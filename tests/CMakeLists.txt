@@ -30,6 +30,7 @@ add_executable(designer_tests
     test_projectmerge.cpp
     test_projectstamp.cpp
     test_settings.cpp
+    test_keymap.cpp
     test_golden.cpp
     test_assembly.cpp
     test_assembly_solve.cpp

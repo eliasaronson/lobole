@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/io/Keymap.h"
+
 #include <nlohmann/json_fwd.hpp>
 
 #include <span>
@@ -47,6 +49,13 @@ struct Settings {
   // Off by default: a CAD app should not open with a shell in it, and the
   // panel costs a process the moment it is used (docs/ui/terminal-panel.md).
   bool terminalPanel = false;
+
+  // Keyboard bindings the user changed, as command id -> chord text. Only
+  // the DIFFERENCES from keymap::Defaults() are stored, so a later change to
+  // a default still reaches anyone who never touched that row. Not a `Field`:
+  // the table above is one scalar per row with a slider or a combo, and a
+  // keymap is neither (docs/ui/u12-keybindings.md).
+  keymap::Keymap keys;
 
   // Keys this build does not know, kept verbatim so an older build cannot
   // delete a newer build's preferences just by running once.

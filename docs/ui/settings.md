@@ -223,8 +223,10 @@ that silently disagrees with the command line would be worse than neither.
 
 ## Not in v1, and why
 
-- **Keybindings.** Needs its own model (conflicts, chords, per-mode maps); a
-  row of text fields would be worse than the current fixed set.
+- ~~**Keybindings.**~~ SHIPPED 2026-08-24 as U12 — it did need its own model
+  (conflicts, chords, per-mode maps), which is why it is a separate table and
+  a separate renderer rather than a `Field` row. The overrides live in this
+  file under `"keys"`; see docs/ui/u12-keybindings.md.
 - **Per-project overrides of user preferences.** A project that forces a GPU
   on whoever opens it is wrong.
 - **Synced/cloud settings.** No account system, and no reason to invent one.

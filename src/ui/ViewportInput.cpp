@@ -205,68 +205,11 @@ void HandleViewportInput(AppState& state) {
     // Zoom is the wheel/trackpad; F fits.)
   }
 
-  // Onshape view/model shortcuts. Guarded only by WantTextInput (like the
-  // sketch keys) so they fire whether or not a panel has focus. `f` (zoom to
-  // fit) works in any context; the rest are model-context so they don't fight
-  // the sketch keymap (e.g. `n` = Coincident while sketching).
-  if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
-    if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F))
-      FitCameraToDocument(state);
-    // Shift+F: frame just the selection (falls back to fit when empty).
-    if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F))
-      FitCameraToSelection(state);
-
-    const bool modelCtx = !state.sketchEdit.IsEditing();
-    if (modelCtx && !io.KeyShift && !state.sketchEdit.pickingPlane &&
-        ImGui::IsKeyPressed(ImGuiKey_S))
-      StartNewSketch(state); // `s`: start a sketch (then pick a plane/face)
-    // `n`: align the camera normal to the selected face (else the hovered
-    // one) — the model-space sibling of the sketcher's plane alignment.
-    if (modelCtx && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_N) &&
-        state.faceSelector) {
-      uint32_t mesh = 0, index = 0;
-      bool have = false;
-      if (const SelectionItem* it =
-              state.selection.First(SelectionItem::Kind::Face)) {
-        have = ResolveFaceItem(state, *it, mesh, index);
-      }
-      if (!have) {
-        if (const Face* hov = state.faceSelector->GetHoveredFace()) {
-          mesh = hov->meshId;
-          index = hov->faceIndex;
-          have = true;
-        }
-      }
-      if (have) {
-        state.camera->AlignToFace(
-            state.faceSelector->GetFaceCenter(mesh, index),
-            state.faceSelector->GetFaceNormal(mesh, index));
-      }
-    }
-    if (modelCtx && io.KeyShift) {
-      if (ImGui::IsKeyPressed(ImGuiKey_P))
-        state.showPlanes = !state.showPlanes; // Shift+P: hide/show planes
-      // Shift+1..7: standard views (camera aligned along the axis normal;
-      // distance 0 keeps the current zoom).
-      auto view = [&](glm::vec3 n) {
-        state.camera->AlignToFace(state.camera->GetTarget(), n);
-      };
-      if (ImGui::IsKeyPressed(ImGuiKey_1))
-        view({0, 0, 1}); // Front
-      else if (ImGui::IsKeyPressed(ImGuiKey_2))
-        view({0, 0, -1}); // Back
-      else if (ImGui::IsKeyPressed(ImGuiKey_3))
-        view({-1, 0, 0}); // Left
-      else if (ImGui::IsKeyPressed(ImGuiKey_4))
-        view({1, 0, 0}); // Right
-      else if (ImGui::IsKeyPressed(ImGuiKey_5))
-        view({0, 1, 0}); // Top
-      else if (ImGui::IsKeyPressed(ImGuiKey_6))
-        view({0, -1, 0}); // Bottom
-      else if (ImGui::IsKeyPressed(ImGuiKey_7))
-        view(glm::normalize(glm::vec3(1, 1, 1))); // Isometric
-    }
-  }
+  // The view/model keymap (F, Shift+F, N, S, Shift+P, Shift+1..7) moved to
+  // the one command table — ui::DispatchShortcuts, called from DrawUI. The
+  // arrow-key navigation above stays here: it is a held-modifier gesture
+  // against the camera, not a command, and it is not rebindable
+  // (docs/ui/u12-keybindings.md).
 
   // Sketch plane-picking / drawing consumes the viewport when active
   if (HandleSketchViewport(state, glm::vec2(io.MousePos.x, io.MousePos.y),

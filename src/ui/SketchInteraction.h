@@ -115,6 +115,20 @@ void DrawToolPrompt(AppState& state);
 // commits immediately. No-op otherwise (the two-step flow proceeds).
 void MirrorToolActivated(AppState& state);
 
+// Arms a sketch tool and resets the transient per-tool edit state. ONE
+// implementation: the toolbar button and the keyboard binding each had their
+// own, and they had drifted — the key path never called MirrorToolActivated,
+// so arming Mirror from the keyboard ignored a preselected construction line
+// that the button honoured.
+void SetSketchTool(AppState& state, SketchTool tool);
+
+// Sketch clipboard (Ctrl+C / Ctrl+V / Ctrl+Shift+V). Exposed so the command
+// table owns the bindings; the sketch keymap used to reach these directly.
+void CopySketchSelection(AppState& state, SketchFeature& sketch);
+void PasteSketchClipboard(AppState& state, SketchFeature& sketch, size_t index);
+void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
+                                size_t index);
+
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.
 // Projects a world-space point to viewport pixel coordinates (proj*view then

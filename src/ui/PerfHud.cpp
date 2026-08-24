@@ -25,13 +25,10 @@ ImVec4 TotalColor(double ms) {
 } // namespace
 
 void DrawPerfHud(AppState& state) {
-  // The one deliberately-undocumented chord. Global route so it works
-  // wherever focus is; not in the menus, not in Preferences, not in the
-  // controls overlay (docs/rendering/frame-timing.md).
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F,
-                      ImGuiInputFlags_RouteGlobal))
-    state.perfHudOpen = !state.perfHudOpen;
-
+  // The chord belongs to `view.perf_hud` in the one command table, marked
+  // hidden there — so it still works everywhere, and still appears in no
+  // menu, no Preferences row and no shortcuts window
+  // (docs/rendering/frame-timing.md).
   if (!state.perfHudOpen)
     return;
 

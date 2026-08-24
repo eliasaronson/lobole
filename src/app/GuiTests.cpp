@@ -36,6 +36,7 @@
 #include "ui/AppState.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
+#include "ui/Commands.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/DragMath.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot
@@ -82,6 +83,10 @@ static void ResetAppForTest() {
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
   }
   s_App->showShortcuts = false; // a stray window eats later viewport clicks
+  // An armed key capture would swallow every key press of the next test, and
+  // it is session state rather than a preference, so the settings reset below
+  // does not cover it.
+  s_App->keyCaptureId.clear();
   // Preferences are DEFAULTS for every test: otherwise the developer's own
   // config decides whether a test passes and CI disagrees with the desk. The
   // app already skips loading them under --gui-tests; this covers a test that
@@ -4365,6 +4370,97 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ctx->KeyPress(ImGuiKey_Escape); // Fillet -> Select
     ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
+  // The gate for the two-table split (docs/ui/u12-keybindings.md): the
+  // metadata lives in core (keymap::Defaults) and the behaviour in ui
+  // (ui::Commands), keyed by the same id. A row in one and not the other is a
+  // command with no key, or a key that runs nothing — both silent.
+  t = IM_REGISTER_TEST(engine, "keys", "registry_is_one_to_one");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    for (const keymap::Binding& b : keymap::Defaults()) {
+      ctx->LogDebug("binding %s", b.id);
+      IM_CHECK_SILENT(ui::FindCommand(b.id) != nullptr);
+    }
+    for (const ui::Command& c : ui::Commands()) {
+      ctx->LogDebug("command %s", c.id);
+      IM_CHECK_SILENT(keymap::Find(c.id) != nullptr);
+    }
+    IM_CHECK_EQ(ui::Commands().size(), keymap::Defaults().size());
+  };
+
+  // ActiveContext must stay DrawToolbar's own branch: if the two disagree you
+  // see one mode's buttons while the keys run another mode's commands.
+  t = IM_REGISTER_TEST(engine, "keys", "context_follows_the_toolbar");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK_EQ(ui::ActiveContext(*s_App), keymap::Context::Part);
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    IM_CHECK_EQ(ui::ActiveContext(*s_App), keymap::Context::Sketch);
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+    IM_CHECK_EQ(ui::ActiveContext(*s_App), keymap::Context::Part);
+  };
+
+  // Rebinding actually moves the key: the new chord runs the command and the
+  // old one stops. Without this the whole keymap could be settings-shaped
+  // decoration over a still-hard-coded dispatcher.
+  t = IM_REGISTER_TEST(engine, "keys", "rebinding_moves_the_shortcut");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+
+    // Default: L is Line.
+    ctx->KeyPress(ImGuiKey_L);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Line);
+
+    // Move Line to Shift+J. ResetAppForTest restores the defaults, because
+    // the keymap lives inside `settings` (docs/ui/settings.md).
+    IM_CHECK(s_App->settings.keys.Set("sketch.line", "Shift+J"));
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    ctx->Yield();
+
+    ctx->KeyPress(ImGuiKey_L); // the OLD chord now does nothing
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+
+    ctx->KeyPress(ImGuiMod_Shift | ImGuiKey_J);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Line);
+
+    // And the toolbar's tooltip follows the binding rather than a literal.
+    IM_CHECK_STR_EQ(ui::WithChord(*s_App, "sketch.line", "Line").c_str(),
+                    "Line (Shift+J)");
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
+  // A sketch binding SHADOWS the global with the same chord. Shift+F is
+  // zoom-to-selection everywhere and Fillet in a sketch — and before the
+  // contexts existed BOTH fired on one press.
+  t = IM_REGISTER_TEST(engine, "keys", "context_shadows_the_global");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    const glm::vec3 before = s_App->camera->GetPosition();
+    ctx->KeyPress(ImGuiMod_Shift | ImGuiKey_F);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Fillet);
+    // The camera did not ALSO reframe: one press, one consumer.
+    IM_CHECK(!s_App->camera->IsAnimating());
+    IM_CHECK_EQ(before, s_App->camera->GetPosition());
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
   };
 

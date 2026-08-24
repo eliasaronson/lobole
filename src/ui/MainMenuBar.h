@@ -4,8 +4,9 @@
 
 namespace ui {
 
-// Main menu bar: File / Edit / Create / View, plus global keyboard
-// shortcuts (registered while drawing the bar).
+// Main menu bar: File / Edit / View / Help. Keyboard bindings are NOT handled
+// here — they live in the one command table (ui/Commands.h) and are dispatched
+// once per frame from DrawUI.
 void DrawMainMenuBar(AppState& state);
 
 } // namespace ui

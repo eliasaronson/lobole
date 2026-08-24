@@ -6,9 +6,9 @@ namespace ui {
 
 // The frame-time overlay (docs/rendering/frame-timing.md). Draws nothing
 // unless `state.perfHudOpen`, which nothing in the UI turns on: it is opened
-// by --perf-hud, by Ctrl+Shift+F, or by the frame_stats RPC. Also handles
-// that shortcut, so the one deliberately-undocumented chord lives beside the
-// window it opens rather than in the menu bar's table.
+// by --perf-hud, by Ctrl+Shift+F, or by the frame_stats RPC. The chord is
+// `view.perf_hud` in the command table, flagged `hidden` so it stays out of
+// the menus, Preferences and the shortcuts window.
 void DrawPerfHud(AppState& state);
 
 } // namespace ui

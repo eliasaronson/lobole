@@ -24,6 +24,10 @@ namespace {
 // not refused — see docs/ui/settings.md.
 constexpr int kFormat = 1;
 constexpr const char* kFormatKey = "settings_format";
+// The keymap is one nested object rather than a `Field`, because a chord is
+// not a scalar with a range or a fixed choice list. It gets its own handling
+// in every function that walks kFields (docs/ui/u12-keybindings.md).
+constexpr const char* kKeysKey = "keys";
 
 constexpr std::array<float, 4> kFontScales{0.85f, 1.0f, 1.2f, 1.4f};
 constexpr std::array<float, 2> kShadowMaps{1024.0f, 2048.0f};
@@ -139,7 +143,7 @@ const Field kFields[] = {
 // Every key this build knows, including the format marker — anything else in
 // the file is somebody else's and gets carried through untouched.
 bool IsKnownKey(const std::string& key) {
-  if (key == kFormatKey)
+  if (key == kFormatKey || key == kKeysKey)
     return true;
   for (const Field& f : kFields)
     if (key == f.key)
@@ -241,7 +245,7 @@ bool Settings::operator==(const Settings& other) const {
   return uiFontScale == other.uiFontScale && gpuDevice == other.gpuDevice &&
          shadows == other.shadows && ssao == other.ssao &&
          shadowMap == other.shadowMap &&
-         autosaveInterval == other.autosaveInterval;
+         autosaveInterval == other.autosaveInterval && keys == other.keys;
 }
 
 std::span<const Field> Fields() { return kFields; }
@@ -278,6 +282,14 @@ Settings Load() {
     return s;
   }
   for (auto it = parsed->begin(); it != parsed->end(); ++it) {
+    if (it.key() == kKeysKey) {
+      // A bad chord in a hand-edited file loses that ONE binding, not the
+      // whole keymap: the same rule the scalar fields get.
+      std::string error;
+      if (!keymap::ApplyOverridesJson(s.keys, it.value(), &error))
+        LOG_WARN("Settings: ignoring {} ({})", error, path.string());
+      continue;
+    }
     if (!IsKnownKey(it.key())) {
       s.unknown.emplace_back(it.key(), it.value().dump());
       continue;
@@ -299,6 +311,7 @@ nlohmann::json ToJson(const Settings& s) {
   j[kFormatKey] = kFormat;
   for (const Field& f : kFields)
     j[f.key] = FieldValue(s, f);
+  j[kKeysKey] = keymap::OverridesToJson(s.keys);
   return j;
 }
 
@@ -314,6 +327,11 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
   for (auto it = j.begin(); it != j.end(); ++it) {
     if (it.key() == kFormatKey)
       continue;
+    if (it.key() == kKeysKey) {
+      if (!keymap::ApplyOverridesJson(candidate.keys, it.value(), error))
+        return false;
+      continue;
+    }
     const Field* field = nullptr;
     for (const Field& f : kFields)
       if (it.key() == f.key)
@@ -348,6 +366,12 @@ bool Save(const Settings& current, const Settings& before, std::string* error) {
     if (!out.contains(f.key) || now != FieldValue(before, f))
       out[f.key] = now;
   }
+  // The keymap is written whole when it differs: per-binding merging across
+  // two running instances buys nothing over the last-writer-wins the rest of
+  // this file already accepts for a single field.
+  if (!out.contains(kKeysKey) || !(current.keys == before.keys))
+    out[kKeysKey] = keymap::OverridesToJson(current.keys);
+
   // Keys from a newer build that we read earlier and must not drop.
   for (const auto& [key, raw] : current.unknown)
     if (!out.contains(key))
@@ -365,6 +389,7 @@ bool Save(const Settings& current, std::string* error) {
   none.shadows = !current.shadows;
   none.ssao = "\x01";
   none.gpuDevice = "\x01";
+  none.keys.Set("\x01", "F"); // a command id no build has: forces a rewrite
   return Save(current, none, error);
 }
 

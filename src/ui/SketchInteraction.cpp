@@ -542,7 +542,7 @@ void ReattachSketchFace(AppState& state, uint64_t sketchId,
 // sketch is being edited. Guarded so keys never fire while typing in a field or
 // during a Ctrl/Alt chord (undo/redo).
 // Copies the selected entities (deduplicated) into the app clipboard.
-static void CopySketchSelection(AppState& state, SketchFeature& sketch) {
+void CopySketchSelection(AppState& state, SketchFeature& sketch) {
   std::vector<uint32_t> ids;
   for (const auto& r : state.sketchEdit.selected)
     if (std::find(ids.begin(), ids.end(), r.entity) == ids.end())
@@ -563,8 +563,8 @@ static void CopySketchSelection(AppState& state, SketchFeature& sketch) {
 // Pastes the clipboard into the active sketch as UNLINKED copies with fresh
 // ids, offset so the paste is visible beside the source. (Linked copies that
 // track the source are a separate design — docs/sketching/copy-links.md.)
-static void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
-                                 size_t index) {
+void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
+                          size_t index) {
   if (state.sketchClipboard.empty())
     return;
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
@@ -606,8 +606,8 @@ static void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
 // outputs re-sync from the source until the link is broken. Cross-sketch
 // requires the source EARLIER in the history; cross-part (source not in
 // this document) falls back to a plain paste with an explanation.
-static void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
-                                       size_t index) {
+void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
+                                size_t index) {
   if (state.sketchClipboardIds.empty())
     return;
   Document& doc = *state.document;
@@ -669,103 +669,22 @@ static void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
       "Sketch panel)";
 }
 
-static void HandleSketchKeys(AppState& state) {
+void SetSketchTool(AppState& state, SketchTool tool) {
   SketchEditState& edit = state.sketchEdit;
-  ImGuiIO& io = ImGui::GetIO();
-  // Copy/paste run on Ctrl chords, ahead of the chord early-out below.
-  if (!io.WantTextInput && io.KeyCtrl && !io.KeyAlt && !io.KeySuper) {
-    size_t index = 0;
-    if (SketchFeature* sk = ResolveActiveSketch(state, &index)) {
-      if (ImGui::IsKeyPressed(ImGuiKey_C) && !edit.selected.empty())
-        CopySketchSelection(state, *sk);
-      if (ImGui::IsKeyPressed(ImGuiKey_V)) {
-        if (io.KeyShift)
-          PasteSketchClipboardLinked(state, *sk, index);
-        else
-          PasteSketchClipboard(state, *sk, index);
-      }
-    }
-  }
-  if (io.WantTextInput || io.KeyCtrl || io.KeyAlt || io.KeySuper)
-    return;
-  const bool shift = io.KeyShift;
-
-  auto setTool = [&](SketchTool t) {
-    edit.tool = t;
-    edit.hasPendingPoint = edit.hasPendingPoint2 = false;
-    edit.hasPendingPoint3 = edit.hasPendingPoint4 = false;
-    edit.splinePoles.clear();
-    edit.mirrorAxisPhase = false;
-    edit.dimPickBody.clear();
-    edit.dimPlacing = false;
-    edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
-    edit.dimOnCreateOpen = false;
-    if (t == SketchTool::Dimension)
-      edit.selected.clear(); // dimension targets accumulate from scratch
-    edit.actionMsg.clear();
-  };
-
-  if (shift) {
-    if (ImGui::IsKeyPressed(ImGuiKey_F))
-      setTool(SketchTool::Fillet); // Shift+F: Fillet
-    else if (ImGui::IsKeyPressed(ImGuiKey_S))
-      edit.autoConstrain = !edit.autoConstrain; // Shift+S: suppress inferencing
-    else if (ImGui::IsKeyPressed(ImGuiKey_E))
-      BeginSketchExtrude(state); // Shift+E: extrude the sketch
-    else if (ImGui::IsKeyPressed(ImGuiKey_R))
-      BeginSketchRevolve(state); // Shift+R: revolve the sketch
-    else if (ImGui::IsKeyPressed(ImGuiKey_H))
-      BeginSketchHole(state); // Shift+H: drill the sketch's points
-    else if (ImGui::IsKeyPressed(ImGuiKey_G))
-      setTool(SketchTool::RectangleCenter); // Shift+G: centre rectangle
-    return;
-  }
-
-  // Bare-key tools.
-  if (ImGui::IsKeyPressed(ImGuiKey_L))
-    return setTool(SketchTool::Line);
-  if (ImGui::IsKeyPressed(ImGuiKey_C))
-    return setTool(SketchTool::Circle);
-  if (ImGui::IsKeyPressed(ImGuiKey_G))
-    return setTool(SketchTool::Rectangle);
-  if (ImGui::IsKeyPressed(ImGuiKey_A))
-    return setTool(SketchTool::ArcThreePoint);
-  if (ImGui::IsKeyPressed(ImGuiKey_S))
-    return setTool(SketchTool::Spline);
-  if (ImGui::IsKeyPressed(ImGuiKey_X))
-    return setTool(SketchTool::Project);
-  if (ImGui::IsKeyPressed(ImGuiKey_M))
-    return setTool(SketchTool::Trim);
-  if (ImGui::IsKeyPressed(ImGuiKey_O))
-    return setTool(SketchTool::Offset);
-  if (ImGui::IsKeyPressed(ImGuiKey_D))
-    return setTool(SketchTool::Dimension);
-
-  if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
-    edit.selected.clear();
-    return;
-  }
-  if (ImGui::IsKeyPressed(ImGuiKey_Q)) { // toggle construction on the selection
-    ToggleConstruction(state);
-    return;
-  }
-
-  // Constraints on the current selection.
-  if (edit.selected.empty())
-    return;
-  using K = sketch::ConstraintKind;
-  if (ImGui::IsKeyPressed(ImGuiKey_H))
-    return (void)ApplySketchConstraint(state, K::Horizontal, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_V))
-    return (void)ApplySketchConstraint(state, K::Vertical, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_N))
-    return (void)ApplySketchConstraint(state, K::Coincident, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_B))
-    return (void)ApplySketchConstraint(state, K::Parallel, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_T))
-    return (void)ApplySketchConstraint(state, K::Tangent, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_E))
-    return (void)ApplySketchConstraint(state, K::Equal, 0.0);
+  edit.tool = tool;
+  edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+  edit.hasPendingPoint3 = edit.hasPendingPoint4 = false;
+  edit.splinePoles.clear();
+  edit.mirrorAxisPhase = false;
+  edit.dimPickBody.clear();
+  edit.dimPlacing = false;
+  edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
+  edit.dimOnCreateOpen = false;
+  if (tool == SketchTool::Dimension)
+    edit.selected.clear(); // dimension targets accumulate from scratch
+  edit.actionMsg.clear();
+  if (tool == SketchTool::Mirror)
+    MirrorToolActivated(state); // preselected construction line = axis
 }
 
 namespace {
@@ -1542,12 +1461,12 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
   }
 
-  HandleSketchKeys(state); // Onshape sketch-context shortcuts
-  // A key shortcut can apply a constraint, which REPLACES the sketch feature
-  // (ModifyFeatureCommand swaps the object) — the pointer above is then a
-  // dangling free. Re-resolve before any further use. (Latent use-after-free;
-  // it started crashing once R3's regeneration allocations reused the freed
-  // block.)
+  // The sketch keymap moved to the one command table (ui/Commands.cpp), which
+  // DrawUI dispatches before this runs. The re-resolve stays: a binding can
+  // apply a constraint, which REPLACES the sketch feature (ModifyFeatureCommand
+  // swaps the object), and the pointer above is then a dangling free. (Latent
+  // use-after-free; it started crashing once R3's regeneration allocations
+  // reused the freed block.)
   sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
     return true; // the shortcut ended sketch edit; viewport was consumed

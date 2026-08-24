@@ -251,6 +251,7 @@ set(core_sources
     src/core/io/GeometryCache.cpp
     src/core/io/AtomicWrite.cpp
     src/core/io/Settings.cpp
+    src/core/io/Keymap.cpp
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
     src/core/io/SerializeStudies.cpp
@@ -561,6 +562,7 @@ set(app_sources
     src/ui/ViewportInput.cpp
     src/ui/SelectionPipeline.cpp
     src/ui/CommandPalette.cpp
+    src/ui/Commands.cpp
     src/ui/SketchInteraction.cpp
     src/ui/Toolbar.cpp
     src/render/RenderSheet.cpp

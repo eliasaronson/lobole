@@ -919,6 +919,12 @@ struct AppState {
   float uiFontScale = 1.0f;
   bool fontRebuildRequested = false;
   bool paletteOpen = false; // Ctrl+K command palette (U6)
+  // A popup a keyboard binding asked for, opened by the toolbar that owns it.
+  // ImGui::OpenPopup builds its id from the ID stack of the CALLING window,
+  // and the key dispatcher runs outside every window — calling it there opens
+  // a popup no BeginPopup will ever match. The command records the name; the
+  // owning toolbar takes it on its next frame (ui::TakePopupRequest).
+  std::string popupRequest;
   // Hidden part bodies by creating-feature id (transient UI state, like the
   // camera): hidden bodies are skipped at render sync — unpickable and
   // outline-free, the assembly occurrence recipe. Cleared on tab switch.
@@ -1165,6 +1171,10 @@ struct AppState {
   settings::Settings settingsSaved;
   double settingsDirtyAt = -1.0; // ImGui time of the last edit; <0 = clean
   bool settingsWindowOpen = false;
+  // Preferences > Keyboard is waiting for the next chord, for this command id.
+  // Session state, not a preference, and it gates the key dispatcher: while a
+  // capture is armed every chord means "bind me", not "run something".
+  std::string keyCaptureId;
   // Render devices this machine offers, for the Preferences combo. When the
   // preferred one could not be honoured, startup records WHY here — the
   // window must not promise that a restart will fix something a restart

@@ -11,6 +11,7 @@
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
 #include "ui/CommandPalette.h"
+#include "ui/Commands.h"
 #include "ui/ConfigurationsPanel.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/DockLayout.h"
@@ -737,6 +738,13 @@ void DrawUI(AppState& state) {
   DrawEmptyStateHint(state);
   DrawViewCube(state);
   DrawCommandPalette(state);
+
+  // Keyboard bindings, once per frame, AFTER every panel has drawn: that is
+  // what makes io.WantTextInput accurate for this frame, so a bare `1` typed
+  // into an occurrence's position field cannot also arm a mate tool. Before
+  // this the bindings lived in four places at three different points in the
+  // frame (docs/ui/u12-keybindings.md).
+  DispatchShortcuts(state);
 
   HandleViewportInput(state);
   // Renderer highlights are a projection of the Selection (U1b): one sync

@@ -5,6 +5,7 @@
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/Commands.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
 #include "ui/Placement.h"
@@ -135,7 +136,8 @@ void WrapIfNeeded(float itemWidth) {
     ImGui::NewLine();
 }
 
-// An icon button with a tooltip. Returns true when clicked.
+// An icon button with a tooltip. Returns true when clicked. The low-level
+// one: prefer CommandButton, which fills in the chord and the gate.
 bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
   WrapIfNeeded(ImGui::CalcTextSize(icon, nullptr, true).x +
                ImGui::GetStyle().FramePadding.x * 2.0f +
@@ -146,6 +148,28 @@ bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     ImGui::SetTooltip("%s", tooltip);
   ImGui::SameLine();
+  return clicked;
+}
+
+// The toolbar's normal button: an icon, the command it runs, and a tooltip
+// that carries the command's LIVE chord — "Fit view (F)" is generated, not
+// typed. Enablement comes from the command's own gate, so the button and the
+// key can never disagree about whether the action is available, and the
+// palette agrees with both (docs/ui/u12-keybindings.md).
+//
+// Every button on every toolbar goes through this. A new button without a
+// command id fails the keys/every_toolbar_button_is_a_command GUI test.
+bool CommandButton(AppState& state, const char* icon, const char* id,
+                   const char* tooltip, bool active = false) {
+  if (active)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  const bool clicked = ToolButton(icon, WithChord(state, id, tooltip).c_str(),
+                                  CommandEnabled(state, id));
+  if (active)
+    ImGui::PopStyleColor();
+  if (clicked)
+    RunCommand(state, id);
   return clicked;
 }
 
@@ -167,204 +191,122 @@ void Divider() {
 // and one id (###tb_section) is what tests and agents address. Only one
 // toolbar is drawn at a time, so the shared id is unambiguous.
 void SectionToolButton(AppState& state) {
-  const bool active = state.sectionToolOpen;
-  if (active)
-    ImGui::PushStyleColor(ImGuiCol_Button,
-                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  if (ToolButton(ICON_FA_SCISSORS "###tb_section",
-                 "Section view (up to four cut planes at once)", true)) {
-    state.sectionToolOpen = !state.sectionToolOpen;
-    // A tool window with an empty list is a dead end: seed a cut through the
-    // middle of whatever this tab shows.
-    if (state.sectionToolOpen && state.sections.empty())
-      AddSection(state, 0);
-  }
-  if (active)
-    ImGui::PopStyleColor();
+  CommandButton(state, ICON_FA_SCISSORS "###tb_section", "view.section",
+                "Section view (up to four cut planes at once)",
+                state.sectionToolOpen);
 }
 
 void DrawModelToolbar(AppState& state) {
-  const bool hasDoc = state.document != nullptr;
-  const bool idle = !HasPendingFeature(state); // no creation while previewing
-
   // Icon buttons carry a stable "###tb_*" id (hidden from the glyph label) so
   // the GUI/remote tests can address them regardless of the icon codepoint.
-  if (ToolButton(ICON_FA_PENCIL "###tb_new_sketch", "New Sketch (S)",
-                 hasDoc && idle))
-    StartNewSketch(state);
+  // The tooltip's chord and the enable gate both come from the command.
+  const auto btn = [&state](const char* icon, const char* id, const char* tip) {
+    CommandButton(state, icon, id, tip);
+  };
+
+  btn(ICON_FA_PENCIL "###tb_new_sketch", "part.new_sketch", "New Sketch");
 
   Divider();
 
-  if (ToolButton(ICON_FA_CUBE "###tb_box", "Box", hasDoc && idle))
-    CreateBox(state);
-  if (ToolButton(ICON_FA_CIRCLE "###tb_sphere", "Sphere", hasDoc && idle))
-    CreateSphere(state);
-  if (ToolButton(ICON_FA_DATABASE "###tb_cylinder", "Cylinder", hasDoc && idle))
-    CreateCylinder(state);
+  btn(ICON_FA_CUBE "###tb_box", "part.box", "Box");
+  btn(ICON_FA_CIRCLE "###tb_sphere", "part.sphere", "Sphere");
+  btn(ICON_FA_DATABASE "###tb_cylinder", "part.cylinder", "Cylinder");
 
   Divider();
 
   // Turn a FINISHED sketch into a solid. The same operations live in the
-  // sketch toolbar (Shift+E/R) for a sketch you are still editing; without
-  // these, closing a sketch with ✓ left no way to extrude it at all.
-  const bool hasProfile = hasDoc && ClosedProfileSketch(state) != nullptr;
-  if (ToolButton(ICON_FA_UP_LONG "###tb_extrude",
-                 "Extrude a sketch (the selected one, else the last)",
-                 hasDoc && idle && hasProfile)) {
-    if (SketchFeature* sk = ClosedProfileSketch(state))
-      BeginExtrudeOfSketch(state, *sk);
-  }
-  if (ToolButton(ICON_FA_ROTATE "###tb_revolve",
-                 "Revolve a sketch (the selected one, else the last)",
-                 hasDoc && idle && hasProfile)) {
-    if (SketchFeature* sk = ClosedProfileSketch(state))
-      BeginRevolveOfSketch(state, *sk);
-  }
+  // sketch toolbar for a sketch you are still editing; without these, closing
+  // a sketch with the check mark left no way to extrude it at all.
+  btn(ICON_FA_UP_LONG "###tb_extrude", "part.extrude",
+      "Extrude a sketch (the selected one, else the last)");
+  btn(ICON_FA_ROTATE "###tb_revolve", "part.revolve",
+      "Revolve a sketch (the selected one, else the last)");
 
   Divider();
 
-  // Curve-driven features (curves-3d): a 3D curve, and the sweep/loft/pipe that
-  // consume it. Gated on the references each needs (a Sweep wants a profile
-  // sketch, a Loft two sections, a Pipe any curve/sketch to run along).
-  const size_t sketches = hasDoc ? SketchFeatureCount(*state.document) : 0;
-  const bool hasPathLike = hasDoc && HasCurveOrSketch(*state.document);
-  if (ToolButton(ICON_FA_WAVE_SQUARE "###tb_curve3d",
-                 "3D Curve (helix / fit-spline)", hasDoc && idle))
-    CreateCurve3D(state);
-  if (ToolButton(ICON_FA_ROUTE "###tb_sweep", "Sweep a profile along a path",
-                 hasDoc && idle && sketches >= 1))
-    CreateSweep(state);
-  if (ToolButton(ICON_FA_BEZIER_CURVE "###tb_loft", "Loft through sections",
-                 hasDoc && idle && sketches >= 2))
-    CreateLoft(state);
-  if (ToolButton(ICON_FA_ROAD "###tb_pipe", "Pipe / tube along a path",
-                 hasDoc && idle && hasPathLike))
-    CreatePipe(state);
+  // Curve-driven features (curves-3d): a 3D curve, and the sweep/loft/pipe
+  // that consume it. Each command gates on the references it needs.
+  btn(ICON_FA_WAVE_SQUARE "###tb_curve3d", "part.curve3d",
+      "3D Curve (helix / fit-spline)");
+  btn(ICON_FA_ROUTE "###tb_sweep", "part.sweep",
+      "Sweep a profile along a path");
+  btn(ICON_FA_BEZIER_CURVE "###tb_loft", "part.loft", "Loft through sections");
+  btn(ICON_FA_ROAD "###tb_pipe", "part.pipe", "Pipe / tube along a path");
 
   Divider();
 
   // Datums.
-  if (ToolButton(ICON_FA_TABLE_CELLS_LARGE "###tb_datum_plane", "Datum Plane",
-                 hasDoc && idle))
-    CreateDatumPlane(state);
-  if (ToolButton(ICON_FA_ARROWS_UP_DOWN "###tb_datum_axis", "Datum Axis",
-                 hasDoc && idle))
-    CreateDatumAxis(state);
+  btn(ICON_FA_TABLE_CELLS_LARGE "###tb_datum_plane", "part.datum_plane",
+      "Datum Plane");
+  btn(ICON_FA_ARROWS_UP_DOWN "###tb_datum_axis", "part.datum_axis",
+      "Datum Axis");
 
   Divider();
 
   // Body combinators (need existing bodies).
-  const size_t producers =
-      hasDoc ? BodyProducers(*state.document, state.document->FeatureCount())
-                   .size()
-             : 0;
-  if (ToolButton(ICON_FA_OBJECT_GROUP "###tb_boolean",
-                 "Boolean (union / subtract / intersect)",
-                 idle && producers >= 2))
-    CreateBoolean(state);
-  if (ToolButton(ICON_FA_LEFT_RIGHT "###tb_mirror", "Mirror a body",
-                 idle && producers >= 1))
-    CreateMirror(state);
-  if (ToolButton(ICON_FA_GRIP "###tb_pattern", "Pattern (linear / circular)",
-                 idle && producers >= 1))
-    CreatePattern(state);
+  btn(ICON_FA_OBJECT_GROUP "###tb_boolean", "part.boolean",
+      "Boolean (union / subtract / intersect)");
+  btn(ICON_FA_LEFT_RIGHT "###tb_mirror", "part.mirror", "Mirror a body");
+  btn(ICON_FA_GRIP "###tb_pattern", "part.pattern",
+      "Pattern (linear / circular)");
 
   Divider();
 
   // Edge / wall / detail ops on a body.
-  const bool hasBody = hasDoc && !state.document->GetBodies().empty();
-  if (ToolButton(ICON_FA_BORDER_TOP_LEFT "###tb_fillet", "Fillet edges",
-                 hasBody && idle))
-    CreateFillet(state);
-  if (ToolButton(ICON_FA_CROP_SIMPLE "###tb_chamfer", "Chamfer edges",
-                 hasBody && idle))
-    CreateChamfer(state);
-  if (ToolButton(ICON_FA_BARS_STAGGERED "###tb_rib",
-                 "Rib (thin web from an open sketch)", hasBody && idle))
-    CreateRib(state);
-  if (ToolButton(ICON_FA_BULLSEYE "###tb_hole",
-                 "Hole: pick a flat face, click the centres", hasBody && idle))
-    StartHoleTool(state);
-  if (ToolButton(ICON_FA_CIRCLE_NOTCH "###tb_thread",
-                 "Thread (cosmetic; pick a cyl. face)", hasBody && idle))
-    CreateThread(state);
-  if (ToolButton(ICON_FA_BOX_OPEN "###tb_shell",
-                 "Shell (hollow a body; pick faces to open)", hasBody && idle))
-    CreateShell(state);
-  if (ToolButton(ICON_FA_ANGLES_RIGHT "###tb_draft",
-                 "Draft (taper faces for moulding)", hasBody && idle))
-    CreateDraft(state);
-  if (ToolButton(ICON_FA_SCISSORS "###tb_split",
-                 "Split a body with a plane or one of its faces",
-                 hasBody && idle))
-    CreateSplit(state);
-  if (ToolButton(ICON_FA_BROOM "###tb_refine",
-                 "Refine (merge coplanar faces and boolean seams)",
-                 hasBody && idle))
-    CreateRefine(state);
+  btn(ICON_FA_BORDER_TOP_LEFT "###tb_fillet", "part.fillet", "Fillet edges");
+  btn(ICON_FA_CROP_SIMPLE "###tb_chamfer", "part.chamfer", "Chamfer edges");
+  btn(ICON_FA_BARS_STAGGERED "###tb_rib", "part.rib",
+      "Rib (thin web from an open sketch)");
+  btn(ICON_FA_BULLSEYE "###tb_hole", "part.hole",
+      "Hole: pick a flat face, click the centres");
+  btn(ICON_FA_CIRCLE_NOTCH "###tb_thread", "part.thread",
+      "Thread (cosmetic; pick a cyl. face)");
+  btn(ICON_FA_BOX_OPEN "###tb_shell", "part.shell",
+      "Shell (hollow a body; pick faces to open)");
+  btn(ICON_FA_ANGLES_RIGHT "###tb_draft", "part.draft",
+      "Draft (taper faces for moulding)");
+  btn(ICON_FA_SCISSORS "###tb_split", "part.split",
+      "Split a body with a plane or one of its faces");
+  btn(ICON_FA_BROOM "###tb_refine", "part.refine",
+      "Refine (merge coplanar faces and boolean seams)");
 
   Divider();
 
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit",
-                 "Fit view (F)", hasDoc))
-    FitCameraToDocument(state);
-  if (ToolButton(ICON_FA_TABLE_CELLS "###tb_planes", "Toggle planes (Shift+P)",
-                 hasDoc))
-    state.showPlanes = !state.showPlanes;
+  btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit", "view.fit",
+      "Fit view");
+  btn(ICON_FA_TABLE_CELLS "###tb_planes", "view.toggle_planes",
+      "Toggle planes");
 
   // Enter the FEM simulation workspace (needs a body to analyze).
-  if (ToolButton(ICON_FA_GAUGE_HIGH "###tb_simulation",
-                 "Simulation (FEM stress study)", hasBody && idle))
-    EnterSimulation(state);
+  btn(ICON_FA_GAUGE_HIGH "###tb_simulation", "part.simulation",
+      "Simulation (FEM stress study)");
 
 #ifdef HAVE_CAM
   // CAM verbs (docs/cam/gui.md). A tool SESSION, not a mode: the backplot
   // coexists with the model and a picked face still means "that face".
-  {
-    const bool camActive = state.camToolOpen;
-    if (camActive)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ToolButton(ICON_FA_SCREWDRIVER_WRENCH "###tb_cam",
-                   "CAM (mill this part: pocket, cut out, face)", hasBody)) {
-      state.camToolOpen = !state.camToolOpen;
-      if (!state.camToolOpen) {
-        state.camGhostOp = 0;
-        if (state.slotPick.featureId == kCamToolSlot)
-          state.slotPick = {};
-      }
-    }
-    if (camActive)
-      ImGui::PopStyleColor();
-  }
+  CommandButton(state, ICON_FA_SCREWDRIVER_WRENCH "###tb_cam", "part.cam",
+                "CAM (mill this part: pocket, cut out, face)",
+                state.camToolOpen);
 #endif
 
-  // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
-  // a second element for the distance. The button reflects the armed state.
-  // Snapshot the armed state: the button toggles state.measure.active, so
-  // guarding the pop on the live value (which the click just flipped) would
-  // unbalance the style stack and trip ImGui's PopStyleColor assert.
   SectionToolButton(state);
 
-  const bool measureActive = state.measure.active;
-  if (measureActive)
-    ImGui::PushStyleColor(ImGuiCol_Button,
-                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  if (ToolButton(ICON_FA_RULER "###tb_measure",
-                 "Measure (pick 1-2 faces/edges; Esc to exit)", hasBody)) {
-    const bool wasActive = state.measure.active;
-    state.measure = MeasureState{};    // clear any in-progress measurement
-    state.measure.active = !wasActive; // toggle
-  }
-  if (measureActive)
-    ImGui::PopStyleColor();
+  // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
+  // a second element for the distance. The button reflects the armed state,
+  // snapshotted BEFORE the click toggles it (a live read would unbalance the
+  // style stack and trip ImGui's PopStyleColor assert).
+  CommandButton(state, ICON_FA_RULER "###tb_measure", "view.measure",
+                "Measure (pick 1-2 faces/edges; Esc to exit)",
+                state.measure.active);
 
   Divider();
 
-  // Offline path-traced still (KeyShot-style). Opens the render dialog.
-  const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
-  if (ToolButton(ICON_FA_CAMERA "###tb_render", "Render (offline raytrace)",
-                 hasDoc && rtReady))
+  // Offline path-traced still (KeyShot-style). Opens the render dialog — the
+  // command records the request rather than calling OpenPopup, because the
+  // same command runs from a key press outside any window (Commands.h).
+  btn(ICON_FA_CAMERA "###tb_render", "view.render",
+      "Render (offline raytrace)");
+  if (TakePopupRequest(state, "Render Still"))
     ImGui::OpenPopup("Render Still");
   DrawRenderModal(state);
 
@@ -376,56 +318,36 @@ void DrawModelToolbar(AppState& state) {
 void DrawSketchModeToolbar(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
 
-  // Finish (accept) the sketch. Stable id: the GUI tests (and remote
-  // click-driving) need to address this button. In a Hole session the ✓ is
-  // the hand-off to the hole options rather than a plain exit.
+  // Finish (accept) the sketch. Escape is a MODAL VERB, not a command — it
+  // resolves against the armed tool, then the selection, then the session —
+  // so it is deliberately not in the keymap and its hint stays a literal
+  // (docs/ui/u12-keybindings.md).
   const bool holeSession = edit.purpose == SketchPurpose::Hole;
-  bool finishHole = false;
   if (ToolButton(ICON_FA_CHECK "###tb_sk_finish",
                  holeSession ? "Hole options (Enter) - Esc cancels the hole"
                              : "Finish sketch (Esc)")) {
     if (holeSession)
-      finishHole = true; // acted on after the toolbar, see below
+      BeginSketchHole(state); // the sketch session is torn down inside
     else
       edit = SketchEditState{};
+    ImGui::NewLine(); // close the row we are abandoning
+    return;           // `edit` is gone; nothing below may touch it this frame
   }
   Divider();
 
-  // Switch to a sketch tool, resetting the transient per-tool edit state.
-  // Shared by the single-tool buttons and the flyout groups.
-  auto activateTool = [&](SketchTool t) {
-    edit.tool = t;
-    edit.hasPendingPoint = edit.hasPendingPoint2 = false;
-    edit.mirrorAxisPhase = false;
-    edit.dimPickBody.clear();
-    edit.dimPlacing = false;
-    edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
-    edit.dimOnCreateOpen = false;
-    if (t == SketchTool::Dimension)
-      edit.selected.clear(); // dimension targets accumulate from scratch
-    edit.actionMsg.clear();
-    if (t == SketchTool::Mirror)
-      MirrorToolActivated(state); // preselected construction line = axis
-  };
-  auto toolBtn = [&](const char* icon, const char* tip, SketchTool t) {
-    const bool active = edit.tool == t;
-    if (active)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(icon))
-      activateTool(t);
-    if (active)
-      ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", tip);
-    ImGui::SameLine();
+  // A draw/modify tool button: the command arms the tool, and the button
+  // lights up while that tool is the armed one.
+  auto toolBtn = [&](const char* icon, const char* id, const char* tip,
+                     SketchTool t) {
+    CommandButton(state, icon, id, tip, edit.tool == t);
   };
   // A flyout group (Onshape-style): the face shows the last-picked variant —
   // click it to use that tool — and the caret opens a popup to switch which
-  // variant the group holds. `current` persists the pick across frames. The
-  // face reflects the active tool if it is one of the group's variants.
+  // variant the group holds. `current` persists the pick across frames. Each
+  // VARIANT is its own command, so every one of them can carry a chord.
   struct ToolVariant {
     const char* icon;
+    const char* id;
     const char* label;
     SketchTool tool;
   };
@@ -447,20 +369,22 @@ void DrawSketchModeToolbar(AppState& state) {
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     if (ImGui::Button(v[current].icon))
-      activateTool(v[current].tool);
+      RunCommand(state, v[current].id);
     if (groupActive)
       ImGui::PopStyleColor();
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", v[current].label);
+      ImGui::SetTooltip(
+          "%s", WithChord(state, v[current].id, v[current].label).c_str());
     ImGui::SameLine(0.0f, 1.0f);
     if (ImGui::Button(ICON_FA_CARET_DOWN "##more"))
       ImGui::OpenPopup("variants");
     if (ImGui::BeginPopup("variants")) {
       for (int i = 0; i < n; i++) {
-        const std::string item = std::string(v[i].icon) + "   " + v[i].label;
+        const std::string item = std::string(v[i].icon) + "   " +
+                                 WithChord(state, v[i].id, v[i].label);
         if (ImGui::Selectable(item.c_str(), i == current)) {
           current = i;
-          activateTool(v[i].tool);
+          RunCommand(state, v[i].id);
         }
       }
       ImGui::EndPopup();
@@ -473,175 +397,133 @@ void DrawSketchModeToolbar(AppState& state) {
   static int rectVariant = 0;
   static int arcVariant = 0;
 
-  toolBtn(ICON_FA_SLASH, "Line (L)", SketchTool::Line);
-  toolGroup("circlegrp", circleVariant,
-            {{ICON_FA_CIRCLE_NOTCH, "Circle (C)", SketchTool::Circle},
-             {ICON_FA_EGG, "Ellipse", SketchTool::Ellipse}});
-  toolGroup("rectgrp", rectVariant,
-            {{ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle},
-             {ICON_FA_EXPAND, "Center Rectangle (Shift+G)",
-              SketchTool::RectangleCenter}});
+  toolBtn(ICON_FA_SLASH, "sketch.line", "Line", SketchTool::Line);
   toolGroup(
-      "arcgrp", arcVariant,
-      {{ICON_FA_BEZIER_CURVE, "3-Point Arc (A)", SketchTool::ArcThreePoint},
-       {ICON_FA_BEZIER_CURVE, "Center Arc (centre, start, end)",
-        SketchTool::Arc},
-       {ICON_FA_BEZIER_CURVE, "Elliptic Arc (centre, major, minor, start, end)",
-        SketchTool::EllipseArc}});
-  toolBtn(ICON_FA_PEN_NIB, "Spline (S)", SketchTool::Spline);
-  toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
-  toolBtn(ICON_FA_SCISSORS, "Trim (M)", SketchTool::Trim);
-  toolBtn(ICON_FA_RULER_COMBINED, "Dimension (D)", SketchTool::Dimension);
+      "circlegrp", circleVariant,
+      {{ICON_FA_CIRCLE_NOTCH, "sketch.circle", "Circle", SketchTool::Circle},
+       {ICON_FA_EGG, "sketch.ellipse", "Ellipse", SketchTool::Ellipse}});
+  toolGroup("rectgrp", rectVariant,
+            {{ICON_FA_VECTOR_SQUARE, "sketch.rectangle", "Rectangle",
+              SketchTool::Rectangle},
+             {ICON_FA_EXPAND, "sketch.rectangle_center", "Centre Rectangle",
+              SketchTool::RectangleCenter}});
+  toolGroup("arcgrp", arcVariant,
+            {{ICON_FA_BEZIER_CURVE, "sketch.arc_3point", "3-Point Arc",
+              SketchTool::ArcThreePoint},
+             {ICON_FA_BEZIER_CURVE, "sketch.arc_center",
+              "Centre Arc (centre, start, end)", SketchTool::Arc},
+             {ICON_FA_BEZIER_CURVE, "sketch.ellipse_arc",
+              "Elliptic Arc (centre, major, minor, start, end)",
+              SketchTool::EllipseArc}});
+  toolBtn(ICON_FA_PEN_NIB, "sketch.spline", "Spline", SketchTool::Spline);
+  toolBtn(ICON_FA_CIRCLE_DOT, "sketch.point", "Point", SketchTool::Point);
+  toolBtn(ICON_FA_SCISSORS, "sketch.trim", "Trim", SketchTool::Trim);
+  toolBtn(ICON_FA_RULER_COMBINED, "sketch.dimension", "Dimension",
+          SketchTool::Dimension);
   Divider();
-  toolBtn(ICON_FA_LEFT_RIGHT, "Mirror", SketchTool::Mirror);
-  toolBtn(ICON_FA_DRAW_POLYGON, "Fillet (Shift+F)", SketchTool::Fillet);
-  toolBtn(ICON_FA_GRIP, "Pattern", SketchTool::Pattern);
-  toolBtn(ICON_FA_CLONE, "Offset (O)", SketchTool::Offset);
-  toolBtn(ICON_FA_DIAGRAM_PROJECT,
-          "Project geometry (X) — click a body edge/face -> live reference",
+  toolBtn(ICON_FA_LEFT_RIGHT, "sketch.mirror", "Mirror", SketchTool::Mirror);
+  toolBtn(ICON_FA_DRAW_POLYGON, "sketch.fillet", "Fillet a corner",
+          SketchTool::Fillet);
+  toolBtn(ICON_FA_GRIP, "sketch.pattern", "Pattern", SketchTool::Pattern);
+  toolBtn(ICON_FA_CLONE, "sketch.offset", "Offset", SketchTool::Offset);
+  toolBtn(ICON_FA_DIAGRAM_PROJECT, "sketch.project",
+          "Project geometry — click a body edge/face -> live reference",
           SketchTool::Project);
   Divider();
 
   // Constraints act on the current selection (validated in
   // ApplySketchConstraint; an invalid combination just no-ops with a hint).
-  using K = sketch::ConstraintKind;
-  const bool hasSel = !edit.selected.empty();
-  auto conBtn = [&](const char* label, const char* tip, K kind) {
-    ImGui::BeginDisabled(!hasSel);
-    if (ImGui::Button(label))
-      ApplySketchConstraint(state, kind, 0.0);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-      ImGui::SetTooltip("%s", tip);
-    ImGui::SameLine();
+  auto conBtn = [&](const char* label, const char* id, const char* tip) {
+    CommandButton(state, label, id, tip);
   };
   // The everyday constraints stay visible; the rest live in the flyout below.
-  conBtn("H", "Horizontal (H)", K::Horizontal);
-  conBtn("V", "Vertical (V)", K::Vertical);
-  conBtn(ICON_FA_ARROWS_TO_DOT, "Coincident (N)", K::Coincident);
-  conBtn(ICON_FA_ARROWS_LEFT_RIGHT, "Parallel (B)", K::Parallel);
-  conBtn(ICON_FA_ANGLE_RIGHT, "Perpendicular", K::Perpendicular);
+  conBtn("H", "sketch.constraint_horizontal", "Horizontal");
+  conBtn("V", "sketch.constraint_vertical", "Vertical");
+  conBtn(ICON_FA_ARROWS_TO_DOT, "sketch.constraint_coincident", "Coincident");
+  conBtn(ICON_FA_ARROWS_LEFT_RIGHT, "sketch.constraint_parallel", "Parallel");
+  conBtn(ICON_FA_ANGLE_RIGHT, "sketch.constraint_perpendicular",
+         "Perpendicular");
 
   // "More constraints" flyout: the less-common relational constraints, one
   // click away. Always openable (so the menu is discoverable); each item
   // applies to the current selection and ApplySketchConstraint no-ops with a
   // hint if the combination doesn't fit. Dimensional constraints are NOT here —
-  // the Dimension tool (D) covers distance / radius / diameter / angle.
+  // the Dimension tool covers distance / radius / diameter / angle. These are
+  // the keymap's unbound-but-bindable rows: a constraint used once a month
+  // gets a Preferences row rather than an invented mnemonic.
   if (ImGui::Button(ICON_FA_ELLIPSIS "##morecon"))
     ImGui::OpenPopup("more_constraints");
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("More constraints…");
   ImGui::SameLine();
   if (ImGui::BeginPopup("more_constraints")) {
-    auto conItem = [&](const char* label, const char* tip, K kind) {
-      if (ImGui::Selectable(label))
-        ApplySketchConstraint(state, kind, 0.0);
-      if (ImGui::IsItemHovered())
+    // Disabled without a selection, like the visible constraint buttons — a
+    // Selectable that runs and silently does nothing is worse than one that
+    // says it cannot.
+    auto conItem = [&](const char* label, const char* id, const char* tip) {
+      const bool enabled = CommandEnabled(state, id);
+      ImGui::BeginDisabled(!enabled);
+      if (ImGui::Selectable(WithChord(state, id, label).c_str()) && enabled)
+        RunCommand(state, id);
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", tip);
     };
-    conItem("Tangent", "Tangent (line/curve + curve) — (T)", K::Tangent);
-    conItem("Equal", "Equal size (2 curves, or 2 lines) — (E)", K::Equal);
-    conItem("Concentric", "Concentric (2 curves share a centre)",
-            K::Concentric);
+    conItem("Tangent", "sketch.constraint_tangent",
+            "Tangent (line/curve + curve)");
+    conItem("Equal", "sketch.constraint_equal",
+            "Equal size (2 curves, or 2 lines)");
+    conItem("Concentric", "sketch.constraint_concentric",
+            "Concentric (2 curves share a centre)");
     ImGui::Separator();
-    conItem("Point on line", "Point lies on a line (point + line)",
-            K::PointOnLine);
-    conItem("Symmetric", "Symmetric (2 points + a line)", K::Symmetric);
-    conItem("Midpoint", "Point at a line's midpoint (point + line)",
-            K::Midpoint);
-    conItem("Fix / pin", "Pin a point in place", K::Fixed);
-    conItem("Collinear", "Collinear (2 lines)", K::Collinear);
+    conItem("Point on line", "sketch.constraint_point_on_line",
+            "Point lies on a line (point + line)");
+    conItem("Symmetric", "sketch.constraint_symmetric",
+            "Symmetric (2 points + a line)");
+    conItem("Midpoint", "sketch.constraint_midpoint",
+            "Point at a line's midpoint (point + line)");
+    conItem("Fix / pin", "sketch.constraint_fixed", "Pin a point in place");
+    conItem("Collinear", "sketch.constraint_collinear", "Collinear (2 lines)");
     ImGui::EndPopup();
   }
   Divider();
 
-  ImGui::BeginDisabled(!hasSel);
-  if (ImGui::Button(ICON_FA_MINUS "##constr"))
-    ToggleConstruction(state);
-  ImGui::EndDisabled();
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-    ImGui::SetTooltip("Construction (Q) — reference geometry, dashed");
-  ImGui::SameLine();
+  CommandButton(state, ICON_FA_MINUS "##constr", "sketch.toggle_construction",
+                "Construction — reference geometry, dashed");
   Divider();
 
   // Mode toggles (were the Sketch panel's checkboxes, U8a).
-  auto toggleBtn = [&](const char* label, const char* tip, bool& value) {
-    if (value)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(label))
-      value = !value;
-    if (value)
-      ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", tip);
-    ImGui::SameLine();
-  };
-  toggleBtn(ICON_FA_MAGNET "###tb_sk_autocon",
-            "Auto-constrain — snap and add constraints while drawing (hold "
-            "Ctrl to place freely; Shift+S toggles)",
-            edit.autoConstrain);
-  toggleBtn(ICON_FA_EYE "###tb_sk_glyphs", "Show constraint glyphs",
-            edit.showConstraintGlyphs);
+  CommandButton(state, ICON_FA_MAGNET "###tb_sk_autocon",
+                "sketch.toggle_autoconstrain",
+                "Auto-constrain — snap and add constraints while drawing "
+                "(hold Ctrl to place freely)",
+                edit.autoConstrain);
+  CommandButton(state, ICON_FA_EYE "###tb_sk_glyphs", "sketch.toggle_glyphs",
+                "Show constraint glyphs", edit.showConstraintGlyphs);
   Divider();
 
   // Insert reference image (U8 polish): file dialog, then the fresh image's
   // session (opacity/calibrate/delete) opens in the Tool window. Editing
   // later: double-click the image's Operations row in the Model panel.
-  {
-    SketchFeature* sk0 = ResolveActiveSketch(state);
-    const size_t imagesBefore = sk0 != nullptr ? sk0->images.size() : 0;
-    if (ImGui::Button(ICON_FA_IMAGE "###tb_sk_image")) {
-      OpenReferenceImageDialog(state); // commits + REPLACES the sketch feature
-      SketchFeature* sk1 = ResolveActiveSketch(state);
-      if (sk1 != nullptr && sk1->images.size() > imagesBefore) {
-        activateTool(SketchTool::Image);
-        edit.selectedImageId = sk1->images.back().id;
-      }
-    }
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Insert reference image\xe2\x80\xa6");
-    ImGui::SameLine();
-  }
+  CommandButton(state, ICON_FA_IMAGE "###tb_sk_image", "sketch.image",
+                "Insert reference image\xe2\x80\xa6");
   Divider();
 
   // Extrude/Revolve straight from the sketch (were panel buttons, U8a);
-  // Finish (✓) already exits without a solid.
-  {
-    SketchFeature* sketch = ResolveActiveSketch(state);
-    const bool canExtrude =
-        sketch != nullptr && !sketch::BuildLoops(sketch->entities).empty();
-    ImGui::BeginDisabled(!canExtrude);
-    if (ImGui::Button(ICON_FA_UP_LONG "###tb_sk_extrude"))
-      BeginSketchExtrude(state); // Shift+E
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-      ImGui::SetTooltip("Extrude the sketch (Shift+E)");
-    ImGui::SameLine();
-    if (ImGui::Button(ICON_FA_ROTATE "###tb_sk_revolve"))
-      BeginSketchRevolve(state); // Shift+R
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-      ImGui::SetTooltip("Revolve the sketch (Shift+R)");
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    // Drill the sketch's points. The only GUI path to a hole on a sketch you
-    // already have (e.g. a patterned bolt circle), and the visible twin of
-    // the ✓ hand-off in a Hole session.
-    ImGui::BeginDisabled(!CanBeginSketchHole(state));
-    if (ImGui::Button(ICON_FA_BULLSEYE "###tb_sk_hole"))
-      finishHole = true;
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-      ImGui::SetTooltip("Drill holes at the sketch's points (Shift+H)");
-    ImGui::SameLine();
-  }
-  // BeginSketchHole tears down the sketch session, so it must run after the
-  // toolbar's widgets are done touching `edit` (the CalibrateImage rule).
-  if (finishHole)
-    BeginSketchHole(state);
+  // Finish already exits without a solid. BeginSketchHole tears down the
+  // sketch session, so `edit` must not be touched after these run — every
+  // one of them is the last thing this function does with it.
+  CommandButton(state, ICON_FA_UP_LONG "###tb_sk_extrude", "sketch.extrude",
+                "Extrude the sketch");
+  CommandButton(state, ICON_FA_ROTATE "###tb_sk_revolve", "sketch.revolve",
+                "Revolve the sketch");
+  CommandButton(state, ICON_FA_BULLSEYE "###tb_sk_hole", "sketch.hole",
+                "Drill holes at the sketch's points");
   Divider();
 
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))
-    FitCameraToDocument(state);
+  CommandButton(state,
+                ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_sk_fit",
+                "view.fit", "Fit view");
   ImGui::NewLine();
 }
 
@@ -717,8 +599,11 @@ void DrawAssemblyToolbar(AppState& state) {
   // smaller group, which is usually the assemblies, and those are the more
   // consequential insert. Assemblies come first for the same reason, each
   // with the part count you are about to place.
-  if (ToolButton(ICON_FA_CIRCLE_PLUS "###tb_insert",
-                 "Insert a part or sub-assembly (place an occurrence)"))
+  // The command records the request rather than calling OpenPopup, because
+  // the same command runs from a key press outside any window (Commands.h).
+  CommandButton(state, ICON_FA_CIRCLE_PLUS "###tb_insert", "assembly.insert",
+                "Insert a part or sub-assembly (place an occurrence)");
+  if (TakePopupRequest(state, "insert_occurrence"))
     ImGui::OpenPopup("insert_occurrence");
   if (ImGui::BeginPopup("insert_occurrence")) {
     const auto place = [&](const PartSlot& slot, OccurrenceRef kind) {
@@ -802,35 +687,28 @@ void DrawAssemblyToolbar(AppState& state) {
   // Every button carries a stable "###tb_*" id like the model toolbar's, so
   // tests and scripted humans address them by name rather than by icon
   // codepoint (the assembly/drawing/simulation bars had none at all).
-  auto mateBtn = [&](const char* icon, const char* tip, MateType t) {
-    const bool active = state.mateTool.active && state.mateTool.type == t;
-    if (active)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(icon))
-      StartMateTool(state, t);
-    if (active)
-      ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("%s", tip);
-    ImGui::SameLine();
+  auto mateBtn = [&](const char* icon, const char* id, const char* tip,
+                     MateType t) {
+    CommandButton(state, icon, id, tip,
+                  state.mateTool.active && state.mateTool.type == t);
   };
-  mateBtn(ICON_FA_LOCK "###tb_mate_fastened", "Fastened mate (rigid)",
-          MateType::Fastened);
-  mateBtn(ICON_FA_ARROWS_SPIN "###tb_mate_revolute", "Revolute mate (hinge)",
-          MateType::Revolute);
-  mateBtn(ICON_FA_ARROWS_LEFT_RIGHT "###tb_mate_slider", "Slider mate",
-          MateType::Slider);
+  mateBtn(ICON_FA_LOCK "###tb_mate_fastened", "assembly.mate_fastened",
+          "Fastened mate (rigid)", MateType::Fastened);
+  mateBtn(ICON_FA_ARROWS_SPIN "###tb_mate_revolute", "assembly.mate_revolute",
+          "Revolute mate (hinge)", MateType::Revolute);
+  mateBtn(ICON_FA_ARROWS_LEFT_RIGHT "###tb_mate_slider", "assembly.mate_slider",
+          "Slider mate", MateType::Slider);
   mateBtn(ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT "###tb_mate_cylindrical",
-          "Cylindrical mate (spin + slide)", MateType::Cylindrical);
-  mateBtn(ICON_FA_TABLE_CELLS_LARGE "###tb_mate_planar",
+          "assembly.mate_cylindrical", "Cylindrical mate (spin + slide)",
+          MateType::Cylindrical);
+  mateBtn(ICON_FA_TABLE_CELLS_LARGE "###tb_mate_planar", "assembly.mate_planar",
           "Planar mate (slide in a plane)", MateType::Planar);
-  mateBtn(ICON_FA_CIRCLE_DOT "###tb_mate_ball", "Ball mate (free rotation)",
-          MateType::Ball);
+  mateBtn(ICON_FA_CIRCLE_DOT "###tb_mate_ball", "assembly.mate_ball",
+          "Ball mate (free rotation)", MateType::Ball);
   Divider();
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_asm_fit",
-                 "Fit view (F)"))
-    FitCameraToDocument(state);
+  CommandButton(state,
+                ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_asm_fit",
+                "view.fit", "Fit view");
 
   // Measure across the assembly: same tool as the part tab — picks carry
   // their occurrence, so distances span occurrences in world space. Snapshot
@@ -838,19 +716,9 @@ void DrawAssemblyToolbar(AppState& state) {
   // the model-toolbar measure button).
   SectionToolButton(state);
 
-  const bool measureActive = state.measure.active;
-  if (measureActive)
-    ImGui::PushStyleColor(ImGuiCol_Button,
-                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  if (ToolButton(ICON_FA_RULER "###tb_asm_measure",
-                 "Measure (pick 1-2 faces/edges; Esc to exit)",
-                 state.assembly->OccurrenceCount() > 0)) {
-    const bool wasActive = state.measure.active;
-    state.measure = MeasureState{};    // clear any in-progress measurement
-    state.measure.active = !wasActive; // toggle
-  }
-  if (measureActive)
-    ImGui::PopStyleColor();
+  CommandButton(state, ICON_FA_RULER "###tb_asm_measure", "view.measure",
+                "Measure (pick 1-2 faces/edges; Esc to exit)",
+                state.measure.active);
 
   Divider();
 
@@ -858,11 +726,9 @@ void DrawAssemblyToolbar(AppState& state) {
   // walked assembly occurrences at their solved placements since the RT work
   // landed; only the buttons and the RPC guard said otherwise, so an assembly
   // could be modelled, mated and exploded but never rendered.
-  if (ToolButton(ICON_FA_CAMERA "###tb_asm_render",
-                 "Render (offline "
-                 "raytrace)",
-                 state.rayTracer != nullptr &&
-                     state.assembly->OccurrenceCount() > 0))
+  CommandButton(state, ICON_FA_CAMERA "###tb_asm_render", "view.render",
+                "Render (offline raytrace)");
+  if (TakePopupRequest(state, "Render Still"))
     ImGui::OpenPopup("Render Still");
   DrawRenderModal(state);
 
@@ -889,45 +755,32 @@ void DrawAssemblyToolbar(AppState& state) {
 // the model tools while a FEM study is being set up.
 void DrawSimulationToolbar(AppState& state) {
   SimulationState& sim = state.simulation;
-  Document* doc = state.document.get();
-  const bool hasStudy = doc && doc->FindStudy(sim.activeStudyId);
 
   // A boundary-condition tool button: armed state highlighted like Measure.
-  auto bcBtn = [&](const char* icon, const char* tip, SimulationState::Tool t) {
-    const bool armed = sim.tool == t;
-    if (armed)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ToolButton(icon, tip, hasStudy)) // toggle
-      SimulationArmTool(state, armed ? SimulationState::Tool::None : t);
-    if (armed)
-      ImGui::PopStyleColor();
+  auto bcBtn = [&](const char* icon, const char* id, const char* tip,
+                   SimulationState::Tool t) {
+    CommandButton(state, icon, id, tip, sim.tool == t); // toggles
   };
-  bcBtn(ICON_FA_LOCK "###tb_sim_fixed", "Fixed support (click a face)",
-        SimulationState::Tool::Fixed);
-  bcBtn(ICON_FA_BOLT "###tb_sim_force", "Force load (click a face)",
-        SimulationState::Tool::Force);
-  bcBtn(ICON_FA_DOWN_LONG "###tb_sim_pressure", "Pressure load (click a face)",
-        SimulationState::Tool::Pressure);
+  bcBtn(ICON_FA_LOCK "###tb_sim_fixed", "sim.fixed",
+        "Fixed support (click a face)", SimulationState::Tool::Fixed);
+  bcBtn(ICON_FA_BOLT "###tb_sim_force", "sim.force",
+        "Force load (click a face)", SimulationState::Tool::Force);
+  bcBtn(ICON_FA_DOWN_LONG "###tb_sim_pressure", "sim.pressure",
+        "Pressure load (click a face)", SimulationState::Tool::Pressure);
 
   Divider();
 
-  if (ToolButton(ICON_FA_PLAY "###tb_sim_run", "Run study (mesh + solve)",
-                 hasStudy)) {
-    // Same worker-thread paths the panel's Run uses. This called the blocking
-    // RunStudyAndCache, so the toolbar could freeze the app for the length of
-    // a solve — and on a topology study, for the length of an optimization.
-    const fem::Study* s = doc->FindStudy(sim.activeStudyId);
-    std::string err;
-    const bool ok = s && s->type == fem::AnalysisType::Topology
-                        ? StartTopologyRun(state, *doc, sim.activeStudyId, &err)
-                        : StartStudyRun(state, *doc, sim.activeStudyId, &err);
-    if (!ok)
-      LOG_WARN("run study failed: {}", err);
-  }
+  // The command uses the same worker-thread paths the panel's Run uses. This
+  // called the blocking RunStudyAndCache once, so the toolbar could freeze the
+  // app for the length of a solve — and on a topology study, for the length of
+  // an optimization.
+  CommandButton(state, ICON_FA_PLAY "###tb_sim_run", "sim.run",
+                "Run study (mesh + solve)");
 
   Divider();
 
+  // Escape is a fixed modal verb, not a binding — the same rule the sketch
+  // session's check mark follows (docs/ui/u12-keybindings.md).
   if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET "###tb_sim_exit",
                  "Exit Simulation (Esc)"))
     ExitSimulation(state);
@@ -949,12 +802,11 @@ void DrawSimulationToolbar(AppState& state) {
 // The drawing-mode toolbar: add a projected view of a part/assembly (the
 // "add part" of a sheet), re-project, the dimension tools, fit, export.
 void DrawDrawingToolbar(AppState& state) {
-  DrawingDocument& dwg = *state.drawing;
-
   // Add view: a picker of part/assembly sources, each with orientation
   // submenus — the sheet equivalent of inserting a part.
-  if (ToolButton(ICON_FA_CIRCLE_PLUS "###tb_dwg_add_view",
-                 "Add view (project a part/assembly)"))
+  CommandButton(state, ICON_FA_CIRCLE_PLUS "###tb_dwg_add_view",
+                "drawing.add_view", "Add view (project a part/assembly)");
+  if (TakePopupRequest(state, "add_view"))
     ImGui::OpenPopup("add_view");
   if (ImGui::BeginPopup("add_view")) {
     ImGui::TextDisabled("Add view of");
@@ -993,59 +845,51 @@ void DrawDrawingToolbar(AppState& state) {
   ImGui::SameLine();
   Divider();
 
-  if (ToolButton(ICON_FA_ARROWS_ROTATE "###tb_dwg_update",
-                 "Update views (re-project)"))
-    UpdateDrawingRenders(state);
+  CommandButton(state, ICON_FA_ARROWS_ROTATE "###tb_dwg_update",
+                "drawing.update", "Update views (re-project)");
 
   Divider();
 
   // Dimension tools: arm state.dimTool; the sheet then picks projected refs.
-  auto dimBtn = [&](const char* icon, const char* tip, DrawingDimKind k) {
-    const bool armed = state.dimTool.active && state.dimTool.kind == k;
-    if (armed)
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ToolButton(icon, tip)) {
-      state.dimTool = AppState::DimTool{};
-      state.dimTool.active = true;
-      state.dimTool.kind = k;
-    }
-    if (armed)
-      ImGui::PopStyleColor();
+  auto dimBtn = [&](const char* icon, const char* id, const char* tip,
+                    DrawingDimKind k) {
+    CommandButton(state, icon, id, tip,
+                  state.dimTool.active && state.dimTool.kind == k);
   };
-  dimBtn(ICON_FA_LEFT_RIGHT "###tb_dwg_dist", "Distance dimension",
-         DrawingDimKind::Distance);
-  dimBtn(ICON_FA_RULER_HORIZONTAL "###tb_dwg_distx", "Horizontal (X) distance",
-         DrawingDimKind::DistanceX);
-  dimBtn(ICON_FA_UP_DOWN "###tb_dwg_disty", "Vertical (Y) distance",
-         DrawingDimKind::DistanceY);
-  dimBtn(ICON_FA_CIRCLE_NOTCH "###tb_dwg_radius", "Radius dimension",
-         DrawingDimKind::Radius);
-  dimBtn(ICON_FA_CIRCLE_HALF_STROKE "###tb_dwg_diameter", "Diameter dimension",
+  dimBtn(ICON_FA_LEFT_RIGHT "###tb_dwg_dist", "drawing.dim_distance",
+         "Distance dimension", DrawingDimKind::Distance);
+  dimBtn(ICON_FA_RULER_HORIZONTAL "###tb_dwg_distx", "drawing.dim_distance_x",
+         "Horizontal (X) distance", DrawingDimKind::DistanceX);
+  dimBtn(ICON_FA_UP_DOWN "###tb_dwg_disty", "drawing.dim_distance_y",
+         "Vertical (Y) distance", DrawingDimKind::DistanceY);
+  dimBtn(ICON_FA_CIRCLE_NOTCH "###tb_dwg_radius", "drawing.dim_radius",
+         "Radius dimension", DrawingDimKind::Radius);
+  dimBtn(ICON_FA_CIRCLE_HALF_STROKE "###tb_dwg_diameter",
+         "drawing.dim_diameter", "Diameter dimension",
          DrawingDimKind::Diameter);
-  dimBtn(ICON_FA_ANGLE_LEFT "###tb_dwg_angle", "Angle dimension",
-         DrawingDimKind::Angle);
-  dimBtn(ICON_FA_BULLSEYE "###tb_dwg_hole_callout",
+  dimBtn(ICON_FA_ANGLE_LEFT "###tb_dwg_angle", "drawing.dim_angle",
+         "Angle dimension", DrawingDimKind::Angle);
+  dimBtn(ICON_FA_BULLSEYE "###tb_dwg_hole_callout", "drawing.dim_hole_callout",
          "Hole callout (pick a drilled hole's circle)",
          DrawingDimKind::HoleCallout);
   dimBtn(ICON_FA_ELLIPSIS "###tb_dwg_pattern_callout",
+         "drawing.dim_pattern_callout",
          "Pattern callout (pick 2+ circles, Enter finishes)",
          DrawingDimKind::PatternCallout);
 
   Divider();
 
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_dwg_fit",
-                 "Fit sheet (F)"))
-    state.sheetView.scale = 0.0; // refit on next paint
+  // `view.fit` knows a drawing tab has a sheet scale rather than a camera.
+  CommandButton(state,
+                ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_dwg_fit",
+                "view.fit", "Fit sheet");
   // Export needs a native save dialog; without one (bare session, container)
   // the click used to do nothing at all. Say so on the button instead.
-  const bool canSave = FileDialogsAvailable();
-  if (ToolButton(ICON_FA_FILE_EXPORT "###tb_dwg_export",
-                 canSave ? "Export drawing (SVG / PDF)"
-                         : "Export needs a system file dialog (unavailable "
-                           "here) - use export_drawing over the script API",
-                 !dwg.GetViews().empty() && canSave))
-    ExportDialog(state);
+  CommandButton(state, ICON_FA_FILE_EXPORT "###tb_dwg_export", "drawing.export",
+                FileDialogsAvailable()
+                    ? "Export drawing (SVG / PDF)"
+                    : "Export needs a system file dialog (unavailable here) - "
+                      "use export_drawing over the script API");
 
   if (state.dimTool.active) {
     ImGui::SameLine();

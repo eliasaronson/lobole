@@ -12,6 +12,7 @@
 #include "render/Camera.h"
 #include "render/OutlineRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/Commands.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SettingsWindow.h"
@@ -20,6 +21,7 @@
 
 #include "imgui.h"
 
+#include <algorithm>
 #include <filesystem>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -27,6 +29,13 @@
 namespace ui {
 
 namespace {
+
+// A menu's shortcut column, read from the keymap rather than typed into the
+// literal beside the label. An unbound command prints nothing: a menu is not
+// the place to advertise that a key is available.
+std::string Hint(const AppState& state, const char* id) {
+  return CommandChord(state, id);
+}
 
 // BeginMenu for a TOP-LEVEL menu: records the name for menu_items (the test
 // engine cannot enumerate the bar itself), then behaves exactly like
@@ -92,25 +101,19 @@ void DrawFileMenu(AppState& state) {
   if (!BeginTopMenu(state, "File"))
     return;
 
-  if (ImGui::MenuItem("New", "Ctrl+N")) {
-    ReplaceDocument(state, std::make_unique<Document>());
-    state.parts.clear();
-    state.tabFolders.clear();
-    ClearSections(state); // a new project starts uncut
-    EnsureParts(state, "Part 1");
-    MarkProjectOpened(state, ""); // a fresh document has no home yet
-  }
+  // The menu ITEM and the chord run the same command — they used to be two
+  // bodies, and Ctrl+N did strictly less than File > New.
+  if (ImGui::MenuItem("New", Hint(state, "file.new").c_str()))
+    RunCommand(state, "file.new");
 #ifdef HAVE_NATIVEFILEDIALOG
-  if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
-    OpenProjectDialog(state);
-  }
+  if (ImGui::MenuItem("Open Project...", Hint(state, "file.open").c_str()))
+    RunCommand(state, "file.open");
   DrawOpenRecentMenu(state);
-  if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
-    SaveProjectAction(state);
-  }
-  if (ImGui::MenuItem("Save Project As...", "Ctrl+Shift+S")) {
-    SaveProjectDialog(state);
-  }
+  if (ImGui::MenuItem("Save Project", Hint(state, "file.save").c_str()))
+    RunCommand(state, "file.save");
+  if (ImGui::MenuItem("Save Project As...",
+                      Hint(state, "file.save_as").c_str()))
+    RunCommand(state, "file.save_as");
 #endif
   // No version-history entry here. F6 removed the F4 "Checkpoints" submenu
   // (it snapshotted only the ACTIVE PART, silently leaving out the assembly,
@@ -122,21 +125,14 @@ void DrawFileMenu(AppState& state) {
   // One import for STEP/STL/BREP: an assembly-structured STEP becomes part
   // tabs + an assembly tab in the CURRENT project (imported and hand-modeled
   // parts mix freely); anything else lands as a feature in the active part.
-  if (ImGui::MenuItem("Import...", "Ctrl+I")) {
-    ImportFileDialog(state);
-  }
-  // Enabled for a part with bodies, an assembly (visual export walks its
-  // occurrences), or a drawing with views (SVG/PDF sheet export).
-  const bool canExport =
-      (state.document && !state.document->GetBodies().empty()) ||
-      (state.assembly && state.assembly->OccurrenceCount() > 0) ||
-      (state.drawing && !state.drawing->GetViews().empty());
-  // Grey it out where no system save dialog exists rather than letting the
-  // click vanish (FileDialogs.h).
-  if (ImGui::MenuItem("Export...", nullptr, false,
-                      canExport && FileDialogsAvailable())) {
-    ExportDialog(state);
-  }
+  if (ImGui::MenuItem("Import...", Hint(state, "file.import").c_str()))
+    RunCommand(state, "file.import");
+  // Greyed out where there is nothing to export, or where no system save
+  // dialog exists, rather than letting the click vanish (FileDialogs.h). The
+  // gate is the command's own, so the palette and the menu agree.
+  if (ImGui::MenuItem("Export...", Hint(state, "file.export").c_str(), false,
+                      CommandEnabled(state, "file.export")))
+    RunCommand(state, "file.export");
   ImGui::Separator();
   if (ImGui::MenuItem("Exit")) {
     glfwSetWindowShouldClose(state.window, GLFW_TRUE);
@@ -153,18 +149,16 @@ void DrawEditMenu(AppState& state) {
   // stack, whichever was most recently mutated (see GlobalUndo).
   const bool canUndo = !pending && CanGlobalUndo(state);
   const bool canRedo = !pending && CanGlobalRedo(state);
-  if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo)) {
-    GlobalUndo(state);
-  }
-  if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo)) {
-    GlobalRedo(state);
-  }
+  if (ImGui::MenuItem("Undo", Hint(state, "edit.undo").c_str(), false, canUndo))
+    RunCommand(state, "edit.undo");
+  if (ImGui::MenuItem("Redo", Hint(state, "edit.redo").c_str(), false, canRedo))
+    RunCommand(state, "edit.redo");
   ImGui::Separator();
   // A floating window that does not otherwise exist — unlike History, whose
   // menu item only re-selected an always-visible tab and was removed.
-  if (ImGui::MenuItem("Preferences...###edit_preferences", "Ctrl+,")) {
-    state.settingsWindowOpen = true;
-  }
+  if (ImGui::MenuItem("Preferences...###edit_preferences",
+                      Hint(state, "edit.preferences").c_str()))
+    RunCommand(state, "edit.preferences");
   ImGui::EndMenu();
 }
 
@@ -187,12 +181,11 @@ void DrawViewMenu(AppState& state) {
       state.camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     }
   }
-  if (ImGui::MenuItem("Fit View", "F")) {
-    FitCameraToDocument(state);
-  }
-  if (ImGui::MenuItem("Zoom to Selection", "Shift+F")) {
-    FitCameraToSelection(state);
-  }
+  if (ImGui::MenuItem("Fit View", Hint(state, "view.fit").c_str()))
+    RunCommand(state, "view.fit");
+  if (ImGui::MenuItem("Zoom to Selection",
+                      Hint(state, "view.zoom_selection").c_str()))
+    RunCommand(state, "view.zoom_selection");
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   // Render quality (shadows, SSAO, shadow map) and font size used to live
   // here as session flags that reset every launch. They are USER PREFERENCES
@@ -207,32 +200,27 @@ void DrawViewMenu(AppState& state) {
     state.syncedDocumentVersion = UINT64_MAX;
   }
 
-  // The Shift+1..7 views, discoverable (U5).
+  // The standard views, discoverable (U5). Names, order and chords all come
+  // from the command table, so rebinding one updates this menu with it.
   if (ImGui::BeginMenu("Standard Views")) {
-    const auto view = [&](const char* name, glm::vec3 n, const char* shortcut) {
-      if (ImGui::MenuItem(name, shortcut) && state.camera)
-        // The camera's OWN pivot, not the world origin. Every standard
-        // view used to slam the target to (0,0,0): fit the view on a part
-        // modelled away from the origin, press Front, and you are looking at
-        // empty space beside it. A standard view is an orientation, not a
-        // place (docs/cam/dogfood-round.md).
-        state.camera->AlignToFace(state.camera->GetTarget(), n);
+    const auto view = [&](const char* name, const char* id) {
+      if (ImGui::MenuItem(name, Hint(state, id).c_str()))
+        RunCommand(state, id);
     };
-    view("Front", {0, 0, 1}, "Shift+1");
-    view("Back", {0, 0, -1}, "Shift+2");
-    view("Left", {-1, 0, 0}, "Shift+3");
-    view("Right", {1, 0, 0}, "Shift+4");
-    view("Top", {0, 1, 0}, "Shift+5");
-    view("Bottom", {0, -1, 0}, "Shift+6");
-    view("Isometric", glm::normalize(glm::vec3(1, 1, 1)), "Shift+7");
+    view("Front", "view.front");
+    view("Back", "view.back");
+    view("Left", "view.left");
+    view("Right", "view.right");
+    view("Top", "view.top");
+    view("Bottom", "view.bottom");
+    view("Isometric", "view.iso");
     ImGui::EndMenu();
   }
 
-  if (ImGui::MenuItem("Reset Layout")) {
-    // Rebuild the default docking layout next frame — recovers from a panel
-    // dragged huge or a stale imgui.ini.
-    state.buildDefaultDockLayout = true;
-  }
+  // Rebuild the default docking layout next frame — recovers from a panel
+  // dragged huge or a stale imgui.ini.
+  if (ImGui::MenuItem("Reset Layout", Hint(state, "view.reset_layout").c_str()))
+    RunCommand(state, "view.reset_layout");
 
   ImGui::Separator();
 
@@ -274,80 +262,78 @@ void DrawViewMenu(AppState& state) {
 
 // Every binding the app actually has, grouped the way a user looks for one.
 // Ctrl+K was advertised nowhere, and the sketch keymap only in the source.
-void DrawShortcutsWindow(bool& open) {
-  if (!open)
+void DrawShortcutsWindow(AppState& state) {
+  if (!state.showShortcuts)
     return;
-  ImGui::SetNextWindowSize(ImVec2(520, 560), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Keyboard Shortcuts###ShortcutsWindow", &open)) {
+  // Sized in FONT UNITS and re-applied on every APPEARING, not
+  // FirstUseEver — the same rule the Preferences window documents: this
+  // window's contents changed shape (it is generated from the keymap now),
+  // and FirstUseEver would leave anyone who had opened the old one stuck
+  // with its size forever in imgui.ini.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const float em = ImGui::GetFontSize();
+  ImGui::SetNextWindowSize(ImVec2(std::min(em * 34.0f, vp->WorkSize.x * 0.9f),
+                                  std::min(em * 40.0f, vp->WorkSize.y * 0.85f)),
+                           ImGuiCond_Appearing);
+  if (!ImGui::Begin("Keyboard Shortcuts###ShortcutsWindow",
+                    &state.showShortcuts)) {
     ImGui::End();
     return;
   }
-  struct Row {
-    const char* keys;
-    const char* what;
-  };
-  const auto section = [](const char* title, const Row* rows, size_t count) {
-    ImGui::SeparatorText(title);
-    if (ImGui::BeginTable(
-            title, 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
-      ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthFixed,
-                              ImGui::GetFontSize() * 8.0f);
-      ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
-      for (size_t i = 0; i < count; i++) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted(rows[i].keys);
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted(rows[i].what);
-      }
-      ImGui::EndTable();
-    }
+
+  ImGui::PushStyleColor(ImGuiCol_Text,
+                        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  ImGui::PushTextWrapPos(0.0f); // wrap, or the line just clips off the edge
+  ImGui::TextUnformatted(
+      "Edit > Preferences > Keyboard changes any of these. A mode's binding "
+      "wins over the same key listed under Everywhere.");
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+  ImGui::Spacing();
+
+  const keymap::Keymap& keys = state.settings.keys;
+  const auto row = [](const std::string& chord, const char* what) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    if (chord.empty())
+      ImGui::TextDisabled("—");
+    else
+      ImGui::TextUnformatted(chord.c_str());
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(what);
   };
 
-  static const Row kGeneral[] = {
-      {"Ctrl+K", "Command palette - every action, by name"},
-      {"Ctrl+N / O / S", "New / Open / Save project"},
-      {"Ctrl+Shift+S", "Save Project As"},
-      {"Ctrl+I", "Import STEP / STL / BREP"},
-      {"Ctrl+Z / Ctrl+Y", "Undo / Redo"},
-      {"Esc", "Cancel the current tool, pick or preview"},
-      {"Enter", "Accept the open tool dialog"},
-      {"Delete", "Delete the selection"},
-  };
-  static const Row kView[] = {
-      {"F", "Fit the view to the model"},
-      {"Shift+F", "Zoom to the selection"},
-      {"N", "Look straight at the selected (or hovered) face"},
-      {"Shift+1..6", "Front / Back / Left / Right / Top / Bottom"},
-      {"Shift+7", "Isometric"},
-      {"Shift+P", "Show or hide the base planes"},
-      {"Arrows", "Orbit the camera"},
-  };
-  static const Row kModel[] = {
-      {"S", "New sketch - then click a plane or a flat face"},
-      {"Click", "Select; Ctrl+click adds; click again cycles what's behind"},
-      {"Shift+click", "Select a face and look straight at it"},
-  };
-  static const Row kSketch[] = {
-      {"L / C / A", "Line / Circle / 3-point arc"},
-      {"G / Shift+G", "Rectangle (corner / centre)"},
-      {"S / O / M", "Spline / Offset / Trim"},
-      {"X", "Project model edges into the sketch"},
-      {"D", "Dimension"},
-      {"Shift+F", "Fillet a corner"},
-      {"Q", "Toggle construction on the selection"},
-      {"Space", "Clear the selection"},
-      {"H / V / N", "Horizontal / Vertical / Coincident constraint"},
-      {"B / T / E", "Parallel / Tangent / Equal constraint"},
-      {"Shift+S", "Suspend constraint inferencing while drawing"},
-      {"Shift+E / Shift+R", "Extrude / Revolve this sketch"},
-      {"Shift+H", "Drill the sketch's points as holes"},
-      {"Esc", "Back to Select, then leave the sketch"},
-  };
-  section("General", kGeneral, IM_ARRAYSIZE(kGeneral));
-  section("View", kView, IM_ARRAYSIZE(kView));
-  section("Modeling", kModel, IM_ARRAYSIZE(kModel));
-  section("Sketching", kSketch, IM_ARRAYSIZE(kSketch));
+  for (keymap::Context ctx : keymap::AllContexts()) {
+    ImGui::SeparatorText(keymap::ContextLabel(ctx));
+    if (!ImGui::BeginTable(keymap::ContextName(ctx), 2,
+                           ImGuiTableFlags_SizingFixedFit |
+                               ImGuiTableFlags_RowBg))
+      continue;
+    ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthFixed,
+                            ImGui::GetFontSize() * 9.0f);
+    ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+    for (const keymap::Binding& b : keymap::Defaults()) {
+      if (b.ctx != ctx || b.hidden)
+        continue;
+      std::string chord = keys.Text(b.id);
+      if (const keymap::Chord alt = keys.Alt(b.id))
+        chord += (chord.empty() ? "" : " / ") + keymap::FormatChord(alt);
+      row(chord, b.label);
+    }
+    // The modal verbs, listed where people look for them but marked as what
+    // they are: fixed. They resolve against armed tools, previews, plane
+    // picks and text fields, so they are not commands and cannot be rebound
+    // (docs/ui/u12-keybindings.md).
+    if (ctx == keymap::Context::Global) {
+      row("Esc", "Cancel the current tool, pick or preview (fixed)");
+      row("Enter", "Accept the open tool dialog (fixed)");
+      row("Delete", "Delete the selection (fixed)");
+      row("Arrows", "Orbit; Ctrl pans, Alt rolls (fixed)");
+      row("Click", "Select; Ctrl+click adds; click again cycles behind");
+      row("Shift+click", "Select a face and look straight at it");
+    }
+    ImGui::EndTable();
+  }
   ImGui::End();
 }
 
@@ -444,7 +430,8 @@ void DrawAboutWindow(AppState& state) {
 
 void DrawHelpMenu(AppState& state) {
   if (BeginTopMenu(state, "Help")) {
-    if (ImGui::MenuItem("Keyboard Shortcuts", "Ctrl+/"))
+    if (ImGui::MenuItem("Keyboard Shortcuts",
+                        Hint(state, "help.shortcuts").c_str()))
       state.showShortcuts = true;
     // Sets a flag; see AppState::showAbout for why this cannot open the
     // popup from in here.
@@ -452,61 +439,9 @@ void DrawHelpMenu(AppState& state) {
       state.showAbout = true;
     ImGui::EndMenu();
   }
-  if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Slash))
-    state.showShortcuts = !state.showShortcuts;
-  DrawShortcutsWindow(state.showShortcuts);
+  // The chord itself belongs to `help.shortcuts` in the one command table.
+  DrawShortcutsWindow(state);
   DrawAboutWindow(state);
-}
-
-// Global keyboard shortcuts. Registered every frame; ImGui's routing lets a
-// focused text field claim chords like Ctrl+Z for itself first.
-void HandleShortcuts(AppState& state) {
-  // The terminal owns the keyboard while the pointer is over it
-  // (docs/ui/terminal-panel.md). Without this gate Ctrl+Z would mean two
-  // things at once — undo a feature AND suspend the job — and which one you
-  // got would depend on invisible focus state.
-  if (TerminalCapturesKeys(state))
-    return;
-
-  const ImGuiInputFlags route = ImGuiInputFlags_RouteGlobal;
-
-  // Preferences: the platform-conventional chord, and it works mid-preview
-  // (opening a window changes nothing about the pending feature).
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, route))
-    state.settingsWindowOpen = true;
-
-  // While a feature preview is pending, freeze the undo stack: Ctrl+Z / Escape
-  // cancel the preview instead of touching history.
-  if (HasPendingFeature(state)) {
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route))
-      CancelPendingFeature(state);
-    return;
-  }
-
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route)) {
-    GlobalUndo(state);
-  }
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, route) ||
-      ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, route)) {
-    GlobalRedo(state);
-  }
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, route)) {
-    ReplaceDocument(state, std::make_unique<Document>());
-  }
-#ifdef HAVE_NATIVEFILEDIALOG
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, route)) {
-    OpenProjectDialog(state);
-  }
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, route)) {
-    SaveProjectAction(state);
-  }
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, route)) {
-    SaveProjectDialog(state);
-  }
-#endif
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_I, route)) {
-    ImportFileDialog(state);
-  }
 }
 
 // F8: the project changed on disk, said where it is always visible.
@@ -546,7 +481,8 @@ void DrawDiskChangeNotice(const AppState& state) {
 } // namespace
 
 void DrawMainMenuBar(AppState& state) {
-  HandleShortcuts(state);
+  // No key handling here any more: every binding is dispatched once per frame
+  // from DrawUI, after the panels have drawn (ui::DispatchShortcuts).
 
   if (!ImGui::BeginMainMenuBar())
     return;

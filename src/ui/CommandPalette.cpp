@@ -2,6 +2,7 @@
 
 #include "render/Camera.h"
 #include "ui/AppActions.h"
+#include "ui/Commands.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchToolbar.h"
@@ -20,152 +21,38 @@ namespace ui {
 
 namespace {
 
+// A palette row: the command table's label and gating, resolved for this
+// frame. The palette used to carry its own hand-written list of 40-odd
+// commands with its own copy of each one's shortcut text; both drifted.
 struct PaletteCommand {
-  std::string label;
-  const char* shortcut = nullptr;
+  std::string label;    // "Create: Box" — section, then the command's name
+  std::string shortcut; // live chord, "" when unbound
   bool enabled = true;
-  std::function<void(AppState&)> run;
+  const char* id = nullptr;
 };
 
-// The command surface: every toolbar/menu action, same gating, same
-// actions. Ctrl+K is the only way to reach some of them by keyboard.
+// Everything reachable from where the app is right now: the active context's
+// commands, then the globals. A hidden binding stays out (the perf HUD).
 std::vector<PaletteCommand> BuildCommands(AppState& state) {
-  const bool part = state.document != nullptr;
-  const bool idle = part && !HasPendingFeature(state);
-  const size_t producers =
-      part ? BodyProducers(*state.document, state.document->FeatureCount())
-                 .size()
-           : 0;
-  const bool hasBody = part && !state.document->GetBodies().empty();
-
+  const keymap::Context ctx = ActiveContext(state);
   std::vector<PaletteCommand> cmds;
-  const auto add = [&](std::string label, const char* shortcut, bool enabled,
-                       std::function<void(AppState&)> run) {
-    cmds.push_back({std::move(label), shortcut, enabled, std::move(run)});
+  const auto collect = [&](keymap::Context want) {
+    for (const keymap::Binding& b : keymap::Defaults()) {
+      if (b.ctx != want || b.hidden)
+        continue;
+      if (FindCommand(b.id) == nullptr)
+        continue; // metadata with no implementation: the gate test catches it
+      cmds.push_back({std::string(b.section) + ": " + b.label,
+                      CommandChord(state, b.id), CommandEnabled(state, b.id),
+                      b.id});
+    }
   };
-
-  add("Create: Sketch", "S", idle, [](AppState& s) { StartNewSketch(s); });
-  add("Create: Box", nullptr, idle, [](AppState& s) { CreateBox(s); });
-  add("Create: Sphere", nullptr, idle, [](AppState& s) { CreateSphere(s); });
-  add("Create: Cylinder", nullptr, idle,
-      [](AppState& s) { CreateCylinder(s); });
-  add("Create: Extrude (from a sketch)", nullptr,
-      idle && ClosedProfileSketch(state) != nullptr, [](AppState& s) {
-        if (SketchFeature* sk = ClosedProfileSketch(s))
-          BeginExtrudeOfSketch(s, *sk);
-      });
-  add("Create: Revolve (from a sketch)", nullptr,
-      idle && ClosedProfileSketch(state) != nullptr, [](AppState& s) {
-        if (SketchFeature* sk = ClosedProfileSketch(s))
-          BeginRevolveOfSketch(s, *sk);
-      });
-  add("Create: Datum Plane", nullptr, idle,
-      [](AppState& s) { CreateDatumPlane(s); });
-  add("Create: Datum Axis", nullptr, idle,
-      [](AppState& s) { CreateDatumAxis(s); });
-  add("Create: Boolean", nullptr, idle && producers >= 2,
-      [](AppState& s) { CreateBoolean(s); });
-  add("Create: Mirror", nullptr, idle && producers >= 1,
-      [](AppState& s) { CreateMirror(s); });
-  add("Create: Pattern", nullptr, idle && producers >= 1,
-      [](AppState& s) { CreatePattern(s); });
-  add("Create: Shell (hollow a body)", nullptr, idle && hasBody,
-      [](AppState& s) { CreateShell(s); });
-  add("Create: Draft (taper faces)", nullptr, idle && hasBody,
-      [](AppState& s) { CreateDraft(s); });
-  add("Create: Split (divide a body)", nullptr, idle && hasBody,
-      [](AppState& s) { CreateSplit(s); });
-  add("Create: Refine (merge faces/seams)", nullptr, idle && hasBody,
-      [](AppState& s) { CreateRefine(s); });
-  add("Create: Fillet", nullptr, idle && hasBody,
-      [](AppState& s) { CreateFillet(s); });
-  add("Create: Chamfer", nullptr, idle && hasBody,
-      [](AppState& s) { CreateChamfer(s); });
-  add("Create: Rib", nullptr, idle && hasBody,
-      [](AppState& s) { CreateRib(s); });
-  add("Create: Hole", nullptr, idle && hasBody,
-      [](AppState& s) { StartHoleTool(s); });
-  add("Create: Thread", nullptr, idle && hasBody,
-      [](AppState& s) { CreateThread(s); });
-  const size_t sketches =
-      state.document ? SketchFeatureCount(*state.document) : 0;
-  const bool hasPathLike = state.document && HasCurveOrSketch(*state.document);
-  add("Create: 3D Curve", nullptr, idle, [](AppState& s) { CreateCurve3D(s); });
-  add("Create: Pipe", nullptr, idle && hasPathLike,
-      [](AppState& s) { CreatePipe(s); });
-  add("Create: Sweep", nullptr, idle && sketches >= 1,
-      [](AppState& s) { CreateSweep(s); });
-  add("Create: Loft", nullptr, idle && sketches >= 2,
-      [](AppState& s) { CreateLoft(s); });
-
-  add("Tool: Measure", nullptr, part || state.assembly != nullptr,
-      [](AppState& s) {
-        s.measure = MeasureState{};
-        s.measure.active = true;
-      });
-  add("Tool: Simulation", nullptr, hasBody,
-      [](AppState& s) { EnterSimulation(s); });
-#ifdef HAVE_CAM
-  // CAM was the one mode-level tool with NO route but its toolbar button —
-  // no menu entry and no palette entry — which a dogfooding round found the
-  // hard way when the toolbar overflowed and culled the button. The toolbar
-  // wraps now; this is the second way in, which every sibling already had.
-  add("Tool: CAM", nullptr, hasBody, [](AppState& s) { s.camToolOpen = true; });
-#endif
-
-  // Replaces the old View > Section View menu (deleted with the tool round).
-  add("Tool: Section", nullptr, true, [](AppState& s) {
-    s.sectionToolOpen = !s.sectionToolOpen;
-    if (s.sectionToolOpen && s.sections.empty())
-      AddSection(s, 0);
-  });
-
-  add("Edit: Undo", "Ctrl+Z", true, [](AppState& s) { GlobalUndo(s); });
-  add("Edit: Redo", "Ctrl+Y", true, [](AppState& s) { GlobalRedo(s); });
-
-  add("View: Fit", "F", true, [](AppState& s) { FitCameraToDocument(s); });
-  add("View: Zoom to Selection", "Shift+F", true,
-      [](AppState& s) { FitCameraToSelection(s); });
-  add("View: Reset Layout", nullptr, true,
-      [](AppState& s) { s.buildDefaultDockLayout = true; });
-  add("View: Toggle Planes", "Shift+P", part,
-      [](AppState& s) { s.showPlanes = !s.showPlanes; });
-  add("View: Viewport Controls", nullptr, true,
-      [](AppState& s) { s.showControlsHelp = !s.showControlsHelp; });
-  const auto stdView = [&](const char* name, glm::vec3 n,
-                           const char* shortcut) {
-    add(std::string("View: ") + name, shortcut, true, [n](AppState& s) {
-      if (s.camera)
-        s.camera->AlignToFace(s.camera->GetTarget(), n); // pivot, not origin
-    });
-  };
-  stdView("Front", {0, 0, 1}, "Shift+1");
-  stdView("Back", {0, 0, -1}, "Shift+2");
-  stdView("Left", {-1, 0, 0}, "Shift+3");
-  stdView("Right", {1, 0, 0}, "Shift+4");
-  stdView("Top", {0, 1, 0}, "Shift+5");
-  stdView("Bottom", {0, -1, 0}, "Shift+6");
-  stdView("Isometric", glm::normalize(glm::vec3(1, 1, 1)), "Shift+7");
-
-  add("File: New", "Ctrl+N", true,
-      [](AppState& s) { ReplaceDocument(s, std::make_unique<Document>()); });
-#ifdef HAVE_NATIVEFILEDIALOG
-  add("File: Open Project...", "Ctrl+O", true,
-      [](AppState& s) { OpenProjectDialog(s); });
-  add("File: Save Project", "Ctrl+S", true,
-      [](AppState& s) { SaveProjectAction(s); });
-  add("File: Save Project As...", "Ctrl+Shift+S", true,
-      [](AppState& s) { SaveProjectDialog(s); });
-#endif
-  add("File: Import... (STEP/STL/BREP)", "Ctrl+I", true,
-      [](AppState& s) { ImportFileDialog(s); });
-  add("File: Export...", nullptr, hasBody,
-      [](AppState& s) { ExportDialog(s); });
+  collect(ctx);
+  if (ctx != keymap::Context::Global)
+    collect(keymap::Context::Global);
   return cmds;
 }
 
-// Case-insensitive fuzzy score: 0 = no match; higher = better (prefix beats
-// substring beats subsequence).
 int FuzzyScore(const std::string& text, const std::string& query) {
   if (query.empty())
     return 1;
@@ -190,10 +77,7 @@ int FuzzyScore(const std::string& text, const std::string& query) {
 } // namespace
 
 void DrawCommandPalette(AppState& state) {
-  // Ctrl+K toggles from anywhere (a focused text field keeps its Ctrl+K).
-  if (!TerminalCapturesKeys(state) &&
-      ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, ImGuiInputFlags_RouteGlobal))
-    state.paletteOpen = !state.paletteOpen;
+  // The toggle chord is `palette.open` in the command table.
   if (!state.paletteOpen)
     return;
 
@@ -258,12 +142,12 @@ void DrawCommandPalette(AppState& state) {
                           i == selected) &&
         c.enabled) {
       state.paletteOpen = false;
-      c.run(state);
+      RunCommand(state, c.id);
     }
     ImGui::EndDisabled();
-    if (c.shortcut != nullptr) {
+    if (!c.shortcut.empty()) {
       ImGui::SameLine(ImGui::GetWindowWidth() - 90.0f);
-      ImGui::TextDisabled("%s", c.shortcut);
+      ImGui::TextDisabled("%s", c.shortcut.c_str());
     }
   }
   if (shown == 0)
@@ -274,7 +158,7 @@ void DrawCommandPalette(AppState& state) {
     const PaletteCommand& c = *matches[static_cast<size_t>(selected)].cmd;
     if (c.enabled) {
       state.paletteOpen = false;
-      c.run(state);
+      RunCommand(state, c.id);
     }
   } else if (escape ||
              (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&

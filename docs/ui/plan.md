@@ -299,6 +299,25 @@ material with the fix living outside simulation mode; a fixed support drew as
 a single stick; File > New left the mode. Verified against beam theory: a
 steel cantilever under self-weight now sags 2.05e-4 mm vs 2.08e-4 analytic.
 
+## U12 — One keymap: commands, contexts, and rebinding — SHIPPED 2026-08-24
+
+Keys were dispatched in four unrelated `if` chains and described in five more
+places that could drift; 55 of 73 toolbar buttons advertised no key at all.
+Now ONE command table (`keymap::Defaults()` in core for the metadata,
+`ui::Commands()` in ui for `enabled`/`run`), six contexts resolved by
+DrawToolbar's own branch, and four consumers reading it: the key dispatcher,
+the toolbar's tooltips and gates, the palette, and the Ctrl+/ window.
+
+Every toolbar button now ships with a chord, and every binding is rebindable
+from Edit > Preferences > Keyboard or over `set_keybinding`. Escape, Enter,
+Delete and the arrows stay fixed on purpose — they are modal verbs that answer
+to whatever tool, preview or field is open, not commands.
+
+Found and fixed on the way: Shift+F fired twice in a sketch (zoom AND fillet),
+Ctrl+N did strictly less than File > New, and arming Mirror from the keyboard
+ignored a preselected axis the button honoured. See
+docs/ui/u12-keybindings.md.
+
 ## Settings window — SHIPPED 2026-08-20
 
 [settings.md](settings.md) — where user preferences live, how they are stored

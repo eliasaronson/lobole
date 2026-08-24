@@ -17,6 +17,7 @@
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
+#include "core/io/Keymap.h"
 #include "core/io/Serialization.h"
 #include "core/io/Settings.h"
 #include "core/sketch/SketchSolver.h"
@@ -37,6 +38,7 @@
 #include "render/RayTracingRenderer.h"
 #include "render/RenderSheet.h"
 #include "ui/AppActions.h"
+#include "ui/Commands.h" // ActiveContext (get_keymap)
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
 #include "ui/SettingsWindow.h"    // ApplySettings / the save debounce
@@ -735,6 +737,7 @@ static const std::set<std::string> kNoPartDoc = {
     // that they were fixed to cover the WHOLE project, and all three stayed
     // part-gated afterwards.
     "get_settings", "set_settings", // user preferences, not the document
+    "get_keymap", "set_keybinding", // and the keyboard bindings inside them
     "reset_layout",                 // the dock layout — and the recovery for
                                     // a wedged one, so gating it is backwards
     "checkpoint_create", "checkpoint_restore", "history_restore",
@@ -830,6 +833,16 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "renderer — --headless runs no frame loop."},
     {"get_settings", "Read the user preferences (docs/ui/settings.md)."},
     {"set_settings", "Change user preferences {key: value, ...}; persists."},
+    {"get_keymap",
+     "The keyboard bindings (docs/ui/u12-keybindings.md): every command with "
+     "its context, label, current chord and default, plus any conflicts. "
+     "{context: \"sketch\"} narrows it. A context binding SHADOWS a global "
+     "one with the same chord — that is how N is Coincident while sketching "
+     "and align-to-face everywhere else."},
+    {"set_keybinding",
+     "Rebind one command: {command: \"part.fillet\", chord: \"Shift+B\"}. "
+     "An empty chord unbinds it; {reset: true} restores the default. "
+     "Persists. Escape/Enter/Delete/arrows are fixed and have no command."},
     {"reset_layout", "Reset the dock layout."},
     {"add_part", "Add a new empty part tab."},
     {"add_assembly", "Add an assembly tab."},
@@ -1301,6 +1314,78 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     state.settingsSaved = state.settings;
     state.settingsDirtyAt = -1.0;
     return settings::ToJson(state.settings);
+  }
+  if (m == "get_keymap") {
+    const keymap::Keymap& keys = state.settings.keys;
+    const bool filtered = p.contains("context");
+    std::string want;
+    if (filtered) {
+      want = p.at("context").get<std::string>();
+      bool known = false;
+      for (keymap::Context c : keymap::AllContexts())
+        known = known || want == keymap::ContextName(c);
+      if (!known)
+        throw std::runtime_error("unknown context: " + want);
+    }
+    json bindings = json::array();
+    for (const keymap::Binding& b : keymap::Defaults()) {
+      if (filtered && want != keymap::ContextName(b.ctx))
+        continue;
+      json row{{"id", b.id},
+               {"context", keymap::ContextName(b.ctx)},
+               {"section", b.section},
+               {"label", b.label},
+               {"chord", keys.Text(b.id)},
+               {"default", b.chord},
+               {"custom", !keys.IsDefault(b.id)}};
+      if (const keymap::Chord alt = keys.Alt(b.id))
+        row["alt"] = keymap::FormatChord(alt);
+      if (b.hidden)
+        row["hidden"] = true;
+      bindings.push_back(row);
+    }
+    json conflicts = json::array();
+    for (const keymap::Conflict& c : keys.Conflicts())
+      conflicts.push_back({{"context", keymap::ContextName(c.ctx)},
+                           {"chord", keymap::FormatChord(c.chord)},
+                           {"commands", json::array({c.a, c.b})}});
+    json contexts = json::array();
+    for (keymap::Context c : keymap::AllContexts())
+      contexts.push_back(keymap::ContextName(c));
+    return json{{"contexts", contexts},
+                {"bindings", bindings},
+                {"active", keymap::ContextName(ui::ActiveContext(state))},
+                {"conflicts", conflicts}};
+  }
+  if (m == "set_keybinding") {
+    const std::string command = p.at("command").get<std::string>();
+    if (keymap::Find(command) == nullptr)
+      throw std::runtime_error(
+          "unknown command: " + command +
+          " (get_keymap lists them; Escape/Enter/Delete are fixed verbs, not "
+          "commands)");
+    keymap::Keymap& keys = state.settings.keys;
+    if (p.contains("reset") && p.at("reset").get<bool>()) {
+      keys.Reset(command);
+    } else {
+      // An absent `chord` is not the same as an empty one: empty UNBINDS on
+      // purpose, absent is a caller who forgot which they meant.
+      if (!p.contains("chord"))
+        throw std::runtime_error(
+            "set_keybinding needs a 'chord' (\"\" unbinds) or {reset: true}");
+      std::string error;
+      if (!keys.Set(command, p.at("chord").get<std::string>(), &error))
+        throw std::runtime_error(error);
+    }
+    // Persist NOW rather than arming the window's debounce, for the same
+    // reason set_settings does: a --headless instance runs no GUI main loop.
+    std::string error;
+    if (!settings::Save(state.settings, state.settingsSaved, &error))
+      throw std::runtime_error("could not save settings: " + error);
+    state.settingsSaved = state.settings;
+    return json{{"command", command},
+                {"chord", keys.Text(command)},
+                {"custom", !keys.IsDefault(command)}};
   }
   if (m == "set_render_options") {
     // Viewport render quality (S3): shadows on/off, SSAO off|half|full,
