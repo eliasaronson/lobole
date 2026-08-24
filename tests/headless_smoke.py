@@ -97,6 +97,10 @@ def main():
     env.pop("WAYLAND_DISPLAY", None)
     tmp = tempfile.mkdtemp(prefix="designer_headless_")
     env["XDG_STATE_HOME"] = tmp  # keep unsaved-slot autosaves out of $HOME
+    # ...and its own CONFIG dir, or the run edits the developer's real
+    # preferences: set_settings persists immediately (headless runs no GUI
+    # loop to debounce it), so a suite reset their font size to 120%.
+    env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     # Keep the app's own stderr: when the autosave phase flakes under load,
     # its log is the only witness to what the process was doing.
     app_log = os.path.join(tmp, "app.log")

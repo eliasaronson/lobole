@@ -40,6 +40,10 @@ def main():
     env = dict(os.environ)
     env.pop("DISPLAY", None)
     env["XDG_STATE_HOME"] = tmp
+    # ...and its own CONFIG dir, or the run edits the developer's real
+    # preferences: set_settings persists immediately (headless runs no GUI
+    # loop to debounce it), so a suite reset their font size to 120%.
+    env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     session = os.path.join(tmp, "session.jsonl")
 
     # Record: a small parametric model, including an undone step.

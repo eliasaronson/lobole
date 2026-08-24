@@ -241,6 +241,12 @@ add_test(NAME widget_ids_lint
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/widget_ids_lint.py)
 set_tests_properties(widget_ids_lint PROPERTIES TIMEOUT 60)
 
+# A test that launches the app must give it its own config dir, or the suite
+# rewrites the developer's real preferences (set_settings persists at once).
+add_test(NAME config_isolation_lint
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/config_isolation_lint.py)
+set_tests_properties(config_isolation_lint PROPERTIES TIMEOUT 60)
+
 # V2 strict inputs + digests: unknown feature fields error, mutating
 # responses carry body digests with deltas, bom warnings. Headless.
 add_test(NAME strict_inputs_smoke

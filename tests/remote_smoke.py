@@ -95,8 +95,15 @@ def is_black(png_path):
 def main():
     binary = sys.argv[1]
     port = free_port()
+    # Its own state AND config dirs: autosaves and the recent-projects list
+    # stay out of $HOME, and the run cannot edit the developer's real
+    # preferences (set_settings persists immediately — headless runs no GUI
+    # loop to debounce it, so a suite once reset their font size to 120%).
+    scratch = tempfile.mkdtemp(prefix="designer_remote_")
+    env = dict(os.environ, XDG_STATE_HOME=scratch,
+               XDG_CONFIG_HOME=os.path.join(scratch, "config"))
     app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
-                           stdout=subprocess.DEVNULL,
+                           env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
     tmp = tempfile.mkdtemp(prefix="designer_remote_")
     try:

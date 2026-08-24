@@ -225,7 +225,10 @@ def main():
     # discovery), and a test must never write into the developer's real
     # ~/.local/state/designer or see the instances they have open.
     state = tempfile.mkdtemp(prefix="designer-mcp-smoke-")
-    env = dict(os.environ, XDG_STATE_HOME=state)
+    # CONFIG too: set_settings persists immediately, so a run that touched
+    # preferences would edit the developer's real settings.json.
+    env = dict(os.environ, XDG_STATE_HOME=state,
+               XDG_CONFIG_HOME=os.path.join(state, "config"))
     app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, env=env)

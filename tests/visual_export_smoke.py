@@ -56,6 +56,10 @@ def main():
     env.pop("WAYLAND_DISPLAY", None)
     tmp = tempfile.mkdtemp(prefix="designer_visual_")
     env["XDG_STATE_HOME"] = tmp
+    # ...and its own CONFIG dir, or the run edits the developer's real
+    # preferences: set_settings persists immediately (headless runs no GUI
+    # loop to debounce it), so a suite reset their font size to 120%.
+    env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
                            env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)

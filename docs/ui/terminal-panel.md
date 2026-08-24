@@ -205,6 +205,9 @@ that silently goes blank on exit reads as a crash of the *app*.
 | **T3** | Input: keys, control chars, paste, and the hover gate | **done** — GUI test asserts both directions of the gate |
 | **T4** | The Claude Code launch (port, cwd, MCP config) + exited state | **done** — the button types `claude` bound to this instance into the shell |
 | **T5** | Polish: selection + copy (**done**), a font-size control, `Tools ▸ Open terminal here` (option D) | partly done |
+| **T6** | The clipboard, in both directions: honour OSC 52 writes, refuse OSC 52 reads | headless test: `\x1b]52;c;<b64>\x07` in, decoded text out; reads answered with nothing |
+| **T7** | Middle-click paste | GUI test: select, middle-click, the bytes arrive at the child |
+| **T8** | Tabs: many sessions in one panel | GUI test: two sessions, a background one still receives output, closing one kills its process |
 
 T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
 
@@ -224,6 +227,151 @@ T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
   `Terminal###TerminalPanel` — silently. That is why the panel first appeared
   floating over the model tree instead of docked.
 
+## T6 — the clipboard, in both directions
+
+**The bug this fixes:** Claude Code's own copy does nothing. Selecting in the
+panel and pressing Ctrl+Shift+C works, and that is what hid it — the two are
+different paths and only the app's half was ever built.
+
+A TUI cannot reach the system clipboard directly; it asks the terminal to, by
+writing **OSC 52** (`ESC ] 52 ; c ; <base64> BEL`). `ScreenCallbacks::SetTermProp`
+handles `CURSORVISIBLE` and `TITLE` and returns 0 for everything else, so the
+sequence is parsed and dropped in silence. Every copy inside Claude Code has
+been a no-op.
+
+libvterm 0.3.3 has a first-class hook for exactly this, so we do not parse or
+base64-decode anything ourselves:
+
+```c
+void vterm_state_set_selection_callbacks(VTermState*, const VTermSelectionCallbacks*,
+                                         void *user, char *buffer, size_t buflen);
+```
+
+`set(mask, frag, user)` arrives **already decoded** into a buffer we own, in
+fragments with `initial`/`final` flags like the title. `query(mask, user)` is
+the read direction.
+
+The design:
+
+- `Screen` grows a member buffer (**64 KiB**) handed to libvterm, and
+  accumulates `set` fragments into `m_pendingClipboard`. The buffer length is
+  the size cap, enforced by libvterm rather than by us: a program that tries
+  to paste 100 MB into your clipboard gets truncated, not honoured.
+- The panel drains it the way it already drains keystrokes —
+  `TakeClipboardWrite()` next to `TakeOutput()`, pull-based, called from
+  `PumpSession`. No callback from `Screen` into ImGui: the whole reason
+  `TerminalScreen` is testable is that it does not know the UI exists, and a
+  headless test can assert the decoded text without a clipboard.
+- **`query` is deliberately not implemented.** OSC 52's read form lets any
+  program running in the terminal *exfiltrate* the user's clipboard —
+  passwords, tokens, whatever was last copied — and get the answer back over
+  its own stdin. xterm ships it disabled for this reason. Writes are a
+  convenience; reads are a capability, and this panel does not grant it. A
+  test asserts a query produces **no reply bytes at all**, because "answers
+  with empty" and "does not answer" are different things to the program
+  asking, and only the second is a refusal.
+- Both `VTERM_SELECTION_CLIPBOARD` and `VTERM_SELECTION_PRIMARY` map to
+  ImGui's one clipboard. GLFW exposes no PRIMARY selection, and inventing a
+  second clipboard the platform will not honour is worse than merging them.
+
+With tabs (T8) every session is pumped, so a background tab can write the
+clipboard. That is intended — a `claude` you left running in tab 2 finishing
+and copying its answer is the reason to have tab 2 — and last write wins,
+exactly as two terminals side by side would behave.
+
+## T7 — middle-click paste
+
+Middle-click pastes **the panel's own selection**, falling back to the system
+clipboard when nothing is selected. Not the X11 PRIMARY selection: GLFW has no
+API for it, reaching it means an Xlib `XConvertSelection` on a private display
+connection with a polled `SelectionNotify` wait, and it would still be a no-op
+under Wayland. For the case that actually comes up — select a path in the
+terminal, middle-click to paste it back — the two are indistinguishable.
+
+One trap, which is why this is not a two-line change. The grid's
+`InvisibleButton` already accepts `ImGuiButtonFlags_MouseButtonMiddle`, so a
+middle *press* fires `IsItemActivated()` — which is the branch that sets the
+selection anchor and **clears `hasSelection`**. Middle-click would therefore
+destroy the selection a fraction of a frame before asking to paste it, and the
+fallback would quietly paste the system clipboard instead. Every selection
+branch has to gate on the left button explicitly, and the paste has to be read
+before them.
+
+The pasted text goes through `Screen::SendPaste`, so it is wrapped in
+bracketed-paste markers when the program asked for them — a multi-line paste
+into Claude Code must not read as a run of Enter presses.
+
+## T8 — tabs
+
+`docs` has said since T5 that this is "a vector, not a redesign", and that
+holds: every per-session field is already inside one struct
+(`TerminalPanel.cpp`, `struct TerminalState`) and `AppState` holds it as one
+opaque `shared_ptr`, so nothing session-shaped has leaked into the app.
+
+The split:
+
+```
+struct Session {  // what TerminalState is today, unchanged
+  PtySession pty; unique_ptr<Screen> screen; rows/cols; label; startError;
+  exitStatus; everStarted; scrollBack; foreground; the six selection fields;
+  int id;         // NEW: monotonic, never reused
+};
+struct TerminalState {           // NEW: the panel, not a session
+  std::vector<std::unique_ptr<Session>> sessions;
+  int active = 0;
+  int nextId = 1;
+};
+```
+
+Then eight helpers change their parameter from `TerminalState&` to `Session&`
+— `StartSession`, `StartShell`, `PumpSession`, `OrderedSelection`,
+`SelectionText`, `BufferLineOfRow`, `HandleInput`, and the body of
+`DrawTerminalPanel`. Mechanical, ~48 touchpoints. **`TerminalScreen` and
+`PtySession` do not change at all**, and neither do the settings table, the
+dock layout, or `TerminalCapturesKeys` — the panel is still one ImGui window,
+and hover over that window is still the rule.
+
+Four things that are not mechanical:
+
+- **Every session is pumped every frame, not just the visible one.** Today
+  `PumpSession` runs only in the draw path. A background tab nobody drains
+  fills its ~64 KB pty buffer and then the child *blocks mid-write* — a
+  background build that appears to hang. The loop goes at the top of
+  `DrawTerminalPanel`, before the tab bar; `Poll()` is a non-blocking read, so
+  an idle tab costs a syscall.
+- **Tab ids must be the session's `id`, not its vector index.** `###term_tab_%d`
+  off a monotonic counter. Index-keyed tabs mean closing or reordering hands a
+  tab ImGui's state for a different session — selection, scroll and all.
+- **No inline rename.** `HandleInput` calls `io.ClearInputKeys()` whenever the
+  pointer is over the panel, so an `InputText` in the header cannot be typed
+  into without a carve-out. It does not need one: `foreground` already tracks
+  the live process, so a tab labels itself `claude`, `zsh`, `ninja` and the
+  label is *more* honest than a name typed once and left stale.
+- **Tab-switch chords are hard-coded in `HandleInput`, not commands.** The
+  panel swallows the keyboard by design, so a U12 binding would never fire
+  inside it; and `keymap::Context` is deliberately the branch `DrawToolbar`
+  takes (Part/Sketch/Assembly/…), so a `Terminal` context would break the
+  invariant that the toolbar you see and the keys that work cannot disagree.
+  They join Ctrl+Shift+C/V as chords the terminal keeps for itself:
+  **Ctrl+Shift+T** new tab, **Ctrl+Shift+W** close tab,
+  **Ctrl+Shift+PageUp/PageDown** to move between them — Shift throughout,
+  because the unshifted forms all mean something to a TUI.
+
+Sizing stays per-session: a tab is resized when it is drawn, so a background
+session keeps rendering at the size it last had, which is what `tmux` does and
+what a program reflowing to a panel it cannot be seen in would not.
+
+Closing the last tab leaves the panel in the existing exited state with its
+`New shell` button, rather than closing the panel — the preference is what
+opens and closes the panel, and two different meanings for "close" in one
+place is how the old one-shot chooser went wrong.
+
+### Order
+
+**T6 → T7 → T8.** T6 and T7 are small, independent, and fix things that are
+broken now; T8 is a refactor that touches every line they would touch, so
+landing it first means writing both fixes twice.
+
 ## Turning it off
 
 `-DENABLE_TERMINAL=OFF` removes the panel, its preference and its tests, and
@@ -235,9 +383,11 @@ transitive deps; the switch exists because "small today" is not a promise.
 - **Windows (ConPTY).** The grid, renderer and input are platform-free by
   construction; only `PtySession` needs a second implementation. Deferred
   with the rest of the Windows port ([../../packaging/windows/](../../packaging/windows/)).
-- **Multiple terminal tabs.** One session covers the request. The panel's
-  session ownership is a `std::unique_ptr`, so a vector is a later change,
-  not a redesign.
+- ~~**Multiple terminal tabs.**~~ Planned as **T8** above.
+- **Reading the clipboard on a program's request (OSC 52 query).** Not
+  deferred — refused. See T6.
+- **The X11 PRIMARY selection**, in either direction. GLFW exposes none of it,
+  and a clipboard the platform will not honour is worse than one clipboard.
 - ~~**Selection and copy-out.**~~ **Done 2026-08-21.** Drag to select,
   double-click for the word (path- and flag-friendly: `.`, `/`, `-`, `_` and
   `~` count as word characters, because a filename is what anyone is
@@ -288,3 +438,12 @@ transitive deps; the switch exists because "small today" is not a promise.
   buttons; an exited process leaves its last screen plus a status line.
 - Manual, once: `claude` in the panel, driving this instance over MCP —
   which is also the acceptance test for T4.
+- T6, headless: `ESC]52;c;aGVsbG8=BEL` leaves `hello` in `TakeClipboardWrite()`;
+  a fragmented write across two `Write()` calls still assembles; an
+  over-length payload truncates rather than growing the buffer; `ESC]52;c;?`
+  produces **zero** reply bytes.
+- T7/T8, GUI: middle-click after a drag sends the selected bytes to the child
+  and does *not* clear the selection first; a second tab runs its own process;
+  a background tab keeps receiving output while another is shown; closing a
+  tab reaps its child (`TerminalRunning` on the remaining session, and the pid
+  is gone).

@@ -184,7 +184,14 @@ their dispatch chain, or the introspection test fails — the repo enforces
   desk disagree. (Precedent from this month: a function-local `static bool`
   for the shortcuts window leaked into five later tests.)
 - **Tests point `XDG_CONFIG_HOME` at a scratch dir**, so no test run can write
-  the developer's real preferences.
+  the developer's real preferences. *(2026-08-24: this had been written down
+  and only half done. `gui-tests-xvfb.sh` isolated per shard; the PYTHON smoke
+  tests isolated `XDG_STATE_HOME` alone, and `headless_smoke` calls
+  `set_settings ui_font_scale=1.2` to prove the RPC is not part-gated — so
+  every headless suite run reset the developer's font size to 120%, visible
+  only at their next launch. All 28 launchers are isolated now and
+  `config_isolation_lint` holds it: a test that spawns the app must mention
+  `XDG_CONFIG_HOME`.)*
 - *(added on review)* **Per SHARD, not per suite.** `gui-tests-xvfb.sh` now
   runs four app processes at once, and already gives each its own
   `XDG_STATE_HOME` because the recent-projects list is machine-global and

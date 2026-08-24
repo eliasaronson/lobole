@@ -20,6 +20,7 @@ ctest supplies both through tools/xvfb-exec.sh).
 import os
 import socket
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -69,8 +70,15 @@ def main():
     shot_on = os.path.join(tmp, f"ao_on_{port}.png")
     shot_off = os.path.join(tmp, f"ao_off_{port}.png")
     shot_bare = os.path.join(tmp, f"ao_bare_{port}.png")
+    # Its own state AND config dirs: autosaves and the recent-projects list
+    # stay out of $HOME, and the run cannot edit the developer's real
+    # preferences (set_settings persists immediately — headless runs no GUI
+    # loop to debounce it, so a suite once reset their font size to 120%).
+    scratch = tempfile.mkdtemp(prefix="designer_ao_")
+    env = dict(os.environ, XDG_STATE_HOME=scratch,
+               XDG_CONFIG_HOME=os.path.join(scratch, "config"))
     app = subprocess.Popen([binary, "--hidden", "--remote", str(port)],
-                           stdout=subprocess.DEVNULL,
+                           env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
     try:
         d = Designer.wait_for(port, timeout=90)

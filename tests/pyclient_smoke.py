@@ -7,6 +7,7 @@ import math
 import os
 import socket
 import subprocess
+import tempfile
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
@@ -29,6 +30,13 @@ def main():
     port = free_port()
     env = dict(os.environ)
     env.pop("DISPLAY", None)
+    # Its own state AND config dirs: autosaves and the recent-projects list
+    # stay out of $HOME, and the run cannot edit the developer's real
+    # preferences (set_settings persists immediately — headless runs no GUI
+    # loop to debounce it, so a suite once reset their font size to 120%).
+    tmp = tempfile.mkdtemp(prefix="designer_pyclient_")
+    env["XDG_STATE_HOME"] = tmp
+    env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
                            env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
