@@ -204,7 +204,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // One flyout button for the folder; clicking lists the parts.
-    ctx->ItemClick("//##PartTabs/###folderImported");
+    ctx->ItemClick("//##PartTabs/**/###folderImported");
     ctx->Yield();
     ctx->ItemClick("//$FOCUSED/###fpart2");
     ctx->Yield();
@@ -245,15 +245,16 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // Addressable by id whatever the label says.
-    IM_CHECK(ctx->ItemExists("//##PartTabs/###part0"));
-    IM_CHECK(ctx->ItemExists("//##PartTabs/###part1"));
-    IM_CHECK(ctx->ItemExists("//##PartTabs/###folderHardware"));
+    IM_CHECK(ctx->ItemExists("//##PartTabs/**/###part0"));
+    IM_CHECK(ctx->ItemExists("//##PartTabs/**/###part1"));
+    IM_CHECK(ctx->ItemExists("//##PartTabs/**/###folderHardware"));
 
     // And the labels carry the kind glyph — a part is a cube, an assembly is
     // cubes, a folder is a folder.
-    ImGuiTestItemInfo part = ctx->ItemInfo("//##PartTabs/###part0");
-    ImGuiTestItemInfo asm_ = ctx->ItemInfo("//##PartTabs/###part1");
-    ImGuiTestItemInfo folder = ctx->ItemInfo("//##PartTabs/###folderHardware");
+    ImGuiTestItemInfo part = ctx->ItemInfo("//##PartTabs/**/###part0");
+    ImGuiTestItemInfo asm_ = ctx->ItemInfo("//##PartTabs/**/###part1");
+    ImGuiTestItemInfo folder =
+        ctx->ItemInfo("//##PartTabs/**/###folderHardware");
     IM_CHECK(strstr(part.DebugLabel, ICON_FA_CUBE) != nullptr);
     IM_CHECK(strstr(asm_.DebugLabel, ICON_FA_CUBES) != nullptr);
     IM_CHECK(strstr(folder.DebugLabel, ICON_FA_FOLDER) != nullptr);
@@ -319,6 +320,107 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->parts[3].kind == ui::DocKind::Drawing);
   };
 
+  // U13b: enough documents to overrun the bar, which the Marsliden dock (17)
+  // does at 1280x720. Three properties, none of which held before:
+  //
+  //   1. "+" stays on screen. It used to be the last item on one SameLine
+  //      run, so it went over the edge with the tabs — and it is the only
+  //      way to add a document.
+  //   2. The strip scrolls INSTEAD of culling. Note this cannot be tested by
+  //      probing tab ids: the test engine scrolls an item into view before
+  //      reporting it, so every id resolves either way (the same trap the
+  //      toolbar's every_tool_is_reachable documents).
+  //   3. The scrollbar is actually SHOWN. Reserving room for it is not the
+  //      same as drawing it — the first cut of this grew the bar by 12 px
+  //      and rendered nothing there, because the bar's height predated the
+  //      child and was shorter than one button row.
+  t = IM_REGISTER_TEST(engine, "tabs", "overflow_scrolls_and_plus_stays");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    for (int i = 0; i < 20; i++)
+      ui::AddPart(*s_App, "Document " + std::to_string(i));
+    ctx->Yield(4); // the height is measured a frame late, by construction
+
+    // By substring: a child's real name carries the parent's and a hashed
+    // suffix ("##PartTabs/##tabstrip_1A2B3C4D"), so an exact lookup finds
+    // nothing — the same wrinkle every_tool_is_reachable hit on the toolbar.
+    ImGuiWindow* strip = nullptr;
+    for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows)
+      if (std::string(w->Name).find("##tabstrip") != std::string::npos) {
+        strip = w;
+        break;
+      }
+    IM_CHECK(strip != nullptr);
+    ImGuiWindow* bar = ImGui::FindWindowByName("##PartTabs");
+    IM_CHECK(bar != nullptr);
+    ctx->LogInfo("bar h=%.0f (asked %.0f)  strip %.0f px in %.0f px, "
+                 "row %.0f in %.0f, scrollbar %d",
+                 bar->Size.y, ui::PartTabsBarHeight(), strip->ContentSize.x,
+                 strip->InnerRect.GetWidth(), ImGui::GetFrameHeight(),
+                 strip->InnerRect.GetHeight(), (int)strip->ScrollbarX);
+    // The bar gets the height it asks for. It did not: the theme's 180x60
+    // WindowMinSize floor (for dock nodes) silently applied here too, so the
+    // bar was 60 px while BeginDockspace reserved 36 and the bottom of every
+    // docked panel sat underneath it.
+    IM_CHECK_LE(bar->Size.y, ui::PartTabsBarHeight() + 1.0f);
+    IM_CHECK(strip->ContentSize.x > strip->InnerRect.GetWidth());
+    IM_CHECK(strip->ScrollbarX);
+    // ScrollbarX alone is not enough: ImGui sets it whenever the content is
+    // too wide, whether or not there is anywhere to draw it. The bar has to
+    // have GROWN to hold both — and InnerRect is the strip MINUS its
+    // scrollbar, so "a full button row still fits in InnerRect" is exactly
+    // the property that fails when the bar did not grow (the row is squeezed
+    // to make room, or the scrollbar is clipped away).
+    IM_CHECK_GE(strip->InnerRect.GetHeight(), ImGui::GetFrameHeight() - 1.0f);
+
+    // "+" is outside the strip and inside the viewport, at any tab count.
+    const ImGuiTestItemInfo plus = ctx->ItemInfo("//##PartTabs/+##addmenu");
+    IM_CHECK(plus.ID != 0);
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    IM_CHECK(plus.RectFull.Max.x <= vp->WorkPos.x + vp->WorkSize.x);
+    IM_CHECK(plus.RectFull.Min.x >= strip->Rect().Max.x);
+    // ...and still opens its menu from there.
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Part##addpart");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)22);
+  };
+
+  // U13b: the dock's panel tabs are icon-only, and every one of them FITS.
+  // They used to render as `Mo…`, `His…`, `CA…` at the default 218 px split —
+  // and this ImGui draws no tooltip for a tab item, so hovering one said
+  // nothing either. Two properties, the same pair the toolbar row asserts:
+  // the strip fits its contents, and the name is still reachable.
+  t = IM_REGISTER_TEST(engine, "tabs", "panel_tabs_fit_and_name_on_hover");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(4);
+    ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel);
+    IM_CHECK(model != nullptr);
+    IM_CHECK(model->DockNode != nullptr);
+    ImGuiTabBar* bar = model->DockNode->TabBar;
+    IM_CHECK(bar != nullptr);
+    ctx->LogInfo("panel tabs want %.0f px, bar is %.0f px (%d tabs)",
+                 bar->WidthAllTabsIdeal, bar->BarRect.GetWidth(),
+                 bar->Tabs.Size);
+    // Ideal = what the tabs would need if none were clipped. Under the bar's
+    // width means no tab is truncated — which no arrangement of the WORDS
+    // could satisfy ("Configurations" alone is wider than half the panel).
+    IM_CHECK(bar->WidthAllTabsIdeal <= bar->BarRect.GetWidth());
+
+    ImGuiTabItem* tab = ImGui::TabBarFindTabByID(bar, model->TabId);
+    IM_CHECK(tab != nullptr);
+    const float x = bar->BarRect.Min.x + tab->Offset - bar->ScrollingAnim;
+    ctx->MouseMoveToPos(
+        ImVec2(x + tab->Width * 0.5f, bar->BarRect.GetCenter().y));
+    ctx->Yield(3);
+    // The hand-rolled tooltip (DockLayout DrawPanelTabTooltips) is what
+    // carries the word now.
+    ImGuiWindow* tip = ImGui::FindWindowByName("##Tooltip_00");
+    IM_CHECK(tip != nullptr);
+    IM_CHECK(tip->Active);
+  };
+
   // "+ > New Folder" creates an EMPTY folder (registry-backed): it renders
   // as a (0) flyout button, survives save/load while empty, and accepts a
   // dropped tab.
@@ -352,8 +454,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->tabFolders[0], std::string("Fasteners"));
 
     // The empty folder is a live drop target.
-    ctx->ItemDragAndDrop("//##PartTabs/###part1",
-                         "//##PartTabs/###folderFasteners");
+    ctx->ItemDragAndDrop("//##PartTabs/**/###part1",
+                         "//##PartTabs/**/###folderFasteners");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts[1].folder, std::string("Fasteners"));
     std::filesystem::remove_all(dir);
@@ -375,7 +477,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // Rename the folder via right-click > Rename.
-    ctx->ItemClick("//##PartTabs/###folderImported", ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/**/###folderImported", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Rename...");
     ctx->Yield(2);
     ctx->KeyCharsReplaceEnter("Hardware");
@@ -385,7 +487,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::ProjectDirty(*s_App));
 
     // Move the top-level part into a NEW folder via its context menu.
-    ctx->ItemClick("//##PartTabs/###part0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/**/###part0", ImGuiMouseButton_Right);
     ctx->MenuClick("//$FOCUSED/Move to folder/New folder...##mvnew");
     ctx->Yield(2);
     ctx->KeyCharsReplaceEnter("Misc");
@@ -393,15 +495,15 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->parts[0].folder, std::string("Misc"));
 
     // ...and back out of it via the flyout entry's context menu.
-    ctx->ItemClick("//##PartTabs/###folderMisc");
+    ctx->ItemClick("//##PartTabs/**/###folderMisc");
     ctx->ItemClick("//$FOCUSED/###fpart0", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Move out of folder");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts[0].folder, std::string(""));
 
     // Drag the top-level tab onto the folder button to file it.
-    ctx->ItemDragAndDrop("//##PartTabs/###part0",
-                         "//##PartTabs/###folderHardware");
+    ctx->ItemDragAndDrop("//##PartTabs/**/###part0",
+                         "//##PartTabs/**/###folderHardware");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts[0].folder, std::string("Hardware"));
 
@@ -409,8 +511,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // Hand-rolled with raw positions: ItemDragAndDrop refocuses the target's
     // window to resolve it, which closes the flyout mid-drag.
     const ImVec2 tailPos =
-        ctx->ItemInfo("//##PartTabs/##tabsdroptail").RectFull.GetCenter();
-    ctx->ItemClick("//##PartTabs/###folderHardware");
+        ctx->ItemInfo("//##PartTabs/**/##tabsdroptail").RectFull.GetCenter();
+    ctx->ItemClick("//##PartTabs/**/###folderHardware");
     const ImVec2 nutPos =
         ctx->ItemInfo("//$FOCUSED/###fpart2").RectFull.GetCenter();
     ctx->MouseMoveToPos(nutPos);
@@ -422,7 +524,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->parts[2].folder, std::string(""));
 
     // Dissolve the folder: contents move to the top level, nothing deleted.
-    ctx->ItemClick("//##PartTabs/###folderHardware", ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/**/###folderHardware", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Dissolve folder");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts.size(), (size_t)3);

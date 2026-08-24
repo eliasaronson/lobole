@@ -1,4 +1,5 @@
 #include "ui/ConflictsPanel.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 
 #include "common/Logger.h"
@@ -146,6 +147,7 @@ void DrawConflictsPanel(AppState& state) {
     ImGui::End();
     return;
   }
+  PanelHeading(kPanelConflicts);
 
   static std::string actionError;
   const ImGuiStyle& style = ImGui::GetStyle();

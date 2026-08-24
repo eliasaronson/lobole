@@ -1,4 +1,5 @@
 #include "ui/VariablesPanel.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
 
@@ -52,6 +53,7 @@ void DrawVariablesPanel(AppState& state) {
   // A secondary tab must never steal the shared node from Model on its
   // first appearance (fresh layout builds select the last-appearing tab).
   ImGui::Begin(kPanelVariables, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+  PanelHeading(kPanelVariables);
   if (!state.document) {
     ImGui::End();
     return;

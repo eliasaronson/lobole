@@ -1,4 +1,5 @@
 #include "ui/ConfigurationsPanel.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 
 #include "core/Command.h"
@@ -48,6 +49,7 @@ void DrawConfigurationsPanel(AppState& state) {
   // Never steal the shared node from Model on first appearance.
   ImGui::Begin(kPanelConfigurations, nullptr,
                ImGuiWindowFlags_NoFocusOnAppearing);
+  PanelHeading(kPanelConfigurations);
   if (!state.document) {
     ImGui::End();
     return;

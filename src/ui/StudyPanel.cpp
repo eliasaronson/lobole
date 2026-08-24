@@ -8,6 +8,7 @@
 #include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/ExprInput.h"   // expression-capable numeric fields
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
@@ -445,6 +446,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
 
 void DrawStudyPanel(AppState& state) {
   ImGui::Begin(kPanelModel);
+  PanelHeading(kPanelModel);
   Document* doc = state.document.get();
   if (!doc) {
     ImGui::End();

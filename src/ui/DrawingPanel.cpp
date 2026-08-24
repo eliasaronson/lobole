@@ -1,5 +1,6 @@
 #include "ui/DrawingPanel.h"
 #include "ui/AppActions.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
 
@@ -672,6 +673,7 @@ void DrawSheetPanel(AppState& state) {
   // occurrence panel also use), so a drawing tab reserves the same panel space
   // instead of floating over the sheet.
   ImGui::Begin(kPanelModel);
+  PanelHeading(kPanelModel);
 
   Sheet& sheet = state.drawing->GetSheet();
 

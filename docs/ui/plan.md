@@ -1,11 +1,12 @@
 # UI & UX — plan
 
-> **Status: U1–U11 shipped**, plus user preferences
+> **Status: U1–U12 shipped**, plus user preferences
 > ([settings.md](settings.md)) and one hover for every drag handle
 > ([viewport-handles.md](viewport-handles.md)). What remains is the
-> visual-polish tail (spacing rhythm, tree badges, a tooltip audit). The
-> prose below is the original plan; per-round designs are the `u*.md` files
-> beside it.
+> visual-polish tail, now scoped as
+> [U13](u13-chrome-and-units.md) — overflow, elision, units and window
+> geometry. The prose below is the original plan; per-round designs are the
+> `u*.md` files beside it.
 
 The workbench shell shipped (docking layout, dark theme, icon toolbar,
 preview→accept, default planes, origin gizmo — roadmap "CAD UI"). What remains
@@ -370,3 +371,7 @@ at 1080p and 4K-scaled.
 - **U9 (added 2026-08-13)** is dogfooding residue, not planned scope: it is
   what a clicks-only round found missing once U7/U8 made the tool pattern
   uniform enough to notice the features that had never joined it.
+- **U13 (added 2026-08-24)** is the visual-polish tail this status line has
+  promised since U4, finally scoped from a screenshot audit rather than from
+  memory — see [u13-chrome-and-units.md](u13-chrome-and-units.md). Nothing in
+  it depends on U1–U12; the six phases are independently shippable.

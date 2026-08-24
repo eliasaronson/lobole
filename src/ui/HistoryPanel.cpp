@@ -1,4 +1,5 @@
 #include "ui/HistoryPanel.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 
 #include "common/Logger.h"
@@ -274,6 +275,7 @@ void DrawHistoryPanel(AppState& state) {
   // appears (see the Variables panel).
   const bool visible =
       ImGui::Begin(kPanelHistory, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+  PanelHeading(kPanelHistory);
   if (!visible) {
     // Behind another tab (or collapsed). ImGui would skip the widgets anyway,
     // but RefreshHistory would not: it spawns `git` twice a second for a

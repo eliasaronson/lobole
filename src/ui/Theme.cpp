@@ -46,10 +46,16 @@ void ApplyColors(ImGuiStyle& style) {
   c[ImGuiCol_TitleBgCollapsed] = kBgDark;
   c[ImGuiCol_MenuBarBg] = kBgDark;
 
+  // The grab is one step ABOVE the surface ramp, not on it. At kSurface it
+  // was the same value as every button, frame and input — so a scrollbar
+  // beside a control was invisible, and the part-tabs strip's horizontal one
+  // (buttons directly above it) could not be seen at all. The track stays
+  // transparent: an opaque one would draw a dark gutter down the edge of
+  // every panel for a bar that is usually not needed.
   c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
-  c[ImGuiCol_ScrollbarGrab] = kSurface;
-  c[ImGuiCol_ScrollbarGrabHovered] = kSurfaceHi;
-  c[ImGuiCol_ScrollbarGrabActive] = kSurfaceHi2;
+  c[ImGuiCol_ScrollbarGrab] = kSurfaceHi;
+  c[ImGuiCol_ScrollbarGrabHovered] = kSurfaceHi2;
+  c[ImGuiCol_ScrollbarGrabActive] = kAccentDim;
 
   c[ImGuiCol_CheckMark] = kAccent;
   c[ImGuiCol_SliderGrab] = kAccent;

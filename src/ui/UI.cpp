@@ -457,7 +457,28 @@ void DrawPartTabs(AppState& state) {
       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
-  if (ImGui::Begin("##PartTabs", nullptr, flags)) {
+  // The same vertical padding PartTabsBarHeight budgeted for. Pushed around
+  // Begin (ImGui reads WindowPadding there) so the height and the padding
+  // cannot disagree — which is how the bar came to be shorter than its own
+  // content in the first place.
+  //
+  // WindowMinSize goes with it, and that one is a BUG FIX, not a tidy-up.
+  // The theme sets a 180x60 floor so a dock node cannot be dragged down to a
+  // sliver (Theme.cpp, U4) — and ImGui applies it to every non-child window,
+  // AFTER any size constraint (CalcWindowMinSize is ImMax'd over the
+  // constrained size, so SetNextWindowSizeConstraints cannot get under it
+  // either). So this bar asked for 36 px, was silently given 60, and the
+  // dockspace went on reserving 36: the bottom ~24 px of every docked panel
+  // has been sitting underneath the tab bar. Lifting the floor for this one
+  // window — which is not dockable and not resizable — makes the height it
+  // asks for the height it gets.
+  const ImGuiStyle& st = ImGui::GetStyle();
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                      ImVec2(st.WindowPadding.x, PartTabsBarPaddingY()));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.0f, 1.0f));
+  const bool barOpen = ImGui::Begin("##PartTabs", nullptr, flags);
+  ImGui::PopStyleVar(2);
+  if (barOpen) {
     // Folder-name entry state (rename, or naming a new folder for one doc).
     // One popup serves both: renameFolderTarget non-empty = rename mode,
     // otherwise newFolderDocId says which doc moves into the named folder.
@@ -527,6 +548,32 @@ void DrawPartTabs(AppState& state) {
       if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
         DeletePart(state, i);
     };
+
+    // The tabs live in their own scrolling child, and "+" sits OUTSIDE it,
+    // pinned to the right. Before this, the tabs were plain buttons on one
+    // SameLine run in a NoScrollbar window: open the Marsliden dock (17
+    // documents) and the bar ran off the edge taking "+" — the only way to
+    // add a document — with it. The bar did scroll, but with no scrollbar
+    // nothing said the other fourteen tabs existed, which is the half of the
+    // bug you cannot see in a screenshot.
+    //
+    // Same shape as the toolbar's wrap (Toolbar.cpp WrapIfNeeded): lose
+    // nothing, and pay for it in height. Here the height only grows while
+    // the strip actually overflows — see PartTabsBarHeight.
+    const float plusW =
+        ImGui::CalcTextSize("+").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    const float stripW =
+        std::max(1.0f, ImGui::GetContentRegionAvail().x - plusW -
+                           ImGui::GetStyle().ItemSpacing.x);
+    // EXPLICIT height: one button row, plus a scrollbar while overflowing —
+    // the same budget PartTabsBarHeight reserved. Not 0 ("whatever the bar
+    // has left"), which inherits the parent's spare room and lets a squeezed
+    // parent clip the tabs rather than fail visibly.
+    const float stripH = ImGui::GetFrameHeight() +
+                         (PartTabsOverflowing() ? st.ScrollbarSize : 0.0f);
+    ImGui::BeginChild("##tabstrip", ImVec2(stripW, stripH),
+                      ImGuiChildFlags_None,
+                      ImGuiWindowFlags_HorizontalScrollbar);
 
     // Top-level tabs first, one button each; foldered documents (assembly
     // import drops its parts in a folder) collapse to one flyout per folder
@@ -631,8 +678,34 @@ void DrawPartTabs(AppState& state) {
         ImGui::EndPopup();
       }
     }
-    // One "+" for all document kinds (was three separate buttons).
-    sameLine();
+    // The strip's empty tail is a drop target: drag a doc out of a folder
+    // and release it on open bar space to unfolder it. Inside the child, so
+    // it is the TABS' leftover space — when they overflow there is none, and
+    // it simply does not draw.
+    if (any)
+      ImGui::SameLine();
+    // Measure the run OURSELVES, from the cursor, before the tail fills the
+    // remainder. ImGui's own GetScrollMaxX() reads zero here on every frame —
+    // it is derived from the previous frame's ContentSize, and the reserved
+    // height depended on it, so the two sat in a stalemate: no extra height,
+    // therefore a squeezed strip, therefore nothing that ever reported an
+    // overflow. Measured live it is a plain fact about this frame's layout.
+    // GetCursorPosX is a content coordinate (scroll already added back in),
+    // so it is the full width of the tabs, not the visible part of it.
+    const bool stripOverflows =
+        ImGui::GetCursorPosX() > ImGui::GetContentRegionMax().x + 1.0f;
+    const float tailW = ImGui::GetContentRegionAvail().x;
+    if (tailW > 8.0f) {
+      ImGui::InvisibleButton("##tabsdroptail",
+                             ImVec2(tailW, ImGui::GetFrameHeight()));
+      acceptDocDrop("");
+    }
+    ImGui::EndChild();
+    SetPartTabsOverflowing(stripOverflows);
+
+    // One "+" for all document kinds (was three separate buttons). Outside
+    // the strip: it must stay reachable at any document count.
+    ImGui::SameLine();
     if (ImGui::Button("+##addmenu"))
       ImGui::OpenPopup("##addmenupop");
     if (ImGui::BeginPopup("##addmenupop")) {
@@ -652,16 +725,6 @@ void DrawPartTabs(AppState& state) {
       }
       ImGui::EndPopup();
     }
-    // The bar's empty tail is a drop target too: drag a doc out of a folder
-    // and release it on open bar space to unfolder it.
-    ImGui::SameLine();
-    const float tailW = ImGui::GetContentRegionAvail().x;
-    if (tailW > 8.0f) {
-      ImGui::InvisibleButton("##tabsdroptail",
-                             ImVec2(tailW, ImGui::GetFrameHeight()));
-      acceptDocDrop("");
-    }
-
     // Folder-name popup (rename / new folder), opened outside the context
     // menus so it survives their closing.
     if (openFolderNamePopup) {

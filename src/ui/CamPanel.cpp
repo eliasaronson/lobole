@@ -1,4 +1,5 @@
 #include "ui/CamPanel.h"
+#include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 
 #ifdef HAVE_CAM
@@ -147,6 +148,7 @@ void DrawCamPanel(AppState& state) {
     ImGui::End();
     return;
   }
+  PanelHeading(kPanelCam);
   if (!state.document) {
     ImGui::TextWrapped("CAM works on a part — a setup cuts one model. Switch "
                        "to a part tab.");

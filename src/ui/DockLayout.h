@@ -10,7 +10,26 @@ namespace ui {
 void BeginDockspace(AppState& state);
 
 // Height of the bottom part-tabs bar. The dockspace reserves this strip so
-// docked panels end above the bar instead of running beneath it.
+// docked panels end above the bar instead of running beneath it. Grows by one
+// scrollbar while the tab strip overflows, so the scrollbar has somewhere to
+// live instead of eating the tabs' own row.
 float PartTabsBarHeight();
+
+// Told by DrawPartTabs once per frame, read by PartTabsBarHeight. A frame
+// late by construction: BeginDockspace has to reserve the strip before the
+// tabs that decide its height have been laid out (the toolbar row measures
+// itself the same way, and for the same reason).
+void SetPartTabsOverflowing(bool overflowing);
+bool PartTabsOverflowing();
+
+// The bar's own vertical window padding, which is tighter than the default —
+// PartTabsBarHeight is derived from it, so the two cannot drift.
+float PartTabsBarPaddingY();
+
+// The panel's name, written at the top of its own body. The dock tabs are
+// icon-only (PanelTitles.h), so this is where the word lives now — and these
+// panels never carried a title of their own before, docked panels having no
+// title bar. Call first thing after Begin().
+void PanelHeading(const char* panelTitle);
 
 } // namespace ui

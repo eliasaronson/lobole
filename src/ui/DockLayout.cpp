@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include <cstring>
+#include <unordered_map>
 
 #include "ui/Toolbar.h"
 
@@ -14,7 +15,97 @@
 
 namespace ui {
 
-float PartTabsBarHeight() { return ImGui::GetFrameHeightWithSpacing() + 4.0f; }
+namespace {
+// Set by DrawPartTabs at the end of each frame; see the header.
+bool s_PartTabsOverflow = false;
+} // namespace
+
+void SetPartTabsOverflowing(bool overflowing) {
+  s_PartTabsOverflow = overflowing;
+}
+
+bool PartTabsOverflowing() { return s_PartTabsOverflow; }
+
+float PartTabsBarPaddingY() { return ImGui::GetStyle().FramePadding.y; }
+
+namespace {
+
+// The word for a panel title, or nullptr if it is not one of ours.
+const char* PanelNameFor(const char* title) {
+  for (const PanelInfo& p : kPanels)
+    if (std::strcmp(p.title, title) == 0)
+      return p.name;
+  return nullptr;
+}
+
+// Name the hovered dock tab. This ImGui draws no tooltip for tab items at
+// all, so icon-only tabs would otherwise be unlabelled everywhere — and
+// there is no per-window API for it either, the tab belonging to the dock
+// node rather than to the window. Hence the walk: find each panel's tab in
+// its node's bar and hit-test it. Offset is relative to the bar and the bar
+// scrolls, so ScrollingAnim comes off it.
+void DrawPanelTabTooltips() {
+  for (const PanelInfo& p : kPanels) {
+    ImGuiWindow* w = ImGui::FindWindowByName(p.title);
+    if (w == nullptr || w->DockNode == nullptr ||
+        w->DockNode->TabBar == nullptr)
+      continue;
+    const ImGuiTabBar* bar = w->DockNode->TabBar;
+    for (const ImGuiTabItem& tab : bar->Tabs) {
+      if (tab.Window != w)
+        continue;
+      const float x = bar->BarRect.Min.x + tab.Offset - bar->ScrollingAnim;
+      const ImRect r(x, bar->BarRect.Min.y, x + tab.Width, bar->BarRect.Max.y);
+      if (r.Overlaps(bar->BarRect) &&
+          ImGui::IsMouseHoveringRect(r.Min, r.Max, false))
+        ImGui::SetTooltip("%s", p.name);
+      break;
+    }
+  }
+}
+
+} // namespace
+
+void PanelHeading(const char* panelTitle) {
+  const char* name = PanelNameFor(panelTitle);
+  if (name == nullptr)
+    return;
+  // Once per window per frame, whoever gets there first. The Model panel is
+  // Begun by four different files in one frame — the feature tree, the
+  // occurrence list, the study panel and the drawing panel, depending on the
+  // document kind — and ImGui APPENDS to a window rather than restarting it,
+  // so an unguarded heading would draw once for each of them. All four call
+  // this; only the first does anything.
+  static std::unordered_map<ImGuiID, int> s_drawnOn;
+  int& frame = s_drawnOn[ImGui::GetCurrentWindow()->ID];
+  if (frame == ImGui::GetFrameCount())
+    return;
+  frame = ImGui::GetFrameCount();
+  // Icon then word, in the ordinary text colour, over a hairline — a title,
+  // not another SeparatorText section (the panels below open with one of
+  // those, and two stacked rules read as an empty section).
+  //
+  // The glyph is taken by POINTER RANGE, not by handing the title to
+  // TextUnformatted: "###" is honoured in widget *labels*, and raw text is
+  // drawn verbatim — the first cut of this rendered "###Model Model".
+  const char* hash = std::strstr(panelTitle, "###");
+  ImGui::TextUnformatted(panelTitle, hash);
+  ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+  ImGui::TextUnformatted(name);
+  ImGui::Separator();
+}
+
+// Derived from what the bar has to HOLD, not from a spacing constant that
+// happened to look right. The old `GetFrameHeightWithSpacing() + 4` came out
+// at the same 36 px at 1x, but by accident: it left a content region SHORTER
+// than one button, and the tabs drew past it. Harmless while the strip was
+// bare buttons; not once the strip is a child that also has to fit a
+// scrollbar, which then had nowhere to go and was clipped away — the bar grew
+// by 12 px and showed nothing for it.
+float PartTabsBarHeight() {
+  const float h = PartTabsBarPaddingY() * 2.0f + ImGui::GetFrameHeight();
+  return s_PartTabsOverflow ? h + ImGui::GetStyle().ScrollbarSize : h;
+}
 
 void BeginDockspace(AppState& state) {
   ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -225,32 +316,29 @@ void BeginDockspace(AppState& state) {
 
   ImGui::End(); // host window
 
+  // Outside the host: a tooltip is its own window, and the tab bars it reads
+  // belong to the dock nodes, which are laid out by the DockSpace() above.
+  DrawPanelTabTooltips();
+
   // A panel asked to come forward. Repeated, because one SetWindowFocus on a
   // shared dock node does not reliably win the tab.
   if (state.focusPanelFrames > 0 && !state.focusPanel.empty()) {
     // By the name a person would say. ImGui matches the WHOLE window string,
     // "###" id and all, so asking for "CAM" would silently do nothing —
-    // resolve it to "CAM###CamPanel" by the label the tab shows.
+    // resolve it through the kPanels table.
+    //
+    // This used to strip the leading glyph off each window title and compare
+    // what remained, which worked while a title read "<glyph> Variables###..."
+    // and stopped the moment the tabs went icon-only: what remains is now the
+    // empty string, and every focus_panel call would have matched nothing and
+    // reported nothing. The table is the pairing; nothing else has to guess.
     const char* target = state.focusPanel.c_str();
     if (ImGui::FindWindowByName(target) == nullptr) {
-      const ImGuiContext& g = *ImGui::GetCurrentContext();
-      for (ImGuiWindow* w : g.Windows) {
-        const char* hash = std::strstr(w->Name, "###");
-        const char* begin = w->Name;
-        // Skip the leading icon glyph and its space: a title reads
-        // "<glyph> Variables###Variables" and callers say "Variables".
-        while (static_cast<unsigned char>(*begin) >= 0x80)
-          begin++;
-        while (*begin == ' ')
-          begin++;
-        const size_t label = hash != nullptr ? static_cast<size_t>(hash - begin)
-                                             : std::strlen(begin);
-        if (label == state.focusPanel.size() &&
-            std::strncmp(begin, target, label) == 0) {
-          target = w->Name;
+      for (const PanelInfo& p : kPanels)
+        if (state.focusPanel == p.name) {
+          target = p.title;
           break;
         }
-      }
     }
     ImGui::SetWindowFocus(target);
     state.focusPanelFrames--;

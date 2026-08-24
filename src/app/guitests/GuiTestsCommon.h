@@ -45,6 +45,7 @@
 #include "ui/CamTool.h"
 #include "ui/Commands.h"
 #include "ui/ConflictsPanel.h"
+#include "ui/DockLayout.h"
 #include "ui/DragMath.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/FileDialogs.h"
