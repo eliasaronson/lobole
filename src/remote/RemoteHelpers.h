@@ -125,6 +125,21 @@ inline nlohmann::json DigestJson(const nlohmann::json& before,
   return {{"bodies", std::move(bodies)}, {"delta", std::move(delta)}};
 }
 
+// Attach the regeneration summary to a response. The `doc` guard is why this
+// is a helper rather than a bare assignment: an assembly or drawing tab has no
+// active PART document, so a handler reachable from those tabs must not
+// dereference one — and the handlers that forgot the guard were not the
+// problem, the ones that forgot the whole block were.
+//
+// The gap this closes: `undo` and `set_active_configuration` used to return a
+// success with a plausible body count and volume while a feature had actually
+// failed — for a 20 mm box whose fillet broke, the reported volume was exactly
+// 20^3, i.e. the UNFILLETED box. Nothing in the response said so, so a script
+// built its next edit on a broken model. `regen.ok` is now in the response
+// that caused the failure, which is the contract this header already
+// described.
+inline void AttachRegen(nlohmann::json& out, const Document* doc);
+
 inline nlohmann::json RegenSummaryJson(const Document& doc) {
   nlohmann::json failed = nlohmann::json::array();
   nlohmann::json warnings = nlohmann::json::array();
@@ -146,6 +161,11 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
   return {{"ok", failed.empty()},
           {"failed", std::move(failed)},
           {"warnings", std::move(warnings)}};
+}
+
+inline void AttachRegen(nlohmann::json& out, const Document* doc) {
+  if (doc != nullptr)
+    out["regen"] = RegenSummaryJson(*doc);
 }
 
 } // namespace remote

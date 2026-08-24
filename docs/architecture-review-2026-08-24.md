@@ -199,7 +199,7 @@ the CAM/drawings gate lists recorded in `docs/cam/` and `docs/drawings/`.
 Minor: `BoxFeature`, `SphereFeature`, `CylinderFeature`, `ImportFeature` are
 defined inline in `core/Feature.h` while the other 20 live in `core/features/`.
 
-### 7. Contract drift in the RPC layer
+### 7. Contract drift in the RPC layer — FIXED, see follow-up C
 
 `RemoteHelpers.h` documents `regen` as *"appended to every mutating RPC's
 response."* Actual: `RemoteModeling` 7, `RemoteProject` 1, everything else 0.
@@ -210,9 +210,9 @@ configuration that breaks a feature returns success. `Vec3ToJson` is defined
 three times, one of them (`RemoteServer.cpp:313`) shadowing the
 `RemoteHelpers.h` copy the same file includes.
 
-*Not scheduled in this round* — it is a behavior change to the RPC surface and
-belongs with whoever next extends those modules, per the roadmap's
-"split what the next feature extends" policy.
+*Fixed 2026-08-24* — see follow-up C below. It turned out to be a reproducible
+defect (a success response carrying the unfilleted volume) rather than the
+cosmetic inconsistency this section originally called it.
 
 ### 8. The docked-panel preamble
 
@@ -364,7 +364,40 @@ migrating wholesale: each still verifies that the click path reaches the logic,
 which is its own subject. Add the headless test *beside* the GUI one when the
 arithmetic is what you are actually unsure about.
 
-**C. RPC `regen`/`digest` contract (§7)** and **D. the panel preamble (§8)** —
-still deferred. Both are behavior changes to surfaces with live callers, and
-both fit the roadmap's "split what the next feature extends, not big-bang"
-policy better than a standalone sweep.
+**C. RPC `regen`/`digest` contract (§7) — FIXED**, and it was a real defect,
+not drift. Reproduced before touching anything: activating a configuration
+whose override broke a fillet returned
+
+```
+{"active": 3, "bodies": 1, "volumes": [7999.999999999998]}
+```
+
+— a success, one body, and a plausible volume. `7999.999…` is exactly 20³, the
+**unfilleted** box, so the response looked healthy while the model was broken
+and there was nothing to poll. `undo` had the same hole and also left a feature
+failed.
+
+Now `regen` is attached by ~18 handlers across `RemoteServer` (undo/redo),
+`RemoteConfigurations`, `RemoteModeling` (the sketch edits) and `RemoteProject`
+(variables, `open_project`, `checkpoint_restore`, `history_restore`,
+`clone_project`, `import_step`), through a `remote::AttachRegen` helper that
+carries the "no active part document" guard so an assembly or drawing tab
+cannot trip it.
+
+Two judgement calls worth knowing:
+
+- **Additive only.** `set_active_configuration`'s hand-rolled
+  `{bodies, volumes}` stays, because `configuration_smoke.py` reads `volumes`
+  and breaking a working caller to de-duplicate a response is a bad trade. It
+  gains `regen` and `digest`; new callers should read those.
+- **Studies are excluded on purpose.** `add_study` / `remove_study` /
+  `set_study` mutate a document but cannot break a feature, so `regen` there
+  would always say `ok` and tell a caller nothing. The contract is "every RPC
+  that can leave a FEATURE broken reports it", not "every RPC that writes".
+
+`tests/regen_honesty_smoke.py` pins it, sabotage-checked three ways (reverting
+the configuration fix, the undo fix, and the `open_project` fix each fail it).
+
+**D. The panel preamble (§8)** — still deferred. A behavior change to a surface
+with live callers, and it fits the roadmap's "split what the next feature
+extends, not big-bang" policy better than a standalone sweep.

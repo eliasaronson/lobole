@@ -1181,12 +1181,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (m == "undo") {
     // Global undo (Phase V): the active tab's stack OR the cross-tab
     // project-variable stack, whichever was most recently mutated.
+    //
+    // Undo regenerates, so it can leave a feature broken — stepping back past
+    // the edit that gave a fillet an edge to bite on, say. It used to report
+    // only `can_undo`, so a script learned nothing about the state it had just
+    // restored. `state.document` is re-read AFTER the undo: a tab switch is
+    // undoable, so the active document may not be the one captured above.
     ui::GlobalUndo(state);
-    return {{"can_undo", ui::CanGlobalUndo(state)}};
+    json out = {{"can_undo", ui::CanGlobalUndo(state)}};
+    remote::AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "redo") {
     ui::GlobalRedo(state);
-    return {{"can_redo", ui::CanGlobalRedo(state)}};
+    json out = {{"can_redo", ui::CanGlobalRedo(state)}};
+    remote::AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "list_parts") {
     // Multi-document project (assemblies A1/A2): the tabs and which is active.

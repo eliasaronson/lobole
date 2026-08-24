@@ -40,6 +40,7 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     state.commands->Execute(std::move(cmd), doc);
     const Configuration* c = doc.FindConfiguration(raw->ConfigurationId());
     out = {{"id", c->id}, {"name", c->name}};
+    AttachRegen(out, &doc);
     return true;
   }
   if (m == "remove_configuration") {
@@ -49,6 +50,7 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     state.commands->Execute(std::make_unique<RemoveConfigurationCommand>(id),
                             doc);
     out = json::object();
+    AttachRegen(out, &doc);
     return true;
   }
   if (m == "list_configurations") {
@@ -93,21 +95,38 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
             "Edit configuration", std::move(before), std::move(after)),
         doc);
     out = {{"id", id}};
+    // Editing the ACTIVE configuration re-applies it, so an override that
+    // breaks a feature breaks it here, not on the next activation.
+    AttachRegen(out, &doc);
     return true;
   }
   if (m == "set_active_configuration") {
     const uint64_t id = p.value("id", uint64_t{0});
     if (id != 0 && !doc.FindConfiguration(id))
       throw std::runtime_error("no such configuration");
+    const json preDigest = BodyDigestJson(doc);
     state.commands->Execute(std::make_unique<SetActiveConfigurationCommand>(id),
                             doc);
     // Echo the resulting geometry so a headless caller sees the effect.
+    //
+    // `bodies` and `volumes` are a hand-rolled subset of what `digest` now
+    // carries, kept because configuration_smoke.py reads `volumes` and
+    // breaking a working caller to de-duplicate a response is a bad trade.
+    // New callers should read `digest`.
+    //
+    // The bug that put `regen` here: activating a configuration whose override
+    // breaks a feature returned exactly this — a success, one body, and a
+    // plausible volume. On a 20 mm box whose fillet failed, `volumes` read
+    // 8000.0, i.e. the UNFILLETED box, so the response looked healthy while
+    // the model was broken.
     json vols = json::array();
     for (const Body& b : doc.GetBodies())
       vols.push_back(b.shape.Volume());
     out = {{"active", doc.ActiveConfiguration()},
            {"bodies", doc.GetBodies().size()},
-           {"volumes", vols}};
+           {"volumes", vols},
+           {"digest", DigestJson(preDigest, doc)}};
+    AttachRegen(out, &doc);
     return true;
   }
   return false;

@@ -260,6 +260,14 @@ add_test(NAME strict_inputs_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(strict_inputs_smoke PROPERTIES TIMEOUT 120)
 
+# The honesty contract: a mutating RPC that leaves a feature broken says so in
+# ITS OWN response, rather than returning a plausible success a caller has to
+# poll behind. Headless.
+add_test(NAME regen_honesty_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/regen_honesty_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
+
 # V4 compare_geometry: boolean-diff metrics, golden-file compare, diff-solid
 # export, occurrence compare. Headless.
 add_test(NAME compare_smoke

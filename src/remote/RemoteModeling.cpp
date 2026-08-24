@@ -496,8 +496,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // Capture the reply BEFORE the command runs — Execute rebuilds the feature
     // object from JSON, so `sk` dangles afterwards.
     json resp = {{"external_index", ei}, {"gen_ids", sk->external[ei].genIds}};
+    const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    resp["regen"] = RegenSummaryJson(*doc);
+    resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
   }
   if (m == "add_constraint" || m == "add_constraints") {
@@ -564,9 +567,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     sk->RegenerateDerived();
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
-    return json{{"added", added}};
+    return json{{"added", added},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {
     // Generative op on a sketch (by id), solve, and commit one edit.
@@ -632,8 +638,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     sk->RegenerateDerived();
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    result["regen"] = RegenSummaryJson(*doc);
+    result["digest"] = DigestJson(preDigest, *doc);
     return result;
   }
   if (m == "add_reference_image" || m == "calibrate_reference_image" ||
@@ -739,8 +748,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    result["regen"] = RegenSummaryJson(*doc);
+    result["digest"] = DigestJson(preDigest, *doc);
     return result;
   }
   if (m == "delete_entity") {
@@ -765,9 +777,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     sk->RegenerateDerived();
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
+    const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
-    return json{{"dropped_constraints", dropped}};
+    return json{{"dropped_constraints", dropped},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   return std::nullopt;
 }

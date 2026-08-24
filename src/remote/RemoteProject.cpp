@@ -228,8 +228,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (!ui::OpenProject(state, path, &error)) // multi-part aware (A1)
       throw std::runtime_error(error);
     ui::MarkProjectOpened(state, path);
-    return json{{"autosave_available", autosaveAvailable},
+    // Loading is where a broken model most often ARRIVES: a project saved
+    // against an older kernel, or one whose feature no longer builds, used to
+    // open with a silent success and nothing to poll.
+    json out = {{"autosave_available", autosaveAvailable},
                 {"autosave_path", Autosaver::SidecarPath(path)}};
+    AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "checkpoint_create") {
     // A checkpoint is a NAMED VERSION of the whole project (F6): save, then
@@ -301,7 +306,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     ui::ReplaceDocument(state, std::move(*loaded));
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
-    return json::object();
+    json out = json::object();
+    AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "history_log") {
     // Git history of a directory project (F5). params: {limit?: 20}
@@ -323,7 +330,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     std::string error;
     if (!ui::RestoreVersion(state, commit, commit, &error))
       throw std::runtime_error(error);
-    return json::object();
+    json out = json::object();
+    AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "project_changed_on_disk") {
     return json{{"changed", ui::ProjectChangedOnDisk(state)},
@@ -429,7 +438,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       }
       state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
                               *doc);
-      return json::object();
+      json out = json::object();
+      AttachRegen(out, state.document.get());
+      return out;
     }
     if (!haveProject)
       throw std::runtime_error("no such variable: " + name);
@@ -440,7 +451,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         msg += " " + r + ";";
       throw std::runtime_error(msg);
     }
-    return json::object();
+    json out = json::object();
+    AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "rename_variable") {
     // Renames + rewrites every referencing expression (a project rename spans
@@ -461,7 +474,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
             "'. Either the source does not exist, the new name is not a "
             "valid identifier, or it is already taken — list_variables "
             "shows what exists in each scope");
-      return json::object();
+      json out = json::object();
+      AttachRegen(out, state.document.get());
+      return out;
     }
     if (!ui::RenameProjectVariable(state, name, newName))
       throw std::runtime_error(
@@ -469,7 +484,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
           "'. Either the source does not exist, the new name is not a "
           "valid identifier, or it is already taken — list_variables "
           "shows what exists in each scope");
-    return json::object();
+    json out = json::object();
+    AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "list_variables") {
     // Both scopes, each tagged. Project variables first (the default scope),
@@ -580,7 +597,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (!ui::OpenProject(state, path, &error))
       throw std::runtime_error(error);
     ui::MarkProjectOpened(state, path);
-    return json{{"path", path}};
+    json out = {{"path", path}};
+    AttachRegen(out, state.document.get());
+    return out;
   }
   if (m == "branch_list") {
     json names = json::array();
@@ -863,10 +882,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       return json{{"assembly_index", state.activePart}, {"occurrences", occs}};
     }
     const size_t before = doc->GetBodies().size();
+    const json preDigest = BodyDigestJson(*doc);
     std::string error;
     if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), &error))
       throw std::runtime_error(error);
-    return json{{"bodies", doc->GetBodies().size() - before}};
+    return json{{"bodies", doc->GetBodies().size() - before},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   return std::nullopt;
 }
