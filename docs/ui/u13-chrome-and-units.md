@@ -1,8 +1,11 @@
 # U13 — Chrome that fits: overflow, elision, units, geometry (2026-08-24)
 
-> Status: **PLANNED — awaiting approval.** Six phases, each independently
-> shippable, ordered cheapest-first. One open decision (U13e's unit home,
-> at the bottom).
+> Status: **SHIPPED 2026-08-24**, all six phases (dc738e0, f3d9eef, f9dc6d4,
+> f9860ee, 4774803, de7713f). The open decision below was settled
+> document-level; format v64. What the work found that this plan did not
+> predict is in "What changed on contact" at the end — read that before
+> trusting the per-phase sections, several of which describe a problem that
+> turned out to be a different one.
 
 A screenshot audit of the running app on real projects (`scratch/marsliden-dock.json`,
 17 documents) found nothing wrong with the *theme* and a lot wrong with the
