@@ -395,45 +395,58 @@ void DrawSettingsWindow(AppState& state) {
   }
 
   bool changed = false;
-  const char* section = nullptr;
-  bool sectionOpen = false;
-  for (const settings::Field& f : settings::Fields()) {
-    if (section == nullptr || std::string(section) != f.section) {
-      section = f.section;
-      const std::string headerId = std::string(section) + "###sec_" + section;
-      sectionOpen = ImGui::CollapsingHeader(headerId.c_str(),
-                                            ImGuiTreeNodeFlags_DefaultOpen);
-    }
-    if (!sectionOpen)
+
+  // Sections in order of first appearance, each drawn EXACTLY ONCE. Not "open
+  // a new header whenever the section changes from the previous row": the two
+  // Sharing rows once landed between the Performance rows, and that loop drew
+  // Performance twice — two collapsing headers sharing one
+  // "###sec_Performance" id, which is an ImGui id collision and leaves the
+  // pair fighting over the open/closed state. The table is grouped again, and
+  // this no longer depends on it being so.
+  std::vector<std::string> sections;
+  for (const settings::Field& f : settings::Fields())
+    if (std::find(sections.begin(), sections.end(), f.section) ==
+        sections.end())
+      sections.push_back(f.section);
+
+  for (const std::string& section : sections) {
+    const std::string headerId = section + "###sec_" + section;
+    if (!ImGui::CollapsingHeader(headerId.c_str(),
+                                 ImGuiTreeNodeFlags_DefaultOpen))
       continue;
-    changed |= DrawField(state, f);
-    // The GPU row says what is actually in use, and says so LOUDLY when the
-    // choice no longer matches it — "nothing happened" is the correct
-    // behaviour for a restart-tier setting, but only if the window admits it.
-    if (std::string(f.key) == "gpu_device" && !state.gpuName.empty()) {
-      const std::string& want = state.settings.gpuDevice;
-      const bool pending =
-          !want.empty() && state.gpuName.find(want) == std::string::npos;
-      const std::string inUse = "Rendering on: " + state.gpuName + ".";
-      DrawBlurb(f, inUse.c_str());
-      if (!state.gpuPreferenceNote.empty() &&
-          state.gpuPreferenceNote.find(want) != std::string::npos) {
-        // Startup already tried and could not: promising a restart here
-        // would be a lie, and the user would take it.
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
-                           state.gpuPreferenceNote.c_str());
-        ImGui::PopTextWrapPos();
-      } else if (pending) {
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
-                           "Restart Designer to render on %s.", want.c_str());
-        ImGui::PopTextWrapPos();
+    for (const settings::Field& f : settings::Fields()) {
+      if (section != f.section)
+        continue;
+      changed |= DrawField(state, f);
+      // The GPU row says what is actually in use, and says so LOUDLY when the
+      // choice no longer matches it — "nothing happened" is the correct
+      // behaviour for a restart-tier setting, but only if the window admits
+      // it.
+      if (std::string(f.key) == "gpu_device" && !state.gpuName.empty()) {
+        const std::string& want = state.settings.gpuDevice;
+        const bool pending =
+            !want.empty() && state.gpuName.find(want) == std::string::npos;
+        const std::string inUse = "Rendering on: " + state.gpuName + ".";
+        DrawBlurb(f, inUse.c_str());
+        if (!state.gpuPreferenceNote.empty() &&
+            state.gpuPreferenceNote.find(want) != std::string::npos) {
+          // Startup already tried and could not: promising a restart here
+          // would be a lie, and the user would take it.
+          ImGui::PushTextWrapPos(0.0f);
+          ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
+                             state.gpuPreferenceNote.c_str());
+          ImGui::PopTextWrapPos();
+        } else if (pending) {
+          ImGui::PushTextWrapPos(0.0f);
+          ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                             "Restart Designer to render on %s.", want.c_str());
+          ImGui::PopTextWrapPos();
+        }
+      } else {
+        DrawBlurb(f);
       }
-    } else {
-      DrawBlurb(f);
+      ImGui::Spacing();
     }
-    ImGui::Spacing();
   }
 
   if (ImGui::CollapsingHeader("Keyboard###sec_Keyboard"))

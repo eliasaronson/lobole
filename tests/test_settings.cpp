@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -213,4 +214,30 @@ TEST_CASE("Device preference: a name wins, but never over eligibility",
   const std::vector<int> none = {-1, -1, -1};
   CHECK(devicepref::Choose(names, none, "") == -1);
   CHECK(devicepref::Choose({}, {}, "nvidia") == -1);
+}
+
+// The Preferences window draws one collapsing header per section. This table's
+// ORDER is what groups the rows under it, so a section split across two runs
+// drew that header TWICE — two widgets sharing one "###sec_<name>" id, which
+// is an ImGui id collision (the pair then fight over the open/closed state)
+// and splits the section on screen for no reason.
+//
+// That shipped: the two Sharing rows landed between the Performance rows in
+// c7e50ff, and Preferences showed Performance twice until 2026-08-24. The
+// window no longer depends on the order, but the table should still READ the
+// way it draws — and a person adding a row edits the table, which is where
+// this wants to fail.
+TEST_CASE("the settings table groups its sections", "[settings]") {
+  std::vector<std::string> runs;
+  for (const settings::Field& f : settings::Fields())
+    if (runs.empty() || runs.back() != f.section)
+      runs.emplace_back(f.section);
+
+  std::set<std::string> seen;
+  for (const std::string& section : runs) {
+    INFO("section '" << section
+                     << "' appears in more than one run of settings::Fields() "
+                        "— move its rows together");
+    CHECK(seen.insert(section).second);
+  }
 }
