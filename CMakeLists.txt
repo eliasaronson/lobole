@@ -529,6 +529,17 @@ set(app_sources
     src/render/UnderlayRenderer.cpp
     src/render/FieldRenderer.cpp
     src/app/GuiTests.cpp
+    src/app/guitests/GuiTestsCommon.cpp
+    src/app/guitests/GuiTestsShell.cpp
+    src/app/guitests/GuiTestsModeling.cpp
+    src/app/guitests/GuiTestsSketch.cpp
+    src/app/guitests/GuiTestsViewport.cpp
+    src/app/guitests/GuiTestsAssembly.cpp
+    src/app/guitests/GuiTestsDrawing.cpp
+    src/app/guitests/GuiTestsCam.cpp
+    src/app/guitests/GuiTestsSimulation.cpp
+    src/app/guitests/GuiTestsProject.cpp
+    src/app/guitests/GuiTestsTerminal.cpp
     src/ui/UI.cpp
     src/ui/DockLayout.cpp
     src/ui/MainMenuBar.cpp
@@ -600,7 +611,19 @@ file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
 if(NOT ENABLE_TEST_ENGINE)
   # No engine: drop its sources and the suite written against it.
   set(IMGUI_TEST_ENGINE_SOURCES "")
-  list(REMOVE_ITEM app_sources src/app/GuiTests.cpp)
+  list(REMOVE_ITEM app_sources
+       src/app/GuiTests.cpp
+       src/app/guitests/GuiTestsCommon.cpp
+       src/app/guitests/GuiTestsShell.cpp
+       src/app/guitests/GuiTestsModeling.cpp
+       src/app/guitests/GuiTestsSketch.cpp
+       src/app/guitests/GuiTestsViewport.cpp
+       src/app/guitests/GuiTestsAssembly.cpp
+       src/app/guitests/GuiTestsDrawing.cpp
+       src/app/guitests/GuiTestsCam.cpp
+       src/app/guitests/GuiTestsSimulation.cpp
+       src/app/guitests/GuiTestsProject.cpp
+       src/app/guitests/GuiTestsTerminal.cpp)
 endif()
 
 add_executable(designer ${SANITIZER_DEFAULTS_SRC} ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
