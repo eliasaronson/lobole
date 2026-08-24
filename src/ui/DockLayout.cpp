@@ -136,6 +136,30 @@ void BeginDockspace(AppState& state) {
     }
   }
 
+  // ...and once it is docked, hide its node's tab bar while it is the only
+  // window there. A single-window node draws a tab bar saying "Terminal"
+  // directly above the panel's OWN tab bar saying "zsh" — two rows of tab
+  // chrome, one of which carries no information the other does not. ImGui
+  // replaces the hidden bar with a small corner triangle that both unhides
+  // it and drags to undock (imgui.cpp, "Unhide tab bar"), so nothing is
+  // actually lost, and it restores the bar by itself the moment a second
+  // window is docked here (DockNodeUpdate clears HiddenTabBar above one
+  // window). Every frame rather than once: the panel is usually docked by a
+  // layout that was saved before this existed, and neither branch above
+  // fires for a window that already has a home.
+  if (state.settings.terminalPanel) {
+    ImGuiWindow* term = ImGui::FindWindowByName(kPanelTerminal);
+    if (term != nullptr && term->DockNode != nullptr &&
+        term->DockNode->Windows.Size == 1) {
+      ImGuiDockNode* node = term->DockNode;
+      const ImGuiDockNodeFlags want =
+          ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_HiddenTabBar;
+      // Guarded, or SetLocalFlags marks the .ini dirty on every frame.
+      if ((node->LocalFlags & want) != want)
+        node->SetLocalFlags(node->LocalFlags | want);
+    }
+  }
+
   if (state.buildDefaultDockLayout) {
     state.buildDefaultDockLayout = false;
     ImGui::DockBuilderRemoveNode(dockspaceId);

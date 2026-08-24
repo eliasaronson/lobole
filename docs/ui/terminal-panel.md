@@ -413,6 +413,19 @@ landing it first means writing both fixes twice.
   went with it: it is navigation for a bar too full to read, and this bar
   shrinks rather than scrolls.
 
+  That was still only half the fix, and the half that showed. Hiding the
+  panel's own bar at one session left the duplication intact the moment you
+  opened a second — because the *other* bar is ImGui's: a single-window dock
+  node draws a tab reading `Terminal` directly above a bar reading `zsh`.
+  `DockLayout` now sets `AutoHideTabBar | HiddenTabBar` on the terminal's node
+  while it is the only window in it. ImGui replaces the hidden bar with a
+  small corner triangle that both unhides it and drags to undock, so the
+  affordance survives, and it restores the bar by itself if a second window is
+  ever docked there (`DockNodeUpdate` clears `HiddenTabBar` above one window).
+  Set every frame, not once: the panel is usually docked by a layout saved
+  before any of this existed, and neither DockBuilder branch fires for a
+  window that already has a home.
+
 - **`Stop` needed a tooltip, which is a way of saying it needed a
   justification.** It SIGHUPs then SIGKILLs the session's process, keeping
   the scrollback readable — for a program that has stopped answering Ctrl+C.
