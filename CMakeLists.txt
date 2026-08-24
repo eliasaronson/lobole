@@ -627,7 +627,47 @@ if(NOT ENABLE_TEST_ENGINE)
        src/app/guitests/GuiTestsTerminal.cpp)
 endif()
 
-add_executable(designer ${SANITIZER_DEFAULTS_SRC} ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+# designer_app: everything the app is EXCEPT its entry points (ui/, render/,
+# remote/ and the GUI suite). It exists so designer_tests can link the actions
+# layer and exercise it headlessly — see tests/test_actions.cpp for the
+# pattern and docs/architecture-review-2026-08-24.md for why this beats an
+# abstract renderer interface.
+#
+# No renderer seam is needed, and none was added: the actions layer already
+# null-checks every renderer pointer (HeadlessMain.cpp runs the whole app that
+# way), so a test constructs an AppState, leaves the pointers null, and the
+# sync functions no-op exactly as they do headless.
+set(app_lib_sources ${app_sources})
+list(REMOVE_ITEM app_lib_sources
+     src/app/main.cpp
+     src/app/HeadlessMain.cpp
+     src/app/CrashHandler.cpp)
+add_library(designer_app STATIC
+    ${app_lib_sources}
+    ${NFD_SOURCES}
+    ${IMGUI_TEST_ENGINE_SOURCES}
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp)
+target_include_directories(designer_app PUBLIC src)
+target_link_libraries(designer_app PUBLIC designer_core ${LIBRARIES})
+if(ENABLE_TEST_ENGINE)
+  # PUBLIC, not PRIVATE: GuiTests*.cpp and the app both switch on it, and a
+  # consumer linking this library must agree about ImGui's ABI.
+  target_compile_definitions(designer_app PUBLIC
+      HAVE_TEST_ENGINE
+      IMGUI_ENABLE_TEST_ENGINE
+      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1)
+endif()
+
+add_executable(designer ${SANITIZER_DEFAULTS_SRC}
+    src/app/main.cpp
+    src/app/HeadlessMain.cpp
+    src/app/CrashHandler.cpp)
 if(HAVE_STDCXX_STACKTRACE)
     target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)
 endif()
@@ -642,17 +682,13 @@ set_target_properties(designer PROPERTIES INSTALL_RPATH "${DESIGNER_INSTALL_RPAT
 # HAVE_TEST_ENGINE is ours: the app's own code switches on it (matching the
 # HAVE_NETGEN / HAVE_FEM_GPU convention).
 if(ENABLE_TEST_ENGINE)
-  target_compile_definitions(designer PRIVATE
-      HAVE_TEST_ENGINE
-      IMGUI_ENABLE_TEST_ENGINE
-      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
-  )
+  # The library already sets these PUBLIC; main.cpp needs them too.
 else()
   message(STATUS "Dear ImGui Test Engine DISABLED: no --gui-tests, no remote "
                  "ui_action; everything else builds")
 endif()
 
-target_link_libraries(designer designer_core ${LIBRARIES})
+target_link_libraries(designer designer_app designer_core ${LIBRARIES})
 
 # X11 for the non-blocking XMapWindow window-show path (see main.cpp); avoids
 # GLFW's waitForVisibilityNotify deadlock under i3. Linux/X11 only.

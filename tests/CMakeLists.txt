@@ -13,6 +13,7 @@ if(NOT Catch2_FOUND)
 endif()
 
 add_executable(designer_tests
+    test_actions.cpp
     # The sanitizer runtime options, in the binary rather than in the caller's
     # environment (empty unless ENABLE_SANITIZERS=ON). See the top-level
     # CMakeLists for why this is per-executable.
@@ -80,7 +81,12 @@ add_executable(designer_tests
     test_drawing.cpp
     test_configuration.cpp
 )
-target_link_libraries(designer_tests PRIVATE designer_core Catch2::Catch2WithMain)
+# designer_app brings the ui/ actions layer in so it can be exercised
+# headlessly (tests/test_actions.cpp). It drags ImGui and Vulkan along as link
+# dependencies, which is fine — no test creates a context or a device — but it
+# does mean calling an ImGui function without a context CRASHES rather than
+# failing to compile. Test the actions layer, not the widgets.
+target_link_libraries(designer_tests PRIVATE designer_app designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(designer_tests PRIVATE
     DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
