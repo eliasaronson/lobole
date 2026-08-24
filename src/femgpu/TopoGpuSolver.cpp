@@ -165,6 +165,16 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   const auto t0 = std::chrono::steady_clock::now();
   if (!im.cg->Solve(im.fF, im.xF, tol, maxIter, &stats, error))
     return false;
+  // FEMGPU_SOLVE_TRACE=1: one stderr line per SIMP linear solve.
+  if (std::getenv("FEMGPU_SOLVE_TRACE"))
+    std::fprintf(stderr,
+                 "FEMGPU_SOLVE: %.0f ms, %d outer iters, rel res %.2e, "
+                 "converged=%d\n",
+                 std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - t0)
+                     .count(),
+                 stats.iterations, stats.relResidual, (int)stats.converged);
+
   // A capped or floored solve is fine — SIMP reacts to energies, not to the
   // last digit of u, and the comment above is why the cap exists. A solve
   // that made NO progress is a different thing: the returned "best iterate"
@@ -181,16 +191,6 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
     return false;
   }
   im.haveWarmStart = true;
-  // FEMGPU_SOLVE_TRACE=1: one stderr line per SIMP linear solve.
-  if (std::getenv("FEMGPU_SOLVE_TRACE"))
-    std::fprintf(stderr,
-                 "FEMGPU_SOLVE: %.0f ms, %d outer iters, rel res %.2e, "
-                 "converged=%d\n",
-                 std::chrono::duration<double, std::milli>(
-                     std::chrono::steady_clock::now() - t0)
-                     .count(),
-                 stats.iterations, stats.relResidual, (int)stats.converged);
-
   u.resize(im.nFree);
   for (int i = 0; i < im.nFree; ++i)
     u[i] = static_cast<double>(im.xF[i]);

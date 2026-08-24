@@ -443,6 +443,175 @@ TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
   }
 }
 
+// ---- Where the fp32 solver stops working (diagnostics, not gates) ---------
+//
+// The 2026-08-23 round found the GPU path returning a ZERO displacement field
+// on a beam-shaped part (docs/topopt/plan.md). `TopologyOptimize` falls back
+// to the CPU when that happens, so this is a performance limit rather than a
+// correctness one — but fixing the numerics needs to start from measurements,
+// and these two are them. Hidden ([.]) : run with `femgpu_tests [fp32floor]`.
+//
+// Measured on an RTX 4060 Laptop, tolerance 1e-5, uniform stiffness, all
+// meshes built from 10 mm CUBIC cells so element SHAPE is held constant:
+//
+//   proportions   tets   MG true residual
+//   1 : 1          384   6.6e-06   <- converges
+//   2.5 : 1        960   2.6e-05
+//   5 : 1         1920   2.8e-04
+//   10 : 1         480   1.2e-03
+//   10 : 1        3840   1.7e-03
+//   20 : 1         240   2.6e-03
+//   20 : 1         960   5.1e-02
+//   10:1 FLAT      600   3.9e-05   <- thin but not long: nearly fine
+//
+// The attainable floor tracks the structure's SLENDERNESS, roughly an order
+// of magnitude per doubling, and NOT the element count (240 tets at 20:1 is
+// worse than 3840 at 10:1). Thinness alone is not the problem — the flat
+// plate is one element thick and lands near the chunky box; length-to-depth
+// is. Jacobi shows the same ordering ~10x more slowly.
+TEST_CASE("femgpu probe: the fp32 residual floor vs slenderness",
+          "[.][fp32floor]") {
+  REQUIRE_GPU();
+  struct Case {
+    const char* name;
+    int nx, ny, nz;
+    double Lx, Ly, Lz;
+  };
+  const Case cases[] = {
+      {"cube    4x4x4   (384 tets, 1:1)", 4, 4, 4, 40, 40, 40},
+      {"chunky 10x4x4   (960 tets, 2.5:1)", 10, 4, 4, 100, 40, 40},
+      {"beam   20x4x4  (1920 tets, 5:1)", 20, 4, 4, 200, 40, 40},
+      {"beam   20x2x2   (480 tets, 10:1)", 20, 2, 2, 200, 20, 20},
+      {"beam   40x4x4  (3840 tets, 10:1)", 40, 4, 4, 400, 40, 40},
+      {"beam   20x1x2   (240 tets, 20:1)", 20, 1, 2, 200, 10, 20},
+      {"beam   40x2x2   (960 tets, 20:1)", 40, 2, 2, 400, 20, 20},
+      {"plate  10x1x10  (600 tets, 10:1 flat)", 10, 1, 10, 100, 10, 100},
+  };
+  for (const Case& c : cases) {
+    fem::FemMesh mesh = GenerateBoxMesh(c.nx, c.ny, c.nz, c.Lx, c.Ly, c.Lz);
+    const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+    const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+    uint32_t state = 42;
+    std::vector<float> f(sys.nFree);
+    for (int i = 0; i < sys.nFree; ++i)
+      f[i] = RandSym(state);
+    const std::vector<float> scales(sys.nElems, 1.0f);
+    for (const char* pc : {"jacobi", "multigrid"}) {
+      std::string err;
+      gpu::CgOptions opts;
+      if (std::string(pc) == "jacobi") {
+        opts.precond = gpu::CgOptions::Precond::Jacobi;
+      } else {
+        const auto dofs = fem::internal::BuildDofMap(
+            static_cast<int>(mesh.nodes.size()), fixed);
+        opts.mg = gpu::MakeMgGpuData(FlatNodes(mesh), sys, dofs.map, &err);
+        REQUIRE(opts.mg);
+        opts.precond = gpu::CgOptions::Precond::Multigrid;
+        opts.chebDegree = 3;
+        opts.chebRatio = 15.0f;
+      }
+      auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
+      REQUIRE(cg);
+      REQUIRE(cg->SetScales(scales, &err));
+      std::vector<float> x(sys.nFree, 0.0f);
+      gpu::CgStats stats;
+      REQUIRE(cg->Solve(f, x, 1e-5f, 20000, &stats, &err));
+      std::printf("%-40s %-10s nFree %5d  iters %5d  true %.2e  converged %d\n",
+                  c.name, pc, sys.nFree, stats.iterations,
+                  ResidualNorm(sys, scales, x, f), (int)stats.converged);
+    }
+  }
+}
+
+// ...and what turns "a bad floor" into "no progress at all". Two ingredients,
+// and it takes BOTH. Measured on the 20:1 beam above, multigrid, tol 1e-5:
+//
+//   stiffness field        RHS        true residual   max|x|
+//   uniform 1.0            random     2.3e-03         1.4e-02
+//   uniform 0.027          random     2.3e-03         5.4e-01
+//   uniform 1.0            bending    1.0e-01         7.6e-01
+//   uniform 0.027          bending    9.7e-02         2.8e+01
+//   frozen skin + 0.027    random     1.7e-02         3.0e-01
+//   frozen skin + 0.027    bending    1.00e+00        0.0e+00   <- the bug
+//
+// The frozen support/load skin is SIMP's own doing: those elements are held
+// at density 1 while the bulk starts at the volume fraction cubed, so the
+// first solve carries a 37:1 stiffness jump across one element face. With a
+// bending load on top of it the CG never finds a single new low and returns
+// its initial guess — which is where the zero displacement field came from.
+// A uniform scale is irrelevant (the 1.0 and 0.027 rows agree), so this is
+// not about magnitudes.
+TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
+  REQUIRE_GPU();
+  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200, 10, 20);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 200000.0, 0.3);
+  const auto dofs =
+      fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+
+  uint32_t st = 42;
+  std::vector<float> fRand(sys.nFree);
+  for (int i = 0; i < sys.nFree; ++i)
+    fRand[i] = RandSym(st);
+  // 100 N over the free-end face, pushing -Y: the load the round placed.
+  std::vector<float> fTip(sys.nFree, 0.0f);
+  int tipNodes = 0;
+  for (const auto& n : mesh.nodes)
+    if (std::abs(n.x - 200.0) < 1e-6)
+      ++tipNodes;
+  for (size_t n = 0; n < mesh.nodes.size(); ++n)
+    if (std::abs(mesh.nodes[n].x - 200.0) < 1e-6) {
+      const int g = dofs.map[3 * n + 1];
+      if (g >= 0)
+        fTip[g] = -100.0f / static_cast<float>(tipNodes);
+    }
+
+  // SIMP's first solve: the support/load skin frozen solid at 1.0, the bulk
+  // at the volume fraction cubed.
+  std::vector<float> mixed(sys.nElems, 0.027f);
+  int frozen = 0;
+  for (int e = 0; e < sys.nElems; ++e) {
+    bool touches = false;
+    for (int i = 0; i < 10; ++i) {
+      const double x = mesh.nodes[mesh.tets[e][i]].x;
+      touches = touches || x < 1e-6 || x > 200.0 - 1e-6;
+    }
+    if (touches) {
+      mixed[e] = 1.0f;
+      ++frozen;
+    }
+  }
+  std::printf("(frozen elements: %d of %d)\n", frozen, sys.nElems);
+
+  for (const float sc : {1.0f, 0.027f, -1.0f}) // -1 = the mixed field
+    for (int rhs = 0; rhs < 2; ++rhs) {
+      const std::vector<float>& f = rhs == 0 ? fRand : fTip;
+      const std::vector<float> scales =
+          sc < 0.0f ? mixed : std::vector<float>(sys.nElems, sc);
+      std::string err;
+      gpu::CgOptions opts;
+      opts.mg = gpu::MakeMgGpuData(FlatNodes(mesh), sys, dofs.map, &err);
+      REQUIRE(opts.mg);
+      opts.precond = gpu::CgOptions::Precond::Multigrid;
+      opts.chebDegree = 3;
+      opts.chebRatio = 15.0f;
+      auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
+      REQUIRE(cg);
+      REQUIRE(cg->SetScales(scales, &err));
+      std::vector<float> x(sys.nFree, 0.0f);
+      gpu::CgStats stats;
+      REQUIRE(cg->Solve(f, x, 1e-5f, 20000, &stats, &err));
+      double xmax = 0.0;
+      for (float v : x)
+        xmax = std::max(xmax, (double)std::abs(v));
+      std::printf("%-22s %-8s iters %5d  true %.2e  max|x| %.3e\n",
+                  sc < 0.0f ? "frozen skin + 0.027"
+                            : (sc == 1.0f ? "uniform 1.0" : "uniform 0.027"),
+                  rhs == 0 ? "random" : "bending", stats.iterations,
+                  ResidualNorm(sys, scales, x, f), xmax);
+    }
+}
+
 TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
           "[femgpu][cg]") {
   // The GPU1 verification: the same small cantilever optimized twice — the

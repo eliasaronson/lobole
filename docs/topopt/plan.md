@@ -401,11 +401,54 @@ built in 3.
 The fp32 matrix-free CG **cannot solve a slender bending problem**. Measured
 on a 200 x 10 x 20 mm cantilever: the relative residual sits at exactly 1.00
 after 128 iterations with the multigrid preconditioner and after 2048 with
-Jacobi, and the per-iteration residual GROWS (1848 -> 2265 -> 5402 -> 13074
--> 28395) — fp32 CG breaking down on a system whose conditioning a beam's
-aspect ratio inflates. The `femgpu` gates never saw it because their mesh is a
-chunky 100x40x40 box; `femgpu: a slender cantilever solves on the GPU (GATE)`
-now covers the other shape.
+Jacobi. The `femgpu` gates never saw it because their mesh is a chunky
+100x40x40 box; `femgpu: a slender cantilever solves on the GPU (GATE)` now
+covers the other shape.
+
+**Measured, 2026-08-24** (`femgpu_tests [fp32floor]`, two hidden probes kept
+as the starting point for whoever fixes the numerics). All meshes are built
+from 10 mm CUBIC cells, so element shape is constant and only the structure's
+proportions vary; tolerance 1e-5, uniform stiffness, multigrid:
+
+| proportions | tets | true residual reached |
+|---|---|---|
+| 1 : 1 | 384 | 6.6e-06 (converges) |
+| 2.5 : 1 | 960 | 2.6e-05 |
+| 5 : 1 | 1920 | 2.8e-04 |
+| 10 : 1 | 480 | 1.2e-03 |
+| 10 : 1 | 3840 | 1.7e-03 |
+| 20 : 1 | 240 | 2.6e-03 |
+| 20 : 1 | 960 | 5.2e-02 |
+| 10 : 1 **flat** | 600 | 3.9e-05 |
+
+The floor tracks **slenderness**, about an order of magnitude per doubling,
+and **not element count** — 240 tets at 20:1 is worse than 3840 tets at 10:1.
+Thinness alone is not the problem: the flat plate is one element thick and
+lands near the chunky box. Length-to-depth is. Jacobi shows the same ordering
+roughly 10x more slowly.
+
+**What turns a bad floor into no progress at all takes TWO ingredients**, and
+neither alone does it (same beam, multigrid, tol 1e-5):
+
+| stiffness field | RHS | true residual | max abs u |
+|---|---|---|---|
+| uniform 1.0 | random | 2.3e-03 | 1.5e-02 |
+| uniform 0.027 | random | 2.3e-03 | 5.3e-01 |
+| uniform 1.0 | bending | 1.1e-01 | 7.6e-01 |
+| uniform 0.027 | bending | 1.0e-01 | 2.8e+01 |
+| frozen skin + 0.027 | random | 1.9e-02 | 3.0e-01 |
+| **frozen skin + 0.027** | **bending** | **1.00e+00** | **0.0e+00** |
+
+The second ingredient is SIMP's own doing: the elements touching a support or
+load face are **frozen at density 1** while the bulk starts at the volume
+fraction cubed, so the very first solve carries a **37:1 stiffness jump across
+one element face** (24 of 240 elements here). Put a bending load on top of
+that and the CG never finds a single new low — it returns its initial guess,
+and on a cold solve that is the zero field. A uniform rescale is irrelevant
+(the 1.0 and 0.027 rows agree), so this is about the stiffness CONTRAST and
+the load's shape, not about magnitudes. Anyone fixing this should start there:
+the contrast is introduced by the freezing policy, which is a choice, not a
+law.
 
 What made it a correctness bug rather than a performance one: `TopoCgSolver`
 reported the failure honestly (`converged = false`, best iterate = the zero
