@@ -288,3 +288,67 @@ Deliberately not in U13, each its own decision:
 
 Recommendation: document-level. Flagging it because it is a format commitment,
 not because the trade is close.
+
+---
+
+## What changed on contact
+
+Six phases shipped as planned. Five things were not what the plan said they
+were, and they are the part worth keeping.
+
+**The part-tabs bar was never the height it asked for.** U13b was scoped as
+"pin the + and add a scrollbar". Reserving room for the scrollbar produced a
+bar 12 px taller showing nothing, which turned out to be two separate bugs
+underneath. `PartTabsBarHeight()` returned a number the window never got:
+ImGui clamps every non-child window to `style.WindowMinSize` (180x60 in
+Theme.cpp, there so a dock node cannot be dragged to a sliver), and it does
+so AFTER any size constraint, so `SetNextWindowSizeConstraints` cannot get
+under it either. The bar asked for 36 px, was given 60, and `BeginDockspace`
+went on reserving 36 — the bottom ~24 px of every docked panel has been
+sitting underneath the tab bar. And the 36 itself was short of one button
+row; the tabs simply drew past it, which was harmless until a child had to
+fit a scrollbar too.
+
+**`GetScrollMaxX()` reads zero in a strip whose height depends on it.** It
+comes from the previous frame's `ContentSize`, and the height depended on the
+answer, so the two deadlocked: no extra height, therefore a squeezed strip,
+therefore nothing that ever reported an overflow. Measuring the run from the
+cursor is a fact about the current frame and has no such loop.
+
+**`label_truncated` is not a clipping signal.** The U13d gate was designed
+around it. It reports that the test engine's 32-byte `DebugLabel` buffer was
+cut — correlated with long labels, unrelated to whether anything was clipped
+on screen. The gate that replaced it asserts the user-visible contract
+instead: a row too long for the panel is still addressable by id, and still
+readable on hover.
+
+**Two of the Preferences findings were already deliberate.** The window sizes
+in FONT units, caps at 90%/85% of the viewport, centres on every appearing
+rather than FirstUseEver, and explicitly rejects `AlwaysAutoResize` — with
+the reason written in place (the blurbs wrap to the content region, so
+content-driven width ran off the screen). `ControlWidth()` caps the combos on
+purpose too. All that survived was one height constant. Reading before
+planning would have caught it; reading before EDITING did.
+
+**Elevation by value step was not available.** One step up the surface ramp
+lands exactly on kSurface, which is what every input, frame and button in the
+tool window already is — the fields would have dissolved into the window
+behind them. It got a drawn shadow instead. The same collision explains why
+the part-tabs scrollbar was invisible on arrival: `ImGuiCol_ScrollbarGrab`
+was kSurface, the same value as the buttons directly above it. Moving the
+grab one step up the ramp fixes every scrollbar beside a control.
+
+## Follow-ups this round did not take
+
+- **`free_port()` is racy, in ~15 test scripts.** It binds port 0, reads the
+  port, CLOSES the socket, and the app binds it later — so a parallel `ctest
+  -j` can hand the same port to two tests. `fem_smoke` failed once this way
+  during U13e and passed alone immediately after. Pre-existing, unrelated to
+  this workstream, and not in the known-flakes list; the fix is a retry
+  around `wait_for` rather than a better port picker.
+- **Leftover scratch instances.** Four `--headless` instances were squatting
+  8795-8798 from earlier sessions, and one GUI instance on 8917 had been
+  pegging a core since the day before. `headless-preview.sh --stop` exists;
+  nothing reaps an instance whose session ended.
+- The toolbar still wraps two icons onto a second row at 1280 px, and the
+  "Out of scope" list above is otherwise untouched.
