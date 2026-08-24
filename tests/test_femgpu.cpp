@@ -704,49 +704,95 @@ TEST_CASE("femgpu probe: condition numbers", "[.][fp32floor]") {
 }
 
 // Does the existing (disabled) penalty continuation make the GPU path usable
-// on a beam, or only stop it returning zeros? ANSWER: only the latter.
+// on a beam? ANSWER: no, and it is not free either. Measured 2026-08-24,
+// 60 iterations, ramp over the first 15:
+//
+//   mesh            ramp   CPU compliance   Mnd (grey)   GPU fell back?
+//   beam 20x1x2      0        4178          60.7%        yes (res 1.00)
+//   beam 20x1x2     15        4176          60.7%        yes (res 1.15)
+//   chunky 10x4x4    0       12.65          33.3%        no
+//   chunky 10x4x4   15       19.46          34.7%        no
+//
 // `penaltyRampIters` starts p at 1, so the bulk sits at the volume fraction
-// itself (0.3) instead of its cube (0.027), which takes kappa from 2.7e+08 to
-// 3.2e+07 and turns the FIRST solve from zero-progress into a normal floored
-// one (1.8e-01, u sane). But the run still falls back somewhere later —
-// measured "relative residual 1.104517", i.e. a warm-started solve that ended
-// up worse than its own starting point. Reducing the contrast helps and is
-// nearly free; it does not lift the fp32 ceiling.
+// itself (0.3) rather than its cube (0.027): kappa falls 2.7e+08 -> 3.2e+07
+// and the FIRST solve goes from zero-progress to a normal floored one
+// (1.8e-01, u sane). But the run still falls back later, on a warm-started
+// solve that ends up worse than its own starting point — and on the chunky
+// mesh, where the GPU works fine, continuation converges to a design 54%
+// SOFTER and greyer. Both runs stop on changeTol well inside the budget, so
+// that is not iteration starvation; it is a worse local optimum.
+//
+// Which is what FemTopo.h already says ("sensitivity filtering already yields
+// a discrete design at constant p"), now with a number attached. Do not turn
+// it on for the solver's sake.
 TEST_CASE("femgpu probe: penalty ramp on a slender part", "[.][fp32floor]") {
   REQUIRE_GPU();
-  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200.0, 10.0, 20.0);
-  fem::Material steel{200000.0, 0.3};
-  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
-  fem::FaceLoad load;
-  load.type = fem::LoadType::Force;
-  load.tris = TrisAtPlane(mesh, 0, 200.0, 1e-6);
-  load.magnitude = 100.0;
-  load.direction = glm::dvec3(0, -1, 0);
+  struct M {
+    const char* name;
+    int nx, ny, nz;
+    double Lx, Ly, Lz;
+  };
+  // The slender one (where the GPU fails) AND a chunky one (where it works),
+  // because the design question and the solver question are separate: on a
+  // 240-element beam the result is grey mush whichever way, so discreteness
+  // has to be judged on a mesh that can hold a shape.
+  const M meshes[] = {{"beam   20x1x2", 20, 1, 2, 200.0, 10.0, 20.0},
+                      {"chunky 10x4x4", 10, 4, 4, 100.0, 40.0, 40.0}};
+  for (const M& m : meshes) {
+    fem::FemMesh mesh = GenerateBoxMesh(m.nx, m.ny, m.nz, m.Lx, m.Ly, m.Lz);
+    fem::Material steel{200000.0, 0.3};
+    const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+    fem::FaceLoad load;
+    load.type = fem::LoadType::Force;
+    load.tris = TrisAtPlane(mesh, 0, m.Lx, 1e-6);
+    load.magnitude = 100.0;
+    load.direction = glm::dvec3(0, -1, 0);
 
-  for (const double ramp : {0.0, 15.0}) {
-    fem::TopoParams params;
-    params.maxIterations = 30;
-    params.penaltyRampIters = ramp;
-    std::string err;
-    auto cpu = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
-    REQUIRE(cpu.has_value());
-    std::string gerr;
-    auto solver = gpu::TopoGpuSolver::Create(true, &gerr);
-    REQUIRE(solver);
-    auto gpu = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
-                                     {}, {}, solver.get());
-    REQUIRE(gpu.has_value());
-    int flips = 0;
-    for (size_t e = 0; e < cpu->density.size(); ++e)
-      if (std::abs(gpu->density[e] - cpu->density[e]) > 0.5)
-        ++flips;
-    std::printf("ramp %4.0f  cpu C %.4g vf %.3f | gpu C %.4g vf %.3f  flips "
-                "%d/%zu  fellback: %s\n",
-                ramp, cpu->complianceHistory.back(),
-                cpu->volumeFractionAchieved, gpu->complianceHistory.back(),
-                gpu->volumeFractionAchieved, flips, cpu->density.size(),
-                gpu->solverFallback.empty() ? "no"
-                                            : gpu->solverFallback.c_str());
+    for (const double ramp : {0.0, 15.0}) {
+      fem::TopoParams params;
+      // 60 iterations ramping over the first 15 — a quarter of the budget,
+      // the usual schedule. (30 gives the same numbers to four figures: both
+      // schedules stop on changeTol first, so the gap below is not iteration
+      // starvation.)
+      params.maxIterations = 60;
+      params.penaltyRampIters = ramp;
+      std::string err;
+      auto cpu =
+          fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+      REQUIRE(cpu.has_value());
+      std::string gerr;
+      auto solver = gpu::TopoGpuSolver::Create(true, &gerr);
+      REQUIRE(solver);
+      auto gpu = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                       {}, {}, solver.get());
+      REQUIRE(gpu.has_value());
+      int flips = 0;
+      for (size_t e = 0; e < cpu->density.size(); ++e)
+        if (std::abs(gpu->density[e] - cpu->density[e]) > 0.5)
+          ++flips;
+      // Is the design still black-and-white? Mnd = mean 4x(1-x), the standard
+      // SIMP discreteness measure: 0% = fully solid/void, 100% = all grey. The
+      // ramp's whole point is a better basin, but it spends iterations at a
+      // penalty that does NOT punish grey, so this is the thing to check.
+      double mnd = 0.0;
+      int grey = 0;
+      for (double x : cpu->density) {
+        mnd += 4.0 * x * (1.0 - x);
+        if (x > 0.1 && x < 0.9)
+          ++grey;
+      }
+      mnd = 100.0 * mnd / cpu->density.size();
+      std::printf("              cpu discreteness Mnd %.1f%%  grey elements "
+                  "%d/%zu\n",
+                  mnd, grey, cpu->density.size());
+      std::printf("%s ramp %4.0f  cpu C %.4g vf %.3f | gpu C %.4g vf %.3f  "
+                  "flips %d/%zu  fellback: %s\n",
+                  m.name, ramp, cpu->complianceHistory.back(),
+                  cpu->volumeFractionAchieved, gpu->complianceHistory.back(),
+                  gpu->volumeFractionAchieved, flips, cpu->density.size(),
+                  gpu->solverFallback.empty() ? "no"
+                                              : gpu->solverFallback.c_str());
+    }
   }
 }
 

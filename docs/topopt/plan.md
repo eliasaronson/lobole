@@ -505,13 +505,21 @@ In rough order of value:
    ceiling; a CPU-side fp64 iterative refinement around the fp32 GPU solve —
    one fp64 SpMV per outer step, against hundreds of inner iterations — buys
    all of it. This is the standard answer to exactly this problem.
-2. **Stop manufacturing the contrast.** `TopoParams::penaltyRampIters` already
-   exists and is disabled (0). Turning it on starts p at 1, so the bulk sits
-   at the volume fraction (0.3) instead of its cube (0.027): κ 2.7e+08 →
-   3.2e+07, and the first solve goes from zero-progress to a normal floored
-   one. **Measured insufficient on its own** — the run still falls back later,
-   on a warm-started solve that ends up worse than its own starting point —
-   but it is nearly free and it removes the worst iteration.
+2. ~~**Stop manufacturing the contrast** via `penaltyRampIters`.~~ **Tried and
+   rejected, 2026-08-24.** Starting p at 1 puts the bulk at the volume
+   fraction (0.3) rather than its cube (0.027), and that does what the
+   conditioning numbers promise: κ 2.7e+08 → 3.2e+07, and the first solve goes
+   from zero-progress to a normal floored one (1.8e-01, displacements sane).
+   It still is not enough — the run falls back later anyway, on a warm-started
+   solve that ends up worse than its own starting point — **and it is not
+   free**: on the chunky mesh, where the GPU works, continuation converged to
+   a design **54% softer** (compliance 19.46 against 12.65) and greyer (640 of
+   960 elements intermediate, against 440). Both runs stop on `changeTol` well
+   inside a 60-iteration budget, so that is a worse local optimum, not
+   iteration starvation. `FemTopo.h` already said continuation was off because
+   "sensitivity filtering already yields a discrete design at constant p";
+   this is that comment with a number attached. The contrast is worth removing
+   if some *other* mechanism can do it without touching the penalty schedule.
 3. **A coarse space that represents beam bending.** The 2-level geometric MG
    cuts iterations, not the precision ceiling, so this helps cost rather than
    correctness. Worth it only after 1.
