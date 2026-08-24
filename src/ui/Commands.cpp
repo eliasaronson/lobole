@@ -1,4 +1,5 @@
 #include "ui/Commands.h"
+#include "ui/AssemblyActions.h"
 
 #include "common/Logger.h"
 #include "core/Document.h"
@@ -10,6 +11,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem
+#include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 #include "ui/TerminalPanel.h"

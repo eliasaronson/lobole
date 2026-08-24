@@ -1,4 +1,5 @@
 #include "ui/FeatureEditor.h"
+#include "ui/AssemblyActions.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
 #include <functional>

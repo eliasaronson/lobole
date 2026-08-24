@@ -1,4 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/AssemblyActions.h"
+#include "ui/SimulationActions.h"
 
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //

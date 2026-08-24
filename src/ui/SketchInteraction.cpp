@@ -1,4 +1,5 @@
 #include "ui/SketchInteraction.h"
+#include "ui/Overlays.h"
 
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"

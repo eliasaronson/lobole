@@ -1,4 +1,5 @@
 #include "ui/PreviewFeature.h"
+#include "ui/OccurrencePanel.h"
 
 #include "core/Command.h"
 #include "core/Document.h"

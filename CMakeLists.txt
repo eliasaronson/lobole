@@ -566,6 +566,7 @@ set(app_sources
     src/ui/ExprInput.cpp
     src/ui/PreviewFeature.cpp
     src/ui/PreviewHandles.cpp
+    src/ui/Overlays.cpp
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
     src/ui/SelectionPipeline.cpp

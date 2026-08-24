@@ -1,4 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/SimulationActions.h"
+#include "ui/StudyPanel.h"
 
 // Simulation GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //

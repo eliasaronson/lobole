@@ -1,4 +1,10 @@
 #include "ui/UI.h"
+#include "ui/AssemblyActions.h"
+#include "ui/DrawingPanel.h"
+#include "ui/OccurrencePanel.h"
+#include "ui/Overlays.h"
+#include "ui/SimulationActions.h"
+#include "ui/StudyPanel.h"
 
 #include "core/features/SketchFeature.h"
 #include "render/Camera.h"

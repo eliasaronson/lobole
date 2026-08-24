@@ -1,4 +1,6 @@
 #include "ui/SelectionPipeline.h"
+#include "ui/AssemblyActions.h"
+#include "ui/StudyPanel.h"
 
 #include "cad/FaceSelector.h"
 #include "render/Camera.h"

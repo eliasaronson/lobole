@@ -42,6 +42,7 @@
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
 #include "ui/SettingsWindow.h"    // ApplySettings / the save debounce
+#include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h" // FaceElementRef
 
 #include <algorithm>

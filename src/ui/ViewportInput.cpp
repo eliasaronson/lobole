@@ -1,4 +1,8 @@
 #include "ui/ViewportInput.h"
+#include "ui/AssemblyActions.h"
+#include "ui/DrawingPanel.h"
+#include "ui/SimulationActions.h"
+#include "ui/StudyPanel.h"
 
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"

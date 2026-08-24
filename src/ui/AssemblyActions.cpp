@@ -1,3 +1,4 @@
+#include "ui/AssemblyActions.h"
 #include "ui/AppActions.h"
 
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
@@ -41,8 +42,6 @@
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
 #include <nlohmann/json.hpp>
-
-#include "imgui.h"
 
 #include <glm/gtc/matrix_transform.hpp> // glm::translate
 #include <glm/gtc/quaternion.hpp>       // glm::mat4_cast

@@ -1,0 +1,120 @@
+#include "ui/Overlays.h"
+
+#include "cad/FaceSelector.h"
+#include "core/Feature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
+#include "ui/AppActions.h"         // EdgeElementRef
+#include "ui/AppActionsInternal.h" // DatumPlanesVisible
+#include "ui/SketchInteraction.h"  // WorldToScreen / SketchUVToScreen
+
+#include "imgui.h"
+
+#include <algorithm>
+
+namespace ui {
+
+void DrawDatumLabels(AppState& state) {
+  if (!state.document || !DatumPlanesVisible(state))
+    return;
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImU32 col = IM_COL32(230, 180, 90, 230);
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    Feature* f = state.document->GetFeature(i);
+    if (auto* dp = dynamic_cast<DatumPlaneFeature*>(f)) {
+      // Label near a corner of the 3-unit quad.
+      glm::vec2 s =
+          SketchUVToScreen(state, dp->OutputPlane(), glm::vec2(2.6f, 2.6f));
+      dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
+    } else if (auto* da = dynamic_cast<DatumAxisFeature*>(f)) {
+      const glm::vec3 end = da->Origin() + da->Direction() * 3.0f;
+      glm::vec2 s = WorldToScreen(state, end);
+      dl->AddText(ImVec2(s.x, s.y), col, da->GetName().c_str());
+    }
+  }
+}
+
+void DrawPromptPill(AppState& state, float& y, const std::string& text,
+                    PromptPill style) {
+  if (text.empty())
+    return;
+  ImU32 bg = 0, fg = 0;
+  switch (style) {
+  case PromptPill::StatusGood:
+    bg = IM_COL32(24, 46, 32, 230);
+    fg = IM_COL32(140, 235, 165, 255);
+    break;
+  case PromptPill::Status:
+    bg = IM_COL32(26, 36, 52, 230);
+    fg = IM_COL32(150, 200, 255, 255);
+    break;
+  case PromptPill::Prompt:
+    bg = IM_COL32(28, 32, 40, 225);
+    fg = IM_COL32(226, 232, 240, 255);
+    break;
+  case PromptPill::Warning:
+    bg = IM_COL32(60, 44, 24, 235);
+    fg = IM_COL32(255, 205, 120, 255);
+    break;
+  }
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const float cx = state.viewportPos.x + state.viewportSize.x * 0.5f;
+  const float padX = 10.0f, padY = 5.0f;
+  const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
+  const ImVec2 a(cx - sz.x * 0.5f - padX, y);
+  const ImVec2 b(cx + sz.x * 0.5f + padX, y + sz.y + 2.0f * padY);
+  dl->AddRectFilled(a, b, bg, 5.0f);
+  dl->AddText(ImVec2(cx - sz.x * 0.5f, y + padY), fg, text.c_str());
+  y = b.y + 4.0f;
+}
+
+void DrawElementNameOverlay(AppState& state) {
+  if (!state.showElementNames || !state.document || !state.faceSelector)
+    return;
+  // While an edge is hovered, label it instead of a face.
+  if (state.pick.edgeHover) {
+    const auto ref = EdgeElementRef(state, state.pick.edgeHoverMesh,
+                                    state.pick.edgeHoverIndex);
+    const char* text = ref ? ref->name.c_str() : "(unnamed)";
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const ImVec2 sz = ImGui::CalcTextSize(text);
+    dl->AddRectFilled(ImVec2(mouse.x + 12 - 3, mouse.y + 12 - 2),
+                      ImVec2(mouse.x + 12 + sz.x + 3, mouse.y + 12 + sz.y + 2),
+                      IM_COL32(20, 24, 30, 220), 3.0f);
+    dl->AddText(ImVec2(mouse.x + 12, mouse.y + 12),
+                IM_COL32(120, 230, 170, 255), text);
+    return;
+  }
+  // Label the hovered face (live feedback), falling back to the selected one.
+  const Face* face = state.faceSelector->GetHoveredFace();
+  if (face == nullptr)
+    face = state.faceSelector->GetSelectedFace();
+  if (face == nullptr)
+    return;
+
+  // Resolve the mesh back to its Body, then that face's element name.
+  const auto& meshes = state.documentMeshes;
+  const auto it = std::find_if(
+      meshes.begin(), meshes.end(),
+      [&](const DocumentRenderMesh& m) { return m.meshId == face->meshId; });
+  if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
+    return;
+  const Body& body = state.document->GetBodies()[it->bodyIndex];
+  const std::string* name =
+      body.elementMap.NameOf(static_cast<int>(face->faceIndex));
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const glm::vec3 center =
+      state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
+  const glm::vec2 s = WorldToScreen(state, center);
+  const char* text = name != nullptr ? name->c_str() : "(unnamed)";
+  const ImVec2 sz = ImGui::CalcTextSize(text);
+  dl->AddRectFilled(ImVec2(s.x - sz.x * 0.5f - 3, s.y - 2),
+                    ImVec2(s.x + sz.x * 0.5f + 3, s.y + sz.y + 2),
+                    IM_COL32(20, 24, 30, 220), 3.0f);
+  dl->AddText(ImVec2(s.x - sz.x * 0.5f, s.y), IM_COL32(120, 230, 170, 255),
+              text);
+}
+
+} // namespace ui

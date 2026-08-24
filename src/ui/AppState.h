@@ -650,6 +650,12 @@ struct AppState {
   SymbolTable projectSymbols;
   ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits
 
+  // ImGui::IsAnyItemActive() sampled once per frame by the frame loop, right
+  // before SyncDocumentRenderers reads it. The field exists so the actions
+  // layer can gate on "a widget is being dragged" without including ImGui —
+  // see ui/Overlays.h and docs/architecture-review-2026-08-24.md.
+  bool anyWidgetActive = false;
+
   // Non-owning
   Camera* camera = nullptr;
   MeshRenderer* meshRenderer = nullptr;

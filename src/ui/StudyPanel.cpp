@@ -1,3 +1,4 @@
+#include "ui/StudyPanel.h"
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
@@ -11,6 +12,7 @@
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
+#include "ui/SimulationActions.h"
 #include "ui/ViewportHandle.h"
 #include <utility>
 

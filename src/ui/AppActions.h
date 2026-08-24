@@ -102,13 +102,7 @@ assembly::AssemblyResolver AssemblyResolverFor(AppState& state);
 // reason logged.
 std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state);
 
-// Assembly occurrence-edit undo (snapshot-based; A2 phase 3). Call
-// SnapshotAssembly *before* mutating the active assembly's occurrences; Undo/
-// Redo restore a snapshot and force a renderer resync. No-ops without an active
-// assembly / empty stack (Undo/Redo return whether they did anything).
-void SnapshotAssembly(AppState& state);
-bool UndoAssembly(AppState& state);
-bool RedoAssembly(AppState& state);
+// AssemblyActions: see ui/AssemblyActions.h
 
 // Drawing-edit undo (snapshot-based, the assembly pattern; workstream 13).
 // Call SnapshotDrawing before mutating the active drawing's sheet/views/dims.
@@ -116,120 +110,17 @@ void SnapshotDrawing(AppState& state);
 bool UndoDrawing(AppState& state);
 bool RedoDrawing(AppState& state);
 
-// Selects an occurrence in the active assembly (0 = clear): records it and
-// highlights all its rendered instances. Safe with null renderers.
-void SelectOccurrence(AppState& state, uint64_t occId);
-
-// Re-solves the active assembly's mates (A3): places every mated, non-fixed
-// occurrence by direct frame alignment, then bumps the version so the renderer
-// resyncs. No-op without an active assembly. Call after any mate/occurrence
-// edit and after loading. Returns the number of mates left in an error state.
-int SolveActiveAssembly(AppState& state);
-
-// Part→assembly change propagation (A4): true when any part referenced by the
-// active assembly has regenerated since the assembly's last solve (compared
-// against the version stamps SolveActiveAssembly records). SetActivePart and
-// OpenProject use it to re-solve automatically; in-context editing re-checks
-// after every part regeneration. False without an active assembly.
-bool AssemblyPartsStale(AppState& state);
-
-// In-context editing (A4): switch to the part tab of `occurrenceId` (in the
-// active assembly) with the assembly ghosted around it — the part renders at
-// identity and every other occurrence at OccMatrix(edited)⁻¹·OccMatrix(other),
-// alpha-blended, unpickable, no outlines. The context re-solves after each
-// part regeneration so ghosts track mates live. Exit = activating any other
-// tab (SetActivePart clears the mode). False when the occurrence or its part
-// can't be resolved.
-bool EnterInContextEdit(AppState& state, uint64_t occurrenceId);
 // The tab index of the slot with a stable id (nullopt when gone) — the
 // in-context banner's Return button and RPCs resolve slots through this.
 std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId);
 
-// Resolves a viewport ray to a face of an occurrence in the active assembly:
-// the occurrence hit and a persistent ElementRef naming the face (for building
-// a mate connector). Returns false if the ray misses, hits an occurrence whose
-// part isn't loaded, or lands on an unnamed face (e.g. a pattern output). The
-// `ray` is in the same space FaceSelector::PickFace expects.
-struct AssemblyFacePick {
-  enum class SnapType { FaceCenter, HoleCenter, EdgeMidpoint };
-
-  uint64_t occurrenceId = 0;
-  ElementRef face;
-  // A persistently named edge when the nearest candidate is a circular-edge
-  // center or a straight/curved edge midpoint; unset means face center.
-  ElementRef snapEdge;
-  SnapType snapType = SnapType::FaceCenter;
-  // A5: when the face belongs to a part INSIDE the picked occurrence, the
-  // ids down to it. A connector built from this pick carries it, so a mate
-  // can anchor on geometry inside a placed unit.
-  std::vector<uint64_t> innerPath;
-};
-bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
-
-// Mate creation tool (A3 phase 3, U7c slots). StartMateTool opens the
-// session and arms connector slot A; the selection pipeline resolves
-// Connector candidates and routes picks to MateConnectorPicked (slot A →
-// advance to B; slot B → live preview mate; edit session → rewrite the
-// mate's connector and re-solve). Accept keeps the preview / closes the
-// session; Cancel removes it. All no-op without an active assembly.
-void StartMateTool(AppState& state, MateType type);
-// Re-pick session for an existing mate: opens the mate session with both
-// connectors filled from the mate; clicking a connector row re-arms it and
-// the next pick rewrites that side (one undo step per re-pick).
-void StartMateEdit(AppState& state, uint64_t mateId);
-// The armed connector slot consumed a pipeline pick (SlotPickClicked routes
-// kMateSessionSlot here).
-void MateConnectorPicked(AppState& state, const SelectionItem& item);
-void AcceptMateTool(AppState& state);
-void CancelMateTool(AppState& state);
-// Arms connector slot A or B on the shared armed-slot state (the mate
-// session's slot rows re-arm through this too).
-void ArmMateConnector(AppState& state, bool second);
-// The mate session's Tool-window contents (connector slot rows, flip/error,
-// accept/cancel). Lives with the other mate UI in OccurrencePanel.cpp;
-// called from DrawToolWindow.
-void DrawMateToolWindow(AppState& state);
-// The world frame of a connector (occurrence placement ∘ its part-local frame),
-// or nullopt if it doesn't resolve. For drawing the connector triad.
-std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
-                                             const Connector& c);
-// Appends the mate tool's connector triads (picked connectors) to `lines`.
-void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
-
-// The 3D drag gizmo (A2.5). BuildGizmoOverlay appends the translate/rotate
-// handles for the selected non-fixed occurrence; HandleGizmoInput runs the drag
-// state machine (grab → live per-frame transform → release snapshots+solves)
-// and returns true when it consumed the viewport (so the caller skips
-// pick/orbit).
-void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines);
-// Pushes an occurrence's current placement to the renderers WITHOUT a resync
-// — the live-drag path. Composes each mesh's place inside the occurrence, so
-// dragging a sub-assembly moves the unit rather than collapsing its parts
-// onto its origin.
-void PushOccurrenceLive(AppState& state, uint64_t occId);
+// OccurrencePanel: see ui/OccurrencePanel.h
 
 // The placement a mesh renders at (solved ∘ explode), exposed for tests and
 // for anything that has to reproduce the live-drag composition.
 glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
 
-bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
-                      bool released);
-
-// The occurrence list + properties editor for an active assembly tab (drawn
-// where the feature tree is for a part). Defined in OccurrencePanel.cpp.
-void DrawOccurrencePanel(AppState& state);
-
-// The sheet settings + title-block editor for an active drawing tab (drawn
-// where the feature tree is for a part). Defined in DrawingPanel.cpp. The view
-// list and dimension tools arrive in later drawings milestones.
-void DrawSheetPanel(AppState& state);
-// Renders the active drawing's sheet (border, title block, and later views/
-// dims) into the viewport through the 2D sheet camera. Defined in
-// DrawingPanel.cpp; called from the frame loop when a drawing tab is active.
-void DrawSheet(AppState& state);
-// 2D sheet pan/zoom (scroll-to-cursor zoom, middle-drag pan) — the drawing-tab
-// replacement for the orbit-camera viewport input. Defined in DrawingPanel.cpp.
-void HandleSheetInput(AppState& state);
+// DrawingPanel: see ui/DrawingPanel.h
 
 // Re-projects every view of the active drawing into state.drawingRenders (the
 // HLR-per-view work). Explicit (D2): called on drawing-tab entry and by the
@@ -277,154 +168,14 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
 
 // ---- Simulation mode (FEM) ------------------------------------------------
 
-// Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter
-// arms `state.simulation.active` and selects (creating if none) a study; exit
-// restores any hidden body instances and clears the mode.
-// Arms a boundary-condition tool (the panel and the toolbar share this so
-// they cannot drift): seeds an unset Force/Pressure magnitude from the part's
-// own weight, so the tool never places a load of 0 that silently does
-// nothing.
-void SimulationArmTool(AppState& state, SimulationState::Tool tool);
-void EnterSimulation(AppState& state);
-void ExitSimulation(AppState& state);
-
-// Meshes + solves study `id` on the active document and caches the results
-// (stamped with the current Version). Returns false and fills *error on any
-// failure — the one source of truth shared by the panel Run button and the
-// run_study RPC. Defined in AppActions.cpp.
-bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
+// SimulationActions: see ui/SimulationActions.h
 
 // ---- Topology optimization runs (TO2, async) ------------------------------
 // A topology study's SIMP solve is minutes long, so it runs on a worker thread
 // over an immutable snapshot; the main thread polls and stores the result at
 // the single join point. One run at a time.
 
-// Prepares the snapshot (meshes on the calling thread) and spawns the worker.
-// Returns false + *error on a prep failure or if a run is already in progress.
-bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
-                      std::string* error);
-
-// If a run has finished (converged, capped, cancelled, or errored), joins it
-// and stores the result (or the study error). Cheap no-op otherwise — call it
-// each frame and before reporting study status. Defined in
-// SimulationActions.cpp.
-void PollTopologyRun(AppState& state, Document& doc);
-
-// Requests cancellation of the run for `studyId` (keeps best-so-far). Returns
-// false if no such run is active.
-bool CancelTopologyRun(AppState& state, uint64_t studyId);
-
-// Live status of the active run. `running` is false when no job is running for
-// `studyId` (finished/never-started — read the cached result instead).
-struct TopoRunStatus {
-  bool running = false;
-  int iteration = 0;
-  int maxIterations = 0;
-  double compliance = 0.0;
-  double maxChange = 0.0;
-  double volumeFraction = 0.0;
-  std::string solver;          // "gpu: <device>" or "cpu (<why>)"
-  double elapsedSeconds = 0.0; // since the run started
-};
-TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
-
-// The async static/modal counterparts (StudyJob): prepare-on-main +
-// solve-on-worker, polled at the same sites as the topology run. A static
-// solve is NOT cancellable (no interruption points in the linear solver).
-bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
-                   std::string* error);
-void PollStudyRun(AppState& state, Document& doc);
-// running=false when no static/modal job is active for `studyId`;
-// elapsedSeconds since launch otherwise.
-struct StudyRunStatus {
-  bool running = false;
-  double elapsedSeconds = 0.0;
-};
-StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId);
-
-// The Studies panel drawn in the Model dock while in simulation mode. Defined
-// in StudyPanel.cpp.
-void DrawStudyPanel(AppState& state);
-
-// The result-field colorbar legend overlaid on the viewport while a field is
-// displayed. Defined in StudyPanel.cpp.
-void DrawFieldLegend(AppState& state);
-
-// Assigns the armed boundary condition (state.simulation.tool) to the face
-// under `ray`, as an undoable study edit. No-op if no tool is armed or the
-// pick misses a named face. Defined in StudyPanel.cpp.
-// Applies the armed BC/keep tool to a picked face (U1c: the selection
-// pipeline resolves the pick; this consumes it).
-void SimulationApplyToFace(AppState& state, const ElementRef& face);
-
-// Boundary-condition glyphs while simulation mode is active: arrows on
-// force/pressure faces (force along its direction, pressure into the face),
-// anchor hatches on fixed faces, diamonds on keep faces.
-void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out);
-
-// Dragging a force arrow to change its magnitude. Its own grab payload
-// (SimulationState::loadDrag), like the gizmo's and the section arrow's —
-// the shared layer answers WHICH handle, not what happens to it
-// (docs/ui/viewport-handles.md). Returns true when it consumed the event.
-bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
-                         bool down, bool released);
-
-// A world-space cross at the peak of the displayed result field (max von Mises
-// or max displacement), warped by the deform scale. Pushed into the no-depth
-// gizmo channel like the CoG marker. Defined in AppActions.cpp.
-void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines);
-
-// Rebuilds the FEM field overlay from the active study's cached results and
-// toggles the solved bodies' normal render (hidden while a field is shown,
-// restored otherwise). Cheap and idempotent — the vertex rebuild is gated on
-// a change signature; the deform scale rides a push constant (no rebuild).
-// Called every frame. Defined in AppActions.cpp.
-void SyncFieldRenderer(AppState& state);
-
-// Bill of materials (A4): derived from the active assembly every call, never
-// stored. One row per referenced part, in first-occurrence order; masses via
-// Measure::MassOfBodies (a part with any density-less body reports its mass
-// unknown and taints the total). `visible=false` occurrences count —
-// visibility is a display state, not suppression.
-struct BomRow {
-  uint64_t partId = 0;
-  std::string partName; // "(missing part)" when the reference dangles
-  int quantity = 0;
-  std::string material;    // slug; "" = none, "mixed" when bodies differ
-  double unitVolume = 0.0; // mm^3, all bodies of the part
-  bool massKnown = false;
-  double unitMassG = 0.0; // valid when massKnown
-};
-struct BomTable {
-  std::vector<BomRow> rows;
-  bool massKnown = true;   // false when any row's mass is unknown
-  double totalMassG = 0.0; // valid when massKnown
-  // V2: WHY a mass is unknown ("part 'X': body 'Y' has no material"), so a
-  // null total explains itself instead of silently tainting the table.
-  std::vector<std::string> warnings;
-};
-BomTable ComputeBom(AppState& state); // empty without an active assembly
-// The table as CSV (quoted where needed); unknown masses are empty cells.
-std::string BomToCsv(const BomTable& bom);
-
-// Visual-mesh export items (interchange X2) for the active tab: a part's
-// bodies at identity, or an assembly's occurrences at their SOLVED placements
-// (occurrences of one part share the underlying shape, so the writers emit
-// instanced geometry). Each item carries the body's material color/PBR (or a
-// palette color for an unassigned body). Empty when nothing is active.
-// Defined in AppActions.cpp; the return type is MeshExport::Item.
-std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state);
-
-// Exploded views (A4). AutoExplode replaces `viewId`'s steps with a radial
-// seed (each occurrence pushed away from the assembly centroid, scaled by the
-// assembly's size) — a starting point to refine by gizmo drag. Snapshots for
-// undo; false without an active assembly / unknown view / fewer than two
-// placed occurrences. ApplyExplodeTransforms re-applies display transforms
-// (solved ∘ explode) to every occurrence's render instances WITHOUT a resync
-// — the factor slider's cheap live path (picking refreshes on the next real
-// resync).
-bool AutoExplode(AppState& state, uint64_t viewId);
-void ApplyExplodeTransforms(AppState& state);
+// StudyPanel: see ui/StudyPanel.h
 
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays
@@ -690,21 +441,6 @@ void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,
                                    bool alignAxis);
 void DeleteReferenceImageAction(AppState& state, uint32_t imageId);
 
-// Imports an assembly STEP as parts + an assembly (interchange I2): one part
-// tab per unique product (geometry extracted as .brep into
-// <project>/imported, or the staging area before the first save),
-// occurrences placed from the file's instance tree. Not undoable (creates
-// documents, like Open).
-bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
-                          std::string* error);
-
-// THE import entry point (one Import… button): a STEP whose structure places
-// several instances imports as an assembly (above); everything else —
-// single-product STEP, .brep, .stl — imports as a feature into the active
-// part.
-bool ImportCADFile(AppState& state, const std::string& path,
-                   std::string* error);
-
 // Shared feature-creation actions (menu + toolbar call these). Each starts a
 // preview the user accepts/cancels (see PreviewFeature).
 void CreateBox(AppState& state);
@@ -811,14 +547,7 @@ void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
 // One prompt-pill renderer (U8b) for the top-center stack — the sketch and
 // model prompt bars share it. Draws `text` as a rounded pill centered over
 // the viewport at stack position `y`, advancing y for the next pill.
-enum class PromptPill {
-  StatusGood, // green: "Fully defined"
-  Status,     // blue: DOF count etc.
-  Prompt,     // neutral: what the armed tool expects
-  Warning     // amber: actionMsg feedback
-};
-void DrawPromptPill(AppState& state, float& y, const std::string& text,
-                    PromptPill style);
+// PromptPill / DrawPromptPill moved to ui/Overlays.h.
 
 // The features in [0, beforeIndex) that produce a body (primitives, imports,
 // extrude/revolve in NewBody mode, and earlier booleans), as {featureId,
@@ -844,11 +573,9 @@ void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines);
 
 // Draws each visible datum plane's and datum axis's name as a 2D label
 // (foreground draw list). Call inside the ImGui frame, near DrawDimensions.
-void DrawDatumLabels(AppState& state);
 
 // When state.showElementNames is on, labels the hovered face with its stable
 // element name (topological-naming debug overlay). No-op otherwise.
-void DrawElementNameOverlay(AppState& state);
 
 // Whether the default planes should render this frame (visible by default,
 // auto-hidden once the part has bodies, always shown while picking/editing).

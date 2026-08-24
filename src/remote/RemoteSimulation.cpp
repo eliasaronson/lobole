@@ -9,6 +9,7 @@
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/SimulationActions.h"
 
 #include <algorithm>
 #include <functional>

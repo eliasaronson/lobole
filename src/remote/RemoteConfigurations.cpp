@@ -7,6 +7,7 @@
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h"
 
 #include <memory>
 #include <vector>

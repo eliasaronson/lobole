@@ -27,6 +27,12 @@ inline LineVertex3D LineVertex(const glm::vec3& pos, const glm::vec3& color) {
   return v;
 }
 
+// Whether the datum planes/axes are drawn at all. Shared because the overlay
+// GEOMETRY (AppendDatumPlaneQuads / AppendDatumAxisLines, in AppActions.cpp)
+// and the overlay LABELS (DrawDatumLabels, in Overlays.cpp) must agree — a
+// label floating beside a hidden plane is the bug this prevents.
+bool DatumPlanesVisible(const AppState& state);
+
 // Assembly-domain helpers defined in AppActions.cpp (they stay because the
 // core lifecycle/renderer/drawing code also uses them) but called by the
 // extracted AssemblyActions.cpp TU. OccurrenceMatrix and PartDocById moved to

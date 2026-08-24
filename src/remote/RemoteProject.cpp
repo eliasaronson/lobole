@@ -14,6 +14,7 @@
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/HistoryPanel.h"
 

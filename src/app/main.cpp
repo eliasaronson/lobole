@@ -36,6 +36,7 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/SettingsWindow.h"
+#include "ui/SimulationActions.h"
 #include "ui/TerminalPanel.h"
 #include "ui/Theme.h"
 #include "ui/UI.h"
@@ -1653,6 +1654,9 @@ int main(int argc, char** argv) {
     }
 
     // Mirror document changes (edits, undo, redo) into the renderers
+    // Sampled here, immediately before the sync that consumes it, so the
+    // value is exactly what SyncDocumentRenderers used to read inline.
+    g_App.anyWidgetActive = ImGui::IsAnyItemActive();
     ui::SyncDocumentRenderers(g_App);
     // Rebuild the FEM field overlay (and hide/show bodies) when the study or
     // result changes; cheap no-op otherwise.

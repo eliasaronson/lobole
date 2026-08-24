@@ -1,3 +1,4 @@
+#include "ui/SimulationActions.h"
 #include "ui/AppActions.h"
 
 #include "common/Logger.h"

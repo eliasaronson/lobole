@@ -10,7 +10,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
-#include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
+#include "ui/AppActions.h"    // SelectFeature / SelectedFeatureId
 #include "ui/FeatureEditor.h" // ArmSlot (blend edge re-pick)
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // DrawSketchModelSections (U8a)

@@ -1,3 +1,4 @@
+#include "ui/DrawingPanel.h"
 #include "ui/AppActions.h"
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"

@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/AssemblyActions.h"
 
 // Assembly GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //

@@ -1,0 +1,187 @@
+#pragma once
+
+#include "cad/MeshExport.h"
+#include "render/MeshRenderer.h"
+#include "ui/AppState.h"
+
+// Assembly editing: occurrences, mates, the drag gizmo,
+// exploded views, the BOM, and STEP/CAD import.
+//
+// Split out of ui/AppActions.h, which had grown to ~180 declarations spanning
+// every domain in the app and is included by 40 translation units — so every
+// panel and RPC module paid for all of it. See
+// docs/architecture-review-2026-08-24.md.
+namespace ui {
+
+// Resolves a viewport ray to a face of an occurrence in the active assembly:
+// the occurrence hit and a persistent ElementRef naming the face (for building
+// a mate connector). Returns false if the ray misses, hits an occurrence whose
+// part isn't loaded, or lands on an unnamed face (e.g. a pattern output). The
+// `ray` is in the same space FaceSelector::PickFace expects.
+struct AssemblyFacePick {
+  enum class SnapType { FaceCenter, HoleCenter, EdgeMidpoint };
+
+  uint64_t occurrenceId = 0;
+  ElementRef face;
+  // A persistently named edge when the nearest candidate is a circular-edge
+  // center or a straight/curved edge midpoint; unset means face center.
+  ElementRef snapEdge;
+  SnapType snapType = SnapType::FaceCenter;
+  // A5: when the face belongs to a part INSIDE the picked occurrence, the
+  // ids down to it. A connector built from this pick carries it, so a mate
+  // can anchor on geometry inside a placed unit.
+  std::vector<uint64_t> innerPath;
+};
+
+// Bill of materials (A4): derived from the active assembly every call, never
+// stored. One row per referenced part, in first-occurrence order; masses via
+// Measure::MassOfBodies (a part with any density-less body reports its mass
+// unknown and taints the total). `visible=false` occurrences count —
+// visibility is a display state, not suppression.
+struct BomRow {
+  uint64_t partId = 0;
+  std::string partName; // "(missing part)" when the reference dangles
+  int quantity = 0;
+  std::string material;    // slug; "" = none, "mixed" when bodies differ
+  double unitVolume = 0.0; // mm^3, all bodies of the part
+  bool massKnown = false;
+  double unitMassG = 0.0; // valid when massKnown
+};
+
+struct BomTable {
+  std::vector<BomRow> rows;
+  bool massKnown = true;   // false when any row's mass is unknown
+  double totalMassG = 0.0; // valid when massKnown
+  // V2: WHY a mass is unknown ("part 'X': body 'Y' has no material"), so a
+  // null total explains itself instead of silently tainting the table.
+  std::vector<std::string> warnings;
+};
+
+// Assembly occurrence-edit undo (snapshot-based; A2 phase 3). Call
+// SnapshotAssembly *before* mutating the active assembly's occurrences; Undo/
+// Redo restore a snapshot and force a renderer resync. No-ops without an active
+// assembly / empty stack (Undo/Redo return whether they did anything).
+void SnapshotAssembly(AppState& state);
+
+bool UndoAssembly(AppState& state);
+
+bool RedoAssembly(AppState& state);
+
+// Selects an occurrence in the active assembly (0 = clear): records it and
+// highlights all its rendered instances. Safe with null renderers.
+void SelectOccurrence(AppState& state, uint64_t occId);
+
+// Re-solves the active assembly's mates (A3): places every mated, non-fixed
+// occurrence by direct frame alignment, then bumps the version so the renderer
+// resyncs. No-op without an active assembly. Call after any mate/occurrence
+// edit and after loading. Returns the number of mates left in an error state.
+int SolveActiveAssembly(AppState& state);
+
+// Part→assembly change propagation (A4): true when any part referenced by the
+// active assembly has regenerated since the assembly's last solve (compared
+// against the version stamps SolveActiveAssembly records). SetActivePart and
+// OpenProject use it to re-solve automatically; in-context editing re-checks
+// after every part regeneration. False without an active assembly.
+bool AssemblyPartsStale(AppState& state);
+
+// In-context editing (A4): switch to the part tab of `occurrenceId` (in the
+// active assembly) with the assembly ghosted around it — the part renders at
+// identity and every other occurrence at OccMatrix(edited)⁻¹·OccMatrix(other),
+// alpha-blended, unpickable, no outlines. The context re-solves after each
+// part regeneration so ghosts track mates live. Exit = activating any other
+// tab (SetActivePart clears the mode). False when the occurrence or its part
+// can't be resolved.
+bool EnterInContextEdit(AppState& state, uint64_t occurrenceId);
+
+bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
+
+// Mate creation tool (A3 phase 3, U7c slots). StartMateTool opens the
+// session and arms connector slot A; the selection pipeline resolves
+// Connector candidates and routes picks to MateConnectorPicked (slot A →
+// advance to B; slot B → live preview mate; edit session → rewrite the
+// mate's connector and re-solve). Accept keeps the preview / closes the
+// session; Cancel removes it. All no-op without an active assembly.
+void StartMateTool(AppState& state, MateType type);
+
+// Re-pick session for an existing mate: opens the mate session with both
+// connectors filled from the mate; clicking a connector row re-arms it and
+// the next pick rewrites that side (one undo step per re-pick).
+void StartMateEdit(AppState& state, uint64_t mateId);
+
+// The armed connector slot consumed a pipeline pick (SlotPickClicked routes
+// kMateSessionSlot here).
+void MateConnectorPicked(AppState& state, const SelectionItem& item);
+
+void AcceptMateTool(AppState& state);
+
+void CancelMateTool(AppState& state);
+
+// Arms connector slot A or B on the shared armed-slot state (the mate
+// session's slot rows re-arm through this too).
+void ArmMateConnector(AppState& state, bool second);
+
+// The world frame of a connector (occurrence placement ∘ its part-local frame),
+// or nullopt if it doesn't resolve. For drawing the connector triad.
+std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
+                                             const Connector& c);
+
+// Appends the mate tool's connector triads (picked connectors) to `lines`.
+void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+
+// The 3D drag gizmo (A2.5). BuildGizmoOverlay appends the translate/rotate
+// handles for the selected non-fixed occurrence; HandleGizmoInput runs the drag
+// state machine (grab → live per-frame transform → release snapshots+solves)
+// and returns true when it consumed the viewport (so the caller skips
+// pick/orbit).
+void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+
+// Pushes an occurrence's current placement to the renderers WITHOUT a resync
+// — the live-drag path. Composes each mesh's place inside the occurrence, so
+// dragging a sub-assembly moves the unit rather than collapsing its parts
+// onto its origin.
+void PushOccurrenceLive(AppState& state, uint64_t occId);
+
+bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
+                      bool released);
+
+BomTable ComputeBom(AppState& state); // empty without an active assembly
+
+// The table as CSV (quoted where needed); unknown masses are empty cells.
+std::string BomToCsv(const BomTable& bom);
+
+// Visual-mesh export items (interchange X2) for the active tab: a part's
+// bodies at identity, or an assembly's occurrences at their SOLVED placements
+// (occurrences of one part share the underlying shape, so the writers emit
+// instanced geometry). Each item carries the body's material color/PBR (or a
+// palette color for an unassigned body). Empty when nothing is active.
+// Defined in AppActions.cpp; the return type is MeshExport::Item.
+std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state);
+
+// Exploded views (A4). AutoExplode replaces `viewId`'s steps with a radial
+// seed (each occurrence pushed away from the assembly centroid, scaled by the
+// assembly's size) — a starting point to refine by gizmo drag. Snapshots for
+// undo; false without an active assembly / unknown view / fewer than two
+// placed occurrences. ApplyExplodeTransforms re-applies display transforms
+// (solved ∘ explode) to every occurrence's render instances WITHOUT a resync
+// — the factor slider's cheap live path (picking refreshes on the next real
+// resync).
+bool AutoExplode(AppState& state, uint64_t viewId);
+
+void ApplyExplodeTransforms(AppState& state);
+
+// Imports an assembly STEP as parts + an assembly (interchange I2): one part
+// tab per unique product (geometry extracted as .brep into
+// <project>/imported, or the staging area before the first save),
+// occurrences placed from the file's instance tree. Not undoable (creates
+// documents, like Open).
+bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
+                          std::string* error);
+
+// THE import entry point (one Import… button): a STEP whose structure places
+// several instances imports as an assembly (above); everything else —
+// single-product STEP, .brep, .stl — imports as a feature into the active
+// part.
+bool ImportCADFile(AppState& state, const std::string& path,
+                   std::string* error);
+
+} // namespace ui

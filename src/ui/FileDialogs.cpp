@@ -1,4 +1,5 @@
 #include "ui/FileDialogs.h"
+#include "ui/AssemblyActions.h"
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"

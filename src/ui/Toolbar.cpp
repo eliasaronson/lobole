@@ -1,4 +1,6 @@
 #include "ui/Toolbar.h"
+#include "ui/AssemblyActions.h"
+#include "ui/SimulationActions.h"
 
 #include "common/Logger.h"
 #include "core/features/SketchFeature.h"

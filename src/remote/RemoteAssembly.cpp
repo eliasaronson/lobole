@@ -7,6 +7,7 @@
 #include "ui/AppActions.h"
 
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h"
 #include <map>
 
 #include <glm/glm.hpp>
