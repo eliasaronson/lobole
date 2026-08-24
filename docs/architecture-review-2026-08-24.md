@@ -1,8 +1,10 @@
 # Architecture review + cleanup plan (2026-08-24)
 
 > Status: **ALL FIVE STAGES SHIPPED 2026-08-24** (3016fda, 4aaeb6b, 6e73bb6,
-> fbe53d3, 8398047). Deferred follow-ups are recorded at the bottom so they are
-> decisions, not omissions.
+> fbe53d3, 8398047), plus the `designer_app` library and the first headless
+> tests of the actions layer (29402e7). The two follow-ups this review deferred
+> are now RESOLVED at the bottom — one shipped, one struck because its premise
+> turned out to be wrong.
 
 A structural pass over the whole tree — layering, duplication, unit sizes,
 target structure, dead code. The findings are measured on the tree at
@@ -145,11 +147,16 @@ ui/SimulationActions.cpp     539 lines   0 ImGui symbols
 ui/AppActions.cpp          4,707 lines   9 ImGui calls — 3 functions (866–968) + one at :3635
 ```
 
-**But ImGui-free is not renderer-free.** Those files call 22 distinct
+Those files also call 22 distinct
 `MeshRenderer`/`OutlineRenderer`/`RayTracingRenderer` methods (`AddMesh`,
-`CreateAsset`, `SetInstanceTransform`, `BuildAccelerationStructures`, …). A
-library extraction therefore does not by itself buy testability — it needs a
-renderer seam. See "Deferred" below.
+`CreateAsset`, `SetInstanceTransform`, `BuildAccelerationStructures`, …).
+
+> **Correction (same day).** This section originally concluded that a library
+> extraction therefore "needs a renderer seam" before it buys any testability.
+> That was wrong, and the follow-ups section below records how it was
+> disproved: the actions layer already null-checks every renderer pointer —
+> `HeadlessMain.cpp` runs the whole app that way — so leaving them null in a
+> test is the seam. The library shipped without one.
 
 ### 4. `AppState` is the compile-time bottleneck
 
@@ -278,34 +285,86 @@ every row through `FeatureFromJson`.
 
 ---
 
-## Deferred (decisions, not omissions)
+## Follow-ups — resolved 2026-08-24
 
-**A. `designer_app` static library.** Extract `ui/` + `render/` + `remote/`
-(minus `main.cpp`, `GuiTests.cpp`, `HeadlessMain.cpp`, `CrashHandler.cpp`) into
-a library `designer_tests` can link. Deferred because on its own it does not
-produce a single new test: the actions layer calls 22 renderer methods, so a
-test either constructs a real `MeshRenderer` (needs a GPU) or relies on
-null-pointer guards that are not uniformly present. Worth doing **together with
-B**, not before it.
+**A. `designer_app` static library — SHIPPED** (`29402e7`), triggered by having
+something real to test rather than done as cleanup.
 
-**B. A renderer seam.** An interface (or null-object) over the
-`MeshRenderer`/`OutlineRenderer`/`RayTracingRenderer` surface the actions layer
-uses — `AddMesh`, `RemoveMesh`, `UpdateMesh`, `CreateAsset`, `AddInstance`,
-`RemoveInstance`, `SetInstanceTransform`, `SetInstanceColor`,
-`SetInstanceVisible`, `SetInstanceGhost`, `SetInstanceMaterial`,
-`SetInstanceProcedural`, `SetMesh`, `SetMeshTransform`, `SetMeshColor`,
-`SetMeshMaterial`, `SetMeshProcedural`, `AddGeometry`, `ClearGeometry`,
-`AddMaterial`, `ClearMaterials`, `BuildAccelerationStructures`. With a stub
-implementation, ~6,600 lines of document-mutating logic
-(`CreateBox`…`CreateRib`, `AddPart`, `DeletePart`, `ComputeBom`, `AutoExplode`,
-`SolveActiveAssembly`, folder management, project variables) becomes testable
-in the 8-second headless loop instead of the 80-second GUI suite.
+`designer_app` is `app_sources` minus `main.cpp`, `HeadlessMain.cpp` and
+`CrashHandler.cpp`, linked by both `designer` and `designer_tests`. Measured
+cost: the test binary 10.0 → 12.7 MB, link time unchanged (4.7 → 4.3 s, noise).
+One hazard worth knowing: ImGui comes along as a link dependency, so calling an
+ImGui function without a context **crashes** rather than failing to compile.
+Test the actions layer, not the widgets — click paths belong in the GUI suite,
+where they are the actual subject.
 
-This is effectively its own workstream and should be scheduled like one — most
-naturally alongside the `main.cpp` dismantle, which the roadmap already gates on
-6b hybrid RT.
+**B. A renderer seam — STRUCK. The premise was wrong.**
+
+The review argued that because the actions layer calls 22
+`MeshRenderer`/`OutlineRenderer`/`RayTracingRenderer` methods, it could not be
+tested without an interface over them. It already can: **every renderer pointer
+in `AppState` is null-checked**, because `HeadlessMain.cpp` runs the whole
+application that way. A test constructs an `AppState`, leaves those pointers
+null, and the sync paths no-op exactly as they do headless. A throwaway spike
+confirmed this before anything landed — a unit test calling `CreateBox`,
+`AcceptPendingFeature`, `SyncDocumentRenderers` and `GlobalUndo` with null
+renderers passed on the first run.
+
+Measurements that settled it:
+
+- **51 call sites**, not a diffuse dependency, in three files.
+- `SyncDocumentRenderers` early-returns on an unchanged version counter, so 41
+  of them fire on *edit*, not per frame.
+- The one genuinely per-frame path is `PushOccurrenceLive` during a gizmo drag.
+  Benchmarked in that exact shape (152 calls/frame, matching the 76-occurrence
+  dock): virtual dispatch costs **13 ns/frame**, against that assembly's
+  measured **6.34 ms** CPU frame — **0.0002%**. Performance was never the
+  obstacle, in any variant.
+
+A recording stub is still the only way to *assert* on renderer effects ("sync
+added three meshes with these colours"), and that remains available for the 10
+renderer-touching functions if a specific bug ever needs it. It is not a
+prerequisite for anything.
+
+**What the value actually was.** Not "covers untested code" — that framing was
+also wrong. Of 176 public actions functions, 80 are already reachable from an
+RPC handler and covered by the 28 headless smokes; most of the rest are reached
+by GUI tests *through clicks*, which static call-graph analysis cannot see
+(`HandleGizmoInput` looked untested and is covered by the `handles/gizmo_*`
+cases). The real gain is **where** the coverage runs: the nearest GUI
+equivalents of the new tests cost 0.87 s and 1.07 s each and need a GPU; the
+eight headless tests total **6 ms** and check more.
+
+### The worked example: `tests/test_actions.cpp`
+
+Read that file before adding to this layer — its header comment is the pattern.
+Two subjects, both chosen for real bug history and no direct coverage:
+
+- **`RecenterSplitOffset`** — the `CLAUDE.md` derived-defaults rule as
+  arithmetic. Pins: derived not literal, re-derives per plane on all three
+  axes, never overwrites a user's expression, and finds the body both before
+  the split runs and after (when the source is gone, replaced by pieces stamped
+  with the split's own id).
+- **`VisibleSceneBounds`** — what the camera frames and where a new section
+  cuts. Pins: off-origin parts, empty document returns false rather than a
+  zero-size box at the origin, assembly occurrences placed by their transforms,
+  hidden ones excluded, and all **eight** corners transformed.
+
+Every invariant was checked against deliberate sabotage, which is the part
+worth copying. It caught a worthless test of my own: *"the offset is unchanged
+on the same plane"* passes against the exact bug it was written to catch,
+because finding nothing and re-deriving the same number are indistinguishable.
+It now changes the plane after the split runs, so a stale value fails.
+
+**When to add more.** The trigger is finding yourself writing a GUI test for
+something that is not really about the GUI — a BOM total, an explode offset, a
+camera-fit box. 32 of the current 174 GUI cases have that shape (few
+interactions, assertions only about document state). They are not worth
+migrating wholesale: each still verifies that the click path reaches the logic,
+which is its own subject. Add the headless test *beside* the GUI one when the
+arithmetic is what you are actually unsure about.
 
 **C. RPC `regen`/`digest` contract (§7)** and **D. the panel preamble (§8)** —
-both are behavior changes to surfaces with live callers, and both fit the
-roadmap's "split what the next feature extends, not big-bang" policy better than
-a standalone sweep.
+still deferred. Both are behavior changes to surfaces with live callers, and
+both fit the roadmap's "split what the next feature extends, not big-bang"
+policy better than a standalone sweep.
