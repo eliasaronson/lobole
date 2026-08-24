@@ -497,7 +497,8 @@ bending, which is the load case that hurts.
 
 In rough order of value:
 
-1. **Mixed precision.** The only lever that moves the actual constraint. The
+1. **Mixed precision** — designed in [gpu5-plan.md](gpu5-plan.md), not built.
+   The only lever that moves the actual constraint. The
    SpMV dominates the runtime and can stay fp32; the inner products, the
    residual and the residual-replacement step are a small fraction of the work
    and are where the digits are lost. fp64 reductions (or compensated fp32
@@ -529,4 +530,5 @@ In rough order of value:
 
 **Open, and not scheduled.** Until someone does 1, a beam-shaped part
 optimizes on the CPU — the fallback makes this a speed limit, not a
-correctness one.
+correctness one. [gpu5-plan.md](gpu5-plan.md) phases it, and its phase 0 is a
+day of probe work that kills the plan if the inner solve does not contract.
