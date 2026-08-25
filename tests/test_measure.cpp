@@ -387,6 +387,67 @@ TEST_CASE("Distance kinds: minimum, maximum, centres", "[measure]") {
   CHECK(mx->distance > mn->distance);
 }
 
+TEST_CASE("Centre to centre uses the CENTRE of a round element", "[measure]") {
+  // Hole spacing, and the reason it needs its own function. AnchorOf gives a
+  // representative point ON the element, which for a circle is on the RIM.
+  // Two holes of the same radius then cancel their offsets and answer
+  // correctly by luck; two holes of DIFFERENT radii report a plausible wrong
+  // number — measured on a 200x100 plate, 102.6 mm where the spacing is
+  // 104.4.
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "A", glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), /*radius=*/5.0,
+      /*height=*/10.0));
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "B", glm::vec3(100, 30, 0), glm::vec3(0, 0, 1), /*radius=*/12.0,
+      /*height=*/10.0));
+  const uint64_t idA = doc.GetFeature(0)->GetId();
+  const uint64_t idB = doc.GetFeature(1)->GetId();
+
+  // The circular rim edge of each.
+  const auto rimOf = [&](size_t bodyIndex, uint64_t id) {
+    const Body& body = doc.GetBodies()[bodyIndex];
+    for (const auto& [idx, name] : body.elementMap.edgeNames) {
+      const auto e = Measure::DescribeEdgeAt(body, idx);
+      if (e && e->kind == "circle")
+        return ElementRef{id, name};
+    }
+    return ElementRef{id, ""};
+  };
+  const ElementRef ra = rimOf(0, idA), rb = rimOf(1, idB);
+  REQUIRE_FALSE(ra.name.empty());
+  REQUIRE_FALSE(rb.name.empty());
+
+  // The rim points are NOT the centres — that is the whole trap.
+  const auto anchorA = Measure::AnchorOf(doc.GetBodies(), ra);
+  const auto centreA = Measure::CentreOf(doc.GetBodies(), ra);
+  REQUIRE(anchorA.has_value());
+  REQUIRE(centreA.has_value());
+  CHECK(glm::distance(*anchorA, *centreA) > 4.9f); // a radius apart
+  CHECK_THAT(centreA->x, WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(centreA->y, WithinAbs(0.0f, 1e-4f));
+
+  const glm::mat4 I(1.0f);
+  const auto d =
+      Measure::DistanceOfKind(doc.GetBodies(), ra, I, doc.GetBodies(), rb, I,
+                              Measure::DistanceKind::Centres);
+  REQUIRE(d.has_value());
+  CHECK_THAT(d->distance, WithinAbs(std::hypot(100.0, 30.0), 1e-4));
+
+  // A cylindrical FACE centres on its axis, level with the face — where a
+  // drawing would put the centre mark.
+  std::string wallA;
+  for (const auto& [idx, name] : doc.GetBodies()[0].elementMap.names)
+    if (const auto f = Measure::DescribeFaceAt(doc.GetBodies()[0], idx))
+      if (f->kind == "cylinder")
+        wallA = name;
+  REQUIRE_FALSE(wallA.empty());
+  const auto wc = Measure::CentreOf(doc.GetBodies(), ElementRef{idA, wallA});
+  REQUIRE(wc.has_value());
+  CHECK_THAT(wc->x, WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(wc->y, WithinAbs(0.0f, 1e-4f));
+}
+
 TEST_CASE("Distance kinds refuse an unknown name", "[measure]") {
   // Never defaulted to minimum: a substituted minimum is plausible and wrong
   // exactly where the caller asked for something else.

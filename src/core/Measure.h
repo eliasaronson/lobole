@@ -312,6 +312,18 @@ std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
 std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
                                   const ElementRef& ref);
 
+// The element's CENTRE, which for anything round is not a point on it.
+//
+// This is the hole-spacing measurement, and getting it from AnchorOf gives a
+// point on the RIM: two holes of the same radius then cancel their offsets
+// and answer correctly by luck, while two holes of DIFFERENT radii report
+// 102.6 mm where the spacing is 104.4 — wrong, and plausible. A circle's
+// centre is its centre; a cylinder's, cone's or torus's is the point on its
+// axis nearest the face; a sphere's is the sphere's. Everything else has no
+// centre distinct from its anchor and falls back to it.
+std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
+                                  const ElementRef& ref);
+
 // Where to attach a DIMENSION between two elements, as opposed to where the
 // minimum distance happens to be measured.
 //

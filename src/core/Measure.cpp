@@ -24,6 +24,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <ElCLib.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAbs_CurveType.hxx>
@@ -1116,8 +1117,8 @@ DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
     return DistanceDetailed(bodiesA, a, xfA, bodiesB, b, xfB);
 
   if (kind == DistanceKind::Centres) {
-    const auto ca = AnchorOf(bodiesA, a);
-    const auto cb = AnchorOf(bodiesB, b);
+    const auto ca = CentreOf(bodiesA, a);
+    const auto cb = CentreOf(bodiesB, b);
     if (!ca || !cb)
       return std::nullopt;
     DistanceResult out;
@@ -1199,6 +1200,51 @@ std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
     out.count++;
   }
   return out;
+}
+
+std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
+                                  const ElementRef& ref) {
+  std::string kind;
+  const TopoDS_Shape shape = ResolveShape(bodies, ref, kind);
+  if (shape.IsNull())
+    return std::nullopt;
+  const auto pt = [](const gp_Pnt& p) {
+    return std::optional<glm::vec3>(glm::vec3(p.X(), p.Y(), p.Z()));
+  };
+  try {
+    if (kind == "edge") {
+      BRepAdaptor_Curve curve(TopoDS::Edge(shape));
+      if (curve.GetType() == GeomAbs_Circle)
+        return pt(curve.Circle().Location());
+      return AnchorOf(bodies, ref);
+    }
+    const TopoDS_Face face = TopoDS::Face(shape);
+    BRepAdaptor_Surface surf(face);
+    // For a bore, the centre that matters is on the AXIS, level with the
+    // face — the point a drawing would put the centre mark on.
+    const auto onAxis = [&](const gp_Ax1& ax) {
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(shape, props);
+      const gp_Pnt com = props.CentreOfMass();
+      const gp_Lin axis(ax);
+      return pt(ElCLib::Value(ElCLib::Parameter(axis, com), axis));
+    };
+    switch (surf.GetType()) {
+    case GeomAbs_Cylinder:
+      return onAxis(surf.Cylinder().Axis());
+    case GeomAbs_Cone:
+      return onAxis(surf.Cone().Axis());
+    case GeomAbs_Torus:
+      return pt(surf.Torus().Location());
+    case GeomAbs_Sphere:
+      return pt(surf.Sphere().Location());
+    default:
+      // A planar or general face's centre of mass IS its centre.
+      return AnchorOf(bodies, ref);
+    }
+  } catch (const Standard_Failure&) {
+    return AnchorOf(bodies, ref);
+  }
 }
 
 std::optional<DistanceResult>
@@ -1337,7 +1383,7 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
       const auto centre = [](const Target& t,
                              const TopoDS_Shape& s) -> std::optional<gp_Pnt> {
         if (!t.Whole()) {
-          const auto p = AnchorOf(*t.bodies, t.ref);
+          const auto p = CentreOf(*t.bodies, t.ref);
           if (!p)
             return std::nullopt;
           const glm::vec3 w = glm::vec3(t.xf * glm::vec4(*p, 1.0f));
