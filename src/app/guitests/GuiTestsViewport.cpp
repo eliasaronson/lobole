@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "cad/CADKernel.h"
 #include "ui/AssemblyActions.h"
 #include "ui/Commands.h"
 #include "ui/MeasureOverlay.h"
@@ -252,6 +253,100 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(apart.find("180") != std::string::npos);    // outward normals
 
     s_App->measure = ui::MeasureState{};
+  };
+
+  // Phase 4c: a corner is measurable, and it is the one measurable that is a
+  // POINT — which is what point picking was ever wanted for. Named by the two
+  // edges meeting there, because the ElementMap names faces and edges and not
+  // vertices, so a raw vertex would be the only measurement here that does
+  // not survive a regen.
+  t = IM_REGISTER_TEST(engine, "measure", "a_corner_is_a_measurable_point");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    const Body& body = Doc()->GetBodies()[0];
+
+    // Two corners of the same face, from the kernel's own enumeration.
+    std::vector<CADShape::FaceCorner> corners;
+    body.shape.FaceCorners(0, corners);
+    IM_CHECK_EQ(corners.size(), (size_t)4);
+    const auto refsFor = [&](const CADShape::FaceCorner& c) {
+      const std::string* a = body.elementMap.EdgeNameOf(c.edgeA);
+      const std::string* b = body.elementMap.EdgeNameOf(c.edgeB);
+      return std::pair<ElementRef, ElementRef>{ElementRef{id, a ? *a : ""},
+                                               ElementRef{id, b ? *b : ""}};
+    };
+    // The two furthest apart on that face — a face diagonal.
+    size_t bi = 0, bj = 1;
+    float far = 0.0f;
+    for (size_t i = 0; i < corners.size(); i++)
+      for (size_t j = i + 1; j < corners.size(); j++) {
+        const float d = glm::distance(corners[i].point, corners[j].point);
+        if (d > far) {
+          far = d;
+          bi = i;
+          bj = j;
+        }
+      }
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    const auto ra = refsFor(corners[bi]);
+    const auto rb = refsFor(corners[bj]);
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfCorner(ra.first, ra.second));
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    // ONE corner reports a coordinate — the thing no face or edge can say,
+    // and the whole reason anyone asked for point picking.
+    IM_CHECK(s_App->measure.readout.rfind("At ", 0) == 0);
+    IM_CHECK(ui::MeasureElementLabel(*s_App, s_App->measure.picked[0]) ==
+             "corner");
+
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfCorner(rb.first, rb.second));
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    // A 2x2 face's diagonal.
+    IM_CHECK(s_App->measure.readout.find("Distance:") != std::string::npos);
+    IM_CHECK_LE(std::abs(glm::distance(s_App->measure.dimension.a,
+                                       s_App->measure.dimension.b) -
+                         far),
+                1e-3f);
+    // ...and it draws, like every other measurement.
+    std::vector<PrimVertex> prims;
+    ui::AppendMeasureOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+
+    // A corner is a POINT, so every distance kind agrees about it — there is
+    // no near end and far end of a point to disagree over.
+    const float minD =
+        glm::distance(s_App->measure.dimension.a, s_App->measure.dimension.b);
+    for (const auto kind :
+         {Measure::DistanceKind::Maximum, Measure::DistanceKind::Centres}) {
+      s_App->measure.distanceKind = kind;
+      ui::UpdateMeasureReadout(*s_App);
+      ctx->Yield();
+      IM_CHECK_LE(std::abs(glm::distance(s_App->measure.dimension.a,
+                                         s_App->measure.dimension.b) -
+                           minD),
+                  1e-3f);
+    }
+    s_App->measure.distanceKind = Measure::DistanceKind::Minimum;
+
+    // Two edges that do not meet resolve to nothing, and the tool says so
+    // rather than measuring from a point it invented.
+    s_App->measure.picked.clear();
+    s_App->measure.picked.push_back(ui::MeasureState::Element::OfCorner(
+        ra.first, ElementRef{id, "not-an-edge"}));
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(s_App->measure.readout.find("no longer meet") !=
+             std::string::npos);
+
+    s_App->measure = ui::MeasureState{};
+    ctx->Yield();
   };
 
   // M6: measuring stops being read-only. The point of measuring a gap is

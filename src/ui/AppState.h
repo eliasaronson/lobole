@@ -355,39 +355,49 @@ struct MeasureState {
     // or an Occurrence is a whole placed shape, and "how far apart are these
     // two parts" is the most natural question in an assembly — one the
     // engine has answered since I4 while the tool refused the pick.
-    enum class Kind : uint8_t { Face, Edge, Body, Occurrence };
+    enum class Kind : uint8_t { Face, Edge, Body, Occurrence, Corner };
     Kind kind = Kind::Face;
     // Face/Edge: the stable element name. Body: {createdBy, ""}. Occurrence:
     // {0, ""} — the occurrence id below is its whole identity.
     ElementRef ref;
+    // Corner only: the SECOND edge. A corner has no stable name of its own —
+    // the ElementMap names faces and edges, not vertices — so it is named by
+    // the two edges meeting there, both of which do have one.
+    ElementRef ref2;
     // Assembly tabs: the occurrence the element was picked on (0 = part
     // context). Part of the element's identity — the same face on two
     // occurrences of one part is two distinct measurables.
     uint64_t occurrenceId = 0;
 
     bool IsEdge() const { return kind == Kind::Edge; }
+    bool IsCorner() const { return kind == Kind::Corner; }
     // A whole placed shape rather than one named element of one.
     bool Whole() const {
       return kind == Kind::Body || kind == Kind::Occurrence;
     }
     bool operator==(const Element& o) const {
       return kind == o.kind && ref.featureId == o.ref.featureId &&
-             ref.name == o.ref.name && occurrenceId == o.occurrenceId;
+             ref.name == o.ref.name && ref2.name == o.ref2.name &&
+             occurrenceId == o.occurrenceId;
     }
 
     // Named constructors, because the four kinds fill different fields and a
     // brace-initialised {ref, bool, id} said nothing about which.
     static Element OfFace(const ElementRef& r, uint64_t occ = 0) {
-      return {Kind::Face, r, occ};
+      return {Kind::Face, r, ElementRef{}, occ};
     }
     static Element OfEdge(const ElementRef& r, uint64_t occ = 0) {
-      return {Kind::Edge, r, occ};
+      return {Kind::Edge, r, ElementRef{}, occ};
     }
     static Element OfBody(uint64_t createdBy) {
-      return {Kind::Body, ElementRef{createdBy, ""}, 0};
+      return {Kind::Body, ElementRef{createdBy, ""}, ElementRef{}, 0};
     }
     static Element OfOccurrence(uint64_t id) {
-      return {Kind::Occurrence, ElementRef{0, ""}, id};
+      return {Kind::Occurrence, ElementRef{0, ""}, ElementRef{}, id};
+    }
+    static Element OfCorner(const ElementRef& a, const ElementRef& b,
+                            uint64_t occ = 0) {
+      return {Kind::Corner, a, b, occ};
     }
   };
   std::vector<Element> picked;
@@ -672,6 +682,10 @@ struct SelectionItem {
   // Connector only: the snapped edge (hole center / edge midpoint) refining
   // the face anchor. Empty for every other kind.
   ElementRef snapElement;
+  // Connector only: the SECOND edge of a corner snap (v65) — a corner is
+  // where two named edges meet, and needs both to be found again. Empty
+  // unless the snap is a corner.
+  ElementRef snapElement2;
   // Connector only (A5): the occurrence ids inside `id` down to the leaf
   // whose face this is. Empty when the occurrence places that part directly
   // — which is every pick that is not inside a sub-assembly.
@@ -681,7 +695,8 @@ struct SelectionItem {
     return kind == o.kind && id == o.id &&
            element.featureId == o.element.featureId &&
            element.name == o.element.name &&
-           snapElement.name == o.snapElement.name && innerPath == o.innerPath;
+           snapElement.name == o.snapElement.name &&
+           snapElement2.name == o.snapElement2.name && innerPath == o.innerPath;
   }
 };
 
@@ -799,6 +814,7 @@ struct AppState {
     bool hasHover = false;
     Connector hover;
     bool hoverSnapIsMidpoint = false;
+    bool hoverSnapIsCorner = false;
     std::string message; // transient hint (e.g. "pick a named face")
   };
 

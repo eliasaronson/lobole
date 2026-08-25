@@ -60,12 +60,15 @@
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Solid.hxx>
+#include <algorithm>
 
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
@@ -505,6 +508,100 @@ void CADShape::FaceSnapPoints(int faceIndex, std::vector<FaceSnap>& out) const {
     }
     out.push_back(snap);
   }
+}
+
+void CADShape::FaceCorners(int faceIndex, std::vector<FaceCorner>& out) const {
+  out.clear();
+  if (!IsValid() || faceIndex < 0)
+    return;
+  int i = 0;
+  TopoDS_Face face;
+  for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
+    if (i == faceIndex) {
+      face = TopoDS::Face(exp.Current());
+      break;
+    }
+  }
+  if (face.IsNull())
+    return;
+
+  // One map for the global edge order, one ancestor pass for the face's
+  // vertex -> incident-edge relation. O(edges of the face), not O(pairs).
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
+  TopTools_IndexedDataMapOfShapeListOfShape vertexToEdges;
+  TopExp::MapShapesAndAncestors(face, TopAbs_VERTEX, TopAbs_EDGE,
+                                vertexToEdges);
+
+  std::vector<FaceCorner> candidates;
+  for (int v = 1; v <= vertexToEdges.Extent(); v++) {
+    std::vector<int> incident;
+    for (TopTools_ListIteratorOfListOfShape it(vertexToEdges(v)); it.More();
+         it.Next()) {
+      const TopoDS_Edge& edge = TopoDS::Edge(it.Value());
+      if (BRep_Tool::Degenerated(edge))
+        continue;
+      const int idx = edges.FindIndex(edge) - 1;
+      if (idx >= 0 &&
+          std::find(incident.begin(), incident.end(), idx) == incident.end())
+        incident.push_back(idx);
+    }
+    // Exactly two edges meeting is what a corner IS. One is an endpoint of a
+    // seam or a loop closing on itself; three or more is not a face corner.
+    if (incident.size() != 2)
+      continue;
+    FaceCorner c;
+    c.edgeA = std::min(incident[0], incident[1]);
+    c.edgeB = std::max(incident[0], incident[1]);
+    const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vertexToEdges.FindKey(v)));
+    c.point = glm::vec3(p.X(), p.Y(), p.Z());
+    candidates.push_back(c);
+  }
+
+  // Drop any pair that meets at more than one vertex: two named edges then
+  // name two points, so they name neither. Refusing beats picking one.
+  for (const FaceCorner& c : candidates) {
+    int seen = 0;
+    for (const FaceCorner& o : candidates)
+      if (o.edgeA == c.edgeA && o.edgeB == c.edgeB)
+        seen++;
+    if (seen == 1)
+      out.push_back(c);
+  }
+}
+
+bool CADShape::CornerPoint(int edgeA, int edgeB, glm::vec3& point) const {
+  if (!IsValid() || edgeA < 0 || edgeB < 0 || edgeA == edgeB)
+    return false;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
+  if (edgeA >= edges.Extent() || edgeB >= edges.Extent())
+    return false;
+  const auto verticesOf = [](const TopoDS_Shape& e) {
+    std::vector<TopoDS_Shape> v;
+    for (TopExp_Explorer ex(e, TopAbs_VERTEX); ex.More(); ex.Next())
+      v.push_back(ex.Current());
+    return v;
+  };
+  const std::vector<TopoDS_Shape> va = verticesOf(edges(edgeA + 1));
+  const std::vector<TopoDS_Shape> vb = verticesOf(edges(edgeB + 1));
+  const TopoDS_Shape* shared = nullptr;
+  int count = 0;
+  for (const TopoDS_Shape& a : va)
+    for (const TopoDS_Shape& b : vb)
+      if (a.IsSame(b)) {
+        // Same vertex reached twice (a closed edge lists it twice) is still
+        // one vertex.
+        if (shared && shared->IsSame(a))
+          continue;
+        shared = &a;
+        count++;
+      }
+  if (count != 1 || !shared)
+    return false; // no corner, or an ambiguous pair — refuse either way
+  const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(*shared));
+  point = glm::vec3(p.X(), p.Y(), p.Z());
+  return true;
 }
 
 bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {

@@ -91,12 +91,12 @@ oriented by the connector frame, and drives the mate DOF); (4) connector
 inference snap — a mate connector snaps to the nearest hole (circular-edge)
 center on pick. Verified via ImGui-test-engine `viewport_drag` over dev-watch.
 Format v26. The hover snap-marker UI shipped 2026-07-24 (phase 4b) for edge
-midpoints and hole centres. **Remaining: corner snapping**, whose recorded
-blocker ("`ElementMap` does not yet provide persistent vertex names") turns
-out to be mis-stated — a corner is where two NAMED boundary edges meet, so it
-needs a second `ElementRef` on the anchor and no toponaming change. Designed
-and kernel-measured 2026-08-25 as phase 4c in
-[a2_5-design.md](a2_5-design.md); moderate, one session, one format bump.
+midpoints and hole centres. **Corner snapping shipped 2026-08-25**
+(phase 4c, format v65). Its recorded
+blocker — "`ElementMap` does not yet provide persistent vertex names" — was
+mis-stated: a corner is where two NAMED boundary edges meet, so it needed a
+second `ElementRef` on the anchor and no toponaming change at all. A2.5 is
+now complete.
 The same measurement found a **live performance defect in the shipped snap
 hover** — `EdgeSnapPoint` re-mapped every edge of the body per call, so
 hovering a 144-hole plate cost 10 ms/frame and a 400-hole one 88 ms.

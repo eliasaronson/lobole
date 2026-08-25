@@ -66,6 +66,12 @@ struct ConnectorAnchor {
   // of the face centroid — e.g. a mate snapped to a hole center. The face still
   // gives the Z normal. Additive; face-centroid when unset.
   ElementRef snapEdge;
+  // Corner snap (phase 4c, v65): with BOTH edges set the origin is the vertex
+  // where they meet. A corner has no stable name of its own — the ElementMap
+  // names faces and edges, not vertices — but two named edges do, and so
+  // does the point they share. When they share no vertex or more than one,
+  // the anchor falls back to `snapEdge`'s own point rather than guessing.
+  ElementRef snapEdge2;
 };
 
 // One side of a mate: a frame on some occurrence of this assembly.

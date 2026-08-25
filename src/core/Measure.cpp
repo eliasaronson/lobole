@@ -1202,6 +1202,24 @@ std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
   return out;
 }
 
+std::optional<glm::vec3> CornerOf(const std::vector<Body>& bodies,
+                                  const ElementRef& edgeA,
+                                  const ElementRef& edgeB) {
+  for (const Body& body : bodies) {
+    if (body.createdBy != edgeA.featureId || body.shape.GetShape().IsNull())
+      continue;
+    const auto a = body.elementMap.ResolveEdge(edgeA.name);
+    const auto b = body.elementMap.ResolveEdge(edgeB.name);
+    if (!a || !b)
+      return std::nullopt;
+    glm::vec3 p;
+    if (!body.shape.CornerPoint(*a, *b, p))
+      return std::nullopt;
+    return p;
+  }
+  return std::nullopt;
+}
+
 std::optional<glm::vec3> CentreOf(const std::vector<Body>& bodies,
                                   const ElementRef& ref) {
   std::string kind;
@@ -1444,6 +1462,49 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
     LOG_ERROR("Measure target distance failed: {}",
               e.GetMessageString() ? e.GetMessageString()
                                    : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
+std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
+                                        DistanceKind kind) {
+  if (kind == DistanceKind::Centres) {
+    // "Centre to centre" from a point means the other side's centre.
+    if (!t.Whole()) {
+      const auto c = CentreOf(*t.bodies, t.ref);
+      if (!c)
+        return std::nullopt;
+      return glm::vec3(t.xf * glm::vec4(*c, 1.0f));
+    }
+  }
+  const TopoDS_Shape shape = ResolveTarget(t);
+  if (shape.IsNull())
+    return std::nullopt;
+  try {
+    if (kind == DistanceKind::Maximum) {
+      std::optional<glm::vec3> best;
+      double far = -1.0;
+      for (TopExp_Explorer ex(shape, TopAbs_VERTEX); ex.More(); ex.Next()) {
+        const gp_Pnt q = BRep_Tool::Pnt(TopoDS::Vertex(ex.Current()));
+        const glm::vec3 v(q.X(), q.Y(), q.Z());
+        const double d = glm::distance(p, v);
+        if (d > far) {
+          far = d;
+          best = v;
+        }
+      }
+      return best;
+    }
+    const TopoDS_Vertex v = BRepBuilderAPI_MakeVertex(gp_Pnt(p.x, p.y, p.z));
+    BRepExtrema_DistShapeShape dist(v, shape);
+    if (!dist.IsDone() || dist.NbSolution() < 1)
+      return std::nullopt;
+    const gp_Pnt q = dist.PointOnShape2(1);
+    return glm::vec3(q.X(), q.Y(), q.Z());
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Measure nearest point failed: {}", e.GetMessageString()
+                                                      ? e.GetMessageString()
+                                                      : "OpenCASCADE failure");
     return std::nullopt;
   }
 }

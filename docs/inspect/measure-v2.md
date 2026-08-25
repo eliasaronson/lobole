@@ -569,9 +569,8 @@ was written to do. Two habits close that class:
 
 ## What shipped, and the one thing that did not
 
-Everything above except **M5's vertex picking**, which stays deferred — but
-for a smaller reason than this plan gave, and with a design now written
-against the kernel rather than against an assumption.
+Everything above, including **M5's vertex picking** — which shipped
+2026-08-25 as a CORNER rather than a vertex, for the reason below.
 
 What that phase was FOR is mostly delivered by other means: point-to-point
 between holes is `distance_kind: centres` on two circular edges or two
@@ -599,13 +598,16 @@ every face offers 4 unambiguous corners with all 4 bounding edges named; on
 a cylinder's wall, one edge pair shares TWO vertices, so the ambiguous case
 is real from the first curved face and must be refused rather than guessed.
 
-The design lives with the assembly work, since that is where a corner is
-first USED — see [../assemblies/a2_5-design.md](../assemblies/a2_5-design.md)
-phase 4c. It is one session and one format bump (v65), and it closes this
-item and A2.5's last refinement together. What measure adds on top is a
-`Kind::Corner` measurable carrying its two refs — session state, no format
-change — so "how far is this corner from that one" becomes askable by
-clicking and by script.
+Shipped as [../assemblies/a2_5-design.md](../assemblies/a2_5-design.md)
+phase 4c, since that is where a corner is first USED, plus a
+`MeasureState::Element::Kind::Corner` carrying its two refs. One corner
+reports a COORDINATE — the one thing no face, edge or body can say, and the
+whole reason point picking was ever wanted — and two report the distance
+between them exactly, with every distance kind agreeing because a point has
+no near end and far end to disagree over.
+
+A raw vertex is still not nameable and still not offered. Nothing was lost
+by that: what people want a vertex for is the corner.
 
 Also not done, and recorded rather than smuggled in: `measure` and
 `interference` have near-twin occurrence resolution (id / name / "Unit/Part"

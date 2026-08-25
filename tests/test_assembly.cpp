@@ -247,6 +247,48 @@ TEST_CASE("Frozen v57 inner-path mate golden", "[assembly][golden]") {
   CHECK(m.b.anchor.origin);
 }
 
+// A corner snap (v65) names its point with TWO edges, because a corner has
+// no stable name of its own — the ElementMap names faces and edges, not
+// vertices. Both halves must survive the round trip or the mate silently
+// falls back to one edge's midpoint, which is a different place.
+TEST_CASE("Frozen v65 corner-snap mate golden", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v65-corner-mate.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->GetMates().size() == 1);
+  const Mate& m = asmDoc->GetMates()[0];
+  CHECK(m.a.anchor.face.name == "1/face3");
+  CHECK(m.a.anchor.snapEdge.name == "1/face3;U0");
+  CHECK(m.a.anchor.snapEdge2.name == "1/face3;U1");
+  CHECK(m.b.anchor.origin);
+
+  // ...and through the CURRENT writer, which is where an unwritten field
+  // shows up as a mate that quietly moves on the next save.
+  const fs::path tmp = fs::temp_directory_path() / "golden_v65_corner.json";
+  REQUIRE(testio::SaveAssembly(*asmDoc, tmp.string()));
+  auto reloaded = testio::LoadAssembly(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  REQUIRE(reloaded->GetMates().size() == 1);
+  CHECK(reloaded->GetMates()[0].a.anchor.snapEdge2.name == "1/face3;U1");
+  fs::remove(tmp);
+}
+
+// Every mate written before v65 has no second edge, and must stay a
+// single-edge snap: the field is additive and its absence is the norm.
+TEST_CASE("A pre-v65 mate golden has no corner edge", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v26-assembly.json";
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(!asmDoc->GetMates().empty());
+  for (const Mate& m : asmDoc->GetMates()) {
+    CHECK_FALSE(m.a.anchor.snapEdge2.IsSet());
+    CHECK_FALSE(m.b.anchor.snapEdge2.IsSet());
+  }
+}
+
 // An older mate has no path and must stay a plain part anchor — the field is
 // additive, and its absence is the overwhelmingly common case.
 TEST_CASE("A pre-v57 mate golden has no inner path", "[assembly][golden]") {

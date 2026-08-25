@@ -122,7 +122,7 @@ and preview clearing. `FaceEdgeIndices exposes box-edge midpoint snaps` covers
 the kernel edge enumeration. Vertex/corner snapping remains deferred because
 `ElementMap` does not yet provide persistent vertex names.
 
-### Phase 4c — corner snapping — DESIGNED 2026-08-25, not built
+### Phase 4c — corner snapping — SHIPPED 2026-08-25
 
 **That deferral reason above is wrong, and it cost a year.** It assumes a
 corner needs a persistent VERTEX name. It does not: a corner of the picked
@@ -173,9 +173,22 @@ point rather than guessing which corner was meant.
 5. **UI** — a `SnapType::Corner`, its marker colour, and `Snap: corner` in
    the toolbar, all beside the two that exist. ~10 lines.
 
-Tests: a box's face offers 4 corners and a cylinder's wall refuses its
-ambiguous pair (kernel); a mate snapped to a corner survives save/reload
-(golden); `assembly/mate_hover_marker` grows a corner-ranking case.
+Tests, all present: a box's face offers 4 corners and every reported pair
+resolves back to one point; a cylinder's cap offers none (one closed edge
+meets nothing) and its wall's ambiguous pair is dropped;
+`assembly/mate_hover_marker` hovers a corner and checks the frame lands on
+it within 1e-3; the v65 golden round-trips both edges.
+
+**Two things the build found.** The measure side arms `Connector` to reach
+the corner snap, and the Connector candidate is pushed FIRST — so offering
+a non-corner snap there would have put a candidate the measure tool cannot
+use at the head of the list and silently eaten the click. `Candidates()`
+therefore drops the non-corner snaps when measure is the armed context, and
+the mate tool still sees all four. And a corner carries its first edge in
+`ref`, so the measure readout initially took the ANGLE between two corners'
+edges and re-anchored the dimension onto them: two diagonal corners of a
+2 mm face read as 2 mm instead of 2.83 mm. A point has no direction; both
+the angle and the re-anchoring are now suppressed for it.
 
 ### Cost — and a live defect this measurement found
 

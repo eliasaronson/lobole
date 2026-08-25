@@ -4470,9 +4470,35 @@ std::string WholeName(AppState& state, const MeasureState::Element& e) {
   return "body";
 }
 
+// The world-space point a CORNER measurable resolves to, if it still does.
+std::optional<glm::vec3> CornerWorldPoint(AppState& state,
+                                          const MeasureState::Element& e) {
+  const auto src = ResolveMeasureSource(state, e);
+  if (!src)
+    return std::nullopt;
+  const auto p = Measure::CornerOf(*src->bodies, e.ref, e.ref2);
+  if (!p)
+    return std::nullopt;
+  return glm::vec3(src->xf * glm::vec4(*p, 1.0f));
+}
+
 MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
                       const units::System& u) {
   MeasureOut out;
+  if (e.IsCorner()) {
+    // A corner IS a coordinate — the one thing no other measurable could
+    // report, and the reason point picking was wanted at all.
+    const auto p = CornerWorldPoint(state, e);
+    if (!p) {
+      out.readout = "Those two edges no longer meet at one point.";
+      return out;
+    }
+    out.name = "corner";
+    out.readout = "At  x " + units::FormatLength(p->x, u) + "   y " +
+                  units::FormatLength(p->y, u) + "   z " +
+                  units::FormatLength(p->z, u);
+    return out;
+  }
   if (e.Whole()) {
     // A whole part reports what a part HAS: what it weighs out of, what it
     // takes to coat, and the box it needs to ship in.
@@ -4504,6 +4530,45 @@ MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
   return out;
 }
 
+// Distance when at least one side is a CORNER. A corner is a point, so its
+// side of the measurement is exact: the nearest point on the other element to
+// it, or — corner to corner — simply the gap between them. Every distance
+// kind agrees, because a point has no near and far end.
+std::optional<Measure::DistanceResult>
+CornerPairDistance(AppState& state, const MeasureState::Element& ea,
+                   const MeasureState::Element& eb,
+                   Measure::DistanceKind kind) {
+  const MeasureState::Element& corner = ea.IsCorner() ? ea : eb;
+  const MeasureState::Element& other = ea.IsCorner() ? eb : ea;
+  const auto cp = CornerWorldPoint(state, corner);
+  if (!cp)
+    return std::nullopt;
+  Measure::DistanceResult out;
+  if (other.IsCorner()) {
+    const auto op = CornerWorldPoint(state, other);
+    if (!op)
+      return std::nullopt;
+    out.pointA = ea.IsCorner() ? *cp : *op;
+    out.pointB = ea.IsCorner() ? *op : *cp;
+    out.distance = glm::distance(*cp, *op);
+    return out;
+  }
+  // Point to element: measure against a zero-length "edge" at the corner by
+  // asking the other side for its nearest point. CentreOf/AnchorOf would
+  // answer a different question, so this goes through the extrema solver
+  // with the corner as one degenerate side.
+  const Resolved ro = ResolveTargetFor(state, other);
+  if (!ro.ok)
+    return std::nullopt;
+  const auto nearest = Measure::NearestPointOn(ro.target, *cp, kind);
+  if (!nearest)
+    return std::nullopt;
+  out.pointA = ea.IsCorner() ? *cp : *nearest;
+  out.pointB = ea.IsCorner() ? *nearest : *cp;
+  out.distance = glm::distance(*cp, *nearest);
+  return out;
+}
+
 MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
                        const MeasureState::Element& eb,
                        const units::System& u) {
@@ -4515,11 +4580,29 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
     return out;
   }
   const Measure::DistanceKind kind = state.measure.distanceKind;
-  const auto d = Measure::DistanceBetween(ra.target, rb.target, kind);
-  // An angle needs a DIRECTION, and a whole part does not have one — a
-  // bracket points every way at once. Elements only.
+  // A CORNER is a single point, so every distance kind collapses to the same
+  // exact answer and no extrema solve is needed. Mixed pairs (a corner to a
+  // face) fall through to the general path with the corner as a degenerate
+  // target — handled below.
+  std::optional<Measure::DistanceResult> d;
+  if (ea.IsCorner() || eb.IsCorner()) {
+    d = CornerPairDistance(state, ea, eb, kind);
+    if (!d) {
+      out.readout = "Could not measure from that corner.";
+      return out;
+    }
+  } else {
+    d = Measure::DistanceBetween(ra.target, rb.target, kind);
+  }
+  // An angle needs a DIRECTION. A whole part has none — a bracket points
+  // every way at once — and neither does a POINT. A corner carries its first
+  // edge in `ref`, so without this the angle would be taken between the two
+  // corners' edges and, worse, re-anchor the dimension onto them: two
+  // diagonal corners of a face read as the 2 mm between their edges instead
+  // of the 2.83 mm between the points that were picked.
+  const bool pointInvolved = ea.IsCorner() || eb.IsCorner();
   const auto ang =
-      (ea.Whole() || eb.Whole())
+      (ea.Whole() || eb.Whole() || pointInvolved)
           ? std::optional<Measure::AngleResult>{}
           : Measure::Angle(*ra.target.bodies, ea.ref, ra.target.xf,
                            *rb.target.bodies, eb.ref, rb.target.xf);
@@ -4594,9 +4677,14 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
       angLine += " - perpendicular";
   } else if (touching) {
     // Leading with an angle we could not take would be silence about the
-    // only interesting thing here, so say why there is none.
-    angLine = "No angle: one of these defines no direction (a sphere or a "
-              "spline has none).";
+    // only interesting thing here, so say why there is none — and say the
+    // REASON that applies, not a list of every reason there could be.
+    angLine = pointInvolved ? "No angle: a corner is a point, and a point "
+                              "has no direction."
+              : (ea.Whole() || eb.Whole())
+                  ? "No angle: a whole part has no single direction."
+                  : "No angle: one of these defines no direction (a sphere "
+                    "or a spline has none).";
   }
 
   if (touching && !angLine.empty())
@@ -4612,7 +4700,7 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   if (!d)
     return out;
   MeasureState::Dimension& dim = out.dimension;
-  const bool wholeInvolved = ea.Whole() || eb.Whole();
+  const bool wholeInvolved = ea.Whole() || eb.Whole() || pointInvolved;
   // Where to ATTACH the dimension, which is not always where the minimum
   // was measured: for a parallel pair every point pair is equidistant, so
   // OCC's answer is an arbitrary corner.
@@ -4804,6 +4892,13 @@ std::string MeasureElementLabel(AppState& state,
     return WholeName(state, e) +
            (e.kind == MeasureState::Element::Kind::Occurrence ? " (part)"
                                                               : " (body)");
+  }
+  if (e.IsCorner()) {
+    std::string where;
+    if (e.occurrenceId != 0 && state.assembly)
+      if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
+        where = occ->name + " - ";
+    return where + "corner";
   }
   std::string out;
   if (e.occurrenceId != 0 && state.assembly)

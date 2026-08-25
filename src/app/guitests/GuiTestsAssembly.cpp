@@ -399,6 +399,27 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->mateTool.hasHover);
     IM_CHECK(s_App->mateTool.hover.anchor.snapEdge.IsSet());
     IM_CHECK(s_App->mateTool.hoverSnapIsMidpoint);
+    IM_CHECK(!s_App->mateTool.hover.anchor.snapEdge2.IsSet()); // not a corner
+
+    // A CORNER of the top face (phase 4c). It outranks the midpoints and the
+    // centroid because it is nearer, and it is named by BOTH edges meeting
+    // there — a vertex has no name of its own in the ElementMap, so a single
+    // edge could not say which end of itself was meant.
+    const glm::vec3 corner(max.x, max.y, max.z);
+    ctx->MouseMoveToPos(WorldToWindow(corner));
+    ctx->Yield();
+    IM_CHECK(s_App->mateTool.hasHover);
+    IM_CHECK(s_App->mateTool.hoverSnapIsCorner);
+    IM_CHECK(s_App->mateTool.hover.anchor.snapEdge.IsSet());
+    IM_CHECK(s_App->mateTool.hover.anchor.snapEdge2.IsSet());
+    IM_CHECK(s_App->mateTool.hover.anchor.snapEdge.name !=
+             s_App->mateTool.hover.anchor.snapEdge2.name);
+    // The frame really lands ON the corner, which is the point of all this.
+    {
+      const auto f = ui::ConnectorWorldFrame(*s_App, s_App->mateTool.hover);
+      IM_CHECK(f.has_value());
+      IM_CHECK_LE(glm::distance(glm::vec3((*f)[3]), corner), 1e-3f);
+    }
 
     // Moving to the middle of the face prefers its centroid over all edges.
     ctx->MouseMoveToPos(WorldToWindow(topFirst));

@@ -452,7 +452,17 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
       if (const auto edgeIdx =
               body.elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
         glm::vec3 snap;
-        if (body.shape.EdgeSnapPoint(*edgeIdx, snap))
+        // A CORNER (v65) when a second edge is named: the vertex the two
+        // share. Falls back to the first edge's own point when they share
+        // none or more than one — an ambiguous pair names no single corner,
+        // and a plausible guess is worse than the point that IS well defined.
+        bool cornered = false;
+        if (c.anchor.snapEdge2.IsSet()) {
+          if (const auto edgeIdx2 =
+                  body.elementMap.ResolveEdge(c.anchor.snapEdge2.name))
+            cornered = body.shape.CornerPoint(*edgeIdx, *edgeIdx2, snap);
+        }
+        if (cornered || body.shape.EdgeSnapPoint(*edgeIdx, snap))
           origin = snap;
       }
     }

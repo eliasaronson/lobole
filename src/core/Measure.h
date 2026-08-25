@@ -276,6 +276,12 @@ std::optional<SetMeasure> DescribeTarget(const Target& t);
 std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
                                               DistanceKind kind);
 
+// The point on a target closest to (or, for Maximum, furthest from) `p` —
+// what a POINT measurable measures against. A corner is a point, so its side
+// of a measurement is exact and only the other side needs solving.
+std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
+                                        DistanceKind kind);
+
 // Whether two WHOLE measurables overlap, and by how much — so a pair of
 // parts that interpenetrate reports as a clash rather than as distance 0,
 // which is what the extrema solver says about any two overlapping solids and
@@ -306,6 +312,17 @@ std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
 // Empty when the ref does not resolve.
 std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
                       const units::System& sys);
+
+// The corner where two named edges meet, as a measurable point (phase 4c).
+// nullopt when they share no vertex, or — the case a cylinder's wall hits on
+// the first try — more than one, since two edges that meet twice name two
+// points and therefore neither.
+//
+// A corner has no stable name of its own: the ElementMap names faces and
+// edges, not vertices. Two named edges do, so their shared vertex does too.
+std::optional<glm::vec3> CornerOf(const std::vector<Body>& bodies,
+                                  const ElementRef& edgeA,
+                                  const ElementRef& edgeB);
 
 // A representative point ON an element: a face's centre of mass, an edge's
 // parametric midpoint. Where a dimension should attach when it has a choice.

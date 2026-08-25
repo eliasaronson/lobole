@@ -92,6 +92,7 @@ struct Candidate {
   // Connector candidates only: the snap was an edge MIDPOINT (vs a hole
   // center / plain face centroid) — drives the hover marker style.
   bool snapMidpoint = false;
+  bool snapCorner = false;
 };
 
 // Candidates under the cursor, best first, restricted to `kinds`. Edges
@@ -111,15 +112,24 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
     // Mate connectors (U7c): the assembly face picker resolves the owning
     // occurrence + named face + hole-center/edge-midpoint snap in one go.
     AssemblyFacePick pick;
-    if (PickAssemblyFace(state, ray, pick)) {
+    if (PickAssemblyFace(state, ray, pick) &&
+        // MEASURE arms Connector only to reach its CORNER snap — a point no
+        // face or edge can express. Every other snap already IS the face or
+        // edge behind it, so offering one here would put a candidate the
+        // measure tool cannot use at the front of the list and silently eat
+        // the click. The mate tool wants them all.
+        (!state.measure.active ||
+         pick.snapType == AssemblyFacePick::SnapType::Corner)) {
       Candidate c;
       c.item.kind = SelectionItem::Kind::Connector;
       c.item.id = pick.occurrenceId;
       c.item.element = pick.face;
       c.item.snapElement = pick.snapEdge;
+      c.item.snapElement2 = pick.snapEdge2;
       c.item.innerPath = pick.innerPath;
       c.snapMidpoint =
           pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint;
+      c.snapCorner = pick.snapType == AssemblyFacePick::SnapType::Corner;
       out.push_back(c);
     }
   }
@@ -277,6 +287,14 @@ void ConsumeMeasure(AppState& state, const Candidate& c) {
     e.kind = MeasureState::Element::Kind::Occurrence;
     e.occurrenceId = c.item.id;
     break;
+  case SelectionItem::Kind::Connector:
+    // Only a CORNER snap is a measurable point; the other snaps are already
+    // reachable as the face or edge they belong to.
+    if (!c.item.snapElement2.IsSet())
+      return;
+    e = MeasureState::Element::OfCorner(c.item.snapElement, c.item.snapElement2,
+                                        c.item.id);
+    break;
   default:
     e.kind = MeasureState::Element::Kind::Face;
     e.ref = c.item.element;
@@ -299,10 +317,15 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
     // an assembly. Measure::ContactBetween has answered "how far apart are
     // these two parts" since I4 and this list was the only thing refusing
     // the pick.
+    // Connector rides along on assemblies purely to reach its CORNER snap:
+    // a corner is the one measurable that is a POINT, and the face picker
+    // already ranks corners against hole centres and midpoints. Candidates()
+    // drops the non-corner snaps for measure, so this cannot shadow a face.
     const uint32_t kinds =
         KindBit(SelectionItem::Kind::Face) |
         KindBit(SelectionItem::Kind::Edge) |
-        (state.assembly ? KindBit(SelectionItem::Kind::Occurrence)
+        (state.assembly ? KindBit(SelectionItem::Kind::Occurrence) |
+                              KindBit(SelectionItem::Kind::Connector)
                         : KindBit(SelectionItem::Kind::Body));
     return ArmedContext{kinds,
                         "Measure: pick faces, edges or whole parts (a second "
@@ -333,6 +356,7 @@ void ClearHoverPreviews(AppState& state) {
   state.mateTool.hasHover = false;
   state.mateTool.hover = Connector{};
   state.mateTool.hoverSnapIsMidpoint = false;
+  state.mateTool.hoverSnapIsCorner = false;
   if (state.faceSelector)
     state.faceSelector->ClearHover();
   if (state.meshRenderer)
@@ -452,6 +476,14 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       case SelectionItem::Kind::Occurrence:
         he = MeasureState::Element::OfOccurrence(top.item.id);
         break;
+      case SelectionItem::Kind::Connector:
+        if (!top.item.snapElement2.IsSet()) {
+          measurable = false; // only a corner snap is a measurable point
+          break;
+        }
+        he = MeasureState::Element::OfCorner(
+            top.item.snapElement, top.item.snapElement2, top.item.id);
+        break;
       default:
         measurable = false;
         break;
@@ -473,11 +505,13 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       state.mateTool.hover.occurrenceId = top.item.id;
       state.mateTool.hover.anchor.face = top.item.element;
       state.mateTool.hover.anchor.snapEdge = top.item.snapElement;
+      state.mateTool.hover.anchor.snapEdge2 = top.item.snapElement2;
       // A face inside a placed unit: the connector records the way down to
       // it, so the mate anchors on that face while still positioning the
       // unit (v57).
       state.mateTool.hover.innerPath = top.item.innerPath;
       state.mateTool.hoverSnapIsMidpoint = top.snapMidpoint;
+      state.mateTool.hoverSnapIsCorner = top.snapCorner;
     } else if (top.item.kind == SelectionItem::Kind::Face ||
                top.item.kind == SelectionItem::Kind::Occurrence) {
       // Occurrences hover via the hit face's range for now (a whole-instance

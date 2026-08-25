@@ -120,6 +120,11 @@ json ConnectorToJson(const Connector& c) {
     if (c.anchor.snapEdge.IsSet()) // inference snap (v26); omit when unset
       anchor["snap_edge"] = {{"feature_id", c.anchor.snapEdge.featureId},
                              {"element", c.anchor.snapEdge.name}};
+    // The second edge of a CORNER snap (v65). Only ever set alongside the
+    // first, and omitted otherwise so nothing else re-saves differently.
+    if (c.anchor.snapEdge2.IsSet())
+      anchor["snap_edge2"] = {{"feature_id", c.anchor.snapEdge2.featureId},
+                              {"element", c.anchor.snapEdge2.name}};
     j["anchor"] = std::move(anchor);
   }
   return j;
@@ -141,6 +146,11 @@ Connector ConnectorFromJson(const json& j) {
       const json& s = a.at("snap_edge");
       c.anchor.snapEdge = ElementRef{s.value("feature_id", uint64_t{0}),
                                      s.value("element", std::string{})};
+    }
+    if (a.contains("snap_edge2")) {
+      const json& s2 = a.at("snap_edge2");
+      c.anchor.snapEdge2 = ElementRef{s2.value("feature_id", uint64_t{0}),
+                                      s2.value("element", std::string{})};
     }
   }
   return c;

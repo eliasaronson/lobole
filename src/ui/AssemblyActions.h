@@ -19,13 +19,16 @@ namespace ui {
 // part isn't loaded, or lands on an unnamed face (e.g. a pattern output). The
 // `ray` is in the same space FaceSelector::PickFace expects.
 struct AssemblyFacePick {
-  enum class SnapType { FaceCenter, HoleCenter, EdgeMidpoint };
+  enum class SnapType { FaceCenter, HoleCenter, EdgeMidpoint, Corner };
 
   uint64_t occurrenceId = 0;
   ElementRef face;
   // A persistently named edge when the nearest candidate is a circular-edge
   // center or a straight/curved edge midpoint; unset means face center.
   ElementRef snapEdge;
+  // The second edge of a CORNER, which is where two named edges meet. Set
+  // only alongside snapEdge, and only when snapType is Corner.
+  ElementRef snapEdge2;
   SnapType snapType = SnapType::FaceCenter;
   // A5: when the face belongs to a part INSIDE the picked occurrence, the
   // ids down to it. A connector built from this pick carries it, so a mate

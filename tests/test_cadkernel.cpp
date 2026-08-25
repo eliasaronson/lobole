@@ -124,6 +124,82 @@ TEST_CASE("FaceSnapPoints exposes box-edge midpoint snaps", "[kernel]") {
   CHECK(foundFace);
 }
 
+TEST_CASE("FaceCorners names a corner by its two edges", "[kernel]") {
+  // A corner has no stable name of its own — the ElementMap names faces and
+  // edges, not vertices — so it is named by the two edges that meet there,
+  // both of which do.
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 3.0, 4.0);
+  REQUIRE(box.IsValid());
+
+  int facesSeen = 0;
+  for (int f = 0; f < 6; f++) {
+    std::vector<CADShape::FaceCorner> corners;
+    box.FaceCorners(f, corners);
+    if (corners.empty())
+      continue;
+    facesSeen++;
+    CHECK(corners.size() == 4); // a quad face has four corners
+    for (const CADShape::FaceCorner& c : corners) {
+      CHECK(c.edgeA < c.edgeB); // normalised, so the pair is one key
+      // The stored pair resolves back to the same point — this is the whole
+      // premise: two named edges are enough to find the corner again.
+      glm::vec3 resolved;
+      REQUIRE(box.CornerPoint(c.edgeA, c.edgeB, resolved));
+      CHECK_THAT(resolved.x, WithinAbs(c.point.x, 1e-9));
+      CHECK_THAT(resolved.y, WithinAbs(c.point.y, 1e-9));
+      CHECK_THAT(resolved.z, WithinAbs(c.point.z, 1e-9));
+      // A box corner is a corner of its bounding box.
+      CHECK(((std::abs(c.point.x) < 1e-9 || std::abs(c.point.x - 2.0) < 1e-9)));
+      CHECK(((std::abs(c.point.y) < 1e-9 || std::abs(c.point.y - 3.0) < 1e-9)));
+    }
+  }
+  CHECK(facesSeen == 6);
+
+  // Two edges that do not meet name no corner, and a degenerate pair is
+  // refused rather than answered.
+  glm::vec3 nowhere;
+  CHECK_FALSE(box.CornerPoint(0, 0, nowhere));
+  CHECK_FALSE(box.CornerPoint(-1, 3, nowhere));
+}
+
+TEST_CASE("FaceCorners refuses an ambiguous edge pair", "[kernel]") {
+  // A cylinder's wall is bounded by two circles and a seam counted twice; one
+  // of those pairs meets at TWO vertices, so it names two points and
+  // therefore neither. Not hypothetical — it is the first curved face anyone
+  // hovers, which is why the refusal is day-one and not later hardening.
+  CADShape cyl = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0), glm::vec3(0, 0, 1), 5.0, 10.0);
+  REQUIRE(cyl.IsValid());
+
+  bool sawWall = false;
+  for (int f = 0; f < 3; f++) {
+    glm::vec3 c, n, u;
+    if (cyl.FacePlane(f, c, n, u))
+      continue; // a flat cap
+    sawWall = true;
+    std::vector<CADShape::FaceCorner> corners;
+    cyl.FaceCorners(f, corners);
+    // Whatever survives must be unambiguous: every reported pair resolves to
+    // exactly one point.
+    for (const CADShape::FaceCorner& corner : corners) {
+      glm::vec3 resolved;
+      CHECK(cyl.CornerPoint(corner.edgeA, corner.edgeB, resolved));
+    }
+  }
+  CHECK(sawWall);
+
+  // A flat cap is bounded by ONE closed circular edge: no two edges meet, so
+  // no corner. Its snap point is the circle centre, which it already had.
+  for (int f = 0; f < 3; f++) {
+    glm::vec3 c, n, u;
+    if (!cyl.FacePlane(f, c, n, u))
+      continue;
+    std::vector<CADShape::FaceCorner> corners;
+    cyl.FaceCorners(f, corners);
+    CHECK(corners.empty());
+  }
+}
+
 TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel]") {
   // The regression this exists for: FaceSnapPoints replaced three calls that
   // each mapped every edge of the WHOLE BODY — one of them once PER EDGE,

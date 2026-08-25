@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "cad/CADKernel.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
@@ -385,6 +386,89 @@ TEST_CASE("Distance kinds: minimum, maximum, centres", "[measure]") {
   REQUIRE(mx.has_value());
   CHECK_THAT(mx->distance, WithinAbs(std::sqrt(72.0), 1e-6));
   CHECK(mx->distance > mn->distance);
+}
+
+TEST_CASE("CornerOf resolves a corner from its two named edges", "[measure]") {
+  // The point that has no name of its own. Two named edges have one, and so
+  // therefore does the vertex they share — which is what makes a corner
+  // measurement survive a regen like every other measurement here.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+
+  // Any face's corners, through the kernel, then back through Measure.
+  std::vector<CADShape::FaceCorner> corners;
+  body.shape.FaceCorners(0, corners);
+  REQUIRE(corners.size() == 4);
+  int checked = 0;
+  for (const CADShape::FaceCorner& c : corners) {
+    const std::string* a = body.elementMap.EdgeNameOf(c.edgeA);
+    const std::string* b = body.elementMap.EdgeNameOf(c.edgeB);
+    REQUIRE((a && b));
+    const auto p = Measure::CornerOf(doc.GetBodies(), ElementRef{id, *a},
+                                     ElementRef{id, *b});
+    REQUIRE(p.has_value());
+    CHECK_THAT(p->x, WithinAbs(c.point.x, 1e-6f));
+    CHECK_THAT(p->y, WithinAbs(c.point.y, 1e-6f));
+    CHECK_THAT(p->z, WithinAbs(c.point.z, 1e-6f));
+    checked++;
+  }
+  CHECK(checked == 4);
+
+  // Two edges that never meet name no corner — refused, not approximated.
+  const auto names = EdgeNames(body);
+  bool sawRefusal = false;
+  for (const std::string& n1 : names)
+    for (const std::string& n2 : names)
+      if (n1 != n2 && !Measure::CornerOf(doc.GetBodies(), ElementRef{id, n1},
+                                         ElementRef{id, n2}))
+        sawRefusal = true;
+  CHECK(sawRefusal); // a box has plenty of non-adjacent edge pairs
+  // A dangling name is refused too.
+  CHECK_FALSE(Measure::CornerOf(doc.GetBodies(), ElementRef{id, names[0]},
+                                ElementRef{id, "gone"})
+                  .has_value());
+}
+
+TEST_CASE("Corner to corner is the diagonal", "[measure]") {
+  // The measurement point picking was wanted FOR: this corner to that one.
+  // Max distance between two faces gives the furthest pair, not the pair you
+  // pointed at; a corner names exactly one point.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 3, 4, 12));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+
+  // Gather every distinct corner of the solid, through the face corners.
+  std::vector<glm::vec3> pts;
+  for (int f = 0; f < 6; f++) {
+    std::vector<CADShape::FaceCorner> corners;
+    body.shape.FaceCorners(f, corners);
+    for (const CADShape::FaceCorner& c : corners) {
+      const std::string* a = body.elementMap.EdgeNameOf(c.edgeA);
+      const std::string* b = body.elementMap.EdgeNameOf(c.edgeB);
+      if (!a || !b)
+        continue;
+      const auto p = Measure::CornerOf(doc.GetBodies(), ElementRef{id, *a},
+                                       ElementRef{id, *b});
+      REQUIRE(p.has_value());
+      bool seen = false;
+      for (const glm::vec3& q : pts)
+        if (glm::distance(q, *p) < 1e-6f)
+          seen = true;
+      if (!seen)
+        pts.push_back(*p);
+    }
+  }
+  CHECK(pts.size() == 8); // a box has eight, each found from three faces
+
+  // The furthest pair is the body diagonal, exactly.
+  double far = 0.0;
+  for (const glm::vec3& a : pts)
+    for (const glm::vec3& b : pts)
+      far = std::max(far, static_cast<double>(glm::distance(a, b)));
+  CHECK_THAT(far, WithinAbs(std::sqrt(9.0 + 16.0 + 144.0), 1e-4));
 }
 
 TEST_CASE("Centre to centre uses the CENTRE of a round element", "[measure]") {

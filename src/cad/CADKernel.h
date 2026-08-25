@@ -112,6 +112,29 @@ public:
   };
   void FaceSnapPoints(int faceIndex, std::vector<FaceSnap>& out) const;
 
+  // The corners of a face (A2.5 phase 4c): every vertex where exactly two of
+  // its bounding edges meet, named by BOTH of those edges.
+  //
+  // Why a pair and not the vertex itself: the ElementMap names faces and
+  // edges, not vertices, so a raw vertex has no stable name and a
+  // measurement or a mate anchored on one would not survive a regen. Two
+  // named edges DO, and their shared vertex therefore does too — the same
+  // trick the snap origin already plays with one edge.
+  //
+  // An edge pair that meets at TWO vertices names neither, so both are
+  // dropped rather than guessed at. That is not hypothetical: a cylinder's
+  // wall has one such pair, so it appears on the first curved face anyone
+  // hovers.
+  struct FaceCorner {
+    int edgeA = -1, edgeB = -1; // ElementMap::edgeNames order, edgeA < edgeB
+    glm::vec3 point{0.0f};
+  };
+  void FaceCorners(int faceIndex, std::vector<FaceCorner>& out) const;
+
+  // Where two edges meet, for resolving a stored corner anchor. False when
+  // they share no vertex or — the ambiguous case above — more than one.
+  bool CornerPoint(int edgeA, int edgeB, glm::vec3& point) const;
+
   // The characteristic point of the edge at `edgeIndex` (same order): a
   // circular edge's center, else the edge's midpoint. Returns false if out of
   // range. Used to derive a snapped connector frame origin — ONE edge, once
@@ -263,6 +286,12 @@ public:
     bool circleCenter = false;
   };
   void FaceSnapPoints(int, std::vector<FaceSnap>&) const {}
+  struct FaceCorner {
+    int edgeA = -1, edgeB = -1;
+    glm::vec3 point{0.0f};
+  };
+  void FaceCorners(int, std::vector<FaceCorner>&) const {}
+  bool CornerPoint(int, int, glm::vec3&) const { return false; }
   bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
 };
 

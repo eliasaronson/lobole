@@ -308,6 +308,7 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   out.innerPath = rm->innerPath;
   out.face = ElementRef{body.createdBy, *name};
   out.snapEdge = ElementRef{};
+  out.snapEdge2 = ElementRef{};
   out.snapType = AssemblyFacePick::SnapType::FaceCenter;
 
   // Every named boundary edge contributes its characteristic point: a circle
@@ -321,6 +322,11 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // 88 ms on a 400-hole one (docs/known-bugs.md).
   std::vector<CADShape::FaceSnap> snaps;
   body.shape.FaceSnapPoints(static_cast<int>(hit.faceIndex), snaps);
+  // ...and the face's CORNERS (phase 4c), which join the same ranking. A
+  // corner is named by the two edges meeting there, both already named;
+  // pairs that meet twice name no single point and are not offered.
+  std::vector<CADShape::FaceCorner> corners;
+  body.shape.FaceCorners(static_cast<int>(hit.faceIndex), corners);
   const glm::mat4 xf = OccurrenceMatrix(*occ);
   glm::vec3 faceOrigin, faceNormal, faceXAxis;
   const bool hasFaceFrame =
@@ -341,8 +347,23 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
       continue;
     best = distance;
     out.snapEdge = ElementRef{body.createdBy, *edgeName};
+    out.snapEdge2 = ElementRef{};
     out.snapType = snap.circleCenter ? AssemblyFacePick::SnapType::HoleCenter
                                      : AssemblyFacePick::SnapType::EdgeMidpoint;
+  }
+  for (const CADShape::FaceCorner& corner : corners) {
+    const std::string* nameA = body.elementMap.EdgeNameOf(corner.edgeA);
+    const std::string* nameB = body.elementMap.EdgeNameOf(corner.edgeB);
+    if (!nameA || !nameB) // both halves must be nameable, or it is not stable
+      continue;
+    const glm::vec3 worldPoint = glm::vec3(xf * glm::vec4(corner.point, 1.0f));
+    const float distance = glm::length(worldPoint - hit.point);
+    if (distance >= best)
+      continue;
+    best = distance;
+    out.snapEdge = ElementRef{body.createdBy, *nameA};
+    out.snapEdge2 = ElementRef{body.createdBy, *nameB};
+    out.snapType = AssemblyFacePick::SnapType::Corner;
   }
   return true;
 }
@@ -385,6 +406,7 @@ Connector ConnectorFromItem(const SelectionItem& item) {
   c.anchor.origin = false;
   c.anchor.face = item.element;
   c.anchor.snapEdge = item.snapElement;
+  c.anchor.snapEdge2 = item.snapElement2;
   // A5/v57: a face inside a placed unit. The mate still positions the
   // top-level occurrence; the path just says which face it anchors on.
   c.innerPath = item.innerPath;
@@ -501,13 +523,23 @@ void CancelMateTool(AppState& state) {
 
 namespace {
 void AppendSnapMarker(std::vector<LineVertex3D>& lines, const glm::mat4& f,
-                      float scale, bool edgeSnap, bool midpoint) {
+                      float scale, bool edgeSnap, bool midpoint, bool corner) {
   const glm::vec3 origin(f[3]);
-  const glm::vec3 color = midpoint   ? glm::vec3(0.30f, 0.85f, 1.0f)
+  const glm::vec3 color = corner     ? glm::vec3(0.55f, 1.0f, 0.45f)
+                          : midpoint ? glm::vec3(0.30f, 0.85f, 1.0f)
                           : edgeSnap ? glm::vec3(1.0f, 0.78f, 0.22f)
                                      : glm::vec3(0.82f, 0.82f, 0.60f);
   const glm::vec3 u = glm::normalize(glm::vec3(f[0])) * scale;
   const glm::vec3 v = glm::normalize(glm::vec3(f[1])) * scale;
+  if (corner) {
+    // An L, not a cross: a corner marker that reads as a corner, and does
+    // not look identical to the three snaps that are not one.
+    lines.push_back(LineVertex(origin, color));
+    lines.push_back(LineVertex(origin + u, color));
+    lines.push_back(LineVertex(origin, color));
+    lines.push_back(LineVertex(origin + v, color));
+    return;
+  }
   lines.push_back(LineVertex(origin - u, color));
   lines.push_back(LineVertex(origin + u, color));
   lines.push_back(LineVertex(origin - v, color));
@@ -534,7 +566,8 @@ void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
     if (const auto f = ConnectorWorldFrame(state, state.mateTool.hover))
       AppendSnapMarker(lines, *f, GizmoScale(state) * 0.12f,
                        state.mateTool.hover.anchor.snapEdge.IsSet(),
-                       state.mateTool.hoverSnapIsMidpoint);
+                       state.mateTool.hoverSnapIsMidpoint,
+                       state.mateTool.hoverSnapIsCorner);
   if (state.mateTool.haveFirst)
     if (const auto f = ConnectorWorldFrame(state, state.mateTool.first))
       AppendFrameTriad(lines, *f, scale);
