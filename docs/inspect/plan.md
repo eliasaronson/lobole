@@ -110,13 +110,15 @@ project. See [section-tool-design.md](section-tool-design.md).
 
 ## I4 — Later
 
-- **Bounding box / quick dimensions** readout for a selection.
+- ~~**Bounding box / quick dimensions** readout for a selection.~~ **Done
+  2026-08-25**: measuring a whole body or occurrence reports its volume,
+  surface area and bounding size ([measure-v2.md](measure-v2.md) M5).
 - **Interference check** between bodies (OCC `Common` non-empty ⇒ clash) —
   becomes important with assemblies; trivial to expose then.
-- **Measurement-driven variables** (bind a variable to a measurement) — wants
-  variables + this; deferred. Now scheduled as
-  [measure-v2.md](measure-v2.md) M6, the phase where measuring stops being
-  read-only.
+- ~~**Measurement-driven variables** (bind a variable to a measurement).~~
+  **Done 2026-08-25** ([measure-v2.md](measure-v2.md) M6): the measure tool
+  makes a project variable from the current measurement, written in storage
+  units like every other expression.
 - **Draft/thickness analysis, curvature maps** — out of scope for now, and
   still out of scope in measure-v2 (recorded there as a deliberate omission
   rather than an oversight).
