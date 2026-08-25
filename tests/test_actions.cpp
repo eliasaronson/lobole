@@ -38,6 +38,7 @@
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/Overlays.h"
 #include "ui/TerminalPanel.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -342,3 +343,67 @@ TEST_CASE("terminal: a tab starts a shell, and shutdown really ends it",
   ui::ShutdownTerminal(state); // no pty left behind for the next test
 }
 #endif
+
+// The prompt pill must not run underneath the floating tool window.
+//
+// Both are anchored to the same viewport at the same height: the tool window
+// top-right, the pill centred. A dogfooding round found the Hole tool's
+// "Step 2 of 3" pill printed straight across its own dialog's first row —
+// in every screenshot anyone had ever taken of a tool session, which is how
+// long it had been there without being written down as a defect.
+//
+// This is arithmetic, not a widget, and the pill is drawn to a foreground
+// draw list that no GUI test can address. So it is pinned here instead —
+// the trigger the architecture review names for writing a headless test
+// beside a GUI one.
+TEST_CASE("prompt pill keeps clear of the tool window", "[actions][overlay]") {
+  ui::AppState state = MakeHeadlessState();
+  state.viewportPos = glm::vec2(200.0f, 50.0f);
+  state.viewportSize = glm::vec2(1000.0f, 700.0f);
+  const glm::vec2 text(300.0f, 16.0f);
+  const float y = state.viewportPos.y + 34.0f;
+
+  SECTION("no tool window: centred on the viewport") {
+    state.toolWindowRect = glm::vec4(0.0f);
+    const glm::vec4 r = ui::PromptPillRect(state, y, text);
+    const float centre = state.viewportPos.x + state.viewportSize.x * 0.5f;
+    CHECK_THAT((r.x + r.z) * 0.5f, WithinAbs(centre, 0.5f));
+  }
+
+  SECTION("tool window at the same height: the pill clears its left edge") {
+    // Where BeginToolWindowFrame puts it: top-right, 12 px in. The WIDTH
+    // matters and is the reason this section is written twice over: a
+    // narrow tool window does not reach the centred pill at all, so the
+    // assertion passes with the clamp deleted and proves nothing. 420 px is
+    // the Hole tool's rough width — the case the dogfooding round hit.
+    const float twRight = state.viewportPos.x + state.viewportSize.x - 12.0f;
+    state.toolWindowRect =
+        glm::vec4(twRight - 420.0f, y - 10.0f, twRight, y + 200.0f);
+    // Unclamped, a pill this wide centred on the viewport WOULD overlap:
+    // that is what makes the next line a real assertion.
+    const float centre = state.viewportPos.x + state.viewportSize.x * 0.5f;
+    REQUIRE(centre + text.x * 0.5f > state.toolWindowRect.x);
+    const glm::vec4 r = ui::PromptPillRect(state, y, text);
+    CHECK(r.z <= state.toolWindowRect.x); // the whole pill, not just its centre
+  }
+
+  SECTION("tool window BELOW the pill does not move it") {
+    // The check is against the pill's own band, not merely "a window exists":
+    // a tool window further down the viewport is not in the way, and shoving
+    // the pill left for it would be a different wrong answer.
+    state.toolWindowRect = glm::vec4(900.0f, y + 400.0f, 1150.0f, y + 600.0f);
+    const glm::vec4 r = ui::PromptPillRect(state, y, text);
+    const float centre = state.viewportPos.x + state.viewportSize.x * 0.5f;
+    CHECK_THAT((r.x + r.z) * 0.5f, WithinAbs(centre, 0.5f));
+  }
+
+  SECTION("a pill too wide to fit beside it is never pushed off-screen") {
+    // A cramped pill that overlaps slightly beats one whose text starts
+    // outside the viewport, where it cannot be read at all.
+    const float twRight = state.viewportPos.x + state.viewportSize.x - 12.0f;
+    state.toolWindowRect =
+        glm::vec4(twRight - 900.0f, y - 10.0f, twRight, y + 200.0f);
+    const glm::vec4 r = ui::PromptPillRect(state, y, glm::vec2(700.0f, 16.0f));
+    CHECK(r.x >= state.viewportPos.x);
+  }
+}

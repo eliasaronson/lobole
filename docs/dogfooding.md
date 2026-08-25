@@ -414,8 +414,11 @@ defects above are now caught by clicks.
 - **Left-panel labels truncate** in the default 210 px dock: "Docume",
   "Orienta", "^ or click a plane / flat face in the". Systemic (three panels
   seen in one round), and parked by Elias until he is back at the machine.
-- **The prompt pill and the Tool window overlap** at the top of the viewport:
-  the Hole tool's "Step 2/3" pill runs underneath its own dialog.
+- ~~**The prompt pill and the Tool window overlap** at the top of the
+  viewport: the Hole tool's "Step 2/3" pill runs underneath its own
+  dialog.~~ **Fixed** — and this entry outlived the fix, which is why the
+  2026-08-25 audit found it still listed. Pinned by a test now
+  (`PromptPillRect`, tests/test_actions.cpp).
 
 ---
 

@@ -254,10 +254,12 @@ stale line hid it.
   2026-08-25** (L1): it replays a `Curve3D`, re-fitted through a dense sample
   of the built curve rather than through Onshape's through-point *query*,
   which does not resolve at rollback.
-- **No revolve drag GUI case** — extrude and fillet have theirs
-  ([ui/direct-manipulation.md](ui/direct-manipulation.md)).
-- **The prompt pill and the Tool window overlap** at the top of the viewport
-  ([dogfooding.md](dogfooding.md), the drawings round).
+- ~~**No revolve drag GUI case**~~ **FIXED 2026-08-25** (L6):
+  `handles/revolve_arc_drag_sets_angle`, the first coverage of the rotating
+  half of the drag math.
+- ~~**The prompt pill and the Tool window overlap**~~ — **it was already
+  fixed** when the audit listed it, and had no test. Pinned 2026-08-25 (L6) by
+  extracting `PromptPillRect` and testing it headlessly.
 
 ## Continuous
 

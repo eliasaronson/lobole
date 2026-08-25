@@ -159,7 +159,13 @@ coverage for extrude and fillet.
 
 Remaining order:
 
-1. Add a revolve drag GUI case.
+1. ~~Add a revolve drag GUI case.~~ **DONE 2026-08-25** —
+   `handles/revolve_arc_drag_sets_angle`. It reads its grab point off the
+   drawn handle rather than recomputing the arc (`PerpTo` and the axis
+   resolution are file-local in PreviewHandles.cpp, and a test that
+   re-derives them can drift from what is on screen), and it drags NEGATIVE
+   because the default angle is 360 — the clamp ceiling, so a positive drag
+   is swallowed and would pass against a handle that did nothing.
 2. Consider the deferred two-sided-extrude and shell-thickness handles only
    when users need them.
 

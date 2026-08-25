@@ -23,6 +23,13 @@ enum class PromptPill {
 
 // One centred pill under the previous one; `y` advances past what it drew, so
 // callers stack pills by threading the same y.
+// Where a prompt pill of `textSize` at height `y` lands: {min.x, min.y,
+// max.x, max.y}. Pure, and separated from the drawing so the one rule that
+// matters — it must not run underneath the floating tool window, which
+// anchors top-right of the same viewport at the same height — can be pinned
+// without a GPU. See tests/test_actions.cpp.
+glm::vec4 PromptPillRect(const AppState& state, float y, glm::vec2 textSize);
+
 void DrawPromptPill(AppState& state, float& y, const std::string& text,
                     PromptPill style);
 

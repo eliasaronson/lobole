@@ -34,6 +34,29 @@ void DrawDatumLabels(AppState& state) {
   }
 }
 
+glm::vec4 PromptPillRect(const AppState& state, float y, glm::vec2 textSize) {
+  const float padX = 10.0f, padY = 5.0f;
+  // Centred on the viewport — but on the part of it the floating tool window
+  // is not sitting in. The window anchors top-right of the same viewport and
+  // the pill is drawn at the same height, so "Measure: pick a face or edge (a
+  // second for distance) - Esc exits" was printed straight across the tool
+  // window's first row, in every screenshot anyone ever took of the tool.
+  // The rect is a frame old (PreviewFeature records it after drawing), which
+  // is fine: it moves when the viewport does, and so does the pill.
+  float right = state.viewportPos.x + state.viewportSize.x;
+  const glm::vec4& tw = state.toolWindowRect;
+  const bool toolWindowOpen = tw.z > tw.x && tw.w > tw.y;
+  if (toolWindowOpen && y < tw.w && y + textSize.y + 2.0f * padY > tw.y)
+    right = std::min(right, tw.x - 8.0f);
+  // Never push it off the left edge: a cramped pill that overlaps slightly
+  // beats one whose text starts outside the viewport.
+  const float left = state.viewportPos.x;
+  const float cx =
+      std::max(left + textSize.x * 0.5f + padX, (left + right) * 0.5f);
+  return glm::vec4(cx - textSize.x * 0.5f - padX, y,
+                   cx + textSize.x * 0.5f + padX, y + textSize.y + 2.0f * padY);
+}
+
 void DrawPromptPill(AppState& state, float& y, const std::string& text,
                     PromptPill style) {
   if (text.empty())
@@ -58,26 +81,11 @@ void DrawPromptPill(AppState& state, float& y, const std::string& text,
     break;
   }
   ImDrawList* dl = ImGui::GetForegroundDrawList();
-  const float padX = 10.0f, padY = 5.0f;
   const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
-  // Centred on the viewport — but on the part of it the floating tool window
-  // is not sitting in. The window anchors top-right of the same viewport and
-  // the pill is drawn at the same height, so "Measure: pick a face or edge (a
-  // second for distance) - Esc exits" was printed straight across the tool
-  // window's first row, in every screenshot anyone ever took of the tool.
-  // The rect is a frame old (PreviewFeature records it after drawing), which
-  // is fine: it moves when the viewport does, and so does the pill.
-  float right = state.viewportPos.x + state.viewportSize.x;
-  const glm::vec4& tw = state.toolWindowRect;
-  const bool toolWindowOpen = tw.z > tw.x && tw.w > tw.y;
-  if (toolWindowOpen && y < tw.w && y + sz.y + 2.0f * padY > tw.y)
-    right = std::min(right, tw.x - 8.0f);
-  // Never push it off the left edge: a cramped pill that overlaps slightly
-  // beats one whose text starts outside the viewport.
-  const float left = state.viewportPos.x;
-  const float cx = std::max(left + sz.x * 0.5f + padX, (left + right) * 0.5f);
-  const ImVec2 a(cx - sz.x * 0.5f - padX, y);
-  const ImVec2 b(cx + sz.x * 0.5f + padX, y + sz.y + 2.0f * padY);
+  const glm::vec4 r = PromptPillRect(state, y, glm::vec2(sz.x, sz.y));
+  const ImVec2 a(r.x, r.y), b(r.z, r.w);
+  const float padX = 10.0f, padY = 5.0f;
+  const float cx = (r.x + r.z) * 0.5f;
   dl->AddRectFilled(a, b, bg, 5.0f);
   dl->AddText(ImVec2(cx - sz.x * 0.5f, y + padY), fg, text.c_str());
   y = b.y + 4.0f;

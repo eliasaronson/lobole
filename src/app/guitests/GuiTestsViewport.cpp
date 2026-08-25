@@ -1,8 +1,10 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "cad/CADKernel.h"
+#include "core/features/RevolveFeature.h"
 #include "ui/AssemblyActions.h"
 #include "ui/Commands.h"
 #include "ui/MeasureOverlay.h"
+#include "ui/PreviewHandles.h"
 #include "ui/SimulationActions.h"
 
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -1182,6 +1184,113 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     // Accept commits the dragged value as one undoable feature.
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(s_App->commands->CanUndo());
+  };
+
+  // The revolve handle — item 1 of direct-manipulation.md's own "remaining
+  // order", written when extrude and fillet got theirs and never done. It is
+  // the only one of the three that ROTATES, so it exercises a different half
+  // of the drag math (RayPlane + RotateAngle rather than RayAxisParam), and
+  // that half had no coverage at all.
+  t = IM_REGISTER_TEST(engine, "handles", "revolve_arc_drag_sets_angle");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    // Offset from the axis: a profile ON the revolve axis has no radius, and
+    // the handle arc would collapse to a point.
+    sketch->AddRectangle({3, 0}, {5, 2});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_sk_revolve");
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    auto* rev =
+        dynamic_cast<RevolveFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(rev != nullptr);
+    IM_CHECK(rev->angleExpr.empty()); // no handle when expression-driven
+    const double a0 = rev->angleDeg;
+    IM_CHECK(std::abs(a0 - 360.0) < 1e-9); // the default, and the clamp ceiling
+
+    // Take the grab point off the DRAWN handle rather than recomputing the
+    // arc: PerpTo and the axis resolution live in an anonymous namespace, and
+    // a test that re-derives them can drift from what is on screen — which
+    // is the one thing a handle test must not do.
+    std::vector<LineVertex3D> lines;
+    ui::BuildPreviewHandleOverlay(*s_App, lines);
+    IM_CHECK(lines.size() > 8); // the 48-segment circle really is there
+
+    glm::vec3 centre(0.0f);
+    for (const LineVertex3D& v : lines)
+      centre += v.position;
+    centre /= static_cast<float>(lines.size());
+    const glm::vec3 v0 = lines[0].position;
+    const glm::vec3 r0 = v0 - centre;
+    const float radius = glm::length(r0);
+    IM_CHECK(radius > 0.1f);
+    // The plane the circle lies in, from the geometry itself. lines[2] is the
+    // next segment's start, so the cross product points along the axis in the
+    // direction of increasing angle.
+    const glm::vec3 axis =
+        glm::normalize(glm::cross(r0, lines[2].position - centre));
+    const glm::vec3 b1 = glm::normalize(r0);
+    const glm::vec3 b2 = glm::cross(axis, b1);
+
+    // Frame it face-on to the arc, so the circle projects as a circle rather
+    // than a line nobody could click.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(centre + axis * (radius * 6.0f) +
+                               b1 * (radius * 0.5f));
+    ctx->Yield(2);
+
+    // Drag NEGATIVE: the default is 360, which is the clamp ceiling, so a
+    // positive drag would be swallowed and the test would pass against a
+    // handle that did nothing.
+    const auto at = [&](float deg) {
+      const float a = glm::radians(deg);
+      return centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius;
+    };
+    ctx->MouseMoveToPos(WorldToWindow(at(0.0f)));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(at(-90.0f)));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active); // the click grabbed the arc
+    IM_CHECK(s_App->handleDrag.rotate); // ...as a rotation, not an axis slide
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    rev = dynamic_cast<RevolveFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(rev != nullptr);
+    IM_CHECK(std::abs(rev->angleDeg - 270.0) < 5.0);
+    IM_CHECK(ui::HasPendingFeature(*s_App)); // still previewing
+
+    // Esc mid-drag restores the grab-time value and keeps the preview.
+    const double a1 = rev->angleDeg;
+    ctx->MouseMoveToPos(WorldToWindow(at(-90.0f)));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(at(-170.0f)));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    rev = dynamic_cast<RevolveFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(rev != nullptr);
+    IM_CHECK(std::abs(rev->angleDeg - a1) < 1e-6);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+
+    // Accept commits the dragged angle as one undoable feature.
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     IM_CHECK(s_App->commands->CanUndo());
   };

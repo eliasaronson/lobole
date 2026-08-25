@@ -354,7 +354,7 @@ shard partition trustworthy.
 Fill the cheap gaps in the same pass; file the expensive ones with the matrix
 as their evidence.
 
-## L6 — Two papercuts (~2 h, rides along with anything)
+## L6 — Two papercuts — **SHIPPED** (one was already fixed, and untested)
 
 - **The prompt pill and the Tool window overlap** at the top of the viewport —
   the Hole tool's "Step 2/3" pill runs underneath its own dialog
@@ -364,6 +364,33 @@ as their evidence.
   of its own remaining order; extrude and fillet have theirs. The doc already
   contains the recipe (project the handle tip with `ui::WorldToScreen`, drag
   along the projected axis, assert the angle changed and the preview survives).
+
+**As built.** The prompt-pill overlap turned out to be **already fixed** —
+`DrawPromptPill` clamps against `toolWindowRect`, and its comment describes
+the exact dogfooding symptom. The same class as L1's importer skip: a closed
+defect still listed as open, which is what a doc audit is for. What was
+missing was a test, and it is arithmetic drawn to a foreground draw list that
+no GUI test can address — so the geometry came out into a pure
+`PromptPillRect` and is pinned in `test_actions.cpp` instead. That is the
+trigger the architecture review names for a headless test beside a GUI one.
+
+**The first version of that test was worthless, and the sabotage check is
+what said so.** Its tool window was 260 px wide, which does not reach a
+centred 300 px pill — so the assertion passed with the clamp deleted. It now
+uses a 420 px window (the Hole tool's rough width, the case the dogfooding
+round actually hit) and `REQUIRE`s that the unclamped pill *would* have
+overlapped, so the check cannot go quietly inert again.
+
+The **revolve handle** is now `handles/revolve_arc_drag_sets_angle`. It is the
+only one of the three that ROTATES, so it exercises `RayPlane` +
+`RotateAngle` rather than `RayAxisParam` — a half of the drag math with no
+coverage at all. Two details worth keeping: the grab point is read off the
+DRAWN handle geometry rather than recomputed (`PerpTo` and the axis
+resolution are file-local, and a test that re-derives them can drift from
+what is on screen), and the drag is NEGATIVE because the default angle is
+360, which is the clamp ceiling — a positive drag would be swallowed and the
+test would pass against a handle that did nothing. Sabotage-checked both
+ways.
 
 ## L7 — U5, the visual-polish tail (~1–2 sessions)
 
