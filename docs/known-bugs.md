@@ -50,6 +50,25 @@ The first (`terminal/off_by_default_docks_right_on`) was diagnosed to a window
 left `Hidden` after a dock-layout rebuild, went away without anyone
 identifying the fix, and is withdrawn below. This one is not diagnosed at all.
 
+**Hunted 2026-08-25, and not caught.** Five shuffled runs — three idle, two
+under a concurrent headless suite, seeds recorded — all passed 215/215. The
+class did not reproduce on demand, so it stays open and undiagnosed. What the
+hunt DID find is below; it is a real defect of the same family (a shared
+global that makes concurrent shards affect each other) but **there is no
+evidence it caused these failures**, and saying otherwise would be the
+plausible-and-wrong answer this file exists to avoid.
+
+> **Found and fixed while hunting:** the terminal panel opened its remote
+> interface by walking a FIXED range, 8437..8456, one bind at a time — making
+> a 20-port window a resource shared by every process on the machine.
+> Measured with four concurrent GUI shards: they collided, walked to 8438 and
+> 8440, and logged an `error` per failed bind — up to 19 socket/bind/close
+> syscalls **on the UI thread, mid-frame**, in a suite whose tests wait fixed
+> frame counts. It now tries the documented default 8437 once (so a client
+> configured for it still finds a lone instance) and otherwise asks the
+> kernel, which is one syscall and cannot collide. Same class as the
+> `free_port()` race in the smoke scripts, one layer up.
+
 **What would actually help**, in order: `--gui-test-shuffle` exists and CI runs
 it (`d1396b5`), so the cheap move is running the suite shuffled a few times
 and **keeping the seed of a failure** — failures are reproducible per seed,

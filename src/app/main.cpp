@@ -1605,17 +1605,25 @@ int main(int argc, char** argv) {
   // The terminal panel binds a Claude Code session to THIS window by port
   // (docs/ui/terminal-panel.md), which is useless if the app was started
   // without --remote. main.cpp owns the server, so it hands the panel a way
-  // to open one on demand — starting from the documented default and walking
-  // up past ports another instance already holds.
+  // to open one on demand.
+  //
+  // The documented default FIRST, so a client configured for 8437 finds a
+  // lone instance — then straight to the kernel. This used to walk 8437..8456
+  // one bind at a time, which made a fixed 20-port range a resource shared
+  // between every process on the machine. Measured with four concurrent GUI
+  // shards: they collided, walked to 8438 and 8440, and logged an `error` per
+  // failed bind — up to 19 socket/bind/close syscalls on the UI THREAD, mid
+  // frame, in a suite whose tests wait fixed frame counts. Asking the kernel
+  // is one syscall and cannot collide with anyone.
   g_App.ensureRemotePort = [&remoteServer]() -> int {
     if (remoteServer.Port() != 0)
       return remoteServer.Port();
-    for (int port = 8437; port < 8457; port++) {
-      if (remoteServer.Start(static_cast<uint16_t>(port), /*hasRenderer=*/true,
-                             /*bindAll=*/false)) {
-        LOG_INFO("Terminal panel opened the remote interface on port {}", port);
-        g_App.remotePort = port;
-        return port;
+    for (const uint16_t want : {uint16_t{8437}, uint16_t{0}}) {
+      if (remoteServer.Start(want, /*hasRenderer=*/true, /*bindAll=*/false)) {
+        const int got = remoteServer.Port();
+        LOG_INFO("Terminal panel opened the remote interface on port {}", got);
+        g_App.remotePort = got;
+        return got;
       }
     }
     LOG_WARN("Could not open a remote port for the terminal panel");
