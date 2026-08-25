@@ -141,6 +141,32 @@ void ArmCamPick(AppState& state, PickSlot slot, const char* prompt) {
 
 namespace {
 
+// The setup this window works on, made on demand.
+//
+// Nothing in here should ever answer "add a setup first". The toolbar opens
+// this window on a part with no CAM job at all — which is exactly when
+// someone reaches for it — and the machining verbs already knew to make one
+// rather than send the user off to find another panel. The two picks in the
+// Zero section did not, so pressing "Pick top face" on a fresh part and
+// clicking a face did nothing at all: the refusal went into slotPick.miss,
+// which this window did not draw.
+//
+// Made on the first ACTION, not when the window opens: looking at the CAM
+// window and closing it again should not leave an empty setup in a document
+// and mark it dirty.
+cam::Setup* EnsureCamSetup(AppState& state) {
+  if (!state.document)
+    return nullptr;
+  if (cam::Setup* setup = ActiveCamSetup(state))
+    return setup;
+  cam::Setup& fresh = state.document->AddCamSetup();
+  state.camActiveSetup = fresh.id;
+  fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
+  state.camSafeZEdit = static_cast<float>(fresh.safeZ);
+  state.projectMetaDirty = true;
+  return &fresh;
+}
+
 // Creates the operation a verb implies, or refuses in words. The derivation
 // itself is engine-side (cam::DeriveOperation) so a headless test can reach
 // it — the panel must not be where a depth comes from.
@@ -149,15 +175,9 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   state.camRefusal.clear();
   if (!state.document)
     return false;
-  cam::Setup* setup = ActiveCamSetup(state);
-  if (setup == nullptr) {
-    // A verb with no setup should make one rather than tell the user to.
-    cam::Setup& fresh = state.document->AddCamSetup();
-    state.camActiveSetup = fresh.id;
-    fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
-    state.camSafeZEdit = static_cast<float>(fresh.safeZ);
-    setup = &fresh;
-  }
+  cam::Setup* setup = EnsureCamSetup(state);
+  if (setup == nullptr)
+    return false;
   const cam::DerivedOp derived =
       cam::DeriveOperation(*setup, state.document->GetBodies(), type, target);
   if (!derived.ok) {
@@ -186,11 +206,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
   }
 
   if (slot == PickSlot::CamTopFace) {
-    cam::Setup* setup = ActiveCamSetup(state);
-    if (setup == nullptr) {
-      state.slotPick.miss = "add a setup first";
+    cam::Setup* setup = EnsureCamSetup(state);
+    if (setup == nullptr)
       return;
-    }
     const cam::FaceRegion region = cam::PickedFaceRegion(
         cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
         item.element);
@@ -231,11 +249,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // C9: turn the table until this face looks at the spindle. Everything
     // downstream then works in the rotated frame, so the same verbs apply to
     // the side of a part as to its top.
-    cam::Setup* setup = ActiveCamSetup(state);
-    if (setup == nullptr) {
-      state.slotPick.miss = "add a setup first";
+    cam::Setup* setup = EnsureCamSetup(state);
+    if (setup == nullptr)
       return;
-    }
     glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
     bool found = false;
     for (const Body& body : state.document->GetBodies()) {
@@ -327,6 +343,18 @@ void DrawCamToolWindow(AppState& state) {
     ImGui::TextDisabled("A %.2f°", setup->rotationA);
   else
     ImGui::TextDisabled("A 0° (3-axis)");
+
+  // Why the last pick did not take. This window never drew it, so a refused
+  // click looked exactly like a click that did nothing — and one of them
+  // ("add a setup first") was reachable on any fresh part
+  // (docs/cam/dogfood-round.md). The docked panel printed it all along.
+  if (armed && !state.slotPick.miss.empty()) {
+    ImGui::PushTextWrapPos(320.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", state.slotPick.miss.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+  }
 
   // The view a machinist works in, by the name a machinist uses. The app's up
   // is +Y and CAM's is +Z, so the plan view — looking down the spindle — is

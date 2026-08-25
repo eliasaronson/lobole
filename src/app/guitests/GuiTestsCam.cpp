@@ -332,6 +332,51 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // G2-G4 (docs/cam/gui.md): the verbs. Two clicks — the verb, then the face
   // — produce a machinable operation with nothing typed, the viewport shows
   // what will be removed, and the verdict arrives without being asked for.
+  // The CAM window is usable on a part that has no CAM job — which is the
+  // only state it can be in the first time anyone opens it. The machining
+  // verbs already made a setup on demand; the two picks in the Zero section
+  // answered "add a setup first" into a field this window does not draw, so
+  // pressing "Pick top face" on a fresh part and clicking a face did nothing
+  // at all, visibly or otherwise (docs/cam/dogfood-round.md).
+  t = IM_REGISTER_TEST(engine, "cam", "the_first_pick_makes_the_setup");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    IM_CHECK(Doc()->GetCamSetups().empty());
+
+    // Opening the window is not an edit: look and close, and the document is
+    // as it was.
+    ToolbarClick(ctx, "###tb_cam");
+    ctx->Yield(3);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(Doc()->GetCamSetups().empty());
+
+    // The first pick is. (The viewport click routes here through
+    // SlotPickClicked; calling it directly keeps the test off the camera.)
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
+    ctx->Yield();
+    ui::SelectionItem top;
+    top.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : Doc()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f)
+          top.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(top.element.IsSet());
+    ui::CamFacePicked(*s_App, top);
+    ctx->Yield(3);
+
+    IM_CHECK_EQ(Doc()->GetCamSetups().size(), (size_t)1);
+    const cam::Setup& made = Doc()->GetCamSetups()[0];
+    IM_CHECK(made.topFace.IsSet());
+    IM_CHECK(std::abs(made.origin.z - 12.0) < 1e-6); // the plate's top
+    IM_CHECK(s_App->slotPick.miss.empty());          // it took, not refused
+    s_App->camToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_a_pocket");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
