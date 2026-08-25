@@ -390,8 +390,20 @@ void BeginDockspace(AppState& state) {
           break;
         }
     }
-    ImGui::SetWindowFocus(target);
-    state.focusPanelFrames--;
+    // Done the moment the tab is actually won — not when the frame budget
+    // runs out. SetWindowFocus closes every popup over the focused window,
+    // so a request left counting closes the menu a user (or test) opens
+    // right after entering simulation mode: File > New snapped shut for a
+    // second after the toolbar click.
+    ImGuiWindow* win = ImGui::FindWindowByName(target);
+    if (win != nullptr && win->DockNode != nullptr &&
+        win->DockNode->SelectedTabId == win->TabId) {
+      state.focusPanelFrames = 0;
+      state.focusPanel.clear();
+    } else {
+      ImGui::SetWindowFocus(target);
+      state.focusPanelFrames--;
+    }
   }
 
   // Track the central node rect (relative to the main viewport) so the 3D

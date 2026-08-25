@@ -827,9 +827,12 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     case fem::LoadType::Force: {
       const glm::vec3 dir = glm::normalize(
           glm::vec3(load.direction.x, load.direction.y, load.direction.z));
-      // The arrow flies ALONG the force and lands on the face: tail behind,
-      // head at the face point. A force that pushes -Y draws pointing -Y.
-      const glm::vec3 tail = c - dir * len;
+      // The arrow flies ALONG the force; which end sits on the face depends
+      // on where the shaft is visible. A push approaches from outside and
+      // lands head-on the face. A pull drawn the same way would put the whole
+      // shaft INSIDE the solid — depth-tested away, an invisible load — so a
+      // pull takes off from the face instead: tail on the face, head out.
+      const glm::vec3 tail = glm::dot(dir, n) > 0.0f ? c : c - dir * len;
       // Draggable (docs/ui/viewport-handles.md): the shaft is the handle, so
       // what highlights is exactly what a click grabs.
       ViewportHandle vh;
@@ -843,7 +846,7 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       const glm::vec3 tint = HandleTint(
           vh, state.hoveredHandle,
           sim.loadDrag.active && sim.loadDrag.loadId == load.id ? vh.id : 0);
-      ArrowGlyph(tail, c, glm::vec4(tint, kForce.a), out);
+      ArrowGlyph(tail, tail + dir * len, glm::vec4(tint, kForce.a), out);
       break;
     }
     case fem::LoadType::Pressure: {

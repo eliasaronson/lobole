@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
 
@@ -181,6 +182,101 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     study = Doc()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr && !study->loads.empty());
     IM_CHECK(std::abs(study->loads[0].magnitude - 100.0) < 1e-6);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // No part of a force glyph may sit BEHIND its face plane, whichever way the
+  // force points. The tail-behind placement put a pulling force's whole shaft
+  // inside the solid, where the depth test hides it — an applied load with no
+  // visible arrow.
+  t = IM_REGISTER_TEST(engine, "sim", "force_arrow_never_buried_in_the_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK(!body.elementMap.names.empty());
+    const ElementRef face{body.createdBy,
+                          body.elementMap.names.begin()->second};
+    // The face's outward frame, through the same resolution the glyphs use.
+    uint32_t mesh = 0, index = 0;
+    IM_CHECK(ui::ResolveFaceItem(
+        *s_App, {ui::SelectionItem::Kind::Face, 0, face}, mesh, index));
+    const glm::vec3 c = s_App->faceSelector->GetFaceCenter(mesh, index);
+    const glm::vec3 n = s_App->faceSelector->GetFaceNormal(mesh, index);
+
+    fem::Load load;
+    load.id = Doc()->AllocateId();
+    load.type = fem::LoadType::Force;
+    load.face = face;
+    load.magnitude = 100.0;
+    load.direction = glm::dvec3(n.x, n.y, n.z); // a PULL, out of the part
+    study->loads.push_back(load);
+    ctx->Yield(2);
+
+    // Signed height of the glyph's lowest vertex over the face plane, and
+    // the direction the shaft (the first primitive) points.
+    std::vector<PrimVertex> prims;
+    const auto rebuild = [&]() {
+      prims.clear();
+      s_App->viewportHandles.clear();
+      ui::AppendSimulationBCGlyphs(*s_App, prims);
+    };
+    const auto lowest = [&]() {
+      float worst = FLT_MAX;
+      for (const PrimVertex& p : prims) {
+        worst = std::min(worst, glm::dot(p.posThis - c, n));
+        worst = std::min(worst, glm::dot(p.posOther - c, n));
+      }
+      return worst;
+    };
+    rebuild();
+    IM_CHECK(!prims.empty());
+    IM_CHECK(lowest() > -1e-3f);
+    // Still pointing WITH the force: outside placement must not flip it.
+    glm::vec3 along = glm::normalize(prims[0].posOther - prims[0].posThis);
+    IM_CHECK(glm::dot(along, n) > 0.99f);
+
+    // And a push keeps the old approach-from-outside placement.
+    study->loads[0].direction = -load.direction;
+    rebuild();
+    IM_CHECK(!prims.empty());
+    IM_CHECK(lowest() > -1e-3f);
+    along = glm::normalize(prims[0].posOther - prims[0].posThis);
+    IM_CHECK(glm::dot(along, n) < -0.99f);
+
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Entering simulation mode redraws the Model dock window as the Studies
+  // panel — so it must also WIN the shared node's tab, or the studies open
+  // hidden behind whatever tab the user browsed last.
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "entering_simulation_brings_the_studies_tab_forward");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    // Put another tab in front, the way a user browsing History does. A dock
+    // tab is selected by clicking it: ImGui::FocusWindow deliberately does
+    // not select dock tabs, so WindowFocus cannot stand in for the click.
+    ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel);
+    ImGuiWindow* history = ImGui::FindWindowByName(ui::kPanelHistory);
+    IM_CHECK(model != nullptr && model->DockNode != nullptr);
+    IM_CHECK(history != nullptr && history->DockNode == model->DockNode);
+    ctx->ItemClick(history->TabId);
+    ctx->Yield(2);
+    IM_CHECK_EQ(model->DockNode->SelectedTabId, history->TabId);
+
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield(8); // the focus request repeats; give it a few frames to win
+    IM_CHECK(s_App->simulation.active);
+    IM_CHECK_EQ(model->DockNode->SelectedTabId, model->TabId);
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };

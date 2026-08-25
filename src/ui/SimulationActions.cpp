@@ -317,6 +317,13 @@ void EnterSimulation(AppState& state) {
   // simulation toolbar has no Measure toggle to turn it back off.
   state.measure = MeasureState{};
   state.simulation.active = true;
+  // The Studies panel draws into the Model dock window; entering simulation
+  // mode while another tab (Variables, History, ...) owns the shared node
+  // leaves the studies hidden behind it until the user finds the right tab.
+  // Repeated frames, because one SetWindowFocus on a shared dock node does
+  // not reliably win the tab (DockLayout.cpp).
+  state.focusPanel = "Model";
+  state.focusPanelFrames = 60;
   if (doc->GetStudies().empty() && state.commands)
     state.commands->Execute(std::make_unique<AddStudyCommand>(""), *doc);
   // Select a study to edit (the first, unless one is already active).

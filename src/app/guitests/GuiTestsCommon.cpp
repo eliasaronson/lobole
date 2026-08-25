@@ -45,6 +45,12 @@ void ResetAppForTest() {
   // test's "click the section button" into a click that CLOSES it.
   ui::ClearSections(*s_App);
   s_App->sectionToolOpen = false;
+  // A pending bring-this-tab-forward request (EnterSimulation, focus_panel)
+  // outlives a short test and then fights the NEXT test's item clicks: the
+  // engine locates "**/" items by focusing windows, and a competing
+  // SetWindowFocus every frame can make a click land on nothing — silently.
+  s_App->focusPanel.clear();
+  s_App->focusPanelFrames = 0;
   s_App->handleDrag = {};
   s_App->hoveredHandle = 0;
   s_App->pick = {};
