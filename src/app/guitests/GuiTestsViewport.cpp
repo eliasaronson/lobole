@@ -220,8 +220,10 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
 
     s_App->measure = ui::MeasureState{};
     s_App->measure.active = true;
-    s_App->measure.picked.push_back({ElementRef{id, px}, false, 0});
-    s_App->measure.picked.push_back({ElementRef{id, py}, false, 0});
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, px}));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, py}));
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     const std::string touching = s_App->measure.readout;
@@ -238,7 +240,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     // Two OPPOSITE faces: 2 mm apart and parallel, so the distance leads and
     // is labelled parallel — for parallel elements the minimum separation IS
     // the separation, everywhere, not "the nearest of many".
-    s_App->measure.picked[1] = {ElementRef{id, nx}, false, 0};
+    s_App->measure.picked[1] =
+        ui::MeasureState::Element::OfFace(ElementRef{id, nx});
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     const std::string apart = s_App->measure.readout;
@@ -249,6 +252,84 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(apart.find("180") != std::string::npos);    // outward normals
 
     s_App->measure = ui::MeasureState{};
+  };
+
+  // M5: whole parts measure. "How far apart are these two parts" is the most
+  // natural question in an assembly; Measure::ContactBetween has answered it
+  // since I4 for the interference report, and the tool's armed kinds were
+  // Face|Edge, so the pick was simply refused.
+  t = IM_REGISTER_TEST(engine, "measure", "whole_bodies_and_parts");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+
+    // A whole BODY on a part tab, seeded from the tree selection — which is
+    // how you name a body when a viewport click would land on a face.
+    s_App->measure = ui::MeasureState{};
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Body, id, {}});
+    ctx->SetRef("//##DockHost");
+    ctx->ItemClick("**/###tb_measure");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)1);
+    IM_CHECK(s_App->measure.picked[0].Whole());
+    // A whole part reports what a part HAS, not what one face of it is.
+    IM_CHECK(s_App->measure.readout.find("Volume:") != std::string::npos);
+    IM_CHECK(s_App->measure.readout.find("Bounding box:") != std::string::npos);
+    IM_CHECK(ui::MeasureElementLabel(*s_App, s_App->measure.picked[0])
+                 .find("(body)") != std::string::npos);
+
+    // Two whole occurrences on an assembly tab, 10 apart.
+    const uint64_t partSlotId = s_App->parts[0].id;
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    IM_CHECK(s_App->assembly != nullptr);
+    Occurrence o1;
+    o1.partId = partSlotId;
+    o1.fixed = true;
+    const uint64_t occ1 = s_App->assembly->AddOccurrence(o1);
+    Occurrence o2;
+    o2.partId = partSlotId;
+    o2.position = glm::vec3(10.0f, 0.0f, 0.0f);
+    const uint64_t occ2 = s_App->assembly->AddOccurrence(o2);
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfOccurrence(occ1));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfOccurrence(occ2));
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    // Two 2 mm cubes 10 apart: 8 mm of clear air between them.
+    IM_CHECK(s_App->measure.readout.find("Distance:") != std::string::npos);
+    IM_CHECK(s_App->measure.readout.find("8 mm") != std::string::npos);
+    // No angle: a whole part points every way at once, so there is no
+    // direction to take one against — and none is claimed.
+    IM_CHECK(s_App->measure.readout.find("Angle:") == std::string::npos);
+    std::vector<PrimVertex> prims;
+    ui::AppendMeasureOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+
+    // Move one INTO the other: a clash reports as a clash. "0 mm apart"
+    // describes a clash and a touch identically, and they are not the same.
+    Occurrence* moved = s_App->assembly->FindById(occ2);
+    IM_CHECK(moved != nullptr);
+    moved->position = glm::vec3(1.0f, 0.0f, 0.0f);
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(s_App->measure.readout.rfind("CLASH", 0) == 0);
+    IM_CHECK(s_App->measure.readout.find("overlapping by") !=
+             std::string::npos);
+
+    s_App->measure = ui::MeasureState{};
+    s_App->selection.Clear();
+    ctx->Yield();
   };
 
   // M4b/M4c: measure joins the selection model, and says what you picked in
@@ -304,8 +385,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
         ui::MeasureElementLabel(*s_App, s_App->measure.picked[0]);
     IM_CHECK(label.find("top face") != std::string::npos);
     IM_CHECK(label.find("/face") == std::string::npos); // no toponame
-    const std::string edgeLabel =
-        ui::MeasureElementLabel(*s_App, {ElementRef{id, anEdge}, true, 0});
+    const std::string edgeLabel = ui::MeasureElementLabel(
+        *s_App, ui::MeasureState::Element::OfEdge(ElementRef{id, anEdge}));
     IM_CHECK(edgeLabel.find("edge") != std::string::npos);
     IM_CHECK(edgeLabel.find(";U") == std::string::npos);
 
@@ -344,8 +425,10 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
 
     s_App->measure = ui::MeasureState{};
     s_App->measure.active = true;
-    s_App->measure.picked.push_back({ElementRef{id, px}, false, 0});
-    s_App->measure.picked.push_back({ElementRef{id, nx}, false, 0});
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, px}));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, nx}));
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     // Opposite faces of a 2 mm box: 2 apart at the closest, and the readout
@@ -398,7 +481,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK_EQ(edges.size(), (size_t)3);
     for (const std::string& n : edges)
-      s_App->measure.picked.push_back({ElementRef{id, n}, true, 0});
+      s_App->measure.picked.push_back(
+          ui::MeasureState::Element::OfEdge(ElementRef{id, n}));
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     IM_CHECK(s_App->measure.readout.find("Total length of 3 edges") !=
@@ -406,7 +490,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
 
     // A face mixed in refuses, and says why an area plus a length is not a
     // quantity rather than printing one of them.
-    s_App->measure.picked.push_back({ElementRef{id, px}, false, 0});
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, px}));
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     IM_CHECK(s_App->measure.readout.find("do not add up") != std::string::npos);
@@ -510,8 +595,10 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
 
     s_App->measure.active = true;
-    s_App->measure.picked.push_back({ElementRef{boxId, "1/face0"}, false, 0});
-    s_App->measure.picked.push_back({ElementRef{boxId, "1/face1"}, false, 0});
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{boxId, "1/face0"}));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{boxId, "1/face1"}));
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     IM_CHECK(!s_App->measure.readout.empty()); // it measured something

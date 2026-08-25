@@ -351,12 +351,44 @@ struct MeasureState {
   // clicked again, removed in the panel, or Escape clears the tool: one
   // element reads out its own measure, two their distance.
   struct Element {
+    // WHAT was picked. Faces and edges are named elements of a body; a Body
+    // or an Occurrence is a whole placed shape, and "how far apart are these
+    // two parts" is the most natural question in an assembly — one the
+    // engine has answered since I4 while the tool refused the pick.
+    enum class Kind : uint8_t { Face, Edge, Body, Occurrence };
+    Kind kind = Kind::Face;
+    // Face/Edge: the stable element name. Body: {createdBy, ""}. Occurrence:
+    // {0, ""} — the occurrence id below is its whole identity.
     ElementRef ref;
-    bool isEdge = false;
     // Assembly tabs: the occurrence the element was picked on (0 = part
     // context). Part of the element's identity — the same face on two
     // occurrences of one part is two distinct measurables.
     uint64_t occurrenceId = 0;
+
+    bool IsEdge() const { return kind == Kind::Edge; }
+    // A whole placed shape rather than one named element of one.
+    bool Whole() const {
+      return kind == Kind::Body || kind == Kind::Occurrence;
+    }
+    bool operator==(const Element& o) const {
+      return kind == o.kind && ref.featureId == o.ref.featureId &&
+             ref.name == o.ref.name && occurrenceId == o.occurrenceId;
+    }
+
+    // Named constructors, because the four kinds fill different fields and a
+    // brace-initialised {ref, bool, id} said nothing about which.
+    static Element OfFace(const ElementRef& r, uint64_t occ = 0) {
+      return {Kind::Face, r, occ};
+    }
+    static Element OfEdge(const ElementRef& r, uint64_t occ = 0) {
+      return {Kind::Edge, r, occ};
+    }
+    static Element OfBody(uint64_t createdBy) {
+      return {Kind::Body, ElementRef{createdBy, ""}, 0};
+    }
+    static Element OfOccurrence(uint64_t id) {
+      return {Kind::Occurrence, ElementRef{0, ""}, id};
+    }
   };
   std::vector<Element> picked;
   std::string readout; // formatted result ("" = nothing measured yet)

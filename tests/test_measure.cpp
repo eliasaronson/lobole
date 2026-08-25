@@ -403,6 +403,90 @@ TEST_CASE("Distance kinds refuse an unknown name", "[measure]") {
   CHECK(Measure::DistanceKindNames().size() == 3);
 }
 
+TEST_CASE("Whole bodies are measurable, and a clash reports as one",
+          "[measure]") {
+  // "How far apart are these two parts" is the most natural question in an
+  // assembly. ContactBetween has answered it since I4 for the interference
+  // report; the measure tool's armed kinds were Face|Edge and nothing else,
+  // so the pick was simply refused.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 2, 2, 2));
+  const uint64_t idA = doc.GetFeature(0)->GetId();
+  const uint64_t idB = doc.GetFeature(1)->GetId();
+  const glm::mat4 I(1.0f);
+
+  Measure::Target a{&doc.GetBodies(), I, ElementRef{idA, ""}};
+  Measure::Target b{&doc.GetBodies(), I, ElementRef{idB, ""}};
+  CHECK(a.Whole());
+
+  const auto gap =
+      Measure::DistanceBetween(a, b, Measure::DistanceKind::Minimum);
+  REQUIRE(gap.has_value());
+  CHECK_THAT(gap->distance, WithinAbs(8.0, 1e-6)); // 10 - 2
+
+  // Centres of two 2-cubes 10 apart: 10 between the centres of mass.
+  const auto ctr =
+      Measure::DistanceBetween(a, b, Measure::DistanceKind::Centres);
+  REQUIRE(ctr.has_value());
+  CHECK_THAT(ctr->distance, WithinAbs(10.0, 1e-6));
+
+  // A whole body reports what a part actually has.
+  const auto d = Measure::DescribeTarget(a);
+  REQUIRE(d.has_value());
+  CHECK_THAT(d->volume, WithinAbs(8.0, 1e-6));
+  CHECK_THAT(d->surfaceArea, WithinAbs(24.0, 1e-6));
+  CHECK_THAT(d->size.x, WithinAbs(2.0f, 1e-4f));
+  CHECK(d->solids == 1);
+
+  // Clear, not overlapping.
+  const auto clear = Measure::OverlapBetween(a, b);
+  REQUIRE(clear.has_value());
+  CHECK_THAT(clear->volume, WithinAbs(0.0, 1e-9));
+
+  // A MIXED pair — this face to that whole part — is one question, not a
+  // case anyone has to remember to write.
+  std::string aPlusX;
+  for (const auto& [idx, name] : doc.GetBodies()[0].elementMap.names)
+    if (const auto f = Measure::DescribeFaceAt(doc.GetBodies()[0], idx))
+      if (f->normal.x > 0.99f)
+        aPlusX = name;
+  REQUIRE_FALSE(aPlusX.empty());
+  Measure::Target face{&doc.GetBodies(), I, ElementRef{idA, aPlusX}};
+  const auto mixed =
+      Measure::DistanceBetween(face, b, Measure::DistanceKind::Minimum);
+  REQUIRE(mixed.has_value());
+  CHECK_THAT(mixed->distance, WithinAbs(8.0, 1e-6));
+  // ...but a face has no volume to overlap with, so that is refused.
+  CHECK_FALSE(Measure::OverlapBetween(face, b).has_value());
+}
+
+TEST_CASE("Two overlapping bodies report the overlap, not distance 0",
+          "[measure]") {
+  // The extrema solver says "0" about any two interpenetrating solids, which
+  // is true and the least useful available fact. A clash should report as a
+  // clash.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 4, 4, 4));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(2, 0, 0), 4, 4, 4));
+  const glm::mat4 I(1.0f);
+  Measure::Target a{&doc.GetBodies(), I,
+                    ElementRef{doc.GetFeature(0)->GetId(), ""}};
+  Measure::Target b{&doc.GetBodies(), I,
+                    ElementRef{doc.GetFeature(1)->GetId(), ""}};
+
+  const auto gap =
+      Measure::DistanceBetween(a, b, Measure::DistanceKind::Minimum);
+  REQUIRE(gap.has_value());
+  CHECK_THAT(gap->distance, WithinAbs(0.0, 1e-6)); // true, and useless alone
+
+  const auto over = Measure::OverlapBetween(a, b);
+  REQUIRE(over.has_value());
+  CHECK_THAT(over->volume, WithinAbs(2.0 * 4.0 * 4.0, 1e-3)); // the 2mm slab
+}
+
 TEST_CASE("TotalOf sums a set, and refuses a mixed one", "[measure]") {
   // "3 elements selected - keep two for a distance" was a refusal with no
   // reason and no alternative. Three edges have a total length; three faces

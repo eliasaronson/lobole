@@ -515,8 +515,7 @@ std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
 // elements stay highlighted until re-clicked / removed / Escape. On an
 // assembly tab `occurrenceId` names the occurrence the element was picked
 // on (0 = part context) — part of the element's identity.
-void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
-                           uint64_t occurrenceId = 0);
+void MeasureElementClicked(AppState& state, const MeasureState::Element& e);
 // Recomputes the readout after the picked set changes (panel removals).
 void UpdateMeasureReadout(AppState& state);
 

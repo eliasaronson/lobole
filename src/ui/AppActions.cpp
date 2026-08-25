@@ -4353,6 +4353,33 @@ struct MeasureSource {
   glm::mat4 xf{1.0f};
   std::string prefix; // "OccurrenceName: " on assemblies, "" on parts
 };
+// An OCCURRENCE measures as every leaf body under it, already placed in
+// world space — the shape assembly::Flatten produces and contact_report
+// already uses, so a sub-assembly measures as the one thing it looks like
+// rather than as its parts.
+std::optional<MeasureSource> ResolveOccurrenceBodies(AppState& state,
+                                                     uint64_t occurrenceId,
+                                                     std::vector<Body>& store) {
+  if (!state.assembly)
+    return std::nullopt;
+  const Occurrence* occ = state.assembly->FindById(occurrenceId);
+  if (!occ)
+    return std::nullopt;
+  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+    if (inst.rootOccurrenceId != occurrenceId || !inst.visible)
+      continue;
+    for (const Body& b : inst.part->GetBodies()) {
+      Body nb = b;
+      nb.shape = b.shape.Transformed(inst.world);
+      store.push_back(std::move(nb));
+    }
+  }
+  if (store.empty())
+    return std::nullopt;
+  // Already in world space, so the transform is identity.
+  return MeasureSource{&store, glm::mat4(1.0f), occ->name + ": "};
+}
+
 std::optional<MeasureSource>
 ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
   if (e.occurrenceId == 0) {
@@ -4391,9 +4418,80 @@ struct MeasureOut {
   glm::vec3 lineA{0.0f}, lineB{0.0f};
 };
 
+// Everything needed to measure one pick, with the world-placed bodies of an
+// occurrence kept alive alongside the Target that points at them.
+struct Resolved {
+  std::vector<Body> owned; // occurrence picks only
+  Measure::Target target;
+  std::string prefix;
+  bool ok = false;
+};
+
+Resolved ResolveTargetFor(AppState& state, const MeasureState::Element& e) {
+  Resolved r;
+  if (e.kind == MeasureState::Element::Kind::Occurrence) {
+    const auto src = ResolveOccurrenceBodies(state, e.occurrenceId, r.owned);
+    if (!src)
+      return r;
+    r.target.bodies = &r.owned;
+    r.target.xf = glm::mat4(1.0f);
+    r.target.ref = ElementRef{0, ""}; // whole set
+    r.prefix = src->prefix;
+    r.ok = true;
+    return r;
+  }
+  const auto src = ResolveMeasureSource(state, e);
+  if (!src)
+    return r;
+  r.target.bodies = src->bodies;
+  r.target.xf = src->xf;
+  // A BODY pick filters the set to the one body that feature created; a
+  // face/edge names the element.
+  r.target.ref = e.kind == MeasureState::Element::Kind::Body
+                     ? ElementRef{e.ref.featureId, ""}
+                     : e.ref;
+  r.prefix = src->prefix;
+  r.ok = true;
+  return r;
+}
+
+// The name of a whole part/body, for the readout.
+std::string WholeName(AppState& state, const MeasureState::Element& e) {
+  if (e.kind == MeasureState::Element::Kind::Occurrence) {
+    if (state.assembly)
+      if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
+        return occ->name;
+    return "occurrence";
+  }
+  if (state.document)
+    for (const Body& b : state.document->GetBodies())
+      if (b.createdBy == e.ref.featureId && !b.name.empty())
+        return b.name;
+  return "body";
+}
+
 MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
                       const units::System& u) {
   MeasureOut out;
+  if (e.Whole()) {
+    // A whole part reports what a part HAS: what it weighs out of, what it
+    // takes to coat, and the box it needs to ship in.
+    const Resolved r = ResolveTargetFor(state, e);
+    const auto d = r.ok ? Measure::DescribeTarget(r.target) : std::nullopt;
+    if (!d) {
+      out.readout = "Could not measure that part.";
+      return out;
+    }
+    out.name = WholeName(state, e);
+    out.readout = "Volume: " + units::FormatVolume(d->volume, u) +
+                  "\nSurface: " + units::FormatArea(d->surfaceArea, u) +
+                  "\nBounding box: " + units::FormatLength(d->size.x, u) +
+                  " x " + units::FormatLength(d->size.y, u) + " x " +
+                  units::FormatLength(d->size.z, u);
+    if (d->solids > 1)
+      out.readout += "\n" + std::to_string(d->solids) + " separate solids";
+    return out;
+  }
   const auto src = ResolveMeasureSource(state, e);
   if (src) {
     if (const auto d = Measure::Describe(*src->bodies, e.ref)) {
@@ -4410,17 +4508,26 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
                        const MeasureState::Element& eb,
                        const units::System& u) {
   MeasureOut out;
-  const auto srcA = ResolveMeasureSource(state, ea);
-  const auto srcB = ResolveMeasureSource(state, eb);
-  if (!srcA || !srcB) {
-    out.readout = "Could not measure between those two elements.";
+  const Resolved ra = ResolveTargetFor(state, ea);
+  const Resolved rb = ResolveTargetFor(state, eb);
+  if (!ra.ok || !rb.ok) {
+    out.readout = "Could not measure between those two.";
     return out;
   }
   const Measure::DistanceKind kind = state.measure.distanceKind;
-  const auto d = Measure::DistanceOfKind(*srcA->bodies, ea.ref, srcA->xf,
-                                         *srcB->bodies, eb.ref, srcB->xf, kind);
-  const auto ang = Measure::Angle(*srcA->bodies, ea.ref, srcA->xf,
-                                  *srcB->bodies, eb.ref, srcB->xf);
+  const auto d = Measure::DistanceBetween(ra.target, rb.target, kind);
+  // An angle needs a DIRECTION, and a whole part does not have one — a
+  // bracket points every way at once. Elements only.
+  const auto ang =
+      (ea.Whole() || eb.Whole())
+          ? std::optional<Measure::AngleResult>{}
+          : Measure::Angle(*ra.target.bodies, ea.ref, ra.target.xf,
+                           *rb.target.bodies, eb.ref, rb.target.xf);
+  // Two whole shapes that interpenetrate are 0 apart, which is true and the
+  // least useful available fact. Ask whether they actually overlap.
+  const auto overlap = (ea.Whole() && eb.Whole())
+                           ? Measure::OverlapBetween(ra.target, rb.target)
+                           : std::optional<Measure::SetContact>{};
   if (!d && !ang) {
     out.readout = "Could not measure between those two elements.";
     return out;
@@ -4443,9 +4550,18 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   //                elements the minimum separation is the separation,
   //                everywhere, rather than "the nearest of many"
   // - otherwise -> distance, then angle
-  const bool touching = d && d->distance <= kTouchingMm;
+  const bool clashing = overlap && overlap->volume > 0.0;
+  const bool touching = d && d->distance <= kTouchingMm && !clashing;
   const bool parallel = ang && ang->parallel;
   std::string distLine;
+  if (clashing) {
+    // Lead with the clash. "0 mm apart" describes a clash and a touch
+    // identically, and they are not the same thing at all.
+    out.readout =
+        "CLASH: overlapping by " + units::FormatVolume(overlap->volume, u);
+    out.hasLine = false;
+    return out;
+  }
   if (d) {
     // Say WHICH distance this is, always. "45 mm" is three different facts
     // depending on the qualifier, and the tool used to print all three the
@@ -4496,6 +4612,7 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   if (!d)
     return out;
   MeasureState::Dimension& dim = out.dimension;
+  const bool wholeInvolved = ea.Whole() || eb.Whole();
   // Where to ATTACH the dimension, which is not always where the minimum
   // was measured: for a parallel pair every point pair is equidistant, so
   // OCC's answer is an arbitrary corner.
@@ -4505,9 +4622,10 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   // the number describing two different pairs of points. Maximum and centres
   // already name the points they mean.
   const std::optional<Measure::DistanceResult> anchors =
-      (parallel && kind == Measure::DistanceKind::Minimum)
-          ? Measure::DimensionAnchors(*srcA->bodies, ea.ref, srcA->xf,
-                                      *srcB->bodies, eb.ref, srcB->xf, true)
+      (parallel && kind == Measure::DistanceKind::Minimum && !wholeInvolved)
+          ? Measure::DimensionAnchors(*ra.target.bodies, ea.ref, ra.target.xf,
+                                      *rb.target.bodies, eb.ref, rb.target.xf,
+                                      true)
           : std::nullopt;
   const Measure::DistanceResult& at = anchors ? *anchors : *d;
   dim.valid = !touching; // a zero-length dimension is not a picture
@@ -4525,11 +4643,11 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   // between — so the picture and the stated basis are the same thing.
   // Only where it reads: the elements have to meet somewhere for an arc
   // about that point to mean anything.
-  if (ang && !ang->parallel && touching) {
-    const auto da = Measure::DirectionOf(*srcA->bodies, ea.ref);
-    const auto db = Measure::DirectionOf(*srcB->bodies, eb.ref);
-    const auto anchorA = Measure::AnchorOf(*srcA->bodies, ea.ref);
-    const auto anchorB = Measure::AnchorOf(*srcB->bodies, eb.ref);
+  if (ang && !ang->parallel && touching && !wholeInvolved) {
+    const auto da = Measure::DirectionOf(*ra.target.bodies, ea.ref);
+    const auto db = Measure::DirectionOf(*rb.target.bodies, eb.ref);
+    const auto anchorA = Measure::AnchorOf(*ra.target.bodies, ea.ref);
+    const auto anchorB = Measure::AnchorOf(*rb.target.bodies, eb.ref);
     if (da && db && anchorA && anchorB) {
       const glm::vec3 at3 = d->pointA; // the contact point
       // An unsigned direction (a line edge) gets the sign that points
@@ -4544,10 +4662,12 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
         return v;
       };
       dim.arcAt = at3;
-      dim.arcFrom = orient(*da, glm::vec3(srcA->xf * glm::vec4(*anchorA, 1.0f)),
-                           srcA->xf);
-      dim.arcTo = orient(*db, glm::vec3(srcB->xf * glm::vec4(*anchorB, 1.0f)),
-                         srcB->xf);
+      dim.arcFrom =
+          orient(*da, glm::vec3(ra.target.xf * glm::vec4(*anchorA, 1.0f)),
+                 ra.target.xf);
+      dim.arcTo =
+          orient(*db, glm::vec3(rb.target.xf * glm::vec4(*anchorB, 1.0f)),
+                 rb.target.xf);
       dim.arcLabel = units::FormatAngle(ang->degrees, u);
       dim.hasArc = true;
     }
@@ -4678,6 +4798,13 @@ void UpdateMeasureHover(AppState& state) {
 
 std::string MeasureElementLabel(AppState& state,
                                 const MeasureState::Element& e) {
+  if (e.Whole()) {
+    // A whole part is named by its own name — there is no sub-element to
+    // describe, and "Bracket" is already what a person calls it.
+    return WholeName(state, e) +
+           (e.kind == MeasureState::Element::Kind::Occurrence ? " (part)"
+                                                              : " (body)");
+  }
   std::string out;
   if (e.occurrenceId != 0 && state.assembly)
     if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
@@ -4690,7 +4817,7 @@ std::string MeasureElementLabel(AppState& state,
     // A ref that no longer resolves has no shape to name. Say so plainly
     // rather than falling back to the toponame, which would look like an
     // ordinary row while meaning "this is gone".
-    return out + (e.isEdge ? "edge" : "face") + " (no longer in the model)";
+    return out + (e.IsEdge() ? "edge" : "face") + " (no longer in the model)";
   }
   // The BODY it belongs to, on a part tab where there is no occurrence name
   // to carry that: "Board - top face" beats "top face" the moment a part has
@@ -4710,15 +4837,29 @@ void SeedMeasureFromSelection(AppState& state) {
   if (state.selection.Empty())
     return;
   for (const SelectionItem& it : state.selection.items) {
-    if (it.kind != SelectionItem::Kind::Face &&
-        it.kind != SelectionItem::Kind::Edge)
-      continue;
-    // On an assembly the item's id IS the owning occurrence, which is part
-    // of a measured element's identity (the same face on two occurrences of
-    // one part is two distinct measurables).
-    state.measure.picked.push_back({it.element,
-                                    it.kind == SelectionItem::Kind::Edge,
-                                    state.assembly ? it.id : 0});
+    const uint64_t occ = state.assembly ? it.id : 0;
+    switch (it.kind) {
+    case SelectionItem::Kind::Face:
+      state.measure.picked.push_back(
+          MeasureState::Element::OfFace(it.element, occ));
+      break;
+    case SelectionItem::Kind::Edge:
+      state.measure.picked.push_back(
+          MeasureState::Element::OfEdge(it.element, occ));
+      break;
+    case SelectionItem::Kind::Body:
+      // Selecting a body in the feature tree and then measuring is how you
+      // pick a WHOLE body on a part tab, where a viewport click lands on
+      // whichever face is under the cursor.
+      state.measure.picked.push_back(MeasureState::Element::OfBody(it.id));
+      break;
+    case SelectionItem::Kind::Occurrence:
+      state.measure.picked.push_back(
+          MeasureState::Element::OfOccurrence(it.id));
+      break;
+    default:
+      break; // features, mates, sketch regions are not measurable
+    }
   }
   UpdateMeasureReadout(state);
 }
@@ -4798,20 +4939,15 @@ void RefreshPinnedMeasurements(AppState& state) {
   m.pinned = std::move(kept);
 }
 
-void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
-                           uint64_t occurrenceId) {
+void MeasureElementClicked(AppState& state, const MeasureState::Element& e) {
   if (!state.measure.active || (!state.document && !state.assembly))
     return;
   auto& picked = state.measure.picked;
-  const auto it = std::find_if(
-      picked.begin(), picked.end(), [&](const MeasureState::Element& e) {
-        return e.ref.featureId == ref.featureId && e.ref.name == ref.name &&
-               e.occurrenceId == occurrenceId;
-      });
+  const auto it = std::find(picked.begin(), picked.end(), e);
   if (it != picked.end())
     picked.erase(it); // clicking a measured element again deselects it
   else
-    picked.push_back({ref, isEdge, occurrenceId});
+    picked.push_back(e);
   UpdateMeasureReadout(state);
 }
 

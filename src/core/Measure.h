@@ -241,6 +241,48 @@ DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
                const glm::mat4& xfA, const std::vector<Body>& bodiesB,
                const ElementRef& b, const glm::mat4& xfB, DistanceKind kind);
 
+// MEASURABLES: a named element, or a whole placed shape.
+//
+// Everything above measures a face or an edge. But "how far apart are these
+// two parts" is the most natural question in an assembly, ContactBetween has
+// answered it since I4 for the interference report, and the measure tool
+// could not accept the pick — the armed kinds were Face|Edge and nothing
+// else.
+//
+// A Target names either. An EMPTY `ref.name` means the whole placed set
+// rather than one element of it; `ref.featureId` then filters to a single
+// body by its createdBy (0 = every body in the set, which is what an
+// occurrence means). Elements and wholes measure through one function, so a
+// mixed pair — this face to that part — is not a case anyone has to
+// remember to write.
+struct Target {
+  const std::vector<Body>* bodies = nullptr;
+  glm::mat4 xf{1.0f};
+  ElementRef ref; // name empty => the whole set
+  bool Whole() const { return ref.name.empty(); }
+};
+
+// What a whole placed shape measures as, for a one-element readout: the
+// volume and surface area a part actually has, and the box it needs.
+struct SetMeasure {
+  double volume = 0.0;
+  double surfaceArea = 0.0;
+  glm::vec3 size{0.0f}; // world-axis-aligned bounding box extents
+  int solids = 0;
+};
+std::optional<SetMeasure> DescribeTarget(const Target& t);
+
+// Distance between any two measurables, elements or wholes.
+std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
+                                              DistanceKind kind);
+
+// Whether two WHOLE measurables overlap, and by how much — so a pair of
+// parts that interpenetrate reports as a clash rather than as distance 0,
+// which is what the extrema solver says about any two overlapping solids and
+// is the least useful true thing available. nullopt when either side is an
+// element (a face has no volume to overlap with).
+std::optional<SetContact> OverlapBetween(const Target& a, const Target& b);
+
 // Total length of a set of edges, or total area of a set of faces — what a
 // third and fourth pick should add up to instead of being refused. Mixing
 // kinds is REFUSED (nullopt): the sum of an area and a length is not a

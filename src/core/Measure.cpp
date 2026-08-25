@@ -21,6 +21,7 @@
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
@@ -36,6 +37,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -1236,6 +1238,177 @@ DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
                                    : "OpenCASCADE failure");
     return extrema;
   }
+}
+
+namespace {
+// The placed OCC shape a Target resolves to: a named face or edge, or —
+// when the name is empty — the bodies of the set fused into one compound,
+// which is what "this whole part" means to the extrema solver.
+TopoDS_Shape ResolveTarget(const Target& t) {
+  if (!t.bodies)
+    return {};
+  if (!t.Whole()) {
+    std::string kind;
+    TopoDS_Shape s = ResolveShape(*t.bodies, t.ref, kind);
+    if (s.IsNull())
+      return {};
+    return s.Moved(TopLoc_Location(ToTrsf(t.xf)));
+  }
+  TopoDS_Compound comp;
+  BRep_Builder builder;
+  builder.MakeCompound(comp);
+  int added = 0;
+  for (const Body& b : *t.bodies) {
+    // featureId 0 = every body (an occurrence); otherwise just the one body
+    // that feature created.
+    if (t.ref.featureId != 0 && b.createdBy != t.ref.featureId)
+      continue;
+    const TopoDS_Shape& s = b.shape.GetShape();
+    if (s.IsNull())
+      continue;
+    builder.Add(comp, s);
+    added++;
+  }
+  if (added == 0)
+    return {};
+  return comp.Moved(TopLoc_Location(ToTrsf(t.xf)));
+}
+
+// The bodies a WHOLE target covers, already placed — what ContactBetween
+// and the mass properties need, as opposed to the fused compound the extrema
+// solver wants.
+std::vector<Body> TargetBodies(const Target& t) {
+  std::vector<Body> out;
+  if (!t.bodies || !t.Whole())
+    return out;
+  for (const Body& b : *t.bodies) {
+    if (t.ref.featureId != 0 && b.createdBy != t.ref.featureId)
+      continue;
+    if (b.shape.GetShape().IsNull())
+      continue;
+    Body nb = b;
+    nb.shape = b.shape.Transformed(t.xf);
+    out.push_back(std::move(nb));
+  }
+  return out;
+}
+} // namespace
+
+std::optional<SetMeasure> DescribeTarget(const Target& t) {
+  const std::vector<Body> placed = TargetBodies(t);
+  if (placed.empty())
+    return std::nullopt;
+  SetMeasure out;
+  glm::vec3 lo(std::numeric_limits<float>::max());
+  glm::vec3 hi(std::numeric_limits<float>::lowest());
+  for (const Body& b : placed) {
+    CADShape::MassProps mp;
+    if (b.shape.ComputeMassProps(mp)) {
+      out.volume += mp.volume;
+      out.surfaceArea += mp.surfaceArea;
+    }
+    out.solids += b.shape.SolidCount();
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    lo = glm::min(lo, bmin);
+    hi = glm::max(hi, bmax);
+  }
+  out.size = hi - lo;
+  return out;
+}
+
+std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
+                                              DistanceKind kind) {
+  // Elements keep the paths that already know about them — including the
+  // maximum sampler and the centre anchors, which read the B-Rep rather than
+  // a fused compound.
+  if (!a.Whole() && !b.Whole()) {
+    return DistanceOfKind(*a.bodies, a.ref, a.xf, *b.bodies, b.ref, b.xf, kind);
+  }
+  const TopoDS_Shape sa = ResolveTarget(a);
+  const TopoDS_Shape sb = ResolveTarget(b);
+  if (sa.IsNull() || sb.IsNull())
+    return std::nullopt;
+  try {
+    if (kind == DistanceKind::Centres) {
+      // Centre of MASS for a whole shape, centroid/midpoint for an element —
+      // both are "the middle of this thing", which is what the caller asked
+      // for.
+      const auto centre = [](const Target& t,
+                             const TopoDS_Shape& s) -> std::optional<gp_Pnt> {
+        if (!t.Whole()) {
+          const auto p = AnchorOf(*t.bodies, t.ref);
+          if (!p)
+            return std::nullopt;
+          const glm::vec3 w = glm::vec3(t.xf * glm::vec4(*p, 1.0f));
+          return gp_Pnt(w.x, w.y, w.z);
+        }
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(s, props);
+        if (props.Mass() <= 0.0) // a sheet or a wire: fall back to area
+          BRepGProp::SurfaceProperties(s, props);
+        return props.CentreOfMass();
+      };
+      const auto ca = centre(a, sa);
+      const auto cb = centre(b, sb);
+      if (!ca || !cb)
+        return std::nullopt;
+      DistanceResult out;
+      out.pointA = glm::vec3(ca->X(), ca->Y(), ca->Z());
+      out.pointB = glm::vec3(cb->X(), cb->Y(), cb->Z());
+      out.distance = glm::distance(out.pointA, out.pointB);
+      return out;
+    }
+    if (kind == DistanceKind::Maximum) {
+      // Same sampled walk DistanceOfKind uses, over whichever shapes these
+      // are. Exact wherever the extreme is a vertex, which is everywhere the
+      // geometry is planar or straight.
+      const auto sample = [](const TopoDS_Shape& s) {
+        std::vector<gp_Pnt> pts;
+        for (TopExp_Explorer ex(s, TopAbs_VERTEX); ex.More(); ex.Next())
+          pts.push_back(BRep_Tool::Pnt(TopoDS::Vertex(ex.Current())));
+        return pts;
+      };
+      const std::vector<gp_Pnt> pa = sample(sa), pb = sample(sb);
+      if (pa.empty() || pb.empty())
+        return std::nullopt;
+      DistanceResult out;
+      double best = -1.0;
+      for (const gp_Pnt& p : pa)
+        for (const gp_Pnt& q : pb)
+          if (const double d2 = p.SquareDistance(q); d2 > best) {
+            best = d2;
+            out.pointA = glm::vec3(p.X(), p.Y(), p.Z());
+            out.pointB = glm::vec3(q.X(), q.Y(), q.Z());
+          }
+      out.distance = std::sqrt(best);
+      return out;
+    }
+    BRepExtrema_DistShapeShape dist(sa, sb);
+    if (!dist.IsDone() || dist.NbSolution() < 1)
+      return std::nullopt;
+    DistanceResult out;
+    out.distance = dist.Value();
+    const gp_Pnt pa = dist.PointOnShape1(1);
+    const gp_Pnt pb = dist.PointOnShape2(1);
+    out.pointA = glm::vec3(pa.X(), pa.Y(), pa.Z());
+    out.pointB = glm::vec3(pb.X(), pb.Y(), pb.Z());
+    return out;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Measure target distance failed: {}",
+              e.GetMessageString() ? e.GetMessageString()
+                                   : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
+std::optional<SetContact> OverlapBetween(const Target& a, const Target& b) {
+  if (!a.Whole() || !b.Whole())
+    return std::nullopt; // a face has no volume to overlap with
+  const std::vector<Body> pa = TargetBodies(a), pb = TargetBodies(b);
+  if (pa.empty() || pb.empty())
+    return std::nullopt;
+  return ContactBetween(pa, glm::mat4(1.0f), pb, glm::mat4(1.0f));
 }
 
 std::optional<double> Distance(const std::vector<Body>& bodies,

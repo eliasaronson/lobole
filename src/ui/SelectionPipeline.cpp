@@ -260,9 +260,30 @@ void ConsumeSlotPick(AppState& state, const Candidate& c) {
 }
 void ConsumeMeasure(AppState& state, const Candidate& c) {
   // On assemblies the Face/Edge item's id is the owning occurrence (0 on
-  // part tabs) — part of the measured element's identity.
-  MeasureElementClicked(state, c.item.element,
-                        c.item.kind == SelectionItem::Kind::Edge, c.item.id);
+  // part tabs) — part of the measured element's identity. A Body carries its
+  // createdBy there instead, and an Occurrence its own id.
+  MeasureState::Element e;
+  switch (c.item.kind) {
+  case SelectionItem::Kind::Edge:
+    e.kind = MeasureState::Element::Kind::Edge;
+    e.ref = c.item.element;
+    e.occurrenceId = c.item.id;
+    break;
+  case SelectionItem::Kind::Body:
+    e.kind = MeasureState::Element::Kind::Body;
+    e.ref = ElementRef{c.item.id, ""};
+    break;
+  case SelectionItem::Kind::Occurrence:
+    e.kind = MeasureState::Element::Kind::Occurrence;
+    e.occurrenceId = c.item.id;
+    break;
+  default:
+    e.kind = MeasureState::Element::Kind::Face;
+    e.ref = c.item.element;
+    e.occurrenceId = c.item.id;
+    break;
+  }
+  MeasureElementClicked(state, e);
 }
 void ConsumeSimFace(AppState& state, const Candidate& c) {
   SimulationApplyToFace(state, c.item.element);
@@ -274,10 +295,18 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
                         ConsumeSlotPick};
   }
   if (state.measure.active) {
-    return ArmedContext{KindBit(SelectionItem::Kind::Face) |
-                            KindBit(SelectionItem::Kind::Edge),
-                        "Measure: pick a face or edge (a second for "
-                        "distance) - Esc exits",
+    // Whole shapes measure too (M5): a BODY on a part tab, an OCCURRENCE on
+    // an assembly. Measure::ContactBetween has answered "how far apart are
+    // these two parts" since I4 and this list was the only thing refusing
+    // the pick.
+    const uint32_t kinds =
+        KindBit(SelectionItem::Kind::Face) |
+        KindBit(SelectionItem::Kind::Edge) |
+        (state.assembly ? KindBit(SelectionItem::Kind::Occurrence)
+                        : KindBit(SelectionItem::Kind::Body));
+    return ArmedContext{kinds,
+                        "Measure: pick faces, edges or whole parts (a second "
+                        "for distance) - Esc exits",
                         ConsumeMeasure};
   }
   if (state.simulation.IsActive() &&
@@ -408,10 +437,29 @@ void HandleSelectionInput(AppState& state, bool overViewport,
     // measurement can be taken against it without re-deriving any of that.
     if (state.measure.active && (top.item.kind == SelectionItem::Kind::Face ||
                                  top.item.kind == SelectionItem::Kind::Edge)) {
-      state.measure.hover.has = true;
-      state.measure.hover.element = {top.item.element,
-                                     top.item.kind == SelectionItem::Kind::Edge,
-                                     top.item.id};
+      MeasureState::Element he;
+      bool measurable = true;
+      switch (top.item.kind) {
+      case SelectionItem::Kind::Face:
+        he = MeasureState::Element::OfFace(top.item.element, top.item.id);
+        break;
+      case SelectionItem::Kind::Edge:
+        he = MeasureState::Element::OfEdge(top.item.element, top.item.id);
+        break;
+      case SelectionItem::Kind::Body:
+        he = MeasureState::Element::OfBody(top.item.id);
+        break;
+      case SelectionItem::Kind::Occurrence:
+        he = MeasureState::Element::OfOccurrence(top.item.id);
+        break;
+      default:
+        measurable = false;
+        break;
+      }
+      if (measurable) {
+        state.measure.hover.has = true;
+        state.measure.hover.element = he;
+      }
     }
     if (top.item.kind == SelectionItem::Kind::SketchRegion) {
       state.pick.regionHoverIds = ParseRegionIds(top.item.element.name);
@@ -531,7 +579,15 @@ void SyncSelectionHighlights(AppState& state) {
     // tool is armed (the element's id carries the occurrence).
     if (state.measure.active) {
       for (const MeasureState::Element& e : state.measure.picked) {
-        if (e.isEdge)
+        // A whole OCCURRENCE lights every mesh that belongs to it, the way
+        // selecting it would — there is no single face to shade.
+        if (e.kind == MeasureState::Element::Kind::Occurrence) {
+          for (const DocumentRenderMesh& m : state.documentMeshes)
+            if (m.occurrenceId == e.occurrenceId)
+              state.meshRenderer->HighlightInstance(m.meshId);
+          continue;
+        }
+        if (e.IsEdge())
           continue;
         uint32_t mesh = 0, index = 0, first = 0, count = 0;
         if (ResolveFaceItem(state,
@@ -564,7 +620,7 @@ void SyncSelectionHighlights(AppState& state) {
   // Measured faces show with the same visuals while the tool is armed.
   if (state.measure.active)
     for (const MeasureState::Element& e : state.measure.picked)
-      if (!e.isEdge)
+      if (!e.IsEdge())
         highlightFace({SelectionItem::Kind::Face, 0, e.ref});
 }
 
@@ -612,7 +668,7 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
   // plus the nearest-distance line between two picked elements.
   if (state.measure.active) {
     for (const MeasureState::Element& e : state.measure.picked) {
-      if (!e.isEdge)
+      if (!e.IsEdge())
         continue;
       uint32_t mesh = 0, index = 0;
       if (ResolveEdgeItem(state,
