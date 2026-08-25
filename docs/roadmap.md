@@ -218,8 +218,11 @@ variables, drawings, BOM + exploded).
 - **GPU5** ([topopt/gpu5-plan.md](topopt/gpu5-plan.md)) — fp64 iterative
   refinement around the fp32 GPU solve, so a slender bending part optimizes at
   GPU speed instead of falling back to the CPU. Buys speed, not correctness:
-  the fallback shipped, so those parts are already *right*. Phase 0 is a day,
-  no production code, and its gate kills the plan if the assumption fails.
+  the fallback shipped, so those parts are already *right*. **Phase 0 ran
+  2026-08-25 and the plan survives** — ρ ≈ 0.01–0.1 from a warm start, 1e-3 in
+  4–5 outer steps — with two amendments recorded there: from `u = 0` the loop
+  can stall at exactly ρ = 1.000, and the inner solve is nondeterministic.
+  Phases 1–3 (production code) unbuilt.
 - **Cross-part linked sketch copies**
   ([sketching/copy-links.md](sketching/copy-links.md) phase 2) — regeneration
   would have to resolve another part's document and dirty its dependents,

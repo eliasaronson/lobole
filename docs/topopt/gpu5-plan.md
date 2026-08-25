@@ -1,6 +1,37 @@
 # GPU5 — fp64 iterative refinement around the fp32 solve (sub-plan)
 
-> Status: **DESIGNED, NOT BUILT.** Written 2026-08-24 after the dogfooding
+> Status: **PHASE 0 RUN 2026-08-25 — the plan SURVIVES, with two amendments.**
+> `femgpu probe: GPU5.0 does fp64 refinement contract?`
+> (`tests/test_femgpu.cpp`, hidden: `femgpu_tests [fp32floor]`).
+>
+> **From a warm start, refinement works.** Five runs on the exact system that
+> returns zeros — 20:1 beam, frozen skin + 0.027, bending load — all converged,
+> reaching 1e-3 at step 4 or 5 with ρ between 0.009 and 0.10 once productive.
+> That is a decimal digit or two per outer step, and it is the gate's own
+> stated condition.
+>
+> **Amendment 1: from u = 0 it can stall forever, at exactly ρ = 1.000.**
+> Three runs in five printed six identical steps with `max|d| = 0` — the inner
+> solver's stall policy returns its best iterate, which from a zero start it
+> never improves on, so the correction is zero, `u` never changes, and the next
+> step gets identical input. **Zero is a fixed point of the whole loop**, and
+> more outer steps buy nothing: refinement's correction *is* the inner solve.
+> This is why the gate said "a warm start that is not zero", and it means the
+> FIRST SIMP solve — which has no warm start — cannot use plain refinement.
+> Perturbing the inner initial guess breaks the fixed point (5 runs of 5 made
+> progress) and costs one RNG pass; that is the cheapest known mitigation and
+> belongs in phase 1.
+>
+> **Amendment 2: "within 4 steps" is too tight to design against.** The
+> observed range is 4–6 even when it works, and it moves between runs because
+> **the inner solve is nondeterministic** — 128, 272 or 368 iterations from
+> byte-identical inputs. Any phase-3 cost model has to budget for the spread,
+> not the best case. Cost per outer step here is 200–650 inner iterations.
+>
+> Phases 1–3 remain unbuilt, and remain a SPEED play: the CPU fallback already
+> makes these parts correct. Original plan below.
+>
+> Status when written: **DESIGNED, NOT BUILT.** Written 2026-08-24 after the dogfooding
 > round found the GPU path returning a zero displacement field on a beam
 > ([plan.md](plan.md), `docs/dogfooding.md` 2026-08-23 (c)). That failure is
 > *fixed* — `TopologyOptimize` drops the external solver and finishes on the

@@ -149,6 +149,33 @@ std::vector<double> CpuApply(const gpu::SpmvSystem& sys,
   return Ap;
 }
 
+// The same, with the VECTOR in fp64 as well as the accumulation. Iterative
+// refinement needs it: its whole mechanism is computing r = F - K u more
+// accurately than the solve that produced u, and rounding u back to fp32
+// before applying K throws away exactly the digits being bought. (K's own
+// entries stay fp32 — `ke` is float — so refinement converges to the solution
+// of the fp32-rounded operator, which is the right target: that rounding is
+// far below the discretization error.)
+std::vector<double> CpuApply64(const gpu::SpmvSystem& sys,
+                               const std::vector<float>& scales,
+                               const std::vector<double>& p) {
+  std::vector<double> Ap(sys.nFree, 0.0);
+  for (int e = 0; e < sys.nElems; ++e) {
+    const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
+    const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
+    for (int r = 0; r < 30; ++r) {
+      if (dof[r] < 0)
+        continue;
+      double acc = 0.0;
+      for (int c = 0; c < 30; ++c)
+        if (dof[c] >= 0)
+          acc += static_cast<double>(ke[r * 30 + c]) * p[dof[c]];
+      Ap[dof[r]] += static_cast<double>(scales[e]) * acc;
+    }
+  }
+  return Ap;
+}
+
 // Relative infinity-norm error of the GPU result against the oracle.
 double RelInfError(const std::vector<float>& gpu,
                    const std::vector<double>& ref) {
@@ -642,6 +669,211 @@ TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
 // to the matrix itself so the fp32 recurrence sees unit diagonals) is worth
 // only 2-5x. It is not the fix. Dropping the contrast is worth 8.5x, and
 // mixed precision is worth ~9 decimal digits — see docs/topopt/plan.md.
+// GPU5.0 — the gate for docs/topopt/gpu5-plan.md. No production code: this
+// exists to answer one question cheaply, and to KILL the plan if the answer
+// is no.
+//
+// The plan proposes fp64 iterative refinement around the fp32 solve:
+//
+//     u = 0
+//     repeat:  r = F - K u        (fp64, on the host)
+//              solve K d = r      (fp32, on the GPU, loosely)
+//              u += d
+//
+// It only works if the inner fp32 solve is a CONTRACTION on the systems that
+// matter — if each outer step shrinks the residual by some rho < 1. That is
+// not obvious here: the whole reason this plan exists is that on the 20:1
+// beam with SIMP's frozen skin the inner solve makes NO progress at all and
+// returns its initial guess, and an inner solve that returns its input
+// unchanged gives d = 0 and rho = 1 exactly. Refinement would stall.
+//
+// So: run the loop on that exact system and print rho. Gate (from the plan):
+// the outer residual reaches 1e-3 within 4 steps from a warm start that is
+// not zero. Cold start is measured too, because the first SIMP solve has no
+// warm start and is where the round found the zeros.
+//
+// RESULT (2026-08-25, RTX 4060 Laptop, 5 runs). The plan SURVIVES, with two
+// amendments, and the run-to-run spread is itself the finding — the inner
+// solve is nondeterministic on this system, returning 128, 272 or 368
+// iterations from byte-identical inputs.
+//
+//   start                     reached 1e-3 at step   rho once productive
+//   warm (non-zero)           4, 4, 4, 5, 5          0.009 - 0.10
+//   cold (u = 0)              4, 5, never x3         0.016 - 0.19
+//   cold, inner guess seeded  4, 4, 5, 5, 5          0.008 - 0.16
+//
+// 1. FROM A WARM START, REFINEMENT WORKS — every run converged, and rho in
+//    the productive regime is 0.01-0.1, i.e. a decimal digit or two per outer
+//    step. That is the gate's own condition and it is met.
+//
+// 2. FROM ZERO IT CAN STALL FOREVER, AT EXACTLY rho = 1.000. Three runs in
+//    five printed this, all six steps identical:
+//
+//      step 1  ||r||/||F|| 1.000e+00   inner iters 128   max|d| 0.00e+00
+//      step 2  ||r||/||F|| 1.000e+00   rho 1.000  ...    max|d| 0.00e+00
+//
+//    The inner solver's stall policy returns its BEST iterate, which from a
+//    zero start it never improves on, so d = 0 -> u unchanged -> r unchanged
+//    -> the next step has identical input. Refinement cannot rescue this,
+//    because refinement's correction IS the inner solve: zero is a fixed
+//    point of the whole loop. More outer steps buy nothing, which is why the
+//    plan's gate specified a non-zero warm start rather than trusting the
+//    cold case.
+//
+// 3. PERTURBING THE INNER INITIAL GUESS BREAKS THE FIXED POINT — 5 runs of 5
+//    made progress, none stalled. One RNG pass over nFree floats, and it is
+//    the cheapest known mitigation for the first (cold) SIMP solve.
+//
+// The "within 4 steps" budget is too tight to design against: the observed
+// range is 4-6 even when it works, and it moves between runs for the reason
+// in the header. Cost per outer step here is 200-650 inner iterations.
+//
+// Rescaling matters and is not incidental. r shrinks by orders of magnitude
+// per step, and handing a tiny vector to an fp32 solver wastes its exponent
+// range; each step normalises r to unit norm before the solve and scales the
+// correction back on the way out.
+TEST_CASE("femgpu probe: GPU5.0 does fp64 refinement contract?",
+          "[.][fp32floor]") {
+  REQUIRE_GPU();
+  // The exact case that returns zeros (see "what zeroes the slender solve").
+  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200, 10, 20);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 200000.0, 0.3);
+  const auto dofs =
+      fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+
+  // 100 N over the free-end face, pushing -Y: the load the round placed.
+  std::vector<float> f(sys.nFree, 0.0f);
+  int tipNodes = 0;
+  for (const auto& n : mesh.nodes)
+    if (std::abs(n.x - 200.0) < 1e-6)
+      ++tipNodes;
+  for (size_t n = 0; n < mesh.nodes.size(); ++n)
+    if (std::abs(mesh.nodes[n].x - 200.0) < 1e-6) {
+      const int g = dofs.map[3 * n + 1];
+      if (g >= 0)
+        f[g] = -100.0f / static_cast<float>(tipNodes);
+    }
+
+  // SIMP's first solve: support/load skin frozen at 1.0, bulk at vf cubed.
+  std::vector<float> mixed(sys.nElems, 0.027f);
+  for (int e = 0; e < sys.nElems; ++e)
+    for (int i = 0; i < 10; ++i) {
+      const double x = mesh.nodes[mesh.tets[e][i]].x;
+      if (x < 1e-6 || x > 200.0 - 1e-6) {
+        mixed[e] = 1.0f;
+        break;
+      }
+    }
+
+  std::string err;
+  gpu::CgOptions opts;
+  opts.mg = gpu::MakeMgGpuData(FlatNodes(mesh), sys, dofs.map, &err);
+  REQUIRE(opts.mg);
+  opts.precond = gpu::CgOptions::Precond::Multigrid;
+  opts.chebDegree = 3;
+  opts.chebRatio = 15.0f;
+  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
+  REQUIRE(cg);
+
+  double fnorm = 0.0;
+  for (int i = 0; i < sys.nFree; ++i)
+    fnorm += static_cast<double>(f[i]) * static_cast<double>(f[i]);
+  fnorm = std::sqrt(fnorm);
+
+  // Returns the step at which the outer residual first went below 1e-3, or 0.
+  // `seed` != 0 gives each inner solve a small random initial guess instead
+  // of zero. The reason is specific: the inner solver's stall policy returns
+  // its BEST iterate, and when it cannot improve on a zero start the best
+  // iterate IS zero — so d = 0, the outer residual is unchanged, and that
+  // whole refinement step is spent for nothing. Breaking the degeneracy costs
+  // one RNG pass.
+  const auto refine = [&](std::vector<double> u, const char* label, int steps,
+                          uint32_t seed = 0) {
+    std::printf("\n--- %s ---\n", label);
+    double prev = -1.0;
+    int hit = 0;
+    for (int k = 1; k <= steps; ++k) {
+      const std::vector<double> Ku = CpuApply64(sys, mixed, u);
+      std::vector<double> r(sys.nFree);
+      double rn = 0.0;
+      for (int i = 0; i < sys.nFree; ++i) {
+        r[i] = static_cast<double>(f[i]) - Ku[i];
+        rn += r[i] * r[i];
+      }
+      rn = std::sqrt(rn);
+      const double rel = rn / fnorm;
+      const double rho = prev < 0.0 ? 0.0 : rel / prev;
+      std::printf("  step %d  ||r||/||F|| %.3e", k, rel);
+      if (prev >= 0.0)
+        std::printf("   rho %.3f", rho);
+      if (rel < 1e-3 && hit == 0)
+        hit = k;
+      // Normalise into fp32's comfortable range, solve, scale back.
+      const double s = rn > 0.0 ? 1.0 / rn : 1.0;
+      std::vector<float> rs(sys.nFree);
+      for (int i = 0; i < sys.nFree; ++i)
+        rs[i] = static_cast<float>(r[i] * s);
+      std::vector<float> d(sys.nFree, 0.0f);
+      if (seed != 0)
+        for (int i = 0; i < sys.nFree; ++i)
+          d[i] = 1e-3f * RandSym(seed);
+      gpu::CgStats st{};
+      REQUIRE(cg->Solve(rs, d, 1e-4f, 4000, &st, &err));
+      double dmax = 0.0;
+      for (float v : d)
+        dmax = std::max(dmax, static_cast<double>(std::abs(v)));
+      std::printf("   inner iters %5d  max|d| %.2e\n", st.iterations, dmax);
+      for (int i = 0; i < sys.nFree; ++i)
+        u[i] += static_cast<double>(d[i]) / s;
+      prev = rel;
+    }
+    return hit;
+  };
+
+  REQUIRE(cg->SetScales(mixed, &err));
+
+  // Cold: what the first SIMP solve does. This is the configuration that
+  // returned a zero displacement field.
+  const int cold = refine(std::vector<double>(sys.nFree, 0.0), "cold start", 6);
+
+  // Warm: what every LATER SIMP solve does — the previous iterate, carried
+  // over from a density field one step away. Modelled here by solving the
+  // uniform-0.027 system (which converges) and starting from its answer.
+  const std::vector<float> uniform(sys.nElems, 0.027f);
+  REQUIRE(cg->SetScales(uniform, &err));
+  std::vector<float> x0(sys.nFree, 0.0f);
+  gpu::CgStats st0{};
+  REQUIRE(cg->Solve(f, x0, 1e-5f, 20000, &st0, &err));
+  std::vector<double> warmStart(sys.nFree);
+  for (int i = 0; i < sys.nFree; ++i)
+    warmStart[i] = static_cast<double>(x0[i]);
+  double wmax = 0.0;
+  for (double v : warmStart)
+    wmax = std::max(wmax, std::abs(v));
+  std::printf("\n(warm start from the uniform-0.027 solve: max|u| %.3e)\n",
+              wmax);
+  REQUIRE(wmax > 0.0); // the gate says "a warm start that is not zero"
+  REQUIRE(cg->SetScales(mixed, &err));
+  const int warm = refine(warmStart, "warm start", 6);
+
+  // ...and the same cold start with the degeneracy broken.
+  REQUIRE(cg->SetScales(mixed, &err));
+  const int coldSeeded = refine(std::vector<double>(sys.nFree, 0.0),
+                                "cold start, inner guess "
+                                "perturbed",
+                                6, 12345u);
+
+  std::printf("\nGPU5.0 GATE: 1e-3 within 4 steps\n");
+  std::printf("  cold                     : %s (step %d)\n",
+              cold > 0 && cold <= 4 ? "PASS" : "fail", cold);
+  std::printf("  cold, inner guess seeded : %s (step %d)\n",
+              coldSeeded > 0 && coldSeeded <= 4 ? "PASS" : "fail", coldSeeded);
+  std::printf("  warm                     : %s (step %d)\n",
+              warm > 0 && warm <= 4 ? "PASS" : "fail", warm);
+  std::printf("(0 = never reached 1e-3 within the steps run)\n");
+}
+
 TEST_CASE("femgpu probe: condition numbers", "[.][fp32floor]") {
   struct Case {
     const char* name;

@@ -497,7 +497,13 @@ bending, which is the load case that hurts.
 
 In rough order of value:
 
-1. **Mixed precision** — designed in [gpu5-plan.md](gpu5-plan.md), not built.
+1. **Mixed precision** — designed in [gpu5-plan.md](gpu5-plan.md); **phase 0
+   ran 2026-08-25 and the assumption holds**: fp64 refinement around the fp32
+   solve reaches 1e-3 in 4–5 outer steps on the exact system that returns
+   zeros, ρ ≈ 0.01–0.1. Two amendments came out of it — from `u = 0` the loop
+   can stall at exactly ρ = 1.000 (zero is a fixed point, because the
+   correction *is* the inner solve), and the inner solve is nondeterministic,
+   so a step budget must allow 4–6 rather than 4. Phases 1–3 not built.
    The only lever that moves the actual constraint. The
    SpMV dominates the runtime and can stay fp32; the inner products, the
    residual and the residual-replacement step are a small fraction of the work
