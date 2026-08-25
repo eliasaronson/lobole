@@ -6,46 +6,6 @@ an entry when it lands a fix + regression test.
 
 ---
 
-## The mate tool's snap hover is quadratic — 88 ms/frame on a drilled plate
-
-**Symptom.** With the mate tool armed, hovering a face that has many boundary
-edges — a plate covered in holes, a flanged bracket — stalls the frame. It
-reads as the app hanging exactly while you are looking for a mate point.
-
-**Root cause.** `CADShape::EdgeSnapPoint` (CADKernel.cpp) opens with
-`TopExp::MapShapes(m_shape, TopAbs_EDGE, edges)` — mapping every edge of the
-WHOLE BODY — on every call. `ResolveAssemblyFacePick`
-(AssemblyActions.cpp:317) calls it once per boundary edge of the hovered
-face. So one hover frame costs O(face edges x body edges), and the mate hover
-resolves a fresh candidate every frame by design (it never trusts stale hover
-state). `FaceEdgeIndices` maps the whole body once more on top.
-
-**Impact**, measured 2026-08-25 on a plate with a grid of holes:
-
-| plate | body edges | drilled face's edges | per hover frame |
-|---|---|---|---|
-| 36 holes | 120 | 40 | 0.68 ms |
-| 144 holes | 444 | 148 | **10.0 ms** |
-| 400 holes | 1212 | 404 | **88 ms** |
-
-At 144 holes that is most of a 60 fps budget; at 400 it is about 11 fps.
-
-**Fix.** Build the edge map once per resolve rather than once per edge —
-either hoist it into `ResolveAssemblyFacePick` and pass it down, or give
-CADShape a small cached map invalidated with the shape. Measured at **0.16 ms
-where today costs 10 ms** (~60x), and 0.62 ms where today costs 88 ms.
-
-**Why it was invisible.** Every test shape is a box. A 4-edge face on a
-120-edge body costs 0.68 ms and looks like nothing; the cost is in the
-product, so it only appears on a part that is both drilled and hovered.
-
-Found while sizing corner snapping
-([assemblies/a2_5-design.md](assemblies/a2_5-design.md) phase 4c), which
-would add candidates to this same loop — it should be fixed first, or the
-new feature takes the blame for it.
-
----
-
 ## A GUI test fails when two tests share a process — and the suite is green
 
 **Symptom.** `terminal/off_by_default_docks_right_on` fails when it runs after

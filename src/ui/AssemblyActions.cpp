@@ -313,12 +313,14 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // Every named boundary edge contributes its characteristic point: a circle
   // center or another edge's midpoint. The face center competes as a candidate
   // too, so a click in the middle of a face does not always snap to an edge.
-  std::vector<int> edgeIndices;
-  body.shape.FaceEdgeIndices(static_cast<int>(hit.faceIndex), edgeIndices);
-  std::vector<glm::vec3> circleCenters;
-  std::vector<int> circleEdges;
-  body.shape.FaceCircleCenters(static_cast<int>(hit.faceIndex), circleCenters,
-                               circleEdges);
+  //
+  // ONE call for all of them. This was three — FaceEdgeIndices,
+  // FaceCircleCenters, and EdgeSnapPoint once per edge — each of which mapped
+  // every edge of the whole body, so a hover on a drilled face cost
+  // O(face edges x body edges) every frame: 10 ms on a 144-hole plate,
+  // 88 ms on a 400-hole one (docs/known-bugs.md).
+  std::vector<CADShape::FaceSnap> snaps;
+  body.shape.FaceSnapPoints(static_cast<int>(hit.faceIndex), snaps);
   const glm::mat4 xf = OccurrenceMatrix(*occ);
   glm::vec3 faceOrigin, faceNormal, faceXAxis;
   const bool hasFaceFrame =
@@ -329,25 +331,18 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   const glm::vec3 worldFaceOrigin = glm::vec3(xf * glm::vec4(faceOrigin, 1.0f));
   float best =
       hasFaceFrame ? glm::length(worldFaceOrigin - hit.point) : FLT_MAX;
-  for (const int edgeIndex : edgeIndices) {
-    const std::string* edgeName = body.elementMap.EdgeNameOf(edgeIndex);
-    glm::vec3 localPoint;
-    if (!edgeName || !body.shape.EdgeSnapPoint(edgeIndex, localPoint))
+  for (const CADShape::FaceSnap& snap : snaps) {
+    const std::string* edgeName = body.elementMap.EdgeNameOf(snap.edgeIndex);
+    if (!edgeName) // an unnamed edge cannot be stored on the anchor
       continue;
-    const glm::vec3 worldPoint = glm::vec3(xf * glm::vec4(localPoint, 1.0f));
+    const glm::vec3 worldPoint = glm::vec3(xf * glm::vec4(snap.point, 1.0f));
     const float distance = glm::length(worldPoint - hit.point);
     if (distance >= best)
       continue;
-    bool isCircular = false;
-    for (const int circleEdge : circleEdges)
-      if (circleEdge == edgeIndex) {
-        isCircular = true;
-        break;
-      }
     best = distance;
     out.snapEdge = ElementRef{body.createdBy, *edgeName};
-    out.snapType = isCircular ? AssemblyFacePick::SnapType::HoleCenter
-                              : AssemblyFacePick::SnapType::EdgeMidpoint;
+    out.snapType = snap.circleCenter ? AssemblyFacePick::SnapType::HoleCenter
+                                     : AssemblyFacePick::SnapType::EdgeMidpoint;
   }
   return true;
 }

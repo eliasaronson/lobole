@@ -202,11 +202,18 @@ At 144 holes that is most of a 60 fps budget spent hovering; at 400 it is
 about 11 fps, which reads as the app hanging while you look for a mate
 point. A perforated plate is not an exotic part.
 
-The fix is to build the edge map ONCE per resolve instead of once per edge
-— measured above at **0.16 ms where today costs 10 ms**, a ~60x
-improvement, and ~140x at 400 holes. That is a smaller change than corner
-snapping itself, and it should land FIRST: adding candidates to a loop that
-is already the bottleneck would otherwise get blamed on the new feature.
+**Fixed 2026-08-25, before any corner work.** `CADShape::FaceSnapPoints`
+replaces all three calls with one walk over one map, and
+`ResolveAssemblyFacePick` consumes it directly: **0.097 ms on the 144-hole
+face that cost 10 ms**, a ~100x improvement, verified against sabotage
+(reverting to the per-edge map puts it back to 8.6 ms and fails the test).
+`FaceCircleCenters` and `FaceEdgeIndices` are gone — subsumed, and their
+tests re-pointed. `EdgeSnapPoint` stays for the solve, which resolves ONE
+edge per mate and is not a hot path.
+
+Guarded by `FaceSnapPoints stays linear on a drilled plate`
+(test_cadkernel.cpp), which builds the 144-hole plate precisely because a
+box cannot catch this: the cost is the PRODUCT of the two edge counts.
 
 Same shape as the rest of this round's findings — the slow path is invisible
 on the small test shapes and obvious on a real one.

@@ -2,7 +2,10 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "cad/CADKernel.h"
+
 #include "cad/MeshExport.h"
+#include <algorithm>
+#include <chrono>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -57,8 +60,7 @@ TEST_CASE("CreateCylinder volume", "[kernel][primitives]") {
   CHECK_THAT(cyl.Volume(), WithinRel(expected, 1e-4));
 }
 
-TEST_CASE("FaceCircleCenters + EdgeSnapPoint find a cylinder's circle",
-          "[kernel]") {
+TEST_CASE("FaceSnapPoints finds a cylinder's circle centre", "[kernel]") {
   // A cylinder about +Z at the origin: its flat cap faces each have one
   // circular edge, centered on the axis (A2.5 connector inference).
   const double r = 1.0, h = 2.0;
@@ -73,25 +75,28 @@ TEST_CASE("FaceCircleCenters + EdgeSnapPoint find a cylinder's circle",
     glm::vec3 c, n, u;
     if (!cyl.FacePlane(f, c, n, u))
       continue; // skip the curved side
-    std::vector<glm::vec3> centers;
-    std::vector<int> edges;
-    cyl.FaceCircleCenters(f, centers, edges);
-    if (centers.empty())
+    std::vector<CADShape::FaceSnap> snaps;
+    cyl.FaceSnapPoints(f, snaps);
+    const auto circle = std::find_if(
+        snaps.begin(), snaps.end(),
+        [](const CADShape::FaceSnap& s) { return s.circleCenter; });
+    if (circle == snaps.end())
       continue;
     foundCap = true;
-    CHECK_THAT(centers[0].x, WithinAbs(0.0, 1e-6)); // on the axis
-    CHECK_THAT(centers[0].y, WithinAbs(0.0, 1e-6));
-    // The named-edge snap point matches the circle center.
+    CHECK_THAT(circle->point.x, WithinAbs(0.0, 1e-6)); // on the axis
+    CHECK_THAT(circle->point.y, WithinAbs(0.0, 1e-6));
+    // EdgeSnapPoint — the single-edge path the solve still uses — agrees
+    // with the batched one, so the two cannot drift.
     glm::vec3 snap;
-    REQUIRE(cyl.EdgeSnapPoint(edges[0], snap));
-    CHECK_THAT(snap.x, WithinAbs(centers[0].x, 1e-6));
-    CHECK_THAT(snap.y, WithinAbs(centers[0].y, 1e-6));
-    CHECK_THAT(snap.z, WithinAbs(centers[0].z, 1e-6));
+    REQUIRE(cyl.EdgeSnapPoint(circle->edgeIndex, snap));
+    CHECK_THAT(snap.x, WithinAbs(circle->point.x, 1e-6));
+    CHECK_THAT(snap.y, WithinAbs(circle->point.y, 1e-6));
+    CHECK_THAT(snap.z, WithinAbs(circle->point.z, 1e-6));
   }
   CHECK(foundCap);
 }
 
-TEST_CASE("FaceEdgeIndices exposes box-edge midpoint snaps", "[kernel]") {
+TEST_CASE("FaceSnapPoints exposes box-edge midpoint snaps", "[kernel]") {
   CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
   REQUIRE(box.IsValid());
 
@@ -100,21 +105,80 @@ TEST_CASE("FaceEdgeIndices exposes box-edge midpoint snaps", "[kernel]") {
     glm::vec3 center, normal, uAxis;
     if (!box.FacePlane(face, center, normal, uAxis))
       continue;
-    std::vector<int> edges;
-    box.FaceEdgeIndices(face, edges);
-    if (edges.empty())
+    std::vector<CADShape::FaceSnap> snaps;
+    box.FaceSnapPoints(face, snaps);
+    if (snaps.empty())
       continue;
     foundFace = true;
-    CHECK(edges.size() == 4);
-    for (const int edge : edges) {
+    CHECK(snaps.size() == 4);
+    for (const CADShape::FaceSnap& snap : snaps) {
+      CHECK_FALSE(snap.circleCenter); // a box has no round edges
+      CHECK(std::isfinite(snap.point.x));
+      CHECK(std::isfinite(snap.point.y));
+      CHECK(std::isfinite(snap.point.z));
       glm::vec3 midpoint;
-      REQUIRE(box.EdgeSnapPoint(edge, midpoint));
-      CHECK(std::isfinite(midpoint.x));
-      CHECK(std::isfinite(midpoint.y));
-      CHECK(std::isfinite(midpoint.z));
+      REQUIRE(box.EdgeSnapPoint(snap.edgeIndex, midpoint));
+      CHECK_THAT(midpoint.x, WithinAbs(snap.point.x, 1e-9));
     }
   }
   CHECK(foundFace);
+}
+
+TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel]") {
+  // The regression this exists for: FaceSnapPoints replaced three calls that
+  // each mapped every edge of the WHOLE BODY — one of them once PER EDGE,
+  // from inside the caller's loop over a face's edges. The mate tool resolves
+  // this every frame while hovering, so a plate covered in holes cost
+  // 10 ms/frame at 144 holes and 88 ms at 400. See docs/known-bugs.md.
+  //
+  // A box cannot catch it. The cost is the PRODUCT of the face's edge count
+  // and the body's, so it needs a face that carries many edges on a body that
+  // has many more — which is what a drilled plate is.
+  CADShape plate = CADKernel::Instance().CreateBox(400.0, 20.0, 400.0);
+  REQUIRE(plate.IsValid());
+  constexpr int kPerSide = 12; // 144 holes
+  for (int i = 0; i < kPerSide; i++)
+    for (int j = 0; j < kPerSide; j++) {
+      const CADShape drill = CADKernel::Instance().CreateCylinder(
+          glm::vec3(20.0f + i * 360.0f / kPerSide, -5.0f,
+                    20.0f + j * 360.0f / kPerSide),
+          glm::vec3(0, 1, 0), 6.0, 30.0);
+      plate = plate.Difference(drill);
+    }
+  REQUIRE(plate.IsValid());
+
+  // The drilled face: the one carrying every hole's rim.
+  int worst = -1;
+  size_t worstEdges = 0;
+  for (int f = 0; f < 500; f++) {
+    std::vector<CADShape::FaceSnap> snaps;
+    plate.FaceSnapPoints(f, snaps);
+    if (snaps.size() > worstEdges) {
+      worstEdges = snaps.size();
+      worst = f;
+    }
+  }
+  REQUIRE(worst >= 0);
+  CHECK(worstEdges > 100); // 4 outline + one rim per hole
+
+  const auto t0 = std::chrono::steady_clock::now();
+  constexpr int kFrames = 30;
+  for (int f = 0; f < kFrames; f++) {
+    std::vector<CADShape::FaceSnap> snaps;
+    plate.FaceSnapPoints(worst, snaps);
+    CHECK(snaps.size() == worstEdges);
+  }
+  const double msPerFrame = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - t0)
+                                .count() /
+                            kFrames;
+  INFO("FaceSnapPoints on a " << worstEdges << "-edge face: " << msPerFrame
+                              << " ms");
+  // Measured at 0.16 ms once the map is built once; 10 ms when it was built
+  // per edge. The bound is deliberately far from BOTH — 12x the real cost, a
+  // fifth of the broken one — so a slow machine cannot fail it and a return
+  // to quadratic cannot pass it.
+  CHECK(msPerFrame < 2.0);
 }
 
 TEST_CASE("Boolean union of overlapping boxes", "[kernel][booleans]") {

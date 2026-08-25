@@ -92,18 +92,31 @@ public:
   bool FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
                 glm::vec3& xAxis) const;
 
-  // Connector inference (A2.5): the centers of the face's circular edges,
-  // with each edge's index in the deduplicated TopExp::MapShapes(EDGE) order
-  // (the ElementMap::edgeNames convention). Used to snap a mate connector to
-  // a hole/boss center on pick. Empty when the face has no circular edges.
-  void FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
-                         std::vector<int>& edgeIndices) const;
-  // All non-degenerate edges bounding a face, in the same global edge-index
-  // convention as ElementMap::edgeNames. Used for midpoint snap inference.
-  void FaceEdgeIndices(int faceIndex, std::vector<int>& edgeIndices) const;
+  // Connector inference (A2.5): every snap candidate a face offers, in ONE
+  // pass — each non-degenerate bounding edge's index in the deduplicated
+  // TopExp::MapShapes(EDGE) order (the ElementMap::edgeNames convention), its
+  // characteristic point (a circular edge's CENTRE, else the edge's
+  // midpoint), and which of those two it is.
+  //
+  // One call, because the three it replaced each walked the whole shape —
+  // and EdgeSnapPoint did so once PER EDGE, from inside the caller's loop
+  // over a face's edges. Resolving the mate-tool hover therefore mapped every
+  // edge of the body N+2 times and cost O(face edges x body edges) EVERY
+  // FRAME: 10 ms on a 144-hole plate, 88 ms on a 400-hole one. See
+  // docs/known-bugs.md. A box hid it completely — the cost is in the product,
+  // so it needs a part that is both drilled and hovered.
+  struct FaceSnap {
+    int edgeIndex = -1;
+    glm::vec3 point{0.0f};
+    bool circleCenter = false; // false => an edge midpoint
+  };
+  void FaceSnapPoints(int faceIndex, std::vector<FaceSnap>& out) const;
+
   // The characteristic point of the edge at `edgeIndex` (same order): a
   // circular edge's center, else the edge's midpoint. Returns false if out of
-  // range. Used to derive a snapped connector frame origin.
+  // range. Used to derive a snapped connector frame origin — ONE edge, once
+  // per mate per solve, so its whole-shape map is not in a hot path. Anything
+  // resolving a whole face's worth of these wants FaceSnapPoints.
   bool EdgeSnapPoint(int edgeIndex, glm::vec3& point) const;
 
   // Access to underlying shape
@@ -244,9 +257,12 @@ public:
     return false;
   }
   bool FaceAxis(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
-  void FaceCircleCenters(int, std::vector<glm::vec3>&,
-                         std::vector<int>&) const {}
-  void FaceEdgeIndices(int, std::vector<int>&) const {}
+  struct FaceSnap {
+    int edgeIndex = -1;
+    glm::vec3 point{0.0f};
+    bool circleCenter = false;
+  };
+  void FaceSnapPoints(int, std::vector<FaceSnap>&) const {}
   bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
 };
 

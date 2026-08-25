@@ -98,10 +98,11 @@ needs a second `ElementRef` on the anchor and no toponaming change. Designed
 and kernel-measured 2026-08-25 as phase 4c in
 [a2_5-design.md](a2_5-design.md); moderate, one session, one format bump.
 The same measurement found a **live performance defect in the shipped snap
-hover** — `EdgeSnapPoint` re-maps every edge of the body per call, so
-hovering a 144-hole plate costs 10 ms/frame and a 400-hole one 88 ms. Fix
-first (build the map once: 10 ms -> 0.16 ms), then add corners, which cost
-0.16 ms at their worst.
+hover** — `EdgeSnapPoint` re-mapped every edge of the body per call, so
+hovering a 144-hole plate cost 10 ms/frame and a 400-hole one 88 ms.
+**Fixed first, 2026-08-25** (`CADShape::FaceSnapPoints`: one walk, one map,
+10 ms -> 0.097 ms), so corners land on a loop that is no longer the
+bottleneck.
 
 
 The A2 editing UX shipped **numeric-first** (Elias's call): occurrences are

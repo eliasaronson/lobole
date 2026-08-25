@@ -464,10 +464,8 @@ bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
   return true;
 }
 
-void CADShape::FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
-                                 std::vector<int>& edgeIndices) const {
-  centers.clear();
-  edgeIndices.clear();
+void CADShape::FaceSnapPoints(int faceIndex, std::vector<FaceSnap>& out) const {
+  out.clear();
   if (!IsValid() || faceIndex < 0)
     return;
   int i = 0;
@@ -481,6 +479,8 @@ void CADShape::FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
   if (face.IsNull())
     return;
 
+  // ONCE. This map is the whole reason this function exists: it used to be
+  // rebuilt for every edge of the face, from the caller's loop.
   // Global edge order (0-based) matches ElementMap::edgeNames / edge picking.
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
@@ -488,43 +488,22 @@ void CADShape::FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
     const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
     if (BRep_Tool::Degenerated(edge))
       continue;
-    BRepAdaptor_Curve curve(edge);
-    if (curve.GetType() != GeomAbs_Circle)
-      continue;
-    const gp_Pnt c = curve.Circle().Location();
     const int idx = edges.FindIndex(edge) - 1; // -> 0-based edgeNames index
     if (idx < 0)
       continue;
-    centers.emplace_back(c.X(), c.Y(), c.Z());
-    edgeIndices.push_back(idx);
-  }
-}
-
-void CADShape::FaceEdgeIndices(int faceIndex,
-                               std::vector<int>& edgeIndices) const {
-  edgeIndices.clear();
-  if (!IsValid() || faceIndex < 0)
-    return;
-  int i = 0;
-  TopoDS_Face face;
-  for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
-    if (i == faceIndex) {
-      face = TopoDS::Face(exp.Current());
-      break;
+    FaceSnap snap;
+    snap.edgeIndex = idx;
+    BRepAdaptor_Curve curve(edge);
+    if (curve.GetType() == GeomAbs_Circle) {
+      const gp_Pnt c = curve.Circle().Location();
+      snap.point = glm::vec3(c.X(), c.Y(), c.Z());
+      snap.circleCenter = true;
+    } else {
+      const gp_Pnt m =
+          curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
+      snap.point = glm::vec3(m.X(), m.Y(), m.Z());
     }
-  }
-  if (face.IsNull())
-    return;
-
-  TopTools_IndexedMapOfShape edges;
-  TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
-  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
-    const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
-    if (BRep_Tool::Degenerated(edge))
-      continue;
-    const int idx = edges.FindIndex(edge) - 1;
-    if (idx >= 0)
-      edgeIndices.push_back(idx);
+    out.push_back(snap);
   }
 }
 
