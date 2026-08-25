@@ -256,6 +256,12 @@ struct SketchEditState {
   uint32_t calibImageId = 0;
   glm::vec2 calibP1{0.0f, 0.0f};
   glm::vec2 calibP2{0.0f, 0.0f};
+  // Drag-to-move for the selected reference image (SketchTool::Image): the
+  // grab point (plane UV) and the image's origin at grab. Commits like the
+  // opacity slider: baseline at grab, one command on release.
+  bool imageDragActive = false;
+  glm::vec2 imageDragGrabUV{0.0f, 0.0f};
+  glm::vec2 imageDragStartOrigin{0.0f, 0.0f};
   int calibStage = 0;
   bool calibAlignAxis = false; // also rotate so p1->p2 lands on the U axis
   float calibDistance = 10.0f; // the typed real-world distance

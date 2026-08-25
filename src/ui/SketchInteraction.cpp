@@ -1839,8 +1839,47 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   }
 
   if (edit.tool == SketchTool::Image) {
-    // The reference-image session lives in the Tool window; canvas clicks
-    // are consumed doing nothing (Esc / Done closes).
+    // The reference-image session lives in the Tool window; on the canvas,
+    // grabbing anywhere on the selected image DRAGS it to a new position.
+    // Other clicks are consumed doing nothing (Esc / Done closes).
+    sketch::ReferenceImage* img = nullptr;
+    for (auto& im : sketch->images)
+      if (im.id == edit.selectedImageId)
+        img = &im;
+    if (img == nullptr)
+      return true;
+    if (edit.imageDragActive) {
+      if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        // One undo entry for the whole drag (the opacity-slider recipe).
+        edit.imageDragActive = false;
+        if (!edit.imageEditBaseline.is_null()) {
+          nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+          if (after != edit.imageEditBaseline)
+            state.commands->PushApplied(std::make_unique<ModifyFeatureCommand>(
+                index, edit.imageEditBaseline, after));
+          edit.imageEditBaseline = nlohmann::json();
+        }
+      } else {
+        img->origin = edit.imageDragStartOrigin + (uv - edit.imageDragGrabUV);
+      }
+      return true;
+    }
+    // Point-in-image: invert  origin + R(rotation) * (px,py)*unitsPerPixel.
+    const auto overImage = [&](glm::vec2 p) {
+      const glm::vec2 d = p - img->origin;
+      const float cs = std::cos(static_cast<float>(-img->rotation));
+      const float sn = std::sin(static_cast<float>(-img->rotation));
+      const glm::vec2 px = glm::vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y) /
+                           static_cast<float>(img->unitsPerPixel);
+      return px.x >= 0.0f && px.x <= static_cast<float>(img->widthPx) &&
+             px.y >= 0.0f && px.y <= static_cast<float>(img->heightPx);
+    };
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && overImage(uv)) {
+      edit.imageDragActive = true;
+      edit.imageDragGrabUV = uv;
+      edit.imageDragStartOrigin = img->origin;
+      edit.imageEditBaseline = DocumentIO::FeatureToJson(*sketch);
+    }
     return true;
   }
 

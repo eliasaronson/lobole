@@ -836,16 +836,34 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
     if (item.kind == SelectionItem::Kind::SketchRegion) {
       const std::vector<uint32_t> ids = ParseRegionIds(item.element.name);
       std::vector<std::vector<uint32_t>>* regions = nullptr;
-      if (auto* ext = dynamic_cast<ExtrudeFeature*>(&f))
+      uint64_t sketchId = 0;
+      if (auto* ext = dynamic_cast<ExtrudeFeature*>(&f)) {
         regions = &ext->regions;
-      else if (auto* rev = dynamic_cast<RevolveFeature*>(&f))
+        sketchId = ext->sketchId;
+      } else if (auto* rev = dynamic_cast<RevolveFeature*>(&f)) {
         regions = &rev->regions;
+        sketchId = rev->sketchId;
+      }
       if (regions != nullptr && !ids.empty()) {
-        const auto it = std::find(regions->begin(), regions->end(), ids);
-        if (it != regions->end())
-          regions->erase(it); // click a selected region again = remove
-        else
-          regions->push_back(ids);
+        // One click picks the loop's whole pattern/mirror family (a linked
+        // pattern is ONE thing — see SketchFeature::SiblingRegions); a click
+        // on any already-picked member removes the family again.
+        std::vector<std::vector<uint32_t>> family = {ids};
+        if (state.document != nullptr)
+          if (auto* sk = dynamic_cast<SketchFeature*>(
+                  state.document->FindFeatureById(sketchId)))
+            family = sk->SiblingRegions(ids);
+        const bool present =
+            std::find(regions->begin(), regions->end(), ids) != regions->end();
+        for (const std::vector<uint32_t>& r : family) {
+          const auto it = std::find(regions->begin(), regions->end(), r);
+          if (present) {
+            if (it != regions->end())
+              regions->erase(it);
+          } else if (it == regions->end()) {
+            regions->push_back(r);
+          }
+        }
         return true;
       }
     }

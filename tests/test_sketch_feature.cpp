@@ -1100,6 +1100,36 @@ TEST_CASE("A sketch with two entities sharing an id is refused",
                           Catch::Matchers::ContainsSubstring("id 9"));
 }
 
+TEST_CASE("SiblingRegions expands a pattern member to the whole family",
+          "[sketch][pattern]") {
+  // The five-hole flange case: one circle, circular-patterned x5. Picking
+  // any one hole as an extrude profile must mean all five — the user who
+  // filed this had to click each hole of their bolt circle by hand.
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t c = sk.AddEntity(sketch::Circle{{10, 0}, 2.0});
+  auto gen = sk.AddCircularPattern({c}, {0, 0}, 2.0 * M_PI / 5.0, /*count=*/5,
+                                   /*link=*/true);
+  REQUIRE(gen.size() == 4);
+
+  // The source expands to all five loops; any instance expands to the same.
+  const auto fam = sk.SiblingRegions({c});
+  REQUIRE(fam.size() == 5);
+  CHECK(sk.SiblingRegions({gen[2]}) == fam);
+
+  // A loop with no pattern behind it stays itself.
+  const uint32_t lone = sk.AddEntity(sketch::Circle{{40, 40}, 1.0});
+  const auto solo = sk.SiblingRegions({lone});
+  REQUIRE(solo.size() == 1);
+  CHECK(solo[0] == std::vector<uint32_t>{lone});
+
+  // Every family row is a real `regions` entry: filtering the sketch's loops
+  // to the family keeps exactly the five pattern circles.
+  auto loops = sketch::BuildLoops(sk.entities);
+  REQUIRE(loops.size() == 6);
+  REQUIRE(sketch::FilterLoopsToRegions(loops, fam));
+  CHECK(loops.size() == 5);
+}
+
 #include <iterator>
 
 #include <set>

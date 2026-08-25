@@ -743,6 +743,18 @@ public:
   // Index of the entity with the given id, or SIZE_MAX if none. Linear scan —
   // sketches hold few entities, and this avoids a desync-prone cached map.
   size_t IndexOfEntity(uint32_t id) const;
+
+  // The profile-loop family of the loop `ids`: when that loop is exactly one
+  // member of a linked pattern/mirror (the source, or one replication index),
+  // every member of that op that forms a profile loop right now — else just
+  // {ids}. A linked pattern is ONE thing (its copies regenerate from the
+  // source), so picking one hole of a bolt circle as an extrude/revolve
+  // profile means the bolt circle: a cut through the source but not its
+  // copies is almost never the intent, and hand-clicking the other N-1
+  // identical holes is how a five-hole flange took five region picks.
+  // Ordering matches LoopEntityIds so the results are valid `regions` rows.
+  std::vector<std::vector<uint32_t>>
+  SiblingRegions(const std::vector<uint32_t>& ids) const;
   // Removes the entity with `id` and cleans up dependent constraints
   // (transfer to a coincident survivor, transitive coincidence repair, orphan
   // sweep). Returns the number of *non-trivial* constraints dropped (i.e. not

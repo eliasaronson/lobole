@@ -244,6 +244,7 @@ void DrawImageSession(AppState& state, SketchFeature& sketch) {
   }
   BeginToolWindowFrame(state, "Reference Image");
   ImGui::Text("Image %u  (%d x %d px)", img->id, img->widthPx, img->heightPx);
+  ImGui::TextDisabled("Drag the image in the viewport to move it.");
 
   // Opacity and Hide are PERSISTED fields (format v49), so an edit to either
   // belongs on the undo stack. Opacity is a drag, so it follows the
@@ -445,6 +446,11 @@ void DrawSketchToolWindow(AppState& state) {
     ImGui::SetNextItemWidth(90);
     ExprDragFloat(state, "Radius##fillet", &edit.filletRadius, 0.02f, 0.01f,
                   1e6f, "%.3f");
+    // The number above is the NEXT fillet's radius — an existing fillet does
+    // not follow it, which reads as "the box does nothing" the first time.
+    // The arc stays tangent-constrained, so a radius dimension resizes it.
+    ImGui::TextDisabled("Applies to the next corner. To resize an existing\n"
+                        "fillet, put a Dimension on its arc.");
     break;
   case SketchTool::Pattern: {
     BeginToolWindowFrame(state, "Sketch Pattern");
@@ -712,7 +718,11 @@ RegionsFromSelection(const SketchFeature& sketch,
     std::vector<uint32_t> ids = sketch::LoopEntityIds(loop);
     for (uint32_t id : ids) {
       if (selIds.count(id)) {
-        regions.push_back(std::move(ids));
+        // The loop's whole pattern/mirror family rides along: a selected
+        // bolt-circle hole means the bolt circle, not one fifth of it.
+        for (std::vector<uint32_t>& r : sketch.SiblingRegions(ids))
+          if (std::find(regions.begin(), regions.end(), r) == regions.end())
+            regions.push_back(std::move(r));
         break;
       }
     }

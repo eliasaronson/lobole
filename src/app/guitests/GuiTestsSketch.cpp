@@ -822,6 +822,65 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->slotPick.Active());
   };
 
+  // A linked pattern is ONE profile family: clicking one hole of a bolt
+  // circle picks every hole; clicking again removes them all. The five-hole
+  // flange this comes from took five hand picks — one per identical hole.
+  t = IM_REGISTER_TEST(engine, "region", "pattern_family_picks_together");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    auto sk =
+        std::make_unique<SketchFeature>("Profiles", SketchPlane(PlaneType::XY));
+    const uint32_t src = sk->AddEntity(sketch::Circle{{2, 0}, 0.8});
+    sk->AddCircularPattern({src}, {0, 0}, 2.0 * M_PI / 3.0, /*count=*/3,
+                           /*link=*/true);
+    const uint32_t lone = sk->AddEntity(sketch::Circle{{6, 0}, 0.8});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>("Pad", skId, 2.0,
+                                                       ExtrudeMode::NewBody));
+    Doc()->Regenerate();
+    const uint64_t extId = Doc()->GetFeature(1)->GetId();
+    ui::OpenFeatureEditor(*s_App, extId);
+
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(1.5f, 0.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(1.5f, 0.5f, 16.0f));
+    ctx->Yield();
+
+    ctx->ItemClick("//Extrude###ToolWindow/###slot7");
+    IM_CHECK(s_App->slotPick.Active());
+
+    // One click inside the SOURCE hole: the whole pattern family, and only
+    // it — the free-standing circle is not part of the pattern.
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(2.0f, 0.0f, 0.0f)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    auto* ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)3);
+    for (const std::vector<uint32_t>& r : ext->regions)
+      IM_CHECK(r != std::vector<uint32_t>{lone});
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() -
+                      3.0 * M_PI * 0.64 * 2.0) < 1e-2);
+
+    // A second click on the same (now picked) hole removes the family:
+    // back to all regions, the lone circle included again.
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)0);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() -
+                      4.0 * M_PI * 0.64 * 2.0) < 1e-2);
+
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.Active());
+  };
+
   // U6: the Ctrl+K command palette — fuzzy find "box", Enter runs the
   // Create Box command (same action the menu calls).
   t = IM_REGISTER_TEST(engine, "dims", "label_drag");
@@ -1815,5 +1874,54 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(sk != nullptr && sk->images.size() == 1);
     IM_CHECK(std::abs(sk->images[0].unitsPerPixel - upp) > 1e-9);
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+  };
+
+  // Moving a reference image: with its session open, grab anywhere ON the
+  // image and drag. Before 2026-08-25 an image sat wherever Insert centred
+  // it — the only thing that could shift one was Calibrate, as a side effect
+  // of a rescale.
+  t = IM_REGISTER_TEST(engine, "sketch", "reference_image_drag_moves_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+    const std::string fixture = std::string(DESIGNER_SOURCE_DIR) +
+                                "/tests/fixtures/images/checker16x12.png";
+    const uint32_t id = ui::AddReferenceImageToSketch(*s_App, fixture);
+    IM_CHECK(id != 0);
+    s_App->sketchEdit.selectedImageId = id;
+    ui::SetSketchTool(*s_App, ui::SketchTool::Image);
+    ctx->Yield(4);
+
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    const glm::vec2 origin0 = sk->images[0].origin;
+    // Insert centres the image on the plane origin, so UV (0,0) is on it.
+    const glm::vec2 from =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, 0.0f));
+    const glm::vec2 to =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(3.0f, 2.0f));
+    ctx->MouseMoveToPos(ImVec2(from.x, from.y));
+    ctx->Yield();
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.imageDragActive);
+    ctx->MouseMoveToPos(ImVec2(to.x, to.y));
+    ctx->Yield(2);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    const glm::vec2 moved = sk->images[0].origin - origin0;
+    // The image followed the mouse by the dragged UV span.
+    IM_CHECK(std::abs(moved.x - 3.0f) < 0.2f);
+    IM_CHECK(std::abs(moved.y - 2.0f) < 0.2f);
+    // ONE undo entry for the whole drag, restoring the grab-time position.
+    IM_CHECK(s_App->commands->CanUndo());
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    IM_CHECK(glm::length(sk->images[0].origin - origin0) < 1e-4f);
   };
 }

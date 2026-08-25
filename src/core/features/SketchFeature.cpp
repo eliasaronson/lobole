@@ -239,6 +239,45 @@ size_t SketchFeature::IndexOfEntity(uint32_t id) const {
   return std::numeric_limits<size_t>::max();
 }
 
+std::vector<std::vector<uint32_t>>
+SketchFeature::SiblingRegions(const std::vector<uint32_t>& ids) const {
+  const std::set<uint32_t> idSet(ids.begin(), ids.end());
+  for (const sketch::DerivedOp& op : derived) {
+    // A linked copy is a loose paste, not a replication of one shape — its
+    // copy being a separate profile IS a reasonable intent. Patterns and
+    // mirrors replicate; those expand.
+    if (op.kind == sketch::DerivedKind::LinkedCopy)
+      continue;
+    // Family member id-sets: the sources, then each replication index k
+    // (a multi-entity source contributes one Inst per entity per k).
+    std::vector<std::set<uint32_t>> members;
+    members.emplace_back(op.sourceIds.begin(), op.sourceIds.end());
+    std::map<int, std::set<uint32_t>> byK;
+    for (const sketch::DerivedOp::Inst& in : op.instances)
+      byK[in.k].insert(in.genId);
+    for (auto& [k, s] : byK)
+      members.push_back(std::move(s));
+    const bool isMember =
+        std::any_of(members.begin(), members.end(),
+                    [&](const std::set<uint32_t>& m) { return m == idSet; });
+    if (!isMember)
+      continue;
+    // Every member that forms a whole profile loop right now, in
+    // LoopEntityIds order so each row is a valid `regions` entry.
+    std::vector<std::vector<uint32_t>> regions;
+    for (const sketch::Loop& loop : sketch::BuildLoops(entities)) {
+      std::vector<uint32_t> lids = sketch::LoopEntityIds(loop);
+      const std::set<uint32_t> lset(lids.begin(), lids.end());
+      if (std::any_of(members.begin(), members.end(),
+                      [&](const std::set<uint32_t>& m) { return m == lset; }))
+        regions.push_back(std::move(lids));
+    }
+    if (!regions.empty())
+      return regions;
+  }
+  return {ids};
+}
+
 uint32_t SketchFeature::AddImage(sketch::ReferenceImage img) {
   const uint32_t id = nextImageId++;
   img.id = id;
