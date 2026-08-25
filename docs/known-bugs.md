@@ -31,11 +31,20 @@ reproduces the original.
 
 ## The GUI suite has order-dependent failures nobody has caught in the act
 
-`conflicts/resolve_a_merge_in_the_panel` failed once on 2026-08-25 in a
-sharded run — `panel != nullptr`, the Conflicts panel not found — and passed
-alone, and passed on the next full run of the same binary. That is the second
-instance this month of the same SHAPE: a GUI test that fails only in company,
-where the 4-shard partition decides who its company is.
+**Three different tests did this on 2026-08-25 alone**, each failing once in a
+sharded run and passing on the next run of the same binary:
+
+| test | how it failed |
+|---|---|
+| `terminal/off_by_default_docks_right_on` | the panel docked but `Hidden` (diagnosed, then stopped reproducing — see below) |
+| `conflicts/resolve_a_merge_in_the_panel` | `panel != nullptr` — the Conflicts panel not found |
+| `compare/compare_shape_against_a_version` | in the final verification run of this round |
+
+One is an incident. Three in a day is a property of the suite. The shape is
+always the same — a test that fails only in company, where the 4-shard
+partition decides who its company is — and machine load is a plausible
+accelerant: the run that failed shared the machine with a full headless suite,
+and the clean rerun of the same binary took 610 s against 205 s.
 
 The first (`terminal/off_by_default_docks_right_on`) was diagnosed to a window
 left `Hidden` after a dock-layout rebuild, went away without anyone
@@ -43,9 +52,15 @@ identifying the fix, and is withdrawn below. This one is not diagnosed at all.
 
 **What would actually help**, in order: `--gui-test-shuffle` exists and CI runs
 it (`d1396b5`), so the cheap move is running the suite shuffled a few times
-and keeping the seed of a failure — the failures are reproducible per seed,
+and **keeping the seed of a failure** — failures are reproducible per seed,
 which is the whole point of the flag. Chasing one from a single observation is
-what the terminal case shows does not pay.
+what the terminal case shows does not pay: it was diagnosed to a window left
+`Hidden` after a dock-layout rebuild, four fixes were tried and rejected, and
+then it stopped reproducing without anyone identifying what fixed it.
+
+A second, cheaper move given the load correlation: capture the shard logs on
+failure rather than leaving them in `/tmp` to be overwritten by the next run.
+The three above were each read from a log that the next run destroyed.
 
 ---
 
