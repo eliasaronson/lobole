@@ -185,6 +185,14 @@ std::string FormatLength(double mm, const System& sys) {
   return FormatNumber(mm / MmPer(sys.length)) + " " + ToString(sys.length);
 }
 
+std::string FormatArea(double mm2, const System& sys) {
+  // The length unit SQUARED, for the same reason FormatVolume cubes it: a
+  // face area belongs in the document's units, and switching between mm² and
+  // cm² per value would make two areas incomparable.
+  const double per = MmPer(sys.length);
+  return FormatNumber(mm2 / (per * per)) + " " + AreaSuffix(sys);
+}
+
 std::string FormatVolume(double mm3, const System& sys) {
   // The length unit CUBED, fixed — not whichever of mm³/cm³/L happens to make
   // this one value short. A column of volumes has to be comparable down the
@@ -204,6 +212,10 @@ std::string FormatAngle(double degrees, const System& sys) {
 }
 
 std::string LengthSuffix(const System& sys) { return ToString(sys.length); }
+
+std::string AreaSuffix(const System& sys) {
+  return std::string(ToString(sys.length)) + "\xc2\xb2"; // U+00B2
+}
 
 std::string VolumeSuffix(const System& sys) {
   return std::string(ToString(sys.length)) + "\xc2\xb3"; // U+00B3

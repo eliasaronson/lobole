@@ -116,6 +116,90 @@ gp_Trsf ToTrsf(const glm::mat4& m) {
   return t;
 }
 
+// What a face or an edge IS: the kind vocabulary, plus the radius and axis
+// wherever the surface/curve defines them. ONE switch per shape type, shared
+// by the two entry points that classify — DescribeFaceAt/DescribeEdgeAt
+// (which resolve by element-map INDEX) and Describe (which resolves by
+// stable NAME). They had drifted: Describe classified circular edges only,
+// so a cylindrical face reported its area and never its radius.
+struct ShapeClass {
+  std::string kind;
+  double radius = 0.0;
+  bool hasRadius = false;
+  glm::vec3 axis{0.0f};
+  bool hasAxis = false;
+};
+
+ShapeClass ClassifyFace(const TopoDS_Face& face) {
+  ShapeClass out;
+  BRepAdaptor_Surface surf(face);
+  const auto axisOf = [&out](const gp_Ax1& ax) {
+    const gp_Dir a = ax.Direction();
+    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.hasAxis = true;
+  };
+  switch (surf.GetType()) {
+  case GeomAbs_Plane:
+    out.kind = "plane";
+    break;
+  case GeomAbs_Cylinder:
+    out.kind = "cylinder";
+    out.radius = surf.Cylinder().Radius();
+    out.hasRadius = true;
+    axisOf(surf.Cylinder().Axis());
+    break;
+  case GeomAbs_Cone:
+    out.kind = "cone";
+    axisOf(surf.Cone().Axis());
+    break;
+  case GeomAbs_Sphere:
+    out.kind = "sphere";
+    out.radius = surf.Sphere().Radius();
+    out.hasRadius = true;
+    break;
+  case GeomAbs_Torus:
+    // Round-8 retro: bent tubes are toruses; "other" made them
+    // unassertable. radius = the MINOR (tube) radius — what a bent-rod
+    // query wants; the axis is the ring's.
+    out.kind = "torus";
+    out.radius = surf.Torus().MinorRadius();
+    out.hasRadius = true;
+    axisOf(surf.Torus().Axis());
+    break;
+  default:
+    out.kind = "other";
+    break;
+  }
+  return out;
+}
+
+ShapeClass ClassifyEdge(const TopoDS_Edge& edge) {
+  ShapeClass out;
+  BRepAdaptor_Curve curve(edge);
+  switch (curve.GetType()) {
+  case GeomAbs_Line:
+    out.kind = "line";
+    break;
+  case GeomAbs_Circle: {
+    // Full circle vs arc: the trimmed parameter span of a circular edge is
+    // its swept angle.
+    const double sweep =
+        std::abs(curve.LastParameter() - curve.FirstParameter());
+    out.kind = sweep >= 2.0 * M_PI - 1e-6 ? "circle" : "arc";
+    out.radius = curve.Circle().Radius();
+    out.hasRadius = true;
+    const gp_Dir a = curve.Circle().Axis().Direction();
+    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.hasAxis = true;
+    break;
+  }
+  default:
+    out.kind = "other";
+    break;
+  }
+  return out;
+}
+
 } // namespace
 
 std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
@@ -153,48 +237,12 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
       }
     }
   }
-  BRepAdaptor_Surface surf(TopoDS::Face(f));
-  switch (surf.GetType()) {
-  case GeomAbs_Plane:
-    out.kind = "plane";
-    break;
-  case GeomAbs_Cylinder: {
-    out.kind = "cylinder";
-    out.radius = surf.Cylinder().Radius();
-    out.hasRadius = true;
-    const gp_Dir a = surf.Cylinder().Axis().Direction();
-    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
-    out.hasAxis = true;
-    break;
-  }
-  case GeomAbs_Cone: {
-    out.kind = "cone";
-    const gp_Dir a = surf.Cone().Axis().Direction();
-    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
-    out.hasAxis = true;
-    break;
-  }
-  case GeomAbs_Sphere:
-    out.kind = "sphere";
-    out.radius = surf.Sphere().Radius();
-    out.hasRadius = true;
-    break;
-  case GeomAbs_Torus: {
-    // Round-8 retro: bent tubes are toruses; "other" made them
-    // unassertable. radius = the MINOR (tube) radius — what a bent-rod
-    // query wants; the axis is the ring's.
-    out.kind = "torus";
-    out.radius = surf.Torus().MinorRadius();
-    out.hasRadius = true;
-    const gp_Dir a = surf.Torus().Axis().Direction();
-    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
-    out.hasAxis = true;
-    break;
-  }
-  default:
-    out.kind = "other";
-    break;
-  }
+  const ShapeClass sc = ClassifyFace(TopoDS::Face(f));
+  out.kind = sc.kind;
+  out.radius = sc.radius;
+  out.hasRadius = sc.hasRadius;
+  out.axis = sc.axis;
+  out.hasAxis = sc.hasAxis;
   return out;
 }
 
@@ -213,27 +261,12 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
       0.5 * (curve.FirstParameter() + curve.LastParameter());
   const gp_Pnt mid = curve.Value(midParam);
   out.midpoint = glm::vec3(mid.X(), mid.Y(), mid.Z());
-  switch (curve.GetType()) {
-  case GeomAbs_Line:
-    out.kind = "line";
-    break;
-  case GeomAbs_Circle: {
-    // Full circle vs arc: the trimmed parameter span of a circular edge is
-    // its swept angle.
-    const double sweep =
-        std::abs(curve.LastParameter() - curve.FirstParameter());
-    out.kind = sweep >= 2.0 * M_PI - 1e-6 ? "circle" : "arc";
-    out.radius = curve.Circle().Radius();
-    out.hasRadius = true;
-    const gp_Dir a = curve.Circle().Axis().Direction();
-    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
-    out.hasAxis = true;
-    break;
-  }
-  default:
-    out.kind = "other";
-    break;
-  }
+  const ShapeClass sc = ClassifyEdge(TopoDS::Edge(e));
+  out.kind = sc.kind;
+  out.radius = sc.radius;
+  out.hasRadius = sc.hasRadius;
+  out.axis = sc.axis;
+  out.hasAxis = sc.hasAxis;
   return out;
 }
 
@@ -670,20 +703,22 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
   Element out;
   out.kind = kind;
   GProp_GProps props;
+  // The same classifier both index-keyed describes use, so a face resolved by
+  // NAME reports the cylinder it is — a bore measured in the GUI used to come
+  // back as 4712.390 mm² of surface area and no diameter at all.
+  const ShapeClass sc = kind == "face" ? ClassifyFace(TopoDS::Face(shape))
+                                       : ClassifyEdge(TopoDS::Edge(shape));
+  out.shape = sc.kind;
+  out.radius = sc.radius;
+  out.hasRadius = sc.hasRadius;
+  out.axis = sc.axis;
+  out.hasAxis = sc.hasAxis;
   if (kind == "face") {
     BRepGProp::SurfaceProperties(shape, props);
     out.area = props.Mass();
   } else {
     BRepGProp::LinearProperties(shape, props);
     out.length = props.Mass();
-    // A circular or arc edge also reports its radius — the top measure use
-    // (hole/fillet sizing). Straight edges leave hasRadius false.
-    BRepAdaptor_Curve curve(TopoDS::Edge(shape));
-    const GeomAbs_CurveType type = curve.GetType();
-    if (type == GeomAbs_Circle) {
-      out.radius = curve.Circle().Radius();
-      out.hasRadius = true;
-    }
   }
   return out;
 }

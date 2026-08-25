@@ -15,9 +15,20 @@ struct Element {
   std::string kind;    // "face" | "edge"
   double area = 0.0;   // faces
   double length = 0.0; // edges
-  // A circular/arc edge additionally reports its radius (0/false otherwise).
+  // What the element IS, in the vocabulary DescribeFaceAt/DescribeEdgeAt and
+  // query_geometry already use: "plane"|"cylinder"|"cone"|"sphere"|"torus"|
+  // "other" for a face, "line"|"circle"|"arc"|"other" for an edge.
+  std::string shape;
+  // A radius wherever one is defined — a circular/arc EDGE, and a cylinder,
+  // sphere or torus FACE. The face half was computed and dropped for a year:
+  // clicking a bore in the Measure tool reported its surface area, where
+  // every CAD system reports a diameter.
   double radius = 0.0;
   bool hasRadius = false;
+  // The axis direction of a cylinder/cone/torus face or a circular edge. Its
+  // SIGN is arbitrary (an axis has no outward), so compare with |dot|.
+  glm::vec3 axis{0.0f};
+  bool hasAxis = false;
 };
 
 // Resolve + describe one element (face area / edge length). nullopt when the

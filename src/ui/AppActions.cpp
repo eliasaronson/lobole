@@ -997,6 +997,12 @@ void ResetActiveTabUiState(AppState& state) {
   // Any tab change exits simulation mode (results themselves live on the
   // Document and survive; only the mode/display state resets).
   state.simulation = SimulationState{};
+  // ...and drops the measure session. Its picks are ElementRefs into the
+  // document that was on screen; carried onto another tab they resolve
+  // against nothing while the readout keeps displaying the old distance over
+  // geometry that was never measured. Simulation was reset here from the
+  // start and measure was simply missed.
+  state.measure = MeasureState{};
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 } // namespace
@@ -4308,18 +4314,26 @@ void ApplyBlendEdgePick(AppState& state, FilletFeature& fil,
 }
 
 namespace {
-// A measured element as a one-line readout.
-std::string FormatElement(const Measure::Element& e) {
-  char buf[128];
+// A measured element as a one-line readout, in the DOCUMENT's units — this
+// printed "%.3f mm" regardless, so a part authored in inches measured in
+// millimetres, and three fixed decimals claimed precision a tessellated
+// solid does not have. units::Format* applies the significant-figures and
+// thousands-separator rules the feature tree and the BOM already use.
+std::string FormatElement(const Measure::Element& e, const units::System& u) {
+  std::string out;
   if (e.kind == "face") {
-    snprintf(buf, sizeof buf, "Face area: %.3f mm\xc2\xb2", e.area);
-  } else if (e.hasRadius) {
-    snprintf(buf, sizeof buf, "Edge length: %.3f mm   radius: %.3f mm",
-             e.length, e.radius);
+    out = "Face area: " + units::FormatArea(e.area, u);
   } else {
-    snprintf(buf, sizeof buf, "Edge length: %.3f mm", e.length);
+    out = "Edge length: " + units::FormatLength(e.length, u);
   }
-  return buf;
+  // A radius wherever the surface or curve defines one — including a
+  // cylindrical FACE, where a bore used to report only its surface area.
+  // Diameter first: it is the number on the drawing.
+  if (e.hasRadius) {
+    out += "   \xc3\x98" + units::FormatLength(e.radius * 2.0, u) + " (R" +
+           units::FormatLength(e.radius, u) + ")";
+  }
+  return out;
 }
 } // namespace
 
@@ -4360,11 +4374,12 @@ void UpdateMeasureReadout(AppState& state) {
     m.readout.clear();
     return;
   }
+  const units::System u = state.ActiveUnits();
   if (m.picked.size() == 1) {
     const auto src = ResolveMeasureSource(state, m.picked[0]);
     if (src) {
       if (const auto e = Measure::Describe(*src->bodies, m.picked[0].ref)) {
-        m.readout = src->prefix + FormatElement(*e);
+        m.readout = src->prefix + FormatElement(*e, u);
         return;
       }
     }
@@ -4378,20 +4393,20 @@ void UpdateMeasureReadout(AppState& state) {
     if (srcA && srcB)
       d = Measure::DistanceDetailed(*srcA->bodies, m.picked[0].ref, srcA->xf,
                                     *srcB->bodies, m.picked[1].ref, srcB->xf);
-    char buf[192];
     if (d) {
+      // Signed deltas, not absolute ones. "40 mm in X" and "-40 mm in X" are
+      // a part and its mirror image; std::abs threw away which one this is.
       const glm::vec3 delta = d->pointB - d->pointA;
-      snprintf(buf, sizeof buf,
-               "Distance: %.3f mm (nearest)\ndx %.3f  dy %.3f  dz %.3f mm",
-               d->distance, std::abs(delta.x), std::abs(delta.y),
-               std::abs(delta.z));
+      m.readout = "Distance: " + units::FormatLength(d->distance, u) +
+                  " (nearest)\ndx " + units::FormatLength(delta.x, u) +
+                  "  dy " + units::FormatLength(delta.y, u) + "  dz " +
+                  units::FormatLength(delta.z, u);
       m.hasDistanceLine = true;
       m.distA = d->pointA;
       m.distB = d->pointB;
     } else {
-      snprintf(buf, sizeof buf, "Could not measure the distance.");
+      m.readout = "Could not measure the distance.";
     }
-    m.readout = buf;
     return;
   }
   m.readout = std::to_string(m.picked.size()) +

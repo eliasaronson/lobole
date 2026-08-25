@@ -189,6 +189,31 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // ...and so does a tab switch. A measured element is an ElementRef into the
+  // document that was on screen; carried to another tab it resolves against
+  // nothing, while the readout keeps displaying the old distance over
+  // geometry that was never measured. ResetActiveTabUiState cleared the
+  // selection, slot picks, sketch edit and simulation mode, and missed this.
+  t = IM_REGISTER_TEST(engine, "measure", "cleared_on_tab_switch");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+
+    s_App->measure.active = true;
+    s_App->measure.picked.push_back({ElementRef{boxId, "1/face0"}, false, 0});
+    s_App->measure.picked.push_back({ElementRef{boxId, "1/face1"}, false, 0});
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(!s_App->measure.readout.empty()); // it measured something
+
+    ui::AddPart(*s_App, "Part 2");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)0);
+    IM_CHECK(s_App->measure.readout.empty());
+    IM_CHECK(!s_App->measure.hasDistanceLine);
+  };
+
   // Simulation is the one workspace that emits numbers a person would act on,
   // and its setup defaults were world literals: gravity along -Z (sideways,
   // since world up is +Y), a force direction chosen before the face was

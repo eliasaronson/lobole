@@ -73,6 +73,7 @@ std::string FormatNumber(double value, int sigFigs = 6);
 // Storage in, display out. The suffix is included ("124.5 mm", "10 080 000
 // mm³", "385.17 kg", "45°").
 std::string FormatLength(double mm, const System& sys);
+std::string FormatArea(double mm2, const System& sys);
 std::string FormatVolume(double mm3, const System& sys);
 std::string FormatMass(double grams, const System& sys);
 std::string FormatAngle(double degrees, const System& sys);
@@ -80,6 +81,7 @@ std::string FormatAngle(double degrees, const System& sys);
 // The unit suffix alone, for a table column header that should not repeat it
 // on every row.
 std::string LengthSuffix(const System& sys);
+std::string AreaSuffix(const System& sys);
 std::string VolumeSuffix(const System& sys);
 std::string MassSuffix(const System& sys);
 

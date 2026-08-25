@@ -72,6 +72,53 @@ TEST_CASE("Measure a box's face areas and edge lengths", "[measure]") {
   CHECK_THAT(hi, WithinRel(4.0, 1e-9));
 }
 
+TEST_CASE("Describe reports a cylindrical face's radius", "[measure]") {
+  // The gap this closes: Describe (resolve by stable NAME — what the GUI tool
+  // and the `measure` RPC both use) classified circular EDGES only, so
+  // clicking a bore reported 4712 mm² of surface area and no diameter, while
+  // DescribeFaceAt — resolve by INDEX, used by query_geometry — had the
+  // radius all along. One classifier now serves both.
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "C", glm::vec3(0), glm::vec3(0, 0, 1), /*radius=*/2.0, /*height=*/5.0));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+
+  bool sawWall = false, sawCap = false;
+  for (const std::string& name : FaceNames(body)) {
+    const auto e = Measure::Describe(doc.GetBodies(), ElementRef{id, name});
+    REQUIRE(e.has_value());
+    CHECK(e->kind == "face");
+    if (e->shape == "cylinder") {
+      sawWall = true;
+      REQUIRE(e->hasRadius);
+      CHECK_THAT(e->radius, WithinRel(2.0, 1e-9));
+      REQUIRE(e->hasAxis);
+      // The axis is the cylinder's, up to an arbitrary sign.
+      CHECK_THAT(std::abs(glm::dot(e->axis, glm::vec3(0, 0, 1))),
+                 WithinRel(1.0f, 1e-4f));
+    } else if (e->shape == "plane") {
+      sawCap = true;
+      CHECK_FALSE(e->hasRadius); // a flat cap is not round in the CAD sense
+    }
+  }
+  CHECK(sawWall);
+  CHECK(sawCap);
+
+  // Edges keep what they always reported, now through the shared classifier.
+  bool sawCircle = false;
+  for (const std::string& name : EdgeNames(body)) {
+    const auto e = Measure::Describe(doc.GetBodies(), ElementRef{id, name});
+    REQUIRE(e.has_value());
+    if (e->shape == "circle") {
+      sawCircle = true;
+      REQUIRE(e->hasRadius);
+      CHECK_THAT(e->radius, WithinRel(2.0, 1e-9));
+    }
+  }
+  CHECK(sawCircle);
+}
+
 TEST_CASE("Measure distance between two boxes' faces", "[measure]") {
   Document doc;
   doc.AddFeature(

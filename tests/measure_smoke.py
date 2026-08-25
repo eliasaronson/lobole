@@ -78,13 +78,35 @@ def main():
         expect(radius_seen is not None and abs(radius_seen - 5.0) < 1e-6,
                f"a circular edge reported radius 5: {radius_seen}")
 
-        # A cap face area = pi r^2.
+        # A cap face area = pi r^2, and the CYLINDRICAL WALL reports the bore
+        # it is. That second half is the regression: this loop measured every
+        # face and only ever asserted area, so a wall came back as 314 mm^2 of
+        # surface and no diameter — the number every CAD system gives you for
+        # a hole — while query_geometry had the radius all along.
         cap = None
+        wall = None
         for f in els["faces"]:
             a = d.call("measure", a={"feature_id": fid, "element": f["name"]})
-            if abs(a["area"] - math.pi * 25) < 1e-2:
+            if a["shape"] == "cylinder":
+                wall = a
+            elif abs(a["area"] - math.pi * 25) < 1e-2:
                 cap = a
         expect(cap is not None, "a cap face reports pi*r^2 area")
+        expect(cap["shape"] == "plane", f"a cap is a plane: {cap}")
+        expect("radius" not in cap, f"a flat cap has no radius: {cap}")
+        expect(wall is not None, "the cylindrical wall was measured")
+        expect(abs(wall["radius"] - 5.0) < 1e-6, f"wall radius 5: {wall}")
+        expect(abs(wall["diameter"] - 10.0) < 1e-6, f"wall diameter 10: {wall}")
+        expect("axis" in wall, f"a cylinder reports its axis: {wall}")
+
+        # list_elements carries the same radius. It read it off DescribeFaceAt
+        # and dropped it on the floor, so the obvious listing did not carry
+        # the obvious number.
+        listed = [f for f in els["faces"] if f["kind"] == "cylinder"]
+        expect(len(listed) == 1, f"one cylindrical face listed: {listed}")
+        expect(abs(listed[0]["radius"] - 5.0) < 1e-6,
+               f"list_elements keeps the face radius: {listed[0]}")
+
 
         # Distance between the two cap faces = the height (10).
         cap_names = []
@@ -98,6 +120,34 @@ def main():
                       b={"feature_id": fid, "element": cap_names[1]})
         expect(abs(dist["distance"] - 10.0) < 1e-3,
                f"cap-to-cap distance is the height: {dist}")
+
+        # `describe` must name what the handler DOES, and this row advertised
+        # "point/distance/angle/radius" for a year while only distance was
+        # implemented. Introspection is what an agent trusts INSTEAD of
+        # guessing, so a row promising an unwritten branch is worse than no
+        # row at all. Asserted in BOTH directions, against the live handler,
+        # so it cannot drift again either way: a claim with no branch fails,
+        # and a branch nobody documented fails too.
+        row = None
+        for mrow in d.call("describe")["methods"]:
+            if mrow["name"] == "measure":
+                row = mrow["doc"].lower()
+        expect(row is not None, "describe has a measure row")
+
+        pair = dict(a={"feature_id": fid, "element": cap_names[0]},
+                    b={"feature_id": fid, "element": cap_names[1]})
+
+        def works(**kw):
+            try:
+                d.call("measure", **kw)
+                return True
+            except RuntimeError:
+                return False
+
+        expect(("angle" in row) == works(kind="angle", **pair),
+               f"describe and the handler disagree about angle: {row}")
+        expect(("point" in row) == works(kind="point", **pair),
+               f"describe and the handler disagree about point: {row}")
 
         # Mass properties: CoM on the axis at half height (the CoG marker).
         total = d.call("mass_properties")["total"]

@@ -47,6 +47,19 @@ TEST_CASE("storage is mm/g/deg; the units are display only", "[units]") {
   CHECK(units::FormatLength(25.4, in) == "1 in");
   CHECK(units::FormatVolume(16387.064, in) == "1 in\xc2\xb3");
   CHECK(units::FormatMass(453.59237, in) == "1 lb");
+  CHECK(units::FormatArea(645.16, in) == "1 in\xc2\xb2");
+}
+
+TEST_CASE("an area is the length unit SQUARED", "[units]") {
+  // Added for the measure readout, which printed "mm²" as a literal — a face
+  // area on an inch part read in millimetres. Same fixed-per-document rule
+  // as FormatVolume, one power down.
+  units::System sys;
+  CHECK(units::FormatArea(9.0, sys) == "9 mm\xc2\xb2");
+  CHECK(units::AreaSuffix(sys) == "mm\xc2\xb2");
+  sys.length = units::Length::Centimetre;
+  CHECK(units::FormatArea(100.0, sys) == "1 cm\xc2\xb2");
+  CHECK(units::AreaSuffix(sys) == "cm\xc2\xb2");
 }
 
 TEST_CASE("a volume is the length unit CUBED, not whichever fits", "[units]") {

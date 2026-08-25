@@ -143,8 +143,15 @@ static constexpr MethodDoc InspectionMethods[] = {
                        "feature_errors, bodies:[...B-Rep checks]}."},
     {"mass_properties",
      "Mass/volume/center-of-mass per body and total (density from materials)."},
-    {"measure", "Geometry queries over stable element names: "
-                "point/distance/angle/radius between elements a and b."},
+    // This row said "point/distance/angle/radius" for a year and the handler
+    // implemented distance. `describe` is what an agent trusts INSTEAD of
+    // guessing, so a row that promises a branch nobody wrote is the
+    // "refuse, don't substitute" rule inverted — we refuse the call and
+    // advertise the capability. It now names exactly what runs.
+    {"measure", "Geometry queries over stable element names. {a}: that "
+                "element's own measure (face area / edge length, plus shape "
+                "kind and radius+diameter where the surface or curve defines "
+                "one). {a,b}: the minimum distance between them."},
     {"list_elements", "Stable face/edge names per body (the toponaming handles "
                       "measure/fillet/mates use)."},
     {"interference",
@@ -1358,14 +1365,21 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const auto e = Measure::Describe(bodies, a);
     if (!e)
       throw std::runtime_error("measure: element did not resolve");
-    json out = {{"kind", e->kind}};
-    if (e->kind == "face") {
+    json out = {{"kind", e->kind}, {"shape", e->shape}};
+    if (e->kind == "face")
       out["area"] = e->area;
-    } else {
+    else
       out["length"] = e->length;
-      if (e->hasRadius)
-        out["radius"] = e->radius; // circular/arc edges
+    // A radius wherever one is defined: a circular/arc edge, and now a
+    // cylinder/sphere/torus FACE too — `query_geometry` has returned the
+    // face radius all along off the same classification, so an agent could
+    // read a bore's diameter and the person clicking that bore could not.
+    if (e->hasRadius) {
+      out["radius"] = e->radius;
+      out["diameter"] = e->radius * 2.0;
     }
+    if (e->hasAxis)
+      out["axis"] = {e->axis.x, e->axis.y, e->axis.z};
     return out;
   }
   if (m == "list_elements") {
@@ -1401,6 +1415,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           // Outward unit surface normal at the centroid: lets an agent tell a
           // +X wall from a -X wall without a separate select_face round-trip.
           f["normal"] = {fi->normal.x, fi->normal.y, fi->normal.z};
+          // Radius/axis of a cylinder, sphere, cone or torus. Computed here
+          // since C3 and emitted only by query_geometry until now, so the
+          // obvious listing did not carry the obvious number.
+          if (fi->hasRadius)
+            f["radius"] = fi->radius;
+          if (fi->hasAxis)
+            f["axis"] = {fi->axis.x, fi->axis.y, fi->axis.z};
         }
         faces.push_back(f);
       }
