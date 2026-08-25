@@ -866,8 +866,29 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() -
                       3.0 * M_PI * 0.64 * 2.0) < 1e-2);
 
-    // A second click on the same (now picked) hole removes the family:
-    // back to all regions, the lone circle included again.
+    // Ctrl narrows to ONE region: with the family picked, Ctrl+clicking the
+    // source hole drops just it — the "all of the pattern but this hole"
+    // intent the family toggle alone would make unreachable.
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)2);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() -
+                      2.0 * M_PI * 0.64 * 2.0) < 1e-2);
+    // And Ctrl+click adds a single region back the same way.
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)3);
+
+    // A plain second click on a picked hole removes the family: back to all
+    // regions, the lone circle included again.
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));

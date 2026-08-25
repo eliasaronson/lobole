@@ -847,9 +847,11 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       if (regions != nullptr && !ids.empty()) {
         // One click picks the loop's whole pattern/mirror family (a linked
         // pattern is ONE thing — see SketchFeature::SiblingRegions); a click
-        // on any already-picked member removes the family again.
+        // on any already-picked member removes the family again. Ctrl narrows
+        // it to THIS region alone — the four-of-five-holes intent, which the
+        // family toggle would otherwise make unreachable by clicking.
         std::vector<std::vector<uint32_t>> family = {ids};
-        if (state.document != nullptr)
+        if (!ImGui::GetIO().KeyCtrl && state.document != nullptr)
           if (auto* sk = dynamic_cast<SketchFeature*>(
                   state.document->FindFeatureById(sketchId)))
             family = sk->SiblingRegions(ids);
@@ -883,7 +885,8 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
   if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     std::vector<SlotSpec> specs = {
         {PickSlot::ExtrudeRegions, "Profiles", kRegion, true,
-         "Click sketch regions to extrude (again removes; none = all)",
+         "Click sketch regions to extrude (a pattern picks together, "
+         "Ctrl = one region; again removes; none = all)",
          /*required=*/false}};
     if (ext->endMode == ExtrudeEnd::UpToFace) {
       specs.push_back({PickSlot::ExtrudeEndFace, "Target face", kFace, false,
@@ -893,7 +896,8 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
   }
   if (dynamic_cast<const RevolveFeature*>(&feature) != nullptr) {
     return {{PickSlot::RevolveRegions, "Profiles", kRegion, true,
-             "Click sketch regions to revolve (again removes; none = all)",
+             "Click sketch regions to revolve (a pattern picks together, "
+             "Ctrl = one region; again removes; none = all)",
              /*required=*/false}};
   }
   if (dynamic_cast<const BooleanFeature*>(&feature) != nullptr) {
