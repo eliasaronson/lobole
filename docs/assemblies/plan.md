@@ -90,8 +90,13 @@ drag-within-mate (a mated occurrence's gizmo shows only the mate's free DOF,
 oriented by the connector frame, and drives the mate DOF); (4) connector
 inference snap — a mate connector snaps to the nearest hole (circular-edge)
 center on pick. Verified via ImGui-test-engine `viewport_drag` over dev-watch.
-Format v26. Remaining refinement: a hover snap-marker UI (edge midpoint /
-vertex / face-center picker) on the same `snap_edge` mechanism.
+Format v26. The hover snap-marker UI shipped 2026-07-24 (phase 4b) for edge
+midpoints and hole centres. **Remaining: corner snapping**, whose recorded
+blocker ("`ElementMap` does not yet provide persistent vertex names") turns
+out to be mis-stated — a corner is where two NAMED boundary edges meet, so it
+needs a second `ElementRef` on the anchor and no toponaming change. Designed
+and kernel-measured 2026-08-25 as phase 4c in
+[a2_5-design.md](a2_5-design.md); moderate, one session, one format bump.
 
 
 The A2 editing UX shipped **numeric-first** (Elias's call): occurrences are

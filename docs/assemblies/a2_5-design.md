@@ -122,6 +122,61 @@ and preview clearing. `FaceEdgeIndices exposes box-edge midpoint snaps` covers
 the kernel edge enumeration. Vertex/corner snapping remains deferred because
 `ElementMap` does not yet provide persistent vertex names.
 
+### Phase 4c — corner snapping — DESIGNED 2026-08-25, not built
+
+**That deferral reason above is wrong, and it cost a year.** It assumes a
+corner needs a persistent VERTEX name. It does not: a corner of the picked
+face is where two of that face's boundary edges meet, and both of those are
+already named. The anchor's existing `snapEdge` is itself a derived point
+with a stable identity taken from a named element — the origin is "that
+edge's centre, else its midpoint". A corner is the same trick with one more
+named ref, not a toponaming change.
+
+The same conclusion was reached independently from the other side in
+[../inspect/measure-v2.md](../inspect/measure-v2.md), whose M5 deferred
+vertex picking for the identical stated reason. Two workstreams, one
+mis-stated blocker.
+
+**Measured on the real kernel** (throwaway spike, 2026-08-25), which is what
+makes this a design rather than a hope:
+
+| shape | face | bounding edges | named | pairs sharing 1 vertex | sharing 2+ |
+|---|---|---|---|---|---|
+| box | any | 4 | 4 | **4** | 0 |
+| cylinder | the wall | 4 | 4 | 4 | **1** |
+| cylinder | a cap | 1 | 1 | 0 | 0 |
+
+Two things fall out. On prismatic geometry — which is what anyone is
+snapping a mate to — every corner is unambiguous and every bounding edge
+carries a name. And the ambiguous case is NOT hypothetical: two boundary
+edges sharing two vertices appears on the very first curved face tried. So
+the refusal rule is needed on day one, and a design that had not measured
+this would have shipped a corner that silently picks one of two points.
+
+**Design.** `ConnectorAnchor` gains a second `ElementRef snapEdge2`. When
+both are set, the frame origin is the vertex the two edges share; when they
+share none or two, the anchor falls back to `snapEdge`'s own characteristic
+point rather than guessing which corner was meant.
+
+1. **Kernel** — `CADShape::FaceCorners(faceIndex, points, edgePairs)`,
+   mirroring `FaceCircleCenters`: every pair of the face's bounding edges
+   that shares exactly one vertex, with that vertex and both edge indices in
+   the `ElementMap::edgeNames` order. Plus `CornerPoint(edgeA, edgeB, out)`
+   for resolving a stored anchor. ~55 lines.
+2. **Inference** — `ResolveAssemblyFacePick`'s candidate loop already ranks
+   every snap point by distance to the hit; corners join it as more
+   candidates. ~25 lines, no new ranking.
+3. **Schema** — `snap_edge2` in SerializeAssembly (2 sites), **kVersion 64 →
+   65**, one golden. The fixed cost of any format change here.
+4. **Frame** — `ConnectorLocalFrame` resolves the pair to the shared vertex.
+   ~15 lines.
+5. **UI** — a `SnapType::Corner`, its marker colour, and `Snap: corner` in
+   the toolbar, all beside the two that exist. ~10 lines.
+
+Tests: a box's face offers 4 corners and a cylinder's wall refuses its
+ambiguous pair (kernel); a mate snapped to a corner survives save/reload
+(golden); `assembly/mate_hover_marker` grows a corner-ranking case.
+
 ## Decisions for sign-off
 
 1. **OutlineRenderer gets a real per-mesh `model` push constant** (mirroring

@@ -569,19 +569,43 @@ was written to do. Two habits close that class:
 
 ## What shipped, and the one thing that did not
 
-Everything above except **M5's vertex picking**, which stays deferred and is
-now better understood: a vertex has no entry in the ElementMap, so it has no
-stable name. Adding `Kind::Vertex` without one would make vertex
-measurements the only ones that do not survive a regen — the invariant the
-whole measure surface rests on. Naming vertices is a toponaming change, which
-is the session and the review this plan said it needed, not a corner of a
-measure round.
+Everything above except **M5's vertex picking**, which stays deferred — but
+for a smaller reason than this plan gave, and with a design now written
+against the kernel rather than against an assumption.
 
-What that phase was FOR is delivered by other means: point-to-point between
-holes is `distance_kind: centres` on two circular edges or two bores, which
-now uses the true centre; and the snap targets it listed (hole centre, arc
-centre, face centroid) are exactly what CentreOf computes, derived from a
-named element so they inherit its stable identity.
+What that phase was FOR is mostly delivered by other means: point-to-point
+between holes is `distance_kind: centres` on two circular edges or two
+bores, which now uses the true centre; and the snap targets it listed (hole
+centre, arc centre, face centroid) are exactly what CentreOf computes,
+derived from a named element so they inherit its stable identity.
+
+### The blocker was mis-stated, in two workstreams at once
+
+The reason recorded here — a vertex has no ElementMap entry, so it has no
+stable name, so naming vertices is a toponaming change — is true of a RAW
+vertex and irrelevant to the thing anyone wants. A corner is where two
+NAMED edges of a face meet. Both halves are stable, so the pair is.
+
+The assembly side reached the same wall from the other direction a month
+earlier and wrote down the same reason: A2.5 phase 4b closes with "Vertex/
+corner snapping remains deferred because `ElementMap` does not yet provide
+persistent vertex names", while the mechanism it shipped in the same phase
+— `ConnectorAnchor::snapEdge`, whose origin is "that edge's centre, else its
+midpoint" — is already a stable derived point from a named element. The
+answer was sitting inside the thing that declared it impossible.
+
+A kernel spike (2026-08-25) settled the two facts a design needs: on a box,
+every face offers 4 unambiguous corners with all 4 bounding edges named; on
+a cylinder's wall, one edge pair shares TWO vertices, so the ambiguous case
+is real from the first curved face and must be refused rather than guessed.
+
+The design lives with the assembly work, since that is where a corner is
+first USED — see [../assemblies/a2_5-design.md](../assemblies/a2_5-design.md)
+phase 4c. It is one session and one format bump (v65), and it closes this
+item and A2.5's last refinement together. What measure adds on top is a
+`Kind::Corner` measurable carrying its two refs — session state, no format
+change — so "how far is this corner from that one" becomes askable by
+clicking and by script.
 
 Also not done, and recorded rather than smuggled in: `measure` and
 `interference` have near-twin occurrence resolution (id / name / "Unit/Part"
