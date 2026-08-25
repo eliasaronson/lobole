@@ -1,5 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "ui/AssemblyActions.h"
+#include "ui/MeasureOverlay.h"
 #include "ui/SimulationActions.h"
 
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -1289,6 +1290,19 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->measure.hasDistanceLine);
     const float gap = glm::length(s_App->measure.distB - s_App->measure.distA);
     IM_CHECK_LE(std::abs(gap - (10.0f - (max.x - min.x))), 1e-3f);
+
+    // ...and it is actually DRAWN. This test asserted `hasDistanceLine` — a
+    // variable — and passed for months while the assembly tab rendered
+    // nothing at all: the primitive build sat inside `if (state.document)`,
+    // which is null on every assembly tab, so the readout said "Distance:
+    // 427.814 mm" over a viewport with no line in it and no highlight on the
+    // picked edge. A claim that something is visible has to be asserted
+    // against the pixels' input, not against the intent.
+    std::vector<PrimVertex> prims;
+    ui::AppendMeasureOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    IM_CHECK(s_App->measure.dimension.valid);
+    IM_CHECK(!s_App->measure.dimension.label.empty());
 
     // Same face, same occurrence → toggles OFF (identity includes the
     // occurrence, so this must not add a third element).

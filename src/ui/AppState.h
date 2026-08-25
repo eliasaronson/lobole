@@ -364,6 +364,36 @@ struct MeasureState {
   bool hasDistanceLine = false;
   glm::vec3 distA{0.0f};
   glm::vec3 distB{0.0f};
+
+  // The DRAWN measurement (M2). Everything below is derived in
+  // UpdateMeasureReadout alongside the text, so the viewport and the panel
+  // cannot disagree about what was measured — the number and the picture are
+  // one computation, not two.
+  //
+  // Before this the whole visualization was a 2 px line between OCC's extrema
+  // pair, with the value in a panel across the screen: for two parallel
+  // 600 mm edges 45 mm apart that draws a stub at one far corner, and for a
+  // plate's thickness it draws INSIDE the solid where the depth test hides
+  // it.
+  struct Dimension {
+    bool valid = false;
+    glm::vec3 a{0.0f}, b{0.0f}; // the dimension line's ends (arrow tips)
+    // Where the elements actually are, when `a`/`b` were re-anchored off the
+    // extrema pair: witness lines run from these to the arrow tips.
+    glm::vec3 witnessA{0.0f}, witnessB{0.0f};
+    bool hasWitness = false;
+    std::string label; // "45 mm" — drawn at the dimension's midpoint
+
+    // The angle, as an arc from `arcFrom` to `arcTo` about `arcAt`. Drawn
+    // between the DIRECTIONS the angle was actually taken between (face
+    // normals for two planar faces, the edges themselves for two lines), so
+    // the picture shows the same basis the readout names.
+    bool hasArc = false;
+    glm::vec3 arcAt{0.0f};
+    glm::vec3 arcFrom{0.0f}, arcTo{0.0f}; // unit directions
+    std::string arcLabel;
+  };
+  Dimension dimension;
   // Hover feedback comes from the selection pipeline (U1c).
 };
 

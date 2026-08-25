@@ -4376,6 +4376,7 @@ ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
 void UpdateMeasureReadout(AppState& state) {
   auto& m = state.measure;
   m.hasDistanceLine = false;
+  m.dimension = MeasureState::Dimension{};
   if ((!state.document && !state.assembly) || m.picked.empty()) {
     m.readout.clear();
     return;
@@ -4468,6 +4469,62 @@ void UpdateMeasureReadout(AppState& state) {
       m.readout = angLine;
     else
       m.readout = distLine + "\n" + angLine;
+
+    // The picture, from the same numbers as the text.
+    if (d && srcA && srcB) {
+      auto& dim = m.dimension;
+      // Where to ATTACH the dimension, which is not always where the minimum
+      // was measured: for a parallel pair every point pair is equidistant, so
+      // OCC's answer is an arbitrary corner.
+      const auto anchors = Measure::DimensionAnchors(
+          *srcA->bodies, m.picked[0].ref, srcA->xf, *srcB->bodies,
+          m.picked[1].ref, srcB->xf, parallel);
+      const Measure::DistanceResult& at = anchors ? *anchors : *d;
+      dim.valid = !touching; // a zero-length dimension is not a picture
+      dim.a = at.pointA;
+      dim.b = at.pointB;
+      dim.label = units::FormatLength(at.distance, u);
+      // Witness lines back to where the extrema actually landed, so a
+      // re-anchored dimension still says which two things it spans.
+      dim.hasWitness =
+          anchors && (glm::distance(at.pointA, d->pointA) > 1e-4f ||
+                      glm::distance(at.pointB, d->pointB) > 1e-4f);
+      dim.witnessA = d->pointA;
+      dim.witnessB = d->pointB;
+
+      // The angle arc, drawn between the directions the angle was TAKEN
+      // between — so the picture and the stated basis are the same thing.
+      // Only where it reads: the elements have to meet somewhere for an arc
+      // about that point to mean anything.
+      if (ang && !ang->parallel && touching) {
+        const auto da = Measure::DirectionOf(*srcA->bodies, m.picked[0].ref);
+        const auto db = Measure::DirectionOf(*srcB->bodies, m.picked[1].ref);
+        const auto anchorA = Measure::AnchorOf(*srcA->bodies, m.picked[0].ref);
+        const auto anchorB = Measure::AnchorOf(*srcB->bodies, m.picked[1].ref);
+        if (da && db && anchorA && anchorB) {
+          const glm::vec3 at3 = d->pointA; // the contact point
+          // An unsigned direction (a line edge) gets the sign that points
+          // along the element and away from the contact, so the ray lies on
+          // the edge you can see rather than off into space.
+          const auto orient = [&](const Measure::Direction& dir,
+                                  const glm::vec3& anchor,
+                                  const glm::mat4& xf) {
+            glm::vec3 v =
+                glm::normalize(glm::vec3(glm::mat3(xf) * glm::vec3(dir.dir)));
+            if (!dir.oriented && glm::dot(v, anchor - at3) < 0.0f)
+              v = -v;
+            return v;
+          };
+          dim.arcAt = at3;
+          dim.arcFrom = orient(
+              *da, glm::vec3(srcA->xf * glm::vec4(*anchorA, 1.0f)), srcA->xf);
+          dim.arcTo = orient(
+              *db, glm::vec3(srcB->xf * glm::vec4(*anchorB, 1.0f)), srcB->xf);
+          dim.arcLabel = units::FormatAngle(ang->degrees, u);
+          dim.hasArc = true;
+        }
+      }
+    }
     return;
   }
   m.readout = std::to_string(m.picked.size()) +

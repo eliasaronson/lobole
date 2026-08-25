@@ -572,6 +572,7 @@ set(app_sources
     src/ui/TextFit.cpp
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
+    src/ui/MeasureOverlay.cpp
     src/ui/SelectionPipeline.cpp
     src/ui/CommandPalette.cpp
     src/ui/Commands.cpp

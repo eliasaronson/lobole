@@ -272,6 +272,11 @@ bool SketchRenderer::CreatePipelines() {
   ok = ok &&
        makePipeline(primStages, &primInput, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
                     true, m_primPipeline);
+  // Same pipeline, depth test off — measurement annotations that must stay
+  // visible where they pass through material.
+  ok = ok &&
+       makePipeline(primStages, &primInput, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                    true, m_primOnTopPipeline, /*depthTest=*/false);
 
   vkDestroyShaderModule(m_device, vert, nullptr);
   vkDestroyShaderModule(m_device, frag, nullptr);
@@ -344,8 +349,12 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
       UploadRaw(m_primBuffers[frame], m_primitives.data(),
                 m_primitives.size() * sizeof(PrimVertex),
                 static_cast<uint32_t>(m_primitives.size()));
+  const uint32_t onTopCount =
+      UploadRaw(m_primOnTopBuffers[frame], m_overlayPrims.data(),
+                m_overlayPrims.size() * sizeof(PrimVertex),
+                static_cast<uint32_t>(m_overlayPrims.size()));
   if (quadCount == 0 && lineCount == 0 && overlayCount == 0 && primCount == 0 &&
-      gizmoCount == 0)
+      gizmoCount == 0 && onTopCount == 0)
     return;
 
   VkViewport vp{};
@@ -375,6 +384,9 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
   // Gizmo handles draw absolutely last with depth test off (A2.5).
   DrawBuffer(commandBuffer, m_gizmoPipeline, m_gizmoBuffers[frame], gizmoCount,
              1.0f);
+  // ...and beside them the on-top thick primitives (measurement dimensions).
+  DrawBuffer(commandBuffer, m_primOnTopPipeline, m_primOnTopBuffers[frame],
+             onTopCount, 1.0f);
 }
 
 void SketchRenderer::DestroyDynamic(DynamicBuffer& buf) {
@@ -393,6 +405,7 @@ void SketchRenderer::Shutdown() {
     DestroyDynamic(m_gizmoBuffers[i]);
     DestroyDynamic(m_quadBuffers[i]);
     DestroyDynamic(m_primBuffers[i]);
+    DestroyDynamic(m_primOnTopBuffers[i]);
   }
   if (m_linePipeline)
     vkDestroyPipeline(m_device, m_linePipeline, nullptr);
@@ -402,6 +415,8 @@ void SketchRenderer::Shutdown() {
     vkDestroyPipeline(m_device, m_quadPipeline, nullptr);
   if (m_primPipeline)
     vkDestroyPipeline(m_device, m_primPipeline, nullptr);
+  if (m_primOnTopPipeline)
+    vkDestroyPipeline(m_device, m_primOnTopPipeline, nullptr);
   if (m_pipelineLayout)
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
   if (m_descriptorPool)

@@ -209,6 +209,28 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
                  const glm::mat4& xfA, const std::vector<Body>& bodiesB,
                  const ElementRef& b, const glm::mat4& xfB);
 
+// A representative point ON an element: a face's centre of mass, an edge's
+// parametric midpoint. Where a dimension should attach when it has a choice.
+std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
+                                  const ElementRef& ref);
+
+// Where to attach a DIMENSION between two elements, as opposed to where the
+// minimum distance happens to be measured.
+//
+// For a general pair those are the same: the extrema pair is the honest
+// answer and the only one. For a PARALLEL pair they are not — every point
+// pair is the same distance apart, so the extrema solver returns whichever
+// it found first, which is typically a far corner. Dimensioning that draws a
+// 45 mm stub at one end of a 600 mm board and reads as a rendering artifact.
+// Here the dimension is anchored on A's own centre and taken to the nearest
+// point to it on B, which is what a draftsman would have drawn.
+//
+// `parallel` comes from Angle(); pass false when there is no angle to take.
+std::optional<DistanceResult>
+DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
+                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::mat4& xfB, bool parallel);
+
 // Axis-aligned bounding box of one resolved element (face or edge), in the
 // bodies' own (part-local) space — feeds zoom-to-selection. nullopt when the
 // ref no longer resolves.

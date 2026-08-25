@@ -606,11 +606,8 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
                           mesh, index))
         drawEdge(mesh, index, kSelected);
     }
-    if (state.measure.hasDistanceLine) {
-      const glm::vec4 kMeasure{1.0f, 0.55f, 0.25f, 1.0f}; // orange
-      AppendPrimLine(state.measure.distA, state.measure.distB, 2.0f, kMeasure,
-                     out);
-    }
+    // The dimension itself moved to AppendMeasureOverlay (M2): it needs the
+    // on-top channel and it is a great deal more than a line.
   }
   if (state.pick.edgeHover)
     drawEdge(state.pick.edgeHoverMesh, state.pick.edgeHoverIndex, kHover);

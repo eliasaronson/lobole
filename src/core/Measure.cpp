@@ -14,6 +14,7 @@
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Result.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -38,6 +39,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
@@ -1001,6 +1003,67 @@ std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
     out.basis = "between " + what + " (unsigned, so 0-90\xc2\xb0)";
   }
   return out;
+}
+
+std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
+                                  const ElementRef& ref) {
+  std::string kind;
+  const TopoDS_Shape shape = ResolveShape(bodies, ref, kind);
+  if (shape.IsNull())
+    return std::nullopt;
+  try {
+    if (kind == "face") {
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(shape, props);
+      const gp_Pnt c = props.CentreOfMass();
+      return glm::vec3(c.X(), c.Y(), c.Z());
+    }
+    BRepAdaptor_Curve curve(TopoDS::Edge(shape));
+    const gp_Pnt mid =
+        curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
+    return glm::vec3(mid.X(), mid.Y(), mid.Z());
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+}
+
+std::optional<DistanceResult>
+DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
+                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::mat4& xfB, bool parallel) {
+  const auto extrema = DistanceDetailed(bodiesA, a, xfA, bodiesB, b, xfB);
+  if (!parallel || !extrema)
+    return extrema;
+  // Parallel: re-anchor on A's own centre. The distance is unchanged (that
+  // is what parallel MEANS), so keep the extrema value and move only where
+  // the dimension is drawn.
+  const auto anchor = AnchorOf(bodiesA, a);
+  if (!anchor)
+    return extrema;
+  const glm::vec3 fromA = glm::vec3(xfA * glm::vec4(*anchor, 1.0f));
+  std::string kb;
+  TopoDS_Shape sb = ResolveShape(bodiesB, b, kb);
+  if (sb.IsNull())
+    return extrema;
+  try {
+    sb = sb.Moved(TopLoc_Location(ToTrsf(xfB)));
+    const TopoDS_Vertex v =
+        BRepBuilderAPI_MakeVertex(gp_Pnt(fromA.x, fromA.y, fromA.z));
+    BRepExtrema_DistShapeShape dist(v, sb);
+    if (!dist.IsDone() || dist.NbSolution() < 1)
+      return extrema;
+    const gp_Pnt onB = dist.PointOnShape2(1);
+    DistanceResult out;
+    out.distance = extrema->distance;
+    out.pointA = fromA;
+    out.pointB = glm::vec3(onB.X(), onB.Y(), onB.Z());
+    return out;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Measure dimension anchors failed: {}",
+              e.GetMessageString() ? e.GetMessageString()
+                                   : "OpenCASCADE failure");
+    return extrema;
+  }
 }
 
 std::optional<double> Distance(const std::vector<Body>& bodies,

@@ -25,6 +25,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/HistoryPanel.h"
 #include "ui/MainMenuBar.h"
+#include "ui/MeasureOverlay.h"
 #include "ui/PerfHud.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
@@ -881,8 +882,14 @@ void DrawUI(AppState& state) {
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
     state.sketchRenderer->SetGizmoLines(std::move(gizmo));
 
-    // The sketch lines, edit primitives, and 2D annotations below are all
-    // part-tab geometry. On an assembly tab clear them and skip the overlays.
+    // Most of what follows is part-tab geometry — sketches, CAM, FEM glyphs —
+    // and an assembly tab has no `document` for it to read. But SELECTION and
+    // MEASURE are not part-only: assembly measure ships an occurrence-aware
+    // distance, and this `if` used to sit around the whole primitive build,
+    // so on an assembly the readout said "Distance: 427.814 mm" while the
+    // viewport drew nothing at all and a picked edge showed no highlight.
+    // The contributors that work on both tabs are now outside it.
+    std::vector<PrimVertex> prims;
     if (state.document) {
       // Inactive sketches as thin lines; the active sketch as thick AA
       // primitives with vertex dots and hover/selection emphasis. Rebuilt each
@@ -890,16 +897,32 @@ void DrawUI(AppState& state) {
       UpdateSketchStatus(state); // DOF + conflicts for coloring/feedback
       state.sketchRenderer->SetStaticLines(
           BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
-      std::vector<PrimVertex> prims =
+      prims =
           BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
       AppendEdgePickPrimitives(state, prims);   // fillet/chamfer edge picking
-      AppendSelectionPrimitives(state, prims);  // selected/hovered edges (U1b)
+    } else {
+      state.sketchRenderer->SetStaticLines({});
+    }
+    AppendSelectionPrimitives(state, prims); // selected/hovered edges (U1b)
+    if (state.document) {
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
       AppendCamToolpathOverlay(state, prims);   // CAM backplot
       prims.insert(prims.end(), camPrims.begin(), camPrims.end());
-      state.sketchRenderer->SetPrimitives(std::move(prims));
+    }
+    state.sketchRenderer->SetPrimitives(std::move(prims));
 
+    // The measurement draws in its OWN channel, with depth test off: a
+    // thickness or bore-to-wall dimension runs through material, and a
+    // depth-tested one is drawn inside the solid where nothing can see it.
+    std::vector<PrimVertex> measurePrims;
+    AppendMeasureOverlay(state, measurePrims);
+    state.sketchRenderer->SetOverlayPrimitives(std::move(measurePrims));
+
+    // 2D annotations. DrawMeasureLabels is outside the part-tab gate for the
+    // same reason the overlay above is.
+    DrawMeasureLabels(state);
+    if (state.document) {
       // Auto-constraint snap indicator + ghost glyphs, and dimension
       // annotations (2D overlays).
       DrawSnapGlyphs(state);
@@ -912,9 +935,6 @@ void DrawUI(AppState& state) {
       DrawConstraintGlyphs(state);
       DrawToolPrompt(state);
       DrawInContextBanner(state);
-    } else {
-      state.sketchRenderer->SetStaticLines({});
-      state.sketchRenderer->SetPrimitives({});
     }
   }
 

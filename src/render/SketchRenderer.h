@@ -60,6 +60,14 @@ public:
   void SetPrimitives(std::vector<PrimVertex> prims) {
     m_primitives = std::move(prims);
   }
+  // The same thick primitives with DEPTH TEST OFF, for annotations that
+  // describe the solid rather than living on it. A measurement is the case
+  // this exists for: a plate's thickness or a bore-to-wall distance runs
+  // THROUGH material, so a depth-tested dimension is drawn inside the solid
+  // and invisible — the number is real and the picture is missing.
+  void SetOverlayPrimitives(std::vector<PrimVertex> prims) {
+    m_overlayPrims = std::move(prims);
+  }
 
   void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
     m_view = view;
@@ -117,6 +125,7 @@ private:
   VkPipeline m_quadPipeline = VK_NULL_HANDLE;
   VkPipeline m_primPipeline = VK_NULL_HANDLE;
   VkPipeline m_gizmoPipeline = VK_NULL_HANDLE; // depth-test off (A2.5)
+  VkPipeline m_primOnTopPipeline = VK_NULL_HANDLE; // thick prims, no depth
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
 
   DynamicBuffer m_uniformBuffers[kFramesInFlight];
@@ -127,12 +136,14 @@ private:
   DynamicBuffer m_gizmoBuffers[kFramesInFlight];
   DynamicBuffer m_quadBuffers[kFramesInFlight];
   DynamicBuffer m_primBuffers[kFramesInFlight];
+  DynamicBuffer m_primOnTopBuffers[kFramesInFlight];
 
   std::vector<LineVertex3D> m_staticLines;
   std::vector<LineVertex3D> m_overlayLines;
   std::vector<LineVertex3D> m_gizmoLines;
   std::vector<LineVertex3D> m_quads;
   std::vector<PrimVertex> m_primitives;
+  std::vector<PrimVertex> m_overlayPrims;
 
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);
