@@ -527,6 +527,18 @@ void UpdateMeasureReadout(AppState& state);
 // cursor costs nothing.
 void UpdateMeasureHover(AppState& state);
 
+// M4: move the current measurement into the pinned list and clear the picks
+// for the next one. No-op when there is nothing measured. Comparing three
+// gaps used to mean writing two of them down.
+void PinMeasurement(AppState& state);
+// Drop one pinned measurement by id, or all of them.
+void UnpinMeasurement(AppState& state, uint64_t id);
+// Recompute every pinned measurement against the current document. Their
+// refs are stable names, so an edit that CHANGES a measured face moves the
+// number; an edit that DESTROYS it drops the pin rather than leaving a stale
+// dimension floating over geometry that no longer exists.
+void RefreshPinnedMeasurements(AppState& state);
+
 // Blend edge collection (fillet/chamfer): toggles the clicked edge on `fil`,
 // remapping the displayed (already blended) name onto the blend's input body
 // first. meshId/edgeIndex are the displayed handles the geometric remap

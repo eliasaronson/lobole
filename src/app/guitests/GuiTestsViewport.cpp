@@ -250,6 +250,106 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->measure = ui::MeasureState{};
   };
 
+  // M4: a measurement you can keep, a distance that says WHICH distance it
+  // is, and a third pick that adds up instead of being refused.
+  t = IM_REGISTER_TEST(engine, "measure", "pin_qualifiers_and_totals");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    const Body& body = Doc()->GetBodies()[0];
+    std::string px, nx;
+    for (const auto& [idx, name] : body.elementMap.names) {
+      const auto f = Measure::DescribeFaceAt(body, idx);
+      if (!f)
+        continue;
+      if (f->normal.x > 0.99f)
+        px = name;
+      else if (f->normal.x < -0.99f)
+        nx = name;
+    }
+    IM_CHECK(!px.empty() && !nx.empty());
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    s_App->measure.picked.push_back({ElementRef{id, px}, false, 0});
+    s_App->measure.picked.push_back({ElementRef{id, nx}, false, 0});
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    // Opposite faces of a 2 mm box: 2 apart at the closest, and the readout
+    // names which distance that is.
+    IM_CHECK(s_App->measure.readout.find("(parallel)") != std::string::npos);
+
+    // Maximum is a different number and says so. This is the clearance
+    // question, and a minimum-only tool answers it plausibly and wrongly.
+    s_App->measure.distanceKind = Measure::DistanceKind::Maximum;
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(s_App->measure.readout.find("(maximum)") != std::string::npos);
+    const float far =
+        glm::distance(s_App->measure.dimension.a, s_App->measure.dimension.b);
+    s_App->measure.distanceKind = Measure::DistanceKind::Centres;
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(s_App->measure.readout.find("(centre to centre)") !=
+             std::string::npos);
+    const float mid =
+        glm::distance(s_App->measure.dimension.a, s_App->measure.dimension.b);
+    IM_CHECK(far > mid); // corner-to-corner beats centre-to-centre
+
+    // Pin it: the measurement is kept, the picks are cleared for the next
+    // one, and the tool stays armed.
+    ui::PinMeasurement(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.pinned.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)0);
+    IM_CHECK(s_App->measure.active);
+    // A pin keeps the qualifier it was TAKEN with, not whatever the live
+    // control says later.
+    IM_CHECK(s_App->measure.pinned[0].kind == Measure::DistanceKind::Centres);
+    s_App->measure.distanceKind = Measure::DistanceKind::Minimum;
+
+    // ...and it draws.
+    std::vector<PrimVertex> prims;
+    ui::AppendMeasureOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+
+    // Three picks TOTAL instead of refusing. "3 elements selected - keep two
+    // for a distance" was a refusal with no reason and no alternative; weld
+    // length and coating area are real questions a pair cannot answer.
+    std::vector<std::string> edges;
+    for (const auto& [idx, name] : body.elementMap.edgeNames) {
+      (void)idx;
+      edges.push_back(name);
+      if (edges.size() == 3)
+        break;
+    }
+    IM_CHECK_EQ(edges.size(), (size_t)3);
+    for (const std::string& n : edges)
+      s_App->measure.picked.push_back({ElementRef{id, n}, true, 0});
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(s_App->measure.readout.find("Total length of 3 edges") !=
+             std::string::npos);
+
+    // A face mixed in refuses, and says why an area plus a length is not a
+    // quantity rather than printing one of them.
+    s_App->measure.picked.push_back({ElementRef{id, px}, false, 0});
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(s_App->measure.readout.find("do not add up") != std::string::npos);
+
+    // Deleting the measured geometry drops the pin rather than leaving a
+    // stale dimension over a model that no longer has that face.
+    s_App->measure.picked.clear();
+    s_App->commands->Execute(std::make_unique<RemoveFeatureCommand>(0), *Doc());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->measure.pinned.size(), (size_t)0);
+
+    s_App->measure = ui::MeasureState{};
+    ctx->Yield();
+  };
+
   // M3: the element under the cursor is measured live, against what is
   // already picked, and drawn dimmed — so you can sweep a face and read the
   // gap without committing, and see what a click is about to give you.

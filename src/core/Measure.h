@@ -183,6 +183,27 @@ std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
                                  const std::vector<Body>& bodiesB,
                                  const ElementRef& b, const glm::mat4& xfB);
 
+// WHICH distance between two elements. Minimum is the one every CAD system
+// defaults to and the only one this used to offer; the other two answer
+// questions minimum cannot.
+//
+//   Minimum  — the closest approach. "Do these clash / what is the gap."
+//   Maximum  — the furthest approach. "Will this still fit at the worst
+//              point", which is the clearance question, and the one a
+//              minimum-only tool silently answers wrong.
+//   Centres  — anchor to anchor (face centroid, edge midpoint). Hole
+//              spacing, and the only one of the three that is stable as the
+//              features around it change shape.
+enum class DistanceKind { Minimum, Maximum, Centres };
+
+// Serialization / RPC strings, and the refusal vocabulary. Unknown strings
+// are REFUSED naming what is accepted, never defaulted to Minimum: a
+// substituted minimum is plausible and wrong exactly where it matters.
+const char* ToString(DistanceKind k);
+[[nodiscard]] bool DistanceKindFromString(const std::string& s,
+                                          DistanceKind& out);
+std::vector<const char*> DistanceKindNames();
+
 // Minimum distance between two elements (either kind). nullopt when a ref
 // doesn't resolve or the extrema computation fails.
 std::optional<double> Distance(const std::vector<Body>& bodies,
@@ -208,6 +229,28 @@ std::optional<DistanceResult>
 DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
                  const glm::mat4& xfA, const std::vector<Body>& bodiesB,
                  const ElementRef& b, const glm::mat4& xfB);
+
+// The same, for a chosen DistanceKind. Minimum is DistanceDetailed. Maximum
+// walks the tessellated boundary of each element for the furthest pair —
+// OCC's extrema solver only minimises, and the furthest points of two curved
+// faces are not in general vertices, so this is sampled and honest about it
+// rather than exact and wrong. Centres is the two anchors.
+std::optional<DistanceResult>
+DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
+               const glm::mat4& xfA, const std::vector<Body>& bodiesB,
+               const ElementRef& b, const glm::mat4& xfB, DistanceKind kind);
+
+// Total length of a set of edges, or total area of a set of faces — what a
+// third and fourth pick should add up to instead of being refused. Mixing
+// kinds is REFUSED (nullopt): the sum of an area and a length is not a
+// quantity, and returning one of them would be picking a winner in silence.
+struct SetTotal {
+  std::string kind; // "face" | "edge"
+  double total = 0.0;
+  int count = 0;
+};
+std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
+                                const std::vector<ElementRef>& refs);
 
 // A representative point ON an element: a face's centre of mass, an edge's
 // parametric midpoint. Where a dimension should attach when it has a choice.

@@ -205,6 +205,61 @@ void DrawMeasureToolWindow(AppState& state) {
   }
   if (!state.measure.readout.empty())
     ImGui::TextWrapped("%s", state.measure.readout.c_str());
+
+  // WHICH distance (M4). Minimum is the default and was the only one; the
+  // other two answer questions minimum cannot — clearance at the worst
+  // point, and hole spacing. Only offered for a pair, which is the only
+  // thing a distance is between.
+  if (state.measure.picked.size() == 2) {
+    ImGui::SetNextItemWidth(150.0f);
+    const char* label = Measure::ToString(state.measure.distanceKind);
+    if (ImGui::BeginCombo("###measure_kind", label)) {
+      for (const char* name : Measure::DistanceKindNames()) {
+        const bool sel = std::string(name) == label;
+        if (ImGui::Selectable(name, sel)) {
+          Measure::DistanceKind k{};
+          if (Measure::DistanceKindFromString(name, k)) {
+            state.measure.distanceKind = k;
+            UpdateMeasureReadout(state);
+          }
+        }
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Which distance: the closest approach, the "
+                          "furthest (clearance), or centre to centre.");
+    ImGui::SameLine();
+    if (ImGui::Button("Pin###measure_pin"))
+      PinMeasurement(state);
+    ImGui::SetItemTooltip("Keep this measurement on screen and start another");
+  }
+
+  // The pinned list. Hovering a row brightens its dimension in the viewport
+  // — with more than one on screen the rows have to point at the geometry.
+  state.measure.hoveredPinned = 0;
+  if (!state.measure.pinned.empty()) {
+    ImGui::Separator();
+    uint64_t drop = 0;
+    for (const MeasureState::Pinned& p : state.measure.pinned) {
+      ImGui::PushID(static_cast<int>(p.id));
+      if (ImGui::SmallButton("x"))
+        drop = p.id;
+      ImGui::SameLine();
+      // First line only: the rows are an index, not a second readout.
+      const size_t nl = p.readout.find('\n');
+      ImGui::TextWrapped("%s", nl == std::string::npos
+                                   ? p.readout.c_str()
+                                   : p.readout.substr(0, nl).c_str());
+      if (ImGui::IsItemHovered())
+        state.measure.hoveredPinned = p.id;
+      ImGui::PopID();
+    }
+    if (drop)
+      UnpinMeasurement(state, drop);
+    if (ImGui::SmallButton("Clear pinned###measure_unpin_all"))
+      UnpinMeasurement(state, 0);
+  }
+
   ImGui::Separator();
   if (ImGui::Button("Done"))
     state.measure = MeasureState{};

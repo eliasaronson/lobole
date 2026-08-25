@@ -4410,8 +4410,9 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
     out.readout = "Could not measure between those two elements.";
     return out;
   }
-  const auto d = Measure::DistanceDetailed(*srcA->bodies, ea.ref, srcA->xf,
-                                           *srcB->bodies, eb.ref, srcB->xf);
+  const Measure::DistanceKind kind = state.measure.distanceKind;
+  const auto d = Measure::DistanceOfKind(*srcA->bodies, ea.ref, srcA->xf,
+                                         *srcB->bodies, eb.ref, srcB->xf, kind);
   const auto ang = Measure::Angle(*srcA->bodies, ea.ref, srcA->xf,
                                   *srcB->bodies, eb.ref, srcB->xf);
   if (!d && !ang) {
@@ -4440,9 +4441,15 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   const bool parallel = ang && ang->parallel;
   std::string distLine;
   if (d) {
-    const char* qualifier = touching   ? " (touching)"
-                            : parallel ? " (parallel)"
-                                       : " (nearest)";
+    // Say WHICH distance this is, always. "45 mm" is three different facts
+    // depending on the qualifier, and the tool used to print all three the
+    // same way.
+    const char* qualifier =
+        kind == Measure::DistanceKind::Maximum   ? " (maximum)"
+        : kind == Measure::DistanceKind::Centres ? " (centre to centre)"
+        : touching                               ? " (touching)"
+        : parallel                               ? " (parallel)"
+                                                 : " (nearest)";
     distLine = "Distance: " + units::FormatLength(d->distance, u) + qualifier;
     // The axis breakdown only where there is one to break down: on a
     // touching pair it is three zeros, which is a line of text that says
@@ -4486,9 +4493,16 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
   // Where to ATTACH the dimension, which is not always where the minimum
   // was measured: for a parallel pair every point pair is equidistant, so
   // OCC's answer is an arbitrary corner.
-  const auto anchors =
-      Measure::DimensionAnchors(*srcA->bodies, ea.ref, srcA->xf, *srcB->bodies,
-                                eb.ref, srcB->xf, parallel);
+  // Re-anchoring is a MINIMUM-only correction. DimensionAnchors resolves the
+  // extrema itself, which for any other kind would draw the dimension at the
+  // MINIMUM points while the readout reported the maximum — the picture and
+  // the number describing two different pairs of points. Maximum and centres
+  // already name the points they mean.
+  const std::optional<Measure::DistanceResult> anchors =
+      (parallel && kind == Measure::DistanceKind::Minimum)
+          ? Measure::DimensionAnchors(*srcA->bodies, ea.ref, srcA->xf,
+                                      *srcB->bodies, eb.ref, srcB->xf, true)
+          : std::nullopt;
   const Measure::DistanceResult& at = anchors ? *anchors : *d;
   dim.valid = !touching; // a zero-length dimension is not a picture
   dim.a = at.pointA;
@@ -4578,8 +4592,45 @@ void UpdateMeasureReadout(AppState& state) {
     m.distB = r.lineB;
     return;
   }
-  m.readout = std::to_string(m.picked.size()) +
-              " elements selected - keep two for a distance";
+  // Three or more: the total. This used to read "3 elements selected - keep
+  // two for a distance", which is a refusal with no reason and no
+  // alternative — and weld length, cut length and coating area are all real
+  // questions that a pair cannot answer.
+  std::vector<ElementRef> refs;
+  const std::vector<Body>* bodies = nullptr;
+  bool oneSource = true;
+  for (const MeasureState::Element& e : m.picked) {
+    const auto src = ResolveMeasureSource(state, e);
+    if (!src) {
+      m.readout = "Could not measure one of those elements.";
+      return;
+    }
+    if (bodies && bodies != src->bodies)
+      oneSource = false;
+    bodies = src->bodies;
+    refs.push_back(e.ref);
+  }
+  if (!oneSource) {
+    m.readout = std::to_string(m.picked.size()) +
+                " elements across different parts - a total is per part; "
+                "keep two for a distance between parts.";
+    return;
+  }
+  const auto total = bodies ? Measure::TotalOf(*bodies, refs) : std::nullopt;
+  if (!total) {
+    // The mixed case is the one worth naming: an area plus a length is not a
+    // quantity, so there is nothing to print rather than something wrong.
+    m.readout = std::to_string(m.picked.size()) +
+                " elements selected - faces and edges do not add up "
+                "(an area plus a length is not a quantity). Keep one kind, "
+                "or two elements for a distance.";
+    return;
+  }
+  m.readout = total->kind == "face"
+                  ? "Total area of " + std::to_string(total->count) +
+                        " faces: " + units::FormatArea(total->total, u)
+                  : "Total length of " + std::to_string(total->count) +
+                        " edges: " + units::FormatLength(total->total, u);
 }
 
 void UpdateMeasureHover(AppState& state) {
@@ -4614,6 +4665,81 @@ void UpdateMeasureHover(AppState& state) {
           : MeasurePair(state, state.measure.picked[0], h.element, u);
   h.readout = r.readout;
   h.dimension = r.dimension;
+}
+
+void PinMeasurement(AppState& state) {
+  MeasureState& m = state.measure;
+  if (m.picked.empty() || m.readout.empty())
+    return;
+  MeasureState::Pinned p;
+  p.id = m.nextPinnedId++;
+  p.elements = m.picked;
+  p.readout = m.readout;
+  p.dimension = m.dimension;
+  p.kind = m.distanceKind;
+  m.pinned.push_back(std::move(p));
+  // Freshly computed against this version, so the next frame's refresh has
+  // nothing to do.
+  m.pinnedVersion = (state.document ? state.document->Version() : 0) ^
+                    ((state.assembly ? state.assembly->Version() : 0) << 1);
+  // Clear the picks, not the tool: the point of pinning is to go straight on
+  // to the next measurement.
+  m.picked.clear();
+  UpdateMeasureReadout(state);
+}
+
+void UnpinMeasurement(AppState& state, uint64_t id) {
+  auto& v = state.measure.pinned;
+  if (id == 0) {
+    v.clear();
+    return;
+  }
+  v.erase(std::remove_if(
+              v.begin(), v.end(),
+              [id](const MeasureState::Pinned& p) { return p.id == id; }),
+          v.end());
+}
+
+void RefreshPinnedMeasurements(AppState& state) {
+  MeasureState& m = state.measure;
+  if (m.pinned.empty())
+    return;
+  // Only when the model actually moved under them.
+  const uint64_t version =
+      (state.document ? state.document->Version() : 0) ^
+      ((state.assembly ? state.assembly->Version() : 0) << 1);
+  if (version == m.pinnedVersion)
+    return;
+  m.pinnedVersion = version;
+  const units::System u = state.ActiveUnits();
+  // A pinned measurement whose element no longer resolves is DROPPED, not
+  // left drawing its last known number over geometry that has changed shape
+  // underneath it — the same drop-on-edit discipline the compare_geometry
+  // overlay follows.
+  const Measure::DistanceKind live = m.distanceKind;
+  std::vector<MeasureState::Pinned> kept;
+  for (MeasureState::Pinned& p : m.pinned) {
+    bool resolves = true;
+    for (const MeasureState::Element& e : p.elements) {
+      const auto src = ResolveMeasureSource(state, e);
+      if (!src || !Measure::Describe(*src->bodies, e.ref)) {
+        resolves = false;
+        break;
+      }
+    }
+    if (!resolves)
+      continue;
+    m.distanceKind = p.kind; // each pin keeps the qualifier it was taken with
+    const MeasureOut r =
+        p.elements.size() == 1
+            ? MeasureOne(state, p.elements[0], u)
+            : MeasurePair(state, p.elements[0], p.elements[1], u);
+    p.readout = r.readout;
+    p.dimension = r.dimension;
+    kept.push_back(p);
+  }
+  m.distanceKind = live;
+  m.pinned = std::move(kept);
 }
 
 void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,

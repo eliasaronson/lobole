@@ -824,6 +824,10 @@ void DrawUI(AppState& state) {
   // pick pipeline, which is what decides "under the cursor"; cached inside,
   // so a still cursor does no OCC work.
   UpdateMeasureHover(state);
+  // Pinned measurements track the document: an edit that CHANGES a measured
+  // face moves the number, and one that DESTROYS it drops the pin instead of
+  // leaving a stale dimension floating over geometry that is gone.
+  RefreshPinnedMeasurements(state);
 
   // A drawing tab paints its 2D sheet into the (mesh-free) viewport.
   if (state.drawing)

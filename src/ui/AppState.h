@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/cam/CamJob.h"
 #include "core/cam/CamVerify.h" // cam::VerdictLine (the G4 verdict, in words)
@@ -412,6 +413,35 @@ struct MeasureState {
     std::string cacheKey;
   };
   Hover hover;
+
+  // WHICH distance the live pair reports (M4). Minimum is what every CAD
+  // system defaults to and the only one this used to offer; maximum answers
+  // the clearance question and centres answers hole spacing.
+  Measure::DistanceKind distanceKind = Measure::DistanceKind::Minimum;
+
+  // Pinned measurements. Comparing three gaps used to mean writing two of
+  // them down: the tool held one pair and replaced it. A pin moves the
+  // current measurement into this list and clears the picks for the next
+  // one; pinned measurements keep drawing until dismissed.
+  //
+  // They are SESSION state, like the picks — not saved with the document.
+  // A measurement is a question you asked, not a property of the part.
+  struct Pinned {
+    uint64_t id = 0;
+    std::vector<Element> elements; // what it measures (1 or 2)
+    std::string readout;
+    Dimension dimension;
+    Measure::DistanceKind kind = Measure::DistanceKind::Minimum;
+  };
+  std::vector<Pinned> pinned;
+  uint64_t nextPinnedId = 1;
+  // The document version the pinned list was last recomputed against. Each
+  // pin is an OCC extrema call; redoing them every frame for a model nobody
+  // touched would be sixty of those a second per pin.
+  uint64_t pinnedVersion = UINT64_MAX;
+  // The pinned row under the cursor in the tool window, so hovering a row
+  // says which measurement in the viewport it is. 0 = none.
+  uint64_t hoveredPinned = 0;
 };
 
 // Simulation mode (FEM): a workspace the user enters and exits, like sketch

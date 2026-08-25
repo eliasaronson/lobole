@@ -1027,6 +1027,131 @@ std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
   }
 }
 
+const char* ToString(DistanceKind k) {
+  switch (k) {
+  case DistanceKind::Maximum:
+    return "maximum";
+  case DistanceKind::Centres:
+    return "centres";
+  case DistanceKind::Minimum:
+    break;
+  }
+  return "minimum";
+}
+
+bool DistanceKindFromString(const std::string& s, DistanceKind& out) {
+  if (s == "minimum") {
+    out = DistanceKind::Minimum;
+    return true;
+  }
+  if (s == "maximum") {
+    out = DistanceKind::Maximum;
+    return true;
+  }
+  if (s == "centres" || s == "centers") { // both spellings; one meaning
+    out = DistanceKind::Centres;
+    return true;
+  }
+  return false;
+}
+
+std::vector<const char*> DistanceKindNames() {
+  return {"minimum", "maximum", "centres"};
+}
+
+std::optional<DistanceResult>
+DistanceOfKind(const std::vector<Body>& bodiesA, const ElementRef& a,
+               const glm::mat4& xfA, const std::vector<Body>& bodiesB,
+               const ElementRef& b, const glm::mat4& xfB, DistanceKind kind) {
+  if (kind == DistanceKind::Minimum)
+    return DistanceDetailed(bodiesA, a, xfA, bodiesB, b, xfB);
+
+  if (kind == DistanceKind::Centres) {
+    const auto ca = AnchorOf(bodiesA, a);
+    const auto cb = AnchorOf(bodiesB, b);
+    if (!ca || !cb)
+      return std::nullopt;
+    DistanceResult out;
+    out.pointA = glm::vec3(xfA * glm::vec4(*ca, 1.0f));
+    out.pointB = glm::vec3(xfB * glm::vec4(*cb, 1.0f));
+    out.distance = glm::distance(out.pointA, out.pointB);
+    return out;
+  }
+
+  // Maximum. BRepExtrema only minimises, and the furthest points of two
+  // curved faces are not in general vertices, so this samples the
+  // tessellated boundary of each element and takes the furthest pair. On the
+  // planar/linear geometry that dominates real use the extreme IS a vertex
+  // and the answer is exact; on a curved face it is a tight lower bound,
+  // which is the honest thing a sampled method can offer.
+  std::string ka, kb;
+  TopoDS_Shape sa = ResolveShape(bodiesA, a, ka);
+  TopoDS_Shape sb = ResolveShape(bodiesB, b, kb);
+  if (sa.IsNull() || sb.IsNull())
+    return std::nullopt;
+  try {
+    sa = sa.Moved(TopLoc_Location(ToTrsf(xfA)));
+    sb = sb.Moved(TopLoc_Location(ToTrsf(xfB)));
+    const auto sample = [](const TopoDS_Shape& s) {
+      std::vector<gp_Pnt> pts;
+      // Vertices first — on a box or a straight edge they are the answer.
+      for (TopExp_Explorer ex(s, TopAbs_VERTEX); ex.More(); ex.Next())
+        pts.push_back(BRep_Tool::Pnt(TopoDS::Vertex(ex.Current())));
+      // Then points along every edge, which is what catches a circular rim
+      // whose extreme is between its (one or two) vertices.
+      constexpr int kPerEdge = 24;
+      for (TopExp_Explorer ex(s, TopAbs_EDGE); ex.More(); ex.Next()) {
+        BRepAdaptor_Curve curve(TopoDS::Edge(ex.Current()));
+        const double t0 = curve.FirstParameter(), t1 = curve.LastParameter();
+        for (int i = 0; i <= kPerEdge; i++)
+          pts.push_back(curve.Value(t0 + (t1 - t0) * i / kPerEdge));
+      }
+      return pts;
+    };
+    const std::vector<gp_Pnt> pa = sample(sa), pb = sample(sb);
+    if (pa.empty() || pb.empty())
+      return std::nullopt;
+    DistanceResult out;
+    double best = -1.0;
+    for (const gp_Pnt& p : pa) {
+      for (const gp_Pnt& q : pb) {
+        const double d2 = p.SquareDistance(q);
+        if (d2 > best) {
+          best = d2;
+          out.pointA = glm::vec3(p.X(), p.Y(), p.Z());
+          out.pointB = glm::vec3(q.X(), q.Y(), q.Z());
+        }
+      }
+    }
+    out.distance = std::sqrt(best);
+    return out;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Measure maximum distance failed: {}",
+              e.GetMessageString() ? e.GetMessageString()
+                                   : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
+std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
+                                const std::vector<ElementRef>& refs) {
+  if (refs.empty())
+    return std::nullopt;
+  SetTotal out;
+  for (const ElementRef& r : refs) {
+    const auto e = Describe(bodies, r);
+    if (!e)
+      return std::nullopt;
+    if (out.kind.empty())
+      out.kind = e->kind;
+    else if (out.kind != e->kind)
+      return std::nullopt; // an area plus a length is not a quantity
+    out.total += e->kind == "face" ? e->area : e->length;
+    out.count++;
+  }
+  return out;
+}
+
 std::optional<DistanceResult>
 DimensionAnchors(const std::vector<Body>& bodiesA, const ElementRef& a,
                  const glm::mat4& xfA, const std::vector<Body>& bodiesB,

@@ -333,6 +333,109 @@ TEST_CASE("Transformed distance measures occurrences in world space",
   CHECK_THAT(best, WithinAbs(8.0, 1e-6));
 }
 
+TEST_CASE("Distance kinds: minimum, maximum, centres", "[measure]") {
+  // Minimum is one of three questions. Maximum is the clearance question —
+  // "will it still fit at the WORST point" — which a minimum-only tool
+  // answers plausibly and wrongly; centres is hole spacing, and the only one
+  // of the three that is stable as the shapes around it change.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 2, 2, 2));
+  const uint64_t idA = doc.GetFeature(0)->GetId();
+  const uint64_t idB = doc.GetFeature(1)->GetId();
+
+  // The two facing faces: A's +X at x=2, B's -X at x=10.
+  std::string aPlusX, bMinusX;
+  for (const auto& [idx, name] : doc.GetBodies()[0].elementMap.names)
+    if (const auto f = Measure::DescribeFaceAt(doc.GetBodies()[0], idx))
+      if (f->normal.x > 0.99f)
+        aPlusX = name;
+  for (const auto& [idx, name] : doc.GetBodies()[1].elementMap.names)
+    if (const auto f = Measure::DescribeFaceAt(doc.GetBodies()[1], idx))
+      if (f->normal.x < -0.99f)
+        bMinusX = name;
+  REQUIRE_FALSE(aPlusX.empty());
+  REQUIRE_FALSE(bMinusX.empty());
+  const ElementRef ra{idA, aPlusX}, rb{idB, bMinusX};
+  const glm::mat4 I(1.0f);
+
+  const auto mn =
+      Measure::DistanceOfKind(doc.GetBodies(), ra, I, doc.GetBodies(), rb, I,
+                              Measure::DistanceKind::Minimum);
+  REQUIRE(mn.has_value());
+  CHECK_THAT(mn->distance, WithinAbs(8.0, 1e-6)); // 10 - 2, face to face
+
+  // Centres: both face centroids are at y=z=1, so the gap is the same 8 —
+  // but now anchored at the centres rather than wherever the extrema landed.
+  const auto ce =
+      Measure::DistanceOfKind(doc.GetBodies(), ra, I, doc.GetBodies(), rb, I,
+                              Measure::DistanceKind::Centres);
+  REQUIRE(ce.has_value());
+  CHECK_THAT(ce->distance, WithinAbs(8.0, 1e-6));
+  CHECK_THAT(ce->pointA.x, WithinAbs(2.0f, 1e-4f));
+  CHECK_THAT(ce->pointA.y, WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(ce->pointB.x, WithinAbs(10.0f, 1e-4f));
+
+  // Maximum: corner to opposite corner of the two 2x2 faces — 8 across plus
+  // 2 and 2 along the face diagonals => sqrt(64 + 4 + 4).
+  const auto mx =
+      Measure::DistanceOfKind(doc.GetBodies(), ra, I, doc.GetBodies(), rb, I,
+                              Measure::DistanceKind::Maximum);
+  REQUIRE(mx.has_value());
+  CHECK_THAT(mx->distance, WithinAbs(std::sqrt(72.0), 1e-6));
+  CHECK(mx->distance > mn->distance);
+}
+
+TEST_CASE("Distance kinds refuse an unknown name", "[measure]") {
+  // Never defaulted to minimum: a substituted minimum is plausible and wrong
+  // exactly where the caller asked for something else.
+  Measure::DistanceKind k = Measure::DistanceKind::Maximum;
+  CHECK(Measure::DistanceKindFromString("minimum", k));
+  CHECK(k == Measure::DistanceKind::Minimum);
+  CHECK(Measure::DistanceKindFromString("centers", k)); // both spellings
+  CHECK(k == Measure::DistanceKind::Centres);
+  CHECK(Measure::DistanceKindFromString("centres", k));
+  CHECK(k == Measure::DistanceKind::Centres);
+  const Measure::DistanceKind before = k;
+  CHECK_FALSE(Measure::DistanceKindFromString("nearest", k));
+  CHECK(k == before); // a refusal leaves the output alone
+  CHECK(Measure::DistanceKindNames().size() == 3);
+}
+
+TEST_CASE("TotalOf sums a set, and refuses a mixed one", "[measure]") {
+  // "3 elements selected - keep two for a distance" was a refusal with no
+  // reason and no alternative. Three edges have a total length; three faces
+  // have a total area; an area plus a length is not a quantity at all.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+
+  std::vector<ElementRef> edges;
+  for (const std::string& n : EdgeNames(body))
+    edges.push_back(ElementRef{id, n});
+  const auto le = Measure::TotalOf(doc.GetBodies(), edges);
+  REQUIRE(le.has_value());
+  CHECK(le->kind == "edge");
+  CHECK(le->count == 12);
+  // A 2x3x4 box: four edges of each length.
+  CHECK_THAT(le->total, WithinAbs(4.0 * (2.0 + 3.0 + 4.0), 1e-6));
+
+  std::vector<ElementRef> faces;
+  for (const std::string& n : FaceNames(body))
+    faces.push_back(ElementRef{id, n});
+  const auto ar = Measure::TotalOf(doc.GetBodies(), faces);
+  REQUIRE(ar.has_value());
+  CHECK(ar->kind == "face");
+  CHECK(ar->count == 6);
+  CHECK_THAT(ar->total, WithinAbs(2.0 * (6.0 + 8.0 + 12.0), 1e-6));
+
+  std::vector<ElementRef> mixed{faces[0], edges[0]};
+  CHECK_FALSE(Measure::TotalOf(doc.GetBodies(), mixed).has_value());
+  CHECK_FALSE(Measure::TotalOf(doc.GetBodies(), {}).has_value());
+}
+
 TEST_CASE("Element bounds of a box's faces", "[measure]") {
   Document doc;
   doc.AddFeature(

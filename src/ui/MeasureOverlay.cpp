@@ -158,6 +158,14 @@ void AppendMeasureOverlay(AppState& state, std::vector<PrimVertex>& out) {
   if (!state.measure.active)
     return;
   AppendDimension(state, state.measure.dimension, 1.0f, out);
+  // Pinned measurements draw alongside the live one, a touch fainter so the
+  // one you are working on still reads first. Hovering a row in the tool
+  // window brings its dimension back to full strength, which is how a list
+  // of three gaps says which is which.
+  for (const MeasureState::Pinned& p : state.measure.pinned) {
+    const bool lit = state.measure.hoveredPinned == p.id;
+    AppendDimension(state, p.dimension, lit ? 1.0f : 0.72f, out);
+  }
   // The preview draws under the same rules and is never mistaken for the
   // committed measurement, because it is visibly fainter.
   if (state.measure.hover.has)
@@ -179,6 +187,8 @@ void DrawMeasureLabels(AppState& state) {
     }
   };
   labels(state.measure.dimension, false);
+  for (const MeasureState::Pinned& p : state.measure.pinned)
+    labels(p.dimension, state.measure.hoveredPinned != p.id);
   if (state.measure.hover.has) {
     labels(state.measure.hover.dimension, true);
     // With nothing picked yet there is no dimension to hang a value on — the
