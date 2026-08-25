@@ -149,14 +149,19 @@ static constexpr MethodDoc InspectionMethods[] = {
     // "refuse, don't substitute" rule inverted — we refuse the call and
     // advertise the capability. It now names exactly what runs.
     {"measure",
-     "Geometry queries over stable element names. {a}: that element's own "
-     "measure (face area / edge length, plus shape kind and radius+diameter "
-     "where the surface or curve defines one). {a,b}: the minimum distance, "
-     "closest points and SIGNED delta between them; kind:'angle' or 'both' "
-     "adds the angle, taken between the outward normals when both elements "
-     "are planar faces (so adjacent box faces read 90 and opposite ones 180) "
-     "and unsigned in 0-90 when either direction's sign is arbitrary, as a "
-     "line edge's is. `basis` says which."},
+     "Geometry queries over stable element names. Each of {a} and {b} names "
+     "one thing: {feature_id, element} for a face or edge, {feature_id} alone "
+     "for a whole BODY, or {occurrence: id|name|\"Unit/Part\"} for a whole "
+     "placed part — and each carries its own {part} or {occurrence}, so a "
+     "measurement can span two parts or two occurrences. {a}: that thing's "
+     "own measure (face area / edge length + shape kind + radius/diameter; a "
+     "body reports volume, surface area and bounding size). {a,b}: distance, "
+     "closest points and a SIGNED delta, plus overlap_volume/clash for two "
+     "whole shapes. distance_kind: minimum (default) | maximum (clearance) | "
+     "centres. kind:'angle' or 'both' adds the angle, taken between the "
+     "outward normals when both are planar faces (adjacent box faces read 90, "
+     "opposite ones 180) and unsigned in 0-90 when either direction's sign is "
+     "arbitrary, as a line edge's is; `basis` says which."},
     {"list_elements", "Stable face/edge names per body (the toponaming handles "
                       "measure/fillet/mates use)."},
     {"interference",
@@ -1347,22 +1352,117 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return out;
   }
   if (m == "measure") {
+    // What ONE side of a measurement names. Each of `a` and `b` carries its
+    // own {part} / {occurrence}, so a measurement can span two parts or two
+    // occurrences — which the GUI has done since assembly measure shipped
+    // and the RPC could not, because it resolved a single body set and used
+    // it for both refs.
+    //
+    // NOTE: `interference` has a near-twin of the occurrence resolution
+    // below. They are not yet one function; that is a recorded follow-up in
+    // docs/inspect/measure-v2.md rather than a refactor smuggled into this
+    // change, because interference's version is load-bearing for the
+    // contact sweep and shares a prefetched body map with it.
+    struct Side {
+      std::vector<Body> owned; // world-placed bodies, for an occurrence
+      const std::vector<Body>* bodies = nullptr;
+      ElementRef ref; // name empty => the whole set
+      std::string label;
+    };
+    auto resolveSide = [&](const json& r, const char* which) {
+      auto side = std::make_unique<Side>();
+      if (r.contains("occurrence")) {
+        if (!state.assembly)
+          throw std::runtime_error(
+              std::string("measure: ") + which +
+              ".occurrence needs an assembly tab (or open the assembly and "
+              "pass `occurrence`); use `part` for a part document");
+        const json& v = r.at("occurrence");
+        const Occurrence* occ = nullptr;
+        glm::mat4 world(1.0f);
+        std::string label;
+        if (v.is_number_unsigned() || v.is_number_integer()) {
+          occ = state.assembly->FindById(v.get<uint64_t>());
+          if (!occ)
+            throw std::runtime_error("measure: occurrence id " + v.dump() +
+                                     " not found (see list_occurrences)");
+          label = occ->name;
+        } else {
+          const std::string name = v.get<std::string>();
+          for (const Occurrence& o : state.assembly->GetOccurrences())
+            if (o.name == name) {
+              occ = &o;
+              label = o.name;
+              break;
+            }
+          if (!occ && name.find('/') != std::string::npos) {
+            // A5: a part INSIDE a sub-assembly, by path.
+            auto hit = assembly::ResolvePath(*state.assembly, name,
+                                             ui::PartResolverFor(state),
+                                             ui::AssemblyResolverFor(state));
+            if (!hit)
+              throw std::runtime_error(hit.error());
+            occ = hit->occ;
+            world = hit->world;
+            label = name;
+          }
+          if (!occ)
+            throw std::runtime_error(
+                "measure: occurrence '" + name +
+                "' not found (see list_occurrences; a part inside a "
+                "sub-assembly is addressed by path, e.g. \"Gangway/Board "
+                "19\")");
+        }
+        // Every leaf under it, placed in world space — a sub-assembly
+        // measures as the one thing it looks like, not as its parts.
+        if (label == occ->name) {
+          for (const assembly::FlatInstance& inst :
+               ui::FlattenActiveAssembly(state)) {
+            if (inst.rootOccurrenceId != occ->id)
+              continue;
+            for (const Body& b : inst.part->GetBodies()) {
+              Body nb = b;
+              nb.shape = b.shape.Transformed(inst.world);
+              side->owned.push_back(std::move(nb));
+            }
+          }
+        } else if (const Document* pd = ui::PartDocById(state, occ->partId)) {
+          for (const Body& b : pd->GetBodies()) {
+            Body nb = b;
+            nb.shape = b.shape.Transformed(world);
+            side->owned.push_back(std::move(nb));
+          }
+        }
+        if (side->owned.empty())
+          throw std::runtime_error("measure: occurrence '" + label +
+                                   "' resolved to no geometry");
+        side->bodies = &side->owned;
+        side->label = label;
+      } else {
+        const Document* doc2 =
+            r.contains("part")   ? ResolvePartParam(state, r.at("part"))
+            : p.contains("part") ? ResolvePartParam(state, p.at("part"))
+                                 : &RequirePartDoc(doc, "measure");
+        side->bodies = &doc2->GetBodies();
+        side->label = "";
+      }
+      // A whole body: {feature_id} with no `element`. A whole occurrence:
+      // no `element` either, and featureId 0 means every body under it.
+      side->ref = ElementRef{r.value("feature_id", uint64_t{0}),
+                             r.value("element", std::string{})};
+      return side;
+    };
     // Geometry queries over stable element names (I1). params:
     // {a: {feature_id, element}, b?: {feature_id, element}, part?}.
     // With `b`: minimum distance between the two elements. Without: the
     // element's own measure (face area / edge length). `part` (name or stable
     // id) resolves the elements against that part's bodies without switching
     // the active tab.
-    auto refOf = [](const json& r) {
-      return ElementRef{r.at("feature_id").get<uint64_t>(),
-                        r.at("element").get<std::string>()};
-    };
-    const ElementRef a = refOf(p.at("a"));
-    const auto& bodies =
-        p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
-                           : RequirePartDoc(doc, "measure").GetBodies();
+    const auto sideA = resolveSide(p.at("a"), "a");
+    const Measure::Target ta{sideA->bodies, glm::mat4(1.0f), sideA->ref};
     if (p.contains("b")) {
-      const ElementRef b = refOf(p.at("b"));
+      const auto sideB = resolveSide(p.at("b"), "b");
+      const Measure::Target tb{sideB->bodies, glm::mat4(1.0f), sideB->ref};
       // What to measure between them. Refused, never substituted: a request
       // for an angle answered with a distance is plausible and wrong, and a
       // typo'd kind must not silently become the default.
@@ -1371,26 +1471,53 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("measure: unknown kind '" + kind +
                                  "'. Accepted: distance, angle, both.");
       }
+      // WHICH distance — minimum (default), maximum (the clearance
+      // question), or centre to centre (hole spacing).
+      Measure::DistanceKind dk = Measure::DistanceKind::Minimum;
+      if (p.contains("distance_kind")) {
+        const std::string dks = p.at("distance_kind").get<std::string>();
+        if (!Measure::DistanceKindFromString(dks, dk)) {
+          std::string names;
+          for (const char* n : Measure::DistanceKindNames())
+            names += (names.empty() ? "" : ", ") + std::string(n);
+          throw std::runtime_error("measure: unknown distance_kind '" + dks +
+                                   "'. Accepted: " + names + ".");
+        }
+      }
       json out;
       if (kind != "angle") {
-        const auto d = Measure::DistanceDetailed(bodies, a, b);
+        const auto d = Measure::DistanceBetween(ta, tb, dk);
         if (!d)
           throw std::runtime_error("measure: an element did not resolve");
         out["distance"] = d->distance;
+        out["distance_kind"] = Measure::ToString(dk);
         out["point_a"] = {d->pointA.x, d->pointA.y, d->pointA.z};
         out["point_b"] = {d->pointB.x, d->pointB.y, d->pointB.z};
         // SIGNED, b - a. Which way it is matters: 40 mm in +X and 40 mm in
         // -X are a part and its mirror image.
         const glm::vec3 delta = d->pointB - d->pointA;
         out["delta"] = {delta.x, delta.y, delta.z};
+        // Two WHOLE shapes that interpenetrate are 0 apart, which is true
+        // and the least useful available fact. Say whether they clash.
+        if (const auto ov = Measure::OverlapBetween(ta, tb)) {
+          out["overlap_volume"] = ov->volume;
+          out["clash"] = ov->volume > 0.0;
+        }
       }
       if (kind != "distance") {
-        const auto ang = Measure::Angle(bodies, a, b);
+        if (ta.Whole() || tb.Whole()) {
+          throw std::runtime_error(
+              "measure: an angle needs a face or an edge on both sides — a "
+              "whole body or occurrence has no single direction to take one "
+              "against.");
+        }
+        const auto ang = Measure::Angle(*ta.bodies, ta.ref, ta.xf, *tb.bodies,
+                                        tb.ref, tb.xf);
         if (!ang) {
           // Name WHICH element has no direction, and what does — a bare
           // "could not" leaves the caller guessing which ref to change.
-          const bool aOk = Measure::DirectionOf(bodies, a).has_value();
-          const bool bOk = Measure::DirectionOf(bodies, b).has_value();
+          const bool aOk = Measure::DirectionOf(*ta.bodies, ta.ref).has_value();
+          const bool bOk = Measure::DirectionOf(*tb.bodies, tb.ref).has_value();
           const std::string who = !aOk && !bOk ? "neither element"
                                   : !aOk       ? "element a"
                                                : "element b";
@@ -1408,12 +1535,25 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       }
       return out;
     }
-    if (p.contains("kind")) {
+    if (p.contains("kind") || p.contains("distance_kind")) {
       throw std::runtime_error(
-          "measure: `kind` chooses what to measure BETWEEN two elements — "
-          "pass `b` as well, or drop `kind` for element a's own measure.");
+          "measure: `kind` and `distance_kind` choose what to measure BETWEEN "
+          "two things — pass `b` as well, or drop them for a's own measure.");
     }
-    const auto e = Measure::Describe(bodies, a);
+    // A WHOLE body or occurrence on its own reports what a part HAS.
+    if (ta.Whole()) {
+      const auto d = Measure::DescribeTarget(ta);
+      if (!d)
+        throw std::runtime_error("measure: that body or occurrence did not "
+                                 "resolve to any geometry");
+      return json{{"kind", "solid"},
+                  {"volume", d->volume},
+                  {"surface_area", d->surfaceArea},
+                  {"size", {d->size.x, d->size.y, d->size.z}},
+                  {"solids", d->solids}};
+    }
+
+    const auto e = Measure::Describe(*ta.bodies, ta.ref);
     if (!e)
       throw std::runtime_error("measure: element did not resolve");
     json out = {{"kind", e->kind}, {"shape", e->shape}};
@@ -1431,6 +1571,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     if (e->hasAxis)
       out["axis"] = {e->axis.x, e->axis.y, e->axis.z};
+    // How a person would name it, so a caller reporting a measurement can
+    // say "the top face" instead of "1/face3".
+    out["name"] = Measure::HumanName(*ta.bodies, ta.ref, state.ActiveUnits());
     return out;
   }
   if (m == "list_elements") {

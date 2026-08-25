@@ -185,6 +185,8 @@ std::string FormatLength(double mm, const System& sys) {
   return FormatNumber(mm / MmPer(sys.length)) + " " + ToString(sys.length);
 }
 
+double MmPerLength(Length u) { return MmPer(u); }
+
 std::string FormatArea(double mm2, const System& sys) {
   // The length unit SQUARED, for the same reason FormatVolume cubes it: a
   // face area belongs in the document's units, and switching between mm² and

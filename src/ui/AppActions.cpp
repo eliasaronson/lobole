@@ -4864,6 +4864,99 @@ void SeedMeasureFromSelection(AppState& state) {
   UpdateMeasureReadout(state);
 }
 
+namespace {
+// The measurement's headline NUMBER, in millimetres (or degrees), separate
+// from the sentence around it. The readout is prose — "Distance: 45 mm
+// (parallel)" — and a clipboard or an expression wants the value.
+std::optional<double> HeadlineValue(const AppState& state, bool* isAngle) {
+  const MeasureState& m = state.measure;
+  if (m.picked.size() != 2)
+    return std::nullopt;
+  const Resolved ra =
+      ResolveTargetFor(const_cast<AppState&>(state), m.picked[0]);
+  const Resolved rb =
+      ResolveTargetFor(const_cast<AppState&>(state), m.picked[1]);
+  if (!ra.ok || !rb.ok)
+    return std::nullopt;
+  const auto d = Measure::DistanceBetween(ra.target, rb.target, m.distanceKind);
+  // Touching pairs lead with the angle, and so does the value they hand out
+  // — the same rule the readout follows, so what you copy is what you read.
+  if (d && d->distance > kTouchingMm) {
+    if (isAngle)
+      *isAngle = false;
+    return d->distance;
+  }
+  if (!m.picked[0].Whole() && !m.picked[1].Whole()) {
+    if (const auto ang =
+            Measure::Angle(*ra.target.bodies, m.picked[0].ref, ra.target.xf,
+                           *rb.target.bodies, m.picked[1].ref, rb.target.xf)) {
+      if (isAngle)
+        *isAngle = true;
+      return ang->degrees;
+    }
+  }
+  if (d) {
+    if (isAngle)
+      *isAngle = false;
+    return d->distance;
+  }
+  return std::nullopt;
+}
+} // namespace
+
+std::string MeasuredValueForClipboard(const AppState& state) {
+  bool isAngle = false;
+  const auto v = HeadlineValue(state, &isAngle);
+  if (!v)
+    return {};
+  const units::System u = state.ActiveUnits();
+  const double shown = isAngle ? (u.angle == units::Angle::Radian
+                                      ? *v * 3.14159265358979323846 / 180.0
+                                      : *v)
+                               : *v / units::MmPerLength(u.length);
+  // PLAIN, not units::FormatNumber: that groups thousands with a space for
+  // readability ("10 080 000"), and this string is pasted into a dimension
+  // field, which parses it as an EXPRESSION. A readable number that will not
+  // parse is worse than an unreadable one that will.
+  char buf[64];
+  std::snprintf(buf, sizeof buf, "%.10g", shown);
+  return buf;
+}
+
+bool CreateVariableFromMeasurement(AppState& state, const std::string& name,
+                                   std::string* why) {
+  const auto fail = [&](const char* reason) {
+    if (why)
+      *why = reason;
+    return false;
+  };
+  if (name.empty())
+    return fail("A variable needs a name.");
+  if (!state.document)
+    return fail("Variables live on a part document; this tab has none.");
+  bool isAngle = false;
+  const auto v = HeadlineValue(state, &isAngle);
+  if (!v)
+    return fail("Measure two things first — there is no value to bind yet.");
+  // STORAGE units, like every other expression in the document: millimetres
+  // and degrees. A variable written in the reader's display unit would
+  // change meaning when the document's units did.
+  //
+  // And plain, for the same reason the clipboard value is: an expression
+  // with a thousands separator in it does not parse.
+  char buf[64];
+  std::snprintf(buf, sizeof buf, "%.10g", *v);
+  if (!SetProjectVariable(state, name, buf,
+                          isAngle ? "measured angle (degrees)"
+                                  : "measured distance (mm)")) {
+    // SetProjectVariable refuses an unusable name; passing that on beats
+    // reporting success over a variable that was never created.
+    return fail("That is not a usable variable name (letters, digits and "
+                "underscores; not starting with a digit).");
+  }
+  return true;
+}
+
 void PinMeasurement(AppState& state) {
   MeasureState& m = state.measure;
   if (m.picked.empty() || m.readout.empty())

@@ -231,6 +231,33 @@ void DrawMeasureToolWindow(AppState& state) {
     if (ImGui::Button("Pin###measure_pin"))
       PinMeasurement(state);
     ImGui::SetItemTooltip("Keep this measurement on screen and start another");
+    ImGui::SameLine();
+    if (ImGui::Button("Copy###measure_copy")) {
+      // The NUMBER, not the sentence: what gets pasted into a dimension
+      // field, which already knows what unit it is in.
+      const std::string v = MeasuredValueForClipboard(state);
+      if (!v.empty())
+        ImGui::SetClipboardText(v.c_str());
+    }
+    ImGui::SetItemTooltip("Copy the value (no unit suffix)");
+
+    // ...and the same number as a VARIABLE. This is where measuring stops
+    // being read-only: the point of measuring a gap is usually to make
+    // something else depend on it.
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::InputTextWithHint("###measure_var_name", "variable name",
+                             state.measureVarName,
+                             sizeof(state.measureVarName));
+    ImGui::SameLine();
+    if (ImGui::Button("Make variable###measure_make_var")) {
+      std::string why;
+      if (CreateVariableFromMeasurement(state, state.measureVarName, &why))
+        state.measureVarName[0] = '\0';
+      else
+        state.sketchEdit.actionMsg = why;
+    }
+    ImGui::SetItemTooltip(
+        "Create a project variable holding this measurement, in mm");
   }
 
   // The pinned list. Hovering a row brightens its dimension in the viewport

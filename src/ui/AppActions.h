@@ -545,6 +545,19 @@ std::string MeasureElementLabel(AppState& state,
                                 const MeasureState::Element& e);
 
 void PinMeasurement(AppState& state);
+
+// M6: the number the current measurement leads with, as a bare value in the
+// document's units and with no label — what belongs on a clipboard.
+// Empty when nothing is measured.
+std::string MeasuredValueForClipboard(const AppState& state);
+
+// ...and the same number as a VARIABLE, which is the point at which
+// measuring stops being read-only. Creates (or redefines) `name` at project
+// scope with the measured value as a literal expression in millimetres —
+// storage units, like every other expression — and returns false with the
+// reason when there is nothing to bind or the name is unusable.
+bool CreateVariableFromMeasurement(AppState& state, const std::string& name,
+                                   std::string* why = nullptr);
 // Drop one pinned measurement by id, or all of them.
 void UnpinMeasurement(AppState& state, uint64_t id);
 // Recompute every pinned measurement against the current document. Their

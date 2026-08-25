@@ -65,6 +65,12 @@ std::vector<const char*> LengthNames();
 std::vector<const char*> MassNames();
 std::vector<const char*> AngleNames();
 
+// Millimetres per one of `u`. The conversion table itself, for the rare
+// caller that needs a bare NUMBER in display units rather than a formatted
+// string — copying a measurement to the clipboard, where the field being
+// pasted into already knows its own unit.
+double MmPerLength(Length u);
+
 // A number a person can read: `sigFigs` significant figures, trailing zeros
 // dropped, integer part grouped in threes with a space (the SI separator —
 // a comma means the decimal point to half the world).

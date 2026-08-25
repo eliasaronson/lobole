@@ -254,6 +254,75 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->measure = ui::MeasureState{};
   };
 
+  // M6: measuring stops being read-only. The point of measuring a gap is
+  // usually to make something else depend on it.
+  t = IM_REGISTER_TEST(engine, "measure", "copy_and_make_a_variable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    const Body& body = Doc()->GetBodies()[0];
+    std::string px, nx;
+    for (const auto& [idx, name] : body.elementMap.names) {
+      const auto f = Measure::DescribeFaceAt(body, idx);
+      if (!f)
+        continue;
+      if (f->normal.x > 0.99f)
+        px = name;
+      else if (f->normal.x < -0.99f)
+        nx = name;
+    }
+    IM_CHECK(!px.empty() && !nx.empty());
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, px}));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, nx}));
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+
+    // The NUMBER, with no unit suffix and no sentence around it — what gets
+    // pasted into a dimension field, which already knows its own unit.
+    const std::string copied = ui::MeasuredValueForClipboard(*s_App);
+    IM_CHECK_STR_EQ(copied.c_str(), "2");
+
+    // ...and the same number as a variable, in STORAGE units, so it does not
+    // change meaning when the document's display units do.
+    std::string why;
+    IM_CHECK(ui::CreateVariableFromMeasurement(*s_App, "gap", &why));
+    ctx->Yield(2);
+    const Parameter* gap = nullptr;
+    for (const Parameter& pv : s_App->projectParameters)
+      if (pv.name == "gap")
+        gap = &pv;
+    IM_CHECK(gap != nullptr);
+    IM_CHECK_STR_EQ(gap->expression.c_str(), "2");
+
+    // Nothing measured: refused with a reason, not a variable holding zero.
+    s_App->measure.picked.clear();
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(ui::MeasuredValueForClipboard(*s_App).empty());
+    IM_CHECK(!ui::CreateVariableFromMeasurement(*s_App, "nothing", &why));
+    IM_CHECK(why.find("Measure two things") != std::string::npos);
+    // ...and so is a nameless one, and one the expression engine will not
+    // accept as a name.
+    IM_CHECK(!ui::CreateVariableFromMeasurement(*s_App, "", &why));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, px}));
+    s_App->measure.picked.push_back(
+        ui::MeasureState::Element::OfFace(ElementRef{id, nx}));
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    IM_CHECK(!ui::CreateVariableFromMeasurement(*s_App, "2bad name", &why));
+    IM_CHECK(why.find("usable variable name") != std::string::npos);
+
+    s_App->measure = ui::MeasureState{};
+    ctx->Yield();
+  };
+
   // M5: whole parts measure. "How far apart are these two parts" is the most
   // natural question in an assembly; Measure::ContactBetween has answered it
   // since I4 for the interference report, and the tool's armed kinds were

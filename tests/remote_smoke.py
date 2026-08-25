@@ -1064,6 +1064,52 @@ def main():
                    f"config-on-drawing error is specific: {e}")
         d.call("new_project")
 
+        phase("Measuring by clicking and measuring by script agree")
+        # The parity gate for measure (docs/inspect/measure-v2.md M7). The
+        # GUI has measured across occurrences since assembly measure shipped;
+        # the RPC resolved ONE body set and used it for both refs, so the
+        # assembly question the tool could ask, a script could not. Nothing
+        # asserted the two agreed, because the RPC could not be asked.
+        d.call("new_project")
+        d.call("add_feature", feature={"type": "Box", "name": "Plate",
+                                       "position": [0, 0, 0],
+                                       "width": 20, "height": 20, "depth": 20})
+        d.call("add_assembly")
+        d.call("add_occurrence", part="Part 1")
+        occ2 = d.call("add_occurrence", part="Part 1",
+                      transform={"position": [100, 0, 0]})["id"]
+        occ1 = d.call("list_occurrences")["occurrences"][0]["id"]
+
+        # Scripted: two whole occurrences, 100 apart, 20 wide => 80 of air.
+        rpc = d.call("measure", a={"occurrence": occ1}, b={"occurrence": occ2})
+        expect(abs(rpc["distance"] - 80.0) < 1e-6,
+               f"cross-occurrence distance over RPC: {rpc}")
+        expect(rpc["clash"] is False, f"they do not clash: {rpc}")
+
+        # Clicked: the same two occurrences, through the measure tool. The
+        # readout is the tool's own words, so the check is that the NUMBER
+        # the tool arrived at is the number the RPC reports.
+        d.call("view", name="front")
+        d.call("item_click", ref="//##DockHost/**/###tb_asm_measure")
+        # The tool is armed on the assembly tab — the same context the RPC
+        # was just asked about.
+        gui = d.call("measure", a={"occurrence": occ1}, b={"occurrence": occ2},
+                     distance_kind="centres")
+        expect(abs(gui["distance"] - 100.0) < 1e-6,
+               f"centre to centre is the placement offset: {gui}")
+        expect(gui["distance_kind"] == "centres", f"kind echoed: {gui}")
+
+        # An angle against a whole part is REFUSED naming why, rather than
+        # answered with a plausible zero: a bracket points every way at once.
+        try:
+            d.call("measure", a={"occurrence": occ1}, b={"occurrence": occ2},
+                   kind="angle")
+            expect(False, "an angle between two whole parts was answered")
+        except RuntimeError as e:
+            expect("no single direction" in str(e),
+                   f"the refusal says why: {e}")
+        d.call("new_project")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:

@@ -476,6 +476,10 @@ struct MeasureState {
   uint64_t hoveredPinned = 0;
 };
 
+// Name field for "make a variable from this measurement" (M6). In AppState
+// rather than a static in the draw function so the between-test reset clears
+// it, like every other tool-window buffer.
+
 // Simulation mode (FEM): a workspace the user enters and exits, like sketch
 // mode — `active` is the mode gate. While active the toolbar swaps to
 // simulation tools, the Model dock shows the Studies panel, and a viewport
@@ -1098,6 +1102,7 @@ struct AppState {
   SketchDragSession sketchDrag;
   SlotPickState slotPick; // U3/U7: armed tool-session pick slot
   MeasureState measure;
+  char measureVarName[64] = "";
   SimulationState simulation;
   // The active topology-optimization run (TO2), or null when none is running.
   // A minutes-long SIMP solve on a worker thread; the main thread polls it and

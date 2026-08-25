@@ -170,8 +170,10 @@ static constexpr MethodDoc ModelingMethods[] = {
                "sources: [entity ids], axis: <line entity id>, link?}."},
     {"pattern", "Sketch pattern (linear/circular) of entities; "
                 "expression-capable count/spacing."},
-    {"list_variables",
-     "List variables with expressions, values, comments, and scope."},
+    // NOTE: list_variables is documented and handled in RemoteProject.cpp,
+    // where the handler is. A second row here made `describe` list the
+    // method TWICE — the convention is one row per `m ==` branch, and this
+    // module has no such branch.
 };
 std::span<const MethodDoc> ModelingMethodDocs() { return ModelingMethods; }
 
