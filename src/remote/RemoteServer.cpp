@@ -796,94 +796,126 @@ static const std::set<std::string> kNoPartDoc = {
 // HandleSemantic but are part of the same surface.
 static constexpr remote::MethodDoc kServerMethods[] = {
     {"describe",
-     "This endpoint: methods, feature/entity/constraint types, enums, and the "
-     "document format version."},
-    {"ping", "Liveness check; returns {ok, app}."},
+     "This endpoint: methods (each with the parameter keys it accepts), "
+     "feature/entity/constraint types, enums, and the document format "
+     "version. {method} narrows to one.",
+     "method"},
+    {"ping", "Liveness check; returns {ok, app}.", ""},
     {"get_state",
      "Full snapshot: features (with errors), bodies (volume, bbox), "
-     "selection, camera, undo/redo, rollback, regen summary."},
-    {"undo", "Undo one step (assembly snapshot history on an assembly tab)."},
-    {"redo", "Redo one step."},
+     "selection, camera, undo/redo, rollback, regen summary.",
+     ""},
+    {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
+     ""},
+    {"redo", "Redo one step.", ""},
     {"view",
      "Orient the camera to a named view {name: front|back|left|right|top|"
-     "bottom|iso}."},
-    {"fit_view", "Frame the geometry in the viewport."},
+     "bottom|iso}.",
+     "fit, name"},
+    {"fit_view", "Frame the geometry in the viewport.", ""},
     {"set_camera",
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
-     "vector); passing eye [x,y,z] derives direction+distance instead."},
-    {"orient_to_face", "Look straight at the selected face."},
+     "vector); passing eye [x,y,z] derives direction+distance instead.",
+     "direction, distance, eye, target, up"},
+    {"orient_to_face", "Look straight at the selected face.", ""},
     {"select_face",
      "Select a face by {mesh, face} or stable {element}/{feature_id, "
-     "element}; returns normal/center."},
-    {"screenshot", "Write the rendered viewport to {path} (needs a renderer "
-                   "— not available under --headless)."},
+     "element}; returns normal/center.",
+     "element, face, mesh"},
+    {"screenshot",
+     "Write the rendered viewport to {path} (needs a renderer "
+     "— not available under --headless).",
+     "fit, path, view"},
     {"render_sheet",
      "One PNG: tiled named views (default iso/front/right/top, up to 6 via "
      "{views}) with a numeric footer — bbox, mass, volume, and on an "
      "assembly the contact_report summary. {focus: occurrence name|id} "
      "frames that one occurrence large in every view (close-ups without "
-     "camera math). Needs a renderer."},
+     "camera math). Needs a renderer.",
+     "focus, path, views"},
     {"render_still",
-     "Path-traced still to {path} (ray tracing; needs GPU support)."},
-    {"rt_build", "Build ray-tracing acceleration structures."},
-    {"set_render_options", "Toggle shadows/SSAO/quality options."},
+     "Path-traced still to {path} (ray tracing; needs GPU support).",
+     "ground, height, path, samples, seed, width"},
+    {"rt_build", "Build ray-tracing acceleration structures.", ""},
+    {"set_render_options", "Toggle shadows/SSAO/quality options.",
+     "shadow_map, shadows, ssao"},
     {"frame_stats",
      "Frame-time statistics over the last {window} frames (default 240): "
      "fps, avg/p50/p95/max ms and the update|ui|wait|record|present split. "
      "{hud: true|false} toggles the overlay (off by default; also "
      "Ctrl+Shift+F). cpu_ms vs display_ms is the read: which of "
      "wait/present holds the vsync idle is driver-dependent. Needs a "
-     "renderer — --headless runs no frame loop."},
-    {"get_settings", "Read the user preferences (docs/ui/settings.md)."},
-    {"set_settings", "Change user preferences {key: value, ...}; persists."},
+     "renderer — --headless runs no frame loop.",
+     "hud, window"},
+    {"get_settings", "Read the user preferences (docs/ui/settings.md).", ""},
+    {"set_settings", "Change user preferences {key: value, ...}; persists.",
+     "*"},
     {"get_keymap",
      "The keyboard bindings (docs/ui/u12-keybindings.md): every command with "
      "its context, label, current chord and default, plus any conflicts. "
      "{context: \"sketch\"} narrows it. A context binding SHADOWS a global "
      "one with the same chord — that is how N is Coincident while sketching "
-     "and align-to-face everywhere else."},
+     "and align-to-face everywhere else.",
+     "context"},
     {"set_keybinding",
      "Rebind one command: {command: \"part.fillet\", chord: \"Shift+B\"}. "
      "An empty chord unbinds it; {reset: true} restores the default. "
-     "Persists. Escape/Enter/Delete/arrows are fixed and have no command."},
-    {"reset_layout", "Reset the dock layout."},
-    {"add_part", "Add a new empty part tab."},
-    {"add_assembly", "Add an assembly tab."},
-    {"list_parts", "List project tabs (parts, assemblies, drawings)."},
-    {"rename_part", "Rename a part."},
-    {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\"."},
-    {"menu_items", "List the menu bar's contents: no {path} = the top-level "
-                   "menus, {path: \"File\"} = that menu's items (submenu: "
-                   "true = walk deeper). The menu closes again."},
-    {"key_press", "Send a key chord, e.g. \"Ctrl+Z\"."},
+     "Persists. Escape/Enter/Delete/arrows are fixed and have no command.",
+     "chord, command, reset"},
+    {"reset_layout", "Reset the dock layout.", ""},
+    {"add_part", "Add a new empty part tab.", "name"},
+    {"add_assembly", "Add an assembly tab.", "name"},
+    {"list_parts", "List project tabs (parts, assemblies, drawings).", ""},
+    {"rename_part", "Rename a part.", "new_name, part"},
+    {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path"},
+    {"menu_items",
+     "List the menu bar's contents: no {path} = the top-level "
+     "menus, {path: \"File\"} = that menu's items (submenu: "
+     "true = walk deeper). The menu closes again.",
+     "path"},
+    {"key_press", "Send a key chord, e.g. \"Ctrl+Z\".", "chord"},
     {"item_click",
      "UI test tier: click a widget by {ref} or by the {id} ui_items reports "
      "(the only handle on hidden-label widgets like a combo). Ref example: "
      "\"//##DockHost/**/###tb_box\" (//window, ** = any depth, ### = the "
-     "widget's stable id); {button: 1} right-clicks."},
-    {"item_double_click", "UI test tier: double-click a widget (same ref "
-                          "grammar as item_click)."},
-    {"item_input", "UI test tier: type into a widget {ref, value}."},
-    {"item_hover", "UI test tier: hover a widget {ref|id} — shows its "
-                   "tooltip and hover state without clicking."},
-    {"popup_click", "UI test tier: open the popup of {ref|id} ({button}: 1 "
-                    "= context menu) and click {item} in it — the only way "
-                    "to reach a menu that is not the main menu bar (the tab "
-                    "bar's '+', context menus). {item} may be a submenu path, "
-                    "\"Part 1/Front\"."},
-    {"popup_items", "UI test tier: list what the popup of {ref|id} holds "
-                    "(submenu: true = address its children as "
-                    "\"Parent/Child\"), then close it."},
-    {"item_combo", "UI test tier: choose {value} in the combo {ref|id} "
-                   "(opens and picks in one action — the popup does not "
-                   "survive between RPCs)."},
-    {"ui_items", "UI test tier: list the widgets under {ref} (default the "
-                 "focused window, {depth}): label, id, window, disabled, "
-                 "screen centre. The GUI, self-described. Labels come from a "
-                 "32-byte buffer, so a long one is CUT — `label_truncated` "
-                 "says so, and the numeric `id` is the handle item_click "
-                 "always accepts."},
+     "widget's stable id); {button: 1} right-clicks.",
+     "button, id, ref"},
+    {"item_double_click",
+     "UI test tier: double-click a widget (same ref "
+     "grammar as item_click).",
+     "id, ref"},
+    {"item_input", "UI test tier: type into a widget {ref, value}.",
+     "id, ref, value"},
+    {"item_hover",
+     "UI test tier: hover a widget {ref|id} — shows its "
+     "tooltip and hover state without clicking.",
+     "id, ref"},
+    {"popup_click",
+     "UI test tier: open the popup of {ref|id} ({button}: 1 "
+     "= context menu) and click {item} in it — the only way "
+     "to reach a menu that is not the main menu bar (the tab "
+     "bar's '+', context menus). {item} may be a submenu path, "
+     "\"Part 1/Front\".",
+     "button, id, item, ref, value"},
+    {"popup_items",
+     "UI test tier: list what the popup of {ref|id} holds "
+     "(submenu: true = address its children as "
+     "\"Parent/Child\"), then close it.",
+     "button, id, ref"},
+    {"item_combo",
+     "UI test tier: choose {value} in the combo {ref|id} "
+     "(opens and picks in one action — the popup does not "
+     "survive between RPCs).",
+     "button, id, item, ref, value"},
+    {"ui_items",
+     "UI test tier: list the widgets under {ref} (default the "
+     "focused window, {depth}): label, id, window, disabled, "
+     "screen centre. The GUI, self-described. Labels come from a "
+     "32-byte buffer, so a long one is CUT — `label_truncated` "
+     "says so, and the numeric `id` is the handle item_click "
+     "always accepts.",
+     "depth, ref"},
     {"scroll_panel",
      "UI test tier: scroll a docked panel {window, to: top|bottom|<y>}; "
      "returns the widget list afterwards. This is for SEEING — a screenshot "
@@ -891,17 +923,21 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "scrolling to appear in one. It is not needed to reach a widget: no "
      "panel here uses a list clipper, so ui_items lists items below the fold "
      "and item_click scrolls them into view by itself. (`scroll` is a "
-     "different thing: it zooms the 3D viewport.)"},
+     "different thing: it zooms the 3D viewport.)",
+     "to, window"},
     {"focus_panel",
      "UI test tier: bring a docked panel's TAB forward {name}, e.g. \"CAM\", "
      "\"Model\", \"History\". A panel tabbed behind another is invisible to "
      "item_click, so without this the only panels a script could drive were "
-     "whichever the saved layout happened to leave in front."},
+     "whichever the saved layout happened to leave in front.",
+     "name"},
     {"viewport_click",
      "Click the 3D viewport at (x, y) as 0-1 fractions OF THE VIEWPORT "
-     "rect (0.5,0.5 = its centre, whatever is docked around it)."},
-    {"viewport_drag", "Drag in the viewport (button 0/1/2) — orbit/pan."},
-    {"scroll", "Scroll (zoom) the viewport."},
+     "rect (0.5,0.5 = its centre, whatever is docked around it).",
+     "button, ctrl"},
+    {"viewport_drag", "Drag in the viewport (button 0/1/2) — orbit/pan.",
+     "button, ctrl, shift"},
+    {"scroll", "Scroll (zoom) the viewport.", "amount, dy, window"},
 };
 
 // Every method any module documents. The describe tables are the registry
@@ -954,13 +990,40 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // constraint dialects, and enum values — so clients (agents, the MCP
     // wrapper) discover the surface without grepping the source. Static
     // metadata only; safe with no document.
+    // `method` narrows to one entry. Three separate dogfooding agents
+    // reached for describe{method: ...} and found describe took no arguments
+    // at all, so the whole 195-method surface came back every time — and
+    // still without saying what any of them takes.
+    const std::string only = p.value("method", std::string{});
     json methods = json::array();
     const auto addDocs = [&](std::span<const remote::MethodDoc> docs) {
       for (const auto& d : docs) {
-        methods.push_back({{"name", d.name},
-                           {"doc", d.doc},
-                           {"requires_part_doc",
-                            !kNoPartDoc.count(d.name) && !IsUiAction(d.name)}});
+        if (!only.empty() && only != d.name)
+          continue;
+        json entry = {{"name", d.name},
+                      {"doc", d.doc},
+                      {"requires_part_doc",
+                       !kNoPartDoc.count(d.name) && !IsUiAction(d.name)}};
+        // "" = takes nothing; "*" = a free-form spec read opaquely, where
+        // the strict unknown-key check is off and prose is the only guide.
+        const std::string ps = d.params ? d.params : "";
+        if (ps == "*") {
+          entry["params_free_form"] = true;
+        } else {
+          json keys = json::array();
+          for (size_t i = 0, j = 0; i <= ps.size(); i++) {
+            if (i == ps.size() || ps[i] == ',') {
+              std::string k = ps.substr(j, i - j);
+              const size_t b = k.find_first_not_of(" ");
+              const size_t e = k.find_last_not_of(" ");
+              if (b != std::string::npos)
+                keys.push_back(k.substr(b, e - b + 1));
+              j = i + 1;
+            }
+          }
+          entry["params"] = std::move(keys);
+        }
+        methods.push_back(std::move(entry));
       }
     };
     addDocs(kServerMethods);
@@ -972,6 +1035,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::DrawingMethodDocs());
     addDocs(remote::ConfigurationMethodDocs());
     addDocs(remote::SimulationMethodDocs());
+    if (!only.empty() && methods.empty())
+      throw std::runtime_error(
+          "unknown method '" + only +
+          "' — call describe with no arguments for the full list");
     json featureTypes = json::array();
     for (const auto& ft : DocumentIO::FeatureTypes())
       featureTypes.push_back({{"type", ft.type},
@@ -1601,7 +1668,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ctx->MenuClick(path.c_str());
     };
   } else if (m == "item_click") {
-    const ItemTarget target(p, m);
+    const ItemTarget target(p, m);           // rpc-params: ref, id
     const int button = p.value("button", 0); // 1 = right-click (context menus)
     m_uiAction = [target, button](ImGuiTestContext* ctx) {
       if (target.RefuseIfDisabled(ctx))
@@ -1609,14 +1676,14 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ctx->ItemClick(target.Ref(), button);
     };
   } else if (m == "item_double_click") {
-    const ItemTarget target(p, m);
+    const ItemTarget target(p, m); // rpc-params: ref, id
     m_uiAction = [target](ImGuiTestContext* ctx) {
       if (target.RefuseIfDisabled(ctx))
         return;
       ctx->ItemDoubleClick(target.Ref());
     };
   } else if (m == "item_input") {
-    const ItemTarget target(p, m);
+    const ItemTarget target(p, m); // rpc-params: ref, id
     const json value = need(p, "value", "text");
     if (!value.is_number() && !value.is_string())
       throw std::runtime_error("item_input value must be a number or string");
@@ -1630,12 +1697,12 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       }
     };
   } else if (m == "item_hover") {
-    const ItemTarget target(p, m);
+    const ItemTarget target(p, m); // rpc-params: ref, id
     m_uiAction = [target](ImGuiTestContext* ctx) {
       ctx->MouseMove(target.Ref());
     };
   } else if (m == "item_combo" || m == "popup_click") {
-    const ItemTarget target(p, m);
+    const ItemTarget target(p, m); // rpc-params: ref, id
     // item_combo names the entry `value`; popup_click (menus, context menus)
     // names it `item`. Same motion either way.
     const std::string entry = m == "item_combo"
@@ -1690,7 +1757,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ctx->KeyPress(ImGuiKey_Escape); // close it again
     };
   } else if (m == "popup_items") {
-    const ItemTarget target(p, m);
+    const ItemTarget target(p, m); // rpc-params: ref, id
     const int button = p.value("button", 0);
     m_uiAction = [this, target, button](ImGuiTestContext* ctx) {
       ImGuiWindow* popup = OpenPopupOf(ctx, target, button);

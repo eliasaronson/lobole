@@ -23,18 +23,21 @@ constexpr MethodDoc kCamMethods[] = {
      "its id and the safe_z derived for it. A setup arrives with one 6 mm "
      "tool, because a setup with no tools can produce nothing, and with a "
      "rapid height clear of the stock, because the default 5 mm is inside "
-     "most of them."},
+     "most of them.",
+     "name, post, safe_z"},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
      "face it was picked from), rotation_a, fit_arcs, tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
-     "so an indexed setup reports the box the machine sees."},
+     "so an indexed setup reports the box the machine sees.",
+     ""},
     {"set_cam_setup",
      "Change a setup {id, name?, post?, safe_z?, rotation_a?, fit_arcs?} or "
      "one of its "
      "tools {id, tool: {number, name?, diameter?, feed_cut?, feed_plunge?, "
-     "spindle_rpm?, flutes?}} — the tool is added when the number is new."},
-    {"remove_cam_setup", "Delete a setup {id} and its operations."},
+     "spindle_rpm?, flutes?}} — the tool is added when the number is new.",
+     "fit_arcs, id, name, post, rotation_a, safe_z, tool"},
+    {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: profile|pocket|face|drill|adaptive, "
      "tool?, top_z?, bottom_z?, stepdown?, side?: outside|inside|on, climb?, "
@@ -47,17 +50,20 @@ constexpr MethodDoc kCamMethods[] = {
      "it, the perimeter cuts outside) or nothing at all to cut the part "
      "free. Face: pick nothing. A refusal says what to pick instead. A "
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
-     "type adaptive; set_cam_op forces either strategy."},
-    {"set_cam_op", "Change an operation {id, …the add_cam_op fields}."},
-    {"remove_cam_op", "Delete an operation {id}."},
+     "type adaptive; set_cam_op forces either strategy.",
+     "bottom_z, setup, side, target, targets, tool, top_z, type"},
+    {"set_cam_op", "Change an operation {id, …the add_cam_op fields}.", "id"},
+    {"remove_cam_op", "Delete an operation {id}.", "id"},
     {"cam_derive_op",
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
      "WITHOUT adding it: the derived operation, or why that pick cannot make "
-     "one. The dry run behind add_cam_op's derivation."},
+     "one. The dry run behind add_cam_op's derivation.",
+     "bottom_z, setup, side, target, targets, tool, top_z, type"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup} without writing a file: per "
      "operation, the move count, cut length (mm), lowest Z, and the error "
-     "when it produced nothing. The cheap way to check a job."},
+     "when it produced nothing. The cheap way to check a job.",
+     "path, post, setup"},
     {"cam_verify",
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
@@ -72,11 +78,13 @@ constexpr MethodDoc kCamMethods[] = {
      "cannot reach and is CORRECT; one large region is a missing operation. "
      "`leftover_biggest` lists where, largest first — a height map cannot "
      "watch a slug fall out or know a tab was asked for, so those show up "
-     "here too and are for you to recognise."},
+     "here too and are for you to recognise.",
+     "resolution, setup"},
     {"cam_post",
      "Write the G-code for a setup {setup, path, post?}. Reports the line "
      "count, the ops it skipped and why. Writes a file; it does not send it "
-     "to a machine."},
+     "to a machine.",
+     "path, post, setup"},
 };
 
 cam::Side SideFrom(const std::string& s) {

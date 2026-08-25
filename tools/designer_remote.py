@@ -32,7 +32,9 @@ class Designer:
 
     # Params as a DICT rather than keywords. `help` takes a parameter called
     # "method", which collides with call()'s own argument — so help was the
-    # one RPC this client could not reach. Keeping call() as it was matters
+    # one RPC this client could not reach. `describe {method}` joined it in
+    # 2026-08 and hit the same wall, so: any RPC with a `method` parameter
+    # goes through request(), not call(). Keeping call() as it was matters
     # too: callers pass whole request dicts as d.call(**{"method": …, …}).
     def request(self, method, params=None):
         self._id += 1

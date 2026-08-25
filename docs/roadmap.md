@@ -246,10 +246,11 @@ stale line hid it.
   [sketching/reference-image-plan.md](sketching/reference-image-plan.md) —
   phase 4 (calibration-point markers, a main-menu entry, undoable opacity,
   tests) is unbuilt, and phase 3's GUI has never been driven end to end.
-- **`describe` has no per-method parameter schema.** `MethodDoc` is
-  `{name, doc}` with the params in prose; only `feature_types[]` carries
-  `params`. Three separate agents have reached for `describe {method: …}`
-  and found it absent ([dogfooding.md](dogfooding.md)).
+- ~~**`describe` has no per-method parameter schema.**~~ **FIXED 2026-08-25**
+  (L2): every method carries the keys it accepts, `describe {method: …}`
+  narrows to one, and `tests/rpc_params_gate.py` reads the handlers to keep
+  the two in step — in both directions, because advertising a parameter the
+  dispatcher refuses is worse than advertising nothing.
 - ~~**The Onshape importer's `fitSpline` skip is stale.**~~ **FIXED
   2026-08-25** (L1): it replays a `Curve3D`, re-fitted through a dense sample
   of the built curve rather than through Onshape's through-point *query*,

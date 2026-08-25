@@ -458,14 +458,19 @@ _EXPOSED = {
 }
 
 @mcp.tool(description="API introspection — call this FIRST to learn the "
-          "surface. Top-level keys: methods (name + one-line doc + "
-          "requires_part_doc), feature_types (type + since_version), "
-          "sketch_entity_types, constraint_kinds, extrude_modes, "
-          "extrude_end_modes, axis_kinds, material_slugs, "
-          "document_format_version. The authoritative companion to the "
-          "format prose in this server's tool descriptions.")
-def describe() -> dict:
-    out = _call("describe")
+          "surface. Top-level keys: methods (name + one-line doc + the "
+          "`params` keys it accepts + requires_part_doc), feature_types "
+          "(type + since_version), sketch_entity_types, constraint_kinds, "
+          "extrude_modes, extrude_end_modes, axis_kinds, material_slugs, "
+          "document_format_version. Pass `method` to get just that one "
+          "instead of all 195 — the params list is what to read before "
+          "guessing a key name, since an unrecognised key is REFUSED, not "
+          "ignored. A method with params_free_form: true reads its params "
+          "object opaquely, so the prose is the only guide there. The "
+          "authoritative companion to the format prose in this server's "
+          "tool descriptions.")
+def describe(method: str = "") -> dict:
+    out = _call("describe", **({"method": method} if method else {}))
     # Which instance answered. Everything below describes an app; this says
     # WHICH app, so a session cannot quietly be about the wrong window.
     out["attached"] = attached_to()

@@ -94,7 +94,7 @@ the API has a call budget ([onshape-terms.md](interchange/onshape-terms.md)),
 so `curve_sample_points`' FeatureScript has not run against a real document.
 The pure mapping under it is covered.
 
-## L2 — `describe` grows a parameter schema, and a gate that keeps it true (~1 session)
+## L2 — `describe` grows a parameter schema, and a gate that keeps it true — **SHIPPED**
 
 **The evidence.** `dogfooding.md` records the **third** separate agent reaching
 for `describe {method: …}` and finding it absent. `remote::MethodDoc` is
@@ -139,6 +139,58 @@ without the gate rather than pretending the gate covers everything.
 **Verification:** the gate checked against deliberate sabotage in both
 directions (add a `p.value` the row does not list; list a param the handler
 does not read), which is the standard this codebase holds its gates to.
+
+**As built.** `MethodDoc` gained a `params` field, all **195 rows** filled;
+`describe {method: "..."}` narrows to one and refuses an unknown name;
+`tools/rpc_params_scan.py` reads the handlers and `tests/rpc_params_gate.py`
+diffs the two (a ctest, source-only, 0.1 s, no app and no GPU). Sabotage-checked
+three ways — a key the handler reads with no row, a row naming a key nobody
+reads, and a new branch with no row at all.
+
+**The risk this plan flagged came in far below estimate: 195 of 195 branches
+attribute cleanly, and only 3 need the opaque marker** (`add_constraint`,
+`add_constraints`, `set_settings` — all genuine `p.raw()` free-form specs).
+The plan's fallback ("if the exception list comes back long, ship the table
+without the gate") was not needed. Four things made the difference, and the
+first two are findings in their own right:
+
+- **Brace-aware scoping, not a regex sweep.** Handlers group methods that
+  share a preamble — five occurrence edits read `id` once, then dispatch
+  inside — so splitting the file at each `m ==` mention misattributes **35%**
+  of branches. Tracking each method scope's brace depth and asking which
+  scope encloses a key most tightly gets it right.
+- **Two branches were labelled by a comment the compiler could not see.**
+  `} else { // rename_occurrence` and `} else { // delete_reference_image`.
+  The scanner attributed their keys to every method in the group, which would
+  have advertised `name` on `set_occurrence_visible` — a parameter the
+  dispatcher then refuses, which is worse than saying nothing. Both are now
+  `else if (m == "...")`: the code says what the comment said, and it is
+  equivalent because each outer group enumerates exactly those names.
+- **`screenshot` and `render_sheet` are staged asynchronously**, before the
+  `RpcParams` path exists, so they match on `request.method` and read
+  `request.params` directly. Worth knowing beyond this gate: **the strict
+  unknown-key rejection does not cover those two.**
+- **An explicit `// rpc-params: a, b, c` marker** for keys read where the
+  scanner cannot follow — a lambda taking the key as an argument
+  (`set_units`), or a helper constructor (`ItemTarget`, which reads `ref` and
+  `id` for the six `item_*`/`popup_*` actions). Greppable, so the exceptions
+  are a visible list rather than silent gaps.
+
+**The gate caught its own parser bug, which is the best evidence it works.**
+`clang-format` reflowed four long rows (`pattern`, `query_geometry`,
+`set_configuration`, `set_study`), splitting their params list across adjacent
+string literals — which C++ concatenates and the first version of the gate did
+not. It read only the trailing literal, so those four rows became a *prefix*
+that still looked like a perfectly valid key list. The scanner disagreed with
+the table and the test went red. The row parser now splits on top-level commas
+and joins each field's literals.
+
+**The payoff, concretely.** `describe` now answers
+`check_geometry → params: ["body"]`, and sending `tolerance` is refused with
+*"unknown parameter 'tolerance' for 'check_geometry'. Accepted: body."* Those
+two agree because the gate forces them from one source of truth — previously
+the second existed and the first did not, so the only way to learn a key name
+was to send a wrong one.
 
 ## L3 — The GUI test that fails only in company (~½ session, timeboxed)
 

@@ -260,8 +260,11 @@ setting.
   it is a performance limit rather than a correctness one.
 - The auto mesh size is chosen for a stress field and is far too coarse for a
   topology design; the warning says so rather than the sizing being fixed.
-- `describe` still lists no parameter schema per method (the dock round's P4).
-  Third agent to reach for `describe {method: ...}` and find it absent.
+- ~~`describe` still lists no parameter schema per method (the dock round's
+  P4). Third agent to reach for `describe {method: ...}` and find it
+  absent.~~ **FIXED 2026-08-25** — and the third agent's instinct was right
+  about the shape: `describe {method: ...}` is what it now takes. See
+  [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md) L2.
 - The box tool's own dimension fields have no ids, so a test still has to set
   a primitive's size through the command layer.
 

@@ -36,85 +36,132 @@ namespace remote {
 // be null on an assembly tab, matching the original un-guarded behavior).
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc ProjectMethods[] = {
-    {"new_project", "Reset to an empty project (one empty part)."},
-    {"open_project", "Open a project {path} (.json file or .dsgn directory)."},
+    {"new_project", "Reset to an empty project (one empty part).", ""},
+    {"open_project", "Open a project {path} (.json file or .dsgn directory).",
+     "path"},
     {"save_project",
      "Save the project to {path, message?, force?}. Refuses when the project "
-     "changed on disk since it was opened; {force:true} saves over it."},
-    {"import_step", "Import a STEP file into the current project (XCAF: names, "
-                    "colors, real assemblies)."},
-    {"export_step", "Export the active part (or {part}) to STEP {path}."},
-    {"export_stl", "Export to STL {path, deflection?}."},
-    {"export_brep", "Export to BREP {path}."},
-    {"export_visual", "Export a visual-quality mesh (glTF/OBJ by extension) of "
-                      "the part or whole assembly."},
+     "changed on disk since it was opened; {force:true} saves over it.",
+     "force, message, path"},
+    {"import_step",
+     "Import a STEP file into the current project (XCAF: names, "
+     "colors, real assemblies).",
+     "as_assembly, path"},
+    {"export_step", "Export the active part (or {part}) to STEP {path}.",
+     "body, deflection, path"},
+    {"export_stl", "Export to STL {path, deflection?}.",
+     "body, deflection, path"},
+    {"export_brep", "Export to BREP {path}.", "body, deflection, path"},
+    {"export_visual",
+     "Export a visual-quality mesh (glTF/OBJ by extension) of "
+     "the part or whole assembly.",
+     "deflection, path"},
     {"checkpoint_create",
-     "Name the current state of the whole project a version {name}."},
-    {"checkpoint_list", "List named versions."},
-    {"checkpoint_restore", "Put the project back to a named version {name}."},
-    {"history_log", "List the project's versions (every save)."},
-    {"history_restore", "Put the project back to a version {commit}."},
-    {"branch_list", "List separate lines of work, and which one is current."},
-    {"branch_create", "Start a separate line of work {name, switch?:true}."},
-    {"branch_switch", "Move to a separate line of work {name}."},
-    {"branch_merge", "Bring {name} into the current line of work. A "
-                     "'conflicted' status is an outcome, not an error."},
-    {"conflict_list", "What two merged versions disagree about, in document "
-                      "terms — including the duplicate ids git merges "
-                      "cleanly and never reports."},
+     "Name the current state of the whole project a version {name}.", "name"},
+    {"checkpoint_list", "List named versions.", ""},
+    {"checkpoint_restore", "Put the project back to a named version {name}.",
+     "name"},
+    {"history_log", "List the project's versions (every save).", "limit"},
+    {"history_restore", "Put the project back to a version {commit}.",
+     "commit"},
+    {"branch_list", "List separate lines of work, and which one is current.",
+     ""},
+    {"branch_create", "Start a separate line of work {name, switch?:true}.",
+     "name, switch"},
+    {"branch_switch", "Move to a separate line of work {name}.", "name"},
+    {"branch_merge",
+     "Bring {name} into the current line of work. A "
+     "'conflicted' status is an outcome, not an error.",
+     "name"},
+    {"conflict_list",
+     "What two merged versions disagree about, in document "
+     "terms — including the duplicate ids git merges "
+     "cleanly and never reports.",
+     ""},
     {"conflict_resolve",
      "Resolve one conflict {path, take: mine|theirs|auto, field?}. 'auto' is "
      "the union merge for an order, a rebuild for derived geometry, and a "
-     "renumber for a duplicate id."},
-    {"merge_finish", "Verify the merged project LOADS AND REGENERATES, then "
-                     "keep it. Refuses with {broken} when it does not."},
-    {"merge_abort", "Throw an in-progress merge away."},
-    {"set_variable", "Add or redefine a variable {name, expression, comment?, "
-                     "scope: project|part}; returns value + regen."},
-    {"list_variables", "Project variables and the active part's local ones."},
+     "renumber for a duplicate id.",
+     "field, path, take"},
+    {"merge_finish",
+     "Verify the merged project LOADS AND REGENERATES, then "
+     "keep it. Refuses with {broken} when it does not.",
+     ""},
+    {"merge_abort", "Throw an in-progress merge away.", ""},
+    {"set_variable",
+     "Add or redefine a variable {name, expression, comment?, "
+     "scope: project|part}; returns value + regen.",
+     "comment, expression, name, scope"},
+    {"list_variables", "Project variables and the active part's local ones.",
+     ""},
     {"set_units",
      "The units the ACTIVE document is READ in {length?: mm|cm|m|in, mass?: "
      "g|kg|lb, angle?: deg|rad}. Display only — storage is always mm/g/deg, "
      "so this cannot move a vertex. Omitted keys keep their current value; "
-     "an unrecognised one is refused, naming what is accepted."},
-    {"get_units", "The active document's display units."},
-    {"rename_variable", "Rename a variable {name, new_name, scope?}, rewriting "
-                        "every referencing expression."},
-    {"delete_variable", "Delete a variable {name, scope?}; refused while "
-                        "referenced."},
-    {"remote_list", "The project's remotes, and how far ahead/behind this "
-                    "branch is."},
-    {"remote_add", "Give the project a remote {name?:origin, url}. A shared "
-                   "project stops committing built geometry."},
-    {"remote_remove", "Forget a remote {name}."},
-    {"fetch", "Bring down refs from {remote?:origin} without touching the "
-              "working tree."},
-    {"pull", "Fetch {remote?:origin} and merge it in. A 'conflicted' status "
-             "is an outcome — see conflict_list."},
-    {"push", "Send this branch to {remote?:origin}. 'rejected' means someone "
-             "else pushed first; pull, then push again."},
-    {"clone_project", "Clone {url} into {path} and open it."},
-    {"autosave_now", "Autosave every dirty document immediately, ignoring "
-                     "the interval; returns how many were written."},
-    {"autosave_status", "Which documents have autosaved work waiting to be "
-                        "recovered."},
+     "an unrecognised one is refused, naming what is accepted.",
+     "angle, length, mass"},
+    {"get_units", "The active document's display units.", ""},
+    {"rename_variable",
+     "Rename a variable {name, new_name, scope?}, rewriting "
+     "every referencing expression.",
+     "name, new_name, scope"},
+    {"delete_variable",
+     "Delete a variable {name, scope?}; refused while "
+     "referenced.",
+     "name, scope"},
+    {"remote_list",
+     "The project's remotes, and how far ahead/behind this "
+     "branch is.",
+     ""},
+    {"remote_add",
+     "Give the project a remote {name?:origin, url}. A shared "
+     "project stops committing built geometry.",
+     "name, url"},
+    {"remote_remove", "Forget a remote {name}.", "name"},
+    {"fetch",
+     "Bring down refs from {remote?:origin} without touching the "
+     "working tree.",
+     "remote"},
+    {"pull",
+     "Fetch {remote?:origin} and merge it in. A 'conflicted' status "
+     "is an outcome — see conflict_list.",
+     "remote"},
+    {"push",
+     "Send this branch to {remote?:origin}. 'rejected' means someone "
+     "else pushed first; pull, then push again.",
+     "remote"},
+    {"clone_project", "Clone {url} into {path} and open it.", "path, url"},
+    {"autosave_now",
+     "Autosave every dirty document immediately, ignoring "
+     "the interval; returns how many were written.",
+     ""},
+    {"autosave_status",
+     "Which documents have autosaved work waiting to be "
+     "recovered.",
+     ""},
     {"project_changed_on_disk",
      "Has anything else written to the project since it was opened or last "
-     "saved? (a terminal command, another editor, a second instance)"},
+     "saved? (a terminal command, another editor, a second instance)",
+     ""},
     {"create_folder",
      "Create a bottom-tab-bar folder {folder}, empty. Display grouping only "
-     "— ids, references and storage are unaffected. Idempotent."},
+     "— ids, references and storage are unaffected. Idempotent.",
+     "folder"},
     {"move_to_folder",
      "Put tabs in a folder: {part, folder}. `part` is a name/id/index or an "
      "ARRAY of them (parts, assemblies and drawings alike); folder \"\" "
      "moves them back to the top level. The folder must already exist, so a "
-     "typo is an error instead of a new folder."},
-    {"rename_folder", "Rename folder {folder} to {new_name}, members and "
-                      "all. Renaming onto an existing folder MERGES them "
-                      "(reported as merged:true)."},
+     "typo is an error instead of a new folder.",
+     "folder, part"},
+    {"rename_folder",
+     "Rename folder {folder} to {new_name}, members and "
+     "all. Renaming onto an existing folder MERGES them "
+     "(reported as merged:true).",
+     "folder, new_name"},
     {"dissolve_folder",
      "Remove folder {folder}; its tabs return to the top level. Documents "
-     "are never deleted with their folder — see delete_part for that."},
+     "are never deleted with their folder — see delete_part for that.",
+     "folder"},
 };
 std::span<const MethodDoc> ProjectMethodDocs() { return ProjectMethods; }
 
@@ -388,6 +435,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (m == "set_units") {
       // Refuse, don't substitute: a caller who writes "inch" and gets
       // millimetres is wrong in every dimension and looks fine.
+      // The keys reach RpcParams through this lambda's argument, so the
+      // describe-schema scanner cannot see them at the p.at() call.
+      // rpc-params: length, mass, angle
       const auto parse = [&p](const char* key, auto&& from, auto& out,
                               const std::vector<const char*>& accepted) {
         if (!p.contains(key))

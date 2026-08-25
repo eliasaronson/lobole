@@ -139,10 +139,13 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
 // null on an assembly/drawing tab.
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc InspectionMethods[] = {
-    {"check_geometry", "Did the model build? {ok, valid, body_count, "
-                       "feature_errors, bodies:[...B-Rep checks]}."},
+    {"check_geometry",
+     "Did the model build? {ok, valid, body_count, "
+     "feature_errors, bodies:[...B-Rep checks]}.",
+     "body"},
     {"mass_properties",
-     "Mass/volume/center-of-mass per body and total (density from materials)."},
+     "Mass/volume/center-of-mass per body and total (density from materials).",
+     "body"},
     // This row said "point/distance/angle/radius" for a year and the handler
     // implemented distance. `describe` is what an agent trusts INSTEAD of
     // guessing, so a row that promises a branch nobody wrote is the
@@ -161,9 +164,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "centres. kind:'angle' or 'both' adds the angle, taken between the "
      "outward normals when both are planar faces (adjacent box faces read 90, "
      "opposite ones 180) and unsigned in 0-90 when either direction's sign is "
-     "arbitrary, as a line edge's is; `basis` says which."},
-    {"list_elements", "Stable face/edge names per body (the toponaming handles "
-                      "measure/fillet/mates use)."},
+     "arbitrary, as a line edge's is; `basis` says which.",
+     "a, b, distance_kind, kind, part"},
+    {"list_elements",
+     "Stable face/edge names per body (the toponaming handles "
+     "measure/fillet/mates use).",
+     "body, part"},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
@@ -171,20 +177,25 @@ static constexpr MethodDoc InspectionMethods[] = {
      "contact_report for the full picture. A part INSIDE a sub-assembly is "
      "addressed by path — \"Gangway/Board 19\", or the id chain \"2/17\" "
      "when a name repeats — which is the only way to ask a question that "
-     "spans the boundary (read-only; a sub-assembly is edited on its tab)."},
+     "spans the boundary (read-only; a sub-assembly is edited on its tab).",
+     "a, b, touch_tol"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
      "default 1.0 mm), clashes. Assembly tab: over occurrences, plus "
      "intended-vs-realized mate diffs when mates exist. Part tab: over the "
      "part's BODIES — catches a bracket floating inside one part, which "
-     "the occurrence-level sweep cannot see."},
+     "the occurrence-level sweep cannot see.",
+     "near_tol, touch_tol"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
      "(+radius_tol), area/length bounds, near_point (+max_distance); "
      "expected_count makes the result carry ok true/false. Covers UNNAMED "
-     "elements too; matches carry stable names where they exist."},
+     "elements too; matches carry stable names where they exist.",
+     "angle_tol_deg, axis, body, element_type, expected_count, geometry_type, "
+     "max_area, max_distance, max_length, max_results, min_area, min_length, "
+     "near_point, normal, part, radius, radius_tol"},
     {"compare_geometry",
      "Boolean-diff similarity: {golden_path} (STEP/BREP reference) vs the "
      "active doc, or {a, b} bodies/occurrences. Returns iou/dice/precision/"
@@ -192,32 +203,40 @@ static constexpr MethodDoc InspectionMethods[] = {
      "plain-language verdicts; {missing_path}/{extra_path} export the diff "
      "solids as BREP. materialize:true DRAWS them on the part instead — "
      "missing red, extra green — so one screenshot shows WHERE it differs "
-     "(part tab only; clear_geometry_delta turns it off)."},
+     "(part tab only; clear_geometry_delta turns it off).",
+     "a, b, extra_path, golden_path, materialize, missing_path"},
     {"clear_geometry_delta",
      "Remove the compare_geometry materialize overlay, leaving the plain "
-     "model. Harmless when there is none."},
+     "model. Harmless when there is none.",
+     ""},
     {"section",
      "Cross-section area where a plane cuts the bodies; on an assembly tab, "
      "every visible occurrence in place. Omit `offset` to cut through the "
-     "middle of what is shown (the chosen offset comes back)."},
+     "middle of what is shown (the chosen offset comes back).",
+     "base_plane, normal, offset, origin"},
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
      "offset}. Works on part AND assembly tabs, with filled cut caps on "
      "both; omit `offset` to cut through the middle of what is shown. "
-     "Shorthand for one cut — add_section/update_section address several."},
+     "Shorthand for one cut — add_section/update_section address several.",
+     "add, base_plane, enabled, offset, reverse"},
     {"add_section",
      "Add a section cut and return its id {base_plane: xy|xz|yz, plane_id? "
      "(a datum plane), offset?, tilt_u?, tilt_v? (degrees), reverse?}. Up to "
-     "four; they persist with the project."},
+     "four; they persist with the project.",
+     "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
     {"list_sections",
      "Every section cut: id, source (base plane / datum / face, with "
      "resolved:false when a named datum/face is gone — such a cut stops "
      "cutting), offset, tilt, reverse, visible, and the cut plane "
-     "{normal, d}."},
+     "{normal, d}.",
+     ""},
     {"update_section",
      "Change one cut {id, base_plane?, plane_id?, offset?, tilt_u?, tilt_v?, "
-     "reverse?, visible?}. Only the fields present are touched."},
-    {"remove_section", "Remove one cut {id}, or all of them with {all: true}."},
+     "reverse?, visible?}. Only the fields present are touched.",
+     "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
+    {"remove_section", "Remove one cut {id}, or all of them with {all: true}.",
+     "all, id"},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 

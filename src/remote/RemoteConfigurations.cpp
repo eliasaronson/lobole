@@ -20,11 +20,15 @@ namespace remote {
 static constexpr MethodDoc ConfigurationMethods[] = {
     {"add_configuration",
      "Add a configuration to the active part (parameter overrides + feature "
-     "suppression) or assembly (occurrence suppression)."},
-    {"remove_configuration", "Remove a configuration by name."},
-    {"list_configurations", "List configurations and the active one."},
-    {"set_configuration", "Edit a configuration's overrides/suppressions."},
-    {"set_active_configuration", "Activate a configuration and regenerate."},
+     "suppression) or assembly (occurrence suppression).",
+     "name"},
+    {"remove_configuration", "Remove a configuration by name.", "id"},
+    {"list_configurations", "List configurations and the active one.", ""},
+    {"set_configuration", "Edit a configuration's overrides/suppressions.",
+     "id, name, parameter_overrides, suppressed_features, "
+     "suppressed_occurrences"},
+    {"set_active_configuration", "Activate a configuration and regenerate.",
+     "id"},
 };
 std::span<const MethodDoc> ConfigurationMethodDocs() {
   return ConfigurationMethods;

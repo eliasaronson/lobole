@@ -327,6 +327,14 @@ add_test(NAME onshape_import_test
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/onshape_import_test.py)
 set_tests_properties(onshape_import_test PROPERTIES TIMEOUT 60)
 
+# `describe`'s parameter schema matches the keys each handler actually reads.
+# Source-only (no app, no GPU, no display) — RpcParams knows a method's exact
+# vocabulary but only at runtime, after the handler has run, so the schema is
+# declared in MethodDoc and this keeps it honest in both directions.
+add_test(NAME rpc_params_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_params_gate.py)
+set_tests_properties(rpc_params_gate PROPERTIES TIMEOUT 60)
+
 # Assemblies A4 exploded views: RPCs, pure-view-state contract, persistence.
 add_test(NAME exploded_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exploded_smoke.py

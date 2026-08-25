@@ -27,49 +27,63 @@ namespace remote {
 // Act on the active assembly tab / project.
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc AssemblyMethods[] = {
-    {"set_active_part", "Switch the active tab by name or index."},
+    {"set_active_part", "Switch the active tab by name or index.",
+     "index, name"},
     {"delete_part",
-     "Delete a part or assembly tab (refused while any assembly places it)."},
+     "Delete a part or assembly tab (refused while any assembly places it).",
+     "index"},
     {"add_occurrence",
      "Place a part OR another assembly in the active assembly {part: name of "
      "either, transform?}. Returns {id, part_id, ref_kind}; a reference that "
-     "would close a cycle is refused."},
-    {"remove_occurrence", "Remove an occurrence by id."},
+     "would close a cycle is refused.",
+     "fixed, name, part, transform, visible"},
+    {"remove_occurrence", "Remove an occurrence by id.", "id"},
     {"list_occurrences",
      "List occurrences with transforms, state and ref_kind (part|assembly); a "
-     "sub-assembly also reports leaf_count and the leaves' paths."},
+     "sub-assembly also reports leaf_count and the leaves' paths.",
+     ""},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
-     "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}."},
-    {"set_occurrence_visible", "Show/hide an occurrence."},
-    {"set_occurrence_fixed", "Fix/free an occurrence for the solver."},
-    {"rename_occurrence", "Rename an occurrence."},
+     "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}.",
+     "id, transform"},
+    {"set_occurrence_visible", "Show/hide an occurrence.", "id, visible"},
+    {"set_occurrence_fixed", "Fix/free an occurrence for the solver.",
+     "fixed, id"},
+    {"rename_occurrence", "Rename an occurrence.", "id, name"},
     {"set_occurrence_configuration",
      "Choose which configuration of a placed SUB-ASSEMBLY this occurrence "
      "uses {id, configuration: name|id|null}; null = that document's active "
-     "one. Two placements of one assembly can differ."},
-    {"select_occurrence", "Select an occurrence in the UI."},
+     "one. Two placements of one assembly can differ.",
+     "configuration, id"},
+    {"select_occurrence", "Select an occurrence in the UI.", "id"},
     {"add_mate",
      "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
-     "connectors...}."},
-    {"set_mate", "Edit a mate's parameters."},
-    {"remove_mate", "Remove a mate by id."},
-    {"list_mates", "List mates with status/errors."},
-    {"select_mate", "Select a mate in the UI."},
-    {"solve_assembly", "Run the mate solver; returns satisfied/errored mates."},
-    {"bom", "Bill of materials (aggregated part counts, masses)."},
-    {"export_bom", "Export the BOM as CSV {path}."},
+     "connectors...}.",
+     "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, type"},
+    {"set_mate", "Edit a mate's parameters.",
+     "ball_rotation, dx, dy, flipped, id, name, offset, rotation"},
+    {"remove_mate", "Remove a mate by id.", "id"},
+    {"list_mates", "List mates with status/errors.", ""},
+    {"select_mate", "Select a mate in the UI.", "id"},
+    {"solve_assembly", "Run the mate solver; returns satisfied/errored mates.",
+     ""},
+    {"bom", "Bill of materials (aggregated part counts, masses).", ""},
+    {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",
-     "Enter in-context editing of a part within the assembly."},
-    {"add_exploded_view", "Add an exploded view."},
-    {"remove_exploded_view", "Remove an exploded view."},
-    {"list_exploded_views", "List exploded views."},
-    {"set_explode_step", "Add/edit an explode step (occurrence + offset)."},
-    {"auto_explode", "Generate explode steps automatically (creates and "
-                     "activates a view when none is given)."},
+     "Enter in-context editing of a part within the assembly.", "occurrence"},
+    {"add_exploded_view", "Add an exploded view.", "name"},
+    {"remove_exploded_view", "Remove an exploded view.", "id"},
+    {"list_exploded_views", "List exploded views.", ""},
+    {"set_explode_step", "Add/edit an explode step (occurrence + offset).",
+     "occurrence, offset, view"},
+    {"auto_explode",
+     "Generate explode steps automatically (creates and "
+     "activates a view when none is given).",
+     "view"},
     {"set_explode",
      "Set the live explode factor (0..1); auto-activates the only view, "
-     "errors if ambiguous. view: 0 deactivates."},
+     "errors if ambiguous. view: 0 deactivates.",
+     "factor, view"},
 };
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
 
@@ -291,7 +305,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         }
       }
       occ->configurationId = cfgId;
-    } else { // rename_occurrence
+    } else if (m == "rename_occurrence") {
       occ->name = p.at("name").get<std::string>();
     }
     state.assembly->BumpVersion();

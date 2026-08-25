@@ -21,7 +21,18 @@ namespace remote {
 // add the branch, add the row) exposed via XxxMethodDocs().
 struct MethodDoc {
   const char* name; // exact RPC method literal
-  const char* doc;  // one-line description (params in prose)
+  const char* doc;  // one-line description (prose: what it does, and why)
+  // The accepted TOP-LEVEL parameter keys, comma-separated, "" for none, or
+  // "*" when the object is a free-form spec the handler reads opaquely
+  // (`p.raw()`). This is what `describe` hands an agent so it does not have
+  // to guess a key name, and it is the half `RpcParams` cannot supply:
+  // SeenKeys() knows the exact vocabulary but only by RUNNING the handler.
+  //
+  // Kept true by `tests/rpc_params_gate.py`, which reads the handlers with
+  // tools/rpc_params_scan.py and fails when a row and its branch disagree in
+  // either direction — so a new key without a row, or a row naming a key
+  // nobody reads, is a failing test rather than a stale line.
+  const char* params;
 };
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
