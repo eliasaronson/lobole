@@ -148,7 +148,8 @@ accident — `pull` is `fetch` + `merge`, and merge already understands the
 format, so a teammate's incoming work is the same five conflict classes, the
 same panel, the same integrity pass.
 
-What remains: **C1** commits authored by the person who made them (the inline
+What remained at writing, and **all of which shipped 2026-08-21** — kept in
+future tense because the reasoning is the record: **C1** commits authored by the person who made them (the inline
 identity is applied on every commit, so it overrides the one git already has);
 **C2** remotes + clone, whose substance is that fetch/push are network calls
 and `RunGit` blocks — fetch and push go to a worker thread (they touch `.git/`

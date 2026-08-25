@@ -34,7 +34,7 @@ history), variables (an expression pass during regeneration), scripting (the com
 *is* the API), git (text format), LLM interface (same command layer + headless mode), and
 testability (geometry ops unit-testable without a GUI).
 
-## Current state (2026-08-20)
+## Current state (2026-08-25)
 
 The app is a working parametric CAD with assemblies, simulation and drawings;
 **all sixteen workstreams are v1-complete** (see the table below), and the
@@ -49,7 +49,7 @@ the script API since UI U9 (2026-08-13); several were script-only before that.
 The 2D sketcher is feature-complete. Parametric core: `Document`
 feature list with deterministic regeneration + a per-feature output-shape cache
 (incremental regen), stable ids, undo/redo, PlaneGCS solving. **Variables & expressions**
-everywhere, including unit-suffixed literals. Serialization is at **format v57** (a
+everywhere, including unit-suffixed literals. Serialization is at **format v64** (a
 diffable directory format, golden-corpus migrations, with built geometry baked
 beside the recipe so opening a project is a load, not a rebuild).
 
@@ -68,14 +68,18 @@ in-house Eigen/Spectra solvers, colormapped results) and **topology
 optimization** on the same mesh; **drawings** (HLR views of parts/assemblies, driven dimensions, SVG + PDF).
 **Rendering:** MSAA + ACES + IBL/PBR, per-instance transparency, PCF shadows +
 SSAO (persisted as user preferences), an offline path-traced Render button.
+**CAM** — 2.5D milling, posted and verified, listed under "Explicitly not
+planned" below because that is the line it reverses, not because it is small.
 
 **Thin or missing:** the UI/UX visual-polish tail (spacing rhythm, tree badges,
 a tooltips audit); assembly-level features; per-occurrence part-config
 selection (the one configurations follow-on); real-time hybrid RT (gated on
-the `main.cpp` render-path cleanup); assembly/thermal/buckling FEM.
+the `main.cpp` render-path cleanup); assembly/thermal/buckling FEM; a slender
+part optimizing at GPU rather than CPU speed (topopt GPU5, designed). And
+**no part has been cut on the mill** — see "What's next".
 
 **Where the defects actually come from (evidence, 2026-08-19/20).**
-`known-bugs.md` is empty and the suite is ~800 tests, yet a single evening of
+`known-bugs.md` was empty and the suite was ~800 tests, yet a single evening of
 a person *using* the app surfaced six real defects — the section arrow dead on
 assembly tabs, the section drag rebuilding every mesh per frame, point picking
 highlighting an adjacent line, the Intel camera wobble (per-frame resources
@@ -309,11 +313,14 @@ points opposite ways for each:
   number before a refactor — one "regression" this month was a laptop lid
   closed mid-benchmark.
 
-### Test coverage (state 2026-08-20)
+### Test coverage (state 2026-08-24)
 
-**660 tests pass under `ctest -LE gui` in ~90 s** (636 C++ Catch2 cases + 24
-headless Python integration smokes) and **161 ImGui-test-engine GUI cases in
-~80 s** via `tools/gui-tests-xvfb.sh`; CI runs the headless subset every push. **Strong:** the
+**782 tests pass under `ctest -LE gui`** (C++ Catch2 cases + headless Python
+integration smokes) and **198 ImGui-test-engine GUI cases in ~80 s** via
+`tools/gui-tests-xvfb.sh` — both counted during the architecture review
+([architecture-review-2026-08-24.md](architecture-review-2026-08-24.md)),
+which ran each of its five stages against them. CI runs the headless subset
+every push. **Strong:** the
 headless core — geometry/features, format+golden-corpus migrations, expression engine,
 and the full RPC surface via smokes (every feature since assemblies shipped with a test).
 **By-construction untested:** renderers + `main.cpp` (need a GPU — verified via gui_smoke
@@ -322,9 +329,13 @@ and the full RPC surface via smokes (every feature since assemblies shipped with
 device-lost and the C4 back-face-culling surfaced on-screen, not in tests, and
 the 2026-08-19/20 round confirmed it with six more. No coverage
 gate in CI; new-feature coverage is by author discipline, not enforced threshold.
-One trap worth knowing when adding GUI cases: a test whose category is exactly
-`perf` lands in the test engine's Perfs group, which this suite never queues —
-it will list and never run.
+Two traps worth knowing when adding GUI cases. A test whose category is
+exactly `perf` lands in the test engine's Perfs group, which this suite never
+queues — it will list and never run. And **a green sharded run is not evidence
+that the suite is order-independent**: the 4-way partition is balanced by
+recorded per-test times, so adding a test reshuffles which cases share a
+process. One pair is known to fail when they meet and is invisible by default
+(see "Known loose ends"); `--serial` is the check.
 
 ## Explicitly not planned (conscious decisions, not omissions)
 

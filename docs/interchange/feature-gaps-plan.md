@@ -15,7 +15,7 @@ effort:
 |---|---------|----------------|--------|---------------|
 | 1 | Split feature | `splitPart` | ✅ **v1 SHIPPED** (robust tier deferred) | body-identity (`createdBy`) collision |
 | 2 | 2D sketch B-spline | spline sketch entities | ✅ **v1 SHIPPED** (rigid net; solved poles deferred) | OCC watertight profile edge |
-| 3 | 3D fit-spline | `fitSpline` | ~1 session | new non-sketch curve object type |
+| 3 | 3D fit-spline | `fitSpline` | ✅ **SHIPPED** as `Curve3D` (v42) — widened into [../modeling/curves-3d-plan.md](../modeling/curves-3d-plan.md) | new non-sketch curve object type |
 
 Grounding facts (verified 2026-07-20): format `kVersion = 38`
 (`src/core/io/SerializationInternal.h:19`); sketch entities are
@@ -285,3 +285,11 @@ identity; B-spline fully-solved poles + point-on-spline/tangent constraints;
 After each ships, update the importer to replay it (replace the skip) and
 drop the corresponding line from `import-plan.md` §"Future modeling
 features".
+
+> **This step was missed for #3** (and for the sketch-spline half of #2).
+> `Curve3D` shipped as format v42 and `tools/onshape_import.py:2246` still
+> says "3D curve object not in Designer yet" — a skip guarding against a gap
+> that closed. Found by the 2026-08-25 doc audit, which is exactly the kind of
+> thing a stale line makes invisible: nobody re-reads a skip whose stated
+> reason still reads true. `splitPart`'s skip is NOT stale — its knife is an
+> unresolved Onshape query, which is a real remaining gap.

@@ -1,8 +1,14 @@
 # C++23 modernization + spdlog-everywhere
 
-Status: **Part 1 (spdlog everywhere) DONE (commit 12583aa, 2026-07-23).** Parts 2–3
-not started. `CMAKE_CXX_STANDARD 23` is set (GCC 15.2, near-complete libstdc++
-C++23 support). No `kVersion` bump, no file-format change — pure internal hygiene.
+Status: **the scheduled work is COMPLETE** — see the sequencing table at the
+bottom, which is the authoritative row-by-row record. Part 1 (spdlog
+everywhere) `12583aa`; `to_underlying` `25f8b71`; `std::expected` slice A
+(Expression) `27e13fc` and slice B (serialization) both landed. Slice C
+(FEM/femgpu) was **deliberately skipped** as poor risk/reward, and Part 3
+(ranges views, deducing `this`, `std::print`) is **policy-only** — adopt in
+new code where a measured case exists, do not sweep. `CMAKE_CXX_STANDARD 23`
+is set (GCC 15.2, near-complete libstdc++ C++23 support). No `kVersion` bump,
+no file-format change — pure internal hygiene.
 
 > Note (2026-07-23): file paths below predate the `src/` reorg — the renderers
 > are now under `src/render/`, CADObject under `src/cad/`, etc. (see

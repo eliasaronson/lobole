@@ -336,7 +336,7 @@ dimension work in G. **Detailed plan:
 
 Risk: low — same shape as Phase A, plus a one-field flag.
 
-## Phase I — Constraint status & management (~2 days)
+## Phase I — Constraint status & management (~2 days) — SHIPPED (`7001a35`)
 
 **Detailed plan: [phase-ghi.md](phase-ghi.md).**
 
@@ -393,7 +393,7 @@ As previously planned, with the repo findings applied:
 Risk: medium — wire orientation is the fiddly part; the ShapeFix pass is the
 known mitigation.
 
-## Phase K — Generative operations: mirror, pattern, fillet, offset (~3–4 days)
+## Phase K — Generative operations: mirror, pattern, fillet, offset (~3–4 days) — SHIPPED (K1+K2+K3)
 
 Detailed plan (with reference-repo findings) in **phase-k.md**. Key
 revision from that research: FreeCAD does these as constraint-linked bakes (no

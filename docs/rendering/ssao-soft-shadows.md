@@ -1,8 +1,14 @@
 # SSAO + key-light soft shadows
 
-Status: S1 SHIPPED (5f4ac15, key-light PCF shadows) + S2 SHIPPED (03c5db6,
-SSAO). S3 remains: View-menu quality settings + bias/strength tuning via a
-dev-watch screenshot loop (all knobs single-site; see the commit messages).
+Status: **COMPLETE.** S1 SHIPPED (5f4ac15, key-light PCF shadows), S2 SHIPPED
+(03c5db6, SSAO), and S3 shipped **2026-08-20** — with one deliberate change of
+destination. The quality knobs were designed here as a View menu; they landed
+in **Edit > Preferences** instead, persisted to `settings.json`
+(`shadows`, `ssao` = off|half|full, `shadowMap` = 1024|2048 in
+`core/io/Settings.h`), because a render-quality choice that resets every
+launch is the thing the settings round was built to stop
+([../ui/settings.md](../ui/settings.md)). Bias/strength were tuned through the
+dev-watch screenshot loop as planned.
 
 Scope: the two raster-polish items left open by the showcase arc
 ([plan.md](plan.md) items 3 and the soft-shadow half of 5). Per

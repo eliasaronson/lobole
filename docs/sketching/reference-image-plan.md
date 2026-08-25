@@ -1,6 +1,15 @@
 # Sketch reference images (underlays) — design & plan
 
-> Status: **IN PROGRESS.** Import a raster image (PNG/JPEG) into a sketch as a
+> Status: **IN PROGRESS — phases 0–3 built, phase 4 unbuilt.** As of the
+> 2026-08-25 doc audit this is the **only workstream doc still genuinely
+> in flight**, and it has been since 2026-07-21; everything else in `docs/`
+> is either shipped or a deferral with a reason. Two things are outstanding
+> and they compound: **phase 4 was never started**, and **phase 3's GUI has
+> never been driven end to end** — the panel and the calibrate tool are
+> unit- and RPC-verified only, so the feature a person actually touches has
+> no click coverage. Treat it as unfinished, not as shipped-with-polish-left.
+>
+> Import a raster image (PNG/JPEG) into a sketch as a
 > scalable underlay, calibrate its scale by picking two points and typing the
 > real distance between them, then trace geometry over it.
 >
@@ -31,7 +40,10 @@
 >   register items in an inactive dock tab), so the panel/tool need a quick
 >   interactive check; the functions they call are unit/RPC-verified.
 > - **Phase 4 (polish) — TODO** (calibration-point overlay markers, main-menu
->   entry, undoable opacity, tests).
+>   entry, undoable opacity, tests). Plus the phase-3 interactive check above,
+>   which in practice means the GUI tests phase 4 was going to add anyway —
+>   `ImGui` does not register items in an inactive dock tab, so the panel has
+>   to be brought forward first (`focus_panel`, added by the CAM round).
 >
 > NOTE: real `kVersion` was 48 (not 46 as an old memory said); this feature is
 > **v49**. Build with `nix-shell --run 'ninja -C build <target>'` (glm comes

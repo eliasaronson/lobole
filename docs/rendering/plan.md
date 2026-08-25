@@ -12,11 +12,18 @@
 > alpha blend, depth-write-off second pass, per-instance alpha) — the
 > pipeline glass materials would reuse.
 >
-> **Remaining** (item numbers below): 3 SSAO, the soft-shadow-map half of 5,
-> TAA (later, needs a G-buffer), and **6b real-time hybrid RT** — still gated
-> on the `main.cpp` render-path cleanup (not started: `main.cpp` is ~1300
-> lines, no extracted `VulkanContext`). Of 6b's two preconditions, PBR (✓)
-> is met; the cleanup is not.
+> **2026-07-19: SSAO + key-light soft shadows — SHIPPED**, closing items 3 and
+> the soft-shadow half of 5 ([ssao-soft-shadows.md](ssao-soft-shadows.md)).
+> S3's quality knobs shipped too, as *persisted user preferences*
+> (`shadows` / `ssao` / `shadowMap` in `core/io/Settings.h`) rather than the
+> session-only View menu the sub-plan proposed — see [../ui/settings.md](../ui/settings.md).
+>
+> **Remaining** (item numbers below): TAA (later, needs a G-buffer) and **6b
+> real-time hybrid RT** — still gated on the `main.cpp` render-path cleanup
+> (not started: `main.cpp` is ~1300 lines, no extracted `VulkanContext`; the
+> 2026-08-24 architecture review extracted the *helpers* into
+> `render/VulkanCommon` but deliberately not the structure). Of 6b's two
+> preconditions, PBR (✓) is met; the cleanup is not.
 >
 > **2026-08-11: outline/wireframe interaction perf — SHIPPED.** Orbiting
 > lagged on many-body assemblies (CPU-side per-frame silhouette recompute +
@@ -53,15 +60,16 @@ originally described was replaced by real per-body materials in R1.)
    in `mesh.frag` fed by real per-body `CADMaterials` properties (the albedo-guess
    heuristic is gone); per-instance since the instancing split (material rides push
    constants, `SetInstanceMaterial`).
-3. **SSAO** — *open; the biggest remaining raster win.* Contact shadows in corners and
-   crevices — an enormous readability win for mechanical parts specifically (you *see* the
-   geometry). Needs a depth (and ideally normal) prepass to sample against.
+3. ~~**SSAO**~~ — **SHIPPED** (S2, `03c5db6`): contact shadows in corners and crevices,
+   from a depth+normal prepass. `SSAORenderer`; quality is a persisted preference
+   (off | half | full). The readability win it promised, and the reason a mechanical
+   part now reads as solid.
 4. ~~**Tone mapping (ACES)**~~ — **SHIPPED** (R2): ACES filmic (Narkowicz fit) in
    `mesh.frag`, highlights roll off instead of clipping.
-5. **IBL environment + soft shadows** — **half SHIPPED** (R3, `517cf51`+`d9a8272`):
-   diffuse irradiance + prefiltered specular + BRDF LUT precomputed from a bundled studio
-   HDR, sampled in `mesh.frag` (split-sum). *Open:* soft-shadow maps from the key light —
-   the remaining raster-quality item alongside SSAO.
+5. ~~**IBL environment + soft shadows**~~ — **SHIPPED**, in two halves. R3
+   (`517cf51`+`d9a8272`): diffuse irradiance + prefiltered specular + BRDF LUT precomputed
+   from a bundled studio HDR, sampled in `mesh.frag` (split-sum). S1 (`5f4ac15`):
+   PCF soft-shadow maps from the key light (`ShadowRenderer`, 1024/2048 by preference).
 
    > 6.1–6.5 together get ~80% of the "whoa, this looks good" reaction at a fraction of the
    > cost and risk of raytracing, and they work everywhere. Do them first.

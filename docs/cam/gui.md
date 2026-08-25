@@ -194,6 +194,8 @@ is therefore **Front**. Nothing here assumes otherwise (every depth comes
 from the face you clicked), but the names disagree, and picking "the top
 face" from the Top view will land on a wall and be refused.
 
-Deliberately still open: pockets too small to ramp into want a helix entry;
-the ~0.4 % cut-length overcount at the ramp seam; arcs in the posted file
-instead of polygonised curves.
+Deliberately still open at v1, and **two of the three have since shipped**
+(CAM phase 2, 2026-08-21): helix entry for pockets too small to ramp into is
+**C6** (`b00cbf9`), and arcs in the posted file instead of polygonised curves
+are **C7** (`6c73990`, flat arcs; helical deferred). Still open: the ~0.4 %
+cut-length overcount at the ramp seam.

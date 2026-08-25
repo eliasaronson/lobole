@@ -161,12 +161,16 @@ workstream — **full build plan in [feature-gaps-plan.md](feature-gaps-plan.md)
   robust downstream body-identity tier are deferred — see
   [feature-gaps-plan.md](feature-gaps-plan.md). The importer's `splitPart`
   skip can now replay a Split.
-- **Splines** — sketch B-splines (fit / control-polygon) and 3D fit
-  splines. Onshape: spline sketch entities + `fitSpline`. Designer's sketch
-  entity set is Point/Line/Circle/Arc/Ellipse only; a spline is a new
-  entity type (solver params, OCC `Geom_BSplineCurve`, rendering) — the
-  largest of the three. 3D fit-spline additionally needs a non-sketch
-  curve object.
+- **Splines** — ✅ **BOTH SHIPPED.** Sketch B-splines landed in sketching
+  phase L (format v40, rigid-net v1): `BSpline` is a member of the sketch
+  entity variant alongside Point/Line/Circle/Arc/Ellipse/EllipseArc. The 3D
+  side landed as its own workstream — `CurveFeature` / `Curve3D` (format
+  v42, fit-spline + helix + control-poly), which grew out of this gap and is
+  planned in [../modeling/curves-3d-plan.md](../modeling/curves-3d-plan.md).
+  Fully-solved poles (point-on-spline / tangent-at-knot) remain deferred.
+  **The importer has not caught up:** `tools/onshape_import.py` still reports
+  `fitSpline` as "3D curve object not in Designer yet". That skip is dead
+  code and should now replay a `Curve3D`.
 
 (**up-to-face extrude bounds are already supported** — `ExtrudeEnd::UpToFace`
 — and are mapped by the importer; listed here only to note they are NOT a

@@ -258,9 +258,11 @@ new section added since.
 - **Cross-document references** in the duplicate-id scan (an assembly mate
   into a part). Id spaces are per-document, so scanning the whole project
   would report collisions that are not references. `Verify` is the backstop.
-- The **disk-change gap** below is still open and still live — planned as
-  [F8](f8-external-changes.md), together with the stable-id invariant that
-  the `ReplaceFeature` bug argues for.
+- The **disk-change gap** below was open and live when this was written;
+  **[F8](f8-external-changes.md) closed it on 2026-08-21** (a project-directory
+  stamp checked at the one place every save funnels through), together with the
+  stable-id invariant that the `ReplaceFeature` bug argues for. Remotes were
+  deferred here too and **F9 shipped them the same day**.
 
 ## Verification sketch
 
