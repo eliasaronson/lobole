@@ -197,7 +197,24 @@ fi
 # Yesterday's failure logs are not today's. They are only written when a
 # shard fails, and nothing ever removed them — so a clean run left four stale
 # ones lying about, which is exactly long enough to be read as current.
+#
+# But deleting them created the opposite problem, and it is the one that
+# actually cost time: the natural response to an order-dependent failure is
+# to RE-RUN it, and the re-run wiped the evidence. Three separate flakes on
+# 2026-08-25 were each read from a log the following run destroyed, so none
+# of them could be diagnosed afterwards.
+#
+# So: the fixed path is still cleared (nothing stale can be mistaken for
+# current), and a failing shard is ALSO archived under a timestamped
+# directory that no later run touches, alongside the one thing that makes it
+# reproducible — the exact filter, in order, and the seed.
 rm -f /tmp/designer-gui-shard*.log
+FAILDIR="${XDG_STATE_HOME:-$HOME/.local/state}/designer/gui-failures"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+# Keep the last 20 archived failures; past that the oldest are noise.
+if [ -d "$FAILDIR" ]; then
+  ls -1dt "$FAILDIR"/* 2>/dev/null | tail -n +21 | xargs -r rm -rf
+fi
 
 ran=0
 failed=0
@@ -214,6 +231,29 @@ for c in $(seq 1 "$i"); do
       tail -20 || true
     cp "$WORK/shard$c.log" "/tmp/designer-gui-shard$c.log"
     echo "    full log: /tmp/designer-gui-shard$c.log"
+    # ...and an archive the next run will not delete, with the two things a
+    # later reader needs and never had: which tests shared this process, in
+    # which order, and the seed that produced that order.
+    ARCH="$FAILDIR/$STAMP-shard$c"
+    mkdir -p "$ARCH"
+    cp "$WORK/shard$c.log" "$ARCH/shard.log"
+    sed -n "${c}p" "$WORK/filters" > "$ARCH/filter"
+    SEEDLINE="$(grep -m1 'shuffled order, seed' "$WORK/shard$c.log" || true)"
+    {
+      echo "# $(date -Is)  shard $c of $i${line:+  ($line)}"
+      echo "# ${SEEDLINE:-not shuffled: the order is the filter order}"
+      echo "#"
+      echo "# Reproduce THIS process — same tests, same order:"
+      echo "cd '$ROOT/build' && ./designer --gui-tests --hidden \\"
+      printf "  --gui-test-filter '%s'" "$(sed -n "${c}p" "$WORK/filters")"
+      if [ -n "$SEEDLINE" ]; then
+        printf " \\\n  --gui-test-shuffle %s" \
+          "$(echo "$SEEDLINE" | sed -n 's/.*seed[ =]*\([0-9]*\).*/\1/p')"
+      fi
+      echo
+    } > "$ARCH/reproduce.sh"
+    chmod +x "$ARCH/reproduce.sh"
+    echo "    archived: $ARCH  (reproduce.sh has the filter and seed)"
   fi
 done
 

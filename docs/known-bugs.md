@@ -58,9 +58,20 @@ what the terminal case shows does not pay: it was diagnosed to a window left
 `Hidden` after a dock-layout rebuild, four fixes were tried and rejected, and
 then it stopped reproducing without anyone identifying what fixed it.
 
-A second, cheaper move given the load correlation: capture the shard logs on
-failure rather than leaving them in `/tmp` to be overwritten by the next run.
-The three above were each read from a log that the next run destroyed.
+~~A second, cheaper move given the load correlation: capture the shard logs on
+failure rather than leaving them in `/tmp` to be overwritten by the next
+run.~~ **Done 2026-08-25.** A failing shard is archived under
+`$XDG_STATE_HOME/designer/gui-failures/<stamp>-shard<N>/` — which no later run
+touches — with its full log, its exact filter, and a runnable `reproduce.sh`
+carrying that filter and the seed. The fixed `/tmp` copies are still cleared
+each run, so nothing stale can be read as current; the two behaviours were in
+tension and the archive resolves it.
+
+The tension is worth stating, because it is why three failures in a row went
+undiagnosed: **the natural response to an order-dependent failure is to
+re-run it, and the re-run destroyed the evidence.** The next one will leave a
+directory behind that names which tests shared its process and in what order
+— the two facts that make this class reproducible at all.
 
 ---
 
