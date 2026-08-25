@@ -586,6 +586,9 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out);
 void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
                     const glm::vec4& color, std::vector<PrimVertex>& out);
 
+// The calibrate-image picks and the span between them, on the sketch plane.
+void AppendCalibrationMarkers(AppState& state, std::vector<PrimVertex>& out);
+
 // A constant-size round dot, for marking points on the model (CAM leftover).
 void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
                    std::vector<PrimVertex>& out);

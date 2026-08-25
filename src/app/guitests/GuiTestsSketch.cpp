@@ -1728,4 +1728,92 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(litCounts().first, 0); // and no line is
     s_App->sketchEdit.selected.clear();
   };
+
+  // Sketch reference images (v49) — the first test to touch them at all.
+  //
+  // The feature shipped its model, its RPCs and its rendering, and its own
+  // plan says phase 3's GUI "couldn't be driven end-to-end headlessly, so
+  // the panel/tool need a quick interactive check". That check was never
+  // done, so every widget below has been unverified since 2026-07-21.
+  //
+  // Insert is NOT clicked here: the first thing it does is open a native file
+  // dialog, which the test engine cannot drive — the same reason Import has
+  // no clicked coverage (docs/ui/gui-coverage.md). The action behind it is
+  // called directly and everything AFTER it is clicked, which is where the
+  // panel actually lives.
+  t = IM_REGISTER_TEST(engine, "sketch", "reference_image_panel_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+
+    const std::string fixture = std::string(DESIGNER_SOURCE_DIR) +
+                                "/tests/fixtures/images/checker16x12.png";
+    const uint32_t id = ui::AddReferenceImageToSketch(*s_App, fixture);
+    IM_CHECK(id != 0);
+    ctx->Yield(2);
+
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr);
+    IM_CHECK_EQ(sk->images.size(), (size_t)1);
+    // The decoded pixel size, which is what every placement is scaled from.
+    IM_CHECK_EQ(sk->images[0].widthPx, 16);
+    IM_CHECK_EQ(sk->images[0].heightPx, 12);
+
+    // Open the image session the way the toolbar's Insert does on success.
+    s_App->sketchEdit.selectedImageId = id;
+    ui::SetSketchTool(*s_App, ui::SketchTool::Image);
+    ctx->Yield(4);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/Opacity"));
+
+    // Opacity is a PERSISTED field, so an edit belongs on the undo stack —
+    // and it was a live cosmetic write with no undo entry at all until
+    // 2026-08-25. Drag it across several frames: if the fix pushed one
+    // command per frame instead of one per drag, a single undo would leave
+    // the value part-way and this fails.
+    sk = ui::ResolveActiveSketch(*s_App);
+    const double before = sk->images[0].opacity;
+    ctx->ItemInputValue("//###ToolWindow/Opacity", 0.9f);
+    ctx->Yield(3);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(std::abs(sk->images[0].opacity - before) > 0.01);
+    IM_CHECK(s_App->commands->CanUndo());
+
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK_EQ(sk->images.size(), (size_t)1); // undid the EDIT, not the image
+    IM_CHECK(std::abs(sk->images[0].opacity - before) < 1e-6);
+
+    // Calibrate arms its own tool and, from 2026-08-25, draws where the
+    // picks landed — before that the tool asked for two points and showed
+    // nothing, so a mis-picked point silently rescaled the whole image.
+    ctx->ItemClick("//###ToolWindow/Calibrate...");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::CalibrateImage);
+    IM_CHECK_EQ(s_App->sketchEdit.calibImageId, id);
+
+    std::vector<PrimVertex> prims;
+    ui::AppendCalibrationMarkers(*s_App, prims);
+    IM_CHECK(prims.empty()); // nothing picked yet, so nothing drawn
+
+    s_App->sketchEdit.calibP1 = glm::vec2(0.0f, 0.0f);
+    s_App->sketchEdit.calibP2 = glm::vec2(8.0f, 0.0f);
+    s_App->sketchEdit.calibStage = 2;
+    prims.clear();
+    ui::AppendCalibrationMarkers(*s_App, prims);
+    IM_CHECK(!prims.empty()); // two dots and the span between them
+
+    // Apply: the typed distance becomes the image scale. 8 plane-units of
+    // picked span declared to be 40 mm is a 5x rescale, and unitsPerPixel is
+    // what every traced dimension then inherits.
+    const double upp = sk->images[0].unitsPerPixel;
+    s_App->sketchEdit.calibDistance = 40.0f;
+    ctx->ItemClick("//###ToolWindow/Apply##calib");
+    ctx->Yield(4);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    IM_CHECK(std::abs(sk->images[0].unitsPerPixel - upp) > 1e-9);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+  };
 }

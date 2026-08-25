@@ -292,7 +292,7 @@ something fixed it without announcing itself.
 
 **The shard pin was not needed**, which is the outcome Elias preferred.
 
-## L4 — Reference images, finished (~1 session)
+## L4 — Reference images, finished — **SHIPPED**
 
 [sketching/reference-image-plan.md](sketching/reference-image-plan.md) is the
 only workstream doc still genuinely in flight, and has been since 2026-07-21.
@@ -312,6 +312,30 @@ the CAM round.
 **Verification:** a GUI test that inserts an image, calibrates it by picking
 two points and typing a distance, and asserts the scale changed; opacity is one
 undo step, not one per slider frame (the `HandleEdit` recipe).
+
+**As built. "Polish" was the wrong word for one of these.** Opacity had no undo
+entry, so adjusting it and pressing Ctrl+Z popped the command underneath —
+the image insertion. **The image disappeared.** The sabotage check is what
+made it plain: reverting the fix fails the new test on `images.size() == 1`,
+not on the opacity value. A persisted field with no command is not a missing
+nicety, it is an undo stack that lies about what it will do.
+
+The rest as planned: calibration markers (the tool asked for two points and
+drew nothing, so a mis-picked point silently rescaled everything traced over
+it), a `File > Reference Image…` entry gated by the same command predicate as
+the toolbar button, and `sketch/reference_image_panel_by_clicking` — **the
+first test to touch this feature at all**, sabotage-checked both ways.
+
+Two things worth knowing for the next feature like it:
+
+- **Insert stays unclicked, deliberately.** It opens a native file dialog,
+  which the test engine cannot drive — the same reason Import has no clicked
+  coverage (`docs/ui/gui-coverage.md`). The action behind it is called
+  directly and everything after it is clicked, which is where the panel is.
+- **GUI tests can now read checked-in fixtures.** `DESIGNER_SOURCE_DIR` was
+  defined for the test binary only; it now rides the test-engine branch of
+  `designer_app` too. The fixture is 87 bytes and deliberately non-square, so
+  a test can tell a width from a height.
 
 ## L5 — The coverage-asymmetry matrix (~1 session)
 

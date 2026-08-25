@@ -244,13 +244,41 @@ void DrawImageSession(AppState& state, SketchFeature& sketch) {
   }
   BeginToolWindowFrame(state, "Reference Image");
   ImGui::Text("Image %u  (%d x %d px)", img->id, img->widthPx, img->heightPx);
+
+  // Opacity and Hide are PERSISTED fields (format v49), so an edit to either
+  // belongs on the undo stack. Opacity is a drag, so it follows the
+  // HandleEdit recipe: JSON baseline when the slider is grabbed, exactly one
+  // ModifyFeatureCommand when it is released — never one per frame.
+  size_t sketchIdx = 0;
+  const bool resolved = ResolveActiveSketch(state, &sketchIdx) == &sketch;
+  const auto commitImageEdit = [&]() {
+    if (!resolved || state.sketchEdit.imageEditBaseline.is_null())
+      return;
+    nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+    if (after != state.sketchEdit.imageEditBaseline) {
+      state.commands->PushApplied(std::make_unique<ModifyFeatureCommand>(
+          sketchIdx, state.sketchEdit.imageEditBaseline, after));
+    }
+    state.sketchEdit.imageEditBaseline = nlohmann::json();
+  };
+
   ImGui::SetNextItemWidth(160);
   float op = static_cast<float>(img->opacity);
   if (ImGui::SliderFloat("Opacity", &op, 0.05f, 1.0f, "%.2f"))
-    img->opacity = op; // live cosmetic edit (not undoable)
+    img->opacity = op; // live; the command lands on release
+  if (ImGui::IsItemActivated() && resolved)
+    state.sketchEdit.imageEditBaseline = DocumentIO::FeatureToJson(sketch);
+  if (ImGui::IsItemDeactivatedAfterEdit())
+    commitImageEdit();
+
   bool hidden = img->hidden;
-  if (ImGui::Checkbox("Hide", &hidden))
+  if (ImGui::Checkbox("Hide", &hidden)) {
+    // One click, so grab and release are the same moment.
+    if (resolved)
+      state.sketchEdit.imageEditBaseline = DocumentIO::FeatureToJson(sketch);
     img->hidden = hidden;
+    commitImageEdit();
+  }
   ImGui::Separator();
   if (ImGui::Button("Calibrate...")) {
     edit.calibImageId = img->id;

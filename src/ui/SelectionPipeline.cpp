@@ -775,4 +775,32 @@ void AppendRegionPickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
   }
 }
 
+// The calibrate-image picks, drawn on the sketch plane.
+//
+// Without this the tool asks you to "click two points a known distance apart"
+// and then shows you nothing at all — you cannot see where the first click
+// landed, whether it hit the tick you aimed at, or what span the typed
+// distance is about to be assigned to. The numbers it produces are a SCALE
+// for the whole image, so a mis-picked point silently rescales everything
+// traced over it.
+void AppendCalibrationMarkers(AppState& state, std::vector<PrimVertex>& out) {
+  const SketchEditState& edit = state.sketchEdit;
+  if (edit.tool != SketchTool::CalibrateImage || edit.calibImageId == 0)
+    return;
+  const SketchFeature* sk = ResolveActiveSketch(state);
+  if (sk == nullptr)
+    return;
+  const glm::vec4 kPick{1.00f, 0.85f, 0.30f, 1.0f}; // the same hover yellow
+  const glm::vec4 kSpan{0.35f, 0.80f, 1.00f, 1.0f}; // and selection blue
+  if (edit.calibStage >= 1)
+    AppendPrimDot(sk->plane.PlaneToWorld(edit.calibP1), 5.0f, kPick, out);
+  if (edit.calibStage >= 2) {
+    AppendPrimDot(sk->plane.PlaneToWorld(edit.calibP2), 5.0f, kPick, out);
+    // The span the typed distance will be assigned to — the thing that is
+    // actually being measured, and the only way to check it before Apply.
+    AppendPrimLine(sk->plane.PlaneToWorld(edit.calibP1),
+                   sk->plane.PlaneToWorld(edit.calibP2), 1.8f, kSpan, out);
+  }
+}
+
 } // namespace ui

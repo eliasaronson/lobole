@@ -242,10 +242,9 @@ stale line hid it.
   `terminal/survives_a_dock_layout_rebuild` instead of being an accident of a
   CAM test, the lifecycle half moved headless, and the dead `everStarted`
   latch two comments still called load-bearing is gone.
-- **Sketch reference images stop at phase 3.**
-  [sketching/reference-image-plan.md](sketching/reference-image-plan.md) —
-  phase 4 (calibration-point markers, a main-menu entry, undoable opacity,
-  tests) is unbuilt, and phase 3's GUI has never been driven end to end.
+- ~~**Sketch reference images stop at phase 3.**~~ **FIXED 2026-08-25** (L4),
+  and the "polish" list was hiding a real bug: opacity had no undo entry, so
+  adjusting it and pressing Ctrl+Z deleted the image. Phases 0–4 complete.
 - ~~**`describe` has no per-method parameter schema.**~~ **FIXED 2026-08-25**
   (L2): every method carries the keys it accepts, `describe {method: …}`
   narrows to one, and `tests/rpc_params_gate.py` reads the handlers to keep

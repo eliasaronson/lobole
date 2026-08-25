@@ -133,6 +133,14 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Export...", Hint(state, "file.export").c_str(), false,
                       CommandEnabled(state, "file.export")))
     RunCommand(state, "file.export");
+  // A sketch reference image is an import too, and it was reachable only from
+  // the sketch toolbar — so a person who had not found that button had no way
+  // to discover the feature existed. Gated by the command (Sketching), so it
+  // greys out off a sketch instead of failing after the file dialog.
+  if (ImGui::MenuItem("Reference Image...###file_reference_image",
+                      Hint(state, "sketch.image").c_str(), false,
+                      CommandEnabled(state, "sketch.image")))
+    RunCommand(state, "sketch.image");
   ImGui::Separator();
   if (ImGui::MenuItem("Exit")) {
     glfwSetWindowShouldClose(state.window, GLFW_TRUE);

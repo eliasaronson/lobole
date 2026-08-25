@@ -259,6 +259,13 @@ struct SketchEditState {
   int calibStage = 0;
   bool calibAlignAxis = false; // also rotate so p1->p2 lands on the U axis
   float calibDistance = 10.0f; // the typed real-world distance
+  // The image feature as it was when an opacity drag STARTED. Opacity was a
+  // live cosmetic edit with no undo entry at all — which is wrong for a
+  // persisted field, and worse than it sounds: the slider writes every frame,
+  // so a naive fix pushes one command per frame of the drag. Baseline at
+  // grab, one ModifyFeatureCommand on release (the HandleEdit recipe from
+  // docs/ui/direct-manipulation.md). Empty when no drag is in progress.
+  nlohmann::json imageEditBaseline;
 
   // What the cursor is over in the Select tool (for hover highlighting),
   // refreshed each frame. `hoveredBody` distinguishes an entity body from a

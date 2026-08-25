@@ -914,6 +914,7 @@ void DrawUI(AppState& state) {
     AppendSelectionPrimitives(state, prims); // selected/hovered edges (U1b)
     if (state.document) {
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
+      AppendCalibrationMarkers(state, prims);   // calibrate-image picks
       AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
       AppendCamToolpathOverlay(state, prims);   // CAM backplot
       prims.insert(prims.end(), camPrims.begin(), camPrims.end());

@@ -1,13 +1,26 @@
 # Sketch reference images (underlays) — design & plan
 
-> Status: **IN PROGRESS — phases 0–3 built, phase 4 unbuilt.** As of the
-> 2026-08-25 doc audit this is the **only workstream doc still genuinely
-> in flight**, and it has been since 2026-07-21; everything else in `docs/`
-> is either shipped or a deferral with a reason. Two things are outstanding
-> and they compound: **phase 4 was never started**, and **phase 3's GUI has
-> never been driven end to end** — the panel and the calibrate tool are
-> unit- and RPC-verified only, so the feature a person actually touches has
-> no click coverage. Treat it as unfinished, not as shipped-with-polish-left.
+> Status: **SHIPPED (phases 0–4, 2026-08-25).** Phase 4 and the phase-3
+> interactive check that was never done landed together, as
+> [loose-ends-2026-08-25.md](../loose-ends-2026-08-25.md) L4.
+>
+> **The polish list was hiding a real bug.** Opacity was a live cosmetic
+> write with no undo entry — so adjusting it and pressing Ctrl+Z popped the
+> command underneath, which is the image insertion: **your image
+> disappeared**. Confirmed by sabotage (reverting the fix makes the new test
+> fail on `images.size() == 1`, not on the opacity value). Opacity and Hide
+> are persisted fields; both are now one `ModifyFeatureCommand`, with the
+> baseline taken when the slider is GRABBED and the command pushed on
+> release — never one per frame of the drag, which the test pins by dragging
+> across several frames and undoing once.
+>
+> Also shipped: **calibration-point markers** (the tool asked for two points
+> and then drew nothing, so a mis-picked point silently rescaled everything
+> traced over the image), a **File > Reference Image…** entry (it was
+> reachable only from the sketch toolbar), and
+> `sketch/reference_image_panel_by_clicking` — the first test to touch this
+> feature at all. Insert itself stays unclicked: it opens a native file
+> dialog, the same reason Import has no clicked coverage.
 >
 > Import a raster image (PNG/JPEG) into a sketch as a
 > scalable underlay, calibrate its scale by picking two points and typing the
@@ -39,11 +52,13 @@
 >   upright. GUI widgets couldn't be driven end-to-end headlessly (ImGui doesn't
 >   register items in an inactive dock tab), so the panel/tool need a quick
 >   interactive check; the functions they call are unit/RPC-verified.
-> - **Phase 4 (polish) — TODO** (calibration-point overlay markers, main-menu
->   entry, undoable opacity, tests). Plus the phase-3 interactive check above,
->   which in practice means the GUI tests phase 4 was going to add anyway —
->   `ImGui` does not register items in an inactive dock tab, so the panel has
->   to be brought forward first (`focus_panel`, added by the CAM round).
+> - **Phase 4 (polish) — DONE 2026-08-25.** Calibration-point overlay markers
+>   (`AppendCalibrationMarkers`, two dots plus the span the typed distance is
+>   about to be assigned to), a File-menu entry gated by the same command
+>   predicate as the toolbar button, undoable opacity/hide, and the GUI test.
+>   The phase-3 check came with it, since it is the same work. One fixture
+>   was added — `tests/fixtures/images/checker16x12.png`, 87 bytes, generated
+>   deterministically and non-square so a test can tell width from height.
 >
 > NOTE: real `kVersion` was 48 (not 46 as an old memory said); this feature is
 > **v49**. Build with `nix-shell --run 'ninja -C build <target>'` (glm comes

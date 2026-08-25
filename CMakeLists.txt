@@ -665,7 +665,11 @@ if(ENABLE_TEST_ENGINE)
   target_compile_definitions(designer_app PUBLIC
       HAVE_TEST_ENGINE
       IMGUI_ENABLE_TEST_ENGINE
-      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1)
+      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+      # Where the checked-in GUI-test fixtures live (tests/fixtures/...).
+      # Only ever read by test code, which is why it rides the test-engine
+      # branch rather than being defined for a release build.
+      DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()
 
 add_executable(designer ${SANITIZER_DEFAULTS_SRC}
