@@ -465,6 +465,58 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   // move docs in/out via the tab context menus, and drag-drop between the
   // bar and folder buttons. Folder edits mark the project dirty even though
   // no document version changes (they live only in project.json).
+  // Foldering an ASSEMBLY tab, which nothing tested. The coverage matrix
+  // (docs/ui/coverage-matrix.md) flagged the tab bar as covered five ways on
+  // part tabs and once on assembly tabs — and "once" was the kind glyphs,
+  // not the folder machinery.
+  //
+  // The code says this cannot break: folders live on PartSlot, every tab kind
+  // IS a PartSlot, and the folder loop never looks at `kind`. That is an
+  // argument from structure, though, and the two bugs this matrix exists
+  // because of were both "the code obviously handles both tabs" until someone
+  // clicked. So: click it.
+  t = IM_REGISTER_TEST(engine, "tabs", "an_assembly_tab_folders_like_a_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ui::AddAssembly(*s_App, "Gearbox");
+    ctx->Yield(2);
+    const size_t asmIdx = s_App->parts.size() - 1;
+    IM_CHECK(s_App->parts[asmIdx].kind == ui::DocKind::Assembly);
+    IM_CHECK(s_App->parts[asmIdx].folder.empty());
+
+    // Right-click the assembly's tab > Move to folder > New folder...
+    ctx->ItemClick(("//##PartTabs/**/###part" + std::to_string(asmIdx)).c_str(),
+                   ImGuiMouseButton_Right);
+    ctx->MenuClick("//$FOCUSED/Move to folder/New folder...##mvnew");
+    ctx->Yield(2);
+    ctx->KeyCharsReplaceEnter("Assemblies");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->parts[asmIdx].folder, std::string("Assemblies"));
+    IM_CHECK(std::find(s_App->tabFolders.begin(), s_App->tabFolders.end(),
+                       std::string("Assemblies")) != s_App->tabFolders.end());
+
+    // And it SURVIVES a save/open round trip — the half a purely in-memory
+    // assertion would miss, and where a kind-specific serialization path
+    // would show up.
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "designer_test_asm_folder")
+            .string();
+    std::filesystem::remove_all(dir);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir, &err));
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK(ui::OpenProject(*s_App, dir, &err));
+    ctx->Yield(2);
+    const auto it = std::find_if(s_App->parts.begin(), s_App->parts.end(),
+                                 [](const ui::PartSlot& sl) {
+                                   return sl.kind == ui::DocKind::Assembly;
+                                 });
+    IM_CHECK(it != s_App->parts.end());
+    IM_CHECK_EQ(it->folder, std::string("Assemblies"));
+    std::filesystem::remove_all(dir);
+  };
+
   t = IM_REGISTER_TEST(engine, "tabs", "folder_manage");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

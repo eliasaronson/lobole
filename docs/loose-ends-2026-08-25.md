@@ -337,7 +337,7 @@ Two things worth knowing for the next feature like it:
   `designer_app` too. The fixture is 87 bytes and deliberately non-square, so
   a test can tell a width from a height.
 
-## L5 — The coverage-asymmetry matrix (~1 session)
+## L5 — The coverage-asymmetry matrix — **SHIPPED**
 
 Roadmap priority: *"for each interactive tool, does a test exercise it on every
 tab kind it claims to support?"* Never run as a deliberate pass, while the
@@ -353,6 +353,47 @@ shard partition trustworthy.
 
 Fill the cheap gaps in the same pass; file the expensive ones with the matrix
 as their evidence.
+
+**As built** — `tools/coverage_matrix.py` → [ui/coverage-matrix.md](ui/coverage-matrix.md).
+The test list comes from `designer --gui-test-list`, so a renamed or deleted
+test cannot linger; everything else is a source scan against hand-written
+marker tables, which is a heuristic and says so.
+
+**Result: nothing a tool supports is completely untested.** The interesting
+part is what that did NOT mean, and it changed how the tool works:
+
+- **A zero-only check would have found nothing.** Every historical bug of this
+  shape had *some* assembly coverage — the section arrow had an assembly test
+  when it broke on assembly tabs the second time. So the matrix flags **thin**
+  cells too: covered, but far less than the same tool's best-covered kind.
+- **The count then over-flagged, and tuning the threshold until it agreed with
+  me would have been fitting the tool to the answer.** Measure and Section on
+  assembly looked thin at 2 tests each — and reading them showed
+  `offset_arrow_drags_on_an_assembly` *is* the regression test for the bug
+  this matrix exists because of, and `whole_bodies_and_parts` asserts the
+  measure overlay on an assembly tab, which is exactly what measure-v2 found
+  missing. Two tests aimed at the two known failures beat five aimed at
+  nothing. Those cells are now `REVIEWED` in the generator, with the reason,
+  so they stop re-flagging and what is left standing is the real question.
+- **CAM is not a tab kind.** Listing it as one made every CAM test count as
+  "not on a part tab", so the first run reported the CAM tool untested on the
+  only tab kind it runs on — a matrix confidently saying the opposite of the
+  truth, which is the exact failure it exists to prevent. CAM is a tool
+  *session* on a part tab, as Simulation is a *mode* on one.
+- **A test family registered from a table has no literal name to scan.** The
+  24 `defaults/*` cases read as missing until the generator learned to expand
+  a family against the binary's list.
+
+**One gap filled:** `tabs/an_assembly_tab_folders_like_a_part`. Folders live on
+`PartSlot` and every tab kind is a `PartSlot`, so the code says this cannot
+break — but that is an argument from structure, and both bugs this matrix
+exists because of were "the code obviously handles both tabs" until someone
+clicked. It now clicks, including through a save/open round trip.
+
+**Filed, not fixed:** the feature tree (38 part / 3 assembly / 2 drawing) and
+the tab bar (5 / 2 / 2). Both are real asymmetries; neither is a known
+failure, and inventing tests to level a ratio is how a suite gets slower
+without getting better.
 
 ## L6 — Two papercuts — **SHIPPED** (one was already fixed, and untested)
 
