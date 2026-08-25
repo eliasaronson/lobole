@@ -1,6 +1,7 @@
 # Loose ends — finishing what was started — plan
 
-> Status: **awaiting sign-off** (2026-08-25). Scope agreed with Elias: the six
+> Status: **signed off, in progress** (2026-08-25). L1 shipped; L2-L7 open.
+> Scope agreed with Elias: the six
 > loose ends plus the U5 visual-polish tail. The four deferred follow-ons that
 > were also on the table — per-occurrence part-config selection, GPU5 phase 0,
 > the Flathub submission tail, and cutting a part on the mill — stay where they

@@ -49,7 +49,7 @@ the script API since UI U9 (2026-08-13); several were script-only before that.
 The 2D sketcher is feature-complete. Parametric core: `Document`
 feature list with deterministic regeneration + a per-feature output-shape cache
 (incremental regen), stable ids, undo/redo, PlaneGCS solving. **Variables & expressions**
-everywhere, including unit-suffixed literals. Serialization is at **format v64** (a
+everywhere, including unit-suffixed literals. Serialization is at **format v65** (a
 diffable directory format, golden-corpus migrations, with built geometry baked
 beside the recipe so opening a project is a load, not a rebuild).
 
@@ -225,8 +225,8 @@ lists above is a deliberate deferral with a reason, not an unfinished project
 ## Known loose ends (audited 2026-08-25)
 
 **Planned as a round:** [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
-(awaiting sign-off) takes all six below plus the U5 visual-polish tail, in
-seven phases. The four deferred follow-ons it considered and left alone —
+(**signed off, in progress**) takes all six below plus the U5 visual-polish
+tail, in seven phases. The four deferred follow-ons it considered and left alone —
 per-occurrence part-config selection, GPU5 phase 0, the Flathub tail, and
 cutting a part on the mill — are listed there with the reason each stayed put.
 
@@ -250,9 +250,10 @@ stale line hid it.
   `{name, doc}` with the params in prose; only `feature_types[]` carries
   `params`. Three separate agents have reached for `describe {method: …}`
   and found it absent ([dogfooding.md](dogfooding.md)).
-- **The Onshape importer's `fitSpline` skip is stale** —
-  `tools/onshape_import.py` still reports "3D curve object not in Designer
-  yet", and `Curve3D` has existed since format v42.
+- ~~**The Onshape importer's `fitSpline` skip is stale.**~~ **FIXED
+  2026-08-25** (L1): it replays a `Curve3D`, re-fitted through a dense sample
+  of the built curve rather than through Onshape's through-point *query*,
+  which does not resolve at rollback.
 - **No revolve drag GUI case** — extrude and fillet have theirs
   ([ui/direct-manipulation.md](ui/direct-manipulation.md)).
 - **The prompt pill and the Tool window overlap** at the top of the viewport
