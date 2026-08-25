@@ -55,7 +55,23 @@ thing behind it invisible to the next person who looks.
 - **[loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)** — the same idea a
   month on: an audit of all 105 docs against the source, the six items it
   found that were started and never finished, and what a stale status line
-  cost. **Awaiting sign-off.**
+  cost. **Complete.** Three of the seven turned out to be already fixed and
+  still listed as open; two "polish" items were user-facing bugs.
+- **[ui/coverage-matrix.md](ui/coverage-matrix.md)** — **generated** by
+  `tools/coverage_matrix.py`: interactive tools × tab kinds, the asymmetry
+  that has cost three bugs. Re-run it after adding GUI tests.
+
+### Test-harness conventions worth knowing before writing one
+
+- `tests/smoke_app.py` is the **only** way a test launches the app
+  (`launch_app()`): it binds a kernel-chosen port in the process that keeps
+  it, so there is no pick-then-hand-off race, and it keeps the app's log and
+  prints it on failure. `config_isolation_lint.py` fails any script that
+  spawns the binary directly.
+- `tests/rpc_params_gate.py` keeps `describe`'s parameter schema honest
+  against what each handler actually reads (`tools/rpc_params_scan.py`).
+- `tests/test_actions.cpp` is where UI *logic* is pinned headlessly — read its
+  header before adding to it. Anything about widgets belongs in the GUI suite.
 - **[architecture-review-2026-08-24.md](architecture-review-2026-08-24.md)** —
   a structural pass over the whole tree (layering, duplication, unit sizes,
   dead code), measured rather than estimated. All five stages shipped; the

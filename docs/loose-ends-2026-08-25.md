@@ -1,7 +1,9 @@
 # Loose ends — finishing what was started — plan
 
-> Status: **COMPLETE (2026-08-25).** All seven phases shipped, plus an eighth
-> (L8) that came out of a question asked mid-round about `fem_smoke`.
+> Status: **COMPLETE (2026-08-25).** All seven phases shipped, plus two more
+> (L8, L9) that came out of questions asked mid-round — one about what
+> `fem_smoke` was actually worth, one about why three GUI flakes could not be
+> diagnosed.
 >
 > **Three of the seven were already fixed and still listed as open** — the
 > importer's `fitSpline` skip (L1), the prompt-pill overlap (L6), and the GUI
@@ -531,6 +533,59 @@ it is a standing untruth in the suite those two will add tests to, and because
 it might be a product bug. **L7 last** because it is the largest and the least
 falsifiable, and because it is the one a bad week can be dropped from without
 stranding anything.
+
+## L8 — One launcher for every smoke script — **SHIPPED** (added mid-round)
+
+Not in the original seven. It came from a question asked while L3 was running:
+*what value does `fem_smoke` bring, and can it be restructured?*
+
+**Its physics was duplication.** `test_fem.cpp` already proves σ=F/A, the
+cantilever against Euler-Bernoulli, the first bending frequency and the
+self-weight deflection — analytically, tightly. `fem_smoke` re-asserted all
+four with bounds its own comments called "generous", which costs four extra
+solves and can only fire when the exact check already has. What is left is
+what only a running server can show: the study CRUD RPCs, the staleness
+contract, and an expression-driven load re-scaling the answer 2×. The async
+worker-thread half is now `fem_async_smoke.py`, so a failure there names the
+async contract instead of taking the CRUD contract down with it.
+
+**And the likely cause of the intermittent failures.** Thirty scripts each
+carried their own `free_port()`: bind 0, read the number, **close the
+socket**, hand it to a child that binds it later. Under `ctest -j` two can be
+given the same port. The app takes `--remote 0` now and binds a kernel-chosen
+port *in the process that keeps it*; `tests/smoke_app.py` is the one launcher,
+all 29 other scripts use it, and `config_isolation_lint.py` fails any script
+that spawns the binary directly.
+
+**The reason nobody had ever diagnosed it:** every script sent the app's
+output to `DEVNULL`. The launcher keeps the log and prints it before the
+traceback — which immediately turned my own first migration bug into a
+one-line diagnosis instead of a guess.
+
+Four things the migration turned up, all caught by tests: a script naming
+screenshots after the port *before* launching; the helper stripping `DISPLAY`
+from the two windowed tests; **`remote_smoke` had silently become headless and
+still passed** (`--headless` overrides `--hidden`), so it had stopped testing
+the windowed path it exists for; and `pyclient_smoke` imports the `designer`
+package rather than `designer_remote`.
+
+## L9 — A failing GUI shard leaves evidence — **SHIPPED** (added mid-round)
+
+Also not in the original seven. Three different tests failed once each in
+sharded runs during this round and none could be diagnosed afterwards, for a
+reason worth naming: the runner copied a failing shard's log to a fixed `/tmp`
+path and cleared those paths at the start of every run — so **the natural
+response to an order-dependent failure, re-running it, destroyed the
+evidence.**
+
+Both behaviours were right alone. Clearing `/tmp` stops a stale log reading as
+current; keeping the log is what makes the failure diagnosable. A failing
+shard is now *also* archived under
+`$XDG_STATE_HOME/designer/gui-failures/<stamp>-shard<N>/`, which no later run
+touches, with the full log, the shard's **exact filter** — which tests shared
+the process, in what order, the part nothing recorded — and a runnable
+`reproduce.sh` carrying that filter and the seed. Verified end to end by
+forcing a failure and re-running the generated script.
 
 ## Deliberately not in this round
 

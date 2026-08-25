@@ -335,14 +335,12 @@ points opposite ways for each:
   number before a refactor — one "regression" this month was a laptop lid
   closed mid-benchmark.
 
-### Test coverage (state 2026-08-24)
+### Test coverage (state 2026-08-25)
 
-**782 tests pass under `ctest -LE gui`** (C++ Catch2 cases + headless Python
-integration smokes) and **198 ImGui-test-engine GUI cases in ~80 s** via
-`tools/gui-tests-xvfb.sh` — both counted during the architecture review
-([architecture-review-2026-08-24.md](architecture-review-2026-08-24.md)),
-which ran each of its five stages against them. CI runs the headless subset
-every push. **Strong:** the
+**836 tests pass under `ctest -LE gui`** (C++ Catch2 cases + headless Python
+integration smokes) and **215 ImGui-test-engine GUI cases in ~90 s** via
+`tools/gui-tests-xvfb.sh`. CI runs the headless subset every push.
+**Strong:** the
 headless core — geometry/features, format+golden-corpus migrations, expression engine,
 and the full RPC surface via smokes (every feature since assemblies shipped with a test).
 **By-construction untested:** renderers + `main.cpp` (need a GPU — verified via gui_smoke
