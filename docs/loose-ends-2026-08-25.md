@@ -1,6 +1,25 @@
 # Loose ends — finishing what was started — plan
 
-> Status: **signed off, in progress** (2026-08-25). L1 shipped; L2-L7 open.
+> Status: **COMPLETE (2026-08-25).** All seven phases shipped, plus an eighth
+> (L8) that came out of a question asked mid-round about `fem_smoke`.
+>
+> **Three of the seven were already fixed and still listed as open** — the
+> importer's `fitSpline` skip (L1), the prompt-pill overlap (L6), and the GUI
+> test that fails only in company (L3). That ratio is the round's main
+> finding: this repo's docs decay faster than its code, and a closed defect
+> still on an open list is worse than an unlisted one, because it absorbs the
+> attention that would have found something real.
+>
+> **Two "polish" items were user-facing bugs.** Reference-image opacity had no
+> undo entry, so Ctrl+Z after adjusting it deleted the image (L4); feature-tree
+> rows distinguished four states with three colours, two of them the same (L7).
+>
+> **Two plan premises were wrong, both provably so before writing them.** L7's
+> tooltips audit was scoped around `label_truncated` — which U13's own
+> as-built notes had already established is not a clipping signal, having
+> built and replaced a gate on exactly that. And L3's root cause was assumed
+> to still reproduce; it did not. Both came from planning against the
+> roadmap's summary rather than the as-built record.
 > Scope agreed with Elias: the six
 > loose ends plus the U5 visual-polish tail. The four deferred follow-ons that
 > were also on the table — per-occurrence part-config selection, GPU5 phase 0,
