@@ -98,13 +98,70 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
 
 } // namespace
 
+// The corpus reaches the CURRENT version — not "every bump has a golden",
+// which is what the policy prose says and what the repo has never done.
+//
+// Measured 2026-08-25: 11 of the 35 documented bumps have no golden, almost
+// all of them v2-v16, from before the practice settled. A strict per-bump
+// gate would fail on arrival and be deleted, which is how a gate teaches
+// people to ignore gates. The two modern gaps (v27 exploded views, v53
+// drawing dim kinds) were plain misses, not bumps that could not be frozen.
+//
+// So gate the thing that actually protects the next bump: the newest golden
+// must BE the current version. It passes today with no backfill, and fails
+// the moment someone bumps kVersion without freezing an artifact at it —
+// which is the drift worth catching.
+//
+// Both corpora count. The single-document goldens live in tests/golden/ and
+// the assembly-schema ones in tests/golden/assembly/, and forgetting the
+// second is not hypothetical: the audit that produced this test first
+// reported v65's golden MISSING because it looked only in the first.
+TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
+  const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  int newest = 0;
+  std::string newestFile;
+  for (const fs::path& dir : {root, root / "assembly"}) {
+    if (!fs::exists(dir))
+      continue;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+      const fs::path& p = entry.path();
+      if (p.extension() != ".json" || p.stem().string().ends_with(".expect"))
+        continue;
+      std::ifstream in(p);
+      if (!in)
+        continue;
+      nlohmann::json j;
+      try {
+        in >> j;
+      } catch (...) {
+        continue;
+      }
+      const int v = j.value("version", 0);
+      if (v > newest) {
+        newest = v;
+        newestFile = p.filename().string();
+      }
+    }
+  }
+  INFO("newest golden is v" << newest << " (" << newestFile
+                            << "), kVersion is v"
+                            << DocumentIO::DocumentFormatVersion()
+                            << ". A kVersion bump ships a golden AT that "
+                               "version — tests/golden/ for a document, "
+                               "tests/golden/assembly/ for assembly schema.");
+  CHECK(newest == DocumentIO::DocumentFormatVersion());
+}
+
 TEST_CASE("The version history covers every kVersion", "[golden]") {
   // docs/versioning/format.md's migration policy says a bump ships a loader
-  // migration, a golden and a round-trip test — all three of which ARE
-  // enforced, by the corpus test below. The version-history table in the
-  // same document was the one item nothing checked, and it quietly stopped
-  // at v60 while the code reached v65: five bumps of rot, each of which had
-  // shipped its golden correctly. A policy nobody checks is a wish.
+  // migration, a golden and a round-trip test. The migration and round-trip
+  // are enforced by the corpus test below, and the golden AT the current
+  // version by the test above (added 2026-08-25 — this comment used to claim
+  // all three were covered here, and the golden's existence was not). The
+  // version-history table was the other unchecked item, and it quietly
+  // stopped at v60 while the code reached v65: five bumps of rot, each of
+  // which had shipped its golden correctly. A policy nobody checks is a
+  // wish.
   const fs::path doc =
       fs::path(DESIGNER_SOURCE_DIR) / "docs" / "versioning" / "format.md";
   REQUIRE(fs::exists(doc));

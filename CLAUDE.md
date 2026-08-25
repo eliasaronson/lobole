@@ -105,11 +105,17 @@ buys back the coverage.
 - `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
   containers), deriving the package list and test exclusions from ci.yml.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add
-  a golden `tests/golden/v<N>-<name>.json/.expect.json` — one per bump — AND
-  a row in docs/versioning/format.md's version history, which a test now
-  checks reaches `kVersion` (it had rotted five versions behind). No
-  back-compat/migration is required (no users yet); fix any test that
-  assumed old behavior. (Check the header for the current version — it moves.)
+  a golden AT that version, AND a row in docs/versioning/format.md's version
+  history. **Both are gated** (`test_golden.cpp`): the newest golden must
+  equal `kVersion`, and the history table must reach it — it had rotted five
+  versions behind. The golden goes in `tests/golden/v<N>-<name>.json` +
+  `.expect.json` for a document, or `tests/golden/assembly/v<N>-<name>.json`
+  for assembly schema; **the gate counts both directories**, and forgetting
+  the second is how an audit once reported a present golden as missing.
+  The corpus is NOT one-per-bump historically — 11 of 35 bumps have none,
+  almost all v2-v16 — so do not read it as exhaustive. No back-compat/
+  migration is required (no users yet); fix any test that assumed old
+  behavior. (Check the header for the current version — it moves.)
 
 ## Driving / screenshotting the running app
 

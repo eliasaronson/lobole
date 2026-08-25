@@ -77,6 +77,19 @@ golden correctly. `The version history covers every kVersion` (also in
 test_golden.cpp) now reads the table and fails when it does not reach
 `kVersion`, because a policy nobody checks is a wish.
 
+**The golden's existence is gated too, and the rule is narrower than this
+prose used to imply.** `The golden corpus reaches the current kVersion`
+asserts that the NEWEST golden — across `tests/golden/` and
+`tests/golden/assembly/`, both of which count — is at `kVersion`. Not "one
+per bump": measured on 2026-08-25, **11 of the 35 bumps below have no
+golden**, nearly all of them v2–v16 from before the practice settled, and the
+two modern gaps (v27 exploded views, v53 drawing dim kinds) were plain
+misses. A strict per-bump gate would have failed on arrival and been deleted,
+which is how a gate teaches people to ignore gates. The narrow one passes
+today with no backfill and fails the moment a bump ships without an
+artifact — which is the drift worth catching. Treat the table below as the
+record of bumps and the corpus as a sample of them, not a mirror.
+
 ## Version history
 
 | v | Commit | Change |
