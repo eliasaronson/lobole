@@ -1,6 +1,8 @@
 #include "ui/DockLayout.h"
 #include "ui/PanelTitles.h"
 
+#include "common/Logger.h"
+
 #include <algorithm>
 
 #include <cstring>
@@ -27,6 +29,17 @@ void SetPartTabsOverflowing(bool overflowing) {
 bool PartTabsOverflowing() { return s_PartTabsOverflow; }
 
 float PartTabsBarPaddingY() { return ImGui::GetStyle().FramePadding.y; }
+
+float DefaultSidePanelWidth(float dockWidth) {
+  // A share of the window, but bounded at both ends — a bare fraction is
+  // wrong on any screen far from the one it was chosen on. At 0.17 a 1280 px
+  // window gives 218 px, which is what forced the dock tabs to go icon-only;
+  // a 3200 px one gives 543 px of mostly empty tree. The bounds are in FONT
+  // units so they follow the text they have to hold, not the pixels.
+  const float em = ImGui::GetFontSize();
+  const float want = dockWidth * kSidePanelFraction;
+  return std::clamp(want, em * 15.0f, em * 24.0f);
+}
 
 namespace {
 
@@ -206,6 +219,42 @@ void BeginDockspace(AppState& state) {
     }
   }
 
+  // A side panel wide enough to crowd the viewport out, inherited from some
+  // other window size. Once per launch, and only past a share nobody picks
+  // on purpose.
+  //
+  // ImGui gives a panel sitting beside a CENTRAL node its ABSOLUTE width and
+  // lets the central node absorb every resize — imgui.cpp
+  // DockNodeTreeUpdatePosSize, branch 3, "use explicit size from the other
+  // and remainder for the central node". That is right for a side panel and
+  // wrong across sessions: a width chosen on one window is the same pixel
+  // count on every window that opens afterwards, forever. Measured on a real
+  // imgui.ini: the same file gave a 757 px tree at 1999 px wide AND at 3196
+  // px wide — 38% of the first window, 24% of the second, and it never
+  // shrinks back on its own. Nothing the user did was wrong; there is simply
+  // no path by which the layout recovers.
+  //
+  // A launch check rather than a clamp every frame: dragging the splitter
+  // wider for a session has to keep working.
+  if (!state.sidePanelWidthChecked && !state.buildDefaultDockLayout) {
+    ImGuiWindow* model = ImGui::FindWindowByName(kPanelModel);
+    ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
+    if (model != nullptr && model->DockNode != nullptr && root != nullptr &&
+        root->Size.x > 1.0f) {
+      state.sidePanelWidthChecked = true;
+      ImGuiDockNode* node = model->DockNode;
+      if (node->Size.x > root->Size.x * kMaxSidePanelFraction) {
+        const float want = DefaultSidePanelWidth(root->Size.x);
+        LOG_INFO("Dock: the model panel was {:.0f} px of a {:.0f} px window; "
+                 "narrowing it to {:.0f}",
+                 node->Size.x, root->Size.x, want);
+        // SizeRef is what branch 3 reads; Size follows on the next update.
+        node->SizeRef.x = want;
+        node->Size.x = want;
+      }
+    }
+  }
+
   // Turning the terminal on mid-session: its window has no dock entry in any
   // saved layout, so without this it floats over the viewport forever (which
   // is exactly how the Configurations panel shipped once). Split a right node
@@ -275,8 +324,9 @@ void BeginDockspace(AppState& state) {
     // U7e: one docked side panel — the right node is gone (feature editing
     // and every tool session live in the floating Tool window), so the
     // viewport gets everything right of the tree.
-    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.17f,
-                                               nullptr, &center);
+    ImGuiID left = ImGui::DockBuilderSplitNode(
+        center, ImGuiDir_Left, DefaultSidePanelWidth(avail.x) / avail.x,
+        nullptr, &center);
     // U7e removed the right node; the terminal panel brings one back, but
     // only when it is enabled — an empty right column would otherwise eat
     // viewport width for a feature the user turned off.

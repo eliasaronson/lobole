@@ -26,6 +26,16 @@ bool PartTabsOverflowing();
 // PartTabsBarHeight is derived from it, so the two cannot drift.
 float PartTabsBarPaddingY();
 
+// How wide the left dock should be in a dockspace `dockWidth` across: a
+// share of it, bounded in font units at both ends. One function because the
+// default LAYOUT and the launch check that narrows an inherited panel must
+// agree — see BeginDockspace.
+float DefaultSidePanelWidth(float dockWidth);
+inline constexpr float kSidePanelFraction = 0.17f;
+// Past this share of the window, a side panel is crowding the viewport out
+// rather than expressing a preference, and the launch check puts it back.
+inline constexpr float kMaxSidePanelFraction = 0.33f;
+
 // The panel's name, written at the top of its own body. The dock tabs are
 // icon-only (PanelTitles.h), so this is where the word lives now — and these
 // panels never carried a title of their own before, docked panels having no

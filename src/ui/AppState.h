@@ -1025,6 +1025,13 @@ struct AppState {
   // One-shot launch check that re-docks panels a stale imgui.ini (saved
   // before the panel existed) left floating — see BeginDockspace.
   bool dockHomesEnforced = false;
+  // One-shot launch check that narrows a side panel wide enough to crowd the
+  // viewport out. ImGui gives a panel beside a CENTRAL node its absolute
+  // width and lets the central node absorb every resize (imgui.cpp,
+  // DockNodeTreeUpdatePosSize branch 3) — so a width that was a sane share
+  // on one window is the same pixel count forever, whatever window opens
+  // next. See BeginDockspace.
+  bool sidePanelWidthChecked = false;
   bool runGuiTests = false;
 
   // CAM (docs/cam/plan.md). Toolpaths are CACHED, not regenerated per frame:
