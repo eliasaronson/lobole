@@ -201,10 +201,14 @@ variables, drawings, BOM + exploded).
    cells were read and found adequate — Measure and Section on assembly are
    covered by tests aimed squarely at their known failures — and that
    judgement is recorded in the generator so it stops re-flagging.
-4. **The visual-polish tail** (workstream 7) — spacing rhythm, tree badges,
-   tooltips audit. Small, independently shippable, and the thing a new user
-   sees first. U13 did the adjacent work (icons, overflow, elision, units),
-   not this.
+4. **The visual-polish tail** (workstream 7) — **tree badges shipped
+   2026-08-25** (four row states were distinguished by colour alone, two of
+   them by the *same* colour); the **tooltips audit is struck**, because it was
+   scoped around `label_truncated` and U13 had already established that is not
+   a clipping signal and already gated the contract it wanted. What remains is
+   taste (spacing rhythm, shaded region fill) plus whole-instance occurrence
+   hover, which needs a renderer hover channel and is not the small item the
+   list implied.
 5. **Then the deferred follow-ons**, in demand order: per-occurrence
    part-config selection, assembly-level features, drawing section/detail
    views, FEM assembly contact, deb/rpm packaging.

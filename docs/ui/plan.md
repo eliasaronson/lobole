@@ -154,8 +154,16 @@ Original design:
 bodies rows; axis triad + View > Standard Views; empty-state hint;
 View > Font Size (session, via the DPI rebuild path — MOVED to Edit > Preferences and made persistent on 2026-08-20, [settings.md](settings.md)); multi-face highlight
 projection (per-instance; same-body faces still last-wins). Remaining:
-spacing/padding rhythm audit, error/suppressed tree BADGES beyond color,
-shaded region fill, whole-instance occurrence hover, tooltips audit. (Empty
+spacing/padding rhythm audit, shaded region fill, whole-instance occurrence
+hover. **Tree BADGES beyond colour shipped 2026-08-25** — four row states
+(failed/warned/suppressed/rolled-past) were red/amber/dimmed/dimmed, and the
+last two were indistinguishable to anyone; each carries a distinct glyph now
+(`FeatureRowBadge`, pinned headlessly). The **tooltips audit is struck**, not
+deferred: it was scoped around `label_truncated`, which U13 established is a
+DebugLabel-buffer signal rather than a clipping one, and U13's replacement
+gate already asserts the contract it wanted. **Whole-instance occurrence
+hover** is larger than this list suggests — `HighlightInstance` is the SELECT
+channel, and hover has no whole-instance form. (Empty
 states were *shipped* here but still named affordances that had since been
 deleted; U9 made them honest.)
 Original scope:

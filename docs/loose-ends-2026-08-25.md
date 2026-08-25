@@ -433,7 +433,7 @@ what is on screen), and the drag is NEGATIVE because the default angle is
 test would pass against a handle that did nothing. Sabotage-checked both
 ways.
 
-## L7 — U5, the visual-polish tail (~1–2 sessions)
+## L7 — U5, the visual-polish tail — **PARTLY SHIPPED, and deliberately so**
 
 The oldest item on the roadmap's next-list and the thing a new user sees first.
 From `ui/plan.md` §U5: spacing/padding rhythm audit, **error/suppressed tree
@@ -451,6 +451,49 @@ not a polish item) and the **tooltips audit** (U13 added `label_truncated` as a
 DebugLabel signal — a truncated label without a tooltip is now *detectable*, so
 this one gets a gate rather than an opinion). Spacing rhythm and shaded region
 fill are taste; timebox them and stop, rather than iterating on screenshots.
+
+**As built — one of the two shipped, and the other's premise was wrong.**
+
+**Badges beyond colour: SHIPPED.** A feature-tree row could be in four states
+— failed, warned, suppressed, rolled past — rendered red, amber, dimmed and
+dimmed. Red against amber is the pair red-green colour blindness confuses, and
+the last two were not distinguishable by *anyone*: same colour, different
+meaning, with only a hover tooltip to tell them apart. Each state now carries a
+distinct glyph (⚠ triangle / ⓘ circle / 🚫 ban / ↺ clock), right-aligned inside
+the row rather than appended to the label — the dock ships at 210 px and names
+already clip there, so a trailing glyph in the layout would push the name
+further out of view, trading one legibility problem for another. Verified on a
+real render: a healthy row, a dimmed row with a ban, a red row with a triangle.
+
+The *choice* is the logic, so it is a pure `FeatureRowBadge` pinned headlessly
+— four states, four distinct glyphs, and precedence matching the colour the row
+already gets, because two channels disagreeing about one row is worse than one
+channel saying too little. Sabotage-checked both ways.
+
+**The tooltips audit rests on a premise U13 already disproved.** This plan said
+`label_truncated` makes a missing tooltip detectable. U13's own as-built notes
+say the opposite, in a section headed *"`label_truncated` is not a clipping
+signal"*: it reports that the test engine's 32-byte `DebugLabel` buffer was
+cut, which correlates with long labels and is unrelated to whether anything was
+clipped on screen. U13 had already built a gate on it, found this out, and
+**replaced it** with one asserting the user-visible contract — a row too long
+for the panel is still addressable by id and still readable on hover. So the
+contract this item wanted is already gated, and building a second gate on the
+same disproved signal would have repeated a mistake that was written down.
+Writing a plan from the roadmap's summary rather than the as-built notes is
+how that happened.
+
+**Whole-instance occurrence hover is not the small item the U5 list implies.**
+`MeshRenderer::HighlightInstance` exists, but it is the SELECT channel
+("pair with ClearFaceHighlight to deselect"); hover is a separate channel
+(`SetFaceHover`/`ClearFaceHover`) with no whole-instance form. So
+`SelectionPipeline`'s comment — "a whole-instance hover channel is renderer
+work, U5" — is still accurate. Left alone rather than conflating hover with
+selection.
+
+**Spacing rhythm and shaded region fill: deliberately not done.** They are
+taste, this plan said to timebox them, and iterating on screenshots is how a
+polish item eats a session without producing anything anyone can check.
 
 ---
 

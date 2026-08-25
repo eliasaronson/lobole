@@ -156,6 +156,22 @@ void RollbackBar(bool& dragging) {
 
 } // namespace
 
+const char* FeatureRowBadge(const Feature& feature, bool rolledPast) {
+  // Precedence matches the colour the row is already given, so the two
+  // channels can never disagree: broken beats suppressed beats warned.
+  // Suppressed and rolled-past are BOTH dimmed and were indistinguishable;
+  // they get different glyphs, matching what their tooltips already said.
+  if (feature.IsSuppressed())
+    return ICON_FA_BAN;
+  if (rolledPast)
+    return ICON_FA_CLOCK_ROTATE_LEFT;
+  if (!feature.GetError().empty())
+    return ICON_FA_TRIANGLE_EXCLAMATION;
+  if (!feature.GetWarning().empty())
+    return ICON_FA_CIRCLE_EXCLAMATION; // a CIRCLE, not a smaller triangle
+  return nullptr;
+}
+
 void DrawFeatureTreePanel(AppState& state) {
   ImGui::Begin(kPanelModel);
   PanelHeading(kPanelModel);
@@ -265,6 +281,7 @@ void DrawFeatureTreePanel(AppState& state) {
       const bool suppressed = feature->IsSuppressed();
       const bool dimmed = suppressed || rolledPast;
       const bool errored = !dimmed && !feature->GetError().empty();
+      const char* badge = FeatureRowBadge(*feature, rolledPast);
       // A warning (built, but a likely-unintended no-op) tints amber — only
       // when the feature is neither broken nor dimmed, so error/dim win.
       const bool warned = !dimmed && !errored && !feature->GetWarning().empty();
@@ -324,6 +341,19 @@ void DrawFeatureTreePanel(AppState& state) {
           moveTo = static_cast<int>(i);
         }
         ImGui::EndDragDropTarget();
+      }
+      // The state badge, right-aligned INSIDE the row rather than appended to
+      // the label: the dock ships at 210 px and names already clip there, so
+      // a trailing glyph in the layout would push the name further out of
+      // view — trading one legibility problem for another. Drawn to the
+      // window list at the row's own rect, so it costs the label nothing and
+      // cannot change the item id the tests address.
+      if (badge != nullptr) {
+        const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+        const float w = ImGui::CalcTextSize(badge).x;
+        ImGui::GetWindowDrawList()->AddText(ImVec2(hi.x - w - 4.0f, lo.y),
+                                            ImGui::GetColorU32(ImGuiCol_Text),
+                                            badge);
       }
       if (errored) {
         ImGui::PopStyleColor();

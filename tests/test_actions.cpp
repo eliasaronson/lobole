@@ -32,12 +32,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <set>
+
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Occurrence.h"
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/FeatureTreePanel.h"
 #include "ui/Overlays.h"
 #include "ui/TerminalPanel.h"
 
@@ -405,5 +408,63 @@ TEST_CASE("prompt pill keeps clear of the tool window", "[actions][overlay]") {
         glm::vec4(twRight - 900.0f, y - 10.0f, twRight, y + 200.0f);
     const glm::vec4 r = ui::PromptPillRect(state, y, glm::vec2(700.0f, 16.0f));
     CHECK(r.x >= state.viewportPos.x);
+  }
+}
+
+// Feature-tree rows must differ by more than colour.
+//
+// The four states a row can be in — failed, warned, suppressed, rolled past —
+// were red, amber, dimmed and dimmed. Red against amber is the pair
+// red-green colour blindness confuses, and the last two were not
+// distinguishable by anyone: same colour, different meaning, with only a
+// hover tooltip to tell them apart. This is the U5 "badges beyond colour"
+// item, and it is a legibility floor rather than a polish nicety.
+//
+// The glyph is drawn to a window draw list, which no GUI test can address —
+// but the CHOICE is the logic, and precedence between four states is the part
+// that can quietly go wrong.
+TEST_CASE("feature tree rows carry a badge, not just a colour",
+          "[actions][overlay]") {
+  ui::AppState state = MakeHeadlessState();
+  Document& doc = *state.document;
+  AddBox(doc, glm::vec3(0.0f), 10, 10, 10);
+  doc.Regenerate();
+  Feature* f = doc.GetFeature(0);
+  REQUIRE(f != nullptr);
+
+  SECTION("a healthy row has no badge") {
+    CHECK(ui::FeatureRowBadge(*f, false) == nullptr);
+  }
+
+  SECTION("every state has one, and they are all different") {
+    const char* rolled = ui::FeatureRowBadge(*f, true);
+    f->SetSuppressed(true);
+    const char* supp = ui::FeatureRowBadge(*f, false);
+    f->SetSuppressed(false);
+    f->SetError("boom");
+    const char* err = ui::FeatureRowBadge(*f, false);
+    f->SetError("");
+    f->SetWarning("removed no material");
+    const char* warn = ui::FeatureRowBadge(*f, false);
+
+    for (const char* b : {rolled, supp, err, warn})
+      CHECK(b != nullptr);
+    // The whole point: four states, four DISTINCT glyphs. Suppressed and
+    // rolled-past share a colour, so if they shared a glyph too the badge
+    // would add nothing where it is needed most.
+    const std::set<std::string> distinct{rolled, supp, err, warn};
+    CHECK(distinct.size() == 4);
+  }
+
+  SECTION("precedence matches the colour the row already gets") {
+    // The panel dims a suppressed row whatever else is true of it, so the
+    // badge must agree — two channels disagreeing about the same row is
+    // worse than one channel saying too little.
+    f->SetSuppressed(true);
+    f->SetError("boom");
+    const std::string suppressedAndBroken = ui::FeatureRowBadge(*f, false);
+    f->SetError("");
+    const std::string suppressedOnly = ui::FeatureRowBadge(*f, false);
+    CHECK(suppressedAndBroken == suppressedOnly);
   }
 }
