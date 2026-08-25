@@ -296,6 +296,10 @@ void ClearHoverPreviews(AppState& state) {
   state.pick.edgeHover = false;
   state.pick.regionHoverIds.clear();
   state.pick.hoverFace = {};
+  // The measure tool's hover measurable (M3), cleared on every path that
+  // clears a hover — including the off-viewport early return, which is how a
+  // preview gets stranded on screen after the cursor leaves.
+  state.measure.hover.has = false;
   // The connector-hover mirror (triad + snap marker overlay reads it).
   state.mateTool.hasHover = false;
   state.mateTool.hover = Connector{};
@@ -399,6 +403,16 @@ void HandleSelectionInput(AppState& state, bool overViewport,
   ClearHoverPreviews(state);
   if (!candidates.empty()) {
     const Candidate& top = candidates.front();
+    // While the measure tool is armed, the top candidate is also a
+    // MEASURABLE: remember it whole (ref + kind + occurrence) so the hover
+    // measurement can be taken against it without re-deriving any of that.
+    if (state.measure.active && (top.item.kind == SelectionItem::Kind::Face ||
+                                 top.item.kind == SelectionItem::Kind::Edge)) {
+      state.measure.hover.has = true;
+      state.measure.hover.element = {top.item.element,
+                                     top.item.kind == SelectionItem::Kind::Edge,
+                                     top.item.id};
+    }
     if (top.item.kind == SelectionItem::Kind::SketchRegion) {
       state.pick.regionHoverIds = ParseRegionIds(top.item.element.name);
     } else if (top.item.kind == SelectionItem::Kind::Edge) {

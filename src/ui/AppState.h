@@ -394,7 +394,24 @@ struct MeasureState {
     std::string arcLabel;
   };
   Dimension dimension;
-  // Hover feedback comes from the selection pipeline (U1c).
+
+  // M3 — measuring before you commit to it. The element under the cursor is
+  // measured live against what is already picked and drawn dimmed, so you
+  // can sweep a face and read the gap without a click, and see what a click
+  // is about to give you. With nothing picked yet it reads out the hovered
+  // element's own measure, which is the cheapest possible "what is this".
+  struct Hover {
+    bool has = false;    // something measurable is under the cursor
+    Element element;     // what it is (set by the selection pipeline)
+    std::string readout; // one line, drawn at the cursor
+    Dimension dimension; // the same picture, dimmed
+    // The measurement is an OCC extrema call. Recomputing it every frame for
+    // a stationary cursor is pure waste, so the result is cached against
+    // everything it depends on: the hovered element, what it is being
+    // measured against, and the document version.
+    std::string cacheKey;
+  };
+  Hover hover;
 };
 
 // Simulation mode (FEM): a workspace the user enters and exits, like sketch

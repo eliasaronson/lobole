@@ -820,6 +820,10 @@ void DrawUI(AppState& state) {
   // Renderer highlights are a projection of the Selection (U1b): one sync
   // point after input may have changed the set.
   SyncSelectionHighlights(state);
+  // The live measurement of whatever is under the cursor (M3). After the
+  // pick pipeline, which is what decides "under the cursor"; cached inside,
+  // so a still cursor does no OCC work.
+  UpdateMeasureHover(state);
 
   // A drawing tab paints its 2D sheet into the (mesh-free) viewport.
   if (state.drawing)

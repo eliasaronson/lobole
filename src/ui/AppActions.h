@@ -520,6 +520,13 @@ void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
 // Recomputes the readout after the picked set changes (panel removals).
 void UpdateMeasureReadout(AppState& state);
 
+// M3: the live measurement of whatever the cursor is over, against what is
+// already picked (or on its own when nothing is). Runs once per frame after
+// the pick pipeline has said what is hovered; the OCC work is cached against
+// the hovered element, the anchor and the document version, so a stationary
+// cursor costs nothing.
+void UpdateMeasureHover(AppState& state);
+
 // Blend edge collection (fillet/chamfer): toggles the clicked edge on `fil`,
 // remapping the displayed (already blended) name onto the blend's input body
 // first. meshId/edgeIndex are the displayed handles the geometric remap

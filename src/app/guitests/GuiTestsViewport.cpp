@@ -250,6 +250,82 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     s_App->measure = ui::MeasureState{};
   };
 
+  // M3: the element under the cursor is measured live, against what is
+  // already picked, and drawn dimmed — so you can sweep a face and read the
+  // gap without committing, and see what a click is about to give you.
+  //
+  // This is GUI-only by nature: it exists under a hovering cursor, and an
+  // RPC cannot leave one there (the test engine hands the mouse back to the
+  // real pointer the moment its action ends). So the test IS the
+  // verification, not a stand-in for one.
+  t = IM_REGISTER_TEST(engine, "measure", "hover_previews_before_the_click");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    glm::vec3 mn, mx;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(mn, mx);
+    const glm::vec3 c = (mn + mx) * 0.5f;
+
+    // Look down at the top face from a slight angle so it is clear to hit.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(c);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(c + glm::normalize(glm::vec3(0.4f, 1.0f, 0.5f)) *
+                                       glm::length(mx - mn) * 5.0f);
+    ctx->Yield();
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    ctx->Yield();
+
+    // Nothing picked: hovering reads out that element's OWN measure. The
+    // cheapest possible "what is this", and it costs no click.
+    const glm::vec3 top(c.x, mx.y, c.z);
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->Yield(2);
+    IM_CHECK(s_App->measure.hover.has);
+    IM_CHECK(!s_App->measure.hover.readout.empty());
+    IM_CHECK(s_App->measure.hover.readout.find("area") != std::string::npos);
+    IM_CHECK(s_App->measure.picked.empty()); // hovering commits nothing
+
+    // The cached key means a stationary cursor recomputes nothing. Clear the
+    // answer by hand and yield: an unchanged key must leave it cleared.
+    s_App->measure.hover.readout = "SENTINEL";
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->measure.hover.readout.c_str(), "SENTINEL");
+
+    // Commit that one, then hover a DIFFERENT face: the preview becomes the
+    // pair measurement, with a drawable dimension, still without a click.
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)1);
+
+    const glm::vec3 side(mx.x, c.y, c.z);
+    ctx->MouseMoveToPos(WorldToWindow(side));
+    ctx->Yield(2);
+    IM_CHECK(s_App->measure.hover.has);
+    IM_CHECK(!s_App->measure.hover.readout.empty());
+    // Two adjacent faces of a box: touching, so the preview leads with the
+    // angle exactly as the committed readout would.
+    IM_CHECK(s_App->measure.hover.readout.rfind("Angle:", 0) == 0);
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)1); // still uncommitted
+
+    // The preview is DRAWN, and it is drawn as well as the committed
+    // measurement rather than instead of it.
+    std::vector<PrimVertex> prims;
+    ui::AppendMeasureOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+
+    // Hovering something already picked previews nothing: measuring an
+    // element against itself is a zero nobody asked for.
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->Yield(2);
+    IM_CHECK(s_App->measure.hover.readout.empty());
+
+    s_App->measure = ui::MeasureState{};
+    ctx->Yield();
+  };
+
   // ...and so does a tab switch. A measured element is an ElementRef into the
   // document that was on screen; carried to another tab it resolves against
   // nothing, while the readout keeps displaying the old distance over

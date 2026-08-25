@@ -4373,6 +4373,189 @@ ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
 }
 } // namespace
 
+namespace {
+// Measure one or two elements into a readout line and a drawable dimension.
+//
+// The committed pair and the hover preview are the SAME measurement, so they
+// share this: a preview computed by any other path would be a preview of
+// something slightly else, which is worse than no preview.
+struct MeasureOut {
+  std::string readout;
+  MeasureState::Dimension dimension;
+  bool hasLine = false;
+  glm::vec3 lineA{0.0f}, lineB{0.0f};
+};
+
+MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
+                      const units::System& u) {
+  MeasureOut out;
+  const auto src = ResolveMeasureSource(state, e);
+  if (src) {
+    if (const auto d = Measure::Describe(*src->bodies, e.ref)) {
+      out.readout = src->prefix + FormatElement(*d, u);
+      return out;
+    }
+  }
+  out.readout = "Could not measure that element.";
+  return out;
+}
+
+MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
+                       const MeasureState::Element& eb,
+                       const units::System& u) {
+  MeasureOut out;
+  const auto srcA = ResolveMeasureSource(state, ea);
+  const auto srcB = ResolveMeasureSource(state, eb);
+  if (!srcA || !srcB) {
+    out.readout = "Could not measure between those two elements.";
+    return out;
+  }
+  const auto d = Measure::DistanceDetailed(*srcA->bodies, ea.ref, srcA->xf,
+                                           *srcB->bodies, eb.ref, srcB->xf);
+  const auto ang = Measure::Angle(*srcA->bodies, ea.ref, srcA->xf,
+                                  *srcB->bodies, eb.ref, srcB->xf);
+  if (!d && !ang) {
+    out.readout = "Could not measure between those two elements.";
+    return out;
+  }
+  if (d) {
+    out.hasLine = true;
+    out.lineA = d->pointA;
+    out.lineB = d->pointB;
+  }
+
+  // BOTH quantities are computed; the readout leads with whichever one is
+  // not degenerate. This is the fix for the report that started this work:
+  // two edges meeting at a corner are 0.000 mm apart, which is true and
+  // useless, and 90 degrees apart, which is the answer. On a single solid
+  // most element pairs touch, so distance-only made zero the tool's most
+  // common output.
+  //
+  // - touching  -> the angle leads, and the distance says "touching"
+  // - parallel  -> the distance leads, LABELLED parallel: for parallel
+  //                elements the minimum separation is the separation,
+  //                everywhere, rather than "the nearest of many"
+  // - otherwise -> distance, then angle
+  const bool touching = d && d->distance <= kTouchingMm;
+  const bool parallel = ang && ang->parallel;
+  std::string distLine;
+  if (d) {
+    const char* qualifier = touching   ? " (touching)"
+                            : parallel ? " (parallel)"
+                                       : " (nearest)";
+    distLine = "Distance: " + units::FormatLength(d->distance, u) + qualifier;
+    // The axis breakdown only where there is one to break down: on a
+    // touching pair it is three zeros, which is a line of text that says
+    // nothing. Signed, not absolute — "40 mm in X" and "-40 mm in X" are a
+    // part and its mirror image, and std::abs threw away which.
+    if (!touching) {
+      const glm::vec3 delta = d->pointB - d->pointA;
+      distLine += "\ndx " + units::FormatLength(delta.x, u) + "  dy " +
+                  units::FormatLength(delta.y, u) + "  dz " +
+                  units::FormatLength(delta.z, u);
+    }
+  }
+  std::string angLine;
+  if (ang) {
+    angLine =
+        "Angle: " + units::FormatAngle(ang->degrees, u) + "  " + ang->basis;
+    if (ang->parallel)
+      angLine += " - parallel";
+    else if (ang->perpendicular)
+      angLine += " - perpendicular";
+  } else if (touching) {
+    // Leading with an angle we could not take would be silence about the
+    // only interesting thing here, so say why there is none.
+    angLine = "No angle: one of these defines no direction (a sphere or a "
+              "spline has none).";
+  }
+
+  if (touching && !angLine.empty())
+    out.readout = angLine + (distLine.empty() ? "" : "\n" + distLine);
+  else if (angLine.empty())
+    out.readout = distLine;
+  else if (distLine.empty())
+    out.readout = angLine;
+  else
+    out.readout = distLine + "\n" + angLine;
+
+  // The picture, from the same numbers as the text.
+  if (!d)
+    return out;
+  MeasureState::Dimension& dim = out.dimension;
+  // Where to ATTACH the dimension, which is not always where the minimum
+  // was measured: for a parallel pair every point pair is equidistant, so
+  // OCC's answer is an arbitrary corner.
+  const auto anchors =
+      Measure::DimensionAnchors(*srcA->bodies, ea.ref, srcA->xf, *srcB->bodies,
+                                eb.ref, srcB->xf, parallel);
+  const Measure::DistanceResult& at = anchors ? *anchors : *d;
+  dim.valid = !touching; // a zero-length dimension is not a picture
+  dim.a = at.pointA;
+  dim.b = at.pointB;
+  dim.label = units::FormatLength(at.distance, u);
+  // Witness lines back to where the extrema actually landed, so a
+  // re-anchored dimension still says which two things it spans.
+  dim.hasWitness = anchors && (glm::distance(at.pointA, d->pointA) > 1e-4f ||
+                               glm::distance(at.pointB, d->pointB) > 1e-4f);
+  dim.witnessA = d->pointA;
+  dim.witnessB = d->pointB;
+
+  // The angle arc, drawn between the directions the angle was TAKEN
+  // between — so the picture and the stated basis are the same thing.
+  // Only where it reads: the elements have to meet somewhere for an arc
+  // about that point to mean anything.
+  if (ang && !ang->parallel && touching) {
+    const auto da = Measure::DirectionOf(*srcA->bodies, ea.ref);
+    const auto db = Measure::DirectionOf(*srcB->bodies, eb.ref);
+    const auto anchorA = Measure::AnchorOf(*srcA->bodies, ea.ref);
+    const auto anchorB = Measure::AnchorOf(*srcB->bodies, eb.ref);
+    if (da && db && anchorA && anchorB) {
+      const glm::vec3 at3 = d->pointA; // the contact point
+      // An unsigned direction (a line edge) gets the sign that points
+      // along the element and away from the contact, so the ray lies on
+      // the edge you can see rather than off into space.
+      const auto orient = [&](const Measure::Direction& dir,
+                              const glm::vec3& anchor, const glm::mat4& xf) {
+        glm::vec3 v =
+            glm::normalize(glm::vec3(glm::mat3(xf) * glm::vec3(dir.dir)));
+        if (!dir.oriented && glm::dot(v, anchor - at3) < 0.0f)
+          v = -v;
+        return v;
+      };
+      dim.arcAt = at3;
+      dim.arcFrom = orient(*da, glm::vec3(srcA->xf * glm::vec4(*anchorA, 1.0f)),
+                           srcA->xf);
+      dim.arcTo = orient(*db, glm::vec3(srcB->xf * glm::vec4(*anchorB, 1.0f)),
+                         srcB->xf);
+      dim.arcLabel = units::FormatAngle(ang->degrees, u);
+      dim.hasArc = true;
+    }
+  }
+  return out;
+}
+
+// Everything a cached hover measurement depends on. Recomputing an OCC
+// extrema call sixty times a second for a cursor that has not moved is pure
+// waste; recomputing it when the model changes under a still cursor is
+// required.
+std::string HoverCacheKey(const AppState& state) {
+  const MeasureState& m = state.measure;
+  std::string key = std::to_string(m.hover.element.ref.featureId) + "/" +
+                    m.hover.element.ref.name + "#" +
+                    std::to_string(m.hover.element.occurrenceId);
+  if (!m.picked.empty()) {
+    key += "|" + std::to_string(m.picked[0].ref.featureId) + "/" +
+           m.picked[0].ref.name + "#" +
+           std::to_string(m.picked[0].occurrenceId);
+  }
+  key += "@" + std::to_string(m.picked.size()) + "@" +
+         std::to_string(state.document ? state.document->Version() : 0) + "@" +
+         std::to_string(state.assembly ? state.assembly->Version() : 0);
+  return key;
+}
+} // namespace
+
 void UpdateMeasureReadout(AppState& state) {
   auto& m = state.measure;
   m.hasDistanceLine = false;
@@ -4383,152 +4566,54 @@ void UpdateMeasureReadout(AppState& state) {
   }
   const units::System u = state.ActiveUnits();
   if (m.picked.size() == 1) {
-    const auto src = ResolveMeasureSource(state, m.picked[0]);
-    if (src) {
-      if (const auto e = Measure::Describe(*src->bodies, m.picked[0].ref)) {
-        m.readout = src->prefix + FormatElement(*e, u);
-        return;
-      }
-    }
-    m.readout = "Could not measure that element.";
+    m.readout = MeasureOne(state, m.picked[0], u).readout;
     return;
   }
   if (m.picked.size() == 2) {
-    const auto srcA = ResolveMeasureSource(state, m.picked[0]);
-    const auto srcB = ResolveMeasureSource(state, m.picked[1]);
-    std::optional<Measure::DistanceResult> d;
-    if (srcA && srcB)
-      d = Measure::DistanceDetailed(*srcA->bodies, m.picked[0].ref, srcA->xf,
-                                    *srcB->bodies, m.picked[1].ref, srcB->xf);
-    std::optional<Measure::AngleResult> ang;
-    if (srcA && srcB)
-      ang = Measure::Angle(*srcA->bodies, m.picked[0].ref, srcA->xf,
-                           *srcB->bodies, m.picked[1].ref, srcB->xf);
-
-    if (!d && !ang) {
-      m.readout = "Could not measure between those two elements.";
-      return;
-    }
-    if (d) {
-      m.hasDistanceLine = true;
-      m.distA = d->pointA;
-      m.distB = d->pointB;
-    }
-
-    // BOTH quantities are computed; the readout leads with whichever one is
-    // not degenerate. This is the fix for the report that started this work:
-    // two edges meeting at a corner are 0.000 mm apart, which is true and
-    // useless, and 90 degrees apart, which is the answer. On a single solid
-    // most element pairs touch, so distance-only made zero the tool's most
-    // common output.
-    //
-    // - touching  -> the angle leads, and the distance says "touching"
-    // - parallel  -> the distance leads, LABELLED parallel: for parallel
-    //                elements the minimum separation is the separation,
-    //                everywhere, rather than "the nearest of many"
-    // - otherwise -> distance, then angle
-    const bool touching = d && d->distance <= kTouchingMm;
-    const bool parallel = ang && ang->parallel;
-    std::string distLine;
-    if (d) {
-      const char* qualifier = touching   ? " (touching)"
-                              : parallel ? " (parallel)"
-                                         : " (nearest)";
-      distLine = "Distance: " + units::FormatLength(d->distance, u) + qualifier;
-      // The axis breakdown only where there is one to break down: on a
-      // touching pair it is three zeros, which is a line of text that says
-      // nothing. Signed, not absolute — "40 mm in X" and "-40 mm in X" are a
-      // part and its mirror image, and std::abs threw away which.
-      if (!touching) {
-        const glm::vec3 delta = d->pointB - d->pointA;
-        distLine += "\ndx " + units::FormatLength(delta.x, u) + "  dy " +
-                    units::FormatLength(delta.y, u) + "  dz " +
-                    units::FormatLength(delta.z, u);
-      }
-    }
-    std::string angLine;
-    if (ang) {
-      angLine =
-          "Angle: " + units::FormatAngle(ang->degrees, u) + "  " + ang->basis;
-      if (ang->parallel)
-        angLine += " - parallel";
-      else if (ang->perpendicular)
-        angLine += " - perpendicular";
-    } else if (touching) {
-      // Leading with an angle we could not take would be silence about the
-      // only interesting thing here, so say why there is none.
-      angLine = "No angle: one of these defines no direction (a sphere or a "
-                "spline has none).";
-    }
-
-    if (touching && !angLine.empty())
-      m.readout = angLine + (distLine.empty() ? "" : "\n" + distLine);
-    else if (angLine.empty())
-      m.readout = distLine;
-    else if (distLine.empty())
-      m.readout = angLine;
-    else
-      m.readout = distLine + "\n" + angLine;
-
-    // The picture, from the same numbers as the text.
-    if (d && srcA && srcB) {
-      auto& dim = m.dimension;
-      // Where to ATTACH the dimension, which is not always where the minimum
-      // was measured: for a parallel pair every point pair is equidistant, so
-      // OCC's answer is an arbitrary corner.
-      const auto anchors = Measure::DimensionAnchors(
-          *srcA->bodies, m.picked[0].ref, srcA->xf, *srcB->bodies,
-          m.picked[1].ref, srcB->xf, parallel);
-      const Measure::DistanceResult& at = anchors ? *anchors : *d;
-      dim.valid = !touching; // a zero-length dimension is not a picture
-      dim.a = at.pointA;
-      dim.b = at.pointB;
-      dim.label = units::FormatLength(at.distance, u);
-      // Witness lines back to where the extrema actually landed, so a
-      // re-anchored dimension still says which two things it spans.
-      dim.hasWitness =
-          anchors && (glm::distance(at.pointA, d->pointA) > 1e-4f ||
-                      glm::distance(at.pointB, d->pointB) > 1e-4f);
-      dim.witnessA = d->pointA;
-      dim.witnessB = d->pointB;
-
-      // The angle arc, drawn between the directions the angle was TAKEN
-      // between — so the picture and the stated basis are the same thing.
-      // Only where it reads: the elements have to meet somewhere for an arc
-      // about that point to mean anything.
-      if (ang && !ang->parallel && touching) {
-        const auto da = Measure::DirectionOf(*srcA->bodies, m.picked[0].ref);
-        const auto db = Measure::DirectionOf(*srcB->bodies, m.picked[1].ref);
-        const auto anchorA = Measure::AnchorOf(*srcA->bodies, m.picked[0].ref);
-        const auto anchorB = Measure::AnchorOf(*srcB->bodies, m.picked[1].ref);
-        if (da && db && anchorA && anchorB) {
-          const glm::vec3 at3 = d->pointA; // the contact point
-          // An unsigned direction (a line edge) gets the sign that points
-          // along the element and away from the contact, so the ray lies on
-          // the edge you can see rather than off into space.
-          const auto orient = [&](const Measure::Direction& dir,
-                                  const glm::vec3& anchor,
-                                  const glm::mat4& xf) {
-            glm::vec3 v =
-                glm::normalize(glm::vec3(glm::mat3(xf) * glm::vec3(dir.dir)));
-            if (!dir.oriented && glm::dot(v, anchor - at3) < 0.0f)
-              v = -v;
-            return v;
-          };
-          dim.arcAt = at3;
-          dim.arcFrom = orient(
-              *da, glm::vec3(srcA->xf * glm::vec4(*anchorA, 1.0f)), srcA->xf);
-          dim.arcTo = orient(
-              *db, glm::vec3(srcB->xf * glm::vec4(*anchorB, 1.0f)), srcB->xf);
-          dim.arcLabel = units::FormatAngle(ang->degrees, u);
-          dim.hasArc = true;
-        }
-      }
-    }
+    const MeasureOut r = MeasurePair(state, m.picked[0], m.picked[1], u);
+    m.readout = r.readout;
+    m.dimension = r.dimension;
+    m.hasDistanceLine = r.hasLine;
+    m.distA = r.lineA;
+    m.distB = r.lineB;
     return;
   }
   m.readout = std::to_string(m.picked.size()) +
               " elements selected - keep two for a distance";
+}
+
+void UpdateMeasureHover(AppState& state) {
+  auto& h = state.measure.hover;
+  if (!state.measure.active || !h.has || state.measure.picked.size() >= 2 ||
+      (!state.document && !state.assembly)) {
+    h.readout.clear();
+    h.dimension = MeasureState::Dimension{};
+    h.cacheKey.clear();
+    return;
+  }
+  // Hovering something already picked would preview measuring it against
+  // itself, which is a zero nobody asked for.
+  for (const MeasureState::Element& p : state.measure.picked) {
+    if (p.ref.featureId == h.element.ref.featureId &&
+        p.ref.name == h.element.ref.name &&
+        p.occurrenceId == h.element.occurrenceId) {
+      h.readout.clear();
+      h.dimension = MeasureState::Dimension{};
+      h.cacheKey.clear();
+      return;
+    }
+  }
+  const std::string key = HoverCacheKey(state);
+  if (key == h.cacheKey)
+    return; // same element, same anchor, same document — same answer
+  h.cacheKey = key;
+  const units::System u = state.ActiveUnits();
+  const MeasureOut r =
+      state.measure.picked.empty()
+          ? MeasureOne(state, h.element, u)
+          : MeasurePair(state, state.measure.picked[0], h.element, u);
+  h.readout = r.readout;
+  h.dimension = r.dimension;
 }
 
 void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
