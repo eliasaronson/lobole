@@ -177,6 +177,40 @@ Tests: a box's face offers 4 corners and a cylinder's wall refuses its
 ambiguous pair (kernel); a mate snapped to a corner survives save/reload
 (golden); `assembly/mate_hover_marker` grows a corner-ranking case.
 
+### Cost — and a live defect this measurement found
+
+Corners are free. Built as ONE `TopExp::MapShapesAndAncestors` VERTEX→EDGE
+pass over the face (a vertex with exactly two incident face edges is a
+corner named by that pair), they add **+0.16 ms/frame at their worst**, and
+that worst is a plate with 400 holes.
+
+The measurement found something else, though, and it is not hypothetical.
+**The snap hover path is already quadratic and already too slow.**
+`EdgeSnapPoint` calls `TopExp::MapShapes(m_shape, TopAbs_EDGE, …)` — mapping
+every edge of the WHOLE BODY — on every call, and
+`ResolveAssemblyFacePick` calls it once per boundary edge of the hovered
+face. So hovering a drilled face costs O(face edges × body edges), every
+frame, while the mate tool is armed:
+
+| plate | body edges | drilled face's edges | hover today | corners add | map hoisted |
+|---|---|---|---|---|---|
+| 36 holes | 120 | 40 | 0.68 ms/frame | +0.011 | — |
+| 144 holes | 444 | 148 | **10.0 ms/frame** | +0.058 | **0.16 ms** |
+| 400 holes | 1212 | 404 | **88 ms/frame** | +0.162 | **0.62 ms** |
+
+At 144 holes that is most of a 60 fps budget spent hovering; at 400 it is
+about 11 fps, which reads as the app hanging while you look for a mate
+point. A perforated plate is not an exotic part.
+
+The fix is to build the edge map ONCE per resolve instead of once per edge
+— measured above at **0.16 ms where today costs 10 ms**, a ~60x
+improvement, and ~140x at 400 holes. That is a smaller change than corner
+snapping itself, and it should land FIRST: adding candidates to a loop that
+is already the bottleneck would otherwise get blamed on the new feature.
+
+Same shape as the rest of this round's findings — the slow path is invisible
+on the small test shapes and obvious on a real one.
+
 ## Decisions for sign-off
 
 1. **OutlineRenderer gets a real per-mesh `model` push constant** (mirroring
