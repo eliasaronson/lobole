@@ -136,6 +136,53 @@ struct GeometryReport {
 };
 GeometryReport CheckGeometry(const CADShape& shape);
 
+// The direction an element defines — the only thing an angle can be taken
+// between. A planar face's outward normal, a line edge's tangent, a
+// cylinder/cone/torus axis, a circular edge's axis. nullopt for a sphere, a
+// spline, a general surface: those define no direction, and inventing a
+// plausible one is how a measurement comes back confidently wrong.
+struct Direction {
+  glm::dvec3 dir{0.0};
+  // False when the SIGN is arbitrary. A line edge has no "way" — OCC's
+  // parameterisation decides which end is first — so an angle taken against
+  // it is only meaningful up to 180°. A face normal points out of the solid
+  // and is oriented; so is nothing else here.
+  bool oriented = false;
+  // How the direction was taken, for a readout that states its basis rather
+  // than leaving the reader to assume one. Both forms, because the sentence
+  // needs one or the other: "between the edges" when the pair matches,
+  // "between the edge and the cylinder axis" when it does not.
+  std::string from;   // singular: "the face normal", "the cylinder axis"
+  std::string plural; // "face normals", "edges", "cylinder axes"
+};
+std::optional<Direction> DirectionOf(const std::vector<Body>& bodies,
+                                     const ElementRef& ref);
+
+// The angle between two elements' directions.
+//
+// CONVENTION, stated because both choices are defensible and a silent one is
+// a trap: two ORIENTED directions (two planar faces) are measured between
+// the outward normals, so two adjacent faces of a box read 90° and two
+// opposite faces read 180° — what a draftsman means by "the angle between
+// these faces". When either direction's sign is arbitrary (any line edge),
+// the result is folded into [0, 90] and `basis` says so.
+struct AngleResult {
+  double degrees = 0.0;       // the angle between the directions, [0, 180]
+  double acute = 0.0;         // min(degrees, 180 - degrees), always [0, 90]
+  bool parallel = false;      // within tolerance — the ANGLE is degenerate
+  bool perpendicular = false; // within tolerance
+  std::string basis; // "between the face normals", "between the edges", ...
+};
+std::optional<AngleResult> Angle(const std::vector<Body>& bodies,
+                                 const ElementRef& a, const ElementRef& b);
+// Assembly variant: each element's direction is rotated by its occurrence's
+// world transform before the angle. Translation cannot change an angle, so
+// only the rotation part is used.
+std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
+                                 const ElementRef& a, const glm::mat4& xfA,
+                                 const std::vector<Body>& bodiesB,
+                                 const ElementRef& b, const glm::mat4& xfB);
+
 // Minimum distance between two elements (either kind). nullopt when a ref
 // doesn't resolve or the extrema computation fails.
 std::optional<double> Distance(const std::vector<Body>& bodies,

@@ -119,6 +119,152 @@ TEST_CASE("Describe reports a cylindrical face's radius", "[measure]") {
   CHECK(sawCircle);
 }
 
+namespace {
+// The named face whose outward normal points along `axis`, for the angle
+// tests below — a box's faces are only identifiable by where they point.
+std::string FaceFacing(const Document& doc, const glm::vec3& axis) {
+  const Body& body = doc.GetBodies()[0];
+  for (const auto& [idx, name] : body.elementMap.names)
+    if (const auto f = Measure::DescribeFaceAt(body, idx))
+      if (glm::dot(f->normal, axis) > 0.99f)
+        return name;
+  return {};
+}
+// The named straight edge running along `axis` (either sign).
+std::string EdgeAlong(const Document& doc, uint64_t id, const glm::vec3& axis) {
+  const Body& body = doc.GetBodies()[0];
+  for (const auto& [idx, name] : body.elementMap.edgeNames) {
+    const auto e = Measure::DescribeEdgeAt(body, idx);
+    if (!e || e->kind != "line")
+      continue;
+    // Direction from the ref itself, so this helper cannot disagree with
+    // what DirectionOf will see.
+    const auto d = Measure::DirectionOf(doc.GetBodies(), ElementRef{id, name});
+    if (d &&
+        std::abs(glm::dot(glm::normalize(d->dir), glm::dvec3(axis))) > 0.99)
+      return name;
+  }
+  return {};
+}
+} // namespace
+
+TEST_CASE("Angle between a box's faces and edges", "[measure]") {
+  // The measurement the tool could not take. The screenshot that started
+  // this: two edges meeting at a corner report distance 0.000 mm, which is
+  // true and useless — the question was the 90 degrees between them.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const auto ref = [&](const std::string& n) { return ElementRef{id, n}; };
+
+  const std::string px = FaceFacing(doc, {1, 0, 0});
+  const std::string nx = FaceFacing(doc, {-1, 0, 0});
+  const std::string py = FaceFacing(doc, {0, 1, 0});
+  REQUIRE_FALSE(px.empty());
+  REQUIRE_FALSE(nx.empty());
+  REQUIRE_FALSE(py.empty());
+
+  // Two ADJACENT faces: 90 degrees, and flagged perpendicular.
+  {
+    const auto a = Measure::Angle(doc.GetBodies(), ref(px), ref(py));
+    REQUIRE(a.has_value());
+    CHECK_THAT(a->degrees, WithinAbs(90.0, 1e-6));
+    CHECK(a->perpendicular);
+    CHECK_FALSE(a->parallel);
+    CHECK(a->basis == "between the face normals");
+  }
+  // Two OPPOSITE faces: 180 degrees, because a planar face's outward normal
+  // is oriented and this is what a draftsman means by the angle between two
+  // faces. Parallel is still true — the planes are parallel; it is the
+  // ANGLE that is degenerate, which is what that flag is for.
+  {
+    const auto a = Measure::Angle(doc.GetBodies(), ref(px), ref(nx));
+    REQUIRE(a.has_value());
+    CHECK_THAT(a->degrees, WithinAbs(180.0, 1e-6));
+    CHECK_THAT(a->acute, WithinAbs(0.0, 1e-6));
+    CHECK(a->parallel);
+  }
+  // A face against itself: 0 degrees, parallel.
+  {
+    const auto a = Measure::Angle(doc.GetBodies(), ref(px), ref(px));
+    REQUIRE(a.has_value());
+    CHECK_THAT(a->degrees, WithinAbs(0.0, 1e-6));
+    CHECK(a->parallel);
+  }
+  // Two perpendicular EDGES: 90 degrees. A line's direction sign is
+  // whichever way OCC parameterised it, so the result is unsigned and the
+  // basis says so — otherwise the same pair could read 90 or 270 depending
+  // on which corner of the box the edge was built from.
+  {
+    const std::string ex = EdgeAlong(doc, id, {1, 0, 0});
+    const std::string ez = EdgeAlong(doc, id, {0, 0, 1});
+    REQUIRE_FALSE(ex.empty());
+    REQUIRE_FALSE(ez.empty());
+    const auto a = Measure::Angle(doc.GetBodies(), ref(ex), ref(ez));
+    REQUIRE(a.has_value());
+    CHECK_THAT(a->degrees, WithinAbs(90.0, 1e-6));
+    CHECK(a->perpendicular);
+    CHECK(a->basis.find("unsigned") != std::string::npos);
+
+    // Two PARALLEL edges never report 180: unsigned folds to [0, 90].
+    const auto par = Measure::Angle(doc.GetBodies(), ref(ex), ref(ex));
+    REQUIRE(par.has_value());
+    CHECK_THAT(par->degrees, WithinAbs(0.0, 1e-6));
+    CHECK(par->parallel);
+  }
+}
+
+TEST_CASE("DirectionOf refuses elements that define no direction",
+          "[measure]") {
+  // A sphere has no axis. Handing back a plausible one is exactly how a
+  // measurement comes back confidently wrong, so this is a refusal.
+  Document doc;
+  doc.AddFeature(std::make_unique<SphereFeature>("S", glm::vec3(0), 3.0));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+  int refused = 0, total = 0;
+  for (const auto& [idx, name] : body.elementMap.names) {
+    (void)idx;
+    total++;
+    if (!Measure::DirectionOf(doc.GetBodies(), ElementRef{id, name}))
+      refused++;
+  }
+  CHECK(total > 0);
+  CHECK(refused == total);
+  // ...and an angle against one is nullopt, not zero.
+  const std::string first = body.elementMap.names.begin()->second;
+  CHECK_FALSE(Measure::Angle(doc.GetBodies(), ElementRef{id, first},
+                             ElementRef{id, first})
+                  .has_value());
+  // A ref that no longer resolves is refused too.
+  CHECK_FALSE(Measure::DirectionOf(doc.GetBodies(), ElementRef{id, "gone"})
+                  .has_value());
+}
+
+TEST_CASE("Angle across placed occurrences", "[measure]") {
+  // The assembly overload: a face's direction is rotated by the occurrence
+  // transform before the angle, and translation cannot change one.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 2, 2));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const std::string px = FaceFacing(doc, {1, 0, 0});
+  REQUIRE_FALSE(px.empty());
+  const ElementRef r{id, px};
+
+  const glm::mat4 far = glm::translate(glm::mat4(1.0f), glm::vec3(500, 0, 0));
+  const auto moved = Measure::Angle(doc.GetBodies(), r, glm::mat4(1.0f),
+                                    doc.GetBodies(), r, far);
+  REQUIRE(moved.has_value());
+  CHECK_THAT(moved->degrees, WithinAbs(0.0, 1e-6)); // still facing the same way
+
+  const glm::mat4 spun =
+      glm::rotate(glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(0, 1, 0));
+  const auto turned = Measure::Angle(doc.GetBodies(), r, glm::mat4(1.0f),
+                                     doc.GetBodies(), r, spun);
+  REQUIRE(turned.has_value());
+  CHECK_THAT(turned->degrees, WithinAbs(30.0, 1e-4));
+}
+
 TEST_CASE("Measure distance between two boxes' faces", "[measure]") {
   Document doc;
   doc.AddFeature(

@@ -189,6 +189,66 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // The report this workstream started from: two edges meeting at a corner
+  // measured "Distance: 0.000 mm (nearest) / dx 0 dy 0 dz 0". True, and
+  // useless — they touch, and the question was the 90 degrees between them.
+  // The readout computes both and leads with whichever is not degenerate.
+  t = IM_REGISTER_TEST(engine, "measure", "touching_leads_with_the_angle");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+
+    // Two ADJACENT faces of the box: they share an edge, so the minimum
+    // distance between them is exactly zero and the angle is the answer.
+    const Body& body = Doc()->GetBodies()[0];
+    std::string px, py, nx;
+    for (const auto& [idx, name] : body.elementMap.names) {
+      const auto f = Measure::DescribeFaceAt(body, idx);
+      if (!f)
+        continue;
+      if (f->normal.x > 0.99f)
+        px = name;
+      else if (f->normal.x < -0.99f)
+        nx = name;
+      else if (f->normal.y > 0.99f)
+        py = name;
+    }
+    IM_CHECK(!px.empty() && !py.empty() && !nx.empty());
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    s_App->measure.picked.push_back({ElementRef{id, px}, false, 0});
+    s_App->measure.picked.push_back({ElementRef{id, py}, false, 0});
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    const std::string touching = s_App->measure.readout;
+    // The angle comes FIRST, and the zero is labelled as contact rather than
+    // presented as a measurement.
+    IM_CHECK(touching.rfind("Angle:", 0) == 0);
+    IM_CHECK(touching.find("90") != std::string::npos);
+    IM_CHECK(touching.find("perpendicular") != std::string::npos);
+    IM_CHECK(touching.find("touching") != std::string::npos);
+    IM_CHECK(touching.find("(nearest)") == std::string::npos);
+    // Three zero deltas are a line that says nothing; it is suppressed.
+    IM_CHECK(touching.find("dx ") == std::string::npos);
+
+    // Two OPPOSITE faces: 2 mm apart and parallel, so the distance leads and
+    // is labelled parallel — for parallel elements the minimum separation IS
+    // the separation, everywhere, not "the nearest of many".
+    s_App->measure.picked[1] = {ElementRef{id, nx}, false, 0};
+    ui::UpdateMeasureReadout(*s_App);
+    ctx->Yield();
+    const std::string apart = s_App->measure.readout;
+    IM_CHECK(apart.rfind("Distance:", 0) == 0);
+    IM_CHECK(apart.find("(parallel)") != std::string::npos);
+    IM_CHECK(apart.find("dx ") != std::string::npos); // the breakdown is back
+    IM_CHECK(apart.find("Angle:") != std::string::npos); // still reported
+    IM_CHECK(apart.find("180") != std::string::npos);    // outward normals
+
+    s_App->measure = ui::MeasureState{};
+  };
+
   // ...and so does a tab switch. A measured element is an ElementRef into the
   // document that was on screen; carried to another tab it resolves against
   // nothing, while the readout keeps displaying the old distance over

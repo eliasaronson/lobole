@@ -148,10 +148,15 @@ static constexpr MethodDoc InspectionMethods[] = {
     // guessing, so a row that promises a branch nobody wrote is the
     // "refuse, don't substitute" rule inverted — we refuse the call and
     // advertise the capability. It now names exactly what runs.
-    {"measure", "Geometry queries over stable element names. {a}: that "
-                "element's own measure (face area / edge length, plus shape "
-                "kind and radius+diameter where the surface or curve defines "
-                "one). {a,b}: the minimum distance between them."},
+    {"measure",
+     "Geometry queries over stable element names. {a}: that element's own "
+     "measure (face area / edge length, plus shape kind and radius+diameter "
+     "where the surface or curve defines one). {a,b}: the minimum distance, "
+     "closest points and SIGNED delta between them; kind:'angle' or 'both' "
+     "adds the angle, taken between the outward normals when both elements "
+     "are planar faces (so adjacent box faces read 90 and opposite ones 180) "
+     "and unsigned in 0-90 when either direction's sign is arbitrary, as a "
+     "line edge's is. `basis` says which."},
     {"list_elements", "Stable face/edge names per body (the toponaming handles "
                       "measure/fillet/mates use)."},
     {"interference",
@@ -1357,10 +1362,56 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
                            : RequirePartDoc(doc, "measure").GetBodies();
     if (p.contains("b")) {
-      const auto d = Measure::Distance(bodies, a, refOf(p.at("b")));
-      if (!d)
-        throw std::runtime_error("measure: an element did not resolve");
-      return json{{"distance", *d}};
+      const ElementRef b = refOf(p.at("b"));
+      // What to measure between them. Refused, never substituted: a request
+      // for an angle answered with a distance is plausible and wrong, and a
+      // typo'd kind must not silently become the default.
+      const std::string kind = p.value("kind", "distance");
+      if (kind != "distance" && kind != "angle" && kind != "both") {
+        throw std::runtime_error("measure: unknown kind '" + kind +
+                                 "'. Accepted: distance, angle, both.");
+      }
+      json out;
+      if (kind != "angle") {
+        const auto d = Measure::DistanceDetailed(bodies, a, b);
+        if (!d)
+          throw std::runtime_error("measure: an element did not resolve");
+        out["distance"] = d->distance;
+        out["point_a"] = {d->pointA.x, d->pointA.y, d->pointA.z};
+        out["point_b"] = {d->pointB.x, d->pointB.y, d->pointB.z};
+        // SIGNED, b - a. Which way it is matters: 40 mm in +X and 40 mm in
+        // -X are a part and its mirror image.
+        const glm::vec3 delta = d->pointB - d->pointA;
+        out["delta"] = {delta.x, delta.y, delta.z};
+      }
+      if (kind != "distance") {
+        const auto ang = Measure::Angle(bodies, a, b);
+        if (!ang) {
+          // Name WHICH element has no direction, and what does — a bare
+          // "could not" leaves the caller guessing which ref to change.
+          const bool aOk = Measure::DirectionOf(bodies, a).has_value();
+          const bool bOk = Measure::DirectionOf(bodies, b).has_value();
+          const std::string who = !aOk && !bOk ? "neither element"
+                                  : !aOk       ? "element a"
+                                               : "element b";
+          throw std::runtime_error(
+              "measure: " + who +
+              " defines a direction to take an angle against. A plane, line, "
+              "circle, cylinder, cone or torus does; a sphere or a spline "
+              "does not.");
+        }
+        out["angle"] = ang->degrees;
+        out["acute"] = ang->acute;
+        out["parallel"] = ang->parallel;
+        out["perpendicular"] = ang->perpendicular;
+        out["basis"] = ang->basis;
+      }
+      return out;
+    }
+    if (p.contains("kind")) {
+      throw std::runtime_error(
+          "measure: `kind` chooses what to measure BETWEEN two elements — "
+          "pass `b` as well, or drop `kind` for element a's own measure.");
     }
     const auto e = Measure::Describe(bodies, a);
     if (!e)

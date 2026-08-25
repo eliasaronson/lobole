@@ -166,38 +166,87 @@ The recommended interleaving, with the rationale:
     drag-within-mate, since they share the interactive-drag + per-mesh-model
     infrastructure — build it once, not before A3.
 
-## What's next (2026-08-20)
+## What's next (2026-08-25)
 
 There is no unshipped pillar, so priority comes from evidence rather than
-from the sequencing list above:
+from the sequencing list above. Everything through 2026-08-24 shipped — CAM
+phase 2, U12 keybindings, U13 chrome + units (format v64), the architecture
+review's five stages, and four dogfooding rounds (FEM/topopt, configs +
+variables, drawings, BOM + exploded).
 
-1. **Keep dogfooding through the GUI, on real objects.** Every defect found in
-   the last two rounds came from a person or an agent *building something*,
+1. **Cut a real part on the mill.** CAM is built, simulated, and verified
+   against its own posted file — and nothing has touched plywood.
+   [cam/dogfood-round.md](cam/dogfood-round.md) ends with the five things to
+   watch, in order, on the first cut. It is the one check simulation cannot
+   stand in for, it costs no code, and every remaining CAM decision
+   (surfacing, continuous 4-axis, what the tool table really needs) is waiting
+   behind what it teaches.
+2. **Keep dogfooding through the GUI, on real objects.** Every defect found in
+   the last six rounds came from a person or an agent *building something*,
    not from the suite — and the GUI-driven half found the ones the RPC-driven
    half structurally cannot. [dogfooding.md](dogfooding.md) records each
    round; the practice is the deliverable, not any single round.
-2. **Close the coverage asymmetries it keeps exposing.** A feature tested on a
-   part tab and not an assembly tab is the recurring shape (the section arrow,
-   twice). Worth a deliberate pass: for each interactive tool, does a test
-   exercise it on every tab kind it claims to support?
-3. **The visual-polish tail** (workstream 7) — spacing rhythm, tree badges,
+3. **Close the coverage asymmetries it keeps exposing.** A feature tested on a
+   part tab and not an assembly tab is the recurring shape — the section arrow
+   (twice), and F9's whole sharing surface, which was part-gated and failed on
+   an assembly tab (`9048d58`). Worth a deliberate pass: for each interactive
+   tool, does a test exercise it on every tab kind it claims to support?
+4. **The visual-polish tail** (workstream 7) — spacing rhythm, tree badges,
    tooltips audit. Small, independently shippable, and the thing a new user
-   sees first.
-4. **Then the deferred follow-ons**, in demand order: per-occurrence
+   sees first. U13 did the adjacent work (icons, overflow, elision, units),
+   not this.
+5. **Then the deferred follow-ons**, in demand order: per-occurrence
    part-config selection, assembly-level features, drawing section/detail
    views, FEM assembly contact, deb/rpm packaging.
 
-The only *designed but unbuilt* work left is **git branching and conflict
-resolution** ([versioning/plan.md](versioning/plan.md)): `GitVault` is
-deliberately a linear local history — no branch, merge or remote — so a
-conflict UI has nothing to sit on yet. Branch + switch is worth having on its
-own (trying a design direction); merge and the pick-mine/theirs UI can wait
-until there is something to merge. Everything else on the lists above is a
-deliberate deferral with a reason, not an unfinished project.
+**Designed but unbuilt**, in full — the list is now two items:
 
-Deliberately *not* raised in priority: hybrid RT (still gated on the
-`main.cpp` cleanup, no forcing function) and semantic merge (the directory
-format already merges cleanly line-by-line).
+- **GPU5** ([topopt/gpu5-plan.md](topopt/gpu5-plan.md)) — fp64 iterative
+  refinement around the fp32 GPU solve, so a slender bending part optimizes at
+  GPU speed instead of falling back to the CPU. Buys speed, not correctness:
+  the fallback shipped, so those parts are already *right*. Phase 0 is a day,
+  no production code, and its gate kills the plan if the assumption fails.
+- **Cross-part linked sketch copies**
+  ([sketching/copy-links.md](sketching/copy-links.md) phase 2) — regeneration
+  would have to resolve another part's document and dirty its dependents,
+  widening regen's input surface. No demand yet.
+
+Git branching and conflict resolution was the third entry here until
+2026-08-21; **F7 shipped it** (local branches, merge, the Conflicts panel),
+F8 added the disk-changed guard and F9 the remotes. Everything else on the
+lists above is a deliberate deferral with a reason, not an unfinished project
+— except the loose ends below, which is the part an audit of these docs on
+2026-08-25 turned up.
+
+## Known loose ends (audited 2026-08-25)
+
+Small, unowned, and each one real. Recorded here because the audit that found
+them was only possible where a status line was honest — three were not, and
+one of those (the importer's `fitSpline` skip) is on this list *because* a
+stale line hid it.
+
+- **A GUI test that fails, documented, while the suite is green.**
+  `terminal/off_by_default_docks_right_on` fails when it runs after
+  `cam/tool_window_follows_the_viewport` in one process; the 4-shard partition
+  happens to separate them, and the partition reshuffles whenever a test is
+  added. `--serial` is 177/178. Diagnosed in `GuiTestsTerminal.cpp` and
+  [versioning/f7-handoff.md](versioning/f7-handoff.md); four fixes tried and
+  rejected. Now also in [known-bugs.md](known-bugs.md).
+- **Sketch reference images stop at phase 3.**
+  [sketching/reference-image-plan.md](sketching/reference-image-plan.md) —
+  phase 4 (calibration-point markers, a main-menu entry, undoable opacity,
+  tests) is unbuilt, and phase 3's GUI has never been driven end to end.
+- **`describe` has no per-method parameter schema.** `MethodDoc` is
+  `{name, doc}` with the params in prose; only `feature_types[]` carries
+  `params`. Three separate agents have reached for `describe {method: …}`
+  and found it absent ([dogfooding.md](dogfooding.md)).
+- **The Onshape importer's `fitSpline` skip is stale** —
+  `tools/onshape_import.py` still reports "3D curve object not in Designer
+  yet", and `Curve3D` has existed since format v42.
+- **No revolve drag GUI case** — extrude and fillet have theirs
+  ([ui/direct-manipulation.md](ui/direct-manipulation.md)).
+- **The prompt pill and the Tool window overlap** at the top of the viewport
+  ([dogfooding.md](dogfooding.md), the drawings round).
 
 ## Continuous
 

@@ -4314,6 +4314,12 @@ void ApplyBlendEdgePick(AppState& state, FilletFeature& fil,
 }
 
 namespace {
+// Below this separation two elements are touching, not "a very small
+// distance apart", and the informative number is the angle between them
+// rather than the zero. Same 1 um the contact checks use to tell a designed
+// touch from a sliver-sized clash (Measure.cpp's kContactFuzz).
+constexpr double kTouchingMm = 1.0e-3;
+
 // A measured element as a one-line readout, in the DOCUMENT's units — this
 // printed "%.3f mm" regardless, so a part authored in inches measured in
 // millimetres, and three fixed decimals claimed precision a tessellated
@@ -4393,20 +4399,75 @@ void UpdateMeasureReadout(AppState& state) {
     if (srcA && srcB)
       d = Measure::DistanceDetailed(*srcA->bodies, m.picked[0].ref, srcA->xf,
                                     *srcB->bodies, m.picked[1].ref, srcB->xf);
+    std::optional<Measure::AngleResult> ang;
+    if (srcA && srcB)
+      ang = Measure::Angle(*srcA->bodies, m.picked[0].ref, srcA->xf,
+                           *srcB->bodies, m.picked[1].ref, srcB->xf);
+
+    if (!d && !ang) {
+      m.readout = "Could not measure between those two elements.";
+      return;
+    }
     if (d) {
-      // Signed deltas, not absolute ones. "40 mm in X" and "-40 mm in X" are
-      // a part and its mirror image; std::abs threw away which one this is.
-      const glm::vec3 delta = d->pointB - d->pointA;
-      m.readout = "Distance: " + units::FormatLength(d->distance, u) +
-                  " (nearest)\ndx " + units::FormatLength(delta.x, u) +
-                  "  dy " + units::FormatLength(delta.y, u) + "  dz " +
-                  units::FormatLength(delta.z, u);
       m.hasDistanceLine = true;
       m.distA = d->pointA;
       m.distB = d->pointB;
-    } else {
-      m.readout = "Could not measure the distance.";
     }
+
+    // BOTH quantities are computed; the readout leads with whichever one is
+    // not degenerate. This is the fix for the report that started this work:
+    // two edges meeting at a corner are 0.000 mm apart, which is true and
+    // useless, and 90 degrees apart, which is the answer. On a single solid
+    // most element pairs touch, so distance-only made zero the tool's most
+    // common output.
+    //
+    // - touching  -> the angle leads, and the distance says "touching"
+    // - parallel  -> the distance leads, LABELLED parallel: for parallel
+    //                elements the minimum separation is the separation,
+    //                everywhere, rather than "the nearest of many"
+    // - otherwise -> distance, then angle
+    const bool touching = d && d->distance <= kTouchingMm;
+    const bool parallel = ang && ang->parallel;
+    std::string distLine;
+    if (d) {
+      const char* qualifier = touching   ? " (touching)"
+                              : parallel ? " (parallel)"
+                                         : " (nearest)";
+      distLine = "Distance: " + units::FormatLength(d->distance, u) + qualifier;
+      // The axis breakdown only where there is one to break down: on a
+      // touching pair it is three zeros, which is a line of text that says
+      // nothing. Signed, not absolute — "40 mm in X" and "-40 mm in X" are a
+      // part and its mirror image, and std::abs threw away which.
+      if (!touching) {
+        const glm::vec3 delta = d->pointB - d->pointA;
+        distLine += "\ndx " + units::FormatLength(delta.x, u) + "  dy " +
+                    units::FormatLength(delta.y, u) + "  dz " +
+                    units::FormatLength(delta.z, u);
+      }
+    }
+    std::string angLine;
+    if (ang) {
+      angLine =
+          "Angle: " + units::FormatAngle(ang->degrees, u) + "  " + ang->basis;
+      if (ang->parallel)
+        angLine += " - parallel";
+      else if (ang->perpendicular)
+        angLine += " - perpendicular";
+    } else if (touching) {
+      // Leading with an angle we could not take would be silence about the
+      // only interesting thing here, so say why there is none.
+      angLine = "No angle: one of these defines no direction (a sphere or a "
+                "spline has none).";
+    }
+
+    if (touching && !angLine.empty())
+      m.readout = angLine + (distLine.empty() ? "" : "\n" + distLine);
+    else if (angLine.empty())
+      m.readout = distLine;
+    else if (distLine.empty())
+      m.readout = angLine;
+    else
+      m.readout = distLine + "\n" + angLine;
     return;
   }
   m.readout = std::to_string(m.picked.size()) +

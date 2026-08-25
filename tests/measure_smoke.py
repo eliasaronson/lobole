@@ -144,10 +144,54 @@ def main():
             except RuntimeError:
                 return False
 
-        expect(("angle" in row) == works(kind="angle", **pair),
-               f"describe and the handler disagree about angle: {row}")
-        expect(("point" in row) == works(kind="point", **pair),
-               f"describe and the handler disagree about point: {row}")
+        # An unrecognised kind is REFUSED naming what IS accepted, never
+        # quietly measured as a distance — a substituted answer is always
+        # plausible (CLAUDE.md, "refuse, don't substitute"). That refusal is
+        # also the machine-readable vocabulary the drift check below needs.
+        try:
+            d.call("measure", kind="nonesuch", **pair)
+            expect(False, "an unknown measure kind was accepted")
+            accepted = []
+        except RuntimeError as e:
+            expect("nonesuch" in str(e), f"the refusal names the bad kind: {e}")
+            tail = str(e).split("Accepted:")[-1].strip().rstrip(".")
+            accepted = [k.strip() for k in tail.split(",")]
+        expect(len(accepted) >= 2, f"the refusal listed the alternatives: {accepted}")
+
+        # Every kind the refusal advertises must WORK, and must be named in
+        # the describe row. Driven off the refusal rather than off a literal
+        # list here, so adding a kind and forgetting to document it fails.
+        for k in accepted:
+            expect(works(kind=k, **pair), f"advertised kind {k!r} does not work")
+            expect(k in row, f"describe does not name the {k!r} kind: {row}")
+        expect(not works(kind="point", **pair),
+               "an unlisted kind was accepted anyway")
+
+        # The two caps of a cylinder face opposite ways: 180 degrees between
+        # their outward normals, and PARALLEL — the planes are parallel, and
+        # it is the angle that is degenerate, which is what the flag marks.
+        caps = d.call("measure", kind="both", **pair)
+        expect(abs(caps["angle"] - 180.0) < 1e-6, f"caps are 180 apart: {caps}")
+        expect(abs(caps["acute"]) < 1e-6, f"acute folds to 0: {caps}")
+        expect(caps["parallel"], f"caps are parallel: {caps}")
+        expect(caps["basis"] == "between the face normals", f"basis: {caps}")
+        # kind=both keeps the distance half intact, with a SIGNED delta.
+        expect(abs(caps["distance"] - 10.0) < 1e-3, f"both keeps distance: {caps}")
+        expect(len(caps["delta"]) == 3, f"a signed delta: {caps}")
+
+        # A cap against the cylindrical WALL: the plane normal vs the cylinder
+        # axis, so the sign is arbitrary and the answer folds into 0-90. An
+        # end cap is perpendicular to the wall it caps.
+        wall_ref = None
+        for f in els["faces"]:
+            if f["kind"] == "cylinder":
+                wall_ref = {"feature_id": fid, "element": f["name"]}
+        mixed = d.call("measure", a={"feature_id": fid, "element": cap_names[0]},
+                       b=wall_ref, kind="angle")
+        expect(abs(mixed["angle"]) < 1e-6 or abs(mixed["angle"] - 90.0) < 1e-6,
+               f"cap vs wall axis is 0 or 90: {mixed}")
+        expect("unsigned" in mixed["basis"], f"mixed pair says unsigned: {mixed}")
+
 
         # Mass properties: CoM on the axis at half height (the CoG marker).
         total = d.call("mass_properties")["total"]
@@ -156,6 +200,23 @@ def main():
                and abs(com[2] - 5.0) < 1e-3, f"CoM at axis mid-height: {com}")
         expect(abs(total["volume"] - math.pi * 25 * 10) < 1e-1,
                f"volume pi*r^2*h: {total['volume']}")
+
+        # A SPHERE defines no direction, and an angle against one is REFUSED
+        # naming which element and what would work — not answered with a
+        # plausible zero.
+        d.call("add_feature", feature={"type": "Sphere", "name": "Ball",
+                                       "center": [0, 0, 100], "radius": 3})
+        ball = None
+        for b in d.call("list_elements")["bodies"]:
+            if b["name"] == "Ball":
+                ball = {"feature_id": b["created_by"],
+                        "element": b["faces"][0]["name"]}
+        expect(ball is not None, "the sphere listed a face")
+        try:
+            d.call("measure", a=ball, b=wall_ref, kind="angle")
+            expect(False, "an angle against a sphere was answered")
+        except RuntimeError as e:
+            expect("element a" in str(e), f"the refusal names which one: {e}")
 
         print("measure_smoke: OK")
     finally:

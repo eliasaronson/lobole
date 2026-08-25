@@ -173,6 +173,33 @@ ShapeClass ClassifyFace(const TopoDS_Face& face) {
   return out;
 }
 
+// The outward unit normal of a planar-or-not face at a representative point:
+// project the face's centre of mass onto the surface for its (u,v) — falling
+// back to the UV-bounds midpoint when the projection cannot converge — take
+// the geometric normal there, and flip it when the face is REVERSED so it
+// points out of the solid. Shared by DescribeFaceAt (which reports it) and
+// DirectionOf (which takes angles against it), in double throughout: an
+// angle read off a float normal carries ~1e-4 degrees of noise, which is
+// enough to make a right angle print as 89.9999.
+std::optional<gp_Dir> FaceNormal(const TopoDS_Face& face, const gp_Pnt& com) {
+  Standard_Real u0, u1, v0, v1;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  Standard_Real u = 0.5 * (u0 + u1), v = 0.5 * (v0 + v1);
+  const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+  if (surf.IsNull())
+    return std::nullopt;
+  GeomAPI_ProjectPointOnSurf proj(com, surf, u0, u1, v0, v1);
+  if (proj.IsDone() && proj.NbPoints() > 0)
+    proj.LowerDistanceParameters(u, v);
+  GeomLProp_SLProps sl(surf, u, v, 1, 1e-7);
+  if (!sl.IsNormalDefined())
+    return std::nullopt;
+  gp_Dir n = sl.Normal();
+  if (face.Orientation() == TopAbs_REVERSED)
+    n.Reverse();
+  return n;
+}
+
 ShapeClass ClassifyEdge(const TopoDS_Edge& edge) {
   ShapeClass out;
   BRepAdaptor_Curve curve(edge);
@@ -214,29 +241,8 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
   out.area = props.Mass();
   const gp_Pnt c = props.CentreOfMass();
   out.centroid = glm::vec3(c.X(), c.Y(), c.Z());
-  // Outward surface normal at a representative point. Project the centroid onto
-  // the surface for its (u,v) — falls back to the UV-bounds midpoint if the
-  // projection can't converge — then take the geometric normal there, flipping
-  // it when the face is reversed so it points OUT of the solid.
-  {
-    const TopoDS_Face face = TopoDS::Face(f);
-    Standard_Real u0, u1, v0, v1;
-    BRepTools::UVBounds(face, u0, u1, v0, v1);
-    Standard_Real u = 0.5 * (u0 + u1), v = 0.5 * (v0 + v1);
-    const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
-    if (!surf.IsNull()) {
-      GeomAPI_ProjectPointOnSurf proj(c, surf, u0, u1, v0, v1);
-      if (proj.IsDone() && proj.NbPoints() > 0)
-        proj.LowerDistanceParameters(u, v);
-      GeomLProp_SLProps sl(surf, u, v, 1, 1e-7);
-      if (sl.IsNormalDefined()) {
-        gp_Dir n = sl.Normal();
-        if (face.Orientation() == TopAbs_REVERSED)
-          n.Reverse();
-        out.normal = glm::vec3(n.X(), n.Y(), n.Z());
-      }
-    }
-  }
+  if (const auto n = FaceNormal(TopoDS::Face(f), c))
+    out.normal = glm::vec3(n->X(), n->Y(), n->Z());
   const ShapeClass sc = ClassifyFace(TopoDS::Face(f));
   out.kind = sc.kind;
   out.radius = sc.radius;
@@ -883,6 +889,118 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
     caps.clear();
   }
   return caps;
+}
+
+std::optional<Direction> DirectionOf(const std::vector<Body>& bodies,
+                                     const ElementRef& ref) {
+  std::string kind;
+  const TopoDS_Shape shape = ResolveShape(bodies, ref, kind);
+  if (shape.IsNull())
+    return std::nullopt;
+  const auto make = [](const gp_Dir& d, bool oriented, const char* from,
+                       const char* plural) {
+    Direction out;
+    out.dir = glm::dvec3(d.X(), d.Y(), d.Z());
+    out.oriented = oriented;
+    out.from = from;
+    out.plural = plural;
+    return std::optional<Direction>(out);
+  };
+  try {
+    if (kind == "face") {
+      const TopoDS_Face face = TopoDS::Face(shape);
+      BRepAdaptor_Surface surf(face);
+      switch (surf.GetType()) {
+      case GeomAbs_Plane: {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(shape, props);
+        if (const auto n = FaceNormal(face, props.CentreOfMass()))
+          return make(*n, /*oriented=*/true, "the face normal", "face normals");
+        return std::nullopt;
+      }
+      case GeomAbs_Cylinder:
+        return make(surf.Cylinder().Axis().Direction(), false,
+                    "the cylinder axis", "cylinder axes");
+      case GeomAbs_Cone:
+        return make(surf.Cone().Axis().Direction(), false, "the cone axis",
+                    "cone axes");
+      case GeomAbs_Torus:
+        return make(surf.Torus().Axis().Direction(), false, "the torus axis",
+                    "torus axes");
+      default:
+        // A sphere has no direction, and neither does a general surface.
+        // Refuse rather than hand back a plausible axis nobody asked for.
+        return std::nullopt;
+      }
+    }
+    BRepAdaptor_Curve curve(TopoDS::Edge(shape));
+    switch (curve.GetType()) {
+    case GeomAbs_Line:
+      // A line's sign is whichever way OCC parameterised it, which is not a
+      // fact about the model — hence oriented=false.
+      return make(curve.Line().Direction(), false, "the edge", "edges");
+    case GeomAbs_Circle:
+      return make(curve.Circle().Axis().Direction(), false, "the circle axis",
+                  "circle axes");
+    default:
+      return std::nullopt;
+    }
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Measure direction failed: {}", e.GetMessageString()
+                                                  ? e.GetMessageString()
+                                                  : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
+std::optional<AngleResult> Angle(const std::vector<Body>& bodies,
+                                 const ElementRef& a, const ElementRef& b) {
+  return Angle(bodies, a, glm::mat4(1.0f), bodies, b, glm::mat4(1.0f));
+}
+
+std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
+                                 const ElementRef& a, const glm::mat4& xfA,
+                                 const std::vector<Body>& bodiesB,
+                                 const ElementRef& b, const glm::mat4& xfB) {
+  const auto da = DirectionOf(bodiesA, a);
+  const auto db = DirectionOf(bodiesB, b);
+  if (!da || !db)
+    return std::nullopt;
+  // Occurrence placements are rigid, so only the rotation touches a
+  // direction — a translation cannot change an angle.
+  const auto placed = [](const glm::dvec3& d, const glm::mat4& xf) {
+    return glm::normalize(glm::dmat3(xf) * d);
+  };
+  const glm::dvec3 va = placed(da->dir, xfA);
+  const glm::dvec3 vb = placed(db->dir, xfB);
+  if (!std::isfinite(va.x) || !std::isfinite(vb.x))
+    return std::nullopt;
+
+  AngleResult out;
+  const double dot = std::clamp(glm::dot(va, vb), -1.0, 1.0);
+  const double deg = std::acos(dot) * 180.0 / M_PI;
+  // Fold to [0, 90] when either side's sign is arbitrary: an edge that OCC
+  // happened to parameterise the other way must not turn 30° into 150°.
+  const bool signed_ = da->oriented && db->oriented;
+  out.degrees = signed_ ? deg : std::min(deg, 180.0 - deg);
+  out.acute = std::min(deg, 180.0 - deg);
+  // A ten-thousandth of a degree: far below anything a designer means, far
+  // above the noise in an analytic surface's axis.
+  constexpr double kTol = 1.0e-4;
+  out.parallel = out.acute <= kTol;
+  out.perpendicular = std::abs(out.acute - 90.0) <= kTol;
+  // Read it aloud before changing it: "between the edge and the edge" is
+  // what a naive join produces, and a basis nobody can read is a basis
+  // nobody checks.
+  if (signed_) {
+    out.basis = "between the face normals";
+  } else {
+    const std::string what = da->plural == db->plural
+                                 ? "the " + da->plural
+                                 : da->from + " and " + db->from;
+    out.basis = "between " + what + " (unsigned, so 0-90\xc2\xb0)";
+  }
+  return out;
 }
 
 std::optional<double> Distance(const std::vector<Body>& bodies,
