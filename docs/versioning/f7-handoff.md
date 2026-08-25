@@ -110,6 +110,18 @@ document rebuilds perfectly while a reference quietly points somewhere else.
 
 ### One latent failure — GREEN in CI, and not fixed
 
+> **Resolved 2026-08-25: it no longer reproduces.** The full GUI suite passes
+> 211/211 under `--serial`, the two-test reproduction below passes, and the
+> CAM test still performs the same interaction — so the mechanism was fixed,
+> not sidestepped. The fixing commit was NOT identified: `b1f0330`'s dock-flag
+> change is the obvious candidate and is not it, and a bisect to 2026-08-21
+> found the pair passing at every commit sampled. The behaviour is now named
+> by `terminal/survives_a_dock_layout_rebuild` rather than left to a CAM
+> test's side effects. See docs/loose-ends-2026-08-25.md L3. The account
+> below is kept because the *lesson* stands, and is now doubly earned: a green
+> sharded run was never evidence, and neither is a green serial one about a
+> mechanism nothing names.
+
 `terminal/off_by_default_docks_right_on` fails after
 `cam/tool_window_follows_the_viewport` **in the same process**. It is
 diagnosed in a comment on the test: the window is created, active and docked,

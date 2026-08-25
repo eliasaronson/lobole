@@ -88,6 +88,14 @@ sharder has already run, which is every time. Full verification is then
   `headless_smoke` autosave flake was a real bug, fixed 2026-08-19 (a document
   version number used as a document identity, ee247f9) — a "flaky under load"
   test is worth one look for a mechanism before it earns that label.
+  `fem_smoke` failed twice under `-j$(nproc)` on 2026-08-25 and passed four
+  full runs after; the failure output was never captured, so it has NOT earned
+  the label. Its own deadlines are generous (120 s poll, 30 s connect), which
+  points away from a wall clock — the leading hypothesis is `free_port()`,
+  which binds port 0, **closes the socket**, then hands the number to a
+  subprocess that binds it later. ~15 scripts do that, so two can be given the
+  same port in parallel. To confirm, run the failing case with the app's
+  stderr kept (fem_smoke sends it to DEVNULL) and look for a bind failure.
 - `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
   containers), deriving the package list and test exclusions from ci.yml.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add

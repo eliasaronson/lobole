@@ -192,7 +192,7 @@ two agree because the gate forces them from one source of truth — previously
 the second existed and the first did not, so the only way to learn a key name
 was to send a wrong one.
 
-## L3 — The GUI test that fails only in company (~½ session, timeboxed)
+## L3 — The GUI test that fails only in company — **SHIPPED** (it was already fixed)
 
 `terminal/off_by_default_docks_right_on` fails when it runs after
 `cam/tool_window_follows_the_viewport` in one process. The default 4-shard run
@@ -244,6 +244,53 @@ red test, not a hidden one.
 
 **The deliverable is that the suite stops lying** — reachable at any of the
 three steps.
+
+**As built — step 1 answered a different question than expected.** The failure
+**does not reproduce**. The full GUI suite passes **211/211 under `--serial`**,
+which is the check the original note named as the real one, and so does the
+documented two-test pair. It was not sidestepped: the CAM test still toggles
+the terminal preference and rebuilds the dock layout twice, exactly as before.
+
+**The fixing commit was not identified, and that is stated rather than
+implied.** `b1f0330` (`NoTabBar` instead of an uncleared
+`AutoHideTabBar|HiddenTabBar` on the panel's node) was the obvious candidate
+and matched the diagnosis well — a node with a hidden tab bar and two windows
+would leave the unselected one's body unsubmitted, which is the reported
+symptom exactly. It is not it: reverting that hunk on top of HEAD does not
+bring the failure back. A bisect to 2026-08-21 then found the pair passing at
+every commit sampled — and that bisect had its good/bad arguments inverted, so
+it proves only that, not where the transition is. Somewhere in 08-22..08-24
+something fixed it without announcing itself.
+
+**What the round leaves behind is worth more than the bisect would have been:**
+
+- **`terminal/survives_a_dock_layout_rebuild`** — the behaviour is now NAMED.
+  Until this, the only thing exercising a layout rebuild against this panel
+  was `cam/tool_window_follows_the_viewport`, which does it as a side effect
+  of testing something else. Inheriting coverage from another domain's test is
+  precisely how the original stayed hidden: nothing failed for the right
+  reason. The new case asserts a widget *inside* the panel, which requires
+  `Begin()` to have returned true — the thing that actually broke — across a
+  rebuild while on, while off, and back. **Honest limitation: it is a
+  characterization test, not a verified regression test.** No sabotage I could
+  construct reproduces the original, because the original no longer exists at
+  any commit I can build.
+- **The lifecycle half moved headless** (`tests/test_actions.cpp`), as Elias
+  asked: `NewTerminalTab`, `ShutdownTerminal` and `TerminalRunning` are free
+  functions over `AppState` with no ImGui in them. Milliseconds, no GPU.
+- **A dead latch, deleted.** Writing that test turned up that `everStarted` —
+  the field at the centre of the 2eda31d fix — is written and **never read**,
+  while `ShutdownTerminal`'s comment and a GUI test's comment both still
+  described it as load-bearing. Forgetting the sessions is what carries the
+  behaviour, and the new headless test pins it by session count
+  (sabotage-verified: kill-without-forgetting fails it).
+- **An orphaned comment reunited with its test.** The explanation of the
+  reopen bug sat in `GuiTestsViewport.cpp` above an unrelated `handles` test:
+  the `RegisterGuiTests` split moved the test and left its comment behind.
+  That refactor verified test NAMES byte-identical — nothing checks that a
+  comment travelled with the code it describes.
+
+**The shard pin was not needed**, which is the outcome Elias preferred.
 
 ## L4 — Reference images, finished (~1 session)
 

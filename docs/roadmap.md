@@ -235,13 +235,13 @@ them was only possible where a status line was honest — three were not, and
 one of those (the importer's `fitSpline` skip) is on this list *because* a
 stale line hid it.
 
-- **A GUI test that fails, documented, while the suite is green.**
-  `terminal/off_by_default_docks_right_on` fails when it runs after
-  `cam/tool_window_follows_the_viewport` in one process; the 4-shard partition
-  happens to separate them, and the partition reshuffles whenever a test is
-  added. `--serial` is 177/178. Diagnosed in `GuiTestsTerminal.cpp` and
-  [versioning/f7-handoff.md](versioning/f7-handoff.md); four fixes tried and
-  rejected. Now also in [known-bugs.md](known-bugs.md).
+- ~~**A GUI test that fails, documented, while the suite is green.**~~
+  **WITHDRAWN 2026-08-25** (L3): it no longer reproduces — 211/211 serial —
+  and the fixing commit could not be identified, which is recorded rather than
+  glossed. What it left behind is real: the behaviour is now named by
+  `terminal/survives_a_dock_layout_rebuild` instead of being an accident of a
+  CAM test, the lifecycle half moved headless, and the dead `everStarted`
+  latch two comments still called load-bearing is gone.
 - **Sketch reference images stop at phase 3.**
   [sketching/reference-image-plan.md](sketching/reference-image-plan.md) —
   phase 4 (calibration-point markers, a main-menu entry, undoable opacity,

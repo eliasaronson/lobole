@@ -89,6 +89,59 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
   };
 
+  // The layout rebuild, on purpose. Until now the only thing that exercised
+  // it was cam/tool_window_follows_the_viewport, which toggles this panel and
+  // rebuilds the dock layout TWICE as a side effect of testing something
+  // else — and for a while that combination left the terminal window docked,
+  // active and `Hidden`, so its body was never submitted and every widget
+  // inside it vanished. It reproduced only when those two tests shared a
+  // process, which the 4-shard partition usually prevented, so the suite was
+  // green while `--serial` was 177/178 (docs/versioning/f7-handoff.md).
+  //
+  // Inheriting coverage from another domain's test is how that stayed hidden:
+  // nothing NAMED the behaviour, so nothing failed for the right reason. This
+  // does, and it asserts the thing that actually broke — a widget INSIDE the
+  // panel, which requires Begin() to have returned true.
+  t = IM_REGISTER_TEST(engine, "terminal", "survives_a_dock_layout_rebuild");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const auto body = [&]() {
+      return ctx->ItemExists("//Terminal###TerminalPanel/###term_claude");
+    };
+    const bool had = s_App->settings.terminalPanel;
+
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(30);
+    IM_CHECK(body());
+
+    // Rebuilt while the panel is ON.
+    s_App->buildDefaultDockLayout = true;
+    ctx->Yield(12);
+    IM_CHECK(body());
+
+    // Rebuilt while it is OFF — this deletes the node the panel lived in,
+    // and is the case that once re-homed the window into the CENTRAL node,
+    // on top of the whole 3D viewport (docs/ui/gui-test-isolation.md).
+    s_App->settings.terminalPanel = false;
+    s_App->buildDefaultDockLayout = true;
+    ctx->Yield(12);
+
+    // ...and back. The panel must come back submitted, and on the right.
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(30);
+    IM_CHECK(body());
+    ImGuiWindow* win = ImGui::FindWindowByName("Terminal###TerminalPanel");
+    IM_CHECK(win != nullptr);
+    IM_CHECK(win->DockId != 0);
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    IM_CHECK(win->Pos.x > vp->Pos.x + vp->Size.x * 0.5f);
+    // Not swallowing the viewport, which is what the central-node re-home
+    // looked like: the panel's rect came back exactly equal to the viewport.
+    IM_CHECK(win->Size.x < vp->Size.x * 0.9f);
+
+    s_App->settings.terminalPanel = had;
+    ctx->Yield(3);
+  };
+
   t = IM_REGISTER_TEST(engine, "terminal", "runs_a_command_and_shows_output");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -416,6 +469,16 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
   // exactly "perf" into ImGuiTestGroup_Perfs, which this suite never queues
   // (it queues ImGuiTestGroup_Tests) — the test would list but never run.
 #endif
+  // Turning the terminal preference off and on again must give a working
+  // shell. ShutdownTerminal terminated the PTY but KEPT the TerminalState, so
+  // the panel could never open a shell again until the app restarted — the
+  // same one-shot trap as the chooser this panel replaced (2eda31d).
+  //
+  // This comment lived in GuiTestsViewport.cpp until 2026-08-25, above an
+  // unrelated `handles` test: the RegisterGuiTests split moved the test and
+  // left its explanation behind. Worth knowing about that refactor — the test
+  // NAMES were verified byte-identical, and nothing checks that a comment
+  // travelled with the code it describes.
   t = IM_REGISTER_TEST(engine, "terminal", "reopens_after_being_turned_off");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const bool had = s_App->settings.terminalPanel;

@@ -6,46 +6,28 @@ an entry when it lands a fix + regression test.
 
 ---
 
-## A GUI test fails when two tests share a process — and the suite is green
+The order-dependent GUI failure recorded here on 2026-08-25 —
+`terminal/off_by_default_docks_right_on` failing behind
+`cam/tool_window_follows_the_viewport` — **does not reproduce and the entry
+was withdrawn the same day.** Verified three ways: the full GUI suite passes
+**211/211 under `--serial`** (the check the original note said was the real
+one), the documented two-test reproduction passes, and the interaction is
+still genuinely there — the CAM test continues to toggle the terminal
+preference and rebuild the dock layout twice.
 
-**Symptom.** `terminal/off_by_default_docks_right_on` fails when it runs after
-`cam/tool_window_follows_the_viewport` **in the same process**. Reproduces
-deterministically, no load involved:
+**The fixing commit was not identified**, and that is worth saying rather than
+implying. `b1f0330`'s dock-flag change was the obvious candidate and is not it
+(reverting that hunk on top of HEAD does not bring the failure back), and a
+bisect back to 2026-08-21 found the pair passing at every commit sampled. So
+it was fixed somewhere in the 08-22..08-24 window by something that did not
+announce itself.
 
-    tools/gui-tests-xvfb.sh -f "tool_window_follows_the_viewport,\
-                                off_by_default_docks_right_on" --serial
-
-**Why it is invisible.** The default run partitions the suite into four shards
-balanced by recorded per-test times, and that partition happens to put the two
-in different processes: `gui-tests-xvfb.sh` is green, `--serial` is 177/178.
-The balance data changes whenever a test is added, so **a green run is not
-evidence this is fixed** — and a future test can bring it back without
-touching either file.
-
-**Root cause (diagnosed, 2026-08-22).** Not a timeout and not the PTY.
-Instrumenting `DrawTerminalPanel` through the failing pair shows the terminal
-window IS created, IS active and IS docked — with `Hidden` true, so `Begin()`
-returns false, the body is never submitted, and the widgets inside cannot be
-found. `WindowInfo` also declines to return a hidden window, which is the null
-the assertion sees. That CAM test is the only one that turns the terminal
-panel on and off *and* rebuilds the dock layout (legitimately — it narrows the
-viewport).
-
-**Four fixes tried and rejected**, recorded on the test so nobody repeats
-them: starting from a rebuilt default layout; waiting on `FindWindowByName`
-instead of `WindowInfo`; `ctx->ItemClick(win->TabId)`; poking
-`DockNode->SelectedTabId`. None makes the body submit. The remaining suspect
-is **which node the window lands in after a layout rebuild**, not when.
-
-**Impact.** Test-only today — no user-facing symptom is known. But the same
-mechanism (a docked window left `Hidden` after a layout rebuild) is what
-`ui/gui-test-isolation.md` found re-homing the terminal into the *central*
-node, where it covered the whole viewport; that one was a real product bug.
-Worth treating as a live lead, not just a flaky test.
-
-**Where.** `src/app/guitests/GuiTestsTerminal.cpp` (diagnosis in the test's own
-comment), [versioning/f7-handoff.md](versioning/f7-handoff.md),
-[ui/gui-test-isolation.md](ui/gui-test-isolation.md).
+What that leaves behind, in [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
+L3: the behaviour is now NAMED by
+`terminal/survives_a_dock_layout_rebuild` instead of being an accident of a
+CAM test, so a return fails for the right reason — though that test is a
+characterization test, not a verified regression test, because no sabotage
+reproduces the original.
 
 ---
 

@@ -1814,12 +1814,6 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->measure.active);
   };
 
-  // Turning the terminal preference off and on again must give a working
-  // shell. ShutdownTerminal terminated the PTY but kept the TerminalState,
-  // whose `everStarted` latch (there to stop the shell respawning after the
-  // user presses Stop) then blocked every future start — a panel that could
-  // never open a shell again until the app restarted. The same one-shot trap
-  // the chooser this panel replaced used to have.
   t = IM_REGISTER_TEST(engine, "handles", "hover_highlights_the_arrow");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

@@ -96,7 +96,6 @@ struct Session {
   std::string label;      // the session's program, for the header
   std::string startError; // why the last start failed, if it did
   int exitStatus = -1;    // of the last session
-  bool everStarted = false;
   int scrollBack = 0;     // lines scrolled up into history; 0 = live
   bool capturing = false; // the pointer is over us and a session is running
   std::string foreground; // process with the terminal, refreshed on output
@@ -196,7 +195,6 @@ void StartSession(AppState& state, Session& t,
     LOG_WARN("Terminal: {}", error);
     return;
   }
-  t.everStarted = true;
   t.label = label;
 }
 
@@ -658,13 +656,17 @@ void ShutdownTerminal(AppState& state) {
     return;
   for (std::unique_ptr<Session>& s : state.terminal->sessions)
     s->pty.Terminate();
-  // ...and FORGET the sessions, not just kill them. `everStarted` is a latch
-  // that stops the shell respawning after the user presses Stop, and
-  // `screen` outlives the process on purpose so the scrollback is still
-  // readable. Both are right while the panel is open — and both meant that
-  // turning the preference off and on again produced a panel that could
-  // never start a shell, dead until the app restarted. Which is the same
-  // one-shot trap the chooser this panel replaced used to have.
+  // ...and FORGET the sessions, not just kill them. `screen` outlives the
+  // process on purpose so the scrollback stays readable, which is right while
+  // the panel is open and wrong the moment it closes: turning the preference
+  // off and on again used to produce a panel that could never start a shell,
+  // dead until the app restarted — the same one-shot trap as the chooser this
+  // panel replaced (2eda31d).
+  //
+  // The other half of that fix was a per-session `everStarted` latch, removed
+  // 2026-08-25: nothing had read it since, so it was state that two comments
+  // still described as load-bearing. Forgetting the sessions is what carries
+  // the behaviour now, and tests/test_actions.cpp pins it by session count.
   //
   // The preference going off already "ends the session rather than hiding
   // it" (below); ending it means the next open is a fresh one.

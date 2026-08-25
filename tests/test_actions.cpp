@@ -38,6 +38,7 @@
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/TerminalPanel.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -286,3 +287,58 @@ TEST_CASE("assembly bounds rotate a placed part's corners",
   CHECK_THAT(hi.y - lo.y, WithinAbs(20.0f, 1e-3));
   CHECK_THAT(hi.x - lo.x, WithinAbs(2.0f, 1e-3));
 }
+
+#ifdef HAVE_TERMINAL
+// The terminal panel's LIFECYCLE, headlessly.
+//
+// This half used to live only in the GUI suite, in a test that also asserted
+// docking — and that test is the one which failed when it ran behind
+// cam/tool_window_follows_the_viewport, invisibly, because the shard
+// partition happened to separate them (docs/versioning/f7-handoff.md).
+// Splitting it puts the assertions that are not about widgets somewhere a
+// dock node cannot reach them: NewTerminalTab, ShutdownTerminal and
+// TerminalRunning are free functions over AppState with no ImGui in them, so
+// they run here in milliseconds rather than ~1 s on a GPU.
+//
+// What CANNOT move is the docking, which is genuinely about ImGui. It stays
+// in GuiTestsTerminal.cpp, where a case now exercises the layout rebuild
+// deliberately instead of inheriting it from a CAM test.
+//
+// What this does NOT pin, despite the obvious temptation: the `everStarted`
+// latch of 2eda31d, where turning the preference off and on left a panel that
+// could never start a shell again. That bug cannot be re-armed — writing this
+// test is what turned up that nothing had READ the field since the fix, so it
+// was deleted. Forgetting the sessions is what carries the behaviour now, and
+// the session-count checks below are what hold it.
+TEST_CASE("terminal: a tab starts a shell, and shutdown really ends it",
+          "[actions][terminal]") {
+  ui::AppState state = MakeHeadlessState();
+
+  CHECK(!ui::TerminalRunning(state)); // nothing runs until asked
+  CHECK(ui::TerminalSessionCount(state) == 0);
+
+  // The panel's own path: opening it with no sessions calls exactly this.
+  ui::NewTerminalTab(state);
+  CHECK(ui::TerminalRunning(state));
+  CHECK(ui::TerminalSessionCount(state) == 1);
+
+  // "Ends the session rather than hiding it" — a process kept alive behind a
+  // closed panel is a process nobody can see, and on this app that process is
+  // usually a Claude Code session holding the instance's port.
+  //
+  // The FORGETTING is what these two lines actually pin (verified by
+  // sabotage: killing without forgetting fails them). Whether the child is
+  // reaped is not observable from here — Session's destructor ends the pty,
+  // so removing the explicit Terminate() call leaves both checks green.
+  ui::ShutdownTerminal(state);
+  CHECK(!ui::TerminalRunning(state));
+  CHECK(ui::TerminalSessionCount(state) == 0); // forgotten, not just killed
+
+  // And the panel opens again afterwards, from a clean slate.
+  ui::NewTerminalTab(state);
+  CHECK(ui::TerminalRunning(state));
+  CHECK(ui::TerminalSessionCount(state) == 1);
+
+  ui::ShutdownTerminal(state); // no pty left behind for the next test
+}
+#endif
