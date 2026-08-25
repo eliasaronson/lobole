@@ -20,8 +20,8 @@
 > **2026-08-20:** contact checks run their boolean with a 1 µm fuzz, so parts
 > designed to touch report contact instead of a sliver-sized "clash".
 >
-> **2026-08-25: I1 measure reopened — [measure-v2.md](measure-v2.md),
-> awaiting sign-off.** Dogfooding the tool on a board found that its most
+> **2026-08-25: I1 measure reopened and rebuilt — [measure-v2.md](measure-v2.md),
+> SHIPPED except vertex picking.** Dogfooding the tool on a board found that its most
 > common answer on a single solid is `0.000 mm`: minimum distance is the only
 > question it asks, and on one body most element pairs touch. Twelve findings,
 > five of them standing wrong answers — no angle anywhere (while `describe`
@@ -29,7 +29,15 @@
 > state surviving a tab switch, a readout that ignores the document's units,
 > and a cylindrical face reporting area where every CAD system reports a
 > diameter. The "deferred polish" line below understates it: measure is
-> missing a floor, not a finish.
+> missing a floor, not a finish. All twelve are closed; M1-M7 shipped in nine
+> commits the same day. The tool now leads with the angle when two things
+> touch, draws the dimension on the geometry with its value, measures under
+> the cursor before you click, keeps pinned measurements, takes
+> minimum/maximum/centre-to-centre, measures whole parts (a clash reports as
+> a clash), seeds from the selection, names elements in words, and answers
+> the same questions over RPC. Vertex picking stays deferred: a vertex has no
+> ElementMap entry, so it has no stable name, and giving it one is a
+> toponaming change.
 
 The "is it right?" toolset: measuring geometry, mass/volume properties, and
 seeing inside a part. Small, high-value, and disproportionately useful to the
@@ -47,7 +55,8 @@ length / circular-edge radius** for one element and **min distance** (OCC
 `BRepExtrema_DistShapeShape`) for two, into a Properties-panel readout. The
 tool alternates describe → distance on successive clicks. Radius was added to
 `Measure::Describe` (`BRepAdaptor_Curve` → `GeomAbs_Circle`).
-**Reopened 2026-08-25 — see [measure-v2.md](measure-v2.md).** What was
+**Reopened and rebuilt 2026-08-25 — see [measure-v2.md](measure-v2.md).**
+What was
 written here as "deferred polish: point picking, angle-between-faces/edges,
 and the unified-selection (U1) integration + floating readout overlay" turned
 out to be the difference between a distance readout and a measuring tool. The

@@ -1,6 +1,21 @@
 # Measure — from a distance readout to a measuring tool — design
 
-> Status: **PROPOSAL, awaiting sign-off.** Written 2026-08-25 from a
+> Status: **SHIPPED 2026-08-25**, except vertex picking (see "What shipped,
+> and the one thing that did not"). Nine commits: the four standing wrong
+> answers, then M1-M7. Every finding below is closed or explicitly deferred,
+> and each phase carries the test that would have caught its bug.
+>
+> Three things the work found that this plan did not, all of them the same
+> shape as the findings that prompted it — a plausible wrong number:
+> the dimension was drawn at the MINIMUM points whatever distance_kind was
+> selected (picture and number describing different point pairs); centre-to-
+> centre read a point on the RIM, so two holes of different radii reported
+> 102.6 mm where the spacing was 104.4; and a variable created from a
+> measurement was formatted with thousands separators, which does not parse
+> as an expression. Plus one pre-existing unrelated defect: `describe` listed
+> `list_variables` twice, which had been failing remote_smoke since v64.
+>
+> Originally written 2026-08-25 as a **PROPOSAL**, from a
 > screenshot in which the Measure tool, asked about two edges of one board,
 > answered `Distance: 0.000 mm (nearest) / dx 0.000 dy 0.000 dz 0.000`. That
 > answer is arithmetically correct and useless: the two edges meet at a
@@ -551,6 +566,28 @@ was written to do. Two habits close that class:
   so a row cannot promise what no branch implements. `test_conventions.cpp`
   already does the structural half (no handler without a row); this is the
   semantic half.
+
+## What shipped, and the one thing that did not
+
+Everything above except **M5's vertex picking**, which stays deferred and is
+now better understood: a vertex has no entry in the ElementMap, so it has no
+stable name. Adding `Kind::Vertex` without one would make vertex
+measurements the only ones that do not survive a regen — the invariant the
+whole measure surface rests on. Naming vertices is a toponaming change, which
+is the session and the review this plan said it needed, not a corner of a
+measure round.
+
+What that phase was FOR is delivered by other means: point-to-point between
+holes is `distance_kind: centres` on two circular edges or two bores, which
+now uses the true centre; and the snap targets it listed (hole centre, arc
+centre, face centroid) are exactly what CentreOf computes, derived from a
+named element so they inherit its stable identity.
+
+Also not done, and recorded rather than smuggled in: `measure` and
+`interference` have near-twin occurrence resolution (id / name / "Unit/Part"
+path → world-placed bodies). They should be one function. Interference's
+version shares a prefetched body map with the contact sweep, so merging them
+is its own change with its own test run.
 
 ## Order & effort
 
