@@ -1,5 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "ui/AssemblyActions.h"
+#include "ui/Commands.h"
 #include "ui/MeasureOverlay.h"
 #include "ui/SimulationActions.h"
 
@@ -248,6 +249,77 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(apart.find("180") != std::string::npos);    // outward normals
 
     s_App->measure = ui::MeasureState{};
+  };
+
+  // M4b/M4c: measure joins the selection model, and says what you picked in
+  // words. Every other tool has seeded from the selection since U7b;
+  // ToggleMeasure opened with `s.measure = MeasureState{}`, which DISCARDS
+  // the selection rather than consuming it, so selecting two faces and
+  // hitting the shortcut made you click both again.
+  t = IM_REGISTER_TEST(engine, "measure", "seeds_from_selection_and_names");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    const Body& body = Doc()->GetBodies()[0];
+    std::string top, side, anEdge;
+    for (const auto& [idx, name] : body.elementMap.names) {
+      const auto f = Measure::DescribeFaceAt(body, idx);
+      if (!f)
+        continue;
+      if (f->normal.y > 0.99f)
+        top = name;
+      else if (f->normal.x > 0.99f)
+        side = name;
+    }
+    for (const auto& [idx, name] : body.elementMap.edgeNames) {
+      (void)idx;
+      anEdge = name;
+      break;
+    }
+    IM_CHECK(!top.empty() && !side.empty() && !anEdge.empty());
+
+    // Select two faces the ordinary way, THEN arm measure.
+    s_App->measure = ui::MeasureState{};
+    s_App->selection.Clear();
+    s_App->selection.items.push_back(
+        {ui::SelectionItem::Kind::Face, 0, ElementRef{id, top}});
+    s_App->selection.items.push_back(
+        {ui::SelectionItem::Kind::Face, 0, ElementRef{id, side}});
+    // Through the toolbar button, which is the path a person takes.
+    ctx->SetRef("//##DockHost");
+    ctx->ItemClick("**/###tb_measure");
+    ctx->Yield();
+    IM_CHECK(s_App->measure.active);
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)2);
+    IM_CHECK(!s_App->measure.readout.empty());
+    // Pick ORDER is what makes one of them `a` and the other `b`, and the
+    // selection set has always preserved it.
+    IM_CHECK_STR_EQ(s_App->measure.picked[0].ref.name.c_str(), top.c_str());
+    IM_CHECK_STR_EQ(s_App->measure.picked[1].ref.name.c_str(), side.c_str());
+
+    // M4c: the rows are readable. The stable name is the identity and the
+    // tooltip; it is not what a person is asked to read.
+    const std::string label =
+        ui::MeasureElementLabel(*s_App, s_App->measure.picked[0]);
+    IM_CHECK(label.find("top face") != std::string::npos);
+    IM_CHECK(label.find("/face") == std::string::npos); // no toponame
+    const std::string edgeLabel =
+        ui::MeasureElementLabel(*s_App, {ElementRef{id, anEdge}, true, 0});
+    IM_CHECK(edgeLabel.find("edge") != std::string::npos);
+    IM_CHECK(edgeLabel.find(";U") == std::string::npos);
+
+    // Toggling off and on again with nothing selected starts empty — the
+    // seed consumes a selection, it does not invent one.
+    ctx->ItemClick("**/###tb_measure"); // off
+    s_App->selection.Clear();
+    ctx->ItemClick("**/###tb_measure"); // on
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)0);
+
+    s_App->measure = ui::MeasureState{};
+    s_App->selection.Clear();
+    ctx->Yield();
   };
 
   // M4: a measurement you can keep, a distance that says WHICH distance it

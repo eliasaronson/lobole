@@ -1005,6 +1005,53 @@ std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
   return out;
 }
 
+std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
+                      const units::System& sys) {
+  const auto e = Describe(bodies, ref);
+  if (!e)
+    return {};
+  // Which way a planar face points, in the words a person uses about a part
+  // on a bench. Only for planes: a cylinder has no "top".
+  const auto facing = [&]() -> const char* {
+    const auto n = DirectionOf(bodies, ref);
+    if (!n || !n->oriented)
+      return nullptr;
+    const glm::dvec3 d = glm::normalize(n->dir);
+    constexpr double kAxisAligned = 0.9; // ~25 degrees of slop
+    if (d.y > kAxisAligned)
+      return "top";
+    if (d.y < -kAxisAligned)
+      return "bottom";
+    if (std::abs(d.x) > kAxisAligned)
+      return "side";
+    if (std::abs(d.z) > kAxisAligned)
+      return "side";
+    return nullptr;
+  };
+
+  if (e->kind == "face") {
+    if (e->shape == "cylinder" && e->hasRadius) {
+      // A cylindrical face is a bore or a boss and either way the number
+      // people say about it is the diameter.
+      return "\xc3\x98" + units::FormatLength(e->radius * 2.0, sys) + " bore";
+    }
+    if (e->shape == "sphere")
+      return "spherical face";
+    if (e->shape == "cone")
+      return "conical face";
+    if (e->shape == "torus")
+      return "toroidal face";
+    if (const char* where = facing())
+      return std::string(where) + " face";
+    return "face";
+  }
+  if (e->shape == "circle" || e->shape == "arc") {
+    return "\xc3\x98" + units::FormatLength(e->radius * 2.0, sys) +
+           (e->shape == "arc" ? " arc" : " circle");
+  }
+  return units::FormatLength(e->length, sys) + " edge";
+}
+
 std::optional<glm::vec3> AnchorOf(const std::vector<Body>& bodies,
                                   const ElementRef& ref) {
   std::string kind;

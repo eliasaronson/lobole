@@ -214,6 +214,18 @@ void ToggleMeasure(AppState& s) {
   const bool wasActive = s.measure.active;
   s.measure = MeasureState{};
   s.measure.active = !wasActive;
+  // Select first, then measure — the U7b behaviour every other tool has had
+  // for a year, via SeedSlotsFromSelection on entry. Measure was the one
+  // that DISCARDED the selection instead of consuming it, so selecting two
+  // faces and hitting Ctrl+Shift+M made you click both again.
+  //
+  // U1's premise is one typed, ordered selection set that every context
+  // reads and writes; measure kept a private list beside it. Seeding is the
+  // first half of closing that: the picks still live in MeasureState (they
+  // carry an occurrence identity the selection set models differently), but
+  // the SET is now where a measurement starts.
+  if (s.measure.active)
+    SeedMeasureFromSelection(s);
 }
 
 void ToggleSection(AppState& s) {

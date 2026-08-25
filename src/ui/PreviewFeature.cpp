@@ -195,12 +195,11 @@ void DrawMeasureToolWindow(AppState& state) {
       break;
     }
     ImGui::SameLine();
-    std::string where;
-    if (e.occurrenceId != 0 && state.assembly)
-      if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
-        where = occ->name + " / ";
-    ImGui::TextWrapped("%s%s %s", where.c_str(), e.isEdge ? "Edge" : "Face",
-                       e.ref.name.c_str());
+    // Named the way a person would. The stable toponame is still the
+    // identity — and still one hover away, for when it IS the thing you
+    // need (a fillet ref, an RPC call).
+    ImGui::TextWrapped("%s", MeasureElementLabel(state, e).c_str());
+    ImGui::SetItemTooltip("%s", e.ref.name.c_str());
     ImGui::PopID();
   }
   if (!state.measure.readout.empty())

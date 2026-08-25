@@ -4380,6 +4380,11 @@ namespace {
 // share this: a preview computed by any other path would be a preview of
 // something slightly else, which is worse than no preview.
 struct MeasureOut {
+  // What was measured, in words ("Board - top face"). Kept apart from the
+  // readout because the tool window already NAMES each pick in its rows —
+  // repeating it under them said "top face / top face" — while the hover
+  // pill has no rows and needs the name and the number together.
+  std::string name;
   std::string readout;
   MeasureState::Dimension dimension;
   bool hasLine = false;
@@ -4392,6 +4397,7 @@ MeasureOut MeasureOne(AppState& state, const MeasureState::Element& e,
   const auto src = ResolveMeasureSource(state, e);
   if (src) {
     if (const auto d = Measure::Describe(*src->bodies, e.ref)) {
+      out.name = Measure::HumanName(*src->bodies, e.ref, u);
       out.readout = src->prefix + FormatElement(*d, u);
       return out;
     }
@@ -4663,8 +4669,58 @@ void UpdateMeasureHover(AppState& state) {
       state.measure.picked.empty()
           ? MeasureOne(state, h.element, u)
           : MeasurePair(state, state.measure.picked[0], h.element, u);
-  h.readout = r.readout;
+  // The hover pill has no row above it to say what this is, so it carries
+  // the name itself — which is the whole "what is this" gesture when nothing
+  // is picked yet.
+  h.readout = r.name.empty() ? r.readout : r.name + "\n" + r.readout;
   h.dimension = r.dimension;
+}
+
+std::string MeasureElementLabel(AppState& state,
+                                const MeasureState::Element& e) {
+  std::string out;
+  if (e.occurrenceId != 0 && state.assembly)
+    if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
+      out = occ->name + " - ";
+  const auto src = ResolveMeasureSource(state, e);
+  std::string what;
+  if (src)
+    what = Measure::HumanName(*src->bodies, e.ref, state.ActiveUnits());
+  if (what.empty()) {
+    // A ref that no longer resolves has no shape to name. Say so plainly
+    // rather than falling back to the toponame, which would look like an
+    // ordinary row while meaning "this is gone".
+    return out + (e.isEdge ? "edge" : "face") + " (no longer in the model)";
+  }
+  // The BODY it belongs to, on a part tab where there is no occurrence name
+  // to carry that: "Board - top face" beats "top face" the moment a part has
+  // two bodies.
+  if (e.occurrenceId == 0 && src) {
+    for (const Body& b : *src->bodies) {
+      if (b.createdBy == e.ref.featureId && !b.name.empty()) {
+        out = b.name + " - ";
+        break;
+      }
+    }
+  }
+  return out + what;
+}
+
+void SeedMeasureFromSelection(AppState& state) {
+  if (state.selection.Empty())
+    return;
+  for (const SelectionItem& it : state.selection.items) {
+    if (it.kind != SelectionItem::Kind::Face &&
+        it.kind != SelectionItem::Kind::Edge)
+      continue;
+    // On an assembly the item's id IS the owning occurrence, which is part
+    // of a measured element's identity (the same face on two occurrences of
+    // one part is two distinct measurables).
+    state.measure.picked.push_back({it.element,
+                                    it.kind == SelectionItem::Kind::Edge,
+                                    state.assembly ? it.id : 0});
+  }
+  UpdateMeasureReadout(state);
 }
 
 void PinMeasurement(AppState& state) {

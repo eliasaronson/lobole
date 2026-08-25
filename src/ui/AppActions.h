@@ -530,6 +530,21 @@ void UpdateMeasureHover(AppState& state);
 // M4: move the current measurement into the pinned list and clear the picks
 // for the next one. No-op when there is nothing measured. Comparing three
 // gaps used to mean writing two of them down.
+// Select first, then measure (M4b): the Face/Edge items already in the
+// selection become the measured set, in PICK ORDER — which the selection
+// set has always preserved, and which is exactly what makes one of them `a`
+// and the other `b`. More than two seeds a total rather than being dropped.
+void SeedMeasureFromSelection(AppState& state);
+
+// How a person names a measured element for display: "Bracket - top face",
+// "Board - 600 mm edge", "Plate - Ø25 bore", with the occurrence prefix on an
+// assembly. The tool window's rows read `Edge 1/face3;U0` before this — the
+// internal stable name, which is what makes a measurement survive a regen
+// and exactly what nobody should have to read. The stable name stays the
+// identity and becomes the tooltip.
+std::string MeasureElementLabel(AppState& state,
+                                const MeasureState::Element& e);
+
 void PinMeasurement(AppState& state);
 // Drop one pinned measurement by id, or all of them.
 void UnpinMeasurement(AppState& state, uint64_t id);

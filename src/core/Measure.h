@@ -2,6 +2,7 @@
 
 #include "core/ElementMap.h"
 #include "core/Feature.h"
+#include "core/Units.h"
 
 #include <optional>
 #include <string>
@@ -251,6 +252,18 @@ struct SetTotal {
 };
 std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
                                 const std::vector<ElementRef>& refs);
+
+// How a PERSON names this element: "top face", "600 mm edge", "Ø25 bore".
+// The measure tool's rows read `Edge 1/face3;U0` — the internal stable name,
+// which is the thing that makes a measurement survive a regen and exactly
+// the thing nobody should have to read.
+//
+// Derived from the classification and the geometry, never stored: a name
+// that went stale would be worse than the toponame it replaced. The stable
+// name stays the identity and the tooltip; this is only for display.
+// Empty when the ref does not resolve.
+std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
+                      const units::System& sys);
 
 // A representative point ON an element: a face's centre of mass, an edge's
 // parametric midpoint. Where a dimension should attach when it has a choice.
