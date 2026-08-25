@@ -25,14 +25,13 @@ except ImportError:
     print("mcp_smoke: python mcp SDK not installed, skipping")
     sys.exit(77)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from smoke_app import launch_app  # noqa: E402
+
 TOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                          "tools")
 
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def expect(condition, message):
@@ -220,7 +219,6 @@ async def run(port):
 
 def main():
     binary = sys.argv[1]
-    port = free_port()
     # A scratch state dir: the app announces itself there (instance
     # discovery), and a test must never write into the developer's real
     # ~/.local/state/designer or see the instances they have open.
@@ -229,25 +227,24 @@ def main():
     # preferences would edit the developer's real settings.json.
     env = dict(os.environ, XDG_STATE_HOME=state,
                XDG_CONFIG_HOME=os.path.join(state, "config"))
-    app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, env=env)
+    app = launch_app(binary, extra_args=["--hidden"], env=env,
+                     headless=False)
     try:
         # The MCP server fails fast when the app is unreachable (that is the
         # behavior an agent should see), so wait for startup here instead.
         sys.path.insert(0, TOOLS_DIR)
         from designer_remote import Designer
-        Designer.wait_for(port).close()
+        Designer.wait_for(app.port).close()
 
         # Discovery: the running app announced itself, so a client can find
         # it without being told the port (the failure this replaced was
         # "Designer is not reachable" while the app was running happily).
         os.environ["XDG_STATE_HOME"] = state
         found = Designer.instances()
-        expect([i for i in found if i["port"] == port],
+        expect([i for i in found if i["port"] == app.port],
                f"the running instance announced itself ({found})")
 
-        asyncio.run(run(port))
+        asyncio.run(run(app.port))
     finally:
         app.terminate()
         try:

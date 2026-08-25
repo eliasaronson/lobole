@@ -29,6 +29,24 @@ CAM test, so a return fails for the right reason — though that test is a
 characterization test, not a verified regression test, because no sabotage
 reproduces the original.
 
+## The GUI suite has order-dependent failures nobody has caught in the act
+
+`conflicts/resolve_a_merge_in_the_panel` failed once on 2026-08-25 in a
+sharded run — `panel != nullptr`, the Conflicts panel not found — and passed
+alone, and passed on the next full run of the same binary. That is the second
+instance this month of the same SHAPE: a GUI test that fails only in company,
+where the 4-shard partition decides who its company is.
+
+The first (`terminal/off_by_default_docks_right_on`) was diagnosed to a window
+left `Hidden` after a dock-layout rebuild, went away without anyone
+identifying the fix, and is withdrawn below. This one is not diagnosed at all.
+
+**What would actually help**, in order: `--gui-test-shuffle` exists and CI runs
+it (`d1396b5`), so the cheap move is running the suite shuffled a few times
+and keeping the seed of a failure — the failures are reproducible per seed,
+which is the whole point of the flag. Chasing one from a single observation is
+what the terminal case shows does not pay.
+
 ---
 
 The orbit-lag + stale-silhouette pair in the outline renderer was fixed by

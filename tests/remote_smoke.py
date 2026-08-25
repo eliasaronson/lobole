@@ -13,15 +13,12 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 BOX = {"type": "Box", "name": "Box 1", "position": [0, 0, 0],
        "width": 2, "height": 2, "depth": 2}
 
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 _T0 = time.time()
@@ -94,7 +91,6 @@ def is_black(png_path):
 
 def main():
     binary = sys.argv[1]
-    port = free_port()
     # Its own state AND config dirs: autosaves and the recent-projects list
     # stay out of $HOME, and the run cannot edit the developer's real
     # preferences (set_settings persists immediately — headless runs no GUI
@@ -102,12 +98,11 @@ def main():
     scratch = tempfile.mkdtemp(prefix="designer_remote_")
     env = dict(os.environ, XDG_STATE_HOME=scratch,
                XDG_CONFIG_HOME=os.path.join(scratch, "config"))
-    app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
-                           env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+    app = launch_app(binary, extra_args=["--hidden"], env=env,
+                         headless=False)  # a real renderer: screenshots
     tmp = tempfile.mkdtemp(prefix="designer_remote_")
     try:
-        d = Designer.wait_for(port)
+        d = Designer.wait_for(app.port)
 
         pong = d.call("ping")
         expect(pong["ok"], "ping")
@@ -115,7 +110,7 @@ def main():
         # screenshot, the open project and whether it has unsaved changes. A
         # client that silently attaches to the wrong window is the failure
         # this exists to prevent.
-        expect(pong["port"] == port, f"ping reports its port ({pong})")
+        expect(pong["port"] == app.port, f"ping reports its port ({pong})")
         expect(pong["mode"] in ("gui", "headless"), f"ping mode ({pong})")
         expect("project" in pong and "dirty" in pong,
                f"ping reports the document ({pong})")

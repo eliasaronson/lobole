@@ -20,15 +20,11 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 SKIP = 77  # ctest SKIP_RETURN_CODE: built without Netgen
 
 
-def free_port():
-    import socket
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def expect(condition, message):
@@ -54,7 +50,6 @@ def poll_until_done(d, study, timeout=180.0):
 
 def main():
     binary = sys.argv[1]
-    port = free_port()
     env = dict(os.environ)
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
@@ -64,11 +59,9 @@ def main():
     # preferences: set_settings persists immediately (headless runs no GUI
     # loop to debounce it), so a suite reset their font size to 120%.
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
-    app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
-                           env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+    app = launch_app(binary, env=env)
     try:
-        d = Designer.wait_for(port)
+        d = Designer.wait_for(app.port)
         expect(d.call("ping")["ok"], "ping")
 
         # --- a steel design envelope ---------------------------------------

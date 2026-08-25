@@ -134,6 +134,11 @@ bool RemoteServer::Start(uint16_t port, bool hasRenderer, bool bindAll) {
   // Loopback unless explicitly told otherwise: this interface can create,
   // read, overwrite and export files with no authentication of any kind.
   addr.sin_addr.s_addr = htonl(bindAll ? INADDR_ANY : INADDR_LOOPBACK);
+  // Port 0 asks the KERNEL to choose, and the chosen port is read back below.
+  // That closes a race every test script here used to run: pick a free port
+  // by binding 0, CLOSE the socket, then hand the number to a child that
+  // binds it later — between those two steps the same port can be handed to
+  // somebody else. Binding once, in the process that keeps it, has no window.
   addr.sin_port = htons(port);
   if (::bind(m_listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
           0 ||
@@ -142,6 +147,24 @@ bool RemoteServer::Start(uint16_t port, bool hasRenderer, bool bindAll) {
     SockClose(m_listenFd);
     m_listenFd = -1;
     return false;
+  }
+  if (port == 0) {
+    sockaddr_in actual{};
+    // Winsock spells this `int`, POSIX `socklen_t`; the packaging/windows
+    // shim surface is deliberately small, so do not add a typedef for one use.
+#ifdef _WIN32
+    int len = sizeof(actual);
+#else
+    socklen_t len = sizeof(actual);
+#endif
+    if (::getsockname(m_listenFd, reinterpret_cast<sockaddr*>(&actual), &len) <
+        0) {
+      LOG_ERROR("Remote control: bound a port the OS will not name");
+      SockClose(m_listenFd);
+      m_listenFd = -1;
+      return false;
+    }
+    port = ntohs(actual.sin_port);
   }
 
   m_running = true;

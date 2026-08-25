@@ -354,6 +354,14 @@ add_test(NAME fem_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(fem_smoke PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
+# The worker-thread half of the same surface, split out 2026-08-25: it is the
+# slow one (it solves, then polls), so a failure here names the async contract
+# rather than taking the CRUD/staleness contract down with it.
+add_test(NAME fem_async_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fem_async_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fem_async_smoke PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 # Async topology optimization over JSON-RPC (TO2): start a run, poll
 # study_status to completion, cancel a second run.
 add_test(NAME topo_smoke

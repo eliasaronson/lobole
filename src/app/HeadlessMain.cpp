@@ -54,6 +54,11 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
     LOG_ERROR("Headless: cannot listen on port {} — exiting", remotePort);
     return 1; // CI must fail fast, not hang serving nothing
   }
+  // With `--remote 0` the kernel chose; say which, so a launcher reading this
+  // process's output learns the port without racing for it. The instance
+  // registry carries the same number for anyone who missed the line.
+  if (remotePort == 0)
+    LOG_INFO("Headless: remote port {}", server.Port());
   if (!recordPath.empty() && !server.StartRecording(recordPath)) {
     return 1;
   }

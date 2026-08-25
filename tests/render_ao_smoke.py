@@ -27,6 +27,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 try:
     from PIL import Image
@@ -35,10 +36,6 @@ except ImportError:  # pillow is not a hard dependency of the project
     sys.exit(77)
 
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def expect(condition, message):
@@ -65,11 +62,7 @@ def bright_mask(img, threshold=140):
 
 def main():
     binary = sys.argv[1]
-    port = free_port()
     tmp = os.environ.get("TMPDIR", "/tmp")
-    shot_on = os.path.join(tmp, f"ao_on_{port}.png")
-    shot_off = os.path.join(tmp, f"ao_off_{port}.png")
-    shot_bare = os.path.join(tmp, f"ao_bare_{port}.png")
     # Its own state AND config dirs: autosaves and the recent-projects list
     # stay out of $HOME, and the run cannot edit the developer's real
     # preferences (set_settings persists immediately — headless runs no GUI
@@ -77,11 +70,15 @@ def main():
     scratch = tempfile.mkdtemp(prefix="designer_ao_")
     env = dict(os.environ, XDG_STATE_HOME=scratch,
                XDG_CONFIG_HOME=os.path.join(scratch, "config"))
-    app = subprocess.Popen([binary, "--hidden", "--remote", str(port)],
-                           env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+    app = launch_app(binary, extra_args=["--hidden"], env=env,
+                     headless=False)  # a real renderer: this is about SSAO
+    # Unique per run: two of these in parallel must not fight over one file,
+    # and the port the kernel gave us is the handiest unique number around.
+    shot_on = os.path.join(tmp, f"ao_on_{app.port}.png")
+    shot_off = os.path.join(tmp, f"ao_off_{app.port}.png")
+    shot_bare = os.path.join(tmp, f"ao_bare_{app.port}.png")
     try:
-        d = Designer.wait_for(port, timeout=90)
+        d = Designer.wait_for(app.port, timeout=90)
 
         # A wide flat plate with one tall post at the FAR end. Correct AO
         # darkens only where the post meets the plate; everything else is open

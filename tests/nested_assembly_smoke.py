@@ -19,6 +19,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 FAILURES = []
 
@@ -29,31 +30,20 @@ def expect(cond, what):
         FAILURES.append(what)
 
 
-def free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    p = s.getsockname()[1]
-    s.close()
-    return p
-
-
 def main(binary):
     tmp = tempfile.mkdtemp(prefix="designer_nested_")
-    port = free_port()
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = tmp
     # ...and its own CONFIG dir, or the run edits the developer's real
     # preferences: set_settings persists immediately (headless runs no GUI
     # loop to debounce it), so a suite reset their font size to 120%.
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
-    app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
-                           env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.STDOUT)
+    app = launch_app(binary, env=env)
     try:
         d = None
         for _ in range(120):
             try:
-                d = Designer(port)
+                d = Designer(app.port)
                 d.call("ping")
                 break
             except Exception:

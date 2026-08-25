@@ -12,13 +12,8 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 import designer_replay  # noqa: E402
-
-
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def expect(condition, message):
@@ -26,12 +21,11 @@ def expect(condition, message):
         raise AssertionError(message)
 
 
-def launch(binary, port, env, record=None):
-    cmd = [binary, "--headless", "--remote", str(port), "--autosave", "0"]
+def launch(binary, env, record=None):
+    extra = ["--autosave", "0"]
     if record:
-        cmd += ["--record", record]
-    return subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+        extra += ["--record", record]
+    return launch_app(binary, extra_args=extra, env=env)
 
 
 def main():
@@ -47,10 +41,9 @@ def main():
     session = os.path.join(tmp, "session.jsonl")
 
     # Record: a small parametric model, including an undone step.
-    port = free_port()
-    app = launch(binary, port, env, record=session)
+    app = launch(binary, env, record=session)
     try:
-        d = Designer.wait_for(port)
+        d = Designer.wait_for(app.port)
         d.call("new_project")
         d.call("set_variable", name="w", expression="4")
         sk = d.call("add_feature", feature={
@@ -76,11 +69,10 @@ def main():
     expect(os.path.getsize(session) > 0, "session file written")
 
     # Replay into a FRESH instance; assert the same geometry falls out.
-    port2 = free_port()
-    app2 = launch(binary, port2, env)
+    app2 = launch(binary, env)
     try:
-        expect(designer_replay.replay(port2, session) == 0, "replay clean")
-        d2 = Designer.wait_for(port2)
+        expect(designer_replay.replay(app2.port, session) == 0, "replay clean")
+        d2 = Designer.wait_for(app2.port)
         st = d2.call("get_state")
         expect(len(st["bodies"]) == 1, "replayed state: one body")
         expect(abs(st["bodies"][0]["volume"] - recorded_volume) < 1e-9,

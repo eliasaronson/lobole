@@ -11,13 +11,11 @@ import tempfile
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer import Designer, ORIGIN  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def expect(cond, msg):
@@ -27,7 +25,6 @@ def expect(cond, msg):
 
 def main():
     binary = sys.argv[1]
-    port = free_port()
     env = dict(os.environ)
     env.pop("DISPLAY", None)
     # Its own state AND config dirs: autosaves and the recent-projects list
@@ -37,11 +34,9 @@ def main():
     tmp = tempfile.mkdtemp(prefix="designer_pyclient_")
     env["XDG_STATE_HOME"] = tmp
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
-    app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
-                           env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+    app = launch_app(binary, env=env)
     try:
-        d = Designer(port)
+        d = Designer(app.port)
         d.new().var("w", 40).var("h", "w / 2").var("t", 5)
 
         sk = (d.sketch(plane="xy", name="Base")

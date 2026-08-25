@@ -21,12 +21,9 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 # Phase logging: this suite runs under `ctest -j`, where a rare failure used
@@ -91,7 +88,6 @@ def expect_error(d, method, fragment, **params):
 
 def main():
     binary = sys.argv[1]
-    port = free_port()
     env = dict(os.environ)
     env.pop("DISPLAY", None)  # a display server must NOT be needed
     env.pop("WAYLAND_DISPLAY", None)
@@ -101,15 +97,12 @@ def main():
     # preferences: set_settings persists immediately (headless runs no GUI
     # loop to debounce it), so a suite reset their font size to 120%.
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
-    # Keep the app's own stderr: when the autosave phase flakes under load,
-    # its log is the only witness to what the process was doing.
-    app_log = os.path.join(tmp, "app.log")
-    app = subprocess.Popen([binary, "--headless", "--remote", str(port),
-                            "--autosave", "1"],
-                           env=env, stdout=subprocess.DEVNULL,
-                           stderr=open(app_log, "w"))
+    # launch_app keeps the app's own log and prints it on failure — this
+    # test grew its own copy of that for the autosave phase, and it is now
+    # what every smoke script gets.
+    app = launch_app(binary, extra_args=["--autosave", "1"], env=env)
     try:
-        d = Designer.wait_for(port)
+        d = Designer.wait_for(app.port)
         expect(d.call("ping")["ok"], "ping")
 
         phase("Strict params")
@@ -371,7 +364,7 @@ def main():
         phase("A SECOND simultaneous client works")
         # A SECOND simultaneous client works (multi-client remote): both see
         # the same document and responses route to the right connection.
-        d2 = Designer(port)
+        d2 = Designer(app.port)
         expect(len(d2.call("get_state")["bodies"]) == 1, "second client reads")
         expect(len(d.call("get_state")["bodies"]) == 1, "first client still ok")
         d2.close()
@@ -1442,12 +1435,7 @@ def main():
             except Exception as e:  # noqa: BLE001 - diagnostics only
                 state = {"get_state failed": str(e)}
             listing = sorted(os.listdir(os.path.dirname(crash_project)))
-            tail = ""
-            try:
-                with open(app_log) as fh:
-                    tail = "".join(fh.readlines()[-15:])
-            except OSError:
-                pass
+            tail = "".join(app.log().splitlines(keepends=True)[-15:])
             expect(False,
                    "autosave sidecar written while dirty\n"
                    f"      app alive: {alive} (exit {app.poll()})\n"
@@ -1458,12 +1446,9 @@ def main():
         app.send_signal(signal.SIGKILL)
         wait_exit(app, 30, "SIGKILLed app")
 
-        port2 = free_port()
-        app2 = subprocess.Popen(
-            [binary, "--headless", "--remote", str(port2), "--autosave", "1"],
-            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        app2 = launch_app(binary, extra_args=["--autosave", "1"], env=env)
         try:
-            d2 = Designer.wait_for(port2)
+            d2 = Designer.wait_for(app2.port)
             r = d2.call("open_project", path=crash_project)
             expect(r["autosave_available"], "recovery offered after crash")
             expect(len(d2.call("get_state")["features"]) == saved_features,
@@ -1480,11 +1465,8 @@ def main():
 
         phase("Clean shutdown on SIGTERM")
         # Clean shutdown on SIGTERM (fresh instance; the first was SIGKILLed)
-        port3 = free_port()
-        app3 = subprocess.Popen(
-            [binary, "--headless", "--remote", str(port3)],
-            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        Designer.wait_for(port3).close()
+        app3 = launch_app(binary, env=env)
+        Designer.wait_for(app3.port).close()
         app3.send_signal(signal.SIGTERM)
         expect(wait_exit(app3, 30, "SIGTERMed app") == 0, "exit 0 on SIGTERM")
 

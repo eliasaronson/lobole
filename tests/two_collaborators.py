@@ -19,6 +19,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
+from smoke_app import launch_app  # noqa: E402
 
 _PHASE = "startup"
 
@@ -34,27 +35,12 @@ def expect(condition, message):
         raise AssertionError(f"[phase: {_PHASE}] {message}")
 
 
-def free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 def start(binary, env):
-    port = free_port()
-    proc = subprocess.Popen([binary, "--headless", "--remote", str(port)],
-                            env=env, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
-    for _ in range(120):
-        try:
-            return proc, Designer(port)
-        except OSError:
-            if proc.poll() is not None:
-                raise RuntimeError("designer exited before serving")
-            time.sleep(0.25)
-    raise RuntimeError("designer never came up")
+    # launch_app waits for the app to NAME its port, so there is nothing left
+    # to retry against here — it either reports one or raises with the app's
+    # own log attached.
+    app = launch_app(binary, env=env)
+    return app, Designer(app.port)
 
 
 def box(name, width):

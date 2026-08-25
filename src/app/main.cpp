@@ -953,6 +953,9 @@ void printUsage(const char* programName) {
   std::cout << "  --remote <port>      Enable JSON-RPC remote control on "
                "127.0.0.1:<port>"
             << std::endl;
+  std::cout << "                       (0 = let the OS choose; the port is "
+               "logged and announced)"
+            << std::endl;
   std::cout << "  --remote-bind-all    Serve --remote on 0.0.0.0 instead of "
                "127.0.0.1 (containers only:\n                       the "
                "interface is unauthenticated and touches files)"
@@ -986,7 +989,10 @@ struct CommandLineArgs {
   long guiTestShuffle = -1;
   bool headless = false;
   bool hidden = false;
+  // 0 is BOTH "not asked for" and, once asked for, "let the OS choose" —
+  // so the request is a separate flag rather than a magic value.
   int remotePort = 0;
+  bool remoteRequested = false;
   bool remoteBindAll = false;
   double autosaveSeconds = 60.0;
   std::string recordPath;
@@ -1074,14 +1080,23 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
         exit(1);
       }
     } else if (arg == "--remote") {
-      if (i + 1 < argc) {
-        args.remotePort = std::atoi(argv[i + 1]);
-        i++;
-      }
-      if (args.remotePort <= 0 || args.remotePort > 65535) {
-        std::cerr << "Error: --remote requires a port (1-65535)" << std::endl;
+      // Strict parse, not atoi: atoi("--headless") is 0, and 0 now MEANS
+      // something ("choose one"), so a fat-fingered flag would silently start
+      // a server on a port the caller never asked for. Refuse, don't
+      // substitute.
+      const std::string_view val = i + 1 < argc ? argv[i + 1] : "";
+      const bool digits = !val.empty() && val.find_first_not_of("0123456789") ==
+                                              std::string_view::npos;
+      const long parsed = digits ? std::stol(std::string(val)) : -1;
+      if (!digits || parsed > 65535) {
+        std::cerr << "Error: --remote requires a port (1-65535), or 0 to let "
+                     "the OS choose one"
+                  << std::endl;
         exit(1);
       }
+      args.remotePort = static_cast<int>(parsed);
+      args.remoteRequested = true;
+      i++;
     } else if (arg == "-v" || arg == "--verbose") {
       args.logLevel = spdlog::level::debug;
     } else if (arg == "-vv") {
@@ -1169,9 +1184,9 @@ int main(int argc, char** argv) {
   // Must branch before any windowing call — this path runs with no display
   // server and no GPU (CI).
   if (args.headless) {
-    if (args.remotePort <= 0) {
+    if (!args.remoteRequested) {
       std::cerr << "Error: --headless requires --remote <port> (there is "
-                   "nothing else to serve)"
+                   "nothing else to serve; --remote 0 picks one)"
                 << std::endl;
       return 2;
     }
@@ -1561,7 +1576,7 @@ int main(int argc, char** argv) {
 
   // Remote control (opt-in)
   RemoteServer remoteServer;
-  if (args.remotePort > 0) {
+  if (args.remoteRequested) {
     // Fail fast on a taken port, as the headless path does (HeadlessMain.cpp).
     // This path ignored the result, so `--hidden --remote <taken>` — how every
     // preview instance and dev-watch starts — came up looking healthy and
@@ -1581,7 +1596,10 @@ int main(int argc, char** argv) {
     if (!args.recordPath.empty()) {
       remoteServer.StartRecording(args.recordPath);
     }
-    g_App.remotePort = args.remotePort;
+    // From the SERVER, not the argument: with `--remote 0` the argument is 0
+    // and the real port is whatever the kernel gave us. The terminal panel
+    // and the instance registry both key off this.
+    g_App.remotePort = remoteServer.Port();
   }
 
   // The terminal panel binds a Claude Code session to THIS window by port

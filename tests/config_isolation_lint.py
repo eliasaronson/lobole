@@ -28,16 +28,31 @@ The rule: a file that spawns the designer binary must mention XDG_CONFIG_HOME.
 That is deliberately shallow — it cannot prove the value is a scratch path —
 but it puts the decision in front of whoever writes the next launcher, which is
 the only moment it is cheap to get right.
+
+**2026-08-25: the rule now has a better answer than "mention it".** Every smoke
+script launches through `smoke_app.launch_app()`, which sets XDG_CONFIG_HOME
+itself — so the isolation is structural rather than per-script discipline, and
+it cannot be forgotten by the next person to copy a launcher. This lint gained
+the second half of that: a script that spawns the binary DIRECTLY is now an
+offender on its own, whatever it does about the environment.
+
+Why that is worth failing over, beyond the config dir: those hand-rolled
+launchers each picked a port by binding 0 and CLOSING the socket before the
+child bound it — a race that surfaced as an occasional unexplained failure —
+and each sent the app's output to DEVNULL, which is why fem_smoke could fail
+intermittently for months without anyone once seeing what the app said.
 """
 import pathlib
 import re
 import sys
 
-# Spawning the app: subprocess.Popen([...binary..., "--headless"/"--hidden"/
-# "--remote"...]). Matching on the FLAGS rather than the variable name, since
-# the binary arrives as sys.argv[1] under a dozen different names.
-LAUNCH = re.compile(r'subprocess\.Popen\(\s*\[[^\]]*?"--(?:remote|headless|hidden)"',
+# Spawning the app DIRECTLY: subprocess.Popen([...binary..., "--headless"/
+# "--hidden"/"--remote"...]). Matching on the FLAGS rather than the variable
+# name, since the binary arrives as sys.argv[1] under a dozen different names.
+DIRECT = re.compile(r'subprocess\.Popen\(\s*\[[^\]]*?"--(?:remote|headless|hidden)"',
                     re.DOTALL)
+# ...and the sanctioned way.
+HELPER = re.compile(r'\blaunch_app\s*\(')
 
 TESTS = pathlib.Path(__file__).resolve().parent
 
@@ -46,31 +61,43 @@ def main() -> int:
     offenders = []
     checked = 0
     for path in sorted(TESTS.glob("*.py")):
-        if path.name == pathlib.Path(__file__).name:
+        # This file and the helper both TALK about the pattern they forbid.
+        if path.name in (pathlib.Path(__file__).name, "smoke_app.py"):
             continue
         source = path.read_text()
-        if not LAUNCH.search(source):
+        direct, helper = DIRECT.search(source), HELPER.search(source)
+        if not direct and not helper:
             continue
         checked += 1
-        if "XDG_CONFIG_HOME" not in source:
-            offenders.append(path.name)
+        if direct:
+            offenders.append(
+                f"{path.name}: spawns the binary directly — use "
+                f"smoke_app.launch_app()")
+        elif "XDG_CONFIG_HOME" not in source and not helper:
+            offenders.append(
+                f"{path.name}: launches without its own XDG_CONFIG_HOME")
 
     if checked == 0:
-        # The regex stopped matching anything — a silent pass would be worse
+        # Neither pattern matched anything — a silent pass would be worse
         # than a loud failure, because this lint would then be dead.
         print("config_isolation_lint: matched no launchers at all; the "
-              "Popen pattern must have drifted", file=sys.stderr)
+              "patterns must have drifted", file=sys.stderr)
         return 1
 
     if offenders:
-        print("These tests launch Designer without their own XDG_CONFIG_HOME,\n"
-              "so a set_settings anywhere in them rewrites the developer's\n"
-              "real ~/.config/designer/settings.json:\n", file=sys.stderr)
+        print("A test must launch Designer through smoke_app.launch_app(),\n"
+              "which gives it a scratch XDG_CONFIG_HOME (so set_settings\n"
+              "cannot rewrite the developer's real settings.json), binds the\n"
+              "port in the process that KEEPS it (no pick-then-hand-off race),\n"
+              "and keeps the app's log so a failure says why:\n",
+              file=sys.stderr)
         for name in offenders:
             print(f"  tests/{name}", file=sys.stderr)
-        print("\nGive each one a scratch dir beside its XDG_STATE_HOME:\n"
-              '  env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")',
-              file=sys.stderr)
+        print("\n    from smoke_app import launch_app\n"
+              "    app = launch_app(binary, env=env)   # app.port is the "
+              "port it got\n\n"
+              "It sets XDG_CONFIG_HOME itself, so passing your own env is "
+              "optional\nand cannot lose the isolation.", file=sys.stderr)
         return 1
 
     print(f"config_isolation_lint: {checked} launchers, all isolated")
