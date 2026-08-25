@@ -70,6 +70,13 @@ Every `kVersion` bump MUST ship, in the same commit:
 load → regenerate → assert feature/body counts and volumes against the
 sidecar `.expect.json`, then round-trip through the current writer.
 
+...and a **row in the table below**, which is item 4. Nothing enforced that
+until 2026-08-25, and the table had quietly stopped at v60 while the code
+reached v65 — five bumps of documentation rot, each of which shipped its
+golden correctly. `The version history covers every kVersion` (also in
+test_golden.cpp) now reads the table and fails when it does not reach
+`kVersion`, because a policy nobody checks is a wish.
+
 ## Version history
 
 | v | Commit | Change |
@@ -109,6 +116,11 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 58 | (CAM C1) | `cam` setups: stock, work origin, `rotation_a`, tools, operations (inline in both formats — a setup is parameters, not a mesh) |
 | 59 | (CAM C8) | Operation `type: "adaptive"` (constant-engagement clearing) |
 | 60 | (CAM C7) | Setup `fit_arcs` (default true; false posts curves as line moves, for a controller that mishandles G2/G3) |
+| 61 | `0b73883` | Expression-driven Box/Sphere/Cylinder dimensions (`*_expr` on the primitives) |
+| 62 | `0edb0f5` | CAM operation `side` written for clearing ops too (it was profile-only, so a saved pocket reloaded broken) |
+| 63 | `5b7ae4f` | CAM setup remembers the face its Z zero was picked from |
+| 64 | `4774803` | Document display units (`units`: length/mass/angle) travel with the document |
+| 65 | `027809c` | Mate connector corner snap (`anchor.snap_edge2`) — a corner named by the two edges meeting there |
 
 ## The directory format (F3, default for new saves)
 

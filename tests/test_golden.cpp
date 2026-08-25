@@ -98,6 +98,40 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
 
 } // namespace
 
+TEST_CASE("The version history covers every kVersion", "[golden]") {
+  // docs/versioning/format.md's migration policy says a bump ships a loader
+  // migration, a golden and a round-trip test — all three of which ARE
+  // enforced, by the corpus test below. The version-history table in the
+  // same document was the one item nothing checked, and it quietly stopped
+  // at v60 while the code reached v65: five bumps of rot, each of which had
+  // shipped its golden correctly. A policy nobody checks is a wish.
+  const fs::path doc =
+      fs::path(DESIGNER_SOURCE_DIR) / "docs" / "versioning" / "format.md";
+  REQUIRE(fs::exists(doc));
+  std::ifstream in(doc);
+  REQUIRE(in);
+  std::string line;
+  int highest = 0;
+  while (std::getline(in, line)) {
+    // Table rows read "| <n> | <commit> | <what changed> |".
+    if (line.size() < 3 || line[0] != '|')
+      continue;
+    const size_t bar = line.find('|', 1);
+    if (bar == std::string::npos)
+      continue;
+    const std::string cell = line.substr(1, bar - 1);
+    try {
+      const int v = std::stoi(cell);
+      highest = std::max(highest, v);
+    } catch (...) {
+      continue; // the header row and anything else
+    }
+  }
+  INFO("format.md's version history reaches v"
+       << highest << ", kVersion is v" << DocumentIO::DocumentFormatVersion());
+  CHECK(highest == DocumentIO::DocumentFormatVersion());
+}
+
 TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
   const fs::path dir = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
   REQUIRE(fs::exists(dir));

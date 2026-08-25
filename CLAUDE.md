@@ -58,11 +58,26 @@ ITS OWN response (`regen`), not in a `get_state` the caller has to know to poll
 
 ## Tests
 
+**Three suites, and they do NOT overlap — running all of ctest's `gui` label
+after the sharder re-runs the whole GUI suite serially for 6 minutes:**
+
+| what | command | cost |
+|---|---|---|
+| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~85 s |
+| GUI | `./tools/gui-tests-xvfb.sh` | ~83 s |
+| the python `gui` ones | `ctest -L gui -E gui_smoke -j1` | ~46 s |
+
+`gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
+unsharded — 357 s against 83 s. Exclude it (`-E gui_smoke`) whenever the
+sharder has already run, which is every time. Full verification is then
+~3.5 min, not ~8.5.
+
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~75 s for 638 tests, of which the SIMP gate alone is ~90 s of CPU and the
+  — ~85 s for 830 tests, of which the SIMP gate alone is ~90 s of CPU and the
   next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
-  (8 s, 619 tests)**; full suite before committing.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 150 tests in **80 s**
+  (11 s, 819 tests)**; full suite before committing. Each `nix-shell` costs
+  ~3 s to enter, so batch commands into one invocation rather than one each.
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 211 tests in **83 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
   (11 s), `--serial` for debugging. Still **flock-serialized** machine-wide,
@@ -75,9 +90,11 @@ ITS OWN response (`regen`), not in a `get_state` the caller has to know to poll
   test is worth one look for a mechanism before it earns that label.
 - `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
   containers), deriving the package list and test exclusions from ci.yml.
-- Format changes bump `kVersion` (src/core/io/SerializationInternal.h) AND add
-  a golden `tests/golden/v<N>-<name>.json/.expect.json` — one per
-  bump. No back-compat/migration is required (no users yet); fix any test that
+- Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add
+  a golden `tests/golden/v<N>-<name>.json/.expect.json` — one per bump — AND
+  a row in docs/versioning/format.md's version history, which a test now
+  checks reaches `kVersion` (it had rotted five versions behind). No
+  back-compat/migration is required (no users yet); fix any test that
   assumed old behavior. (Check the header for the current version — it moves.)
 
 ## Driving / screenshotting the running app

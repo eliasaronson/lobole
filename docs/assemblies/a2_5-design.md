@@ -118,9 +118,11 @@ bump.
 
 Covered by GUI test `assembly/mate_hover_marker`: it verifies miss clearing,
 face-center versus midpoint ranking, midpoint-reference persistence on click,
-and preview clearing. `FaceEdgeIndices exposes box-edge midpoint snaps` covers
-the kernel edge enumeration. Vertex/corner snapping remains deferred because
-`ElementMap` does not yet provide persistent vertex names.
+and preview clearing. `FaceSnapPoints exposes box-edge midpoint snaps`
+covers the kernel edge enumeration (renamed with the perf fix below, which
+folded three whole-shape walks into one). Vertex/corner snapping was
+deferred here "because `ElementMap` does not yet provide persistent vertex
+names" — see 4c, where that turns out to be the wrong reason.
 
 ### Phase 4c — corner snapping — SHIPPED 2026-08-25
 
@@ -158,11 +160,13 @@ both are set, the frame origin is the vertex the two edges share; when they
 share none or two, the anchor falls back to `snapEdge`'s own characteristic
 point rather than guessing which corner was meant.
 
-1. **Kernel** — `CADShape::FaceCorners(faceIndex, points, edgePairs)`,
-   mirroring `FaceCircleCenters`: every pair of the face's bounding edges
-   that shares exactly one vertex, with that vertex and both edge indices in
-   the `ElementMap::edgeNames` order. Plus `CornerPoint(edgeA, edgeB, out)`
-   for resolving a stored anchor. ~55 lines.
+1. **Kernel** — `CADShape::FaceCorners(faceIndex, out)`, beside
+   `FaceSnapPoints`: every vertex of the face where exactly two of its
+   bounding edges meet, with that vertex and both edge indices in the
+   `ElementMap::edgeNames` order. Plus `CornerPoint(edgeA, edgeB, out)` for
+   resolving a stored anchor. ~55 lines. **Built as one VERTEX->EDGE
+   ancestor pass, not pairwise** — O(edges), which is also what keeps the
+   +0.16 ms below true.
 2. **Inference** — `ResolveAssemblyFacePick`'s candidate loop already ranks
    every snap point by distance to the hit; corners join it as more
    candidates. ~25 lines, no new ranking.
