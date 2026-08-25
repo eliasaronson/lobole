@@ -16,8 +16,10 @@ Maps today: variables, sketches (lines/circles/arcs/points/splines + most
 constraints), extrude / revolve / loft / sweep / boolean, feature mirror
 (replayed), face-attached sketches (plane from the host cap face). Sketch
 B-splines import (Onshape interpolates its points; we solve for the control
-poles whose Designer curve passes through them). Every unmapped feature
-(fillet, chamfer, splitPart, 3D fitSpline, patterns) and every skipped
+poles whose Designer curve passes through them). 3D fitSplines import as
+Curve3D, re-fitted through a dense sample of the curve Onshape built.
+Every unmapped feature
+(fillet, chamfer, splitPart, patterns) and every skipped
 constraint is REPORTED with a reason, never silently dropped.
 
 CLI:
@@ -221,6 +223,30 @@ class Client:
             'evVertexPoint(context, {"vertex": v}); res = append(res, '
             '[p[0].value*1000, p[1].value*1000, p[2].value*1000]); } '
             'return res; }')
+        res = self._eval_fs(ref, eid, script, rollback)
+        return [[v.get("value") for v in item.get("value", [])]
+                for item in res.get("result", {}).get("value", [])]
+
+    def curve_sample_points(self, ref, eid, feature_id, rollback, n=17):
+        """`n` world-mm points along the curve a feature created (qCreatedBy,
+        EntityType.EDGE), at a rollback state.
+
+        Why sample the RESULT rather than read the feature's own through-
+        points: those are a query of vertices/mate connectors, and this
+        importer has learned repeatedly that Onshape queries do not resolve
+        at rollback (see up_to_verts, consumed_edges, face_diffs — all of
+        them measure geometry for the same reason). A fit spline re-fitted
+        through a dense sample of itself is the same curve to within the
+        sample spacing, and it cannot fail to resolve."""
+        script = (
+            'function(context is Context, queries){ var es = evaluateQuery('
+            'context, qCreatedBy(makeId("' + feature_id + '"), '
+            'EntityType.EDGE)); if (size(es) == 0) { return []; } '
+            'var res = []; for (var i = 0; i < ' + str(n) + '; i += 1){ '
+            'var t = i / ' + str(n - 1) + '; var l = evEdgeTangentLine('
+            'context, {"edge": es[0], "parameter": t}); res = append(res, '
+            '[l.origin[0].value*1000, l.origin[1].value*1000, '
+            'l.origin[2].value*1000]); } return res; }')
         res = self._eval_fs(ref, eid, script, rollback)
         return [[v.get("value") for v in item.get("value", [])]
                 for item in res.get("result", {}).get("value", [])]
@@ -443,6 +469,23 @@ def up_to_verts_for(client, ref, eid, features):
     return out
 
 
+def curve_points_for(client, ref, eid, features):
+    """{feature index: [sampled curve point mm, ...]} for each 3D-curve
+    feature (1 FS call each), so replay-dump maps them offline."""
+    out = {}
+    for i, f in enumerate(features.get("features", [])):
+        if f.get("featureType") not in _CURVE_FEATURE_TYPES or f.get("suppressed"):
+            continue
+        try:
+            pts = client.curve_sample_points(ref, eid, f["featureId"], i + 1)
+            if pts:
+                out[str(i)] = pts
+        except SystemExit as e:
+            print(f"  warning: no curve points for {f.get('name')}: {e}",
+                  file=sys.stderr)
+    return out
+
+
 def cmd_dump(client, ref, out_path):
     """Record everything the importer will consume — the fixture format
     offline tests AND `replay-dump` consume, so iterating on the mapping
@@ -471,6 +514,8 @@ def cmd_dump(client, ref, out_path):
                     "true_planes": true_planes_for(client, ref, eid, feats),
                     # Affected face centroids per shell/draft/thread.
                     "face_diffs": face_diffs_for(client, ref, eid, feats),
+                    # Sampled points along each 3D curve (fitSpline).
+                    "curve_points": curve_points_for(client, ref, eid, feats),
                 }
             elif kind == "ASSEMBLY":
                 dump["assemblies"][eid] = {
@@ -540,6 +585,10 @@ class DumpSource:
     def face_diff(self, feature_index, eid=None):
         ps = self.dump["partstudios"][eid or self.eid]
         return ps.get("face_diffs", {}).get(str(feature_index))
+
+    def curve_points(self, feature_index, eid=None):
+        ps = self.dump["partstudios"][eid or self.eid]
+        return ps.get("curve_points", {}).get(str(feature_index))
 
 
 class LiveSource:
@@ -617,6 +666,17 @@ class LiveSource:
                     out.append(m[:3])
             return out
         return [m[:3] for m in pre if not _face_c_match(m, post)]
+
+    def curve_points(self, feature_index, eid=None):
+        feats = self.features().get("features", [])
+        if feature_index >= len(feats):
+            return None
+        try:
+            return self.client.curve_sample_points(
+                self.ref, eid or self.eid, feats[feature_index]["featureId"],
+                feature_index + 1)
+        except SystemExit:
+            return None
 
 
 # ===========================================================================
@@ -1309,6 +1369,48 @@ def _params_by_id(feature):
 def _query_strings(param):
     return " ".join(q.get("queryString") or "" for q in
                     (param or {}).get("queries", []))
+
+
+# Onshape feature types that produce a free 3D curve. Designer models these
+# as Curve3D (format v42) — see docs/modeling/curves-3d-plan.md.
+_CURVE_FEATURE_TYPES = ("fitSpline",)
+
+
+def map_fit_spline(feature, points):
+    """→ (designer Curve3D dict, notes). None when the form can't map.
+
+    `points` are world-mm samples along the curve Onshape built (see
+    Client.curve_sample_points for why the result is measured rather than
+    the through-point query resolved). Designer re-interpolates them, which
+    reproduces the same curve: a fit spline through a dense sample of itself
+    is that spline, to within the sample spacing."""
+    notes = []
+    if not points:
+        return None, ["fitSpline curve points unresolved"]
+    if len(points) < 2:
+        return None, [f"fitSpline has {len(points)} point(s), needs 2"]
+    if any(len(pt) != 3 for pt in points):
+        return None, ["fitSpline points are not 3D"]
+    # isPeriodic is Onshape's name for a closed loop. Absent (an older
+    # document, or a form that does not offer it) reads as open, which is
+    # the overwhelmingly common case and is what the geometry shows anyway.
+    closed = bool(_param_val(feature, "isPeriodic"))
+    if closed:
+        # A periodic sample repeats its first point last; Designer's `closed`
+        # flag re-closes it, so leaving the duplicate in would pin a zero-
+        # length span through the seam.
+        if len(points) > 2 and _same_point(points[0], points[-1]):
+            points = points[:-1]
+        notes.append("closed (periodic) spline")
+    out = {"type": "Curve3D", "name": feature.get("name", "Curve"),
+           "kind": "fit_spline",
+           "points": [[round(c, 6) for c in pt] for pt in points],
+           "degree": 3, "closed": closed}
+    return out, notes
+
+
+def _same_point(a, b, tol=1e-6):
+    return all(abs(x - y) < tol for x, y in zip(a, b))
 
 
 def map_extrude(feature, sketch_features):
@@ -2051,6 +2153,26 @@ class Replayer:
         else:
             self.report.add(name, "skipped", err.splitlines()[0][:60])
 
+    def import_fit_spline(self, feature, feature_index):
+        """A 3D fit spline → Designer's Curve3D (format v42).
+
+        Until 2026-08-25 this branch reported a skip claiming Designer had no
+        3D curve type, which had been false since v42. The skip outlived the
+        gap it guarded because its stated reason still read plausible, so
+        nobody re-read it — docs/loose-ends-2026-08-25.md L1."""
+        name = feature.get("name", "Curve")
+        pts = self.src.curve_points(feature_index)
+        out, notes = map_fit_spline(feature, pts)
+        if out is None:
+            self.report.add(name, "skipped", "; ".join(notes))
+            return
+        err = self._add_and_check(out)
+        if err is None:
+            self.report.add(name, "mapped", "; ".join(notes) or
+                            f"{len(out['points'])} fit points")
+        else:
+            self.report.add(name, "skipped", err.splitlines()[0][:60])
+
     def import_fillet(self, feature, feature_index):
         """Fillet/chamfer: resolve the consumed (blended) edges by geometric
         diff (Onshape queries don't resolve reliably), match them to the
@@ -2244,10 +2366,7 @@ class Replayer:
                                 "splitPart: knife query unresolved (Designer "
                                 "Split exists; geometric knife mapping TODO)")
             elif ftype == "fitSpline":
-                # A 3D fit-spline feature (a free curve object). Designer has no
-                # 3D curve type yet (gap #3); 2D sketch splines DO import.
-                self.report.add(name, "skipped",
-                                "fitSpline: 3D curve object not in Designer yet")
+                self.import_fit_spline(f, fi)
             else:
                 self.report.add(name, "skipped",
                                 f"feature type '{ftype}' not mapped yet")

@@ -12,6 +12,7 @@ the feature-list mapping, which is what regresses most often (e.g. the
 Usage: onshape_import_test.py   (the designer binary arg, if passed, is
 ignored — this test needs neither the app nor a display).
 """
+import inspect
 import json
 import os
 import sys
@@ -207,6 +208,73 @@ def test_constraints():
     check(len(kinds) > 0, f"mapped constraint kinds: {sorted(kinds)}")
 
 
+def test_fit_spline_mapping():
+    """map_fit_spline: the 3D-curve mapping that replaced a dead skip.
+
+    The skip it replaced ("3D curve object not in Designer yet") had been
+    untrue since Curve3D shipped as format v42 — so these checks are as much
+    about the mapping REFUSING clearly as about it succeeding, since a wrong
+    curve that imports is worse than one that reports why it did not."""
+    print("map_fit_spline:")
+
+    pts = [[0.0, 0.0, 0.0], [10.0, 5.0, 0.0], [20.0, 0.0, 8.0]]
+    out, notes = oi.map_fit_spline({"name": "Spine"}, pts)
+    check(out is not None, "open spline maps")
+    check(out["type"] == "Curve3D" and out["kind"] == "fit_spline",
+          "maps to a Curve3D of kind fit_spline")
+    check(out["name"] == "Spine", "carries the Onshape feature name")
+    check(out["points"] == pts, "points pass through unchanged (already mm)")
+    check(out["closed"] is False, "open by default")
+    check(out["degree"] == 3, "cubic")
+
+    # Every refusal path names its reason — the house rule is refuse, don't
+    # substitute, and a silently-empty curve is the substitution here.
+    for bad, label in [(None, "unresolved points"),
+                       ([], "empty points"),
+                       ([[0.0, 0.0, 0.0]], "a single point"),
+                       ([[0.0, 0.0], [1.0, 1.0]], "2D points")]:
+        out2, notes2 = oi.map_fit_spline({"name": "X"}, bad)
+        check(out2 is None and notes2 and notes2[0],
+              f"refuses {label}, with a reason")
+
+    # Periodic: Onshape's sample repeats the seam point; Designer's `closed`
+    # flag re-closes it, so leaving the duplicate would pin a zero-length
+    # span through the seam.
+    ring = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0],
+            [0.0, 0.0, 0.0]]
+    feat = {"name": "Ring",
+            "parameters": [{"parameterId": "isPeriodic", "value": True}]}
+    out3, notes3 = oi.map_fit_spline(feat, list(ring))
+    check(out3["closed"] is True, "isPeriodic maps to closed")
+    check(len(out3["points"]) == 3,
+          "the repeated seam point is dropped when closing")
+    check(out3["points"][0] == ring[0], "and the seam itself is kept once")
+
+    # A closed spline whose sample does NOT repeat the seam keeps every point
+    # — dropping one unconditionally would silently shorten the curve.
+    feat2 = {"name": "Ring2",
+             "parameters": [{"parameterId": "isPeriodic", "value": True}]}
+    out4, _ = oi.map_fit_spline(feat2, [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0],
+                                        [5.0, 5.0, 0.0]])
+    check(len(out4["points"]) == 3, "a non-repeating closed sample is intact")
+
+
+def test_fit_spline_is_dispatched():
+    """The mapping is wired to the dispatch, not just written.
+
+    This is the check that would have caught the original defect: the skip
+    lived in the feature-type if/chain, and nothing asserted what that chain
+    does with a fitSpline."""
+    print("fitSpline dispatch:")
+    src = inspect.getsource(oi.Replayer)
+    check('ftype == "fitSpline"' in src, "the dispatch still has the branch")
+    check("import_fit_spline" in src, "and it calls import_fit_spline")
+    check("3D curve object not in Designer yet" not in
+          inspect.getsource(oi), "the stale skip text is gone from the tool")
+    check("fitSpline" in oi._CURVE_FEATURE_TYPES,
+          "and the dump collects curve points for it")
+
+
 def main():
     print(f"fixture: {FIXTURE}")
     if not os.path.exists(FIXTURE):
@@ -218,6 +286,8 @@ def main():
     test_spline_mapping()
     test_ellipse_mapping()
     test_constraints()
+    test_fit_spline_mapping()
+    test_fit_spline_is_dispatched()
     if failures:
         print(f"\n{len(failures)} failure(s)")
         return 1

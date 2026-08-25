@@ -44,7 +44,7 @@ machinery is in play in all four, and L5 produces the map the others fill in.
 
 ---
 
-## L1 — The importer replays a `Curve3D` instead of skipping (~1 h)
+## L1 — The importer replays a `Curve3D` instead of skipping — **SHIPPED**
 
 `tools/onshape_import.py:2246` reports *"fitSpline: 3D curve object not in
 Designer yet"*. `Curve3D` has existed since format v42 — `CurveFeature` with
@@ -66,6 +66,32 @@ round-tripping. Zero API calls — `replay-dump` reads a saved JSON dump.
 data, which `GeomAPI_Interpolate` takes optionally; if the fixture's spline
 carries tangents that do not map cleanly, import the points and say so in the
 report rather than inventing an end condition.
+
+**As built.** No fixture in the repo contains a `fitSpline`, so verification is
+a unit test of the pure mapping (`map_fit_spline`) plus a check that the
+**dispatch calls it** — which is the check that would have caught the original
+defect, since the skip lived in the feature-type if/chain and nothing asserted
+what that chain did. All three sabotage-checked. Two things came out
+differently from the sketch above:
+
+- **Sample the built curve, do not resolve the through-point query.** Onshape's
+  fit points are a query of vertices/mate connectors, and this importer has
+  learned three times over that queries do not resolve at rollback
+  (`up_to_verts`, `consumed_edges`, `face_diffs` all measure geometry
+  instead). A new `Client.curve_sample_points` walks the created edge with
+  `evEdgeTangentLine`; re-fitting through a dense sample of a spline gives back
+  that spline. Both sources gained `curve_points`, and `cmd_dump` records it,
+  so `replay-dump` maps it offline like everything else.
+- **Periodic splines repeat their seam point.** Designer's `closed` flag
+  re-closes the loop, so passing the duplicate through would pin a zero-length
+  span across the seam. Dropped — but only when the first and last points
+  actually coincide, since dropping unconditionally would silently shorten a
+  curve. Both halves are tested.
+
+**Still unverified:** the live path. There are no Onshape credentials here and
+the API has a call budget ([onshape-terms.md](interchange/onshape-terms.md)),
+so `curve_sample_points`' FeatureScript has not run against a real document.
+The pure mapping under it is covered.
 
 ## L2 — `describe` grows a parameter schema, and a gate that keeps it true (~1 session)
 

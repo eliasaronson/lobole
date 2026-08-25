@@ -168,9 +168,11 @@ workstream — **full build plan in [feature-gaps-plan.md](feature-gaps-plan.md)
   v42, fit-spline + helix + control-poly), which grew out of this gap and is
   planned in [../modeling/curves-3d-plan.md](../modeling/curves-3d-plan.md).
   Fully-solved poles (point-on-spline / tangent-at-knot) remain deferred.
-  **The importer has not caught up:** `tools/onshape_import.py` still reports
-  `fitSpline` as "3D curve object not in Designer yet". That skip is dead
-  code and should now replay a `Curve3D`.
+  **The importer caught up 2026-08-25:** `map_fit_spline` + `import_fit_spline`
+  replay a `Curve3D`, re-fitted through a dense sample of the curve Onshape
+  built rather than through its through-point *query* — for the same reason
+  `up_to_verts`, `consumed_edges` and `face_diffs` all measure geometry:
+  Onshape queries do not resolve at rollback.
 
 (**up-to-face extrude bounds are already supported** — `ExtrudeEnd::UpToFace`
 — and are mapped by the importer; listed here only to note they are NOT a

@@ -286,10 +286,14 @@ After each ships, update the importer to replay it (replace the skip) and
 drop the corresponding line from `import-plan.md` §"Future modeling
 features".
 
-> **This step was missed for #3** (and for the sketch-spline half of #2).
-> `Curve3D` shipped as format v42 and `tools/onshape_import.py:2246` still
-> says "3D curve object not in Designer yet" — a skip guarding against a gap
-> that closed. Found by the 2026-08-25 doc audit, which is exactly the kind of
-> thing a stale line makes invisible: nobody re-reads a skip whose stated
-> reason still reads true. `splitPart`'s skip is NOT stale — its knife is an
-> unresolved Onshape query, which is a real remaining gap.
+> **This step was missed for #3** (and for the sketch-spline half of #2), and
+> **was done on 2026-08-25**. `Curve3D` shipped as format v42 while the
+> importer went on reporting "3D curve object not in Designer yet" — a skip
+> guarding a gap that had closed. Found by the doc audit, which is exactly the
+> kind of thing a stale line makes invisible: nobody re-reads a skip whose
+> stated reason still reads true. The mapping now samples the built curve
+> instead of resolving Onshape's through-point query, and a unit test asserts
+> the **dispatch** calls it — the check that would have caught the original,
+> since the defect lived in the if/chain and nothing asserted what it did.
+> `splitPart`'s skip is NOT stale — its knife is an unresolved Onshape query,
+> which is a real remaining gap.
