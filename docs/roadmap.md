@@ -224,6 +224,12 @@ lists above is a deliberate deferral with a reason, not an unfinished project
 
 ## Known loose ends (audited 2026-08-25)
 
+**Planned as a round:** [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
+(awaiting sign-off) takes all six below plus the U5 visual-polish tail, in
+seven phases. The four deferred follow-ons it considered and left alone —
+per-occurrence part-config selection, GPU5 phase 0, the Flathub tail, and
+cutting a part on the mill — are listed there with the reason each stayed put.
+
 Small, unowned, and each one real. Recorded here because the audit that found
 them was only possible where a status line was honest — three were not, and
 one of those (the importer's `fitSpline` skip) is on this list *because* a

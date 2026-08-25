@@ -52,6 +52,10 @@ thing behind it invisible to the next person who looks.
   measured-at-size round (open 259 s → 0.04 s, and what was slow and why).
 - **[tier1-closeout.md](tier1-closeout.md)** — the 2026-07-14 sign-off that
   closed out five workstreams' remainders at once.
+- **[loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)** — the same idea a
+  month on: an audit of all 105 docs against the source, the six items it
+  found that were started and never finished, and what a stale status line
+  cost. **Awaiting sign-off.**
 - **[architecture-review-2026-08-24.md](architecture-review-2026-08-24.md)** —
   a structural pass over the whole tree (layering, duplication, unit sizes,
   dead code), measured rather than estimated. All five stages shipped; the
