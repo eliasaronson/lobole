@@ -7,6 +7,58 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## Adding or removing a CAM operation freezes the app for about a second
+
+Reported 2026-08-26 by the owner, from the panel: adding an operation and
+deleting one both stall the window for on the order of a second. The work is
+synchronous inside the ImGui frame, so the freeze is the whole app, not the
+panel.
+
+**What is measured, on the saved 4-op baffle job** (`scratch/w170s-alto`,
+360 x 250 mm stock, drill + two pockets + profile), over the RPC on this
+machine:
+
+| step | cost |
+|---|---|
+| `cam_toolpath` — regenerate EVERY operation (`cam::GenerateAll`) | ~32 ms |
+| `cam_verify` — post + simulate + compare (0.25 mm grid) | ~390 ms |
+| the same verify at the panel's own 0.4 mm grid | ~150 ms (scaled) |
+
+So on THAT job the two paths do not add up to a second, and the entry says so
+rather than declaring the obvious mechanism guilty. What is certain is the
+shape: every mutation calls `RefreshCamToolpaths` (CamPanel.cpp), which throws
+away all toolpaths and regenerates the whole setup, and the verb paths
+(CamTool.cpp) follow it with `RunCamVerification`, which posts the job, parses
+the G-code back, re-meshes every body at 0.05 deflection and simulates the
+stock cell by cell. Both run on the UI thread between two frames.
+
+**Suspects for the missing order of magnitude**, in the order worth checking:
+a bigger part (verify scales with stock area / grid², and a 700 x 400 panel at
+0.4 mm is ~1.75M cells); an **adaptive** clearing operation, whose generator
+is libarea and is the slow one by a wide margin; more operations than four,
+since every one of them regenerates on every edit; and the autosave that a
+`projectMetaDirty` edit arms on a 30-part project.
+
+**Found while looking, unmeasured but per-FRAME:** `AppendCamVisualisation`
+(UI.cpp, every frame) calls `cam::PickedFaceRegion(cam::BodiesInSetupFrame(…))`
+for the hovered face whenever a CAM pick is armed — an OCC transform of every
+body plus a section, per frame, while the cursor moves over the model. The
+ghost of the selected operation is rebuilt per frame the same way.
+
+**Impact:** the CAM panel is the one panel where a person adds and deletes
+several operations in a row, so this is a second per step through exactly the
+loop the tool exists for.
+
+**Likely fix**, in the order that pays: regenerate only the operation that
+changed and keep the others (the toolpaths are already per-operation); cache
+`BodiesInSetupFrame` and the model height map per document version instead of
+rebuilding them per call and per frame; then move regenerate+verify off the
+frame — a worker with a "checking…" state, the way the study solves already
+work. **Pin it first**: run `--perf-hud` (worst-frame attribution) and do the
+add/delete, which is how the subassembly-hide freeze below got its number.
+
+---
+
 ## mesh_study/run_study are synchronous past the client's default timeout
 
 Found 2026-08-26: a modal study on a baffle with six Ø3 pilot holes meshed
