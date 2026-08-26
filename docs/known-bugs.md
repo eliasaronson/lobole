@@ -6,6 +6,19 @@ an entry when it lands a fix + regression test.
 
 ---
 
+## Drawing dimensions land where they collide
+
+Found 2026-08-26: `DefaultDimOffset` placed overall dims through the title
+block, off the sheet bottom, and on top of each other — every one of five
+manufacturing sheets needed two to four manual `offset` passes before it was
+readable, and one auto-placed dim measured between lines nobody intended
+(a "78" on the brace sheet that corresponds to no feature). Impact: a
+first-try drawing is not presentable, for the GUI's Add-dimension button and
+the RPC alike. **Likely fix:** a placement ladder — stack labels outside the
+view edge nearest the dim, skipping boxes already taken by views, the title
+block, and other labels — plus an overlap validator in `check_drawing` so
+regressions fail a gate instead of an eyeball.
+
 ## CAM cannot target a round opening — every face pick is planar-only
 
 Found 2026-08-26 (W 170 S baffle CAM). `FindFace` (CamToolpath.cpp) resolves
@@ -83,7 +96,9 @@ anyway — the results were there on reconnect, which LOOKS like a hang
 followed by a mystery. `run_study` has `async` + `study_status` polling,
 but nothing steers a caller there, and `mesh_study` has no async at all.
 **Likely fix:** describe-doc the async path on both, and/or return a hint
-when a synchronous solve exceeds ~10 s.
+when a synchronous solve exceeds ~10 s. Client side: `designer_remote.py`
+should take a per-request timeout (and its study/mesh calls a long default)
+— the 60 s connection default is what actually bit.
 
 ---
 

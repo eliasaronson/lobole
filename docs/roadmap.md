@@ -237,8 +237,17 @@ lists above is a deliberate deferral with a reason, not an unfinished project
 
 ## Known loose ends (audited 2026-08-25)
 
-**Planned as a round:** [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
-(**signed off, in progress**) takes all six below plus the U5 visual-polish
+**Planned as a round:** [loose-ends-2026-08-26.md](loose-ends-2026-08-26.md)
+(**planned**) — the agent-friction round out of the first windowless
+end-to-end dogfood (W 170 S speaker: parts → assembly → modal FEM →
+drawings → verified G-code over `--offscreen` + MCP autostart): four waves
+from refusal/addressing papercuts through CAM round-opening picks and an
+`execute_script` MCP tool to drawing auto-placement/notes and CAM tool
+types. Every item reproduced in-session; defects in
+[known-bugs.md](known-bugs.md).
+
+**Previous round:** [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
+(**complete**) took all six below plus the U5 visual-polish
 tail, in seven phases. The four deferred follow-ons it considered and left alone —
 per-occurrence part-config selection, GPU5 phase 0, the Flathub tail, and
 cutting a part on the mill — are listed there with the reason each stayed put.
