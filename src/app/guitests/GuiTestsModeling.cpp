@@ -1072,6 +1072,53 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(total - 3.0 * v0) < 1e-3);
   };
 
+  // R14: a cut leaves no body to click, so the pattern's Source slot takes
+  // the CUT'S OWN TREE ROW. Without this the engine can pattern a hole but
+  // the GUI cannot ask for one.
+  t = IM_REGISTER_TEST(engine, "pattern", "cut_row_is_the_pattern_source");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0), 60.0, 20.0, 5.0));
+    auto sk =
+        std::make_unique<SketchFeature>("HoleSk", SketchPlane(PlaneType::XY));
+    sk->AddEntity(sketch::Circle{{10, 10}, 3.0});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(1)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Hole", skId, 5.0, ExtrudeMode::Cut, false));
+    const uint64_t cutId = Doc()->GetFeature(2)->GetId();
+    ctx->Yield();
+    const double drilled = Doc()->GetBodies()[0].shape.Volume();
+
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_pattern");
+    ctx->Yield();
+    auto* pat = dynamic_cast<PatternFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(pat != nullptr);
+    IM_CHECK(pat->sourceId != cutId); // defaults to the body producer
+
+    ctx->ItemClick("//###ToolWindow/###slot3"); // arm Source
+    ctx->Yield();
+    IM_CHECK(s_App->slotPick.Active());
+    ctx->ItemClick("//##DockHost/**/Hole##2"); // the CUT's row
+    ctx->Yield();
+    IM_CHECK_EQ(pat->sourceId, cutId);
+
+    pat->axis.kind = AxisRef::Kind::X;
+    pat->count = 3;
+    pat->spacing = 15.0;
+    Doc()->Regenerate();
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    IM_CHECK(Doc()->GetFeature(3)->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // Two more holes than the drilled plate had.
+    const double hole = 3.14159265358979 * 9.0 * 5.0;
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() -
+                      (drilled - 2.0 * hole)) < 1e-3);
+  };
+
   t = IM_REGISTER_TEST(engine, "fillet", "fillet_corner_via_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

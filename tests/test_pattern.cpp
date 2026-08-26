@@ -4,7 +4,9 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/PatternFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
 #include <filesystem>
@@ -177,4 +179,84 @@ TEST_CASE("A pattern with a missing source reports why", "[pattern][error]") {
   CHECK_FALSE(doc.Regenerate());
   const std::string err = doc.GetFeature(0)->GetError();
   CHECK(err.find("source body") != std::string::npos);
+}
+
+// --- Pattern of a CUT (R14) --------------------------------------------------
+
+TEST_CASE("Pattern of a cut replicates the cutter", "[pattern]") {
+  // A plate with one drilled hole; the pattern repeats the HOLE, not a body.
+  // This used to refuse "source body not found", pushing repeated holes into
+  // one multi-loop sketch and throwing the pattern's design intent away.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 20, 5));
+  auto sk =
+      std::make_unique<SketchFeature>("HoleSk", SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::Circle{{10, 10}, 3.0});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Hole", skId, 5.0,
+                                                  ExtrudeMode::Cut, false));
+  const uint64_t cutId = doc.GetFeature(2)->GetId();
+
+  auto pat =
+      std::make_unique<PatternFeature>("Holes x4", PatternKind::Linear, cutId);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 4;
+  pat->spacing = 12.0;
+  doc.AddFeature(std::move(pat));
+
+  INFO(doc.GetFeature(3)->GetError());
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 1);
+  const double hole = 3.1415926535897932 * 9.0 * 5.0;
+  CHECK_THAT(TotalVolume(doc), WithinRel(6000.0 - 4.0 * hole, 1e-3));
+
+  // Each instance's faces are name-resolvable, suffixed per instance — a
+  // fillet or a CAM pick on the third hole has something to hold on to.
+  const ElementMap& em = doc.GetBodies()[0].elementMap;
+  int suffixed = 0;
+  for (const auto& [index, name] : em.names)
+    if (name.find('#') != std::string::npos)
+      suffixed++;
+  CHECK(suffixed >= 3); // the barrel of instances 1..3 (0 is the source cut)
+}
+
+TEST_CASE("Pattern of a cut through a MISSING source still says so",
+          "[pattern]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 20, 20, 5));
+  auto pat = std::make_unique<PatternFeature>("Ghost", PatternKind::Linear,
+                                              uint64_t{999});
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 2;
+  pat->spacing = 5.0;
+  doc.AddFeature(std::move(pat));
+  CHECK_FALSE(doc.GetFeature(1)->GetError().empty());
+}
+
+TEST_CASE("Mirroring a cut mirrors the hole", "[pattern]") {
+  // The mirror branch of the cut path — a bracket's two symmetric holes.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(-30, 0, 0), 60, 20, 5));
+  auto sk =
+      std::make_unique<SketchFeature>("HoleSk", SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::Circle{{20, 10}, 3.0});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Hole", skId, 5.0,
+                                                  ExtrudeMode::Cut, false));
+  const uint64_t cutId = doc.GetFeature(2)->GetId();
+  auto pat =
+      std::make_unique<PatternFeature>("Mirror", PatternKind::Mirror, cutId);
+  pat->basePlane = PlaneType::YZ; // x = 0
+  doc.AddFeature(std::move(pat));
+
+  INFO(doc.GetFeature(3)->GetError());
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 1);
+  const double hole = 3.1415926535897932 * 9.0 * 5.0;
+  CHECK_THAT(TotalVolume(doc), WithinRel(6000.0 - 2.0 * hole, 1e-3));
 }

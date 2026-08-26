@@ -908,7 +908,8 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
   }
   if (dynamic_cast<const PatternFeature*>(&feature) != nullptr) {
     return {{PickSlot::PatternSource, "Source", kBody, false,
-             "Pick the body to pattern"}};
+             "Pick the body to pattern, or a cut's tree row to pattern "
+             "the hole it makes"}};
   }
   if (dynamic_cast<const ShellFeature*>(&feature) != nullptr) {
     return {

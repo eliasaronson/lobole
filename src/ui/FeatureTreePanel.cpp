@@ -9,6 +9,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h" // Measure::MassOfBodies (mass-props section)
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -296,11 +297,24 @@ void DrawFeatureTreePanel(AppState& state) {
       // test refs built on them) stay exactly "<Name>##<index>".
       ImGui::TextUnformatted(FeatureIcon(feature->TypeName()));
       ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
+      // A cut leaves no body to click, so with a pattern's Source slot armed
+      // the CUT'S OWN ROW is the pick — that is how a hole gets patterned in
+      // the GUI at all (R14). Any other feature row keeps its normal click.
+      auto* cutExt = dynamic_cast<ExtrudeFeature*>(feature);
+      const bool armedForCutSource =
+          state.slotPick.Active() &&
+          state.slotPick.slot == static_cast<int>(PickSlot::PatternSource) &&
+          cutExt != nullptr && cutExt->mode == ExtrudeMode::Cut;
       if (ImGui::Selectable(label.c_str(),
                             SelectedFeatureId(state) == feature->GetId(),
                             flags)) {
         SelectFeature(state, feature->GetId());
-        if (datum && state.sketchEdit.pickingPlane) {
+        if (armedForCutSource) {
+          // A Body item IS {createdBy, ""} — a feature id — so the cut's id
+          // travels the same slot path a body pick does.
+          SlotPickClicked(state, {SelectionItem::Kind::Body, feature->GetId()},
+                          /*meshId=*/0, /*index=*/0);
+        } else if (datum && state.sketchEdit.pickingPlane) {
           // A datum row IS the pick while one is armed, exactly as the base
           // planes are (U10) — a named plane in the tree beats hunting its
           // quad in the viewport.

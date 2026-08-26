@@ -99,9 +99,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "tool_id": <feature id>, "op": "union"|"subtract"|"intersect"}}
 - Pattern: {{"type": "Pattern", "name": str,
   "kind": "mirror"|"linear"|"circular", "source_id": <feature id>, ...}}
-  source must CREATE a body (Box, Revolve, an additive Extrude, ...) — a cut
-  cannot be patterned (regen fails "source body not found"); repeat holes by
-  putting every circle in ONE multi-loop sketch and cutting once.
+  source either CREATES a body (Box, Revolve, an additive Extrude, ...) — the
+  bodies are replicated — or IS a cut Extrude, in which case its cutter is
+  replicated and each copy subtracted, so a hole patterns as a hole.
   mirror: "parent_id"?: <DatumPlane id> or "base_plane": "xy"|"xz"|"yz"
   linear: "axis": <axis ref>, "count": int, "count_expr"?: str,
           "spacing": num, "spacing_expr"?: str

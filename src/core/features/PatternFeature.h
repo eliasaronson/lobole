@@ -29,8 +29,15 @@ public:
   [[nodiscard]] std::string TypeName() const override { return "Pattern"; }
   bool Execute(RegenContext& ctx) override;
 
+private:
+  // The cut-source path: replicate the source's cutter and subtract each
+  // transformed copy (the original cut already made instance 0).
+  bool ExecuteCutPattern(RegenContext& ctx, const CADShape& tool,
+                         const ElementMap& toolMap);
+
+public:
   [[nodiscard]] std::string WhyIncomplete() const override {
-    return sourceId == 0 ? "pick the body to pattern" : "";
+    return sourceId == 0 ? "pick the body (or cut) to pattern" : "";
   }
 
   void VisitExprs(const ExprVisitor& visit) override {

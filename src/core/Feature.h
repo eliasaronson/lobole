@@ -130,6 +130,17 @@ public:
   // during regeneration, because an empty tool must still be able to open.
   [[nodiscard]] virtual std::string WhyIncomplete() const { return {}; }
 
+  // The tool solid a CUT feature swept on its last Execute, for a Pattern
+  // referencing it: a cut leaves no body behind to replicate, so the pattern
+  // replicates the CUTTER instead (R14). Null for everything else. Valid
+  // only within the same regeneration pass — features regen in order and a
+  // pattern may only reference an earlier feature, so it always reads the
+  // tool its source just built.
+  virtual const CADShape* CutToolShape() const { return nullptr; }
+  // The names of that tool's faces/edges, so each patterned instance can carry
+  // suffixed copies of them (…#2) instead of arriving nameless.
+  virtual const ElementMap* CutToolMap() const { return nullptr; }
+
   // Why this feature's last regeneration failed (empty = healthy). Transient
   // (never serialized), like Parameter::error: Document::Regenerate clears it
   // before each Execute and sets a generic message if Execute fails silently;

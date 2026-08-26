@@ -32,6 +32,11 @@ public:
 
   std::string TypeName() const override { return "Extrude"; }
   bool Execute(RegenContext& ctx) override;
+  const CADShape* CutToolShape() const override {
+    return mode == ExtrudeMode::Cut && m_cutTool.IsValid() ? &m_cutTool
+                                                           : nullptr;
+  }
+  const ElementMap* CutToolMap() const override { return &m_cutToolMap; }
 
   void VisitExprs(const ExprVisitor& visit) override {
     visit(distanceExpr, distance);
@@ -65,4 +70,8 @@ public:
   // sketch (every region), the pre-v34 behavior. A region that no longer
   // matches a loop fails regeneration with a reattach-style error.
   std::vector<std::vector<uint32_t>> regions;
+
+  // The last-swept cut prism and its face/edge names (Feature::CutToolShape).
+  CADShape m_cutTool;
+  ElementMap m_cutToolMap;
 };

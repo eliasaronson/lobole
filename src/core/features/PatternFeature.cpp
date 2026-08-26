@@ -25,8 +25,21 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     }
   }
   if (instances.empty()) {
+    // A CUT source leaves no body behind to replicate — replicate its
+    // CUTTER instead (R14): transformed copies of the tool the source just
+    // swept, each subtracted like the original cut. Patterned holes used to
+    // refuse "source body not found", pushing every repeated hole into one
+    // multi-loop sketch and throwing the pattern's design intent away.
+    const Feature* src = ctx.FindById(sourceId);
+    const CADShape* tool = src != nullptr ? src->CutToolShape() : nullptr;
+    if (tool != nullptr && tool->IsValid()) {
+      const ElementMap* toolMap = src->CutToolMap();
+      return ExecuteCutPattern(ctx, *tool,
+                               toolMap != nullptr ? *toolMap : ElementMap{});
+    }
     SetError("source body (feature " + std::to_string(sourceId) +
-             ") not found — did the source feature fail?");
+             ") not found — did the source feature fail? (a cut Extrude "
+             "source patterns its cutter instead)");
     return false;
   }
   const size_t seedCount = instances.size();
@@ -83,4 +96,61 @@ bool PatternFeature::Execute(RegenContext& ctx) {
   if (!ok)
     SetError(fuseErr.empty() ? "pattern failed" : fuseErr);
   return ok;
+}
+
+bool PatternFeature::ExecuteCutPattern(RegenContext& ctx, const CADShape& tool,
+                                       const ElementMap& toolMap) {
+  // Each instance's cutter carries the source cut's names with an instance
+  // suffix ("4/g7" -> "4/g7#2"), so a face cut by the third hole is as
+  // referenceable as the one cut by the first. Nothing parses a MappedName —
+  // it is compared whole — so the suffix is opaque everywhere else.
+  const auto suffixed = [&toolMap](const std::string& tag) {
+    ElementMap m;
+    for (const auto& [i, n] : toolMap.names)
+      m.names[i] = n + "#" + tag;
+    for (const auto& [i, n] : toolMap.edgeNames)
+      m.edgeNames[i] = n + "#" + tag;
+    return m;
+  };
+  std::vector<std::pair<CADShape, ElementMap>> cutters;
+  if (kind == PatternKind::Mirror) {
+    const auto plane = ResolveParentPlane(ctx, planeId, basePlane);
+    if (!plane) {
+      SetError("mirror plane not found");
+      return false;
+    }
+    CADShape reflected = tool;
+    reflected.Mirror(plane->GetOrigin(), plane->GetNormal());
+    cutters.emplace_back(std::move(reflected), suffixed("m"));
+  } else {
+    glm::vec3 axisOrigin{0.0f};
+    glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
+    if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
+      SetError("pattern axis not found");
+      return false;
+    }
+    int n = count;
+    if (!countExpr.empty() && ctx.symbols != nullptr) {
+      const auto v =
+          ExpressionEngine::Default().EvaluateText(countExpr, *ctx.symbols);
+      if (v.has_value())
+        n = static_cast<int>(std::lround(*v));
+    }
+    n = std::max(1, n);
+    for (int k = 1; k < n; k++) { // k = 0 is the source cut itself
+      CADShape copy = tool;
+      if (kind == PatternKind::Linear)
+        copy.Translate(axisDir * static_cast<float>(k * spacing));
+      else
+        copy.RotateAbout(axisOrigin, axisDir,
+                         glm::radians(static_cast<double>(k) * angleDeg));
+      cutters.emplace_back(std::move(copy), suffixed(std::to_string(k)));
+    }
+  }
+  for (auto& [shape, map] : cutters) {
+    if (!ApplyBodyModeReporting(ctx.bodies, std::move(shape), std::move(map),
+                                ExtrudeMode::Cut, *this))
+      return false;
+  }
+  return true;
 }
