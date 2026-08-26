@@ -119,6 +119,80 @@ def main():
         expect(len(dims) == 1 and dims[0]["resolved"] and dims[0]["text"],
                f"one resolved dim: {dims}")
 
+        # --- R1 (2026-08-26): wrong shapes are refusals, not type_errors ---
+        try:
+            d.call("create_drawing", name="bad-sheet", sheet="A4")
+            raise AssertionError("string sheet must be refused")
+        except RuntimeError as e:
+            expect("sheet is an object" in str(e), f"names the shape: {e}")
+        try:
+            d.call("add_drawing_dim", view=front_id, kind="distance_x",
+                   refs=[{"edge": vlines[0]["ref"]},
+                         {"edge": vlines[-1]["ref"]}], offset=5)
+            raise AssertionError("scalar offset must be refused")
+        except RuntimeError as e:
+            expect("[x, y]" in str(e), f"names the shape: {e}")
+        try:
+            d.call("set_drawing_sheet", title_block="W170S")
+            raise AssertionError("string title_block must be refused")
+        except RuntimeError as e:
+            expect("object of strings" in str(e), f"names the shape: {e}")
+
+        # --- R2 (2026-08-26): `distance` measures perpendicular to an edge.
+        # An edge names a direction, not a point: anchoring it at its
+        # midpoint measured the DIAGONAL (an edge-to-hole read 170 for a
+        # 144-centred hole; two parallel edges with offset midpoints read 78
+        # for a 45 mm rail). Perpendicular for edge cases; two holes stay
+        # centre-to-centre.
+        d.call("add_part", name="r2plate")
+        d.call("set_active_part", name="r2plate")
+        d.call("add_feature", feature={"type": "Box", "name": "plate",
+               "position": [0, 0, 0], "width": 100, "height": 80,
+               "depth": 10})
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "holes",
+            "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [
+                {"type": "circle", "center": [30, 55], "radius": 10},
+                {"type": "circle", "center": [70, 20], "radius": 6},
+                {"type": "rect", "c1": [0, 60], "c2": [15, 70]}]})
+        d.call("add_feature", feature={"type": "Extrude", "name": "cuts",
+               "sketch_id": sk["id"], "distance": 1, "mode": "cut",
+               "end_mode": "through_all", "reversed": True})
+        d.call("create_drawing", name="r2-dwg", sheet={"size": "a4"})
+        v2 = d.call("add_drawing_view", source="r2plate",
+                    orientation="front")
+        g2 = d.call("list_drawing_geometry", view=v2["id"])["geometry"]
+        vis = [e for e in g2 if e["visible"]]
+        circles = sorted([e for e in vis if e["type"] == "circle"],
+                         key=lambda e: -e["radius"])
+        expect(len(circles) >= 2, f"both holes visible: {len(circles)}")
+        vl2 = [e for e in vis if e["type"] == "line"
+               and abs(e["p1"][0] - e["p2"][0]) < 1e-6]
+        xs = sorted({round(e["p1"][0], 3) for e in vl2})
+        expect(len(xs) == 3, f"left, notch, right verticals: {xs}")
+        at_x = lambda x: next(e for e in vl2 if abs(e["p1"][0] - x) < 1e-3)
+
+        def dval(a, b):
+            r = d.call("add_drawing_dim", view=v2["id"], kind="distance",
+                       refs=[{"edge": a["ref"]}, {"edge": b["ref"]}])
+            d.call("remove_drawing_dim", id=r["id"])
+            return r["value"]
+        expect(abs(dval(at_x(xs[0]), circles[0]) - 30) < 0.1,
+               "edge-to-hole is perpendicular (30, not the 39.1 diagonal)")
+        expect(abs(dval(circles[0], circles[1]) -
+                   (40 ** 2 + 35 ** 2) ** 0.5) < 0.1,
+               "hole-to-hole stays centre-to-centre")
+        expect(abs(dval(at_x(xs[2]), at_x(xs[1])) - 85) < 0.1,
+               "offset parallel edges measure perpendicular (85, not 88.6)")
+        # Leave the project as the later save/reopen assertions expect it.
+        tabs = d.call("list_parts")["parts"]
+        for t in sorted(tabs, key=lambda t: -t["index"]):
+            if t["name"] in ("r2-dwg", "r2plate"):
+                d.call("delete_part", index=t["index"])
+        d.call("set_active_part", name="bracket-dwg")  # back to the D3 sheet
+
         # --- Save, reopen, verify the drawing survives ---------------------
         proj = os.path.join(tmp, "gearbox.dsgn")
         d.call("save_project", path=proj)

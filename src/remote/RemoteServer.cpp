@@ -2122,6 +2122,17 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                        "without a window)");
           continue;
         }
+        // Drawing sheets are drawn by the GUI layer, which the offscreen
+        // capture deliberately excludes — returning the empty frame here
+        // cost a real session an eyeball round on five blank PNGs.
+        if (m_mode == RemoteMode::Offscreen && state.drawing) {
+          RespondError(request.client, request.id,
+                       "a drawing sheet renders in the GUI layer, which "
+                       "--offscreen does not draw — export_drawing writes "
+                       "the sheet as SVG/PDF, or screenshot from a windowed "
+                       "instance");
+          continue;
+        }
         // Optional `view` reorients + fits before the capture, matching the
         // MCP wrapper so raw callers get the oriented shot too.
         if (request.params.contains("view")) {

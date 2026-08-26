@@ -93,6 +93,45 @@ bool RefCircle(const SheetView& v, const ProjRef& r, glm::dvec2& c,
   return false;
 }
 
+// A ref that IS a straight edge: foot point + unit direction. A circle's
+// polyline must not pass for one — a conic match disqualifies, and the
+// points must lie on their own chord. Distinguishing this matters because a
+// plain `distance` involving an edge measures PERPENDICULAR to it; anchoring
+// an edge at its midpoint measured the diagonal instead (an edge-to-hole
+// distance on a 144-centred hole read "170", and two parallel window edges
+// with offset midpoints read "78" for a 45 mm rail — both real drawings).
+bool RefStraightLine(const SheetView& v, const ProjRef& r, glm::dvec2& p,
+                     glm::dvec2& dir) {
+  const auto cs = Match(v, r);
+  if (cs.empty())
+    return false;
+  for (const SheetCurve* c : cs)
+    if (c->conicRadius > 0.0)
+      return false;
+  const SheetCurve* best = nullptr;
+  double bestLen = -1.0;
+  for (const SheetCurve* c : cs) {
+    if (c->points.size() < 2)
+      continue;
+    const double len = glm::length(c->points.back() - c->points.front());
+    if (len > bestLen) {
+      bestLen = len;
+      best = c;
+    }
+  }
+  if (!best || bestLen < 1e-9)
+    return false;
+  const glm::dvec2 a = best->points.front();
+  const glm::dvec2 d = (best->points.back() - a) / bestLen;
+  const glm::dvec2 n(-d.y, d.x);
+  for (const glm::dvec2& q : best->points)
+    if (std::abs(glm::dot(q - a, n)) > std::max(1e-6, bestLen * 1e-6))
+      return false; // curved (an arc or ellipse projected without a conic)
+  p = a;
+  dir = d;
+  return true;
+}
+
 // A ref's dominant line: the longest matched segment's foot point + unit dir.
 bool RefLine(const SheetView& v, const ProjRef& r, glm::dvec2& p,
              glm::dvec2& dir) {
@@ -138,6 +177,28 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     glm::dvec2 a, b;
     if (!RefPoint(view, dim.refs[0], a) || !RefPoint(view, dim.refs[1], b))
       return rd;
+    // Plain `distance` with a straight edge on either side measures
+    // PERPENDICULAR to that edge — an edge names a direction, not a point,
+    // and its midpoint is an accident of its length. Point↔point (two hole
+    // centres: a bolt circle) stays centre-to-centre. The axis kinds below
+    // impose their own direction and need none of this.
+    if (dim.kind == DrawingDimKind::Distance) {
+      glm::dvec2 lp, ld, lp2, ld2;
+      const bool aLine = RefStraightLine(view, dim.refs[0], lp, ld);
+      const bool bLine = RefStraightLine(view, dim.refs[1], lp2, ld2);
+      if (aLine && bLine && std::abs(glm::dot(ld, ld2)) > 0.999) {
+        // `a` (edge A's midpoint) lies on the edge; measure straight across.
+        const glm::dvec2 n(-ld.y, ld.x);
+        b = a + n * glm::dot(lp2 - a, n);
+      } else if (aLine != bLine) {
+        const glm::dvec2& fp = aLine ? lp : lp2;
+        const glm::dvec2 fd = aLine ? ld : ld2;
+        const glm::dvec2 n(-fd.y, fd.x);
+        const glm::dvec2 pt = aLine ? b : a;
+        a = pt - n * glm::dot(pt - fp, n); // the foot on the edge
+        b = pt;
+      }
+    }
     rd.ext1 = a;
     rd.ext2 = b;
     // Geometry stays in sheet millimetres (that is where the dimension is

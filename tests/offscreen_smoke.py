@@ -170,6 +170,17 @@ def main():
             except ImportError:
                 print("      (pillow not installed; flat-frame check skipped)")
 
+        phase("drawing tabs refuse offscreen screenshots, naming the remedy")
+        # Sheets are ImGui-drawn; the offscreen capture is scene-only, and
+        # returning the empty frame cost a session five blank PNGs.
+        d.call("create_drawing", name="dwg")
+        try:
+            d.request("screenshot", {"path": os.path.join(tmp, "dwg.png")})
+            raise AssertionError("offscreen drawing screenshot must refuse")
+        except RuntimeError as e:
+            expect("export_drawing" in str(e), f"names the remedy ({e})")
+        d.call("set_active_part", name="Part 1")  # back for the face phase
+
         phase("orient_to_face is ungated on the assembly tab")
         # It sat in rpc_gate_smoke's GATED_ON_PURPOSE ("assembly-tab
         # behaviour unverified") until this mode provided a render surface

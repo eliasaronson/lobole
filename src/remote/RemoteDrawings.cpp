@@ -75,9 +75,24 @@ SheetSize ParseSheetSizeOrThrow(const std::string& s) {
   return size;
 }
 
-// Apply a create_drawing/set_drawing_sheet `sheet` JSON block. The size
-// string must already be validated (ParseSheetSizeOrThrow) so this never
-// half-applies.
+// A `sheet` parameter that is not an object dies deep in nlohmann as a raw
+// type_error — `{"sheet": "A4"}` was the first thing an agent tried. Refuse
+// naming the accepted shape, BEFORE any tab exists to half-configure.
+void RequireSheetObject(const json& sj) {
+  if (!sj.is_object())
+    throw std::runtime_error(
+        "sheet is an object: {size: a4|a3|a2|a1|a0|letter, landscape?: "
+        "bool, title_block?: {project, document, author, date, notes}} — "
+        "for just a size, pass {\"size\": \"a4\"}");
+  if (sj.contains("title_block") && !sj.at("title_block").is_object())
+    throw std::runtime_error(
+        "title_block is an object of strings: {project?, document?, "
+        "author?, date?, notes?}");
+}
+
+// Apply a create_drawing/set_drawing_sheet `sheet` JSON block. The shape
+// (RequireSheetObject) and the size string (ParseSheetSizeOrThrow) must
+// already be validated so this never half-applies.
 void ApplySheetJson(Sheet& sheet, const json& sj) {
   if (sj.contains("size"))
     sheet.size = ParseSheetSizeOrThrow(sj.at("size").get<std::string>());
@@ -130,10 +145,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     // title-block fields so a headless caller can set them in one call.
     const std::string name =
         p.value("name", "Drawing " + std::to_string(state.parts.size() + 1));
-    // Validate BEFORE creating the tab — a bad size string must not leave a
-    // half-configured drawing behind.
-    if (p.contains("sheet") && p.at("sheet").contains("size"))
-      ParseSheetSizeOrThrow(p.at("sheet").at("size").get<std::string>());
+    // Validate BEFORE creating the tab — a bad shape or size string must
+    // not leave a half-configured drawing behind.
+    if (p.contains("sheet")) {
+      RequireSheetObject(p.at("sheet"));
+      if (p.at("sheet").contains("size"))
+        ParseSheetSizeOrThrow(p.at("sheet").at("size").get<std::string>());
+    }
     const size_t idx = ui::AddDrawing(state, name);
     if (p.contains("sheet") && state.drawing) {
       ApplySheetJson(state.drawing->GetSheet(), p.at("sheet"));
@@ -151,6 +169,10 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("the active document is not a drawing");
     if (p.contains("size"))
       ParseSheetSizeOrThrow(p.at("size").get<std::string>()); // validate first
+    if (p.contains("title_block") && !p.at("title_block").is_object())
+      throw std::runtime_error(
+          "title_block is an object of strings: {project?, document?, "
+          "author?, date?, notes?}");
     ui::SnapshotDrawing(state);
     json sj = json::object();
     if (p.contains("size"))
@@ -518,6 +540,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     }
     if (p.contains("offset")) {
       const json& o = p.at("offset");
+      // A bare number here died as a raw nlohmann type_error ("cannot use
+      // at() with number") — the first shape an agent guessed.
+      if (!o.is_array() || o.size() != 2 || !o.at(0).is_number() ||
+          !o.at(1).is_number())
+        throw std::runtime_error(
+            "offset is [x, y] in sheet mm (the label's offset from the "
+            "dimension's anchor); omit it to auto-place clear of the view");
       dim.labelOffset = {o.at(0).get<double>(), o.at(1).get<double>()};
     } else {
       // No offset given: place the dimension clear of the view instead of on
