@@ -95,6 +95,21 @@ omitting the key. The screenshot path re-records the prepasses into its own
 buffer and deliberately writes no timestamps there — they would double-write
 the frame's slot.
 
+**Reading the numbers** — two caveats the first field screenshots (2026-08-26,
+RTX 4060) demonstrated within the hour:
+
+- **Pass cost is not feature cost.** The shadow/ssao items time their own
+  render passes; the CONSUMPTION side — PCF shadow sampling, the AO texture
+  read — executes in `mesh.frag`, inside `main`. Measured: the shadow pass
+  read 0.79 ms, but turning shadows off dropped `main` by ~4.3 ms. A feature's
+  full cost is its pass plus main's delta with it toggled.
+- **Laptop clocks confound cross-config comparisons.** Turning SSAO off made
+  `main` read SLOWER (4.70 → 10.10 ms): with less total load inside a vsync
+  frame, the GPU downclocks and the same work stretches in wall time. Compare
+  configurations by total GPU ms and p95/fps, not by one pass across configs
+  — and trust the split most when the GPU is saturated (the Intel readings,
+  pegged at 100%, are clock-stable; the idle NVIDIA ones are not).
+
 Two things the build taught:
 
 - **The availability flag does not cover uninitialized queries.** Reading a
