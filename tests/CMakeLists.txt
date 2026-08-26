@@ -408,6 +408,13 @@ add_test(NAME py_client_compiles
                  ${CMAKE_CURRENT_BINARY_DIR}/designer_remote.pyc)
 set_tests_properties(py_client_compiles PROPERTIES TIMEOUT 60)
 
+# The pyproject's claims resolve: its modules exist and each console script
+# names a real callable — `uv tool install` happens on machines where no test
+# runs, so metadata rot has to be caught here.
+add_test(NAME packaging_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/packaging_smoke.py)
+set_tests_properties(packaging_smoke PROPERTIES TIMEOUT 60)
+
 # Models a bracket through the MCP server (stdio) over the same live app.
 # Skips (77) when the python mcp SDK is not installed.
 add_test(NAME mcp_smoke

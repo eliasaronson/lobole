@@ -1,0 +1,36 @@
+# The MCP server and JSON-RPC client, installable as a tool. The C++ app is
+# NOT in here — it ships via nix/Flatpak; this package is the thin agent
+# surface that attaches to a running instance (or names the command to start
+# one). The sources stay in tools/ so in-repo scripts and tests keep importing
+# them by path; installing just gives the same two modules a home on PATH:
+#
+#   uv tool install /path/to/this/repo          # local clone
+#   uvx --from git+ssh://<remote> designer-mcp  # straight from git (private ok)
+#   claude mcp add designer -- designer-mcp
+#
+# "designer-mcp" is a PLACEHOLDER name — do not publish to PyPI under it.
+# Publishing waits on the real project name (and moves the modules into a
+# proper package namespace at the same time; two top-level modules are fine
+# for a tool install, rude for site-packages).
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "designer-mcp"
+version = "0.1.0"
+description = "MCP server and remote-control client for a running Designer CAD instance"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+# <2: mcp 2.x renamed FastMCP to MCPServer and changed other APIs; the server
+# is written against 1.x, which is also what nixpkgs pins. Lift the pin only
+# by migrating designer_mcp.py (and shell.nix) together, not by loosening it.
+dependencies = ["mcp>=1.0,<2"]
+
+[project.scripts]
+designer-mcp = "designer_mcp:main"
+designer-remote = "designer_remote:main"
+
+[tool.setuptools]
+package-dir = { "" = "tools" }
+py-modules = ["designer_mcp", "designer_remote"]

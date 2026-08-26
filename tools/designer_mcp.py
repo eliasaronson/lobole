@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """MCP server for Designer — drive a running instance over its JSON-RPC remote.
 
-Design: docs/scripting/s1-mcp.md. Start the app with `designer --remote 8437`,
-then register this server with an MCP client, e.g.:
+Design: docs/scripting/s1-mcp.md. Register this server with an MCP client:
 
-    claude mcp add designer -- python3 tools/designer_mcp.py --port 8437
+    claude mcp add designer -- python3 tools/designer_mcp.py   # from a checkout
+    claude mcp add designer -- designer-mcp    # installed (uv tool install .)
 
-The port also comes from $DESIGNER_PORT (flag wins). Requires the official
-MCP Python SDK (`mcp` on PyPI, `python3Packages.mcp` on nixpkgs).
+No port needed: running instances announce themselves and the server attaches
+(several running → it asks; pin with --port or $DESIGNER_PORT, flag wins).
+Requires the official MCP Python SDK (`mcp` on PyPI, `python3Packages.mcp`
+on nixpkgs).
 """
 import argparse
 import os
@@ -332,6 +334,34 @@ def _running_instances():
         return []  # discovery is a convenience, never a failure mode
 
 
+def _start_hint():
+    """The start command for THIS machine's Designer — probed, not guessed.
+
+    The server can be installed far from any checkout (`uv tool install`), so
+    a refusal that always says `designer --remote …` names a command half the
+    machines don't have. Suggest only what is actually here: a dev-tree
+    binary beside this file, `designer` on PATH, or the flatpak.
+    """
+    import pathlib
+    import shutil
+    import subprocess
+    dev = pathlib.Path(__file__).resolve().parent.parent / "build" / "designer"
+    if dev.is_file():
+        return str(dev)
+    if shutil.which("designer"):
+        return "designer"
+    if shutil.which("flatpak"):
+        try:
+            probe = subprocess.run(
+                ["flatpak", "info", "io.github.eliasaronson.Designer"],
+                capture_output=True, timeout=10)
+            if probe.returncode == 0:
+                return "flatpak run io.github.eliasaronson.Designer"
+        except OSError:
+            pass
+    return None
+
+
 def _resolve_port():
     """Which app to talk to — found, not assumed.
 
@@ -348,12 +378,20 @@ def _resolve_port():
     if len(live) == 1:
         return int(live[0]["port"])
     if not live:
+        cmd = _start_hint()
+        if cmd is None:
+            raise RuntimeError(
+                "No running Designer found, and no installed one to start: "
+                "probed for build/designer beside this server, `designer` on "
+                "PATH, and the io.github.eliasaronson.Designer flatpak. "
+                "Install the app, then start it with `designer --remote "
+                f"{DEFAULT_PORT}`.")
         raise RuntimeError(
-            "No running Designer found. Start one with:  designer --remote "
-            f"{DEFAULT_PORT}   (or `designer --headless --remote "
-            f"{DEFAULT_PORT}` for no window — modeling and measurement work, "
-            "screenshots do not). If it is already running, it is on a build "
-            "older than instance discovery: pass --port/DESIGNER_PORT.")
+            f"No running Designer found. Start one with:  {cmd} --remote "
+            f"{DEFAULT_PORT}   (add --headless for no window — modeling and "
+            "measurement work, screenshots do not). If it is already "
+            "running, it is on a build older than instance discovery: pass "
+            "--port/DESIGNER_PORT.")
     listed = ", ".join(
         f"{i['port']} ({i.get('mode', '?')})" for i in live)
     raise RuntimeError(
@@ -1822,9 +1860,10 @@ def rpc(method: str, params: dict | None = None) -> dict:
           "choose) or nothing reachable.")
 def instances() -> dict:
     live = _running_instances()
+    cmd = _start_hint() or "designer"
     return {"attached": attached_to(),
             "instances": live,
-            "hint": ("Start one with `designer --remote 8437`."
+            "hint": (f"Start one with `{cmd} --remote {DEFAULT_PORT}`."
                      if not live else
                      "Pin one with DESIGNER_PORT=<port> if several are up.")}
 

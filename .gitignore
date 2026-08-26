@@ -79,6 +79,10 @@ todo.txt
 designer-appimage
 *.AppImage
 
+# Python packaging residue (`uv build` / pip leave these beside the sources).
+*.egg-info/
+dist/
+
 # Assistant/agent working directories and their notes — machine-local
 # configuration, not project source.
 .codex/

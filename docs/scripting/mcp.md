@@ -16,13 +16,42 @@
    For other clients:
 
    ```
-   claude mcp add designer -- python3 /path/to/Designer/tools/designer_mcp.py --port 8437
+   claude mcp add designer -- python3 /path/to/Designer/tools/designer_mcp.py
    ```
 
-   The port also comes from `$DESIGNER_PORT`; the flag wins.
+   No port is needed (instances announce themselves — next section); pin one
+   with `--port` or `$DESIGNER_PORT` (the flag wins) only to drive a specific
+   instance.
 
 The server connects lazily — registering before the app is running is fine;
 tools error with the remedy until it is reachable.
+
+## Installing the server without the checkout
+
+The repo root `pyproject.toml` packages `designer_mcp` + `designer_remote`
+(sources stay in `tools/`; nothing in-repo changes) with two console entry
+points, so a machine that has the app but not the source tree can get the
+agent surface as a tool:
+
+```
+uv tool install /path/to/Designer          # or: uvx --from git+ssh://<remote> designer-mcp
+claude mcp add designer -- designer-mcp
+```
+
+`designer-remote <port> <method> [json]` comes along as the CLI. Two caveats,
+both deliberate:
+
+- **The name `designer-mcp` is a placeholder** and the package is not on
+  PyPI; install from a path or a git URL (private remotes work over ssh).
+  Publishing waits on the real project name, and moves the modules into a
+  proper package namespace at the same time.
+- **`mcp` is pinned `<2`**: mcp 2.x renamed FastMCP to MCPServer and changed
+  other APIs. The server is 1.x code and nixpkgs pins 1.x; the pin is lifted
+  by migrating, not loosened.
+
+`packaging_smoke` (headless suite) keeps the metadata honest: every
+`py-modules` entry must exist and every console script must resolve to a real
+callable, so a renamed `main()` fails here instead of on a user's machine.
 
 ## Finding the app (no port to guess)
 
@@ -39,8 +68,11 @@ The MCP server resolves what to talk to in that order:
 2. **Exactly one running instance** → attach to it.
 3. **Several** → refuse and list them. Guessing would answer questions about
    a document you are not looking at.
-4. **None** → an error naming the exact command to start one, including the
-   headless variant and what it cannot do (screenshots).
+4. **None** → an error naming the exact command to start one on THIS machine
+   — it probes for a dev-tree `build/designer` beside the server, `designer`
+   on PATH, then the flatpak, and refuses with what it probed when none
+   exists — including the headless variant and what it cannot do
+   (screenshots).
 
 `describe` reports what it attached to (`attached`: *"Designer on port 8799:
 bracket.dsgn (unsaved changes), gui"*), and the `instances` tool lists what is

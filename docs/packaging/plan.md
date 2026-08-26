@@ -373,6 +373,39 @@ Remaining before a *polished* Windows release:
 
 ---
 
+## Deliverable 4 — the agent surface (Claude Code / MCP)
+
+A Claude Code user needs two very different things, and they ship separately:
+the **app** (heavy, GPU — deliverables 1–3 above) and the **agent surface**
+(thin, pure Python). Conflating them would mean stuffing a 500 MB closure
+into a language package manager; splitting them means each travels its native
+channel. Chamfer (github.com/SmartAI/Chamfer) is the reference for the UX to
+match: one command, everything bootstrapped, and the tool reports what it
+probed on your machine before work begins.
+
+Phased; 1 is **[done 2026-08-26]**, the rest in order:
+
+1. **Installable server** — repo-root `pyproject.toml` packages
+   `designer_mcp` + `designer_remote` (sources stay in `tools/`) with
+   `designer-mcp` / `designer-remote` entry points; `uv tool install <repo>`
+   or `uvx --from git+ssh://…` (private remote works), then
+   `claude mcp add designer -- designer-mcp`. The no-instance refusal is
+   install-aware (probes dev tree → PATH → flatpak and names the command
+   found, or what it probed). `packaging_smoke` gates the metadata. See
+   docs/scripting/mcp.md.
+2. **PyPI publish** — BLOCKED on the real project name ("designer-mcp" is a
+   placeholder). With the name: move the two modules into a proper package
+   namespace, fetch the feature-format reference from the app's `describe`
+   at attach instead of baking it (a PyPI server meets arbitrary app
+   versions; the baked text is only gated in-repo), and publish. Also the
+   moment to migrate off the `mcp<2` pin.
+3. **Autostart, maybe** — needs an explicit decision to reverse the
+   documented rejection (docs/scripting/mcp.md); the conditions if it comes:
+   opt-in, headless-only, child dies with the server.
+4. **Claude Code plugin** — bundles the MCP registration + the modeling
+   workflow, so onboarding is "install the app, install the plugin". Needs a
+   public repo (or a marketplace) to point at.
+
 ## Sequencing
 
 1. `flake.nix` package + `devShells` → `nix build` green. **[done]**
@@ -382,6 +415,10 @@ Remaining before a *polished* Windows release:
 4. Flatpak manifest (OCC/Netgen from source) → local `flatpak run` green.
 5. Renderer verification on Mesa + NVIDIA-extension.
 6. Flathub metadata (.desktop/icon/AppStream) → submission.
+
+Deliverable 4's steps interleave freely: its step 1 is done and needed
+nothing above; its steps 2/4 and the Cachix/Flathub steps all wait on the
+same two decisions (public repo, project name).
 
 Steps 1–3 are the cheap Nix-native wins and unblock reproducible CI releases
 **for Nix users and headless consumers**. Steps 4–6 are the Flatpak investment
