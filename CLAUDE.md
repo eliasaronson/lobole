@@ -79,11 +79,11 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~85 s for 836 tests, of which the SIMP gate alone is ~90 s of CPU and the
+  — ~85 s for 864 tests, of which the SIMP gate alone is ~90 s of CPU and the
   next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
   (11 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 215 tests in **~90 s**
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 222 tests in **~90 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
   (11 s), `--serial` for debugging. Still **flock-serialized** machine-wide,

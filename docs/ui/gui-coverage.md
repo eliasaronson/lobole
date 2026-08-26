@@ -29,7 +29,7 @@ that a feature appeared.
 | Rib | `###tb_rib` | `rib/menu_rib_previews_and_adds_volume`, and the defaults gate |
 | Thread | `###tb_thread` | `thread/face_pick_fills_the_slot` |
 | Boolean | `###tb_boolean` | three tests |
-| Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/circular_preview_param_edits_survive`, defaults gate |
+| Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/circular_preview_param_edits_survive`, `pattern/cut_row_is_the_pattern_source` (a hole patterns as a hole — the source is the CUT's tree row), defaults gate |
 | Datum plane / axis | `###tb_datum_plane`, `###tb_datum_axis` | `datum/plane_offset_then_sketch_on_its_row`, defaults gate |
 
 Plus the `defaults/*` gate (`docs/ui/u10-defaults-and-refusals.md`), which opens

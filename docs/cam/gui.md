@@ -148,7 +148,10 @@ Two papercuts already owed from using the panel, both of which evaporate:
 - GUI: two clicks (verb, face) produce a pocket op with a non-empty toolpath;
   a pick on a curved face refuses visibly; closing the session drops the
   ghosts but keeps the backplot; **and the id-conflict guard stays** (two
-  tools + two operations, after `3c873a7`).
+  tools + two operations, after `3c873a7`). R15 adds the same pair for the
+  edge break (`cam/verbs_two_clicks_to_an_edge_break`): with the setup's
+  default FLAT tool the pick refuses and makes no operation; with a ball nose
+  it derives the round from the wall and the tool.
 - The verdict text is asserted against a job with a known gouge, so the words
   cannot drift from what the verifier reports.
 
