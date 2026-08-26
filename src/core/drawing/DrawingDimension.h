@@ -66,7 +66,29 @@ inline constexpr double kDimOffsetGapMM = 8.0;
 // bbox centre. Falls back to {0, -12} (the historical GUI default) when the
 // dim doesn't resolve or the view has no geometry. Anchors are sheet mm
 // (view position included), matching ResolveDim's per-kind offset semantics
-// exactly. Stacked-dim collision nudging is a known follow-up.
+// exactly.
 glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view);
+
+// What auto-placement must stay clear of: rectangles already taken (every
+// view's bbox, the title block, existing dims' label boxes) and the sheet
+// border. Built by ui::AutoDimOffset from live state.
+struct DimPlaceContext {
+  std::vector<std::pair<glm::dvec2, glm::dvec2>> avoid;
+  glm::dvec2 borderMin{0.0}, borderMax{0.0};
+};
+
+// The label's box on the sheet. ONE estimate shared by auto-placement and
+// check_drawing's overlap validator, so what placement avoids is exactly
+// what the validator flags — two estimates would drift and one of them
+// would lie.
+void LabelBox(const glm::dvec2& labelPos, const std::string& text,
+              glm::dvec2& mn, glm::dvec2& mx);
+
+// DefaultDimOffset with lanes: the base placement, stepped outward until
+// the resulting LABEL clears everything in `ctx` (five sheets in one
+// session needed 2–4 manual passes each because every below-the-view dim
+// landed on the same line, and the pile ran into the title block).
+glm::dvec2 PlaceDimOffset(const DrawingDim& dim, const SheetView& view,
+                          const DimPlaceContext& ctx);
 
 } // namespace drawing

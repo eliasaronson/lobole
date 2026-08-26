@@ -131,6 +131,44 @@ ValidateDrawing(const DrawingDocument& doc,
     }
   }
 
+  // Labels must not sit on a view, the title block, or each other (R12).
+  // The box comes from the SAME LabelBox auto-placement avoids, so what
+  // placement dodges is exactly what this flags — two estimates would
+  // drift and one of them would lie.
+  struct LabelRect {
+    uint64_t id;
+    std::string text;
+    glm::dvec2 mn, mx;
+  };
+  std::vector<LabelRect> labels;
+  for (const ResolvedDim& d : dims) {
+    if (!d.resolved)
+      continue;
+    glm::dvec2 mn(0.0), mx(0.0);
+    LabelBox(d.labelPos, d.text, mn, mx);
+    if (RectsOverlap(mn, mx, chrome.titleBlockMin, chrome.titleBlockMax))
+      issues.push_back({"dim_over_title_block", 0, 0, d.id,
+                        "dim " + std::to_string(d.id) + " ('" + d.text +
+                            "') sits on the title block"});
+    for (const auto& [vid, sv] : renders) {
+      if (!sv.hasGeometry || !RectsOverlap(mn, mx, sv.bboxMin, sv.bboxMax))
+        continue;
+      issues.push_back({"dim_label_over_view", vid, 0, d.id,
+                        "dim " + std::to_string(d.id) + " ('" + d.text +
+                            "') sits on " + viewName(vid)});
+      break;
+    }
+    labels.push_back({d.id, d.text, mn, mx});
+  }
+  for (size_t i = 0; i < labels.size(); i++)
+    for (size_t j = i + 1; j < labels.size(); j++)
+      if (RectsOverlap(labels[i].mn, labels[i].mx, labels[j].mn, labels[j].mx))
+        issues.push_back({"dim_labels_overlap", 0, 0, labels[i].id,
+                          "dims " + std::to_string(labels[i].id) + " ('" +
+                              labels[i].text + "') and " +
+                              std::to_string(labels[j].id) + " ('" +
+                              labels[j].text + "') overlap"});
+
   return issues;
 }
 

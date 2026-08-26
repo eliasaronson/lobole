@@ -186,6 +186,44 @@ def main():
                "hole-to-hole stays centre-to-centre")
         expect(abs(dval(at_x(xs[2]), at_x(xs[1])) - 85) < 0.1,
                "offset parallel edges measure perpendicular (85, not 88.6)")
+        # --- R12 (2026-08-26): auto-placement clears views, title block and
+        # other labels. Seven no-offset dims on one view — the pile-up that
+        # cost five real sheets 2-4 manual passes each — must land with ZERO
+        # placement issues from check_drawing's overlap validator (which
+        # shares LabelBox with the placement, so they cannot drift apart).
+        def auto_dim(kind, refs):
+            r = d.call("add_drawing_dim", view=v2["id"], kind=kind,
+                       refs=[{"edge": e["ref"]} for e in refs])
+            expect(r["resolved"], f"auto dim resolves: {r}")
+        auto_dim("distance", [at_x(xs[0]), at_x(xs[2])])
+        auto_dim("distance_x", [at_x(xs[0]), circles[0]])
+        auto_dim("distance_x", [at_x(xs[0]), circles[1]])
+        hl2 = [e for e in vis if e["type"] == "line"
+               and abs(e["p1"][1] - e["p2"][1]) < 1e-6]
+        ys2 = sorted({round(e["p1"][1], 3) for e in hl2})
+        at_y = lambda y: next(e for e in hl2 if abs(e["p1"][1] - y) < 1e-3)
+        auto_dim("distance", [at_y(ys2[0]), at_y(ys2[-1])])
+        auto_dim("distance_y", [at_y(ys2[0]), circles[0]])
+        auto_dim("diameter", [circles[0]])
+        auto_dim("diameter", [circles[1]])
+        chk = d.call("check_drawing")
+        placement = [i for i in chk["issues"]
+                     if i["kind"] in ("dim_labels_overlap",
+                                      "dim_over_title_block",
+                                      "dim_label_over_view",
+                                      "dim_outside_border")]
+        expect(not placement,
+               f"seven auto-placed dims, zero collisions: {placement}")
+        # ...and the validator flags a label parked mid-view on purpose.
+        r = d.call("add_drawing_dim", view=v2["id"], kind="distance",
+                   refs=[{"edge": at_x(xs[0])["ref"]},
+                         {"edge": at_x(xs[2])["ref"]}], offset=[0, 0])
+        chk = d.call("check_drawing")
+        expect(any(i["kind"] == "dim_label_over_view"
+                   for i in chk["issues"]),
+               f"mid-view label flagged: {chk['issues']}")
+        d.call("remove_drawing_dim", id=r["id"])
+
         # Leave the project as the later save/reopen assertions expect it.
         tabs = d.call("list_parts")["parts"]
         for t in sorted(tabs, key=lambda t: -t["index"]):

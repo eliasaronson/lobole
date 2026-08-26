@@ -352,6 +352,12 @@ glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
   const double left = view.bboxMin.x - kDimOffsetGapMM;
   switch (dim.kind) {
   case DrawingDimKind::Distance: // dim line = anchors + off
+    // A vertical measure belongs LEFT of the view: the below-the-view base
+    // shifts BOTH anchors down by the offset, which for a tall span pushed
+    // the label half a view-height past the border and onto the title block
+    // (caught by the R12 overlap gate on its first run).
+    if (std::abs(rd.ext1.y - rd.ext2.y) > std::abs(rd.ext1.x - rd.ext2.x))
+      return {left - std::max(rd.ext1.x, rd.ext2.x), 0.0};
     return {0.0, below - std::max(rd.ext1.y, rd.ext2.y)};
   case DrawingDimKind::DistanceX: // line at min(a.y, b.y) + off.y
     return {0.0, below - std::min(rd.ext1.y, rd.ext2.y)};
@@ -371,6 +377,132 @@ glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
     return {0.0, below - 0.5 * (rd.ext1.y + rd.ext2.y)};
   default: // new kinds (callouts) fall back until they add an arm
     return kFallback;
+  }
+}
+
+void LabelBox(const glm::dvec2& labelPos, const std::string& text,
+              glm::dvec2& mn, glm::dvec2& mx) {
+  // Count glyphs, not bytes: Ø is two bytes of UTF-8 and one glyph wide.
+  size_t glyphs = 0;
+  for (const unsigned char c : text)
+    glyphs += (c & 0xC0) != 0x80;
+  const double w = std::max<size_t>(glyphs, 1) * 2.2;
+  const double h = 5.0;
+  mn = labelPos - glm::dvec2(w * 0.5, h * 0.5);
+  mx = labelPos + glm::dvec2(w * 0.5, h * 0.5);
+}
+
+namespace {
+
+// Where ResolveDim would put the LABEL for this offset — the per-kind offset
+// semantics of ResolveDim above, replayed without a full resolve per lane.
+glm::dvec2 LabelPosFor(DrawingDimKind kind, const ResolvedDim& rd,
+                       const glm::dvec2& off) {
+  switch (kind) {
+  case DrawingDimKind::DistanceX:
+    return {0.5 * (rd.ext1.x + rd.ext2.x),
+            std::min(rd.ext1.y, rd.ext2.y) + off.y};
+  case DrawingDimKind::DistanceY:
+    return {std::min(rd.ext1.x, rd.ext2.x) + off.x,
+            0.5 * (rd.ext1.y + rd.ext2.y)};
+  case DrawingDimKind::Radius:
+  case DrawingDimKind::Diameter: {
+    const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
+                                                   : glm::dvec2(0.7071, 0.7071);
+    return rd.center + dir * rd.radius + off;
+  }
+  default:
+    return 0.5 * (rd.ext1 + rd.ext2) + off;
+  }
+}
+
+bool BoxClear(const glm::dvec2& mn, const glm::dvec2& mx,
+              const DimPlaceContext& ctx) {
+  if (mn.x < ctx.borderMin.x || mn.y < ctx.borderMin.y ||
+      mx.x > ctx.borderMax.x || mx.y > ctx.borderMax.y)
+    return false;
+  constexpr double pad = 1.0;
+  for (const auto& [amn, amx] : ctx.avoid)
+    if (mn.x < amx.x + pad && mx.x > amn.x - pad && mn.y < amx.y + pad &&
+        mx.y > amn.y - pad)
+      return false;
+  return true;
+}
+
+} // namespace
+
+glm::dvec2 PlaceDimOffset(const DrawingDim& dim, const SheetView& view,
+                          const DimPlaceContext& ctx) {
+  const glm::dvec2 base = DefaultDimOffset(dim, view);
+  DrawingDim probe = dim;
+  probe.labelOffset = {0.0, 0.0};
+  const ResolvedDim rd = ResolveDim(probe, view);
+  if (!rd.resolved)
+    return base;
+  const std::string text =
+      rd.text.empty() ? std::string("00000") : rd.text; // width estimate
+  const auto clearAt = [&](const glm::dvec2& off) {
+    glm::dvec2 mn, mx;
+    LabelBox(LabelPosFor(dim.kind, rd, off), text, mn, mx);
+    return BoxClear(mn, mx, ctx);
+  };
+  constexpr double kLane = 7.0;
+  switch (dim.kind) {
+  case DrawingDimKind::Radius:
+  case DrawingDimKind::Diameter: {
+    // Try eight leader directions at growing lengths, preferring the base's
+    // away-from-centre direction.
+    const glm::dvec2 first =
+        glm::length(base) > 1e-9 ? glm::normalize(base) : glm::dvec2(1.0, 0.0);
+    for (int ring = 0; ring < 4; ring++) {
+      const double len = kDimOffsetGapMM + ring * kLane;
+      for (int k = 0; k < 8; k++) {
+        const double a = k * 0.7853981633974483; // pi/4
+        const double ca = std::cos(a), sa = std::sin(a);
+        const glm::dvec2 dir{first.x * ca - first.y * sa,
+                             first.x * sa + first.y * ca};
+        const glm::dvec2 off = dir * len;
+        if (clearAt(off))
+          return off;
+      }
+    }
+    return base;
+  }
+  default: {
+    // Linear kinds: aim the LABEL at a lane line outside the view — the
+    // preferred side first (below / left), then the opposite side. One side
+    // alone is not enough: a label column standing over the title block
+    // exhausts every downward lane and fell back onto a collision (caught
+    // by the overlap gate on the W 170 S baffle's two stacked '144' dims).
+    const bool vertical =
+        dim.kind == DrawingDimKind::DistanceY ||
+        (dim.kind == DrawingDimKind::Distance &&
+         std::abs(rd.ext1.y - rd.ext2.y) > std::abs(rd.ext1.x - rd.ext2.x));
+    const auto offFor = [&](double target) -> glm::dvec2 {
+      switch (dim.kind) {
+      case DrawingDimKind::DistanceX:
+        return {0.0, target - std::min(rd.ext1.y, rd.ext2.y)};
+      case DrawingDimKind::DistanceY:
+        return {target - std::min(rd.ext1.x, rd.ext2.x), 0.0};
+      default: // Distance / Angle: the whole dim line shifts by the offset
+        return vertical
+                   ? glm::dvec2(target - 0.5 * (rd.ext1.x + rd.ext2.x), 0.0)
+                   : glm::dvec2(0.0, target - 0.5 * (rd.ext1.y + rd.ext2.y));
+      }
+    };
+    const double lo = vertical ? view.bboxMin.x : view.bboxMin.y;
+    const double hi = vertical ? view.bboxMax.x : view.bboxMax.y;
+    for (int side = 0; side < 2; side++) {
+      for (int lane = 0; lane < 8; lane++) {
+        const double target = side == 0 ? lo - kDimOffsetGapMM - kLane * lane
+                                        : hi + kDimOffsetGapMM + kLane * lane;
+        const glm::dvec2 off = offFor(target);
+        if (clearAt(off))
+          return off;
+      }
+    }
+    return base;
+  }
   }
 }
 

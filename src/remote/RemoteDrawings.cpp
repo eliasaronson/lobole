@@ -555,12 +555,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
             "dimension's anchor); omit it to auto-place clear of the view");
       dim.labelOffset = {o.at(0).get<double>(), o.at(1).get<double>()};
     } else {
-      // No offset given: place the dimension clear of the view instead of on
-      // top of the geometry (offset {0,0} was the old, useless default).
-      const auto it = state.drawingRenders.find(viewId);
-      dim.labelOffset = it != state.drawingRenders.end()
-                            ? drawing::DefaultDimOffset(dim, it->second)
-                            : glm::dvec2{0.0, -12.0};
+      // No offset given: place the dimension clear of the views, the title
+      // block AND the labels already on the sheet (R12 — every below-the-
+      // view dim used to land on the same line, and the pile ran into the
+      // title block).
+      dim.labelOffset = ui::AutoDimOffset(state, dim);
     }
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddDim(dim);

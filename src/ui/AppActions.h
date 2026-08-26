@@ -160,6 +160,11 @@ FoldedPosition DrawingFoldedPosition(AppState& state, const DrawingView& view);
 // not projected or a ref is dangling. Defined in AppActions.cpp.
 drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim);
 
+// Auto-place a new dim's label clear of every view, the title block and the
+// labels already on the sheet (drawing::PlaceDimOffset with live context).
+// The {0,-12} fallback covers an unprojected view.
+glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim);
+
 // Re-projects and writes the active drawing to `path` (.svg or .pdf by
 // extension). The shared export path for the export_drawing RPC and the GUI
 // Export dialog. Returns false and fills *error on failure.

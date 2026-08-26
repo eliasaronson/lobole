@@ -174,12 +174,10 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
     d.kind = state.dimTool.kind;
     d.viewId = state.dimTool.viewId;
     d.refs = state.dimTool.refs;
-    // Auto-place clear of the view (drag to move); the picked view is in
-    // drawingRenders by construction — the user just clicked its curves.
-    const auto rit = state.drawingRenders.find(d.viewId);
-    d.labelOffset = rit != state.drawingRenders.end()
-                        ? drawing::DefaultDimOffset(d, rit->second)
-                        : glm::dvec2{0.0, -12.0};
+    // Auto-place clear of the views, title block and existing labels (drag
+    // to move); the picked view is in drawingRenders by construction — the
+    // user just clicked its curves.
+    d.labelOffset = AutoDimOffset(state, d);
     SnapshotDrawing(state);
     state.drawing->AddDim(d);
     state.dimTool = AppState::DimTool{}; // done — disarm

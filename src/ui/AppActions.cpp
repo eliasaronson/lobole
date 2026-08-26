@@ -3262,6 +3262,29 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
   return drawing::ResolveDim(dim, it->second, ctx);
 }
 
+glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
+  const auto it = state.drawingRenders.find(dim.viewId);
+  if (it == state.drawingRenders.end() || !state.drawing)
+    return {0.0, -12.0};
+  drawing::DimPlaceContext ctx;
+  const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
+  ctx.borderMin = chrome.borderMin;
+  ctx.borderMax = chrome.borderMax;
+  ctx.avoid.push_back({chrome.titleBlockMin, chrome.titleBlockMax});
+  for (const auto& [vid, sv] : state.drawingRenders)
+    if (sv.hasGeometry)
+      ctx.avoid.push_back({sv.bboxMin, sv.bboxMax});
+  for (const DrawingDim& dm : state.drawing->GetDims()) {
+    const drawing::ResolvedDim rd = ResolveDrawingDim(state, dm);
+    if (!rd.resolved)
+      continue;
+    glm::dvec2 mn(0.0), mx(0.0);
+    drawing::LabelBox(rd.labelPos, rd.text, mn, mx);
+    ctx.avoid.push_back({mn, mx});
+  }
+  return drawing::PlaceDimOffset(dim, it->second, ctx);
+}
+
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error) {
   if (!state.drawing) {
