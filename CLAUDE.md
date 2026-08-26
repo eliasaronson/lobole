@@ -94,14 +94,17 @@ buys back the coverage.
   `headless_smoke` autosave flake was a real bug, fixed 2026-08-19 (a document
   version number used as a document identity, ee247f9) — a "flaky under load"
   test is worth one look for a mechanism before it earns that label.
-  `fem_smoke` failed twice under `-j$(nproc)` on 2026-08-25 and passed four
-  full runs after; the failure output was never captured, so it has NOT earned
-  the label. Its own deadlines are generous (120 s poll, 30 s connect), which
-  points away from a wall clock — the leading hypothesis is `free_port()`,
-  which binds port 0, **closes the socket**, then hands the number to a
-  subprocess that binds it later. ~15 scripts do that, so two can be given the
-  same port in parallel. To confirm, run the failing case with the app's
-  stderr kept (fem_smoke sends it to DEVNULL) and look for a bind failure.
+  `fem_smoke` failed twice under `-j$(nproc)` on 2026-08-25; the suspected
+  `free_port()` race was FIXED the same day (L8: the app binds `--remote 0`
+  itself; `tests/smoke_app.py` is the one launcher and keeps the app's log).
+- **Generating CPU load for a test: `tools/with-cpu-load.sh N -- cmd` — NEVER
+  bare `while :; do :; done &` burners.** Backgrounded pids noted in one shell
+  command are invisible to the next (each is a new shell), the burners orphan
+  to init, and `kill $BURNERS` reaps nothing. This has pinned the machine for
+  hours twice. Same class: don't SIGKILL `xvfb-run` wrappers — killing the
+  wrapper (or `.terminate()` on it) orphans the Xvfb child AND the app; kill
+  the announced app pid (`headless-preview.sh --stop`), and the GUI runner now
+  reaps orphaned Xvfb on its next run.
 - `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
   containers), deriving the package list and test exclusions from ci.yml.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add

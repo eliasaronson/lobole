@@ -52,6 +52,16 @@ else
 fi
 SCREEN='-screen 0 1600x1000x24'
 
+# Reap orphaned Xvfb servers before starting new ones. When a run (or a
+# headless-preview / ad-hoc xvfb-run) is killed hard, xvfb-run dies without
+# reaping its Xvfb child, which reparents to init and idles forever — 43 of
+# them had accumulated by 2026-08-26, one with 8 CPU-hours. Under this lock
+# no other suite is running, and a LIVE run's Xvfb has a living xvfb-run
+# parent — so PPID 1 alone identifies the corpses. The user's real session
+# is Xorg/Wayland, never an "Xvfb" comm.
+ps -eo pid,ppid,comm --no-headers | awk '$2==1 && $3=="Xvfb" {print $1}' |
+  xargs -r kill 2>/dev/null || true
+
 # One test process. $1 = X display number, $2 = --gui-test-filter argument,
 # $3 = a private state directory.
 #
