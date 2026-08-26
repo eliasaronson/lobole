@@ -15,14 +15,15 @@
 // Each instance that opens a remote port writes
 //
 //   $XDG_STATE_HOME/designer/instances/<port>.json
-//     { "app": "designer", "pid": …, "port": …, "mode": "gui"|"headless",
-//       "started": <unix seconds> }
+//     { "app": "designer", "pid": …, "port": …,
+//       "mode": "gui"|"headless"|"offscreen", "started": <unix seconds> }
 //
 // and removes it when the port closes. A crash leaves the file behind, so a
 // reader must treat the pid as the truth (`kill(pid, 0)`) and every writer
 // sweeps dead entries on startup. `mode` is the capability split a client
 // actually cares about: "gui" has a renderer and a test engine (screenshots
-// and ui_action work), "headless" has neither.
+// and ui_action work), "offscreen" has a renderer and no GUI to drive,
+// "headless" has neither.
 //
 // Deliberately NOT here: the open project and whether it has unsaved changes.
 // Those change constantly, and a file rewritten on every edit is a worse
@@ -32,14 +33,14 @@ namespace remote {
 struct InstanceInfo {
   int pid = 0;
   uint16_t port = 0;
-  std::string mode; // "gui" | "headless"
+  std::string mode; // "gui" | "headless" | "offscreen"
   int64_t started = 0;
 };
 
 // Announces this process on `port`, and prunes entries whose process is gone.
 // Failure is never fatal: an unwritable state dir costs discovery, not the
 // remote interface, so this logs and returns false rather than refusing.
-bool AnnounceInstance(uint16_t port, bool hasRenderer);
+bool AnnounceInstance(uint16_t port, const std::string& mode);
 
 // Withdraws this process's announcement for `port`. Safe to call twice.
 void WithdrawInstance(uint16_t port);

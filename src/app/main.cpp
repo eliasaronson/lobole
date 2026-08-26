@@ -43,7 +43,9 @@
 #include "ui/Theme.h"
 #include "ui/UI.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <memory>
 #include <random>
@@ -181,8 +183,12 @@ IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties,
   return false;
 }
 
+// `wsi` = this process will present to a window (swapchain device extension,
+// present-support probe). --offscreen passes false: it renders to images it
+// reads back, and enabling VK_KHR_swapchain without VK_KHR_surface on the
+// instance is a spec violation — WSI is all-or-nothing across the two levels.
 static void SetupVulkan(ImVector<const char*> instance_extensions,
-                        GLFWwindow* window) {
+                        GLFWwindow* window, bool wsi) {
   VkResult err;
 
   // Create Vulkan Instance
@@ -350,7 +356,8 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
   // Create Logical Device
   {
     ImVector<const char*> device_extensions;
-    device_extensions.push_back("VK_KHR_swapchain");
+    if (wsi)
+      device_extensions.push_back("VK_KHR_swapchain");
 
     uint32_t properties_count;
     ImVector<VkExtensionProperties> properties;
@@ -980,6 +987,10 @@ void printUsage(const char* programName) {
   std::cout << "  --headless           No window/GPU: serve --remote with the "
                "document engine only"
             << std::endl;
+  std::cout << "  --offscreen          No window/display, real renderer: "
+               "serve --remote with renders\n                       "
+               "(needs a Vulkan device; ui_action needs a window)"
+            << std::endl;
   std::cout << "  --autosave <sec>     Autosave interval in seconds "
                "(default 60, 0 = off)"
             << std::endl;
@@ -1005,6 +1016,7 @@ struct CommandLineArgs {
   // "pick one and tell me". See --gui-test-shuffle.
   long guiTestShuffle = -1;
   bool headless = false;
+  bool offscreen = false;
   bool hidden = false;
   // 0 is BOTH "not asked for" and, once asked for, "let the OS choose" —
   // so the request is a separate flag rather than a magic value.
@@ -1067,6 +1079,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       args.listGuiTests = true;
     } else if (arg == "--headless") {
       args.headless = true;
+    } else if (arg == "--offscreen") {
+      args.offscreen = true;
     } else if (arg == "--remote-bind-all") {
       // For containers: the port is useless on loopback when the network is
       // namespaced. Unauthenticated, so it is never the default.
@@ -1148,6 +1162,135 @@ static void RecordWindowGeometry(GLFWwindow* w) {
   g_App.settingsDirtyAt = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
 }
 
+// --offscreen: RunHeadless's document engine and remote server, plus a real
+// Vulkan renderer with no window, no surface and no display server — Vulkan
+// only needs a display to PRESENT, and this mode never presents. What renders
+// today: the path-traced still (render_still), which needs only the ray
+// tracer, the IBL maps and a camera. The raster capture handshake
+// (screenshot/render_sheet) stays refused until the offscreen tick fulfils it.
+//
+// Lives here rather than beside RunHeadless because everything it drives —
+// SetupVulkan, the renderer globals, CleanupVulkan — is file-static in this
+// translation unit.
+static std::atomic<bool> g_OffscreenStopRequested{false};
+static void HandleOffscreenStop(int) { g_OffscreenStopRequested = true; }
+
+static int RunOffscreen(const CommandLineArgs& args) {
+  LOG_INFO("Offscreen mode: real renderer, no window or display server");
+
+  SetupVulkan({}, nullptr, /*wsi=*/false);
+  // The GUI sets this in SetupVulkanWindow, which never runs here.
+  g_MSAASamples = GetMaxUsableSampleCount();
+
+  // Same defaults as the GUI and RunHeadless, so view/fit_view/get_state
+  // agree across modes and a GUI session opening the same project sees the
+  // same framing.
+  g_Camera = std::make_unique<Camera>();
+  g_Camera->SetPosition(Camera::DefaultIsometricPosition());
+  g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+  g_Camera->SetAspectRatio(1280.0f / 720.0f);
+
+  g_App.document = std::make_unique<Document>();
+  g_App.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(g_App); // one part to start (assemblies A1)
+  g_App.camera = g_Camera.get();
+
+  // Image-based lighting, same block as the GUI init: the RT still lights
+  // with these maps (MakeStillDesc refuses without them).
+  g_IBLTextures = std::make_unique<IBLTextures>();
+  {
+    const std::string hdr =
+        (RuntimePaths::DataDir() / "hdri/brown_photostudio_02_1k.hdr").string();
+    IBLPrecompute ibl;
+    if (ibl.Build(hdr, IblCacheDir())) {
+      if (!g_IBLTextures->Upload(g_Device, g_PhysicalDevice, g_Queue,
+                                 g_CommandPool, ibl))
+        g_IBLTextures->MakeFallback(g_Device, g_PhysicalDevice, g_Queue,
+                                    g_CommandPool);
+    } else {
+      g_IBLTextures->MakeFallback(g_Device, g_PhysicalDevice, g_Queue,
+                                  g_CommandPool);
+    }
+  }
+
+  g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
+  if (!g_RayTracingRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
+                                        g_QueueFamily, g_CommandPool)) {
+    // Not fatal: modeling and measurement still serve; render_still reports
+    // "ray tracing not available" in its own response.
+    LOG_WARN("Offscreen: ray tracing unavailable on this device — "
+             "render_still will refuse");
+  } else {
+    LOG_INFO("Offscreen: ray tracing initialized");
+  }
+
+  g_App.rayTracer = g_RayTracingRenderer.get();
+  g_App.ibl = g_IBLTextures.get();
+  // faceSelector stays null until the raster stack exists: select_face needs
+  // render meshes to pick against, and none are built in this mode yet.
+
+  if (!args.fileToLoad.empty()) {
+    LOG_INFO("Loading startup file: {}", args.fileToLoad);
+    ui::ImportAsFeature(g_App, args.fileToLoad);
+  }
+
+  RemoteServer server;
+  // No wake callback: there is no GLFW event loop to wake (and
+  // glfwPostEmptyEvent without glfwInit would be the bug). The 2 ms poll
+  // below is the pacing.
+  if (!server.Start(static_cast<uint16_t>(args.remotePort),
+                    RemoteMode::Offscreen, args.remoteBindAll)) {
+    LOG_ERROR("Offscreen: cannot listen on port {} — exiting", args.remotePort);
+    return 1;
+  }
+  if (args.remotePort == 0)
+    LOG_INFO("Offscreen: remote port {}", server.Port());
+  if (!args.recordPath.empty() && !server.StartRecording(args.recordPath)) {
+    return 1;
+  }
+
+  std::signal(SIGINT, HandleOffscreenStop);
+  std::signal(SIGTERM, HandleOffscreenStop);
+
+  const auto start = std::chrono::steady_clock::now();
+  auto seconds = [&] {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         start)
+        .count();
+  };
+  Autosaver autosaver(args.autosaveSeconds);
+  autosaver.Prime(seconds());
+
+  double last = seconds();
+  while (!g_OffscreenStopRequested) {
+    server.ProcessPending(g_App);
+    const double now = seconds();
+    // Real dt so orient_to_face's animation completes at wall-clock speed;
+    // captures (commit B) hold until IsAnimating() clears.
+    g_Camera->Update(static_cast<float>(now - last));
+    last = now;
+    ui::AutosaveProject(g_App, autosaver, now);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+
+  LOG_INFO("Offscreen: stop requested, shutting down");
+  server.Stop();
+  // Clean exit with nothing unsaved: drop the sidecar. Dirty exits keep it.
+  if (g_App.document && g_App.document->Version() == g_App.lastSavedVersion) {
+    Autosaver::Clear(g_App.projectPath);
+  }
+
+  vkDeviceWaitIdle(g_Device);
+  g_App.document.reset();
+  g_App.commands.reset();
+  g_Camera.reset();
+  g_RayTracingRenderer.reset();
+  g_IBLTextures->Shutdown(g_Device);
+  g_IBLTextures.reset();
+  CleanupVulkan();
+  return 0;
+}
+
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
@@ -1196,6 +1339,38 @@ int main(int argc, char** argv) {
 
   // Initialize logger with specified level
   Logger::Initialize(args.logLevel);
+
+  // Mode flags conflict loudly, never by precedence: --headless silently
+  // overriding --hidden once left a windowed test running headless for weeks
+  // (CLAUDE.md), so a flag pair that cannot both hold is an error, not a
+  // ranking. Checked before either mode branch can win.
+  if (args.offscreen) {
+    if (args.headless) {
+      std::cerr << "Error: --offscreen cannot run with --headless "
+                   "(offscreen IS headless plus a renderer — pick one)"
+                << std::endl;
+      return 2;
+    }
+    if (args.hidden) {
+      std::cerr << "Error: --offscreen cannot run with --hidden "
+                   "(offscreen has no window to hide)"
+                << std::endl;
+      return 2;
+    }
+    if (args.runGuiTests) {
+      std::cerr << "Error: --gui-tests cannot run with --offscreen "
+                   "(the tests drive a windowed GUI)"
+                << std::endl;
+      return 2;
+    }
+    if (!args.remoteRequested) {
+      std::cerr << "Error: --offscreen requires --remote <port> (there is "
+                   "nothing else to serve; --remote 0 picks one)"
+                << std::endl;
+      return 2;
+    }
+    return RunOffscreen(args);
+  }
 
   // Headless: document engine + remote server, no GLFW/Vulkan/ImGui at all.
   // Must branch before any windowing call — this path runs with no display
@@ -1289,7 +1464,7 @@ int main(int argc, char** argv) {
       glfwGetRequiredInstanceExtensions(&extensions_count);
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
-  SetupVulkan(extensions, window);
+  SetupVulkan(extensions, window, /*wsi=*/true);
 
   VkSurfaceKHR surface;
   VkResult err =
@@ -1609,7 +1784,7 @@ int main(int argc, char** argv) {
     // HeadlessMain), so screenshots work; whether the GUI can be DRIVEN is
     // the separate question SetTestEngine answers.
     if (!remoteServer.Start(static_cast<uint16_t>(args.remotePort),
-                            /*hasRenderer=*/true, args.remoteBindAll)) {
+                            RemoteMode::Gui, args.remoteBindAll)) {
       LOG_ERROR("Cannot listen on port {} - is another instance using it?",
                 args.remotePort);
       return 1;
@@ -1643,7 +1818,7 @@ int main(int argc, char** argv) {
     if (remoteServer.Port() != 0)
       return remoteServer.Port();
     for (const uint16_t want : {uint16_t{8437}, uint16_t{0}}) {
-      if (remoteServer.Start(want, /*hasRenderer=*/true, /*bindAll=*/false)) {
+      if (remoteServer.Start(want, RemoteMode::Gui, /*bindAll=*/false)) {
         const int got = remoteServer.Port();
         LOG_INFO("Terminal panel opened the remote interface on port {}", got);
         g_App.remotePort = got;

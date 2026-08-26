@@ -388,8 +388,8 @@ def _resolve_port():
                 f"{DEFAULT_PORT}`.")
         raise RuntimeError(
             f"No running Designer found. Start one with:  {cmd} --remote "
-            f"{DEFAULT_PORT}   (add --headless for no window — modeling and "
-            "measurement work, screenshots do not). If it is already "
+            f"{DEFAULT_PORT}   (add --offscreen for no window with renders, "
+            "or --headless for the document engine alone). If it is already "
             "running, it is on a build older than instance discovery: pass "
             "--port/DESIGNER_PORT.")
     listed = ", ".join(

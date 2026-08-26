@@ -47,13 +47,13 @@ struct ScratchState {
 TEST_CASE("An instance announces itself and withdraws", "[remote][registry]") {
   ScratchState scratch("designer-registry-basic");
 
-  REQUIRE(remote::AnnounceInstance(8901, /*hasRenderer=*/true));
+  REQUIRE(remote::AnnounceInstance(8901, "gui"));
   auto live = remote::LiveInstances();
   REQUIRE(live.size() == 1);
   CHECK(live[0].port == 8901);
   CHECK(live[0].pid == static_cast<int>(::getpid()));
-  // "gui" vs "headless" is the capability split a caller acts on: a renderer
-  // and a test engine, so screenshots and ui_action work.
+  // gui / headless / offscreen is the capability split a caller acts on:
+  // whether renders exist, and whether there is a GUI to drive.
   CHECK(live[0].mode == "gui");
 
   remote::WithdrawInstance(8901);
@@ -63,8 +63,8 @@ TEST_CASE("An instance announces itself and withdraws", "[remote][registry]") {
 
 TEST_CASE("Two instances are both discoverable", "[remote][registry]") {
   ScratchState scratch("designer-registry-two");
-  REQUIRE(remote::AnnounceInstance(8902, true));
-  REQUIRE(remote::AnnounceInstance(8903, false));
+  REQUIRE(remote::AnnounceInstance(8902, "gui"));
+  REQUIRE(remote::AnnounceInstance(8903, "offscreen"));
   auto live = remote::LiveInstances();
   REQUIRE(live.size() == 2);
   // Ambiguity has to reach the client — attaching to the wrong window would

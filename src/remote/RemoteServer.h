@@ -28,20 +28,30 @@ class RpcParams;
 //   - screenshots of the live viewport
 // Requests:  {"id": 1, "method": "add_feature", "params": {...}}\n
 // Responses: {"id": 1, "result": {...}} or {"id": 1, "error": "..."}\n
+// What kind of process is serving: decides which render/GUI capabilities the
+// RPC surface can honestly offer, and is reported by `ping` and the instance
+// registry so a client learns it before trying.
+//   Gui       — windowed frame loop; renders, screenshots, and (per build)
+//               the ImGui test engine.
+//   Headless  — document engine only; no renderer of any kind.
+//   Offscreen — real renderer with no window or display server; renders
+//               work, there is no GUI to drive.
+enum class RemoteMode { Gui, Headless, Offscreen };
+
 class RemoteServer {
 public:
   ~RemoteServer();
 
-  // Two capabilities, not one flag. `hasRenderer` = there is a rendered frame
-  // to capture and pick against (screenshots, viewport coordinates); false
-  // under --headless. Whether the UI-PARITY tier works is a separate
-  // question, answered by SetTestEngine — a build configured with
+  // Mode and capability are separate questions. `mode` says whether a
+  // rendered frame exists to capture and pick against (screenshots, viewport
+  // coordinates) — Headless has none. Whether the UI-PARITY tier works is
+  // answered by SetTestEngine — a build configured with
   // -DENABLE_TEST_ENGINE=OFF has a renderer and no way to drive it.
   // `bindAll` opens the port on 0.0.0.0 instead of 127.0.0.1. The RPC
   // surface has no authentication and can read and write files, so loopback
   // is the only safe default on a shared machine; a container with a
   // namespaced network is the case this exists for.
-  bool Start(uint16_t port, bool hasRenderer, bool bindAll = false);
+  bool Start(uint16_t port, RemoteMode mode, bool bindAll = false);
 
   // Enables the UI-parity tier (menu clicks, item input, viewport clicks).
   // A no-op in a build without the ImGui Test Engine, so callers need no
@@ -135,7 +145,14 @@ private:
   ImGuiTestEngine* m_engine = nullptr;
   std::thread m_thread;
   std::atomic<bool> m_running{false};
-  bool m_hasRenderer = false;
+  RemoteMode m_mode = RemoteMode::Headless;
+  // Something outside this class fulfils the screenshot/sheet handshake
+  // (WantsScreenshot/ScreenshotDone). Gating on this is what keeps a capture
+  // request from wedging the queue in a mode where nothing ever answers it:
+  // accepting one sets m_screenshotPending and ProcessPending then queues
+  // every later request behind a capture that would never come. Offscreen
+  // joins when its tick fulfils the handshake (raster capture, commit B).
+  bool CaptureAvailable() const { return m_mode == RemoteMode::Gui; }
   uint16_t m_port = 0;
   int m_listenFd = -1;
 

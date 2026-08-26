@@ -89,7 +89,7 @@ def main():
             "width": 20, "height": 30, "depth": 40})
         expect(r.get("regen", {}).get("ok"), f"box regenerates ({r})")
         mp = d.call("mass_properties")
-        expect(abs(mp["volume"] - 24000.0) < 1.0,
+        expect(abs(mp["total"]["volume"] - 24000.0) < 1.0,
                f"box volume is 24000 mm^3 ({mp})")
 
         phase("GUI-driving refusals survive, naming the mode")

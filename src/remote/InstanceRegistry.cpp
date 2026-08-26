@@ -69,7 +69,7 @@ std::string InstancesDir() {
   return (fs::path(Autosaver::StateDir()) / "instances").string();
 }
 
-bool AnnounceInstance(uint16_t port, bool hasRenderer) {
+bool AnnounceInstance(uint16_t port, const std::string& mode) {
   try {
     fs::create_directories(InstancesDir());
     // Sweep first: this process may be reusing a port whose previous owner
@@ -79,7 +79,7 @@ bool AnnounceInstance(uint16_t port, bool hasRenderer) {
     const json j{{"app", "designer"},
                  {"pid", CurrentPid()},
                  {"port", port},
-                 {"mode", hasRenderer ? "gui" : "headless"},
+                 {"mode", mode},
                  {"started", NowSeconds()}};
     const fs::path target = FileFor(port);
     const fs::path tmp = target.string() + ".tmp";

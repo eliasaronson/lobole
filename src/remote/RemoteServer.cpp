@@ -117,8 +117,22 @@ void RemoteServerRunUiAction(ImGuiTestContext* ctx) {
 
 RemoteServer::~RemoteServer() { Stop(); }
 
-bool RemoteServer::Start(uint16_t port, bool hasRenderer, bool bindAll) {
-  m_hasRenderer = hasRenderer;
+namespace {
+const char* ModeName(RemoteMode mode) {
+  switch (mode) {
+  case RemoteMode::Gui:
+    return "gui";
+  case RemoteMode::Headless:
+    return "headless";
+  case RemoteMode::Offscreen:
+    return "offscreen";
+  }
+  return "headless"; // unreachable; the safe answer is the capability floor
+}
+} // namespace
+
+bool RemoteServer::Start(uint16_t port, RemoteMode mode, bool bindAll) {
+  m_mode = mode;
   s_Instance = this;
 
   // Bind synchronously so a taken/privileged port fails Start (headless CI
@@ -172,9 +186,9 @@ bool RemoteServer::Start(uint16_t port, bool hasRenderer, bool bindAll) {
   m_thread = std::thread([this] { ReaderThread(); });
   // Announce it so a client can FIND this instance rather than be told which
   // port to assume (remote/InstanceRegistry.h). The registry records the
-  // RENDERER, which is what decides whether a screenshot is possible;
-  // whether the GUI can be driven is per-build and `ping` reports it.
-  remote::AnnounceInstance(port, hasRenderer);
+  // MODE, which is what decides whether renders are possible; whether the
+  // GUI can be driven is per-build and `ping` reports it.
+  remote::AnnounceInstance(port, ModeName(mode));
   if (bindAll) {
     LOG_WARN("Remote control listening on 0.0.0.0:{} — UNAUTHENTICATED, and "
              "it can read and write files. Only do this inside a sandbox you "
@@ -1121,7 +1135,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"ok", true},
             {"app", "designer"},
             {"port", m_port},
-            {"mode", m_hasRenderer ? "gui" : "headless"},
+            {"mode", ModeName(m_mode)},
             {"ui_actions", UiActionsAvailable()},
             {"project", project},
             {"dirty", ui::ProjectDirty(state)}};
@@ -1377,9 +1391,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const render::FrameTimer::Stats fs = state.frameTimer.Snapshot(window);
     if (fs.frames == 0)
       throw std::runtime_error(
-          m_hasRenderer ? "no frames measured yet (the window may be minimised)"
-                        : "no frame loop under --headless: run the GUI (or "
-                          "tools/headless-preview.sh) to measure frame time");
+          m_mode == RemoteMode::Gui
+              ? "no frames measured yet (the window may be minimised)"
+          : m_mode == RemoteMode::Offscreen
+              ? "no frame loop in --offscreen (it renders on demand); frame "
+                "timing exists only in a windowed instance"
+              : "no frame loop under --headless: run the GUI (or "
+                "tools/headless-preview.sh) to measure frame time");
     json phases = json::object();
     json worstPhases = json::object();
     for (size_t i = 0; i < render::kPhaseCount; i++) {
@@ -2089,10 +2107,14 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         continue;
       }
       if (request.method == "screenshot") {
-        if (!m_hasRenderer) {
+        if (!CaptureAvailable()) {
           RespondError(request.client, request.id,
-                       "screenshot requires a rendered frame — start "
-                       "designer without --headless");
+                       m_mode == RemoteMode::Offscreen
+                           ? "screenshot is unavailable in --offscreen — "
+                             "render_still returns an image, or use a "
+                             "windowed instance"
+                           : "screenshot requires a rendered frame — start "
+                             "designer without --headless");
           continue;
         }
         // Optional `view` reorients + fits before the capture, matching the
@@ -2118,10 +2140,13 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       if (request.method == "render_sheet") {
         // V3: stage a multi-view sheet job; the ProcessPending pump captures
         // one view per frame and composites when all tiles are in.
-        if (!m_hasRenderer) {
+        if (!CaptureAvailable()) {
           RespondError(request.client, request.id,
-                       "render_sheet requires a rendered frame — start "
-                       "designer without --headless");
+                       m_mode == RemoteMode::Offscreen
+                           ? "render_sheet is unavailable in --offscreen — "
+                             "use a windowed instance"
+                           : "render_sheet requires a rendered frame — start "
+                             "designer without --headless");
           continue;
         }
         const std::string outPath =
@@ -2200,13 +2225,17 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                          // behind
       }
       if (!UiActionsAvailable() && IsUiAction(request.method)) {
-        // Two different reasons, two different remedies: nothing to click
-        // (no GUI running) versus nothing to click WITH (this build has no
+        // Three different reasons, three different remedies: nothing to
+        // click (no GUI running), no GUI at all (--offscreen renders but
+        // draws no interface), or nothing to click WITH (this build has no
         // test engine). Saying which is the difference between "run it
         // differently" and "build it differently".
         RespondError(
             request.client, request.id,
-            m_hasRenderer
+            m_mode == RemoteMode::Offscreen
+                ? "UI actions are unavailable in --offscreen — there is no "
+                  "GUI to drive. The semantic RPCs and renders all work."
+            : m_mode == RemoteMode::Gui
                 ? "UI actions need the ImGui Test Engine, and this build was "
                   "configured with -DENABLE_TEST_ENGINE=OFF. The semantic "
                   "RPCs (add_feature, measure, screenshot, …) all work."
