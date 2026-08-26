@@ -6,6 +6,41 @@ an entry when it lands a fix + regression test.
 
 ---
 
+## Hiding a subassembly costs ~300 ms — a visibility toggle runs a full renderer rebuild
+
+Found 2026-08-26 by the perf HUD's worst-frame readout, on its first day in
+the field: `worst 315.29 ms · update 301.41` the moment a subassembly was
+hidden on the dock (76 occurrences).
+
+**Root cause (known):** toggling occurrence visibility bumps the assembly
+version, and `SyncDocumentRenderers` answers any version change the same way
+— remove and re-add every mesh, recompute section caps. The renderers already
+have the cheap path (`SetInstanceVisible`); nothing routes a visibility-only
+change onto it.
+
+**Impact:** a one-off ~300 ms freeze per hide/show on a medium assembly,
+scaling with occurrence count. Not per-frame. Hide/show is a first-hour user
+action on any assembly, so this is worth fixing before strangers arrive.
+
+**Likely fix:** an incremental path — a visibility-only change flips
+`SetInstanceVisible` on the affected occurrence subtree and skips the
+rebuild. Deliberately NOT done in the same round that found it: sync
+granularity is exactly where staleness bugs live (the
+raw-block-instead-of-result class), so it wants its own session with tests
+that sabotage the "did the ghost/section/highlight state survive" corners.
+
+## `fem_async_smoke` fails under machine saturation (twice on 2026-08-26)
+
+Both failures happened while the GUI shards and `ctest -j$(nproc)` ran
+CONCURRENTLY (one invocation launched both); it passes immediately alone and
+in normally-loaded full runs. Async solve polled against a wall clock + a
+saturated machine is the familiar shape — but unlike the old fem_smoke
+story, the L8 launcher now keeps the app log, so the next failure is
+diagnosable instead of folklore. Not yet earned the "flaky" label; rerun,
+and read the log if it happens OUTSIDE a double-suite invocation.
+
+---
+
 The order-dependent GUI failure recorded here on 2026-08-25 —
 `terminal/off_by_default_docks_right_on` failing behind
 `cam/tool_window_follows_the_viewport` — **does not reproduce and the entry

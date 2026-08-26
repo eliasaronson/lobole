@@ -184,15 +184,20 @@ def launch(binary, extra_args=(), env=None, timeout=30.0, headless=True):
 
 
 def _spawn(binary, extra_args, env, timeout, headless):
-    """Launch, wait for the app to name its port, return (proc, port, log, tmp)."""
+    """Launch, wait for the app to name its port, return (proc, port, log, tmp).
+
+    `headless` is a tri-state: True runs --headless, False the windowed app,
+    and the string "offscreen" runs --offscreen (real renderer, no window) —
+    which, like headless, must work with no display server at all.
+    """
     tmp = tempfile.mkdtemp(prefix="designer_smoke_")
     e = dict(os.environ if env is None else env)
     if headless:
-        # No display: the headless path runs under ctest with no X, and a
-        # stray DISPLAY makes it look like the windowed path is wanted.
-        # ONLY when headless — mcp_smoke launches the windowed app with
-        # --hidden under Xvfb, and stripping DISPLAY there gets it
-        # "GLFW Error 65550: Failed to detect any supported platform".
+        # No display: these paths run under ctest with no X, and a stray
+        # DISPLAY makes it look like the windowed path is wanted. ONLY for
+        # them — mcp_smoke launches the windowed app with --hidden under
+        # Xvfb, and stripping DISPLAY there gets it "GLFW Error 65550:
+        # Failed to detect any supported platform".
         e.pop("DISPLAY", None)
         e.pop("WAYLAND_DISPLAY", None)
     # set_settings persists immediately headless (no GUI loop to debounce it),
@@ -201,7 +206,9 @@ def _spawn(binary, extra_args, env, timeout, headless):
 
     log_path = os.path.join(tmp, "app.log")
     cmd = [binary]
-    if headless:
+    if headless == "offscreen":
+        cmd.append("--offscreen")
+    elif headless:
         cmd.append("--headless")
     cmd += ["--remote", "0", *extra_args]
     with open(log_path, "w") as log:

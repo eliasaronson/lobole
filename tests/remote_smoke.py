@@ -111,7 +111,8 @@ def main():
         # client that silently attaches to the wrong window is the failure
         # this exists to prevent.
         expect(pong["port"] == app.port, f"ping reports its port ({pong})")
-        expect(pong["mode"] in ("gui", "headless"), f"ping mode ({pong})")
+        expect(pong["mode"] in ("gui", "headless", "offscreen"),
+               f"ping mode ({pong})")
         expect("project" in pong and "dirty" in pong,
                f"ping reports the document ({pong})")
 

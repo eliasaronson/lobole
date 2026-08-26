@@ -49,8 +49,9 @@ import sys
 # Spawning the app DIRECTLY: subprocess.Popen([...binary..., "--headless"/
 # "--hidden"/"--remote"...]). Matching on the FLAGS rather than the variable
 # name, since the binary arrives as sys.argv[1] under a dozen different names.
-DIRECT = re.compile(r'subprocess\.Popen\(\s*\[[^\]]*?"--(?:remote|headless|hidden)"',
-                    re.DOTALL)
+DIRECT = re.compile(
+    r'subprocess\.Popen\(\s*\[[^\]]*?"--(?:remote|headless|hidden|offscreen)"',
+    re.DOTALL)
 # ...and the sanctioned way.
 HELPER = re.compile(r'\blaunch_app\s*\(')
 

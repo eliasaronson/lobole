@@ -8,6 +8,11 @@ Status: **SHIPPED 2026-08-26**, as designed below. As-built notes:
 - `ProcessPending`'s activity count includes an async job still in flight
   (staged screenshot, sheet render, ui action) — those span frames and need
   the loop at full rate to make progress, even with an empty queue.
+- Follow-up the first field screenshots forced (0bc8fc8): the pacer records
+  WHICH signal last held or restored full rate, shown as
+  "idle 1% · wake remote 0.3s ago" in the HUD and as `wake`/`wake_age_s` in
+  `frame_stats`. "Idle 0% while hands-off" turned out to be agent RPC
+  traffic + screenshot-tool mouse motion — undiagnosable without the name.
 - The build surfaced an unrelated latent abort: the Study panel's gravity
   field passed `EnterReturnsTrue` to `InputFloat3`, which `InputScalar`
   ASSERTS on — invisible under this build dir's Release cache, fatal on a
@@ -48,8 +53,12 @@ are picked up within 100 ms with no plumbing, and the win is still ~85% of
 the idle GPU work.
 
 The wait sits **before** `frameTimer.BeginFrame`, so the sleep is not
-measured as frame time: at idle, `frame_stats` reads ~10 fps with the same
-per-frame ms as before, and cpu-vs-display keeps meaning what
+measured as frame time — and note the as-built consequence: an idle app's
+`frame_stats` reads NORMAL per-frame ms and therefore normal-looking fps
+(the timer measures rendering, not the wall), while the `idle_frames` share
+is what says the loop paced at ~10 Hz. It also means idle iterations cannot
+fake a worst-frame spike, which is what let the spike readout skip an
+idle-exclusion filter entirely. cpu-vs-display keeps meaning what
 [frame-timing.md](frame-timing.md) says it means.
 
 ## What counts as "active"

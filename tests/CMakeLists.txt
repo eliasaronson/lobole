@@ -164,6 +164,38 @@ add_test(NAME headless_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 
+# Drives designer --offscreen --remote: a real Vulkan renderer with NO window
+# and NO display server (the test strips DISPLAY to prove it). Needs an ICD,
+# not a display — the femgpu precedent — so it skips (77) in a container and
+# runs wherever a device exists. RESOURCE_LOCK serializes it against the
+# other GPU tests.
+add_test(NAME offscreen_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/offscreen_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(offscreen_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
+
+# Mode flags must conflict loudly, never win by precedence: --headless once
+# silently overrode the --hidden a test passed, and the test spent weeks
+# testing nothing (CLAUDE.md). All four exit at argument parsing, before any
+# window or GPU exists, so they run anywhere.
+add_test(NAME offscreen_conflicts_headless
+         COMMAND $<TARGET_FILE:designer> --offscreen --headless --remote 0)
+set_tests_properties(offscreen_conflicts_headless PROPERTIES
+    PASS_REGULAR_EXPRESSION "--offscreen cannot run with --headless")
+add_test(NAME offscreen_conflicts_hidden
+         COMMAND $<TARGET_FILE:designer> --offscreen --hidden --remote 0)
+set_tests_properties(offscreen_conflicts_hidden PROPERTIES
+    PASS_REGULAR_EXPRESSION "--offscreen cannot run with --hidden")
+add_test(NAME offscreen_conflicts_guitests
+         COMMAND $<TARGET_FILE:designer> --offscreen --gui-tests --remote 0)
+set_tests_properties(offscreen_conflicts_guitests PROPERTIES
+    PASS_REGULAR_EXPRESSION "--gui-tests cannot run with --offscreen")
+add_test(NAME offscreen_requires_remote
+         COMMAND $<TARGET_FILE:designer> --offscreen)
+set_tests_properties(offscreen_requires_remote PROPERTIES
+    PASS_REGULAR_EXPRESSION "--offscreen requires --remote")
+
 # The part gate vs the handlers it gates: two lists that must agree, and
 # until 2026-08-23 nothing checked that they did.
 add_test(NAME rpc_gate_smoke

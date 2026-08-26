@@ -24,7 +24,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The gates skipped here, by name. Kept as one regex so the reason above and
 # the list below cannot drift apart.
-SLOW='Topo:|Topology|RunTopology|TopologyOptimize|femgpu|fem_smoke|topo_smoke'
+SLOW='Topo:|Topology|RunTopology|TopologyOptimize|femgpu|fem_smoke|topo_smoke|offscreen_smoke'
 
 exec nix-shell "$root/shell.nix" --run \
   "cd '$root/build' && ctest -LE gui -j\$(nproc) -E '$SLOW' --output-on-failure $*"

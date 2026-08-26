@@ -10,6 +10,14 @@ launch is the thing the settings round was built to stop
 ([../ui/settings.md](../ui/settings.md)). Bias/strength were tuned through the
 dev-watch screenshot loop as planned.
 
+> **Superseded details (2026-08-26,
+> [ssao-upsample.md](ssao-upsample.md)):** the half tier now upsamples with
+> a depth-guided joint-bilateral pass instead of plain bilinear; the "4x4
+> tiled rotation noise" below became per-pixel interleaved gradient noise
+> (the tile's blur residual read as 8 px stripes on curved surfaces at half
+> res); and the blur compares against the gradient-predicted local depth
+> plane. The architecture description below is otherwise still accurate.
+
 Scope: the two raster-polish items left open by the showcase arc
 ([plan.md](plan.md) items 3 and the soft-shadow half of 5). Per
 [roadmap.md](../roadmap.md), the `main.cpp` render-path cleanup gates **only**
