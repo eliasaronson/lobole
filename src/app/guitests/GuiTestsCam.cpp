@@ -404,8 +404,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // Click 2: the face. (The viewport click routes here through
     // SlotPickClicked; calling it directly keeps the test off the camera.)
-    // First a curved face, which must be refused in words rather than
-    // silently turned into a depth.
+    // First the post's barrel, which must be refused in words rather than
+    // silently turned into a depth. Since R10 a vertical cylinder IS a wall
+    // (that is how round openings are cut), so the refusal is the pocket
+    // wall-guard's "click the pocket's FLOOR", not the old "curved".
     Doc()->AddFeature(std::make_unique<CylinderFeature>(
         "Post", glm::vec3(200, 0, 0), glm::vec3(0, 0, 1), 5.0, 10.0));
     ctx->Yield(2);
@@ -421,7 +423,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         curved.element = ElementRef{b.createdBy, name};
         ui::CamFacePicked(*s_App, curved);
         IM_CHECK(!s_App->slotPick.miss.empty());
-        IM_CHECK(s_App->slotPick.miss.find("curved") != std::string::npos);
+        IM_CHECK(s_App->slotPick.miss.find("FLOOR") != std::string::npos);
         break;
       }
       break;
