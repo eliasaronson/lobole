@@ -2109,12 +2109,9 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       if (request.method == "screenshot") {
         if (!CaptureAvailable()) {
           RespondError(request.client, request.id,
-                       m_mode == RemoteMode::Offscreen
-                           ? "screenshot is unavailable in --offscreen — "
-                             "render_still returns an image, or use a "
-                             "windowed instance"
-                           : "screenshot requires a rendered frame — start "
-                             "designer without --headless");
+                       "screenshot requires a rendered frame — start "
+                       "designer without --headless (--offscreen renders "
+                       "without a window)");
           continue;
         }
         // Optional `view` reorients + fits before the capture, matching the
@@ -2142,11 +2139,9 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         // one view per frame and composites when all tiles are in.
         if (!CaptureAvailable()) {
           RespondError(request.client, request.id,
-                       m_mode == RemoteMode::Offscreen
-                           ? "render_sheet is unavailable in --offscreen — "
-                             "use a windowed instance"
-                           : "render_sheet requires a rendered frame — start "
-                             "designer without --headless");
+                       "render_sheet requires a rendered frame — start "
+                       "designer without --headless (--offscreen renders "
+                       "without a window)");
           continue;
         }
         const std::string outPath =

@@ -5,10 +5,18 @@
 
 ## Setup
 
-1. Start the app with the remote interface: `designer --remote 8437`
-   — or with no window/GPU/display at all: `designer --headless --remote 8437`
-   (full modeling + `mass_properties`/`list_elements`; `screenshot`,
-   `render_still`, face selection and `ui_action` error with the remedy)
+1. Start the app with the remote interface — three modes:
+
+   | mode | window | display server | renders | ui_action |
+   |---|---|---|---|---|
+   | `designer --remote 8437` | yes | needed | all | yes (per build) |
+   | `designer --offscreen --remote 8437` | none | not needed | all (`screenshot`, `render_still`, `render_sheet`, `set_render_options`, face selection) | no — nothing draws a GUI |
+   | `designer --headless --remote 8437` | none | not needed | none (each errors with the remedy) | no |
+
+   `--offscreen` needs a Vulkan device but no display — the mode for agents
+   and CI on machines where nothing owns a screen (software Vulkan like
+   lavapipe is enough; CI runs the offscreen smoke on it). `--headless` needs
+   no GPU at all: full modeling + `mass_properties`/`list_elements`.
 2. Register the server with your client. Claude Code sessions started in this
    repo pick it up automatically from the checked-in **`.mcp.json`**
    (approve the project server when prompted; `python3` must have the `mcp`

@@ -37,6 +37,7 @@
 #include "render/VulkanCommon.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SimulationActions.h"
 #include "ui/TerminalPanel.h"
@@ -693,6 +694,83 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window* wd) {
   }
 }
 
+// The --offscreen twin of SetupDepthBuffer's render pass (above): identical
+// attachment shape, formats, samples and subpass dependency — the renderers'
+// pipelines are built against THIS pass, and CaptureScreenshot builds its
+// framebuffer against it, so the two definitions never have to be compatible
+// with each other, only self-consistent. The one deliberate difference: the
+// readback attachment ends at COLOR_ATTACHMENT_OPTIMAL, not PRESENT_SRC_KHR —
+// there is no swapchain, and PRESENT_SRC is a VK_KHR_swapchain layout the
+// offscreen device does not even enable. Keep the dependency in sync with
+// SetupDepthBuffer's (the WRITE_AFTER_WRITE story documented there).
+static VkRenderPass CreateOffscreenRenderPass(VkFormat format,
+                                              VkSampleCountFlagBits samples) {
+  const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
+  VkAttachmentDescription atts[3] = {};
+  // 0: color (multisampled when MSAA; the readback image otherwise)
+  atts[0].format = format;
+  atts[0].samples = samples;
+  atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  atts[0].storeOp =
+      msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
+  atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  atts[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  // 1: depth
+  atts[1].format = g_DepthFormat;
+  atts[1].samples = samples;
+  atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  atts[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  atts[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  atts[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  // 2: resolve target = the readback image (MSAA only)
+  atts[2].format = format;
+  atts[2].samples = VK_SAMPLE_COUNT_1_BIT;
+  atts[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  atts[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  atts[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  atts[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  atts[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  atts[2].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+  VkAttachmentReference depthRef{
+      1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+  VkAttachmentReference resolveRef{2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+  VkSubpassDescription sub{};
+  sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  sub.colorAttachmentCount = 1;
+  sub.pColorAttachments = &colorRef;
+  sub.pDepthStencilAttachment = &depthRef;
+  if (msaa)
+    sub.pResolveAttachments = &resolveRef;
+  VkSubpassDependency dep{};
+  dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dep.dstSubpass = 0;
+  dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                     VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                     VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+  dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+  rp.attachmentCount = msaa ? 3 : 2;
+  rp.pAttachments = atts;
+  rp.subpassCount = 1;
+  rp.pSubpasses = &sub;
+  rp.dependencyCount = 1;
+  rp.pDependencies = &dep;
+  VkRenderPass pass = VK_NULL_HANDLE;
+  vkCreateRenderPass(g_Device, &rp, g_Allocator, &pass);
+  return pass;
+}
+
 static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
                               VkSurfaceKHR surface, int width, int height) {
   wd->Surface = surface;
@@ -1224,10 +1302,78 @@ static int RunOffscreen(const CommandLineArgs& args) {
     LOG_INFO("Offscreen: ray tracing initialized");
   }
 
+  // The raster stack, mirrored from the GUI init at the fixed 1280x720 the
+  // hidden/gui-test carve-out also uses (a host-derived size would make
+  // captures depend on whose machine rendered them). Shadow and SSAO come
+  // before the mesh renderer, whose descriptor sets bind their maps at
+  // creation — same order constraint as the GUI.
+  constexpr uint32_t kOffW = 1280, kOffH = 720;
+  constexpr VkFormat kOffFormat = VK_FORMAT_B8G8R8A8_UNORM;
+  const VkRenderPass offscreenPass =
+      CreateOffscreenRenderPass(kOffFormat, g_MSAASamples);
+  g_ShadowRenderer = std::make_unique<ShadowRenderer>();
+  if (!g_ShadowRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
+                                    g_QueueFamily, g_CommandPool))
+    LOG_ERROR("Offscreen: ShadowRenderer initialization failed");
+  g_SSAORenderer = std::make_unique<SSAORenderer>();
+  if (!g_SSAORenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
+                                  g_QueueFamily, g_CommandPool, kOffW, kOffH))
+    LOG_ERROR("Offscreen: SSAORenderer initialization failed");
+  g_MeshRenderer = std::make_unique<MeshRenderer>();
+  g_MeshRenderer->SetIBL(
+      g_IBLTextures->IrradianceView(), g_IBLTextures->PrefilterView(),
+      g_IBLTextures->BrdfLutView(), g_IBLTextures->EnvSampler(),
+      g_IBLTextures->LutSampler());
+  g_MeshRenderer->SetShadowMap(g_ShadowRenderer->ShadowMapView(),
+                               g_ShadowRenderer->ShadowSampler());
+  g_MeshRenderer->SetAOMap(g_SSAORenderer->AOView(),
+                           g_SSAORenderer->AOSampler());
+  if (g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+                                 g_Queue, g_QueueFamily, g_CommandPool,
+                                 g_MSAASamples))
+    g_MeshRenderer->SetViewportSize(kOffW, kOffH);
+  else
+    LOG_ERROR("Offscreen: MeshRenderer initialization failed");
+  g_OutlineRenderer = std::make_unique<OutlineRenderer>();
+  if (g_OutlineRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+                                    g_Queue, g_QueueFamily, g_CommandPool,
+                                    g_MSAASamples)) {
+    g_OutlineRenderer->SetViewportSize(kOffW, kOffH);
+    // Same override as the GUI init: the struct's default is EDGES in bright
+    // red at width 5 ("for testing"), which paints the whole part red at
+    // this scale. WIREFRAME with the subtle styling is the product look.
+    OutlineSettings outline = g_OutlineRenderer->GetOutlineSettings();
+    outline.mode = OutlineMode::WIREFRAME;
+    g_OutlineRenderer->SetOutlineSettings(outline);
+  }
+  g_SketchRenderer = std::make_unique<SketchRenderer>();
+  if (g_SketchRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+                                   g_Queue, g_QueueFamily, g_CommandPool,
+                                   g_MSAASamples))
+    g_SketchRenderer->SetViewportSize(kOffW, kOffH);
+  g_UnderlayRenderer = std::make_unique<UnderlayRenderer>();
+  if (g_UnderlayRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+                                     g_Queue, g_QueueFamily, g_CommandPool,
+                                     g_MSAASamples))
+    g_UnderlayRenderer->SetViewportSize(kOffW, kOffH);
+  g_FieldRenderer = std::make_unique<FieldRenderer>();
+  if (g_FieldRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+                                  g_Queue, g_QueueFamily, g_CommandPool,
+                                  g_MSAASamples))
+    g_FieldRenderer->SetViewport(0, 0, kOffW, kOffH);
+  g_FaceSelector = std::make_unique<FaceSelector>();
+
+  g_App.meshRenderer = g_MeshRenderer.get();
+  g_App.outlineRenderer = g_OutlineRenderer.get();
+  g_App.sketchRenderer = g_SketchRenderer.get();
+  g_App.underlayRenderer = g_UnderlayRenderer.get();
+  g_App.fieldRenderer = g_FieldRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
+  g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
-  // faceSelector stays null until the raster stack exists: select_face needs
-  // render meshes to pick against, and none are built in this mode yet.
+  // Shadow/SSAO/shadow-map-size preferences flow into the same fields
+  // set_render_options writes, so the toggles below read coherent state.
+  ui::ApplySettings(g_App);
 
   if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
@@ -1262,13 +1408,87 @@ static int RunOffscreen(const CommandLineArgs& args) {
   autosaver.Prime(seconds());
 
   double last = seconds();
+  double animatingSince = -1.0;
   while (!g_OffscreenStopRequested) {
     server.ProcessPending(g_App);
     const double now = seconds();
-    // Real dt so orient_to_face's animation completes at wall-clock speed;
-    // captures (commit B) hold until IsAnimating() clears.
+    // Real dt so orient_to_face's animation completes at wall-clock speed.
     g_Camera->Update(static_cast<float>(now - last));
     last = now;
+
+    // The per-frame sync the GUI loop does before rendering, minus ImGui:
+    // document edits into the renderers, selection into highlights (only
+    // DrawUI calls this in the GUI — without it a select_face followed by a
+    // screenshot would silently show no highlight), render-quality target
+    // recreation (skipping the rebinds would leave the mesh renderer
+    // sampling destroyed views on the first quality change), section planes.
+    ui::SyncDocumentRenderers(g_App);
+    ui::SyncFieldRenderer(g_App);
+    ui::SyncSelectionHighlights(g_App);
+    if (g_ShadowRenderer && g_MeshRenderer &&
+        g_ShadowRenderer->SetResolution((uint32_t)g_App.shadowMapSize)) {
+      g_MeshRenderer->RebindShadowMap(g_ShadowRenderer->ShadowMapView());
+    }
+    if (g_SSAORenderer && g_MeshRenderer &&
+        g_SSAORenderer->SetFullResolution(g_App.ssaoFullRes)) {
+      g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+    }
+    g_MeshRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
+    g_OutlineRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
+    g_FieldRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
+    g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
+    ui::PumpRenderJob(g_App);
+
+    // Captures hold until the camera lands: orient_to_face animates ~1 s,
+    // and WantsScreenshot's own 300-call cap was tuned for 60 fps frames —
+    // at this tick rate it elapses in 0.6 s, mid-flight. Bounded by wall
+    // clock so a stuck animation degrades to a mid-flight capture rather
+    // than a wedged queue.
+    if (g_Camera->IsAnimating()) {
+      if (animatingSince < 0)
+        animatingSince = now;
+    } else {
+      animatingSince = -1.0;
+    }
+    std::string shotPath;
+    if ((animatingSince < 0 || now - animatingSince > 5.0) &&
+        server.WantsScreenshot(shotPath)) {
+      const glm::mat4 view = g_Camera->GetViewMatrix();
+      const glm::mat4 proj = g_Camera->GetProjectionMatrix();
+      g_MeshRenderer->UpdateCamera(view, proj);
+      g_OutlineRenderer->UpdateCamera(view, proj);
+      g_SketchRenderer->UpdateCamera(view, proj);
+      g_UnderlayRenderer->UpdateCamera(view, proj);
+      g_FieldRenderer->UpdateCamera(view, proj);
+      vkQueueWaitIdle(g_Queue);
+      const ui::ClearColor vp = ui::ViewportClearColor();
+      VkClearValue clear{};
+      clear.color.float32[0] = vp.r;
+      clear.color.float32[1] = vp.g;
+      clear.color.float32[2] = vp.b;
+      clear.color.float32[3] = 1.0f;
+      std::string shotError;
+      FrameStats shotStats; // rect unset = judge the whole frame, which IS
+                            // the viewport here (no panel chrome exists)
+      const bool ok = CaptureScreenshot(
+          g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, offscreenPass,
+          kOffFormat, kOffW, kOffH, clear,
+          [&](VkCommandBuffer cb) {
+            // The scene only — no ImGui: nothing draws an interface in this
+            // mode, so a capture is the viewport, full frame.
+            g_MeshRenderer->Render(cb, 0);
+            g_FieldRenderer->Render(cb, 0);
+            g_OutlineRenderer->Render(cb, 0);
+            g_UnderlayRenderer->Render(cb, 0);
+            g_SketchRenderer->Render(cb, 0);
+          },
+          shotPath, &shotError, g_MSAASamples,
+          [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, 0); }, &shotStats,
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      server.ScreenshotDone(ok, shotError, shotStats.dominantFraction,
+                            shotStats.hash);
+    }
+
     ui::AutosaveProject(g_App, autosaver, now);
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
@@ -1284,9 +1504,20 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_App.document.reset();
   g_App.commands.reset();
   g_Camera.reset();
+  // Renderer teardown order mirrors the GUI exit: UnderlayRenderer's
+  // Shutdown waits on the device, so it must run before CleanupVulkan.
+  g_MeshRenderer.reset();
+  g_SketchRenderer.reset();
+  g_UnderlayRenderer.reset();
+  g_FieldRenderer.reset();
+  g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
+  g_ShadowRenderer.reset();
+  g_SSAORenderer.reset();
+  g_FaceSelector.reset();
   g_IBLTextures->Shutdown(g_Device);
   g_IBLTextures.reset();
+  vkDestroyRenderPass(g_Device, offscreenPass, g_Allocator);
   CleanupVulkan();
   return 0;
 }

@@ -270,11 +270,12 @@ The loop that works — follow it every time:
    inspect intermediate history states. When done: save_project, and
    render_still for a presentation shot.
 
-No display session of your own? screenshot needs a rendering instance:
-launch `tools/headless-preview.sh <scratch-port>` (real renderer offscreen
-under Xvfb) and point DESIGNER_PORT / --port at it — it drives and
-screenshots exactly like a windowed instance. Leave port 8799 for the human's
-dev-watch (the build they review).
+No display session of your own? Start `designer --offscreen --remote 0` —
+a real renderer with no window or display server: screenshot, render_still,
+render_sheet, set_render_options and select_face all work (ui_action does
+not — driving the GUI needs a window, e.g. `tools/headless-preview.sh
+<scratch-port>` under Xvfb). Leave port 8799 for the human's dev-watch (the
+build they review).
 
 RESEARCH REAL DIMENSIONS FIRST. When the part interfaces with a real product
 (bearings, inserts, screws, connectors, rails), web-search the datasheet
@@ -1348,7 +1349,8 @@ def set_settings(**values) -> dict:
           "read). shadows: key-light shadow map on/off. ssao: 'off'|'half'|"
           "'full' — ambient occlusion off, half-res (default) or full-res. "
           "shadow_map: 1024|2048 texels. Useful for A/B-ing renders via "
-          "screenshot. Needs a GUI instance (errors under --headless).")
+          "screenshot. Needs a rendering instance — gui or --offscreen; "
+          "errors under --headless.")
 def set_render_options(shadows: bool | None = None, ssao: str | None = None,
                        shadow_map: int | None = None) -> dict:
     params = {}

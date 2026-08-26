@@ -29,6 +29,11 @@ struct FrameStats {
   int x = 0, y = 0, w = 0, h = 0;
 };
 
+// `colorFinalLayout` is what the render pass leaves the readback attachment
+// in — the barrier before the copy names it as oldLayout. The windowed pass
+// ends at PRESENT_SRC_KHR (the default); an offscreen pass has no swapchain
+// (PRESENT_SRC is a VK_KHR_swapchain layout) and ends at
+// COLOR_ATTACHMENT_OPTIMAL instead.
 bool CaptureScreenshot(
     VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
     VkCommandPool commandPool, VkRenderPass renderPass, VkFormat format,
@@ -37,4 +42,5 @@ bool CaptureScreenshot(
     const std::string& outputPath, std::string* error = nullptr,
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
     const std::function<void(VkCommandBuffer)>& recordPrepass = {},
-    FrameStats* stats = nullptr);
+    FrameStats* stats = nullptr,
+    VkImageLayout colorFinalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);

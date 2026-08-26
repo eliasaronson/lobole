@@ -147,12 +147,13 @@ private:
   std::atomic<bool> m_running{false};
   RemoteMode m_mode = RemoteMode::Headless;
   // Something outside this class fulfils the screenshot/sheet handshake
-  // (WantsScreenshot/ScreenshotDone). Gating on this is what keeps a capture
-  // request from wedging the queue in a mode where nothing ever answers it:
-  // accepting one sets m_screenshotPending and ProcessPending then queues
-  // every later request behind a capture that would never come. Offscreen
-  // joins when its tick fulfils the handshake (raster capture, commit B).
-  bool CaptureAvailable() const { return m_mode == RemoteMode::Gui; }
+  // (WantsScreenshot/ScreenshotDone): the windowed frame loop in Gui, the
+  // offscreen tick in Offscreen, nothing in Headless. Gating on this is what
+  // keeps a capture request from wedging the queue in a mode where nothing
+  // ever answers it: accepting one sets m_screenshotPending and
+  // ProcessPending then queues every later request behind a capture that
+  // would never come.
+  bool CaptureAvailable() const { return m_mode != RemoteMode::Headless; }
   uint16_t m_port = 0;
   int m_listenFd = -1;
 

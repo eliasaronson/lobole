@@ -4,6 +4,13 @@
 > review: a `list_elements` RPC/tool (stable face/edge names + `created_by`
 > per body, pure document state) so agents can build Fillet/Chamfer edge
 > refs — landed with the I2 step below.
+>
+> **2026-08-26:** a third mode sits between this and the GUI now:
+> `--offscreen` runs the same engine+remote WITH a real Vulkan renderer and
+> no window/display server — screenshot, render_still, render_sheet,
+> set_render_options and select_face work there; only the ui_action tier
+> still needs a window. The refusal table below is current for `--headless`
+> only. See docs/scripting/mcp.md and tests/offscreen_smoke.py.
 
 Run the document/geometry engine with **no window, no GPU, no display server**:
 serve the JSON-RPC remote (and therefore MCP) from a machine with nothing but

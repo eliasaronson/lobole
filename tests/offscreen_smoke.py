@@ -91,16 +91,60 @@ def main():
         mp = d.call("mass_properties")
         expect(abs(mp["total"]["volume"] - 24000.0) < 1.0,
                f"box volume is 24000 mm^3 ({mp})")
+        # A second box forming a step: the concave corner is where shadows
+        # and AO visibly land, so the render-option toggle below has pixels
+        # to change on ANY device (a lone convex box barely self-shadows).
+        r = d.call("add_feature", feature={
+            "type": "Box", "name": "Box 2", "position": [20, 0, 0],
+            "width": 20, "height": 12, "depth": 40})
+        expect(r.get("regen", {}).get("ok"), f"step regenerates ({r})")
 
         phase("GUI-driving refusals survive, naming the mode")
         expect_error(d, "menu_click", "offscreen", path="Edit/Undo")
         expect_error(d, "key_press", "offscreen", chord="Ctrl+Z")
         expect_error(d, "viewport_drag", "offscreen")
         expect_error(d, "frame_stats", "offscreen")
-        # Commit A: raster capture is not wired yet; the refusal must point
-        # at what IS available instead of parroting the --headless text.
-        expect_error(d, "screenshot", "render_still",
-                     path=os.path.join(tmp, "shot.png"))
+
+        phase("screenshot: a real framed raster capture, no warnings")
+        shot1 = os.path.join(tmp, "shot1.png")
+        r = d.request("screenshot",
+                      {"path": shot1, "view": "iso", "fit": True})
+        expect(os.path.getsize(shot1) > 1000, f"a real PNG ({r})")
+        expect(not r.get("warnings"),
+               f"a framed shot of a part carries no warnings ({r})")
+
+        phase("set_render_options reaches the pixels")
+        d.call("set_render_options", shadows=False,
+               ssao="off")
+        shot2 = os.path.join(tmp, "shot2.png")
+        d.request("screenshot", {"path": shot2})
+        bytes1 = open(shot1, "rb").read()
+        bytes2 = open(shot2, "rb").read()
+        expect(bytes1 != bytes2,
+               "shadows+AO off changes the capture (options are not "
+               "silently ignored offscreen)")
+        d.call("set_render_options", shadows=True, ssao="half")
+
+        phase("select_face picks against real render meshes")
+        face_name = d.call("list_elements")["bodies"][0]["faces"][0]["name"]
+        f = d.call("select_face", element=face_name)
+        expect("normal" in f and "center" in f,
+               f"select_face returns geometry ({f})")
+        d.call("orient_to_face")
+        # The capture after an orient must wait for the ~1 s camera
+        # animation to land (the hold path this mode reimplements), and the
+        # view genuinely changed, so no identical-frame warning either.
+        shot3 = os.path.join(tmp, "shot3.png")
+        r = d.request("screenshot", {"path": shot3})
+        expect(not r.get("warnings"),
+               f"post-orient capture is fresh and framed ({r})")
+        expect(open(shot3, "rb").read() != bytes2,
+               "orienting to a face moved the camera")
+
+        phase("render_sheet composites standard views")
+        sheet = os.path.join(tmp, "sheet.png")
+        d.request("render_sheet", {"path": sheet})
+        expect(os.path.getsize(sheet) > 1000, "a composited sheet PNG")
 
         phase("render_still: deterministic path-traced PNG")
         rt = d.call("rt_build")

@@ -18,7 +18,7 @@ bool CaptureScreenshot(
     const std::string& outputPath, std::string* error,
     VkSampleCountFlagBits samples,
     const std::function<void(VkCommandBuffer)>& recordPrepass,
-    FrameStats* stats) {
+    FrameStats* stats, VkImageLayout colorFinalLayout) {
   auto fail = [&](const char* what) {
     if (error)
       *error = what;
@@ -177,9 +177,9 @@ bool CaptureScreenshot(
   recordScene(cb);
   vkCmdEndRenderPass(cb);
 
-  // Render pass final layout is PRESENT_SRC; transition for the copy
+  // Transition from wherever the render pass left the image for the copy.
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-  barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  barrier.oldLayout = colorFinalLayout;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;

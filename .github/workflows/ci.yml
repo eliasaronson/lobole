@@ -92,6 +92,15 @@ jobs:
           total=${line#*/}; total=${total%% passed}
           [ "$ok" = "$total" ] || exit 1
 
+      # --offscreen: real renderer, no window, no display server — so no
+      # xvfb-run here, deliberately: needing one would be the regression this
+      # step exists to catch. Same lavapipe ICD as above; lavapipe emulates
+      # ray query on the CPU, so even the render_still assertions run.
+      - name: Offscreen smoke (software Vulkan, NO Xvfb)
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: ctest --test-dir build -R offscreen_smoke --output-on-failure
+
   build-and-test:
     runs-on: ubuntu-24.04
     steps:
