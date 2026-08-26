@@ -951,6 +951,10 @@ set(SSAO_BLUR_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/ssao_blur.frag
 set(SSAO_BLUR_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/ssao_blur_frag.spv")
 compile_shader(ssao_blur_frag_shader ${SSAO_BLUR_FRAG_SHADER_SOURCE} ${SSAO_BLUR_FRAG_SHADER_OUTPUT})
 
+set(SSAO_UPSAMPLE_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/ssao_upsample.frag")
+set(SSAO_UPSAMPLE_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/ssao_upsample_frag.spv")
+compile_shader(ssao_upsample_frag_shader ${SSAO_UPSAMPLE_FRAG_SHADER_SOURCE} ${SSAO_UPSAMPLE_FRAG_SHADER_OUTPUT})
+
 # FEM result field shaders (deform warp + Turbo colormap)
 set(FIELD_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/field.vert")
 set(FIELD_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/field_vert.spv")
@@ -961,7 +965,7 @@ set(FIELD_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/field_frag.spv")
 compile_shader(field_frag_shader ${FIELD_FRAG_SHADER_SOURCE} ${FIELD_FRAG_SHADER_OUTPUT})
 
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader ssao_upsample_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)

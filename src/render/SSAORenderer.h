@@ -18,8 +18,13 @@
 //      section-clip behavior as the main pass's opaque loop);
 //   2. AO (half-res R8): 16-sample hemisphere kernel + 4x4 tiled rotation
 //      noise, fullscreen-triangle fragment pass;
-//   3. depth-aware 4x4 bilateral blur (half-res R8) — its output is what
-//      mesh.frag multiplies into the ambient/IBL term (AOView()).
+//   3. depth-aware 4x4 bilateral blur (half-res R8);
+//   4. half mode only: joint-bilateral upsample to a full-res R8 target,
+//      guided by the full-res prepass depth (docs/rendering/ssao-upsample.md)
+//      — so the half tier stops bleeding AO across silhouettes. AOView()
+//      returns the upsampled target in half mode, the native blur target in
+//      full mode; mesh.frag multiplies it into the ambient/IBL term either
+//      way and never knows the difference.
 // All targets are window-resolution-dependent: call Resize on swapchain
 // rebuild (waits for idle internally) and rebind AOView() into the mesh
 // renderer. Each pass's subpass dependencies order write vs. fragment-sample
@@ -55,8 +60,11 @@ public:
   void RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
                         MeshRenderer& scene);
 
-  // Blurred AO for MeshRenderer::SetAOMap / RebindAOMap.
-  VkImageView AOView() const { return m_aoBlur.view; }
+  // What mesh.frag samples (MeshRenderer::SetAOMap / RebindAOMap): the
+  // full-res upsampled AO in half mode, the native full-res blur in full.
+  VkImageView AOView() const {
+    return m_fullRes ? m_aoBlur.view : m_aoUpsample.view;
+  }
   VkSampler AOSampler() const { return m_linearSampler; }
   // For mesh.frag's gl_FragCoord -> AO uv mapping.
   glm::vec2 InvFullResolution() const {
@@ -100,10 +108,12 @@ private:
   Target m_prepassDepth;  // D32
   Target m_prepassNormal; // RGBA8, view-space normal
   Target m_aoRaw;         // R8
-  Target m_aoBlur;        // R8 — what mesh.frag samples
+  Target m_aoBlur;        // R8, AO res — what mesh.frag samples in full mode
+  Target m_aoUpsample;    // R8, FULL res — what it samples in half mode
   VkFramebuffer m_prepassFramebuffer = VK_NULL_HANDLE;
   VkFramebuffer m_aoFramebuffer = VK_NULL_HANDLE;
   VkFramebuffer m_blurFramebuffer = VK_NULL_HANDLE;
+  VkFramebuffer m_upsampleFramebuffer = VK_NULL_HANDLE;
 
   // Resolution-independent objects (created once).
   VkRenderPass m_prepassRenderPass = VK_NULL_HANDLE; // normal + depth
@@ -123,11 +133,15 @@ private:
   VkPipeline m_prepassPipeline = VK_NULL_HANDLE;
   VkPipeline m_aoPipeline = VK_NULL_HANDLE;
   VkPipeline m_blurPipeline = VK_NULL_HANDLE;
+  // Shares m_blurSetLayout/m_blurPipelineLayout (same 2-sampler + vec4-push
+  // shape); only the fragment shader and the bound images differ.
+  VkPipeline m_upsamplePipeline = VK_NULL_HANDLE;
 
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> m_prepassSets; // per frame (UBO)
   std::vector<VkDescriptorSet> m_aoSets;      // per frame (UBO + images)
   VkDescriptorSet m_blurSet = VK_NULL_HANDLE; // images only
+  VkDescriptorSet m_upsampleSet = VK_NULL_HANDLE; // blurred AO + depth
 
   std::vector<VkBuffer> m_prepassUBOs;
   std::vector<VkDeviceMemory> m_prepassUBOMemory;

@@ -77,6 +77,7 @@ def main():
     shot_on = os.path.join(tmp, f"ao_on_{app.port}.png")
     shot_off = os.path.join(tmp, f"ao_off_{app.port}.png")
     shot_bare = os.path.join(tmp, f"ao_bare_{app.port}.png")
+    shot_half = os.path.join(tmp, f"ao_half_{app.port}.png")
     try:
         d = Designer.wait_for(app.port, timeout=90)
 
@@ -173,6 +174,47 @@ def main():
         expect(occ_top - wall_top < 25,
                f"occlusion reaches the geometry it belongs to (starts "
                f"{occ_top - wall_top} px below the walls' top)")
+
+        # --- Half tier = half-res AO + joint-bilateral upsample
+        # (docs/rendering/ssao-upsample.md). Two contracts: it must look LIKE
+        # native full (a regression bound on the mean difference), and its
+        # occlusion must still land ON the geometry — a wrong upsample UV or
+        # a dead depth guide displaces AO exactly like the mapping bug this
+        # smoke was built for, so the same invariant catches it.
+        d.call("set_render_options", shadows=False, ssao="half")
+        d.call("screenshot", path=shot_half)
+        half = Image.open(shot_half).convert("L").crop(box)
+        expect(half.size == on.size, "same viewport in the half frame")
+        from PIL import ImageChops
+        hist = ImageChops.difference(on, half).histogram()
+        total = float(sum(hist))
+        mean_diff = sum(i * c for i, c in enumerate(hist)) / total
+        print(f"  half-vs-full mean abs diff {mean_diff:.3f}/255", flush=True)
+        # Measured 0.104 on the RTX rig at landing; 1.0 is far above noise
+        # and far below a visible divergence.
+        expect(mean_diff < 1.0,
+               f"upsampled half matches native full ({mean_diff:.3f}/255)")
+
+        halfpx = half.load()
+        # >=8, not the >=4 the full tier uses: half-RES AO carries a faint
+        # (4-7/255) wash on open surfaces — coarse-depth self-occlusion bias,
+        # measured IDENTICAL before and after the upsample landed (18.9k px
+        # in both), so it is the AO computation, not the upsample. The
+        # locality invariant is about REAL occlusion being displaced, and the
+        # strong pixels are where half matches full (2.9k px in both).
+        occluded_h = [(x, y) for y in range(0, h, 2) for x in range(0, w, 2)
+                      if offpx[x, y] - halfpx[x, y] >= 8]
+        expect(len(occluded_h) > 50,
+               f"half-tier occlusion is doing something ({len(occluded_h)} px)")
+        stray_h = [q for q in occluded_h if not near_geometry(q)]
+        frac_h = len(stray_h) / float(len(occluded_h))
+        expect(frac_h < 0.15,
+               f"half-tier occlusion lands on its geometry "
+               f"({frac_h * 100:.1f}% stray)")
+        occ_top_h = min(y for _, y in occluded_h)
+        expect(occ_top_h - wall_top < 25,
+               f"half-tier occlusion reaches its geometry (gap "
+               f"{occ_top_h - wall_top} px)")
         print("render_ao_smoke: all assertions passed")
     finally:
         app.terminate()
@@ -180,7 +222,7 @@ def main():
             app.wait(timeout=20)
         except subprocess.TimeoutExpired:
             app.kill()
-        for p in (shot_on, shot_off, shot_bare):
+        for p in (shot_on, shot_off, shot_bare, shot_half):
             if os.path.exists(p):
                 os.remove(p)
 

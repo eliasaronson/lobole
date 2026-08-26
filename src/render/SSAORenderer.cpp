@@ -93,6 +93,8 @@ void SSAORenderer::Shutdown() {
     vkDestroyPipeline(m_device, m_aoPipeline, nullptr);
   if (m_blurPipeline)
     vkDestroyPipeline(m_device, m_blurPipeline, nullptr);
+  if (m_upsamplePipeline)
+    vkDestroyPipeline(m_device, m_upsamplePipeline, nullptr);
   if (m_prepassPipelineLayout)
     vkDestroyPipelineLayout(m_device, m_prepassPipelineLayout, nullptr);
   if (m_aoPipelineLayout)
@@ -138,7 +140,8 @@ void SSAORenderer::Shutdown() {
   if (m_r8RenderPass)
     vkDestroyRenderPass(m_device, m_r8RenderPass, nullptr);
 
-  m_prepassPipeline = m_aoPipeline = m_blurPipeline = VK_NULL_HANDLE;
+  m_prepassPipeline = m_aoPipeline = m_blurPipeline = m_upsamplePipeline =
+      VK_NULL_HANDLE;
   m_prepassPipelineLayout = m_aoPipelineLayout = m_blurPipelineLayout =
       VK_NULL_HANDLE;
   m_descriptorPool = VK_NULL_HANDLE;
@@ -296,6 +299,39 @@ void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRenderPass(cb);
   }
+
+  // 4. Half mode only: joint-bilateral upsample to full res, depth-guided
+  // (docs/rendering/ssao-upsample.md) — this is the target mesh.frag samples
+  // in half mode. In full mode the blur target is already full-res and is
+  // sampled directly; the same r8 render pass carries the write->sample
+  // dependency, exactly as between the AO and blur passes above.
+  if (!m_fullRes) {
+    VkClearValue clear;
+    clear.color = {{1.0f, 0.0f, 0.0f, 0.0f}};
+    VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rp.renderPass = m_r8RenderPass;
+    rp.framebuffer = m_upsampleFramebuffer;
+    rp.renderArea.extent = {m_width, m_height};
+    rp.clearValueCount = 1;
+    rp.pClearValues = &clear;
+    vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
+    VkViewport vp{0.0f, 0.0f, (float)m_width, (float)m_height, 0.0f, 1.0f};
+    VkRect2D sc{{0, 0}, {m_width, m_height}};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_upsamplePipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_blurPipelineLayout, 0, 1, &m_upsampleSet, 0,
+                            nullptr);
+    // xy = the HALF-res texel size: the shader walks the 2x2 neighborhood of
+    // AO texels around each full-res pixel. Same depth-sharpness as the blur.
+    const glm::vec4 upParams(1.0f / m_aoWidth, 1.0f / m_aoHeight,
+                             kBlurDepthSharpness, 0.0f);
+    vkCmdPushConstants(cb, m_blurPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(upParams), &upParams);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cb);
+  }
 }
 
 bool SSAORenderer::CreateTargetImage(uint32_t width, uint32_t height,
@@ -349,7 +385,14 @@ bool SSAORenderer::CreateTargets(uint32_t width, uint32_t height) {
       !CreateTargetImage(m_aoWidth, m_aoHeight, VK_FORMAT_R8_UNORM,
                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                              VK_IMAGE_USAGE_SAMPLED_BIT,
-                         VK_IMAGE_ASPECT_COLOR_BIT, m_aoBlur)) {
+                         VK_IMAGE_ASPECT_COLOR_BIT, m_aoBlur) ||
+      // Full-res even in full mode (where it goes unrecorded): an
+      // unconditionally valid target keeps the descriptor set legal across
+      // SetFullResolution toggles for one R8 image of memory.
+      !CreateTargetImage(m_width, m_height, VK_FORMAT_R8_UNORM,
+                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                             VK_IMAGE_USAGE_SAMPLED_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT, m_aoUpsample)) {
     LOG_ERROR("SSAORenderer: failed to create targets");
     return false;
   }
@@ -379,6 +422,12 @@ bool SSAORenderer::CreateTargets(uint32_t width, uint32_t height) {
   if (vkCreateFramebuffer(m_device, &fb, nullptr, &m_blurFramebuffer) !=
       VK_SUCCESS)
     return false;
+  fb.width = m_width;
+  fb.height = m_height;
+  fb.pAttachments = &m_aoUpsample.view;
+  if (vkCreateFramebuffer(m_device, &fb, nullptr, &m_upsampleFramebuffer) !=
+      VK_SUCCESS)
+    return false;
 
   return true;
 }
@@ -399,11 +448,15 @@ void SSAORenderer::DestroyTargets() {
     vkDestroyFramebuffer(m_device, m_aoFramebuffer, nullptr);
   if (m_blurFramebuffer)
     vkDestroyFramebuffer(m_device, m_blurFramebuffer, nullptr);
-  m_prepassFramebuffer = m_aoFramebuffer = m_blurFramebuffer = VK_NULL_HANDLE;
+  if (m_upsampleFramebuffer)
+    vkDestroyFramebuffer(m_device, m_upsampleFramebuffer, nullptr);
+  m_prepassFramebuffer = m_aoFramebuffer = m_blurFramebuffer =
+      m_upsampleFramebuffer = VK_NULL_HANDLE;
   destroy(m_prepassDepth);
   destroy(m_prepassNormal);
   destroy(m_aoRaw);
   destroy(m_aoBlur);
+  destroy(m_aoUpsample);
 }
 
 bool SSAORenderer::CreateRenderPasses() {
@@ -701,11 +754,11 @@ bool SSAORenderer::CreateDescriptors() {
   poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT * 2;
   poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 3 + 2;
+  poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT * 3 + 4;
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   pi.poolSizeCount = 2;
   pi.pPoolSizes = poolSizes;
-  pi.maxSets = MAX_FRAMES_IN_FLIGHT * 2 + 1;
+  pi.maxSets = MAX_FRAMES_IN_FLIGHT * 2 + 2;
   if (vkCreateDescriptorPool(m_device, &pi, nullptr, &m_descriptorPool) !=
       VK_SUCCESS)
     return false;
@@ -730,6 +783,9 @@ bool SSAORenderer::CreateDescriptors() {
   ai.descriptorSetCount = 1;
   ai.pSetLayouts = &m_blurSetLayout;
   if (vkAllocateDescriptorSets(m_device, &ai, &m_blurSet) != VK_SUCCESS)
+    return false;
+  // The upsample set reuses the blur LAYOUT; only the bound images differ.
+  if (vkAllocateDescriptorSets(m_device, &ai, &m_upsampleSet) != VK_SUCCESS)
     return false;
 
   // UBO bindings are stable; image bindings go via WriteTargetDescriptors
@@ -780,6 +836,10 @@ void SSAORenderer::WriteTargetDescriptors() {
   }
   push(m_blurSet, 0, &aoRaw);
   push(m_blurSet, 1, &depth);
+  VkDescriptorImageInfo aoBlurred{m_linearSampler, m_aoBlur.view,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  push(m_upsampleSet, 0, &aoBlurred);
+  push(m_upsampleSet, 1, &depth);
   vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()),
                          writes.data(), 0, nullptr);
 }
@@ -803,14 +863,15 @@ void SSAORenderer::TransitionTargetsToRead() {
   const struct {
     VkImage image;
     VkImageAspectFlags aspect;
-  } targets[4] = {
+  } targets[5] = {
       {m_prepassDepth.image, VK_IMAGE_ASPECT_DEPTH_BIT},
       {m_prepassNormal.image, VK_IMAGE_ASPECT_COLOR_BIT},
       {m_aoRaw.image, VK_IMAGE_ASPECT_COLOR_BIT},
       {m_aoBlur.image, VK_IMAGE_ASPECT_COLOR_BIT},
+      {m_aoUpsample.image, VK_IMAGE_ASPECT_COLOR_BIT},
   };
-  VkImageMemoryBarrier barriers[4]{};
-  for (int i = 0; i < 4; i++) {
+  VkImageMemoryBarrier barriers[5]{};
+  for (int i = 0; i < 5; i++) {
     barriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barriers[i].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -822,7 +883,7 @@ void SSAORenderer::TransitionTargetsToRead() {
   }
   vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
-                       nullptr, 4, barriers);
+                       nullptr, 5, barriers);
   vkEndCommandBuffer(cb);
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
@@ -836,10 +897,10 @@ bool SSAORenderer::CreatePipelines() {
   auto load = [&](const char* name) {
     return vkutil::LoadShaderModule(m_device, name);
   };
-  VkShaderModule modules[5] = {
+  VkShaderModule modules[6] = {
       load("ssao_prepass_vert.spv"), load("ssao_prepass_frag.spv"),
-      load("fullscreen_vert.spv"), load("ssao_frag.spv"),
-      load("ssao_blur_frag.spv")};
+      load("fullscreen_vert.spv"),   load("ssao_frag.spv"),
+      load("ssao_blur_frag.spv"),    load("ssao_upsample_frag.spv")};
   auto destroyModules = [&] {
     for (VkShaderModule m : modules)
       if (m)
@@ -1018,6 +1079,14 @@ bool SSAORenderer::CreatePipelines() {
     if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                   nullptr, &m_blurPipeline) != VK_SUCCESS) {
       LOG_ERROR("SSAORenderer: failed to create blur pipeline");
+      destroyModules();
+      return false;
+    }
+    // 4. Upsample: same layout (2 samplers + vec4 push), different fragment.
+    stages[1].module = modules[5];
+    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                  nullptr, &m_upsamplePipeline) != VK_SUCCESS) {
+      LOG_ERROR("SSAORenderer: failed to create upsample pipeline");
       destroyModules();
       return false;
     }
