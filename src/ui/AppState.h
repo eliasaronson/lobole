@@ -5,7 +5,8 @@
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/cam/CamJob.h"
-#include "core/cam/CamVerify.h" // cam::VerdictLine (the G4 verdict, in words)
+#include "core/cam/CamToolpath.h" // cam::FaceRegion (the ghost/hover cache)
+#include "core/cam/CamVerify.h"   // cam::VerdictLine (the G4 verdict, in words)
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
@@ -1208,6 +1209,21 @@ struct AppState {
   // The operation the viewport is illustrating (G3): its removed volume, its
   // depth label. 0 = none, which is what closing the session leaves behind.
   uint64_t camGhostOp = 0;
+  // The face region the ghost and the hover preview draw, cached. Both used
+  // to section the picked face — through a copy of every body — on EVERY
+  // FRAME the ghost was on or the cursor sat over a face, which is OCC work
+  // inside the frame loop. The key is everything the answer depends on, so a
+  // stale one is not expressible: a model edit bumps the version, and a
+  // different pick changes the ref.
+  struct CamRegionCache {
+    uint64_t documentVersion = UINT64_MAX;
+    uint64_t setupId = 0;
+    double rotationA = 0.0;
+    ElementRef ref;
+    cam::FaceRegion region;
+  };
+  CamRegionCache camGhostRegion;
+  CamRegionCache camHoverRegion;
   bool camShowStock = true;
   // The last verification (G4), in the words the panel prints, plus the
   // points where the tool could not reach. Both cleared on any edit, because

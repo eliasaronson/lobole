@@ -59,6 +59,60 @@ void RefreshCamToolpaths(AppState& state) {
   state.camToolpaths = cam::GenerateAll(*setup, state.document->GetBodies());
 }
 
+void RefreshCamToolpath(AppState& state, uint64_t opId) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  if (setup == nullptr || !state.document || opId == 0)
+    return;
+  const cam::Operation* op = nullptr;
+  for (const cam::Operation& candidate : setup->operations)
+    if (candidate.id == opId)
+      op = &candidate;
+  if (op == nullptr) {
+    DropCamToolpath(state, opId);
+    return;
+  }
+  if (!op->enabled) {
+    // GenerateAll skips disabled operations, so the incremental path has to
+    // as well or the two disagree about what the job contains.
+    DropCamToolpath(state, opId);
+    return;
+  }
+  cam::Toolpath fresh = cam::Generate(*setup, *op, state.document->GetBodies());
+  for (cam::Toolpath& existing : state.camToolpaths)
+    if (existing.operationId == opId) {
+      existing = std::move(fresh);
+      return;
+    }
+  // New: insert where a full pass would have put it — operations order, so
+  // the backplot and the posted file follow the list the user sees.
+  size_t at = state.camToolpaths.size();
+  bool seen = false;
+  for (size_t i = 0, slot = 0; i < setup->operations.size(); i++) {
+    const cam::Operation& candidate = setup->operations[i];
+    if (candidate.id == opId) {
+      at = slot;
+      seen = true;
+      break;
+    }
+    if (candidate.enabled)
+      slot++;
+  }
+  (void)seen;
+  state.camToolpaths.insert(
+      state.camToolpaths.begin() +
+          static_cast<ptrdiff_t>(std::min(at, state.camToolpaths.size())),
+      std::move(fresh));
+}
+
+void DropCamToolpath(AppState& state, uint64_t opId) {
+  for (auto it = state.camToolpaths.begin(); it != state.camToolpaths.end();
+       ++it)
+    if (it->operationId == opId) {
+      state.camToolpaths.erase(it);
+      return;
+    }
+}
+
 namespace {
 
 // The tool, to scale, where it first enters the material (docs/cam/gui.md).
@@ -180,6 +234,20 @@ void DrawCamPanel(AppState& state) {
 
   cam::Setup* setup = ActiveCamSetup(state);
   bool dirty = false;
+  // WHICH operation changed, so only that one is regenerated. One adaptive
+  // pocket takes seconds to generate; regenerating the whole setup on every
+  // widget touch made the app freeze for as long as its slowest operation,
+  // once per edit (docs/known-bugs.md). 0 = nothing yet; kAllOps = something
+  // setup-wide (the stock, a tool, the frame), which every operation reads.
+  constexpr uint64_t kAllOps = ~uint64_t{0};
+  uint64_t changed = 0;
+  const auto touched = [&](uint64_t opId) {
+    dirty = true;
+    // Two different operations in one frame is not a thing a person can do,
+    // but a script or a re-entrant widget could: fall back to everything
+    // rather than leave one of them stale.
+    changed = (changed == 0 || changed == opId) ? opId : kAllOps;
+  };
 
   // --- setup row ---------------------------------------------------------
   ImGui::SetNextItemWidth(140.0f);
@@ -476,7 +544,7 @@ void DrawCamPanel(AppState& state) {
   for (cam::Operation& op : setup->operations) {
     ImGui::PushID(static_cast<int>(op.id));
     if (ImGui::Checkbox("###enabled", &op.enabled))
-      dirty = true;
+      touched(op.id);
     ImGui::SameLine();
     // What this operation IS, in a sentence. The numbers behind it are
     // derived from the model and the cutter (docs/cam/gui.md); the fields
@@ -502,14 +570,14 @@ void DrawCamPanel(AppState& state) {
       ImGui::SetNextItemWidth(90.0f);
       if (ImGui::Combo("###type", &type, kOpTypes, IM_ARRAYSIZE(kOpTypes))) {
         op.type = static_cast<cam::OpType>(type);
-        dirty = true;
+        touched(op.id);
       }
       ImGui::SameLine();
       ImGui::SetNextItemWidth(60.0f);
       float top = static_cast<float>(op.topZ);
       if (ImGui::DragFloat("###top", &top, 0.25f, -1000.0f, 1000.0f, "%.2f")) {
         op.topZ = top;
-        dirty = true;
+        touched(op.id);
       }
       ImGui::SetItemTooltip("Top of the cut (Z)");
       ImGui::SameLine();
@@ -518,7 +586,7 @@ void DrawCamPanel(AppState& state) {
       if (ImGui::DragFloat("###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
                            "%.2f")) {
         op.bottomZ = bottom;
-        dirty = true;
+        touched(op.id);
       }
       ImGui::SetItemTooltip("Bottom of the cut (Z)");
       ImGui::SameLine();
@@ -526,7 +594,7 @@ void DrawCamPanel(AppState& state) {
       float step = static_cast<float>(op.stepdown);
       if (ImGui::DragFloat("###stepdown", &step, 0.25f, 0.0f, 100.0f, "%.2f")) {
         op.stepdown = step;
-        dirty = true;
+        touched(op.id);
       }
       ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
       if (op.type == cam::OpType::EdgeRound) {
@@ -535,7 +603,7 @@ void DrawCamPanel(AppState& state) {
         if (ImGui::DragFloat("Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
                              "%.2f")) {
           op.edgeSize = size;
-          dirty = true;
+          touched(op.id);
         }
         ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
                               "bevel (V-bit), mm. 0 = the biggest this tool "
@@ -549,20 +617,20 @@ void DrawCamPanel(AppState& state) {
         if (ImGui::DragFloat("Stepover###stepover", &over, 0.01f, 0.05f, 0.9f,
                              "%.2f")) {
           op.stepover = over;
-          dirty = true;
+          touched(op.id);
         }
         ImGui::SetItemTooltip("Fraction of the cutter taken per pass "
                               "sideways — the number adaptive clearing holds "
                               "constant");
       }
       if (ImGui::Checkbox("Climb###climb", &op.climb))
-        dirty = true;
+        touched(op.id);
       ImGui::SameLine();
       ImGui::SetNextItemWidth(55.0f);
       int tabs = op.tabCount;
       if (ImGui::DragInt("Tabs###tabs", &tabs, 0.2f, 0, 32)) {
         op.tabCount = tabs;
-        dirty = true;
+        touched(op.id);
       }
       ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
                             "pass (profile only)");
@@ -594,7 +662,15 @@ void DrawCamPanel(AppState& state) {
         ops.erase(it);
         break;
       }
+    // Deleting one operation cannot change another's toolpath, so drop its
+    // entry and regenerate NOTHING. This used to re-cut the whole job.
+    DropCamToolpath(state, removeOp);
     dirty = true;
+    state.projectMetaDirty = true;
+    state.camVerdict.clear();
+    state.camLeftover.clear();
+    if (state.camGhostOp == removeOp)
+      state.camGhostOp = 0;
   }
 
   if (ImGui::SmallButton("Add operation###cam_add_op")) {
@@ -612,7 +688,7 @@ void DrawCamPanel(AppState& state) {
       op.name = "Operation " + std::to_string(setup->operations.size() + 1);
       setup->operations.push_back(op);
       state.camRefusal.clear();
-      dirty = true;
+      touched(op.id);
     } else {
       state.camRefusal = derived.why;
     }
@@ -625,7 +701,13 @@ void DrawCamPanel(AppState& state) {
 
   if (dirty) {
     state.projectMetaDirty = true;
-    RefreshCamToolpaths(state); // the picture always matches the parameters
+    // The picture always matches the parameters — but only the operation
+    // that changed is re-cut. `test_cam` pins that one-at-a-time and
+    // all-at-once agree, which is what lets this be a cache at all.
+    if (changed == 0 || changed == kAllOps)
+      RefreshCamToolpaths(state);
+    else
+      RefreshCamToolpath(state, changed);
     // A verdict about the PREVIOUS toolpath is worse than no verdict: drop
     // it, and let the next Generate produce an honest one.
     state.camVerdict.clear();
@@ -642,6 +724,8 @@ namespace ui {
 void DrawCamPanel(AppState&) {}
 void AppendCamToolpathOverlay(AppState&, std::vector<PrimVertex>&) {}
 void RefreshCamToolpaths(AppState&) {}
+void RefreshCamToolpath(AppState&, uint64_t) {}
+void DropCamToolpath(AppState&, uint64_t) {}
 } // namespace ui
 
 #endif

@@ -19,10 +19,18 @@ void DrawCamPanel(AppState& state);
 // no picture.
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out);
 
-// Regenerates the cached toolpaths for the active setup. Cheap enough to call
-// on any edit (a plate profile is ~200 moves); the cache exists so the
-// overlay does not re-slice the model every frame.
+// Regenerates the cached toolpaths for the active setup — ALL of them. Use it
+// when something setup-wide changed (the stock, a tool, the frame); for an
+// edit to one operation use RefreshCamToolpath below, because "all of them"
+// is not cheap: one adaptive pocket on a real part measured 7.1 s, and every
+// edit used to pay it again (docs/known-bugs.md).
 void RefreshCamToolpaths(AppState& state);
+
+// Regenerates ONE operation's toolpath in place (appending if it is new), and
+// drops one by id. The vector is per-operation and in operations order, so
+// the result is the same as a full pass — `test_cam.cpp` pins that.
+void RefreshCamToolpath(AppState& state, uint64_t opId);
+void DropCamToolpath(AppState& state, uint64_t opId);
 
 // The post options a setup implies. One place, so the panel and the tool
 // session cannot disagree about whether this machine gets arcs (C7).

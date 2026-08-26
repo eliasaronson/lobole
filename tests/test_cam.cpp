@@ -2145,4 +2145,55 @@ TEST_CASE("cam verify: an unmodelled edge break says why it gouges", "[cam]") {
     CHECK(line.text.find("not in the MODEL") == std::string::npos);
 }
 
+TEST_CASE("cam: one operation at a time cuts what all of them cut", "[cam]") {
+  // The panel regenerates ONLY the operation a user just touched — adding,
+  // deleting or editing one no longer re-cuts the whole job, which used to
+  // cost the slowest operation in it on every edit (one adaptive pocket
+  // measured 7.1 s). That is only safe while a single Generate and a whole
+  // GenerateAll agree, which is what this pins.
+  auto doc = PocketDoc();
+  cam::Setup setup = BasicSetup();
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+
+  cam::Operation pocket =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+          .op;
+  pocket.id = 1;
+  cam::Operation profile =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, {})
+          .op;
+  profile.id = 2;
+  cam::Operation disabled = profile;
+  disabled.id = 3;
+  disabled.enabled = false;
+  setup.operations = {pocket, profile, disabled};
+
+  const std::vector<cam::Toolpath> all =
+      cam::GenerateAll(setup, doc->GetBodies());
+  // A disabled operation is not in the job — the incremental path drops its
+  // entry for exactly this reason.
+  REQUIRE(all.size() == 2);
+  for (const cam::Toolpath& whole : all) {
+    const cam::Operation* op = nullptr;
+    for (const cam::Operation& candidate : setup.operations)
+      if (candidate.id == whole.operationId)
+        op = &candidate;
+    REQUIRE(op != nullptr);
+    const cam::Toolpath one = cam::Generate(setup, *op, doc->GetBodies());
+    INFO("operation " << op->id);
+    CHECK(one.error == whole.error);
+    CHECK(one.toolNumber == whole.toolNumber);
+    REQUIRE(one.moves.size() == whole.moves.size());
+    CHECK_THAT(one.CutLength(), WithinRel(whole.CutLength(), 1e-12));
+    CHECK_THAT(one.MinZ(), WithinAbs(whole.MinZ(), 1e-12));
+    for (size_t i = 0; i < one.moves.size(); i++) {
+      REQUIRE(one.moves[i].kind == whole.moves[i].kind);
+      REQUIRE_THAT(one.moves[i].to.x, WithinAbs(whole.moves[i].to.x, 1e-12));
+      REQUIRE_THAT(one.moves[i].to.y, WithinAbs(whole.moves[i].to.y, 1e-12));
+      REQUIRE_THAT(one.moves[i].to.z, WithinAbs(whole.moves[i].to.z, 1e-12));
+    }
+  }
+}
+
 #endif // HAVE_CAM

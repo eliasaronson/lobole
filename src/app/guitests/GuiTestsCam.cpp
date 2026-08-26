@@ -565,6 +565,100 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  // The cached toolpaths are now maintained ONE OPERATION AT A TIME (adding,
+  // deleting and editing each touch their own entry), so the property that
+  // makes the cache safe is that it always equals a full pass. Assert exactly
+  // that after each kind of edit — a stale entry is the failure this class of
+  // optimisation invites.
+  t = IM_REGISTER_TEST(engine, "cam", "incremental_toolpaths_never_go_stale");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
+    const uint64_t plate = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Void", glm::vec3(15, 10, 14), 30, 20, 20));
+    const uint64_t voidId = Doc()->GetFeature(1)->GetId();
+    Doc()->AddFeature(std::make_unique<BooleanFeature>("Pocket", plate, voidId,
+                                                       BooleanOp::Subtract));
+    ctx->Yield(2);
+
+    // Same shape as the full pass: same operations, same order, same moves.
+    const auto matchesFullPass = [&](const char* when) {
+      const cam::Setup* live = ui::ActiveCamSetup(*s_App);
+      IM_CHECK(live != nullptr);
+      const std::vector<cam::Toolpath> full =
+          cam::GenerateAll(*live, Doc()->GetBodies());
+      ctx->LogDebug("%s: cached %d, full %d", when,
+                    (int)s_App->camToolpaths.size(), (int)full.size());
+      IM_CHECK_EQ(s_App->camToolpaths.size(), full.size());
+      for (size_t i = 0; i < full.size(); i++) {
+        IM_CHECK_EQ(s_App->camToolpaths[i].operationId, full[i].operationId);
+        IM_CHECK_EQ(s_App->camToolpaths[i].moves.size(), full[i].moves.size());
+        IM_CHECK(std::abs(s_App->camToolpaths[i].CutLength() -
+                          full[i].CutLength()) < 1e-6);
+      }
+    };
+
+    ToolbarClick(ctx, "###tb_cam");
+    ctx->Yield(2);
+
+    // Two operations, through the verbs: a pocket on the floor, then the
+    // part cut out.
+    ui::SelectionItem floor;
+    floor.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : Doc()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+            std::abs(o.z - 14.0f) < 1e-4f)
+          floor.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(floor.element.IsSet());
+    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_pocket");
+    ctx->Yield();
+    ui::CamFacePicked(*s_App, floor);
+    ctx->Yield(2);
+    matchesFullPass("after the first operation");
+    IM_CHECK_EQ(s_App->camToolpaths.size(), (size_t)1);
+
+    ui::SelectionItem wall;
+    wall.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : Doc()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f)
+          wall.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(wall.element.IsSet());
+    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_profile");
+    ctx->Yield();
+    ui::CamFacePicked(*s_App, wall); // the part's own side: cut it out
+    ctx->Yield(2);
+    matchesFullPass("after the second");
+
+    // An edit to ONE operation's parameters: the panel's path, called the
+    // way the panel calls it.
+    {
+      cam::Setup* live = ui::ActiveCamSetup(*s_App);
+      IM_CHECK(live != nullptr);
+      IM_CHECK(live->operations.size() >= (size_t)2);
+      cam::Operation& first = live->operations[0];
+      first.stepdown = std::max(0.5, first.stepdown * 0.5);
+      ui::RefreshCamToolpath(*s_App, first.id);
+      ctx->Yield();
+      matchesFullPass("after editing one operation");
+    }
+
+    // And a delete, through the tool window's own button.
+    const size_t before = s_App->camToolpaths.size();
+    ctx->ItemClick("//CAM###ToolWindow/**/x###rmop");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camToolpaths.size(), before - 1);
+    matchesFullPass("after deleting one");
+    s_App->camToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

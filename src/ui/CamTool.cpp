@@ -66,19 +66,50 @@ void LoopWalls(const std::vector<glm::dvec2>& pts, double zLow, double zHigh,
 // The volume an operation removes, from the face it was given. Pockets and
 // profiles both know their own boundary; a facing pass covers the stock, so
 // it is drawn from the stock box instead.
+// The region a picked face bounds, CACHED. Both callers below run once per
+// frame — the ghost while it is shown, the hover preview while a pick is
+// armed — and each call framed every body (a copy, element maps and all) and
+// sectioned the face through OCC. That is model work inside the frame loop.
+// The key is everything the answer depends on, so a stale hit cannot be
+// expressed: a model edit moves the document version, an indexed setup moves
+// rotationA, and a different pick moves the ref.
+const cam::FaceRegion& CachedRegion(AppState& state,
+                                    AppState::CamRegionCache& cache,
+                                    const cam::Setup& setup,
+                                    const ElementRef& ref) {
+  const uint64_t version = state.document ? state.document->Version() : 0;
+  const bool sameRef =
+      cache.ref.featureId == ref.featureId && cache.ref.name == ref.name;
+  if (cache.documentVersion != version || cache.setupId != setup.id ||
+      cache.rotationA != setup.rotationA || !sameRef) {
+    cache.documentVersion = version;
+    cache.setupId = setup.id;
+    cache.rotationA = setup.rotationA;
+    cache.ref = ref;
+    cache.region =
+        state.document
+            ? cam::PickedFaceRegion(
+                  cam::BodiesInSetupFrame(setup, state.document->GetBodies()),
+                  ref)
+            : cam::FaceRegion{};
+  }
+  return cache.region;
+}
+
 void OperationGhost(AppState& state, const cam::Setup& setup,
                     const cam::Operation& op, std::vector<PrimVertex>& prims,
                     std::vector<LineVertex3D>& quads) {
   // Setup space: op.topZ/bottomZ are, so the boundary must be too (C9).
-  const std::vector<Body> bodies =
-      cam::BodiesInSetupFrame(setup, state.document->GetBodies());
   std::vector<cam::Loop> loops;
   if (!op.targets.empty()) {
-    const cam::FaceRegion region = cam::PickedFaceRegion(bodies, op.targets[0]);
+    const cam::FaceRegion& region =
+        CachedRegion(state, state.camGhostRegion, setup, op.targets[0]);
     if (!region.ok)
       return;
     loops = region.loops;
   } else {
+    const std::vector<Body> bodies =
+        cam::BodiesInSetupFrame(setup, state.document->GetBodies());
     glm::dvec3 lo(0.0), hi(0.0);
     if (!cam::StockBounds(setup, bodies, lo, hi))
       return;
@@ -195,7 +226,9 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   setup->operations.push_back(op);
   state.camGhostOp = op.id;
   state.projectMetaDirty = true;
-  RefreshCamToolpaths(state);
+  // Just the new one: the operations already in the job did not change, and
+  // one of them may be an adaptive pocket that takes seconds to re-cut.
+  RefreshCamToolpath(state, op.id);
   RunCamVerification(state);
   LOG_INFO("CAM: {} from a picked face, Z {:.3f} to {:.3f}", op.name, op.topZ,
            op.bottomZ);
@@ -516,7 +549,7 @@ void DrawCamToolWindow(AppState& state) {
       if (state.camGhostOp == removeOp)
         state.camGhostOp = 0;
       state.projectMetaDirty = true;
-      RefreshCamToolpaths(state);
+      DropCamToolpath(state, removeOp);
       RunCamVerification(state);
     }
   }
@@ -595,9 +628,8 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
   // be cleared, at the height it would be cleared to.
   if (session && state.slotPick.featureId == kCamToolSlot &&
       state.pick.hoverFace.IsSet()) {
-    const cam::FaceRegion region = cam::PickedFaceRegion(
-        cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
-        state.pick.hoverFace);
+    const cam::FaceRegion& region =
+        CachedRegion(state, state.camHoverRegion, *setup, state.pick.hoverFace);
     if (region.ok)
       for (const cam::Loop& loop : region.loops)
         LoopLines(loop.pts, region.z, 2.4f, kHoverLine, prims);
