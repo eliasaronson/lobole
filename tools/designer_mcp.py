@@ -70,9 +70,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   them. Often a distance/radius constraint with "expr" is the better tool;
   entity exprs shine for direct analytic placement (lobe centers, cam
   profiles).
-  Do NOT send entity ids — the app assigns them; add_feature returns
-  "entity_ids" in list order (except rect expansions — see above). Use
-  those ids for constraints and ops.
+  Do NOT send entity ids — the app assigns them; add_feature returns the
+  new feature's id as "id", plus "entity_ids" in list order (except rect
+  expansions — see above). Use those ids for constraints and ops.
 - Extrude: {{"type": "Extrude", "name": str, "sketch_id": <feature id>,
   "distance": num, "distance_expr"?: str, "reversed"?: bool,
   "mode": "new_body"|"add"|"cut",
@@ -99,6 +99,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "tool_id": <feature id>, "op": "union"|"subtract"|"intersect"}}
 - Pattern: {{"type": "Pattern", "name": str,
   "kind": "mirror"|"linear"|"circular", "source_id": <feature id>, ...}}
+  source must CREATE a body (Box, Revolve, an additive Extrude, ...) — a cut
+  cannot be patterned (regen fails "source body not found"); repeat holes by
+  putting every circle in ONE multi-loop sketch and cutting once.
   mirror: "parent_id"?: <DatumPlane id> or "base_plane": "xy"|"xz"|"yz"
   linear: "axis": <axis ref>, "count": int, "count_expr"?: str,
           "spacing": num, "spacing_expr"?: str
@@ -525,14 +528,21 @@ def attached_to():
     return f"Designer on {where}: {project}{dirty}, {mode}"
 
 
-def _call(method, **params):
-    """Call the app, reconnecting once across a dropped connection."""
+def _call(method, /, **params):
+    """Call the app, reconnecting once across a dropped connection.
+
+    `method` is positional-ONLY and the body goes through request(), not
+    call(): an RPC parameter named "method" (describe narrows by one) would
+    otherwise collide with this function's own first argument — the exact
+    trap designer_remote.request() exists for, reproduced here the first
+    time an MCP client called describe(method=...).
+    """
     global _client
     for attempt in (1, 2):
         if _client is None:
             _connect()
         try:
-            return _client.call(method, **params)
+            return _client.request(method, params)
         except (ConnectionError, BrokenPipeError, OSError):
             _client = None  # stale socket (app restarted?) — retry fresh
             if attempt == 2:

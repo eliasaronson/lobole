@@ -99,6 +99,13 @@ async def run(port):
             # truth; the module constant is the MCP-side prose.
             import designer_mcp
             desc = await call("describe")
+            # Narrowed describe: its RPC parameter is named `method`, which
+            # collided with _call's own first argument the first time an
+            # agent used it (positional-only `/` is the fix). Pin it.
+            one = await call("describe", method="add_feature")
+            expect(len(one["methods"]) == 1
+                   and one["methods"][0]["name"] == "add_feature",
+                   f"describe narrows to one method ({one['methods'][:2]})")
             for ft in desc["feature_types"]:
                 expect(ft["type"] in designer_mcp.FEATURE_FORMATS,
                        f"feature type {ft['type']} missing from "

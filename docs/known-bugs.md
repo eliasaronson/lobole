@@ -6,6 +6,52 @@ an entry when it lands a fix + regression test.
 
 ---
 
+## Part RPCs use three different addressing conventions
+
+Found 2026-08-26 (W 170 S dogfooding). `add_occurrence` takes a part by
+**name**, `set_active_part`/`delete_part` take an **index** into the tab
+list, `rename_part` takes `part` (a name) plus `new_name`. An agent building
+a multi-part project writes a name→index lookup helper in its first five
+minutes (every dogfooding script now carries one). Names can also be
+ambiguous — see the next entry — at which point index is the only safe key,
+but nothing that ANSWERS in names (add_occurrence errors, contact_report)
+carries the index alongside.
+
+**Likely fix:** accept `{name}` OR `{index}` (refusing ambiguous names)
+everywhere a part is addressed, one shared resolver.
+
+## Duplicate assembly names are accepted silently
+
+Found 2026-08-26: an assembly script died after `add_assembly` (a later mate
+refused); the retry created a SECOND tab named "W170S 30l BR". Nothing
+warned; `list_parts` showed both, and index-addressing was the only way to
+delete the right one. A part/assembly name that duplicates an existing one
+should be refused (the merge machinery already refuses duplicate ids —
+0363a3e — this is the same conviction one level up).
+
+## No way to list a part's studies
+
+Found 2026-08-26: study ids come back from `add_study` and from nowhere
+else — `get_state` does not include studies, and there is no `list_studies`.
+Lose the id (a died script, a new session) and the only recovery is probing
+`study_status` over a numeric range. Ids are also per-document, so the same
+number means different studies on different parts. **Likely fix:** a
+`list_studies` RPC (id, name, kind, has_results, stale) + a `studies`
+block in `get_state`; both trivially derivable from the document.
+
+## mesh_study/run_study are synchronous past the client's default timeout
+
+Found 2026-08-26: a modal study on a baffle with six Ø3 pilot holes meshed
+to 41k tets; the blocking `run_study` outlived designer_remote's 60 s
+default socket timeout, the client died mid-call, and the server finished
+anyway — the results were there on reconnect, which LOOKS like a hang
+followed by a mystery. `run_study` has `async` + `study_status` polling,
+but nothing steers a caller there, and `mesh_study` has no async at all.
+**Likely fix:** describe-doc the async path on both, and/or return a hint
+when a synchronous solve exceeds ~10 s.
+
+---
+
 ## Hiding a subassembly costs ~300 ms — a visibility toggle runs a full renderer rebuild
 
 Found 2026-08-26 by the perf HUD's worst-frame readout, on its first day in
