@@ -1,6 +1,7 @@
 # Agent-friction round — plan (2026-08-26)
 
-> Status: **PLANNED.** Source: one end-to-end dogfooding day over the new
+> Status: **COMPLETE 2026-08-26** — all four waves shipped (R6 retracted;
+> see each wave header for its commits). Source: one end-to-end dogfooding day over the new
 > `--offscreen` + MCP-autostart path — a Visaton W 170 S speaker taken from
 > datasheet to parts, assembly, modal FEM, five manufacturing drawings and
 > verified router G-code, entirely windowless. Every item below REPRODUCED
@@ -94,7 +95,11 @@
   the `rpc` tool; the MCP host's approval gates it. Gate: `mcp_smoke`
   builds a small part through it.
 
-## Wave 3 — drawing quality (1–2 sessions)
+## Wave 3 — drawing quality — **SHIPPED 2026-08-26**
+
+> 3225b9b (R12 auto-placement + the `check_drawing` overlap validator),
+> dc89381 (R13 notes + centre marks). The known-bugs entry for colliding
+> dimensions retires with them.
 
 - **R12 dimension auto-placement** (defect entry in known-bugs): ladder
   placement outside the nearest view edge, skipping view bboxes, the title
@@ -106,7 +111,10 @@
   kind covers; automatic centre marks on view circles. One format bump
   covers both: kVersion + golden + format.md row (both gated).
 
-## Wave 4 — modeling/CAM depth (larger, in this order)
+## Wave 4 — modeling/CAM depth — **SHIPPED 2026-08-26**
+
+> 067ba26 (R14 pattern of a cut), 4480b15 (R15 tool shapes + the edge
+> break, carrying the v66 format bump for R13 and R15 together).
 
 - **R14 pattern of a cut — SHIPPED** (067ba26). The cut Extrude caches the
   prism it swept; the pattern replicates that cutter and subtracts each

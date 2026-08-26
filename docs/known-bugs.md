@@ -7,20 +7,6 @@ an entry when it lands a fix + regression test.
 ---
 
 
-## Drawing dimensions land where they collide
-
-Found 2026-08-26: `DefaultDimOffset` placed overall dims through the title
-block, off the sheet bottom, and on top of each other — every one of five
-manufacturing sheets needed two to four manual `offset` passes before it was
-readable, and one auto-placed dim measured between lines nobody intended
-(a "78" on the brace sheet that corresponds to no feature). Impact: a
-first-try drawing is not presentable, for the GUI's Add-dimension button and
-the RPC alike. **Likely fix:** a placement ladder — stack labels outside the
-view edge nearest the dim, skipping boxes already taken by views, the title
-block, and other labels — plus an overlap validator in `check_drawing` so
-regressions fail a gate instead of an eyeball.
-
-
 ## mesh_study/run_study are synchronous past the client's default timeout
 
 Found 2026-08-26: a modal study on a baffle with six Ø3 pilot holes meshed
