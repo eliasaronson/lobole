@@ -1404,6 +1404,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // idle-throttle.md): a low fps with a high idle share is the
             // app resting, not the app slow.
             {"idle_frames", fs.idleFrames},
+            // Who last held/restored full rate, and how long ago — "idle 0%
+            // while hands-off" is undiagnosable without the waker's name.
+            {"wake", state.pacerWake},
+            {"wake_age_s", state.pacerWakeAgeS},
             // Which PASS the GPU spends its time on — the number the CPU
             // split cannot see. supported:false names the reason (a queue
             // with no timestamp support) instead of omitting the key.

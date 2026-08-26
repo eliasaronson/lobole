@@ -1253,6 +1253,10 @@ struct AppState {
   // `pacerIdleFrames` mirrors how many iterations ran idle-paced.
   bool pacerForceEnable = false;
   uint64_t pacerIdleFrames = 0;
+  // The last wake signal's name (FramePacer::WakeName) and its age — the
+  // "why is this not idling" readout for the HUD and frame_stats.
+  const char* pacerWake = "none";
+  double pacerWakeAgeS = -1.0;
   nlohmann::json
       editBaseline; // parameter-edit snapshot while a widget is active
 

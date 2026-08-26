@@ -27,6 +27,22 @@ struct PacerInputs {
 
 class FramePacer {
 public:
+  // WHY the loop is at full rate — the diagnosis readout. The first HUD
+  // screenshots from the field showed "idle 1%" after seconds of stillness,
+  // and the cause (an agent session's RPC traffic) took a reproduction to
+  // rule in; naming the waker makes that a one-glance read.
+  enum class Wake : uint8_t {
+    None = 0, // idling, or never woken
+    Input,
+    Text,
+    Camera,
+    Job,
+    Remote,
+    Edit,
+    Off, // pacer disabled (setting, or test mode without force)
+  };
+  static const char* WakeName(Wake w);
+
   // Full-rate window after the last activity: longer than ImGui's tooltip
   // delay, so a still-mouse hover still produces its tooltip and nav fades
   // finish before the rate drops.
@@ -43,8 +59,16 @@ public:
   // Iterations that ran idle-paced, ever. Monotonic — tests watch it move.
   uint64_t IdleFrames() const { return m_idleFrames; }
 
+  // The most recent wake signal and how long ago it fired (seconds; negative
+  // = never). During the cooldown these say what STARTED it.
+  Wake LastWake() const { return m_lastWake; }
+  double LastWakeAge(double now) const {
+    return m_lastActivity < 0.0 ? -1.0 : now - m_lastActivity;
+  }
+
 private:
   double m_lastActivity = -1.0; // <0 = never; first call counts as activity
+  Wake m_lastWake = Wake::None;
   uint64_t m_lastVersion = 0;
   bool m_haveVersion = false;
   uint64_t m_idleFrames = 0;

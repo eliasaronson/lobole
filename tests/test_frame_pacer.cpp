@@ -80,6 +80,37 @@ TEST_CASE("Disabled and test-mode pacers never idle, force wins", "[pacer]") {
   CHECK(test.IdleNext(in, 10.0 + FramePacer::kCooldownSeconds + 0.01));
 }
 
+TEST_CASE("The wake readout names the most specific cause", "[pacer]") {
+  using W = FramePacer::Wake;
+  FramePacer p;
+  (void)p.IdleNext(Quiet(), 0.0);
+  REQUIRE(p.IdleNext(Quiet(), 2.0));
+
+  // Remote outranks input: an agent driving the app usually also LOOKS like
+  // input-adjacent activity, and "remote" is the actionable name.
+  PacerInputs in = Quiet();
+  in.inputActivity = true;
+  in.remoteRequests = 1;
+  (void)p.IdleNext(in, 2.1);
+  CHECK(p.LastWake() == W::Remote);
+  // During the cooldown, quiet frames keep naming what STARTED it.
+  (void)p.IdleNext(Quiet(), 2.2);
+  CHECK(p.LastWake() == W::Remote);
+  CHECK(p.LastWakeAge(2.5) > 0.3);
+  CHECK(p.LastWakeAge(2.5) < 0.5);
+
+  in = Quiet();
+  in.inputActivity = true;
+  (void)p.IdleNext(in, 3.0);
+  CHECK(p.LastWake() == W::Input);
+
+  FramePacer off;
+  in = Quiet();
+  in.enabled = false;
+  (void)off.IdleNext(in, 0.0);
+  CHECK(off.LastWake() == W::Off);
+}
+
 TEST_CASE("Re-enabling does not fire a stale version delta", "[pacer]") {
   // The version must keep updating WHILE disabled: an edit made during a
   // disabled stretch is not a wake-up call the moment the setting comes back.

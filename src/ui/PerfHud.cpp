@@ -57,14 +57,25 @@ void DrawPerfHud(AppState& state) {
 
   ImGui::TextColored(TotalColor(s.avgMs), "%.1f fps  %.2f ms", s.fps, s.avgMs);
   // A resting app reads ~10 fps BY DESIGN (docs/rendering/idle-throttle.md);
-  // without this line that is indistinguishable from "slow".
-  if (s.idleFrames > 0) {
+  // without this line that is indistinguishable from "slow". And when it is
+  // NOT resting, the wake name says who keeps it awake — the field's first
+  // screenshots read "idle 1%" after seconds of hands-off, and the cause (an
+  // agent session's RPCs) was only findable by reproduction.
+  if (state.settings.idleThrottle) {
     ImGui::SameLine();
-    ImGui::TextDisabled("(idle %d%%)",
-                        static_cast<int>(100 * s.idleFrames / s.frames));
+    const int share =
+        s.frames > 0 ? static_cast<int>(100 * s.idleFrames / s.frames) : 0;
+    if (state.pacerWakeAgeS >= 0.0)
+      ImGui::TextDisabled("(idle %d%% · wake %s %.1fs ago)", share,
+                          state.pacerWake, state.pacerWakeAgeS);
+    else
+      ImGui::TextDisabled("(idle %d%%)", share);
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Share of the window the idle throttle paced at "
-                        "~10 fps.\nInput, edits, and RPCs restore full rate.");
+      ImGui::SetTooltip(
+          "Share of the window the idle throttle paced at ~10 fps, and the\n"
+          "signal that last held or restored full rate: input, text (caret),\n"
+          "camera (tween), job (solver/render), remote (RPC), edit "
+          "(document\nchange), off (throttle disabled).");
   }
   // The tail, not just the average: a drag that hitches every twentieth frame
   // has a fine average and an unusable feel.

@@ -1976,8 +1976,11 @@ int main(int argc, char** argv) {
                             : g_App.drawing  ? g_App.drawing->Version()
                             : g_App.document ? g_App.document->Version()
                                              : 0;
-      paceIdle = s_pacer.IdleNext(pin, glfwGetTime());
+      const double nowPace = glfwGetTime();
+      paceIdle = s_pacer.IdleNext(pin, nowPace);
       g_App.pacerIdleFrames = s_pacer.IdleFrames();
+      g_App.pacerWake = app::FramePacer::WakeName(s_pacer.LastWake());
+      g_App.pacerWakeAgeS = s_pacer.LastWakeAge(nowPace);
     }
 
 #ifdef HAVE_TEST_ENGINE

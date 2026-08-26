@@ -2,6 +2,28 @@
 
 namespace app {
 
+const char* FramePacer::WakeName(Wake w) {
+  switch (w) {
+  case Wake::None:
+    return "none";
+  case Wake::Input:
+    return "input";
+  case Wake::Text:
+    return "text";
+  case Wake::Camera:
+    return "camera";
+  case Wake::Job:
+    return "job";
+  case Wake::Remote:
+    return "remote";
+  case Wake::Edit:
+    return "edit";
+  case Wake::Off:
+    return "off";
+  }
+  return "?";
+}
+
 bool FramePacer::IdleNext(const PacerInputs& in, double now) {
   // A version DELTA is activity; the version itself must keep updating even
   // while disabled, or re-enabling would see a stale number and fire once.
@@ -14,14 +36,24 @@ bool FramePacer::IdleNext(const PacerInputs& in, double now) {
 
   if (!in.enabled || (in.testMode && !in.forceEnable)) {
     m_lastActivity = now;
+    m_lastWake = Wake::Off;
     return false;
   }
 
-  const bool active = in.inputActivity || in.wantTextInput ||
-                      in.cameraAnimating || in.jobRunning ||
-                      in.remoteRequests > 0 || versionChanged;
-  if (active || m_lastActivity < 0.0)
+  // Ordered so the readout names the most specific cause when several fire:
+  // input almost always accompanies the others, so it comes last.
+  const Wake wake = in.remoteRequests > 0 ? Wake::Remote
+                    : in.jobRunning       ? Wake::Job
+                    : versionChanged      ? Wake::Edit
+                    : in.cameraAnimating  ? Wake::Camera
+                    : in.wantTextInput    ? Wake::Text
+                    : in.inputActivity    ? Wake::Input
+                                          : Wake::None;
+  if (wake != Wake::None || m_lastActivity < 0.0) {
     m_lastActivity = now;
+    if (wake != Wake::None)
+      m_lastWake = wake;
+  }
 
   const bool idle = now - m_lastActivity >= kCooldownSeconds;
   if (idle)
