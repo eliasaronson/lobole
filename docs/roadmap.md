@@ -237,14 +237,15 @@ lists above is a deliberate deferral with a reason, not an unfinished project
 
 ## Known loose ends (audited 2026-08-25)
 
-**Planned as a round:** [loose-ends-2026-08-26.md](loose-ends-2026-08-26.md)
-(**planned**) — the agent-friction round out of the first windowless
+**Latest round:** [loose-ends-2026-08-26.md](loose-ends-2026-08-26.md)
+(**complete**) — the agent-friction round out of the first windowless
 end-to-end dogfood (W 170 S speaker: parts → assembly → modal FEM →
 drawings → verified G-code over `--offscreen` + MCP autostart): four waves
 from refusal/addressing papercuts through CAM round-opening picks and an
-`execute_script` MCP tool to drawing auto-placement/notes and CAM tool
-types. Every item reproduced in-session; defects in
-[known-bugs.md](known-bugs.md).
+`execute_script` MCP tool to drawing auto-placement/notes, a cut that can
+be PATTERNED, and CAM tools that have a shape (ball/V-bit) with the
+edge-break operation that uses them. Every item reproduced in-session;
+what is left of them is in [known-bugs.md](known-bugs.md).
 
 **Previous round:** [loose-ends-2026-08-25.md](loose-ends-2026-08-25.md)
 (**complete**) took all six below plus the U5 visual-polish

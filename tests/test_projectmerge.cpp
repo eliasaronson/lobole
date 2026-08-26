@@ -736,6 +736,46 @@ TEST_CASE("A duplicate id renumbers, and its own side's references follow",
   CHECK(bobHole["sketch_id"] == bobSketch["id"]);
 }
 
+// The scan's ORDER is load-bearing. `directory_iterator` hands files back in
+// filesystem order, so the same merge resolved on two machines took two
+// different orders and only one of them worked: renumbering an id renames its
+// file, and a reference always points backwards at a LOWER id, so the highest
+// id first renames a referrer whose side can then no longer be attributed.
+// This is the bug CI caught while the same test passed on the dev machine.
+TEST_CASE("Duplicate ids are reported lowest first, and that order resolves",
+          "[merge]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchProject p("ordered");
+  SeedProject(p);
+  REQUIRE(GitVault::Init(p.path()));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string main = GitVault::CurrentBranch(p.path());
+  DivergeWithSameIds(p, main);
+
+  std::string error;
+  const GitVault::MergeStatus status = GitVault::Merge(p.path(), "bob", &error);
+  if (status == GitVault::MergeStatus::Conflicted) {
+    for (const auto& c : ProjectMerge::Scan(p.path()).conflicts)
+      if (c.autoResolvable)
+        REQUIRE(ProjectMerge::AutoResolve(p.path(), c, &error));
+    REQUIRE(GitVault::CommitMerge(p.path(), "merge bob", &error));
+  }
+
+  const ProjectMerge::Report report = ProjectMerge::Scan(p.path());
+  REQUIRE(report.conflicts.size() == 2);
+  CHECK(report.conflicts[0].id < report.conflicts[1].id);
+
+  // Taken the other way round — the order a filesystem could hand back, and
+  // the order a person can still click in — the second one REFUSES, and the
+  // refusal names the way out instead of sending them to a text editor.
+  REQUIRE(
+      ProjectMerge::RenumberDuplicate(p.path(), report.conflicts[1], &error));
+  CHECK_FALSE(
+      ProjectMerge::RenumberDuplicate(p.path(), report.conflicts[0], &error));
+  CHECK(error.find("LOWEST id first") != std::string::npos);
+}
+
 // The honest half survives: with no merge to attribute against — a project
 // that arrived by rsync, a zip, or a hand-edit — a reference still cannot say
 // which of the two it meant.

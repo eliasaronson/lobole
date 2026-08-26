@@ -26,6 +26,12 @@ dimension list).
   so it never runs automatically. A view whose source changed reads **stale**
   until you update the drawing. (The first view of a drawing tab, and an
   opened drawing, project once automatically.)
+- **Note** — a line of text placed on the sheet, optionally with a leader to
+  a piece of projected geometry. The annotation class no dimension kind
+  covers ("6× Ø4.4 on Ø175.8 PCD", "break all sharp edges").
+- **Centre mark** — the little cross at the centre of every visible circle,
+  drawn automatically (sized from the circle) in the GUI, the SVG and the PDF.
+  Nothing to add and nothing to place.
 - **Dangling** — a dimension whose referenced edge was consumed upstream (a
   fillet ate it, a feature was deleted) resolves as dangling and is flagged;
   it is never silently rebound to a different edge.
@@ -43,8 +49,12 @@ dimension list).
    when any view is stale.
 4. **Dimensions** — click a kind (Distance, Dist X/Y, Radius, Diameter, Angle),
    then click the projected edges/circles on the sheet; the dimension appears
-   once enough are picked. Drag a dimension's value label to reposition it.
+   once enough are picked. It **places itself** clear of the views, the title
+   block and the labels already on the sheet; drag its value label to move it.
 5. **File → Export…** writes the sheet as **SVG** or **PDF**.
+
+Notes are drawn on the sheet (and exported) but are **added over the RPC**
+today — `add_drawing_note` below; there is no button for them yet.
 
 ## Over RPC / MCP
 
@@ -57,8 +67,16 @@ update_drawing            # the explicit HLR re-projection; returns per-view cou
 list_drawing_geometry {view}   # discover a view's edges/circles + the ref to dimension
 add_drawing_dim {view, kind, refs:[{edge|sil_face:{feature_id, element},
                                      occurrence?, end?}], offset?}
+add_drawing_note {text, position:[x,y], view?, ref?:{feature_id, element}}
+list_drawing_notes / remove_drawing_note {id}
+check_drawing            # views stale/dangling refs/labels that collide
 export_drawing {path}     # .svg or .pdf by extension
 ```
+
+`offset` on a dimension is OPTIONAL: left out, the label is placed outside the
+nearest view edge, skipping the other views, the title block and the labels
+already placed. `check_drawing` reports what is left overlapping, so a sheet
+that needs hand-placing says so instead of exporting unreadable.
 
 `refs` are toponaming references: `list_drawing_geometry` returns, for each
 projected edge/circle, the `ref` (`{feature_id, element}`) and its

@@ -126,8 +126,18 @@ plan's flagged use), as are linear spacing and circular per-step angle. Reused
 the `BodyProducers` combo, and `ExprDim`; new kernel helpers `CADShape::Mirror`
 /`RotateAbout`/`SplitSolids` and a shared `FuseInstancesReplacingSource`.
 Format v15. Tests: `test_pattern.cpp` + a `remote_smoke.py` block; verified
-in-app (a 6-up circular ring and a 4-up linear row). *Feature (vs body)
-patterns and per-instance references deferred.*
+in-app (a 6-up circular ring and a 4-up linear row). *Per-instance references
+deferred.*
+
+**2026-08-26 (R14): a CUT source patterns its cutter.** A cut leaves no body
+to replicate, so the pattern used to refuse "source body not found" and
+repeated holes had to go into one multi-loop sketch — which throws the count
+and spacing away as editable parameters. A cut Extrude now caches the prism
+it swept (`Feature::CutToolShape` + `CutToolMap`) and the pattern subtracts a
+transformed copy per instance, each carrying the source's element names with
+an instance suffix (`4/g7#2`). In the GUI the pick is the CUT'S TREE ROW with
+the Source slot armed — a body pick resolves to its `createdBy`, which is the
+plate, never the cut.
 
 **Toponaming is complete (T1–T5)** — M7 shipped on top of it; M3's
 up-to-face extrude can now consume face `ElementRef`s directly.

@@ -327,6 +327,9 @@ std::string ReadFile(const fs::path& path) {
 void ScanDuplicateIds(const std::string& projectDir,
                       std::vector<Conflict>& out) {
   std::error_code ec;
+  // Collected here first so they can be SORTED before they are reported —
+  // see the sort below: the order these come out in is not cosmetic.
+  std::vector<Conflict> duplicates;
   // Every directory that is one of the id-keyed collections, at either
   // nesting depth.
   std::vector<fs::path> collectionDirs;
@@ -391,9 +394,27 @@ void ScanDuplicateIds(const std::string& projectDir,
       if (!nameA.empty() || !nameB.empty())
         c.summary += ": \"" + nameA + "\" and \"" + nameB + "\"";
       c.summary += " — git merged both without a word";
-      out.push_back(std::move(c));
+      duplicates.push_back(std::move(c));
     }
   }
+
+  // By ascending id, and that is a CORRECTNESS property, not tidiness.
+  // `directory_iterator` hands files back in whatever order the filesystem
+  // keeps them (ext4 by hash, overlayfs by insertion), so the same merge
+  // resolved on two machines took two different orders — and one of them
+  // failed. Renumbering an id renames its file; a reference inside a file
+  // always points BACKWARDS at a lower id, so taking the lowest contested id
+  // first means no referrer has been renamed yet and every reference can
+  // still be attributed to the side that wrote it. Taking the highest first
+  // renames the referrer, and the next resolution cannot say whose reference
+  // it is looking at. CI caught this: the same test passed here and failed
+  // on the runner.
+  std::sort(duplicates.begin(), duplicates.end(),
+            [](const Conflict& a, const Conflict& b) {
+              return a.id != b.id ? a.id < b.id : a.path < b.path;
+            });
+  for (Conflict& c : duplicates)
+    out.push_back(std::move(c));
 }
 
 } // namespace
@@ -1155,10 +1176,22 @@ bool RenumberDuplicate(const std::string& projectDir, const Conflict& conflict,
         continue; // meant the file that keeps the id — nothing to do
       }
       if (error) {
+        // A file in NO tree — not the base, not either side — is one an
+        // earlier renumber in this same merge produced. Its attribution went
+        // with its old name, so it cannot be followed; the way out is order,
+        // and the scan already lists duplicates lowest-id first.
+        const bool weRenamedIt = sides.valid && !sides.inBase.count(rel) &&
+                                 !sides.addedByOurs.count(rel) &&
+                                 !sides.addedByTheirs.count(rel);
         *error =
             entry.path().filename().string() + " still refers to id " +
             std::to_string(oldId) +
-            (attributed
+            (weRenamedIt
+                 ? ", and it was itself renumbered earlier in this merge, so "
+                   "which side wrote it is no longer knowable — resolve "
+                   "duplicate ids from the LOWEST id first (the scan lists "
+                   "them that way) and this one resolves itself"
+             : attributed
                  ? ", and neither side added it — it cannot say which of the "
                    "two it meant; open the two files and decide by hand"
                  : ", and it cannot say which of the two it meant — open the "
