@@ -38,6 +38,11 @@ struct Settings {
   bool shadows = true;
   std::string ssao = "half"; // off | half | full
   int shadowMap = 2048;      // 1024 | 2048
+  // Idle throttle (docs/rendering/idle-throttle.md): with nothing happening
+  // — no input, animation, solve, or remote traffic — the frame loop waits
+  // for events at a ~10 Hz floor instead of re-rendering the unchanged scene
+  // at vsync rate. Quality-neutral; battery, fans, and iGPU turbo headroom.
+  bool idleThrottle = true;
 
   // Sharing — who a commit is BY. Empty means "whatever git is configured
   // with", which is the right answer for anyone who has configured it; these

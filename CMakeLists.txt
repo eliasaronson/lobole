@@ -517,6 +517,7 @@ target_precompile_headers(designer_core PRIVATE
 # Application: windowing, rendering, UI.
 set(app_sources
     src/app/main.cpp
+    src/app/FramePacer.cpp
     src/common/RuntimePaths.cpp
     src/render/VulkanCommon.cpp
     src/app/CrashHandler.cpp

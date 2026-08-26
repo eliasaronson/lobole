@@ -59,7 +59,17 @@ public:
   bool IsRunning() const { return m_running; }
 
   // Main-thread pump: executes queued requests against the app state.
-  void ProcessPending(ui::AppState& state);
+  // Returns the tick's remote activity: requests executed, plus one while an
+  // async job (ui action / screenshot / sheet render) is still in flight —
+  // the idle pacer treats nonzero as "stay at full rate"
+  // (docs/rendering/idle-throttle.md).
+  size_t ProcessPending(ui::AppState& state);
+
+  // Called from the socket reader threads whenever a request lands in the
+  // queue, so a throttled frame loop wakes immediately instead of eating the
+  // idle timeout on every RPC. Set BEFORE Start() and never after: the
+  // reader threads read it unsynchronized.
+  void SetWakeCallback(std::function<void()> wake) { m_wake = std::move(wake); }
 
   // Session recording (S4): tee every handled semantic request as one JSON
   // per line — a replayable session (tools/designer_replay.py). UI actions
@@ -135,6 +145,7 @@ private:
 
   std::mutex m_queueMutex;
   std::deque<Request> m_requests;
+  std::function<void()> m_wake; // enqueue notification; see SetWakeCallback
 
   std::ofstream m_recording; // open = recording (main thread only)
 

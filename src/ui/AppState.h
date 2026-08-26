@@ -1234,6 +1234,13 @@ struct AppState {
   // key that window cannot edit.
   render::FrameTimer frameTimer;
   bool perfHudOpen = false;
+  // Idle throttle (docs/rendering/idle-throttle.md). The pacer itself lives
+  // in main.cpp; these are its test/observability seams: `pacerForceEnable`
+  // lets the pacer's own GUI test opt back in under --gui-tests (where the
+  // pacer is otherwise bypassed — the engine drives frames), and
+  // `pacerIdleFrames` mirrors how many iterations ran idle-paced.
+  bool pacerForceEnable = false;
+  uint64_t pacerIdleFrames = 0;
   nlohmann::json
       editBaseline; // parameter-edit snapshot while a widget is active
 

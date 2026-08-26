@@ -519,6 +519,39 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ctx->ItemExists("//###SettingsWindow/###set_gpu_device"));
   };
 
+  // Idle throttle (docs/rendering/idle-throttle.md). Three contracts in one
+  // sitting: the suite itself never idles (the engine drives frames, so the
+  // pacer is bypassed under --gui-tests), a force-enabled pacer rests after
+  // the cooldown, and input restores full rate.
+  t = IM_REGISTER_TEST(engine, "shell", "idle_throttle_rests_and_input_wakes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // Bypassed in test mode: frames must never slow under the engine.
+    const uint64_t before = s_App->pacerIdleFrames;
+    ctx->Yield(5);
+    IM_CHECK_EQ(s_App->pacerIdleFrames, before);
+
+    // Opt back in through the test seam and hold still past the cooldown.
+    // The cooldown is wall time, so this loop watches the clock, not a frame
+    // count — test-mode frames are fast until the pacer slows them.
+    s_App->pacerForceEnable = true;
+    const double start = ImGui::GetTime();
+    while (ImGui::GetTime() - start < 1.6 && s_App->pacerIdleFrames == before)
+      ctx->Yield();
+    IM_CHECK(s_App->pacerIdleFrames > before);
+
+    // Mouse motion is activity: the pacer returns to full rate and the idle
+    // counter freezes for at least the cooldown window.
+    ctx->MouseMoveToPos(ImVec2(300.0f, 300.0f));
+    ctx->MouseMoveToPos(ImVec2(420.0f, 340.0f));
+    ctx->Yield(2);
+    const uint64_t afterWake = s_App->pacerIdleFrames;
+    ctx->Yield(5);
+    IM_CHECK_EQ(s_App->pacerIdleFrames, afterWake);
+
+    s_App->pacerForceEnable = false;
+    ctx->Yield();
+  };
+
   // Viewport handles (docs/ui/viewport-handles.md): the three owners publish
   // into one list, so hover can say WHICH arrow is under the cursor — before
   // this, the hit test ran only on click and nothing knew until you pressed.

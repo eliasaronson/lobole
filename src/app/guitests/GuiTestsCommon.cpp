@@ -51,6 +51,9 @@ void ResetAppForTest() {
   // SetWindowFocus every frame can make a click land on nothing — silently.
   s_App->focusPanel.clear();
   s_App->focusPanelFrames = 0;
+  // A force-enabled idle pacer left armed makes every later frame a 100 ms
+  // event-wait — the whole suite crawls if the pacer test aborts mid-way.
+  s_App->pacerForceEnable = false;
   s_App->handleDrag = {};
   s_App->hoveredHandle = 0;
   s_App->pick = {};

@@ -107,6 +107,17 @@ const Field kFields[] = {
      kSsao,
      0.0f,
      0.0f},
+    {"idle_throttle",
+     "Performance",
+     "Limit idle rendering",
+     "Drop to ~10 fps while nothing is happening. Saves battery and GPU "
+     "headroom; input picks the rate back up instantly.",
+     Tier::Live,
+     &Settings::idleThrottle,
+     {},
+     {},
+     0.0f,
+     0.0f},
     {"shadow_map",
      "Performance",
      "Shadow map size",
@@ -274,7 +285,7 @@ std::optional<json> ReadFile(const fs::path& path) {
 bool Settings::operator==(const Settings& other) const {
   return uiFontScale == other.uiFontScale && gpuDevice == other.gpuDevice &&
          shadows == other.shadows && ssao == other.ssao &&
-         shadowMap == other.shadowMap &&
+         shadowMap == other.shadowMap && idleThrottle == other.idleThrottle &&
          autosaveInterval == other.autosaveInterval && keys == other.keys;
 }
 
@@ -432,6 +443,7 @@ bool Save(const Settings& current, std::string* error) {
   none.shadowMap = -1;
   none.autosaveInterval = -1.0;
   none.shadows = !current.shadows;
+  none.idleThrottle = !current.idleThrottle;
   none.ssao = "\x01";
   none.gpuDevice = "\x01";
   none.keys.Set("\x01", "F"); // a command id no build has: forces a rewrite

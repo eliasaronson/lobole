@@ -115,6 +115,22 @@ def main():
         expect("project" in pong and "dirty" in pong,
                f"ping reports the document ({pong})")
 
+        phase("Idle throttle wakes on RPC")
+        # The frame loop drops to a ~10 Hz event-wait when nothing is
+        # happening (docs/rendering/idle-throttle.md); an enqueued request
+        # must WAKE it, not eat the timeout. Let the app go idle, then time a
+        # ping: with the wake these answer in single-digit ms; without it
+        # most land mid-wait and take tens of ms. Eight rounds with slack for
+        # machine load — without the wake, 6+ of 8 exceed the bound.
+        slow = 0
+        for _ in range(8):
+            time.sleep(1.3)  # past the 1 s cooldown, into the idle floor
+            t0 = time.monotonic()
+            d.call("ping")
+            if time.monotonic() - t0 >= 0.030:
+                slow += 1
+        expect(slow <= 2, f"idle pings answered promptly ({slow}/8 >= 30 ms)")
+
         phase("Semantic tier")
         # Semantic tier: features as JSON
         d.call("new_project")

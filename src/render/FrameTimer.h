@@ -52,7 +52,8 @@ public:
   static constexpr size_t kHistory = 240;
 
   struct Stats {
-    size_t frames = 0; // frames the window actually holds
+    size_t frames = 0;     // frames the window actually holds
+    size_t idleFrames = 0; // of those, iterations the idle pacer slowed
     double fps = 0.0;
     double avgMs = 0.0;
     double p50Ms = 0.0;
@@ -66,6 +67,15 @@ public:
     m_phaseStart = now;
     m_pending = Frame{};
     m_inFrame = true;
+  }
+
+  // This iteration ran idle-paced (the loop waited for events before it —
+  // docs/rendering/idle-throttle.md). The wait itself is NOT in the frame's
+  // time (it happens before BeginFrame); the flag is what lets frame_stats
+  // and the HUD say "10 fps because idle", not "10 fps because slow".
+  void SetIdlePaced(bool idle) {
+    if (m_inFrame)
+      m_pending.idle = idle;
   }
 
   // Closes `phase` at `now`. Phases are closed in order; a phase never marked
@@ -123,6 +133,8 @@ public:
       const Frame& f = m_ring[(m_next + kHistory - k) % kHistory];
       totals.push_back(f.total);
       sum += f.total;
+      if (f.idle)
+        s.idleFrames++;
       for (size_t p = 0; p < kPhaseCount; p++)
         s.phaseMs[p] += f.phase[p];
     }
@@ -141,6 +153,7 @@ public:
 private:
   struct Frame {
     float total = 0.0f;
+    bool idle = false; // iteration was idle-paced (SetIdlePaced)
     std::array<float, kPhaseCount> phase{};
   };
 

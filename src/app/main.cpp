@@ -2,6 +2,7 @@
 // Based on Dear ImGui GLFW+Vulkan example
 
 #include "app/CrashHandler.h"
+#include "app/FramePacer.h"
 #include "app/GuiTests.h"
 #include "app/HeadlessMain.h"
 #include "cad/FaceSelector.h"
@@ -1576,6 +1577,12 @@ int main(int argc, char** argv) {
 
   // Remote control (opt-in)
   RemoteServer remoteServer;
+  // Before EITHER Start path (here and ensureRemotePort below): the reader
+  // threads call this unsynchronized. An enqueued request wakes a throttled
+  // loop out of WaitEventsTimeout, so RPC latency does not inherit the idle
+  // floor (docs/rendering/idle-throttle.md). glfwPostEmptyEvent is one of the
+  // few GLFW calls documented thread-safe.
+  remoteServer.SetWakeCallback([] { glfwPostEmptyEvent(); });
   if (args.remoteRequested) {
     // Fail fast on a taken port, as the headless path does (HeadlessMain.cpp).
     // This path ignored the result, so `--hidden --remote <taken>` — how every
@@ -1639,8 +1646,20 @@ int main(int argc, char** argv) {
   ImVec4 clear_color = ImVec4(vp.r, vp.g, vp.b, 1.00f);
 
   // Main loop
+  static app::FramePacer s_pacer;
+  bool paceIdle = false; // last iteration's verdict paces this one
   while (!glfwWindowShouldClose(window)) {
+    // Idle throttle (docs/rendering/idle-throttle.md): with nothing
+    // happening, wait for events at a ~10 Hz floor instead of re-rendering
+    // the unchanged scene at vsync rate. BEFORE BeginFrame on purpose — the
+    // wait is not part of the frame, so frame_stats keeps reading "10 fps of
+    // cheap frames", not "100 ms frames". Any OS event or a posted wake (a
+    // remote request) ends the wait immediately. Every iteration that runs
+    // still renders exactly as before.
+    if (paceIdle)
+      glfwWaitEventsTimeout(app::FramePacer::kIdleTimeoutSeconds);
     g_App.frameTimer.BeginFrame(glfwGetTime());
+    g_App.frameTimer.SetIdlePaced(paceIdle);
     glfwPollEvents();
 
     // Monitor content scale changed (window moved to another display) or the
@@ -1729,7 +1748,7 @@ int main(int argc, char** argv) {
       g_Camera->Update(deltaTime);
 
     // Remote-control requests act on the document/UI before this frame
-    remoteServer.ProcessPending(g_App);
+    const size_t remoteActivity = remoteServer.ProcessPending(g_App);
 
     // The PROJECT, not the open tab (F10): this used to be handed
     // g_App.document, so a multi-document project autosaved one part and an
@@ -1899,6 +1918,38 @@ int main(int argc, char** argv) {
         remoteServer.ScreenshotDone(ok, shotError, shotStats.dominantFraction,
                                     shotStats.hash);
       }
+    }
+
+    // Idle-throttle verdict for the NEXT iteration, from THIS one's state
+    // (docs/rendering/idle-throttle.md). Input covers every drag (a button
+    // is down); the rest are the ways the picture changes without input.
+    {
+      const ImGuiIO& io = ImGui::GetIO();
+      bool keyHeld = false;
+      for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++) {
+        if (ImGui::IsKeyDown(static_cast<ImGuiKey>(k))) {
+          keyHeld = true;
+          break;
+        }
+      }
+      app::PacerInputs pin;
+      pin.enabled = g_App.settings.idleThrottle;
+      pin.testMode = args.runGuiTests;
+      pin.forceEnable = g_App.pacerForceEnable;
+      pin.inputActivity = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f ||
+                          io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f ||
+                          ImGui::IsAnyMouseDown() || keyHeld;
+      pin.wantTextInput = io.WantTextInput;
+      pin.cameraAnimating = g_Camera && g_Camera->IsAnimating();
+      pin.jobRunning = g_App.topoJob != nullptr || g_App.studyJob != nullptr ||
+                       g_App.renderJob.active;
+      pin.remoteRequests = static_cast<int>(remoteActivity);
+      pin.documentVersion = g_App.assembly   ? g_App.assembly->Version()
+                            : g_App.drawing  ? g_App.drawing->Version()
+                            : g_App.document ? g_App.document->Version()
+                                             : 0;
+      paceIdle = s_pacer.IdleNext(pin, glfwGetTime());
+      g_App.pacerIdleFrames = s_pacer.IdleFrames();
     }
 
 #ifdef HAVE_TEST_ENGINE

@@ -293,8 +293,15 @@ void RemoteServer::ClientThread(int client) {
              {{"id", nullptr}, {"error", std::string("parse: ") + e.what()}});
         continue;
       }
-      std::lock_guard<std::mutex> lock(m_queueMutex);
-      m_requests.push_back(std::move(request));
+      {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_requests.push_back(std::move(request));
+      }
+      // Outside the lock: wake a throttled frame loop so the request is
+      // pumped now, not after the idle timeout
+      // (docs/rendering/idle-throttle.md).
+      if (m_wake)
+        m_wake();
     }
   }
   SockClose(client);
@@ -1393,6 +1400,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"phases_ms", phases},
             {"cpu_ms", fs.avgMs - display},
             {"display_ms", display},
+            // Iterations the idle throttle paced (docs/rendering/
+            // idle-throttle.md): a low fps with a high idle share is the
+            // app resting, not the app slow.
+            {"idle_frames", fs.idleFrames},
             {"hud", state.perfHudOpen}};
   }
   if (m == "get_settings") {
@@ -1919,9 +1930,14 @@ bool RemoteServer::QueueUiAction(const Request& request) {
 #endif
 }
 
-void RemoteServer::ProcessPending(ui::AppState& state) {
+size_t RemoteServer::ProcessPending(ui::AppState& state) {
   if (!m_running)
-    return;
+    return 0;
+  // Remote activity this tick, for the idle pacer: requests executed, plus
+  // one while an async job still spans frames (a ui action driven by the
+  // test engine, a staged screenshot, a sheet render) — those need the loop
+  // at full rate to make progress.
+  size_t activity = 0;
 
   m_state = &state; // UI actions read it from the engine's coroutine
 
@@ -2009,13 +2025,14 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
     Request request;
     {
       std::lock_guard<std::mutex> lock(m_queueMutex);
-      if (m_requests.empty())
-        return;
       if ((m_uiActionInFlight || m_screenshotPending || m_sheet.active))
-        return; // wait for completion before the next request
+        return activity + 1; // in flight: full rate until it completes
+      if (m_requests.empty())
+        return activity;
       request = std::move(m_requests.front());
       m_requests.pop_front();
     }
+    activity++;
 
     try {
       bool handled = false;
@@ -2075,7 +2092,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         m_screenshotPath = request.params.at("path").get<std::string>();
         m_screenshotPending = true;
         m_screenshotHeldFrames = 0;
-        return; // main loop captures after this frame renders
+        return activity; // main loop captures after this frame renders
       }
       if (request.method == "render_sheet") {
         // V3: stage a multi-view sheet job; the ProcessPending pump captures
@@ -2158,7 +2175,8 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         m_sheet.id = request.id;
         m_sheet.client = request.client;
         m_sheet.active = true;
-        return; // the pump kicks tile 0 next frame; requests queue behind
+        return activity; // the pump kicks tile 0 next frame; requests queue
+                         // behind
       }
       if (!UiActionsAvailable() && IsUiAction(request.method)) {
         // Two different reasons, two different remedies: nothing to click
@@ -2176,7 +2194,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         continue;
       }
       if (QueueUiAction(request)) {
-        return; // response sent when the engine finishes the action
+        return activity; // response sent when the engine finishes the action
       }
       RespondError(request.client, request.id,
                    "unknown method: " + request.method);

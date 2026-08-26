@@ -56,6 +56,16 @@ void DrawPerfHud(AppState& state) {
   }
 
   ImGui::TextColored(TotalColor(s.avgMs), "%.1f fps  %.2f ms", s.fps, s.avgMs);
+  // A resting app reads ~10 fps BY DESIGN (docs/rendering/idle-throttle.md);
+  // without this line that is indistinguishable from "slow".
+  if (s.idleFrames > 0) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(idle %d%%)",
+                        static_cast<int>(100 * s.idleFrames / s.frames));
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Share of the window the idle throttle paced at "
+                        "~10 fps.\nInput, edits, and RPCs restore full rate.");
+  }
   // The tail, not just the average: a drag that hitches every twentieth frame
   // has a fine average and an unusable feel.
   ImGui::TextDisabled("p50 %.2f   p95 %.2f   max %.2f", s.p50Ms, s.p95Ms,

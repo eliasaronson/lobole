@@ -584,8 +584,12 @@ void DrawStudyPanel(AppState& state) {
       float g[3] = {(float)s->gravity.x, (float)s->gravity.y,
                     (float)s->gravity.z};
       LeftLabel("g (m/s^2)");
-      if (ImGui::InputFloat3("###study_gravity_vec", g, "%.2f",
-                             ImGuiInputTextFlags_EnterReturnsTrue))
+      // Commit on deactivation (Enter OR clicking away), like the mesh-size
+      // field above. NOT EnterReturnsTrue: that flag is InputText-only —
+      // InputScalar ASSERTS on it, so this line aborted every Debug build
+      // (a fresh clone's default) the moment gravity was switched on.
+      ImGui::InputFloat3("###study_gravity_vec", g, "%.2f");
+      if (ImGui::IsItemDeactivatedAfterEdit())
         ModifyStudy(state, s->id, "Set gravity", [&](fem::Study& cs) {
           cs.gravity = glm::dvec3(g[0], g[1], g[2]);
         });
