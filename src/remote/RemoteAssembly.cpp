@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteProject.h"
 #include "ui/AppActions.h"
 
 #include "ui/AppState.h"
@@ -27,11 +28,13 @@ namespace remote {
 // Act on the active assembly tab / project.
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc AssemblyMethods[] = {
-    {"set_active_part", "Switch the active tab by name or index.",
-     "index, name"},
+    {"set_active_part",
+     "Switch the active tab {part: name|id|index} (legacy: name, index).",
+     "index, name, part"},
     {"delete_part",
-     "Delete a part or assembly tab (refused while any assembly places it).",
-     "index"},
+     "Delete a part/assembly/drawing tab {part: name|id|index} (legacy: "
+     "index); refused while any assembly places it.",
+     "index, part"},
     {"add_occurrence",
      "Place a part OR another assembly in the active assembly {part: name of "
      "either, transform?}. Returns {id, part_id, ref_kind}; a reference that "
@@ -697,20 +700,23 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     return json{{"path", path}, {"rows", bom.rows.size()}};
   }
   if (m == "set_active_part") {
-    // params: {index} or {name} — the describe doc promises both, and every
-    // sibling RPC (rename_part, add_occurrence) already resolves names.
-    if (p.contains("name")) {
-      const std::string name = p.at("name").get<std::string>();
-      ui::EnsureParts(state);
-      for (size_t i = 0; i < state.parts.size(); i++) {
-        if (state.parts[i].name == name) {
-          ui::SetActivePart(state, i);
-          return json{{"active", state.activePart}};
-        }
-      }
-      throw std::runtime_error("no tab named '" + name + "' (see list_parts)");
+    // {part: name|id|index} through the ONE resolver rename_part uses —
+    // three sibling RPCs once took three different keys, and the
+    // missing-param error named only 'index', hiding that names worked.
+    // Legacy {name}/{index} stay accepted.
+    size_t slot;
+    if (p.contains("part")) {
+      slot = remote::ResolveSlotIndex(state, p.at("part"));
+    } else if (p.contains("name")) {
+      slot = remote::ResolveSlotIndex(state, p.at("name"));
+    } else if (p.contains("index")) {
+      slot = p.at("index").get<size_t>();
+    } else {
+      throw std::runtime_error(
+          "pass the tab as {part: name|id|index} (legacy {name} or {index} "
+          "also work); list_parts shows every tab");
     }
-    ui::SetActivePart(state, p.at("index").get<size_t>());
+    ui::SetActivePart(state, slot);
     return json{{"active", state.activePart}};
   }
   if (m == "edit_in_context") {
@@ -728,8 +734,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"occurrence", state.inContext.occurrenceId}};
   }
   if (m == "delete_part") {
+    size_t slot;
+    if (p.contains("part")) {
+      slot = remote::ResolveSlotIndex(state, p.at("part"));
+    } else if (p.contains("index")) {
+      slot = p.at("index").get<size_t>();
+    } else {
+      throw std::runtime_error(
+          "pass the tab as {part: name|id|index} (legacy {index} also "
+          "works); list_parts shows every tab");
+    }
     std::string why;
-    if (!ui::DeletePart(state, p.at("index").get<size_t>(), &why))
+    if (!ui::DeletePart(state, slot, &why))
       throw std::runtime_error(why.empty() ? "cannot delete that tab" : why);
     return json{{"active", state.activePart}};
   }

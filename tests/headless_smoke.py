@@ -1406,6 +1406,52 @@ def main():
         expect("G2 " in curved, "arcs on means arcs in the file")
         expect(len(curved) < len(plain), "and a smaller file")
 
+        phase("Tab addressing, duplicate names, the .json refusal")
+        # R4/R5/R16 (2026-08-26). Names address tabs, so duplicates refuse;
+        # {part: name|id|index} is one resolver across the tab RPCs; and a
+        # multi-document project saved to a .json path used to mint a
+        # history-less directory NAMED .json — refused now, naming .dsgn.
+        first_tab = d.call("list_parts")["parts"][0]["name"]
+        d.call("add_part", name="addr-a")
+        try:
+            d.call("add_part", name="addr-a")
+            raise AssertionError("duplicate part name must refuse")
+        except RuntimeError as e:
+            expect("already exists" in str(e), f"dup refusal says so: {e}")
+        try:
+            d.call("rename_part", part=first_tab, new_name="addr-a")
+            raise AssertionError("rename onto a taken name must refuse")
+        except RuntimeError as e:
+            expect("already exists" in str(e), f"rename refusal: {e}")
+        d.call("rename_part", part=first_tab, new_name=first_tab)  # self: ok
+        # Default names skip taken ones (size+1 collided after a deletion).
+        tabs = d.call("list_parts")["parts"]
+        auto = d.call("add_part")
+        expect(auto["name"] not in {t["name"] for t in tabs},
+               f"default name is fresh: {auto}")
+        # One resolver: {part: <name>} on set_active and delete.
+        d.call("set_active_part", part="addr-a")
+        expect(d.call("list_parts")["active"] ==
+               next(t["index"] for t in d.call("list_parts")["parts"]
+                    if t["name"] == "addr-a"), "set_active_part by part=")
+        try:
+            d.call("set_active_part")
+            raise AssertionError("no-arg set_active_part must refuse")
+        except RuntimeError as e:
+            expect("part:" in str(e) and "index" in str(e),
+                   f"refusal names every accepted form: {e}")
+        # R16: this project has several documents now.
+        try:
+            d.call("save_project", path=os.path.join(tmp, "multi.json"))
+            raise AssertionError("multi-doc .json save must refuse")
+        except RuntimeError as e:
+            expect(".dsgn" in str(e), f"refusal names .dsgn: {e}")
+        expect(not os.path.exists(os.path.join(tmp, "multi.json")),
+               "nothing written on the refused save")
+        d.call("delete_part", part=auto["name"])
+        d.call("delete_part", part="addr-a")
+        d.call("set_active_part", part=first_tab)
+
         phase("Autosave + crash recovery")
         # Autosave + crash recovery (F2): save clean, dirty the doc, let the
         # 1s autosave fire, SIGKILL (a real crash — no signal handler), then

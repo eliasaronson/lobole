@@ -7,6 +7,7 @@
 #include "core/drawing/DrawingValidate.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteProject.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 
@@ -143,8 +144,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "create_drawing") {
     // Adds a drawing tab. Optional `sheet` seeds paper size / orientation /
     // title-block fields so a headless caller can set them in one call.
-    const std::string name =
-        p.value("name", "Drawing " + std::to_string(state.parts.size() + 1));
+    std::string name;
+    if (p.contains("name")) {
+      name = p.at("name").get<std::string>();
+      RequireFreshTabName(state, name);
+    } else {
+      name = FreshDefaultTabName(state, "Drawing");
+    }
     // Validate BEFORE creating the tab — a bad shape or size string must
     // not leave a half-configured drawing behind.
     if (p.contains("sheet")) {

@@ -1650,6 +1650,20 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
       StampDiskState(state, path); // we just wrote it; disk and memory agree
     return r.has_value();
   }
+  // A multi-document project is about to become a DIRECTORY. Writing it
+  // under a .json name would work — and did: the W 170 S project saved as a
+  // directory *named* w170s.json, in the full container form but WITHOUT
+  // the git vault (which keys on .dsgn), silently dropping every save
+  // message. Same format, different capability, decided by a filename —
+  // refuse instead: .json stays the single-document interchange form.
+  if (fs::path(path).extension() == ".json") {
+    if (error)
+      *error = "a multi-document project saves as a .dsgn directory "
+               "(per-feature files + git history); .json is the "
+               "single-document interchange form — save to '" +
+               fs::path(path).stem().string() + ".dsgn'";
+    return false;
+  }
   // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
   try {
     const fs::path dir(path);

@@ -1343,14 +1343,26 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return out;
   }
   if (m == "add_part") {
-    const std::string name =
-        p.value("name", "Part " + std::to_string(state.parts.size() + 1));
+    // A duplicate name is refused (names address tabs); the DEFAULT skips
+    // taken names, since "Part parts.size()+1" collided after a deletion.
+    std::string name;
+    if (p.contains("name")) {
+      name = p.at("name").get<std::string>();
+      remote::RequireFreshTabName(state, name);
+    } else {
+      name = remote::FreshDefaultTabName(state, "Part");
+    }
     const size_t idx = ui::AddPart(state, name);
     return {{"index", idx}, {"name", name}, {"id", state.parts[idx].id}};
   }
   if (m == "add_assembly") {
-    const std::string name =
-        p.value("name", "Assembly " + std::to_string(state.parts.size() + 1));
+    std::string name;
+    if (p.contains("name")) {
+      name = p.at("name").get<std::string>();
+      remote::RequireFreshTabName(state, name);
+    } else {
+      name = remote::FreshDefaultTabName(state, "Assembly");
+    }
     const size_t idx = ui::AddAssembly(state, name);
     return {{"index", idx}, {"name", name}, {"id", state.parts[idx].id}};
   }
@@ -1363,6 +1375,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const std::string newName = p.at("new_name").get<std::string>();
     if (newName.empty())
       throw std::runtime_error("new_name must be non-empty");
+    if (state.parts[slot].name != newName) // renaming to itself is a no-op
+      remote::RequireFreshTabName(state, newName);
     state.parts[slot].name = newName;
     state.projectMetaDirty = true; // tab names live in project.json only
     return {{"index", slot}, {"name", newName}, {"id", state.parts[slot].id}};

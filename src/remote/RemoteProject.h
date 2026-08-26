@@ -30,6 +30,15 @@ std::optional<nlohmann::json> HandleProjectRpc(ui::AppState& state,
 // RPCs): the alternative is each one growing its own subtly different copy.
 size_t ResolveSlotIndex(ui::AppState& state, const nlohmann::json& sel);
 
+// Refuse a tab name that already exists. Two tabs answering to one name make
+// name-addressing ambiguous and every listing confusing — a died-and-retried
+// script once minted two identical assemblies with nothing said.
+void RequireFreshTabName(ui::AppState& state, const std::string& name);
+
+// "Part N" that is actually free: the parts.size()+1 default collided after
+// a deletion, and with duplicate names refused the default must never refuse.
+std::string FreshDefaultTabName(ui::AppState& state, const char* stem);
+
 // One row per RPC this module dispatches (for the describe endpoint).
 std::span<const MethodDoc> ProjectMethodDocs();
 

@@ -206,6 +206,29 @@ size_t ResolveSlotIndex(ui::AppState& state, const json& sel) {
   return static_cast<size_t>(slot);
 }
 
+void RequireFreshTabName(ui::AppState& state, const std::string& name) {
+  ui::EnsureParts(state);
+  for (const ui::PartSlot& ps : state.parts)
+    if (ps.name == name)
+      throw std::runtime_error(
+          "a tab named '" + name +
+          "' already exists — names address tabs (add_occurrence, "
+          "set_active_part), so two answering to one would be ambiguous; "
+          "pick another or rename_part the existing one");
+}
+
+std::string FreshDefaultTabName(ui::AppState& state, const char* stem) {
+  ui::EnsureParts(state);
+  for (size_t n = state.parts.size() + 1;; n++) {
+    const std::string candidate = std::string(stem) + " " + std::to_string(n);
+    bool taken = false;
+    for (const ui::PartSlot& ps : state.parts)
+      taken = taken || ps.name == candidate;
+    if (!taken)
+      return candidate;
+  }
+}
+
 namespace {
 
 // The tab-bar folder registry as JSON, appended to every folder RPC's reply.

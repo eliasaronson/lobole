@@ -140,7 +140,11 @@ record of bumps and the corpus as a sample of them, not a mirror.
 `part.dsgn/` = `index.json` (envelope: format/version/rollback/parameters +
 the ordered feature-id list) + `features/<id>-<kebab-type>.json`, one file
 per feature named by stable id (the type suffix is cosmetic). The single
-`.json` file remains the interchange form; `Save`/`Load` dispatch on the
+`.json` file remains the interchange form **for a single document only**:
+a multi-document project always writes the container directory, and saving
+one to a `.json` path is REFUSED (2026-08-26) — it used to mint a directory
+*named* `.json` without the git vault, which keys on `.dsgn`.
+`Save`/`Load` dispatch on the
 path (`.dsgn` or an existing directory; picking an `index.json` inside a
 `.dsgn` opens the project). Feature files with unchanged content are not
 rewritten, and deleted features' files are removed on save — a git diff
