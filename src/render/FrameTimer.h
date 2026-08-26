@@ -60,6 +60,15 @@ public:
     double p95Ms = 0.0;
     double maxMs = 0.0;
     std::array<double, kPhaseCount> phaseMs{}; // averages over the window
+    // The WORST frame's own phase split — spike attribution. The averages
+    // above cannot say which phase held a 50 ms hitch that happened once in
+    // the window; this is that frame's breakdown (its total is maxMs).
+    // Caveat carried from Mark(): a frame that early-returned (swapchain
+    // rebuild) lands its unmarked phases' time in whichever phase closed
+    // next, so a resize hitch can read oddly here.
+    std::array<double, kPhaseCount> worstPhaseMs{};
+    bool worstIdle = false; // the worst frame ran idle-paced (rare; ~10 Hz
+                            // iterations do the same work, just later)
   };
 
   void BeginFrame(double now) {
@@ -129,15 +138,21 @@ public:
     std::vector<float> totals;
     totals.reserve(n);
     double sum = 0.0;
+    const Frame* worst = nullptr;
     for (size_t k = n; k > 0; k--) {
       const Frame& f = m_ring[(m_next + kHistory - k) % kHistory];
       totals.push_back(f.total);
       sum += f.total;
       if (f.idle)
         s.idleFrames++;
+      if (worst == nullptr || f.total > worst->total)
+        worst = &f;
       for (size_t p = 0; p < kPhaseCount; p++)
         s.phaseMs[p] += f.phase[p];
     }
+    for (size_t p = 0; p < kPhaseCount; p++)
+      s.worstPhaseMs[p] = worst->phase[p];
+    s.worstIdle = worst->idle;
     for (size_t p = 0; p < kPhaseCount; p++)
       s.phaseMs[p] /= static_cast<double>(n);
 

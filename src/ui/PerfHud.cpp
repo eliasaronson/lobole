@@ -81,6 +81,28 @@ void DrawPerfHud(AppState& state) {
   // has a fine average and an unusable feel.
   ImGui::TextDisabled("p50 %.2f   p95 %.2f   max %.2f", s.p50Ms, s.p95Ms,
                       s.maxMs);
+  // WHICH phase held the worst frame — the averages dilute a one-off 50 ms
+  // hitch far below visibility, so `max` alone says "something spiked" and
+  // nothing else. This is the spike's own breakdown.
+  if (s.frames > 0) {
+    size_t worstPhase = 0;
+    for (size_t p = 1; p < render::kPhaseCount; p++)
+      if (s.worstPhaseMs[p] > s.worstPhaseMs[worstPhase])
+        worstPhase = p;
+    ImGui::TextDisabled(
+        "worst %.2f ms · %s %.2f%s", s.maxMs,
+        render::PhaseName(static_cast<render::FramePhase>(worstPhase)),
+        s.worstPhaseMs[worstPhase], s.worstIdle ? "  (idle-paced)" : "");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(
+          "The worst frame's own phase split:\n"
+          "update %.2f  ui %.2f  wait %.2f  record %.2f  present %.2f\n"
+          "wait/present = display or vsync; the others are our CPU work.\n"
+          "Caveat: a swapchain-rebuild frame skips phase marks, so its\n"
+          "time lands in the next closed phase and can read oddly.",
+          s.worstPhaseMs[0], s.worstPhaseMs[1], s.worstPhaseMs[2],
+          s.worstPhaseMs[3], s.worstPhaseMs[4]);
+  }
 
   const std::vector<float> recent = timer.Recent(120);
   if (!recent.empty()) {

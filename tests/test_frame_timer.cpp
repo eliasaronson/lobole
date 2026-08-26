@@ -123,3 +123,47 @@ TEST_CASE("frame timer: nothing measured yet is zero, not garbage",
   CHECK_THAT(one.p95Ms, Catch::Matchers::WithinRel(12.0, 1e-3));
   CHECK_THAT(one.maxMs, Catch::Matchers::WithinRel(12.0, 1e-3));
 }
+
+TEST_CASE("frame timer: the worst frame carries its own phase split",
+          "[frametimer]") {
+  FrameTimer t;
+  double clock = 5.0;
+  // 50 even 10 ms frames, then ONE 60 ms frame that is almost entirely UI —
+  // a one-off hitch. The window averages dilute it 50:1, so an
+  // implementation that returns the averaged split scaled up (rather than
+  // THAT frame's own) fails the ui-share check below.
+  for (int k = 0; k < 50; k++)
+    PushFrame(t, clock, 10.0);
+  t.BeginFrame(clock);
+  clock += 0.002;
+  t.Mark(FramePhase::Update, clock);
+  clock += 0.050;
+  t.Mark(FramePhase::BuildUI, clock);
+  clock += 0.002;
+  t.Mark(FramePhase::Wait, clock);
+  clock += 0.002;
+  t.Mark(FramePhase::Record, clock);
+  clock += 0.004;
+  t.EndFrame(clock);
+
+  const FrameTimer::Stats s = t.Snapshot();
+  CHECK_THAT(s.maxMs, Catch::Matchers::WithinRel(60.0, 1e-3));
+  CHECK_THAT(s.worstPhaseMs[static_cast<size_t>(FramePhase::BuildUI)],
+             Catch::Matchers::WithinRel(50.0, 1e-3));
+  CHECK(!s.worstIdle);
+  // Its split accounts for its whole frame, as the averages do for theirs.
+  double sum = 0.0;
+  for (size_t pIdx = 0; pIdx < render::kPhaseCount; pIdx++)
+    sum += s.worstPhaseMs[pIdx];
+  CHECK_THAT(sum, Catch::Matchers::WithinRel(s.maxMs, 1e-3));
+
+  // An idle-paced frame that happens to be the worst says so: at the ~10 Hz
+  // floor the same work just runs later, which is not a hitch.
+  FrameTimer t2;
+  double c2 = 0.0;
+  t2.BeginFrame(c2);
+  t2.SetIdlePaced(true);
+  c2 += 0.020;
+  t2.EndFrame(c2);
+  CHECK(t2.Snapshot().worstIdle);
+}

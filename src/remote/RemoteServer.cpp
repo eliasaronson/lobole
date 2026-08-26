@@ -1381,9 +1381,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                         : "no frame loop under --headless: run the GUI (or "
                           "tools/headless-preview.sh) to measure frame time");
     json phases = json::object();
-    for (size_t i = 0; i < render::kPhaseCount; i++)
-      phases[render::PhaseName(static_cast<render::FramePhase>(i))] =
-          fs.phaseMs[i];
+    json worstPhases = json::object();
+    for (size_t i = 0; i < render::kPhaseCount; i++) {
+      const char* name = render::PhaseName(static_cast<render::FramePhase>(i));
+      phases[name] = fs.phaseMs[i];
+      worstPhases[name] = fs.worstPhaseMs[i];
+    }
     // The conclusion, not just the ingredients: which of wait/present holds
     // the vsync idle is a driver detail, so a caller reading one of them
     // alone would draw the wrong one.
@@ -1408,6 +1411,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // while hands-off" is undiagnosable without the waker's name.
             {"wake", state.pacerWake},
             {"wake_age_s", state.pacerWakeAgeS},
+            // The worst frame's own phase split (its total is max_ms): which
+            // phase held the hitch the averages dilute away.
+            {"worst_phases_ms", worstPhases},
+            {"worst_idle", fs.worstIdle},
             // Which PASS the GPU spends its time on — the number the CPU
             // split cannot see. supported:false names the reason (a queue
             // with no timestamp support) instead of omitting the key.

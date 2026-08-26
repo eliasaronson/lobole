@@ -122,6 +122,20 @@ Two things the build taught:
   frame** — the CPU split reported all ~30 ms as `display` and could not say
   the GPU was 94% idle. That is the gap this closes.
 
+## Worst-frame attribution (2026-08-26)
+
+`max` alone says "something spiked" and nothing else — the phase averages
+dilute a one-off 50 ms hitch 240:1. `Snapshot` now also carries the worst
+frame's OWN phase split (`worstPhaseMs`, plus an idle-paced flag), shown as
+a `worst 52.79 ms · ui 48.11` line in the HUD and as `worst_phases_ms` in
+`frame_stats`. Free: the ring already held every frame's split; this is read
+out in the walk Snapshot already does. First real reading attributed a
+733 ms open-project frame to `update` (document load + regen + renderer
+sync) — correct, on the first try. Caveats: a swapchain-rebuild frame skips
+phase marks (its time lands in the next closed phase), and the idle
+throttle's event wait sits OUTSIDE the frame, so idle iterations cannot fake
+a spike — the flag exists for the rare case one genuinely is the worst.
+
 ## Deferred, with reasons
 - **Recording to a file** for offline comparison. `frame_stats` returns JSON,
   so a caller that wants a time series can poll and keep it; building a
