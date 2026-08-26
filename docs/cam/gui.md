@@ -32,6 +32,7 @@ Zero:  [ Pick top face ]        ← Z zero, stock top, work origin
 ────────────────────────────
   [ Clear a pocket ]  → click the pocket floor
   [ Cut it out ]      → click the outline, or nothing = the whole part
+  [ Break an edge ]   → click the wall whose top edge to round/chamfer
   [ Face the top ]    → no pick
 ```
 

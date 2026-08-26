@@ -3,6 +3,9 @@
 #include "core/ElementMap.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
+
+#include <cmath>
 
 #include <cstdint>
 #include <string>
@@ -20,10 +23,26 @@ namespace cam {
 
 // --- tools ----------------------------------------------------------------
 
+// What the end of the tool looks like. Everything before R15 assumed a flat
+// end mill — a fair default, and wrong for the two tools a chamfer or a
+// roundover needs. The shape is not cosmetic: it decides what the verifier
+// thinks was removed, and it is what an edge-follow operation reads to know
+// whether it is cutting a bevel or an arc.
+enum class ToolType {
+  Flat,  // square end mill
+  Ball,  // ball nose; tip radius = diameter/2
+  VBit,  // engraving/chamfer cone, `tipAngleDeg` INCLUDED angle
+  Drill, // twist drill, `tipAngleDeg` point angle (118° typical)
+};
+
 struct Tool {
   int number = 1; // T-word; also how a post addresses it
   std::string name;
   double diameter = 6.0; // mm
+  ToolType type = ToolType::Flat;
+  // Included angle at the point, for the two conical types. 90° is the
+  // common chamfer bit; a drill is usually 118°.
+  double tipAngleDeg = 90.0;
   int flutes = 2;
   double fluteLength = 20.0; // mm, the usable depth
   // Feeds and speeds are NOT computed from a chip-load formula: this app
@@ -33,6 +52,29 @@ struct Tool {
   double feedPlunge = 100.0; // mm/min in Z
   double spindleRpm = 10000.0;
 };
+
+// How far ABOVE the tool's lowest point its cutting surface sits, `d` mm out
+// from the axis. Zero everywhere for a flat mill (the old assumption, kept
+// exactly); the bowl of a ball; the cone of a V-bit or a drill point. The
+// verifier's material removal and the edge-follow geometry both come from
+// this one function, so the two cannot disagree about the tool's shape.
+[[nodiscard]] inline double TipHeight(const Tool& t, double d) {
+  const double r = t.diameter * 0.5;
+  d = std::min(std::abs(d), r);
+  switch (t.type) {
+  case ToolType::Ball:
+    return r - std::sqrt(std::max(0.0, r * r - d * d));
+  case ToolType::VBit:
+  case ToolType::Drill: {
+    // Half the included angle, measured from the axis.
+    const double half = glm::radians(t.tipAngleDeg * 0.5);
+    const double tanHalf = std::tan(half);
+    return tanHalf > 1e-9 ? d / tanHalf : 0.0;
+  }
+  default:
+    return 0.0;
+  }
+}
 
 // --- operations -----------------------------------------------------------
 
@@ -45,6 +87,10 @@ enum class OpType {
   // in concentric rings, so the whole depth can be taken in one pass. Needs
   // the LGPL libarea shared library; without it the pocket path is used.
   Adaptive,
+  // R15: follow a wall's TOP EDGE and break it — a chamfer with a V-bit, a
+  // roundover with a ball nose. The tool decides which; a flat mill is
+  // refused rather than run as a square step nobody asked for.
+  EdgeRound,
 };
 
 // Which side of a contour the tool runs on. For a pocket this is implicit
@@ -79,7 +125,13 @@ struct Operation {
   double tabHeight = 1.5;
 
   // Pocket/Face only: fraction of the tool diameter to step over per pass.
+  // EdgeRound reads it too: it is what sets the cusp between arc passes.
   double stepover = 0.45;
+
+  // EdgeRound only: the size of the break, in mm — the radius of the round
+  // for a ball, the horizontal width of the bevel for a V-bit. 0 = derive it
+  // from the tool and the wall (defaults rule).
+  double edgeSize = 0.0;
 
   bool enabled = true;
 };

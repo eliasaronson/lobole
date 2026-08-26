@@ -181,7 +181,12 @@ struct VerdictLine {
   std::string text;
 };
 
-[[nodiscard]] std::vector<VerdictLine>
-Explain(const Verdict& v, double tolerance, double minutes);
+// `breaksAnEdge` says the job contains an edge-break operation. It changes
+// nothing that is measured — it names the most likely cause of the gouge such
+// a job reports, which is that the round or chamfer exists in the TOOLPATH and
+// not in the model the verifier compares against.
+[[nodiscard]] std::vector<VerdictLine> Explain(const Verdict& v,
+                                               double tolerance, double minutes,
+                                               bool breaksAnEdge = false);
 
 } // namespace cam

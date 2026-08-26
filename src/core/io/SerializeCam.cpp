@@ -24,6 +24,8 @@ const char* OpTypeName(cam::OpType t) {
     return "drill";
   case cam::OpType::Adaptive:
     return "adaptive";
+  case cam::OpType::EdgeRound:
+    return "edge_round";
   default:
     return "profile";
   }
@@ -38,7 +40,32 @@ cam::OpType OpTypeFromName(const std::string& s) {
     return cam::OpType::Drill;
   if (s == "adaptive")
     return cam::OpType::Adaptive;
+  if (s == "edge_round")
+    return cam::OpType::EdgeRound;
   return cam::OpType::Profile;
+}
+
+const char* ToolTypeName(cam::ToolType t) {
+  switch (t) {
+  case cam::ToolType::Ball:
+    return "ball";
+  case cam::ToolType::VBit:
+    return "vbit";
+  case cam::ToolType::Drill:
+    return "drill";
+  default:
+    return "flat";
+  }
+}
+
+cam::ToolType ToolTypeFromName(const std::string& s) {
+  if (s == "ball")
+    return cam::ToolType::Ball;
+  if (s == "vbit")
+    return cam::ToolType::VBit;
+  if (s == "drill")
+    return cam::ToolType::Drill;
+  return cam::ToolType::Flat;
 }
 
 const char* SideName(cam::Side s) {
@@ -97,6 +124,12 @@ json CamSetupToJson(const cam::Setup& setup) {
                {"feed_cut", t.feedCut},
                {"feed_plunge", t.feedPlunge},
                {"spindle_rpm", t.spindleRpm}};
+    // Written only when it is not the flat mill everything assumed before
+    // v66, so a job of plain end mills re-saves byte-identically.
+    if (t.type != cam::ToolType::Flat) {
+      tj["tool_type"] = ToolTypeName(t.type);
+      tj["tip_angle"] = t.tipAngleDeg;
+    }
     j["tools"].push_back(std::move(tj));
   }
 
@@ -127,8 +160,11 @@ json CamSetupToJson(const cam::Setup& setup) {
                     {"width", op.tabWidth},
                     {"height", op.tabHeight}};
     }
-    if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Face)
+    if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Face ||
+        op.type == cam::OpType::EdgeRound)
       oj["stepover"] = op.stepover;
+    if (op.type == cam::OpType::EdgeRound)
+      oj["edge_size"] = op.edgeSize;
     if (!op.enabled)
       oj["enabled"] = false;
     if (!op.targets.empty()) {
@@ -176,6 +212,8 @@ cam::Setup CamSetupFromJson(const json& j) {
     t.feedCut = tj.value("feed_cut", 300.0);
     t.feedPlunge = tj.value("feed_plunge", 100.0);
     t.spindleRpm = tj.value("spindle_rpm", 10000.0);
+    t.type = ToolTypeFromName(tj.value("tool_type", std::string("flat")));
+    t.tipAngleDeg = tj.value("tip_angle", 90.0);
     setup.tools.push_back(std::move(t));
   }
   for (const json& oj : j.value("operations", json::array())) {
@@ -203,6 +241,7 @@ cam::Setup CamSetupFromJson(const json& j) {
       op.tabHeight = oj["tabs"].value("height", 1.5);
     }
     op.stepover = oj.value("stepover", 0.45);
+    op.edgeSize = oj.value("edge_size", 0.0);
     op.enabled = oj.value("enabled", true);
     for (const json& rj : oj.value("targets", json::array())) {
       ElementRef ref;

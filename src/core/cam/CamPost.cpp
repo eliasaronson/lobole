@@ -413,9 +413,27 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       std::ostringstream t;
       t << "T" << tp.toolNumber << " M6";
       e.Raw(t.str());
-      if (opts.comments && tool != nullptr)
+      if (opts.comments && tool != nullptr) {
+        // The SHAPE goes in the comment too. "T2 D6" is the same line for a
+        // 6 mm end mill and a 6 mm ball nose, and the operator at the machine
+        // is the one who has to tell them apart before pressing cycle start.
+        std::string shape;
+        switch (tool->type) {
+        case ToolType::Ball:
+          shape = " ball";
+          break;
+        case ToolType::VBit:
+          shape = " V " + Num(tool->tipAngleDeg, 1) + " deg";
+          break;
+        case ToolType::Drill:
+          shape = " drill " + Num(tool->tipAngleDeg, 1) + " deg";
+          break;
+        default:
+          break;
+        }
         e.Comment("tool " + std::to_string(tool->number) + ": " + tool->name +
-                  " D" + Num(tool->diameter, 3));
+                  " D" + Num(tool->diameter, 3) + shape);
+      }
       const bool paused = !dialect->toolTable && opts.pauseOnToolChange;
       if (paused)
         e.Raw("M0 (change tool, set Z zero, then cycle start)");

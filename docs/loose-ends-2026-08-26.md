@@ -108,15 +108,20 @@
 
 ## Wave 4 — modeling/CAM depth (larger, in this order)
 
-- **R14 pattern of a cut.** Re-apply the source cut per instance with the
-  transformed profile instead of refusing "source body not found". Fold in
-  stable names for patterned faces (the toponaming plan's known gap).
-  Undo the FEATURE_FORMATS restriction note when it lands.
-- **R15 CAM tool types.** Tool gains a type (flat/ball/V/drill) + geometry
-  (tip angle, corner radius); posts annotate it; first consumer is a
-  roundover/chamfer edge-follow op — the baffle-edge diffraction
-  treatment every speaker build wants and the current flat-only tool
-  model cannot express.
+- **R14 pattern of a cut — SHIPPED** (067ba26). The cut Extrude caches the
+  prism it swept; the pattern replicates that cutter and subtracts each
+  copy. Instance faces carry the source's names with a `#<k>` suffix, so
+  the patterned holes are as referenceable as the first. The GUI pick is
+  the CUT'S TREE ROW (a cut has no body to click); FEATURE_FORMATS' "a cut
+  cannot be patterned" note is gone.
+- **R15 CAM tool types — SHIPPED.** `cam::ToolType` (flat/ball/vbit/drill)
+  + `tip_angle`, refused by name rather than defaulted; one `TipHeight`
+  function is the tool's shape, and the VERIFIER simulates it. First
+  consumer is the `edge_round` operation — "Break an edge" follows a
+  wall's top edge, chamfering with a V-bit and rounding with a ball, and
+  refuses a flat mill. A break the MODEL does not have gouges by
+  construction, so the verdict names that cause instead of reading as
+  scrap. Format v66 (with R13's notes), golden `v66-cam-tool-shape`.
 
 ## Deliberately not in this round
 

@@ -705,6 +705,82 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
   return out;
 }
 
+namespace {
+
+// --- breaking an edge -------------------------------------------------------
+//
+// A chamfer and a roundover are the same operation with a different tool: run
+// the cutter round the wall's TOP EDGE, offset and lowered so its own shape
+// leaves the break. The tool decides which — a V-bit cuts a bevel in one
+// pass, a ball nose walks an arc in as many as the cusp needs — so this is one
+// verb, not two, and a flat mill is refused instead of ploughing a square
+// step nobody asked for.
+//
+// Geometry (wall at the origin, material inward, top at z = 0):
+//   V-bit  the cone's flank IS the bevel. Put the axis ON the contour and
+//          plunge w·cot(half-angle): the tip lands exactly on the wall at the
+//          bottom of the bevel, so nothing below the break is touched.
+//   ball   the finished surface is a quarter-round of radius R, its axis R in
+//          from the wall and R below the top. The ball rides the air side of
+//          it: centre = axis + (R + r)·(cos t, sin t), t from the top (a
+//          graze on the flat) down to the wall.
+struct EdgeBreak {
+  double size = 0.0;  // roundover radius / bevel width, mm
+  double depth = 0.0; // how far below the top edge the TOOL reaches
+  bool ok = false;
+  std::string why;
+};
+
+// The largest break this tool can make within `window` mm of wall below the
+// top edge, or the size asked for, checked against the tool.
+EdgeBreak EdgeBreakFor(const Tool& tool, double asked, double window) {
+  EdgeBreak out;
+  const double r = tool.diameter * 0.5;
+  if (tool.type == ToolType::Flat || tool.type == ToolType::Drill) {
+    out.why = "tool " + std::to_string(tool.number) + " is a " +
+              (tool.type == ToolType::Flat ? "flat end mill" : "drill") +
+              " — breaking an edge needs a ball nose (a roundover) or a V-bit "
+              "(a chamfer). Set the tool's type.";
+    return out;
+  }
+  if (tool.type == ToolType::VBit) {
+    const double half = glm::radians(tool.tipAngleDeg * 0.5);
+    const double tanHalf = std::tan(half);
+    if (tanHalf < 1e-9 || half >= glm::radians(89.9)) {
+      out.why = "a V-bit with a " + Round2(tool.tipAngleDeg) +
+                " degree included angle has no flank to cut a bevel with";
+      return out;
+    }
+    // cot(half) mm of depth per mm of width; the bevel must fit the wall,
+    // and the flank must reach the top surface (so w <= the tool radius).
+    const double cot = 1.0 / tanHalf;
+    const double fits = std::min(r, window / cot);
+    out.size = asked > 0.0 ? asked : fits;
+    if (out.size > r + 1e-9) {
+      out.why = "tool " + std::to_string(tool.number) + " is " +
+                Round2(tool.diameter) + " mm across, so its flank can cut a " +
+                Round2(r) + " mm bevel at most — " + Round2(out.size) +
+                " mm would bury the shank";
+      return out;
+    }
+    out.depth = out.size * cot;
+  } else {
+    out.size = asked > 0.0 ? asked : std::min(r, window);
+    // The ball hangs its own radius below the deepest contact point.
+    out.depth = out.size + r;
+  }
+  if (out.size <= 1e-9) {
+    out.why =
+        "there is no room for a break here — the wall below the edge is " +
+        Round2(window) + " mm";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+} // namespace
+
 DerivedOp DeriveOperation(const Setup& setup,
                           const std::vector<Body>& rawBodies, OpType type,
                           const ElementRef& target, int toolNumber) {
@@ -874,6 +950,33 @@ DerivedOp DeriveOperation(const Setup& setup,
                 "Above the part sets how much sits above it)";
       return out;
     }
+    break;
+  }
+  case OpType::EdgeRound: {
+    // Derives from the wall it breaks: the edge is the wall's own top, and
+    // the break is the biggest the tool can make without running past the
+    // bottom of that wall. Both numbers come from geometry the user clicked.
+    if (!target.IsSet()) {
+      out.why = "an edge break follows a wall — pick the vertical face whose "
+                "top edge to round or chamfer";
+      return out;
+    }
+    const WallContour wall = PickedWallContour(bodies, target);
+    if (!wall.ok) {
+      out.why = wall.why;
+      return out;
+    }
+    const EdgeBreak brk = EdgeBreakFor(tool, 0.0, wall.topZ - wall.bottomZ);
+    if (!brk.ok) {
+      out.why = brk.why;
+      return out;
+    }
+    op.name = tool.type == ToolType::Ball ? "Round the edge" : "Chamfer edge";
+    op.targets = {target};
+    op.side = wall.opening ? Side::Inside : Side::Outside;
+    op.topZ = wall.topZ;
+    op.bottomZ = wall.topZ - brk.depth;
+    op.edgeSize = brk.size;
     break;
   }
   case OpType::Drill: {
@@ -1410,6 +1513,66 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
     tp.error = "none of the drill targets resolved to a cylindrical face";
 }
 
+void GenerateEdgeRound(const Setup& setup, const Operation& op,
+                       const Tool& tool, const std::vector<Body>& bodies,
+                       Toolpath& tp) {
+  if (op.targets.empty()) {
+    tp.error = "an edge break follows a wall — pick the vertical face whose "
+               "top edge to round or chamfer";
+    return;
+  }
+  const WallContour wall = PickedWallContour(bodies, op.targets.front());
+  if (!wall.ok) {
+    tp.error = wall.why;
+    return;
+  }
+  const EdgeBreak brk =
+      EdgeBreakFor(tool, op.edgeSize, std::max(0.0, op.topZ - op.bottomZ));
+  if (!brk.ok) {
+    tp.error = brk.why;
+    return;
+  }
+  const double r = tool.diameter * 0.5;
+  const double top = op.topZ;
+  // An opening is cut from inside itself, so "into the material" is the
+  // direction that GROWS its contour; round the outside of a part and it is
+  // the one that shrinks it.
+  const double sign = wall.opening ? 1.0 : -1.0;
+  const Clipper2Lib::Paths64 base{ToClipper(wall.loop.pts)};
+
+  const auto lap = [&](double delta, double z) {
+    Clipper2Lib::Paths64 paths =
+        std::abs(delta) < 1e-9 ? base : Offset(base, delta);
+    for (Clipper2Lib::Path64& path : paths) {
+      Orient(path, op.climb, wall.opening);
+      EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ,
+               /*tabCount=*/0, /*tabWidth=*/0.0, /*tabZ=*/0.0,
+               /*entryZ=*/top);
+    }
+  };
+
+  if (tool.type == ToolType::VBit) {
+    // One pass: the axis on the contour, down by the bevel's own depth.
+    lap(0.0, top - brk.depth);
+    return;
+  }
+  // Arc passes from a graze on the flat top round to the wall. The step is
+  // the cusp control the stepover already means everywhere else.
+  const double R = brk.size;
+  const double arc = R * glm::half_pi<double>();
+  const double step = std::max(1e-3, op.stepover * tool.diameter);
+  const int passes = std::max(1, static_cast<int>(std::ceil(arc / step)));
+  for (int i = 0; i <= passes; i++) {
+    const double t =
+        glm::half_pi<double>() *
+        (1.0 - static_cast<double>(i) / static_cast<double>(passes));
+    const double inward = R - (R + r) * std::cos(t);
+    // Every Z here is the tool's LOWEST POINT, the control point the post and
+    // the verifier both use — so the ball's centre height is r above it.
+    lap(sign * inward, top - R + (R + r) * std::sin(t) - r);
+  }
+}
+
 } // namespace
 
 Toolpath GenerateFramed(const Setup& setup, const Operation& op,
@@ -1447,6 +1610,9 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
     break;
   case OpType::Adaptive:
     GenerateAdaptive(setup, op, *tool, bodies, tp);
+    break;
+  case OpType::EdgeRound:
+    GenerateEdgeRound(setup, op, *tool, bodies, tp);
     break;
   }
   if (tp.moves.empty() && tp.error.empty())

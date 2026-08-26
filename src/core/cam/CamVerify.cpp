@@ -265,11 +265,14 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
       for (int i = i0; i <= i1; i++) {
         double t = 0.0;
         const glm::dvec2 c(stock.CellX(i), stock.CellY(j));
-        if (DistToSegment(c, a, b, t) > radius)
+        const double d = DistToSegment(c, a, b, t);
+        if (d > radius)
           continue;
-        // A flat end mill: the tool bottom is the interpolated Z. (A profile
-        // function would go here for ball/bull/V — the shape FreeCAD's
-        // cSimTool uses, and the reason to keep this one line separate.)
+        // The tool's own shape, cut by cut: flat mills are still the
+        // interpolated Z everywhere under them (TipHeight is 0), a ball
+        // leaves its bowl, a V-bit or a drill its cone. Verifying a
+        // roundover against a flat-mill model reported the arc it MEANT to
+        // leave as 100% gouge (R15).
         //
         // `t` is the parameter of the CLOSEST point on the XY segment, which
         // is 0 for a move that does not travel in XY at all — so a straight
@@ -280,8 +283,10 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
         // covers.
         const double toolZ =
             xyStill ? std::min(from.z, m.to.z) : from.z + (m.to.z - from.z) * t;
-        if (stock.At(i, j) > toolZ)
-          stock.Set(i, j, static_cast<float>(toolZ));
+        const double surface =
+            toolZ + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+        if (stock.At(i, j) > surface)
+          stock.Set(i, j, static_cast<float>(surface));
       }
     }
     from = m.to;
@@ -604,7 +609,7 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
 }
 
 std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
-                                 double minutes) {
+                                 double minutes, bool breaksAnEdge) {
   std::vector<VerdictLine> out;
   char buf[256];
 
@@ -624,6 +629,16 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   "Check the depths and the tool diameter.",
                   v.maxGouge, v.gougeAt.x, v.gougeAt.y);
     out.push_back({VerdictLine::Level::Bad, buf});
+    // An edge break removes material the model still has, unless the round
+    // or the chamfer is modelled too — so this job gouges BY CONSTRUCTION
+    // and the verdict would otherwise read as scrap every time. The fix is
+    // the honest one: model the break (a Fillet or Chamfer feature on that
+    // edge) and the verifier and the toolpath describe the same part.
+    if (breaksAnEdge)
+      out.push_back({VerdictLine::Level::Warn,
+                     "This job breaks an edge. A round or a chamfer that is "
+                     "not in the MODEL reads as a gouge here — model it (a "
+                     "Fillet or Chamfer on that edge) and this line goes."});
   }
   if (v.rapidsThroughStock > 0) {
     std::snprintf(buf, sizeof(buf),

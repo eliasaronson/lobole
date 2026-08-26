@@ -1,0 +1,75 @@
+{
+  "format": "designer-document",
+  "version": 66,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Plate",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 40,
+      "height": 30,
+      "depth": 10
+    }
+  ],
+  "cam": [
+    {
+      "id": 2,
+      "name": "Edge break",
+      "post": "mach3",
+      "safe_z": 15.0,
+      "stock": {
+        "margin": [
+          2.0,
+          2.0,
+          1.0
+        ],
+        "bottom_margin": 1.0
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "12 mm V 90",
+          "diameter": 12.0,
+          "flutes": 2,
+          "flute_length": 20.0,
+          "feed_cut": 600.0,
+          "feed_plunge": 200.0,
+          "spindle_rpm": 12000.0,
+          "tool_type": "vbit",
+          "tip_angle": 90.0
+        },
+        {
+          "number": 2,
+          "name": "6 mm ball",
+          "diameter": 6.0,
+          "flutes": 2,
+          "flute_length": 20.0,
+          "feed_cut": 600.0,
+          "feed_plunge": 200.0,
+          "spindle_rpm": 12000.0,
+          "tool_type": "ball",
+          "tip_angle": 90.0
+        }
+      ],
+      "operations": [
+        {
+          "id": 3,
+          "name": "Chamfer edge",
+          "type": "edge_round",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 8.0,
+          "side": "outside",
+          "stepover": 0.45,
+          "edge_size": 2.0
+        }
+      ],
+      "fit_arcs": true
+    }
+  ]
+}

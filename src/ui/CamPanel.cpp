@@ -32,7 +32,9 @@ constexpr glm::vec4 kRapidColor(0.55f, 0.55f, 0.62f, 0.45f);
 
 // Order matches cam::OpType. "Adaptive" is a pocket cut a different way,
 // so it reads as a strategy rather than as a separate kind of job.
-const char* kOpTypes[] = {"Profile", "Pocket", "Face", "Drill", "Adaptive"};
+// In OpType order — the combo writes the index straight back as the enum.
+const char* kOpTypes[] = {"Profile", "Pocket",   "Face",
+                          "Drill",   "Adaptive", "Edge break"};
 
 } // namespace
 
@@ -347,6 +349,29 @@ void DrawCamPanel(AppState& state) {
       }
       ImGui::SetItemTooltip("Cutting feed, mm/min — what YOU run. The app "
                             "does not guess feeds and speeds.");
+      // The shape of the end. It is not decoration: the verifier simulates
+      // it, and "Break an edge" reads it to know whether it is cutting a
+      // bevel or an arc.
+      ImGui::SetNextItemWidth(90.0f);
+      int shape = static_cast<int>(t.type);
+      if (ImGui::Combo("###tooltype", &shape, "flat\0ball\0V-bit\0drill\0")) {
+        t.type = static_cast<cam::ToolType>(shape);
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("End shape. A ball rounds an edge, a V-bit "
+                            "chamfers it; a flat mill does neither.");
+      if (t.type == cam::ToolType::VBit || t.type == cam::ToolType::Drill) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70.0f);
+        float angle = static_cast<float>(t.tipAngleDeg);
+        if (ImGui::DragFloat("deg###tipangle", &angle, 1.0f, 5.0f, 179.0f,
+                             "%.0f")) {
+          t.tipAngleDeg = angle;
+          dirty = true;
+        }
+        ImGui::SetItemTooltip("INCLUDED angle at the point: 90 for the "
+                              "common chamfer bit, 118 for a twist drill.");
+      }
       ImGui::PopID();
     }
     ImGui::PopID(); // "tools"
@@ -504,8 +529,21 @@ void DrawCamPanel(AppState& state) {
         dirty = true;
       }
       ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+      if (op.type == cam::OpType::EdgeRound) {
+        ImGui::SetNextItemWidth(70.0f);
+        float size = static_cast<float>(op.edgeSize);
+        if (ImGui::DragFloat("Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
+                             "%.2f")) {
+          op.edgeSize = size;
+          dirty = true;
+        }
+        ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
+                              "bevel (V-bit), mm. 0 = the biggest this tool "
+                              "can make within the wall.");
+      }
       if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Face ||
-          op.type == cam::OpType::Adaptive) {
+          op.type == cam::OpType::Adaptive ||
+          op.type == cam::OpType::EdgeRound) {
         ImGui::SetNextItemWidth(70.0f);
         float over = static_cast<float>(op.stepover);
         if (ImGui::DragFloat("Stepover###stepover", &over, 0.01f, 0.05f, 0.9f,

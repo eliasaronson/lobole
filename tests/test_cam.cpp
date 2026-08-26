@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <numbers>
 
 // CAM's testable half (docs/cam/plan.md): bodies in, moves out, then G-code.
@@ -582,6 +583,34 @@ ElementRef UpFaceAt(const Document& doc, double z) {
     }
   }
   return {};
+}
+
+// A vertical face of the block whose outward normal points along -X or +X —
+// the wall an edge break follows.
+ElementRef SideWall(const Document& doc) {
+  for (const Body& b : doc.GetBodies()) {
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (!b.shape.FacePlane(index, c, n, u))
+        continue;
+      if (std::abs(n.z) < 0.01f)
+        return ElementRef{b.createdBy, name};
+    }
+  }
+  return {};
+}
+
+// A tool of a given shape, otherwise the setup's own.
+cam::Tool ShapedTool(cam::ToolType type, double diameter, double angle = 90.0) {
+  cam::Tool t;
+  t.number = 1;
+  t.diameter = diameter;
+  t.type = type;
+  t.tipAngleDeg = angle;
+  t.feedCut = 600.0;
+  t.feedPlunge = 200.0;
+  t.spindleRpm = 12000.0;
+  return t;
 }
 
 // A 40 x 30 x 20 block with a 6 mm through bore at (20, 15) — the part a
@@ -1883,6 +1912,237 @@ TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
     INFO("first difference at line " << line);
     CHECK(gcode == want);
   }
+}
+
+// --- R15: tool shapes and the edge break -------------------------------------
+
+TEST_CASE("cam: a tool's shape is what the cutter leaves", "[cam]") {
+  // TipHeight is the one place the tool's profile is written down; the
+  // verifier's material removal and the edge geometry both read it, so they
+  // cannot disagree about the shape of the cutter.
+  const cam::Tool flat = ShapedTool(cam::ToolType::Flat, 6.0);
+  CHECK_THAT(cam::TipHeight(flat, 0.0), WithinAbs(0.0, 1e-12));
+  CHECK_THAT(cam::TipHeight(flat, 3.0), WithinAbs(0.0, 1e-12));
+
+  // A Ø6 ball: flat at the tip, a full radius up at its edge.
+  const cam::Tool ball = ShapedTool(cam::ToolType::Ball, 6.0);
+  CHECK_THAT(cam::TipHeight(ball, 0.0), WithinAbs(0.0, 1e-12));
+  CHECK_THAT(cam::TipHeight(ball, 3.0), WithinAbs(3.0, 1e-9));
+  CHECK_THAT(cam::TipHeight(ball, 1.8), WithinAbs(3.0 - 2.4, 1e-9)); // 3-4-5
+
+  // A 90 degree V-bit rises one millimetre per millimetre out from the axis;
+  // a 60 degree one rises faster.
+  CHECK_THAT(cam::TipHeight(ShapedTool(cam::ToolType::VBit, 6.0, 90.0), 2.0),
+             WithinAbs(2.0, 1e-9));
+  CHECK_THAT(cam::TipHeight(ShapedTool(cam::ToolType::VBit, 6.0, 60.0), 2.0),
+             WithinAbs(2.0 / std::tan(std::numbers::pi / 6.0), 1e-9));
+}
+
+TEST_CASE("cam: a V-bit chamfers the edge it is pointed at", "[cam]") {
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 90.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  // Nothing typed: the edge is the wall's own top (z = 20), and the bevel is
+  // the biggest a Ø12 90-degree bit can cut — its radius, 6 mm — which at
+  // 45 degrees is 6 mm deep.
+  CHECK_THAT(derived.op.topZ, WithinAbs(20.0, 1e-6));
+  CHECK_THAT(derived.op.edgeSize, WithinAbs(6.0, 1e-6));
+  CHECK_THAT(derived.op.bottomZ, WithinAbs(14.0, 1e-6));
+
+  cam::Setup job = setup;
+  cam::Operation op = derived.op;
+  op.id = 1;
+  op.edgeSize = 2.0; // a 2 mm chamfer instead
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  // One lap, its axis ON the contour, two millimetres down: the cone's flank
+  // is the bevel, so the tip lands exactly on the wall at its bottom.
+  CHECK_THAT(paths[0].MinZ(), WithinAbs(18.0, 1e-6));
+  double onContour = 0.0, cuts = 0.0;
+  for (const cam::Move& mv : paths[0].moves) {
+    if (mv.kind == cam::Move::Kind::Rapid)
+      continue;
+    cuts++;
+    // The block is 40 x 30 at the origin: a point on its outline has x or y
+    // on one of the four sides.
+    const bool onX =
+        std::abs(mv.to.x) < 1e-6 || std::abs(mv.to.x - 40.0) < 1e-6;
+    const bool onY =
+        std::abs(mv.to.y) < 1e-6 || std::abs(mv.to.y - 30.0) < 1e-6;
+    if (onX || onY)
+      onContour++;
+  }
+  CHECK(cuts > 4);
+  CHECK(onContour == cuts);
+}
+
+TEST_CASE("cam: a ball nose rounds the edge over an arc", "[cam]") {
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::Ball, 6.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  CHECK(derived.op.name == "Round the edge");
+  CHECK_THAT(derived.op.edgeSize, WithinAbs(3.0, 1e-6)); // the ball's radius
+
+  cam::Setup job = setup;
+  cam::Operation op = derived.op;
+  op.id = 1;
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+
+  // The passes walk the arc: pass i has its centre R + r from the round's
+  // own axis (3 mm in from the wall, 3 mm below the top) at angle t, and its
+  // leftmost lap therefore runs at a known x and a known Z. Assert the
+  // programme contains each of them — the ramp into a pass shares the XY and
+  // sits above it, so looking for the depth itself is the honest check.
+  const double R = 3.0, r = 3.0;
+  const int passes =
+      static_cast<int>(std::ceil(R * std::numbers::pi * 0.5 / (0.45 * 6.0)));
+  REQUIRE(passes >= 2);
+  for (int i = 0; i <= passes; i++) {
+    const double t = std::numbers::pi * 0.5 * (1.0 - double(i) / passes);
+    const double x = R - (R + r) * std::cos(t); // the lap's left side
+    const double z = 20.0 - R + (R + r) * std::sin(t) - r; // the ball's TIP
+    int at = 0;
+    for (const cam::Move& mv : paths[0].moves)
+      if (mv.kind != cam::Move::Kind::Rapid && std::abs(mv.to.x - x) < 1e-4 &&
+          std::abs(mv.to.z - z) < 1e-4)
+        at++;
+    INFO("pass " << i << " expected x " << x << " z " << z);
+    CHECK(at >= 2); // both ends of that side, at depth
+  }
+  // It grazes the flat top on the first pass and hangs its own radius below
+  // the deepest contact on the last.
+  CHECK_THAT(paths[0].MinZ(), WithinAbs(20.0 - R - r, 1e-6));
+}
+
+TEST_CASE("cam: a flat mill is refused an edge break", "[cam]") {
+  auto doc = BlockDoc();
+  const cam::Setup setup = BasicSetup(); // a 6 mm FLAT end mill
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+  REQUIRE_FALSE(derived.ok);
+  // Names the tool it has and the two that would work — substituting one
+  // would cut a square step where a chamfer was asked for.
+  CHECK(derived.why.find("flat end mill") != std::string::npos);
+  CHECK(derived.why.find("ball") != std::string::npos);
+  CHECK(derived.why.find("V-bit") != std::string::npos);
+
+  // Asked for a bevel wider than the cutter can reach, it says how wide it
+  // can go rather than cutting a smaller one silently.
+  cam::Setup vee = setup;
+  vee.tools = {ShapedTool(cam::ToolType::VBit, 6.0, 90.0)};
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::EdgeRound;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 10.0;
+  op.edgeSize = 8.0; // the tool's radius is 3
+  op.targets = {wall};
+  vee.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(vee, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].moves.empty());
+  CHECK(paths[0].error.find("3 mm bevel at most") != std::string::npos);
+}
+
+TEST_CASE("cam: a tool's shape survives a save and reload", "[cam]") {
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "designer_cam_toolshape.json";
+  {
+    auto doc = BlockDoc();
+    cam::Setup& setup = doc->AddCamSetup();
+    setup.name = "Job";
+    setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 60.0)};
+    cam::Operation op;
+    op.id = doc->AllocateId();
+    op.type = cam::OpType::EdgeRound;
+    op.topZ = 20.0;
+    op.bottomZ = 16.0;
+    op.edgeSize = 2.5;
+    setup.operations.push_back(op);
+    REQUIRE(DocumentIO::Save(*doc, path.string()).has_value());
+  }
+  auto loaded = DocumentIO::Load(path.string());
+  REQUIRE(loaded.has_value());
+  REQUIRE((*loaded)->GetCamSetups().size() == 1);
+  const cam::Setup& setup = (*loaded)->GetCamSetups()[0];
+  REQUIRE(setup.tools.size() == 1);
+  // A V-bit that reloads as a flat mill is a chamfer that reloads as a
+  // square step — the substitution this project refuses everywhere else.
+  CHECK(setup.tools[0].type == cam::ToolType::VBit);
+  CHECK_THAT(setup.tools[0].tipAngleDeg, WithinAbs(60.0, 1e-9));
+  REQUIRE(setup.operations.size() == 1);
+  CHECK(setup.operations[0].type == cam::OpType::EdgeRound);
+  CHECK_THAT(setup.operations[0].edgeSize, WithinAbs(2.5, 1e-9));
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("cam verify: an unmodelled edge break says why it gouges", "[cam]") {
+  // The verifier compares the cut stock with the DESIGNED part, so a round
+  // the toolpath makes and the model does not have is, correctly, material
+  // removed below the designed surface. Left at that the verdict reads as
+  // scrap on every edge-break job — so the explanation names the cause and
+  // the fix (model the break) instead of leaving the operator to guess.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::Ball, 6.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+  REQUIRE(derived.ok);
+  cam::Operation op = derived.op;
+  op.id = 1;
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  // The shape of the tool rides in the file's own comments: "T1 D6" alone is
+  // the same line for an end mill and a ball nose, and the operator standing
+  // at the machine is the one who has to tell them apart.
+  CHECK(gcode.find("ball") != std::string::npos);
+
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), /*res=*/0.4);
+  CHECK(v.maxGouge > 0.6); // the round itself, honestly measured
+  bool explained = false;
+  for (const cam::VerdictLine& line : cam::Explain(v, 0.6, 0.0,
+                                                   /*breaksAnEdge=*/true))
+    if (line.text.find("not in the MODEL") != std::string::npos)
+      explained = true;
+  CHECK(explained);
+  // And it is only said when the job actually breaks an edge.
+  for (const cam::VerdictLine& line : cam::Explain(v, 0.6, 0.0, false))
+    CHECK(line.text.find("not in the MODEL") == std::string::npos);
 }
 
 #endif // HAVE_CAM

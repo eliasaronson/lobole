@@ -128,6 +128,12 @@ constexpr Verb kVerbs[] = {
      "so it does not break loose under the cutter; the wall of an opening "
      "cuts that opening out. An opening that goes all the way through has no "
      "floor to click, so its wall is the only thing to point at."},
+    {"Break an edge", "###cam_verb_edge", cam::OpType::EdgeRound,
+     PickSlot::CamEdgeWall, "Click the wall whose top edge to round or chamfer",
+     "Follow a wall's top edge with a shaped cutter: a ball nose rounds it "
+     "over, a V-bit chamfers it. The TOOL decides which, so a flat end mill "
+     "is refused rather than ploughing a square step. The size of the break "
+     "comes from the tool and the wall unless the operation says otherwise."},
 };
 
 } // namespace
@@ -283,9 +289,10 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     return;
   }
 
-  const cam::OpType type = slot == PickSlot::CamPocketFloor
-                               ? cam::OpType::Pocket
-                               : cam::OpType::Profile;
+  const cam::OpType type =
+      slot == PickSlot::CamPocketFloor ? cam::OpType::Pocket
+      : slot == PickSlot::CamEdgeWall  ? cam::OpType::EdgeRound
+                                       : cam::OpType::Profile;
   // A refusal keeps the slot armed: the user's next click is almost always
   // the face they meant, and re-pressing the verb first is a wasted step.
   if (CreateVerbOperation(state, type, item.element))
@@ -663,8 +670,12 @@ void RunCamVerification(AppState& state) {
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and
   // reporting it would teach the user to ignore the verdict.
   const double tolerance = kRes * 1.5;
+  bool breaksAnEdge = false;
+  for (const cam::Operation& op : setup->operations)
+    breaksAnEdge |= op.enabled && op.type == cam::OpType::EdgeRound;
   state.camVerdict = cam::Explain(
-      insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths));
+      insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
+      breaksAnEdge);
   state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
 }
 

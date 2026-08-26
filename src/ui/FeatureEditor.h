@@ -40,6 +40,7 @@ enum class PickSlot : int {
   CamPocketFloor, // CAM G2: the floor of a pocket to clear
   CamProfileOutline, // CAM G2: the face whose outline gets cut out
   CamIndexFace,      // CAM C9: the face to turn up under the spindle
+  CamEdgeWall,       // CAM R15: the wall whose top edge to round or chamfer
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

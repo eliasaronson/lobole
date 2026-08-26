@@ -34,12 +34,18 @@ constexpr MethodDoc kCamMethods[] = {
     {"set_cam_setup",
      "Change a setup {id, name?, post?, safe_z?, rotation_a?, fit_arcs?} or "
      "one of its "
-     "tools {id, tool: {number, name?, diameter?, feed_cut?, feed_plunge?, "
-     "spindle_rpm?, flutes?}} — the tool is added when the number is new.",
+     "tools {id, tool: {number, name?, diameter?, tool_type?: "
+     "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
+     "spindle_rpm?, flutes?}} — the tool is added when the number is new. "
+     "tool_type is the shape of the end: it decides what the verifier thinks "
+     "was removed, and an edge_round op reads it to know whether it is "
+     "cutting a bevel (vbit, tip_angle is the INCLUDED angle) or an arc "
+     "(ball). An unknown name is refused, not read as flat.",
      "fit_arcs, id, name, post, rotation_a, safe_z, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
-     "Add an operation {setup, type: profile|pocket|face|drill|adaptive, "
+     "Add an operation {setup, type: "
+     "profile|pocket|face|drill|adaptive|edge_round, "
      "tool?, top_z?, bottom_z?, stepdown?, side?: outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element}]}; returns its id and every field derived for "
@@ -48,7 +54,11 @@ constexpr MethodDoc kCamMethods[] = {
      "script does not type a depth the panel would not let a person type. "
      "Pocket: pick the floor. Profile: pick a wall (an opening cuts inside "
      "it, the perimeter cuts outside) or nothing at all to cut the part "
-     "free. Face: pick nothing. A refusal says what to pick instead. A "
+     "free. Face: pick nothing. Edge_round: pick the WALL whose top edge to "
+     "break — a V-bit chamfers it, a ball rounds it, a flat mill is refused; "
+     "edge_size? sets the bevel width / round radius, and left out it is the "
+     "biggest break that tool can make within the wall. A refusal says what "
+     "to pick instead. A "
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, setup, side, target, targets, tool, top_z, type"},
@@ -111,8 +121,38 @@ struct TypeRow {
 constexpr TypeRow kTypes[] = {
     {cam::OpType::Profile, "profile"},   {cam::OpType::Pocket, "pocket"},
     {cam::OpType::Face, "face"},         {cam::OpType::Drill, "drill"},
-    {cam::OpType::Adaptive, "adaptive"},
+    {cam::OpType::Adaptive, "adaptive"}, {cam::OpType::EdgeRound, "edge_round"},
 };
+
+// The tool's shape, same table-both-ways discipline: a name we do not know is
+// refused, never silently read as the flat mill everything used to assume.
+struct ToolTypeRow {
+  cam::ToolType type;
+  const char* name;
+};
+constexpr ToolTypeRow kToolTypes[] = {
+    {cam::ToolType::Flat, "flat"},
+    {cam::ToolType::Ball, "ball"},
+    {cam::ToolType::VBit, "vbit"},
+    {cam::ToolType::Drill, "drill"},
+};
+
+const char* ToolTypeName(cam::ToolType t) {
+  for (const ToolTypeRow& row : kToolTypes)
+    if (row.type == t)
+      return row.name;
+  return "flat";
+}
+
+cam::ToolType ToolTypeFrom(const std::string& s) {
+  for (const ToolTypeRow& row : kToolTypes)
+    if (s == row.name)
+      return row.type;
+  std::string known;
+  for (const ToolTypeRow& row : kToolTypes)
+    known += (known.empty() ? "" : ", ") + std::string(row.name);
+  throw std::runtime_error("unknown tool type '" + s + "'; use " + known);
+}
 
 const char* TypeName(cam::OpType t) {
   for (const TypeRow& row : kTypes)
@@ -183,6 +223,8 @@ void ApplyOpFields(Document& doc, cam::Operation& op, const RpcParams& p,
     op.climb = p.at("climb").get<bool>();
   if (p.contains("stepover"))
     op.stepover = p.at("stepover").get<double>();
+  if (p.contains("edge_size"))
+    op.edgeSize = p.at("edge_size").get<double>();
   if (p.contains("enabled"))
     op.enabled = p.at("enabled").get<bool>();
   if (p.contains("tabs")) {
@@ -211,7 +253,8 @@ void ApplyOpFields(Document& doc, cam::Operation& op, const RpcParams& p,
 
 json ToolJson(const cam::Tool& t) {
   return json{{"number", t.number},         {"name", t.name},
-              {"diameter", t.diameter},     {"flutes", t.flutes},
+              {"diameter", t.diameter},     {"tool_type", ToolTypeName(t.type)},
+              {"tip_angle", t.tipAngleDeg}, {"flutes", t.flutes},
               {"feed_cut", t.feedCut},      {"feed_plunge", t.feedPlunge},
               {"spindle_rpm", t.spindleRpm}};
 }
@@ -225,6 +268,10 @@ json OpJson(const cam::Operation& op) {
             {"bottom_z", op.bottomZ},
             {"stepdown", op.stepdown},
             {"enabled", op.enabled}};
+  if (op.type == cam::OpType::EdgeRound) {
+    j["edge_size"] = op.edgeSize;
+    j["stepover"] = op.stepover;
+  }
   // Side is reported for the clearing types too. It was profile-only, so a
   // pocket built over the RPC kept the struct's Outside default INVISIBLY —
   // and adaptive, the one strategy that reads it, then cleared outside a
@@ -345,6 +392,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       }
       tool->name = tj.value("name", tool->name);
       tool->diameter = tj.value("diameter", tool->diameter);
+      if (tj.contains("tool_type"))
+        tool->type = ToolTypeFrom(tj.at("tool_type").get<std::string>());
+      tool->tipAngleDeg = tj.value("tip_angle", tool->tipAngleDeg);
       tool->flutes = tj.value("flutes", tool->flutes);
       tool->feedCut = tj.value("feed_cut", tool->feedCut);
       tool->feedPlunge = tj.value("feed_plunge", tool->feedPlunge);
@@ -451,8 +501,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // The same sentences the panel shows. A verdict that reads as a row of
     // numbers over the RPC and as English in the GUI is two verdicts, and the
     // agent gets the worse one.
+    bool breaksAnEdge = false;
+    for (const cam::Operation& op : setup.operations)
+      breaksAnEdge |= op.enabled && op.type == cam::OpType::EdgeRound;
     json says = json::array();
-    for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0))
+    for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0, breaksAnEdge))
       says.push_back(line.text);
     json biggest = json::array();
     for (const cam::Verdict::Region& r : v.biggest)

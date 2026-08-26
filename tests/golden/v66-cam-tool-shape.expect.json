@@ -1,0 +1,17 @@
+{
+  "features": 1,
+  "bodies": 1,
+  "volumes": [
+    12000.0
+  ],
+  "cam_op_sides": [
+    "outside"
+  ],
+  "cam_op_types": [
+    "edge_round"
+  ],
+  "cam_tool_types": [
+    "vbit",
+    "ball"
+  ]
+}

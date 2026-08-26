@@ -139,11 +139,13 @@ cam::Setup                     // a document object, like fem::Study
   machine        // post id: "mach3" | "linuxcnc"
   fitArcs        // post curves as G2/G3 (C7). A machine property, so it
                  // lives here and persists
-  tools[]        // number, diameter, flutes, length, feeds/speeds
+  tools[]        // number, diameter, TYPE (flat|ball|vbit|drill) + tip angle,
+                 // flutes, length, feeds/speeds. The type is what the
+                 // verifier simulates and what an edge break reads (R15).
   operations[]
 
 cam::Operation
-  type      // Profile | Pocket | Face | Drill | Adaptive
+  type      // Profile | Pocket | Face | Drill | Adaptive | EdgeRound
   targets[] // ElementRef — faces/edges/pockets, stable across edits
   toolIndex
   depths    // top, bottom, stepdown, stock-to-leave

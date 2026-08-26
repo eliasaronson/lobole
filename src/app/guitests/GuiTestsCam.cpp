@@ -510,6 +510,61 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!backplot.empty());
   };
 
+  // R15: the same two clicks for the third verb, and the refusal that keeps
+  // it honest — a flat end mill cannot break an edge, and saying so beats
+  // ploughing a square step where a chamfer was asked for.
+  t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_an_edge_break");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_cam");
+    ctx->Yield(2);
+    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_edge");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamEdgeWall);
+
+    // A wall of the plate — any vertical face.
+    ui::SelectionItem wall;
+    wall.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : Doc()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f)
+          wall.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(wall.element.IsSet());
+
+    // The setup arrives with a 6 mm FLAT tool, so the first pick refuses in
+    // words and names the two tools that would work.
+    ui::CamFacePicked(*s_App, wall);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->slotPick.miss.empty());
+    IM_CHECK(s_App->slotPick.miss.find("ball") != std::string::npos);
+    cam::Setup* live = ui::ActiveCamSetup(*s_App);
+    IM_CHECK(live != nullptr);
+    IM_CHECK(live->operations.empty()); // refused, not half-made
+
+    // Make it a ball nose and pick again: one operation, every number
+    // derived from the wall and the tool.
+    live->tools[0].type = cam::ToolType::Ball;
+    ctx->Yield();
+    ui::CamFacePicked(*s_App, wall);
+    ctx->Yield(2);
+    live = ui::ActiveCamSetup(*s_App);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    const cam::Operation& op = live->operations[0];
+    IM_CHECK(op.type == cam::OpType::EdgeRound);
+    IM_CHECK(std::abs(op.topZ - 20.0) < 1e-4);    // the wall's own top
+    IM_CHECK(std::abs(op.edgeSize - 3.0) < 1e-4); // the ball's radius
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+    s_App->camToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

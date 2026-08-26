@@ -134,6 +134,7 @@ record of bumps and the corpus as a sample of them, not a mirror.
 | 63 | `5b7ae4f` | CAM setup remembers the face its Z zero was picked from |
 | 64 | `4774803` | Document display units (`units`: length/mass/angle) travel with the document |
 | 65 | `027809c` | Mate connector corner snap (`anchor.snap_edge2`) — a corner named by the two edges meeting there |
+| 66 | (R13/R15) | Drawing `notes` (text + optional leader, per sheet); CAM tool `tool_type`/`tip_angle` and the `edge_round` operation (`edge_size`) |
 
 ## The directory format (F3, default for new saves)
 

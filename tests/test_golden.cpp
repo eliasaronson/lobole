@@ -52,6 +52,46 @@ void AssertCamSides(const Document& doc, const nlohmann::json& expect) {
   }
 }
 
+// The SHAPE of each tool, and the type of each operation (v66). A V-bit that
+// reloads as a flat mill is a chamfer that reloads as a square step, and an
+// edge break that reloads as a profile is a full-depth cut round the part —
+// both are the silent substitution this project refuses, so both are gated.
+void AssertCamShapes(const Document& doc, const nlohmann::json& expect) {
+  if (expect.contains("cam_tool_types")) {
+    const auto want =
+        expect.at("cam_tool_types").get<std::vector<std::string>>();
+    std::vector<std::string> got;
+    for (const cam::Setup& setup : doc.GetCamSetups())
+      for (const cam::Tool& t : setup.tools)
+        got.push_back(t.type == cam::ToolType::Ball    ? "ball"
+                      : t.type == cam::ToolType::VBit  ? "vbit"
+                      : t.type == cam::ToolType::Drill ? "drill"
+                                                       : "flat");
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("tool " << i);
+      CHECK(got[i] == want[i]);
+    }
+  }
+  if (expect.contains("cam_op_types")) {
+    const auto want = expect.at("cam_op_types").get<std::vector<std::string>>();
+    std::vector<std::string> got;
+    for (const cam::Setup& setup : doc.GetCamSetups())
+      for (const cam::Operation& op : setup.operations)
+        got.push_back(op.type == cam::OpType::EdgeRound  ? "edge_round"
+                      : op.type == cam::OpType::Pocket   ? "pocket"
+                      : op.type == cam::OpType::Face     ? "face"
+                      : op.type == cam::OpType::Drill    ? "drill"
+                      : op.type == cam::OpType::Adaptive ? "adaptive"
+                                                         : "profile");
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("operation " << i);
+      CHECK(got[i] == want[i]);
+    }
+  }
+}
+
 // Which face Z zero was picked from. On the SETUP, so a job reopened from its
 // own file still knows — the panel used to ask a session field and answered
 // "Z zero is not set yet" about an origin it had saved and was using.
@@ -217,6 +257,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertMatchesExpect(*doc, expect);
       AssertCamSides(*doc, expect);
       AssertCamTopFace(*doc, expect);
+      AssertCamShapes(*doc, expect);
       AssertUnits(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
@@ -228,6 +269,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertMatchesExpect(*reloaded, expect);
       AssertCamSides(*reloaded, expect);
       AssertCamTopFace(*reloaded, expect);
+      AssertCamShapes(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove(tmp);
     }
@@ -266,6 +308,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       AssertMatchesExpect(*reloaded, expect);
       AssertCamSides(*reloaded, expect);
       AssertCamTopFace(*reloaded, expect);
+      AssertCamShapes(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove_all(proj);
     }
