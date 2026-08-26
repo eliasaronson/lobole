@@ -774,6 +774,14 @@ static const std::set<std::string> kNoPartDoc = {
     // Clearing the compare_geometry overlay must work from any tab — the
     // overlay is part-scoped, but switching tabs is how you leave it behind.
     "clear_geometry_delta",
+    // Aims the camera at the selected face. Faces are selectable on an
+    // assembly tab too (viewport click), and the handler touches only the
+    // selection, faceSelector and camera — none of which are part-scoped.
+    // With nothing selected it refuses "no face selected", which is the
+    // honest answer the part gate used to mask with "switch to a part tab".
+    // Sat in rpc_gate_smoke's GATED_ON_PURPOSE until --offscreen provided a
+    // render surface to verify on.
+    "orient_to_face",
     // Nothing below is about the open document, and each was reachable only
     // from a part tab until a drawing-tab dogfooding round tripped over it.
     // The gate is a list kept apart from the handlers, so when a handler is
@@ -1397,7 +1405,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               ? "no frame loop in --offscreen (it renders on demand); frame "
                 "timing exists only in a windowed instance"
               : "no frame loop under --headless: run the GUI (or "
-                "tools/headless-preview.sh) to measure frame time");
+                "tools/headless-preview.sh --gui) to measure frame time");
     json phases = json::object();
     json worstPhases = json::object();
     for (size_t i = 0; i < render::kPhaseCount; i++) {

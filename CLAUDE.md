@@ -130,8 +130,10 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   `headless-preview.sh` gives its instance a scratch config dir for exactly
   that reason, seeded from the real one so it still looks like their app.
 - **Agents/CI get their OWN instance**: `./tools/headless-preview.sh <scratch-port>`
-  runs the real renderer offscreen under Xvfb (full materials/shadows/SSAO). Use
-  a scratch port (NOT 8799). One-shot: `headless-preview.sh --render PROJECT OUT.png <port>`.
+  runs `--offscreen` — the real renderer (full materials/shadows/SSAO) with no
+  window, no Xvfb, no display server. Use a scratch port (NOT 8799). One-shot:
+  `headless-preview.sh --render PROJECT OUT.png <port>`. Only `ui_action`
+  needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
 - **Non-visual checks need no GPU**: `build/designer --headless --remote <port>`.
 - **Don't guess ports**: every instance announces itself in
   `~/.local/state/designer/instances/<port>.json` (`Designer.instances()` in

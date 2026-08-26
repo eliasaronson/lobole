@@ -12,9 +12,10 @@
 # to run in your display session (not a sandboxed background process).
 #
 # For an AGENT/CI instance that renders + screenshots WITHOUT your display
-# session, use tools/headless-preview.sh (runs `--hidden` under Xvfb on a
-# scratch port). Convention: this dev-watch on 8799 is MAIN (the build you
-# review); headless-preview instances use other ports so they never collide.
+# session, use tools/headless-preview.sh (runs `--offscreen` on a scratch
+# port — no Xvfb; `--gui` for the windowed-under-Xvfb shape when ui_action is
+# needed). Convention: this dev-watch on 8799 is MAIN (the build you review);
+# headless-preview instances use other ports so they never collide.
 #
 # This is relaunch-on-rebuild, not hot code reload (impossible for a compiled
 # Vulkan app) — but it gives the same "always current" behaviour for driving.

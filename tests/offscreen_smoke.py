@@ -170,6 +170,23 @@ def main():
             except ImportError:
                 print("      (pillow not installed; flat-frame check skipped)")
 
+        phase("orient_to_face is ungated on the assembly tab")
+        # It sat in rpc_gate_smoke's GATED_ON_PURPOSE ("assembly-tab
+        # behaviour unverified") until this mode provided a render surface
+        # to verify on. The verified contract: the part-tab selection does
+        # NOT leak across the tab switch, so with nothing selected on the
+        # assembly the refusal is the honest "no face selected" — not the
+        # part gate's misleading "switch to a part tab".
+        d.call("select_face", element=face_name)
+        d.call("add_assembly", name="Asm")
+        try:
+            d.call("orient_to_face")
+            raise AssertionError(
+                "orient_to_face with no assembly-tab selection must refuse")
+        except RuntimeError as e:
+            expect("no face selected" in str(e),
+                   f"honest refusal, not the part gate ({e})")
+
         return 0
     finally:
         app.terminate()

@@ -273,7 +273,7 @@ The loop that works — follow it every time:
 No display session of your own? Start `designer --offscreen --remote 0` —
 a real renderer with no window or display server: screenshot, render_still,
 render_sheet, set_render_options and select_face all work (ui_action does
-not — driving the GUI needs a window, e.g. `tools/headless-preview.sh
+not — driving the GUI needs a window, e.g. `tools/headless-preview.sh --gui
 <scratch-port>` under Xvfb). Leave port 8799 for the human's dev-watch (the
 build they review).
 

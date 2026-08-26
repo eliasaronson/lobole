@@ -1650,7 +1650,7 @@ int main(int argc, char** argv) {
   // Offscreen and GUI-test runs keep the fixed 1280x720, and that carve-out
   // is load-bearing rather than tidiness: toolbar/every_tool_is_reachable and
   // tabs/overflow_scrolls_and_plus_stays are assertions about what fits AT
-  // THAT SIZE, and gui-tests-xvfb.sh / headless-preview.sh both create that
+  // THAT SIZE, and gui-tests-xvfb.sh / headless-preview.sh --gui create that
   // screen. A host-derived size here would make layout tests depend on whose
   // monitor they ran on.
   const bool rememberGeometry = !args.hidden && !args.runGuiTests;

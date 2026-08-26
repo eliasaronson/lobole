@@ -46,11 +46,9 @@ GATED_ON_PURPOSE = {
     # A pending (preview) feature only ever exists on a part tab.
     "accept_pending": "a pending feature only exists on a part tab",
     "cancel_pending": "a pending feature only exists on a part tab",
-    # Open question rather than a settled reason: it aims the camera at a
-    # selected FACE, and faces are selectable on an assembly tab too. Left
-    # gated because ungating it needs a render surface to verify on, which
-    # this test does not have.
-    "orient_to_face": "aims at a picked face; assembly-tab behaviour unverified",
+    # orient_to_face sat here ("assembly-tab behaviour unverified") until
+    # --offscreen provided a render surface to verify on; it is ungated now
+    # and tests/offscreen_smoke.py pins its assembly-tab behaviour.
 }
 
 # What a handler body looks like when it depends on the active part: `doc`
