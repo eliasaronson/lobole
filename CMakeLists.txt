@@ -520,6 +520,7 @@ set(app_sources
     src/app/FramePacer.cpp
     src/common/RuntimePaths.cpp
     src/render/VulkanCommon.cpp
+    src/render/GpuTimer.cpp
     src/app/CrashHandler.cpp
     src/app/HeadlessMain.cpp
     src/render/IBLTextures.cpp

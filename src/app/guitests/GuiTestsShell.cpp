@@ -105,6 +105,20 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
       phaseSum += fs.phaseMs[i];
     IM_CHECK(std::abs(phaseSum - fs.avgMs) < 0.05 * fs.avgMs + 0.05);
 
+    // GPU per-pass timestamps ride along on every frame. This rig's GPU
+    // supports them (a queue without timestampValidBits would make the rest
+    // of this vacuous, so assert the support rather than skip silently).
+    IM_CHECK(s_App->gpuStats.supported);
+    IM_CHECK(s_App->gpuStats.samples > 0);
+    // The main pass draws the UI every frame, so it cannot be zero; and the
+    // three deltas are contiguous, so they must SUM to the total exactly —
+    // a gap would mean a write point drifted off its pass boundary.
+    IM_CHECK(s_App->gpuStats.mainMs > 0.0);
+    IM_CHECK(std::abs(s_App->gpuStats.totalMs -
+                      (s_App->gpuStats.shadowMs + s_App->gpuStats.ssaoMs +
+                       s_App->gpuStats.mainMs)) < 1e-9);
+    IM_CHECK(s_App->gpuStats.totalMs < 1000.0); // ms, not a unit mix-up
+
     // Hidden: nothing in the UI opened it, and the window does not exist.
     IM_CHECK(!s_App->perfHudOpen);
     // NoError: asking whether a window is absent must not log an error, or

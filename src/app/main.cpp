@@ -23,6 +23,7 @@
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "render/FramesInFlight.h"
+#include "render/GpuTimer.h"
 #include "render/IBL.h"
 #include "render/IBLTextures.h"
 #include "render/MeshRenderer.h"
@@ -134,6 +135,7 @@ static std::unique_ptr<FieldRenderer> g_FieldRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<ShadowRenderer> g_ShadowRenderer;
 static std::unique_ptr<SSAORenderer> g_SSAORenderer;
+static render::GpuTimer g_GpuTimer; // per-pass GPU timing (frame-timing.md)
 static std::unique_ptr<FaceSelector> g_FaceSelector;
 static std::unique_ptr<IBLTextures> g_IBLTextures;
 
@@ -789,7 +791,11 @@ static void CleanupVulkanWindow() {
 // FrameRender and CaptureScreenshot so remote screenshots show identical
 // shadows/AO. Each pass's own subpass dependencies order its writes vs.
 // fragment sampling, so no explicit barriers are needed here.
-static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame) {
+static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
+                                 render::GpuTimer* timer = nullptr) {
+  // `timer` only from the live frame loop: the screenshot path re-records
+  // these passes into its own one-shot buffer, and timestamps there would
+  // double-write the frame's query slot.
   if (!g_MeshRenderer)
     return;
   if (g_ShadowRenderer) {
@@ -802,6 +808,8 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame) {
                                      g_ShadowRenderer->TexelUVSize());
     }
   }
+  if (timer)
+    timer->Write(cb, currentFrame, render::GpuTimer::Point::AfterShadow);
   if (g_SSAORenderer) {
     g_MeshRenderer->SetAOEnabled(g_App.showAmbientOcclusion);
     if (g_App.showAmbientOcclusion) {
@@ -810,6 +818,8 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame) {
       g_MeshRenderer->SetAOState(g_SSAORenderer->InvFullResolution());
     }
   }
+  if (timer)
+    timer->Write(cb, currentFrame, render::GpuTimer::Point::AfterSSAO);
   // Off-toggles skip the passes entirely; the shaders won't sample the
   // (stale) maps and the image layouts stay read-only.
 }
@@ -836,6 +846,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     err = vkResetFences(g_Device, 1, &fd->Fence);
     check_vk_result(err);
   }
+  // The fence above completed this slot's PREVIOUS submission, so its query
+  // results are ready to read without waiting — the GpuTimer contract.
+  g_GpuTimer.Harvest(wd->FrameIndex);
   // The acquire and that fence are the frame's GPU/vsync wait; everything
   // after is our recording (docs/rendering/frame-timing.md).
   g_App.frameTimer.Mark(render::FramePhase::Wait, glfwGetTime());
@@ -849,8 +862,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
     check_vk_result(err);
   }
+  g_GpuTimer.BeginFrame(fd->CommandBuffer, wd->FrameIndex);
 
-  RecordScenePrepasses(fd->CommandBuffer, wd->FrameIndex);
+  RecordScenePrepasses(fd->CommandBuffer, wd->FrameIndex, &g_GpuTimer);
 
   {
     VkRenderPassBeginInfo info = {};
@@ -888,6 +902,8 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
   vkCmdEndRenderPass(fd->CommandBuffer);
+  g_GpuTimer.Write(fd->CommandBuffer, wd->FrameIndex,
+                   render::GpuTimer::Point::AfterMain);
   {
     VkPipelineStageFlags wait_stage =
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -1418,6 +1434,7 @@ int main(int argc, char** argv) {
   } else {
     LOG_INFO("ShadowRenderer initialized successfully");
   }
+  g_GpuTimer.Initialize(g_Device, g_PhysicalDevice, g_QueueFamily);
   g_SSAORenderer = std::make_unique<SSAORenderer>();
   if (!g_SSAORenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
                                   g_QueueFamily, g_CommandPool,
@@ -1810,6 +1827,17 @@ int main(int argc, char** argv) {
     // shows progress; runs on the main thread with its own one-shot submits).
     ui::PumpRenderJob(g_App);
 
+    // Mirror the GPU pass averages where frame_stats and the HUD read them.
+    {
+      const render::GpuTimer::Snapshot gs = g_GpuTimer.Average();
+      g_App.gpuStats.supported = gs.supported;
+      g_App.gpuStats.samples = gs.samples;
+      g_App.gpuStats.shadowMs = gs.shadowMs;
+      g_App.gpuStats.ssaoMs = gs.ssaoMs;
+      g_App.gpuStats.mainMs = gs.mainMs;
+      g_App.gpuStats.totalMs = gs.totalMs;
+    }
+
     // Everything above is per-frame CPU work on the document and renderers;
     // the ImGui build is measured on its own (docs/rendering/frame-timing.md).
     g_App.frameTimer.Mark(render::FramePhase::Update, glfwGetTime());
@@ -1988,6 +2016,7 @@ int main(int argc, char** argv) {
   g_App.document.reset();
   g_App.commands.reset();
   g_Camera.reset();
+  g_GpuTimer.Shutdown(g_Device);
   g_MeshRenderer.reset();
   g_SketchRenderer.reset();
   // Must reset here (not at static-destruction time): ~UnderlayRenderer ->

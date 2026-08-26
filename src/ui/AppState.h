@@ -1233,6 +1233,18 @@ struct AppState {
   // preference would have to be either visible in the Preferences window or a
   // key that window cannot edit.
   render::FrameTimer frameTimer;
+  // GPU per-pass averages, mirrored from main.cpp's GpuTimer each frame
+  // (pure data here so this header stays Vulkan-free). `supported` false =
+  // the queue has no timestamp support; frame_stats says so instead of
+  // guessing. shadow+ssao+main == total by construction (contiguous deltas).
+  struct GpuPassStats {
+    bool supported = false;
+    size_t samples = 0;
+    double shadowMs = 0.0;
+    double ssaoMs = 0.0;
+    double mainMs = 0.0;
+    double totalMs = 0.0;
+  } gpuStats;
   bool perfHudOpen = false;
   // Idle throttle (docs/rendering/idle-throttle.md). The pacer itself lives
   // in main.cpp; these are its test/observability seams: `pacerForceEnable`

@@ -70,13 +70,44 @@ had barely moved.
 inside), so the statistics are unit-tested against a synthetic frame sequence
 with known percentiles rather than by staring at a HUD.
 
-## Deferred, with reasons
+## GPU timestamps — the deferral below, built (2026-08-26)
 
-- **GPU timestamp queries** (`vkCmdWriteTimestamp` around the prepasses) would
-  attribute time *inside* the GPU — shadows vs SSAO vs mesh. Real value, but
-  it needs a per-frame query pool, resolve-a-frame-late bookkeeping, and
-  `timestampPeriod` handling; the CPU split above already separates "our work"
-  from "the GPU's", which is the question that was actually being asked twice.
+What un-deferred it: the Intel-GPU performance assessment needed to know
+which PASS eats that GPU's frame, and there was no way to ask — the offscreen
+harness cannot even run on that GPU (it cannot present under Xvfb; the app
+falls back to the NVIDIA), so the numbers must come from the user's real
+session, which means the instrument has to live in the app.
+
+`render::GpuTimer` writes four timestamps per frame — command-buffer start,
+after the shadow pass, after the SSAO chain, after the main pass — into one
+query-pool slot per swapchain image (the FramesInFlight convention). The
+bookkeeping the deferral predicted leans on synchronization the loop already
+has: a slot is harvested right after the frame loop fence-waits that image,
+at which point its previous submission has COMPLETED — so results are read
+with the availability flag and never a wait. Cost: ~4 counter writes on the
+GPU, one non-blocking readback on the CPU, zero stalls.
+
+Surfaced as a `gpu` object in `frame_stats` (`supported`, `samples`,
+`shadow_ms`, `ssao_ms`, `main_ms`, `total_ms` — the deltas are contiguous,
+so the parts sum to the total by construction) and a line in the HUD. A
+queue with `timestampValidBits == 0` reports `supported: false` rather than
+omitting the key. The screenshot path re-records the prepasses into its own
+buffer and deliberately writes no timestamps there — they would double-write
+the frame's slot.
+
+Two things the build taught:
+
+- **The availability flag does not cover uninitialized queries.** Reading a
+  slot before its first reset+write is invalid
+  (`VUID-vkGetQueryPoolResults-None-09401`) — the validation layer caught it
+  on first-use slots, and a per-slot used flag now guards the harvest. This
+  is exactly what the pre-landing validation run exists for.
+- First real read (RTX 4060, dock assembly, 1600x1000): shadow 0.44 ms +
+  SSAO 0.44 ms + main 0.98 ms = **1.85 ms of GPU work inside a ~30 ms vsync
+  frame** — the CPU split reported all ~30 ms as `display` and could not say
+  the GPU was 94% idle. That is the gap this closes.
+
+## Deferred, with reasons
 - **Recording to a file** for offline comparison. `frame_stats` returns JSON,
   so a caller that wants a time series can poll and keep it; building a
   recorder before anything consumes one is speculative.
@@ -91,8 +122,10 @@ with known percentiles rather than by staring at a HUD.
   parameter reads only the newest N.
 - `frametime/frame_stats_measure_hud_stays_hidden` (GUI): the app has run
   frames, so the snapshot has a positive fps and phases that sum to the frame;
-  the HUD window does not exist until Ctrl+Shift+F opens it, and closes again
-  on the second press — the "hidden by default" half of the request, asserted
+  GPU timestamps are supported on the rig, sampling, with a nonzero main pass
+  and parts summing exactly to the total (a gap would mean a write point
+  drifted off its pass boundary); the HUD window does not exist until
+  Ctrl+Shift+F opens it, and closes again on the second press — the "hidden by default" half of the request, asserted
   rather than assumed. The category is `frametime` and not `perf` because the
   test engine routes a category of exactly `perf` into its Perfs group, which
   this suite never queues: the test listed but never ran.

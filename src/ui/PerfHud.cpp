@@ -96,6 +96,20 @@ void DrawPerfHud(AppState& state) {
                       "ready.\nWith vsync on, a large display share is "
                       "NORMAL — it only means GPU-bound\nwhen the total "
                       "frame time is above the refresh period too.");
+  // What the GPU itself spends per pass — the half `display` cannot split.
+  // On an unsupported queue say so; silence would read as "no GPU cost".
+  if (!state.gpuStats.supported) {
+    ImGui::TextDisabled("gpu: no timestamp support on this queue");
+  } else if (state.gpuStats.samples > 0) {
+    ImGui::Text("gpu shadow %5.2f  ssao %5.2f  main %5.2f  = %5.2f ms",
+                state.gpuStats.shadowMs, state.gpuStats.ssaoMs,
+                state.gpuStats.mainMs, state.gpuStats.totalMs);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(
+          "Timestamp queries around the shadow pass, the SSAO chain\n"
+          "(prepass + AO + blur) and the main pass (scene + UI).\n"
+          "GPU-bound means this total approaches the frame time.");
+  }
 
   ImGui::Separator();
   for (size_t p = 0; p < render::kPhaseCount; p++) {
