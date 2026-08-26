@@ -69,6 +69,21 @@ inline constexpr double kDimOffsetGapMM = 8.0;
 // exactly.
 glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view);
 
+// A note ready to draw: the text at its anchor, plus the leader line end
+// when the note points at picked geometry (resolved like a dim ref).
+struct ResolvedNote {
+  uint64_t id = 0;
+  std::string text;
+  glm::dvec2 pos{0.0};
+  bool hasLeader = false;
+  glm::dvec2 anchor{0.0};
+};
+
+// Resolve a note against its view's projection (`view` may be null for a
+// free note; a leader that no longer matches degrades to text-only rather
+// than dropping the note — the words still carry their meaning).
+ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view);
+
 // What auto-placement must stay clear of: rectangles already taken (every
 // view's bbox, the title block, existing dims' label boxes) and the sheet
 // border. Built by ui::AutoDimOffset from live state.

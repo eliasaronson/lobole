@@ -96,7 +96,8 @@ std::string PdfText(const std::string& s) {
 bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
-             const std::string& path, std::string* error) {
+             const std::string& path, std::string* error,
+             const std::vector<drawing::ResolvedNote>& notes) {
   try {
     const Sheet& sheet = doc.GetSheet();
     const SheetChrome chrome = ChromeOf(sheet);
@@ -138,6 +139,23 @@ bool SaveSVG(const DrawingDocument& doc,
         if (!c.visible)
           out << " stroke-dasharray=\"1.6 1.2\"";
         out << "/>\n";
+      }
+      // Centre marks: a small cross on every visible circle — the machinist
+      // aims at the centre, and the projected circle alone does not mark it.
+      for (const drawing::SheetCurve& c : v.curves) {
+        if (!c.visible || c.conicRadius <= 0.0)
+          continue;
+        const double leg = std::min(2.5, std::max(1.0, c.conicRadius * 0.35));
+        out << "    <line x1=\"" << Num(c.conicCenter.x - leg) << "\" y1=\""
+            << Num(fy(c.conicCenter.y)) << "\" x2=\""
+            << Num(c.conicCenter.x + leg) << "\" y2=\""
+            << Num(fy(c.conicCenter.y))
+            << "\" stroke=\"#141418\" stroke-width=\"0.15\"/>\n";
+        out << "    <line x1=\"" << Num(c.conicCenter.x) << "\" y1=\""
+            << Num(fy(c.conicCenter.y - leg)) << "\" x2=\""
+            << Num(c.conicCenter.x) << "\" y2=\""
+            << Num(fy(c.conicCenter.y + leg))
+            << "\" stroke=\"#141418\" stroke-width=\"0.15\"/>\n";
       }
       out << "  </g>\n";
     }
@@ -192,6 +210,14 @@ bool SaveSVG(const DrawingDocument& doc,
         }
         // A small white gap behind the text keeps it legible over the line.
         label(d.labelPos, d.text);
+      }
+      for (const drawing::ResolvedNote& n : notes) {
+        if (n.hasLeader) {
+          line(n.anchor, n.pos, 0.25);
+          if (glm::length(n.pos - n.anchor) > 1e-9)
+            arrow(n.anchor, glm::normalize(n.anchor - n.pos));
+        }
+        label(n.pos, n.text);
       }
       out << "  </g>\n";
     }
@@ -250,7 +276,8 @@ bool SaveSVG(const DrawingDocument& doc,
 bool SavePDF(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
-             const std::string& path, std::string* error) {
+             const std::string& path, std::string* error,
+             const std::vector<drawing::ResolvedNote>& notes) {
   try {
     const Sheet& sheet = doc.GetSheet();
     const SheetChrome chrome = ChromeOf(sheet);
@@ -307,9 +334,19 @@ bool SavePDF(const DrawingDocument& doc,
       cs << "0 0 0 rg\n";
     };
 
-    for (const drawing::SheetView& v : views)
+    for (const drawing::SheetView& v : views) {
       for (const drawing::SheetCurve& c : v.curves)
         poly(c.points, c.visible ? 0.35 : 0.25, !c.visible);
+      for (const drawing::SheetCurve& c : v.curves) {
+        if (!c.visible || c.conicRadius <= 0.0)
+          continue; // centre marks: the machinist aims at the centre
+        const double leg = std::min(2.5, std::max(1.0, c.conicRadius * 0.35));
+        seg({c.conicCenter.x - leg, c.conicCenter.y},
+            {c.conicCenter.x + leg, c.conicCenter.y}, 0.15);
+        seg({c.conicCenter.x, c.conicCenter.y - leg},
+            {c.conicCenter.x, c.conicCenter.y + leg}, 0.15);
+      }
+    }
 
     for (const drawing::ResolvedDim& d : dims) {
       if (!d.resolved)
@@ -333,6 +370,14 @@ bool SavePDF(const DrawingDocument& doc,
         }
       }
       text(d.labelPos, 3.5, d.text, 0.08, true);
+    }
+    for (const drawing::ResolvedNote& n : notes) {
+      if (n.hasLeader) {
+        seg(n.anchor, n.pos, 0.25);
+        if (glm::length(n.pos - n.anchor) > 1e-9)
+          arrow(n.anchor, glm::normalize(n.anchor - n.pos));
+      }
+      text(n.pos, 3.5, n.text, 0.08, true);
     }
 
     // Title block.

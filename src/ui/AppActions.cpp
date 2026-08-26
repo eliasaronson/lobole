@@ -3302,12 +3302,20 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
   std::vector<drawing::ResolvedDim> dims;
   for (const DrawingDim& dm : state.drawing->GetDims())
     dims.push_back(ResolveDrawingDim(state, dm));
+  std::vector<drawing::ResolvedNote> notes;
+  for (const DrawingNote& n : state.drawing->GetNotes()) {
+    const auto nit = state.drawingRenders.find(n.viewId);
+    notes.push_back(drawing::ResolveNote(
+        n, nit != state.drawingRenders.end() ? &nit->second : nullptr));
+  }
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext == ".svg")
-    return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error);
+    return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error,
+                                  notes);
   if (ext == ".pdf")
-    return DrawingExport::SavePDF(*state.drawing, views, dims, path, error);
+    return DrawingExport::SavePDF(*state.drawing, views, dims, path, error,
+                                  notes);
   if (error)
     *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
   return false;

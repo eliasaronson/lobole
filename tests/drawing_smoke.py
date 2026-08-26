@@ -214,6 +214,11 @@ def main():
                                       "dim_outside_border")]
         expect(not placement,
                f"seven auto-placed dims, zero collisions: {placement}")
+        # R13: centre marks on every visible circle in the export.
+        svg_path = os.path.join(tmp, "r2.svg")
+        d.call("export_drawing", path=svg_path)
+        expect(open(svg_path).read().count('stroke-width="0.15"') >= 4,
+               "centre marks on both holes in the SVG")
         # ...and the validator flags a label parked mid-view on purpose.
         r = d.call("add_drawing_dim", view=v2["id"], kind="distance",
                    refs=[{"edge": at_x(xs[0])["ref"]},
@@ -232,6 +237,23 @@ def main():
         d.call("set_active_part", name="bracket-dwg")  # back to the D3 sheet
 
         # --- Save, reopen, verify the drawing survives ---------------------
+        # --- R13: notes (free + leadered) persist and export ---------------
+        d.call("add_drawing_note", text="MDF 19 - break all edges",
+               position=[40, 180])
+        d.call("add_drawing_note", text="datum edge", position=[240, 180],
+               view=front_id, ref=vlines[0]["ref"])
+        notes = d.call("list_drawing_notes")["notes"]
+        expect(len(notes) == 2 and notes[1]["leader_resolved"],
+               f"two notes, leader resolved: {notes}")
+        nsvg = os.path.join(tmp, "notes.svg")
+        d.call("export_drawing", path=nsvg)
+        expect("break all edges" in open(nsvg).read(), "note text exported")
+        try:
+            d.call("add_drawing_note", text="", position=[0, 0])
+            raise AssertionError("empty note text must refuse")
+        except RuntimeError as e:
+            expect("non-empty" in str(e), f"note refusal: {e}")
+
         proj = os.path.join(tmp, "gearbox.dsgn")
         d.call("save_project", path=proj)
 
@@ -262,6 +284,8 @@ def main():
         lp2 = {p["name"]: p for p in d.call("list_parts")["parts"]}
         expect(set(lp2) == {"Part 1", "bracket-dwg"},
                f"all tabs reopened: {set(lp2)}")
+        expect(len(d.call("list_drawing_notes")["notes"]) == 2,
+               "notes survive the save/reopen round-trip")
         expect(lp2["bracket-dwg"]["type"] == "drawing",
                "bracket-dwg still a drawing after reopen")
         ld2 = d.call("list_drawings")["drawings"]

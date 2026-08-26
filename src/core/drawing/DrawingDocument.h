@@ -99,6 +99,18 @@ struct DrawingDim {
   glm::dvec2 labelOffset{0.0}; // sheet mm, the sketch labelOffset pattern
 };
 
+// A free text note on the sheet ("6x Ø4.4 on Ø175.8 BC", finish, material)
+// — the class of annotation no dimension kind covers. Optional leader: when
+// `leader` is set, a line runs from the resolved geometry (a picked edge or
+// circle in `viewId`, resolved like a dim ref) to the text.
+struct DrawingNote {
+  uint64_t id = 0;
+  std::string text;
+  glm::dvec2 pos{0.0}; // text anchor, sheet mm
+  uint64_t viewId = 0; // 0 = free note; else the leader's view
+  ProjRef leader;      // unset = no leader line
+};
+
 // The document. Views and dims share one never-reused id counter (the
 // AssemblyDocument rule: an id names a thing unambiguously across the file).
 class DrawingDocument {
@@ -123,6 +135,12 @@ public:
 
   uint64_t AddDim(DrawingDim dim);
   bool RemoveDim(uint64_t id);
+
+  const std::vector<DrawingNote>& GetNotes() const { return m_notes; }
+  std::vector<DrawingNote>& GetNotes() { return m_notes; }
+  size_t NoteCount() const { return m_notes.size(); }
+  uint64_t AddNote(DrawingNote note);
+  bool RemoveNote(uint64_t id);
   DrawingDim* FindDim(uint64_t id);
   const DrawingDim* FindDim(uint64_t id) const;
 
@@ -143,6 +161,7 @@ private:
   Sheet m_sheet;
   std::vector<DrawingView> m_views;
   std::vector<DrawingDim> m_dims;
+  std::vector<DrawingNote> m_notes;
   uint64_t m_nextId = 1;
   uint64_t m_version = 0;
 };

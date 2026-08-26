@@ -1361,6 +1361,29 @@ DrawingView DrawingViewFromJson(const json& j) {
   return v;
 }
 
+// Notes (v66) live inline in the drawing's index.json — a few short strings
+// don't earn per-file diffs the way dims and views do.
+json DrawingNoteToJson(const DrawingNote& n) {
+  json j{{"id", n.id}, {"text", n.text}, {"pos", {n.pos.x, n.pos.y}}};
+  if (n.viewId != 0)
+    j["view"] = n.viewId;
+  if (n.leader.edge.IsSet() || n.leader.silFace.IsSet())
+    j["leader"] = ProjRefJson(n.leader);
+  return j;
+}
+
+DrawingNote DrawingNoteFromJson(const json& j) {
+  DrawingNote n;
+  n.id = j.value("id", uint64_t{0});
+  n.text = j.value("text", std::string{});
+  if (j.contains("pos") && j.at("pos").is_array() && j.at("pos").size() == 2)
+    n.pos = {j.at("pos").at(0).get<double>(), j.at("pos").at(1).get<double>()};
+  n.viewId = j.value("view", uint64_t{0});
+  if (j.contains("leader"))
+    n.leader = ProjRefFromJson(j.at("leader"));
+  return n;
+}
+
 json DrawingDimToJson(const DrawingDim& d) {
   json refs = json::array();
   for (const ProjRef& r : d.refs)
@@ -1445,10 +1468,14 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    index["notes"] = json::array();
+    for (const DrawingNote& n : dwg.GetNotes())
+      index["notes"].push_back(DrawingNoteToJson(n));
+
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
-    LOG_INFO("Saved drawing ({} views, {} dims) to {}", dwg.ViewCount(),
-             dwg.DimCount(), dirPath);
+    LOG_INFO("Saved drawing ({} views, {} dims, {} notes) to {}",
+             dwg.ViewCount(), dwg.DimCount(), dwg.NoteCount(), dirPath);
     return true;
   } catch (const std::exception& e) {
     if (error)
@@ -1521,9 +1548,14 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
       maxId = std::max(maxId, d.id);
       dwg->GetDims().push_back(std::move(d));
     }
+    for (const json& nj : index.value("notes", json::array())) {
+      DrawingNote n = DrawingNoteFromJson(nj);
+      maxId = std::max(maxId, n.id);
+      dwg->GetNotes().push_back(std::move(n));
+    }
     dwg->EnsureNextIdAtLeast(maxId + 1);
-    LOG_INFO("Loaded drawing ({} views, {} dims) from {}", dwg->ViewCount(),
-             dwg->DimCount(), dirPath);
+    LOG_INFO("Loaded drawing ({} views, {} dims, {} notes) from {}",
+             dwg->ViewCount(), dwg->DimCount(), dwg->NoteCount(), dirPath);
     return dwg;
   } catch (const std::exception& e) {
     if (error)
@@ -1549,6 +1581,9 @@ static bool SaveDrawingImpl(const DrawingDocument& dwg, const std::string& path,
     j["dims"] = json::array();
     for (const DrawingDim& d : dwg.GetDims())
       j["dims"].push_back(DrawingDimToJson(d));
+    j["notes"] = json::array();
+    for (const DrawingNote& n : dwg.GetNotes())
+      j["notes"].push_back(DrawingNoteToJson(n));
     std::ofstream out(path);
     if (!out) {
       if (error)
@@ -1607,6 +1642,11 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(const std::string& path,
       DrawingDim d = DrawingDimFromJson(dj);
       maxId = std::max(maxId, d.id);
       dwg->GetDims().push_back(std::move(d));
+    }
+    for (const json& nj : j.value("notes", json::array())) {
+      DrawingNote n = DrawingNoteFromJson(nj);
+      maxId = std::max(maxId, n.id);
+      dwg->GetNotes().push_back(std::move(n));
     }
     dwg->EnsureNextIdAtLeast(maxId + 1);
     LOG_INFO("Loaded drawing ({} views, {} dims) from {}", dwg->ViewCount(),

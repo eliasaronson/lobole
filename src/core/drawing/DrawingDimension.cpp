@@ -380,6 +380,22 @@ glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
   }
 }
 
+ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view) {
+  ResolvedNote rn;
+  rn.id = note.id;
+  rn.text = note.text;
+  rn.pos = note.pos;
+  if (view != nullptr &&
+      (note.leader.edge.IsSet() || note.leader.silFace.IsSet())) {
+    glm::dvec2 a(0.0);
+    if (RefPoint(*view, note.leader, a)) {
+      rn.hasLeader = true;
+      rn.anchor = a;
+    }
+  }
+  return rn;
+}
+
 void LabelBox(const glm::dvec2& labelPos, const std::string& text,
               glm::dvec2& mn, glm::dvec2& mx) {
   // Count glyphs, not bytes: Ø is two bytes of UTF-8 and one glyph wide.

@@ -307,6 +307,29 @@ void DrawDims(ImDrawList* dl, AppState& state) {
       }
     }
   }
+
+  // Notes (v66): text + optional leader, same resolution as the exporters.
+  for (const DrawingNote& note : state.drawing->GetNotes()) {
+    const auto nit = state.drawingRenders.find(note.viewId);
+    const drawing::ResolvedNote rn = drawing::ResolveNote(
+        note, nit != state.drawingRenders.end() ? &nit->second : nullptr);
+    if (rn.hasLeader) {
+      dl->AddLine(SheetToScreen(state, rn.anchor), SheetToScreen(state, rn.pos),
+                  ink, 1.2f);
+      const glm::dvec2 back = rn.anchor - rn.pos;
+      if (glm::length(back) > 1e-9)
+        SheetArrow(dl, state, rn.anchor, glm::normalize(back), ink);
+    }
+    if (fontPx >= 4.0f) {
+      const ImVec2 org = SheetToScreen(state, rn.pos);
+      const ImVec2 tsz =
+          font->CalcTextSizeA(fontPx, FLT_MAX, 0.0f, rn.text.c_str());
+      dl->AddRectFilled(ImVec2(org.x - 2, org.y - 1),
+                        ImVec2(org.x + tsz.x + 2, org.y + tsz.y + 1),
+                        IM_COL32(250, 250, 250, 230), 2.0f);
+      dl->AddText(font, fontPx, org, ink, rn.text.c_str());
+    }
+  }
 }
 
 // Draws every projected view of the active drawing onto the sheet: visible
@@ -333,6 +356,20 @@ void DrawViews(ImDrawList* dl, AppState& state) {
         StrokePolyline(dl, state, c.points, visible, 1.6f);
       else
         StrokeDashed(dl, state, c.points, hidden, 1.0f);
+    }
+    // Centre marks on visible circles (v66) — same rule as the exporters.
+    for (const drawing::SheetCurve& c : sv.curves) {
+      if (!c.visible || c.conicRadius <= 0.0)
+        continue;
+      const double leg = std::min(2.5, std::max(1.0, c.conicRadius * 0.35));
+      dl->AddLine(
+          SheetToScreen(state, {c.conicCenter.x - leg, c.conicCenter.y}),
+          SheetToScreen(state, {c.conicCenter.x + leg, c.conicCenter.y}),
+          visible, 1.0f);
+      dl->AddLine(
+          SheetToScreen(state, {c.conicCenter.x, c.conicCenter.y - leg}),
+          SheetToScreen(state, {c.conicCenter.x, c.conicCenter.y + leg}),
+          visible, 1.0f);
     }
 
     if (sv.hasGeometry) {

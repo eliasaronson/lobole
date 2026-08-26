@@ -58,6 +58,24 @@ bool DrawingDocument::RemoveDim(uint64_t id) {
   return true;
 }
 
+uint64_t DrawingDocument::AddNote(DrawingNote note) {
+  note.id = m_nextId++;
+  m_notes.push_back(std::move(note));
+  BumpVersion();
+  return m_notes.back().id;
+}
+
+bool DrawingDocument::RemoveNote(uint64_t id) {
+  const auto it =
+      std::find_if(m_notes.begin(), m_notes.end(),
+                   [id](const DrawingNote& n) { return n.id == id; });
+  if (it == m_notes.end())
+    return false;
+  m_notes.erase(it);
+  BumpVersion();
+  return true;
+}
+
 DrawingDim* DrawingDocument::FindDim(uint64_t id) {
   const auto it =
       std::find_if(m_dims.begin(), m_dims.end(),

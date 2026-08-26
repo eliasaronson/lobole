@@ -60,6 +60,13 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"list_drawing_dims", "List dimensions with values.", ""},
     {"export_drawing", "Export the drawing to SVG or PDF by extension {path}.",
      "path"},
+    {"add_drawing_note",
+     "Add a text note {text, position: [x,y] sheet mm, view?, ref?: "
+     "{feature_id, element}} — ref draws a leader from that geometry (needs "
+     "view). The annotation class no dimension kind covers.",
+     "position, ref, text, view"},
+    {"remove_drawing_note", "Remove a note by id.", "id"},
+    {"list_drawing_notes", "List notes with leader state.", ""},
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 
@@ -422,6 +429,61 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       arr.push_back(vj);
     }
     return json{{"views", arr}};
+  }
+  if (m == "add_drawing_note") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    const std::string text = p.at("text").get<std::string>();
+    if (text.empty())
+      throw std::runtime_error("text must be non-empty");
+    const json& pos = p.at("position");
+    if (!pos.is_array() || pos.size() != 2 || !pos.at(0).is_number() ||
+        !pos.at(1).is_number())
+      throw std::runtime_error("position is [x, y] in sheet mm");
+    DrawingNote n;
+    n.text = text;
+    n.pos = {pos.at(0).get<double>(), pos.at(1).get<double>()};
+    if (p.contains("view")) {
+      n.viewId = p.at("view").get<uint64_t>();
+      if (!state.drawing->FindView(n.viewId))
+        throw std::runtime_error("no such view");
+    }
+    if (p.contains("ref")) {
+      if (n.viewId == 0)
+        throw std::runtime_error(
+            "a leader ref needs `view` — the ref resolves against that "
+            "view's projection");
+      const json& rj = p.at("ref");
+      n.leader.viewId = n.viewId;
+      n.leader.edge = ElementRef{rj.value("feature_id", uint64_t{0}),
+                                 rj.value("element", std::string{})};
+    }
+    ui::SnapshotDrawing(state);
+    return json{{"id", state.drawing->AddNote(std::move(n))}};
+  }
+  if (m == "remove_drawing_note") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    ui::SnapshotDrawing(state);
+    if (!state.drawing->RemoveNote(p.at("id").get<uint64_t>()))
+      throw std::runtime_error("no note with that id");
+    return json::object();
+  }
+  if (m == "list_drawing_notes") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    json arr = json::array();
+    for (const DrawingNote& n : state.drawing->GetNotes()) {
+      const auto it = state.drawingRenders.find(n.viewId);
+      const drawing::ResolvedNote rn = drawing::ResolveNote(
+          n, it != state.drawingRenders.end() ? &it->second : nullptr);
+      arr.push_back({{"id", n.id},
+                     {"text", n.text},
+                     {"pos", {n.pos.x, n.pos.y}},
+                     {"view", n.viewId},
+                     {"leader_resolved", rn.hasLeader}});
+    }
+    return json{{"notes", arr}};
   }
   if (m == "export_drawing") {
     if (!state.drawing)
