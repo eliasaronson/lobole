@@ -53,6 +53,11 @@
   sits below the stock top ("rapids start inside stock — stock top is Z20")
   — the session lost a round to exactly this and the verifier's "line 11"
   message named neither the op nor the height. Gate: CAM smoke.
+- **R16 refuse `.json` for multi-document saves** (known-bugs entry): the
+  container form writes under any name, but the git vault keys on `.dsgn`
+  — the W170S project saved as a directory *named* `w170s.json`, historyless,
+  messages dropped. Refuse naming `.dsgn`; keep `.json` = single-document
+  interchange, per format.md. Gate: `headless_smoke` + a format.md line.
 
 ## Wave 2 — agent-capability unlocks (1–2 sessions)
 

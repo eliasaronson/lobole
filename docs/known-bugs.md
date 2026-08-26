@@ -6,6 +6,22 @@ an entry when it lands a fix + regression test.
 
 ---
 
+## save_project to a .json path silently forks the format contract
+
+Found 2026-08-26 when the W 170 S project was saved as `w170s.json`: a
+MULTI-document project is always written in the project-container form
+(project.json + parts/ + assemblies/ — correct), so the path became a
+directory *named* `w170s.json`; but the git vault initializes only for a
+`.dsgn` extension, so the identical directory format saved WITHOUT history
+and every `save_project {message}` was silently dropped ("ignored
+otherwise", says the doc — for a directory-form save that is a silent
+capability loss, not an interchange save). format.md's "the .json file
+remains the interchange form" holds only for single-part projects; nothing
+says so. **Likely fix:** refuse a `.json` path for a multi-document project,
+naming `.dsgn` ("a multi-document project saves as a .dsgn directory; .json
+is the single-document interchange form") — the substitute is plausible,
+loads fine, and is wrong, which is this repo's definition of a refusal.
+
 ## Drawing dimensions land where they collide
 
 Found 2026-08-26: `DefaultDimOffset` placed overall dims through the title
