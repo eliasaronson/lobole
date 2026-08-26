@@ -221,6 +221,24 @@ async def run(port):
             expect(abs((await call("get_state"))["bodies"][0]["volume"]
                        - expected) < 1e-2, "reversed pad keeps its volume")
 
+            # execute_script (R11): the loop-and-computed-args path for
+            # MCP-only agents — `d` arrives pre-bound to the attached
+            # instance, prints come back, and the work LANDS in the model.
+            before = len((await call("get_state"))["features"])
+            run_out = await call("execute_script", script=(
+                "for k in range(3):\n"
+                "    r = d.request('add_feature', {'feature': {\n"
+                "        'type': 'Box', 'name': f'grid {k}',\n"
+                "        'position': [50 + 12 * k, 0, 0],\n"
+                "        'width': 8, 'height': 8, 'depth': 4 + k}})\n"
+                "    assert r['regen']['ok']\n"
+                "print('made', 3)\n"))
+            expect(run_out["exit"] == 0, f"script exit 0 ({run_out})")
+            expect("made 3" in run_out["stdout"], f"stdout ({run_out})")
+            after = (await call("get_state"))["features"]
+            expect(len(after) == before + 3,
+                   f"the scripted boxes landed ({before}->{len(after)})")
+
     print("mcp_smoke: all assertions passed")
 
 

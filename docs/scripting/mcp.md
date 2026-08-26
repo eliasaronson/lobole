@@ -121,6 +121,16 @@ schemas). Most were one-line wrappers, and the ones that earn their place in a
 better, because a loop with logic between the steps is not expressible as one
 tool call per step.
 
+**2026-08-26: `execute_script` closes the scripting gap for MCP-only
+agents.** The "a script does it better" advice above assumed a local shell;
+an agent living purely in MCP (claude.ai, Claude Desktop) had no way to run
+one. `execute_script` runs a python snippet in a subprocess with the client
+pre-bound as `d` (DESIGNER_PORT pinned to the attached instance,
+`designer_remote` importable, stdout/stderr returned capped, relative paths
+landing in a returned scratch cwd, `timeout` for long solves). Same trust
+domain as `rpc` — it drives the same instance with the same powers, and the
+MCP host's tool approval gates it.
+
 The exposed set is what a person asks an assistant for:
 
 | Group | Tools |

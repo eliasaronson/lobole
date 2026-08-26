@@ -70,7 +70,7 @@
   messages dropped. Refuse naming `.dsgn`; keep `.json` = single-document
   interchange, per format.md. Gate: `headless_smoke` + a format.md line.
 
-## Wave 2 — agent-capability unlocks — R10 SHIPPED 2026-08-26
+## Wave 2 — agent-capability unlocks — **SHIPPED 2026-08-26**
 
 - **R10 CAM picks for round openings — DONE.** Verified on the real W170S
   baffle: drill + both openings + outline all derived from picks, verify
@@ -84,7 +84,9 @@
   cones/frees. Retires the onion-skin-twin workaround for plain round
   holes. Gate: a CAM test that wall-picks Ø73 + Ø148 on the W170S baffle
   geometry and passes `cam_verify ok`.
-- **R11 `execute_script` MCP tool.** Run a short python snippet in a
+- **R11 `execute_script` MCP tool — DONE** (gated by mcp_smoke: a
+  scripted loop of boxes lands in the model through real MCP stdio).
+  Original plan: Run a short python snippet in a
   subprocess with `designer_remote` importable and DESIGNER_PORT pinned to
   the attached instance; timeout + output caps; returns stdout/stderr.
   This is the loop-and-computed-args path for MCP-only agents (claude.ai,

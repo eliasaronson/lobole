@@ -318,8 +318,8 @@ mcp = FastMCP(
     "conversational surface; EVERY other RPC (assemblies, drawings, studies, "
     "configurations, sketch constraints, exports, raw GUI actions) is reached "
     "with rpc('method', {...}) and documented by help('method'). For building "
-    "a part with loops or computed arguments, a Python script against "
-    "tools/designer_remote.py beats a tool call per step.",
+    "a part with loops or computed arguments, execute_script (a python "
+    "snippet with the client pre-bound as `d`) beats a tool call per step.",
 )
 
 _client = None
@@ -1955,6 +1955,60 @@ def rpc(method: str, params: dict | None = None) -> dict:
         except Exception as e:
             raise RuntimeError(f"{e}{hint}") from e
     return _call(method, **(params or {}))
+
+
+@mcp.tool(description="Run a python script against the attached instance — "
+          "the loop-and-computed-args path: ONE round trip for work that "
+          "would be dozens of tool calls (feature patterns with computed "
+          "positions, build-measure-adjust loops, batch queries). The "
+          "script runs in a subprocess with `d` PRE-BOUND to a connected "
+          "designer_remote.Designer client: call d.request(method, params) "
+          "/ d.call(method, **params) directly — no imports, no port "
+          "(DESIGNER_PORT is set; tools/designer_remote.py is importable "
+          "for anything fancier). print() what matters: stdout/stderr come "
+          "back (capped at 20000 chars each). Relative file paths land in "
+          "the returned cwd, a scratch directory. Same trust domain as the "
+          "rpc tool — it drives the same instance with the same powers.")
+def execute_script(script: str, timeout: float = 120.0) -> dict:
+    import pathlib
+    import subprocess
+    _connect_if_needed()
+    port = _attached.get("port") if _attached else None
+    if not port:
+        raise RuntimeError("no instance attached")
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    cwd = tempfile.mkdtemp(prefix="designer-script-")
+    prelude = (
+        "import os, sys\n"
+        f"sys.path.insert(0, {tools_dir!r})\n"
+        "from designer_remote import Designer\n"
+        "d = Designer(int(os.environ['DESIGNER_PORT']), timeout=600.0)\n"
+        "# --- script ---\n")
+    path = pathlib.Path(cwd, "script.py")
+    path.write_text(prelude + script)
+    env = dict(os.environ)
+    env["DESIGNER_PORT"] = str(port)
+    try:
+        proc = subprocess.run([sys.executable, str(path)], cwd=cwd, env=env,
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"script exceeded {timeout:g}s (pass a larger timeout for long "
+            "solves/renders; partial stdout:\n"
+            + ((e.stdout or "")[-2000:] if e.stdout else "(none)") + ")")
+
+    def cap(s):
+        return s if len(s) <= 20000 else s[:10000] + "\n…[capped]…\n" + s[-10000:]
+    out = {"exit": proc.returncode, "stdout": cap(proc.stdout),
+           "stderr": cap(proc.stderr), "cwd": cwd,
+           "attached": attached_to()}
+    return out
+
+
+def _connect_if_needed():
+    global _client
+    if _client is None:
+        _connect()
 
 
 @mcp.tool(description="Which Designer instances are running, and which one "
