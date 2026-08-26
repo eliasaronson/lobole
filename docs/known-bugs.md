@@ -6,6 +6,41 @@ an entry when it lands a fix + regression test.
 
 ---
 
+## CAM cannot target a round opening — every face pick is planar-only
+
+Found 2026-08-26 (W 170 S baffle CAM). `FindFace` (CamToolpath.cpp) resolves
+every pick through `FacePlane`, which fails on curved faces — so
+`IsWallFace`, `PickedWallContour` and `PickedFaceRegion` all reject the
+cylindrical wall of a Ø73/Ø148 through-hole with "pick a flat face — that
+one is curved". "Cut the opening" is therefore impossible for the most
+common opening there is. Workaround used: an onion-skin CAM twin (cuts
+stopped 0.5 mm short so each opening grows a flat floor to pocket-pick).
+**Likely fix:** let FindFace fall through to a curved-wall contour (section
+the cylinder at mid-height) — the WallContour machinery after it is
+shape-agnostic.
+
+Related paper cuts from the same session: `type: drill` via derive refuses
+with "drilling picks cylindrical faces, not a verb" even when `targets`
+holds cylindrical faces (the derive path ignores drill targets; explicit
+top_z+bottom_z is the undocumented way in); and an explicit `top_z` set to
+the PART top rapids through the 1 mm of stock above it — the deriver knows
+to use the stock top, the error surface ("rapid through material at line
+11") doesn't say which op or height to fix.
+
+## Drawing RPC papercuts: leaked json exceptions, inconsistent distance
+
+Found 2026-08-26. (a) `create_drawing {sheet: "A4"}` and a scalar
+`add_drawing_dim offset` die with raw `[json.exception.type_error.*]`
+instead of refusals naming the accepted shape (object with size/landscape;
+[x,y]) — the refuse-with-what-IS-accepted rule, unenforced at json-shape
+level. (b) A `distance` dim from a line to a circle measures to some
+silhouette point (144-centre hole → "170"), while `distance_x`/`distance_y`
+measure to the circle CENTRE (144 ✓) — same picks, different anchors,
+and the wrong one is the default kind. (c) A drawing tab screenshot from
+an --offscreen instance is silently blank: sheets are drawn by the ImGui
+layer, which offscreen captures exclude — should refuse naming the remedy
+(export_drawing, or a windowed instance) rather than return an empty frame.
+
 ## Part RPCs use three different addressing conventions
 
 Found 2026-08-26 (W 170 S dogfooding). `add_occurrence` takes a part by
