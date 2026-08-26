@@ -829,8 +829,63 @@ DerivedOp DeriveOperation(const Setup& setup,
     break;
   }
   case OpType::Drill: {
-    out.why = "drilling picks cylindrical faces, not a verb";
-    return out;
+    // Derives from the hole it makes: top from the stock (entry rapids
+    // belong above it — an explicit part-top here once rapided through the
+    // millimetre of stock over the part), bottom from the hole's own
+    // extent. The old refusal ("…not a verb") fired even when the caller
+    // passed cylindrical targets, leaving explicit top_z+bottom_z as the
+    // undocumented way in.
+    if (!target.IsSet()) {
+      out.why = "drill derives from the holes it makes — pass targets: the "
+                "cylindrical faces to drill (list_elements names them)";
+      return out;
+    }
+    op.name = "Drill";
+    op.topZ = hi.z;
+    bool found = false;
+    for (const Body& body : bodies) {
+      if (body.createdBy != target.featureId || !body.shape.IsValid())
+        continue;
+      const std::optional<int> idx = body.elementMap.Resolve(target.name);
+      if (!idx)
+        continue;
+      glm::vec3 origin(0.0f), axis(0.0f), xAxis(0.0f);
+      if (!body.shape.FaceAxis(*idx, origin, axis, xAxis)) {
+        out.why = "drilling picks cylindrical faces — that one is not a "
+                  "cylinder (list_elements shows each face's kind)";
+        return out;
+      }
+      if (std::abs(axis.z) < 0.99f) {
+        out.why = "that hole does not point at the spindle — index the "
+                  "setup to bring it up, or drill it in another setup";
+        return out;
+      }
+      int i = 0;
+      for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+           ex.Next(), i++) {
+        if (i != *idx)
+          continue;
+        Bnd_Box box;
+        BRepBndLib::Add(ex.Current(), box);
+        if (!box.IsVoid()) {
+          double x0, y0, z0, x1, y1, z1;
+          box.Get(x0, y0, z0, x1, y1, z1);
+          // A through hole drills to the part's bottom face, a blind one
+          // to its own floor — the face's extent says which.
+          op.bottomZ = z0;
+          found = true;
+        }
+        break;
+      }
+      if (found)
+        break;
+    }
+    if (!found) {
+      out.why = "that face is not on a body this job can machine";
+      return out;
+    }
+    op.targets = {target};
+    break;
   }
   }
 

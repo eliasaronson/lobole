@@ -1406,6 +1406,24 @@ def main():
         expect("G2 " in curved, "arcs on means arcs in the file")
         expect(len(curved) < len(plain), "and a smaller file")
 
+        # R9 (2026-08-26): a typed top_z below the stock top warns at
+        # toolpath time, naming the op and both heights — the verifier's
+        # later "rapid through material at line N" names neither.
+        cam_ops = d.call("list_cam_setups")["setups"][0]["operations"]
+        d.call("set_cam_op", id=cam_ops[0]["id"], top_z=0.5)
+        warned = d.call("cam_toolpath", setup=cam_setup)
+        expect(any("stock top" in w for w in warned.get("warnings", [])),
+               f"low top_z warns: {warned.get('warnings')}")
+        d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
+        expect("warnings" not in d.call("cam_toolpath", setup=cam_setup),
+               "restored top_z clears the warning")
+        # R7: a targetless drill derive teaches, instead of "not a verb".
+        try:
+            d.call("cam_derive_op", setup=cam_setup, type="drill")
+            raise AssertionError("targetless drill derive must refuse")
+        except RuntimeError as e:
+            expect("pass targets" in str(e), f"drill refusal teaches: {e}")
+
         phase("Tab addressing, duplicate names, the .json refusal")
         # R4/R5/R16 (2026-08-26). Names address tabs, so duplicates refuse;
         # {part: name|id|index} is one resolver across the tab RPCs; and a

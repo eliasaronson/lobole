@@ -14,7 +14,14 @@
 > Pattern's body-only sources, tool-change M0 (verified already on by
 > default and present in posted Mach3 output).
 
-## Wave 1 — refusals, addressing, honesty (one session, all small)
+## Wave 1 — refusals, addressing, honesty — **SHIPPED 2026-08-26**
+
+> bc4bbe9 (R1–R3), 65b447a (R4, R5, R16), and the R7/R8/R9 commit; R6
+> retracted below. One meta-find from the round: rpc_gate_smoke's handler
+> extractor keys on `if (m == "...") {`, so an inner braced dispatch on the
+> method name SHADOWS the handler's body in the scan — the gate caught its
+> own blind spot when cam_toolpath's return grew braces (fixed braceless,
+> commented at the site).
 
 - **R1 json-shape refusals in drawings.** `create_drawing {sheet: "A4"}`
   and a scalar `add_drawing_dim offset` die as raw `json.exception` —
@@ -39,9 +46,13 @@
   → refusal listing indexes); `add_occurrence` unchanged. Retires the
   name→index helper every dogfood script has grown. Gate: `headless_smoke`
   + MCP prose.
-- **R6 `list_studies` + a `studies` block in `get_state`.** id, name, kind,
-  has_results, stale — both derivable from the document today. Gate:
-  `fem_smoke`.
+- **R6 — RETRACTED (2026-08-26, during the fix round).** `list_studies` has
+  existed all along, covered by `fem_smoke` and `topo_smoke`; the dogfood
+  session's discovery grep filtered method names on the substring "study",
+  which misses the plural "studies", and the absence was then "confirmed"
+  by brute-forcing ids instead of re-checking `describe`. The 08-25 round's
+  lesson, reproduced in the planning direction: verify each premise against
+  the code before planning a fix for it.
 - **R7 drill ergonomics.** `type: drill` with `targets` derives top from
   the stock and bottom from the hole depth instead of refusing "drilling
   picks cylindrical faces, not a verb" (which fires even WHEN the caller

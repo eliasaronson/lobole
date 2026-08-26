@@ -584,7 +584,68 @@ ElementRef UpFaceAt(const Document& doc, double z) {
   return {};
 }
 
+// A 40 x 30 x 20 block with a 6 mm through bore at (20, 15) — the part a
+// drill operation is aimed at.
+std::unique_ptr<Document> DrilledDoc() {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Bore", glm::vec3(20, 15, 0), glm::vec3(0, 0, 1), 3.0, 20.0));
+  const uint64_t bore = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Drilled", block, bore,
+                                                   BooleanOp::Subtract));
+  return doc;
+}
+
+// The vertical cylindrical face (the bore wall) — what list_elements hands
+// an agent that picked the hole.
+ElementRef BoreWall(const Document& doc) {
+  for (const Body& b : doc.GetBodies()) {
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), axis(0.0f), x(0.0f);
+      if (!b.shape.FaceAxis(index, o, axis, x))
+        continue;
+      if (std::abs(axis.z) > 0.99f)
+        return ElementRef{b.createdBy, name};
+    }
+  }
+  return {};
+}
+
 } // namespace
+
+TEST_CASE("cam: a drill derives its depths from the hole it makes", "[cam]") {
+  auto doc = DrilledDoc();
+  const cam::Setup setup = BasicSetup();
+  const ElementRef wall = BoreWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Drill, wall);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  // Top from the STOCK (a typed part-top once sent entry rapids through the
+  // millimetre of stock above the part); bottom from the hole's own extent.
+  CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-9));
+  CHECK_THAT(derived.op.bottomZ, WithinAbs(0.0, 1e-4)); // OCC bbox gap
+  REQUIRE(derived.op.targets.size() == 1);
+  CHECK(derived.op.targets[0].name == wall.name);
+
+  // No target is a teaching refusal, not "not a verb" — that message fired
+  // even when the caller HAD passed cylindrical targets.
+  const cam::DerivedOp none = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Drill, ElementRef{});
+  REQUIRE_FALSE(none.ok);
+  CHECK(none.why.find("pass targets") != std::string::npos);
+
+  // A flat face is refused as the wrong KIND, naming where to look.
+  const cam::DerivedOp flat = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Drill, UpFaceAt(*doc, 20.0));
+  REQUIRE_FALSE(flat.ok);
+  CHECK(flat.why.find("cylind") != std::string::npos);
+}
 
 TEST_CASE("cam: clicking a pocket floor derives every depth", "[cam]") {
   auto doc = PocketDoc();

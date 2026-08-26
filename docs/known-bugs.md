@@ -6,21 +6,6 @@ an entry when it lands a fix + regression test.
 
 ---
 
-## save_project to a .json path silently forks the format contract
-
-Found 2026-08-26 when the W 170 S project was saved as `w170s.json`: a
-MULTI-document project is always written in the project-container form
-(project.json + parts/ + assemblies/ — correct), so the path became a
-directory *named* `w170s.json`; but the git vault initializes only for a
-`.dsgn` extension, so the identical directory format saved WITHOUT history
-and every `save_project {message}` was silently dropped ("ignored
-otherwise", says the doc — for a directory-form save that is a silent
-capability loss, not an interchange save). format.md's "the .json file
-remains the interchange form" holds only for single-part projects; nothing
-says so. **Likely fix:** refuse a `.json` path for a multi-document project,
-naming `.dsgn` ("a multi-document project saves as a .dsgn directory; .json
-is the single-document interchange form") — the substitute is plausible,
-loads fine, and is wrong, which is this repo's definition of a refusal.
 
 ## Drawing dimensions land where they collide
 
@@ -48,60 +33,10 @@ stopped 0.5 mm short so each opening grows a flat floor to pocket-pick).
 the cylinder at mid-height) — the WallContour machinery after it is
 shape-agnostic.
 
-Related paper cuts from the same session: `type: drill` via derive refuses
-with "drilling picks cylindrical faces, not a verb" even when `targets`
-holds cylindrical faces (the derive path ignores drill targets; explicit
-top_z+bottom_z is the undocumented way in); and an explicit `top_z` set to
-the PART top rapids through the 1 mm of stock above it — the deriver knows
-to use the stock top, the error surface ("rapid through material at line
-11") doesn't say which op or height to fix.
+(The drill-derive and top_z papercuts found alongside this were fixed in
+the 2026-08-26 friction round: drill derives from its targets, and
+cam_toolpath warns when a typed top_z sits below the stock top.)
 
-## Drawing RPC papercuts: leaked json exceptions, inconsistent distance
-
-Found 2026-08-26. (a) `create_drawing {sheet: "A4"}` and a scalar
-`add_drawing_dim offset` die with raw `[json.exception.type_error.*]`
-instead of refusals naming the accepted shape (object with size/landscape;
-[x,y]) — the refuse-with-what-IS-accepted rule, unenforced at json-shape
-level. (b) A `distance` dim from a line to a circle measures to some
-silhouette point (144-centre hole → "170"), while `distance_x`/`distance_y`
-measure to the circle CENTRE (144 ✓) — same picks, different anchors,
-and the wrong one is the default kind. (c) A drawing tab screenshot from
-an --offscreen instance is silently blank: sheets are drawn by the ImGui
-layer, which offscreen captures exclude — should refuse naming the remedy
-(export_drawing, or a windowed instance) rather than return an empty frame.
-
-## Part RPCs use three different addressing conventions
-
-Found 2026-08-26 (W 170 S dogfooding). `add_occurrence` takes a part by
-**name**, `set_active_part`/`delete_part` take an **index** into the tab
-list, `rename_part` takes `part` (a name) plus `new_name`. An agent building
-a multi-part project writes a name→index lookup helper in its first five
-minutes (every dogfooding script now carries one). Names can also be
-ambiguous — see the next entry — at which point index is the only safe key,
-but nothing that ANSWERS in names (add_occurrence errors, contact_report)
-carries the index alongside.
-
-**Likely fix:** accept `{name}` OR `{index}` (refusing ambiguous names)
-everywhere a part is addressed, one shared resolver.
-
-## Duplicate assembly names are accepted silently
-
-Found 2026-08-26: an assembly script died after `add_assembly` (a later mate
-refused); the retry created a SECOND tab named "W170S 30l BR". Nothing
-warned; `list_parts` showed both, and index-addressing was the only way to
-delete the right one. A part/assembly name that duplicates an existing one
-should be refused (the merge machinery already refuses duplicate ids —
-0363a3e — this is the same conviction one level up).
-
-## No way to list a part's studies
-
-Found 2026-08-26: study ids come back from `add_study` and from nowhere
-else — `get_state` does not include studies, and there is no `list_studies`.
-Lose the id (a died script, a new session) and the only recovery is probing
-`study_status` over a numeric range. Ids are also per-document, so the same
-number means different studies on different parts. **Likely fix:** a
-`list_studies` RPC (id, name, kind, has_results, stale) + a `studies`
-block in `get_state`; both trivially derivable from the document.
 
 ## mesh_study/run_study are synchronous past the client's default timeout
 
@@ -111,10 +46,10 @@ default socket timeout, the client died mid-call, and the server finished
 anyway — the results were there on reconnect, which LOOKS like a hang
 followed by a mystery. `run_study` has `async` + `study_status` polling,
 but nothing steers a caller there, and `mesh_study` has no async at all.
-**Likely fix:** describe-doc the async path on both, and/or return a hint
-when a synchronous solve exceeds ~10 s. Client side: `designer_remote.py`
-should take a per-request timeout (and its study/mesh calls a long default)
-— the 60 s connection default is what actually bit.
+**Partially fixed 2026-08-26** (friction round): `designer_remote.request`
+takes a per-call timeout and mesh_study's describe doc names the trap.
+Remaining: an async path for `mesh_study` itself, and/or a server-side
+hint when a synchronous solve exceeds ~10 s.
 
 ---
 

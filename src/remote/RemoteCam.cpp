@@ -488,6 +488,29 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const std::vector<cam::Toolpath> paths =
         cam::GenerateAll(setup, doc->GetBodies());
 
+    // An explicit top_z below the stock top means every entry RAPID passes
+    // through material — the verifier catches it later as "rapid through
+    // material at line N", which names neither the op nor the height. Say
+    // it here, where the fix is one field on one op. (The derivation uses
+    // the stock top; only typed depths can get this wrong.)
+    json warnings = json::array();
+    glm::dvec3 stockLo(0.0), stockHi(0.0);
+    if (cam::StockBounds(setup, doc->GetBodies(), stockLo, stockHi)) {
+      const auto zfmt = [](double v) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.4g", v);
+        return std::string(buf);
+      };
+      for (const cam::Operation& op : setup.operations) {
+        if (op.enabled && op.topZ < stockHi.z - 1e-6)
+          warnings.push_back(
+              "op " + std::to_string(op.id) + " '" + op.name + "': top_z " +
+              zfmt(op.topZ) + " is below the stock top (Z" + zfmt(stockHi.z) +
+              ") — entry rapids will pass through stock; raise top_z or "
+              "leave it out to derive");
+      }
+    }
+
     json ops = json::array();
     double totalCut = 0.0;
     double lowest = 0.0;
@@ -512,11 +535,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       ops.push_back(std::move(oj));
     }
 
+    // (Braceless on purpose: rpc_gate_smoke's handler extractor keys on
+    // `if (m == "...") {`, and a braced inner dispatch would shadow this
+    // handler's body with just the return block.)
+    json toolpathOut{{"operations", ops},
+                     {"cut_length_mm", totalCut},
+                     {"min_z", lowest},
+                     {"failed", failed}};
+    if (!warnings.empty())
+      toolpathOut["warnings"] = warnings;
     if (m == "cam_toolpath")
-      return json{{"operations", ops},
-                  {"cut_length_mm", totalCut},
-                  {"min_z", lowest},
-                  {"failed", failed}};
+      return toolpathOut;
 
     const std::string post = p.value("post", setup.post);
     std::string gcode, error;

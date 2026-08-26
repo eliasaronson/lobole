@@ -36,20 +36,32 @@ class Designer:
     # 2026-08 and hit the same wall, so: any RPC with a `method` parameter
     # goes through request(), not call(). Keeping call() as it was matters
     # too: callers pass whole request dicts as d.call(**{"method": …, …}).
-    def request(self, method, params=None):
+    def request(self, method, params=None, timeout=None):
+        """`timeout` (seconds) overrides the connection default for THIS
+        call. A modal solve on a fine mesh outlived the 60 s default, the
+        client died mid-call, and the server finished anyway — which reads
+        as a hang followed by a mystery. mesh_study/run_study want a long
+        one (or run_study {async: true} + study_status polling)."""
         self._id += 1
         request = {"id": self._id, "method": method, "params": params or {}}
-        self.file.write(json.dumps(request) + "\n")
-        self.file.flush()
-        while True:
-            line = self.file.readline()
-            if not line:
-                raise ConnectionError("designer disconnected")
-            msg = json.loads(line)
-            if msg.get("id") == self._id:
-                if "error" in msg:
-                    raise RuntimeError(msg["error"])
-                return msg.get("result")
+        previous = self.sock.gettimeout()
+        if timeout is not None:
+            self.sock.settimeout(timeout)
+        try:
+            self.file.write(json.dumps(request) + "\n")
+            self.file.flush()
+            while True:
+                line = self.file.readline()
+                if not line:
+                    raise ConnectionError("designer disconnected")
+                msg = json.loads(line)
+                if msg.get("id") == self._id:
+                    if "error" in msg:
+                        raise RuntimeError(msg["error"])
+                    return msg.get("result")
+        finally:
+            if timeout is not None:
+                self.sock.settimeout(previous)
 
     def close(self):
         # makefile() dups the socket fd — close BOTH, or the server never

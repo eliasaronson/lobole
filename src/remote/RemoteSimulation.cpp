@@ -49,7 +49,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "face, study"},
     {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
-     "Mesh the study (Netgen tets); returns element counts/quality.", "study"},
+     "Mesh the study (Netgen tets); returns element counts/quality. "
+     "Synchronous — a fine mesh takes minutes, so give the client a long "
+     "timeout (the server finishes even if the client gives up).",
+     "study"},
     {"run_study", "Solve the study (blocking or async; poll study_status).",
      "async, study"},
     {"cancel_study", "Cancel a running study.", "study"},
