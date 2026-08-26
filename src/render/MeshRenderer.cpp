@@ -178,8 +178,8 @@ void MeshRenderer::RemoveInstance(uint32_t instanceId) {
     // Last occurrence gone: drop the tessellation too. Ensure the buffers
     // aren't referenced by an in-flight frame before destroying them
     // (rapid resync, e.g. accepting a feature preview, otherwise causes a
-    // GPU device-lost).
-    vkDeviceWaitIdle(m_device);
+    // GPU device-lost) — once per batch, not once per asset.
+    WaitDeviceIdleOnce();
     DestroyAssetBuffers(asset);
     m_assets[instance->assetId - 1].reset();
   }
@@ -266,8 +266,17 @@ void MeshRenderer::UpdateCamera(const glm::mat4& view,
   m_projectionMatrix = projection;
 }
 
+void MeshRenderer::WaitDeviceIdleOnce() {
+  if (m_deviceIdle || m_device == VK_NULL_HANDLE)
+    return;
+  vkDeviceWaitIdle(m_device);
+  m_deviceIdle = true;
+}
+
 void MeshRenderer::Render(VkCommandBuffer commandBuffer,
                           uint32_t currentFrame) {
+  // Recording a draw ends the "device is idle" guarantee for the batch.
+  m_deviceIdle = false;
   // Update uniform buffer
   UniformBufferObject ubo{};
   ubo.view = m_viewMatrix;

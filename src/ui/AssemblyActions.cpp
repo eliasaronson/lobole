@@ -1026,6 +1026,10 @@ namespace {
 // outline + face-selector, whose geometry sharing is a later optimization.
 struct SharedBody {
   uint32_t assetId = 0;
+  // The outline renderer's asset for the same tessellation. Shared for the
+  // same reason: uploading it per occurrence cost 3.2 ms EACH, which was
+  // most of an assembly resync (394 ms of 670 on a 98-instance dock).
+  uint32_t outlineAssetId = 0;
   std::vector<Vertex3D> vertices;
   std::vector<uint32_t> indices;
   std::vector<uint32_t> triangleFaces;
@@ -1105,6 +1109,9 @@ void SyncAssemblyRenderers(AppState& state) {
                          ? body.displayColor
                          : kBodyPalette[palette++ % std::size(kBodyPalette)];
         sb.assetId = state.meshRenderer->CreateAsset(sb.vertices, sb.indices);
+        if (state.outlineRenderer)
+          sb.outlineAssetId =
+              state.outlineRenderer->CreateAsset(sb.vertices, sb.indices);
         // Resolve order: appearance > material > displayColor > palette
         // (same merge as the part-tab draw loop in AppActions).
         if (!body.material.empty() || body.appearance.Any()) {
@@ -1157,12 +1164,13 @@ void SyncAssemblyRenderers(AppState& state) {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }
       uint32_t outlineId = 0;
-      if (state.outlineRenderer) {
-        // Untransformed vertices + a per-mesh model matrix (A2.5): the outline
-        // draws at the occurrence transform via a push constant, so a live drag
-        // is a SetMeshTransform matrix update, not a vertex re-upload/resync.
-        outlineId = state.outlineRenderer->AddMesh(sb.vertices, sb.indices);
-        state.outlineRenderer->SetMeshTransform(outlineId, xf);
+      if (state.outlineRenderer && sb.outlineAssetId != 0) {
+        // Untransformed vertices + a per-instance model matrix (A2.5): the
+        // outline draws at the occurrence transform via a push constant, so a
+        // live drag is a SetMeshTransform matrix update, not a re-upload — and
+        // since R? the geometry itself is shared, so placing the sixth copy of
+        // a bracket uploads nothing at all.
+        outlineId = state.outlineRenderer->AddInstance(sb.outlineAssetId, xf);
       }
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,

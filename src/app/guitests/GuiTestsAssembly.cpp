@@ -68,6 +68,52 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // An exploded view is pure display state: it must move what is drawn and
   // leave the occurrence transforms alone (that invariant is what makes a
   // saved exploded view unable to corrupt a placement).
+  // Instancing reaches the OUTLINES too: three placements of one part are
+  // three instances of ONE outline asset, not three uploads of the same
+  // vertex and index buffers plus three identical adjacency builds. That was
+  // 3.2 ms per placement and most of an assembly resync — 394 ms of 670 on
+  // the 98-instance dock. Counting assets is the honest check: a picture can
+  // look right while the work behind it is done N times.
+  t = IM_REGISTER_TEST(engine, "assembly", "outlines_are_instanced_per_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Repeats");
+    ui::SetActivePart(*s_App, asmIdx);
+    IM_CHECK(s_App->outlineRenderer != nullptr);
+    for (int i = 0; i < 3; ++i) {
+      Occurrence o;
+      o.name = "Copy " + std::to_string(i + 1);
+      o.partId = partId;
+      o.fixed = true;
+      o.position = glm::vec3(60.0f * static_cast<float>(i), 0.0f, 0.0f);
+      s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)3);
+    IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)3);
+    IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
+
+    // Hiding one drops its instance and keeps the shared asset alive for the
+    // two that remain.
+    s_App->assembly->GetOccurrences()[0].visible = false;
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)2);
+    IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
+
+    // And the last one going takes the asset with it — no leak, which is the
+    // half of refcounting a count alone would not catch.
+    for (Occurrence& o : s_App->assembly->GetOccurrences())
+      o.visible = false;
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)0);
+    IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)0);
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly",
                        "an_exploded_view_moves_what_is_drawn");
   t->TestFunc = [](ImGuiTestContext* ctx) {

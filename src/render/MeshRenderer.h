@@ -381,5 +381,9 @@ private:
   MeshAsset* GetAsset(uint32_t assetId);
   MeshInstance* GetInstance(uint32_t instanceId);
   bool CreateAssetBuffers(MeshAsset* asset);
+  // See OutlineRenderer: one device wait per batch of removals, not one per
+  // asset destroyed. A resync of an assembly drops every instance in a row.
+  bool m_deviceIdle = false;
+  void WaitDeviceIdleOnce();
   void DestroyAssetBuffers(MeshAsset* asset);
 };

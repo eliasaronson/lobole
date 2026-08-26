@@ -52,28 +52,41 @@ hint when a synchronous solve exceeds ~10 s.
 
 ---
 
-## Hiding a subassembly costs ~300 ms — a visibility toggle runs a full renderer rebuild
+## An assembly resync re-tessellates every part it draws
 
-Found 2026-08-26 by the perf HUD's worst-frame readout, on its first day in
-the field: `worst 315.29 ms · update 301.41` the moment a subassembly was
-hidden on the dock (76 occurrences).
+Was: "hiding a subassembly costs ~300 ms". Measured properly 2026-08-26 on
+the Marsliden dock (98 instances, 17 distinct parts), by timing the phases of
+the rebuild a visibility toggle runs:
 
-**Root cause (known):** toggling occurrence visibility bumps the assembly
-version, and `SyncDocumentRenderers` answers any version change the same way
-— remove and re-add every mesh, recompute section caps. The renderers already
-have the cheap path (`SetInstanceVisible`); nothing routes a visibility-only
-change onto it.
+| phase | before | after |
+|---|---|---|
+| outline `AddMesh` x98 (upload + adjacency, per instance) | 394 ms | ~0 (one asset per part) |
+| outline `RemoveMesh` x98 (a device wait EACH) | 81-191 ms | ~5 ms |
+| mesh `RemoveInstance` (a device wait per asset destroyed) | 18-56 ms | ~2 ms |
+| **tessellation, 17 parts (OCC mesh + edge polylines)** | **177 ms** | **177 ms — still there** |
+| `AddInstance` x98 | 0.0 ms | 0.0 ms |
+| face selector x98 | 2.4 ms | 2.4 ms |
 
-**Impact:** a one-off ~300 ms freeze per hide/show on a medium assembly,
-scaling with occurrence count. Not per-frame. Hide/show is a first-hour user
-action on any assembly, so this is worth fixing before strangers arrive.
+The two renderer costs are fixed (`assembly/outlines_are_instanced_per_part`
+gates the sharing and its refcount): a toggle round trip on the dock went
+1395-1608 ms to 701-804 ms, measured the same way.
 
-**Likely fix:** an incremental path — a visibility-only change flips
-`SetInstanceVisible` on the affected occurrence subtree and skips the
-rebuild. Deliberately NOT done in the same round that found it: sync
-granularity is exactly where staleness bugs live (the
-raw-block-instead-of-result class), so it wants its own session with tests
-that sabotage the "did the ghost/section/highlight state survive" corners.
+**What is left** is the tessellation: every resync re-meshes each distinct
+part through OCC even when nothing about that part changed. A mate solve, an
+explode edit, a visibility toggle and a part edit all pay it.
+
+**Likely fix:** cache the per-part tessellation (vertices, indices, edge
+polylines and both renderer assets) keyed by the part document's version, so
+a resync re-meshes only what actually regenerated. The lifetime is the
+fiddly half — the assets outlive the instances that reference them, so the
+cache has to hold a reference and drop it when the part changes or the tab
+closes.
+
+**Not doing:** the "visibility-only fast path" this entry used to propose
+(route a hide onto `SetInstanceVisible` and skip the rebuild). With the
+rebuild an order of magnitude cheaper, the remaining win is small and it
+would put a second, differently-shaped code path through the sync — which is
+where staleness bugs live.
 
 ## `fem_async_smoke` fails under machine saturation (twice on 2026-08-26)
 

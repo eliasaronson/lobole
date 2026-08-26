@@ -83,25 +83,25 @@ void OutlineRenderer::Shutdown() {
 
   vkDeviceWaitIdle(m_device);
 
-  // Cleanup meshes
+  // Cleanup instances, then the shapes they shared
   for (auto& mesh : m_meshes) {
-    if (mesh) {
-      if (mesh->vertexBuffer != VK_NULL_HANDLE) {
-        vkutil::DestroyBuffer(m_device, mesh->vertexBuffer,
-                              mesh->vertexBufferMemory);
-      }
-      if (mesh->indexBuffer != VK_NULL_HANDLE) {
-        vkutil::DestroyBuffer(m_device, mesh->indexBuffer,
-                              mesh->indexBufferMemory);
-      }
-      for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
-        if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
-          vkutil::DestroyBuffer(m_device, mesh->edgeIndexBuffers[f],
-                                mesh->edgeIndexBufferMemory[f],
-                                &mesh->edgeIndexMapped[f]);
-        }
+    if (!mesh)
+      continue;
+    for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+      if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
+        vkutil::DestroyBuffer(m_device, mesh->edgeIndexBuffers[f],
+                              mesh->edgeIndexBufferMemory[f],
+                              &mesh->edgeIndexMapped[f]);
       }
     }
+  }
+  for (auto& asset : m_assets) {
+    if (!asset)
+      continue;
+    vkutil::DestroyBuffer(m_device, asset->vertexBuffer,
+                          asset->vertexBufferMemory);
+    vkutil::DestroyBuffer(m_device, asset->indexBuffer,
+                          asset->indexBufferMemory);
   }
 
   // Cleanup uniform buffers
@@ -633,18 +633,16 @@ bool OutlineRenderer::CreateDescriptorSets() {
 }
 
 // Utility function implementations will be added in the next part...
-uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
-                                  const std::vector<uint32_t>& indices) {
-  LOG_INFO("OutlineRenderer: Adding mesh with {} vertices", vertices.size());
-
-  auto mesh = std::make_unique<OutlineMesh>();
-  mesh->vertexCount = static_cast<uint32_t>(vertices.size());
-  mesh->indexCount = static_cast<uint32_t>(indices.size());
+uint32_t OutlineRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
+                                      const std::vector<uint32_t>& indices) {
+  auto asset = std::make_unique<OutlineAsset>();
+  asset->vertexCount = static_cast<uint32_t>(vertices.size());
+  asset->indexCount = static_cast<uint32_t>(indices.size());
 
   // Both uploads used to drop the result — the VkBuffer-returning CreateBuffer
   // threw on failure, so nothing here checked, and a throw from inside AddMesh
   // would have unwound through the render loop. 0 is already this class's
-  // invalid-mesh id (ids start at 1), so failure is reportable in the return.
+  // invalid id (ids start at 1), so failure is reportable in the return.
   auto uploadViaStaging = [&](VkDeviceSize size, const void* src,
                               VkBufferUsageFlags usage, VkBuffer& outBuffer,
                               VkDeviceMemory& outMemory) {
@@ -677,46 +675,104 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
 
   const VkDeviceSize vertexBufferSize = sizeof(Vertex3D) * vertices.size();
   const VkDeviceSize indexBufferSize = sizeof(uint32_t) * indices.size();
+  if (vertexBufferSize == 0 || indexBufferSize == 0)
+    return 0;
 
   if (!uploadViaStaging(vertexBufferSize, vertices.data(),
-                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh->vertexBuffer,
-                        mesh->vertexBufferMemory) ||
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, asset->vertexBuffer,
+                        asset->vertexBufferMemory) ||
       !uploadViaStaging(indexBufferSize, indices.data(),
-                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh->indexBuffer,
-                        mesh->indexBufferMemory)) {
-    LOG_ERROR("OutlineRenderer: mesh upload failed ({} vertices, {} indices)",
+                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, asset->indexBuffer,
+                        asset->indexBufferMemory)) {
+    LOG_ERROR("OutlineRenderer: asset upload failed ({} vertices, {} indices)",
               vertices.size(), indices.size());
-    vkutil::DestroyBuffer(m_device, mesh->vertexBuffer,
-                          mesh->vertexBufferMemory);
-    vkutil::DestroyBuffer(m_device, mesh->indexBuffer, mesh->indexBufferMemory);
+    vkutil::DestroyBuffer(m_device, asset->vertexBuffer,
+                          asset->vertexBufferMemory);
+    vkutil::DestroyBuffer(m_device, asset->indexBuffer,
+                          asset->indexBufferMemory);
     return 0;
   }
 
-  // Precompute edge adjacency once; classification per view is then a flat
-  // pass (see OutlineEdges.h). The per-frame edge index buffers are sized to
-  // the worst case any view can produce, so they are never reallocated.
-  mesh->adjacency = outline::BuildEdgeAdjacency(
+  // Precompute edge adjacency once PER SHAPE; classification per view is then
+  // a flat pass (see OutlineEdges.h). It used to run per instance, which is
+  // the same answer computed once per placement of the same part.
+  asset->adjacency = outline::BuildEdgeAdjacency(
       vertices.empty() ? nullptr : &vertices[0].position, vertices.size(),
       sizeof(Vertex3D), indices.data(), indices.size());
-  mesh->edgeIndices = mesh->adjacency.staticIndices;
+
+  const uint32_t assetId = m_nextAssetId++;
+  m_assets.push_back(std::move(asset));
+  LOG_DEBUG("OutlineRenderer: asset {} with {} vertices, {} static edge "
+            "indices, {} silhouette candidates",
+            assetId, vertices.size(),
+            m_assets.back()->adjacency.staticIndices.size(),
+            m_assets.back()->adjacency.smoothEdges.size());
+  return assetId;
+}
+
+uint32_t OutlineRenderer::AddInstance(uint32_t assetId,
+                                      const glm::mat4& transform) {
+  if (assetId == 0 || assetId > m_assets.size() || !m_assets[assetId - 1])
+    return 0;
+  OutlineAsset& asset = *m_assets[assetId - 1];
+
+  auto mesh = std::make_unique<OutlineMesh>();
+  mesh->assetId = assetId;
+  mesh->transform = transform;
+  mesh->edgeIndices = asset.adjacency.staticIndices;
   mesh->staticIndexCount = static_cast<uint32_t>(mesh->edgeIndices.size());
+  asset.refCount++;
 
   // Slot buffers are created ON DEMAND (EnsureEdgeBuffer, in the upload
   // path), not one per slot here: there are kMaxFramesInFlight slots for
   // capacity, but a real swapchain only ever touches 2-3 of them, and this
-  // runs per MESH — eagerly filling all eight would multiply the index memory
-  // of a large assembly for slots nothing will ever bind.
+  // runs per INSTANCE — eagerly filling all eight would multiply the index
+  // memory of a large assembly for slots nothing will ever bind.
   m_silhouettesDirty = true;
 
-  uint32_t meshId = m_nextMeshId++;
+  // Ids stay dense and 1-based: a removed instance leaves a null hole rather
+  // than shifting everyone after it.
+  const uint32_t meshId = m_nextMeshId++;
   m_meshes.push_back(std::move(mesh));
-
-  LOG_INFO("OutlineRenderer: Created mesh {} with {} vertices, {} static edge "
-           "indices, {} silhouette candidates",
-           meshId, vertices.size(), m_meshes.back()->staticIndexCount,
-           m_meshes.back()->adjacency.smoothEdges.size());
-
   return meshId;
+}
+
+uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
+                                  const std::vector<uint32_t>& indices) {
+  const uint32_t assetId = CreateAsset(vertices, indices);
+  if (assetId == 0)
+    return 0;
+  return AddInstance(assetId);
+}
+
+size_t OutlineRenderer::AssetCount() const {
+  size_t n = 0;
+  for (const auto& asset : m_assets)
+    if (asset)
+      n++;
+  return n;
+}
+
+size_t OutlineRenderer::MeshCount() const {
+  size_t n = 0;
+  for (const auto& mesh : m_meshes)
+    if (mesh)
+      n++;
+  return n;
+}
+
+OutlineRenderer::OutlineAsset*
+OutlineRenderer::AssetOf(const OutlineMesh& mesh) {
+  if (mesh.assetId == 0 || mesh.assetId > m_assets.size())
+    return nullptr;
+  return m_assets[mesh.assetId - 1].get();
+}
+
+const OutlineRenderer::OutlineAsset*
+OutlineRenderer::AssetOf(const OutlineMesh& mesh) const {
+  if (mesh.assetId == 0 || mesh.assetId > m_assets.size())
+    return nullptr;
+  return m_assets[mesh.assetId - 1].get();
 }
 
 void OutlineRenderer::UpdateCamera(const glm::mat4& view,
@@ -743,8 +799,18 @@ void OutlineRenderer::UpdateCamera(const glm::mat4& view,
   m_cameraPosition = newCameraPosition;
 }
 
+void OutlineRenderer::WaitDeviceIdleOnce() {
+  if (m_deviceIdle || m_device == VK_NULL_HANDLE)
+    return;
+  vkDeviceWaitIdle(m_device);
+  m_deviceIdle = true;
+}
+
 void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
                              uint32_t currentFrame) {
+  // Anything recorded here can reference a mesh's buffers next frame, so the
+  // batch guarantee ends at the first recorded draw.
+  m_deviceIdle = false;
   if (!m_isInitialized || m_settings.mode == OutlineMode::NONE ||
       m_meshes.empty()) {
     return;
@@ -792,17 +858,18 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
   if (!mesh)
     return;
 
-  // Removal is rare (body delete/regen), so a full wait before freeing
-  // buffers an in-flight frame may still reference is acceptable here —
-  // unlike the old per-frame silhouette path, this never runs mid-orbit.
-  vkDeviceWaitIdle(m_device);
+  // Wait before freeing buffers an in-flight frame may still reference —
+  // once per batch of removals, not once per mesh (see m_deviceIdle).
+  WaitDeviceIdleOnce();
 
-  if (mesh->vertexBuffer != VK_NULL_HANDLE) {
-    vkutil::DestroyBuffer(m_device, mesh->vertexBuffer,
-                          mesh->vertexBufferMemory);
-  }
-  if (mesh->indexBuffer != VK_NULL_HANDLE) {
-    vkutil::DestroyBuffer(m_device, mesh->indexBuffer, mesh->indexBufferMemory);
+  // The shape's buffers go when the LAST placement of it does, exactly as
+  // MeshRenderer's assets do.
+  if (OutlineAsset* asset = AssetOf(*mesh); asset && --asset->refCount <= 0) {
+    vkutil::DestroyBuffer(m_device, asset->vertexBuffer,
+                          asset->vertexBufferMemory);
+    vkutil::DestroyBuffer(m_device, asset->indexBuffer,
+                          asset->indexBufferMemory);
+    m_assets[mesh->assetId - 1].reset();
   }
   for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
     if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
@@ -837,7 +904,11 @@ void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
 void OutlineRenderer::EnsureEdgeBuffer(OutlineMesh& mesh, uint32_t slot) {
   if (mesh.edgeIndexBuffers[slot] != VK_NULL_HANDLE)
     return;
-  const VkDeviceSize bytes = sizeof(uint32_t) * mesh.adjacency.MaxIndexCount();
+  const OutlineAsset* asset = AssetOf(mesh);
+  if (asset == nullptr)
+    return;
+  const VkDeviceSize bytes =
+      sizeof(uint32_t) * asset->adjacency.MaxIndexCount();
   if (bytes == 0)
     return;
   if (!vkutil::CreateBuffer(
@@ -871,7 +942,8 @@ void OutlineRenderer::RefreshSilhouettes() {
   size_t meshCount = 0;
   size_t silhouetteIndices = 0;
   for (auto& mesh : m_meshes) {
-    if (!mesh || mesh->adjacency.smoothEdges.empty()) {
+    const OutlineAsset* asset = mesh ? AssetOf(*mesh) : nullptr;
+    if (!asset || asset->adjacency.smoothEdges.empty()) {
       // Nothing view-dependent; the static prefix (already in edgeIndices)
       // is the whole wireframe.
       continue;
@@ -879,7 +951,7 @@ void OutlineRenderer::RefreshSilhouettes() {
     mesh->edgeIndices.resize(mesh->staticIndexCount);
     const glm::vec3 cameraLocal = glm::vec3(glm::inverse(mesh->transform) *
                                             glm::vec4(m_cameraPosition, 1.0f));
-    outline::AppendSilhouetteIndices(mesh->adjacency, cameraLocal,
+    outline::AppendSilhouetteIndices(asset->adjacency, cameraLocal,
                                      m_silhouetteScratch, mesh->edgeIndices);
     mesh->edgeVersion++;
     meshCount++;
@@ -989,17 +1061,18 @@ void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer,
                           &m_outlineDescriptorSets[currentFrame], 0, nullptr);
 
   for (const auto& mesh : m_meshes) {
-    if (mesh && mesh->vertexBuffer != VK_NULL_HANDLE &&
-        mesh->indexBuffer != VK_NULL_HANDLE) {
+    const OutlineAsset* asset = mesh ? AssetOf(*mesh) : nullptr;
+    if (asset && asset->vertexBuffer != VK_NULL_HANDLE &&
+        asset->indexBuffer != VK_NULL_HANDLE) {
       vkCmdPushConstants(commandBuffer, m_outlinePipelineLayout,
                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                         &mesh->transform); // per-mesh model (A2.5)
-      VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+                         &mesh->transform); // per-instance model (A2.5)
+      VkBuffer vertexBuffers[] = {asset->vertexBuffer};
       VkDeviceSize offsets[] = {0};
       vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-      vkCmdBindIndexBuffer(commandBuffer, mesh->indexBuffer, 0,
+      vkCmdBindIndexBuffer(commandBuffer, asset->indexBuffer, 0,
                            VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(commandBuffer, mesh->indexCount, 1, 0, 0, 0);
+      vkCmdDrawIndexed(commandBuffer, asset->indexCount, 1, 0, 0, 0);
     }
   }
 }
@@ -1029,13 +1102,14 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer,
                           &m_wireframeDescriptorSets[currentFrame], 0, nullptr);
 
   for (const auto& mesh : m_meshes) {
-    if (mesh && mesh->vertexBuffer != VK_NULL_HANDLE &&
+    const OutlineAsset* asset = mesh ? AssetOf(*mesh) : nullptr;
+    if (asset && asset->vertexBuffer != VK_NULL_HANDLE &&
         mesh->edgeIndexBuffers[currentFrame] != VK_NULL_HANDLE &&
         mesh->uploadedIndexCount[currentFrame] > 0) {
       vkCmdPushConstants(commandBuffer, m_wireframePipelineLayout,
                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                         &mesh->transform); // per-mesh model (A2.5)
-      VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
+                         &mesh->transform); // per-instance model (A2.5)
+      VkBuffer vertexBuffers[] = {asset->vertexBuffer};
       VkDeviceSize offsets[] = {0};
       vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
       // Bind this frame slot's buffer and draw exactly what was uploaded to

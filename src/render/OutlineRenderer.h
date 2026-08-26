@@ -51,7 +51,23 @@ public:
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
   void Shutdown();
 
-  // Mesh management
+  // Assets and instances, the split MeshRenderer already had: one
+  // tessellation + its edge adjacency, drawn at many transforms. An assembly
+  // of six identical brackets used to upload six copies of the same vertex
+  // and index buffers and build the same adjacency six times — 3.2 ms per
+  // instance, 394 ms of a 670 ms resync on a 98-instance dock.
+  uint32_t CreateAsset(const std::vector<Vertex3D>& vertices,
+                       const std::vector<uint32_t>& indices);
+  uint32_t AddInstance(uint32_t assetId,
+                       const glm::mat4& transform = glm::mat4(1.0f));
+  // Live counts, so a test can assert that instancing HAPPENED rather than
+  // that the picture looks right: N occurrences of one part = N instances of
+  // 1 asset.
+  [[nodiscard]] size_t AssetCount() const;
+  [[nodiscard]] size_t MeshCount() const;
+
+  // Mesh management. AddMesh is the one-body-one-mesh form: an asset of its
+  // own plus a single instance (the part tab, where nothing repeats).
   uint32_t AddMesh(const std::vector<Vertex3D>& vertices,
                    const std::vector<uint32_t>& indices);
   void UpdateMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices,
@@ -84,24 +100,34 @@ private:
   // passes the image index. See render/FramesInFlight.h.
   static const int MAX_FRAMES_IN_FLIGHT = render::kMaxFramesInFlight;
 
-  struct OutlineMesh {
+  // The shared half: geometry on the GPU and the adjacency that classifies
+  // its edges. Both are a property of the SHAPE, so every placement of the
+  // same part reads one copy.
+  struct OutlineAsset {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
+    outline::EdgeAdjacency adjacency;
+    int refCount = 0; // instances referring to it
+  };
+
+  struct OutlineMesh {
+    uint32_t assetId = 0;
     glm::mat4 transform = glm::mat4(1.0f);
 
-    // Wireframe edge indices. CPU side: precomputed adjacency plus the
-    // current line list, laid out [static feature/boundary prefix |
-    // per-view silhouette suffix]. GPU side: one persistently mapped
+    // Wireframe edge indices. CPU side: the asset's adjacency classified for
+    // THIS instance's view direction, laid out [static feature/boundary
+    // prefix | per-view silhouette suffix] — per instance, because the
+    // camera sits somewhere different in each one's local space. GPU side:
+    // one persistently mapped
     // host-visible buffer per frame in flight, allocated once at worst case
     // (MaxIndexCount) — updates are a memcpy into the slot whose fence the
     // frame loop already waited on, so no reallocation, no staging copy and
     // no mid-frame vkDeviceWaitIdle, and an in-flight frame can never see
     // its buffer freed under it.
-    outline::EdgeAdjacency adjacency;
     std::vector<uint32_t> edgeIndices;
     uint32_t staticIndexCount = 0;
     uint64_t edgeVersion = 1; // bumped whenever edgeIndices changes
@@ -187,6 +213,10 @@ private:
 
   // Mesh data
   std::vector<std::unique_ptr<OutlineMesh>> m_meshes;
+  std::vector<std::unique_ptr<OutlineAsset>> m_assets;
+  uint32_t m_nextAssetId = 1;
+  [[nodiscard]] OutlineAsset* AssetOf(const OutlineMesh& mesh);
+  [[nodiscard]] const OutlineAsset* AssetOf(const OutlineMesh& mesh) const;
   uint32_t m_nextMeshId = 1;
 
   // Camera data
@@ -214,4 +244,13 @@ private:
 
   // State
   bool m_isInitialized = false;
+  // True while the device is known idle because we just waited on it. A
+  // resync removes every mesh in one go, and each removal used to wait for
+  // the GPU by itself: 98 instances of an assembly meant 98 full device
+  // stalls back to back. Nothing can be submitted between two removals — the
+  // frame loop is the only submitter and it is not running — so ONE wait
+  // covers the whole batch. Render() clears it, because a submitted frame
+  // may reference the buffers again.
+  bool m_deviceIdle = false;
+  void WaitDeviceIdleOnce();
 };

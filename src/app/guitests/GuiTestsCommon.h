@@ -38,6 +38,7 @@
 #include "remote/RemoteDrawings.h"
 #include "render/Camera.h"
 #include "render/FrameTimer.h"
+#include "render/OutlineRenderer.h" // instance/asset counts (outline gates)
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
