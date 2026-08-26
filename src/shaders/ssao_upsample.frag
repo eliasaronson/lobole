@@ -22,6 +22,12 @@ layout(location = 0) out float outAO;
 void main() {
     float centerDepth = texture(uDepth, fragUV).r;
     vec2 texel = pc.params.xy;
+    // Same plane prediction as the blur (see ssao_blur.frag): derivatives
+    // are per FULL-res pixel; the offsets below are in half-res texels, so
+    // the gradient doubles. Same silhouette clamp.
+    vec2 grad = 2.0 * vec2(dFdx(centerDepth), dFdy(centerDepth));
+    float maxGrad = 1.6 / pc.params.z;
+    grad = clamp(grad, vec2(-maxGrad), vec2(maxGrad));
     // The 2x2 half-res texel neighborhood around this full-res pixel.
     vec2 pos = fragUV / texel - 0.5;
     vec2 base = (floor(pos) + 0.5) * texel;
@@ -36,7 +42,8 @@ void main() {
     float nearestW = -1.0;
     for (int i = 0; i < 4; i++) {
         vec2 uv = base + offsets[i];
-        float dw = exp(-abs(texture(uDepth, uv).r - centerDepth) *
+        float predicted = centerDepth + dot(grad, (uv - fragUV) / texel);
+        float dw = exp(-abs(texture(uDepth, uv).r - predicted) *
                        pc.params.z);
         float ao = texture(uAO, uv).r;
         sum += ao * bilinear[i] * dw;

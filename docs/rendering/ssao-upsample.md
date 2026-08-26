@@ -23,6 +23,19 @@ Status: **SHIPPED 2026-08-26.** As-built, measured on the RTX rig
   ssao 13.03 / main 16.38 — the ssao bucket keeps the full-res depth+normal
   prepass (a fixed cost independent of AO resolution), which is why it does
   not quarter. The remaining lever is `main`'s 16.4 ms: the MSAA setting.
+- **The barrel stripes (owner report, 2026-08-26) were NOT the upsample.**
+  Amplified AO maps on the dock showed vertical banding on curved surfaces
+  at half — and the pre-upsample binary shows the identical pattern, period
+  and strength. Root cause: the 4x4 tiled rotation noise. Its residual after
+  the blur has period 4 AO texels — 4 screen px at full res (reads as fine
+  grain) but 8 px at half (reads as STRIPES on anything curved). Fixed at
+  the source: per-pixel interleaved gradient noise replaces the tile (no
+  period for the eye to find), which cleaned the barrels at half and left
+  full's smooth character unchanged. The blur and upsample also now compare
+  neighbors against the local depth PLANE (gradient-predicted, clamped at
+  the weight's own tolerance so silhouettes still reject) — principled on
+  sloped surfaces, verified harmless. The noise texture stays bound so the
+  C++ layout is untouched; only shaders changed.
 - **RTX perf cannot resolve the win** (~2-3 ms buckets wandering under DVFS
   in a vsync frame — the frame-timing doc's laptop caveat, observed again).
   The Intel claim is arithmetic (AO+blur at a quarter of the pixels + one

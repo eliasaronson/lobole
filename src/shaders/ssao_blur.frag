@@ -18,12 +18,25 @@ layout(location = 0) out float outAO;
 
 void main() {
     float centerDepth = texture(uDepth, fragUV).r;
+    // Compare each neighbor against the local depth PLANE, not the center
+    // value: on a sloped or curved surface the raw comparison down-weights
+    // half the window, the 4x4 noise tile stops averaging out, and
+    // tile-period banding appears (the barrels, 2026-08-26). Derivatives
+    // are per blur-target pixel — exactly the offset unit below. Clamped so
+    // a silhouette's huge gradient cannot predict across the edge: past the
+    // weight's own tolerance a prediction could only resurrect neighbors
+    // the raw test rightly rejects.
+    vec2 grad = vec2(dFdx(centerDepth), dFdy(centerDepth));
+    float maxGrad = 1.6 / pc.params.z;
+    grad = clamp(grad, vec2(-maxGrad), vec2(maxGrad));
     float sum = 0.0;
     float weightSum = 0.0;
     for (int x = -2; x < 2; x++) {
         for (int y = -2; y < 2; y++) {
-            vec2 uv = fragUV + (vec2(x, y) + 0.5) * pc.params.xy;
-            float w = exp(-abs(texture(uDepth, uv).r - centerDepth) *
+            vec2 off = vec2(x, y) + 0.5;
+            vec2 uv = fragUV + off * pc.params.xy;
+            float predicted = centerDepth + dot(grad, off);
+            float w = exp(-abs(texture(uDepth, uv).r - predicted) *
                           pc.params.z);
             sum += texture(uAO, uv).r * w;
             weightSum += w;

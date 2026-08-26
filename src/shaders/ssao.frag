@@ -15,7 +15,13 @@ layout(binding = 0) uniform SSAOParams {
 
 layout(binding = 1) uniform sampler2D uDepth;   // prepass depth (full-res)
 layout(binding = 2) uniform sampler2D uNormal;  // prepass view-space normals
-layout(binding = 3) uniform sampler2D uNoise;   // 4x4 rotation vectors, tiled
+// Bound but no longer sampled: rotation now comes from per-pixel
+// interleaved gradient noise below. The 4x4 tile's period is 4 AO texels =
+// 8 screen px at half res, and its residual after the blur read as visible
+// STRIPES on curved surfaces (the barrels, 2026-08-26) where the same
+// residual at full res passed as fine grain. Per-pixel noise has no period
+// for the eye to find; the binding stays so the C++ layout is untouched.
+layout(binding = 3) uniform sampler2D uNoise;
 
 layout(location = 0) in vec2 fragUV;
 
@@ -51,7 +57,13 @@ void main() {
     }
     vec3 origin = viewPosAt(fragUV, depth);
     vec3 normal = normalize(texture(uNormal, fragUV).xyz * 2.0 - 1.0);
-    vec3 rand = texture(uNoise, fragUV * ubo.params2.xy).xyz;
+    // Interleaved gradient noise (Jimenez): a well-distributed per-pixel
+    // rotation angle. gl_FragCoord is in AO-target pixels here.
+    float ign = fract(52.9829189 *
+                      fract(0.06711056 * gl_FragCoord.x +
+                            0.00583715 * gl_FragCoord.y));
+    float angle = 6.2831853 * ign;
+    vec3 rand = vec3(cos(angle), sin(angle), 0.0);
 
     // Per-pixel-rotated tangent basis (Gram-Schmidt); fall back to a fixed
     // axis in the rare case the noise vector is parallel to the normal.
