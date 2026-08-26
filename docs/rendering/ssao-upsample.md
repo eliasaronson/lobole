@@ -16,6 +16,13 @@ Status: **SHIPPED 2026-08-26.** As-built, measured on the RTX rig
   work and had simply never been measured (the smoke only ever tested
   `full`). The smoke's half-tier locality invariant therefore runs at the
   >=8 threshold where displaced-occlusion detection is meaningful.
+- **Field-confirmed on the Arc (2026-08-26, owner's session)**: occlusion
+  half, everything else max — **30.44 ms / 32.8 fps** against the predicted
+  ~31 ms / ~32 fps, from the 40.2 ms everything-max baseline: 9.7 ms
+  reclaimed. Still GPU-bound (gpu total 31.4 ms), split shadow 1.96 /
+  ssao 13.03 / main 16.38 — the ssao bucket keeps the full-res depth+normal
+  prepass (a fixed cost independent of AO resolution), which is why it does
+  not quarter. The remaining lever is `main`'s 16.4 ms: the MSAA setting.
 - **RTX perf cannot resolve the win** (~2-3 ms buckets wandering under DVFS
   in a vsync frame — the frame-timing doc's laptop caveat, observed again).
   The Intel claim is arithmetic (AO+blur at a quarter of the pixels + one
