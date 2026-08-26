@@ -76,11 +76,14 @@ The MCP server resolves what to talk to in that order:
 2. **Exactly one running instance** → attach to it.
 3. **Several** → refuse and list them. Guessing would answer questions about
    a document you are not looking at.
-4. **None** → an error naming the exact command to start one on THIS machine
-   — it probes for a dev-tree `build/designer` beside the server, `designer`
-   on PATH, then the flatpak, and refuses with what it probed when none
-   exists — including the headless variant and what it cannot do
-   (screenshots).
+4. **None** → **autostart**: spawn `designer --offscreen --remote 0` (the
+   binary is probed — dev-tree `build/designer` beside the server, `designer`
+   on PATH, then the flatpak), attach to the port the child announces, and
+   kill it when the server exits. The child gets a scratch
+   `XDG_CONFIG_HOME` seeded from the real one, so `set_settings` can never
+   rewrite the human's preferences. Disable with `--no-autostart` /
+   `DESIGNER_AUTOSTART=0`; with autostart off or no binary found, the error
+   names the exact start command (or what was probed).
 
 `describe` reports what it attached to (`attached`: *"Designer on port 8799:
 bracket.dsgn (unsaved changes), gui"*), and the `instances` tool lists what is
@@ -96,13 +99,17 @@ a build configured with `-DENABLE_TEST_ENGINE=OFF` refuses those calls naming
 that reason, and `ping`/`describe` report `ui_actions: false` up front. Every
 other tool, screenshots included, works there.
 
-**Autostart is deliberately not implemented.** Spawning a window from an MCP
-server would create a *second* instance while the user has one open, and the
-agent would silently inspect a different document; a headless spawn cannot
-screenshot, which is the main reason to use MCP over a script. The automated
-case is already served by `designer --headless --remote <port>` in a script.
-If it is ever added it must be opt-in, headless-only, and tied to the server's
-lifetime (a spawned instance that outlives its parent sits on a port forever).
+**Autostart: rejected 2026-08-17, reversed 2026-08-26 — because the two
+objections died.** The rejection reasoned: spawning a *window* would create a
+second instance beside the user's open one (the agent then silently inspects
+a different document), and a *headless* spawn cannot screenshot, which is the
+main reason to use MCP over a script. `--offscreen` invalidates both — no
+window exists to shadow anything, and it renders. What survived from the
+rejection are its conditions, now enforced: autostart triggers **only when
+discovery finds nothing running** (a pinned port or any live instance always
+wins), the spawn is **offscreen-only**, and the child is **tied to the
+server's lifetime** (killed at exit; `tests/mcp_autostart_smoke.py` pins
+that no process or registry entry outlives it).
 
 ## What's exposed (revised 2026-08-17)
 

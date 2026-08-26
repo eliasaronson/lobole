@@ -399,9 +399,12 @@ Phased; 1 is **[done 2026-08-26]**, the rest in order:
    at attach instead of baking it (a PyPI server meets arbitrary app
    versions; the baked text is only gated in-repo), and publish. Also the
    moment to migrate off the `mcp<2` pin.
-3. **Autostart, maybe** — needs an explicit decision to reverse the
-   documented rejection (docs/scripting/mcp.md); the conditions if it comes:
-   opt-in, headless-only, child dies with the server.
+3. **Autostart** — **[done 2026-08-26]**, decision made: on by default, since
+   `--offscreen` killed both of the rejection's objections (no window to
+   shadow the user's document, and it renders). Triggers only when discovery
+   finds nothing; child dies with the server; `--no-autostart` /
+   `DESIGNER_AUTOSTART=0` to disable. docs/scripting/mcp.md records the
+   reversal; tests/mcp_autostart_smoke.py pins the lifecycle.
 4. **Claude Code plugin** — bundles the MCP registration + the modeling
    workflow, so onboarding is "install the app, install the plugin". Needs a
    public repo (or a marketplace) to point at.

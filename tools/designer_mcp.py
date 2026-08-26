@@ -8,8 +8,10 @@ Design: docs/scripting/s1-mcp.md. Register this server with an MCP client:
 
 No port needed: running instances announce themselves and the server attaches
 (several running → it asks; pin with --port or $DESIGNER_PORT, flag wins).
-Requires the official MCP Python SDK (`mcp` on PyPI, `python3Packages.mcp`
-on nixpkgs).
+With NOTHING running it autostarts `designer --offscreen --remote 0` — a real
+renderer, no window — and kills it on exit; disable with --no-autostart or
+DESIGNER_AUTOSTART=0. Requires the official MCP Python SDK (`mcp` on PyPI,
+`python3Packages.mcp` on nixpkgs).
 """
 import argparse
 import os
@@ -335,8 +337,8 @@ def _running_instances():
         return []  # discovery is a convenience, never a failure mode
 
 
-def _start_hint():
-    """The start command for THIS machine's Designer — probed, not guessed.
+def _designer_argv():
+    """THIS machine's Designer as an argv, probed — not guessed.
 
     The server can be installed far from any checkout (`uv tool install`), so
     a refusal that always says `designer --remote …` names a command half the
@@ -348,19 +350,105 @@ def _start_hint():
     import subprocess
     dev = pathlib.Path(__file__).resolve().parent.parent / "build" / "designer"
     if dev.is_file():
-        return str(dev)
+        return [str(dev)]
     if shutil.which("designer"):
-        return "designer"
+        return ["designer"]
     if shutil.which("flatpak"):
         try:
             probe = subprocess.run(
                 ["flatpak", "info", "io.github.eliasaronson.Designer"],
                 capture_output=True, timeout=10)
             if probe.returncode == 0:
-                return "flatpak run io.github.eliasaronson.Designer"
+                return ["flatpak", "run", "io.github.eliasaronson.Designer"]
         except OSError:
             pass
     return None
+
+
+def _start_hint():
+    argv = _designer_argv()
+    return " ".join(argv) if argv else None
+
+
+# The instance this server spawned, if any. Autostart triggers ONLY when
+# discovery finds nothing running (a pinned port never autostarts), spawns
+# --offscreen (no window to shadow the user's document, and renders — the two
+# objections the old autostart rejection rested on), and the child dies with
+# this process. Off switch: --no-autostart / DESIGNER_AUTOSTART=0.
+_autostarted = None
+_autostart_enabled = os.environ.get(
+    "DESIGNER_AUTOSTART", "").lower() not in ("0", "off", "no")
+
+
+def _stop_autostarted():
+    global _autostarted
+    proc = _autostarted
+    _autostarted = None
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        proc.kill()
+
+
+def _autostart():
+    """Spawn `--offscreen --remote 0`; return its announced port, or None
+    when no Designer is installed here (the caller then refuses, naming what
+    was probed). A spawn that dies or never announces raises with the app's
+    own words — an agent must see WHY, not a generic timeout."""
+    global _autostarted
+    import atexit
+    import pathlib
+    import shutil
+    import subprocess
+    import time
+    argv = _designer_argv()
+    if argv is None:
+        return None
+    scratch = tempfile.mkdtemp(prefix="designer-mcp-autostart-")
+    env = dict(os.environ)
+    # Same reasoning as tools/headless-preview.sh: set_settings persists
+    # immediately, so a scratch instance must not write the human's real
+    # preferences. Seed from them so it still looks like their app.
+    cfg = pathlib.Path(scratch, "config", "designer")
+    cfg.mkdir(parents=True)
+    real = pathlib.Path(env.get("XDG_CONFIG_HOME",
+                                os.path.expanduser("~/.config")),
+                        "designer", "settings.json")
+    if real.is_file():
+        shutil.copy(real, cfg / "settings.json")
+    env["XDG_CONFIG_HOME"] = str(pathlib.Path(scratch, "config"))
+    log_path = os.path.join(scratch, "app.log")
+    with open(log_path, "w") as log:
+        proc = subprocess.Popen(argv + ["--offscreen", "--remote", "0"],
+                                stdout=log, stderr=subprocess.STDOUT, env=env)
+    _autostarted = proc
+    atexit.register(_stop_autostarted)
+    deadline = time.time() + 60
+    while time.time() < deadline and proc.poll() is None:
+        # The registry is the rendezvous: the child announces its kernel-
+        # chosen port under its pid, so there is no port to race for.
+        for info in _running_instances():
+            if int(info.get("pid", 0)) == proc.pid:
+                print(f"designer-mcp: autostarted `{' '.join(argv)} "
+                      f"--offscreen` on port {info['port']} (it dies with "
+                      "this server; disable with --no-autostart)",
+                      file=sys.stderr)
+                return int(info["port"])
+        time.sleep(0.2)
+    try:
+        with open(log_path) as f:
+            said = f.read()[-800:].strip()
+    except OSError:
+        said = ""
+    _stop_autostarted()
+    raise RuntimeError(
+        f"autostart failed: `{' '.join(argv)} --offscreen --remote 0` "
+        + (f"exited {proc.poll()}" if proc.poll() is not None
+           else "never announced a port")
+        + (". It said:\n" + said if said else ""))
 
 
 def _resolve_port():
@@ -379,6 +467,10 @@ def _resolve_port():
     if len(live) == 1:
         return int(live[0]["port"])
     if not live:
+        if _autostart_enabled:
+            port = _autostart()
+            if port is not None:
+                return port
         cmd = _start_hint()
         if cmd is None:
             raise RuntimeError(
@@ -388,11 +480,11 @@ def _resolve_port():
                 "Install the app, then start it with `designer --remote "
                 f"{DEFAULT_PORT}`.")
         raise RuntimeError(
-            f"No running Designer found. Start one with:  {cmd} --remote "
-            f"{DEFAULT_PORT}   (add --offscreen for no window with renders, "
-            "or --headless for the document engine alone). If it is already "
-            "running, it is on a build older than instance discovery: pass "
-            "--port/DESIGNER_PORT.")
+            f"No running Designer found (autostart is off). Start one with:  "
+            f"{cmd} --remote {DEFAULT_PORT}   (add --offscreen for no window "
+            "with renders, or --headless for the document engine alone). If "
+            "it is already running, it is on a build older than instance "
+            "discovery: pass --port/DESIGNER_PORT.")
     listed = ", ".join(
         f"{i['port']} ({i.get('mode', '?')})" for i in live)
     raise RuntimeError(
@@ -1903,14 +1995,19 @@ def modeling_workflow() -> str:
 
 
 def main():
-    global _port
+    global _port, _autostart_enabled
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=None,
                         help="pin a port; omit to attach to the running "
                              "instance that announced itself")
+    parser.add_argument("--no-autostart", action="store_true",
+                        help="never spawn an instance; with nothing running, "
+                             "refuse and name the start command instead")
     args = parser.parse_args()
     if args.port is not None:
         _port = args.port
+    if args.no_autostart:
+        _autostart_enabled = False
     mcp.run()  # stdio
 
 

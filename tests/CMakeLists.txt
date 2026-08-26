@@ -175,6 +175,15 @@ add_test(NAME offscreen_smoke
 set_tests_properties(offscreen_smoke PROPERTIES TIMEOUT 300
                      SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
+# The MCP server's autostart lifecycle: nothing running → it spawns
+# --offscreen and the child dies with it. Skips (77) without the mcp SDK or
+# a Vulkan device. Finds the binary itself (build/designer beside tools/),
+# so no $<TARGET_FILE> — which is the point: it tests the server's own probe.
+add_test(NAME mcp_autostart_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_autostart_smoke.py)
+set_tests_properties(mcp_autostart_smoke PROPERTIES TIMEOUT 120
+                     SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
+
 # Mode flags must conflict loudly, never win by precedence: --headless once
 # silently overrode the --hidden a test passed, and the test spent weeks
 # testing nothing (CLAUDE.md). All four exit at argument parsing, before any
