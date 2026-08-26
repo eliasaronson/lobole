@@ -70,9 +70,12 @@
   messages dropped. Refuse naming `.dsgn`; keep `.json` = single-document
   interchange, per format.md. Gate: `headless_smoke` + a format.md line.
 
-## Wave 2 — agent-capability unlocks (1–2 sessions)
+## Wave 2 — agent-capability unlocks — R10 SHIPPED 2026-08-26
 
-- **R10 CAM picks for round openings.** `FindFace` resolves every pick via
+- **R10 CAM picks for round openings — DONE.** Verified on the real W170S
+  baffle: drill + both openings + outline all derived from picks, verify
+  ok, no onion-skin twin. Gated by "a round opening is cut by picking its
+  wall" in test_cam. Original finding: `FindFace` resolves every pick via
   `FacePlane`, so cylindrical walls fail before `IsWallFace` can classify
   them; "cut the opening" is impossible for the most common opening there
   is. Fix: a curved-wall path — for a cylindrical face with axis ∥ Z,

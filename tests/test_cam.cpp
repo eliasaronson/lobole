@@ -592,7 +592,7 @@ std::unique_ptr<Document> DrilledDoc() {
       std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
   const uint64_t block = doc->GetFeature(0)->GetId();
   doc->AddFeature(std::make_unique<CylinderFeature>(
-      "Bore", glm::vec3(20, 15, 0), glm::vec3(0, 0, 1), 3.0, 20.0));
+      "Bore", glm::vec3(20, 15, 0), glm::vec3(0, 0, 1), 8.0, 20.0));
   const uint64_t bore = doc->GetFeature(1)->GetId();
   doc->AddFeature(std::make_unique<BooleanFeature>("Drilled", block, bore,
                                                    BooleanOp::Subtract));
@@ -615,6 +615,46 @@ ElementRef BoreWall(const Document& doc) {
 }
 
 } // namespace
+
+TEST_CASE("cam: a round opening is cut by picking its wall", "[cam]") {
+  auto doc = DrilledDoc();
+  const cam::Setup setup = BasicSetup();
+  const ElementRef wall = BoreWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  // R10: the pick every round hole has. FacePlane-based resolution used to
+  // refuse it ("pick a flat face — that one is curved"), which left the
+  // most common opening there is unmachinable by wall pick — the W 170 S
+  // baffle needed an onion-skin twin part just to give its Ø73/Ø148
+  // openings floors to pocket.
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, wall);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  CHECK(derived.op.side == cam::Side::Inside); // an opening cuts inside it
+  CHECK(derived.op.name == "Cut the opening");
+  CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-9));
+  CHECK(derived.op.bottomZ < 0.0); // through: carries into the spoilboard
+
+  cam::Setup job = setup;
+  cam::Operation op = derived.op;
+  op.id = 1;
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  CHECK(paths[0].CutLength() > 0.0);
+  // The cutter's centre runs one tool radius INSIDE the Ø16 bore: a circle
+  // of radius 5 around (20, 15). Spot-check every cutting move.
+  for (const cam::Move& mv : paths[0].moves) {
+    if (mv.kind == cam::Move::Kind::Rapid)
+      continue;
+    const double r = std::hypot(mv.to.x - 20.0, mv.to.y - 15.0);
+    CHECK(r < 5.0 + 1e-3);
+  }
+}
 
 TEST_CASE("cam: a drill derives its depths from the hole it makes", "[cam]") {
   auto doc = DrilledDoc();

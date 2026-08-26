@@ -593,12 +593,53 @@ double DistanceToLoop(const std::vector<glm::dvec2>& pts, const glm::dvec2& p) {
 
 } // namespace
 
+// A picked face that is a VERTICAL CYLINDER — the wall every round opening
+// has, and the pick FacePlane-based resolution rejected outright ("pick a
+// flat face — that one is curved" for the most common opening there is,
+// R10). `onWall` is a point ON the bore's cross-section circle, which is
+// what the nearest-loop pick below needs: the axis centre would sit a full
+// radius from its own contour and lose to the 0.5 mm tolerance.
+bool FindVerticalCylinderFace(const std::vector<Body>& bodies,
+                              const ElementRef& ref, TopoDS_Face& face,
+                              glm::dvec2& onWall) {
+  if (!ref.IsSet())
+    return false;
+  for (const Body& body : bodies) {
+    if (body.createdBy != ref.featureId || !body.shape.IsValid())
+      continue;
+    const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+    if (!idx)
+      return false;
+    int i = 0;
+    for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), i++) {
+      if (i != *idx)
+        continue;
+      face = TopoDS::Face(ex.Current());
+      if (face.IsNull())
+        return false;
+      BRepAdaptor_Surface surf(face);
+      if (surf.GetType() != GeomAbs_Cylinder)
+        return false;
+      const gp_Cylinder cyl = surf.Cylinder();
+      if (std::abs(cyl.Axis().Direction().Z()) < 0.99)
+        return false; // lying on its side: no 3-axis contour follows it
+      const gp_Pnt loc = cyl.Location();
+      onWall = {loc.X() + cyl.Radius(), loc.Y()};
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
 bool IsWallFace(const std::vector<Body>& bodies, const ElementRef& ref) {
   TopoDS_Face face;
   glm::vec3 centre(0.0f), normal(0.0f);
-  if (!FindFace(bodies, ref, face, centre, normal))
-    return false;
-  return std::abs(normal.z) < 0.01f;
+  if (FindFace(bodies, ref, face, centre, normal))
+    return std::abs(normal.z) < 0.01f;
+  glm::dvec2 onWall(0.0);
+  return FindVerticalCylinderFace(bodies, ref, face, onWall);
 }
 
 WallContour PickedWallContour(const std::vector<Body>& bodies,
@@ -606,13 +647,21 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
   WallContour out;
   TopoDS_Face face;
   glm::vec3 centre(0.0f), normal(0.0f);
-  if (!FindFace(bodies, ref, face, centre, normal)) {
-    out.why = "that face is not on a body this job can machine";
-    return out;
-  }
-  if (std::abs(normal.z) >= 0.01f) {
-    out.why = "pick a wall — that face is level, so it is a floor to clear "
-              "rather than a contour to follow";
+  glm::dvec2 at(0.0);
+  if (FindFace(bodies, ref, face, centre, normal)) {
+    if (std::abs(normal.z) >= 0.01f) {
+      out.why = "pick a wall — that face is level, so it is a floor to clear "
+                "rather than a contour to follow";
+      return out;
+    }
+    at = {centre.x, centre.y};
+  } else if (FindVerticalCylinderFace(bodies, ref, face, at)) {
+    // A bore or boss wall: the section-loop machinery below is shape-
+    // agnostic, so the round opening needs nothing more than being let in.
+  } else {
+    out.why = "pick a wall — a flat vertical face or a vertical cylinder (a "
+              "bore or a boss); that face is neither, or not on a body this "
+              "job can machine";
     return out;
   }
   Bnd_Box box;
@@ -634,7 +683,6 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
   // than the one at the part's waist.
   const std::vector<Loop> loops =
       SectionLoops(bodies, (z0 + z1) * 0.5, deflection);
-  const glm::dvec2 at(centre.x, centre.y);
   double best = std::numeric_limits<double>::max();
   const Loop* pick = nullptr;
   for (const Loop& l : loops) {

@@ -20,23 +20,6 @@ view edge nearest the dim, skipping boxes already taken by views, the title
 block, and other labels — plus an overlap validator in `check_drawing` so
 regressions fail a gate instead of an eyeball.
 
-## CAM cannot target a round opening — every face pick is planar-only
-
-Found 2026-08-26 (W 170 S baffle CAM). `FindFace` (CamToolpath.cpp) resolves
-every pick through `FacePlane`, which fails on curved faces — so
-`IsWallFace`, `PickedWallContour` and `PickedFaceRegion` all reject the
-cylindrical wall of a Ø73/Ø148 through-hole with "pick a flat face — that
-one is curved". "Cut the opening" is therefore impossible for the most
-common opening there is. Workaround used: an onion-skin CAM twin (cuts
-stopped 0.5 mm short so each opening grows a flat floor to pocket-pick).
-**Likely fix:** let FindFace fall through to a curved-wall contour (section
-the cylinder at mid-height) — the WallContour machinery after it is
-shape-agnostic.
-
-(The drill-derive and top_z papercuts found alongside this were fixed in
-the 2026-08-26 friction round: drill derives from its targets, and
-cam_toolpath warns when a typed top_z sits below the stock top.)
-
 
 ## mesh_study/run_study are synchronous past the client's default timeout
 
