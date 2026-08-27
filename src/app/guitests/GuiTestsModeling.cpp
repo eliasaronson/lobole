@@ -269,6 +269,108 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->position.y, y0);
   };
 
+  // U14 phase 3: the point of owning the buffer. Type part of a variable's
+  // name into any numeric field and the document's variables are offered
+  // with their values; Tab takes the highlighted one.
+  t = IM_REGISTER_TEST(engine, "properties",
+                       "dimension_field_completes_a_variable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
+    Doc()->Regenerate();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+
+    // Ctrl+click, type a prefix, Tab. No completion popup existed before
+    // the field owned its own text buffer — ImGui's could not be written to.
+    ctx->ItemInput("//Box###ToolWindow/Width/##Width");
+    ctx->Yield(2);
+    ctx->KeyChars("plate_w");
+    ctx->Yield(2);
+    IM_CHECK(ImGui::FindWindowByName("##expr_complete") != nullptr);
+    ctx->KeyPress(ImGuiKey_Tab);
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 42.5);
+
+    // And it completes INSIDE an expression, not just as the whole of one.
+    ctx->ItemInput("//Box###ToolWindow/Width/##Width");
+    ctx->Yield(2);
+    ctx->KeyChars("2*plate_w");
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Tab);
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 85.0);
+  };
+
+  // ...and the row is CLICKABLE, which is the part that looked impossible.
+  // ImGui deactivates an active InputText on ANY outside click, in the same
+  // frame and unconditionally, so the click that picks a row is also the
+  // click that ends the edit. Since the buffer is ours that is recoverable:
+  // the popup is drawn before the field and reports the pick first, so the
+  // deactivation can be read as "not a commit" and the field re-focused.
+  t = IM_REGISTER_TEST(engine, "properties", "completion_row_can_be_clicked");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
+    Doc()->Regenerate();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+
+    ctx->ItemInput("//Box###ToolWindow/Width/##Width");
+    ctx->Yield(2);
+    ctx->KeyChars("plate_w");
+    ctx->Yield(2);
+    ctx->ItemClick("//##expr_complete/plate_width##0");
+    ctx->Yield(3);
+    // The field is still open — a pick is not a commit — so Enter is what
+    // applies it.
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 42.5);
+  };
+
+  // The same completion in the fx field, which STORES the text rather than
+  // its value — a different widget with its own commit rules, sharing the
+  // popup. Its trap: a pick deactivates and re-focuses the field, and the
+  // re-focus must not read as the user entering it (which would re-seed the
+  // buffer from the model and throw the completion away).
+  t = IM_REGISTER_TEST(engine, "properties", "fx_field_completes_a_variable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
+    Doc()->Regenerate();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemClick("//Box###ToolWindow/Width/fx");
+    ctx->Yield(2);
+
+    ctx->ItemInput("//Box###ToolWindow/Width/##expr");
+    ctx->Yield(2);
+    ctx->KeyChars("plate_w");
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Tab);
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(3);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_STR_EQ(box->widthExpr.c_str(), "plate_width");
+    IM_CHECK_EQ(box->width, 42.5);
+  };
+
   t = IM_REGISTER_TEST(engine, "preview", "box_accept_commits_once");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

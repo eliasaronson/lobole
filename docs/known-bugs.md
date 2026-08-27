@@ -216,3 +216,30 @@ covered by `tests/test_outline_edges.cpp`.
 
 The preview-handle miss regression was fixed in `PreviewHandles.cpp` and is
 covered by the `fillet_body_edge_via_click` GUI test.
+
+---
+
+## `item_click` does not leave a text field focused (ui_action, 2026-08-27)
+
+Every remote UI action is queued, run and unwound before the RPC returns, so
+the widget it touched is not active by the time the next call arrives. On a
+button that is irrelevant; on an `InputText` it means **no remote script can
+drive a multi-step text interaction** — click the field, then send keys, and
+the keys go nowhere. Verified by clicking a dimension's expression field and
+sending `Left`, `Delete`, `Enter`: the text was unchanged.
+
+`item_input` sidesteps it by doing the whole thing in one action (click, type,
+Enter), which is why every existing script and test uses it and nobody noticed.
+
+Two consequences worth knowing before reaching for the remote:
+
+- A **transient popup cannot be screenshotted** — anything that only exists
+  while a field is focused (the u14 variable-completion popup, an in-progress
+  tool prompt) is gone by the time `screenshot` runs. This was found trying to
+  photograph exactly that.
+- A field cannot be left mid-edit for a human to look at.
+
+The fix would be either an action that leaves focus in place, or a `key_chars`
+action to pair with `item_click`. Neither is needed by anything today, which is
+why this is filed rather than fixed.
+

@@ -1,5 +1,7 @@
 #include "ui/VariablesPanel.h"
+
 #include "ui/DockLayout.h" // PanelHeading
+#include "ui/ExprComplete.h"
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
 
@@ -137,20 +139,35 @@ void DrawVariablesPanel(AppState& state) {
 
   // Full-width editable cell. Returns the committed text when this cell just
   // finished an edit, nullptr otherwise.
+  // `complete` opts the cell into variable completion: right for a
+  // definition (height = width * 2), wrong for the name being defined and
+  // noise in a comment.
   const auto cellInput = [&](int row, int column, const char* id,
-                             const std::string& current,
-                             float width = -FLT_MIN) -> const char* {
+                             const std::string& current, float width = -FLT_MIN,
+                             bool complete = false) -> const char* {
     const bool editing = edit.row == row && edit.column == column;
     char tmp[sizeof(edit.buf)];
     snprintf(tmp, sizeof(tmp), "%s", current.c_str());
     ImGui::SetNextItemWidth(width);
-    ImGui::InputText(id, editing ? edit.buf : tmp, sizeof(edit.buf));
-    if (ImGui::IsItemActivated()) {
+    char* text = editing ? edit.buf : tmp;
+    bool activated = false;
+    bool left = false;
+    if (complete) {
+      const ExprFieldEvents ev =
+          ExprCompletingInput(state, id, text, sizeof(edit.buf));
+      activated = ev.activated;
+      left = ev.left;
+    } else {
+      ImGui::InputText(id, text, sizeof(edit.buf));
+      activated = ImGui::IsItemActivated();
+      left = ImGui::IsItemDeactivatedAfterEdit();
+    }
+    if (activated) {
       edit.row = row;
       edit.column = column;
       snprintf(edit.buf, sizeof(edit.buf), "%s", current.c_str());
     }
-    if (editing && ImGui::IsItemDeactivatedAfterEdit()) {
+    if (editing && left) {
       edit.row = edit.column = -1;
       return edit.buf;
     }
@@ -313,7 +330,8 @@ void DrawVariablesPanel(AppState& state) {
       }
       const float exprWidth = wide ? -FLT_MIN : -SmallButtonReserve("x");
       if (const char* text =
-              cellInput(i, 2, exprId.c_str(), p.expression, exprWidth)) {
+              cellInput(i, 2, exprId.c_str(), p.expression, exprWidth,
+                        /*complete=*/true)) {
         if (p.expression != text) {
           setVar(r, text, p.comment);
           actionError.clear();

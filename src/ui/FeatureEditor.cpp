@@ -35,6 +35,7 @@
 #include "imgui.h"
 #include "imgui_internal.h" // GetCurrentWindowRead (LeftLabel auto-resize case)
 
+#include "ui/ExprComplete.h"
 #include "ui/ExprInput.h"         // expression-capable numeric fields
 #include "ui/PanelLayout.h"       // LeftLabel / SmallButtonReserve (U4)
 #include "ui/SelectionPipeline.h" // ParseRegionIds (U2 region slots)
@@ -237,12 +238,13 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   char tmp[sizeof(buf)];
   snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
   LeftLabel(label);
-  ImGui::InputText("##expr", editing ? buf : tmp, sizeof(buf));
-  if (ImGui::IsItemActivated()) {
+  const ExprFieldEvents ev =
+      ExprCompletingInput(state, "##expr", editing ? buf : tmp, sizeof(buf));
+  if (ev.activated) {
     activeField = key;
     snprintf(buf, sizeof(buf), "%s", exprText.c_str());
   }
-  if (editing && ImGui::IsItemDeactivatedAfterEdit()) {
+  if (editing && ev.left) {
     activeField.clear();
     nlohmann::json before = DocumentIO::FeatureToJson(feature);
     char* end = nullptr;
@@ -308,12 +310,13 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
   char tmp[sizeof(buf)];
   snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
   LeftLabel(label);
-  ImGui::InputText("##expr", editing ? buf : tmp, sizeof(buf));
-  if (ImGui::IsItemActivated()) {
+  const ExprFieldEvents ev =
+      ExprCompletingInput(state, "##expr", editing ? buf : tmp, sizeof(buf));
+  if (ev.activated) {
     activeField = key;
     snprintf(buf, sizeof(buf), "%s", exprText.c_str());
   }
-  if (editing && ImGui::IsItemDeactivatedAfterEdit()) {
+  if (editing && ev.left) {
     activeField.clear();
     nlohmann::json before = DocumentIO::FeatureToJson(feature);
     char* end = nullptr;

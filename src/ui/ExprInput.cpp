@@ -1,6 +1,7 @@
 #include "ui/ExprInput.h"
 
 #include "core/Expression.h"
+#include "ui/ExprComplete.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // GetInputTextState / ImParseFormatTrimDecorations
@@ -31,13 +32,16 @@ char g_exprText[256];    // ...and the text it is editing
 int g_exprArm = 0;       // frames left to wait for keyboard focus to arrive
 bool g_exprLive = false; // the stand-in has held focus at least once
 int g_exprFrame = 0;     // last frame the stand-in was drawn
+int g_exprCaret = -1;    // where to put the caret on refocus (-1: select all)
 
 constexpr int kArmFrames = 8;
 
 void LeaveExprMode() {
+  ExprCompleteClose();
   g_exprId = 0;
   g_exprArm = 0;
   g_exprLive = false;
+  g_exprCaret = -1;
 }
 
 // True while `label`'s field is standing in as a text field. Also the place
@@ -81,9 +85,24 @@ void SeedFromDouble(char* out, size_t n, const char* fmt, double v) {
 
 // Draws the stand-in. Returns true (with *out set) once it commits.
 bool DrawExprField(AppState& state, const char* label, double* out) {
+  const ImGuiID id = g_exprId;
+  // BEFORE the field: last frame's completion popup, and the pick it may
+  // produce. A pick arrives on the same frame the click deactivates the
+  // field, so it has to be known before the field is asked whether it
+  // committed.
+  const ExprPick pick =
+      ExprCompletePopup(state, id, g_exprText, sizeof(g_exprText));
+  if (pick.picked) {
+    g_exprCaret = pick.caret;
+    g_exprLive = false; // re-focus, and reload the field from our buffer
+    g_exprArm = kArmFrames;
+  }
   if (!g_exprLive) {
-    if (g_exprArm == kArmFrames)
-      ImGui::SetKeyboardFocusHere();
+    // Asked for every frame until it lands, not once: a pick made with the
+    // MOUSE requests focus while the button is still down, and the click
+    // that made it has already claimed the active id for the popup row —
+    // that first request is simply lost.
+    ImGui::SetKeyboardFocusHere();
     g_exprArm--;
     // ImGui keeps ONE InputTextState, keyed by item id, and on re-activation
     // it restores the text IT holds — which for a field edited earlier in
@@ -92,16 +111,33 @@ bool DrawExprField(AppState& state, const char* label, double* out) {
     // expression typed into it, and a keystroke appends to that: "2.000"
     // seeded, "1+1+...+1" restored, "30" typed, 146 committed.) Ours is the
     // live buffer, and this is how you say so.
-    if (ImGuiInputTextState* st = ImGui::GetInputTextState(g_exprId))
+    if (ImGuiInputTextState* st = ImGui::GetInputTextState(g_exprId)) {
       st->ReloadUserBufAndSelectAll();
+      if (g_exprCaret >= 0) {
+        // ...except after a pick, where the caret belongs after the name
+        // that was just inserted rather than around the whole expression.
+        st->ReloadSelectionStart = st->ReloadSelectionEnd = g_exprCaret;
+      }
+    }
   }
   // AutoSelectAll for parity with the Ctrl+click field this replaces: the
   // value arrives selected, so the first keystroke overwrites it rather than
   // appending to it.
   ImGui::InputText(label, g_exprText, sizeof(g_exprText),
                    ImGuiInputTextFlags_AutoSelectAll);
+  if (pick.picked) {
+    // Applied AFTER the InputText, because a deactivating one writes its own
+    // text into the buffer on its way out — but BEFORE the still-active
+    // check, because only a mouse pick deactivates the field. A pick made
+    // with Tab or Enter leaves it active, and an early return there would
+    // drop the completion on the floor.
+    std::snprintf(g_exprText, sizeof(g_exprText), "%s", pick.text.c_str());
+    return false; // a pick is not a commit: the field stays open
+  }
+  ExprCompleteRefresh(state, id, g_exprText);
   if (ImGui::IsItemActive()) {
     g_exprLive = true;
+    g_exprCaret = -1;
     return false; // still typing
   }
   if (!g_exprLive && g_exprArm > 0)

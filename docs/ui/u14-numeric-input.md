@@ -1,11 +1,11 @@
 # U14 — One way to enter a number, and it accepts expressions (2026-08-27)
 
-> Status: **Phases 0, 1 and 2 SHIPPED 2026-08-27.** Findings 1-4 are closed
-> and gated (four GUI tests plus a source scan); 879 headless and 229 GUI
-> tests pass. Phase 0 is what turned this from "add autocomplete" into "the
-> feature is dead". Phase 3 (completion) remains — read "What changed on
-> contact" at the end before trusting the phase sections, which predicted
-> the wrong risk twice and undercounted the raw fields.
+> Status: **COMPLETE, shipped 2026-08-27.** All five findings closed, gated
+> by seven GUI tests plus a source scan; 879 headless and 232 GUI tests pass.
+> Phase 0 is what turned this from "add autocomplete" into "the feature is
+> dead". Read "What changed on contact" at the end before trusting the phase
+> sections: they predicted the wrong risk twice and undercounted the raw
+> fields.
 
 The question that started this was small — *is there a common interface for
 entering numbers, and could it tab-complete the document's variables?* The
@@ -196,7 +196,8 @@ Public API throughout.
 
 Keyboard-only acceptance was considered and rejected: shipping a hint that
 explains a limitation is worse than removing the limitation, and here the
-limitation is removable.
+limitation is removable. It was removable — `properties/completion_row_can_be_clicked`
+picks a row with the mouse.
 
 ## Open decision
 
@@ -255,3 +256,52 @@ ran it failed on two `ImGui::DragScalar` calls no one had counted — the hand
 grep had listed the friendly spellings (`DragFloat`, `InputInt`, …) and missed
 the general one. A scanning test that finds something on its first run is the
 argument for scanning tests.
+
+## Phase 3 as built
+
+`ui/ExprComplete.{h,cpp}`. The popup lists the document's and project's
+variables with their current values, then the builtin functions, then the unit
+suffixes; a project-scoped variable says so. Tab accepts, Enter accepts only
+once a row has been chosen with the arrows (otherwise Enter is what commits the
+field, and a popup that happens to be open must not swallow it), and a row can
+be clicked. A function brings its open paren so the caret lands where the
+argument goes.
+
+It reaches every field with a buffer of its own: all the drag fields, the `fx`
+expression rows, and the Variables panel's definition column (its name and
+comment columns opt out — completion belongs in a definition, not in the name
+being defined). Two remainders, both because the field does not own its text:
+`ExprInputFloat/Double/Int` keep ImGui's `InputScalar` buffer, and the
+Configurations override cell refills a stack buffer from the model every frame.
+Converting either means giving it the stand-in treatment, which is Phase 1's
+work again for fields that have neither of Phase 1's bugs.
+
+**Three ordering traps, all the same shape.** The popup and the field fight
+over one buffer and one frame, and every bug here was a question of who writes
+last:
+
+1. The popup is drawn BEFORE the field, from geometry and candidates cached
+   last frame — because the click that picks a row is also the click that
+   deactivates the field, in the same frame, and the verdict has to be known
+   before the field is asked whether it committed.
+2. The picked text is applied AFTER the field, because a deactivating
+   `InputText` writes its own text into the buffer on its way out and would
+   undo a splice made before it.
+3. ...but before the "still active" early-out, because **only a mouse pick
+   deactivates the field**. Tab and Enter leave it active, so an early return
+   there dropped the completion silently. The click test passed and the Tab
+   test regressed, which is what made the asymmetry visible.
+
+And a fourth, in the shared text field: the re-focus that reloads ImGui's copy
+from our buffer must survive one frame PAST the pick, because on the pick frame
+it runs before the picked text has been written. Otherwise ImGui's copy wins
+and the field commits the prefix.
+
+## What could not be verified by eye
+
+The popup was not screenshotted. Remote UI actions are queued and unwound
+before the RPC returns, so `item_click` does not leave a text field focused for
+a following `key_press` — a transient popup is gone by the time `screenshot`
+runs. Filed in [../known-bugs.md](../known-bugs.md). The behaviour is covered
+by four GUI tests driving the real application; its appearance is not.
+
