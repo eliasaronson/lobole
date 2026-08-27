@@ -162,7 +162,10 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       sim.tool == SimulationState::Tool::Pressure) {
     LeftLabel(sim.tool == SimulationState::Tool::Force ? "Magnitude (N)"
                                                        : "Pressure (MPa)");
-    ExprInputDouble(state, "###sim_magnitude", &sim.pendingMagnitude, "%.1f");
+    std::string magExpr;
+    if (ExprInputDouble(state, "###sim_magnitude", &sim.pendingMagnitude,
+                        "%.1f", &magExpr))
+      sim.pendingMagnitudeExpr = magExpr; // empty for a plain number
     if (sim.tool == SimulationState::Tool::Force) {
       // Off by default: the force pushes INTO whichever face is clicked, which
       // is what placing a force on a face means. A world-space vector typed
@@ -497,11 +500,16 @@ void DrawStudyPanel(AppState& state) {
   // reverting.
   double meshSize = s->meshSize;
   LeftLabel("Mesh size (mm, 0=auto)");
-  ExprInputDouble(state, "###study_mesh_size", &meshSize, "%.3g");
-  if (ImGui::IsItemDeactivatedAfterEdit() && meshSize != s->meshSize)
+  // A typed EXPRESSION keeps its text (the study carries a slot for it);
+  // a plain number clears the slot back to a literal.
+  std::string meshExpr;
+  const bool meshChanged = ExprInputDouble(state, "###study_mesh_size",
+                                           &meshSize, "%.3g", &meshExpr);
+  if ((meshChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
+      (meshSize != s->meshSize || meshExpr != s->meshSizeExpr))
     ModifyStudy(state, s->id, "Set mesh size", [&](fem::Study& cs) {
       cs.meshSize = meshSize;
-      cs.meshSizeExpr.clear();
+      cs.meshSizeExpr = meshExpr;
     });
 
   if (s->type == fem::AnalysisType::Modal) {
@@ -523,11 +531,14 @@ void DrawStudyPanel(AppState& state) {
       });
     double fr = s->filterRadius;
     LeftLabel("Filter radius (mm, 0=auto)");
-    ExprInputDouble(state, "###topo_filter_radius", &fr, "%.3g");
-    if (ImGui::IsItemDeactivatedAfterEdit() && fr != s->filterRadius)
+    std::string frExpr;
+    const bool frChanged =
+        ExprInputDouble(state, "###topo_filter_radius", &fr, "%.3g", &frExpr);
+    if ((frChanged || ImGui::IsItemDeactivatedAfterEdit()) &&
+        (fr != s->filterRadius || frExpr != s->filterRadiusExpr))
       ModifyStudy(state, s->id, "Set filter radius", [&](fem::Study& cs) {
         cs.filterRadius = fr;
-        cs.filterRadiusExpr.clear();
+        cs.filterRadiusExpr = frExpr;
       });
     int mi = s->maxIterations;
     LeftLabel("Max iterations");
@@ -907,8 +918,10 @@ void SimulationApplyToFace(AppState& state, const ElementRef& face) {
                   ? fem::LoadType::Force
                   : fem::LoadType::Pressure;
   load.face = face;
-  if (load.type != fem::LoadType::Fixed)
+  if (load.type != fem::LoadType::Fixed) {
     load.magnitude = sim.pendingMagnitude;
+    load.magnitudeExpr = sim.pendingMagnitudeExpr;
+  }
   if (load.type == fem::LoadType::Force) {
     // The face decides the direction unless the user asked for a specific
     // one: a force placed on a face pushes into it.

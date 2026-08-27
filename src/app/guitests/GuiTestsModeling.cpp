@@ -166,7 +166,12 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
+    // Each case starts from a LITERAL: an expression now switches the row to
+    // its fx form (typed_expression_keeps_its_text), so "##Width" is only
+    // there while the field holds a number and "##expr" is where the text
+    // lives afterwards.
     constexpr const char* kWidth = "//Box###ToolWindow/Width/##Width";
+    constexpr const char* kExpr = "//Box###ToolWindow/Width/##expr";
 
     // Arithmetic whose leading literal differs from what is in the field.
     // This is the one case that works today: sscanf reads 5, 5 != 2 moves the
@@ -182,6 +187,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     // TempInputScalar never calls MarkItemEdited, so IsItemDeactivatedAfterEdit
     // is false and the text is discarded without a word. Same for every
     // expression that names a variable.
+    ctx->ItemInputValue(kExpr, "40"); // back to a literal
+    ctx->Yield(2);
     ctx->ItemInputValue(kWidth, "sqrt(100)");
     ctx->Yield(2);
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -190,6 +197,8 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
     // And arithmetic whose leading literal happens to EQUAL the current value
     // is dropped for the same reason — the number did not move.
+    ctx->ItemInputValue(kExpr, "10"); // back to a literal, same value
+    ctx->Yield(2);
     ctx->ItemInputValue(kWidth, "10/2");
     ctx->Yield(2);
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -321,6 +330,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->width, 42.5);
 
     // And it completes INSIDE an expression, not just as the whole of one.
+    // (Through ##expr: the row is in its fx form now, holding the text.)
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##expr", "12");
+    ctx->Yield(2);
     ctx->ItemInput("//Box###ToolWindow/Width/##Width");
     ctx->Yield(2);
     ctx->KeyChars("2*plate_w");
@@ -332,6 +344,44 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
     IM_CHECK_EQ(box->width, 85.0);
+  };
+
+  // A dimension typed as an expression KEEPS ITS TEXT. Evaluating and
+  // discarding was defensible while nothing could type a variable into these
+  // fields; once completion offers them, a field that collapses "plate_width"
+  // to the 42.5 it evaluated to is silently dropping the link — and the next
+  // edit edits 42.5.
+  t = IM_REGISTER_TEST(engine, "properties", "typed_expression_keeps_its_text");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK(Doc()->SetParameter("plate_width", "42.5"));
+    Doc()->Regenerate();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", "plate_width*2");
+    ctx->Yield(3);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_STR_EQ(box->widthExpr.c_str(), "plate_width*2");
+    IM_CHECK_EQ(box->width, 85.0);
+
+    // ...so the variable still drives it.
+    IM_CHECK(Doc()->SetParameter("plate_width", "10"));
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 20.0);
+
+    // A plain number stays a literal — expressions are still opt-in per edit.
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##expr", "7");
+    ctx->Yield(3);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK(box->widthExpr.empty());
+    IM_CHECK_EQ(box->width, 7.0);
   };
 
   // ...and the row is CLICKABLE, which is the part that looked impossible.

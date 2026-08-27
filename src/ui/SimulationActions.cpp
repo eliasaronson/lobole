@@ -298,6 +298,7 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   const double weightN = mass->massG * 0.001 * 9.81;
   if (tool == SimulationState::Tool::Force) {
     sim.pendingMagnitude = weightN;
+    sim.pendingMagnitudeExpr.clear(); // a derived default is a number
     return;
   }
   // Pressure is MPa over the part's surface: the same weight spread over the
@@ -307,6 +308,7 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
     areaMm2 += b.surfaceArea;
   if (areaMm2 > 0.0)
     sim.pendingMagnitude = weightN / areaMm2; // N/mm^2 == MPa
+  sim.pendingMagnitudeExpr.clear();
 }
 
 void EnterSimulation(AppState& state) {

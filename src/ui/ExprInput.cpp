@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace ui {
 
@@ -35,6 +36,18 @@ int g_exprFrame = 0;     // last frame the stand-in was drawn
 int g_exprCaret = -1;    // where to put the caret on refocus (-1: select all)
 
 constexpr int kArmFrames = 8;
+
+// "12", " 3.5 " — a value, not an expression. The distinction is what decides
+// whether there is any TEXT worth keeping.
+bool IsPlainNumber(const char* text) {
+  char* end = nullptr;
+  std::strtod(text, &end);
+  if (end == text || end == nullptr)
+    return false;
+  while (*end == ' ')
+    end++;
+  return *end == '\0';
+}
 
 void LeaveExprMode() {
   ExprCompleteClose();
@@ -101,7 +114,8 @@ void SeedFromDouble(char* out, size_t n, const char* fmt, double v) {
 }
 
 // Draws the stand-in. Returns true (with *out set) once it commits.
-bool DrawExprField(AppState& state, const char* label, double* out) {
+bool DrawExprField(AppState& state, const char* label, double* out,
+                   std::string* exprOut) {
   const ImGuiID id = g_exprId;
   // BEFORE the field: last frame's completion popup, and the pick it may
   // produce. A pick arrives on the same frame the click deactivates the
@@ -176,6 +190,8 @@ bool DrawExprField(AppState& state, const char* label, double* out) {
     return false;
   }
   *out = *r;
+  if (exprOut != nullptr && !IsPlainNumber(g_exprText))
+    *exprOut = g_exprText;
   return true;
 }
 
@@ -186,7 +202,8 @@ bool DrawExprField(AppState& state, const char* label, double* out) {
 //
 // This is the path for ExprInputDouble, which is an ImGui InputScalar and
 // keeps its own buffer; the drag fields above no longer come through here.
-bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out) {
+bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out,
+                      std::string* exprOut = nullptr) {
   if (ImGui::GetActiveID() == id) {
     if (ImGuiInputTextState* st = ImGui::GetInputTextState(id)) {
       std::snprintf(g_buf, sizeof(g_buf), "%.*s", static_cast<int>(st->TextLen),
@@ -221,6 +238,8 @@ bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out) {
     return false;
   }
   *out = *r;
+  if (exprOut != nullptr)
+    *exprOut = g_buf; // reached only for a non-plain-number buffer
   return true;
 }
 
@@ -251,10 +270,11 @@ constexpr ImGuiSliderFlags kDragFlags =
 } // namespace
 
 bool ExprDragDouble(AppState& state, const char* label, double* v, float speed,
-                    double vmin, double vmax, const char* fmt) {
+                    double vmin, double vmax, const char* fmt,
+                    std::string* exprOut) {
   if (InExprMode(label)) {
     double expr = 0.0;
-    if (!DrawExprField(state, label, &expr))
+    if (!DrawExprField(state, label, &expr, exprOut))
       return false;
     *v = std::clamp(expr, vmin, vmax);
     return true;
@@ -271,7 +291,7 @@ bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
                    float vmin, float vmax, const char* fmt) {
   if (InExprMode(label)) {
     double expr = 0.0;
-    if (!DrawExprField(state, label, &expr))
+    if (!DrawExprField(state, label, &expr, nullptr))
       return false;
     *v = std::clamp(static_cast<float>(expr), vmin, vmax);
     return true;
@@ -288,7 +308,7 @@ bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
                  int vmin, int vmax, const char* fmt) {
   if (InExprMode(label)) {
     double expr = 0.0;
-    if (!DrawExprField(state, label, &expr))
+    if (!DrawExprField(state, label, &expr, nullptr))
       return false;
     *v = std::clamp(static_cast<int>(std::lround(expr)), vmin, vmax);
     return true;
@@ -302,10 +322,10 @@ bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
 }
 
 bool ExprInputDouble(AppState& state, const char* label, double* v,
-                     const char* fmt) {
+                     const char* fmt, std::string* exprOut) {
   bool changed = ImGui::InputDouble(label, v, 0.0, 0.0, fmt);
   double expr = 0.0;
-  if (ExprCommitOnLastItem(state, &expr)) {
+  if (ExprCommitOnItem(state, ImGui::GetItemID(), &expr, exprOut)) {
     *v = expr;
     changed = true;
   }
@@ -375,11 +395,12 @@ bool ExprInputFloat(AppState& state, const char* label, float* v,
   return changed;
 }
 
-bool ExprInputInt(AppState& state, const char* label, int* v) {
+bool ExprInputInt(AppState& state, const char* label, int* v,
+                  std::string* exprOut) {
   const ImGuiID field = InnerFieldId(label);
   bool changed = ImGui::InputInt(label, v);
   double expr = 0.0;
-  if (ExprCommitOnItem(state, field, &expr)) {
+  if (ExprCommitOnItem(state, field, &expr, exprOut)) {
     *v = static_cast<int>(std::lround(expr));
     changed = true;
   }

@@ -333,3 +333,44 @@ both inline dimension editors. The Configurations override cell is the one
 remainder, and only because it refills a stack buffer from the model every
 frame.
 
+## The evaluate-and-discard decision was wrong (2026-08-27)
+
+This plan deferred it twice — "`ExprInput` keeps its evaluate-and-discard
+semantics", "the expression text itself is not stored" — and both times the
+reasoning was that a field without an `*Expr` slot cannot keep the text. True,
+but it skipped the fields that **have** one. Typing `wall_d` into an Extrude's
+Distance evaluated to 20, stored 20, and dropped the link to the variable
+without a word; the next edit was editing 20.
+
+That was defensible only while nothing could type a variable into those fields
+— which, per finding 1, was the actual state of the world. The moment
+completion started *offering* variables there, discarding the text became the
+worst behaviour in the feature: the app invites you to reference a variable and
+then quietly doesn't.
+
+Fixed where there is a slot to fix it in. `ExprDragDouble`, `ExprInputDouble`
+and `ExprInputInt` take an optional `std::string* exprOut` that receives the
+committed expression text (empty for a plain number), and the fields with
+somewhere to put it store it:
+
+- every feature dimension (`ExprDim`) and pattern count (`ExprCount`) — the
+  row switches to its `fx` form on commit, so the persistence is *visible*;
+- the study's mesh size and topology filter radius, which had been explicitly
+  clearing their `*Expr` slots on every typed edit;
+- a placed force's magnitude, carried through `SimulationState` from the
+  pending value to the load.
+
+A plain number still clears the slot back to a literal — expressions stay
+opt-in per edit, which is the original design and the right one.
+
+What still discards, correctly, because there is nowhere to store text: the
+sketch tool-session parameters (fillet radius, pattern step, offset distance),
+CAM, occurrence placement, section planes, the drawing scale, preferences.
+Giving CAM operations `*Expr` slots remains a format bump and its own
+workstream.
+
+**Two of the seven GUI tests had encoded the old behaviour** — they typed one
+expression after another into `##Width` and only checked the number that came
+out, which cannot tell "evaluated correctly" from "evaluated and forgot". They
+now start each case from a literal and assert the text.
+

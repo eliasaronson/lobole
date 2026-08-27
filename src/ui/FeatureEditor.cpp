@@ -79,11 +79,13 @@ void HandleEdit(AppState& state, Feature& feature, bool changedThisFrame,
 }
 
 bool DragDim(AppState& state, const char* label, double* value,
-             float reserveRight = 0.0f) {
+             float reserveRight = 0.0f, std::string* exprOut = nullptr) {
   LeftLabel(label, reserveRight);
   const std::string id = std::string("##") + label;
-  // Expression-capable (Ctrl+click, type "width/2"): the shared widget.
-  return ExprDragDouble(state, id.c_str(), value, 0.05f, 0.01, 1e6, "%.3f");
+  // Expression-capable (double-click or Ctrl+click, type "width/2"): the
+  // shared widget. `exprOut` is for the fields that can KEEP the text.
+  return ExprDragDouble(state, id.c_str(), value, 0.05f, 0.01, 1e6, "%.3f",
+                        exprOut);
 }
 
 // Labels-left drop-in for ImGui::Combo.
@@ -214,9 +216,17 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PushID(label);
 
   if (exprText.empty()) {
-    HandleEdit(state, feature,
-               DragDim(state, label, &value, SmallButtonReserve("fx")), index,
-               commit);
+    std::string typed;
+    const bool changed =
+        DragDim(state, label, &value, SmallButtonReserve("fx"), &typed);
+    // An expression typed straight into the field KEEPS ITS TEXT, exactly as
+    // the fx field would. Otherwise "wall_d" collapses to the 20 it happened
+    // to evaluate to the moment it commits, the next edit edits 20, and
+    // nothing ever said the link to the variable was dropped. Set before
+    // HandleEdit so the regeneration and the undo entry both see it.
+    if (!typed.empty())
+      exprText = typed;
+    HandleEdit(state, feature, changed, index, commit);
     ImGui::SameLine();
     if (ImGui::SmallButton("fx")) {
       nlohmann::json before = DocumentIO::FeatureToJson(feature);
@@ -289,8 +299,11 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
 
   if (exprText.empty()) {
     LeftLabel(label, SmallButtonReserve("fx"));
-    HandleEdit(state, feature, ExprInputInt(state, "##count", &value), index,
-               commit);
+    std::string typed;
+    const bool changed = ExprInputInt(state, "##count", &value, &typed);
+    if (!typed.empty())
+      exprText = typed; // same as ExprDim: the text is the point
+    HandleEdit(state, feature, changed, index, commit);
     if (value < 1)
       value = 1;
     ImGui::SameLine();

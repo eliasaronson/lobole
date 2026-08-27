@@ -541,6 +541,10 @@ struct SimulationState {
   // does nothing, which is the class docs/ui/u10-defaults-and-refusals.md
   // exists to stop.
   double pendingMagnitude = 0.0;
+  // ...and the expression that produced it, when one was typed, so a load
+  // placed from "part_weight*2" stays driven by the variable instead of
+  // collapsing to the newtons it happened to evaluate to (u14).
+  std::string pendingMagnitudeExpr;
   glm::dvec3 pendingDirection{0.0, -1.0, 0.0};
   bool directionOverridden = false;
 
