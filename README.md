@@ -78,7 +78,7 @@ runs either way.
 
 | Missing | Effect |
 | --- | --- |
-| **Netgen** | No FEM meshing — the simulation workspace opens and `run_study` errors. Not in Ubuntu's repos; `shell.nix` and the Flatpak provide it. |
+| **Netgen** | No FEM meshing — the simulation workspace opens and `run_study` errors. The suites drop what cannot be checked and say so: the two `sim` GUI cases that assert on solve numbers go unregistered (named in a startup warning), as do the Catch2 FEM ones. Not in Ubuntu's repos; `shell.nix` and the Flatpak provide it. |
 | **Spectra** | No modal analysis (natural frequencies). Static stress still works. |
 | **Dear ImGui Test Engine** | Deliberate, via `-DENABLE_TEST_ENGINE=OFF`; see below. |
 

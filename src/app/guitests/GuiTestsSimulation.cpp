@@ -292,6 +292,16 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   // into a document where the button that re-arms it is DISABLED while a pick
   // is live, so the panel was simply stuck (docs/cam/dogfood-round.md,
   // round 2).
+  // The only two cases that need a real tet mesh: both assert on solve
+  // numbers (beam-theory deflection and stress; a held volume fraction), and
+  // Netgen is the one mesher — without it fem::Mesh returns "built without
+  // FEM support" and there is nothing to check. Registered only when the
+  // build HAS it, the same gate test_fem.cpp and test_topopt.cpp use, so a
+  // Netgen-less build (CI's apt job: Netgen is not in Ubuntu's repos, see
+  // the README) reports a suite that PASSES rather than two red cases that
+  // say nothing about the code. The #else says so out loud — a quietly
+  // smaller total reads as "everything covered" when it is not.
+#ifdef HAVE_NETGEN
   t = IM_REGISTER_TEST(engine, "sim", "a_static_run_matches_beam_theory");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     BuildCantileverStudy(ctx, 10.0);
@@ -351,6 +361,12 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!rt->complianceHistory.empty());
     IM_CHECK(rt->complianceHistory.back() > 0.0);
   };
+
+#else  // !HAVE_NETGEN
+  LOG_WARN("GUI suite: 2 sim cases NOT registered "
+           "(a_static_run_matches_beam_theory, topology_holds_its_volume_"
+           "target) — this build has no Netgen, so a study cannot be meshed");
+#endif // HAVE_NETGEN
 
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");
   t->TestFunc = [](ImGuiTestContext* ctx) {
