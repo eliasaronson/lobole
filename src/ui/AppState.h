@@ -5,6 +5,7 @@
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamSim.h"      // the cutting simulation cursor + stock
 #include "core/cam/CamToolpath.h" // cam::FaceRegion (the ghost/hover cache)
 #include "core/cam/CamVerify.h"   // cam::VerdictLine (the G4 verdict, in words)
 #include "core/drawing/DrawingDocument.h"
@@ -42,6 +43,7 @@ class RayTracingRenderer;
 class SketchRenderer;
 class UnderlayRenderer;
 class FieldRenderer;
+class StockRenderer;
 class FaceSelector;
 class IBLTextures;
 struct GLFWwindow;
@@ -806,6 +808,7 @@ struct AppState {
   SketchRenderer* sketchRenderer = nullptr;
   UnderlayRenderer* underlayRenderer = nullptr; // sketch reference images (v49)
   FieldRenderer* fieldRenderer = nullptr;       // FEM result overlay
+  StockRenderer* stockRenderer = nullptr;       // CAM cutting simulation
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;
   GLFWwindow* window = nullptr;
@@ -1230,6 +1233,39 @@ struct AppState {
   // a verdict about a previous toolpath is worse than no verdict.
   std::vector<cam::VerdictLine> camVerdict;
   std::vector<glm::dvec3> camLeftover;
+
+  // Cutting simulation (docs/cam/simulation.md). Playback is SESSION state:
+  // nothing here serializes, and a document edit invalidates it rather than
+  // re-cutting under the cursor.
+  //
+  // Ends through ONE path, ui::EndCamPlayback — it hides the bodies while it
+  // runs, and a mode that hides things and has several exits is the U11 bug
+  // class this codebase has already paid for once.
+  bool camPlaybackOpen = false;
+  bool camPlaying = false;
+  // What the timeline was built from, kept so a re-post can be spotted.
+  std::string camPlaybackGcode;
+  cam::Timeline camTimeline;
+  cam::StockSim camStockSim;
+  cam::SimCursor camCursor;
+  // Grid for the picture. Verification runs at 0.4 mm; a visual wants finer,
+  // and the cost is quadratic, so it is a setting rather than a constant.
+  double camSimRes = 0.25;
+  // Multiplier on real feed rates. The cursor advances by DISTANCE, so this
+  // is "mm of path per second of wall clock" scaled by the job's own feeds.
+  float camPlaybackSpeed = 8.0f;
+  double camPlaybackLastTick = 0.0;
+  // The StockSim revision the drawn mesh was built from, so a frame that
+  // changed nothing re-meshes nothing.
+  uint64_t camStockDrawnRevision = 0;
+  // Why playback will not start, in words, where the button is.
+  std::string camPlaybackRefusal;
+  // The cutter, drawn as a real solid through the mesh renderer (it is static
+  // geometry that MOVES, which is the one thing that renderer is good at).
+  // `camToolInstanceFor` is the T number it was built for; a tool change
+  // rebuilds it.
+  uint32_t camToolInstance = 0;
+  int camToolInstanceFor = -1;
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default via
   // settings.terminalPanel; the state is created the first time it draws, so

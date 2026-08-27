@@ -1,5 +1,10 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#ifdef HAVE_CAM
+#include "render/StockRenderer.h"
+#include "ui/CamPlayback.h"
+#endif
+
 // Cam GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
 // Test names and categories are UNCHANGED: tools/gui-tests-xvfb.sh builds its
@@ -766,6 +771,86 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
                               &error));
     IM_CHECK(gcode.find("G90 G91.1 G21") != std::string::npos);
     IM_CHECK(gcode.find("nan") == std::string::npos);
+  };
+
+  // The cutting simulation (docs/cam/simulation.md). Two things it must do:
+  // show the block coming apart, and give everything back on the way out.
+  t = IM_REGISTER_TEST(engine, "cam", "simulation_plays_and_gives_it_back");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    setup.safeZ = 20.0;
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+
+    // Before anything is generated the button REFUSES, in words, where it
+    // is — the defaults/refusals rule (docs/ui/u10-*). A transport that
+    // opens onto an empty program would be worse than no button.
+    ctx->ItemClick("###cam_sim_start");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camPlaybackOpen);
+    IM_CHECK(!s_App->camPlaybackRefusal.empty());
+
+    ctx->ItemClick("###cam_add_op");
+    ctx->Yield(2);
+    ctx->ItemClick("###cam_generate");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+
+    ctx->ItemClick("###cam_sim_start");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camPlaybackOpen);
+    IM_CHECK(!s_App->camTimeline.Empty());
+    // Nothing is cut at the start, and the whole program cuts something.
+    IM_CHECK(s_App->camStockSim.RemovedVolume() < 1e-9);
+    ui::SeekCamPlayback(*s_App, s_App->camTimeline.End());
+    ctx->Yield(2);
+    const double removed = s_App->camStockSim.RemovedVolume();
+    IM_CHECK(removed > 100.0);
+    // And it scrubs BACK — a height map cannot be un-cut, so this only
+    // passes because seeking backwards re-runs from the pristine block.
+    ui::SeekCamPlayback(*s_App, {0, 0.0});
+    ctx->Yield(2);
+    IM_CHECK(s_App->camStockSim.RemovedVolume() < 1e-9);
+
+    // The path drawn while a playback is open IS the file being played.
+    ui::SeekCamPlayback(*s_App, s_App->camTimeline.CursorAtDistance(
+                                    s_App->camTimeline.totalDistance * 0.5));
+    ctx->Yield(2);
+    std::vector<PrimVertex> prims;
+    ui::AppendCamToolpathOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+
+    // Hand the dock node back before the assertions that could fail late.
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel)) {
+      ctx->ItemClick(modelWin->TabId);
+      ctx->Yield(2);
+    }
+
+    // Closing gives everything back: no session state, no stock mesh, and no
+    // tool instance left in the renderer. This is the U11 class — a mode that
+    // hides things and forgets to put them back.
+    ui::EndCamPlayback(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camPlaybackOpen);
+    IM_CHECK(!s_App->camPlaying);
+    IM_CHECK(s_App->camTimeline.Empty());
+    IM_CHECK_EQ(s_App->camToolInstance, (uint32_t)0);
+    if (s_App->stockRenderer != nullptr)
+      IM_CHECK(!s_App->stockRenderer->HasMesh());
+    // The backplot is back to the plain one.
+    std::vector<PrimVertex> after;
+    ui::AppendCamToolpathOverlay(*s_App, after);
+    IM_CHECK(!after.empty());
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

@@ -1,7 +1,9 @@
 # Cutting simulation — watching the stock come off
 
-> Status: **PLANNED** (2026-08-27). From: *"a cutting simulation/visualizer
-> similar to Fusion 360"*.
+> Status: **BUILT** (2026-08-27), S1–S5. From: *"a cutting simulation/visualizer
+> similar to Fusion 360"*. What follows is the design as written, with an
+> [as-built section](#as-built) at the end recording what changed and what the
+> first real job measured.
 >
 > The engine ([plan.md](plan.md)) and the way in ([gui.md](gui.md)) are built.
 > C5 already **simulates material removal** — it just never shows it. This is
@@ -225,3 +227,91 @@ almost answer:
 - GUI: play → scrub → exit restores body visibility and leaves no ghost (the
   U11 class), and a screenshot of a half-cut pocket goes in the CAM suite.
 - **No format bump.** Playback is session state; nothing here serializes.
+
+## As built
+
+Built in the order above; S1–S5 landed together. What the code argued back:
+
+**The file already said which operation a move belongs to.** The plan assumed
+op attribution would need the toolpath list matched back against the program —
+which cannot be done reliably, because the post interleaves retracts and tool
+changes. But `Emitter::Comment` has been writing `(op 7)` since C4, and the
+parser was throwing comment text away one line before it could read it.
+Keeping the text costs six lines and the boundary comes out of the FILE, which
+is the thing being simulated. (`(SKIPPED op 9: …)` means the opposite, so the
+match is exactly `op <digits>` and nothing else — there is a test.)
+
+**The parser was dropping the F word entirely.** `F` fell into the `default:`
+of the word switch, so the one number a machinist looks at was the one number
+nothing downstream could see: no feed check in the verifier, and no honest
+clock here. It is on `GMove` now, modal, and a non-positive feed is reported
+rather than adopted. `M6` was invisible too — both were real gaps, found by
+needing them rather than by looking.
+
+**One carve, not two.** `Simulate`'s inner loop became `CarveSweep(from, to,
+tool, stock)` and everything calls it: `Simulate`, `Inspect`, and the
+playback. That also removed a per-move `GProgram` allocation from `Inspect`'s
+hot loop, which was building a two-move program for every cutting move.
+
+**Every segment is carved from its own start.** The obvious implementation
+carves the slice between the old cursor and the new one, and it is wrong in a
+way that would never have been noticed: a sub-segment clamps the tool's Z at
+the split, so a program with an ascending cut could finish a hair deeper than
+the same program run in one pass. Carving each segment from its own start (the
+current one truncated at the cursor) is idempotent, costs nothing, and makes
+the end state **bit-identical** to the map `Inspect` reads the verdict from —
+which is the property the whole "one simulator" argument rests on, and now a
+test.
+
+### What it measured
+
+A 60 × 40 × 12 plate, faced and profiled with tabs — 5 677 mm of path, 316
+lines of Mach3:
+
+| | |
+|---|---|
+| play to the end, 0.25 mm grid | **25 ms** |
+| play to the end, 0.1 mm grid | **46 ms** |
+| scrub backwards (re-runs from pristine) | **3–8 ms** |
+| step forward one frame | **2–4 ms** |
+| the machined block, 24 249 cells | **28 triangles** |
+
+Two things follow. The keyframe cache S1 hedged about is **not needed** — a
+full re-run of a real program is a frame, so backward scrubbing can stay the
+simple thing. And run-merging does what it was chosen for: a profiled block is
+flats and walls, and 24 249 cells come out as 28 triangles. The gate that
+pins it (`triangles < cells / 4`) has three orders of magnitude of headroom
+today, which is the point — it fails loudly if the mesher ever degrades to
+per-cell.
+
+Removed volume on that job: **13 871 mm³** against 14 208 mm³ of stock-minus-
+part, the difference being four tabs and grid quantisation. That number comes
+back over the RPC (`removed_mm3`), so a headless caller can assert a
+simulation did something without owning a renderer.
+
+### Where it differs from the plan
+
+- **The stock's `EnsureCapacity` does wait — but only on a GROW.** Buffers
+  double, so a playback pays it a handful of times at the start and never
+  again. The steady state is a memcpy into a mapped, per-frame-in-flight
+  buffer, which was the point.
+- **The tool is a `MeshRenderer` instance, not part of the stock draw.** It is
+  static geometry that MOVES, which is the one thing that renderer is best at:
+  built once per tool number, then a transform per frame. It gets PBR and
+  shadows for free; the stock, which changes every frame, does not.
+- **Bodies are ghosted at 0.22, not hidden.** Seeing the part inside the block
+  is most of why the picture is worth having. Re-applied every frame, because
+  instance ids change on every regeneration — an "already ghosted" early-out
+  can hold only stale ids, which is the bug the FEM overlay shipped once.
+- **`cam_simulate` generates the toolpaths if there are none.** A GUI user has
+  pressed Generate; an agent has not, and refusing would only teach it to
+  press an invisible button first.
+
+### Still open
+
+- The stock re-meshes whole on every advance. It is 1–2 ms on a plate and
+  scales with the grid; a part four times the area at 0.1 mm would be worth a
+  dirty-rect rebuild. Measure before building it.
+- S6 is untouched: colour by operation, holder collision, deviation map. All
+  three are now cheap — the height map, the op id per move and the tool
+  profile are all in place.

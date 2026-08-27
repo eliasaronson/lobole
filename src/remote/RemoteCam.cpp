@@ -4,11 +4,15 @@
 
 #include "core/Document.h"
 #include "core/cam/CamPost.h"
+#include "core/cam/CamSim.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
 #include "ui/AppState.h"
+#include "ui/CamPanel.h" // RefreshCamToolpaths
+#include "ui/CamPlayback.h"
 
+#include <algorithm>
 #include <fstream>
 
 namespace remote {
@@ -90,6 +94,18 @@ constexpr MethodDoc kCamMethods[] = {
      "watch a slug fall out or know a tab was asked for, so those show up "
      "here too and are for you to recognise.",
      "resolution, setup"},
+    {"cam_simulate",
+     "Play the POSTED file through a block of stock and report what has come "
+     "off at a point in it {setup?, at?: 0..1 along the path or \"end\", "
+     "play?, close?, resolution?}. Returns {open, at, distance_mm, total_mm, "
+     "cutting_minutes, removed_mm3, operation, tool, feed_mm_min, line, "
+     "position}. The cursor is PATH DISTANCE, not a clock: every cutting "
+     "feed is in the file but no machine states its rapid rate, so a time "
+     "axis would be part measurement and part invention — `cutting_minutes` "
+     "counts what the file states and nothing else. Generates the toolpaths "
+     "if they are not current, and leaves the app SHOWING the simulation "
+     "(screenshot it, or `close` to put the model back).",
+     "at, close, play, resolution, setup"},
     {"cam_post",
      "Write the G-code for a setup {setup, path, post?}. Reports the line "
      "count, the ops it skipped and why. Writes a file; it does not send it "
@@ -536,6 +552,79 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"ok", v.Safe(tol)},
                 {"complete", v.Complete(tol)}};
   }
+  if (m == "cam_simulate") {
+    if (p.value("close", false)) {
+      ui::EndCamPlayback(state);
+      return json{{"open", false}};
+    }
+    const cam::Setup& setup =
+        RequireSetup(*doc, p.contains("setup") ? p.at("setup").get<uint64_t>()
+                                               : state.camActiveSetup);
+    if (p.contains("resolution"))
+      state.camSimRes = std::clamp(p.at("resolution").get<double>(), 0.05, 5.0);
+    // A setup change, a finer grid, or a job that was never generated all
+    // mean the same thing: whatever was playing is not this. Rearm rather
+    // than scrub a file that no longer exists.
+    if (state.camActiveSetup != setup.id || p.contains("resolution")) {
+      ui::EndCamPlayback(state);
+      state.camActiveSetup = setup.id;
+    }
+    if (!state.camPlaybackOpen) {
+      if (state.camToolpaths.empty())
+        ui::RefreshCamToolpaths(state);
+      if (!ui::BeginCamPlayback(state))
+        throw std::runtime_error(state.camPlaybackRefusal);
+    }
+
+    const cam::Timeline& tl = state.camTimeline;
+    if (p.contains("at")) {
+      const json& at = p.at("at");
+      if (at.is_string()) {
+        const std::string where = at.get<std::string>();
+        if (where == "end")
+          ui::SeekCamPlayback(state, tl.End());
+        else if (where == "start")
+          ui::SeekCamPlayback(state, {0, 0.0});
+        else
+          throw std::runtime_error("at must be a fraction 0..1, \"start\" or "
+                                   "\"end\"; got '" +
+                                   where + "'");
+      } else {
+        const double f = std::clamp(at.get<double>(), 0.0, 1.0);
+        ui::SeekCamPlayback(state, tl.CursorAtDistance(f * tl.totalDistance));
+      }
+    }
+    if (p.contains("play"))
+      state.camPlaying = p.at("play").get<bool>();
+
+    const cam::GMove* move = tl.MoveAt(state.camCursor);
+    const glm::dvec3 pos = tl.PositionAt(state.camCursor);
+    json out{{"open", true},
+             {"playing", state.camPlaying},
+             {"at", tl.totalDistance > 1e-9
+                        ? tl.DistanceAt(state.camCursor) / tl.totalDistance
+                        : 0.0},
+             {"distance_mm", tl.DistanceAt(state.camCursor)},
+             {"total_mm", tl.totalDistance},
+             {"cutting_minutes", tl.MinutesAt(state.camCursor)},
+             {"removed_mm3", state.camStockSim.RemovedVolume()},
+             {"resolution_mm", state.camSimRes},
+             {"segments", tl.Segments()},
+             {"position", {pos.x, pos.y, pos.z}}};
+    if (move != nullptr) {
+      out["operation"] = move->op;
+      out["tool"] = move->tool;
+      out["line"] = move->line;
+      out["rapid"] = move->rapid;
+      if (move->feed > 1e-9)
+        out["feed_mm_min"] = move->feed;
+      for (const cam::Operation& op : setup.operations)
+        if (op.id == move->op)
+          out["operation_name"] = op.name;
+    }
+    return out;
+  }
+
   if (m == "cam_toolpath" || m == "cam_post") {
     const cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
     const std::vector<cam::Toolpath> paths =

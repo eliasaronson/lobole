@@ -33,10 +33,12 @@
 #include "render/Screenshot.h"
 #include "render/ShadowRenderer.h"
 #include "render/SketchRenderer.h"
+#include "render/StockRenderer.h"
 #include "render/UnderlayRenderer.h"
 #include "render/VulkanCommon.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/CamPlayback.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SimulationActions.h"
@@ -135,6 +137,7 @@ static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<SketchRenderer> g_SketchRenderer;
 static std::unique_ptr<UnderlayRenderer> g_UnderlayRenderer;
 static std::unique_ptr<FieldRenderer> g_FieldRenderer;
+static std::unique_ptr<StockRenderer> g_StockRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<ShadowRenderer> g_ShadowRenderer;
 static std::unique_ptr<SSAORenderer> g_SSAORenderer;
@@ -973,6 +976,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   if (g_FieldRenderer) { // FEM result overlay (stands in for hidden bodies)
     g_FieldRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
+  if (g_StockRenderer) { // CAM cutting simulation: the block being cut
+    g_StockRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
+  }
   if (g_OutlineRenderer) {
     g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
@@ -1361,6 +1367,11 @@ static int RunOffscreen(const CommandLineArgs& args) {
                                   g_Queue, g_QueueFamily, g_CommandPool,
                                   g_MSAASamples))
     g_FieldRenderer->SetViewport(0, 0, kOffW, kOffH);
+  g_StockRenderer = std::make_unique<StockRenderer>();
+  if (g_StockRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+                                  g_Queue, g_QueueFamily, g_CommandPool,
+                                  g_MSAASamples))
+    g_StockRenderer->SetViewport(0, 0, kOffW, kOffH);
   g_FaceSelector = std::make_unique<FaceSelector>();
 
   g_App.meshRenderer = g_MeshRenderer.get();
@@ -1368,6 +1379,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_App.sketchRenderer = g_SketchRenderer.get();
   g_App.underlayRenderer = g_UnderlayRenderer.get();
   g_App.fieldRenderer = g_FieldRenderer.get();
+  g_App.stockRenderer = g_StockRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
@@ -1424,6 +1436,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
     // sampling destroyed views on the first quality change), section planes.
     ui::SyncDocumentRenderers(g_App);
     ui::SyncFieldRenderer(g_App);
+    ui::TickCamPlayback(g_App, now);
+    ui::SyncCamPlayback(g_App);
     ui::SyncSelectionHighlights(g_App);
     if (g_ShadowRenderer && g_MeshRenderer &&
         g_ShadowRenderer->SetResolution((uint32_t)g_App.shadowMapSize)) {
@@ -1437,6 +1451,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
     g_OutlineRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
     g_FieldRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
+    if (g_StockRenderer)
+      g_StockRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
     ui::PumpRenderJob(g_App);
 
     // Captures hold until the camera lands: orient_to_face animates ~1 s,
@@ -1460,6 +1476,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
       g_SketchRenderer->UpdateCamera(view, proj);
       g_UnderlayRenderer->UpdateCamera(view, proj);
       g_FieldRenderer->UpdateCamera(view, proj);
+      if (g_StockRenderer)
+        g_StockRenderer->UpdateCamera(view, proj);
       vkQueueWaitIdle(g_Queue);
       const ui::ClearColor vp = ui::ViewportClearColor();
       VkClearValue clear{};
@@ -1478,6 +1496,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
             // mode, so a capture is the viewport, full frame.
             g_MeshRenderer->Render(cb, 0);
             g_FieldRenderer->Render(cb, 0);
+            if (g_StockRenderer)
+              g_StockRenderer->Render(cb, 0);
             g_OutlineRenderer->Render(cb, 0);
             g_UnderlayRenderer->Render(cb, 0);
             g_SketchRenderer->Render(cb, 0);
@@ -1510,6 +1530,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_SketchRenderer.reset();
   g_UnderlayRenderer.reset();
   g_FieldRenderer.reset();
+  g_StockRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();
@@ -1929,6 +1950,16 @@ int main(int argc, char** argv) {
     LOG_WARN("FieldRenderer initialization failed");
   }
 
+  // Initialize StockRenderer (CAM cutting simulation)
+  g_StockRenderer = std::make_unique<StockRenderer>();
+  if (g_StockRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
+                                  g_Queue, g_QueueFamily, g_CommandPool,
+                                  g_MSAASamples)) {
+    g_StockRenderer->SetViewport(0, 0, 1280, 720);
+  } else {
+    LOG_WARN("StockRenderer initialization failed");
+  }
+
   // Initialize RayTracingRenderer
   g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
   bool rtInitialized = g_RayTracingRenderer->Initialize(
@@ -1946,6 +1977,7 @@ int main(int argc, char** argv) {
   g_App.sketchRenderer = g_SketchRenderer.get();
   g_App.underlayRenderer = g_UnderlayRenderer.get();
   g_App.fieldRenderer = g_FieldRenderer.get();
+  g_App.stockRenderer = g_StockRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
@@ -2147,6 +2179,9 @@ int main(int argc, char** argv) {
       if (g_FieldRenderer) {
         g_FieldRenderer->SetViewport(0, 0, fb_width, fb_height);
       }
+      if (g_StockRenderer) {
+        g_StockRenderer->SetViewport(0, 0, fb_width, fb_height);
+      }
       if (g_Camera) {
         g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
                                  static_cast<float>(fb_height));
@@ -2205,6 +2240,8 @@ int main(int argc, char** argv) {
     // Rebuild the FEM field overlay (and hide/show bodies) when the study or
     // result changes; cheap no-op otherwise.
     ui::SyncFieldRenderer(g_App);
+    ui::TickCamPlayback(g_App, glfwGetTime());
+    ui::SyncCamPlayback(g_App);
 
     // S3 render-quality settings (View > Render Quality / set_render_options
     // RPC): recreate the GPU targets when they change. Both helpers wait for
@@ -2228,6 +2265,8 @@ int main(int argc, char** argv) {
       g_FieldRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
       g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
     }
+    if (g_StockRenderer)
+      g_StockRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
 
     // Advance an in-flight offline render by one sample batch (the Render modal
     // shows progress; runs on the main thread with its own one-shot submits).
@@ -2278,6 +2317,11 @@ int main(int argc, char** argv) {
 
     if (g_FieldRenderer && g_Camera) {
       g_FieldRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
+                                    g_Camera->GetProjectionMatrix());
+    }
+
+    if (g_StockRenderer && g_Camera) {
+      g_StockRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
                                     g_Camera->GetProjectionMatrix());
     }
 
@@ -2336,6 +2380,8 @@ int main(int argc, char** argv) {
                 g_MeshRenderer->Render(cb, wd->FrameIndex);
               if (g_FieldRenderer)
                 g_FieldRenderer->Render(cb, wd->FrameIndex);
+              if (g_StockRenderer)
+                g_StockRenderer->Render(cb, wd->FrameIndex);
               if (g_OutlineRenderer)
                 g_OutlineRenderer->Render(cb, wd->FrameIndex);
               if (g_UnderlayRenderer)
@@ -2375,6 +2421,7 @@ int main(int argc, char** argv) {
                           ImGui::IsAnyMouseDown() || keyHeld;
       pin.wantTextInput = io.WantTextInput;
       pin.cameraAnimating = g_Camera && g_Camera->IsAnimating();
+      pin.simPlaying = g_App.camPlaying;
       pin.jobRunning = g_App.topoJob != nullptr || g_App.studyJob != nullptr ||
                        g_App.renderJob.active;
       pin.remoteRequests = static_cast<int>(remoteActivity);
@@ -2434,6 +2481,7 @@ int main(int argc, char** argv) {
   // at exit on an already-freed device -> SIGSEGV at shutdown.
   g_UnderlayRenderer.reset();
   g_FieldRenderer.reset();
+  g_StockRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();

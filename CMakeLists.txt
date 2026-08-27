@@ -380,7 +380,9 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     list(APPEND core_sources src/core/cam/CamToolpath.cpp
                              src/core/cam/CamPost.cpp
-                             src/core/cam/CamVerify.cpp)
+                             src/core/cam/CamVerify.cpp
+                             src/core/cam/CamSim.cpp
+                             src/core/cam/CamStockMesh.cpp)
     message(STATUS "Clipper2 found - CAM enabled")
 
     # Adaptive clearing (C8): Kresimir Tusek's Adaptive2d from FreeCAD's
@@ -532,6 +534,7 @@ set(app_sources
     src/render/SketchRenderer.cpp
     src/render/UnderlayRenderer.cpp
     src/render/FieldRenderer.cpp
+    src/render/StockRenderer.cpp
     src/app/GuiTests.cpp
     src/app/guitests/GuiTestsCommon.cpp
     src/app/guitests/GuiTestsShell.cpp
@@ -558,6 +561,7 @@ set(app_sources
     src/ui/SyncJob.cpp
     src/ui/SettingsWindow.cpp
     src/ui/CamPanel.cpp
+    src/ui/CamPlayback.cpp
     src/ui/CamTool.cpp
     src/ui/PerfHud.cpp
     src/ui/TerminalPanel.cpp
@@ -964,8 +968,17 @@ set(FIELD_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/field.frag")
 set(FIELD_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/field_frag.spv")
 compile_shader(field_frag_shader ${FIELD_FRAG_SHADER_SOURCE} ${FIELD_FRAG_SHADER_OUTPUT})
 
+# CAM cutting-simulation stock shaders (flat-lit dynamic block)
+set(STOCK_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/stock.vert")
+set(STOCK_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/stock_vert.spv")
+compile_shader(stock_vert_shader ${STOCK_VERT_SHADER_SOURCE} ${STOCK_VERT_SHADER_OUTPUT})
+
+set(STOCK_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/stock.frag")
+set(STOCK_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/stock_frag.spv")
+compile_shader(stock_frag_shader ${STOCK_FRAG_SHADER_SOURCE} ${STOCK_FRAG_SHADER_OUTPUT})
+
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader ssao_upsample_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader ssao_upsample_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader stock_vert_shader stock_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)

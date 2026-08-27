@@ -10,6 +10,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
+#include "ui/CamPlayback.h"
 #include "ui/CamTool.h"
 #include "ui/FeatureEditor.h"
 #include "ui/SelectionPipeline.h"
@@ -165,6 +166,12 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
 } // namespace
 
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
+  // While a simulation is open the line drawn is the file being PLAYED, dimmed
+  // behind the cursor — one path on screen, and it is the one being cut.
+  if (CamPlaybackDrawsPath(state)) {
+    AppendCamPlaybackPath(state, out);
+    return;
+  }
   if (!state.camShowToolpath || state.camToolpaths.empty())
     return;
   const cam::Setup* active = ActiveCamSetup(state);
@@ -461,6 +468,9 @@ void DrawCamPanel(AppState& state) {
   // may scroll; what the job SAYS is not.
   ImGui::Separator();
   if (ImGui::Button("Generate###cam_generate")) {
+    // A playback is a picture of a FILE, and this button replaces the file.
+    // Leaving it running would scrub through G-code the job no longer posts.
+    EndCamPlayback(state);
     RefreshCamToolpaths(state);
     RunCamVerification(state);
   }
@@ -536,6 +546,11 @@ void DrawCamPanel(AppState& state) {
   }
   if (!state.camLastPost.empty())
     ImGui::TextDisabled("%s", state.camLastPost.c_str());
+
+  // The transport sits with Generate and the verdict, because it answers the
+  // same question they do — is this job right — and it is the one that shows
+  // rather than tells.
+  DrawCamTransport(state);
 
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");

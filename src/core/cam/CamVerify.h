@@ -35,6 +35,19 @@ struct GMove {
   glm::dvec3 to{0.0};
   int tool = 1;
   int line = 0; // 1-based, for messages that point at the file
+  // Modal feed, mm/min. The parser used to read F and THROW IT AWAY, so the
+  // one number a machinist looks at was the one number nothing downstream
+  // could see — no feed check, and no honest clock for playback. 0 means the
+  // file never stated one, which is a fact and not a default.
+  double feed = 0.0;
+  // Which operation emitted this move, from the post's own `(op N)` comment.
+  // Read out of the FILE rather than matched back to the toolpath list: the
+  // post interleaves retracts and tool changes, so the two are not parallel,
+  // and the file is the thing being simulated. 0 = preamble/postamble.
+  uint64_t op = 0;
+  // First move under a new tool (an M6, or a T that differs from the last
+  // one). What "skip to the next tool" steps between.
+  bool toolChange = false;
 };
 
 struct GProgram {
@@ -42,8 +55,9 @@ struct GProgram {
   std::vector<std::string> errors; // malformed words, NaN coordinates, …
 };
 
-// Modal G-code: G0/G1 with X/Y/Z/F, T for the tool, parenthesised comments.
-// Anything it does not understand is reported rather than skipped silently.
+// Modal G-code: G0/G1 with X/Y/Z/F, T for the tool, M6 for a tool change,
+// parenthesised comments. Anything it does not understand is reported rather
+// than skipped silently.
 [[nodiscard]] GProgram ParseGcode(std::string_view text);
 
 // --- height maps ----------------------------------------------------------
@@ -69,6 +83,14 @@ struct HeightMap {
 // The stock block, uncut.
 [[nodiscard]] HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max,
                                   double res);
+
+// Lowers `stock` where a tool sweeping from `from` to `to` passes. THE one
+// place material is removed: `Simulate`, the rapid probe in `Inspect` and the
+// playback in CamSim.h all funnel through it, so the picture on screen cannot
+// remove different metal from the check that signs the job off. A null tool
+// is a 2 mm flat mill (the file states a T, not a shape).
+void CarveSweep(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
+                HeightMap& stock);
 
 // Runs `program` against `stock`, lowering it where the tool passes. Tool
 // radii come from the setup's tool table (the file carries only T-words).

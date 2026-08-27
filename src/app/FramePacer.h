@@ -20,6 +20,7 @@ struct PacerInputs {
   bool inputActivity = false;   // mouse moved/down/wheel, any key down
   bool wantTextInput = false;   // caret blink
   bool cameraAnimating = false; // view tweens
+  bool simPlaying = false;      // CAM cutting simulation running
   bool jobRunning = false;      // topo/study solve or offline render
   int remoteRequests = 0;       // executed by this iteration's pump
   uint64_t documentVersion = 0; // active tab's change counter (0 = no tab)
@@ -36,6 +37,7 @@ public:
     Input,
     Text,
     Camera,
+    Sim, // a cutting simulation is playing: the picture changes with no input
     Job,
     Remote,
     Edit,

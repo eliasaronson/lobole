@@ -12,6 +12,8 @@ const char* FramePacer::WakeName(Wake w) {
     return "text";
   case Wake::Camera:
     return "camera";
+  case Wake::Sim:
+    return "sim";
   case Wake::Job:
     return "job";
   case Wake::Remote:
@@ -45,6 +47,7 @@ bool FramePacer::IdleNext(const PacerInputs& in, double now) {
   const Wake wake = in.remoteRequests > 0 ? Wake::Remote
                     : in.jobRunning       ? Wake::Job
                     : versionChanged      ? Wake::Edit
+                    : in.simPlaying       ? Wake::Sim
                     : in.cameraAnimating  ? Wake::Camera
                     : in.wantTextInput    ? Wake::Text
                     : in.inputActivity    ? Wake::Input

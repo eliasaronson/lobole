@@ -9,7 +9,7 @@
 > why not CAMotics". **C6–C9 BUILT 2026-08-21** — helix entry, arcs, adaptive
 > clearing and an indexed 4th axis, see
 > [Phase 2](#phase-2--what-v1-deferred-designed). A **cutting simulation**
-> built on C5's height map is planned in [simulation.md](simulation.md).
+> built on C5's height map is BUILT — see [simulation.md](simulation.md).
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
 > **4th (rotary) axis** is an addition rather than a redesign. Continuous
@@ -213,7 +213,7 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 | **C7** | Arcs (`G2`/`G3`) in the posted file | **done** `6c73990` (flat arcs; helical deferred) |
 | **C8** | Adaptive clearing (vendor Tusek's `Adaptive2d`) | **done** `27033f2` (LGPL, linked as a shared library) |
 | **C9** | Indexed 4th axis (one A per setup) | **done** `ee530f9` |
-| **S1-S5** | Cutting simulation: scrub the posted program, watch the stock come off ([simulation.md](simulation.md)) | **planned**, ~1½ sessions |
+| **S1-S5** | Cutting simulation: scrub the posted program, watch the stock come off ([simulation.md](simulation.md)) | **done** 2026-08-27 |
 | later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | each on demand, and none of them costed |
 
 ## What C1–C4 shipped

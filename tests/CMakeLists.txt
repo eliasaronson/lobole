@@ -54,6 +54,7 @@ add_executable(designer_tests
     test_frame_timer.cpp
     test_terminal.cpp
     test_cam.cpp
+    test_cam_sim.cpp
     test_command_modify.cpp
     test_reorder.cpp
     test_expression.cpp

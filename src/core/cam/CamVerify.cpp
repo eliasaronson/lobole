@@ -69,6 +69,12 @@ GProgram ParseGcode(std::string_view text) {
   int tool = 1;
   int lineNo = 0;
   bool havePos = false;
+  double feed = 0.0;
+  uint64_t op = 0;
+  // Set by an M6 or by a T that differs from the tool in force, and consumed
+  // by the next move emitted — a tool change is a line of its own, so the
+  // boundary belongs to the first move that cuts with the new tool.
+  bool toolChange = false;
 
   size_t i = 0;
   while (i <= text.size()) {
@@ -77,8 +83,11 @@ GProgram ParseGcode(std::string_view text) {
     i = end + 1;
     lineNo++;
 
-    // Strip parenthesised comments and anything after a semicolon.
-    std::string clean;
+    // Strip parenthesised comments and anything after a semicolon — but KEEP
+    // the comment text, because the post writes the operation boundary into
+    // it (`(op 7)`) and that is the only place the file says which operation
+    // a move belongs to.
+    std::string clean, comment;
     clean.reserve(line.size());
     int depth = 0;
     for (const char c : line) {
@@ -90,6 +99,21 @@ GProgram ParseGcode(std::string_view text) {
         break;
       else if (depth == 0)
         clean.push_back(static_cast<char>(std::toupper(c)));
+      else
+        comment.push_back(c);
+    }
+    // Exactly `op <digits>`, so the post's own "(SKIPPED op 7: ...)" — which
+    // means the opposite — cannot be read as the start of that operation.
+    if (comment.rfind("op ", 0) == 0) {
+      const std::string digits = comment.substr(3);
+      if (!digits.empty() &&
+          std::all_of(digits.begin(), digits.end(),
+                      [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        try {
+          op = std::stoull(digits);
+        } catch (...) {
+        }
+      }
     }
     if (clean.empty())
       continue;
@@ -156,7 +180,22 @@ GProgram ParseGcode(std::string_view text) {
         ij.y = value;
         break;
       case 'T':
+        if (static_cast<int>(value) != tool)
+          toolChange = true;
         tool = static_cast<int>(value);
+        break;
+      case 'F':
+        // Modal, and only ever positive. A negative or zero F is a file that
+        // would stall the spindle in the cut; it is reported, not adopted.
+        if (value > 1e-9)
+          feed = value;
+        else
+          out.errors.push_back("line " + std::to_string(lineNo) + ": feed of " +
+                               num + " is not a feed");
+        break;
+      case 'M':
+        if (static_cast<int>(value) == 6)
+          toolChange = true;
         break;
       default:
         break;
@@ -199,6 +238,11 @@ GProgram ParseGcode(std::string_view text) {
                     pos.z + (to.z - pos.z) * t};
             m.tool = tool;
             m.line = lineNo;
+            m.feed = feed;
+            m.op = op;
+            // The boundary is the first chord, not every chord of the arc.
+            m.toolChange = toolChange;
+            toolChange = false;
             out.moves.push_back(m);
           }
           pos = to;
@@ -213,6 +257,10 @@ GProgram ParseGcode(std::string_view text) {
       m.to = to;
       m.tool = tool;
       m.line = lineNo;
+      m.feed = feed;
+      m.op = op;
+      m.toolChange = toolChange;
+      toolChange = false;
       out.moves.push_back(m);
       pos = to;
       havePos = true;
@@ -233,6 +281,56 @@ HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max, double res) {
   return map;
 }
 
+void CarveSweep(const glm::dvec3& from, const glm::dvec3& to, const Tool* tool,
+                HeightMap& stock) {
+  const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
+
+  // Cells the swept tool can touch, from the segment's bounding box grown
+  // by the radius. Everything outside cannot be reached, so it is not
+  // tested at all.
+  const glm::dvec2 a(from.x, from.y), b(to.x, to.y);
+  const bool xyStill = glm::length(b - a) < 1e-9;
+  const double lo_x = std::min(a.x, b.x) - radius;
+  const double hi_x = std::max(a.x, b.x) + radius;
+  const double lo_y = std::min(a.y, b.y) - radius;
+  const double hi_y = std::max(a.y, b.y) + radius;
+  const int i0 = std::max(0, static_cast<int>((lo_x - stock.x0) / stock.res));
+  const int i1 = std::min(stock.nx - 1,
+                          static_cast<int>((hi_x - stock.x0) / stock.res) + 1);
+  const int j0 = std::max(0, static_cast<int>((lo_y - stock.y0) / stock.res));
+  const int j1 = std::min(stock.ny - 1,
+                          static_cast<int>((hi_y - stock.y0) / stock.res) + 1);
+
+  for (int j = j0; j <= j1; j++) {
+    for (int i = i0; i <= i1; i++) {
+      double t = 0.0;
+      const glm::dvec2 c(stock.CellX(i), stock.CellY(j));
+      const double d = DistToSegment(c, a, b, t);
+      if (d > radius)
+        continue;
+      // The tool's own shape, cut by cut: flat mills are still the
+      // interpolated Z everywhere under them (TipHeight is 0), a ball
+      // leaves its bowl, a V-bit or a drill its cone. Verifying a
+      // roundover against a flat-mill model reported the arc it MEANT to
+      // leave as 100% gouge (R15).
+      //
+      // `t` is the parameter of the CLOSEST point on the XY segment, which
+      // is 0 for a move that does not travel in XY at all — so a straight
+      // plunge removed material down to where it STARTED, which is to say
+      // none. Every drilled hole came out full of stock, and the retract
+      // out of it was then reported as a rapid through material. A move
+      // that stands still in XY reaches its lowest point over every cell it
+      // covers.
+      const double toolZ =
+          xyStill ? std::min(from.z, to.z) : from.z + (to.z - from.z) * t;
+      const double surface =
+          toolZ + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+      if (stock.At(i, j) > surface)
+        stock.Set(i, j, static_cast<float>(surface));
+    }
+  }
+}
+
 void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
   glm::dvec3 from(0.0);
   bool have = false;
@@ -242,53 +340,7 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
       have = true;
       continue;
     }
-    const Tool* tool = setup.FindTool(m.tool);
-    const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
-
-    // Cells the swept tool can touch, from the segment's bounding box grown
-    // by the radius. Everything outside cannot be reached, so it is not
-    // tested at all.
-    const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
-    const bool xyStill = glm::length(b - a) < 1e-9;
-    const double lo_x = std::min(a.x, b.x) - radius;
-    const double hi_x = std::max(a.x, b.x) + radius;
-    const double lo_y = std::min(a.y, b.y) - radius;
-    const double hi_y = std::max(a.y, b.y) + radius;
-    const int i0 = std::max(0, static_cast<int>((lo_x - stock.x0) / stock.res));
-    const int i1 = std::min(
-        stock.nx - 1, static_cast<int>((hi_x - stock.x0) / stock.res) + 1);
-    const int j0 = std::max(0, static_cast<int>((lo_y - stock.y0) / stock.res));
-    const int j1 = std::min(
-        stock.ny - 1, static_cast<int>((hi_y - stock.y0) / stock.res) + 1);
-
-    for (int j = j0; j <= j1; j++) {
-      for (int i = i0; i <= i1; i++) {
-        double t = 0.0;
-        const glm::dvec2 c(stock.CellX(i), stock.CellY(j));
-        const double d = DistToSegment(c, a, b, t);
-        if (d > radius)
-          continue;
-        // The tool's own shape, cut by cut: flat mills are still the
-        // interpolated Z everywhere under them (TipHeight is 0), a ball
-        // leaves its bowl, a V-bit or a drill its cone. Verifying a
-        // roundover against a flat-mill model reported the arc it MEANT to
-        // leave as 100% gouge (R15).
-        //
-        // `t` is the parameter of the CLOSEST point on the XY segment, which
-        // is 0 for a move that does not travel in XY at all — so a straight
-        // plunge removed material down to where it STARTED, which is to say
-        // none. Every drilled hole came out full of stock, and the retract
-        // out of it was then reported as a rapid through material. A move
-        // that stands still in XY reaches its lowest point over every cell it
-        // covers.
-        const double toolZ =
-            xyStill ? std::min(from.z, m.to.z) : from.z + (m.to.z - from.z) * t;
-        const double surface =
-            toolZ + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
-        if (stock.At(i, j) > surface)
-          stock.Set(i, j, static_cast<float>(surface));
-      }
-    }
+    CarveSweep(from, m.to, setup.FindTool(m.tool), stock);
     from = m.to;
   }
 }
@@ -541,10 +593,8 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
         }
       }
       // Apply every move (cuts remove material; rapids over air do nothing).
-      GProgram one;
-      one.moves = {GMove{false, from, m.tool, m.line}, m};
       if (!m.rapid) {
-        Simulate(one, setup, probe);
+        CarveSweep(from, m.to, setup.FindTool(m.tool), probe);
         MarkSwept(from, m, setup, probe, touched);
       }
       from = m.to;
