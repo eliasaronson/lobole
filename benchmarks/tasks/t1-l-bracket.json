@@ -1,0 +1,33 @@
+{
+  "id": "t1-l-bracket",
+  "tier": 1,
+  "title": "L-bracket",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nAn L-shaped bracket, one solid piece:\n- a base 80 along X, 60 along Y, 6 thick along Z, corner at the origin,\n  extending into +X, +Y, +Z;\n- an upright wall 6 thick that rises from the base to a total height of 50 in\n  Z, occupying X from 0 to 6 and the full 60 of Y.\nThe two meet in a square inside corner (no fillet).",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "the legs are fused, not two bodies"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        80,
+        60,
+        50
+      ],
+      "tol": 0.2,
+      "why": "overall size"
+    },
+    {
+      "kind": "volume",
+      "value": 44640,
+      "tol_pct": 1.0
+    },
+    {
+      "kind": "inclined_planes",
+      "eq": 0,
+      "why": "square corner, no draft"
+    }
+  ]
+}

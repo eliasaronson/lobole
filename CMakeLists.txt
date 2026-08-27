@@ -816,6 +816,15 @@ if(DESIGNER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# Benchmark oracle. Grades an exported STEP by reading it back with
+# OpenCASCADE and NOTHING else — deliberately no designer_core, so it can
+# contradict the app instead of agreeing with it (benchmarks/README.md).
+if(OPENCASCADE_FOUND)
+    add_executable(bench_oracle benchmarks/oracle/oracle.cpp)
+    target_link_libraries(bench_oracle PRIVATE nlohmann_json::nlohmann_json
+                                               ${OPENCASCADE_LIBS})
+endif()
+
 # Find glslc (Vulkan shader compiler)
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
 if(NOT GLSLC)

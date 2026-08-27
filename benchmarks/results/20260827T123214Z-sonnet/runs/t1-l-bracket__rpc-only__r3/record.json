@@ -1,0 +1,195 @@
+{
+  "task": "t1-l-bracket",
+  "tier": 1,
+  "arm": "rpc-only",
+  "rep": 3,
+  "model": "sonnet",
+  "id": "t1-l-bracket__rpc-only__r3",
+  "cost_usd": 0.2565183,
+  "duration_ms": 41891,
+  "num_turns": 13,
+  "tool_calls": 12,
+  "tools_used": {
+    "describe": 5,
+    "help": 2,
+    "rpc": 4,
+    "check_geometry": 1
+  },
+  "final_text": "Built successfully: a single valid solid L-bracket body (bbox 80\u00d760\u00d750, volume 44640 mm\u00b3, matching the base+wall geometry with the shared inside corner accounted for).",
+  "error": "",
+  "timed_out": false,
+  "wall_s": 43.7,
+  "input_tokens": 20,
+  "output_tokens": 3470,
+  "exported": true,
+  "passed": 4,
+  "total": 4,
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "the legs are fused, not two bodies",
+      "pass": true,
+      "got": 1
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        80,
+        60,
+        50
+      ],
+      "tol": 0.2,
+      "why": "overall size",
+      "pass": true,
+      "got": [
+        80.0,
+        60.0,
+        50.0
+      ]
+    },
+    {
+      "kind": "volume",
+      "value": 44640,
+      "tol_pct": 1.0,
+      "pass": true,
+      "got": 44640.0
+    },
+    {
+      "kind": "inclined_planes",
+      "eq": 0,
+      "why": "square corner, no draft",
+      "pass": true,
+      "got": 0
+    }
+  ],
+  "facts": {
+    "area": 17088.0,
+    "bbox": {
+      "max": [
+        80.0,
+        60.0,
+        50.0
+      ],
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "size": [
+        80.0,
+        60.0,
+        50.0
+      ]
+    },
+    "com": [
+      26.871000000000002,
+      30.0,
+      11.871
+    ],
+    "cylinder_groups": [],
+    "cylinders": [],
+    "faces": 14,
+    "faces_by_kind": {
+      "plane": 14
+    },
+    "file": "/home/elias/Documents/Designer/benchmarks/results/20260827T123214Z-sonnet/runs/t1-l-bracket__rpc-only__r3/part.step",
+    "inclined_planes": 0,
+    "ok": true,
+    "planes": [
+      {
+        "area": 3000.0,
+        "axis_aligned": true,
+        "faces": 2,
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 744.0,
+        "axis_aligned": true,
+        "faces": 3,
+        "normal": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 4800.0,
+        "axis_aligned": true,
+        "faces": 2,
+        "normal": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 360.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "offset": 50.0
+      },
+      {
+        "area": 4440.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "offset": 6.0
+      },
+      {
+        "area": 744.0,
+        "axis_aligned": true,
+        "faces": 3,
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "offset": 60.0
+      },
+      {
+        "area": 2640.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "offset": 6.0
+      },
+      {
+        "area": 360.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "offset": 80.0
+      }
+    ],
+    "shells": 1,
+    "solids": 1,
+    "volume": 44640.0
+  },
+  "claimed_success": true,
+  "over_claim": false
+}

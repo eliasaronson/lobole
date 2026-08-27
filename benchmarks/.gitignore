@@ -1,0 +1,10 @@
+# A sweep produces ~7 MB, and 5 MB of that is the raw agent transcript. Every
+# number taken from it already lives in record.json (tool calls by name, final
+# message, cost, tokens), so the transcript stays local for forensics and out
+# of history for weight.
+results/*/runs/*/stream.jsonl
+results/*/runs/*/cwd/
+
+# The exported STEP files DO stay committed, deliberately: they are the one
+# thing a future oracle version cannot reconstruct, and re-grading an old sweep
+# with a better oracle is worth 1 MB a run.

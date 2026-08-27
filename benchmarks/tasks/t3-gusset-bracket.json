@@ -1,0 +1,34 @@
+{
+  "id": "t3-gusset-bracket",
+  "tier": 3,
+  "title": "Gusseted bracket",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA gusseted bracket, one solid piece:\n- a base 90 along X, 50 along Y, 8 thick along Z, corner at the origin,\n  extending into +X, +Y, +Z;\n- an upright wall 8 thick occupying X from 0 to 8 and the full 50 of Y, rising\n  to a total height of 60 in Z;\n- a triangular gusset 6 thick, centred on the width so it spans Y from 22 to\n  28, filling the inside corner between them: a right triangle whose legs run\n  40 along X from the wall face at X=8, and 40 up Z from the base face at\n  Z=8, with the sloped edge running from (X=48, Z=8) to (X=8, Z=48).",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "gusset fused to the bracket"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        90,
+        50,
+        60
+      ],
+      "tol": 0.2,
+      "why": "overall size"
+    },
+    {
+      "kind": "volume",
+      "value": 61600.0,
+      "tol_pct": 1.0
+    },
+    {
+      "kind": "inclined_planes",
+      "min": 1,
+      "max": 2,
+      "why": "the sloped gusset face exists and is actually sloped"
+    }
+  ]
+}

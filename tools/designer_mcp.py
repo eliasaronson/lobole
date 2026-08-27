@@ -2058,6 +2058,28 @@ def modeling_workflow() -> str:
     return WORKFLOW
 
 
+def _restrict_tools(keep):
+    """Hide every tool but `keep`. Used by benchmark arms.
+
+    Reaches into FastMCP's registry because it exposes no supported way to
+    unregister. So it REFUSES loudly if that registry ever moves: serving the
+    full surface after being asked for six tools would silently turn a
+    benchmark arm into a duplicate of the arm it is being compared against,
+    and the run would look valid.
+    """
+    registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+    if not isinstance(registry, dict):
+        raise SystemExit("--only-tools: FastMCP's tool registry moved; refusing "
+                         "to serve the full surface as if it were restricted")
+    missing = [t for t in keep if t not in registry]
+    if missing:
+        raise SystemExit(f"--only-tools: no such tool(s): {', '.join(missing)}. "
+                         f"Known: {', '.join(sorted(registry))}")
+    for name in list(registry):
+        if name not in keep:
+            del registry[name]
+
+
 def main():
     global _port, _autostart_enabled
     parser = argparse.ArgumentParser(description=__doc__)
@@ -2067,11 +2089,20 @@ def main():
     parser.add_argument("--no-autostart", action="store_true",
                         help="never spawn an instance; with nothing running, "
                              "refuse and name the start command instead")
+    parser.add_argument("--only-tools", default="",
+                        help="serve ONLY these tools (comma-separated), "
+                             "hiding the rest. For benchmark arms that measure "
+                             "what the size of the tool surface costs — "
+                             "benchmarks/README.md. rpc/help still reach every "
+                             "RPC, so this narrows the SCHEMAS, not the API.")
     args = parser.parse_args()
     if args.port is not None:
         _port = args.port
     if args.no_autostart:
         _autostart_enabled = False
+    if args.only_tools:
+        _restrict_tools([t.strip() for t in args.only_tools.split(",")
+                         if t.strip()])
     mcp.run()  # stdio
 
 

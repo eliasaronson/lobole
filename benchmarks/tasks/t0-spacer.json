@@ -1,0 +1,42 @@
+{
+  "id": "t0-spacer",
+  "tier": 0,
+  "title": "Round spacer",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA cylindrical spacer 25 long with its axis on Z, from Z=0 to Z=25,\ncentred on the Z axis: outside diameter 40, with a 12 diameter hole through\nits whole length.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        40,
+        40,
+        25
+      ],
+      "tol": 0.2,
+      "why": "overall size"
+    },
+    {
+      "kind": "volume",
+      "value": 28588.493,
+      "tol_pct": 1.0
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 12,
+      "internal": true,
+      "count": 1,
+      "why": "the bore is a hole, not a boss"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 40,
+      "internal": false,
+      "count": 1,
+      "why": "the outside is round"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "script-first",
+  "description": "The full tool surface, told to build the part by writing a script rather than by calling one tool per feature. Exists to break a confound: rpc-only differs from full in BOTH schema count and strategy, because an agent left with rpc/execute_script scripts whether or not it wanted to. Holding the surface constant and changing only the strategy separates 'fewer schemas helped' from 'scripting helped'. The prompt deliberately teaches no API — naming a tool or a feature type here would confound it right back with discoverability.",
+  "only_tools": [],
+  "append_system_prompt": "When building a part, prefer to write one Python script that creates the whole part and run it in a single call, rather than issuing one tool call per feature. Compute repeated positions in the script instead of enumerating them. Check the result after running it, and fix the script if it is wrong."
+}

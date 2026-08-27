@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "designer": {
+      "command": "/nix/store/mr6r0dgqmcjkqnkhvx8n6a1mdlqx30p4-python3-3.14.7-env/bin/python3",
+      "args": [
+        "/home/elias/Documents/Designer/tools/designer_mcp.py",
+        "--port",
+        "38885",
+        "--no-autostart",
+        "--only-tools",
+        "describe,help,rpc,execute_script,get_state,check_geometry"
+      ]
+    }
+  }
+}

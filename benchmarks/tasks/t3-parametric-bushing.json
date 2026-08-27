@@ -1,0 +1,61 @@
+{
+  "id": "t3-parametric-bushing",
+  "tier": 3,
+  "title": "Parametric bushing",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA bushing driven by document variables, so that changing a variable\nchanges the part:\n- create a variable `bore` = 12 and a variable `wall` = 6;\n- build a bushing 30 long with its axis on Z, from Z=0 to Z=30, centred on the\n  Z axis, whose bore diameter is driven by `bore` and whose outside diameter is\n  driven by the expression `bore + 2 * wall`;\n- then change `bore` to 20 and leave the model regenerated at that value.\nThe finished part must be a 20 bore, 32 outside diameter, 30 long bushing that\nwould follow another change to `bore`.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        32,
+        32,
+        30
+      ],
+      "tol": 0.2,
+      "why": "the OD followed bore + 2*wall after the edit"
+    },
+    {
+      "kind": "volume",
+      "value": 14702.654,
+      "tol_pct": 1.0
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 20,
+      "internal": true,
+      "count": 1,
+      "why": "the bore regenerated to the new value"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 32,
+      "internal": false,
+      "count": 1,
+      "why": "the outside is round and followed the expression"
+    }
+  ],
+  "doc_checks": [
+    {
+      "kind": "variable",
+      "name": "bore",
+      "value": 20,
+      "why": "the variable exists and holds the edited value"
+    },
+    {
+      "kind": "variable",
+      "name": "wall",
+      "value": 6,
+      "why": "second variable"
+    },
+    {
+      "kind": "expr_references",
+      "variable": "bore",
+      "why": "geometry is DRIVEN by the variable, not retyped"
+    }
+  ]
+}

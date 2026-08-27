@@ -1,0 +1,52 @@
+{
+  "id": "t2-stepped-shaft",
+  "tier": 2,
+  "title": "Stepped shaft",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA stepped shaft, one solid, coaxial on the Z axis and centred on it:\na 30 diameter section from Z=0 to Z=20, and an 18 diameter section continuing\nfrom Z=20 to Z=55. No hole through it.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        30,
+        30,
+        55
+      ],
+      "tol": 0.2,
+      "why": "overall size"
+    },
+    {
+      "kind": "volume",
+      "value": 23043.582,
+      "tol_pct": 1.0
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 30,
+      "internal": false,
+      "count": 1,
+      "why": "the large step"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 18,
+      "internal": false,
+      "count": 1,
+      "why": "the small step"
+    },
+    {
+      "kind": "com",
+      "value": [
+        0,
+        0,
+        20.629
+      ],
+      "tol": 0.4,
+      "why": "the steps are the right way round"
+    }
+  ]
+}

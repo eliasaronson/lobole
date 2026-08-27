@@ -1,0 +1,6 @@
+{
+  "name": "rpc-only",
+  "description": "Six tools instead of the full set. rpc + help reach every RPC there is, so this arm loses no capability — only schema bulk in the context window. Chamfer attributed most of its efficiency win to exactly this trade, and this is the arm that tests whether it holds here.",
+  "only_tools": ["describe", "help", "rpc", "execute_script", "get_state", "check_geometry"],
+  "append_system_prompt": ""
+}

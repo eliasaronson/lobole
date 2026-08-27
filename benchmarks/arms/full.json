@@ -1,0 +1,6 @@
+{
+  "name": "full",
+  "description": "The tool surface a Designer user's agent gets today: every MCP tool, no extra prompting.",
+  "only_tools": [],
+  "append_system_prompt": ""
+}

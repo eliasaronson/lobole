@@ -120,6 +120,20 @@ buys back the coverage.
   migration is required (no users yet); fix any test that assumed old
   behavior. (Check the header for the current version — it moves.)
 
+## Benchmark — is the API still usable by an agent?
+
+`benchmarks/` grades an agent that has ONLY the MCP surface (`--tools ""`, no
+shell, no repo) on eight described parts, with a C++/OCCT oracle that reads the
+exported STEP back and links no designer_core. Changing a tool, a description,
+a refusal message or `help()` changes what this measures — **no benchmark, no
+claim**, and results are committed, never overwritten.
+
+- Free self-test, run it first: `python3 benchmarks/runners/reference.py`
+  builds all eight by hand and must score 39/39. If it fails, the app or a task
+  is broken — not the agent.
+- A sweep costs money: `python3 benchmarks/run.py --reps 3` (~$5, ~25 min).
+  `--dry-run` prints the plan and the ceiling for free.
+
 ## Driving / screenshotting the running app
 
 The app must own a real renderer to screenshot; true `--headless` has none.

@@ -1,0 +1,52 @@
+{
+  "id": "t2-flange",
+  "tier": 2,
+  "title": "Bolt-circle flange",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA round flange, axis on Z, 12 thick, from Z=0 to Z=12, centred on the\norigin: 90 outside diameter, a 30 diameter bore through the middle, and six\n7 diameter holes through the full thickness, equally spaced on a 68 diameter\nbolt circle with the first one on the +X axis.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        90,
+        90,
+        12
+      ],
+      "tol": 0.2,
+      "why": "overall size"
+    },
+    {
+      "kind": "volume",
+      "value": 65087.517,
+      "tol_pct": 1.0
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 30,
+      "internal": true,
+      "count": 1,
+      "why": "the centre bore"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 7,
+      "internal": true,
+      "count": 6,
+      "why": "six bolt holes \u2014 the count is the claim"
+    },
+    {
+      "kind": "com",
+      "value": [
+        0,
+        0,
+        6
+      ],
+      "tol": 0.3,
+      "why": "the bolt circle is actually equally spaced"
+    }
+  ]
+}
