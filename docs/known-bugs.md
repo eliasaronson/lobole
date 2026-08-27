@@ -7,6 +7,27 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## CAM machines the model's +Z face, and the app is +Y up
+
+Found 2026-08-27 by the cutting simulation, which draws a solid cutter and so
+showed the spindle lying on its side. CAM's setup space takes Z as the spindle
+axis (correct — every machine does), and this application takes Y as up
+(gravity `(0,-9.81,0)`, the XZ plane is "Top Plane"). So with `rotation_a = 0`
+a job faces the model's **+Z** face — the one the app itself calls Front —
+every cutting plane stands vertical in the default view, and
+`cam_derive_op` on the visual top face is refused as *"a wall"*.
+
+Reproduced on a 300 x 40 x 20 beam: stock `min [-2,-2,-1] max [302,42,21]`,
+`Face top` derived at `top_z 21 / bottom_z 20`.
+
+**Not a simulation bug** — the played path sits where the generated toolpath
+does, to 8 um. It is the fourth collision with the Y-up decision, and the fix
+is [../up-axis.md](up-axis.md), not a CAM-local workaround (which that change
+would delete). Until then: orient parts so the face to machine points +Z.
+
+---
+
+
 ## Generating an adaptive pocket takes ~7 s on the UI thread
 
 Measured 2026-08-26 on the saved baffle job (`scratch/w170s-alto`, a

@@ -337,6 +337,19 @@ simulation did something without owning a renderer.
   HAS a tool change — one that could only ever jump to the end would be a
   button lying about the job.
 
+### The frame it exposed
+
+The spindle is model **+Z** while this application is **+Y up**, so a job
+machines the face the app itself calls "Front", picking the visual top face is
+refused as "a wall", and the cutter is drawn lying on its side. None of that is
+the simulation's — it is the fourth collision with the Y-up decision
+(`docs/dogfooding.md:364` named CAM's Z as the third) — but the simulation is
+what made it impossible to keep missing: a thin backplot line looks like a
+line from any angle, a solid cutter does not.
+
+Deliberately NOT worked around here. Mapping +Y to setup +Z would be exactly
+the code that [../up-axis.md](../up-axis.md) deletes.
+
 ### Still open
 
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and
