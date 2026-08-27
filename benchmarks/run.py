@@ -101,6 +101,7 @@ def run_agent(prompt, cfg_path, arm, model, cwd, budget, timeout):
     ]
     if arm.get("append_system_prompt"):
         cmd += ["--append-system-prompt", arm["append_system_prompt"]]
+    os.makedirs(cwd, exist_ok=True)   # right before launch, not minutes before
     t0 = time.time()
     try:
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
@@ -223,7 +224,6 @@ def one_run(task, arm, rep, model, outdir, args):
     # An empty cwd, outside the repo: no CLAUDE.md to discover, nothing to read
     # even if the agent had tools to read it with.
     cwd = os.path.join(rundir, "cwd")
-    os.makedirs(cwd, exist_ok=True)
 
     rec = {"task": task["id"], "tier": task["tier"], "arm": arm["name"],
            "rep": rep, "model": model, "id": rid}
@@ -237,6 +237,11 @@ def one_run(task, arm, rep, model, outdir, args):
                                cwd, args.budget, args.timeout)
         open(os.path.join(rundir, "stream.jsonl"), "w").write(raw)
         rec.update(agent)
+        # The agent never got off the ground: no turns, no cost, an error from
+        # the CLI itself. That is a broken CELL, not a failed part, and calling
+        # it 0/5 would quietly slander whichever arm it landed in.
+        if agent["num_turns"] is None and agent["error"]:
+            rec["harness_error"] = agent["error"][:400]
 
         # The runner exports; the agent is never asked to. A part that exists
         # in the document counts, whether or not the agent thought to save it.
@@ -275,12 +280,20 @@ def one_run(task, arm, rep, model, outdir, args):
 
 def summarize(records, outdir, meta):
     """One table per arm. Sums, not averages of averages."""
+    broken = [r for r in records if r.get("harness_error")]
+    records = [r for r in records if not r.get("harness_error")]
+    meta = dict(meta)
     arms = sorted({r["arm"] for r in records})
     lines = [f"# Designer benchmark — {meta['stamp']}", "",
              f"model `{meta['model']}` · {meta['reps']} rep(s) · "
              f"{len(meta['tasks'])} tasks · sequential on one machine", "",
              "| arm | checks passed | tasks clean | over-claims | tool calls | "
              "cost USD | wall s |", "|---|---|---|---|---|---|---|"]
+    if broken:
+        lines[3:3] = [f"**{len(broken)} cell(s) excluded — the agent never "
+                      f"started, so they score nothing rather than zero:** "
+                      + ", ".join(f"`{r['task']}/{r['arm']}/r{r['rep']}`"
+                                  for r in broken), ""]
     for a in arms:
         rs = [r for r in records if r["arm"] == a]
         passed = sum(r["passed"] for r in rs)
@@ -377,10 +390,14 @@ def main():
                    "over_claim": False}
             print(f"HARNESS ERROR: {e}")
         else:
-            flag = "  OVER-CLAIM" if rec["over_claim"] else ""
-            print(f"{rec['passed']}/{rec['total']} checks, "
-                  f"{rec['tool_calls']} calls, ${rec['cost_usd'] or 0:.2f}, "
-                  f"{rec['wall_s']}s{flag}")
+            if rec.get("harness_error"):
+                print(f"HARNESS ERROR (excluded): "
+                      f"{rec['harness_error'][:120]}")
+            else:
+                flag = "  OVER-CLAIM" if rec["over_claim"] else ""
+                print(f"{rec['passed']}/{rec['total']} checks, "
+                      f"{rec['tool_calls']} calls, ${rec['cost_usd'] or 0:.2f}, "
+                      f"{rec['wall_s']}s{flag}")
         records.append(rec)
         jsonl.write(json.dumps(rec) + "\n")
         jsonl.flush()

@@ -25,13 +25,34 @@ import statistics
 import sys
 
 
-def load(path):
-    rows = []
-    with open(os.path.join(path, "runs.jsonl")) as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+def is_broken(r):
+    """Did the agent never get off the ground?
+
+    Detected from the RECORD, not from a flag, so it applies retroactively to
+    sweeps written before the flag existed — no rewriting an old runs.jsonl to
+    make an analysis come out tidier.
+    """
+    return bool(r.get("harness_error")) or (r.get("num_turns") is None
+                                            and r.get("error"))
+
+
+def load(paths):
+    """Read one or more sweeps. Arms run in separate sweeps compare fine as
+    long as they ran on the same machine against the same build — meta.json
+    records the commit for exactly that argument."""
+    rows, broken = [], []
+    for path in paths:
+        with open(os.path.join(path, "runs.jsonl")) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                r = json.loads(line)
+                (broken if is_broken(r) else rows).append(r)
+    if broken:
+        print(f"excluded {len(broken)} cell(s) where the agent never started: "
+              + ", ".join(f"{r['task']}/{r['arm']}/r{r['rep']}" for r in broken)
+              + "\n")
     return rows
 
 
@@ -62,7 +83,7 @@ def boot(pairs, draws=20000, seed=20260827):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("results")
+    ap.add_argument("results", nargs="+")
     ap.add_argument("--a", required=True, help="baseline arm")
     ap.add_argument("--b", required=True, help="arm compared against it")
     args = ap.parse_args()

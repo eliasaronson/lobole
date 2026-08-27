@@ -131,6 +131,13 @@ paid run ever started.
 |---|---|
 | `full` | every MCP tool, no extra prompting — what an agent gets today |
 | `rpc-only` | six tools (`describe`, `help`, `rpc`, `execute_script`, `get_state`, `check_geometry`) |
+| `script-first` | every tool, told to build the part by writing a script |
+
+`script-first` exists to break a confound. An agent left with `rpc` and
+`execute_script` scripts whether or not it wanted to, so `rpc-only` differs from
+`full` in **two** ways at once. Holding the surface constant and changing only
+the strategy separates "fewer schemas helped" from "scripting helped" — and in
+the first sweep it was decisively the schemas (see `REPORT.md`).
 
 `rpc-only` loses **no capability** — `rpc` reaches every RPC there is. It loses
 only schema bulk in the context window. Chamfer credited most of its efficiency
@@ -141,6 +148,8 @@ rest, and refuses loudly if it cannot, because an arm that silently served the
 full surface would look like a valid comparison and be a duplicate.
 
 ## Reading a result
+
+`REPORT.md` carries the current headline finding. 
 
 `summary.md` has the headline table; `runs.jsonl` has one record per run with
 its checks, tool calls by name, cost, tokens and the agent's final message;

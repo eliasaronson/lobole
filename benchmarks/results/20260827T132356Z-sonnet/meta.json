@@ -1,0 +1,12 @@
+{
+  "stamp": "20260827T132356Z",
+  "model": "sonnet",
+  "reps": 1,
+  "tasks": [
+    "t1-mount-plate"
+  ],
+  "arms": [
+    "script-first"
+  ],
+  "git": "cadd41d"
+}

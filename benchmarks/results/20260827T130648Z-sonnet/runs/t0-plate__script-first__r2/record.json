@@ -1,0 +1,170 @@
+{
+  "task": "t0-plate",
+  "tier": 0,
+  "arm": "script-first",
+  "rep": 2,
+  "model": "sonnet",
+  "id": "t0-plate__script-first__r2",
+  "cost_usd": 0.0936286,
+  "duration_ms": 4418,
+  "num_turns": 2,
+  "tool_calls": 1,
+  "tools_used": {
+    "add_feature": 1
+  },
+  "final_text": "The box's width/height/depth map directly to X/Y/Z with position at origin, giving the correct 120\u00d780\u00d710 mm plate extending into +X/+Y/+Z. Volume checks out at 96000 mm\u00b3 (120\u00d780\u00d710).\n\nBuilt successfully: a 120\u00d780\u00d710 mm plate with one corner at the origin, extending into +X, +Y, +Z.",
+  "error": "Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.",
+  "timed_out": false,
+  "wall_s": 9.4,
+  "input_tokens": 4,
+  "output_tokens": 238,
+  "exported": true,
+  "passed": 4,
+  "total": 4,
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid",
+      "pass": true,
+      "got": 1
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        120,
+        80,
+        10
+      ],
+      "tol": 0.2,
+      "why": "overall size",
+      "pass": true,
+      "got": [
+        120.0,
+        80.0,
+        10.0
+      ]
+    },
+    {
+      "kind": "volume",
+      "value": 96000,
+      "tol_pct": 1.0,
+      "pass": true,
+      "got": 96000.0
+    },
+    {
+      "kind": "inclined_planes",
+      "eq": 0,
+      "why": "every face is axis-aligned",
+      "pass": true,
+      "got": 0
+    }
+  ],
+  "facts": {
+    "area": 23200.0,
+    "bbox": {
+      "max": [
+        120.0,
+        80.0,
+        10.0
+      ],
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "size": [
+        120.0,
+        80.0,
+        10.0
+      ]
+    },
+    "com": [
+      60.0,
+      40.0,
+      5.0
+    ],
+    "cylinder_groups": [],
+    "cylinders": [],
+    "faces": 6,
+    "faces_by_kind": {
+      "plane": 6
+    },
+    "file": "/home/elias/Documents/Designer/benchmarks/results/20260827T130648Z-sonnet/runs/t0-plate__script-first__r2/part.step",
+    "inclined_planes": 0,
+    "ok": true,
+    "planes": [
+      {
+        "area": 800.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 1200.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 9600.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 9600.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "offset": 10.0
+      },
+      {
+        "area": 1200.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "offset": 80.0
+      },
+      {
+        "area": 800.0,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "offset": 120.0
+      }
+    ],
+    "shells": 1,
+    "solids": 1,
+    "volume": 96000.0
+  },
+  "claimed_success": true,
+  "over_claim": false
+}
