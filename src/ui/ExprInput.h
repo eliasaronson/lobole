@@ -20,14 +20,24 @@ bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
 bool ExprDragDouble(AppState& state, const char* label, double* v, float speed,
                     double vmin, double vmax, const char* fmt);
 bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
-                 int vmin, int vmax);
+                 int vmin, int vmax, const char* fmt = "%d");
 // InputDouble drop-in (typed entry rather than drag) with the same
 // expression evaluation on commit.
 bool ExprInputDouble(AppState& state, const char* label, double* v,
                      const char* fmt);
-// Two components sharing one row + label (a DragFloat2 drop-in; the label's
-// visible part is everything before "##").
+// Two or three components sharing one row + label (DragFloat2/3 drop-ins;
+// the label's visible part is everything before "##").
 bool ExprDragFloat2(AppState& state, const char* label, float v[2],
                     float speed);
+bool ExprDragFloat3(AppState& state, const char* label, float v[3],
+                    float speed);
+// InputFloat / InputInt / InputFloat3 drop-ins. These keep ImGui's own widget
+// (they are text fields already, with a buffer big enough to type into) and
+// only add the evaluation on commit.
+bool ExprInputFloat(AppState& state, const char* label, float* v,
+                    const char* fmt);
+bool ExprInputInt(AppState& state, const char* label, int* v);
+bool ExprInputFloat3(AppState& state, const char* label, float v[3],
+                     const char* fmt);
 
 } // namespace ui

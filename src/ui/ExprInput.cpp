@@ -133,9 +133,8 @@ bool DrawExprField(AppState& state, const char* label, double* out) {
 //
 // This is the path for ExprInputDouble, which is an ImGui InputScalar and
 // keeps its own buffer; the drag fields above no longer come through here.
-bool ExprCommitOnLastItem(AppState& state, double* out) {
-  const ImGuiID id = ImGui::GetItemID();
-  if (ImGui::IsItemActive()) {
+bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out) {
+  if (ImGui::GetActiveID() == id) {
     if (ImGuiInputTextState* st = ImGui::GetInputTextState(id)) {
       std::snprintf(g_buf, sizeof(g_buf), "%.*s", static_cast<int>(st->TextLen),
                     st->TextA.Data);
@@ -170,6 +169,25 @@ bool ExprCommitOnLastItem(AppState& state, double* out) {
   }
   *out = *r;
   return true;
+}
+
+bool ExprCommitOnLastItem(AppState& state, double* out) {
+  return ExprCommitOnItem(state, ImGui::GetItemID(), out);
+}
+
+// The id of the text field inside an InputScalar. With step buttons ImGui
+// wraps it in PushID(label) + InputText(""), so the group's id is not the
+// one to watch; without them the field IS the item. InputScalarN nests one
+// more level, PushID(i), per component.
+ImGuiID InnerFieldId(const char* label, int component = -1) {
+  ImGui::PushID(label);
+  if (component >= 0)
+    ImGui::PushID(component);
+  const ImGuiID id = ImGui::GetID("");
+  if (component >= 0)
+    ImGui::PopID();
+  ImGui::PopID();
+  return id;
 }
 
 // The drag flags every field here shares: clamp typed/dragged values, and
@@ -214,7 +232,7 @@ bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
 }
 
 bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
-                 int vmin, int vmax) {
+                 int vmin, int vmax, const char* fmt) {
   if (InExprMode(label)) {
     double expr = 0.0;
     if (!DrawExprField(state, label, &expr))
@@ -223,7 +241,7 @@ bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
     return true;
   }
   const bool changed = ImGui::DragScalar(label, ImGuiDataType_S32, v, speed,
-                                         &vmin, &vmax, "%d", kDragFlags);
+                                         &vmin, &vmax, fmt, kDragFlags);
   char seed[32];
   std::snprintf(seed, sizeof(seed), "%d", *v);
   ArmExprMode(seed);
@@ -241,19 +259,34 @@ bool ExprInputDouble(AppState& state, const char* label, double* v,
   return changed;
 }
 
-bool ExprDragFloat2(AppState& state, const char* label, float v[2],
+namespace {
+
+// N drag components sharing one row and one trailing label, laid out the way
+// ImGui's DragFloatN does. ImGui's own DragScalarN cannot be reused: each
+// component needs its own stand-in text field, and the stand-in REPLACES the
+// drag rather than sitting beside it.
+bool ExprDragFloatN(AppState& state, const char* label, float* v, int n,
                     float speed) {
+  static const char* const kIds[3] = {"##x", "##y", "##z"};
+  // Grouped exactly as ImGui's DragScalarN groups its components: EndGroup
+  // forwards the active/deactivated status of whichever component the user
+  // is in to the row as a whole, which is what the callers query
+  // (IsItemActivated to snapshot for undo, IsItemDeactivatedAfterEdit to
+  // commit). Without it a three-component row silently stops being undoable.
+  ImGui::BeginGroup();
   ImGui::PushID(label);
   const float w = ImGui::CalcItemWidth();
   const float inner = ImGui::GetStyle().ItemInnerSpacing.x;
-  const float half = std::max(1.0f, (w - inner) * 0.5f);
-  ImGui::SetNextItemWidth(half);
-  bool changed =
-      ExprDragFloat(state, "##x", &v[0], speed, -FLT_MAX, FLT_MAX, "%.3f");
-  ImGui::SameLine(0.0f, inner);
-  ImGui::SetNextItemWidth(half);
-  changed |=
-      ExprDragFloat(state, "##y", &v[1], speed, -FLT_MAX, FLT_MAX, "%.3f");
+  const float each = std::max(1.0f, (w - inner * static_cast<float>(n - 1)) /
+                                        static_cast<float>(n));
+  bool changed = false;
+  for (int i = 0; i < n; i++) {
+    if (i > 0)
+      ImGui::SameLine(0.0f, inner);
+    ImGui::SetNextItemWidth(each);
+    changed |=
+        ExprDragFloat(state, kIds[i], &v[i], speed, -FLT_MAX, FLT_MAX, "%.3f");
+  }
   const char* hidden = std::strstr(label, "##");
   const int visible = hidden != nullptr ? static_cast<int>(hidden - label)
                                         : static_cast<int>(std::strlen(label));
@@ -262,6 +295,57 @@ bool ExprDragFloat2(AppState& state, const char* label, float v[2],
     ImGui::TextUnformatted(label, label + visible);
   }
   ImGui::PopID();
+  ImGui::EndGroup();
+  return changed;
+}
+
+} // namespace
+
+bool ExprDragFloat2(AppState& state, const char* label, float v[2],
+                    float speed) {
+  return ExprDragFloatN(state, label, v, 2, speed);
+}
+
+bool ExprDragFloat3(AppState& state, const char* label, float v[3],
+                    float speed) {
+  return ExprDragFloatN(state, label, v, 3, speed);
+}
+
+bool ExprInputFloat(AppState& state, const char* label, float* v,
+                    const char* fmt) {
+  bool changed = ImGui::InputFloat(label, v, 0.0f, 0.0f, fmt);
+  double expr = 0.0;
+  if (ExprCommitOnLastItem(state, &expr)) {
+    *v = static_cast<float>(expr);
+    changed = true;
+  }
+  return changed;
+}
+
+bool ExprInputInt(AppState& state, const char* label, int* v) {
+  const ImGuiID field = InnerFieldId(label);
+  bool changed = ImGui::InputInt(label, v);
+  double expr = 0.0;
+  if (ExprCommitOnItem(state, field, &expr)) {
+    *v = static_cast<int>(std::lround(expr));
+    changed = true;
+  }
+  return changed;
+}
+
+bool ExprInputFloat3(AppState& state, const char* label, float v[3],
+                     const char* fmt) {
+  ImGuiID fields[3];
+  for (int i = 0; i < 3; i++)
+    fields[i] = InnerFieldId(label, i);
+  bool changed = ImGui::InputFloat3(label, v, fmt);
+  for (int i = 0; i < 3; i++) {
+    double expr = 0.0;
+    if (ExprCommitOnItem(state, fields[i], &expr)) {
+      v[i] = static_cast<float>(expr);
+      changed = true;
+    }
+  }
   return changed;
 }
 

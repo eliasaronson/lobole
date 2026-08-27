@@ -1,4 +1,6 @@
 #include "ui/PreviewFeature.h"
+
+#include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/OccurrencePanel.h"
 
 #include "core/Command.h"
@@ -362,7 +364,8 @@ void DrawSectionToolWindow(AppState& state) {
     ImGui::SetNextItemWidth(90.0f);
     // Step from the model's own size: 0.1 fixed units was invisible on a
     // 3-metre assembly and enormous on a 2 mm part.
-    ImGui::DragFloat("###offset", &sec.offset, std::max(1e-4f, extent * 0.01f));
+    ExprDragFloat(state, "###offset", &sec.offset,
+                  std::max(1e-4f, extent * 0.01f), -FLT_MAX, FLT_MAX, "%.3f");
     ImGui::SameLine();
     if (ImGui::Button("Flip###reverse"))
       sec.reverse = !sec.reverse;
@@ -376,11 +379,11 @@ void DrawSectionToolWindow(AppState& state) {
     // the widest thing in this window.
     ImGui::Indent(24.0f);
     ImGui::SetNextItemWidth(80.0f);
-    ImGui::DragFloat("###tiltU", &sec.tiltU, 0.5f, -89.0f, 89.0f, "%.1f°");
+    ExprDragFloat(state, "###tiltU", &sec.tiltU, 0.5f, -89.0f, 89.0f, "%.1f°");
     ImGui::SetItemTooltip("Tilt about the plane's first in-plane axis");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80.0f);
-    ImGui::DragFloat("###tiltV", &sec.tiltV, 0.5f, -89.0f, 89.0f, "%.1f°");
+    ExprDragFloat(state, "###tiltV", &sec.tiltV, 0.5f, -89.0f, 89.0f, "%.1f°");
     ImGui::SetItemTooltip("Tilt about the second — the cut pivots about its "
                           "offset point, so it does not slide off the model");
     if (sec.tiltU != 0.0f || sec.tiltV != 0.0f) {

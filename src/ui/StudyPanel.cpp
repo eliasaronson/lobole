@@ -174,7 +174,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                         (float)sim.pendingDirection.y,
                         (float)sim.pendingDirection.z};
         LeftLabel("Direction");
-        if (ImGui::InputFloat3("###sim_direction", dir))
+        if (ExprInputFloat3(state, "###sim_direction", dir, "%.3f"))
           sim.pendingDirection = glm::dvec3(dir[0], dir[1], dir[2]);
       } else {
         ImGui::TextDisabled("Direction: into the face you click");
@@ -507,7 +507,7 @@ void DrawStudyPanel(AppState& state) {
   if (s->type == fem::AnalysisType::Modal) {
     int nm = s->numModes;
     LeftLabel("Modes");
-    const bool nmChanged = ImGui::InputInt("###study_modes", &nm);
+    const bool nmChanged = ExprInputInt(state, "###study_modes", &nm);
     if ((nmChanged || ImGui::IsItemDeactivatedAfterEdit()) && nm >= 1 &&
         nm != s->numModes)
       ModifyStudy(state, s->id, "Set mode count",
@@ -531,7 +531,7 @@ void DrawStudyPanel(AppState& state) {
       });
     int mi = s->maxIterations;
     LeftLabel("Max iterations");
-    const bool miChanged = ImGui::InputInt("###topo_max_iterations", &mi);
+    const bool miChanged = ExprInputInt(state, "###topo_max_iterations", &mi);
     if ((miChanged || ImGui::IsItemDeactivatedAfterEdit()) && mi >= 1 &&
         mi != s->maxIterations)
       ModifyStudy(state, s->id, "Set max iterations",
@@ -588,8 +588,9 @@ void DrawStudyPanel(AppState& state) {
       // field above. NOT EnterReturnsTrue: that flag is InputText-only —
       // InputScalar ASSERTS on it, so this line aborted every Debug build
       // (a fresh clone's default) the moment gravity was switched on.
-      ImGui::InputFloat3("###study_gravity_vec", g, "%.2f");
-      if (ImGui::IsItemDeactivatedAfterEdit())
+      const bool gChanged =
+          ExprInputFloat3(state, "###study_gravity_vec", g, "%.2f");
+      if (gChanged || ImGui::IsItemDeactivatedAfterEdit())
         ModifyStudy(state, s->id, "Set gravity", [&](fem::Study& cs) {
           cs.gravity = glm::dvec3(g[0], g[1], g[2]);
         });

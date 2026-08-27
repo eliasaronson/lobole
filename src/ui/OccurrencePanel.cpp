@@ -171,7 +171,7 @@ void DrawMatesSection(AppState& state) {
     break;
   case MateType::Planar: {
     float dxy[2] = {sel->dx, sel->dy};
-    const bool changed = ImGui::DragFloat2("Slide (x,y)", dxy, 0.1f);
+    const bool changed = ExprDragFloat2(state, "Slide (x,y)", dxy, 0.1f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
@@ -184,7 +184,8 @@ void DrawMatesSection(AppState& state) {
   }
   case MateType::Ball: {
     glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->ballRotation));
-    const bool changed = ImGui::DragFloat3("Rotation (deg)", &euler.x, 1.0f);
+    const bool changed =
+        ExprDragFloat3(state, "Rotation (deg)", &euler.x, 1.0f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
@@ -564,7 +565,7 @@ void DrawOccurrencePanel(AppState& state) {
     }
 
     glm::vec3 pos = sel->position;
-    const bool posChanged = ImGui::DragFloat3("Position", &pos.x, 0.1f);
+    const bool posChanged = ExprDragFloat3(state, "Position", &pos.x, 0.1f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state); // one snapshot per drag session
     if (posChanged) {
@@ -573,7 +574,8 @@ void DrawOccurrencePanel(AppState& state) {
     }
 
     glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->orientation));
-    const bool rotChanged = ImGui::DragFloat3("Rotation (deg)", &euler.x, 1.0f);
+    const bool rotChanged =
+        ExprDragFloat3(state, "Rotation (deg)", &euler.x, 1.0f);
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (rotChanged) {

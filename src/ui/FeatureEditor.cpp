@@ -99,10 +99,10 @@ bool LabeledCombo(const char* label, int* sel, const char* const items[],
 }
 
 // Labels-left drop-in for the xyz drag rows.
-bool DragFloat3Row(const char* label, float* v) {
+bool DragFloat3Row(AppState& state, const char* label, float* v) {
   LeftLabel(label);
   const std::string id = std::string("##") + label;
-  return ImGui::DragFloat3(id.c_str(), v, 0.05f);
+  return ExprDragFloat3(state, id.c_str(), v, 0.05f);
 }
 
 void CommitDiscrete(AppState& state, Feature& feature,
@@ -287,7 +287,7 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
 
   if (exprText.empty()) {
     LeftLabel(label, SmallButtonReserve("fx"));
-    HandleEdit(state, feature, ImGui::InputInt("##count", &value), index,
+    HandleEdit(state, feature, ExprInputInt(state, "##count", &value), index,
                commit);
     if (value < 1)
       value = 1;
@@ -521,9 +521,12 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     break;
   }
   case DatumPlaneKind::ThroughPoints:
-    HandleEdit(state, dp, DragFloat3Row("Point 1", &dp.p0.x), index, commit);
-    HandleEdit(state, dp, DragFloat3Row("Point 2", &dp.p1.x), index, commit);
-    HandleEdit(state, dp, DragFloat3Row("Point 3", &dp.p2.x), index, commit);
+    HandleEdit(state, dp, DragFloat3Row(state, "Point 1", &dp.p0.x), index,
+               commit);
+    HandleEdit(state, dp, DragFloat3Row(state, "Point 2", &dp.p1.x), index,
+               commit);
+    HandleEdit(state, dp, DragFloat3Row(state, "Point 3", &dp.p2.x), index,
+               commit);
     break;
   }
 }
@@ -543,8 +546,10 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
 
   switch (da.kind) {
   case DatumAxisKind::TwoPoints:
-    HandleEdit(state, da, DragFloat3Row("Point 1", &da.p0.x), index, commit);
-    HandleEdit(state, da, DragFloat3Row("Point 2", &da.p1.x), index, commit);
+    HandleEdit(state, da, DragFloat3Row(state, "Point 1", &da.p0.x), index,
+               commit);
+    HandleEdit(state, da, DragFloat3Row(state, "Point 2", &da.p1.x), index,
+               commit);
     break;
   case DatumAxisKind::SketchLine:
     if (Feature* sk = state.document->FindFeatureById(da.sketchId)) {
@@ -1174,8 +1179,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   }
 
   if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {
-    HandleEdit(state, feature, DragFloat3Row("Position", &box->position.x),
-               index, commit);
+    HandleEdit(state, feature,
+               DragFloat3Row(state, "Position", &box->position.x), index,
+               commit);
     // ExprDim, not DragDim: the "fx" button is what lets a variable drive
     // the dimension, and without it a primitive could not be parametric —
     // which meant a part built from primitives could not be configured.
@@ -1184,15 +1190,17 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
             box->height);
     ExprDim(state, feature, index, commit, "Depth", box->depthExpr, box->depth);
   } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
-    HandleEdit(state, feature, DragFloat3Row("Center", &sphere->center.x),
-               index, commit);
+    HandleEdit(state, feature,
+               DragFloat3Row(state, "Center", &sphere->center.x), index,
+               commit);
     ExprDim(state, feature, index, commit, "Radius", sphere->radiusExpr,
             sphere->radius);
   } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
-    HandleEdit(state, feature, DragFloat3Row("Center", &cyl->center.x), index,
-               commit);
-    HandleEdit(state, feature, DragFloat3Row("Direction", &cyl->direction.x),
+    HandleEdit(state, feature, DragFloat3Row(state, "Center", &cyl->center.x),
                index, commit);
+    HandleEdit(state, feature,
+               DragFloat3Row(state, "Direction", &cyl->direction.x), index,
+               commit);
     ExprDim(state, feature, index, commit, "Radius", cyl->radiusExpr,
             cyl->radius);
     ExprDim(state, feature, index, commit, "Height", cyl->heightExpr,
@@ -1384,10 +1392,11 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       CommitDiscrete(state, feature, before, index, commit);
     }
     if (cv->kind == Curve3DKind::Helix) {
-      HandleEdit(state, feature, DragFloat3Row("Origin", &cv->axisOrigin.x),
-                 index, commit);
-      HandleEdit(state, feature, DragFloat3Row("Axis", &cv->axisDir.x), index,
+      HandleEdit(state, feature,
+                 DragFloat3Row(state, "Origin", &cv->axisOrigin.x), index,
                  commit);
+      HandleEdit(state, feature, DragFloat3Row(state, "Axis", &cv->axisDir.x),
+                 index, commit);
       ExprDim(state, feature, index, commit, "Radius", cv->radiusExpr,
               cv->radius);
       ExprDim(state, feature, index, commit, "Pitch", cv->pitchExpr, cv->pitch);
@@ -1398,7 +1407,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     } else {
       if (cv->kind == Curve3DKind::ControlPoly) {
         LeftLabel("Degree");
-        HandleEdit(state, feature, ImGui::InputInt("##Degree", &cv->degree),
+        HandleEdit(state, feature, ExprInputInt(state, "##Degree", &cv->degree),
                    index, commit);
         if (cv->degree < 1)
           cv->degree = 1;
@@ -1418,8 +1427,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         }
         ImGui::SameLine();
         HandleEdit(state, feature,
-                   ImGui::DragFloat3("##pt", &cv->points[p].x, 0.05f), index,
-                   commit);
+                   ExprDragFloat3(state, "##pt", &cv->points[p].x, 0.05f),
+                   index, commit);
         ImGui::PopID();
       }
       if (ImGui::Button("Add point")) {
@@ -1440,10 +1449,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     LeftLabel("Wall");
     static const double wmin = 0.0, wmax = 1e6;
     HandleEdit(state, feature,
-               ImGui::DragScalar("##Wall", ImGuiDataType_Double,
-                                 &pi->wallThickness, 0.02f, &wmin, &wmax,
-                                 pi->wallThickness <= 0.0 ? "solid" : "%.3f",
-                                 ImGuiSliderFlags_AlwaysClamp),
+               ExprDragDouble(state, "##Wall", &pi->wallThickness, 0.02f, wmin,
+                              wmax,
+                              pi->wallThickness <= 0.0 ? "solid" : "%.3f"),
                index, commit);
   } else if (auto* sw = dynamic_cast<SweepFeature*>(&feature)) {
     DrawFeatureRefCombo(state, feature, "Profile", &sw->profileSketchId, index,
@@ -1540,10 +1548,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       LeftLabel("Length");
       static const double lmin = 0.0, lmax = 1e6;
       HandleEdit(state, feature,
-                 ImGui::DragScalar("##Length", ImGuiDataType_Double,
-                                   &th->length, 0.05f, &lmin, &lmax,
-                                   th->length <= 0.0 ? "full face" : "%.3f",
-                                   ImGuiSliderFlags_AlwaysClamp),
+                 ExprDragDouble(state, "##Length", &th->length, 0.05f, lmin,
+                                lmax, th->length <= 0.0 ? "full face" : "%.3f"),
                  index, commit);
     }
     PickSlotRow(state, feature, PickSlot::ThreadFace,

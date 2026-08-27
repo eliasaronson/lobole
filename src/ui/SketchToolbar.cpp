@@ -529,7 +529,7 @@ void DrawSketchToolWindow(AppState& state) {
     } else {
       ImGui::TextUnformatted("Real distance between the two points:");
       ImGui::SetNextItemWidth(120);
-      ImGui::InputFloat("##calibdist", &edit.calibDistance, 0.0f, 0.0f, "%.4g");
+      ExprInputFloat(state, "##calibdist", &edit.calibDistance, "%.4g");
       ImGui::Checkbox("Align to axis", &edit.calibAlignAxis);
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Also rotate the image so the two points sit on the "

@@ -95,7 +95,7 @@ private:
 // orientation" style ids the way the rest of the app does — the visible half
 // is drawn here, the id half goes to the widget.
 //
-// Usage: LeftLabel("Scale"); ImGui::InputFloat("###dwg_scale", &v);
+// Usage: LeftLabel("Scale"); ExprInputFloat(state, "###dwg_scale", &v, "%.3f");
 //
 // Kept as two calls rather than a wrapper per widget type: ImGui has thirty
 // input widgets and wrapping each one is how a UI layer stops being ImGui.

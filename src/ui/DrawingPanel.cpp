@@ -1,6 +1,8 @@
 #include "ui/DrawingPanel.h"
+
 #include "ui/AppActions.h"
 #include "ui/DockLayout.h" // PanelHeading
+#include "ui/ExprInput.h"  // expression-capable numeric fields
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
 
@@ -604,7 +606,7 @@ void DrawViewsSection(AppState& state) {
     ImGui::Combo("###dwg_orientation", &orientIdx, kOrientLabels,
                  IM_ARRAYSIZE(kOrientLabels));
     LeftLabel("Scale");
-    ImGui::InputFloat("###dwg_scale", &addScale, 0.0f, 0.0f, "%.3f");
+    ExprInputFloat(state, "###dwg_scale", &addScale, "%.3f");
     if (ImGui::Button("Add view###dwg_add_view")) {
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);

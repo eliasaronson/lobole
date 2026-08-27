@@ -12,6 +12,7 @@
 #include "ui/AppActions.h"
 #include "ui/CamPlayback.h"
 #include "ui/CamTool.h"
+#include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h"
 #include "ui/SelectionPipeline.h"
 
@@ -348,14 +349,15 @@ void DrawCamPanel(AppState& state) {
   // first — so it lives where that refusal can send you.
   if (ImGui::CollapsingHeader("Stock and safety###cam_stock")) {
     ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::DragFloat("Safe Z###cam_safez",
-                         reinterpret_cast<float*>(&state.camSafeZEdit), 0.5f))
+    if (ExprDragFloat(state, "Safe Z###cam_safez",
+                      reinterpret_cast<float*>(&state.camSafeZEdit), 0.5f,
+                      -FLT_MAX, FLT_MAX, "%.3f"))
       dirty = true;
     ImGui::SetItemTooltip("Rapid height above the stock top");
     float above = static_cast<float>(setup->stock.margin.z);
     ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::DragFloat("Above the part###cam_stock_above", &above, 0.1f, 0.0f,
-                         100.0f, "%.2f")) {
+    if (ExprDragFloat(state, "Above the part###cam_stock_above", &above, 0.1f,
+                      0.0f, 100.0f, "%.2f")) {
       setup->stock.margin.z = above;
       dirty = true;
     }
@@ -364,16 +366,16 @@ void DrawCamPanel(AppState& state) {
                           "this to zero.");
     float around = static_cast<float>(setup->stock.margin.x);
     ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::DragFloat("Around it###cam_stock_around", &around, 0.1f, 0.0f,
-                         100.0f, "%.2f")) {
+    if (ExprDragFloat(state, "Around it###cam_stock_around", &around, 0.1f,
+                      0.0f, 100.0f, "%.2f")) {
       setup->stock.margin.x = around;
       setup->stock.margin.y = around;
       dirty = true;
     }
     float below = static_cast<float>(setup->stock.bottomMargin);
     ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::DragFloat("Below it###cam_stock_below", &below, 0.1f, 0.0f,
-                         100.0f, "%.2f")) {
+    if (ExprDragFloat(state, "Below it###cam_stock_below", &below, 0.1f, 0.0f,
+                      100.0f, "%.2f")) {
       setup->stock.bottomMargin = below;
       dirty = true;
     }
@@ -384,8 +386,8 @@ void DrawCamPanel(AppState& state) {
                           "Turn off for a controller that mishandles them.");
     float indexA = static_cast<float>(setup->rotationA);
     ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::DragFloat("A index###cam_index_a", &indexA, 0.5f, -360.0f,
-                         360.0f, "%.2f°")) {
+    if (ExprDragFloat(state, "A index###cam_index_a", &indexA, 0.5f, -360.0f,
+                      360.0f, "%.2f°")) {
       setup->rotationA = indexA;
       dirty = true;
     }
@@ -411,14 +413,15 @@ void DrawCamPanel(AppState& state) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(70.0f);
       float dia = static_cast<float>(t.diameter);
-      if (ImGui::DragFloat("mm###dia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
+      if (ExprDragFloat(state, "mm###dia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
         t.diameter = dia;
         dirty = true;
       }
       ImGui::SameLine();
       ImGui::SetNextItemWidth(70.0f);
       float feed = static_cast<float>(t.feedCut);
-      if (ImGui::DragFloat("F###feed", &feed, 10.0f, 1.0f, 10000.0f, "%.0f")) {
+      if (ExprDragFloat(state, "F###feed", &feed, 10.0f, 1.0f, 10000.0f,
+                        "%.0f")) {
         t.feedCut = feed;
         dirty = true;
       }
@@ -439,8 +442,8 @@ void DrawCamPanel(AppState& state) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(70.0f);
         float angle = static_cast<float>(t.tipAngleDeg);
-        if (ImGui::DragFloat("deg###tipangle", &angle, 1.0f, 5.0f, 179.0f,
-                             "%.0f")) {
+        if (ExprDragFloat(state, "deg###tipangle", &angle, 1.0f, 5.0f, 179.0f,
+                          "%.0f")) {
           t.tipAngleDeg = angle;
           dirty = true;
         }
@@ -590,7 +593,8 @@ void DrawCamPanel(AppState& state) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(60.0f);
       float top = static_cast<float>(op.topZ);
-      if (ImGui::DragFloat("###top", &top, 0.25f, -1000.0f, 1000.0f, "%.2f")) {
+      if (ExprDragFloat(state, "###top", &top, 0.25f, -1000.0f, 1000.0f,
+                        "%.2f")) {
         op.topZ = top;
         touched(op.id);
       }
@@ -598,8 +602,8 @@ void DrawCamPanel(AppState& state) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(60.0f);
       float bottom = static_cast<float>(op.bottomZ);
-      if (ImGui::DragFloat("###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
-                           "%.2f")) {
+      if (ExprDragFloat(state, "###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
+                        "%.2f")) {
         op.bottomZ = bottom;
         touched(op.id);
       }
@@ -607,7 +611,8 @@ void DrawCamPanel(AppState& state) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(55.0f);
       float step = static_cast<float>(op.stepdown);
-      if (ImGui::DragFloat("###stepdown", &step, 0.25f, 0.0f, 100.0f, "%.2f")) {
+      if (ExprDragFloat(state, "###stepdown", &step, 0.25f, 0.0f, 100.0f,
+                        "%.2f")) {
         op.stepdown = step;
         touched(op.id);
       }
@@ -615,8 +620,8 @@ void DrawCamPanel(AppState& state) {
       if (op.type == cam::OpType::EdgeRound) {
         ImGui::SetNextItemWidth(70.0f);
         float size = static_cast<float>(op.edgeSize);
-        if (ImGui::DragFloat("Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
-                             "%.2f")) {
+        if (ExprDragFloat(state, "Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
+                          "%.2f")) {
           op.edgeSize = size;
           touched(op.id);
         }
@@ -629,8 +634,8 @@ void DrawCamPanel(AppState& state) {
           op.type == cam::OpType::EdgeRound) {
         ImGui::SetNextItemWidth(70.0f);
         float over = static_cast<float>(op.stepover);
-        if (ImGui::DragFloat("Stepover###stepover", &over, 0.01f, 0.05f, 0.9f,
-                             "%.2f")) {
+        if (ExprDragFloat(state, "Stepover###stepover", &over, 0.01f, 0.05f,
+                          0.9f, "%.2f")) {
           op.stepover = over;
           touched(op.id);
         }
@@ -643,7 +648,7 @@ void DrawCamPanel(AppState& state) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(55.0f);
       int tabs = op.tabCount;
-      if (ImGui::DragInt("Tabs###tabs", &tabs, 0.2f, 0, 32)) {
+      if (ExprDragInt(state, "Tabs###tabs", &tabs, 0.2f, 0, 32)) {
         op.tabCount = tabs;
         touched(op.id);
       }

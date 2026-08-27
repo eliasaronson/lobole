@@ -241,6 +241,34 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->width, 30.0);
   };
 
+  // U14 phase 2: the xyz rows are our own layout now rather than ImGui's
+  // DragScalarN, so each component is a full expression field — and the row
+  // has to stay grouped, or IsItemActivated/IsItemDeactivatedAfterEdit stop
+  // reaching HandleEdit and the edit silently stops being undoable.
+  t = IM_REGISTER_TEST(engine, "properties", "vector_row_takes_an_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    const float y0 = box->position.y;
+
+    ctx->ItemInputValue("//Box###ToolWindow/##Position/##y", "3*4");
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->position.y, 12.0f);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->position.y, y0);
+  };
+
   t = IM_REGISTER_TEST(engine, "preview", "box_accept_commits_once");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

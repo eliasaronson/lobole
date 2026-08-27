@@ -1,10 +1,11 @@
 # U14 — One way to enter a number, and it accepts expressions (2026-08-27)
 
-> Status: **Phases 0 and 1 SHIPPED 2026-08-27.** Findings 1, 2 and 3 are
-> closed and gated by three GUI tests; 878 headless and 228 GUI tests pass.
-> Phase 0 is what turned this from "add autocomplete" into "the feature is
-> dead". Phases 2 and 3 remain — read "What changed on contact" at the end
-> before trusting the Phase 1 section, which predicted the wrong risk.
+> Status: **Phases 0, 1 and 2 SHIPPED 2026-08-27.** Findings 1-4 are closed
+> and gated (four GUI tests plus a source scan); 879 headless and 229 GUI
+> tests pass. Phase 0 is what turned this from "add autocomplete" into "the
+> feature is dead". Phase 3 (completion) remains — read "What changed on
+> contact" at the end before trusting the phase sections, which predicted
+> the wrong risk twice and undercounted the raw fields.
 
 The question that started this was small — *is there a common interface for
 entering numbers, and could it tab-complete the document's variables?* The
@@ -140,15 +141,30 @@ before the `InputText` is active, so typing can start too early. Mitigation, in
 order of preference: keep the same ImGui ID and `SetKeyboardFocusHere`; else a
 yield; else a small `ItemInput` shim in `GuiTestsCommon`.
 
-### Phase 2 — convert the 32 raw sites
+### Phase 2 — convert the raw sites — SHIPPED
 
-CAM's 14 first — the largest gap and the one with real arithmetic in it.
-Then Study, Occurrence, FeatureEditor, PreviewFeature, and the last three.
-Needs two new wrappers, `ExprDragFloat3` and `ExprInputInt`.
+**34, not 32**: the source scan found two `ImGui::DragScalar` calls (pipe wall
+thickness, thread length) that the hand grep had missed because it enumerated
+the friendly spellings. The gate earned its place before it had ever guarded
+anything.
 
-Closes finding 4. Then gate it: a `test_conventions.cpp` scan so a new raw
-`ImGui::DragFloat` under `src/ui/` fails the build, the way the bool parsers
-are already gated.
+Five new wrappers rather than two: `ExprDragFloat3`, `ExprInputInt`,
+`ExprInputFloat`, `ExprInputFloat3`, and a format argument on `ExprDragInt`
+(the autosave-interval field displays `%d s`).
+
+The `Input*` family keeps ImGui's widget and only adds the evaluation — those
+are text fields already, with a 64-byte buffer, so they have neither the drop
+nor the truncation. Only the drags needed the stand-in. `InputScalar` with
+step buttons hides its text field inside `PushID(label)` + `InputText("")`, and
+`InputScalarN` nests one more level per component, so the commit hook takes an
+explicit id rather than "the last item".
+
+The `Drag*N` rows ARE ours now (a stand-in has to replace the drag, not sit
+beside it), and they are wrapped in `BeginGroup`/`EndGroup` exactly as ImGui
+wraps its own: `EndGroup` forwards the active component's status to the row,
+which is what `HandleEdit` queries to snapshot for undo. Without it a
+three-component row silently stops being undoable — gated by
+`properties/vector_row_takes_an_expression`, which edits and then undoes.
 
 ### Phase 3 — completion
 
@@ -232,3 +248,10 @@ completion popup, not for correctness. `ExprInputDouble` still uses that path
 (it is an ImGui `InputScalar` with its own 64-byte buffer, so it has neither
 the drop nor the truncation); it joins the shared field in Phase 3, when
 completion needs it to.
+
+**Phase 2 found two more fields than the audit did.** The convention gate is
+a `[convention]` scan in `tests/test_conventions.cpp`, and the first time it
+ran it failed on two `ImGui::DragScalar` calls no one had counted — the hand
+grep had listed the friendly spellings (`DragFloat`, `InputInt`, …) and missed
+the general one. A scanning test that finds something on its first run is the
+argument for scanning tests.

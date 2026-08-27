@@ -1,5 +1,7 @@
 #include "ui/SettingsWindow.h"
 
+#include "ui/ExprInput.h" // expression-capable numeric fields
+
 #include "core/io/GitVault.h"
 
 #include "common/Logger.h"
@@ -160,8 +162,8 @@ bool DrawField(AppState& state, const settings::Field& f) {
     }
   } else if (auto* dm = std::get_if<double settings::Settings::*>(&f.member)) {
     int value = static_cast<int>(s.*(*dm));
-    if (ImGui::DragInt(id.c_str(), &value, 1.0f, static_cast<int>(f.min),
-                       static_cast<int>(f.max), "%d s")) {
+    if (ExprDragInt(state, id.c_str(), &value, 1.0f, static_cast<int>(f.min),
+                    static_cast<int>(f.max), "%d s")) {
       s.*(*dm) = value;
       changed = true;
     }

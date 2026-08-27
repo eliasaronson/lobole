@@ -131,3 +131,45 @@ TEST_CASE("an enum-returning *FromString parser has no silent fallback",
           }());
   CHECK(silent.empty());
 }
+
+TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
+  // A raw ImGui::DragFloat/InputInt/... takes a number and CANNOT take an
+  // expression — and worse, ImGui's own Ctrl+click text entry runs a bare
+  // sscanf on whatever is typed. "10/2" reads as 10 and commits, silently:
+  // the same plausible-wrong-value shape as the enum parsers above, in the
+  // GUI instead of a parser. Thirty-two fields were like this until U14
+  // (docs/ui/u14-numeric-input.md), CAM's entire panel among them.
+  //
+  // ui::ExprInput's wrappers are drop-ins with the same signatures, so the
+  // fix for anything this catches is to add the Expr prefix and pass state.
+  const std::regex raw(
+      R"(ImGui::(Drag|Input)(Float|Double|Int|Scalar)[234N]?\s*\()");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"}) {
+    for (const SourceFile& f : SourcesUnder("src/ui", ext)) {
+      // ExprInput.cpp is where the wrappers call ImGui; that is the point.
+      if (f.path.filename() == "ExprInput.cpp")
+        continue;
+      std::istringstream lines(f.text);
+      std::string line;
+      int n = 0;
+      while (std::getline(lines, line)) {
+        n++;
+        if (line.find("//") != std::string::npos &&
+            line.find("//") < line.find("ImGui::"))
+          continue; // a comment showing the old spelling
+        if (std::regex_search(line, raw))
+          offenders.push_back(Relative(f.path) + ":" + std::to_string(n));
+      }
+    }
+  }
+  INFO("use ui::ExprInput's wrapper instead — a raw one accepts \"10/2\" as "
+       "10:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + "\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
