@@ -778,6 +778,166 @@ TEST_CASE("cam: a derived pocket clears its own boundary, not the model's",
   }
 }
 
+TEST_CASE("cam: a cut too narrow for the cutter says SO, with the numbers",
+          "[cam]") {
+  // The first failure a beginner hits, and the one they had no way to
+  // diagnose: the region closes up under the first inward offset, every depth
+  // silently skips, and the operation lands on the generic "produced no
+  // toolpath — check its depths against the model" — which blames the depths
+  // of a job whose depths are right and whose cutter is too fat.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  // A 4 mm wide slot: narrower than the 6 mm tool BasicSetup carries.
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(10, 13, 12), 20, 4, 20));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocket", block, voidId,
+                                                   BooleanOp::Subtract));
+
+  cam::Setup setup = BasicSetup();
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op;
+  op.id = 11;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 1; // 6 mm
+  op.topZ = 20.0;
+  op.bottomZ = 12.0;
+  op.targets.push_back(floor);
+
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  REQUIRE(tp.Empty());
+  INFO(tp.error);
+  // What it IS, what the tool is, and what would work — the three things a
+  // person needs to act. Not "check its depths".
+  CHECK(tp.error.find("4 mm across") != std::string::npos);
+  CHECK(tp.error.find("tool 1 is 6 mm") != std::string::npos);
+  CHECK(tp.error.find("cannot reach in") != std::string::npos);
+  CHECK(tp.error.find("depths") == std::string::npos);
+
+  // A 3 mm cutter fits the same slot and cuts it.
+  cam::Tool small;
+  small.number = 2;
+  small.diameter = 3.0;
+  setup.tools.push_back(small);
+  op.toolNumber = 2;
+  const cam::Toolpath fits = cam::Generate(setup, op, doc->GetBodies());
+  INFO(fits.error);
+  CHECK_FALSE(fits.Empty());
+  CHECK(fits.error.empty());
+}
+
+TEST_CASE("cam: stock to leave can be what does not fit, and says so",
+          "[cam]") {
+  // The tool fits the slot; the tool PLUS the stock being left does not. Two
+  // different problems with two different fixes, so they get two messages —
+  // telling someone to buy a smaller cutter when they should turn down
+  // stock_to_leave is a wasted afternoon.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(10, 12, 12), 20, 6.5, 20));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocket", block, voidId,
+                                                   BooleanOp::Subtract));
+
+  const cam::Setup setup = BasicSetup(); // 6 mm tool
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op;
+  op.id = 12;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 12.0;
+  op.stockToLeave = 1.0; // 6 + 2 x 1 = 8 mm of room needed in a 6.5 mm slot
+  op.targets.push_back(floor);
+
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  REQUIRE(tp.Empty());
+  INFO(tp.error);
+  CHECK(tp.error.find("stock") != std::string::npos);
+  CHECK(tp.error.find("8 mm of room") != std::string::npos);
+  // NOT the "buy a smaller cutter" message: this cutter is fine.
+  CHECK(tp.error.find("cannot reach in") == std::string::npos);
+}
+
+TEST_CASE("cam: adaptive is silent about a shape it cannot enter — we are not",
+          "[cam]") {
+  // The path a person actually takes: a derived pocket deep enough comes back
+  // as type ADAPTIVE, and adaptive returns no moves and no complaint for a
+  // region its cutter cannot enter. Without measuring the width here, the one
+  // failure a beginner hits first reads as "check its depths".
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(10, 13, 8), 20, 4, 20));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocket", block, voidId,
+                                                   BooleanOp::Subtract));
+
+  const cam::Setup setup = BasicSetup(); // 6 mm tool
+  const ElementRef floor = UpFaceAt(*doc, 8.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op;
+  op.id = 14;
+  op.type = cam::OpType::Adaptive;
+  op.side = cam::Side::Inside;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 8.0;
+  op.targets.push_back(floor);
+
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  REQUIRE(tp.Empty());
+  INFO(tp.error);
+  CHECK(tp.error.find("4 mm across") != std::string::npos);
+  CHECK(tp.error.find("depths") == std::string::npos);
+}
+
+TEST_CASE("cam: an opening too narrow to cut out says which, and how narrow",
+          "[cam]") {
+  // The same failure through the other verb: clicking the wall of a through
+  // opening cuts INSIDE it, so the contour offsets inward and a slot narrower
+  // than the cutter closes up. Before, this was the same misleading
+  // "check its depths".
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  // 5 mm wide, right through — narrower than the 6 mm tool.
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(14, 12, -1), 12, 5, 22));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Slot", block, voidId,
+                                                   BooleanOp::Subtract));
+
+  const cam::Setup setup = BasicSetup();
+  const ElementRef wall = WallNear(*doc, 14.0, 14.5);
+  REQUIRE(wall.IsSet());
+  cam::Operation op;
+  op.id = 13;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Inside;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 0.0;
+  op.targets.push_back(wall);
+
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  REQUIRE(tp.Empty());
+  INFO(tp.error);
+  CHECK(tp.error.find("opening") != std::string::npos);
+  CHECK(tp.error.find("5 mm across") != std::string::npos);
+  CHECK(tp.error.find("depths") == std::string::npos);
+}
+
 TEST_CASE("cam: an island in the picked floor is machined around", "[cam]") {
   auto doc = PocketDoc(/*island=*/true);
   const cam::Setup setup = BasicSetup();

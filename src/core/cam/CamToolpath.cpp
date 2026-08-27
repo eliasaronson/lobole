@@ -143,6 +143,73 @@ std::string Round2(double mm) {
   return buf;
 }
 
+// The largest circle that fits inside `region`, in mm.
+//
+// A region vanishes under an inward offset exactly when the offset passes its
+// inscribed radius — the concentric pocket already relies on that to size its
+// helix — so bisecting the offset measures the narrowest place without a
+// medial axis. Only ever called on the failure path, so the twenty offsets
+// cost nothing that matters.
+double InscribedRadius(const Clipper2Lib::Paths64& region) {
+  if (region.empty())
+    return 0.0;
+  // An upper bound: half the diagonal of the bounding box. Nothing round can
+  // be wider than that.
+  int64_t lox = INT64_MAX, loy = INT64_MAX, hix = INT64_MIN, hiy = INT64_MIN;
+  for (const Clipper2Lib::Path64& path : region)
+    for (const Clipper2Lib::Point64& p : path) {
+      lox = std::min(lox, p.x);
+      loy = std::min(loy, p.y);
+      hix = std::max(hix, p.x);
+      hiy = std::max(hiy, p.y);
+    }
+  if (hix <= lox || hiy <= loy)
+    return 0.0;
+  double lo = 0.0;
+  double hi = 0.5 * std::sqrt(std::pow((hix - lox) / kScale, 2.0) +
+                              std::pow((hiy - loy) / kScale, 2.0));
+  for (int i = 0; i < 20; i++) {
+    const double mid = 0.5 * (lo + hi);
+    if (Offset(region, -mid).empty())
+      hi = mid;
+    else
+      lo = mid;
+  }
+  return lo;
+}
+
+// Why the cutter could not get into `region`, in the words a person can act
+// on: how wide the place actually is, how wide this tool is, and what would
+// fit. Empty when the tool DOES fit, so the caller keeps looking for the real
+// reason rather than blaming the tool for something else.
+//
+// This exists because the generic "produced no toolpath — check its depths"
+// blamed the depths for a job whose depths were right and whose cutter was
+// too fat, which is the one failure a beginner hits first and the one they
+// have no way to diagnose.
+std::string TooTightForTool(const Clipper2Lib::Paths64& region,
+                            const Tool& tool, double stockToLeave,
+                            const char* what) {
+  const double across = InscribedRadius(region) * 2.0;
+  if (across <= 1e-9)
+    return {};
+  const double needs = tool.diameter + 2.0 * stockToLeave;
+  if (across >= needs - 1e-6)
+    return {}; // it fits; something else is wrong
+  const std::string head = std::string("this ") + what + " is " +
+                           Round2(across) + " mm across at its narrowest and " +
+                           "tool " + std::to_string(tool.number) + " is " +
+                           Round2(tool.diameter) + " mm";
+  // Two different problems with two different fixes: a cutter that cannot fit
+  // at all, and one that fits but not with the stock being left on.
+  if (across < tool.diameter - 1e-6)
+    return head + " — it cannot reach in. Use a cutter of " + Round2(across) +
+           " mm or less.";
+  return head + ", but leaving " + Round2(stockToLeave) +
+         " mm of stock needs " + Round2(needs) +
+         " mm of room. Leave less stock, or use a smaller cutter.";
+}
+
 void Emit(Toolpath& tp, Move::Kind kind, const glm::dvec3& to, double feed) {
   Move m;
   m.kind = kind;
@@ -1177,6 +1244,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // there, so stopping when the model runs out leaves the part welded to the
   // sheet: the exact failure tabs exist to control.
   Clipper2Lib::Paths64 lastFound;
+  // Why nothing came out, if nothing does — see the same field in the pocket.
+  std::string tooTight;
   for (size_t pass = 0; pass < passes.size(); pass++) {
     const double z = passes[pass];
     std::vector<Loop> solid;
@@ -1200,6 +1269,10 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       continue; // above the model, where there has never been anything
     Clipper2Lib::Paths64 paths =
         delta == 0.0 ? contour : Offset(contour, delta);
+    // An inside profile offsets INWARD, so an opening narrower than the
+    // cutter closes up and this pass emits nothing. Say which, and how narrow.
+    if (paths.empty() && op.side == Side::Inside && tooTight.empty())
+      tooTight = TooTightForTool(contour, tool, op.stockToLeave, "opening");
     for (Clipper2Lib::Path64& path : paths) {
       Orient(path, op.climb, op.side == Side::Inside);
       // Tabs on EVERY pass, not only the last one. A tab is a pillar from the
@@ -1213,6 +1286,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
                pass == 0 ? op.topZ : passes[pass - 1]);
     }
   }
+  if (tp.moves.empty() && tp.error.empty())
+    tp.error = tooTight;
 }
 
 // Pocket: clear the voids inside the part's outline. Concentric offsets
@@ -1232,6 +1307,11 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
     return;
   }
   double entryZ = op.topZ;
+  // Why nothing came out, if nothing does. Kept across the depths and used
+  // only when the whole operation ends up empty: a pocket that clears at one
+  // depth and closes up at the next is doing the right thing, and a message
+  // about that would be noise.
+  std::string tooTight;
   for (const double z : DepthPasses(op)) {
     Clipper2Lib::Paths64 region = picked;
     if (region.empty()) {
@@ -1261,8 +1341,13 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       inset += step;
       ring = Offset(region, -inset);
     }
-    if (rings.empty())
+    if (rings.empty()) {
+      // The region closed up before the first pass — the cutter is wider than
+      // the narrowest part of what it was asked to clear.
+      if (tooTight.empty())
+        tooTight = TooTightForTool(region, tool, op.stockToLeave, "pocket");
       continue;
+    }
 
     // Does the ramp fit on the loop we would cut first? If not, the descent
     // on that loop would be far steeper than asked (C6).
@@ -1309,6 +1394,8 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
     }
     entryZ = z;
   }
+  if (tp.moves.empty() && tp.error.empty())
+    tp.error = tooTight;
 }
 
 void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
@@ -1335,6 +1422,8 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     return;
   }
   double entryZ = op.topZ;
+  // Why nothing came out, if nothing does — see the same field in the pocket.
+  std::string tooTight;
   for (const double z : DepthPasses(op)) {
     Clipper2Lib::Paths64 region = picked;
     if (region.empty()) {
@@ -1387,11 +1476,21 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
           "concentric — adaptive declined this shape (" + cleared.error + ")";
       return;
     }
+    if (cleared.error.empty() && cleared.moves.empty() && tooTight.empty()) {
+      // Adaptive returns SILENCE for a region its cutter cannot enter — no
+      // moves and no complaint — so the width has to be measured here or the
+      // operation lands on the generic "check its depths". This is the path a
+      // real pocket takes: a derived pocket deep enough comes back as
+      // `adaptive`, so it is the one a person actually hits.
+      tooTight = TooTightForTool(region, tool, op.stockToLeave, "pocket");
+    }
     if (!cleared.error.empty() && tp.error.empty())
       tp.error = cleared.error; // partial: say so, keep what it did cut
     tp.moves.insert(tp.moves.end(), cleared.moves.begin(), cleared.moves.end());
     entryZ = z;
   }
+  if (tp.moves.empty() && tp.error.empty())
+    tp.error = tooTight;
 }
 
 // Face: clear the stock top down to topZ over the whole stock rectangle.
