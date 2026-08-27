@@ -14,9 +14,11 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
 #include "ui/AppActions.h"       // SelectFeature
+#include "ui/ExprComplete.h"     // variable completion in the dim editors
 #include "ui/SketchToolbar.h"    // BeginSketchExtrude/Revolve (Shift+E/R)
 
 #include "imgui.h"
+#include "imgui_internal.h" // GetInputTextState (re-read after a completion)
 
 #include <algorithm>
 #include <cstdlib>
@@ -2751,6 +2753,47 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
 } // namespace
 
 namespace {
+
+// The inline dimension editors take an expression over the document's
+// variables, so they complete like every other expression field (u14). They
+// already re-focus themselves every frame, which is most of what a pick
+// needs; what is left is the ordering. The popup is drawn FIRST, because the
+// click that picks a row also ends the edit and the verdict has to be known
+// before the field reports Enter. The picked text is written AFTER the
+// InputText, because a deactivating one writes its own text out on the way
+// past — and ImGui is told to re-read the buffer on the frame after that,
+// or its copy wins and the field commits the prefix.
+bool CompletingDimInput(AppState& state, const char* id, char* buf,
+                        size_t bufSize, float width) {
+  static ImGuiID reloadId = 0;
+  static int reloadCaret = -1;
+  const ImGuiID fieldId = ImGui::GetID(id);
+  const ExprPick pick = ExprCompletePopup(state, fieldId, buf, bufSize);
+  if (reloadId == fieldId && reloadCaret >= 0) {
+    if (ImGuiInputTextState* st = ImGui::GetInputTextState(fieldId)) {
+      st->WantReloadUserBuf = true;
+      st->ReloadSelectionStart = st->ReloadSelectionEnd = reloadCaret;
+    }
+    reloadId = 0;
+    reloadCaret = -1;
+  }
+  ImGui::SetNextItemWidth(width);
+  ImGui::SetKeyboardFocusHere();
+  const bool commit =
+      ImGui::InputText(id, buf, bufSize, ImGuiInputTextFlags_EnterReturnsTrue);
+  if (pick.picked) {
+    snprintf(buf, bufSize, "%s", pick.text.c_str());
+    reloadId = fieldId;
+    reloadCaret = pick.caret;
+    return false; // a pick is not a commit
+  }
+  ExprCompleteRefresh(state, fieldId, buf);
+  return commit;
+}
+
+} // namespace
+
+namespace {
 glm::vec2 SeedLabelOffset(const SketchFeature& sk, const sketch::Constraint& c);
 } // namespace
 
@@ -3142,10 +3185,7 @@ void DrawDimensions(AppState& state) {
                        ImGuiWindowFlags_NoMove |
                        ImGuiWindowFlags_AlwaysAutoResize |
                        ImGuiWindowFlags_NoSavedSettings);
-      ImGui::SetNextItemWidth(120);
-      ImGui::SetKeyboardFocusHere();
-      bool commit = ImGui::InputText("##v", buf, sizeof(buf),
-                                     ImGuiInputTextFlags_EnterReturnsTrue);
+      bool commit = CompletingDimInput(state, "##v", buf, sizeof(buf), 120.0f);
       if (!editError.empty())
         ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
                            editError.c_str());
@@ -3270,10 +3310,7 @@ void DrawDimensionOnCreate(AppState& state) {
                    ImGuiWindowFlags_NoSavedSettings);
   ImGui::TextUnformatted(what);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(110);
-  ImGui::SetKeyboardFocusHere();
-  bool commit = ImGui::InputText("##docv", buf, sizeof(buf),
-                                 ImGuiInputTextFlags_EnterReturnsTrue);
+  bool commit = CompletingDimInput(state, "##docv", buf, sizeof(buf), 110.0f);
   if (!editError.empty())
     ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
                        editError.c_str());

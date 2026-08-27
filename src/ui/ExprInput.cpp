@@ -61,10 +61,27 @@ bool InExprMode(const char* label) {
   return true;
 }
 
-// Ctrl+click on the drag just submitted hands the field to the stand-in,
-// seeded with the value as the field displays it.
+// The gestures that open text entry on the drag just submitted. ImGui's own
+// DragScalar accepts three (imgui_widgets.cpp, "Tabbing or CTRL+click on Drag
+// turns it into an InputText") and ImGuiSliderFlags_NoInput turns off all
+// three, so all three are rebuilt here — DOUBLE-CLICK especially, which is
+// the one people find without being told.
+bool WantsExprMode() {
+  const ImGuiIO& io = ImGui::GetIO();
+  if (ImGui::IsItemClicked() && io.KeyCtrl)
+    return true;
+  // The second click of a double-click; the first started a drag, exactly as
+  // it does in ImGui's version.
+  if (io.MouseClickedCount[0] == 2 &&
+      ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+    return true;
+  // Keyboard: Enter on a nav-focused field. Activation without the mouse.
+  return ImGui::IsItemActivated() && !ImGui::IsMouseDown(ImGuiMouseButton_Left);
+}
+
+// Hand the field to the stand-in, seeded with the value as it displays it.
 void ArmExprMode(const char* seed) {
-  if (!ImGui::IsItemClicked() || !ImGui::GetIO().KeyCtrl)
+  if (!WantsExprMode())
     return;
   std::snprintf(g_exprText, sizeof(g_exprText), "%s", seed);
   g_exprId = ImGui::GetItemID();

@@ -305,3 +305,31 @@ a following `key_press` — a transient popup is gone by the time `screenshot`
 runs. Filed in [../known-bugs.md](../known-bugs.md). The behaviour is covered
 by four GUI tests driving the real application; its appearance is not.
 
+## Two regressions found by using it (2026-08-27, same day)
+
+**Double-click stopped opening a field for typing.** ImGui's `DragScalar`
+accepts *three* gestures for text entry — Ctrl+click, **double-click**, and
+Enter on a nav-focused field (`imgui_widgets.cpp`, "Tabbing or CTRL+click on
+Drag turns it into an InputText") — and `ImGuiSliderFlags_NoInput` turns off
+all three. Phase 1 rebuilt only Ctrl+click, so every numeric field in the app
+became *harder* to type into than before this work started, which is a fair
+description of a pure loss. All three are rebuilt now, gated by
+`properties/dimension_field_opens_on_double_click`.
+
+The lesson is narrow and worth keeping: **taking a widget over means taking
+over everything it did, not the part you were looking at.** The flag's own
+documentation names two gestures and the code implements three.
+
+**Sketch dimensions did not complete.** The inline dimension editor
+(`SketchInteraction.cpp`, `##v` and the on-create `##docv`) is its own
+`InputText` in a floating window, not a `ui::ExprInput` field, so Phase 3
+never reached it — even though it has accepted expressions since the variables
+workstream and is where a sketch actually gets its numbers. Wired now through
+the same popup, gated by `dims/inline_editor_completes_a_variable`.
+
+Every UI path that calls `EvaluateText` on typed input is now covered: the
+drag stand-in, the `fx` rows, the Variables panel's definition column, and
+both inline dimension editors. The Configurations override cell is the one
+remainder, and only because it refills a stack buffer from the model every
+frame.
+

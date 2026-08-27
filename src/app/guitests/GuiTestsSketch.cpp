@@ -1501,6 +1501,52 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // ...and completes the document's variables, like every other expression
+  // field (u14). The inline editor is a separate widget from ui::ExprInput —
+  // its own InputText in a floating window — so it is separately wired and
+  // separately gated.
+  t = IM_REGISTER_TEST(engine, "dims", "inline_editor_completes_a_variable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK(Doc()->SetParameter("wall_d", "10"));
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-1.5f, -0.5f}, {1.5f, -0.5f}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
+    ctx->Yield();
+    s_App->sketchEdit.editingDim = 0;
+    ctx->Yield(2);
+
+    for (int i = 0; i < 12; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("wal");
+    ctx->Yield(2);
+    IM_CHECK(ImGui::FindWindowByName("##expr_complete") != nullptr);
+    ctx->KeyPress(ImGuiKey_Tab);
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    IM_CHECK(sk->constraints[0].valueExpr == "wall_d");
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 10.0), 1e-6);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
   // Inline dimension editor accepts full expressions: "3*4" stores
   // valueExpr and drives value 12; a later plain number clears the expr.
   t = IM_REGISTER_TEST(engine, "dims", "inline_editor_expression");

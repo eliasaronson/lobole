@@ -241,6 +241,29 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->width, 30.0);
   };
 
+  // ImGui's drag opens text entry on THREE gestures, and
+  // ImGuiSliderFlags_NoInput turns off all three: Ctrl+click, double-click,
+  // and Enter on a nav-focused field. Double-click is the one people find
+  // without being told, and rebuilding only Ctrl+click made every numeric
+  // field in the app harder to type into than before U14.
+  t = IM_REGISTER_TEST(engine, "properties",
+                       "dimension_field_opens_on_double_click");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+
+    ctx->ItemDoubleClick("//Box###ToolWindow/Width/##Width"); // no modifier
+    ctx->Yield(2);
+    ctx->KeyChars("7*3");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 21.0);
+  };
+
   // U14 phase 2: the xyz rows are our own layout now rather than ImGui's
   // DragScalarN, so each component is a full expression field — and the row
   // has to stay grouped, or IsItemActivated/IsItemDeactivatedAfterEdit stop
