@@ -54,8 +54,15 @@ jobs:
             libvterm-dev \
             xvfb mesa-vulkan-drivers
 
-      - name: ccache
-        uses: actions/cache@v4
+      # restore + save rather than actions/cache, because the save half must
+      # run on FAILURE too. actions/cache only saves when the job succeeds, and
+      # this suite has been red — so nothing was ever written under
+      # `ccache-gui-*` and every run paid a ~15 min cold build ("Cache not
+      # found for input keys" even on the restore-key prefix), which is exactly
+      # the state where a warm cache is worth most. Saved straight after Build,
+      # before the long test steps, since the compile cache is all it holds.
+      - name: ccache (restore)
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ccache
           key: ccache-gui-${{ runner.os }}-${{ github.sha }}
@@ -85,6 +92,13 @@ jobs:
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-gui-${{ runner.os }}-${{ github.sha }}
 
       # Not through tools/gui-tests-xvfb.sh: that script wraps everything in
       # nix-shell, which this runner does not have. Same binary and flags.
@@ -138,8 +152,10 @@ jobs:
             libocct-ocaf-dev libocct-visualization-dev libtbb-dev \
             libvterm-dev
 
-      - name: ccache
-        uses: actions/cache@v4
+      # See the gui-suite job: the save half runs on failure too, so a red
+      # test step still leaves a warm compile cache behind.
+      - name: ccache (restore)
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ github.sha }}
@@ -150,6 +166,13 @@ jobs:
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
 
       # Ubuntu 24.04 ships OpenCASCADE 7.6.3 and the project is developed
       # against 7.9.3. Two cases differ: XCAF STEP import placement, and a
@@ -277,8 +300,10 @@ jobs:
 
       # A cache of its own: sanitized objects are not interchangeable with the
       # Release ones, and sharing a key would evict whichever ran last.
-      - name: ccache
-        uses: actions/cache@v4
+      # See the gui-suite job: the save half runs on failure too, so a red
+      # test step still leaves a warm compile cache behind.
+      - name: ccache (restore)
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ccache
           key: ccache-asan-${{ runner.os }}-${{ github.sha }}
@@ -288,6 +313,13 @@ jobs:
         run: |
           cmake -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON
           cmake --build build-asan -j"$(nproc)" --target designer designer_tests
+
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-asan-${{ runner.os }}-${{ github.sha }}
 
       # The exclusions are two lists: the sanitizer's (long numeric gates —
       # see tools/sanitizer-env.sh) and this runner's OCC 7.6 pair, the same

@@ -234,9 +234,23 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
 // The solve runs on a worker thread now (clicking Run used to block the
 // draw), so pump frames until the result lands. Bounded: a hang must fail
 // the test rather than spin forever.
+//
+// A FAILED run is not a hang and must not be waited out. Both prepare paths
+// (PrepareStudy / PrepareTopology) clear study.error synchronously before
+// their worker exists, and the poll paths set it only on a terminal failure
+// — so a non-empty error inside this loop is a finished, failed run, and
+// there is nothing left to wait for. Without this, a build without Netgen
+// (CI: run_study errors in the first frame) spun the full 6000 frames on
+// software Vulkan, turning an instant failure into ~8 minutes per test and
+// reporting it as the engine's 300 s watchdog abort rather than as the
+// missing mesher.
 bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
-  for (int i = 0; i < 6000 && !Doc()->StudyResults(studyId); ++i)
+  for (int i = 0; i < 6000 && !Doc()->StudyResults(studyId); ++i) {
+    const fem::Study* s = Doc()->FindStudy(studyId);
+    if (s && !s->error.empty())
+      break;
     ctx->Yield();
+  }
   if (Doc()->StudyResults(studyId))
     return true;
   // An IM_CHECK here would return from THIS function and let the test walk on
