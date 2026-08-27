@@ -5,7 +5,11 @@
 > ([viewport-handles.md](viewport-handles.md)). What remains is the
 > visual-polish tail, which shipped as
 > [U13](u13-chrome-and-units.md) 2026-08-24 — overflow, elision, document
-> units (format v64) and window geometry. The prose below is the original plan; per-round designs are the
+> units (format v64) and window geometry. [U14](u14-numeric-input.md)
+> 2026-08-27 — the numeric-entry widget now actually accepts expressions
+> (the Ctrl+click path had silently dropped every variable-referencing one
+> since it shipped); its remaining phases convert the 32 raw fields and add
+> completion over the document's variables. The prose below is the original plan; per-round designs are the
 > `u*.md` files beside it.
 
 The workbench shell shipped (docking layout, dark theme, icon toolbar,

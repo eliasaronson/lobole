@@ -150,6 +150,97 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->width, 5.0);
   };
 
+  // U14 phase 0 (docs/ui/u14-numeric-input.md). Ctrl+click a dimension and
+  // type an expression — the whole point of ui::ExprInput, offered on every
+  // ExprDrag* field since the variables workstream, and never once tested.
+  // The sketch expression tests go through the inline dimension editor's own
+  // InputText and the assembly one through "##expr" after fx; this path had
+  // no coverage at all, which is how the drop below survived.
+  //
+  // ItemInputValue IS the gesture: MouseMove, Ctrl down, click, type, Enter
+  // (imgui_te_context.cpp, ImGuiTestAction_Input).
+  t = IM_REGISTER_TEST(engine, "properties",
+                       "dimension_field_takes_an_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+    constexpr const char* kWidth = "//Box###ToolWindow/Width/##Width";
+
+    // Arithmetic whose leading literal differs from what is in the field.
+    // This is the one case that works today: sscanf reads 5, 5 != 2 moves the
+    // value, ImGui marks the item edited, and only then does
+    // ExprCommitOnLastItem get to look at the text.
+    ctx->ItemInputValue(kWidth, "5*8");
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 40.0);
+
+    // A function call. sscanf cannot parse it, so the value does not move, so
+    // TempInputScalar never calls MarkItemEdited, so IsItemDeactivatedAfterEdit
+    // is false and the text is discarded without a word. Same for every
+    // expression that names a variable.
+    ctx->ItemInputValue(kWidth, "sqrt(100)");
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 10.0);
+
+    // And arithmetic whose leading literal happens to EQUAL the current value
+    // is dropped for the same reason — the number did not move.
+    ctx->ItemInputValue(kWidth, "10/2");
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 5.0);
+  };
+
+  // Same widget, second defect: the Ctrl+click field borrows ImGui's temp
+  // input, whose buffer is a 32-byte stack array (TempInputScalar). Past 31
+  // characters the keystrokes are refused (imgui_widgets.cpp, BufCapacity)
+  // and what commits is a PREFIX of what was typed — a different number, no
+  // warning. 33 chars here; truncated it evaluates to 16 rather than 17.
+  t = IM_REGISTER_TEST(engine, "properties",
+                       "dimension_expression_is_not_truncated");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+
+    std::string expr = "1";
+    for (int i = 0; i < 16; i++)
+      expr += "+1";
+    IM_CHECK_EQ((int)expr.size(), 33);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", expr.c_str());
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 17.0);
+  };
+
+  // The human path, which ItemInputValue does NOT exercise: it clears the
+  // field with Ctrl+A first, so it would pass even if the value arrived
+  // unselected and the typed text appended to it ("2" + "30" = 230).
+  t = IM_REGISTER_TEST(engine, "properties", "dimension_field_opens_selected");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+
+    ctx->ItemInput("//Box###ToolWindow/Width/##Width"); // Ctrl+click, no more
+    ctx->Yield(2);
+    ctx->KeyChars("30");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 30.0);
+  };
+
   t = IM_REGISTER_TEST(engine, "preview", "box_accept_commits_once");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
