@@ -57,6 +57,26 @@ std::vector<Vertex3D> ToMeshVertices(const cam::StockMesh& m) {
   return out;
 }
 
+// One move forward / back. Landing on the END of a segment is what "step"
+// means here: the move has happened, and its cut is on the block.
+cam::SimCursor StepForward(cam::SimCursor at, const cam::Timeline& tl) {
+  if (at.t < 1.0)
+    return {at.seg, 1.0};
+  return at.seg + 1 < tl.Segments() ? cam::SimCursor{at.seg + 1, 1.0}
+                                    : tl.End();
+}
+
+cam::SimCursor StepBack(cam::SimCursor at) {
+  if (at.t > 0.0)
+    return {at.seg, 0.0};
+  return at.seg > 0 ? cam::SimCursor{at.seg - 1, 0.0} : cam::SimCursor{0, 0.0};
+}
+
+void Tip(const char* text) {
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s", text);
+}
+
 void DropToolInstance(AppState& state) {
   if (state.meshRenderer && state.camToolInstance != 0)
     state.meshRenderer->RemoveMesh(state.camToolInstance);
@@ -276,6 +296,17 @@ void DrawCamTransport(AppState& state) {
   }
 
   const cam::Timeline& tl = state.camTimeline;
+  // TWO rows. The CAM panel is 217 px wide in the default layout, and seven
+  // buttons on one line would run off the end of it — the same width that
+  // decided where Generate and the verdict go (docs/cam/dogfood-round.md).
+  if (ImGui::Button(ICON_FA_BACKWARD_FAST "###cam_sim_rewind"))
+    SeekCamPlayback(state, {0, 0.0});
+  Tip("Back to the start");
+  ImGui::SameLine();
+  if (ImGui::Button(ICON_FA_BACKWARD_STEP "###cam_sim_stepback"))
+    SeekCamPlayback(state, StepBack(state.camCursor));
+  Tip("Back one move");
+  ImGui::SameLine();
   if (ImGui::Button(state.camPlaying ? ICON_FA_PAUSE "###cam_sim_play"
                                      : ICON_FA_PLAY "###cam_sim_play")) {
     state.camPlaying = !state.camPlaying;
@@ -285,17 +316,26 @@ void DrawCamTransport(AppState& state) {
       SeekCamPlayback(state, {0, 0.0});
   }
   ImGui::SameLine();
-  if (ImGui::Button(ICON_FA_BACKWARD_STEP "###cam_sim_rewind"))
-    SeekCamPlayback(state, {0, 0.0});
-  ImGui::SameLine();
-  if (ImGui::Button(ICON_FA_FORWARD_STEP "###cam_sim_nextop"))
-    SeekCamPlayback(state, tl.NextOp(state.camCursor));
-  if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Skip to the next operation");
+  if (ImGui::Button(ICON_FA_FORWARD_STEP "###cam_sim_step"))
+    SeekCamPlayback(state, StepForward(state.camCursor, tl));
+  Tip("Forward one move — the way to look at the move a verdict names");
   ImGui::SameLine();
   if (ImGui::Button(ICON_FA_FORWARD_FAST "###cam_sim_end"))
     SeekCamPlayback(state, tl.End());
+  Tip("To the end");
+
+  if (ImGui::Button(ICON_FA_ANGLES_RIGHT " Op###cam_sim_nextop"))
+    SeekCamPlayback(state, tl.NextOp(state.camCursor));
+  Tip("Skip to the next operation");
   ImGui::SameLine();
+  // Only when the job HAS a tool change — a button that can only ever jump to
+  // the end is a button that lies about what the job does.
+  if (!tl.toolChanges.empty()) {
+    if (ImGui::Button(ICON_FA_ANGLES_RIGHT " Tool###cam_sim_nexttool"))
+      SeekCamPlayback(state, tl.NextToolChange(state.camCursor));
+    Tip("Skip to the next tool change");
+    ImGui::SameLine();
+  }
   if (ImGui::Button("Close###cam_sim_close")) {
     EndCamPlayback(state);
     return;

@@ -12,6 +12,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <utility>
 
 // Cutting simulation (docs/cam/simulation.md). The load-bearing test in this
 // file is the first one: playing the program to its end must leave the SAME
@@ -190,6 +191,109 @@ TEST_CASE("cam sim: the timeline is addressable by distance", "[cam]") {
   // Off both ends, rather than out of bounds.
   CHECK(tl.CursorAtDistance(-5.0) == cam::SimCursor{0, 0.0});
   CHECK(tl.CursorAtDistance(1e6) == tl.End());
+}
+
+TEST_CASE("cam sim: the distance axis is what the file actually travels",
+          "[cam]") {
+  // The slider's whole axis, checked against the file it came from: never
+  // going backwards, ending exactly at the total, and carrying the feeds the
+  // POST wrote rather than feeds invented here. A scrub bar that disagreed
+  // with the program would be a picture of a different job.
+  Job job = ProfiledBlock();
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ParseGcode(job.gcode), job.setup.rapidFeed);
+  REQUIRE(tl.Segments() > 100);
+
+  double last = 0.0;
+  for (size_t k = 0; k < tl.Segments(); k++) {
+    CHECK(tl.distance[k] >= last);
+    CHECK(tl.minutes[k] >= (k == 0 ? 0.0 : tl.minutes[k - 1]));
+    last = tl.distance[k];
+  }
+  CHECK_THAT(tl.DistanceAt(tl.End()), WithinRel(tl.totalDistance, 1e-12));
+  CHECK_THAT(tl.MinutesAt(tl.End()), WithinRel(tl.cuttingMinutes, 1e-12));
+
+  // Every cutting move carries a feed the SETUP states — the post writes
+  // feedCut in XY and feedPlunge going down, and nothing else.
+  const cam::Tool& tool = job.setup.tools.front();
+  int cutting = 0;
+  for (const cam::GMove& m : tl.program.moves) {
+    if (m.rapid)
+      continue;
+    if (m.feed <= 1e-9)
+      continue; // the first move only establishes position
+    cutting++;
+    const bool known = std::abs(m.feed - tool.feedCut) < 1e-6 ||
+                       std::abs(m.feed - tool.feedPlunge) < 1e-6;
+    INFO("line " << m.line << " feed " << m.feed);
+    CHECK(known);
+  }
+  CHECK(cutting > 50);
+}
+
+TEST_CASE("cam sim: the played path sits where the toolpath does", "[cam]") {
+  // The frame check. The backplot draws `Toolpath::moves`; the playback draws
+  // the PARSED FILE. If the post moved, rotated or offset anything on the way
+  // out, the two pictures would sit in different places on the model — which
+  // is what a user sees as "the positions are off". Same points, same order,
+  // or one of the two is lying.
+  Job job = ProfiledBlock();
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job.setup, job.doc->GetBodies());
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ParseGcode(job.gcode), job.setup.rapidFeed);
+
+  // NOT point for point: the post fits arcs and merges collinear runs, so the
+  // file is a shorter description of the same path (a rectangle profiled with
+  // a round tool comes back as four lines and four G2s). What has to match is
+  // the GEOMETRY — where the path is, and how far it travels.
+  const auto span = [](const std::vector<glm::dvec3>& pts) {
+    glm::dvec3 lo(pts.front()), hi(pts.front());
+    for (const glm::dvec3& p : pts) {
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+    return std::pair<glm::dvec3, glm::dvec3>{lo, hi};
+  };
+  const auto length = [](const std::vector<glm::dvec3>& pts) {
+    double d = 0.0;
+    for (size_t i = 1; i < pts.size(); i++)
+      d += glm::length(pts[i] - pts[i - 1]);
+    return d;
+  };
+
+  std::vector<glm::dvec3> generated;
+  for (const cam::Toolpath& tp : paths)
+    for (const cam::Move& m : tp.moves)
+      if (m.kind != cam::Move::Kind::Rapid)
+        generated.push_back(m.to);
+  std::vector<glm::dvec3> played;
+  for (const cam::GMove& m : tl.program.moves)
+    if (!m.rapid)
+      played.push_back(m.to);
+  REQUIRE(generated.size() > 100);
+  REQUIRE(played.size() > 100);
+
+  // The BOX the cutting lives in. This is the one that catches "the positions
+  // are off": a frame that shifted or turned on the way through the post
+  // moves this box, however many points describe it.
+  const auto [genLo, genHi] = span(generated);
+  const auto [playLo, playHi] = span(played);
+  INFO("generated " << genLo.x << "," << genLo.y << "," << genLo.z << " .. "
+                    << genHi.x << "," << genHi.y << "," << genHi.z);
+  INFO("played    " << playLo.x << "," << playLo.y << "," << playLo.z << " .. "
+                    << playHi.x << "," << playHi.y << "," << playHi.z);
+  // The chord tolerance an arc is re-expanded at (0.02 mm) is the budget: a
+  // ramp fitted into a G2 comes back a few microns shallower at its deepest
+  // chord. A frame error would be millimetres, not microns.
+  CHECK(glm::length(playLo - genLo) < 0.02);
+  CHECK(glm::length(playHi - genHi) < 0.02);
+
+  // And it travels the same distance, to within the chord tolerance an arc
+  // is re-expanded at.
+  INFO("generated " << length(generated) << " mm, played " << length(played)
+                    << " mm");
+  CHECK_THAT(length(played), WithinRel(length(generated), 0.01));
 }
 
 TEST_CASE("cam sim: a rapid is not counted as time it cannot know", "[cam]") {

@@ -169,8 +169,9 @@ by transform per frame — free.
 ### S5 — transport
 
 Play/pause/step/scrub, speed multiplier, jump to next operation and next tool
-change, and the readout (op, tool, line, feed). Three things this codebase
-specifically requires:
+change, and the readout (op, tool, line, feed). (All of it shipped; it needed
+two rows to fit the panel — see [as built](#where-it-differs-from-the-plan).)
+Three things this codebase specifically requires:
 
 - **Frame pacing.** `FramePacer` (`src/app/FramePacer.h`) parks the app on
   `glfwWaitEvents` when nothing is happening; playback needs its own wake
@@ -217,15 +218,31 @@ almost answer:
 
 ## Gates
 
-- Headless: `SimulateTo(end)` is **bit-identical** to `Simulate` — the picture
-  and the verdict cannot drift apart, which is the premise of the whole design.
-- Headless: a known map (a 10 mm pocket in a 50 mm block) meshes to the right
-  bounds and the right enclosed volume; run-merging changes the mesh, never the
-  volume.
-- Headless: the parsed feed is modal and matches what the post emitted; the
-  distance axis is monotonic and ends at the toolpath's own length.
-- GUI: play → scrub → exit restores body visibility and leaves no ghost (the
-  U11 class), and a screenshot of a half-cut pocket goes in the CAM suite.
+What actually gates it, in `tests/test_cam_sim.cpp` (headless) and
+`GuiTestsCam.cpp::simulation_plays_and_gives_it_back`:
+
+- **`SeekTo(End())` is bit-identical to `Inspect`'s machined map.** The
+  premise of the whole design: the picture and the verdict cannot drift apart.
+  (Against `Inspect`, not `Simulate` — `Simulate` applies rapids, and the
+  playback follows `Inspect` in checking them instead.)
+- **Scrubbing past and back lands on the same map**, which only holds because
+  going backwards re-runs from the pristine block.
+- **The mesh is the map**: a pocket-in-a-block meshes to the right bounds and
+  the right enclosed volume, and the volume equals the columns the map
+  describes — run-merging may change the triangle count, never the volume. A
+  cut BELOW the stock bottom still closes.
+- **Merging keeps its promise**: `triangles < cells / 4` on a machined block.
+- **The distance axis is what the file travels**: monotonic, ending exactly at
+  the total, and every cutting move carries a feed the SETUP states rather
+  than one invented here.
+- **The parser keeps the feed, the tool change and the operation** — including
+  that `(SKIPPED op 9: …)` does not read as operation 9 starting.
+- **A rapid is not counted as time it cannot know**, and the distance axis is
+  the same whether or not a traverse rate is stated.
+- **GUI**: the button refuses in words before anything is generated; play →
+  step → scrub back → skip-to-op all move the cursor; mid-playback there is a
+  real stock mesh and a real tool instance; and closing leaves no session
+  state, no stock mesh and no tool instance (the U11 class).
 - **No format bump.** Playback is session state; nothing here serializes.
 
 ## As built
@@ -306,6 +323,19 @@ simulation did something without owning a renderer.
 - **`cam_simulate` generates the toolpaths if there are none.** A GUI user has
   pressed Generate; an agent has not, and refusing would only teach it to
   press an invisible button first.
+- **`SimulateTo(...)` became `StockSim::SeekTo`.** The resumable simulation
+  needs somewhere to keep the pristine block and the cursor, and threading
+  both through a free function only moved that state to the caller.
+- **The RPC has no `render` flag.** The existing `screenshot` RPC works while
+  a playback is open — that is how the pictures in this doc were taken — so a
+  second way to ask for the same still would only be a second thing to keep
+  working.
+- **The transport is two rows, not one.** The CAM panel is 217 px wide; seven
+  buttons on one line run off the end of it. Row one is the moves (start,
+  back one, play/pause, forward one, end), row two the jumps (next operation,
+  next tool change, close). The tool-change button appears only when the job
+  HAS a tool change — one that could only ever jump to the end would be a
+  button lying about the job.
 
 ### Still open
 

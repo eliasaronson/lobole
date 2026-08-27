@@ -830,6 +830,28 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::AppendCamToolpathOverlay(*s_App, prims);
     IM_CHECK(!prims.empty());
 
+    // And there is a PICTURE, not just a cursor: a surface for the half-cut
+    // block, and the cutter standing in it. Asserting the renderers hold real
+    // geometry is what a screenshot would be checking anyway, without a
+    // reference image to rot.
+    IM_CHECK(s_App->stockRenderer != nullptr);
+    IM_CHECK(s_App->stockRenderer->HasMesh());
+    IM_CHECK(s_App->camToolInstance != 0);
+
+    // Step forward one move, then back: the buttons a person uses to look at
+    // the move a verdict named.
+    const cam::SimCursor mid = s_App->camCursor;
+    ctx->ItemClick("###cam_sim_step");
+    ctx->Yield(2);
+    IM_CHECK(mid < s_App->camCursor);
+    ctx->ItemClick("###cam_sim_stepback");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camCursor < mid || s_App->camCursor == mid);
+    // Skipping to the next operation lands ON an operation boundary.
+    ctx->ItemClick("###cam_sim_nextop");
+    ctx->Yield(2);
+    IM_CHECK(mid < s_App->camCursor);
+
     // Hand the dock node back before the assertions that could fail late.
     if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel)) {
       ctx->ItemClick(modelWin->TabId);
