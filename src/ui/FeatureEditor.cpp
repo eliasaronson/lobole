@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "cad/CADMaterials.h"
+#include "cad/SketchPlane.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/ThreadStandards.h"
@@ -497,7 +498,9 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
   // Parent plane (Offset/Angled only): the three base planes, then every
   // datum earlier in the history.
   if (dp.kind != DatumPlaneKind::ThroughPoints) {
-    std::vector<const char*> labels = {"Front (XY)", "Top (XZ)", "Right (YZ)"};
+    std::vector<const char*> labels = {SketchPlane::BasePlaneLabel(0),
+                                       SketchPlane::BasePlaneLabel(1),
+                                       SketchPlane::BasePlaneLabel(2)};
     std::vector<uint64_t> ids = {0, 0, 0}; // base planes carry id 0
     std::vector<PlaneType> bases = {PlaneType::XY, PlaneType::XZ,
                                     PlaneType::YZ};
@@ -662,7 +665,9 @@ void SourceBodyCombo(AppState& state, Feature& owner, uint64_t& sourceId,
 void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
                    PlaneType& basePlane, size_t index, bool commit,
                    const std::function<void()>& onChanged = {}) {
-  std::vector<const char*> labels = {"Front (XY)", "Top (XZ)", "Right (YZ)"};
+  std::vector<const char*> labels = {SketchPlane::BasePlaneLabel(0),
+                                     SketchPlane::BasePlaneLabel(1),
+                                     SketchPlane::BasePlaneLabel(2)};
   std::vector<uint64_t> ids = {0, 0, 0};
   std::vector<PlaneType> bases = {PlaneType::XY, PlaneType::XZ, PlaneType::YZ};
   for (size_t i = 0; i < index; i++) {

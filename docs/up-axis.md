@@ -1,10 +1,22 @@
 # Which axis is up — the Y-up decision, and undoing it
 
-> Status: **PLANNED** (2026-08-27, revised 2026-08-28 after a code audit — every
-> file:line below was verified against the tree). Not started. Written after
-> the CAM cutting simulation drew a solid spindle lying on its side
-> ([cam/simulation.md](cam/simulation.md)) — the fourth subsystem to collide
-> with the same choice.
+> Status: **SHIPPED 2026-08-28** — Z1+Z2 (the constant, the routing, the
+> gate) in one commit, Z3+Z4 (the flip + render layer) in the next; all
+> three suites green, screenshot pass done (upright iso/front/top, RT still
+> with a horizontal floor and an upright HDRI room, CAM deriving a pocket on
+> the visual top face with zero CAM changes). What the plan predicted held:
+> the flip itself was one line, the named-view/plane/gravity fallout came
+> out through `conv::` automatically, and the hand-work was exactly the
+> predicted list — four equirect sites, the stock shader's light rig, the
+> glTF swizzle, two smoke-test view expectations, four GUI tests staged
+> Y-up, and one plate built thin-along-Y in two drawing tests. One surprise:
+> the Camera CONSTRUCTOR seeded its roll from the identity quaternion's +Y
+> and needed an explicit `SetUp(kWorldUp)`.
+>
+> (Original plan below, kept as written 2026-08-27, revised 2026-08-28 after
+> a code audit. Written after the CAM cutting simulation drew a solid
+> spindle lying on its side ([cam/simulation.md](cam/simulation.md)) — the
+> fourth subsystem to collide with the same choice.)
 >
 > This is a **sensitive, wide, shallow** change. It touches almost nothing
 > deeply and almost everything a little, and the test suite is known to be

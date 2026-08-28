@@ -222,9 +222,9 @@ std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
     glm::vec3 color;
   };
   const PlaneDef defs[3] = {
-      {{1, 0, 0}, {0, 1, 0}, {0.35f, 0.45f, 0.75f}}, // Front (XY)
-      {{1, 0, 0}, {0, 0, 1}, {0.40f, 0.65f, 0.45f}}, // Top (XZ)
-      {{0, 1, 0}, {0, 0, 1}, {0.70f, 0.40f, 0.42f}}, // Right (YZ)
+      {{1, 0, 0}, {0, 1, 0}, {0.35f, 0.45f, 0.75f}}, // XY (Top)
+      {{1, 0, 0}, {0, 0, 1}, {0.40f, 0.65f, 0.45f}}, // XZ (Front)
+      {{0, 1, 0}, {0, 0, 1}, {0.70f, 0.40f, 0.42f}}, // YZ (Right)
   };
   for (int i = 0; i < 3; i++) {
     glm::vec3 color = defs[i].color * (i == hoveredPlane ? 2.0f : 1.0f);

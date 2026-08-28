@@ -18,8 +18,11 @@ Camera::Camera()
       m_maxDistance(100000.0f) {
 
   // Establish the default iso view (far enough out for a new part workspace):
-  // sets m_distance and m_orientation from the look-at.
+  // sets m_distance and m_orientation from the look-at. SetPosition keeps
+  // the CURRENT up, and the identity quaternion's up is +Y — re-roll to the
+  // world's up explicitly or the fresh view is tilted.
   SetPosition(DefaultIsometricPosition());
+  SetUp(conv::kWorldUpF);
   UpdateProjectionMatrix();
 }
 

@@ -47,9 +47,11 @@ layout(set = 0, binding = 4) uniform sampler2DShadow uShadowMap;
 layout(set = 0, binding = 5) uniform sampler2D uAO;
 
 const float PI = 3.14159265359;
-// Must match IBL.cpp DirToEquirectUV exactly.
+// Must match IBL.cpp DirToEquirectUV exactly. The HDRI format is Y-polar;
+// the world is Z-up, so world dirs swizzle into env space first.
 vec2 dirToUV(vec3 d) {
     d = normalize(d);
+    d = vec3(d.x, d.z, -d.y); // world -> env
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2(u, v);

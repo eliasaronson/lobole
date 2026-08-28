@@ -17,9 +17,10 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
+    // A plate lying flat: 80 wide (X), 60 deep (Y), 8 thick along world up.
     ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 80.0f);
-    ctx->ItemInputValue("//Box###ToolWindow/Height/##Height", 8.0f);
-    ctx->ItemInputValue("//Box###ToolWindow/Depth/##Depth", 60.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Height/##Height", 60.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Depth/##Depth", 8.0f);
     ctx->Yield(2); // editing a committed feature commits as you type
 
     // A drawing tab, from the tab bar's + menu.
@@ -41,9 +42,10 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     const auto& views = s_App->drawing->GetViews();
     IM_CHECK_EQ(views.size(), (size_t)2);
 
-    // What each named view actually SHOWS. Up is +Y here, so the front of a
-    // plate 80 wide and 8 thick is 80 x 8 — not the 80 x 60 a Z-up table
-    // produced, which is the top view wearing the wrong name.
+    // What each named view actually SHOWS: the front of a plate 80 wide and
+    // 8 thick is 80 x 8, and looking down on it gives the 80 x 60 face —
+    // the axis-swap that a mangled orientation table produces is exactly
+    // what this catches (docs/up-axis.md).
     // No IM_CHECK in here: its failure path returns void, which makes the
     // lambda's return type ambiguous. An unprojected view comes back as
     // zero and fails the size checks below just as loudly.

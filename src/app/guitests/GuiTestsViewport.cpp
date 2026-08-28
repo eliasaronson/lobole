@@ -514,7 +514,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
       const auto f = Measure::DescribeFaceAt(body, idx);
       if (!f)
         continue;
-      if (f->normal.y > 0.99f)
+      if (glm::dot(glm::dvec3(f->normal), conv::kWorldUp) > 0.99)
         top = name;
       else if (f->normal.x > 0.99f)
         side = name;
@@ -800,9 +800,9 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
                  s_App->camera->GetTarget().x, s_App->camera->GetTarget().y,
                  s_App->camera->GetTarget().z);
     IM_CHECK(glm::length(s_App->camera->GetTarget() - fitted) < 1.0f);
-    // …and it did turn: looking along -Z, the app's "Front".
+    // …and it did turn: looking along -kWorldFront, at the part's front.
     const glm::vec3 fwd = glm::normalize(s_App->camera->GetForward());
-    IM_CHECK(std::abs(fwd.z + 1.0f) < 0.02f);
+    IM_CHECK(glm::length(fwd + glm::vec3(conv::kWorldFront)) < 0.02f);
   };
 
   // Fitting the view with a tool window open puts the model in the band the

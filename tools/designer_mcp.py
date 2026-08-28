@@ -110,7 +110,7 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 - DatumPlane: {{"type": "DatumPlane", "name": str,
   "kind": "offset"|"angled"|"through_points", ...}}
   offset/angled parent: "parent_id"?: <DatumPlane id> or
-  "base_plane": "xy"|"xz"|"yz" (xy = Front, xz = Top, yz = Right)
+  "base_plane": "xy"|"xz"|"yz" (Z is up: xy = Top, xz = Front, yz = Right)
   offset: "offset": num, "offset_expr"?: str, "flip"?: bool
   angled: "axis": <axis ref>, "angle_deg": num, "angle_expr"?: str
   through_points: "points": [[x,y,z],[x,y,z],[x,y,z]]
@@ -224,6 +224,8 @@ MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
 
 WORKFLOW = """You are modeling in Designer, a parametric B-Rep CAD app
 (sketch → constrain → extrude/revolve, feature history, expressions).
+The world is Z-up: +Z is height, the XY plane is the Top plane / the floor,
+gravity pulls -Z — the usual CAD and G-code convention.
 
 The loop that works — follow it every time:
 1. Restate the brief as named dimensions, then set_variable for each driving
@@ -742,7 +744,7 @@ def measure(a: dict, b: dict | None = None,
           "body's faces and edges, plus the body's created_by feature id. "
           "Every face carries kind ('plane'|'cylinder'|'cone'|'sphere'|"
           "'other'), area, `centroid` [x,y,z], and outward `normal` [x,y,z] "
-          "— find 'the back face' or 'the +Y pocket floors' by geometry "
+          "— find 'the back face' or 'the +Z pocket floors' by geometry "
           "directly, NO select_face probe loop needed; every edge carries "
           "kind ('line'|'circle'|'arc'|'other'), length, `midpoint`, and "
           "radius when circular — identify bore rims / "

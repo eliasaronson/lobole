@@ -639,16 +639,18 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->sketchEdit.pickingPlane);
     IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
 
-    // The default cylinder stands on +Y at x = -4 (NextSpot): radius 0.8,
-    // spanning y -1..1. Look at it from +Z so the lateral face fills the
-    // middle of the view (a model face always outranks the base planes).
+    // The default cylinder stands along world up at x = -4 (NextSpot):
+    // radius 0.8, spanning -1..1 along up. Look at it from the front so the
+    // lateral face fills the middle of the view (a model face always
+    // outranks the base planes).
     const glm::vec3 axis(-4.0f, 0.0f, 0.0f);
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(axis);
-    s_App->camera->SetUp(glm::vec3(0, 1, 0));
-    s_App->camera->SetPosition(axis + glm::vec3(0, 0, 10));
+    s_App->camera->SetUp(conv::kWorldUpF);
+    s_App->camera->SetPosition(axis + 10.0f * glm::vec3(conv::kWorldFront));
     ctx->Yield(2);
-    ctx->MouseMoveToPos(WorldToWindow(axis + glm::vec3(0.0f, 0.0f, 0.8f)));
+    ctx->MouseMoveToPos(
+        WorldToWindow(axis + 0.8f * glm::vec3(conv::kWorldFront)));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK(s_App->sketchEdit.pickingPlane); // still armed
@@ -657,11 +659,11 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->sketchEdit.actionMsg.empty()); // and it says why
 
     // The flat top cap is accepted.
-    s_App->camera->SetTarget(axis + glm::vec3(0, 1, 0));
-    s_App->camera->SetUp(glm::vec3(0, 0, -1));
-    s_App->camera->SetPosition(axis + glm::vec3(0, 11, 0));
+    s_App->camera->SetTarget(axis + conv::kWorldUpF);
+    s_App->camera->SetUp(-glm::vec3(conv::kWorldFront));
+    s_App->camera->SetPosition(axis + 11.0f * conv::kWorldUpF);
     ctx->Yield(2);
-    ctx->MouseMoveToPos(WorldToWindow(axis + glm::vec3(0.0f, 1.0f, 0.0f)));
+    ctx->MouseMoveToPos(WorldToWindow(axis + conv::kWorldUpF));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK(!s_App->sketchEdit.pickingPlane);

@@ -3,6 +3,7 @@
 
 #include "TestIO.h"
 #include "cad/CADKernel.h"
+#include "core/Conventions.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/drawing/DrawingDocument.h"
@@ -109,8 +110,9 @@ int EdgeCount(const TopoDS_Shape& shape) {
 // a square plate, a swapped axis is invisible.
 TEST_CASE("Named view orientations agree with the model's up axis",
           "[drawing][hlr]") {
-  // Width 80 along X, height 8 along Y (up), depth 60 along Z.
-  CADShape plate = CADKernel::Instance().CreateBox(80.0, 8.0, 60.0);
+  // Width 80 along X, depth 60 along Y, thickness 8 along Z (up): a plate
+  // lying flat on the world's floor.
+  CADShape plate = CADKernel::Instance().CreateBox(80.0, 60.0, 8.0);
   REQUIRE(plate.IsValid());
 
   const auto extentOf = [&](ViewOrientation o) {
@@ -153,7 +155,7 @@ TEST_CASE("Named view orientations agree with the model's up axis",
   const auto [frontRight, frontUp] = axes(O::Front);
   CHECK(glm::length(axes(O::Top).first - frontRight) < 1e-9);
   CHECK(glm::length(axes(O::Right).second - frontUp) < 1e-9);
-  CHECK(frontUp == glm::dvec3(0, 1, 0)); // the world's up, not the CAD habit
+  CHECK(frontUp == conv::kWorldUp); // named views stand up in the world frame
 }
 
 TEST_CASE("HLR box front view traces every curve to a source edge",

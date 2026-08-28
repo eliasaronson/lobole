@@ -244,7 +244,8 @@ def main():
         d.call("undo")  # camera/view state functions without a GUI
         v = d.call("view", name="front")
         offset = [p - t for p, t in zip(v["position"], v["target"])]
-        expect(abs(offset[0]) < 1e-4 and offset[2] > 0, "front view headless")
+        # Z-up world: the front-view camera sits toward -Y (docs/up-axis.md).
+        expect(abs(offset[0]) < 1e-4 and offset[1] < 0, "front view headless")
         # Direct camera control (set_camera) is pure state — works headless.
         v = d.call("set_camera", target=[1.0, 2.0, 3.0], distance=250.0)
         expect(abs(v["distance"] - 250.0) < 1e-3, "set_camera distance")

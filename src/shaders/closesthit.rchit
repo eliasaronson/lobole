@@ -77,9 +77,11 @@ const float PI = 3.14159265359;
 const float kSunCos = 0.9994; // shadow-ray cone, ~2 degree half-angle
 const float kAORadius = 2.0;  // ambient-occlusion ray reach
 
-// Must match IBL.cpp DirToEquirectUV / mesh.frag dirToUV exactly.
+// Must match IBL.cpp DirToEquirectUV / mesh.frag dirToUV exactly (including
+// the world -> env swizzle: the HDRI is Y-polar, the world Z-up).
 vec2 dirToUV(vec3 d) {
     d = normalize(d);
+    d = vec3(d.x, d.z, -d.y); // world -> env
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2(u, v);

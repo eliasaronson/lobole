@@ -22,8 +22,11 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
 layout(binding = 8, set = 0) uniform sampler2D uEnvironment;
 
 const float PI = 3.14159265359;
+// Must match IBL.cpp DirToEquirectUV exactly (including the world -> env
+// swizzle: the HDRI is Y-polar, the world Z-up).
 vec2 dirToUV(vec3 d) {
     d = normalize(d);
+    d = vec3(d.x, d.z, -d.y); // world -> env
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2(u, v);

@@ -1903,6 +1903,11 @@ class Replayer:
 
     # ---- mirror (feature replay) ---------------------------------------
 
+    # Onshape's plane query tokens mapped to their raw plane GEOMETRY.
+    # Coordinates stream in unrotated, so these stay geometric whatever
+    # either app calls "up" — an imported model keeps Onshape's own
+    # orientation and may need a re-orient in the Z-up world
+    # (docs/up-axis.md).
     BASE_PLANES = {  # query token -> (point mm, unit normal)
         "Frontplane": ((0, 0, 0), (0, 0, 1)),
         "Topplane": ((0, 0, 0), (0, 1, 0)),

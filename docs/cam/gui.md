@@ -192,11 +192,12 @@ left dock node without `NoFocusOnAppearing`, so on first launch it took the
 tab from the model tree. Three unrelated tests had been failing on it
 ("unable to hover Model"); a user would have said their tree was gone.
 
-**A convention worth knowing:** CAM's Z is the spindle axis, but the view
-cube's *Top* is +Y — the app renders Y as up. The plan view for a milling job
-is therefore **Front**. Nothing here assumes otherwise (every depth comes
-from the face you clicked), but the names disagree, and picking "the top
-face" from the Top view will land on a wall and be refused.
+**A convention that used to be worth knowing, resolved:** CAM's Z is the
+spindle axis, and the app's world is Z-up since docs/up-axis.md (2026-08-28)
+— the plan view for a 3-axis job simply IS the Top view, and picking "the
+top face" from the Top view derives an operation instead of being refused as
+a wall. "Look down the spindle" remains for indexed setups, whose spindle is
+not the world's up.
 
 Deliberately still open at v1, and **two of the three have since shipped**
 (CAM phase 2, 2026-08-21): helix entry for pockets too small to ramp into is

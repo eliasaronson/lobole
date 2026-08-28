@@ -800,14 +800,15 @@ def main():
         # Standard views: instant (no animation), fit + exact axis alignment
         d.call("new_project")
         d.call("add_feature", feature=BOX)
-        v = d.call("view", name="front")  # camera on +Z of the box center
-        offset = [p - t for p, t in zip(v["position"], v["target"])]
-        expect(abs(offset[0]) < 1e-4 and abs(offset[1]) < 1e-4
-               and offset[2] > 1.0, "front view puts the camera on +Z")
-        v = d.call("view", name="top")
+        # Z-up world (docs/up-axis.md): front camera toward -Y, top on +Z.
+        v = d.call("view", name="front")
         offset = [p - t for p, t in zip(v["position"], v["target"])]
         expect(abs(offset[0]) < 1e-4 and abs(offset[2]) < 1e-4
-               and offset[1] > 1.0, "top view puts the camera on +Y")
+               and offset[1] < -1.0, "front view puts the camera on -Y")
+        v = d.call("view", name="top")
+        offset = [p - t for p, t in zip(v["position"], v["target"])]
+        expect(abs(offset[0]) < 1e-4 and abs(offset[1]) < 1e-4
+               and offset[2] > 1.0, "top view puts the camera on +Z")
         st = d.call("get_state")  # the snap is already committed, not animating
         expect(all(abs(a - b) < 1e-4 for a, b in
                    zip(st["camera"]["position"], v["position"])),

@@ -101,9 +101,11 @@ def main():
             "width": 14, "height": 70, "depth": 120})
 
         # A fixed camera: this test compares regions by screen fraction, so it
-        # must not depend on fit heuristics that change with the model.
+        # must not depend on fit heuristics that change with the model. The
+        # scene above is staged with its slot rising along +Y, so the up is
+        # pinned explicitly rather than inheriting the world default.
         d.call("set_camera", target=[200, 40, 100],
-               direction=[-0.35, 0.55, 0.75], distance=520)
+               direction=[-0.35, 0.55, 0.75], up=[0, 1, 0], distance=520)
         # Shadows OFF in both frames. With them on, the difference between
         # AO-on and AO-off is largest inside shadows — not because AO is wrong
         # there, but because ACES is steeper in dark regions. That artifact of

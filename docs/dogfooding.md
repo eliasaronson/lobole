@@ -350,8 +350,10 @@ against a part whose three dimensions are all different:
 | top | 80 x 8 | 80 x 60 |
 | right | 8 x 60 | 60 x 8 |
 
-Every one matches a **Z-up** convention exactly, and this app is **Y-up**
-(the view cube's Top is +Y). `OrientationAxes` in `DrawingDocument.cpp` was a
+Every one matches a **Z-up** convention exactly, and this app was **Y-up**
+at the time (the view cube's Top was +Y; the world has been Z-up since
+docs/up-axis.md, 2026-08-28, which reverted this fix in the right direction).
+`OrientationAxes` in `DrawingDocument.cpp` was a
 Z-up table — its Iso case says so in a comment — so a "front" view was really
 the top, on every drawing anyone had ever made. Fixed as a pure rotation of
 the basis, which preserves handedness and therefore cannot mirror anything.

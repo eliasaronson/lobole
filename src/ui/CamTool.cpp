@@ -396,12 +396,10 @@ void DrawCamToolWindow(AppState& state) {
     ImGui::PopTextWrapPos();
   }
 
-  // The view a machinist works in, by the name a machinist uses. The app's up
-  // is +Y and CAM's is +Z, so the plan view — looking down the spindle — is
-  // filed under "Front" in Standard Views, and the entry called "Top" shows
-  // the part edge-on (docs/cam/dogfood-round.md, round 2). Rather than rename
-  // the CAD frame, CAM offers the view it means, in the frame this setup cuts
-  // in: an indexed job looks down ITS spindle, not the world's.
+  // The plan view of THIS setup. For a plain 3-axis job (rotationA = 0) the
+  // spindle is world up and this equals the Top view — the world is Z-up
+  // since docs/up-axis.md — but an indexed setup looks down ITS spindle,
+  // not the world's, and the stock-framed zoom is useful either way.
   if (ImGui::Button("Look down the spindle###cam_view_spindle") &&
       state.camera != nullptr && setup != nullptr) {
     // The camera goes where the spindle is and looks the way it looks, with
@@ -436,8 +434,9 @@ void DrawCamToolWindow(AppState& state) {
       state.camera->SnapToView(dir, up);
     }
   }
-  ImGui::SetItemTooltip("Plan view, in the frame this setup cuts in — what "
-                        "the machine sees, whatever the view cube calls it");
+  ImGui::SetItemTooltip("Plan view in the frame this setup cuts in, framed "
+                        "on the stock — for an indexed setup this is the "
+                        "rotated spindle, not the world's Top");
 
   ImGui::Separator();
   ImGui::TextDisabled("Machine it");

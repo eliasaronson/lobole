@@ -161,8 +161,10 @@ def main():
                "sketch_id": sk["id"], "distance": 1, "mode": "cut",
                "end_mode": "through_all", "reversed": True})
         d.call("create_drawing", name="r2-dwg", sheet={"size": "a4"})
+        # Top view: the holes are drilled along Z (up), so the plan view is
+        # the one that shows them as circles (Z-up world, docs/up-axis.md).
         v2 = d.call("add_drawing_view", source="r2plate",
-                    orientation="front")
+                    orientation="top")
         g2 = d.call("list_drawing_geometry", view=v2["id"])["geometry"]
         vis = [e for e in g2 if e["visible"]]
         circles = sorted([e for e in vis if e["type"] == "circle"],

@@ -33,9 +33,14 @@ constexpr int kBrdfSamples = 1024;
 
 using Image = IBLPrecompute::Image;
 
-glm::vec2 DirToEquirectUV(const glm::vec3& d) {
+// The equirect HDRI format is Y-polar (its zenith is env +Y); the world is
+// Z-up. World directions swizzle into env space first — env = (x, z, -y) —
+// and back out in the inverse. Must match the shader copies exactly
+// (mesh.frag, closesthit.rchit, miss.rmiss).
+glm::vec2 DirToEquirectUV(const glm::vec3& dIn) {
+  const glm::vec3 d(dIn.x, dIn.z, -dIn.y); // world -> env
   float u = std::atan2(d.z, d.x) / (2.0f * kPI) + 0.5f;
-  float v = std::acos(std::clamp(d.y, -1.0f, 1.0f)) / kPI; // 0 at +Y (top)
+  float v = std::acos(std::clamp(d.y, -1.0f, 1.0f)) / kPI; // 0 at env zenith
   return {u, v};
 }
 
@@ -43,7 +48,9 @@ glm::vec3 EquirectUVToDir(float u, float v) {
   float phi = (u - 0.5f) * 2.0f * kPI;
   float theta = v * kPI;
   float sinT = std::sin(theta);
-  return {sinT * std::cos(phi), std::cos(theta), sinT * std::sin(phi)};
+  const glm::vec3 e{sinT * std::cos(phi), std::cos(theta),
+                    sinT * std::sin(phi)};
+  return {e.x, -e.z, e.y}; // env -> world (inverse of the swizzle above)
 }
 
 // Bilinear sample of an equirectangular image: wrap in u (longitude), clamp in

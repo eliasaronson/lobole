@@ -1,5 +1,6 @@
 #include "cad/SketchPlane.h"
 #include "core/Conventions.h"
+#include <array>
 #include <glm/gtc/matrix_transform.hpp>
 
 SketchPlane::SketchPlane(PlaneType type, const glm::vec3& origin)
@@ -62,6 +63,22 @@ const char* SketchPlane::StandardPlaneName(PlaneType type) {
 }
 
 void SketchPlane::SetNameFromType() { m_name = StandardPlaneName(m_type); }
+
+const char* SketchPlane::BasePlaneLabel(int index) {
+  // Built from StandardPlaneName so a combo row can never disagree with the
+  // plane object it selects ("Top" is whichever plane the frame says).
+  static const std::array<std::string, 3> kLabels = [] {
+    const char* suffix[3] = {" (XY)", " (XZ)", " (YZ)"};
+    std::array<std::string, 3> a;
+    for (int i = 0; i < 3; i++) {
+      std::string name = StandardPlaneName(static_cast<PlaneType>(i));
+      a[static_cast<size_t>(i)] =
+          name.substr(0, name.find(' ')) + suffix[i]; // "Top Plane" -> "Top"
+    }
+    return a;
+  }();
+  return kLabels[static_cast<size_t>(index)].c_str();
+}
 
 glm::mat4 SketchPlane::GetPlaneMatrix() const {
   // Create transformation matrix from plane coordinates to world coordinates

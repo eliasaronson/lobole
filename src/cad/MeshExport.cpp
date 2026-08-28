@@ -7,6 +7,7 @@
 #include <Message_ProgressRange.hxx>
 #include <Quantity_ColorRGBA.hxx>
 #include <RWGltf_CafWriter.hxx>
+#include <RWMesh_CoordinateSystemConverter.hxx>
 #include <RWObj_CafWriter.hxx>
 #include <Standard_Version.hxx>
 // RWPly_CafWriter arrived in OCC 7.7; Ubuntu 24.04 still ships 7.6.3, and
@@ -134,6 +135,15 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
     bool ok = false;
     if (isGltf) {
       RWGltf_CafWriter writer(path.c_str(), /*theIsBinary=*/ext == ".glb");
+      // glTF is Y-up by spec and the world here is Z-up: without this
+      // converter every exported model lies on its side in external viewers
+      // — the exact boundary Blender's exporter swizzles at. OBJ/PLY below
+      // stay in world coordinates on purpose: they have no official up axis
+      // and their consumers here are CAD-shaped.
+      RWMesh_CoordinateSystemConverter csc;
+      csc.SetInputCoordinateSystem(RWMesh_CoordinateSystem_Zup);
+      csc.SetOutputCoordinateSystem(RWMesh_CoordinateSystem_glTF);
+      writer.SetCoordinateSystemConverter(csc);
       ok = writer.Perform(doc, fileInfo, progress);
     } else if (ext == ".obj") {
       RWObj_CafWriter writer(path.c_str());

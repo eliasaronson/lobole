@@ -12,17 +12,12 @@
 // functions and compares real values, so a hand-edited copy of a table fails
 // here even if it greps clean.
 //
-// NOTE (Z3): when kWorldUp flips to +Z, CAM's setup frame (Z = spindle)
-// starts agreeing with the world frame at rotationA = 0; add the assertion
-//   FromSetupSpace(identity setup, +Z) == conv::kWorldUp
-// here at that point. Today it would fail by design — that disagreement IS
-// the standing bug the flip removes.
-
 #include <catch2/catch_test_macros.hpp>
 
 #include "cad/SketchPlane.h"
 #include "core/Conventions.h"
 #include "core/Measure.h"
+#include "core/cam/CamToolpath.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/fem/FemStudy.h"
 #include "render/Camera.h"
@@ -145,6 +140,18 @@ TEST_CASE("the measure tool's facing words follow world up", "[world_up]") {
   CHECK(std::strcmp(FacingWord(conv::kWorldRight), "side") == 0);
   // A diagonal has no word.
   CHECK(FacingWord(glm::normalize(glm::dvec3(1, 1, 1))) == nullptr);
+}
+
+TEST_CASE("CAM's setup frame agrees with the world frame", "[world_up]") {
+  // Setup space is Z-up-spindle by machine-tool convention (ISO 841). For a
+  // plain 3-axis job (rotationA = 0) it must be the IDENTITY on the world:
+  // this disagreement — spindle +Z in a world that called +Y up — was the
+  // fourth axis bug and the one docs/up-axis.md exists for. If this fails,
+  // either the world flipped without CAM's knowledge or someone added a
+  // compensating rotation that must not exist.
+  cam::Setup setup;
+  CHECK(Eq(cam::FromSetupSpace(setup, glm::dvec3(0, 0, 1)), conv::kWorldUp));
+  CHECK(Eq(cam::FromSetupSpace(setup, glm::dvec3(1, 0, 0)), conv::kWorldRight));
 }
 
 TEST_CASE("the default camera stands upright above the floor", "[world_up]") {

@@ -29,6 +29,9 @@ public:
   // "Front Plane" / "Top Plane" / "Right Plane" for a base plane type,
   // derived from the world frame (core/Conventions.h).
   static const char* StandardPlaneName(PlaneType type);
+  // Combo-row spelling, name + geometry: "Top (XY)". Index 0/1/2 = XY/XZ/YZ,
+  // matching the serialized base-plane order.
+  static const char* BasePlaneLabel(int index);
 
   // Coordinate transformations
   glm::mat4 GetPlaneMatrix() const;        // Local to world transform

@@ -23,8 +23,13 @@ namespace conv {
 // equivalently, from the part toward the front-view camera. The three form a
 // right-handed frame: kWorldRight x kWorldUp == kWorldFront (checked by the
 // gate), so flipping kWorldUp requires re-deriving kWorldFront with it.
-inline constexpr glm::dvec3 kWorldUp{0.0, 1.0, 0.0};
-inline constexpr glm::dvec3 kWorldFront{0.0, 0.0, 1.0};
+//
+// Z-up, front toward -Y: the frame every convention we interoperate with
+// uses — G-code's spindle, drawing practice, FreeCAD/SolidWorks/Onshape/
+// Blender. The app was Y-up until 2026-08-28 (the renderer's habit, adopted
+// as a model convention); docs/up-axis.md is the history and the flip.
+inline constexpr glm::dvec3 kWorldUp{0.0, 0.0, 1.0};
+inline constexpr glm::dvec3 kWorldFront{0.0, -1.0, 0.0};
 inline constexpr glm::dvec3 kWorldRight{1.0, 0.0, 0.0};
 
 // Float convenience for the render/UI layer.

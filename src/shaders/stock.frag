@@ -16,9 +16,11 @@ layout(location = 0) out vec4 outColor;
 // are legible, not as a finished part competing with the model beside it.
 // Three fixed directional terms, no IBL, no shadows: this is the FieldRenderer
 // precedent (its own pipeline, its own simple shading) and the same trade.
-const vec3 kKey  = normalize(vec3(-0.45, 0.75, 0.5));
-const vec3 kFill = normalize(vec3(0.6, 0.35, 0.3));
-const vec3 kRim  = normalize(vec3(0.2, -0.8, -0.4));
+// Z-up world (docs/up-axis.md): key from above-behind-left, fill low right,
+// rim from below-front for the step edges.
+const vec3 kKey  = normalize(vec3(-0.45, -0.5, 0.75));
+const vec3 kFill = normalize(vec3(0.6, -0.3, 0.35));
+const vec3 kRim  = normalize(vec3(0.2, 0.4, -0.8));
 
 void main() {
     if (any(greaterThan(fragClipDist, vec4(0.0)))) discard; // section planes

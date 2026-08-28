@@ -12,8 +12,9 @@ literals.
 ## What was wrong
 
 **Gravity pulled sideways.** The "Gravity (self-weight)" checkbox set
-`(0, 0, −9.81)`. World up in this app is **+Y** (`Camera::Up`, the XZ "top"
-plane, the height axis of every primitive), so self-weight pushed the part
+`(0, 0, −9.81)`. World up in this app was **+Y** at the time (Z-up since
+docs/up-axis.md, 2026-08-28 — the default now derives from
+`conv::kGravity`), so self-weight pushed the part
 toward −Z: a cantilever sagged in the wrong direction *and* bent about the
 wrong axis, which for a 60 × 6 × 10 beam is a 2.8× stiffness difference. The
 number that came out was wrong, and it looked like an answer.

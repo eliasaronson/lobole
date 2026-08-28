@@ -3,6 +3,7 @@
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/OccurrencePanel.h"
 
+#include "cad/SketchPlane.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Occurrence.h"
@@ -301,7 +302,9 @@ void DrawMeasureToolWindow(AppState& state) {
 // tabs; the sections themselves are view state and outlive the window.
 void DrawSectionToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "Section");
-  const char* planes[] = {"Front (XY)", "Top (XZ)", "Right (YZ)"};
+  const char* planes[] = {SketchPlane::BasePlaneLabel(0),
+                          SketchPlane::BasePlaneLabel(1),
+                          SketchPlane::BasePlaneLabel(2)};
 
   glm::vec3 bmin, bmax;
   const bool haveScene = VisibleSceneBounds(state, bmin, bmax);
