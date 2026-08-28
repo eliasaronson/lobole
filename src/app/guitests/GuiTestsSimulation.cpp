@@ -23,10 +23,9 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
-    // -Y. World up is +Y here, so self-weight along -Z sagged the part
-    // sideways and bent it about the wrong axis.
-    IM_CHECK(std::abs(study->gravity.y + 9.81) < 1e-9);
-    IM_CHECK(study->gravity.x == 0.0 && study->gravity.z == 0.0);
+    // Straight down in the world frame — a hand-written axis here once
+    // sagged the part sideways and bent it about the wrong axis.
+    IM_CHECK(glm::length(study->gravity - conv::kGravity) < 1e-9);
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };

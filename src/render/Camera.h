@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Conventions.h"
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -15,7 +17,9 @@ public:
   // Shared initial/reset isometric view: farther out than the previous
   // millimetre-scale framing while retaining a useful empty-workspace view.
   static glm::vec3 DefaultIsometricPosition() {
-    return {14.4f, 10.8f, 14.4f}; // one wheel-notch farther out
+    // 14.4 along each horizontal axis, 10.8 along world up — slightly under
+    // the diagonal so the default view looks a little down at the part.
+    return glm::vec3(14.4f) - 3.6f * conv::kWorldUpF;
   }
 
   Camera();
@@ -97,14 +101,17 @@ public:
   void SetDistance(float distance);
 
   // Face alignment for sketching. distance <= 0 keeps the current zoom.
+  // `up` is the world direction mapped to screen up (the named views pass
+  // their table roll; the default is world up, with a fallback when the view
+  // direction is vertical).
   void AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal,
-                   float distance = 0.0f);
+                   float distance = 0.0f, glm::vec3 up = conv::kWorldUpF);
   // Instantly look at the current pivot from `direction` (unit offset from
   // pivot toward the camera) with `up` as screen-up. Cancels any animation —
   // remote callers need the very next frame to render the final view.
   void SnapToView(const glm::vec3& direction, const glm::vec3& up);
   void AnimateToPosition(const glm::vec3& position, const glm::vec3& target,
-                         float duration = 1.0f);
+                         float duration = 1.0f, glm::vec3 up = conv::kWorldUpF);
   void StopAnimation() { m_isAnimating = false; }
   // Jump straight to the animation's end state. StopAnimation freezes the
   // blend wherever it happens to be, which makes any screen<->world mapping

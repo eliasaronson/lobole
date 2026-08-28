@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "core/Conventions.h"
 #include "render/VulkanCommon.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -125,7 +126,7 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
     // Fit the ortho frustum to the scene bbox from the primary light's
     // direction. Pinned to MeshRenderer::UpdateCamera's primary light —
     // shadowing any other light would need its own map.
-    const glm::vec3 lightDir = glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f));
+    const glm::vec3 lightDir = conv::kKeyLightDir;
     const glm::vec3 center = 0.5f * (bbMin + bbMax);
     const float diag = std::max(glm::length(bbMax - bbMin), 1e-3f);
     const glm::mat4 view = glm::lookAt(center + lightDir * diag, center,

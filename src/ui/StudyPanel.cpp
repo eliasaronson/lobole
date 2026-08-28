@@ -3,6 +3,7 @@
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
 #include "core/Command.h"
+#include "core/Conventions.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -584,10 +585,9 @@ void DrawStudyPanel(AppState& state) {
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
     if (ImGui::Checkbox("Gravity (self-weight)###study_gravity", &on)) {
-      // -Y, not -Z: world up is +Y here (Camera::Up, the XZ "top" plane, the
-      // height axis of every primitive). Self-weight pointing along -Z sagged
-      // the part sideways.
-      const glm::dvec3 g = on ? glm::dvec3(0, -9.81, 0) : glm::dvec3(0, 0, 0);
+      // Straight down in the WORLD frame — a hand-written axis here once
+      // sagged the part sideways (docs/up-axis.md).
+      const glm::dvec3 g = on ? conv::kGravity : glm::dvec3(0, 0, 0);
       ModifyStudy(state, s->id, "Toggle gravity",
                   [&](fem::Study& cs) { cs.gravity = g; });
     }

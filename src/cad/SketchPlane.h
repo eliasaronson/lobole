@@ -5,11 +5,10 @@
 #include <memory>
 #include <string>
 
-enum class PlaneType {
-  XY, // Front plane (normal = +Z)
-  XZ, // Top plane (normal = +Y)
-  YZ  // Right plane (normal = +X)
-};
+// Named for their GEOMETRY (normal = +Z, +Y, +X respectively). Which one is
+// called "Front"/"Top"/"Right" follows the world frame — see
+// SketchPlane::StandardPlaneName and core/Conventions.h.
+enum class PlaneType { XY, XZ, YZ };
 
 class SketchPlane {
 public:
@@ -26,6 +25,10 @@ public:
 
   PlaneType GetType() const { return m_type; }
   const std::string& GetName() const { return m_name; }
+
+  // "Front Plane" / "Top Plane" / "Right Plane" for a base plane type,
+  // derived from the world frame (core/Conventions.h).
+  static const char* StandardPlaneName(PlaneType type);
 
   // Coordinate transformations
   glm::mat4 GetPlaneMatrix() const;        // Local to world transform
@@ -69,20 +72,4 @@ private:
   // Grid settings
   float m_gridSize = 1.0f;
   int m_gridSubdivisions = 10;
-};
-
-// Default planes factory
-class DefaultPlanes {
-public:
-  static std::shared_ptr<SketchPlane> CreateFrontPlane() {
-    return std::make_shared<SketchPlane>(PlaneType::XY);
-  }
-
-  static std::shared_ptr<SketchPlane> CreateTopPlane() {
-    return std::make_shared<SketchPlane>(PlaneType::XZ);
-  }
-
-  static std::shared_ptr<SketchPlane> CreateRightPlane() {
-    return std::make_shared<SketchPlane>(PlaneType::YZ);
-  }
 };

@@ -9,6 +9,7 @@
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
 #include "common/Logger.h"
+#include "core/Conventions.h"
 #include "core/Expression.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
@@ -626,23 +627,15 @@ std::string UiActionFailureReason(ImGuiTest* test) {
 // Snap the camera to a named standard view (optionally fitting first). Shared
 // by the `view` RPC and the raw `screenshot` handler so a raw screenshot(view=)
 // orients the same way the MCP wrapper does. Returns false for an unknown name.
-// Directions follow the default planes (Front = XY, normal +Z, Y up);
-// top/bottom pick the up the camera reaches by tilting over from front.
+// Directions come from conv::kNamedViews — the same table as the view.*
+// commands, the view cube and the drawings' OrientationAxes.
 // boxMin/boxMax (both or neither) fit the camera to that WORLD box instead
 // of the whole document — the render_sheet focus path.
 bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit,
                        const glm::vec3* boxMin = nullptr,
                        const glm::vec3* boxMax = nullptr) {
-  static const std::map<std::string, std::pair<glm::vec3, glm::vec3>> kViews = {
-      {"front", {{0, 0, 1}, {0, 1, 0}}},
-      {"back", {{0, 0, -1}, {0, 1, 0}}},
-      {"right", {{1, 0, 0}, {0, 1, 0}}},
-      {"left", {{-1, 0, 0}, {0, 1, 0}}},
-      {"top", {{0, 1, 0}, {0, 0, -1}}},
-      {"bottom", {{0, -1, 0}, {0, 0, 1}}},
-      {"iso", {glm::normalize(glm::vec3(1, 1, 1)), {0, 1, 0}}}};
-  auto it = kViews.find(name);
-  if (it == kViews.end())
+  const conv::NamedView* v = conv::FindView(name);
+  if (v == nullptr)
     return false;
   // Fit runs first: it re-aims at the target (SetTarget), so the snap must
   // set the orientation last.
@@ -652,7 +645,7 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit,
     else
       ui::FitCameraToDocument(state);
   }
-  state.camera->SnapToView(it->second.first, it->second.second);
+  state.camera->SnapToView(glm::vec3(v->toCamera), glm::vec3(v->up));
   return true;
 }
 
@@ -1668,8 +1661,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const glm::vec3 offset = eye - cam.GetTarget();
       if (glm::length(offset) < 1e-6f)
         throw std::runtime_error("eye must not equal the target");
-      const glm::vec3 up =
-          p.contains("up") ? vec3(p["up"]) : glm::vec3(0.0f, 1.0f, 0.0f);
+      const glm::vec3 up = p.contains("up") ? vec3(p["up"]) : conv::kWorldUpF;
       cam.SnapToView(glm::normalize(offset), up);
       cam.SetDistance(glm::length(offset));
     }
@@ -1677,8 +1669,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const glm::vec3 dir = vec3(p["direction"]);
       if (glm::length(dir) < 1e-9f)
         throw std::runtime_error("direction must be non-zero");
-      const glm::vec3 up =
-          p.contains("up") ? vec3(p["up"]) : glm::vec3(0.0f, 1.0f, 0.0f);
+      const glm::vec3 up = p.contains("up") ? vec3(p["up"]) : conv::kWorldUpF;
       cam.SnapToView(glm::normalize(dir), up);
     }
     if (p.contains("distance")) {

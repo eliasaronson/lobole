@@ -345,10 +345,12 @@ void CreateSphere(AppState& state) {
 }
 
 void CreateCylinder(AppState& state) {
+  // A fresh cylinder stands upright: base one unit below the spot, axis
+  // along world up.
   BeginPreviewFeature(state, std::make_unique<CylinderFeature>(
                                  NextName(state, "Cylinder"),
-                                 NextSpot(state) + glm::vec3(0.0f, -1.0f, 0.0f),
-                                 glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0));
+                                 NextSpot(state) - conv::kWorldUpF,
+                                 conv::kWorldUpF, 0.8, 2.0));
 }
 
 void CreateDatumPlane(AppState& state) {
@@ -3869,14 +3871,19 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   if (groundPlane) {
     const glm::vec3 center = 0.5f * (bbMin + bbMax);
     const float diag = glm::length(bbMax - bbMin);
-    const float half = 10.0f * diag;         // covers every camera angle
-    const float y = bbMin.y - 0.001f * diag; // just below: no coplanar fizz
-    const glm::vec3 n(0.0f, 1.0f, 0.0f);
+    const float half = 10.0f * diag; // covers every camera angle
+    // The floor is perpendicular to world up, just below the scene's lowest
+    // point (no coplanar fizz).
+    const glm::vec3 n = conv::kWorldUpF;
+    const float floorH = glm::dot(bbMin, n) - 0.001f * diag;
+    const glm::vec3 base = center - glm::dot(center, n) * n + floorH * n;
+    const glm::vec3 a = half * conv::kWorldRightF;
+    const glm::vec3 b = half * conv::kWorldFrontF;
     std::vector<Vertex3D> quad = {
-        {{center.x - half, y, center.z - half}, n},
-        {{center.x + half, y, center.z - half}, n},
-        {{center.x + half, y, center.z + half}, n},
-        {{center.x - half, y, center.z + half}, n},
+        {base - a - b, n},
+        {base + a - b, n},
+        {base + a + b, n},
+        {base - a + b, n},
     };
     std::vector<uint32_t> quadIdx = {0, 1, 2, 0, 2, 3};
     state.rayTracer->AddGeometry(quad, quadIdx, 0, RT_GEOM_SHADOW_CATCHER);

@@ -187,10 +187,10 @@ struct SheetChrome {
 SheetChrome ChromeOf(const Sheet& sheet);
 
 // The orthographic view direction (the way the viewer looks) and the world
-// vector that maps to sheet +Y (up), for a named orientation. World Z is up;
-// a Front view maps world +X -> sheet +X and +Z -> sheet +Y. Passed straight
-// to drawing::ProjectView. `up` for Front/Back/Left/Right is +Z; for Top/
-// Bottom the sheet is a plan, so `up` is the world Y axis.
+// vector that maps to sheet +Y (up), for a named orientation. Derived from
+// conv::kNamedViews (core/Conventions.h) so a drawing's "front" is the same
+// front as the view cube's and the `view` RPC's. Passed straight to
+// drawing::ProjectView.
 void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up);
 
 const char* SheetSizeToString(SheetSize size);

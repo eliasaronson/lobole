@@ -6,6 +6,7 @@
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
 
+#include "core/Conventions.h"
 #include "core/features/SketchFeature.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
@@ -157,12 +158,18 @@ void DrawViewCube(AppState& state) {
   struct CubeFace {
     glm::vec3 normal;
     int corners[4]; // CCW seen from outside
-    const char* label;
+    const conv::NamedView* view;
   };
+  // Geometry (corner indexing) is fixed; which face is CALLED "Top" comes
+  // from the conventions table, the same one the view.* commands and the
+  // drawings use — so a click lands on exactly the named view it labels.
   static const CubeFace kFaces[6] = {
-      {{1, 0, 0}, {1, 3, 7, 5}, "Right"}, {{-1, 0, 0}, {0, 4, 6, 2}, "Left"},
-      {{0, 1, 0}, {2, 6, 7, 3}, "Top"},   {{0, -1, 0}, {0, 1, 5, 4}, "Bottom"},
-      {{0, 0, 1}, {4, 5, 7, 6}, "Front"}, {{0, 0, -1}, {0, 2, 3, 1}, "Back"},
+      {{1, 0, 0}, {1, 3, 7, 5}, conv::ViewForDirection({1, 0, 0})},
+      {{-1, 0, 0}, {0, 4, 6, 2}, conv::ViewForDirection({-1, 0, 0})},
+      {{0, 1, 0}, {2, 6, 7, 3}, conv::ViewForDirection({0, 1, 0})},
+      {{0, -1, 0}, {0, 1, 5, 4}, conv::ViewForDirection({0, -1, 0})},
+      {{0, 0, 1}, {4, 5, 7, 6}, conv::ViewForDirection({0, 0, 1})},
+      {{0, 0, -1}, {0, 2, 3, 1}, conv::ViewForDirection({0, 0, -1})},
   };
 
   const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -186,7 +193,7 @@ void DrawViewCube(AppState& state) {
     clicked = false; // the cube must not also swallow this click
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       state.camera->AlignToFace(state.camera->GetTarget(),
-                                glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)));
+                                glm::vec3(conv::FindView("iso")->toCamera));
     }
     ImGui::SetTooltip("Isometric view (Shift+7)");
   }
@@ -277,12 +284,14 @@ void DrawViewCube(AppState& state) {
     dl->AddPolyline(quad, 4, IM_COL32(150, 160, 175, 200), ImDrawFlags_Closed,
                     1.0f);
     if (n.z > 0.45f) { // label only when facing enough to read
-      const ImVec2 sz = ImGui::CalcTextSize(f.label);
+      const ImVec2 sz = ImGui::CalcTextSize(f.view->label);
       dl->AddText(ImVec2(center.x - sz.x * 0.5f, center.y - sz.y * 0.5f),
-                  hot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230), f.label);
+                  hot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230),
+                  f.view->label);
     }
     if (hot && clicked)
-      state.camera->AlignToFace(state.camera->GetTarget(), f.normal);
+      state.camera->AlignToFace(state.camera->GetTarget(), f.normal, 0.0f,
+                                glm::vec3(f.view->up));
   }
 
   // Draw the home corner last so it sits above the cube's faces.
@@ -907,7 +916,7 @@ void DrawUI(AppState& state) {
           BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
       prims =
           BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
-      AppendEdgePickPrimitives(state, prims);   // fillet/chamfer edge picking
+      AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
     } else {
       state.sketchRenderer->SetStaticLines({});
     }

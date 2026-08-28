@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "core/Conventions.h"
 #include "render/MeshRenderer.h"
 #include "render/VulkanCommon.h"
 #include "thirdparty/stb_image_write.h" // declarations only; impl lives in Screenshot.cpp
@@ -739,10 +740,10 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   u.viewInverse = glm::inverse(desc.view);
   u.projInverse = glm::inverse(desc.proj);
   u.viewPos = glm::vec4(desc.cameraPos, 1.0f);
-  // Match the raster primary key light: direction *toward* the light is
-  // normalize(1, 1.5, 1); store the travel direction (negated) so the shader
-  // recovers the toward-light vector as -lightDir.
-  glm::vec3 toLight = glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f));
+  // Match the raster primary key light (conv::kKeyLightDir, toward the
+  // light); store the travel direction (negated) so the shader recovers the
+  // toward-light vector as -lightDir.
+  glm::vec3 toLight = conv::kKeyLightDir;
   u.lightDir = glm::vec4(-toLight, 1.8f);
   u.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f);
   u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);

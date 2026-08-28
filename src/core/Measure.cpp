@@ -1,5 +1,7 @@
 #include "core/Measure.h"
 
+#include "core/Conventions.h"
+
 #include <glm/gtc/quaternion.hpp>
 
 #include <Standard_Failure.hxx>
@@ -1008,6 +1010,20 @@ std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
   return out;
 }
 
+const char* FacingWord(const glm::dvec3& unitDir) {
+  constexpr double kAxisAligned = 0.9; // ~25 degrees of slop
+  const double upness = glm::dot(unitDir, conv::kWorldUp);
+  if (upness > kAxisAligned)
+    return "top";
+  if (upness < -kAxisAligned)
+    return "bottom";
+  if (std::abs(glm::dot(unitDir, conv::kWorldFront)) > kAxisAligned)
+    return "side";
+  if (std::abs(glm::dot(unitDir, conv::kWorldRight)) > kAxisAligned)
+    return "side";
+  return nullptr;
+}
+
 std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
                       const units::System& sys) {
   const auto e = Describe(bodies, ref);
@@ -1019,17 +1035,7 @@ std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
     const auto n = DirectionOf(bodies, ref);
     if (!n || !n->oriented)
       return nullptr;
-    const glm::dvec3 d = glm::normalize(n->dir);
-    constexpr double kAxisAligned = 0.9; // ~25 degrees of slop
-    if (d.y > kAxisAligned)
-      return "top";
-    if (d.y < -kAxisAligned)
-      return "bottom";
-    if (std::abs(d.x) > kAxisAligned)
-      return "side";
-    if (std::abs(d.z) > kAxisAligned)
-      return "side";
-    return nullptr;
+    return FacingWord(glm::normalize(n->dir));
   };
 
   if (e->kind == "face") {

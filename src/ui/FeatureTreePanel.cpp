@@ -5,6 +5,7 @@
 #include "ui/TextFit.h"
 
 #include "cad/CADMaterials.h"
+#include "cad/SketchPlane.h"
 #include "core/Command.h"
 #include "core/Feature.h"
 #include "core/MassProps.h" // Measure::MassOfBodies (mass-props section)
@@ -180,16 +181,17 @@ void DrawFeatureTreePanel(AppState& state) {
   Document* doc = state.document.get();
   if (doc) {
     // Default geometry: the three base planes a sketch can be started on.
+    // Named through SketchPlane so these rows always match the plane object
+    // DefaultPlane(i) actually creates.
     ImGui::SeparatorText("Default geometry");
-    static const char* kPlaneNames[3] = {"Front Plane", "Top Plane",
-                                         "Right Plane"};
     // While a plane pick is armed (New Sketch, the Hole tool), these rows are
     // the pick: a single click on the NAMED plane is easier than hunting the
     // right quad in the viewport, and it used to do nothing at all.
     const bool armedForPlane = state.sketchEdit.pickingPlane;
     for (int i = 0; i < 3; i++) {
-      if (ImGui::Selectable(kPlaneNames[i], false,
-                            ImGuiSelectableFlags_AllowDoubleClick)) {
+      if (ImGui::Selectable(
+              SketchPlane::StandardPlaneName(static_cast<PlaneType>(i)), false,
+              ImGuiSelectableFlags_AllowDoubleClick)) {
         const int n = static_cast<int>(doc->FeatureCount()) + 1;
         if (armedForPlane) {
           const SketchPurpose purpose = state.sketchEdit.purpose;

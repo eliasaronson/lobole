@@ -4,6 +4,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "core/Conventions.h"
 #include "render/FramesInFlight.h"
 #include <cstring>
 #include <fstream>
@@ -288,22 +289,24 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
 
   // FreeCAD-style multi-light setup for professional CAD lighting
 
-  // Primary directional light (main illumination from upper right)
-  ubo.primaryLight.direction = glm::vec4(
-      glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f)), 1.8f); // High intensity
+  // Primary directional light (main illumination from upper right). The rig
+  // directions live in core/Conventions.h — the shadow map and the ray tracer
+  // share the key light, and the three copies drifted before.
+  ubo.primaryLight.direction =
+      glm::vec4(conv::kKeyLightDir, 1.8f); // High intensity
   ubo.primaryLight.color =
       glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white
 
   // Fill light (softer light from opposite direction to reduce harsh shadows)
-  ubo.fillLight.direction = glm::vec4(
-      glm::normalize(glm::vec3(-0.5f, -0.8f, -0.5f)), 0.4f); // Lower intensity
+  ubo.fillLight.direction =
+      glm::vec4(conv::kFillLightDir, 0.4f); // Lower intensity
   ubo.fillLight.color =
       glm::vec4(0.8f, 0.85f, 1.0f, 1.0f); // Slightly cool blue fill
 
   // Rim light (side lighting for edge definition)
-  ubo.rimLight.direction = glm::vec4(
-      glm::normalize(glm::vec3(0.8f, 0.2f, -0.9f)), 0.6f); // Medium intensity
-  ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f);  // Neutral white
+  ubo.rimLight.direction =
+      glm::vec4(conv::kRimLightDir, 0.6f);                // Medium intensity
+  ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f); // Neutral white
 
   // Ambient light (reduced for better contrast)
   ubo.ambientColor =

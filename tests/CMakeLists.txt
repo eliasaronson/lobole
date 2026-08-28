@@ -78,6 +78,7 @@ add_executable(designer_tests
     test_sketch_inference.cpp
     test_sketch_selection.cpp
     test_camera.cpp
+    test_world_up.cpp
     test_outline_edges.cpp
     test_ibl.cpp
     test_fem.cpp

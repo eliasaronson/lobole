@@ -1,4 +1,5 @@
 #include "cad/SketchPlane.h"
+#include "core/Conventions.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 SketchPlane::SketchPlane(PlaneType type, const glm::vec3& origin)
@@ -44,19 +45,23 @@ void SketchPlane::UpdateAxes() {
   m_vAxis = glm::cross(m_normal, m_uAxis);
 }
 
-void SketchPlane::SetNameFromType() {
-  switch (m_type) {
-  case PlaneType::XY:
-    m_name = "Front Plane";
-    break;
-  case PlaneType::XZ:
-    m_name = "Top Plane";
-    break;
-  case PlaneType::YZ:
-    m_name = "Right Plane";
-    break;
-  }
+const char* SketchPlane::StandardPlaneName(PlaneType type) {
+  // The name follows the world frame, not the geometry: the plane whose
+  // normal is the world up axis is the one a person calls "Top", whichever
+  // coordinate plane that happens to be. FeatureTreePanel lists the base
+  // planes through this too, so the tree rows and the plane objects cannot
+  // disagree.
+  const glm::dvec3 n = type == PlaneType::XY   ? glm::dvec3(0, 0, 1)
+                       : type == PlaneType::XZ ? glm::dvec3(0, 1, 0)
+                                               : glm::dvec3(1, 0, 0);
+  if (glm::abs(glm::dot(n, conv::kWorldUp)) > 0.9)
+    return "Top Plane";
+  if (glm::abs(glm::dot(n, conv::kWorldFront)) > 0.9)
+    return "Front Plane";
+  return "Right Plane";
 }
+
+void SketchPlane::SetNameFromType() { m_name = StandardPlaneName(m_type); }
 
 glm::mat4 SketchPlane::GetPlaneMatrix() const {
   // Create transformation matrix from plane coordinates to world coordinates

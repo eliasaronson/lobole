@@ -2,6 +2,7 @@
 #include "ui/AssemblyActions.h"
 
 #include "common/Logger.h"
+#include "core/Conventions.h"
 #include "core/Document.h"
 #include "core/features/SketchFeature.h"
 #include "render/Camera.h"
@@ -21,6 +22,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -203,11 +205,24 @@ void Constrain(AppState& s, sketch::ConstraintKind kind) {
   ApplySketchConstraint(s, kind, 0.0);
 }
 
-void StandardView(AppState& s, glm::vec3 normal) {
+// "view.front", "view.top", ... — static storage for Command::id, which
+// borrows the pointer rather than owning a string.
+static const std::array<std::string, std::size(conv::kNamedViews)>
+    kViewCommandIds = [] {
+      std::array<std::string, std::size(conv::kNamedViews)> a;
+      for (size_t i = 0; i < a.size(); i++)
+        a[i] = std::string("view.") + conv::kNamedViews[i].name;
+      return a;
+    }();
+
+void StandardView(AppState& s, const conv::NamedView& v) {
   // The camera's OWN pivot, not the world origin: a standard view is an
-  // orientation, not a place (docs/cam/dogfood-round.md).
+  // orientation, not a place (docs/cam/dogfood-round.md). The table's up
+  // matters for top/bottom: before it was passed through, the GUI's top view
+  // and the RPC's were rolled 180 degrees from each other.
   if (s.camera)
-    s.camera->AlignToFace(s.camera->GetTarget(), normal);
+    s.camera->AlignToFace(s.camera->GetTarget(), glm::vec3(v.toCamera), 0.0f,
+                          glm::vec3(v.up));
 }
 
 void ToggleMeasure(AppState& s) {
@@ -350,16 +365,14 @@ const std::vector<Command>& Table() {
     add("view.align_to_face", nullptr, AlignToPickedFace);
     add("view.toggle_planes", HasDocument,
         [](AppState& s) { s.showPlanes = !s.showPlanes; });
-    add("view.front", nullptr, [](AppState& s) { StandardView(s, {0, 0, 1}); });
-    add("view.back", nullptr, [](AppState& s) { StandardView(s, {0, 0, -1}); });
-    add("view.left", nullptr, [](AppState& s) { StandardView(s, {-1, 0, 0}); });
-    add("view.right", nullptr, [](AppState& s) { StandardView(s, {1, 0, 0}); });
-    add("view.top", nullptr, [](AppState& s) { StandardView(s, {0, 1, 0}); });
-    add("view.bottom", nullptr,
-        [](AppState& s) { StandardView(s, {0, -1, 0}); });
-    add("view.iso", nullptr, [](AppState& s) {
-      StandardView(s, glm::normalize(glm::vec3(1, 1, 1)));
-    });
+    // One command per named view, straight from the conventions table — the
+    // same directions the `view` RPC and the drawings use. Ids live in
+    // kViewCommandIds because Command::id is a borrowed const char*.
+    for (size_t i = 0; i < std::size(conv::kNamedViews); i++) {
+      const conv::NamedView& v = conv::kNamedViews[i];
+      add(kViewCommandIds[i].c_str(), nullptr,
+          [&v](AppState& s) { StandardView(s, v); });
+    }
     add("view.reset_layout", nullptr,
         [](AppState& s) { s.buildDefaultDockLayout = true; });
     add("view.controls_help", nullptr,

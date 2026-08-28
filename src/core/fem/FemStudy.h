@@ -6,6 +6,7 @@
 // history. Mesh and results are derived data, never serialized (see
 // FemMesher.h / the FEM2 solver); only this configuration persists.
 
+#include "core/Conventions.h"
 #include "core/ElementMap.h"
 #include "core/Expression.h"
 #include "core/fem/FemMesher.h"
@@ -49,9 +50,9 @@ struct Load {
   std::string magnitudeExpr;
   // Down, for a load whose face could not be resolved. Every path that HAS a
   // face derives this from it (DefaultForceDirection): a force pushes into
-  // the face you picked. World up is +Y here — a -Z literal was "down" in no
-  // coordinate system this app uses.
-  glm::dvec3 direction{0.0, -1.0, 0.0};
+  // the face you picked. "Down" comes from the world frame — a hand-written
+  // axis here was once "down" in no coordinate system this app uses.
+  glm::dvec3 direction = -conv::kWorldUp;
 };
 
 // What a study solves for.

@@ -186,7 +186,7 @@ void DrawViewMenu(AppState& state) {
       // Trackball orbit carries the up vector as state, so it must be reset too
       // — otherwise a tumbled view leaves up near-parallel to the new forward
       // and the reset view is degenerate (right = forward x up collapses).
-      state.camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+      state.camera->SetUp(conv::kWorldUpF);
     }
   }
   if (ImGui::MenuItem("Fit View", Hint(state, "view.fit").c_str()))

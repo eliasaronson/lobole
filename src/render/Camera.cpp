@@ -32,8 +32,8 @@ glm::quat Camera::OrientationLookingAlong(const glm::vec3& dir,
   // always a valid orthonormal frame (world-up normally, world-Z when looking
   // straight up/down).
   if (glm::abs(glm::dot(f, glm::normalize(u))) > 0.999f)
-    u = (glm::abs(f.y) < 0.9f) ? glm::vec3(0.0f, 1.0f, 0.0f)
-                               : glm::vec3(0.0f, 0.0f, 1.0f);
+    u = (glm::abs(glm::dot(f, conv::kWorldUpF)) < 0.9f) ? conv::kWorldUpF
+                                                        : conv::kWorldFrontF;
   const glm::vec3 right = glm::normalize(glm::cross(f, u));
   const glm::vec3 trueUp = glm::cross(right, f);
   // Columns are the camera's world axes: +X right, +Y up, +Z backwards
@@ -165,16 +165,15 @@ void Camera::Roll(double delta) {
 }
 
 void Camera::AlignToFace(const glm::vec3& faceCenter,
-                         const glm::vec3& faceNormal, float distance) {
+                         const glm::vec3& faceNormal, float distance,
+                         glm::vec3 up) {
   // Keep the current zoom unless the caller asks for a specific distance.
   if (distance <= 0.0f)
     distance = m_distance;
 
   const glm::vec3 n = glm::normalize(faceNormal);
   const glm::vec3 newPosition = faceCenter + n * distance;
-  // Upright handling (world-up, or world-Z for a horizontal face) is applied
-  // when the target orientation is built in AnimateToPosition.
-  AnimateToPosition(newPosition, faceCenter, 1.0f);
+  AnimateToPosition(newPosition, faceCenter, 1.0f, up);
 }
 
 void Camera::SnapToView(const glm::vec3& direction, const glm::vec3& up) {
@@ -184,7 +183,8 @@ void Camera::SnapToView(const glm::vec3& direction, const glm::vec3& up) {
 }
 
 void Camera::AnimateToPosition(const glm::vec3& position,
-                               const glm::vec3& target, float duration) {
+                               const glm::vec3& target, float duration,
+                               glm::vec3 up) {
   m_animStartOrient = m_orientation;
   m_animStartPivot = m_pivot;
   m_animStartDistance = m_distance;
@@ -192,10 +192,9 @@ void Camera::AnimateToPosition(const glm::vec3& position,
   const glm::vec3 dir = target - position;
   m_animEndPivot = target;
   m_animEndDistance = glm::length(dir);
-  m_animEndOrient =
-      (m_animEndDistance > 1e-6f)
-          ? OrientationLookingAlong(dir, glm::vec3(0.0f, 1.0f, 0.0f))
-          : m_orientation;
+  m_animEndOrient = (m_animEndDistance > 1e-6f)
+                        ? OrientationLookingAlong(dir, up)
+                        : m_orientation;
 
   m_animationTime = 0.0f;
   m_animationDuration = duration;

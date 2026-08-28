@@ -313,6 +313,13 @@ std::optional<SetTotal> TotalOf(const std::vector<Body>& bodies,
 std::string HumanName(const std::vector<Body>& bodies, const ElementRef& ref,
                       const units::System& sys);
 
+// "top" / "bottom" / "side" for an axis-aligned unit direction (a planar
+// face's outward normal), in the words a person uses about a part on a
+// bench; nullptr when the direction is not near an axis. Split out of
+// HumanName so the world-up gate (tests/test_world_up.cpp) can check the
+// words against conv::kWorldUp directly.
+const char* FacingWord(const glm::dvec3& unitDir);
+
 // The corner where two named edges meet, as a measurable point (phase 4c).
 // nullopt when they share no vertex, or — the case a cylinder's wall hits on
 // the first try — more than one, since two edges that meet twice name two
