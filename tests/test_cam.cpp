@@ -536,6 +536,41 @@ std::unique_ptr<Document> PocketDoc(bool island = false) {
   return doc;
 }
 
+// A 120 x 90 x 20 block with an 80 x 60 pocket down to z = 12, and whichever
+// inner wires the test needs in that floor: a HOLE through it at (60, 45), a
+// BOSS standing on it at (44, 34), or both. Big enough that a 6 mm cutter has
+// somewhere to go — the 20 x 14 pocket above leaves a region narrower than
+// the tool once anything stands in it.
+std::unique_ptr<Document> FlangeDoc(double holeDia, bool boss) {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 120, 90, 20));
+  uint64_t solid = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(20, 15, 12), 80, 60, 20));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocket", solid, voidId,
+                                                   BooleanOp::Subtract));
+  solid = doc->GetFeature(2)->GetId();
+  if (boss) {
+    doc->AddFeature(
+        std::make_unique<BoxFeature>("Boss", glm::vec3(40, 30, 12), 8, 8, 6));
+    const uint64_t bossId = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    doc->AddFeature(std::make_unique<BooleanFeature>("WithBoss", solid, bossId,
+                                                     BooleanOp::Union));
+    solid = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+  }
+  if (holeDia > 0.0) {
+    doc->AddFeature(std::make_unique<CylinderFeature>(
+        "Bore", glm::vec3(60, 45, -1), glm::vec3(0, 0, 1), holeDia * 0.5,
+        30.0));
+    const uint64_t bore = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    doc->AddFeature(std::make_unique<BooleanFeature>("Holed", solid, bore,
+                                                     BooleanOp::Subtract));
+  }
+  return doc;
+}
+
 // A 40 x 30 x 20 block with a 12 x 14 slot straight through it, closed on
 // every side. The case a face pick cannot reach: a through opening has no
 // floor, so its walls are the only thing to point at.
@@ -2053,65 +2088,142 @@ TEST_CASE("cam: every origin corner is where it says it is", "[cam]") {
   CHECK(glm::length(c.origin - once) < 1e-12);
 }
 
-TEST_CASE("cam: clearing the outline passes over the openings", "[cam]") {
-  // A hole in a pocket floor is not an island: nothing stands in it. Going
-  // AROUND one leaves an uncut sliver wherever it nearly touches the pocket
-  // wall — a gap too narrow for the cutter to come back to. FreeCAD spells
-  // the same option `UseOutline` (Path/Op/PocketShape.py) and implements it
-  // the same way: keep the outer wire, drop the rest.
-  auto doc = PocketDoc(/*island=*/true);
+namespace {
+
+// The floor of the pocket in these fixtures, at z = 12.
+ElementRef PocketFloorRef(const Document& doc) {
   ElementRef floor;
-  for (const Body& b : doc->GetBodies())
+  for (const Body& b : doc.GetBodies())
     for (const auto& [index, name] : b.elementMap.names) {
       glm::vec3 c(0.0f), n(0.0f), u(0.0f);
       if (b.shape.FacePlane(index, c, n, u) && n.z > 0.99f &&
           std::abs(c.z - 12.0f) < 1e-3f)
         floor = ElementRef{b.createdBy, name};
     }
+  return floor;
+}
+
+// Through the SAME derivation the verb uses, so the job under test is the job
+// a click makes — depths, side, stepdown and the pocket/adaptive choice all
+// come from the model rather than from numbers typed here.
+cam::Setup PocketJob(const Document& doc, const ElementRef& floor,
+                     bool useOutline) {
+  cam::Setup s = BasicSetup();
+  const cam::DerivedOp d =
+      cam::DeriveOperation(s, doc.GetBodies(), cam::OpType::Pocket, floor);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.useOutline = useOutline;
+  s.operations.push_back(op);
+  return s;
+}
+
+// Does any cutting move pass within `r` of (x, y)?
+bool CutsOver(const cam::Toolpath& tp, double x, double y, double r) {
+  for (const cam::Move& m : tp.moves)
+    if (m.kind != cam::Move::Kind::Rapid &&
+        std::hypot(m.to.x - x, m.to.y - y) < r)
+      return true;
+  return false;
+}
+
+} // namespace
+
+TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
+  // Nothing stands in a hole, so the cutter may cross it. Going AROUND one
+  // leaves an uncut sliver wherever it nearly touches the pocket wall — a gap
+  // the tool can never come back to.
+  auto doc = FlangeDoc(/*holeDia=*/16.0, /*boss=*/false);
+  const ElementRef floor = PocketFloorRef(*doc);
   REQUIRE(floor.IsSet());
 
-  cam::Setup s = BasicSetup();
-  cam::Operation op;
-  op.id = 1;
-  op.type = cam::OpType::Pocket;
-  op.toolNumber = 1;
-  op.topZ = 20.0;
-  op.bottomZ = 12.0;
-  op.stepdown = 3.0;
-  op.side = cam::Side::Inside;
-  op.targets = {floor};
+  const cam::Toolpath a = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/false), doc->GetBodies())[0];
+  const cam::Toolpath b = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/true), doc->GetBodies())[0];
+  INFO(a.error << " / " << b.error);
+  REQUIRE(a.error.empty());
+  REQUIRE(b.error.empty());
 
-  s.operations = {op};
-  const cam::Toolpath around = cam::GenerateAll(s, doc->GetBodies())[0];
-  INFO(around.error);
-  REQUIRE(around.error.empty());
+  // The hole is at (60, 45) with a radius of 8. Going AROUND it keeps the
+  // cutter's centre at least 11 mm out (8 + the tool radius), so anything
+  // inside 6 mm of the centre means the path crossed it.
+  CHECK(CutsOver(b, 60.0, 45.0, 6.0));
+  CHECK_FALSE(CutsOver(a, 60.0, 45.0, 6.0));
+  // SHORTER, not longer. Weaving around an island costs more than crossing
+  // it: the detour is extra contour on every depth pass, and the sliver it
+  // leaves behind is not cut by any of it.
+  INFO("around " << a.CutLength() << " over " << b.CutLength());
+  CHECK(b.CutLength() < a.CutLength());
 
-  s.operations[0].useOutline = true;
-  const cam::Toolpath over = cam::GenerateAll(s, doc->GetBodies())[0];
-  INFO(over.error);
-  REQUIRE(over.error.empty());
+  // A hole NARROWER than the cutter. The tool cannot enter it whatever it
+  // does, so crossing is harmless — and going AROUND is pure waste: extra
+  // motion to avoid a 3 mm circle a 6 mm cutter could never have reached
+  // into. Measured, the outline path is the shorter one, which is the answer
+  // to "what happens if the hole is smaller than the cutter": nothing bad,
+  // and slightly less of it.
+  auto small = FlangeDoc(/*holeDia=*/3.0, /*boss=*/false); // vs a 6 mm cutter
+  const ElementRef smallFloor = PocketFloorRef(*small);
+  REQUIRE(smallFloor.IsSet());
+  const cam::Toolpath sa =
+      cam::GenerateAll(PocketJob(*small, smallFloor, /*useOutline=*/false),
+                       small->GetBodies())[0];
+  const cam::Toolpath sb =
+      cam::GenerateAll(PocketJob(*small, smallFloor, /*useOutline=*/true),
+                       small->GetBodies())[0];
+  REQUIRE(sa.error.empty());
+  REQUIRE(sb.error.empty());
+  INFO("small: around " << sa.CutLength() << " over " << sb.CutLength());
+  CHECK(sb.CutLength() <= sa.CutLength());
+  // Both hole sizes clear the SAME outline once their island is dropped, which
+  // is the point: with nothing standing in it, the size of the opening stops
+  // being something the clearing has to know about.
+  CHECK_THAT(sb.CutLength(), WithinRel(b.CutLength(), 1e-9));
+}
 
-  // Going over the island covers MORE ground than going around it.
-  INFO("around " << around.CutLength() << " over " << over.CutLength());
-  CHECK(over.CutLength() > around.CutLength());
+TEST_CASE("cam: clearing the outline still goes around material", "[cam]") {
+  // The hazard the option must NOT open. A boss standing up from the floor
+  // has the same kind of inner wire as a hole and the opposite meaning:
+  // driving over one is a full-width cut at full depth into material nobody
+  // asked to remove. No flag may point the cutter at that, so an island
+  // survives `useOutline` — which is where FreeCAD's `UseOutline` differs,
+  // taking `Part.Face(element.OuterWire)` and losing the bosses with the
+  // holes.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/true);
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
 
-  // And it actually crosses the island, which the other never does: the boss
-  // is 5 x 5 at (18, 14), so its centre is (20.5, 16.5).
-  const auto crossesIsland = [](const cam::Toolpath& tp) {
-    for (const cam::Move& m : tp.moves)
-      if (m.kind != cam::Move::Kind::Rapid && std::abs(m.to.x - 20.5) < 1.5 &&
-          std::abs(m.to.y - 16.5) < 1.5)
-        return true;
-    return false;
-  };
-  CHECK(crossesIsland(over));
-  CHECK_FALSE(crossesIsland(around));
+  const cam::Toolpath a = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/false), doc->GetBodies())[0];
+  const cam::Toolpath b = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/true), doc->GetBodies())[0];
+  INFO(a.error << " / " << b.error);
+  REQUIRE(a.error.empty());
+  REQUIRE(b.error.empty());
 
-  // Round-trips: an operation that goes around its islands — every one before
-  // this — must not start passing over them.
-  cam::Setup back = s;
-  back.operations[0].useOutline = false;
-  CHECK_FALSE(back.operations[0].useOutline);
+  // The boss is 8 x 8 at (40, 30), so its centre is (44, 34) and going
+  // around it keeps the cutter's centre at least 7 mm out. NEITHER path cuts
+  // inside 5 mm of it.
+  CHECK_FALSE(CutsOver(a, 44.0, 34.0, 5.0));
+  CHECK_FALSE(CutsOver(b, 44.0, 34.0, 5.0));
+  // And with nothing else to differ about, the two agree exactly.
+  INFO("around " << a.CutLength() << " over " << b.CutLength());
+  CHECK_THAT(b.CutLength(), WithinRel(a.CutLength(), 1e-9));
+}
+
+TEST_CASE("cam: a floor with both keeps the boss and drops the hole", "[cam]") {
+  // Both kinds of inner wire at once: the case that proves the test is on the
+  // WIRE and not on the count.
+  auto doc = FlangeDoc(/*holeDia=*/16.0, /*boss=*/true);
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  const cam::Toolpath b = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/true), doc->GetBodies())[0];
+  INFO(b.error);
+  REQUIRE(b.error.empty());
+  CHECK(CutsOver(b, 60.0, 45.0, 6.0));       // over the hole
+  CHECK_FALSE(CutsOver(b, 44.0, 34.0, 5.0)); // around the boss
 }
 
 TEST_CASE("cam: retooling carries the derived stepdown, not the typed one",

@@ -128,6 +128,26 @@ yet. Verification stops being a thing you remember to run.
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
 | later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
+**`Over openings` passes over HOLES, never over material (2026-08-30).**
+Asked as "that sounds like it could be dangerous — what happens if the holes
+are smaller than the cutter?", and the sub-cutter hole turned out to be the
+safe half: the tool cannot enter a 3 mm circle whatever it does, so crossing
+it is harmless and going around it is pure waste. The danger is the opposite
+category. A BOSS standing up from the floor has the same kind of inner wire
+as a hole and the opposite meaning, and driving over one is a full-width cut
+at full depth into material nobody asked to remove. The first cut of this
+feature dropped every inner wire, and its own test asserted the cutter driving
+through a boss.
+
+The generator tells them apart by sectioning 0.05 mm above the floor: an
+inner wire with something standing in it is KEPT whatever the option says. No
+flag may point the cutter at material. This is where FreeCAD's `UseOutline`
+differs — `Part.Face(element.OuterWire)` loses the bosses with the holes.
+
+Measured, dropping a true island makes the path SHORTER as well as complete:
+weaving around one is extra contour on every depth pass, and the sliver it
+leaves is not cut by any of it.
+
 **A hole is not an island — `Over openings` (2026-08-30).** A pocket takes its
 boundary from the picked face's wires: the outer one is where to stop, every
 inner one an island to go around. Right for material standing in the pocket,

@@ -132,11 +132,19 @@ struct Operation {
   // around thin air, and where a hole nearly touches the pocket wall it
   // leaves an uncut sliver too narrow for the tool to return to.
   //
-  // A hole is not an island: there is nothing there to avoid. Setting this
-  // clears the outline and passes straight over the openings. FreeCAD spells
-  // the same idea `UseOutline` ("uses the outline of the base geometry",
-  // Path/Op/PocketShape.py) and implements it the same way — keep the outer
-  // wire, drop the rest.
+  // A hole is not an island: there is nothing there to avoid, and a hole
+  // NARROWER than the cutter is the case this exists for — the tool bridges
+  // it and keeps cutting the floor either side. Setting this passes straight
+  // over the openings.
+  //
+  // It does NOT pass over material. A boss standing up from the floor has the
+  // same kind of inner wire and the opposite meaning, and driving over one is
+  // a full-width cut at full depth into metal nobody asked to remove. The
+  // generator tells them apart by sectioning just above the floor: an inner
+  // wire with something standing in it is kept whatever this says. FreeCAD's
+  // `UseOutline` (Path/Op/PocketShape.py) is the same idea and does not draw
+  // that distinction — it takes `Part.Face(element.OuterWire)` and loses the
+  // bosses with the holes.
   bool useOutline = false;
 
   // Pocket/Face only: fraction of the tool diameter to step over per pass.

@@ -1475,6 +1475,12 @@ double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
 namespace {
 
 // The XY contour(s) a profile follows, and the region a pocket clears, when
+// How far above a pocket floor to look for material standing in one of its
+// inner wires. Small enough that a boss of any real height is found, large
+// enough to clear the tolerance a section carries — and the section at the
+// floor ITSELF is ambiguous, because the floor's own face is there.
+constexpr double kIslandProbe = 0.05;
+
 // the operation was made by clicking a face: the face's own wires, the same
 // at every depth. Empty when the operation has no target, which is the
 // caller's signal to fall back to sectioning the model.
@@ -1501,10 +1507,38 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
   Clipper2Lib::Paths64 outer, islands;
   for (const Loop& l : region.loops)
     (l.hole ? islands : outer).push_back(ToClipper(l.pts));
-  // `useOutline`: the openings are holes, not islands — nothing stands in
-  // them, so the cutter passes over rather than around.
-  if (!holesToo || op.useOutline || islands.empty())
+  if (!holesToo || islands.empty())
     return outer;
+  // `useOutline` passes over the OPENINGS in a floor. An inner wire is only
+  // an opening if nothing stands in it: a hole has no material at or above
+  // the floor, and the cutter bridges it harmlessly — a hole narrower than
+  // the cutter is the case the option exists for. A BOSS has the same kind of
+  // wire and the opposite meaning, and driving over one is a full-width cut
+  // at full depth into standing material. So the option drops openings and
+  // keeps islands, whatever it is set to: no flag may point the cutter at
+  // material nobody asked it to remove.
+  if (op.useOutline) {
+    // The material standing just above the floor. EVEN-ODD over every loop of
+    // the section, because the answer is a question of NESTING: inside the
+    // part is filled, inside the pocket is not, inside a boss standing in
+    // that pocket is again. Taking only the outward-wound loops instead reads
+    // the part's own outline as "material everywhere", which keeps every hole
+    // as an island and makes the option do nothing at all.
+    Clipper2Lib::Paths64 section;
+    for (const Loop& l : SectionLoops(bodies, region.z + kIslandProbe))
+      section.push_back(ToClipper(l.pts));
+    const Clipper2Lib::Paths64 standing =
+        Clipper2Lib::Union(section, Clipper2Lib::FillRule::EvenOdd);
+    Clipper2Lib::Paths64 keep;
+    for (const Clipper2Lib::Path64& island : islands)
+      if (!Clipper2Lib::Intersect(Clipper2Lib::Paths64{island}, standing,
+                                  Clipper2Lib::FillRule::NonZero)
+               .empty())
+        keep.push_back(island);
+    islands = std::move(keep);
+    if (islands.empty())
+      return outer;
+  }
   return Clipper2Lib::Difference(outer, islands,
                                  Clipper2Lib::FillRule::NonZero);
 }
