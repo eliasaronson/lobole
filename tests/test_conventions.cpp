@@ -173,3 +173,61 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
           }());
   CHECK(offenders.empty());
 }
+
+TEST_CASE("every scene renderer is aimed at the 3D viewport", "[convention]") {
+  // The 3D view is a sub-region between the docked panels, and UI.cpp repoints
+  // the renderers at it every frame. A renderer left out of that list keeps a
+  // FULL-WINDOW viewport while the camera aspect is the sub-region, so its
+  // geometry lands at a different scale and offset than everything drawn
+  // around it — and nothing crashes, so it ships.
+  //
+  // It has now happened twice, and the second time was mine:
+  //
+  //   - 0346a8e, the FEM field: "the FieldRenderer was never added to that
+  //     list... The Shape iso-surface was unaffected because it draws through
+  //     the MeshRenderer, which is in the list."
+  //   - 4a3083d, the CAM stock: reported as a workpiece not parallel to the
+  //     part with its cuts shifted sideways, while the cutter — an instance of
+  //     the mesh renderer — sat exactly right.
+  //
+  // Neither could be seen in review: an `--offscreen` instance has no panels,
+  // so there the sub-region IS the whole framebuffer.
+  //
+  // The discriminator is `void SetViewport(int32_t`, which takes a viewport
+  // RECT. The prepass renderers (shadow, SSAO, ray tracing) do not have it and
+  // are correctly not in the list.
+  const std::string ui = [] {
+    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / "src/ui/UI.cpp");
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  }();
+  REQUIRE(ui.find("auto setVp") != std::string::npos);
+  // The list wraps across lines, so compare with the whitespace removed.
+  std::string flat;
+  flat.reserve(ui.size());
+  for (const char c : ui)
+    if (!std::isspace(static_cast<unsigned char>(c)))
+      flat.push_back(c);
+
+  int checked = 0;
+  for (const SourceFile& f : SourcesUnder("src/render", ".h")) {
+    const std::string name = f.path.stem().string(); // e.g. StockRenderer
+    if (name.size() < 9 || name.substr(name.size() - 8) != "Renderer")
+      continue;
+    if (f.text.find("void SetViewport(int32_t") == std::string::npos)
+      continue; // a prepass renderer: no scene viewport of its own
+    // AppState names them camelCase: StockRenderer -> stockRenderer.
+    std::string member = name;
+    member[0] = static_cast<char>(std::tolower(member[0]));
+    INFO(Relative(f.path)
+         << " takes a viewport rect but UI.cpp never aims it at the 3D "
+            "viewport — add setVp(state."
+         << member << ") beside the others, or it will draw full-window.");
+    CHECK(flat.find("setVp(state." + member + ")") != std::string::npos);
+    checked++;
+  }
+  // If the discriminator ever stops matching anything, this test would pass
+  // by doing nothing at all.
+  CHECK(checked >= 6);
+}
