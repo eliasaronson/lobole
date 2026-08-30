@@ -92,6 +92,43 @@ void AssertCamShapes(const Document& doc, const nlohmann::json& expect) {
   }
 }
 
+// How the part is fixtured, and whether the machine has a rotary axis (v67).
+// The frame decides the coordinates of every cut, so a setup that reloads
+// "as modelled" cuts a laid-flat job in the orientation it was NOT clamped
+// in. And the rotary flag is what keeps an A word out of a 3-axis file: the
+// two were one number until docs/cam/setup-frame.md separated them, and a
+// golden is how the separation stays separated.
+void AssertCamFrames(const Document& doc, const nlohmann::json& expect) {
+  if (expect.contains("cam_setup_frames")) {
+    const auto want =
+        expect.at("cam_setup_frames").get<std::vector<std::vector<double>>>();
+    std::vector<std::vector<double>> got;
+    for (const cam::Setup& setup : doc.GetCamSetups())
+      got.push_back({setup.frame.x, setup.frame.y, setup.frame.z,
+                     setup.frame.w}); // [x, y, z, w], as written
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("setup " << i);
+      REQUIRE(want[i].size() == 4);
+      for (int c = 0; c < 4; c++)
+        CHECK_THAT(
+            got[i][static_cast<size_t>(c)],
+            Catch::Matchers::WithinAbs(want[i][static_cast<size_t>(c)], 1e-12));
+    }
+  }
+  if (expect.contains("cam_setup_rotary")) {
+    const auto want = expect.at("cam_setup_rotary").get<std::vector<bool>>();
+    std::vector<bool> got;
+    for (const cam::Setup& setup : doc.GetCamSetups())
+      got.push_back(setup.hasRotaryAxis);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("setup " << i);
+      CHECK(got[i] == want[i]);
+    }
+  }
+}
+
 // Which face Z zero was picked from. On the SETUP, so a job reopened from its
 // own file still knows — the panel used to ask a session field and answered
 // "Z zero is not set yet" about an origin it had saved and was using.
@@ -258,6 +295,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertCamSides(*doc, expect);
       AssertCamTopFace(*doc, expect);
       AssertCamShapes(*doc, expect);
+      AssertCamFrames(*doc, expect);
       AssertUnits(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
@@ -270,6 +308,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertCamSides(*reloaded, expect);
       AssertCamTopFace(*reloaded, expect);
       AssertCamShapes(*reloaded, expect);
+      AssertCamFrames(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove(tmp);
     }
@@ -309,6 +348,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       AssertCamSides(*reloaded, expect);
       AssertCamTopFace(*reloaded, expect);
       AssertCamShapes(*reloaded, expect);
+      AssertCamFrames(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove_all(proj);
     }

@@ -31,12 +31,15 @@ constexpr MethodDoc kCamMethods[] = {
      "name, post, safe_z"},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
-     "face it was picked from), rotation_a, fit_arcs, tools, "
+     "face it was picked from), frame (how the part is CLAMPED, as "
+     "[x,y,z,w]; identity = as modelled), has_rotary_axis, rotation_a, "
+     "fit_arcs, tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
-     "so an indexed setup reports the box the machine sees.",
+     "so a setup that lays the part flat reports the box the machine sees.",
      ""},
     {"set_cam_setup",
-     "Change a setup {id, name?, post?, safe_z?, rotation_a?, fit_arcs?} or "
+     "Change a setup {id, name?, post?, safe_z?, lay_face_up?: {feature_id, "
+     "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?} or "
      "one of its "
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
@@ -44,8 +47,16 @@ constexpr MethodDoc kCamMethods[] = {
      "tool_type is the shape of the end: it decides what the verifier thinks "
      "was removed, and an edge_round op reads it to know whether it is "
      "cutting a bevel (vbit, tip_angle is the INCLUDED angle) or an arc "
-     "(ball). An unknown name is refused, not read as flat.",
-     "fit_arcs, id, name, post, rotation_a, safe_z, tool"},
+     "(ball). An unknown name is refused, not read as flat. "
+     "lay_face_up CLAMPS the part with that face toward the spindle — a "
+     "fixturing statement, so it posts no rotary move and any flat face "
+     "works. It is what lets a part modelled upright (an imported panel, a "
+     "speaker baffle) be cut without a rotated copy of it, and repeating the "
+     "call is idempotent. flip turns the fixture over for the second side. "
+     "rotation_a is the MACHINE's rotary index and needs has_rotary_axis: "
+     "without it no file can carry an A word.",
+     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, name, post, "
+     "rotation_a, safe_z, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: "
@@ -355,6 +366,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"post", setup.post},
                  {"safe_z", setup.safeZ},
                  {"rotation_a", setup.rotationA},
+                 {"has_rotary_axis", setup.hasRotaryAxis},
+                 // How the part is CLAMPED, as [x, y, z, w]. Identity = as
+                 // modelled. A script that reads a toolpath without this
+                 // cannot tell which way up the part was cut.
+                 {"frame",
+                  {setup.frame.x, setup.frame.y, setup.frame.z, setup.frame.w}},
                  // Z zero, and the face it was taken from. The panel shows
                  // both; a script could not see either.
                  {"origin", {setup.origin.x, setup.origin.y, setup.origin.z}},
@@ -391,6 +408,38 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       setup.safeZ = p.at("safe_z").get<double>();
     if (p.contains("rotation_a"))
       setup.rotationA = p.at("rotation_a").get<double>();
+    if (p.contains("has_rotary_axis"))
+      setup.hasRotaryAxis = p.at("has_rotary_axis").get<bool>();
+    // Clamp the part with this face up — the scripted twin of the panel's
+    // "Lay a face up". Given as a face, not as a quaternion, because that is
+    // the thing a caller actually knows; the frame is derived from it, and
+    // from the frame in hand, so repeating the call is idempotent.
+    if (p.contains("lay_face_up")) {
+      const json& fj = p.at("lay_face_up");
+      ElementRef ref;
+      ref.featureId = fj.at("feature_id").get<uint64_t>();
+      ref.name = fj.at("element").get<std::string>();
+      glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
+      bool found = false;
+      for (const Body& body : doc->GetBodies()) {
+        if (body.createdBy != ref.featureId)
+          continue;
+        const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+        found = idx && body.shape.FacePlane(*idx, centre, normal, uAxis);
+        break;
+      }
+      if (!found)
+        throw std::runtime_error(
+            "no planar face '" + ref.name + "' on feature " +
+            std::to_string(ref.featureId) + " — lay_face_up needs a flat face");
+      setup.frame = cam::SolveFaceUp(glm::dvec3(normal), setup.frame);
+      setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+    }
+    // The other side of the part, derived from this frame rather than typed.
+    if (p.value("flip", false)) {
+      setup.frame = cam::FlipFrame(setup.frame);
+      setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+    }
     if (p.contains("fit_arcs"))
       setup.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("tool")) {

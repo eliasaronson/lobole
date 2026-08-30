@@ -38,15 +38,17 @@ constexpr glm::vec4 kDoneColor(0.42f, 0.44f, 0.50f, 0.35f);
 constexpr glm::vec4 kAheadCut(0.35f, 0.80f, 1.00f, 0.95f);
 constexpr glm::vec4 kAheadRapid(0.55f, 0.55f, 0.62f, 0.45f);
 
-// Setup space -> model space, as a matrix. `FromSetupSpace` is a rotation
-// about X and nothing else (C9), and the renderers want it per draw rather
-// than per point.
-glm::mat4 SetupToModel(const cam::Setup& setup) {
-  if (std::abs(setup.rotationA) < 1e-9)
-    return glm::mat4(1.0f);
-  return glm::rotate(glm::mat4(1.0f),
-                     glm::radians(static_cast<float>(setup.rotationA)),
-                     glm::vec3(1.0f, 0.0f, 0.0f));
+// Setup space -> model space, as a matrix: the renderers want it per draw
+// rather than per point. The rotation itself is `cam::SetupToModel` — this
+// used to build its own from `rotationA`, which is one of the four places
+// that quietly assumed a setup could only be turned about X.
+glm::mat4 SetupModelMatrix(const cam::Setup& setup) {
+  const glm::dmat3 r = cam::SetupToModel(setup);
+  glm::mat4 m(1.0f);
+  for (int col = 0; col < 3; col++)
+    for (int row = 0; row < 3; row++)
+      m[col][row] = static_cast<float>(r[col][row]);
+  return m;
 }
 
 std::vector<Vertex3D> ToMeshVertices(const cam::StockMesh& m) {
@@ -204,7 +206,7 @@ void SyncCamPlayback(AppState& state) {
   if (setup == nullptr || !state.stockRenderer) {
     return;
   }
-  const glm::mat4 model = SetupToModel(*setup);
+  const glm::mat4 model = SetupModelMatrix(*setup);
 
   // The stock, re-meshed only when the simulation actually moved.
   if (state.camStockSim.Revision() != state.camStockDrawnRevision) {

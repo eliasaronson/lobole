@@ -315,9 +315,13 @@ When it does, watch these, in this order:
 1. **The first rapid.** Safe Z is derived (20 mm on 18 mm stock); check the
    tool actually clears the clamps, which the app knows nothing about.
 2. **Z zero.** The panel says "Z zero at 17.000" — the height of the picked
-   face in MODEL coordinates. The file is in model coordinates too, so the
-   work offset has to put model Z 17 at the top of the material. This is the
-   number to check twice before the first plunge.
+   face in **SETUP** coordinates: the frame the part is clamped in, which is
+   model coordinates only when it is clamped as modelled. The file is in the
+   same frame, so the work offset has to put setup Z 17 at the top of the
+   material. Since v67 a setup can lay the part flat without touching the
+   model (docs/cam/setup-frame.md), and then the two frames differ — read the
+   number off the panel, never off the model tree. This is the number to
+   check twice before the first plunge.
 3. **The tool change.** `M0`, then `S18000 M3` — verify the spindle restarts.
 4. **The tabs.** 3.8 mm tall by design, and the backplot draws them. If the
    part breaks free anyway, that is the number to raise.

@@ -72,7 +72,8 @@ void LoopWalls(const std::vector<glm::dvec2>& pts, double zLow, double zHigh,
 // sectioned the face through OCC. That is model work inside the frame loop.
 // The key is everything the answer depends on, so a stale hit cannot be
 // expressed: a model edit moves the document version, an indexed setup moves
-// rotationA, and a different pick moves the ref.
+// rotationA, a re-clamped one moves the frame, and a different pick moves the
+// ref.
 const cam::FaceRegion& CachedRegion(AppState& state,
                                     AppState::CamRegionCache& cache,
                                     const cam::Setup& setup,
@@ -81,10 +82,12 @@ const cam::FaceRegion& CachedRegion(AppState& state,
   const bool sameRef =
       cache.ref.featureId == ref.featureId && cache.ref.name == ref.name;
   if (cache.documentVersion != version || cache.setupId != setup.id ||
-      cache.rotationA != setup.rotationA || !sameRef) {
+      cache.rotationA != setup.rotationA || cache.frame != setup.frame ||
+      !sameRef) {
     cache.documentVersion = version;
     cache.setupId = setup.id;
     cache.rotationA = setup.rotationA;
+    cache.frame = setup.frame;
     cache.ref = ref;
     cache.region =
         state.document
@@ -235,6 +238,52 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   return true;
 }
 
+// The picked face's plane, in MODEL space. Both orientation picks need it,
+// and neither wants the setup frame applied — the whole point is to work out
+// what the frame should become.
+bool PickedFaceNormal(const Document& doc, const ElementRef& ref,
+                      glm::vec3& normal) {
+  glm::vec3 centre(0.0f), uAxis(0.0f);
+  for (const Body& body : doc.GetBodies()) {
+    if (body.createdBy != ref.featureId)
+      continue;
+    const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+    return idx && body.shape.FacePlane(*idx, centre, normal, uAxis);
+  }
+  return false;
+}
+
+// Turning the part re-answers "how high is the top face", because Z zero is
+// a height in SETUP space and the setup just moved. Leaving it made the panel
+// report a Z zero from the previous orientation — the one number that breaks
+// tools, stated confidently and wrong.
+void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
+  if (!setup.topFace.IsSet())
+    return;
+  const cam::FaceRegion region = cam::PickedFaceRegion(
+      cam::BodiesInSetupFrame(setup, state.document->GetBodies()),
+      setup.topFace);
+  if (region.ok) {
+    setup.origin = glm::dvec3(0.0, 0.0, region.z);
+    return;
+  }
+  // The face that was level is not level any more: this orientation cannot
+  // keep that Z zero, and pretending otherwise is worse than asking again.
+  setup.topFace = {};
+  setup.origin = glm::dvec3(0.0);
+}
+
+// Everything that has to follow the setup's orientation changing.
+void CamOrientationChanged(AppState& state, cam::Setup& setup) {
+  ReZeroFromTopFace(state, setup);
+  setup.safeZ = cam::DeriveSafeZ(setup, state.document->GetBodies());
+  state.camSafeZEdit = static_cast<float>(setup.safeZ);
+  state.slotPick = {};
+  state.projectMetaDirty = true;
+  RefreshCamToolpaths(state);
+  RunCamVerification(state);
+}
+
 } // namespace
 
 void CamFacePicked(AppState& state, const SelectionItem& item) {
@@ -284,40 +333,48 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     return;
   }
 
-  if (slot == PickSlot::CamIndexFace) {
-    // C9: turn the table until this face looks at the spindle. Everything
-    // downstream then works in the rotated frame, so the same verbs apply to
-    // the side of a part as to its top.
+  if (slot == PickSlot::CamLayFaceUp) {
+    // S2: clamp the part so this face looks at the spindle. A part is
+    // modelled where it belongs in the assembly — a speaker baffle stands
+    // upright — and this is the statement that it lies flat on the bed for
+    // the job. It says nothing about the machine: no A word is posted, and
+    // any planar face works, because a clamp is not a trunnion.
     cam::Setup* setup = EnsureCamSetup(state);
     if (setup == nullptr)
       return;
-    glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
-    bool found = false;
-    for (const Body& body : state.document->GetBodies()) {
-      if (body.createdBy != item.element.featureId)
-        continue;
-      const std::optional<int> idx = body.elementMap.Resolve(item.element.name);
-      if (idx && body.shape.FacePlane(*idx, centre, normal, uAxis))
-        found = true;
-      break;
+    glm::vec3 normal(0.0f);
+    if (!PickedFaceNormal(*state.document, item.element, normal)) {
+      state.slotPick.miss = "pick a flat face — that one is curved";
+      return;
     }
-    if (!found) {
+    setup->frame = cam::SolveFaceUp(glm::dvec3(normal), setup->frame);
+    CamOrientationChanged(state, *setup);
+    LOG_INFO("CAM: laid a face up, frame ({:.4f} {:.4f} {:.4f} {:.4f})",
+             setup->frame.w, setup->frame.x, setup->frame.y, setup->frame.z);
+    return;
+  }
+
+  if (slot == PickSlot::CamIndexFace) {
+    // C9: turn the TABLE until this face looks at the spindle — the rotary
+    // path, which posts an A word. How the part is clamped is `frame` and the
+    // branch above; this one is a statement about the machine.
+    cam::Setup* setup = EnsureCamSetup(state);
+    if (setup == nullptr)
+      return;
+    glm::vec3 normal(0.0f);
+    if (!PickedFaceNormal(*state.document, item.element, normal)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }
     double degrees = 0.0;
     if (!cam::SolveIndexA(glm::dvec3(normal), degrees)) {
       state.slotPick.miss = "no rotation about X can bring that face up — it "
-                            "points along the rotary axis";
+                            "points along the rotary axis. Lay it up instead: "
+                            "a clamp can hold the part any way round.";
       return;
     }
     setup->rotationA = degrees;
-    setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());
-    state.camSafeZEdit = static_cast<float>(setup->safeZ);
-    state.slotPick = {};
-    state.projectMetaDirty = true;
-    RefreshCamToolpaths(state);
-    RunCamVerification(state);
+    CamOrientationChanged(state, *setup);
     LOG_INFO("CAM: indexed to A{:.3f}", degrees);
     return;
   }
@@ -367,22 +424,52 @@ void DrawCamToolWindow(AppState& state) {
     ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
                        "Z zero is not set yet");
 
-  const bool armedIndex =
-      armed && state.slotPick.slot == static_cast<int>(PickSlot::CamIndexFace);
-  ImGui::BeginDisabled(armed && !armedIndex);
-  if (ImGui::Button("Turn a face up###cam_index_face"))
-    ArmCamPick(state, PickSlot::CamIndexFace,
-               "Click the face to turn up under the spindle");
+  // How the part is clamped. Offered to every job, because it is a statement
+  // about the fixture and not about the machine — the reason it exists is
+  // that a part modelled upright (a speaker baffle, an imported panel) has no
+  // level face worth zeroing on until it is laid down.
+  const bool armedLay =
+      armed && state.slotPick.slot == static_cast<int>(PickSlot::CamLayFaceUp);
+  ImGui::BeginDisabled(armed && !armedLay);
+  if (ImGui::Button("Lay a face up###cam_lay_face"))
+    ArmCamPick(state, PickSlot::CamLayFaceUp,
+               "Click the face to clamp facing up — that is how the part sits "
+               "on the bed");
   ImGui::EndDisabled();
-  ImGui::SetItemTooltip("Rotary (4th axis) jobs: index the table so this face "
-                        "points at the spindle, then use the verbs as usual");
+  ImGui::SetItemTooltip("Clamp the part with this face up. Changes nothing in "
+                        "the model and posts no rotary move — it is how the "
+                        "part sits on the bed for this setup.");
   ImGui::SameLine();
-  if (armedIndex)
+  if (armedLay)
     ImGui::TextDisabled("pick a face…");
-  else if (setup != nullptr && std::abs(setup->rotationA) > 1e-9)
-    ImGui::TextDisabled("A %.2f°", setup->rotationA);
+  else if (setup != nullptr && !cam::FrameIsSquare(*setup))
+    ImGui::TextDisabled("laid flat");
   else
-    ImGui::TextDisabled("A 0° (3-axis)");
+    ImGui::TextDisabled("as modelled");
+
+  // The ROTARY index, which is a different claim and only true of a machine
+  // that has the axis. Offering it unconditionally is what let a 3-axis job
+  // be handed `G0 A90` for wanting a panel flat (docs/cam/setup-frame.md).
+  if (setup != nullptr && setup->hasRotaryAxis) {
+    const bool armedIndex =
+        armed &&
+        state.slotPick.slot == static_cast<int>(PickSlot::CamIndexFace);
+    ImGui::BeginDisabled(armed && !armedIndex);
+    if (ImGui::Button("Turn a face up###cam_index_face"))
+      ArmCamPick(state, PickSlot::CamIndexFace,
+                 "Click the face to turn up under the spindle");
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("Rotary (4th axis) jobs: index the table so this "
+                          "face points at the spindle, then use the verbs as "
+                          "usual");
+    ImGui::SameLine();
+    if (armedIndex)
+      ImGui::TextDisabled("pick a face…");
+    else if (std::abs(setup->rotationA) > 1e-9)
+      ImGui::TextDisabled("A %.2f°", setup->rotationA);
+    else
+      ImGui::TextDisabled("A 0° (3-axis)");
+  }
 
   // Why the last pick did not take. This window never drew it, so a refused
   // click looked exactly like a click that did nothing — and one of them

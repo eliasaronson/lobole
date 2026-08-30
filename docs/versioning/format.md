@@ -135,6 +135,7 @@ record of bumps and the corpus as a sample of them, not a mirror.
 | 64 | `4774803` | Document display units (`units`: length/mass/angle) travel with the document |
 | 65 | `027809c` | Mate connector corner snap (`anchor.snap_edge2`) — a corner named by the two edges meeting there |
 | 66 | (R13/R15) | Drawing `notes` (text + optional leader, per sheet); CAM tool `tool_type`/`tip_angle` and the `edge_round` operation (`edge_size`) |
+| 67 | (S1–S5) | The CAM setup's fixture `frame` (how the part is clamped) and `has_rotary_axis` — split out of `rotation_a`, which had been answering both questions (docs/cam/setup-frame.md) |
 
 ## The directory format (F3, default for new saves)
 

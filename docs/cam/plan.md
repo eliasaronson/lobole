@@ -521,6 +521,19 @@ backplot, the ghost, the depth label, the stock box and the derived depths
 were each in the wrong frame. Fixed by moving the framing INSIDE the engine
 entry points that take a `Setup`, so a caller cannot forget. The safe-Z rule for the index is enforced in the post.
 
+**But only half the shape landed, and the half that did not took nine months
+to surface.** "Toolpaths in setup space" shipped; the *frame* did not. C9
+stored one `double rotationA` where the plan above says `frame`, so how a
+part is CLAMPED and what angle a TRUNNION moves to became the same number —
+and choosing an orientation silently chose a machine. A part modelled
+upright (any panel imported from STEP or Onshape in its assembly
+orientation) could only be machined by indexing a rotary axis, which then
+posted `G0 A90` at 3-axis routers. The split is
+**docs/cam/setup-frame.md** (S1–S7, v67): `frame` for the fixture,
+`rotationA` for the machine, and `hasRotaryAxis` so a shop without the axis
+can never be handed one. Everything else in C9 survived intact — the framing
+really was inside the entry points, so the fix was one function deep.
+
 **A trap that cost two test runs, and would cost a user more.** A GUI test
 that fails partway never reaches its own cleanup. When C7 changed the
 preamble, a stale `G90 G21` assertion in the CAM panel test failed, so the

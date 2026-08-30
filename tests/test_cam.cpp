@@ -1545,6 +1545,9 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
       b.shape = b.shape.Transformed(m);
   }
   cam::Setup indexed = BasicSetup();
+  // The machine has the axis, and is indexed on it. Both halves are needed:
+  // a rotated FIXTURE never posts an A word (S3).
+  indexed.hasRotaryAxis = true;
   indexed.rotationA = 90.0;
   indexed.operations.push_back(op);
   const cam::Toolpath b = cam::GenerateAll(indexed, turned->GetBodies())[0];
@@ -1621,6 +1624,9 @@ TEST_CASE("cam: an indexed job is verified in its own frame", "[cam]") {
   }
 
   cam::Setup indexed = BasicSetup();
+  // The machine has the axis, and is indexed on it. Both halves are needed:
+  // a rotated FIXTURE never posts an A word (S3).
+  indexed.hasRotaryAxis = true;
   indexed.rotationA = 90.0;
   // Derived, not typed: the depths must come from the frame the cut happens
   // in, which is the other half of the same bug.
@@ -1651,6 +1657,212 @@ TEST_CASE("cam: an indexed job is verified in its own frame", "[cam]") {
   // Profiling outside the part removes the margin and must not touch it.
   CHECK(v.maxGouge < 0.6);
   CHECK(v.rapidsThroughStock == 0);
+}
+
+// --- S1-S3: the fixture frame is not a 4th axis ---------------------------
+
+namespace {
+
+// A block turned 90 degrees about X in the MODEL, so only the setup can put
+// it back. Shared by the frame tests below.
+std::unique_ptr<Document> TurnedBlockDoc() {
+  auto turned = std::make_unique<Document>();
+  turned->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  std::vector<Body>& bodies = const_cast<std::vector<Body>&>(
+      static_cast<const Document&>(*turned).GetBodies());
+  glm::mat4 m(1.0f);
+  m[1][1] = 0.0f;
+  m[1][2] = 1.0f;
+  m[2][1] = -1.0f;
+  m[2][2] = 0.0f; // +90 about X
+  for (Body& b : bodies)
+    b.shape = b.shape.Transformed(m);
+  return turned;
+}
+
+cam::Operation ProfileOp() {
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 10.0;
+  op.stepdown = 0.0;
+  return op;
+}
+
+} // namespace
+
+TEST_CASE("cam: a fixture frame cuts what a rotary index would", "[cam]") {
+  // The composition order, pinned. A setup whose FRAME is 90 degrees about X
+  // must cut exactly what a setup indexed to A=90 cuts: they are the same
+  // orientation stated two ways, and the only difference is what the file
+  // says about the machine (the next test). Getting the order wrong — the
+  // index composed before the fixture rather than after — fails here.
+  auto turned = TurnedBlockDoc();
+
+  cam::Setup indexed = BasicSetup();
+  indexed.hasRotaryAxis = true;
+  indexed.rotationA = 90.0;
+  indexed.operations.push_back(ProfileOp());
+  const cam::Toolpath a = cam::GenerateAll(indexed, turned->GetBodies())[0];
+  INFO(a.error);
+  REQUIRE(a.error.empty());
+
+  cam::Setup clamped = BasicSetup();
+  // The same turn, as a fixture: the quaternion for +90 about X.
+  const double h = glm::radians(90.0) * 0.5;
+  clamped.frame = glm::dquat(std::cos(h), std::sin(h), 0.0, 0.0);
+  clamped.operations.push_back(ProfileOp());
+  const cam::Toolpath b = cam::GenerateAll(clamped, turned->GetBodies())[0];
+  INFO(b.error);
+  REQUIRE(b.error.empty());
+
+  REQUIRE(b.moves.size() == a.moves.size());
+  CHECK_THAT(b.CutLength(), WithinRel(a.CutLength(), 1e-9));
+  for (size_t i = 0; i < a.moves.size(); i++) {
+    INFO("move " << i);
+    CHECK_THAT(b.moves[i].to.x, WithinAbs(a.moves[i].to.x, 1e-9));
+    CHECK_THAT(b.moves[i].to.y, WithinAbs(a.moves[i].to.y, 1e-9));
+    CHECK_THAT(b.moves[i].to.z, WithinAbs(a.moves[i].to.z, 1e-9));
+  }
+}
+
+TEST_CASE("cam: clamping a part flat posts no rotary move", "[cam]") {
+  // The bug this whole change exists for: laying a panel flat on the bed used
+  // to be spelled `rotationA`, so a 3-axis router was handed `G0 A90`.
+  auto turned = TurnedBlockDoc();
+  cam::Setup clamped = BasicSetup();
+  const double h = glm::radians(90.0) * 0.5;
+  clamped.frame = glm::dquat(std::cos(h), std::sin(h), 0.0, 0.0);
+  clamped.safeZ = cam::DeriveSafeZ(clamped, turned->GetBodies());
+  clamped.operations.push_back(ProfileOp());
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(clamped, turned->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  for (const cam::Move& m : paths[0].moves)
+    CHECK_FALSE(m.hasA);
+
+  for (const char* post : {"mach3", "linuxcnc"}) {
+    INFO(post);
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess(post, clamped, paths, {}, gcode, &error));
+    // Not one A word, in any line, in either dialect.
+    CHECK(gcode.find(" A") == std::string::npos);
+    CHECK(gcode.find("\nA") == std::string::npos);
+  }
+
+  // And a machine that HAS the axis but is not indexed on it says nothing
+  // either: the flag alone is not a reason to move a table.
+  cam::Setup rotary = clamped;
+  rotary.hasRotaryAxis = true;
+  const std::vector<cam::Toolpath> rp =
+      cam::GenerateAll(rotary, turned->GetBodies());
+  for (const cam::Move& m : rp[0].moves)
+    CHECK_FALSE(m.hasA);
+}
+
+TEST_CASE("cam: a clamped part verifies in the frame it was cut in", "[cam]") {
+  // The verifier frames its own bodies, so this should pass on arrival — and
+  // if the frame composes the wrong way it reports a part cut in mid-air.
+  auto turned = TurnedBlockDoc();
+  cam::Setup clamped = BasicSetup();
+  const double h = glm::radians(90.0) * 0.5;
+  clamped.frame = glm::dquat(std::cos(h), std::sin(h), 0.0, 0.0);
+  clamped.safeZ = cam::DeriveSafeZ(clamped, turned->GetBodies());
+
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(clamped, turned->GetBodies(), lo, hi));
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 8.0;
+  clamped.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(clamped, turned->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", clamped, paths, {}, gcode, &error));
+
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, clamped, turned->GetBodies(), 0.5);
+  INFO("gouge " << v.maxGouge << " rapids " << v.rapidsThroughStock);
+  REQUIRE(v.cells > 0);
+  CHECK(v.maxGouge < 0.6);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+TEST_CASE("cam: any flat face can be laid up, and twice is once", "[cam]") {
+  const glm::dquat id(1.0, 0.0, 0.0, 0.0);
+
+  // A face already under the spindle asks for no change at all. Without the
+  // idempotence the pick would drift the part a little on every click.
+  CHECK(glm::length(cam::SolveFaceUp({0.0, 0.0, 1.0}, id) - id) < 1e-12);
+
+  // Every direction works, including the two `SolveIndexA` must refuse: a
+  // clamp is not a trunnion, and a panel standing on its edge is the case
+  // that started this (docs/cam/setup-frame.md).
+  const std::vector<glm::dvec3> normals = {
+      {0.0, 1.0, 0.0},  {0.0, -1.0, 0.0}, {1.0, 0.0, 0.0},
+      {-1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.6, -0.48, 0.64}};
+  for (const glm::dvec3& n : normals) {
+    INFO("normal " << n.x << " " << n.y << " " << n.z);
+    const glm::dquat f = cam::SolveFaceUp(n, id);
+    // The frame maps the spindle to the face, so undoing it lays the face
+    // flat: that is the whole contract, and it is what the pipeline relies on.
+    const glm::dvec3 up =
+        glm::transpose(glm::dmat3(glm::mat3_cast(f))) * glm::normalize(n);
+    CHECK_THAT(up.z, WithinAbs(1.0, 1e-12));
+    // Asking again for the same face, from the frame it produced, is a no-op.
+    const glm::dquat again = cam::SolveFaceUp(n, f);
+    CHECK(glm::length(again - f) < 1e-9);
+  }
+}
+
+TEST_CASE("cam: a flipped setup cuts the other side", "[cam]") {
+  // A flip job is two setups on ONE part. The second's frame is derived from
+  // the first, so the two cannot disagree about which part they are cutting.
+  const glm::dquat id(1.0, 0.0, 0.0, 0.0);
+  const glm::dquat back = cam::FlipFrame(id);
+
+  // What faced the spindle now faces the bed, and the other way round.
+  const glm::dmat3 m(glm::mat3_cast(back));
+  const glm::dvec3 up = m * glm::dvec3(0.0, 0.0, 1.0);
+  CHECK_THAT(up.z, WithinAbs(-1.0, 1e-12));
+  // Flipping twice is where it started.
+  const glm::dquat there = cam::FlipFrame(back);
+  CHECK(std::abs(std::abs(there.w) - 1.0) < 1e-12);
+
+  // And a real cut: the block's underside becomes the top face.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup flipped = BasicSetup();
+  flipped.frame = back;
+  flipped.safeZ = cam::DeriveSafeZ(flipped, doc->GetBodies());
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(flipped, doc->GetBodies(), lo, hi));
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 8.0;
+  flipped.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(flipped, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  for (const cam::Move& m2 : paths[0].moves)
+    CHECK_FALSE(m2.hasA);
 }
 
 TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {

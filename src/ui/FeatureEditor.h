@@ -39,7 +39,8 @@ enum class PickSlot : int {
   CamTopFace,     // CAM G1: the face that defines Z zero / the stock top
   CamPocketFloor, // CAM G2: the floor of a pocket to clear
   CamProfileOutline, // CAM G2: the face whose outline gets cut out
-  CamIndexFace,      // CAM C9: the face to turn up under the spindle
+  CamIndexFace,      // CAM C9: the face to turn up under the spindle (rotary)
+  CamLayFaceUp,      // CAM S2: the face to clamp facing the spindle (fixture)
   CamEdgeWall,       // CAM R15: the wall whose top edge to round or chamfer
 };
 

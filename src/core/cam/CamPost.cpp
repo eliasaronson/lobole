@@ -1,5 +1,7 @@
 #include "core/cam/CamPost.h"
 
+#include "core/cam/CamToolpath.h"
+
 #include <glm/geometric.hpp>
 
 #include <cmath>
@@ -458,7 +460,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
     // The index this setup is cut at, stated before the first move of it and
     // at safe Z. A file that assumes the table is already at A0 is a file
     // that cuts the wrong face.
-    if (std::abs(setup.rotationA) > 1e-9 && !e.haveA) {
+    if (EmitsRotary(setup) && !e.haveA) {
       e.Retract(setup.safeZ);
       e.Raw("G0 A" + Num(setup.rotationA, opts.decimals));
       e.haveA = true;

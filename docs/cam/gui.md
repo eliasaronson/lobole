@@ -126,7 +126,7 @@ yet. Verification stops being a thing you remember to run.
 | **G2** | The verbs (`Clear a pocket`, `Cut it out`, `Face the top`) on the Tool-window pattern, with derived depths | ~1 session | **done** `8d71991` `43ef325` |
 | **G3** | Removed-volume ghost, hover preview, depth label, stock box | ~1 session | **done** `43ef325` |
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
-| later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | |
+| later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
 G1 first: picking the top face is the highest-value single click in CAM, and
 the tool-to-scale drawing prevents the most common beginner surprise.

@@ -1,0 +1,65 @@
+{
+  "format": "designer-document",
+  "version": 67,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Baffle",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 210,
+      "height": 16,
+      "depth": 400
+    }
+  ],
+  "cam": [
+    {
+      "id": 2,
+      "name": "Baffle face",
+      "post": "linuxcnc",
+      "safe_z": 25.0,
+      "frame": [
+        -0.7071067811865476,
+        0.0,
+        0.0,
+        0.7071067811865476
+      ],
+      "stock": {
+        "margin": [
+          2.0,
+          2.0,
+          1.0
+        ],
+        "bottom_margin": 1.0
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm flat",
+          "diameter": 6.0,
+          "flutes": 2,
+          "flute_length": 25.0,
+          "feed_cut": 1200.0,
+          "feed_plunge": 400.0,
+          "spindle_rpm": 18000.0
+        }
+      ],
+      "operations": [
+        {
+          "id": 3,
+          "name": "Cut it out",
+          "type": "profile",
+          "tool_number": 1,
+          "side": "outside",
+          "top_z": 8.0,
+          "bottom_z": -9.0,
+          "stepdown": 3.0
+        }
+      ]
+    }
+  ]
+}

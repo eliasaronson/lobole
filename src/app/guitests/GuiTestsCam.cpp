@@ -334,6 +334,80 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
+  // S2 (docs/cam/setup-frame.md): the case every other fixture in this file
+  // dodges by being modelled face-up. A panel that stands upright — an
+  // imported speaker baffle, and every part that arrives from STEP or Onshape
+  // in the orientation it has in the assembly — has no level face worth
+  // zeroing on. Laying one flat is a statement about the FIXTURE, so it must
+  // work on a 3-axis machine and put no A word in the file.
+  t = IM_REGISTER_TEST(engine, "cam", "upright_panel_lays_flat");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // 210 wide, 16 THICK, 400 tall: standing on edge, like a real baffle.
+    Doc()->AddFeature(std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0),
+                                                   210, 16, 400));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    s_App->camToolOpen = true;
+    ctx->Yield(3);
+
+    // Find the big face — the one anyone would machine. Its normal is along
+    // Y, so no amount of 2.5D can touch it as the part is modelled.
+    const Body& body = Doc()->GetBodies()[0];
+    ui::SelectionItem big;
+    big.kind = ui::SelectionItem::Kind::Face;
+    double best = 0.0;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!body.shape.FacePlane(index, o, n, u))
+        continue;
+      const double area = std::abs(n.y); // the two Y-facing faces are the big
+      if (area > best) {                 // ones on a panel this shape
+        best = area;
+        big.element = ElementRef{body.createdBy, name};
+      }
+    }
+    IM_CHECK(big.element.IsSet());
+
+    // As modelled, Z zero refuses it — correctly, and this is the wall the
+    // user hits.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.miss.empty());
+    IM_CHECK(!Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+
+    // Clamp it with that face up. No rotary axis is declared, and none is
+    // needed: a clamp can hold a part any way round.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamLayFaceUp, "Click the face");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    const cam::Setup* laid = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(!cam::FrameIsSquare(*laid));
+    IM_CHECK(!laid->hasRotaryAxis);
+    IM_CHECK(s_App->slotPick.miss.empty());
+
+    // And now the SAME face is the top face, with a Z zero on it.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    IM_CHECK(s_App->slotPick.miss.empty());
+    IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+
+    // A real operation on it, and a file with no A word in it.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(5);
+    const cam::Setup* job = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(!job->operations.empty());
+    IM_CHECK(!s_App->camToolpaths.empty());
+    for (const cam::Toolpath& tp : s_App->camToolpaths)
+      for (const cam::Move& m : tp.moves)
+        IM_CHECK(!m.hasA);
+    s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
+  };
+
   // G2-G4 (docs/cam/gui.md): the verbs. Two clicks — the verb, then the face
   // — produce a machinable operation with nothing typed, the viewport shows
   // what will be removed, and the verdict arrives without being asked for.

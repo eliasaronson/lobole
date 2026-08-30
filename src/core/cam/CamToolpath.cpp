@@ -574,12 +574,79 @@ bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
   return StockBoundsFramed(setup, BodiesInSetupFrame(setup, bodies), min, max);
 }
 
+bool EmitsRotary(const Setup& setup) {
+  return setup.hasRotaryAxis && std::abs(setup.rotationA) > 1e-9;
+}
+
+glm::dquat FlipFrame(const glm::dquat& frame) {
+  // Half a turn about X, composed on the right so it acts in SETUP space —
+  // about the axis the part is lying on, not about the model's X.
+  return frame * glm::dquat(0.0, 1.0, 0.0, 0.0);
+}
+
+bool FrameIsSquare(const Setup& setup) {
+  // A unit quaternion is a pure rotation, so |w| = 1 exactly characterises
+  // "no rotation" — cheaper and steadier than comparing four components or
+  // reconstructing an angle.
+  return std::abs(std::abs(setup.frame.w) - 1.0) < 1e-9;
+}
+
+namespace {
+
+// Nothing to do: the part is clamped as modelled and the table is square. The
+// common case, and worth not building a matrix for — this is on the per-point
+// path that draws every backplot.
+bool SetupIsSquare(const Setup& setup) {
+  return std::abs(setup.rotationA) < 1e-9 && FrameIsSquare(setup);
+}
+
+} // namespace
+
+glm::dmat3 SetupToModel(const Setup& setup) {
+  // Fixture first, then the index: the part is clamped to the table, and the
+  // table then turns the whole fixture with it. Composing them the other way
+  // would index the part about an axis it is not sitting on.
+  glm::dmat3 m = glm::mat3_cast(setup.frame);
+  if (std::abs(setup.rotationA) > 1e-9) {
+    const double a = glm::radians(setup.rotationA);
+    const double c = std::cos(a), s = std::sin(a);
+    // Columns are the images of X, Y, Z: R_x(A).
+    m *= glm::dmat3(glm::dvec3(1.0, 0.0, 0.0), glm::dvec3(0.0, c, s),
+                    glm::dvec3(0.0, -s, c));
+  }
+  return m;
+}
+
 glm::dvec3 FromSetupSpace(const Setup& setup, const glm::dvec3& p) {
-  if (std::abs(setup.rotationA) < 1e-9)
+  if (SetupIsSquare(setup))
     return p;
-  const double a = glm::radians(setup.rotationA);
-  const double c = std::cos(a), s = std::sin(a);
-  return {p.x, p.y * c - p.z * s, p.y * s + p.z * c};
+  return SetupToModel(setup) * p;
+}
+
+glm::dquat SolveFaceUp(const glm::dvec3& normal, const glm::dquat& current) {
+  const double len = glm::length(normal);
+  if (len < 1e-9)
+    return current;
+  const glm::dvec3 n = normal / len;
+  // The frame maps the spindle (+Z) to the face normal, so undoing it lays
+  // the face flat under the spindle. Shortest arc from +Z to n.
+  const glm::dvec3 z(0.0, 0.0, 1.0);
+  const double d = glm::dot(z, n);
+  glm::dquat q0;
+  if (d < -1.0 + 1e-12) {
+    // Antiparallel: every axis in the XY plane is a shortest arc, and X is as
+    // good as any. Without this branch the cross product is zero and the
+    // quaternion comes back as garbage rather than as a half turn.
+    q0 = glm::dquat(0.0, 1.0, 0.0, 0.0);
+  } else {
+    const glm::dvec3 axis = glm::cross(z, n);
+    q0 = glm::normalize(glm::dquat(1.0 + d, axis.x, axis.y, axis.z));
+  }
+  // q0 is one answer; q0 * R_z(t) is every other. Pick the t nearest the
+  // frame in hand: dot(q0 * R_z(t), current) is maximal at this half-angle.
+  const glm::dquat c = glm::inverse(q0) * current;
+  const double half = std::atan2(c.z, c.w);
+  return q0 * glm::dquat(std::cos(half), 0.0, 0.0, std::sin(half));
 }
 
 FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
@@ -1185,17 +1252,16 @@ DerivedOp DeriveOperation(const Setup& setup,
 
 std::vector<Body> BodiesInSetupFrame(const Setup& setup,
                                      const std::vector<Body>& in) {
-  if (std::abs(setup.rotationA) < 1e-9)
+  if (SetupIsSquare(setup))
     return in;
-  // Rotate the WORLD by -A about X: the part turns under a spindle that
-  // always points down, which is what an indexed trunnion does.
-  const double a = glm::radians(-setup.rotationA);
-  const double c = std::cos(a), s = std::sin(a);
+  // Undo the setup's frame: the part turns under a spindle that always points
+  // down, which is what both a clamp and an indexed trunnion amount to. A
+  // rotation's inverse is its transpose.
+  const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup));
   glm::mat4 m(1.0f);
-  m[1][1] = static_cast<float>(c);
-  m[1][2] = static_cast<float>(s);
-  m[2][1] = static_cast<float>(-s);
-  m[2][2] = static_cast<float>(c);
+  for (int col = 0; col < 3; col++)
+    for (int row = 0; row < 3; row++)
+      m[col][row] = static_cast<float>(toSetup[col][row]);
 
   std::vector<Body> out;
   out.reserve(in.size());
@@ -1801,7 +1867,9 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
                "against the model";
   // The index this setup is cut at rides on every move, so the post emits it
   // and the machine is never asked to guess which way the part is facing.
-  if (std::abs(setup.rotationA) > 1e-9)
+  // How the part is CLAMPED never gets here: it is already baked into the
+  // coordinates, and a 3-axis shop must not be handed an axis it lacks.
+  if (EmitsRotary(setup))
     for (Move& m : tp.moves) {
       m.hasA = true;
       m.a = setup.rotationA;

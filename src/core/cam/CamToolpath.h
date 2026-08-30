@@ -125,21 +125,56 @@ struct DerivedOp {
 
 // --- C9: the setup frame (indexed 4th axis) --------------------------------
 
-// The bodies as this setup sees them: rotated by -rotationA about X, so the
-// setup's "up" is +Z again and the whole 2.5D pipeline — sectioning, face
-// regions, stock bounds, the verifier — works unchanged on a part clamped in
-// a trunnion. This is what the plan meant by generating toolpaths in SETUP
-// SPACE: an indexed axis becomes a transform and an A word, not a rewrite.
+// Whether this setup commands a rotary axis: the machine has one AND it is
+// indexed off zero. The ONE question the toolpath and the post ask before
+// putting an A word in a file — a rotated FIXTURE is not an answer to it.
+[[nodiscard]] bool EmitsRotary(const Setup& setup);
+
+// The other side of the same part: this fixture turned a half turn about the
+// setup's own X, so what was against the bed faces the spindle. A flip job's
+// second setup is DERIVED from its first — the alternative is typing an
+// orientation twice and having the two disagree.
+[[nodiscard]] glm::dquat FlipFrame(const glm::dquat& frame);
+
+// Whether the part is clamped as modelled — the fixture frame is identity.
+// Says nothing about `rotationA`: the two are separate claims.
+[[nodiscard]] bool FrameIsSquare(const Setup& setup);
+
+// Setup space -> model space: how the part is fixtured, then how far the
+// table is indexed. The ONE place the two compose, so nothing downstream has
+// to know there are two.
+[[nodiscard]] glm::dmat3 SetupToModel(const Setup& setup);
+
+// The bodies as this setup sees them: `SetupToModel` undone, so the setup's
+// "up" is +Z again and the whole 2.5D pipeline — sectioning, face regions,
+// stock bounds, the verifier — works unchanged on a part that is not modelled
+// face-up. This is what the plan meant by generating toolpaths in SETUP
+// SPACE: an orientation becomes a transform, not a rewrite.
 //
 // Element names survive: only the shape is transformed, so a machining
 // selection still resolves.
 [[nodiscard]] std::vector<Body> BodiesInSetupFrame(const Setup& setup,
                                                    const std::vector<Body>& in);
 
+// The FIXTURING frame that lays `normal` under the spindle — the quaternion
+// taking +Z to it. Any planar face has one; there is nothing to refuse.
+//
+// A normal fixes two of three rotational degrees of freedom; the spin about
+// the spindle is still free, and `current` settles it: of all the frames that
+// lay the face up, this returns the one nearest the frame already in hand.
+// So clicking a face changes as little as possible, and clicking the same
+// face twice is idempotent rather than a slow spiral.
+[[nodiscard]] glm::dquat SolveFaceUp(const glm::dvec3& normal,
+                                     const glm::dquat& current);
+
 // The A that would turn `normal` to face the spindle, in degrees. Returns
 // false when there is none: a face pointing along X can never face +Z under
 // a rotation about X, and saying so beats rotating to the nearest wrong
 // thing.
+//
+// This is the ROTARY path, and the restriction is real for a trunnion. For
+// laying a part on the bed use `SolveFaceUp`, which has no such limit — a
+// clamp can hold a part any way up.
 [[nodiscard]] bool SolveIndexA(const glm::dvec3& normal, double& degrees);
 
 // A point in setup space, back in model space — for DRAWING. Toolpaths,

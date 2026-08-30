@@ -279,6 +279,33 @@ void DrawCamPanel(AppState& state) {
     return; // `setups` may have reallocated
   }
   ImGui::SameLine();
+  // The other side of the same part. A flip job is two setups on ONE part —
+  // the alternative people reach for is a rotated COPY of the part, which
+  // then has to be kept in step with the original by hand
+  // (docs/cam/setup-frame.md S4).
+  if (ImGui::SmallButton("Flip###cam_flip_setup")) {
+    cam::Setup& other = state.document->AddCamSetup(setup->name + " (back)");
+    // Carry the MACHINE and the material across — they did not change when
+    // the part was turned over. Operations do not come: they are what the
+    // other side is for.
+    other.frame = cam::FlipFrame(setup->frame);
+    other.stock = setup->stock;
+    other.tools = setup->tools;
+    other.post = setup->post;
+    other.fitArcs = setup->fitArcs;
+    other.rapidFeed = setup->rapidFeed;
+    other.hasRotaryAxis = setup->hasRotaryAxis;
+    other.safeZ = cam::DeriveSafeZ(other, state.document->GetBodies());
+    state.camActiveSetup = other.id;
+    state.camSafeZEdit = static_cast<float>(other.safeZ);
+    state.projectMetaDirty = true;
+    ImGui::End();
+    return; // `setups` may have reallocated
+  }
+  ImGui::SetItemTooltip("Add a second setup for the other side: the same "
+                        "part, turned over. Same stock and tools, no "
+                        "operations yet.");
+  ImGui::SameLine();
   if (ImGui::SmallButton("x###cam_del_setup")) {
     state.document->RemoveCamSetup(setup->id);
     state.camActiveSetup = 0;
@@ -384,15 +411,30 @@ void DrawCamPanel(AppState& state) {
       dirty = true;
     ImGui::SetItemTooltip("Post curves as arcs instead of many short lines. "
                           "Turn off for a controller that mishandles them.");
-    float indexA = static_cast<float>(setup->rotationA);
-    ImGui::SetNextItemWidth(90.0f);
-    if (ExprDragFloat(state, "A index###cam_index_a", &indexA, 0.5f, -360.0f,
-                      360.0f, "%.2f°")) {
-      setup->rotationA = indexA;
+    // Does this machine HAVE a 4th axis? A property of the machine, like the
+    // post and whether it fits arcs. Until it is ticked no file can carry an
+    // A word — which is the whole point: laying a part flat on the bed used
+    // to post `G0 A90` at routers that have no A (docs/cam/setup-frame.md).
+    if (ImGui::Checkbox("Has a 4th axis (A)###cam_has_rotary",
+                        &setup->hasRotaryAxis)) {
       dirty = true;
+      changed = kAllOps;
     }
-    ImGui::SetItemTooltip("Rotary 4th axis: how far the table is turned for "
-                          "this setup. 0 for a 3-axis job.");
+    ImGui::SetItemTooltip("Tick only for a machine with a rotary table. How "
+                          "the part is CLAMPED is \"Lay a face up\" and needs "
+                          "no rotary axis.");
+    if (setup->hasRotaryAxis) {
+      float indexA = static_cast<float>(setup->rotationA);
+      ImGui::SetNextItemWidth(90.0f);
+      if (ExprDragFloat(state, "A index###cam_index_a", &indexA, 0.5f, -360.0f,
+                        360.0f, "%.2f°")) {
+        setup->rotationA = indexA;
+        dirty = true;
+        changed = kAllOps;
+      }
+      ImGui::SetItemTooltip("Rotary 4th axis: how far the table is turned for "
+                            "this setup. 0 for a 3-axis job.");
+    }
   }
   // The struct holds a double; the widget edits a float mirror so ImGui's
   // drag behaves. Kept in sync here rather than in two places.

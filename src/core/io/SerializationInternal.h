@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    66; // v66: drawing notes; cam tool type/tip angle + the edge-break op
+    67; // v67: the cam setup's fixture frame + whether the machine has a
+        // rotary axis (docs/cam/setup-frame.md)
+        // (v66: drawing notes; cam tool type/tip angle + the edge-break op)
         // (v65: mate connector corner snap (anchor snap_edge2))
         // (v64: display units (length/mass/angle) travel with the document)
         // (v63: the cam setup remembers the face Z zero was picked from)

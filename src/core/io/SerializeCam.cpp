@@ -1,4 +1,5 @@
 #include "core/cam/CamJob.h"
+#include "core/cam/CamToolpath.h" // FrameIsSquare
 #include "core/io/SerializationInternal.h"
 
 // CAM setups (v58, docs/cam/plan.md). Small enough to live inline in the
@@ -103,8 +104,17 @@ json CamSetupToJson(const cam::Setup& setup) {
   if (setup.topFace.IsSet())
     j["top_face"] = {{"feature_id", setup.topFace.featureId},
                      {"element", setup.topFace.name}};
+  // How the part is clamped (v67). Written only when it is not "as modelled",
+  // so a job on a part that already lies flat re-saves byte-identically.
+  // Doubles, not the float QuatToJson the assembly schema uses: this frame
+  // multiplies into every cut coordinate, and 0.7071067811865476 round-trips
+  // where 0.70710678f does not.
+  if (!cam::FrameIsSquare(setup))
+    j["frame"] = {setup.frame.x, setup.frame.y, setup.frame.z, setup.frame.w};
   // Written only when set: every 3-axis job would otherwise carry a rotary
-  // key that means nothing (and the 4th axis is deferred — plan.md).
+  // key that means nothing.
+  if (setup.hasRotaryAxis)
+    j["has_rotary_axis"] = true;
   if (setup.rotationA != 0.0)
     j["rotation_a"] = setup.rotationA;
   if (!setup.fitArcs)
@@ -191,7 +201,16 @@ cam::Setup CamSetupFromJson(const json& j) {
   if (j.contains("origin") && j["origin"].is_array() && j["origin"].size() == 3)
     setup.origin = {j["origin"][0].get<double>(), j["origin"][1].get<double>(),
                     j["origin"][2].get<double>()};
+  if (j.contains("frame") && j["frame"].is_array() && j["frame"].size() == 4)
+    setup.frame =
+        glm::dquat(j["frame"][3].get<double>(), j["frame"][0].get<double>(),
+                   j["frame"][1].get<double>(), j["frame"][2].get<double>());
   setup.rotationA = j.value("rotation_a", 0.0);
+  // Before v67 there was no such flag and `rotation_a` was the only way to
+  // turn a part, so a file that carries one was written by a machine that
+  // has the axis. Defaulting it to false instead would silently drop the A
+  // word from a rotary job that used to post one.
+  setup.hasRotaryAxis = j.value("has_rotary_axis", setup.rotationA != 0.0);
   setup.fitArcs = j.value("fit_arcs", true);
   if (j.contains("stock")) {
     const json& sj = j["stock"];

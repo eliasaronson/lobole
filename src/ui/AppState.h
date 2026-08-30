@@ -1234,6 +1234,10 @@ struct AppState {
     uint64_t documentVersion = UINT64_MAX;
     uint64_t setupId = 0;
     double rotationA = 0.0;
+    // The fixture frame too: laying a face up re-sections every body, so a
+    // key that watched only the rotary axis served a region from the previous
+    // orientation (S2).
+    glm::dquat frame{1.0, 0.0, 0.0, 0.0};
     ElementRef ref;
     cam::FaceRegion region;
   };

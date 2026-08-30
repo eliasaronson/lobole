@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
 
@@ -151,10 +152,19 @@ struct Setup {
   std::string name;
 
   Stock stock;
-  // Work origin and orientation. The post emits coordinates in this frame;
-  // rotating it is how an INDEXED 4th axis works (deferred, but the shape is
-  // here so it lands as data rather than as a redesign).
+  // Work origin, in setup space. The post emits coordinates in this frame.
   glm::dvec3 origin{0.0, 0.0, 0.0};
+
+  // How the part is FIXTURED: the rotation taking setup space to model space.
+  // A part is modelled where it belongs in the assembly — a speaker baffle
+  // stands upright — and clamping it flat on the bed is a statement about the
+  // job, not about the model. Saying it here is what lets one part be cut on
+  // several sides without a rotated copy per side (docs/cam/setup-frame.md).
+  //
+  // It says NOTHING about the machine. `rotationA` below is the other half of
+  // what used to be one number, and the conflation is what made laying a
+  // panel flat post `G0 A90` at a 3-axis router.
+  glm::dquat frame{1.0, 0.0, 0.0, 0.0};
   // The face Z zero was taken from. On the SETUP, not on the session: a job
   // reopened from its own file used to say "Z zero is not set yet" about an
   // origin it had saved and was using, because the panel asked a field that
@@ -163,9 +173,13 @@ struct Setup {
   // them (docs/cam/dogfood-round.md). Empty = nobody has picked one; the
   // origin is then whatever it defaults to.
   ElementRef topFace;
-  // Rotation about X in degrees — the A axis of a typical 4th-axis mill. 0
-  // for every 3-axis job, and nothing emits it yet.
+  // The MACHINE's rotary index: rotation about X in degrees, emitted as an A
+  // word. 0 for every 3-axis job — INCLUDING one whose frame is rotated.
   double rotationA = 0.0;
+  // Whether the machine has an A axis at all. A property of the MACHINE, like
+  // `post` and `fitArcs`, so it persists. False means the rotary controls are
+  // not offered and no file can command an axis the shop does not own.
+  bool hasRotaryAxis = false;
 
   // Whether the post fits G2/G3 arcs (C7). A property of the MACHINE, so it
   // lives on the setup and persists — a controller that mishandles arcs
