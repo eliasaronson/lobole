@@ -68,6 +68,12 @@ public:
     m_vw = w;
     m_vh = h;
   }
+  // What it is actually drawing into, so a test can assert this renderer was
+  // pointed at the same rectangle as the rest of the scene rather than
+  // recomputing the caller's arithmetic.
+  [[nodiscard]] glm::ivec4 Viewport() const {
+    return {m_vx, m_vy, static_cast<int32_t>(m_vw), static_cast<int32_t>(m_vh)};
+  }
 
   void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
   [[nodiscard]] bool IsInitialized() const { return m_initialized; }

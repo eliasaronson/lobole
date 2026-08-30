@@ -838,6 +838,28 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->stockRenderer->HasMesh());
     IM_CHECK(s_App->camToolInstance != 0);
 
+    // And it is aimed at the SAME rectangle as the rest of the scene. The 3D
+    // view is a sub-region between the docked panels; a renderer left out of
+    // the list in UI.cpp draws full-window while the camera aspect is the
+    // sub-region, so its geometry lands at a different scale and offset than
+    // everything drawn around it. That shipped: the stock came out not
+    // parallel to the part with its cuts shifted sideways, while the cutter —
+    // a mesh-renderer instance, correctly aimed — sat right where it belonged.
+    //
+    // Only a WINDOWED run can catch it. Under --offscreen there are no panels,
+    // so the sub-region is the whole framebuffer and the bug is invisible,
+    // which is exactly how it got past a screenshot review.
+    const ImGuiIO& vpIo = ImGui::GetIO();
+    const glm::vec2 vpScale(vpIo.DisplayFramebufferScale.x,
+                            vpIo.DisplayFramebufferScale.y);
+    const glm::vec2 wantPos = s_App->viewportPos * vpScale;
+    const glm::vec2 wantSize = s_App->viewportSize * vpScale;
+    const glm::ivec4 got = s_App->stockRenderer->Viewport();
+    IM_CHECK_EQ(got.x, (int)wantPos.x);
+    IM_CHECK_EQ(got.y, (int)wantPos.y);
+    IM_CHECK_EQ(got.z, (int)wantSize.x);
+    IM_CHECK_EQ(got.w, (int)wantSize.y);
+
     // Step forward one move, then back: the buttons a person uses to look at
     // the move a verdict named.
     const cam::SimCursor mid = s_App->camCursor;

@@ -13,6 +13,7 @@
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
 #include "render/SketchRenderer.h"
+#include "render/StockRenderer.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h"
@@ -1015,6 +1016,15 @@ void DrawUI(AppState& state) {
         state
             .fieldRenderer); // FEM/topology overlay — else it renders full-
                              // window while the camera aspect is the sub-region
+    // The CAM cutting simulation's stock. EVERY renderer that draws into the
+    // 3D scene belongs in this list: one left out renders full-window while
+    // the camera is aimed at the sub-region, so its geometry lands at a
+    // different scale and offset than everything around it. The stock was
+    // left out, and it showed up as a workpiece that was not parallel to the
+    // part with its cuts shifted sideways — while the cutter, an instance of
+    // the mesh renderer, sat correctly. An --offscreen instance cannot
+    // reproduce it: with no panels the sub-region IS the whole framebuffer.
+    setVp(state.stockRenderer);
     if (state.camera)
       state.camera->SetAspectRatio(fbSize.x / fbSize.y);
   }
