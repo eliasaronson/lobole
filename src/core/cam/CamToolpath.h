@@ -115,6 +115,29 @@ struct DerivedOp {
   Operation op;    // id left 0 — the caller owns id allocation
 };
 
+// Half the cutter per pass: the rule of thumb every 2.5D job starts from,
+// expressed in the TOOL so it stays right for a 1 mm cutter and a 12 mm one.
+// One derivation, three callers — the verbs, a retool, and the panel.
+[[nodiscard]] inline double DerivedStepdown(const Tool& tool) {
+  return tool.diameter * 0.5;
+}
+
+// Point `op` at a different cutter. Every derived number is a fraction of the
+// cutter, so a stepdown still sitting at the OLD tool's derived value follows
+// the new one: a 6 mm end mill's 3 mm pass handed to a 3 mm cutter is a
+// full-diameter plunge. A stepdown the user typed is theirs, and is kept.
+//
+// Refuses a tool the setup does not have rather than falling back to tool 1 —
+// the substitute cuts perfectly well, at the wrong feeds, with the wrong
+// cutter.
+[[nodiscard]] bool Retool(const Setup& setup, Operation& op, int toolNumber,
+                          std::string& why);
+
+// Move an operation to `toIndex`. Order is load-bearing: `GenerateAll` and the
+// post both walk the vector, so it decides the cutting sequence and where the
+// tool changes — and their `M0` pauses — fall.
+[[nodiscard]] bool MoveOperation(Setup& setup, uint64_t opId, size_t toIndex);
+
 // `toolNumber` 0 = the setup's first tool. Every derived number is a fraction
 // of the cutter, so an operation derived for one tool and cut with another
 // carries the wrong stepdown.

@@ -128,6 +128,20 @@ yet. Verification stops being a thing you remember to run.
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
 | later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
+**The operation row (2026-08-30).** Two things it could not say. *Which
+cutter*: `op.toolNumber` was read to print a diameter and never written, so
+"this opening is 5.46 mm across and tool 1 is 6 mm — use a cutter of 5.46 mm
+or less" was a refusal naming a remedy the panel could not perform, with the
+smaller tool already defined in the setup. It is a row of `T1 T2 …` buttons
+under Advanced — buttons rather than a combo because a setup has a handful of
+tools, so one click beats two, and because a combo gathers with an empty
+label and could not be gated. Retooling carries the stepdown: half the new
+cutter, unless you typed your own. *Which order*: the operations list had no
+reordering at all, though the order IS the cutting sequence — the generator
+and the post both walk the vector, so it decides what is roughed before what
+is finished and where the tool changes and their `M0` pauses fall. Drag the
+grip handle. Scripted twin: `move_cam_op {id, to}`.
+
 G1 first: picking the top face is the highest-value single click in CAM, and
 the tool-to-scale drawing prevents the most common beginner surprise.
 

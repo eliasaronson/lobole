@@ -600,9 +600,36 @@ void DrawCamPanel(AppState& state) {
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");
   uint64_t removeOp = 0;
+  uint64_t moveOp = 0; // dragged operation …
+  size_t moveTo = 0;   // … and where it was dropped
   ImGui::PushID("ops");
-  for (cam::Operation& op : setup->operations) {
+  for (size_t opIndex = 0; opIndex < setup->operations.size(); opIndex++) {
+    cam::Operation& op = setup->operations[opIndex];
     ImGui::PushID(static_cast<int>(op.id));
+    // The order is the cutting sequence — GenerateAll and the post both walk
+    // this vector — so it has to be editable. Rough before finish, and the
+    // tool changes fall where the order puts them.
+    ImGui::Selectable(ICON_FA_GRIP_VERTICAL "###drag", false,
+                      ImGuiSelectableFlags_None, ImVec2(12.0f, 0.0f));
+    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
+      ImGui::SetDragDropPayload("cam_op", &opIndex, sizeof(size_t));
+      ImGui::Text("%s", op.name.empty() ? kOpTypes[static_cast<int>(op.type)]
+                                        : op.name.c_str());
+      ImGui::EndDragDropSource();
+    }
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("cam_op")) {
+        size_t from = 0;
+        std::memcpy(&from, pl->Data, sizeof(size_t));
+        if (from < setup->operations.size() && from != opIndex) {
+          moveOp = setup->operations[from].id;
+          moveTo = opIndex;
+        }
+      }
+      ImGui::EndDragDropTarget();
+    }
+    ImGui::SetItemTooltip("Drag to reorder — this is the order it cuts in");
+    ImGui::SameLine();
     if (ImGui::Checkbox("###enabled", &op.enabled))
       touched(op.id);
     ImGui::SameLine();
@@ -626,6 +653,43 @@ void DrawCamPanel(AppState& state) {
       removeOp = op.id;
 
     if (ImGui::TreeNode("Advanced###adv")) {
+      // WHICH CUTTER. There was no way to say it by clicking — `toolNumber`
+      // was read to print a diameter and never written — so "use a cutter of
+      // 5.46 mm or less" was a refusal naming a remedy the panel could not
+      // perform, even with the smaller tool already in the setup.
+      //
+      // A row of buttons rather than a combo: a setup has a handful of tools,
+      // so this shows every option at a glance and costs ONE click instead of
+      // two. It is also the only form the test engine can address — a combo
+      // gathers with an empty label whatever you name it (the trap the
+      // drawings round hit), so a combo here could not be gated.
+      ImGui::TextDisabled("Tool");
+      for (const cam::Tool& t : setup->tools) {
+        ImGui::SameLine();
+        const bool active = t.number == op.toolNumber;
+        if (active)
+          ImGui::PushStyleColor(
+              ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        char id[32];
+        std::snprintf(id, sizeof(id), "T%d###optool_t%d", t.number, t.number);
+        if (ImGui::SmallButton(id)) {
+          std::string why;
+          if (cam::Retool(*setup, op, t.number, why))
+            touched(op.id);
+          else
+            state.camRefusal = why;
+        }
+        if (active)
+          ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%.3g mm %s — the stepdown follows the cutter "
+                              "unless you have typed your own",
+                              t.diameter, t.name.c_str());
+      }
+      if (setup->FindTool(op.toolNumber) == nullptr) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "T%d missing",
+                           op.toolNumber);
+      }
       int type = static_cast<int>(op.type);
       ImGui::SetNextItemWidth(90.0f);
       if (ImGui::Combo("###type", &type, kOpTypes, IM_ARRAYSIZE(kOpTypes))) {
@@ -717,6 +781,15 @@ void DrawCamPanel(AppState& state) {
     ImGui::PopID();
   }
   ImGui::PopID(); // "ops"
+  if (moveOp != 0 && cam::MoveOperation(*setup, moveOp, moveTo)) {
+    // Reordering changes no toolpath — only the sequence they are cut in and
+    // where the tool changes fall — so nothing is regenerated. The posted
+    // file does change, which is what the dirty flag is for.
+    dirty = true;
+    state.projectMetaDirty = true;
+    state.camVerdict.clear();
+    state.camLeftover.clear();
+  }
   if (removeOp != 0) {
     auto& ops = setup->operations;
     for (auto it = ops.begin(); it != ops.end(); ++it)

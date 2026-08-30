@@ -1865,6 +1865,103 @@ TEST_CASE("cam: a flipped setup cuts the other side", "[cam]") {
     CHECK_FALSE(m2.hasA);
 }
 
+TEST_CASE("cam: retooling carries the derived stepdown, not the typed one",
+          "[cam]") {
+  cam::Setup s = BasicSetup(); // T1 = 6 mm
+  cam::Tool small;
+  small.number = 2;
+  small.name = "3mm flat";
+  small.diameter = 3.0;
+  small.feedCut = 600.0;
+  small.feedPlunge = 200.0;
+  s.tools.push_back(small);
+
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.stepdown = cam::DerivedStepdown(s.tools[0]); // nobody has stated one
+  std::string why;
+
+  // Untouched: it follows the cutter. Half of 6 becomes half of 3 — the whole
+  // point, since a 6 mm tool's 3 mm pass is a full-diameter plunge for a 3 mm
+  // one.
+  REQUIRE(cam::Retool(s, op, 2, why));
+  CHECK(op.toolNumber == 2);
+  CHECK_THAT(op.stepdown, WithinAbs(1.5, 1e-9));
+
+  // Typed: it is the user's number and survives the change.
+  op.stepdown = 0.4;
+  REQUIRE(cam::Retool(s, op, 1, why));
+  CHECK(op.toolNumber == 1);
+  CHECK_THAT(op.stepdown, WithinAbs(0.4, 1e-9));
+
+  // A tool this setup does not have is REFUSED, naming it — not quietly read
+  // as tool 1, which cuts perfectly well with the wrong cutter at the wrong
+  // feeds.
+  const int before = op.toolNumber;
+  CHECK_FALSE(cam::Retool(s, op, 7, why));
+  CHECK(why.find("tool 7") != std::string::npos);
+  CHECK(op.toolNumber == before);
+}
+
+TEST_CASE("cam: operations reorder, and the order is what gets posted",
+          "[cam]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup s = BasicSetup();
+  cam::Tool second = s.tools[0];
+  second.number = 2;
+  second.name = "3mm flat";
+  second.diameter = 3.0;
+  s.tools.push_back(second);
+
+  for (int i = 0; i < 3; i++) {
+    cam::Operation op;
+    op.id = static_cast<uint64_t>(i + 1);
+    op.type = cam::OpType::Profile;
+    op.toolNumber = i == 1 ? 2 : 1; // T1, T2, T1 — two tool changes
+    op.topZ = 20.0;
+    op.bottomZ = 10.0;
+    op.stepdown = 0.0;
+    s.operations.push_back(op);
+  }
+
+  // Move the last to the front.
+  REQUIRE(cam::MoveOperation(s, 3, 0));
+  CHECK(s.operations[0].id == 3);
+  CHECK(s.operations[1].id == 1);
+  CHECK(s.operations[2].id == 2);
+  // And back again: a move to its own index is a no-op, not a refusal.
+  REQUIRE(cam::MoveOperation(s, 3, 2));
+  CHECK(s.operations[0].id == 1);
+  REQUIRE(cam::MoveOperation(s, 1, 0));
+
+  // Past the end is refused rather than clamped to the last slot.
+  CHECK_FALSE(cam::MoveOperation(s, 1, 3));
+  CHECK_FALSE(cam::MoveOperation(s, 99, 0));
+
+  // The order reaches the FILE: T1, T2, T1 is two tool changes; grouping the
+  // two T1 operations together is one. That is what reordering buys, and it
+  // is why the order is not cosmetic.
+  const auto toolChanges = [&](const cam::Setup& setup) {
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(setup, doc->GetBodies());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", setup, paths, {}, gcode, &error));
+    int n = 0;
+    for (size_t i = gcode.find("M6"); i != std::string::npos;
+         i = gcode.find("M6", i + 1))
+      n++;
+    return n;
+  };
+  const int scattered = toolChanges(s); // T1, T2, T1
+  REQUIRE(cam::MoveOperation(s, 2, 2)); // -> T1, T1, T2
+  CHECK(s.operations[2].id == 2);
+  const int grouped = toolChanges(s);
+  INFO("scattered " << scattered << " grouped " << grouped);
+  CHECK(grouped < scattered);
+}
+
 TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   double degrees = 0.0;
   // Straight up already: A = 0.

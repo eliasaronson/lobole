@@ -334,6 +334,85 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
+  // Which cutter an operation uses, and in what order they cut. Both were
+  // unreachable by clicking: `toolNumber` was READ to print a diameter and
+  // never written, so "use a cutter of 5.46 mm or less" was a refusal naming
+  // a remedy the panel could not perform; and the operations list had no
+  // reorder at all, though the order is the cutting sequence.
+  t = IM_REGISTER_TEST(engine, "cam", "operation_tool_and_order");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    {
+      cam::Tool big;
+      big.number = 1;
+      big.name = "6 mm flat";
+      big.diameter = 6.0;
+      cam::Tool small = big;
+      small.number = 2;
+      small.name = "3 mm flat";
+      small.diameter = 3.0;
+      cam::Setup* live = Doc()->FindCamSetup(setup.id);
+      live->tools = {big, small};
+      for (int i = 0; i < 2; i++) {
+        cam::Operation op;
+        op.id = Doc()->AllocateId();
+        op.name = i == 0 ? "First" : "Second";
+        op.type = cam::OpType::Profile;
+        op.toolNumber = 1;
+        op.topZ = 13.0;
+        op.bottomZ = -1.0;
+        op.stepdown = cam::DerivedStepdown(big); // nobody has stated one
+        live->operations.push_back(op);
+      }
+    }
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+
+    cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    const uint64_t firstId = live->operations[0].id;
+    const uint64_t secondId = live->operations[1].id;
+
+    // Point the first operation at the smaller cutter, by clicking.
+    const std::string adv =
+        "**/$$" + std::to_string(firstId) + "/Advanced###adv";
+    ctx->ItemClick(adv.c_str());
+    ctx->Yield(2);
+    // Only one Advanced is open, so exactly one T2 button is visible.
+    ctx->ItemClick("**/###optool_t2");
+    ctx->Yield(3);
+    live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK_EQ(live->operations[0].toolNumber, 2);
+    // And the stepdown followed the cutter: half of 3, not half of 6. A pass
+    // derived for a 6 mm tool is a full-diameter plunge for a 3 mm one.
+    IM_CHECK(std::abs(live->operations[0].stepdown - 1.5) < 1e-6);
+    // The one nobody retooled is untouched.
+    IM_CHECK_EQ(live->operations[1].toolNumber, 1);
+    IM_CHECK(std::abs(live->operations[1].stepdown - 3.0) < 1e-6);
+
+    // Now drag the second operation above the first.
+    const std::string dragA = "**/$$" + std::to_string(firstId) + "/###drag";
+    const std::string dragB = "**/$$" + std::to_string(secondId) + "/###drag";
+    ctx->ItemDragAndDrop(dragB.c_str(), dragA.c_str());
+    ctx->Yield(3);
+    live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK_EQ(live->operations.size(), (size_t)2);
+    IM_CHECK_EQ(live->operations[0].id, secondId);
+    IM_CHECK_EQ(live->operations[1].id, firstId);
+
+    // Hand the shared dock node back before anything can fail below.
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
   // S2 (docs/cam/setup-frame.md): the case every other fixture in this file
   // dodges by being modelled face-up. A panel that stands upright — an
   // imported speaker baffle, and every part that arrives from STEP or Onshape

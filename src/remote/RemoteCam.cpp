@@ -77,7 +77,20 @@ constexpr MethodDoc kCamMethods[] = {
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, setup, side, target, targets, tool, top_z, type"},
-    {"set_cam_op", "Change an operation {id, …the add_cam_op fields}.", "id"},
+    {"set_cam_op",
+     "Change an operation {id, …the add_cam_op fields}. `tool` re-points it "
+     "at another cutter: a stepdown still at the old tool's derived value "
+     "follows the new one (every derived number is a fraction of the "
+     "cutter), one you typed is kept, and a tool this setup does not have is "
+     "refused.",
+     "id"},
+    {"move_cam_op",
+     "Move an operation to a position {id, to} (0-based) and return the "
+     "setup's new order. Operation order IS the cutting sequence — the "
+     "generator and the post both walk it — so it decides what is roughed "
+     "before what is finished, and where the tool changes and their M0 "
+     "pauses fall.",
+     "id, to"},
     {"remove_cam_op", "Delete an operation {id}.", "id"},
     {"cam_derive_op",
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
@@ -228,14 +241,20 @@ std::pair<cam::Setup*, cam::Operation*> FindOp(Document& doc, uint64_t opId) {
 // was then the verb ("pocket"), and the derivation has already turned it into
 // the strategy the geometry calls for ("adaptive", C8). Applying the verb over
 // the top threw that away and cut a deep pocket in concentric rings.
-void ApplyOpFields(Document& doc, cam::Operation& op, const RpcParams& p,
-                   bool keepType = false) {
+void ApplyOpFields(Document& doc, const cam::Setup& setup, cam::Operation& op,
+                   const RpcParams& p, bool keepType = false) {
   if (p.contains("type") && !keepType)
     op.type = TypeFrom(p.at("type").get<std::string>());
   if (p.contains("name"))
     op.name = p.at("name").get<std::string>();
-  if (p.contains("tool"))
-    op.toolNumber = p.at("tool").get<int>();
+  if (p.contains("tool")) {
+    // Through the same retool the panel's combo uses: a stepdown still at the
+    // old cutter's derived value follows the new one, and a tool the setup
+    // does not have is REFUSED rather than silently cutting with tool 1.
+    std::string why;
+    if (!cam::Retool(setup, op, p.at("tool").get<int>(), why))
+      throw std::runtime_error(why);
+  }
   if (p.contains("top_z"))
     op.topZ = p.at("top_z").get<double>();
   if (p.contains("bottom_z"))
@@ -511,7 +530,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // Anything stated explicitly still wins — the derivation is a starting
     // point, not a cage. (To force a strategy on a derived operation, set it
     // afterwards with set_cam_op.)
-    ApplyOpFields(*doc, op, p, /*keepType=*/derive);
+    ApplyOpFields(*doc, setup, op, p, /*keepType=*/derive);
     // A clearing operation clears INSIDE its boundary; the struct's Outside
     // default is a profile's notion and means "nothing to cut" here.
     if (!p.contains("side") && !derive &&
@@ -533,8 +552,27 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     auto [setup, op] = FindOp(*doc, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");
-    ApplyOpFields(*doc, *op, p);
+    ApplyOpFields(*doc, *setup, *op, p);
     return json{{"id", op->id}};
+  }
+
+  if (m == "move_cam_op") {
+    const uint64_t id = p.at("id").get<uint64_t>();
+    const size_t to = p.at("to").get<size_t>();
+    for (cam::Setup& setup : doc->GetCamSetups())
+      for (const cam::Operation& op : setup.operations)
+        if (op.id == id) {
+          if (!cam::MoveOperation(setup, id, to))
+            throw std::runtime_error("index " + std::to_string(to) +
+                                     " is past the end — this " + "setup has " +
+                                     std::to_string(setup.operations.size()) +
+                                     " operations");
+          json order = json::array();
+          for (const cam::Operation& o : setup.operations)
+            order.push_back(o.id);
+          return json{{"order", order}};
+        }
+    throw std::runtime_error("no CAM operation with that id");
   }
 
   if (m == "remove_cam_op") {

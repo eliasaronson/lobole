@@ -1019,7 +1019,7 @@ DerivedOp DeriveOperation(const Setup& setup,
   // Half the cutter per pass and 45% of it per step-over: the rule of thumb
   // every 2.5D job starts from, expressed in the tool rather than in
   // millimetres so it stays right for a 1 mm cutter and a 12 mm one.
-  op.stepdown = tool.diameter * 0.5;
+  op.stepdown = DerivedStepdown(tool);
   op.stepover = 0.45;
 
   // The model's own box, as opposed to the stock's: "does this wall go all
@@ -1248,6 +1248,41 @@ DerivedOp DeriveOperation(const Setup& setup,
   out.op = op;
   out.ok = true;
   return out;
+}
+
+bool Retool(const Setup& setup, Operation& op, int toolNumber,
+            std::string& why) {
+  const Tool* next = setup.FindTool(toolNumber);
+  if (next == nullptr) {
+    why = "there is no tool " + std::to_string(toolNumber) + " in this setup";
+    return false;
+  }
+  const Tool* prev = setup.FindTool(op.toolNumber);
+  // "Still derived" is the test, not "never edited": a stepdown equal to the
+  // old cutter's own derivation is one nobody has stated, so it follows.
+  const bool derived = op.stepdown <= 0.0 ||
+                       (prev != nullptr &&
+                        std::abs(op.stepdown - DerivedStepdown(*prev)) < 1e-9);
+  op.toolNumber = next->number;
+  if (derived)
+    op.stepdown = DerivedStepdown(*next);
+  return true;
+}
+
+bool MoveOperation(Setup& setup, uint64_t opId, size_t toIndex) {
+  std::vector<Operation>& ops = setup.operations;
+  size_t from = ops.size();
+  for (size_t i = 0; i < ops.size(); i++)
+    if (ops[i].id == opId)
+      from = i;
+  if (from == ops.size() || toIndex >= ops.size())
+    return false;
+  if (from == toIndex)
+    return true;
+  const Operation moved = ops[from];
+  ops.erase(ops.begin() + static_cast<ptrdiff_t>(from));
+  ops.insert(ops.begin() + static_cast<ptrdiff_t>(toIndex), moved);
+  return true;
 }
 
 std::vector<Body> BodiesInSetupFrame(const Setup& setup,
