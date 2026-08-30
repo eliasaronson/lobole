@@ -1082,8 +1082,10 @@ void SyncAssemblyRenderers(AppState& state) {
   if (!state.partRenderCache)
     state.partRenderCache = std::make_shared<PartRenderCacheStore>();
   PartRenderCacheStore& cache = *state.partRenderCache;
-  // Which parts this sync actually drew, so entries for parts no longer in
-  // the tree are released rather than held forever.
+  cache.syncSerial++;
+  // Which parts this sync actually drew. They are never evicted below — you
+  // cannot drop what is on screen — and everything else ages against the
+  // budget.
   std::unordered_set<uint64_t> touched;
 
   // One submit+wait for every asset this sync uploads, instead of one per
@@ -1208,9 +1210,17 @@ void SyncAssemblyRenderers(AppState& state) {
         }
         shared.push_back(std::move(sb));
       }
+      for (const SharedBody& sb : entry.bodies) {
+        if (sb.assetId == 0)
+          continue;
+        // Both renderers upload the same vertices + indices, hence x2.
+        entry.gpuBytes += 2 * (sb.vertices.size() * sizeof(Vertex3D) +
+                               sb.indices.size() * sizeof(uint32_t));
+      }
       it = cache.parts.emplace(inst.partId, std::move(entry)).first;
       buildMs += elapsedMsSince(buildStart);
     }
+    it->second.lastUsed = cache.syncSerial;
 
     // The flattened world transform, offset by the TOP-LEVEL occurrence's
     // explode vector — exploding a sub-assembly moves the whole unit, not
@@ -1292,18 +1302,39 @@ void SyncAssemblyRenderers(AppState& state) {
   if (state.outlineRenderer)
     state.outlineRenderer->EndAssetBatch();
 
-  // Release what this sync did not draw. A part that left the tree — or whose
-  // last occurrence was hidden — would otherwise hold its tessellation and
-  // both GPU buffers for the life of the session. Hiding is the common case
-  // and is cheap to undo (one re-tessellation when it comes back), so this
-  // stays a strict "not drawn this sync" rule rather than an LRU.
-  for (auto it = cache.parts.begin(); it != cache.parts.end();) {
-    if (touched.count(it->first) != 0) {
-      ++it;
+  // Age out what is not on screen, down to kPartRenderCacheBudgetBytes.
+  //
+  // This was once a strict "release anything not drawn this sync", which
+  // looked tidy and made two assembly tabs THRASH: alternating between two
+  // 299-part assemblies re-tessellated all 299 every switch (4.2 s each), so
+  // the cache bought exactly nothing in a multi-assembly project. Keeping
+  // everything instead grows without bound across imports. Hence a budget,
+  // evicting least-recently-drawn first — and never a part drawn this sync,
+  // whose assets are in use.
+  size_t idleBytes = 0;
+  std::vector<std::pair<uint64_t, uint64_t>> idle; // (lastUsed, partId)
+  for (const auto& [partId, entry] : cache.parts) {
+    if (touched.count(partId) != 0)
       continue;
+    idleBytes += entry.gpuBytes;
+    idle.emplace_back(entry.lastUsed, partId);
+  }
+  if (idleBytes > kPartRenderCacheBudgetBytes) {
+    std::sort(idle.begin(), idle.end()); // oldest first
+    size_t dropped = 0;
+    for (const auto& [lastUsed, partId] : idle) {
+      if (idleBytes <= kPartRenderCacheBudgetBytes)
+        break;
+      auto it = cache.parts.find(partId);
+      if (it == cache.parts.end())
+        continue;
+      idleBytes -= it->second.gpuBytes;
+      dropped += it->second.gpuBytes;
+      ReleaseEntryAssets(state, it->second);
+      cache.parts.erase(it);
     }
-    ReleaseEntryAssets(state, it->second);
-    it = cache.parts.erase(it);
+    LOG_INFO("Part render cache over budget: dropped {} MB of idle geometry",
+             dropped / (1024 * 1024));
   }
 
   // (Highlights re-apply themselves: they are a per-frame projection of the

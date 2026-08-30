@@ -106,13 +106,21 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)2);
     IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
 
-    // And the last one going takes the asset with it — no leak, which is the
-    // half of refcounting a count alone would not catch.
+    // Hiding the LAST one drops every instance — and deliberately KEEPS the
+    // asset, held by AppState::partRenderCache so unhiding is instant rather
+    // than a re-tessellation. That retention is the whole point of the cache;
+    // it used to be released here, which is why hiding one occurrence of a
+    // 299-part import cost 5.9 s.
     for (Occurrence& o : s_App->assembly->GetOccurrences())
       o.visible = false;
     s_App->assembly->BumpVersion();
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)0);
+    IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
+
+    // The refcount still has to balance, or "retained" would just be a leak
+    // with a nicer name: dropping the cache frees it.
+    ui::ReleasePartRenderCache(*s_App);
     IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)0);
   };
 

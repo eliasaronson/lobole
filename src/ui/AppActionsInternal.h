@@ -65,10 +65,16 @@ struct SharedBody {
   float grainContrast = 0.0f;
 };
 
-// What is cached for one part, and the document version it was built from.
+// What is cached for one part, the document version it was built from, and
+// what it costs to keep.
 struct PartRenderCacheEntry {
   uint64_t docVersion = 0;
   std::vector<SharedBody> bodies;
+  // Device-local bytes the two renderer assets hold (vertices + indices,
+  // twice). Budgeted against, because this is the scarce resource.
+  size_t gpuBytes = 0;
+  // The sync serial that last drew this part; the LRU key.
+  uint64_t lastUsed = 0;
 };
 
 // AppState::partRenderCache's payload: part slot id -> its entry. The assets
@@ -79,7 +85,25 @@ struct PartRenderCacheEntry {
 // places that should.
 struct PartRenderCacheStore {
   std::unordered_map<uint64_t, PartRenderCacheEntry> parts;
+  uint64_t syncSerial = 0; // ++ per sync; stamps entries for the LRU
 };
+
+// How much device memory the cache may hold for parts that are NOT currently
+// being drawn. Retained geometry beyond this is dropped, least-recently-drawn
+// first.
+//
+// Both simpler rules are wrong, and each was measured on the 299-part speaker
+// import (51 MB of assets):
+//   - "drop everything not drawn this sync" made two assembly tabs THRASH —
+//     alternating between them re-tessellated all 299 parts every switch,
+//     4.2 s each, i.e. the cache bought nothing in a multi-assembly project.
+//   - "keep everything" grows without bound: every import adds another
+//     assembly's worth for the life of the session.
+// A budget keeps a handful of large assemblies hot and still has a ceiling.
+//
+// NOT a cap on total VRAM: what is on screen is always resident, so a single
+// assembly larger than this still loads in full (it just keeps nothing else).
+inline constexpr size_t kPartRenderCacheBudgetBytes = 256u * 1024 * 1024;
 
 // Drops one part's cached tessellation + assets (a part deleted, or a tab
 // closed). Safe when nothing is cached for it.
