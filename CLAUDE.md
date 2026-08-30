@@ -151,7 +151,9 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   offset in the real app. That class of bug is invisible offscreen and needs a
   windowed GUI test (`cam/simulation_plays_and_gives_it_back` asserts it).
   It also does NOT isolate `XDG_STATE_HOME`: its autosave lands in the user's
-  real `~/.local/state/designer/`. Export a scratch one when driving a job. Use a scratch port (NOT 8799). One-shot:
+  real `~/.local/state/designer/` and will overwrite an unsaved document's
+  recovery copy. Export a scratch one when driving a job.
+  Use a scratch port (NOT 8799). One-shot:
   `headless-preview.sh --render PROJECT OUT.png <port>`. Only `ui_action`
   needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
 - **Non-visual checks need no GPU**: `build/designer --headless --remote <port>`.
