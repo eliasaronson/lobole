@@ -30,6 +30,7 @@
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/SSAORenderer.h"
+#include "render/SceneRenderer.h"
 #include "render/Screenshot.h"
 #include "render/ShadowRenderer.h"
 #include "render/SketchRenderer.h"
@@ -138,6 +139,37 @@ static std::unique_ptr<SketchRenderer> g_SketchRenderer;
 static std::unique_ptr<UnderlayRenderer> g_UnderlayRenderer;
 static std::unique_ptr<FieldRenderer> g_FieldRenderer;
 static std::unique_ptr<StockRenderer> g_StockRenderer;
+
+// THE list of renderers that draw into the 3D scene, IN DRAW ORDER
+// (docs/rendering/renderer-wiring.md). The order is real information, not
+// incidental: the field and the stock stand in front of the mesh they replace,
+// the outline goes over the solids it traces, reference images go under the
+// sketch lines drawn on top of them.
+//
+// Every per-frame duty below loops over this instead of naming six renderers
+// six times. That is the whole point — the same list written out seven times
+// is how the last three renderers each shipped with one of their wires
+// missing.
+static std::vector<SceneRenderer*> g_Scene;
+
+// Registered once a construction path has built its renderers. Null entries
+// are skipped, so one that failed to initialize is simply absent rather than a
+// crash.
+static void RegisterSceneRenderers() {
+  // ORDER IS THE CONTENT of this function. tests/test_conventions.cpp reads it
+  // to check that every SceneRenderer implementation appears here — being
+  // absent means drawing nothing at all.
+  g_Scene.clear();
+  for (SceneRenderer* r :
+       {static_cast<SceneRenderer*>(g_MeshRenderer.get()),
+        static_cast<SceneRenderer*>(g_FieldRenderer.get()),
+        static_cast<SceneRenderer*>(g_StockRenderer.get()),
+        static_cast<SceneRenderer*>(g_OutlineRenderer.get()),
+        static_cast<SceneRenderer*>(g_UnderlayRenderer.get()),
+        static_cast<SceneRenderer*>(g_SketchRenderer.get())})
+    if (r != nullptr)
+      g_Scene.push_back(r);
+}
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<ShadowRenderer> g_ShadowRenderer;
 static std::unique_ptr<SSAORenderer> g_SSAORenderer;
@@ -970,25 +1002,8 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   }
 
   // 3D scene first, UI on top
-  if (g_MeshRenderer) {
-    g_MeshRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
-  }
-  if (g_FieldRenderer) { // FEM result overlay (stands in for hidden bodies)
-    g_FieldRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
-  }
-  if (g_StockRenderer) { // CAM cutting simulation: the block being cut
-    g_StockRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
-  }
-  if (g_OutlineRenderer) {
-    g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
-  }
-  if (g_UnderlayRenderer) {
-    // Reference images first, so the sketch lines below draw on top.
-    g_UnderlayRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
-  }
-  if (g_SketchRenderer) {
-    g_SketchRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
-  }
+  for (SceneRenderer* r : g_Scene)
+    r->Render(fd->CommandBuffer, wd->FrameIndex);
 
   ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
@@ -1380,6 +1395,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_App.underlayRenderer = g_UnderlayRenderer.get();
   g_App.fieldRenderer = g_FieldRenderer.get();
   g_App.stockRenderer = g_StockRenderer.get();
+  RegisterSceneRenderers();
+  g_App.sceneRenderers = g_Scene;
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
@@ -1447,12 +1464,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
         g_SSAORenderer->SetFullResolution(g_App.ssaoFullRes)) {
       g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
     }
-    g_MeshRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
-    g_OutlineRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
-    g_FieldRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
+    for (SceneRenderer* r : g_Scene)
+      r->SetClipPlanes(ui::SectionPlanes(g_App));
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
-    if (g_StockRenderer)
-      g_StockRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
     ui::PumpRenderJob(g_App);
 
     // Captures hold until the camera lands: orient_to_face animates ~1 s,
@@ -1471,13 +1485,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
         server.WantsScreenshot(shotPath)) {
       const glm::mat4 view = g_Camera->GetViewMatrix();
       const glm::mat4 proj = g_Camera->GetProjectionMatrix();
-      g_MeshRenderer->UpdateCamera(view, proj);
-      g_OutlineRenderer->UpdateCamera(view, proj);
-      g_SketchRenderer->UpdateCamera(view, proj);
-      g_UnderlayRenderer->UpdateCamera(view, proj);
-      g_FieldRenderer->UpdateCamera(view, proj);
-      if (g_StockRenderer)
-        g_StockRenderer->UpdateCamera(view, proj);
+      for (SceneRenderer* r : g_Scene)
+        r->UpdateCamera(view, proj);
       vkQueueWaitIdle(g_Queue);
       const ui::ClearColor vp = ui::ViewportClearColor();
       VkClearValue clear{};
@@ -1494,13 +1503,8 @@ static int RunOffscreen(const CommandLineArgs& args) {
           [&](VkCommandBuffer cb) {
             // The scene only — no ImGui: nothing draws an interface in this
             // mode, so a capture is the viewport, full frame.
-            g_MeshRenderer->Render(cb, 0);
-            g_FieldRenderer->Render(cb, 0);
-            if (g_StockRenderer)
-              g_StockRenderer->Render(cb, 0);
-            g_OutlineRenderer->Render(cb, 0);
-            g_UnderlayRenderer->Render(cb, 0);
-            g_SketchRenderer->Render(cb, 0);
+            for (SceneRenderer* r : g_Scene)
+              r->Render(cb, 0);
           },
           shotPath, &shotError, g_MSAASamples,
           [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, 0); }, &shotStats,
@@ -1978,6 +1982,8 @@ int main(int argc, char** argv) {
   g_App.underlayRenderer = g_UnderlayRenderer.get();
   g_App.fieldRenderer = g_FieldRenderer.get();
   g_App.stockRenderer = g_StockRenderer.get();
+  RegisterSceneRenderers();
+  g_App.sceneRenderers = g_Scene;
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
@@ -2167,21 +2173,17 @@ int main(int argc, char** argv) {
         if (g_MeshRenderer)
           g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
       }
-      if (g_OutlineRenderer) {
+      // The framebuffer changed size. SetViewportSize is a DIFFERENT question
+      // from the scene viewport rect (which UI.cpp sets from the sub-region
+      // between the panels every frame) and only some renderers have it.
+      if (g_OutlineRenderer)
         g_OutlineRenderer->SetViewportSize(fb_width, fb_height);
-      }
-      if (g_SketchRenderer) {
+      if (g_SketchRenderer)
         g_SketchRenderer->SetViewportSize(fb_width, fb_height);
-      }
-      if (g_UnderlayRenderer) {
+      if (g_UnderlayRenderer)
         g_UnderlayRenderer->SetViewportSize(fb_width, fb_height);
-      }
-      if (g_FieldRenderer) {
-        g_FieldRenderer->SetViewport(0, 0, fb_width, fb_height);
-      }
-      if (g_StockRenderer) {
-        g_StockRenderer->SetViewport(0, 0, fb_width, fb_height);
-      }
+      for (SceneRenderer* r : g_Scene)
+        r->SetViewport(0, 0, fb_width, fb_height);
       if (g_Camera) {
         g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
                                  static_cast<float>(fb_height));
@@ -2257,16 +2259,10 @@ int main(int argc, char** argv) {
     }
 
     // Section view (I3): push the clip plane to the renderers each frame.
-    if (g_MeshRenderer)
-      g_MeshRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
-    if (g_OutlineRenderer)
-      g_OutlineRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
-    if (g_FieldRenderer) {
-      g_FieldRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
+    for (SceneRenderer* r : g_Scene)
+      r->SetClipPlanes(ui::SectionPlanes(g_App));
+    if (g_FieldRenderer)
       g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
-    }
-    if (g_StockRenderer)
-      g_StockRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
 
     // Advance an in-flight offline render by one sample batch (the Render modal
     // shows progress; runs on the main thread with its own one-shot submits).
@@ -2295,35 +2291,10 @@ int main(int argc, char** argv) {
     ui::DrawUI(g_App);
 
     // Update camera matrices for 3D rendering
-    if (g_MeshRenderer && g_Camera) {
-      g_MeshRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
-                                   g_Camera->GetProjectionMatrix());
-    }
-
-    if (g_OutlineRenderer && g_Camera) {
-      g_OutlineRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
-                                      g_Camera->GetProjectionMatrix());
-    }
-
-    if (g_SketchRenderer && g_Camera) {
-      g_SketchRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
-                                     g_Camera->GetProjectionMatrix());
-    }
-
-    if (g_UnderlayRenderer && g_Camera) {
-      g_UnderlayRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
-                                       g_Camera->GetProjectionMatrix());
-    }
-
-    if (g_FieldRenderer && g_Camera) {
-      g_FieldRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
-                                    g_Camera->GetProjectionMatrix());
-    }
-
-    if (g_StockRenderer && g_Camera) {
-      g_StockRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
-                                    g_Camera->GetProjectionMatrix());
-    }
+    if (g_Camera)
+      for (SceneRenderer* r : g_Scene)
+        r->UpdateCamera(g_Camera->GetViewMatrix(),
+                        g_Camera->GetProjectionMatrix());
 
     // Rendering
     ImGui::Render();
@@ -2376,18 +2347,8 @@ int main(int argc, char** argv) {
             wd->SurfaceFormat.format, static_cast<uint32_t>(wd->Width),
             static_cast<uint32_t>(wd->Height), wd->ClearValue,
             [&](VkCommandBuffer cb) {
-              if (g_MeshRenderer)
-                g_MeshRenderer->Render(cb, wd->FrameIndex);
-              if (g_FieldRenderer)
-                g_FieldRenderer->Render(cb, wd->FrameIndex);
-              if (g_StockRenderer)
-                g_StockRenderer->Render(cb, wd->FrameIndex);
-              if (g_OutlineRenderer)
-                g_OutlineRenderer->Render(cb, wd->FrameIndex);
-              if (g_UnderlayRenderer)
-                g_UnderlayRenderer->Render(cb, wd->FrameIndex);
-              if (g_SketchRenderer)
-                g_SketchRenderer->Render(cb, wd->FrameIndex);
+              for (SceneRenderer* r : g_Scene)
+                r->Render(cb, wd->FrameIndex);
               ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
             },
             shotPath, &shotError, g_MSAASamples,

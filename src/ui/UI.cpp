@@ -12,6 +12,7 @@
 #include "render/FieldRenderer.h"
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
+#include "render/SceneRenderer.h"
 #include "render/SketchRenderer.h"
 #include "render/StockRenderer.h"
 #include "render/UnderlayRenderer.h"
@@ -1001,30 +1002,15 @@ void DrawUI(AppState& state) {
   const glm::vec2 fbPos = state.viewportPos * scale;
   const glm::vec2 fbSize = state.viewportSize * scale;
   if (fbSize.x > 0 && fbSize.y > 0) {
-    auto setVp = [&](auto* r) {
-      if (r)
-        r->SetViewport(
-            static_cast<int32_t>(fbPos.x), static_cast<int32_t>(fbPos.y),
-            static_cast<uint32_t>(fbSize.x), static_cast<uint32_t>(fbSize.y));
-    };
-    setVp(state.meshRenderer);
-    setVp(state.outlineRenderer);
-    setVp(state.sketchRenderer);
-    setVp(state.underlayRenderer); // sketch reference images — same reason as
-                                   // fieldRenderer below (else stretched)
-    setVp(
-        state
-            .fieldRenderer); // FEM/topology overlay — else it renders full-
-                             // window while the camera aspect is the sub-region
-    // The CAM cutting simulation's stock. EVERY renderer that draws into the
-    // 3D scene belongs in this list: one left out renders full-window while
-    // the camera is aimed at the sub-region, so its geometry lands at a
-    // different scale and offset than everything around it. The stock was
-    // left out, and it showed up as a workpiece that was not parallel to the
-    // part with its cuts shifted sideways — while the cutter, an instance of
-    // the mesh renderer, sat correctly. An --offscreen instance cannot
-    // reproduce it: with no panels the sub-region IS the whole framebuffer.
-    setVp(state.stockRenderer);
+    // Every renderer that draws into the 3D scene, aimed at the sub-region
+    // between the panels — one loop over the registry, in the order it draws.
+    // This used to be a hand-written list, and being missing from it is how
+    // the FEM field (0346a8e) and the CAM stock (4a3083d) each shipped drawing
+    // full-window while the camera aspect was this rectangle.
+    for (SceneRenderer* r : state.sceneRenderers)
+      r->SetViewport(
+          static_cast<int32_t>(fbPos.x), static_cast<int32_t>(fbPos.y),
+          static_cast<uint32_t>(fbSize.x), static_cast<uint32_t>(fbSize.y));
     if (state.camera)
       state.camera->SetAspectRatio(fbSize.x / fbSize.y);
   }

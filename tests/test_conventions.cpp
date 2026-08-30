@@ -174,45 +174,40 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
   CHECK(offenders.empty());
 }
 
-TEST_CASE("every scene renderer is aimed at the 3D viewport", "[convention]") {
-  // The 3D view is a sub-region between the docked panels, and UI.cpp repoints
-  // the renderers at it every frame. A renderer left out of that list keeps a
-  // FULL-WINDOW viewport while the camera aspect is the sub-region, so its
-  // geometry lands at a different scale and offset than everything drawn
-  // around it — and nothing crashes, so it ships.
+TEST_CASE("every scene renderer is in the draw-order registry",
+          "[convention]") {
+  // One list is left after the wiring refactor — `RegisterSceneRenderers` in
+  // main.cpp, which is the draw order — and everything per-frame loops over
+  // it. A renderer that implements the frame contract and is not in it draws
+  // nothing at all, in every mode, which is at least loud. Being missing from
+  // the OLD list was worse and is what this gate was written for: it drew
+  // full-window while the camera aspect was the sub-region between the
+  // panels, and shipped twice.
   //
-  // It has now happened twice, and the second time was mine:
+  //   - 0346a8e, the FEM field: every field silently offset.
+  //   - 4a3083d, the CAM stock: a workpiece not parallel to the part.
   //
-  //   - 0346a8e, the FEM field: "the FieldRenderer was never added to that
-  //     list... The Shape iso-surface was unaffected because it draws through
-  //     the MeshRenderer, which is in the list."
-  //   - 4a3083d, the CAM stock: reported as a workpiece not parallel to the
-  //     part with its cuts shifted sideways, while the cutter — an instance of
-  //     the mesh renderer — sat exactly right.
-  //
-  // Neither could be seen in review: an `--offscreen` instance has no panels,
-  // so there the sub-region IS the whole framebuffer.
+  // Neither was visible in review, because an `--offscreen` instance has no
+  // panels and there the sub-region IS the whole framebuffer.
   //
   // The discriminator is deriving from SceneRenderer — the frame contract
-  // itself. (It used to be `void SetViewport(int32_t`, a viewport RECT, which
-  // stopped working the moment the interface existed: SceneRenderer.h is a
-  // `*Renderer.h` that declares exactly that signature, so the gate demanded
-  // the abstract base be added to the list. Asking who IMPLEMENTS the contract
-  // cannot make that mistake.) The prepass renderers — shadow, SSAO, ray
-  // tracing — do not implement it and are correctly not in the list.
-  const std::string ui = [] {
-    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / "src/ui/UI.cpp");
+  // itself. (It used to match `void SetViewport(int32_t`, which stopped
+  // working the moment the interface existed: SceneRenderer.h is a
+  // `*Renderer.h` declaring exactly that signature, so the gate demanded the
+  // abstract base be registered. Asking who IMPLEMENTS the contract cannot
+  // make that mistake.) The prepass renderers — shadow, SSAO, ray tracing —
+  // do not implement it and are correctly absent.
+  const std::string main = [] {
+    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / "src/app/main.cpp");
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();
   }();
-  REQUIRE(ui.find("auto setVp") != std::string::npos);
-  // The list wraps across lines, so compare with the whitespace removed.
-  std::string flat;
-  flat.reserve(ui.size());
-  for (const char c : ui)
-    if (!std::isspace(static_cast<unsigned char>(c)))
-      flat.push_back(c);
+  const size_t at = main.find("void RegisterSceneRenderers()");
+  REQUIRE(at != std::string::npos);
+  const size_t end = main.find("\n}", at);
+  REQUIRE(end != std::string::npos);
+  const std::string body = main.substr(at, end - at);
 
   int checked = 0;
   for (const SourceFile& f : SourcesUnder("src/render", ".h")) {
@@ -221,14 +216,11 @@ TEST_CASE("every scene renderer is aimed at the 3D viewport", "[convention]") {
       continue;
     if (f.text.find(": public SceneRenderer") == std::string::npos)
       continue; // a prepass renderer, or the interface itself
-    // AppState names them camelCase: StockRenderer -> stockRenderer.
-    std::string member = name;
-    member[0] = static_cast<char>(std::tolower(member[0]));
     INFO(Relative(f.path)
-         << " takes a viewport rect but UI.cpp never aims it at the 3D "
-            "viewport — add setVp(state."
-         << member << ") beside the others, or it will draw full-window.");
-    CHECK(flat.find("setVp(state." + member + ")") != std::string::npos);
+         << " implements the frame contract but RegisterSceneRenderers() "
+            "never adds it — it will draw nothing. Add g_"
+         << name << " in draw order.");
+    CHECK(body.find("g_" + name) != std::string::npos);
     checked++;
   }
   // If the discriminator ever stops matching anything, this test would pass

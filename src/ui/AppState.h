@@ -43,6 +43,7 @@ class RayTracingRenderer;
 class SketchRenderer;
 class UnderlayRenderer;
 class FieldRenderer;
+class SceneRenderer;
 class StockRenderer;
 class FaceSelector;
 class IBLTextures;
@@ -813,6 +814,13 @@ struct AppState {
   UnderlayRenderer* underlayRenderer = nullptr; // sketch reference images (v49)
   FieldRenderer* fieldRenderer = nullptr;       // FEM result overlay
   StockRenderer* stockRenderer = nullptr;       // CAM cutting simulation
+  // Every renderer that draws into the 3D scene, in DRAW ORDER — the same
+  // list main.cpp renders from (docs/rendering/renderer-wiring.md). The typed
+  // pointers above stay because the ui/ layer drives CONTENT through them
+  // (AddMesh, SetInstanceGhost, SetMesh, SetStaticLines); this one exists so
+  // the per-frame contract is a loop instead of a list nobody can forget to
+  // add to.
+  std::vector<SceneRenderer*> sceneRenderers;
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;
   GLFWwindow* window = nullptr;
