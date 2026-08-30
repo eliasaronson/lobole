@@ -209,6 +209,12 @@ TEST_CASE("every scene renderer is in the draw-order registry",
   REQUIRE(end != std::string::npos);
   const std::string body = main.substr(at, end - at);
 
+  const size_t tat = main.find("void ShutdownSceneRenderers()");
+  REQUIRE(tat != std::string::npos);
+  const size_t tend = main.find("\n}", tat);
+  REQUIRE(tend != std::string::npos);
+  const std::string teardown = main.substr(tat, tend - tat);
+
   int checked = 0;
   for (const SourceFile& f : SourcesUnder("src/render", ".h")) {
     const std::string name = f.path.stem().string(); // e.g. StockRenderer
@@ -221,6 +227,13 @@ TEST_CASE("every scene renderer is in the draw-order registry",
             "never adds it — it will draw nothing. Add g_"
          << name << " in draw order.");
     CHECK(body.find("g_" + name) != std::string::npos);
+    // And the teardown side, which is the OTHER list this bug class has come
+    // out of: the underlay was missing from it and destructed at process exit
+    // on a freed device (a222bc8, "the long-standing shutdown crash").
+    INFO(Relative(f.path)
+         << " is never torn down — ShutdownSceneRenderers() must reset g_"
+         << name << " while the device is still alive.");
+    CHECK(teardown.find("g_" + name) != std::string::npos);
     checked++;
   }
   // If the discriminator ever stops matching anything, this test would pass

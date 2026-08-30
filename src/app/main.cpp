@@ -160,15 +160,47 @@ static void RegisterSceneRenderers() {
   // to check that every SceneRenderer implementation appears here — being
   // absent means drawing nothing at all.
   g_Scene.clear();
-  for (SceneRenderer* r :
-       {static_cast<SceneRenderer*>(g_MeshRenderer.get()),
-        static_cast<SceneRenderer*>(g_FieldRenderer.get()),
-        static_cast<SceneRenderer*>(g_StockRenderer.get()),
-        static_cast<SceneRenderer*>(g_OutlineRenderer.get()),
-        static_cast<SceneRenderer*>(g_UnderlayRenderer.get()),
-        static_cast<SceneRenderer*>(g_SketchRenderer.get())})
-    if (r != nullptr)
-      g_Scene.push_back(r);
+  const std::pair<const char*, SceneRenderer*> all[] = {
+      {"g_MeshRenderer", g_MeshRenderer.get()},
+      {"g_FieldRenderer", g_FieldRenderer.get()},
+      {"g_StockRenderer", g_StockRenderer.get()},
+      {"g_OutlineRenderer", g_OutlineRenderer.get()},
+      {"g_UnderlayRenderer", g_UnderlayRenderer.get()},
+      {"g_SketchRenderer", g_SketchRenderer.get()},
+  };
+  for (const auto& [name, r] : all) {
+    // The renderers are constructed in TWO places — the offscreen path and
+    // the windowed one — so a new one can be built in one and forgotten in
+    // the other, and then it silently draws nothing in that mode only. Say
+    // which, at startup, rather than leaving it to be noticed in a
+    // screenshot.
+    if (r == nullptr) {
+      LOG_WARN("scene renderer {} was never constructed in this mode — it "
+               "will draw nothing here",
+               name);
+      continue;
+    }
+    g_Scene.push_back(r);
+  }
+}
+
+// The mirror of RegisterSceneRenderers, deliberately adjacent to it because
+// the two lists must agree.
+//
+// Teardown is ownership, not the frame contract, so the unique_ptrs are still
+// reset by name — but ONCE, here, instead of in both shutdown paths. That is
+// the list the underlay was missing from (a222bc8): it survived as a static,
+// its destructor ran at process exit after the Vulkan device was gone, and
+// ~UnderlayRenderer -> Shutdown() -> vkDeviceWaitIdle on a dead device was
+// "the long-standing shutdown crash".
+static void ShutdownSceneRenderers() {
+  g_Scene.clear();
+  g_MeshRenderer.reset();
+  g_FieldRenderer.reset();
+  g_StockRenderer.reset();
+  g_OutlineRenderer.reset();
+  g_UnderlayRenderer.reset();
+  g_SketchRenderer.reset();
 }
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<ShadowRenderer> g_ShadowRenderer;
@@ -1530,12 +1562,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_Camera.reset();
   // Renderer teardown order mirrors the GUI exit: UnderlayRenderer's
   // Shutdown waits on the device, so it must run before CleanupVulkan.
-  g_MeshRenderer.reset();
-  g_SketchRenderer.reset();
-  g_UnderlayRenderer.reset();
-  g_FieldRenderer.reset();
-  g_StockRenderer.reset();
-  g_OutlineRenderer.reset();
+  ShutdownSceneRenderers();
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();
   g_SSAORenderer.reset();
@@ -2434,16 +2461,11 @@ int main(int argc, char** argv) {
   g_App.commands.reset();
   g_Camera.reset();
   g_GpuTimer.Shutdown(g_Device);
-  g_MeshRenderer.reset();
-  g_SketchRenderer.reset();
   // Must reset here (not at static-destruction time): ~UnderlayRenderer ->
   // Shutdown() calls vkDeviceWaitIdle, so it has to run while g_Device is still
   // alive — before CleanupVulkan below. Omitting it left the global to destruct
   // at exit on an already-freed device -> SIGSEGV at shutdown.
-  g_UnderlayRenderer.reset();
-  g_FieldRenderer.reset();
-  g_StockRenderer.reset();
-  g_OutlineRenderer.reset();
+  ShutdownSceneRenderers();
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();
   g_SSAORenderer.reset();
