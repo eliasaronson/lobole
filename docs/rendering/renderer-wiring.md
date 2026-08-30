@@ -21,9 +21,10 @@ sites across three files**, in duties that are each a hand-maintained list:
 | `g_App.xRenderer =` | 12 | null pointer in the UI layer |
 | declaration, forward declaration, global | 3 | — |
 
-**The compiler checks none of it, and every omission fails silently and
-plausibly.** Nothing crashes; you get a picture that is wrong in a way that
-looks like a modelling problem.
+**The compiler checks none of it, and every omission fails late.** Usually
+silently and plausibly — a picture that is wrong in a way that looks like a
+modelling problem — and once as a SIGSEGV at process exit that went unexplained
+long enough to earn the name "the long-standing shutdown crash".
 
 **Every one of the last three renderers added arrived with a wiring bug**, in
 two different lists, one of them a crash:
