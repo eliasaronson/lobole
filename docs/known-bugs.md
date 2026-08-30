@@ -17,9 +17,12 @@ cannot show the viewport ones at all, because it has no panels, so the
 sub-region between them is the whole framebuffer.
 
 A conventions gate now covers the viewport list (`d6dade3`). The other seven
-lists are unguarded. The structural fix — a scene-renderer registry, then
-passing the frame state at `Render` time so a missing wire is a compile error
-— is planned in [rendering/renderer-wiring.md](rendering/renderer-wiring.md).
+lists are unguarded. The structural fix is planned as **R1-R5** in
+[rendering/renderer-wiring.md](rendering/renderer-wiring.md) — a scene-renderer
+registry, then passing the frame state at `Render` time so a missing wire is a
+compile error. ~1 session; the six renderers already share identical
+signatures and all three render blocks already agree on order, which is what
+makes it cheap.
 
 ---
 
