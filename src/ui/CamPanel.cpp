@@ -1,3 +1,5 @@
+#include <filesystem>
+
 #include "ui/CamPanel.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
@@ -636,19 +638,33 @@ void DrawCamPanel(AppState& state) {
     // moved above the operations list and the two became visible at once
     // (docs/cam/dogfood-round.md).
     if (ImGui::Button("Save G-code###cam_save_gcode")) {
-      // Beside the project, named after the setup: somewhere findable, and
-      // never overwriting the model. With no project there is no "beside",
-      // and the fallback was a bare "job.nc" — written into whatever
-      // directory the app was launched from, which for a dev build is the
-      // repo. Refuse and say where it would go instead of leaving G-code
-      // somewhere nobody will look for it (docs/cam/dogfood-round.md).
+      // BESIDE the project, which is what this always meant to say and did
+      // not: `projectPath` is the .dsgn bundle itself, so appending to it
+      // wrote the G-code INSIDE the project. `StampProject` walks every
+      // regular file in there, so the job's own output changed the project's
+      // disk stamp and the next save refused with "the project changed on
+      // disk since you opened it" — the app fighting itself over a file it
+      // had just written.
+      //
+      // With no project there is no "beside", and the fallback was a bare
+      // "job.nc" written into whatever directory the app was launched from.
+      // Refuse and say where it would go instead of leaving G-code somewhere
+      // nobody will look for it (docs/cam/dogfood-round.md).
       if (state.projectPath.empty()) {
         state.camLastPost =
             "save the project first — the G-code goes beside it, named after "
             "the setup";
         LOG_INFO("CAM: refused to post an unsaved project");
       } else {
-        std::string path = state.projectPath + "/" + setup->name + ".nc";
+        const std::filesystem::path project(state.projectPath);
+        std::filesystem::path dir = project.parent_path();
+        if (dir.empty())
+          dir = ".";
+        // Named for the project AND the setup: several parts' jobs land in
+        // one directory, and "Setup 1.nc" from two of them is one file.
+        const std::string path =
+            (dir / (project.stem().string() + " - " + setup->name + ".nc"))
+                .string();
         std::string gcode, error;
         if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
                              PostOpts(*setup), gcode, &error) &&
@@ -821,6 +837,23 @@ void DrawCamPanel(AppState& state) {
                               "sideways — the number adaptive clearing holds "
                               "constant");
       }
+      // What this pass DOES NOT take: the roughing/finishing split. A pocket
+      // roughed with 0.3 mm left and then re-cut at 0 comes out with a wall
+      // the cutter has touched once, at full depth, in one pass — which is
+      // the difference between a flange a driver seats flat on and a stack of
+      // stepdown terraces. The engine has had it since C1; only a script
+      // could reach it.
+      float leave = static_cast<float>(op.stockToLeave);
+      ImGui::SetNextItemWidth(58.0f);
+      if (ExprDragFloat(state, "Leave###leave", &leave, 0.05f, 0.0f, 10.0f,
+                        "%.2f")) {
+        op.stockToLeave = leave;
+        touched(op.id);
+      }
+      ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
+                            "with 0.2-0.4, then a second operation at 0 "
+                            "finishes the wall in one full-depth pass.");
+      ImGui::SameLine();
       if (ImGui::Checkbox("Climb###climb", &op.climb))
         touched(op.id);
       ImGui::SameLine();

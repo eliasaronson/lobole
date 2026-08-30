@@ -128,6 +128,22 @@ yet. Verification stops being a thing you remember to run.
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
 | later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
+**Save G-code wrote into the project (FIXED 2026-08-30).** The comment said
+"beside the project"; the code said `projectPath + "/" + name + ".nc"`, and
+`projectPath` IS the `.dsgn` bundle — so the G-code landed inside it.
+`StampProject` walks every regular file in the project, so the job's own
+output changed the project's disk stamp and the next save refused with "the
+project changed on disk since you opened it": the app fighting itself over a
+file it had just written. It goes in the bundle's PARENT now, named for the
+project and the setup (`smart_speaker - Setup 1.nc`) so several parts' jobs
+can share a directory.
+
+**`Leave` on an operation (2026-08-30).** `stockToLeave` has been in the
+engine since C1 and reachable only by script. It is the roughing/finishing
+split: rough at 0.2-0.4 mm, then a second operation at 0 cuts the wall once,
+at full depth, in one pass — the difference between a flange a driver seats
+flat on and a stack of stepdown terraces.
+
 **Picking, after the fixture frame (2026-08-30).** Three changes, all from
 one dogfooding round on a baffle.
 
