@@ -31,7 +31,8 @@ constexpr MethodDoc kCamMethods[] = {
      "name, post, safe_z"},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
-     "face it was picked from), frame (how the part is CLAMPED, as "
+     "face it was picked from), origin_at (the corner it is measured FROM), "
+     "frame (how the part is CLAMPED, as "
      "[x,y,z,w]; identity = as modelled), has_rotary_axis, rotation_a, "
      "fit_arcs, tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
@@ -39,7 +40,10 @@ constexpr MethodDoc kCamMethods[] = {
      ""},
     {"set_cam_setup",
      "Change a setup {id, name?, post?, safe_z?, lay_face_up?: {feature_id, "
-     "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?} or "
+     "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?, "
+     "origin_at?: stock_min|stock_centre|model_min, "
+     "stock?: {mode?: relative|fixed, size?: [x,y,z], place?: [x,y,z], "
+     "margin?: [x,y,z], bottom_margin?}} or "
      "one of its "
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
@@ -54,9 +58,15 @@ constexpr MethodDoc kCamMethods[] = {
      "speaker baffle) be cut without a rotated copy of it, and repeating the "
      "call is idempotent. flip turns the fixture over for the second side. "
      "rotation_a is the MACHINE's rotary index and needs has_rotary_axis: "
-     "without it no file can carry an A word.",
-     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, name, post, "
-     "rotation_a, safe_z, tool"},
+     "without it no file can carry an A word. "
+     "origin_at is WHERE X0 Y0 IS in the posted file — the corner the "
+     "operator touches off on; the post subtracts it from every coordinate, "
+     "and Z comes from the picked top face. stock.mode `fixed` makes the "
+     "workpiece the sheet you own (size + place, where the part sits in it) "
+     "rather than a shrink-wrap of the part; a sheet smaller than the part is "
+     "refused, naming the axis and the shortfall.",
+     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, name, origin_at, "
+     "post, rotation_a, safe_z, stock, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: "
@@ -357,6 +367,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "add_cam_setup") {
     cam::Setup& setup = doc->AddCamSetup(p.value("name", std::string()));
+    (void)cam::RecomputeOrigin(setup, doc->GetBodies());
     // Safe Z clear of the stock, exactly as the panel does it. Without this
     // an RPC-built job kept the struct's bare 5 mm, which sits INSIDE any
     // stock taller than that: the first dogfooding round over the RPC
@@ -394,6 +405,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  // Z zero, and the face it was taken from. The panel shows
                  // both; a script could not see either.
                  {"origin", {setup.origin.x, setup.origin.y, setup.origin.z}},
+                 {"origin_at",
+                  setup.originAt == cam::OriginAt::StockCentre ? "stock_centre"
+                  : setup.originAt == cam::OriginAt::ModelMin  ? "model_min"
+                                                               : "stock_min"},
                  {"fit_arcs", setup.fitArcs}};
       if (setup.topFace.IsSet())
         sj["top_face"] = {{"feature_id", setup.topFace.featureId},
@@ -429,6 +444,46 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       setup.rotationA = p.at("rotation_a").get<double>();
     if (p.contains("has_rotary_axis"))
       setup.hasRotaryAxis = p.at("has_rotary_axis").get<bool>();
+    if (p.contains("origin_at")) {
+      const std::string at = p.at("origin_at").get<std::string>();
+      if (at == "stock_min")
+        setup.originAt = cam::OriginAt::StockMin;
+      else if (at == "stock_centre")
+        setup.originAt = cam::OriginAt::StockCentre;
+      else if (at == "model_min")
+        setup.originAt = cam::OriginAt::ModelMin;
+      else
+        throw std::runtime_error(
+            "unknown origin_at '" + at +
+            "'; accepted: stock_min, stock_centre, model_min");
+    }
+    if (p.contains("stock")) {
+      const json& sj = p.at("stock");
+      if (sj.contains("mode")) {
+        const std::string mode = sj.at("mode").get<std::string>();
+        if (mode == "relative")
+          setup.stock.mode = cam::StockMode::Relative;
+        else if (mode == "fixed")
+          setup.stock.mode = cam::StockMode::Fixed;
+        else
+          throw std::runtime_error("unknown stock mode '" + mode +
+                                   "'; accepted: relative, fixed");
+      }
+      const auto vec3 = [&](const char* key, glm::dvec3& into) {
+        if (sj.contains(key)) {
+          const json& v = sj.at(key);
+          if (!v.is_array() || v.size() != 3)
+            throw std::runtime_error(std::string("stock ") + key +
+                                     " must be [x, y, z]");
+          into = {v[0].get<double>(), v[1].get<double>(), v[2].get<double>()};
+        }
+      };
+      vec3("size", setup.stock.size);
+      vec3("place", setup.stock.place);
+      vec3("margin", setup.stock.margin);
+      if (sj.contains("bottom_margin"))
+        setup.stock.bottomMargin = sj.at("bottom_margin").get<double>();
+    }
     // Clamp the part with this face up — the scripted twin of the panel's
     // "Lay a face up". Given as a face, not as a quaternion, because that is
     // the thing a caller actually knows; the frame is derived from it, and
@@ -459,6 +514,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       setup.frame = cam::FlipFrame(setup.frame);
       setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
     }
+    // Anything above can have moved the stock box, and the work origin is
+    // derived from it — as is every coordinate the post writes.
+    (void)cam::RecomputeOrigin(setup, doc->GetBodies());
     if (p.contains("fit_arcs"))
       setup.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("tool")) {

@@ -201,6 +201,7 @@ cam::Setup* EnsureCamSetup(AppState& state) {
     return setup;
   cam::Setup& fresh = state.document->AddCamSetup();
   state.camActiveSetup = fresh.id;
+  (void)cam::RecomputeOrigin(fresh, state.document->GetBodies());
   fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
   state.camSafeZEdit = static_cast<float>(fresh.safeZ);
   state.projectMetaDirty = true;
@@ -253,24 +254,22 @@ bool PickedFaceNormal(const Document& doc, const ElementRef& ref,
   return false;
 }
 
-// Turning the part re-answers "how high is the top face", because Z zero is
-// a height in SETUP space and the setup just moved. Leaving it made the panel
-// report a Z zero from the previous orientation — the one number that breaks
-// tools, stated confidently and wrong.
+// Turning the part re-answers where zero is: the origin is a point in SETUP
+// space and the setup just moved. Leaving it stale made the panel report a Z
+// zero from the previous orientation — the one number that breaks tools,
+// stated confidently and wrong — and since v68 it also offsets every
+// coordinate in the posted file.
 void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
-  if (!setup.topFace.IsSet())
-    return;
-  const cam::FaceRegion region = cam::PickedFaceRegion(
-      cam::BodiesInSetupFrame(setup, state.document->GetBodies()),
-      setup.topFace);
-  if (region.ok) {
-    setup.origin = glm::dvec3(0.0, 0.0, region.z);
-    return;
+  if (setup.topFace.IsSet()) {
+    const cam::FaceRegion region = cam::PickedFaceRegion(
+        cam::BodiesInSetupFrame(setup, state.document->GetBodies()),
+        setup.topFace);
+    // The face that was level is not level any more: this orientation cannot
+    // keep that Z zero, and pretending otherwise is worse than asking again.
+    if (!region.ok)
+      setup.topFace = {};
   }
-  // The face that was level is not level any more: this orientation cannot
-  // keep that Z zero, and pretending otherwise is worse than asking again.
-  setup.topFace = {};
-  setup.origin = glm::dvec3(0.0);
+  (void)cam::RecomputeOrigin(setup, state.document->GetBodies());
 }
 
 // Everything that has to follow the setup's orientation changing.
@@ -313,8 +312,10 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // needed a detour into Advanced to undo what this had just done
     // (docs/cam/dogfood-round.md, round 2). The default 1 mm is the rough
     // board every facing pass exists for; a board already flat is one number.
-    setup->origin = glm::dvec3(0.0, 0.0, region.z);
     setup->topFace = item.element;
+    // Through the ONE derivation, so a Z zero picked here and a work origin
+    // set from the panel cannot disagree about where the file's zero is.
+    (void)cam::RecomputeOrigin(*setup, state.document->GetBodies());
     // The stock just moved, so the rapid height that cleared the old one may
     // now be inside the new one.
     setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());

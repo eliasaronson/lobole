@@ -128,6 +128,17 @@ yet. Verification stops being a thing you remember to run.
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
 | later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
+**Stock and Zero (2026-08-30, v68).** "Stock and safety" gained the two
+things a Fusion setup has and this one did not. *What the workpiece is*:
+"Around the part" (the model box plus margins — what every job had, still the
+default) or "A fixed sheet" with its real size and where the part sits in it.
+A sheet smaller than the part is refused, naming the axis and the shortfall,
+because "get a bigger board" and "draw something" used to arrive as the same
+sentence. *Where zero is*: the corner the operator touches off on — stock
+corner, stock centre or part corner — with the derived triple printed beside
+it. The post SUBTRACTS it, so the file's zero is that corner at the height of
+the picked top face. Both are scripted by `set_cam_setup {origin_at, stock}`.
+
 **The operation row (2026-08-30).** Two things it could not say. *Which
 cutter*: `op.toolNumber` was read to print a diameter and never written, so
 "this opening is 5.46 mm across and tool 1 is 6 mm — use a cutter of 5.46 mm

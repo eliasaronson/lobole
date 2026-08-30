@@ -196,6 +196,56 @@ TEST_CASE("cam sim: a laid-flat job plays where its toolpath cuts", "[cam]") {
   CHECK(std::abs(corner.z) < 40.0);
 }
 
+TEST_CASE("cam sim: a job zeroed on its corner still plays its own verdict",
+          "[cam]") {
+  // W5's cross-cutting gate. Since v68 the post writes coordinates relative to
+  // the work origin and the file's readers add it back. Both the verifier and
+  // the simulator read the FILE, so an offset applied once instead of twice
+  // lands here — as a program that cuts somewhere the stock is not. At the
+  // origin (0,0,0) every other test in this file lives, and the mistake is
+  // invisible.
+  Job job = ProfiledBlock();
+  job.setup.originAt = cam::OriginAt::StockMin;
+  REQUIRE(cam::RecomputeOrigin(job.setup, job.doc->GetBodies()));
+  REQUIRE(job.setup.origin != glm::dvec3(0.0));
+  {
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(job.setup, job.doc->GetBodies());
+    std::string error;
+    REQUIRE(cam::PostProcess("mach3", job.setup, paths, {}, job.gcode, &error));
+  }
+  constexpr double kRes = 0.5;
+
+  const cam::Inspection insp =
+      cam::Inspect(job.gcode, job.setup, job.doc->GetBodies(), kRes);
+  REQUIRE(insp.ok);
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(job.setup, job.doc->GetBodies(), lo, hi));
+  const cam::Timeline tl = cam::BuildTimeline(
+      cam::ProgramInSetupSpace(job.gcode, job.setup), job.setup.rapidFeed);
+  REQUIRE_FALSE(tl.Empty());
+
+  cam::StockSim sim;
+  sim.Begin(tl, job.setup, cam::MakeStock(lo, hi, kRes));
+  sim.SeekTo(tl.End());
+  REQUIRE(sim.Stock().z.size() == insp.machined.z.size());
+  CHECK(sim.Stock().z == insp.machined.z);
+  CHECK(sim.RemovedVolume() > 100.0);
+
+  // And the file really is offset: parsed RAW it sits a whole origin away
+  // from the stock and ploughs through it, so the two disagree loudly. This
+  // is the assertion that would have caught the offset being applied on one
+  // side only — the failure mode this phase exists to make impossible.
+  const cam::Timeline raw =
+      cam::BuildTimeline(cam::ParseGcode(job.gcode), job.setup.rapidFeed);
+  cam::StockSim wrong;
+  wrong.Begin(raw, job.setup, cam::MakeStock(lo, hi, kRes));
+  wrong.SeekTo(raw.End());
+  CHECK(wrong.Stock().z != insp.machined.z);
+  CHECK(std::abs(wrong.RemovedVolume() - sim.RemovedVolume()) > 100.0);
+}
+
 TEST_CASE("cam sim: playing to the end leaves the verdict's own map", "[cam]") {
   Job job = ProfiledBlock();
   constexpr double kRes = 0.5;

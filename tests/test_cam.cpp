@@ -13,7 +13,9 @@
 #include "core/io/Serialization.h"
 
 #include <catch2/catch_test_macros.hpp>
+
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <sstream>
 
 #include <algorithm>
 #include <cmath>
@@ -1863,6 +1865,192 @@ TEST_CASE("cam: a flipped setup cuts the other side", "[cam]") {
   CHECK(paths[0].error.empty());
   for (const cam::Move& m2 : paths[0].moves)
     CHECK_FALSE(m2.hasA);
+}
+
+// --- W1-W3: the workpiece, and where zero is on it ------------------------
+
+TEST_CASE("cam: the posted file measures from the picked corner", "[cam]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup s = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  s.operations.push_back(op);
+
+  // An origin of (0,0,0) is what every job carried before v68, and it must
+  // post EXACTLY what it always did — that is what confines this change.
+  cam::Setup zeroed = s;
+  zeroed.origin = glm::dvec3(0.0);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(zeroed, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  std::string atZero, error;
+  REQUIRE(cam::PostProcess("linuxcnc", zeroed, paths, {}, atZero, &error));
+
+  // Now zero on the stock's min corner, which is where an operator touches
+  // off. Same cut, different words for it.
+  cam::Setup corner = s;
+  corner.originAt = cam::OriginAt::StockMin;
+  REQUIRE(cam::RecomputeOrigin(corner, doc->GetBodies()));
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(corner, doc->GetBodies(), lo, hi));
+  CHECK_THAT(corner.origin.x, WithinAbs(lo.x, 1e-9));
+  CHECK_THAT(corner.origin.y, WithinAbs(lo.y, 1e-9));
+  CHECK_THAT(corner.origin.z, WithinAbs(hi.z, 1e-9)); // the top of the material
+
+  std::string shifted;
+  REQUIRE(cam::PostProcess("linuxcnc", corner, paths, {}, shifted, &error));
+  CHECK(shifted != atZero);
+
+  // Every coordinate moved by exactly the origin, and no further. Compare the
+  // CUTTING moves: the leading retract is a bare `G0 Z`, so both files are
+  // still at whatever X/Y the machine was left at and the parser starts both
+  // from the same nothing.
+  const auto cutting = [](const cam::GProgram& p) {
+    std::vector<glm::dvec3> out;
+    for (const cam::GMove& m : p.moves)
+      if (!m.rapid)
+        out.push_back(m.to);
+    return out;
+  };
+  const cam::GProgram a = cam::ParseGcode(atZero);
+  const cam::GProgram b = cam::ParseGcode(shifted);
+  const std::vector<glm::dvec3> ca = cutting(a), cb = cutting(b);
+  REQUIRE(ca.size() == cb.size());
+  REQUIRE(ca.size() > 20);
+  for (size_t i = 0; i < ca.size(); i++) {
+    INFO("cut " << i);
+    const glm::dvec3 d = ca[i] - cb[i];
+    CHECK_THAT(d.x, WithinAbs(corner.origin.x, 2e-4)); // 4 decimals posted
+    CHECK_THAT(d.y, WithinAbs(corner.origin.y, 2e-4));
+    CHECK_THAT(d.z, WithinAbs(corner.origin.z, 2e-4));
+  }
+
+  // And read back through the setup they belong to, the two are the SAME
+  // program — which is what every consumer that compares a file to the model
+  // relies on.
+  const std::vector<glm::dvec3> back =
+      cutting(cam::ProgramInSetupSpace(shifted, corner));
+  REQUIRE(back.size() == ca.size());
+  for (size_t i = 0; i < ca.size(); i++) {
+    INFO("cut " << i);
+    CHECK(glm::length(back[i] - ca[i]) < 2e-4);
+  }
+
+  // Arc centres are INCREMENTAL, so they are immune to the offset. Posting
+  // with arcs on and comparing the I/J words proves it rather than assuming.
+  cam::PostOptions arcs;
+  arcs.fitArcs = true;
+  std::string arcZero, arcShift;
+  REQUIRE(cam::PostProcess("linuxcnc", zeroed, paths, arcs, arcZero, &error));
+  REQUIRE(cam::PostProcess("linuxcnc", corner, paths, arcs, arcShift, &error));
+  const auto ijWords = [](const std::string& g) {
+    std::vector<std::string> out;
+    std::istringstream in(g);
+    for (std::string line; std::getline(in, line);)
+      for (size_t i = 0; i < line.size(); i++)
+        if ((line[i] == 'I' || line[i] == 'J') &&
+            (i == 0 || line[i - 1] == ' '))
+          out.push_back(line.substr(i, line.find(' ', i) - i));
+    return out;
+  };
+  CHECK(ijWords(arcZero) == ijWords(arcShift));
+}
+
+TEST_CASE("cam: a fixed workpiece is the sheet, not a shrink-wrap", "[cam]") {
+  auto doc = BlockDoc(200, 120, 18);
+  cam::Setup s = BasicSetup();
+  s.stock.mode = cam::StockMode::Fixed;
+  s.stock.size = {600.0, 400.0, 18.0};
+  s.stock.place = {0.5, 0.5, 1.0};
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT(hi.x - lo.x, WithinAbs(600.0, 1e-6));
+  CHECK_THAT(hi.y - lo.y, WithinAbs(400.0, 1e-6));
+  // An 18 mm part in an 18 mm board is a FIT, not a shortfall: OCC's bbox
+  // gap makes an exact match measure a hair short every time.
+  CHECK_THAT(hi.z - lo.z, WithinAbs(18.0, 1e-3));
+  CHECK(cam::StockRefusal(s, doc->GetBodies()).empty());
+
+  // Relative mode is untouched: the box every job had before v68.
+  cam::Setup rel = s;
+  rel.stock.mode = cam::StockMode::Relative;
+  glm::dvec3 rlo(0.0), rhi(0.0);
+  REQUIRE(cam::StockBounds(rel, doc->GetBodies(), rlo, rhi));
+  CHECK_THAT(rhi.x - rlo.x, WithinAbs(204.0, 1e-6)); // 200 + 2 mm each side
+
+  // A sheet smaller than the part is REFUSED, and says which axis and by how
+  // much — "get a bigger board" is a different instruction from "draw
+  // something", and both used to arrive as the same sentence.
+  cam::Setup small = s;
+  small.stock.size = {100.0, 400.0, 18.0};
+  glm::dvec3 slo(0.0), shi(0.0);
+  CHECK_FALSE(cam::StockBounds(small, doc->GetBodies(), slo, shi));
+  const std::string why = cam::StockRefusal(small, doc->GetBodies());
+  INFO(why);
+  CHECK(why.find("100") != std::string::npos);
+  CHECK(why.find("200") != std::string::npos);
+  CHECK(why.find(" X ") != std::string::npos);
+  // And the verbs refuse with those words rather than "there is no solid".
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(small, doc->GetBodies(), cam::OpType::Profile, {});
+  CHECK_FALSE(derived.ok);
+  CHECK(derived.why == why);
+}
+
+TEST_CASE("cam: where the part sits in the sheet is a placement", "[cam]") {
+  auto doc = BlockDoc(200, 120, 18); // spans 0..200, 0..120, 0..18
+  cam::Setup s = BasicSetup();
+  s.stock.mode = cam::StockMode::Fixed;
+  s.stock.size = {600.0, 400.0, 18.0};
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  s.stock.place = {0.0, 0.0, 1.0}; // part's low face on the stock's low face
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT(lo.x, WithinAbs(0.0, 1e-6));
+  s.stock.place = {1.0, 0.0, 1.0}; // …and its high face on the stock's high
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT(hi.x, WithinAbs(200.0, 1e-6));
+  s.stock.place = {0.5, 0.5, 1.0};
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT((lo.x + hi.x) * 0.5, WithinAbs(100.0, 1e-6)); // part's own centre
+}
+
+TEST_CASE("cam: every origin corner is where it says it is", "[cam]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup s = BasicSetup();
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+
+  const auto originFor = [&](cam::OriginAt at) {
+    cam::Setup c = s;
+    c.originAt = at;
+    REQUIRE(cam::RecomputeOrigin(c, doc->GetBodies()));
+    return c.origin;
+  };
+  const glm::dvec3 stockMin = originFor(cam::OriginAt::StockMin);
+  CHECK_THAT(stockMin.x, WithinAbs(lo.x, 1e-9));
+  CHECK_THAT(stockMin.y, WithinAbs(lo.y, 1e-9));
+  const glm::dvec3 centre = originFor(cam::OriginAt::StockCentre);
+  CHECK_THAT(centre.x, WithinAbs((lo.x + hi.x) * 0.5, 1e-9));
+  const glm::dvec3 modelMin = originFor(cam::OriginAt::ModelMin);
+  CHECK_THAT(modelMin.x, WithinAbs(lo.x + s.stock.margin.x, 1e-6));
+  // Every one of them touches off on the TOP of the material.
+  for (const glm::dvec3& o : {stockMin, centre, modelMin})
+    CHECK_THAT(o.z, WithinAbs(hi.z, 1e-9));
+
+  // Re-deriving is idempotent: the origin does not walk when the panel calls
+  // this on every stock edit.
+  cam::Setup c = s;
+  REQUIRE(cam::RecomputeOrigin(c, doc->GetBodies()));
+  const glm::dvec3 once = c.origin;
+  REQUIRE(cam::RecomputeOrigin(c, doc->GetBodies()));
+  CHECK(glm::length(c.origin - once) < 1e-12);
 }
 
 TEST_CASE("cam: retooling carries the derived stepdown, not the typed one",

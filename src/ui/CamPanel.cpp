@@ -228,6 +228,7 @@ void DrawCamPanel(AppState& state) {
     if (ImGui::Button("Add setup###cam_add_setup")) {
       cam::Setup& fresh = state.document->AddCamSetup();
       state.camActiveSetup = fresh.id;
+      (void)cam::RecomputeOrigin(fresh, state.document->GetBodies());
       // Safe Z clear of the stock, not the struct's bare 5 mm — which sits
       // inside anything taller than that (docs/cam/gui.md).
       fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
@@ -272,6 +273,7 @@ void DrawCamPanel(AppState& state) {
   if (ImGui::SmallButton("+###cam_add_setup2")) {
     cam::Setup& fresh = state.document->AddCamSetup();
     state.camActiveSetup = fresh.id;
+    (void)cam::RecomputeOrigin(fresh, state.document->GetBodies());
     fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
     state.camSafeZEdit = static_cast<float>(fresh.safeZ);
     state.projectMetaDirty = true;
@@ -295,7 +297,9 @@ void DrawCamPanel(AppState& state) {
     other.fitArcs = setup->fitArcs;
     other.rapidFeed = setup->rapidFeed;
     other.hasRotaryAxis = setup->hasRotaryAxis;
+    other.originAt = setup->originAt;
     other.safeZ = cam::DeriveSafeZ(other, state.document->GetBodies());
+    (void)cam::RecomputeOrigin(other, state.document->GetBodies());
     state.camActiveSetup = other.id;
     state.camSafeZEdit = static_cast<float>(other.safeZ);
     state.projectMetaDirty = true;
@@ -399,6 +403,71 @@ void DrawCamPanel(AppState& state) {
       setup->stock.margin.y = around;
       dirty = true;
     }
+    // WHAT the workpiece is. Relative — the model's box plus margins — is what
+    // every job had before v68 and stays the default; Fixed is the sheet you
+    // actually own, which a shrink-wrap around one part cannot express.
+    int mode = setup->stock.mode == cam::StockMode::Fixed ? 1 : 0;
+    static const char* kStockModes[] = {"Around the part", "A fixed sheet"};
+    ImGui::SetNextItemWidth(140.0f);
+    if (ImGui::Combo("###cam_stock_mode", &mode, kStockModes,
+                     IM_ARRAYSIZE(kStockModes))) {
+      setup->stock.mode =
+          mode == 1 ? cam::StockMode::Fixed : cam::StockMode::Relative;
+      // Seed the sheet from the box it already had, so switching modes never
+      // lands on a stock of zero (the u10 rule: a default carrying a unit is
+      // derived from what it acts on).
+      if (setup->stock.mode == cam::StockMode::Fixed &&
+          setup->stock.size == glm::dvec3(0.0)) {
+        glm::dvec3 lo(0.0), hi(0.0);
+        if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi))
+          setup->stock.size = hi - lo;
+      }
+      dirty = true;
+      changed = kAllOps;
+    }
+    if (setup->stock.mode == cam::StockMode::Fixed) {
+      for (int a = 0; a < 3; a++) {
+        float v = static_cast<float>(setup->stock.size[a]);
+        ImGui::SetNextItemWidth(58.0f);
+        const char* ids[3] = {"###stock_sx", "###stock_sy", "###stock_sz"};
+        if (a > 0)
+          ImGui::SameLine();
+        if (ExprDragFloat(state, ids[a], &v, 0.5f, 0.0f, 100000.0f, "%.1f")) {
+          setup->stock.size[a] = v;
+          dirty = true;
+          changed = kAllOps;
+        }
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("mm");
+      const std::string refusal =
+          cam::StockRefusal(*setup, state.document->GetBodies());
+      if (!refusal.empty()) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
+                           refusal.c_str());
+        ImGui::PopTextWrapPos();
+      }
+    }
+
+    // WHERE ZERO IS — the corner the operator touches off on, and the point
+    // every coordinate in the posted file is measured from.
+    int at = static_cast<int>(setup->originAt);
+    static const char* kOriginAt[] = {"Stock corner", "Stock centre",
+                                      "Part corner"};
+    ImGui::SetNextItemWidth(140.0f);
+    if (ImGui::Combo("###cam_origin_at", &at, kOriginAt,
+                     IM_ARRAYSIZE(kOriginAt))) {
+      setup->originAt = static_cast<cam::OriginAt>(at);
+      dirty = true;
+      changed = kAllOps;
+    }
+    ImGui::SetItemTooltip("Where X0 Y0 is in the posted file — the corner you "
+                          "touch off on. Z comes from the picked top face.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.2f %.2f %.2f", setup->origin.x, setup->origin.y,
+                        setup->origin.z);
+
     float below = static_cast<float>(setup->stock.bottomMargin);
     ImGui::SetNextItemWidth(90.0f);
     if (ExprDragFloat(state, "Below it###cam_stock_below", &below, 0.1f, 0.0f,
@@ -438,9 +507,12 @@ void DrawCamPanel(AppState& state) {
   }
   // The struct holds a double; the widget edits a float mirror so ImGui's
   // drag behaves. Kept in sync here rather than in two places.
-  if (dirty)
+  if (dirty) {
     setup->safeZ = state.camSafeZEdit;
-  else
+    // The stock box may have moved, and the work origin is derived from it —
+    // so is every coordinate in the posted file.
+    (void)cam::RecomputeOrigin(*setup, state.document->GetBodies());
+  } else
     state.camSafeZEdit = static_cast<float>(setup->safeZ);
 
   // --- tools -------------------------------------------------------------

@@ -60,6 +60,18 @@ struct GProgram {
 // than skipped silently.
 [[nodiscard]] GProgram ParseGcode(std::string_view text);
 
+// The posted file, back in SETUP space. A file's coordinates are relative to
+// the work origin (the operator's zero); everything that compares a file to
+// the model — the verifier, the simulator, the backplot — works in setup
+// space. This is the one place the origin is added back, and it is the exact
+// inverse of what `Emitter` subtracts (docs/cam/stock-and-origin.md W1).
+//
+// Take this rather than ParseGcode wherever a Setup is in hand: a program
+// parsed raw and compared against a framed model is off by the origin, which
+// at origin (0,0,0) — every job before v68 — is invisible.
+[[nodiscard]] GProgram ProgramInSetupSpace(std::string_view text,
+                                           const Setup& setup);
+
 // --- height maps ----------------------------------------------------------
 
 struct HeightMap {

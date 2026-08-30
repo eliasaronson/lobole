@@ -334,6 +334,74 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
+  // W2/W5 (docs/cam/stock-and-origin.md): the corner the operator touches off
+  // on, chosen by clicking, and honoured by the file. Before v68 `origin` was
+  // a label the post never read, so "Z zero at 16.000" was a claim no line of
+  // the g-code kept.
+  t = IM_REGISTER_TEST(engine, "cam", "work_origin_is_where_it_says");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    // A fresh setup already has an origin, DERIVED — not (0,0,0), which is a
+    // literal sitting where the defaults rule wants a derivation.
+    cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(cam::RecomputeOrigin(*live, Doc()->GetBodies()));
+    glm::dvec3 lo(0.0), hi(0.0);
+    IM_CHECK(cam::StockBounds(*live, Doc()->GetBodies(), lo, hi));
+    IM_CHECK(std::abs(live->origin.x - lo.x) < 1e-9);
+    IM_CHECK(std::abs(live->origin.y - lo.y) < 1e-9);
+    IM_CHECK(std::abs(live->origin.z - hi.z) < 1e-9);
+
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_stock"); // open Stock and safety
+    ctx->Yield(2);
+
+    // Move zero to the stock's centre by clicking, and the origin follows.
+    Doc()->FindCamSetup(setup.id)->originAt = cam::OriginAt::StockCentre;
+    IM_CHECK(cam::RecomputeOrigin(*Doc()->FindCamSetup(setup.id),
+                                  Doc()->GetBodies()));
+    ctx->Yield(2);
+    live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(std::abs(live->origin.x - (lo.x + hi.x) * 0.5) < 1e-6);
+
+    // And the FILE measures from it: post a real operation and read the
+    // extremes back. This is the assertion that fails if the origin goes back
+    // to being a label.
+    ctx->ItemClick("###cam_add_op");
+    ctx->Yield(2);
+    ctx->ItemClick("###cam_generate");
+    ctx->Yield(5);
+    live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(!live->operations.empty());
+    if (!s_App->camToolpaths.empty()) {
+      std::string gcode, error;
+      IM_CHECK(cam::PostProcess(live->post, *live, s_App->camToolpaths,
+                                ui::PostOpts(*live), gcode, &error));
+      const cam::GProgram file = cam::ParseGcode(gcode);
+      const cam::GProgram back = cam::ProgramInSetupSpace(gcode, *live);
+      IM_CHECK(file.moves.size() == back.moves.size());
+      bool sawOffset = false;
+      for (size_t i = 0; i < file.moves.size(); i++)
+        if (!file.moves[i].rapid &&
+            std::abs(back.moves[i].to.x - file.moves[i].to.x) > 1e-6)
+          sawOffset = true;
+      IM_CHECK(sawOffset); // the file is NOT in model coordinates any more
+    }
+
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      ctx->ItemClick(modelWin->TabId);
+    ctx->Yield(2);
+  };
+
   // Which cutter an operation uses, and in what order they cut. Both were
   // unreachable by clicking: `toolNumber` was READ to print a diameter and
   // never written, so "use a cutter of 5.46 mm or less" was a refusal naming

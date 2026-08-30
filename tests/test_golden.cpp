@@ -6,6 +6,7 @@
 #include "core/Feature.h"
 #include "core/Units.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
 
 #include <nlohmann/json.hpp>
@@ -89,6 +90,51 @@ void AssertCamShapes(const Document& doc, const nlohmann::json& expect) {
       INFO("operation " << i);
       CHECK(got[i] == want[i]);
     }
+  }
+}
+
+// The workpiece and where zero is on it (v68). The stock box is what every
+// derived depth, the verifier and the simulator read; the origin is what the
+// POST subtracts from every coordinate it writes. A fixed-size sheet that
+// reloads as a shrink-wrap, or an origin that reloads at the model origin, is
+// a file whose numbers are all offset by however much the box moved — and the
+// part comes out looking right in the viewport either way.
+void AssertCamStock(const Document& doc, const nlohmann::json& expect) {
+  if (expect.contains("cam_stock_boxes")) {
+    const auto& want = expect.at("cam_stock_boxes");
+    size_t i = 0;
+    for (const cam::Setup& setup : doc.GetCamSetups()) {
+      REQUIRE(i < want.size());
+      glm::dvec3 lo(0.0), hi(0.0);
+      INFO("setup " << i);
+      REQUIRE(cam::StockBounds(setup, doc.GetBodies(), lo, hi));
+      for (int c = 0; c < 3; c++) {
+        CHECK_THAT(lo[c], Catch::Matchers::WithinAbs(
+                              want[i]["min"][c].get<double>(), 1e-6));
+        CHECK_THAT(hi[c], Catch::Matchers::WithinAbs(
+                              want[i]["max"][c].get<double>(), 1e-6));
+      }
+      i++;
+    }
+    CHECK(i == want.size());
+  }
+  if (expect.contains("cam_origins")) {
+    const auto want =
+        expect.at("cam_origins").get<std::vector<std::vector<double>>>();
+    size_t i = 0;
+    for (const cam::Setup& setup : doc.GetCamSetups()) {
+      REQUIRE(i < want.size());
+      INFO("setup " << i);
+      // Recomputed rather than read: the origin is DERIVED, and the golden
+      // asserts the derivation still lands where the file said it did.
+      cam::Setup copy = setup;
+      REQUIRE(cam::RecomputeOrigin(copy, doc.GetBodies()));
+      for (int c = 0; c < 3; c++)
+        CHECK_THAT(copy.origin[c], Catch::Matchers::WithinAbs(
+                                       want[i][static_cast<size_t>(c)], 1e-6));
+      i++;
+    }
+    CHECK(i == want.size());
   }
 }
 
@@ -296,6 +342,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertCamTopFace(*doc, expect);
       AssertCamShapes(*doc, expect);
       AssertCamFrames(*doc, expect);
+      AssertCamStock(*doc, expect);
       AssertUnits(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
@@ -309,6 +356,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertCamTopFace(*reloaded, expect);
       AssertCamShapes(*reloaded, expect);
       AssertCamFrames(*reloaded, expect);
+      AssertCamStock(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove(tmp);
     }
@@ -349,6 +397,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       AssertCamTopFace(*reloaded, expect);
       AssertCamShapes(*reloaded, expect);
       AssertCamFrames(*reloaded, expect);
+      AssertCamStock(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove_all(proj);
     }

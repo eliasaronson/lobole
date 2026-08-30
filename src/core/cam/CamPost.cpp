@@ -3,6 +3,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include <glm/geometric.hpp>
+#include <glm/glm.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -35,6 +36,16 @@ struct Emitter {
   std::ostringstream out;
   int decimals = 4;
   int line = 0;
+  // The work origin, in setup space. EVERY coordinate this emitter writes is
+  // relative to it, and this is the only place the subtraction happens — the
+  // engine works in setup space throughout, and the file is the one artifact
+  // that has to speak the operator's numbers. Without it the panel's "Z zero
+  // at 16.000" was a claim no line of the file honoured
+  // (docs/cam/stock-and-origin.md W1).
+  glm::dvec3 origin{0.0, 0.0, 0.0};
+  [[nodiscard]] glm::dvec3 Work(const glm::dvec3& p) const {
+    return p - origin;
+  }
   // Modal state: G-code repeats nothing it does not have to, and a file that
   // restates X on every line is unreadable when something goes wrong.
   double x = std::nan("");
@@ -56,10 +67,11 @@ struct Emitter {
   // Motion() emitted "G0 Xnan Ynan Z20" — a line that is at best rejected and
   // at worst interpreted. Retract touches Z and nothing else.
   void Retract(double zTo) {
-    if (!Differs(zTo, z))
+    const double w = zTo - origin.z;
+    if (!Differs(w, z))
       return;
-    out << "G0 Z" << Num(zTo, decimals) << "\n";
-    z = zTo;
+    out << "G0 Z" << Num(w, decimals) << "\n";
+    z = w;
   }
 
   // An arc in the XY plane (G17), centre given INCREMENTALLY from the arc
@@ -69,25 +81,30 @@ struct Emitter {
   // stating the mode is the difference between a curve and a crash.
   void Arc(bool clockwise, const glm::dvec3& to, const glm::dvec2& centre,
            double f) {
+    const glm::dvec3 w = Work(to);
+    // The centre moves with everything else, so I/J — being the difference
+    // between two points in the SAME space — come out unchanged. Shifting it
+    // here anyway rather than relying on that keeps one rule instead of two.
+    const glm::dvec2 c(centre.x - origin.x, centre.y - origin.y);
     std::ostringstream l;
     l << (clockwise ? "G2" : "G3");
-    l << " X" << Num(to.x, decimals) << " Y" << Num(to.y, decimals);
-    if (Differs(to.z, z))
-      l << " Z" << Num(to.z, decimals);
-    l << " I" << Num(centre.x - x, decimals) << " J"
-      << Num(centre.y - y, decimals);
+    l << " X" << Num(w.x, decimals) << " Y" << Num(w.y, decimals);
+    if (Differs(w.z, z))
+      l << " Z" << Num(w.z, decimals);
+    l << " I" << Num(c.x - x, decimals) << " J" << Num(c.y - y, decimals);
     if (f > 0.0 && Differs(f, feed)) {
       l << " F" << Num(f, decimals);
       feed = f;
     }
     out << l.str() << "\n";
-    x = to.x;
-    y = to.y;
-    z = to.z;
+    x = w.x;
+    y = w.y;
+    z = w.z;
   }
 
-  void Motion(const char* code, const glm::dvec3& to, double f, bool withA,
+  void Motion(const char* code, const glm::dvec3& in, double f, bool withA,
               double aVal) {
+    const glm::dvec3 to = Work(in);
     std::ostringstream l;
     l << code;
     if (Differs(to.x, x))
@@ -378,6 +395,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
 
   Emitter e;
   e.decimals = opts.decimals;
+  e.origin = setup.origin;
   if (opts.comments) {
     e.Comment("Designer CAM - " + setup.name);
     e.Comment("post: " + std::string(dialect->id));

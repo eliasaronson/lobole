@@ -124,8 +124,8 @@ bool BeginCamPlayback(AppState& state) {
   }
 
   state.camPlaybackGcode = gcode;
-  state.camTimeline =
-      cam::BuildTimeline(cam::ParseGcode(gcode), setup->rapidFeed);
+  state.camTimeline = cam::BuildTimeline(
+      cam::ProgramInSetupSpace(gcode, *setup), setup->rapidFeed);
   if (state.camTimeline.Empty()) {
     state.camPlaybackRefusal = "The posted file contains no moves to simulate.";
     state.camPlaybackGcode.clear();

@@ -269,6 +269,15 @@ GProgram ParseGcode(std::string_view text) {
   return out;
 }
 
+GProgram ProgramInSetupSpace(std::string_view text, const Setup& setup) {
+  GProgram p = ParseGcode(text);
+  if (setup.origin == glm::dvec3(0.0))
+    return p;
+  for (GMove& m : p.moves)
+    m.to += setup.origin;
+  return p;
+}
+
 HeightMap MakeStock(const glm::dvec3& min, const glm::dvec3& max, double res) {
   HeightMap map;
   map.res = std::max(0.01, res);
@@ -530,7 +539,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   if (!StockBounds(setup, rawBodies, lo, hi))
     return out;
 
-  const GProgram program = ParseGcode(gcode);
+  const GProgram program = ProgramInSetupSpace(gcode, setup);
   HeightMap machined = MakeStock(lo, hi, res);
 
   // Rapids through material: checked BEFORE the cut is applied, because a

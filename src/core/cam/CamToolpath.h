@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include <string>
 #include <vector>
 
 // Toolpath generation for 2.5D milling (docs/cam/plan.md).
@@ -114,6 +115,29 @@ struct DerivedOp {
   std::string why; // when !ok: why this verb cannot apply here
   Operation op;    // id left 0 — the caller owns id allocation
 };
+
+// Where the workpiece is, in setup space, when the stock is FIXED: the model
+// box positioned inside the typed size by `Stock::place`. Relative mode is the
+// model box plus margins, as it always was. One function answers "what is the
+// workpiece" for safe Z, derived depths, the verifier, the simulator and the
+// plan view, which is why a second stock mode is not a rewrite.
+
+// Empty when this setup has a workpiece it can cut; otherwise why not, in
+// words. A fixed stock smaller than the part is the case worth naming: the
+// job is not merely wrong, it does not exist.
+[[nodiscard]] std::string StockRefusal(const Setup& setup,
+                                       const std::vector<Body>& bodies);
+
+// Put `setup.origin` where `setup.originAt` says, in setup space. The Z comes
+// from the picked top face when there is one — that is what "Pick top face"
+// has always promised — and from the stock top otherwise, because that is the
+// face an operator touches off on.
+//
+// Call it after ANYTHING that moves the box: the stock, the fixture frame, the
+// top-face pick, the model. A stale origin is a file whose every coordinate is
+// offset by the amount the box moved.
+[[nodiscard]] bool RecomputeOrigin(Setup& setup,
+                                   const std::vector<Body>& bodies);
 
 // Half the cutter per pass: the rule of thumb every 2.5D job starts from,
 // expressed in the TOOL so it stays right for a 1 mm cutter and a 12 mm one.

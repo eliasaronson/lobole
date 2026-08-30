@@ -17,8 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    67; // v67: the cam setup's fixture frame + whether the machine has a
-        // rotary axis (docs/cam/setup-frame.md)
+    68; // v68: the cam work origin is DERIVED from a named corner
+        // (`origin_at`) and the post subtracts it; fixed-size stock
+        // (`stock.mode`/`size`/`place`) — docs/cam/stock-and-origin.md
+        // (v67: the cam setup's fixture frame + whether the machine has a
+        // rotary axis (docs/cam/setup-frame.md))
         // (v66: drawing notes; cam tool type/tip angle + the edge-break op)
         // (v65: mate connector corner snap (anchor snap_edge2))
         // (v64: display units (length/mass/angle) travel with the document)

@@ -145,3 +145,51 @@ representation (which parts, where, in what order) and is not a stock mode.
 **Work-offset registers (G54…G59).** The file stays single-offset. Choosing
 *which* register is a machine convention, and the post can gain a setting for
 it when a second setup ever needs a second register.
+
+## As built
+
+All six phases shipped, 2026-08-30, format **v68**.
+
+**W1 landed as designed, and the confinement gate is the useful one.** A setup
+whose origin is (0,0,0) posts byte-identically to before, so the change is
+provably limited to jobs that have a work origin. `Emitter` subtracts;
+`ProgramInSetupSpace` adds back; those are the only two places, and
+`cam sim: a job zeroed on its corner still plays its own verdict` fails if
+either side is missed — it also asserts that parsing the file RAW disagrees
+with the verdict, which is the shape the mistake would actually take.
+
+**Arc centres really are immune**, as predicted: I/J are incremental, so the
+offset cancels. The test compares the I/J words of a job posted at zero and
+the same job posted from a corner and requires them identical, rather than
+trusting the reasoning.
+
+**A tolerance the plan did not anticipate.** An 18 mm part in an 18 mm board
+measured as *not fitting*, every time: OCC's bounding box carries a gap (the
+same one the CAM round recorded as "mesh bbox grew 4 um"). `kStockFit = 1e-3`
+is the allowance, with the same reasoning the verifier's `kGrazeTolerance`
+uses — a micron of shortfall is the gap, a millimetre is a part that does not
+come out of this material.
+
+**`origin` is now derived, and the file saves the RULE.** `origin_at` — the
+corner — is what round-trips; the coordinate is written for a reader and
+recomputed on load, so it stays right when the part changes under it. An
+unknown corner name is refused rather than read as the default, since every
+coordinate in the file is measured from it.
+
+**The default moved, deliberately.** A fresh setup zeroes on the stock's min
+corner rather than at (0,0,0). The old default was a hard-coded literal
+sitting exactly where the defaults rule wants a derivation, and it put zero at
+the *model* origin — which for a generated or imported part is wherever the
+source document left it, the question that started this.
+
+### Not built
+
+**A picked vertex as the origin**, which the plan listed. `ElementMap` has no
+vertex kind, so it needs element-map plumbing this change does not do. The
+three box corners cover "which corner do I touch off on" for box stock, which
+is every case the stock modes can express.
+
+**`FromSolid` stock.** A body in the document as the workpiece reads simply
+until you notice the verifier samples the MODEL to compare against, so the
+stock body would be machined *and* expected. It needs a way to mark a body as
+not-part, which is a bigger idea than a stock mode.

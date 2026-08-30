@@ -314,14 +314,20 @@ When it does, watch these, in this order:
 
 1. **The first rapid.** Safe Z is derived (20 mm on 18 mm stock); check the
    tool actually clears the clamps, which the app knows nothing about.
-2. **Z zero.** The panel says "Z zero at 17.000" — the height of the picked
-   face in **SETUP** coordinates: the frame the part is clamped in, which is
-   model coordinates only when it is clamped as modelled. The file is in the
-   same frame, so the work offset has to put setup Z 17 at the top of the
-   material. Since v67 a setup can lay the part flat without touching the
-   model (docs/cam/setup-frame.md), and then the two frames differ — read the
-   number off the panel, never off the model tree. This is the number to
-   check twice before the first plunge.
+2. **Z zero. THIS CHANGED IN v68 — re-read it even if you knew the old rule.**
+   The file is now written *relative to the work origin*: zero in the g-code
+   is the corner the panel names (Stock corner / Stock centre / Part corner)
+   at the height of the picked top face. So you touch off **on that corner,
+   on the face you clicked**, and set the offset to zero — you do NOT offset
+   by the model height any more.
+
+   Before v68 the file was in model coordinates and the panel's "Z zero at
+   17.000" was a claim no line of the file kept; the operator had to put
+   model Z 17 at the material top by hand. A file posted then and a file
+   posted now are *different numbers for the same cut*, so do not mix an old
+   printout with a new post. The panel prints the origin next to the corner
+   selector; that triple is what the machine should read at your touch-off
+   point. This is still the number to check twice before the first plunge.
 3. **The tool change.** `M0`, then `S18000 M3` — verify the spindle restarts.
 4. **The tabs.** 3.8 mm tall by design, and the backplot draws them. If the
    part breaks free anyway, that is the number to raise.

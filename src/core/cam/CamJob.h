@@ -142,18 +142,45 @@ struct Operation {
 // Stock: what is in the vise before the first cut. Derived from the model's
 // bounding box plus margins rather than typed in absolute terms, so it stays
 // right when the model changes (defaults rule — docs/ui/u10-*).
+// How the workpiece is described. Relative is the default and the right one
+// for a part cut from oversize material; Fixed is the sheet you actually own,
+// which a shrink-wrap around one part cannot express
+// (docs/cam/stock-and-origin.md W3).
+enum class StockMode { Relative, Fixed };
+
 struct Stock {
-  glm::dvec3 margin{2.0, 2.0, 1.0}; // added around the model bbox (mm)
+  StockMode mode = StockMode::Relative;
+  glm::dvec3 margin{2.0, 2.0, 1.0}; // Relative: added around the model bbox
   double bottomMargin = 1.0;        // below the model, for the sacrificial pass
+  // Fixed: the workpiece as it is, in mm, and where the part sits inside it —
+  // 0 = the part's low face against the stock's low face, 1 = high against
+  // high, 0.5 = centred. Z defaults to 1: sheet goods are referenced from
+  // their top, which is the face you surface and touch off on.
+  glm::dvec3 size{0.0, 0.0, 0.0};
+  glm::dvec3 place{0.5, 0.5, 1.0};
 };
+
+// Where X0 Y0 Z0 is: the corner the operator touches off on. Derived from the
+// stock or the model, never a typed coordinate — `origin{0,0,0}` was a
+// hard-coded literal standing where the defaults rule wants a derivation, and
+// it put zero at the MODEL origin, which for a generated or imported part is
+// wherever the source document happened to leave it.
+//
+// A picked VERTEX is the obvious fourth option and is deferred: ElementMap
+// has no vertex kind, so it needs plumbing this change does not.
+enum class OriginAt { StockMin, StockCentre, ModelMin };
 
 struct Setup {
   uint64_t id = 0;
   std::string name;
 
   Stock stock;
-  // Work origin, in setup space. The post emits coordinates in this frame.
+  // Work origin, in setup space: every coordinate the POST writes is relative
+  // to it. Derived — see `OriginAt` and `RecomputeOrigin`, which is what keeps
+  // it right when the stock, the fixture or the picked face moves. Read it,
+  // do not assign it.
   glm::dvec3 origin{0.0, 0.0, 0.0};
+  OriginAt originAt = OriginAt::StockMin;
 
   // How the part is FIXTURED: the rotation taking setup space to model space.
   // A part is modelled where it belongs in the assembly — a speaker baffle

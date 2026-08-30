@@ -96,8 +96,16 @@ json CamSetupToJson(const cam::Setup& setup) {
   j["name"] = setup.name;
   j["post"] = setup.post;
   j["safe_z"] = setup.safeZ;
+  // DERIVED (v68): recomputed from the stock, the fixture and the picked face
+  // on load, so it is written for a reader rather than read back. The RULE is
+  // saved instead — the corner, not the coordinate — which is what stays right
+  // when the part changes under it.
   if (setup.origin != glm::dvec3(0.0))
     j["origin"] = {setup.origin.x, setup.origin.y, setup.origin.z};
+  if (setup.originAt != cam::OriginAt::StockMin)
+    j["origin_at"] = setup.originAt == cam::OriginAt::StockCentre
+                         ? "stock_centre"
+                         : "model_min";
   // Which face Z zero came from. Saved because the panel says so — and said
   // "Z zero is not set yet" about a job that had one, every time it was
   // reopened, because the answer lived in the session rather than the job.
@@ -123,6 +131,15 @@ json CamSetupToJson(const cam::Setup& setup) {
       {"margin",
        {setup.stock.margin.x, setup.stock.margin.y, setup.stock.margin.z}},
       {"bottom_margin", setup.stock.bottomMargin}};
+  // Written only when the workpiece is not the shrink-wrap every job had
+  // before v68, so those re-save byte-identically.
+  if (setup.stock.mode == cam::StockMode::Fixed) {
+    j["stock"]["mode"] = "fixed";
+    j["stock"]["size"] = {setup.stock.size.x, setup.stock.size.y,
+                          setup.stock.size.z};
+    j["stock"]["place"] = {setup.stock.place.x, setup.stock.place.y,
+                           setup.stock.place.z};
+  }
 
   j["tools"] = json::array();
   for (const cam::Tool& t : setup.tools) {
@@ -201,6 +218,22 @@ cam::Setup CamSetupFromJson(const json& j) {
   if (j.contains("origin") && j["origin"].is_array() && j["origin"].size() == 3)
     setup.origin = {j["origin"][0].get<double>(), j["origin"][1].get<double>(),
                     j["origin"][2].get<double>()};
+  // An unknown corner is REFUSED, not read as the default: every coordinate
+  // in the posted file is measured from it, so a silent substitution moves the
+  // whole job.
+  if (j.contains("origin_at")) {
+    const std::string at = j["origin_at"].get<std::string>();
+    if (at == "stock_min")
+      setup.originAt = cam::OriginAt::StockMin;
+    else if (at == "stock_centre")
+      setup.originAt = cam::OriginAt::StockCentre;
+    else if (at == "model_min")
+      setup.originAt = cam::OriginAt::ModelMin;
+    else
+      throw std::runtime_error(
+          "unknown cam origin_at '" + at +
+          "'; this build accepts stock_min, stock_centre, model_min");
+  }
   if (j.contains("frame") && j["frame"].is_array() && j["frame"].size() == 4)
     setup.frame =
         glm::dquat(j["frame"][3].get<double>(), j["frame"][0].get<double>(),
@@ -220,6 +253,25 @@ cam::Setup CamSetupFromJson(const json& j) {
                             sj["margin"][1].get<double>(),
                             sj["margin"][2].get<double>()};
     setup.stock.bottomMargin = sj.value("bottom_margin", 1.0);
+    if (sj.contains("mode")) {
+      const std::string mode = sj["mode"].get<std::string>();
+      if (mode == "fixed")
+        setup.stock.mode = cam::StockMode::Fixed;
+      else if (mode == "relative")
+        setup.stock.mode = cam::StockMode::Relative;
+      else
+        throw std::runtime_error("unknown cam stock mode '" + mode +
+                                 "'; this build accepts relative, fixed");
+    }
+    if (sj.contains("size") && sj["size"].is_array() && sj["size"].size() == 3)
+      setup.stock.size = {sj["size"][0].get<double>(),
+                          sj["size"][1].get<double>(),
+                          sj["size"][2].get<double>()};
+    if (sj.contains("place") && sj["place"].is_array() &&
+        sj["place"].size() == 3)
+      setup.stock.place = {sj["place"][0].get<double>(),
+                           sj["place"][1].get<double>(),
+                           sj["place"][2].get<double>()};
   }
   for (const json& tj : j.value("tools", json::array())) {
     cam::Tool t;
