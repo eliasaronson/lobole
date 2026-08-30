@@ -25,7 +25,8 @@ sites across three files**, in duties that are each a hand-maintained list:
 plausibly.** Nothing crashes; you get a picture that is wrong in a way that
 looks like a modelling problem.
 
-It has happened twice on the same list:
+**Every one of the last three renderers added arrived with a wiring bug**, in
+two different lists, one of them a crash:
 
 - **`0346a8e`** (2026-07-17), the FEM field: *"the FieldRenderer was never
   added to that list — so it kept a full-window viewport while the camera
@@ -34,6 +35,18 @@ It has happened twice on the same list:
 - **`4a3083d`** (2026-08-30), the CAM stock: reported from the field as a
   workpiece not parallel to the part with its cuts shifted sideways, while the
   cutter — an instance of the mesh renderer — sat exactly right.
+- **`a222bc8`** (2026-07-23), the **shutdown** list, the underlay: *"main()'s
+  shutdown resets every renderer global before CleanupVulkan destroys the
+  Vulkan device — except g_UnderlayRenderer (the newest one; it was missed)…
+  This is the long-standing 'shutdown crash.'"* A different list, and this one
+  was a SIGSEGV that went unexplained for a while rather than a wrong picture.
+
+(A fourth, `cc80f4d`, is the same viewport-versus-framebuffer confusion one
+layer over in the AO sampling — adjacent rather than the same list.)
+
+The rate matters as much as the count: **six of the nine renderers were created
+between 2026-07-05 and 2026-08-27.** This is not a list that gets touched once
+a year.
 
 And **`--offscreen` cannot show it**: no panels, so the 3D sub-region IS the
 whole framebuffer. Every screenshot review and every headless test is blind to
