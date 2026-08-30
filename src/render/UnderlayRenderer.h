@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/SceneRenderer.h"
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
@@ -25,7 +26,7 @@ struct UnderlayDraw {
 // from SketchRenderer because it owns PERSISTENT device-local textures (decoded
 // once per asset) rather than SketchRenderer's per-frame host-visible line
 // buffers. Depth test on / write off, like the rest of the sketch overlay.
-class UnderlayRenderer {
+class UnderlayRenderer : public SceneRenderer {
 public:
   UnderlayRenderer() = default;
   ~UnderlayRenderer() { Shutdown(); }
@@ -34,14 +35,14 @@ public:
                   VkRenderPass renderPass, VkQueue graphicsQueue,
                   uint32_t queueFamily, VkCommandPool commandPool,
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
-  void Shutdown();
+  void Shutdown() override;
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
+  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
     m_view = view;
     m_proj = proj;
   }
   void SetViewportSize(uint32_t w, uint32_t h) { SetViewport(0, 0, w, h); }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
+  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
     m_viewportX = x;
     m_viewportY = y;
     m_viewportWidth = w;
@@ -57,7 +58,7 @@ public:
   // texture is never freed while a frame in flight may still sample it.
   void ReleaseTextures();
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
   bool IsInitialized() const { return m_initialized; }
 
 private:

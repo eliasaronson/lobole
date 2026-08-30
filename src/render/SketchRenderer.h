@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/MeshRenderer.h" // Vertex3D
+#include "render/SceneRenderer.h"
 
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -28,7 +29,7 @@ struct PrimVertex {
 // view/proj UBO; per-draw opacity rides in a push constant. Vertex data is
 // uploaded into per-frame host-visible buffers each frame, so updates never
 // race a frame already in flight.
-class SketchRenderer {
+class SketchRenderer : public SceneRenderer {
 public:
   SketchRenderer() = default;
   ~SketchRenderer() { Shutdown(); }
@@ -37,7 +38,7 @@ public:
                   VkRenderPass renderPass, VkQueue graphicsQueue,
                   uint32_t queueFamily, VkCommandPool commandPool,
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
-  void Shutdown();
+  void Shutdown() override;
 
   // Sketch entity lines (line list: pairs of endpoints). Replaced on
   // document change.
@@ -69,19 +70,19 @@ public:
     m_overlayPrims = std::move(prims);
   }
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
+  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
     m_view = view;
     m_proj = proj;
   }
   void SetViewportSize(uint32_t w, uint32_t h) { SetViewport(0, 0, w, h); }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
+  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
     m_viewportX = x;
     m_viewportY = y;
     m_viewportWidth = w;
     m_viewportHeight = h;
   }
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
   bool IsInitialized() const { return m_initialized; }
 
 private:

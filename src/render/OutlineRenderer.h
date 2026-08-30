@@ -3,6 +3,7 @@
 #include "render/FramesInFlight.h"
 
 #include "render/ClipPlanes.h"
+#include "render/SceneRenderer.h"
 
 #include "render/OutlineEdges.h"
 #include <chrono>
@@ -39,7 +40,7 @@ struct OutlineSettings {
   bool liveSilhouettes = false;
 };
 
-class OutlineRenderer {
+class OutlineRenderer : public SceneRenderer {
 public:
   OutlineRenderer();
   ~OutlineRenderer();
@@ -49,7 +50,7 @@ public:
                   VkRenderPass renderPass, VkQueue graphicsQueue,
                   uint32_t queueFamily, VkCommandPool commandPool,
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
-  void Shutdown();
+  void Shutdown() override;
 
   // Assets and instances, the split MeshRenderer already had: one
   // tessellation + its edge adjacency, drawn at many transforms. An assembly
@@ -76,8 +77,9 @@ public:
   void SetMeshTransform(uint32_t meshId, const glm::mat4& transform);
 
   // Camera and rendering
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& projection);
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  void UpdateCamera(const glm::mat4& view,
+                    const glm::mat4& projection) override;
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
 
   // Settings
   void SetOutlineSettings(const OutlineSettings& settings) {
@@ -90,8 +92,11 @@ public:
 
   // Section clip plane (world): xyz = normal, w = distance; edges past it
   // are discarded. Zero = disabled (default).
-  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
-  void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
+  void SetClipPlanes(const ClipPlaneArray& planes) override {
+    m_clipPlanes = planes;
+  }
+  void SetViewport(int32_t x, int32_t y, uint32_t width,
+                   uint32_t height) override;
 
   bool IsInitialized() const { return m_isInitialized; }
 

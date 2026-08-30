@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/ClipPlanes.h"
+#include "render/SceneRenderer.h"
 
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -21,7 +22,7 @@ struct FieldVertex {
   float scalar;           // active field, pre-normalized to [0,1]
 };
 
-class FieldRenderer {
+class FieldRenderer : public SceneRenderer {
 public:
   FieldRenderer() = default;
   ~FieldRenderer() { Shutdown(); }
@@ -30,7 +31,7 @@ public:
                   VkRenderPass renderPass, VkQueue graphicsQueue,
                   uint32_t queueFamily, VkCommandPool commandPool,
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
-  void Shutdown();
+  void Shutdown() override;
 
   // Replace the field geometry (indexed triangle list). Empty clears it.
   void SetMesh(std::vector<FieldVertex> vertices,
@@ -41,20 +42,22 @@ public:
   }
   bool HasMesh() const { return !m_indices.empty(); }
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
+  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
     m_view = view;
     m_proj = proj;
   }
-  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
+  void SetClipPlanes(const ClipPlaneArray& planes) override {
+    m_clipPlanes = planes;
+  }
   void SetDeformScale(float scale) { m_deformScale = scale; }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
+  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
     m_vx = x;
     m_vy = y;
     m_vw = w;
     m_vh = h;
   }
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
   bool IsInitialized() const { return m_initialized; }
 
 private:

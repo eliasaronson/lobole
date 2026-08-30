@@ -193,9 +193,13 @@ TEST_CASE("every scene renderer is aimed at the 3D viewport", "[convention]") {
   // Neither could be seen in review: an `--offscreen` instance has no panels,
   // so there the sub-region IS the whole framebuffer.
   //
-  // The discriminator is `void SetViewport(int32_t`, which takes a viewport
-  // RECT. The prepass renderers (shadow, SSAO, ray tracing) do not have it and
-  // are correctly not in the list.
+  // The discriminator is deriving from SceneRenderer — the frame contract
+  // itself. (It used to be `void SetViewport(int32_t`, a viewport RECT, which
+  // stopped working the moment the interface existed: SceneRenderer.h is a
+  // `*Renderer.h` that declares exactly that signature, so the gate demanded
+  // the abstract base be added to the list. Asking who IMPLEMENTS the contract
+  // cannot make that mistake.) The prepass renderers — shadow, SSAO, ray
+  // tracing — do not implement it and are correctly not in the list.
   const std::string ui = [] {
     std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / "src/ui/UI.cpp");
     std::stringstream ss;
@@ -215,8 +219,8 @@ TEST_CASE("every scene renderer is aimed at the 3D viewport", "[convention]") {
     const std::string name = f.path.stem().string(); // e.g. StockRenderer
     if (name.size() < 9 || name.substr(name.size() - 8) != "Renderer")
       continue;
-    if (f.text.find("void SetViewport(int32_t") == std::string::npos)
-      continue; // a prepass renderer: no scene viewport of its own
+    if (f.text.find(": public SceneRenderer") == std::string::npos)
+      continue; // a prepass renderer, or the interface itself
     // AppState names them camelCase: StockRenderer -> stockRenderer.
     std::string member = name;
     member[0] = static_cast<char>(std::tolower(member[0]));

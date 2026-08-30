@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/ClipPlanes.h"
+#include "render/SceneRenderer.h"
 
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -29,7 +30,7 @@ struct StockVertex {
   glm::vec3 normal;
 };
 
-class StockRenderer {
+class StockRenderer : public SceneRenderer {
 public:
   StockRenderer() = default;
   ~StockRenderer() { Shutdown(); }
@@ -38,7 +39,7 @@ public:
                   VkRenderPass renderPass, VkQueue graphicsQueue,
                   uint32_t queueFamily, VkCommandPool commandPool,
                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
-  void Shutdown();
+  void Shutdown() override;
 
   // Replace the stock geometry. Empty clears it.
   void SetMesh(std::vector<StockVertex> vertices,
@@ -57,12 +58,14 @@ public:
   void SetTransform(const glm::mat4& m) { m_model = m; }
   void SetColor(const glm::vec4& c) { m_color = c; }
 
-  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
+  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
     m_view = view;
     m_proj = proj;
   }
-  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
-  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
+  void SetClipPlanes(const ClipPlaneArray& planes) override {
+    m_clipPlanes = planes;
+  }
+  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) override {
     m_vx = x;
     m_vy = y;
     m_vw = w;
@@ -75,7 +78,7 @@ public:
     return {m_vx, m_vy, static_cast<int32_t>(m_vw), static_cast<int32_t>(m_vh)};
   }
 
-  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) override;
   [[nodiscard]] bool IsInitialized() const { return m_initialized; }
 
 private:
