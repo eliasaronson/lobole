@@ -277,12 +277,24 @@ OCC's own documentation is not specific enough to rely on:
    regen, since the feature stores a path. Unchanged from before this round
    (the assembly path is the one that got the fix), and it only bites on files
    that are one big solid.
-4. **A memory suballocator.** Measured and deliberately skipped: batching the
-   submits took 1.15 s off a cold build, and the ~1200 remaining
-   `vkAllocateMemory` calls are worth far less than the tessellation was. With
-   the tessellation now parallel, the ~1.6 s that is left in a cold sync is
-   the place to look next if a cold import still feels slow.
-5. **`MeshRenderer::CreateAsset` never reuses a released slot** — ids come
+4. **The first frame after an import is still an uncovered stall.** The
+   progress modal covers the parse, the extraction and the tab creation, then
+   closes — and the cold assembly sync that follows is 2.6 s with nothing on
+   screen explaining it. The original plan for this round said the same pump
+   would pre-warm the cache a few parts per frame so the modal spanned it;
+   that was not built, because parallel tessellation took the same stall from
+   9.7 s to 3.1 s and the remaining case is far weaker. It is the honest gap
+   in "the import is behind a modal".
+5. **A memory suballocator — smaller than it looks.** A cold sync now reads
+   `2556 ms [build 438, picking 28, parallel tessellation 1496]`, so the
+   tessellation is STILL the largest single item and the whole GPU asset path
+   (create + upload, batched) is 438 ms. About 590 ms of that total is not
+   attributed to any phase yet — teardown, the tree walk and the eviction pass
+   are the candidates, and nobody has measured which. Attribute that before
+   spending anything on allocation strategy: batching the submits already took
+   1.15 s off, and what is left is not obviously worth the lifetime complexity
+   in `DestroyAssetBuffers`.
+6. **`MeshRenderer::CreateAsset` never reuses a released slot** — ids come
    from `m_assets.size()` after a `push_back`, so the vector grows for the
    life of the process. The cache makes this far rarer than it was; it is a
    null `unique_ptr` per hole, so it is a tidiness issue, not a leak.
