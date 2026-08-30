@@ -7,6 +7,7 @@
 #include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
+#include "core/features/BooleanFeature.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -294,6 +295,90 @@ TEST_CASE("cam sim: the played path sits where the toolpath does", "[cam]") {
   INFO("generated " << length(generated) << " mm, played " << length(played)
                     << " mm");
   CHECK_THAT(length(played), WithinRel(length(generated), 0.01));
+}
+
+TEST_CASE("cam sim: an ARC-fitted, tabbed job plays where it cuts", "[cam]") {
+  // The gap that let a real defect through. The bbox check above uses a
+  // rectangular profile: no arcs, no tabs, one pass. A real job derived from
+  // a round opening has all three — the post fits G2/G3 across the moves,
+  // tabs interrupt them, and the parser re-expands the arcs — and the
+  // PLAYBACK draws the parsed file while the backplot draws the toolpath. If
+  // those two disagree the picture is of a different job than the one that
+  // will be cut, and only a job with arcs can show it.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 200, 150, 20));
+  const uint64_t plate = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Bore", glm::vec3(100, 75, -1), glm::vec3(0, 0, 1), 30.0, 22.0));
+  const uint64_t bore = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Opening", plate, bore,
+                                                   BooleanOp::Subtract));
+
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  cam::Operation op;
+  op.id = 21;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Inside;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 2.75; // 8 passes, like a derived job
+  op.tabCount = 4;    // and tabs, like a derived job
+  op.tabWidth = 12.0;
+  op.tabHeight = 4.4;
+  // The wall of the bore is what "cut the opening" points at.
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u))
+        continue; // planar: not the bore
+      op.targets.push_back(ElementRef{b.createdBy, name});
+      break;
+    }
+  REQUIRE(op.targets.size() == 1);
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  // The post FITTED arcs: this job is the interesting one precisely because
+  // it did.
+  INFO(gcode.substr(0, 400));
+  CHECK((gcode.find("G2") != std::string::npos ||
+         gcode.find("G3") != std::string::npos));
+
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ParseGcode(gcode), setup.rapidFeed);
+  std::vector<glm::dvec3> generated, played;
+  for (const cam::Toolpath& tp : paths)
+    for (const cam::Move& m : tp.moves)
+      if (m.kind != cam::Move::Kind::Rapid)
+        generated.push_back(m.to);
+  for (const cam::GMove& m : tl.program.moves)
+    if (!m.rapid)
+      played.push_back(m.to);
+  REQUIRE(generated.size() > 50);
+  REQUIRE(played.size() > 50);
+
+  const auto span = [](const std::vector<glm::dvec3>& pts) {
+    glm::dvec3 lo(pts.front()), hi(pts.front());
+    for (const glm::dvec3& p : pts) {
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+    return std::pair<glm::dvec3, glm::dvec3>{lo, hi};
+  };
+  const auto [genLo, genHi] = span(generated);
+  const auto [playLo, playHi] = span(played);
+  INFO("generated " << genLo.x << "," << genLo.y << "," << genLo.z << " .. "
+                    << genHi.x << "," << genHi.y << "," << genHi.z);
+  INFO("played    " << playLo.x << "," << playLo.y << "," << playLo.z << " .. "
+                    << playHi.x << "," << playHi.y << "," << playHi.z);
+  CHECK(glm::length(playLo - genLo) < 0.05);
+  CHECK(glm::length(playHi - genHi) < 0.05);
 }
 
 TEST_CASE("cam sim: a rapid is not counted as time it cannot know", "[cam]") {
