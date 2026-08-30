@@ -72,7 +72,129 @@ Job ProfiledBlock() {
   return j;
 }
 
+// The same job on a panel that stands UPRIGHT — thin in Y, tall in Z, like
+// every part imported in its assembly orientation — laid flat on the bed by
+// the setup's fixture frame rather than by editing the model
+// (docs/cam/setup-frame.md). Every other fixture in this file is modelled
+// face-up, which means setup space and model space are identical in them and
+// nothing here has ever exercised the distinction.
+Job LaidFlatPanel() {
+  Job j;
+  j.doc = BlockDoc(40, 10, 30); // 40 wide, 10 THICK, 30 tall: on its edge
+  j.setup = BasicSetup();
+  // Clamp it with a Y-facing face up: the frame that maps +Z to -Y.
+  j.setup.frame = cam::SolveFaceUp({0.0, -1.0, 0.0}, glm::dquat(1, 0, 0, 0));
+  j.setup.safeZ = cam::DeriveSafeZ(j.setup, j.doc->GetBodies());
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(j.setup, j.doc->GetBodies(), lo, hi));
+  cam::Operation op;
+  op.id = 7;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 5.0;
+  j.setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(j.setup, j.doc->GetBodies());
+  std::string error;
+  REQUIRE(cam::PostProcess("mach3", j.setup, paths, {}, j.gcode, &error));
+  return j;
+}
+
 } // namespace
+
+TEST_CASE("cam sim: a laid-flat part plays the map its verdict is read from",
+          "[cam]") {
+  // The load-bearing equality of this whole file, on a setup whose frame is
+  // NOT identity. Everything the simulation touches has to agree about which
+  // space it is in: StockBounds derives the box in setup space, the post
+  // writes the file in setup space, and StockSim carves the one with the
+  // other. If any of the three slipped back into model space the block would
+  // be the wrong shape and the tool would cut past it — and at identity,
+  // where every other test in this file lives, that mistake is invisible.
+  Job job = LaidFlatPanel();
+  constexpr double kRes = 0.5;
+
+  const cam::Inspection insp =
+      cam::Inspect(job.gcode, job.setup, job.doc->GetBodies(), kRes);
+  REQUIRE(insp.ok);
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(job.setup, job.doc->GetBodies(), lo, hi));
+  // The panel is lying down: the box is 40 x 30 in the machine's XY and only
+  // as deep as the panel is thick. Asserted so this test fails LOUDLY if the
+  // frame stops reaching StockBounds, rather than quietly comparing two maps
+  // that are both wrong in the same way.
+  CHECK_THAT(hi.x - lo.x, WithinAbs(44.0, 1e-6)); // 40 + 2 mm margin each side
+  CHECK_THAT(hi.y - lo.y, WithinAbs(34.0, 1e-6)); // 30 + 2 mm
+  CHECK_THAT(hi.z - lo.z, WithinAbs(12.0, 1e-6)); // 10 thick + 1 above, 1 below
+
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ParseGcode(job.gcode), job.setup.rapidFeed);
+  REQUIRE_FALSE(tl.Empty());
+
+  cam::StockSim sim;
+  sim.Begin(tl, job.setup, cam::MakeStock(lo, hi, kRes));
+  sim.SeekTo(tl.End());
+
+  REQUIRE(sim.Stock().z.size() == insp.machined.z.size());
+  CHECK(sim.Stock().z == insp.machined.z);
+  // And it actually cut something: an equality between two empty simulations
+  // would pass this without the tool ever touching the block.
+  CHECK(sim.RemovedVolume() > 100.0);
+}
+
+TEST_CASE("cam sim: a laid-flat job plays where its toolpath cuts", "[cam]") {
+  // The frame check of "the played path sits where the toolpath does", with a
+  // fixture frame in the way. Both sides are in setup space, so the answer is
+  // that the frame changes nothing here — which is worth pinning, because the
+  // way to get it wrong is to apply the frame once on one side.
+  Job job = LaidFlatPanel();
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job.setup, job.doc->GetBodies());
+  const cam::Timeline tl =
+      cam::BuildTimeline(cam::ParseGcode(job.gcode), job.setup.rapidFeed);
+
+  const auto span = [](const std::vector<glm::dvec3>& pts) {
+    glm::dvec3 lo(pts.front()), hi(pts.front());
+    for (const glm::dvec3& p : pts) {
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+    return std::pair<glm::dvec3, glm::dvec3>{lo, hi};
+  };
+  std::vector<glm::dvec3> generated;
+  for (const cam::Toolpath& tp : paths)
+    for (const cam::Move& m : tp.moves)
+      if (m.kind != cam::Move::Kind::Rapid)
+        generated.push_back(m.to);
+  std::vector<glm::dvec3> played;
+  for (const cam::GMove& m : tl.program.moves)
+    if (!m.rapid)
+      played.push_back(m.to);
+  REQUIRE(generated.size() > 20);
+  REQUIRE(played.size() > 20);
+
+  const auto [genLo, genHi] = span(generated);
+  const auto [playLo, playHi] = span(played);
+  INFO("generated " << genLo.x << "," << genLo.y << "," << genLo.z << " .. "
+                    << genHi.x << "," << genHi.y << "," << genHi.z);
+  INFO("played    " << playLo.x << "," << playLo.y << "," << playLo.z << " .. "
+                    << playHi.x << "," << playHi.y << "," << playHi.z);
+  CHECK(glm::length(playLo - genLo) < 0.02);
+  CHECK(glm::length(playHi - genHi) < 0.02);
+
+  // And drawn back on the model, the path is on the PART — the property the
+  // backplot and the stock mesh both rely on, since each is rendered through
+  // the setup frame rather than re-derived in model space.
+  const glm::dvec3 corner =
+      cam::FromSetupSpace(job.setup, glm::dvec3(genLo.x, genLo.y, genHi.z));
+  // The panel is 40 x 10 x 30 about the origin, plus the stock margin.
+  CHECK(std::abs(corner.x) < 40.0);
+  CHECK(std::abs(corner.y) < 40.0);
+  CHECK(std::abs(corner.z) < 40.0);
+}
 
 TEST_CASE("cam sim: playing to the end leaves the verdict's own map", "[cam]") {
   Job job = ProfiledBlock();
