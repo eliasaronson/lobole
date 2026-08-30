@@ -98,18 +98,19 @@ becomes: implement the interface, `push_back` once.
 
 What it costs, honestly:
 
-- It touches all four `Render` paths in `main.cpp`, which CLAUDE.md calls the
+- It touches all three `Render` paths in `main.cpp`, which CLAUDE.md calls the
   untested Vulkan layer. The change is mechanical but wants the GUI suite and
-  a screenshot pass, not just the headless one.
+  a screenshot pass, not just the headless one — the draw order is the thing
+  to eyeball.
 - `MeshRenderer` keeps extra duties nothing else has (shadow casters, AO and
   shadow-map rebinds, instance/asset management). It implements the interface
   for its *scene* duties and stays special for the rest — the registry is not
   an attempt to make it uniform.
-- The viewport API has to be unified on the rect form first. That is a good
-  change on its own; `SetViewportSize` then means "the framebuffer changed
-  size", which is a different question and should be named like one.
+- `SetViewportSize(w, h)` survives on four of them and is a DIFFERENT question
+  ("the framebuffer changed size"). It stays off the interface; only the rect
+  form belongs there. Renaming it is optional and separate.
 
-**What it does not fix:** there are still four `Render` call sites and someone
+**What it does not fix:** there are still three `Render` call sites and someone
 must still register. It converts seven lists into one, which is most of the
 win, but the remaining one is still a list.
 
@@ -127,9 +128,9 @@ virtual void Render(VkCommandBuffer, uint32_t frame, const SceneView&) = 0;
 ```
 
 Then `SetViewport`, `UpdateCamera` and `SetClipPlanes` **disappear entirely**,
-and with them their seven call sites. A renderer *cannot* be drawn with a
-stale or unset viewport, because the data arrives with the call — and the four
-call sites already have all of it. Missing wiring stops being a silent visual
+and with them their forty call sites. A renderer *cannot* be drawn with a
+stale or unset viewport, because the data arrives with the call — and the
+three call sites already have all of it. Missing wiring stops being a silent visual
 defect and becomes a compile error.
 
 It also **retires the step-1 gate**: there is no list left to be missing from,
