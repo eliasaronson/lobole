@@ -60,6 +60,12 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <OSD.hxx>              // per-thread signal handler (prewarm workers)
+#include <Standard_Failure.hxx> // ...and what it converts faults into
+
+#include <atomic>
+#include <thread>
+
 namespace ui {
 
 void SnapshotAssembly(AppState& state) {
@@ -1027,6 +1033,130 @@ void ApplyExplodeTransforms(AppState& state) {
 // outlives this function: AppState::partRenderCache keeps it across resyncs.
 
 namespace {
+
+// One body's tessellation, computed on a worker thread. Pure CPU: no OCC
+// document mutation beyond the shape's own triangulation, no AppState, no
+// Vulkan.
+struct CpuBody {
+  std::vector<Vertex3D> vertices;
+  std::vector<uint32_t> indices;
+  std::vector<uint32_t> triangleFaces;
+  std::vector<std::vector<glm::vec3>> edges;
+};
+
+using PrewarmedParts = std::unordered_map<uint64_t, std::vector<CpuBody>>;
+
+// Tessellates the given parts across threads, ahead of the sync loop that
+// consumes them.
+//
+// This is the single biggest cost of first seeing a large assembly: OCC meshes
+// 299 parts one after another for ~3.7 s. `BRepMesh_IncrementalMesh` already
+// parallelises WITHIN one shape; nothing parallelised across shapes, and the
+// parts are independent.
+//
+// Safety, established by measurement rather than by reading OCC's docs
+// (harness in the session notes):
+//   - Meshing 299 distinct products serially and across 8 threads produced
+//     IDENTICAL output, vertex counts and summed positions alike.
+//   - The only shared mutable state a mesher can touch is the triangulation it
+//     writes into each TFace, so the hazard is two threads meshing shapes that
+//     SHARE a TShape. Part documents load their geometry independently (an
+//     .brep sidecar each, or features that build fresh shapes), and a scan of
+//     the real 299-part import found zero TFaces shared between parts.
+//   - That last point is a property of today's features, not an invariant
+//     anything enforces — a future "duplicate part" would copy a CADShape,
+//     which SHARES its TShape. So rather than trust it, work is GROUPED BY
+//     TSHAPE below: shapes that share one are always meshed by the same
+//     thread, which makes the race impossible instead of merely absent.
+void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
+                          PrewarmedParts& out) {
+  // One work item per body, keyed by the TShape whose triangulation it writes.
+  struct Item {
+    uint64_t partId;
+    size_t bodyIndex;
+    const CADShape* shape;
+  };
+  std::unordered_map<const void*, std::vector<Item>> byTShape;
+  size_t bodies = 0;
+  for (uint64_t partId : parts) {
+    const Document* part = PartDocById(state, partId);
+    if (part == nullptr)
+      continue;
+    const auto& partBodies = part->GetBodies();
+    out[partId].resize(partBodies.size());
+    for (size_t bi = 0; bi < partBodies.size(); bi++) {
+      if (!partBodies[bi].shape.IsValid())
+        continue;
+      byTShape[partBodies[bi].shape.GetShape().TShape().get()].push_back(
+          {partId, bi, &partBodies[bi].shape});
+      bodies++;
+    }
+  }
+  if (bodies == 0)
+    return;
+
+  std::vector<std::vector<Item>*> groups;
+  groups.reserve(byTShape.size());
+  for (auto& [tshape, items] : byTShape)
+    groups.push_back(&items);
+
+  const auto meshOne = [&out](const Item& item) {
+    CADShape::Mesh m = item.shape->GenerateMesh(0.1);
+    if (m.vertices.empty())
+      return;
+    CpuBody& dst = out[item.partId][item.bodyIndex];
+    dst.vertices = CADMeshConverter::ConvertCADMeshToVertices(m);
+    dst.indices = std::move(m.indices);
+    dst.triangleFaces = std::move(m.triangleFaces);
+    dst.edges = item.shape->GenerateEdgePolylines(0.1);
+  };
+
+  // `out` is pre-sized above and every item writes its own slot, so the map
+  // is never rehashed and no two threads touch the same element.
+  //
+  // Half the cores, capped: the mesher is internally parallel, so
+  // oversubscribing loses — measured 3.2x at 8 threads and only 2.3x at 16 on
+  // a 22-thread machine.
+  const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+  const size_t workers =
+      std::min<size_t>({groups.size(), std::max(1u, hw / 2), 8});
+  if (workers <= 1) {
+    for (const std::vector<Item>* g : groups)
+      for (const Item& item : *g)
+        meshOne(item);
+    return;
+  }
+
+  std::atomic<size_t> next{0};
+  std::vector<std::thread> pool;
+  pool.reserve(workers);
+  for (size_t t = 0; t < workers; t++) {
+    pool.emplace_back([&] {
+      // OCC turns hardware signals into Standard_Failure through a handler
+      // installed PER THREAD (OCC_CONVERT_SIGNALS). Without this a fault in
+      // the mesher here is a raw SIGSEGV rather than a catchable failure.
+      OSD::SetSignal(Standard_False);
+      for (;;) {
+        const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+        if (i >= groups.size())
+          break;
+        // Every item in a group shares a TShape, so they run in sequence on
+        // this one thread.
+        for (const Item& item : *groups[i]) {
+          try {
+            meshOne(item);
+          } catch (const Standard_Failure& e) {
+            LOG_WARN("Tessellation failed for part {}: {}", item.partId,
+                     e.GetMessageString());
+          }
+        }
+      }
+    });
+  }
+  for (std::thread& th : pool)
+    th.join();
+}
+
 // Releases the renderer assets an entry holds. The cache is the only thing
 // referencing them once the instances are gone, so dropping an entry without
 // this leaks a GPU buffer for the life of the process.
@@ -1103,19 +1233,45 @@ void SyncAssemblyRenderers(AppState& state) {
   // regression is read rather than re-profiled.
   using SyncClock = std::chrono::steady_clock;
   const auto syncStart = SyncClock::now();
-  double buildMs = 0, instanceMs = 0, pickMs = 0;
+  double buildMs = 0, instanceMs = 0, pickMs = 0, prewarmMs = 0;
   size_t builtParts = 0, instanceCount = 0;
   const auto elapsedMsSince = [](SyncClock::time_point t) {
     return std::chrono::duration<double, std::milli>(SyncClock::now() - t)
         .count();
   };
 
+  // Which parts this sync will have to tessellate, gathered BEFORE the loop
+  // so they can be meshed in parallel (PrewarmTessellations). On a warm cache
+  // this list is empty and the whole phase costs one walk of the tree.
+  const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
+  PrewarmedParts prewarmed;
+  {
+    std::vector<uint64_t> missing;
+    std::unordered_set<uint64_t> seen;
+    for (const assembly::FlatInstance& inst : flat) {
+      if (!inst.visible || !seen.insert(inst.partId).second)
+        continue;
+      const Document* part = PartDocById(state, inst.partId);
+      if (part == nullptr)
+        continue;
+      const auto entry = cache.parts.find(inst.partId);
+      if (entry == cache.parts.end() ||
+          entry->second.docVersion != part->Version())
+        missing.push_back(inst.partId);
+    }
+    if (!missing.empty()) {
+      const auto warmStart = SyncClock::now();
+      PrewarmTessellations(state, missing, prewarmed);
+      prewarmMs = elapsedMsSince(warmStart);
+    }
+  }
+
   // A5: the LEAF parts of the tree, placed. A top-level part occurrence is a
   // one-element subtree, so this loop is unchanged for a flat assembly — and
   // instancing survives nesting, because a FlatInstance still carries its
   // partId and the mesh-asset cache is keyed on that (six barrels in two
   // nested assemblies remain one asset).
-  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+  for (const assembly::FlatInstance& inst : flat) {
     if (!inst.visible)
       continue; // hidden here, or inside a hidden sub-assembly
     Document* part = PartDocById(state, inst.partId);
@@ -1154,17 +1310,34 @@ void SyncAssemblyRenderers(AppState& state) {
       // every part after it and silently recolour unrelated geometry — and a
       // cached colour would then disagree with a freshly built one.
       size_t palette = static_cast<size_t>(inst.partId);
-      for (const auto& body : bodies) {
+      const auto warm = prewarmed.find(inst.partId);
+      for (size_t bodyIdx = 0; bodyIdx < bodies.size(); bodyIdx++) {
+        const auto& body = bodies[bodyIdx];
         SharedBody sb;
-        CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
-        if (cadMesh.vertices.empty()) {
-          shared.push_back(std::move(sb)); // keep index alignment; assetId 0
-          continue;
+        // Normally the tessellation is already done (PrewarmTessellations,
+        // above); meshing here is the fallback for a part that was not in the
+        // missing list — an in-context ghost path, say — and keeps this loop
+        // correct on its own.
+        CpuBody* pre = nullptr;
+        if (warm != prewarmed.end() && bodyIdx < warm->second.size() &&
+            !warm->second[bodyIdx].vertices.empty())
+          pre = &warm->second[bodyIdx];
+        if (pre != nullptr) {
+          sb.vertices = std::move(pre->vertices);
+          sb.indices = std::move(pre->indices);
+          sb.triangleFaces = std::move(pre->triangleFaces);
+          sb.edges = std::move(pre->edges);
+        } else {
+          CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
+          if (cadMesh.vertices.empty()) {
+            shared.push_back(std::move(sb)); // keep index alignment; assetId 0
+            continue;
+          }
+          sb.vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
+          sb.indices = std::move(cadMesh.indices);
+          sb.triangleFaces = std::move(cadMesh.triangleFaces);
+          sb.edges = body.shape.GenerateEdgePolylines(0.1);
         }
-        sb.vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
-        sb.indices = cadMesh.indices;
-        sb.triangleFaces = cadMesh.triangleFaces;
-        sb.edges = body.shape.GenerateEdgePolylines(0.1);
         sb.palette = body.hasDisplayColor
                          ? body.displayColor
                          : kBodyPalette[palette++ % std::size(kBodyPalette)];
@@ -1341,9 +1514,10 @@ void SyncAssemblyRenderers(AppState& state) {
   // Selection now — see SyncSelectionHighlights.)
   LOG_INFO("Assembly synced: {} occurrences, {} instances, {} parts cached "
            "({} tessellated) in {:.0f} ms [build {:.0f}, instances {:.0f}, "
-           "picking {:.0f}]",
+           "picking {:.0f}, of which parallel tessellation {:.0f}]",
            state.assembly->OccurrenceCount(), instanceCount, cache.parts.size(),
-           builtParts, elapsedMsSince(syncStart), buildMs, instanceMs, pickMs);
+           builtParts, elapsedMsSince(syncStart), buildMs, instanceMs, pickMs,
+           prewarmMs);
 }
 
 // In-context editing (A4): appends the context assembly's other occurrences

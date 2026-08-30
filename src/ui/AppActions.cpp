@@ -1,5 +1,6 @@
 #include "ui/AppActions.h"
 #include "core/Units.h"
+#include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -76,13 +77,11 @@
 
 namespace ui {
 
-// Defined in AssemblyActions.cpp (assembly domain, extracted from this TU);
-// called by SyncDocumentRenderers below.
-void SyncAssemblyRenderers(AppState& state);
-void SyncInContextGhosts(AppState& state);
-// Likewise: the per-part render cache lives with the assembly sync that fills
-// it, but DeletePart and ReplaceDocument here are what invalidate it.
-void EvictPartRenderCache(AppState& state, uint64_t partSlotId);
+// SyncAssemblyRenderers / SyncInContextGhosts / EvictPartRenderCache are
+// defined in AssemblyActions.cpp (the assembly domain, extracted from this TU)
+// and declared in AppActionsInternal.h, which this TU now includes for the
+// render-cache types — so the hand-copied declarations that used to sit here
+// are gone, and cannot drift from the real ones.
 
 uint64_t SelectedFeatureId(const AppState& state) {
   const SelectionItem* it = state.selection.First(SelectionItem::Kind::Feature);
@@ -177,12 +176,10 @@ namespace {
 constexpr glm::vec3 kSketchColor{0.40f, 0.72f, 1.00f};
 constexpr glm::vec3 kActiveSketchColor{0.55f, 0.85f, 1.00f};
 
-LineVertex3D LineVertex(const glm::vec3& pos, const glm::vec3& color) {
-  LineVertex3D v;
-  v.position = pos;
-  v.color = color;
-  return v;
-}
+// LineVertex lived here as a second copy of the inline one in
+// AppActionsInternal.h — harmless while this TU did not include that header,
+// ambiguous the moment it did. The header's is the one every other
+// AppActions* TU already uses.
 
 // Appends a sketch feature's entities as world-space line segments.
 void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
@@ -3780,6 +3777,12 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   struct RTItem {
     const Body* body;
     glm::mat4 xf;
+    // Which cached tessellation this body is, when there is one. partId 0
+    // means "no cache entry to look for" (the part-tab branch below): the
+    // cache is filled by the assembly sync and keyed on assembly part slots.
+    uint64_t partId = 0;
+    uint64_t partVersion = 0;
+    size_t bodyIndex = 0;
   };
   std::vector<RTItem> rtItems;
   if (state.assembly) {
@@ -3788,8 +3791,10 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
       if (!inst.visible)
         continue;
-      for (const auto& body : inst.part->GetBodies())
-        rtItems.push_back({&body, inst.world});
+      const auto& bodies = inst.part->GetBodies();
+      for (size_t bi = 0; bi < bodies.size(); bi++)
+        rtItems.push_back(
+            {&bodies[bi], inst.world, inst.partId, inst.part->Version(), bi});
     }
   } else {
     for (const auto& body : state.document->GetBodies())
@@ -3799,12 +3804,42 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   state.rayTracer->ClearGeometry();
   state.rayTracer->ClearMaterials();
 
+  // The raster sync already tessellated every one of these parts and the
+  // result is still in AppState::partRenderCache. Reading it instead of
+  // re-meshing turns a Render of a 299-part import from ~4 s of pure
+  // duplicate OCC work into a copy — and it is a copy of exactly the geometry
+  // on screen, so the still cannot disagree with the viewport.
+  const auto cachedBodyFor = [&state](const RTItem& it) -> const SharedBody* {
+    if (it.partId == 0 || !state.partRenderCache)
+      return nullptr;
+    const auto entry = state.partRenderCache->parts.find(it.partId);
+    if (entry == state.partRenderCache->parts.end())
+      return nullptr;
+    // Version-checked, not merely present: a stale tessellation in a render
+    // is the "correct-looking wrong answer" this codebase keeps paying for.
+    if (entry->second.docVersion != it.partVersion ||
+        it.bodyIndex >= entry->second.bodies.size())
+      return nullptr;
+    const SharedBody& sb = entry->second.bodies[it.bodyIndex];
+    return sb.vertices.empty() ? nullptr : &sb;
+  };
+
   glm::vec3 bbMin(FLT_MAX), bbMax(-FLT_MAX);
+  size_t reused = 0, meshed = 0;
   for (const RTItem& it : rtItems) {
     const Body& body = *it.body;
-    CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
-    if (cadMesh.vertices.empty())
-      continue;
+    const SharedBody* cached = cachedBodyFor(it);
+    CADShape::Mesh cadMesh;
+    if (cached == nullptr) {
+      cadMesh = body.shape.GenerateMesh(0.1);
+      if (cadMesh.vertices.empty())
+        continue;
+      meshed++;
+    } else {
+      reused++;
+    }
+    const std::vector<uint32_t>& indices =
+        cached != nullptr ? cached->indices : cadMesh.indices;
 
     CADMaterials::MaterialType mt =
         body.material.empty()
@@ -3829,7 +3864,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     }
 
     std::vector<Vertex3D> vertices =
-        CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
+        cached != nullptr ? cached->vertices
+                          : CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
     if (it.xf != glm::mat4(1.0f)) {
       // Occurrence placement is rigid: positions by the matrix, normals by
       // its rotation. RT geometry carries no per-instance transform, so the
@@ -3876,11 +3912,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     }
     uint32_t matId = state.rayTracer->AddMaterial(rtm);
 
-    state.rayTracer->AddGeometry(vertices, cadMesh.indices, matId);
+    state.rayTracer->AddGeometry(vertices, indices, matId);
   }
 
   if (state.rayTracer->GeometryCount() == 0)
     return false;
+  LOG_INFO("Ray tracing scene: {} geometries ({} reused from the part render "
+           "cache, {} tessellated here)",
+           state.rayTracer->GeometryCount(), reused, meshed);
 
   // Shadow-catcher ground plane: a large quad just under the scene so soft
   // shadows and AO have a surface to land on. The closest-hit shader renders it

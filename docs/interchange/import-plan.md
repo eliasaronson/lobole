@@ -243,20 +243,35 @@ the obvious workaround: the work is per UNIQUE PART, and a part is tessellated
 if even one of its occurrences is visible. 274 visible vs 314 visible was
 5.5 s vs 5.9 s.
 
-### Follow-ups, in the order they are worth doing
+### Follow-ups
 
-1. **The ray-traced still re-tessellates per OCCURRENCE.**
-   `SyncRayTracingScene` (AppActions.cpp) builds its item list from
-   `FlattenActiveAssembly` and calls `GenerateMesh(0.1)` on each — 314
-   tessellations rather than 299, and all of them again on every Render, even
-   though `partRenderCache` is holding exactly that data. Roughly 4 s per
-   Render on this file, and now a small change.
-2. **Tessellate a cold import in parallel.** The remaining ~4 s of the ~6.7 s
-   first view is OCC meshing 299 parts one after another.
-   `BRepMesh_IncrementalMesh` already parallelises WITHIN a shape; nothing
-   parallelises across them. The parts are independent, so this is the largest
-   remaining win — gated on confirming OCC's thread-safety for concurrent
-   meshing of distinct shapes.
+**1 and 2 are DONE** (2026-08-30). The ray-traced still now reads the part
+render cache instead of re-meshing per OCCURRENCE ("314 reused, 0 tessellated
+here"), and a cold import tessellates across threads. First view of the
+speaker import: **6.7 s -> 3.1 s**, of which the tessellation phase went
+5375 ms -> ~1500 ms; a Render went from ~4 s of duplicate meshing to ~0.
+The `Assembly synced:` log line carries the breakdown, parallel phase included.
+
+**On the safety of concurrent meshing** — established by measurement, since
+OCC's own documentation is not specific enough to rely on:
+
+- Meshing 299 distinct products serially and across 8 threads produced
+  IDENTICAL output (vertex counts, triangle counts, summed positions and
+  normals). 3.2x at 8 threads; only 2.3x at 16, because
+  `BRepMesh_IncrementalMesh` is already internally parallel and
+  oversubscribing loses.
+- The only shared mutable state a mesher touches is the triangulation it
+  writes into each TFace, so the hazard is two threads meshing shapes that
+  SHARE a TShape. A scan of the real import found **zero** TFaces shared
+  between parts, on both the reader's products and the .brep sidecars the app
+  actually loads. (A first version of that scan reported 50 shared faces — it
+  was comparing pointers to shapes it had already destroyed. Worth the
+  warning: a sharing check must keep every shape alive.)
+- Zero sharing today is a property of today's features, not an invariant
+  anything enforces: a future "duplicate part" would copy a `CADShape`, which
+  shares its TShape. So the work is **grouped by TShape** and a group always
+  runs on one thread — the race is impossible rather than merely absent.
+
 3. **A single-product STEP is still read twice** — once by the import worker
    to decide part-vs-assembly, then again by `ImportFeature::Execute` on
    regen, since the feature stores a path. Unchanged from before this round
@@ -264,8 +279,9 @@ if even one of its occurrences is visible. 274 visible vs 314 visible was
    that are one big solid.
 4. **A memory suballocator.** Measured and deliberately skipped: batching the
    submits took 1.15 s off a cold build, and the ~1200 remaining
-   `vkAllocateMemory` calls are worth far less than the tessellation above.
-   Do (2) first.
+   `vkAllocateMemory` calls are worth far less than the tessellation was. With
+   the tessellation now parallel, the ~1.6 s that is left in a cold sync is
+   the place to look next if a cold import still feels slow.
 5. **`MeshRenderer::CreateAsset` never reuses a released slot** — ids come
    from `m_assets.size()` after a `push_back`, so the vector grows for the
    life of the process. The cache makes this far rarer than it was; it is a
