@@ -299,15 +299,26 @@ void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
 // inside-out after a helix.
 enum class Entry { Ramp, AtDepth };
 
-void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
-              const std::vector<glm::dvec2>& pts, double z, double safeZ,
-              int tabCount, double tabWidth, double tabZ, double entryZ,
-              Entry entry = Entry::Ramp) {
+// Cuts one closed loop at depth `z`, entering by ramp (or straight in, at
+// depth) and returns WHERE IT FINISHED as an arc length along the loop.
+//
+// `startS` is where to begin, and the return value is what to pass as the
+// next depth pass's `startS`. That chaining is the whole point: the lap
+// deliberately overshoots the ramp so the ramped-down stretch still gets cut
+// at full depth, so every pass ends `rampLen` past where it began — and a
+// pass that then restarts at pts[0] has to lift, fly back ACROSS the opening
+// at safe height, and drop again, once per pass. Starting where the last one
+// stopped puts the lift and the drop at the same point instead, which is no
+// travel at all.
+double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
+                const std::vector<glm::dvec2>& pts, double z, double safeZ,
+                int tabCount, double tabWidth, double tabZ, double entryZ,
+                Entry entry = Entry::Ramp, double startS = 0.0) {
   if (pts.size() < 2)
-    return;
+    return startS;
   const double perimeter = Perimeter(pts);
   if (perimeter < 1e-9)
-    return;
+    return startS;
 
   if (entry == Entry::AtDepth) {
     // Straight to the start of this loop at depth. The step from the
@@ -318,14 +329,38 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     lap.push_back(pts[0]);
     for (size_t i = 1; i < lap.size(); i++)
       Emit(tp, Move::Kind::Cut, {lap[i].x, lap[i].y, z}, tool.feedCut);
-    return;
+    return startS;
   }
+
+  // Where along the loop this pass begins. Everything below measures arc
+  // length from pts[0] so tabs stay put; `s` is the distance travelled by
+  // THIS pass, `startS + s` is where that lands on the contour.
+  const auto wrapS = [&](double v) {
+    return std::fmod(std::fmod(v, perimeter) + perimeter, perimeter);
+  };
+  startS = wrapS(startS);
+  const auto at = [&](const std::vector<glm::dvec2>& poly, double arc) {
+    double m = std::fmod(std::fmod(arc, perimeter) + perimeter, perimeter);
+    for (size_t i = 0; i < poly.size(); i++) {
+      const glm::dvec2& a = poly[i];
+      const glm::dvec2& b = poly[(i + 1) % poly.size()];
+      const double seg = glm::length(b - a);
+      if (m <= seg || i + 1 == poly.size())
+        return seg < 1e-12 ? a : a + (b - a) * std::clamp(m / seg, 0.0, 1.0);
+      m -= seg;
+    }
+    return poly[0];
+  };
+  const glm::dvec2 begin = at(pts, startS);
 
   // Rapid over, then down to the height we enter from: that is either the
   // stock top or the depth the previous pass already cut here, so it is air.
-  Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, safeZ}, 0.0);
+  // When the previous pass handed us its finishing point this is the SAME
+  // point it retracted at, so the two rapids are a vertical hop rather than a
+  // flight back across the opening.
+  Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, safeZ}, 0.0);
   const double from = std::max(entryZ, z);
-  Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, from}, 0.0);
+  Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, from}, 0.0);
 
   const double descend = from - z;
   double rampLen =
@@ -353,7 +388,7 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     return std::fmod(std::fmod(s, perimeter) + perimeter, perimeter);
   };
   const auto tabTop = [&](double s) {
-    const double m = wrap(s);
+    const double m = wrap(startS + s);
     for (const auto& [lo, hi] : tabs)
       if (m > lo && m < hi)
         return tabZ;
@@ -364,18 +399,7 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   const auto zPath = [&](double s) {
     return rampLen > 1e-9 && s < rampLen ? from - descend * (s / rampLen) : z;
   };
-  const auto pointAt = [&](double s) {
-    double m = wrap(s);
-    for (size_t i = 0; i < pts.size(); i++) {
-      const glm::dvec2& a = pts[i];
-      const glm::dvec2& b = pts[(i + 1) % pts.size()];
-      const double seg = glm::length(b - a);
-      if (m <= seg || i + 1 == pts.size())
-        return seg < 1e-12 ? a : a + (b - a) * std::clamp(m / seg, 0.0, 1.0);
-      m -= seg;
-    }
-    return pts[0];
-  };
+  const auto pointAt = [&](double s) { return at(pts, startS + s); };
 
   // A full lap AFTER the ramp finishes, so every millimetre of the contour is
   // cut at depth even though the descent used most of one.
@@ -383,16 +407,27 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   std::vector<double> stations;
   stations.reserve(pts.size() * 2 + tabs.size() * 4 + 4);
   {
+    // Every place worth stopping at is an ABSOLUTE arc length from pts[0] —
+    // the contour's own vertices, and the tab edges. This pass starts at
+    // `startS`, so each one is reached after `absolute - startS` mm of
+    // travel, and again a perimeter later because the lap overshoots the
+    // ramp. Measuring them from pts[0] while walking from startS is what
+    // rounds every corner off and moves the tabs (they came out 6 mm tall
+    // instead of 2 mm, which is the test that caught it).
+    const auto station = [&](double absolute) {
+      for (double a = wrapS(absolute - startS); a <= total + 1e-9;
+           a += perimeter)
+        if (a > 1e-9)
+          stations.push_back(a);
+    };
     double acc = 0.0;
-    for (size_t i = 0; i < pts.size() && acc <= total; i++) {
+    for (size_t i = 0; i < pts.size(); i++) {
       acc += glm::length(pts[(i + 1) % pts.size()] - pts[i]);
-      for (double a = acc; a <= total + 1e-9; a += perimeter)
-        stations.push_back(a);
+      station(acc);
     }
     for (const auto& [lo, hi] : tabs)
       for (const double edge : {lo, hi})
-        for (double a = edge; a <= total + 1e-9; a += perimeter)
-          stations.push_back(a);
+        station(edge);
     if (rampLen > 1e-9)
       stations.push_back(rampLen);
     stations.push_back(total);
@@ -408,7 +443,7 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   }
 
   if (rampLen <= 1e-9)
-    Emit(tp, Move::Kind::Plunge, {pts[0].x, pts[0].y, std::max(z, tabTop(0.0))},
+    Emit(tp, Move::Kind::Plunge, {begin.x, begin.y, std::max(z, tabTop(0.0))},
          tool.feedPlunge);
 
   // Walk it segment by segment. Every tab edge is a station, so a segment is
@@ -432,6 +467,7 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   }
   const glm::dvec2 last = pointAt(total);
   Emit(tp, Move::Kind::Rapid, {last.x, last.y, safeZ}, 0.0);
+  return wrapS(startS + total);
 }
 
 } // namespace
@@ -1246,6 +1282,9 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   Clipper2Lib::Paths64 lastFound;
   // Why nothing came out, if nothing does — see the same field in the pocket.
   std::string tooTight;
+  // Where each loop's previous depth pass finished, so the next one carries on
+  // from there instead of flying back across the opening at safe height.
+  std::vector<double> resume;
   for (size_t pass = 0; pass < passes.size(); pass++) {
     const double z = passes[pass];
     std::vector<Loop> solid;
@@ -1273,7 +1312,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     // cutter closes up and this pass emits nothing. Say which, and how narrow.
     if (paths.empty() && op.side == Side::Inside && tooTight.empty())
       tooTight = TooTightForTool(contour, tool, op.stockToLeave, "opening");
-    for (Clipper2Lib::Path64& path : paths) {
+    for (size_t loop = 0; loop < paths.size(); loop++) {
+      Clipper2Lib::Path64& path = paths[loop];
       Orient(path, op.climb, op.side == Side::Inside);
       // Tabs on EVERY pass, not only the last one. A tab is a pillar from the
       // bottom of the cut up to `tabHeight`, and a pass that ran through it
@@ -1281,9 +1321,16 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       // a 3.8 mm tab and getting 1 mm, which is a part that breaks free under
       // the cutter and is thrown. EmitLoop lifts to max(z, tabZ), so a pass
       // that never reaches the tab top is unaffected.
-      EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, op.tabCount,
-               op.tabWidth, bottom + op.tabHeight,
-               pass == 0 ? op.topZ : passes[pass - 1]);
+      //
+      // Each loop remembers where its previous pass finished, PER LOOP: a
+      // contour can offset into several, and handing loop B the point where
+      // loop A stopped would start it somewhere on B that means nothing.
+      if (resume.size() <= loop)
+        resume.resize(loop + 1, 0.0);
+      resume[loop] = EmitLoop(
+          tp, setup, tool, FromClipper(path), z, setup.safeZ, op.tabCount,
+          op.tabWidth, bottom + op.tabHeight,
+          pass == 0 ? op.topZ : passes[pass - 1], Entry::Ramp, resume[loop]);
     }
   }
   if (tp.moves.empty() && tp.error.empty())

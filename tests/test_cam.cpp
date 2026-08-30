@@ -901,6 +901,76 @@ TEST_CASE("cam: adaptive is silent about a shape it cannot enter — we are not"
   CHECK(tp.error.find("depths") == std::string::npos);
 }
 
+TEST_CASE("cam: a depth pass carries on from where the last one stopped",
+          "[cam]") {
+  // The lap deliberately overshoots the ramp so the ramped-down stretch still
+  // gets cut at full depth — which means every pass ENDS a ramp-length past
+  // where it began. A pass that then restarted at pts[0] had to lift, fly
+  // back across the opening at safe height and drop again, once per pass:
+  // visible as a fan of chords through the middle of every bore, and pure
+  // air time on the machine.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 200, 150, 20));
+  const uint64_t plate = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Bore", glm::vec3(100, 75, -1), glm::vec3(0, 0, 1), 30.0, 22.0));
+  const uint64_t bore = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Opening", plate, bore,
+                                                   BooleanOp::Subtract));
+
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  cam::Operation op;
+  op.id = 31;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Inside;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 3.0; // several passes, so there are boundaries to check
+  // The bore's wall is CYLINDRICAL, and WallNear only considers planar faces
+  // — pointing it at the bore hands back one of the plate's outside walls
+  // instead, which is a different job entirely and quietly makes this test
+  // prove nothing.
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u))
+        continue; // planar
+      op.targets.push_back(ElementRef{b.createdBy, name});
+      break;
+    }
+  REQUIRE(op.targets.size() == 1);
+  setup.operations.push_back(op);
+
+  const cam::Toolpath tp =
+      cam::Generate(setup, setup.operations[0], doc->GetBodies());
+  REQUIRE(!tp.Empty());
+
+  // No rapid may travel in XY while inside the bore's footprint. A retract
+  // straight up and a plunge straight down are fine; a flight ACROSS is the
+  // defect. (The approach to the very first pass comes in from outside.)
+  int crossings = 0;
+  glm::dvec3 from(0.0);
+  bool have = false;
+  for (const cam::Move& m : tp.moves) {
+    if (have && m.kind == cam::Move::Kind::Rapid) {
+      const glm::dvec2 a(from), b(m.to);
+      const double travel = glm::length(b - a);
+      // Both ends inside the bore, and it moved: that is a chord across it.
+      const glm::dvec2 centre(100.0, 75.0);
+      if (travel > 1.0 && glm::length(a - centre) < 30.0 &&
+          glm::length(b - centre) < 30.0)
+        crossings++;
+    }
+    from = m.to;
+    have = true;
+  }
+  INFO("rapid crossings of the opening: " << crossings);
+  CHECK(crossings == 0);
+}
+
 TEST_CASE("cam: an opening too narrow to cut out says which, and how narrow",
           "[cam]") {
   // The same failure through the other verb: clicking the wall of a through
