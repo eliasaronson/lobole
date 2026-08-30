@@ -145,7 +145,13 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   that reason, seeded from the real one so it still looks like their app.
 - **Agents/CI get their OWN instance**: `./tools/headless-preview.sh <scratch-port>`
   runs `--offscreen` — the real renderer (full materials/shadows/SSAO) with no
-  window, no Xvfb, no display server. Use a scratch port (NOT 8799). One-shot:
+  window, no Xvfb, no display server. **It has NO PANELS, so the 3D viewport is
+  the whole framebuffer** — a renderer left out of the viewport-rect list in
+  `UI.cpp` draws full-window and looks perfect here while being scaled and
+  offset in the real app. That class of bug is invisible offscreen and needs a
+  windowed GUI test (`cam/simulation_plays_and_gives_it_back` asserts it).
+  It also does NOT isolate `XDG_STATE_HOME`: its autosave lands in the user's
+  real `~/.local/state/designer/`. Export a scratch one when driving a job. Use a scratch port (NOT 8799). One-shot:
   `headless-preview.sh --render PROJECT OUT.png <port>`. Only `ui_action`
   needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
 - **Non-visual checks need no GPU**: `build/designer --headless --remote <port>`.
