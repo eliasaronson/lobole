@@ -248,9 +248,17 @@ void SyncCamPlayback(AppState& state) {
     state.camToolInstance =
         state.meshRenderer->AddMesh(ToMeshVertices(mesh), mesh.indices);
     state.camToolInstanceFor = tool->number;
+    // MATTE, deliberately. This was metallic 0.9 / roughness 0.25 — a
+    // near-mirror, so what you saw on the holder was mostly the environment
+    // map reflected in it. A reflection slides across a curved surface as the
+    // camera orbits, at its own rate rather than the geometry's, which reads
+    // exactly as "the upper part almost follows the camera". The flute is
+    // thin and mostly buried in material, so it did not show the effect and
+    // "behaved correctly". A tool glyph is an instrument for reading where
+    // the cutter is; a mirror finish costs that reading to gain nothing.
     state.meshRenderer->SetMeshMaterial(state.camToolInstance,
-                                        glm::vec3(0.86f, 0.87f, 0.90f),
-                                        glm::vec4(0.9f, 0.25f, 0.5f, 0.04f));
+                                        glm::vec3(0.78f, 0.79f, 0.82f),
+                                        glm::vec4(0.0f, 0.65f, 0.3f, 0.04f));
   }
   const glm::dvec3 at = state.camTimeline.PositionAt(state.camCursor);
   state.meshRenderer->SetMeshTransform(

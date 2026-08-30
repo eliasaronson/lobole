@@ -277,6 +277,8 @@ void ApplyOpFields(Document& doc, const cam::Setup& setup, cam::Operation& op,
     op.side = SideFrom(p.at("side").get<std::string>());
   if (p.contains("climb"))
     op.climb = p.at("climb").get<bool>();
+  if (p.contains("use_outline"))
+    op.useOutline = p.at("use_outline").get<bool>();
   if (p.contains("stepover"))
     op.stepover = p.at("stepover").get<double>();
   if (p.contains("edge_size"))

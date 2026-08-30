@@ -128,6 +128,32 @@ yet. Verification stops being a thing you remember to run.
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
 | later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
+**A hole is not an island — `Over openings` (2026-08-30).** A pocket takes its
+boundary from the picked face's wires: the outer one is where to stop, every
+inner one an island to go around. Right for material standing in the pocket,
+wrong for a HOLE — the cutter detours around thin air, and where a hole nearly
+touches the pocket wall it leaves an uncut sliver too narrow for the tool to
+come back to. Drilling the holes first does not help: the cut still routes
+around where they are. `Over openings` clears the outline and passes straight
+across them. FreeCAD spells the same idea `UseOutline` ("uses the outline of
+the base geometry", `Path/Op/PocketShape.py`) and implements it the same way —
+`Part.Face(element.OuterWire)`, keep the outer wire and drop the rest.
+
+**`Drill a hole` (2026-08-30).** `OpType::Drill` has been in the engine since
+C1, derived from a picked cylindrical face, and reachable only by script. It
+is a verb now — and since a verb stays armed, a bolt circle is one click per
+hole. Its refusal for a hole that does not face the spindle now says "lay a
+face up", which has been the answer since v67.
+
+**The tool glyph is matte (2026-08-30).** It was metallic 0.9 / roughness 0.25
+— a near-mirror, so most of what showed on the holder was the environment map
+reflected in it, and a reflection slides across a curved surface at its own
+rate as the camera orbits. Reported as "the upper part almost follows the
+camera but not completely", which is exactly what that looks like; the flute
+is thin and mostly buried in material, so it did not show the effect and
+"behaved correctly". The glyph is an instrument for reading where the cutter
+is, and a mirror finish costs that reading to gain nothing.
+
 **Save G-code wrote into the project (FIXED 2026-08-30).** The comment said
 "beside the project"; the code said `projectPath + "/" + name + ".nc"`, and
 `projectPath` IS the `.dsgn` bundle — so the G-code landed inside it.

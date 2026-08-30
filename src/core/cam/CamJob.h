@@ -125,6 +125,20 @@ struct Operation {
   double tabWidth = 6.0;
   double tabHeight = 1.5;
 
+  // Clear the face's OUTLINE, ignoring the openings inside it. A pocket takes
+  // its boundary from the picked face's wires: the outer one is where to
+  // stop, and every inner one is an island to go around. That is right for
+  // material standing in the pocket and wrong for a HOLE — the cutter detours
+  // around thin air, and where a hole nearly touches the pocket wall it
+  // leaves an uncut sliver too narrow for the tool to return to.
+  //
+  // A hole is not an island: there is nothing there to avoid. Setting this
+  // clears the outline and passes straight over the openings. FreeCAD spells
+  // the same idea `UseOutline` ("uses the outline of the base geometry",
+  // Path/Op/PocketShape.py) and implements it the same way — keep the outer
+  // wire, drop the rest.
+  bool useOutline = false;
+
   // Pocket/Face only: fraction of the tool diameter to step over per pass.
   // EdgeRound reads it too: it is what sets the cusp between arc passes.
   double stepover = 0.45;

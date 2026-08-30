@@ -853,6 +853,19 @@ void DrawCamPanel(AppState& state) {
       ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
                             "with 0.2-0.4, then a second operation at 0 "
                             "finishes the wall in one full-depth pass.");
+      // A hole in the floor is not an island: nothing stands in it, so the
+      // cutter should pass over rather than detour around — and a detour
+      // around a hole that nearly touches the pocket wall leaves an uncut
+      // sliver too narrow for the tool to come back to.
+      if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Adaptive ||
+          op.type == cam::OpType::Face) {
+        if (ImGui::Checkbox("Over openings###useoutline", &op.useOutline))
+          touched(op.id);
+        ImGui::SetItemTooltip(
+            "Clear the face's outline and pass straight OVER the holes in it, "
+            "instead of going around each one. Turn it off when something "
+            "really does stand in the pocket.");
+      }
       ImGui::SameLine();
       if (ImGui::Checkbox("Climb###climb", &op.climb))
         touched(op.id);

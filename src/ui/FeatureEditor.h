@@ -42,6 +42,7 @@ enum class PickSlot : int {
   CamIndexFace,      // CAM C9: the face to turn up under the spindle (rotary)
   CamLayFaceUp,      // CAM S2: the face to clamp facing the spindle (fixture)
   CamEdgeWall,       // CAM R15: the wall whose top edge to round or chamfer
+  CamDrillHole,      // CAM: the cylindrical face of a hole to drill
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

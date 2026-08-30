@@ -182,6 +182,10 @@ json CamSetupToJson(const cam::Setup& setup) {
       oj["side"] = SideName(op.side);
     if (!op.climb)
       oj["climb"] = false;
+    // Written only when set, so an operation that goes around its islands —
+    // every one before this — re-saves byte-identically.
+    if (op.useOutline)
+      oj["use_outline"] = true;
     if (op.tabCount != 0) {
       oj["tabs"] = {{"count", op.tabCount},
                     {"width", op.tabWidth},
@@ -306,6 +310,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.side = SideFromName(
         oj.value("side", std::string(clears ? "inside" : "outside")));
     op.climb = oj.value("climb", true);
+    op.useOutline = oj.value("use_outline", false);
     if (oj.contains("tabs")) {
       op.tabCount = oj["tabs"].value("count", 0);
       op.tabWidth = oj["tabs"].value("width", 6.0);

@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    68; // v68: the cam work origin is DERIVED from a named corner
+    68; // v68: cam operation `use_outline` (clear the face's outline,
+        //      passing over its openings rather than around them);
+        //      the cam work origin is DERIVED from a named corner
         // (`origin_at`) and the post subtracts it; fixed-size stock
         // (`stock.mode`/`size`/`place`) — docs/cam/stock-and-origin.md
         // (v67: the cam setup's fixture frame + whether the machine has a

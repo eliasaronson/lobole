@@ -1313,8 +1313,8 @@ DerivedOp DeriveOperation(const Setup& setup,
         return out;
       }
       if (std::abs(axis.z) < 0.99f) {
-        out.why = "that hole does not point at the spindle — index the "
-                  "setup to bring it up, or drill it in another setup";
+        out.why = "that hole does not point at the spindle — lay a face up "
+                  "to clamp the part so it does, or drill it in another setup";
         return out;
       }
       int i = 0;
@@ -1501,7 +1501,9 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
   Clipper2Lib::Paths64 outer, islands;
   for (const Loop& l : region.loops)
     (l.hole ? islands : outer).push_back(ToClipper(l.pts));
-  if (!holesToo || islands.empty())
+  // `useOutline`: the openings are holes, not islands — nothing stands in
+  // them, so the cutter passes over rather than around.
+  if (!holesToo || op.useOutline || islands.empty())
     return outer;
   return Clipper2Lib::Difference(outer, islands,
                                  Clipper2Lib::FillRule::NonZero);

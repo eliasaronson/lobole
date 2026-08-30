@@ -2053,6 +2053,67 @@ TEST_CASE("cam: every origin corner is where it says it is", "[cam]") {
   CHECK(glm::length(c.origin - once) < 1e-12);
 }
 
+TEST_CASE("cam: clearing the outline passes over the openings", "[cam]") {
+  // A hole in a pocket floor is not an island: nothing stands in it. Going
+  // AROUND one leaves an uncut sliver wherever it nearly touches the pocket
+  // wall — a gap too narrow for the cutter to come back to. FreeCAD spells
+  // the same option `UseOutline` (Path/Op/PocketShape.py) and implements it
+  // the same way: keep the outer wire, drop the rest.
+  auto doc = PocketDoc(/*island=*/true);
+  ElementRef floor;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u) && n.z > 0.99f &&
+          std::abs(c.z - 12.0f) < 1e-3f)
+        floor = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(floor.IsSet());
+
+  cam::Setup s = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 12.0;
+  op.stepdown = 3.0;
+  op.side = cam::Side::Inside;
+  op.targets = {floor};
+
+  s.operations = {op};
+  const cam::Toolpath around = cam::GenerateAll(s, doc->GetBodies())[0];
+  INFO(around.error);
+  REQUIRE(around.error.empty());
+
+  s.operations[0].useOutline = true;
+  const cam::Toolpath over = cam::GenerateAll(s, doc->GetBodies())[0];
+  INFO(over.error);
+  REQUIRE(over.error.empty());
+
+  // Going over the island covers MORE ground than going around it.
+  INFO("around " << around.CutLength() << " over " << over.CutLength());
+  CHECK(over.CutLength() > around.CutLength());
+
+  // And it actually crosses the island, which the other never does: the boss
+  // is 5 x 5 at (18, 14), so its centre is (20.5, 16.5).
+  const auto crossesIsland = [](const cam::Toolpath& tp) {
+    for (const cam::Move& m : tp.moves)
+      if (m.kind != cam::Move::Kind::Rapid && std::abs(m.to.x - 20.5) < 1.5 &&
+          std::abs(m.to.y - 16.5) < 1.5)
+        return true;
+    return false;
+  };
+  CHECK(crossesIsland(over));
+  CHECK_FALSE(crossesIsland(around));
+
+  // Round-trips: an operation that goes around its islands — every one before
+  // this — must not start passing over them.
+  cam::Setup back = s;
+  back.operations[0].useOutline = false;
+  CHECK_FALSE(back.operations[0].useOutline);
+}
+
 TEST_CASE("cam: retooling carries the derived stepdown, not the typed one",
           "[cam]") {
   cam::Setup s = BasicSetup(); // T1 = 6 mm
