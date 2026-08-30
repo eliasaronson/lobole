@@ -352,6 +352,25 @@ Z-up ([../up-axis.md](../up-axis.md)) and this all became correct with zero
 CAM changes — the compensation code that was never written is the code that
 never had to be deleted.
 
+### The renderer bug it exposed (FIXED 2026-08-30)
+
+The stock shipped drawing into the WHOLE WINDOW while everything else drew into
+the 3D sub-region between the panels, because `StockRenderer` was never added
+to the per-frame viewport list in `UI.cpp`. On screen: a workpiece not parallel
+to the part with its cuts shifted sideways, while the cutter — a `MeshRenderer`
+instance, correctly aimed — sat exactly right. That asymmetry is what the
+report named, and it is what identified the cause.
+
+Not a simulation bug, and the second renderer to hit the same list
+(`0346a8e` did it before). Fixed in `4a3083d`, and the list it was missing from
+no longer exists: see [../rendering/renderer-wiring.md](../rendering/renderer-wiring.md).
+
+Worth keeping for the method: **an `--offscreen` instance has no panels, so the
+sub-region IS the whole framebuffer and the bug cannot appear there.** Every
+test and screenshot taken while building this was offscreen, which is why the
+geometry could be verified to 8 um and still look wrong on a real screen. The
+gate is therefore a windowed GUI test.
+
 ### Still open
 
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and

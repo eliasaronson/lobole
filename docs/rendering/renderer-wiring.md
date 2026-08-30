@@ -6,10 +6,10 @@
 > [what R1–R3 changed about R4](#what-r1r3-changed-about-r4).
 > **R5 done for R1–R3** (byte-identical screenshots, all suites green).
 
-## The bug class
+## The bug class (what it was, before R1–R3)
 
-Adding a renderer that draws into the 3D scene means touching **about twenty
-sites across three files**, in duties that are each a hand-maintained list:
+Adding a renderer that draws into the 3D scene meant touching **about twenty
+sites across three files**, in duties that were each a hand-maintained list:
 
 | duty | sites | what a miss looks like |
 |---|---|---|
@@ -22,7 +22,7 @@ sites across three files**, in duties that are each a hand-maintained list:
 | `g_App.xRenderer =` | 12 | null pointer in the UI layer |
 | declaration, forward declaration, global | 3 | — |
 
-**The compiler checks none of it, and every omission fails late.** Usually
+**The compiler checked none of it, and every omission failed late.** Usually
 silently and plausibly — a picture that is wrong in a way that looks like a
 modelling problem — and once as a SIGSEGV at process exit that went unexplained
 long enough to earn the name "the long-standing shutdown crash".
@@ -54,15 +54,24 @@ And **`--offscreen` cannot show it**: no panels, so the 3D sub-region IS the
 whole framebuffer. Every screenshot review and every headless test is blind to
 this entire class.
 
-## Step 1 — the gate (done)
+## Where it stands now
 
-`tests/test_conventions.cpp` fails if a renderer exposing
-`void SetViewport(int32_t` is missing from `UI.cpp`'s `setVp` list. It selects
-exactly the six scene renderers and excludes the three prepass ones. Verified
-by deleting a line and watching it fail.
+**Two lists remain, and both are gated.** `RegisterSceneRenderers()` (the draw
+order) and `ShutdownSceneRenderers()` (ownership), adjacent to each other in
+`main.cpp`. Everything per-frame — viewport, camera, clip planes, the three
+render blocks — loops over the registry and enumerates nothing.
 
-That stops **this** list from growing a hole again. It does nothing for the
-other seven.
+`tests/test_conventions.cpp` fails if a class deriving from `SceneRenderer` is
+absent from either list. The discriminator is `: public SceneRenderer` — asking
+who implements the frame contract — which selects exactly the six scene
+renderers and excludes the three prepass ones. Verified both ways: by dropping
+the stock from the registry and watching it fail.
+
+A renderer constructed in one mode and not the other now names itself in the
+log at startup, so the two construction paths cannot silently disagree.
+
+Together those cover **both** ways this bug class has reached a user: the
+silent wrong viewport, and the shutdown crash.
 
 ## What the measurements changed
 
@@ -89,17 +98,13 @@ renderers behind one type.
 
 ## The plan
 
-| | scope | size |
-|---|---|---|
-| **R1** | `SceneRenderer` interface; the six inherit it. No call site changes | ~1 h |
-| **R2** | The registry, and the per-frame loops: viewport, camera, clips, render | ~2 h |
-| **R3** | Construction and shutdown through the registry, plus the count assertion | ~1 h |
-| **R4** | `SceneView` at `Render`; delete the three setters; delete `setVp`; retire the step-1 gate | ~2 h |
-| **R5** | Verification: three suites and a screenshot pass | ~1 h |
-
-R1–R3 are "step 2", R4 is "step 3". **Do them as one piece** — landing R1–R3
-alone leaves the sticky state in place with a registry pointed at it, which is
-the worst of both.
+| | scope | size | |
+|---|---|---|---|
+| **R1** | `SceneRenderer` interface; the six inherit it. No call site changes | ~1 h | **done** `b2f757a` |
+| **R2** | The registry, and the per-frame loops: viewport, camera, clips, render | ~2 h | **done** `1020252` |
+| **R3** | One teardown list; a named warning per construction path | ~1 h | **done** `2c452ae` |
+| **R4** | `SceneView` at `Render`; delete the three setters | ~half a session | **not done**, and costlier than this said — see below |
+| **R5** | Verification: three suites and a screenshot pass | ~1 h | **done for R1–R3** |
 
 ### R1 — the interface, changing nothing
 
@@ -183,12 +188,15 @@ A renderer *cannot* be drawn with a stale or unset viewport, because the data
 arrives with the call — and the three call sites already have all of it.
 Missing wiring stops being a silent visual defect and becomes a compile error.
 
-Two deletions belong in this phase, deliberately:
+`UI.cpp`'s `setVp` block is already gone — R2 replaced it with a loop over the
+registry. The conventions gate STAYS: see below, the plan was wrong about that.
 
-- **`UI.cpp`'s `setVp` block**, which no longer has anything to do.
-- **The step-1 conventions gate.** There is no list left to be missing from, so
-  a test policing it guards a vanished invariant — worse than no test, because
-  it reads as coverage. Delete it in the same commit and say so in the message.
+The catch R2 uncovered: `SSAORenderer::RecordSSAOPasses` takes a
+`MeshRenderer&` and reads the camera matrices out of it on purpose — *"the
+prepasses read them here so they are guaranteed identical to what the main pass
+uses"*. Deleting the sticky state therefore means restructuring how the prepass
+gets its scene state, in the AO and shadow path. That is the work this phase
+actually is.
 
 **Gate:** the whole per-frame contract reads
 
@@ -197,8 +205,9 @@ for (SceneRenderer* r : g_Scene)
   r->Render(cmd, frame, view);
 ```
 
-and adding a renderer is: declare it, construct it, register it. Twenty sites
-become three.
+Adding a renderer is already down to *declare it, construct it, register it*
+after R1–R3. What R4 adds is that getting the frame state wrong stops being
+possible rather than merely being caught.
 
 ### R5 — verification
 
@@ -222,8 +231,9 @@ suites are necessary and not sufficient:
   casters, AO and shadow-map rebinds, instance/asset management). It implements
   the interface for its *scene* duties and stays special for the rest. The
   registry is not an attempt to make it uniform.
-- **Landing R1–R3 without R4.** Leaves a registry pointing at sticky state and
-  a gate guarding a list that is half-gone. Do not stop there.
+- ~~**Landing R1–R3 without R4.**~~ This warning was wrong — see
+  [what R1–R3 changed about R4](#what-r1r3-changed-about-r4). R1–R3 is a
+  coherent stopping point and is where this currently stands.
 
 ## What R1–R3 changed about R4
 
