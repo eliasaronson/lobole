@@ -128,6 +128,33 @@ yet. Verification stops being a thing you remember to run.
 | **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
 | later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | flip **done** (S4, docs/cam/setup-frame.md) |
 
+**Picking, after the fixture frame (2026-08-30).** Three changes, all from
+one dogfooding round on a baffle.
+
+*"Pick top face" clamps.* Calling a face the top IS the statement that the
+part is held with it up, so the pick lays it up and then takes Z zero from it.
+For a face already level `SolveFaceUp` returns the frame it was given, so
+nothing moves — the two were only ever separate steps for the faces that used
+to be **refused**, and making the user translate a refusal into two more
+clicks is not a design. "Lay a face up" stays for the other case: re-clamping
+*without* re-answering Z zero, which is what a flip job needs.
+
+*Re-clamping re-derives depths.* `topZ`/`bottomZ` are heights in setup space,
+so turning the part left every existing operation measuring from a box that
+had moved — a cut that went through the panel became a cut through air. They
+follow the frame now, and the count is stated (`state.camNote`) rather than
+left to be noticed in the backplot. Same channel says when a Z zero was lost
+because the face it came from is no longer level, which used to happen in
+complete silence and read as "laying a face flat is broken".
+
+*A verb stays armed.* One verb is almost never one face — a part has six holes
+to clear — and disarming on success cost a verb press per hole. The slot
+survives the pick; Escape or pressing the verb again puts it away. Pick
+buttons are no longer greyed out while another is armed, because a sticky mode
+that greys its neighbours means Escape between every change of verb. The
+floating window also gained a `Tool` row: every number a verb derives is a
+fraction of the cutter, so choosing it afterwards means re-deriving.
+
 **Stock and Zero (2026-08-30, v68).** "Stock and safety" gained the two
 things a Fusion setup has and this one did not. *What the workpiece is*:
 "Around the part" (the model box plus margins — what every job had, still the

@@ -219,8 +219,8 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   cam::Setup* setup = EnsureCamSetup(state);
   if (setup == nullptr)
     return false;
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(*setup, state.document->GetBodies(), type, target);
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      *setup, state.document->GetBodies(), type, target, state.camVerbTool);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return false;
@@ -272,11 +272,27 @@ void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
   (void)cam::RecomputeOrigin(setup, state.document->GetBodies());
 }
 
-// Everything that has to follow the setup's orientation changing.
+// Everything that has to follow the setup's orientation changing — and it
+// says what it did. Re-clamping moves the box every derived number is measured
+// from, so a job that already had operations quietly became a different job;
+// the depths follow the frame, and the count is reported rather than left for
+// the user to notice in the backplot.
 void CamOrientationChanged(AppState& state, cam::Setup& setup) {
+  const bool hadZero = setup.topFace.IsSet();
   ReZeroFromTopFace(state, setup);
+  const int moved = cam::RederiveDepths(setup, state.document->GetBodies());
   setup.safeZ = cam::DeriveSafeZ(setup, state.document->GetBodies());
   state.camSafeZEdit = static_cast<float>(setup.safeZ);
+
+  std::string note;
+  if (hadZero && !setup.topFace.IsSet())
+    note = "the face Z zero came from is not level any more — pick a top face";
+  if (moved > 0)
+    note += (note.empty() ? "" : "; ") + std::to_string(moved) +
+            (moved == 1 ? " operation's depths" : " operations' depths") +
+            " re-derived in the new clamping";
+  state.camNote = note;
+
   state.slotPick = {};
   state.projectMetaDirty = true;
   RefreshCamToolpaths(state);
@@ -296,6 +312,25 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     cam::Setup* setup = EnsureCamSetup(state);
     if (setup == nullptr)
       return;
+    // Calling a face "the top" IS the statement that the part is clamped with
+    // it up, so this lays it up rather than refusing. For a face already level
+    // in this setup `SolveFaceUp` returns the frame it was given, so nothing
+    // moves — the two were only ever separate steps for the faces that used to
+    // be refused, and making the user translate a refusal into two more clicks
+    // is not a design.
+    //
+    // "Lay a face up" stays, for re-clamping WITHOUT re-answering Z zero — the
+    // flip that machines the back off a reference you have already set.
+    bool reclamped = false;
+    glm::vec3 normal(0.0f);
+    if (PickedFaceNormal(*state.document, item.element, normal)) {
+      const glm::dquat want =
+          cam::SolveFaceUp(glm::dvec3(normal), setup->frame);
+      if (std::abs(glm::dot(want, setup->frame)) < 1.0 - 1e-9) {
+        setup->frame = want;
+        reclamped = true;
+      }
+    }
     const cam::FaceRegion region = cam::PickedFaceRegion(
         cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
         item.element);
@@ -316,6 +351,16 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // Through the ONE derivation, so a Z zero picked here and a work origin
     // set from the panel cannot disagree about where the file's zero is.
     (void)cam::RecomputeOrigin(*setup, state.document->GetBodies());
+    state.camNote.clear();
+    if (reclamped) {
+      const int moved =
+          cam::RederiveDepths(*setup, state.document->GetBodies());
+      state.camNote = "laid the part flat on that face";
+      if (moved > 0)
+        state.camNote +=
+            ", and re-derived " + std::to_string(moved) +
+            (moved == 1 ? " operation's depths" : " operations' depths");
+    }
     // The stock just moved, so the rapid height that cleared the old one may
     // now be inside the new one.
     setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());
@@ -384,12 +429,20 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
       slot == PickSlot::CamPocketFloor ? cam::OpType::Pocket
       : slot == PickSlot::CamEdgeWall  ? cam::OpType::EdgeRound
                                        : cam::OpType::Profile;
-  // A refusal keeps the slot armed: the user's next click is almost always
-  // the face they meant, and re-pressing the verb first is a wasted step.
-  if (CreateVerbOperation(state, type, item.element))
-    state.slotPick = {};
-  else
+  // The slot stays armed either way. A refusal keeps it because the user's
+  // next click is almost always the face they meant; a SUCCESS keeps it
+  // because one verb is almost never one face — a part has six holes to
+  // clear, not one, and re-pressing "Clear a pocket" between each was a click
+  // per hole spent saying something already said. Escape disarms, and so does
+  // pressing the verb again.
+  const std::string prompt = state.slotPick.prompt;
+  if (CreateVerbOperation(state, type, item.element)) {
+    state.slotPick.miss.clear();
+    state.camNote = "added — keep clicking faces, or press Escape when done";
+  } else {
     state.slotPick.miss = state.camRefusal;
+  }
+  state.slotPick.prompt = prompt;
 }
 
 void DrawCamToolWindow(AppState& state) {
@@ -409,13 +462,11 @@ void DrawCamToolWindow(AppState& state) {
   ImGui::TextDisabled("Zero");
   const bool armedTop =
       armed && state.slotPick.slot == static_cast<int>(PickSlot::CamTopFace);
-  ImGui::BeginDisabled(armed && !armedTop);
   if (ImGui::Button(setup != nullptr && setup->topFace.IsSet()
                         ? "Re-pick top face###cam_tool_topface"
                         : "Pick top face###cam_tool_topface"))
     ArmCamPick(state, PickSlot::CamTopFace,
                "Click the top face — that sets Z zero for the job");
-  ImGui::EndDisabled();
   ImGui::SameLine();
   if (armedTop)
     ImGui::TextDisabled("click the top face…");
@@ -431,12 +482,10 @@ void DrawCamToolWindow(AppState& state) {
   // level face worth zeroing on until it is laid down.
   const bool armedLay =
       armed && state.slotPick.slot == static_cast<int>(PickSlot::CamLayFaceUp);
-  ImGui::BeginDisabled(armed && !armedLay);
   if (ImGui::Button("Lay a face up###cam_lay_face"))
     ArmCamPick(state, PickSlot::CamLayFaceUp,
                "Click the face to clamp facing up — that is how the part sits "
                "on the bed");
-  ImGui::EndDisabled();
   ImGui::SetItemTooltip("Clamp the part with this face up. Changes nothing in "
                         "the model and posts no rotary move — it is how the "
                         "part sits on the bed for this setup.");
@@ -455,11 +504,9 @@ void DrawCamToolWindow(AppState& state) {
     const bool armedIndex =
         armed &&
         state.slotPick.slot == static_cast<int>(PickSlot::CamIndexFace);
-    ImGui::BeginDisabled(armed && !armedIndex);
     if (ImGui::Button("Turn a face up###cam_index_face"))
       ArmCamPick(state, PickSlot::CamIndexFace,
                  "Click the face to turn up under the spindle");
-    ImGui::EndDisabled();
     ImGui::SetItemTooltip("Rotary (4th axis) jobs: index the table so this "
                           "face points at the spindle, then use the verbs as "
                           "usual");
@@ -481,6 +528,15 @@ void DrawCamToolWindow(AppState& state) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
     ImGui::TextWrapped("%s", state.slotPick.miss.c_str());
     ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+  }
+  // …and what the last action DID, when it did more than was asked. Laying
+  // the part flat to take a Z zero, or re-deriving depths after a re-clamp,
+  // are consequences the user has to be told about — the alternative is a job
+  // that changed under them between one click and the next.
+  if (!state.camNote.empty()) {
+    ImGui::PushTextWrapPos(320.0f);
+    ImGui::TextDisabled("%s", state.camNote.c_str());
     ImGui::PopTextWrapPos();
   }
 
@@ -528,18 +584,53 @@ void DrawCamToolWindow(AppState& state) {
 
   ImGui::Separator();
   ImGui::TextDisabled("Machine it");
+  // WHICH CUTTER the next verb derives for. Every number a verb produces is a
+  // fraction of the cutter, so choosing the tool after the fact means
+  // re-deriving; and the verbs are the one-click way in, which is worth
+  // nothing if the one click has to be undone to change tools.
+  if (setup != nullptr && setup->tools.size() > 1) {
+    ImGui::TextDisabled("Tool");
+    for (const cam::Tool& tool : setup->tools) {
+      ImGui::SameLine();
+      const bool active = state.camVerbTool == 0
+                              ? tool.number == setup->tools.front().number
+                              : tool.number == state.camVerbTool;
+      if (active)
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      char id[40];
+      std::snprintf(id, sizeof(id), "T%d###cam_verb_t%d", tool.number,
+                    tool.number);
+      if (ImGui::SmallButton(id))
+        state.camVerbTool = tool.number;
+      if (active)
+        ImGui::PopStyleColor();
+      ImGui::SetItemTooltip("%.3g mm %s — what the next verb derives for",
+                            tool.diameter, tool.name.c_str());
+    }
+  }
   for (const Verb& verb : kVerbs) {
     const bool armedHere =
         armed && state.slotPick.slot == static_cast<int>(verb.slot);
-    ImGui::BeginDisabled(armed && !armedHere);
+    // NOT disabled while another pick is armed. They were, back when a verb
+    // disarmed itself on success; now that one stays armed, greying its
+    // neighbours out means Escape between every change of verb. Any pick
+    // button switches to itself.
     if (ImGui::Button((std::string(verb.label) + verb.id).c_str(),
-                      ImVec2(190.0f, 0.0f)))
-      ArmCamPick(state, verb.slot, verb.prompt);
-    ImGui::EndDisabled();
+                      ImVec2(190.0f, 0.0f))) {
+      // Pressing the armed verb again puts it away. A verb that STAYS armed
+      // after a pick needs a way out that is not only the Escape key.
+      if (armedHere) {
+        state.slotPick = {};
+        state.camNote.clear();
+      } else {
+        ArmCamPick(state, verb.slot, verb.prompt);
+      }
+    }
     ImGui::SetItemTooltip("%s", verb.tip);
     if (armedHere) {
       ImGui::SameLine();
-      ImGui::TextDisabled("pick a face…");
+      ImGui::TextDisabled("click faces…");
     }
   }
   // The two verbs that need no pick at all.

@@ -1241,6 +1241,13 @@ struct AppState {
     ElementRef ref;
     cam::FaceRegion region;
   };
+  // What the last CAM action DID, when it did more than was asked — laid the
+  // part flat to take a Z zero, re-derived depths after a re-clamp. Not a
+  // refusal (those are camRefusal, in red): a consequence, stated, because the
+  // alternative is a job that quietly changed under the user.
+  std::string camNote;
+  // Which cutter the next verb derives for. 0 = the setup's first tool.
+  int camVerbTool = 0;
   CamRegionCache camGhostRegion;
   CamRegionCache camHoverRegion;
   bool camShowStock = true;

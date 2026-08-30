@@ -139,6 +139,16 @@ struct DerivedOp {
 [[nodiscard]] bool RecomputeOrigin(Setup& setup,
                                    const std::vector<Body>& bodies);
 
+// Re-derive every operation's DEPTHS in the setup's current frame, returning
+// how many moved. `topZ`/`bottomZ` are heights in setup space, so re-clamping
+// the part leaves them measuring from a box that has moved — a cut that was
+// through the panel becomes a cut through air, or through the spoilboard.
+//
+// Only operations that name a target are touched: those are the ones whose
+// numbers were derived from the model in the first place, and there is
+// nothing to re-derive the others from.
+int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
+
 // Half the cutter per pass: the rule of thumb every 2.5D job starts from,
 // expressed in the TOOL so it stays right for a 1 mm cutter and a 12 mm one.
 // One derivation, three callers — the verbs, a retool, and the panel.

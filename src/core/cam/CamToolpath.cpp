@@ -1351,6 +1351,27 @@ DerivedOp DeriveOperation(const Setup& setup,
   return out;
 }
 
+int RederiveDepths(Setup& setup, const std::vector<Body>& bodies) {
+  int moved = 0;
+  for (Operation& op : setup.operations) {
+    if (op.targets.empty())
+      continue;
+    const DerivedOp d = DeriveOperation(setup, bodies, op.type,
+                                        op.targets.front(), op.toolNumber);
+    if (!d.ok)
+      continue;
+    // Depths only. The tool, the tabs, the stepover and anything else typed
+    // are answers to different questions and the frame did not change them.
+    if (std::abs(op.topZ - d.op.topZ) > 1e-9 ||
+        std::abs(op.bottomZ - d.op.bottomZ) > 1e-9) {
+      op.topZ = d.op.topZ;
+      op.bottomZ = d.op.bottomZ;
+      moved++;
+    }
+  }
+  return moved;
+}
+
 bool Retool(const Setup& setup, Operation& op, int toolNumber,
             std::string& why) {
   const Tool* next = setup.FindTool(toolNumber);

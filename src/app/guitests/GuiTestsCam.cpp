@@ -73,8 +73,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
 
-    // A curved or downward face is refused with a reason, not accepted
-    // quietly — the work origin must be where the user pointed.
+    // A SIDE face used to be refused here. It is not any more: calling a face
+    // the top is the statement that the part is clamped with it up, so the
+    // pick clamps it and takes Z zero from it — one click where the refusal
+    // cost three. It must SAY that it re-clamped.
     const Body& body = Doc()->GetBodies()[0];
     ui::SelectionItem side;
     side.kind = ui::SelectionItem::Kind::Face;
@@ -87,11 +89,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     }
     if (side.element.IsSet()) {
       ui::CamFacePicked(*s_App, side);
-      IM_CHECK(!s_App->slotPick.miss.empty()); // refused, visibly
-      IM_CHECK(!Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+      ctx->Yield(2);
+      IM_CHECK(s_App->slotPick.miss.empty());
+      IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+      IM_CHECK(!cam::FrameIsSquare(*Doc()->FindCamSetup(setup.id)));
+      IM_CHECK(!s_App->camNote.empty()); // "laid the part flat on that face"
     }
 
-    // The top face sets Z zero for the job.
+    // …and picking the plate's own top face puts it back, and sets Z zero.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
     ui::SelectionItem top;
     top.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
@@ -334,6 +340,71 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
+  // Picking a face as "the top" IS the statement that the part is clamped
+  // with it up, so the pick lays it up rather than refusing. And a verb stays
+  // armed after it lands: one verb is almost never one face.
+  t = IM_REGISTER_TEST(engine, "cam", "top_face_clamps_and_verbs_stay_armed");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // Upright panel again: its big faces are the ones worth machining and
+    // none of them is level as modelled.
+    Doc()->AddFeature(std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0),
+                                                   210, 16, 400));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    s_App->camToolOpen = true;
+    ctx->Yield(3);
+
+    const Body& body = Doc()->GetBodies()[0];
+    ui::SelectionItem big;
+    big.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (body.shape.FacePlane(index, o, n, u) && n.y < -0.99f)
+        big.element = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK(big.element.IsSet());
+
+    // ONE pick: it clamps the part flat AND takes Z zero from that face. This
+    // used to be a refusal the user had to translate into two more clicks.
+    IM_CHECK(cam::FrameIsSquare(*Doc()->FindCamSetup(setup.id)));
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(s_App->slotPick.miss.empty());
+    IM_CHECK(!cam::FrameIsSquare(*live)); // laid flat by the same click
+    IM_CHECK(live->topFace.IsSet());      // …and Z zero came from it
+    IM_CHECK(!s_App->camNote.empty());    // and it SAID so
+
+    // Picking the same face again is idempotent: no second re-clamp.
+    const glm::dquat after = live->frame;
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(glm::length(live->frame - after) < 1e-9);
+
+    // A verb stays armed after it lands, so a part with several holes is
+    // several clicks and not several verb-presses.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+    IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamPocketFloor);
+    IM_CHECK(!s_App->slotPick.prompt.empty()); // the pill survives the pick
+
+    // …and a second face lands a second operation with no verb press.
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    IM_CHECK_EQ(Doc()->FindCamSetup(setup.id)->operations.size(), (size_t)2);
+    s_App->slotPick = {};
+    s_App->camToolOpen = false;
+  };
+
   // W2/W5 (docs/cam/stock-and-origin.md): the corner the operator touches off
   // on, chosen by clicking, and honoured by the file. Before v68 `origin` was
   // a label the post never read, so "Z zero at 16.000" was a claim no line of
@@ -517,15 +588,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK(big.element.IsSet());
 
-    // As modelled, Z zero refuses it — correctly, and this is the wall the
-    // user hits.
-    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
-    ui::CamFacePicked(*s_App, big);
-    ctx->Yield();
-    IM_CHECK(!s_App->slotPick.miss.empty());
-    IM_CHECK(!Doc()->FindCamSetup(setup.id)->topFace.IsSet());
-
-    // Clamp it with that face up. No rotary axis is declared, and none is
+    // Clamp it with that face up, EXPLICITLY. Picking it as the top face does
+    // the same thing in one click (top_face_clamps_and_verbs_stay_armed);
+    // this path is the one that re-clamps WITHOUT re-answering Z zero, which
+    // is what a flip job needs. No rotary axis is declared, and none is
     // needed: a clamp can hold a part any way round.
     ui::ArmCamPick(*s_App, ui::PickSlot::CamLayFaceUp, "Click the face");
     ui::CamFacePicked(*s_App, big);
@@ -688,7 +754,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->camToolpaths.empty());
     IM_CHECK(s_App->camToolpaths[0].error.empty());
     IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
-    IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0); // disarmed on success
+    // STILL armed on success: one verb is almost never one face, so the slot
+    // survives the pick and the next click is the next hole. It used to
+    // disarm, which cost a verb press per hole. Escape or the verb again puts
+    // it away — `top_face_clamps_and_verbs_stay_armed` gates the loop.
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+    s_App->slotPick = {}; // and this test is done with it
 
     // G4: the verdict arrived by itself, in words — and for a job that cuts
     // the part correctly it says nothing ALARMING. The panel checks on a
