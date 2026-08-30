@@ -224,7 +224,12 @@ all 314 instances):
   per-part map as a local, and both renderers destroy an asset when its last
   instance goes — so the teardown at the head of every resync threw away every
   tessellation and every upload. `AppState::partRenderCache` keeps them, keyed
-  on the part document's version, and retains the assets across the teardown.
+  on (part slot id, part document version), and `RetainAsset`/`ReleaseAsset`
+  hold them across the teardown. **The eviction rule matters as much as the
+  cache**: a strict "release anything not drawn this sync" made two assembly
+  tabs thrash (alternating two 299-part assemblies re-tessellated all 299 every
+  switch, 4.2 s each), so it is an LRU against a device-memory budget,
+  never evicting what the current sync draws.
 - **Every buffer upload drained the queue.** `vkutil::CopyBuffer` ends in a
   `vkQueueWaitIdle`; a cold build of this file creates 1196 buffers.
   `vkutil::StagingBatch` puts them behind one submit (−1.1 s cold).
@@ -237,3 +242,31 @@ Hiding occurrences was never the answer, which is worth stating because it is
 the obvious workaround: the work is per UNIQUE PART, and a part is tessellated
 if even one of its occurrences is visible. 274 visible vs 314 visible was
 5.5 s vs 5.9 s.
+
+### Follow-ups, in the order they are worth doing
+
+1. **The ray-traced still re-tessellates per OCCURRENCE.**
+   `SyncRayTracingScene` (AppActions.cpp) builds its item list from
+   `FlattenActiveAssembly` and calls `GenerateMesh(0.1)` on each — 314
+   tessellations rather than 299, and all of them again on every Render, even
+   though `partRenderCache` is holding exactly that data. Roughly 4 s per
+   Render on this file, and now a small change.
+2. **Tessellate a cold import in parallel.** The remaining ~4 s of the ~6.7 s
+   first view is OCC meshing 299 parts one after another.
+   `BRepMesh_IncrementalMesh` already parallelises WITHIN a shape; nothing
+   parallelises across them. The parts are independent, so this is the largest
+   remaining win — gated on confirming OCC's thread-safety for concurrent
+   meshing of distinct shapes.
+3. **A single-product STEP is still read twice** — once by the import worker
+   to decide part-vs-assembly, then again by `ImportFeature::Execute` on
+   regen, since the feature stores a path. Unchanged from before this round
+   (the assembly path is the one that got the fix), and it only bites on files
+   that are one big solid.
+4. **A memory suballocator.** Measured and deliberately skipped: batching the
+   submits took 1.15 s off a cold build, and the ~1200 remaining
+   `vkAllocateMemory` calls are worth far less than the tessellation above.
+   Do (2) first.
+5. **`MeshRenderer::CreateAsset` never reuses a released slot** — ids come
+   from `m_assets.size()` after a `push_back`, so the vector grows for the
+   life of the process. The cache makes this far rarer than it was; it is a
+   null `unique_ptr` per hole, so it is a tidiness issue, not a leak.

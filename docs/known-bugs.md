@@ -52,7 +52,7 @@ hint when a synchronous solve exceeds ~10 s.
 
 ---
 
-## An assembly resync re-tessellates every part it draws
+## An assembly resync re-tessellates every part it draws — FIXED 2026-08-30
 
 Was: "hiding a subassembly costs ~300 ms". Measured properly 2026-08-26 on
 the Marsliden dock (98 instances, 17 distinct parts), by timing the phases of
@@ -71,22 +71,43 @@ The two renderer costs are fixed (`assembly/outlines_are_instanced_per_part`
 gates the sharing and its refcount): a toggle round trip on the dock went
 1395-1608 ms to 701-804 ms, measured the same way.
 
-**What is left** is the tessellation: every resync re-meshes each distinct
-part through OCC even when nothing about that part changed. A mate solve, an
-explode edit, a visibility toggle and a part edit all pay it.
+**FIXED 2026-08-30** (`c3c5169`, `3b5391b`), by the cache this entry
+predicted. `AppState::partRenderCache` keys the per-part tessellation and both
+renderer assets on (part slot id, part document version);
+`MeshRenderer::RetainAsset` / `OutlineRenderer::RetainAsset` are the reference
+the lifetime needed, so the assets survive the instance teardown at the head of
+every resync.
 
-**Likely fix:** cache the per-part tessellation (vertices, indices, edge
-polylines and both renderer assets) keyed by the part document's version, so
-a resync re-meshes only what actually regenerated. The lifetime is the
-fiddly half — the assets outlive the instances that reference them, so the
-cache has to hold a reference and drop it when the part changes or the tab
-closes.
+The real numbers came from a much bigger part than the dock — a 299-part,
+314-occurrence STEP import, where the same defect cost 5.9 s rather than
+177 ms:
 
-**Not doing:** the "visibility-only fast path" this entry used to propose
-(route a hide onto `SetInstanceVisible` and skip the rebuild). With the
-rebuild an order of magnitude cheaper, the remaining win is small and it
-would put a second, differently-shaped code path through the sync — which is
-where staleness bugs live.
+| | before | after |
+|---|---|---|
+| resync (tab switch) | 5900 ms | **30 ms** |
+| visibility toggle | 5890 ms | **39 ms** |
+| two assemblies alternating | 4157 ms | **41 ms** |
+
+Two things the fix taught that the plan above did not anticipate:
+
+- **The eviction rule matters as much as the cache.** A strict "release
+  anything not drawn this sync" made two assembly tabs THRASH — alternating
+  between two 299-part assemblies re-tessellated all 299 every switch. It is
+  an LRU against a device-memory budget now
+  (`kPartRenderCacheBudgetBytes`), never evicting what the current sync draws.
+- **The palette was order-dependent.** The fallback body colour was a counter
+  over encounter order, so hiding one occurrence recoloured unrelated parts —
+  invisible until a cached colour disagreed with a freshly built one. Seeded
+  from the part now.
+
+**Still not doing:** the "visibility-only fast path" this entry used to
+propose (route a hide onto `SetInstanceVisible` and skip the rebuild). At
+39 ms the remaining win is nil, and it would put a second, differently-shaped
+code path through the sync — which is where staleness bugs live.
+
+**Still there:** a COLD build (first view of an import) is ~6.7 s, of which
+~4 s is OCC tessellating 299 parts serially. See the follow-ups in
+docs/interchange/import-plan.md.
 
 ## `fem_async_smoke` fails under machine saturation (twice on 2026-08-26)
 

@@ -71,6 +71,13 @@ struct MeshAsset {            // one per distinct tessellation (per part body)
     ...memory...
     uint32_t refCount;        // instances referencing this asset
 };
+// Since 2026-08-30 refCount also counts NON-instance holders: an assembly
+// resync removes every instance before re-adding them, so the per-part cache
+// (AppState::partRenderCache) takes a reference of its own via
+// MeshRenderer::RetainAsset / OutlineRenderer::RetainAsset to stop the
+// tessellation being destroyed and re-uploaded on every tab switch. "Last
+// instance gone" is therefore no longer the same as "asset freed".
+
 struct MeshInstance {         // one per occurrence
     AssetId   asset;
     glm::mat4 transform;
