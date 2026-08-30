@@ -6,6 +6,7 @@
 #include "render/SceneRenderer.h"
 
 #include "render/OutlineEdges.h"
+#include "render/VulkanCommon.h" // vkutil::StagingBatch (asset upload batching)
 #include <chrono>
 #include <glm/glm.hpp>
 #include <memory>
@@ -61,6 +62,16 @@ public:
                        const std::vector<uint32_t>& indices);
   uint32_t AddInstance(uint32_t assetId,
                        const glm::mat4& transform = glm::mat4(1.0f));
+  // Keeps an asset alive with no instances on it, so its upload and its edge
+  // adjacency survive a rebuild that removes every instance first. The same
+  // sharing lesson as the comment above, one level up: sharing per part
+  // WITHIN a sync was step one, sharing ACROSS syncs is step two.
+  void RetainAsset(uint32_t assetId);
+  void ReleaseAsset(uint32_t assetId);
+  // Collect many CreateAsset uploads behind one submit+wait; see
+  // MeshRenderer::BeginAssetBatch. Render() flushes an unpaired batch.
+  void BeginAssetBatch();
+  void EndAssetBatch();
   // Live counts, so a test can assert that instancing HAPPENED rather than
   // that the picture looks right: N occurrences of one part = N instances of
   // 1 asset.
@@ -220,6 +231,8 @@ private:
   std::vector<std::unique_ptr<OutlineMesh>> m_meshes;
   std::vector<std::unique_ptr<OutlineAsset>> m_assets;
   uint32_t m_nextAssetId = 1;
+  // Open only between BeginAssetBatch/EndAssetBatch (see MeshRenderer).
+  std::unique_ptr<vkutil::StagingBatch> m_assetBatch;
   [[nodiscard]] OutlineAsset* AssetOf(const OutlineMesh& mesh);
   [[nodiscard]] const OutlineAsset* AssetOf(const OutlineMesh& mesh) const;
   uint32_t m_nextMeshId = 1;

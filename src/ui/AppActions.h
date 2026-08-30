@@ -385,6 +385,12 @@ void FitCameraToSelection(AppState& state);
 // changed (edit, undo, redo). Call once per frame before drawing.
 void SyncDocumentRenderers(AppState& state);
 
+// Drops every cached part tessellation and releases the GPU assets it holds
+// (AppState::partRenderCache). MUST run while the renderers are still alive —
+// the cache stores asset ids, and the release is what frees their buffers —
+// so main.cpp calls it immediately before ShutdownSceneRenderers().
+void ReleasePartRenderCache(AppState& state);
+
 // Show a boolean-diff result ON the model: `missing` (in the reference and
 // not in what you are looking at) in red, `extra` (beyond the reference) in
 // green, both translucent. This is compare_geometry's `materialize` and the

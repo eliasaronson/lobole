@@ -9,7 +9,8 @@ namespace ui {
 //
 // THE import entry (Ctrl+I): .step/.stp/.stl/.brep in one dialog. A STEP
 // placing several instances imports as an assembly, everything else as a
-// feature into the active part (ImportCADFile).
+// feature into the active part (ui::StartImport, which runs a STEP read
+// in the background behind a progress modal).
 void ImportFileDialog(AppState& state);
 void OpenReferenceImageDialog(AppState& state); // sketch underlay (v49)
 // Folder picker (projects are .dsgn folders): picking the project — or

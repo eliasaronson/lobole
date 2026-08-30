@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cad/MeshExport.h"
+#include "core/io/ImportAssembly.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppState.h"
 
@@ -180,11 +181,25 @@ void ApplyExplodeTransforms(AppState& state);
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
                           std::string* error);
 
-// THE import entry point (one Import… button): a STEP whose structure places
-// several instances imports as an assembly (above); everything else —
-// single-product STEP, .brep, .stl — imports as a feature into the active
-// part.
-bool ImportCADFile(AppState& state, const std::string& path,
-                   std::string* error);
+// Same, for a caller that already parsed the file (ImportCADFile probes the
+// structure to choose this path). `stepPath` names the source in messages and
+// the log; nothing is read from it. Parsing dominates the cost of an import,
+// so a caller holding the model must never re-read the file.
+bool ImportStepAsAssembly(AppState& state,
+                          const CADKernel::ImportedModel& model,
+                          const std::string& stepPath, std::string* error);
+
+// The two halves of materializing a plan, in order: a part tab per planned
+// part, then the assembly that places them. Split out of ImportStepAsAssembly
+// so the background import (ui/ImportJob.cpp) can run the first a slice per
+// frame while its progress modal keeps painting. Returns the new part's slot
+// id; the ids, in plan order, are what MaterializeImportedAssembly places.
+uint64_t MaterializeImportedPart(AppState& state,
+                                 const interchange::PlannedPart& part,
+                                 const std::string& asmName);
+void MaterializeImportedAssembly(AppState& state,
+                                 const interchange::AssemblyImportPlan& plan,
+                                 const std::string& asmName,
+                                 const std::vector<uint64_t>& partIds);
 
 } // namespace ui

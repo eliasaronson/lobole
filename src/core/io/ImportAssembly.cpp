@@ -27,13 +27,21 @@ std::string SanitizeStem(const std::string& name) {
 
 AssemblyImportPlan BuildAssemblyImportPlan(const std::string& stepPath,
                                            const std::string& destDir) {
-  AssemblyImportPlan plan;
-
   CADKernel::ImportedModel model;
   if (!CADKernel::Instance().LoadSTEPStructured(stepPath, model)) {
+    AssemblyImportPlan plan;
     plan.error = "could not read '" + stepPath + "' as STEP";
     return plan;
   }
+  return BuildAssemblyImportPlan(model, stepPath, destDir);
+}
+
+AssemblyImportPlan
+BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
+                        const std::string& stepPath, const std::string& destDir,
+                        const ExtractionProgress& onProduct) {
+  AssemblyImportPlan plan;
+
   if (model.instances.empty()) {
     plan.error = "no importable shapes in '" + stepPath + "'";
     return plan;
@@ -80,6 +88,10 @@ AssemblyImportPlan BuildAssemblyImportPlan(const std::string& stepPath,
     }
     productUsable[i] = true;
     plan.parts.push_back({name, brep, product.hasColor, product.color});
+    if (onProduct && !onProduct(i + 1, model.products.size())) {
+      plan.error = "import cancelled";
+      return plan;
+    }
   }
   if (plan.parts.empty()) {
     plan.error = "no valid product geometry in '" + stepPath + "'";

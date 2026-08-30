@@ -197,3 +197,43 @@ O1+O2 core mapping first (sketch/extrude/revolve/fillet covers most real
 parts), breadth grows by fixture. Suggested checkpoint after I2: import a
 real SolidWorks-exported STEP assembly and file whatever breaks before
 starting I3.
+
+## What the first real file broke (2026-08-30)
+
+The I2 checkpoint above — "import a real SolidWorks-exported STEP assembly and
+file whatever breaks" — run against a 48 MB, 299-product, 314-occurrence
+speaker model. Nothing was wrong with the *result*; everything was wrong with
+what it cost. Measured against an `--offscreen` instance and a harness linking
+`libdesigner_core.a`:
+
+| | before | after |
+|---|---|---|
+| import (File > Import, frozen window) | ~38 s | ~14 s, off the UI thread behind a modal |
+| switching back to the assembly tab | 5.5–5.9 s, every time | 30 ms |
+| hiding one occurrence | 5.9 s | 39 ms |
+
+Four causes, none of them the one that looked obvious (the picker — 20 ms for
+all 314 instances):
+
+- **The file was parsed twice.** `ImportCADFile` read the whole STEP to decide
+  part-vs-assembly, dropped the model, and `BuildAssemblyImportPlan` read it
+  again. The comment justifying that — "STEP reads are cheap next to the
+  extraction that follows" — is backwards at this size: extraction is 0.9 s,
+  the read 12 s. The plan builder now takes an already-parsed model.
+- **Nothing was cached between resyncs.** `SyncAssemblyRenderers` built its
+  per-part map as a local, and both renderers destroy an asset when its last
+  instance goes — so the teardown at the head of every resync threw away every
+  tessellation and every upload. `AppState::partRenderCache` keeps them, keyed
+  on the part document's version, and retains the assets across the teardown.
+- **Every buffer upload drained the queue.** `vkutil::CopyBuffer` ends in a
+  `vkQueueWaitIdle`; a cold build of this file creates 1196 buffers.
+  `vkutil::StagingBatch` puts them behind one submit (−1.1 s cold).
+- **Progress needs care.** `STEPCAFControl_Reader::Transfer` reports through a
+  `Message_ProgressIndicator`, but it fires ~200k times on this file — calling
+  `GetPosition()` in every callback took the transfer from 8.3 s to 20.1 s.
+  Sample it, do not read it per tick.
+
+Hiding occurrences was never the answer, which is worth stating because it is
+the obvious workaround: the work is per UNIQUE PART, and a part is tessellated
+if even one of its occurrences is visible. 274 visible vs 314 visible was
+5.5 s vs 5.9 s.

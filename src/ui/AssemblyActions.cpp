@@ -3,7 +3,7 @@
 
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
 
-#include "cad/CADKernel.h" // ImportCADFile structure probe
+#include "cad/CADKernel.h" // CADKernel::ImportedModel (import)
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
 #include "cad/FaceSelector.h"
@@ -50,6 +50,7 @@
 #include "ui/AppState.h"
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -57,6 +58,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace ui {
 
@@ -1020,30 +1022,41 @@ void ApplyExplodeTransforms(AppState& state) {
     PushOccurrenceLive(state, occ.id);
 }
 
+// `SharedBody` — one part body tessellated once and shared by every
+// occurrence of the part — now lives in AppActionsInternal.h, because it
+// outlives this function: AppState::partRenderCache keeps it across resyncs.
+
 namespace {
-// One part body, tessellated once and cached so N occurrences of the same part
-// share a single GPU asset (the instancing lever). CPU copies are kept for the
-// outline + face-selector, whose geometry sharing is a later optimization.
-struct SharedBody {
-  uint32_t assetId = 0;
-  // The outline renderer's asset for the same tessellation. Shared for the
-  // same reason: uploading it per occurrence cost 3.2 ms EACH, which was
-  // most of an assembly resync (394 ms of 670 on a 98-instance dock).
-  uint32_t outlineAssetId = 0;
-  std::vector<Vertex3D> vertices;
-  std::vector<uint32_t> indices;
-  std::vector<uint32_t> triangleFaces;
-  std::vector<std::vector<glm::vec3>> edges;
-  glm::vec3 palette;
-  bool hasMaterial = false;
-  glm::vec3 albedo;
-  glm::vec4 pbr;
-  // Procedural wood/plywood grain: pattern, grainScale, grainContrast.
-  int procPattern = 0;
-  float grainScale = 0.0f;
-  float grainContrast = 0.0f;
-};
+// Releases the renderer assets an entry holds. The cache is the only thing
+// referencing them once the instances are gone, so dropping an entry without
+// this leaks a GPU buffer for the life of the process.
+void ReleaseEntryAssets(AppState& state, const PartRenderCacheEntry& entry) {
+  for (const SharedBody& sb : entry.bodies) {
+    if (sb.assetId != 0 && state.meshRenderer)
+      state.meshRenderer->ReleaseAsset(sb.assetId);
+    if (sb.outlineAssetId != 0 && state.outlineRenderer)
+      state.outlineRenderer->ReleaseAsset(sb.outlineAssetId);
+  }
+}
 } // namespace
+
+void EvictPartRenderCache(AppState& state, uint64_t partSlotId) {
+  if (!state.partRenderCache)
+    return;
+  auto it = state.partRenderCache->parts.find(partSlotId);
+  if (it == state.partRenderCache->parts.end())
+    return;
+  ReleaseEntryAssets(state, it->second);
+  state.partRenderCache->parts.erase(it);
+}
+
+void ReleasePartRenderCache(AppState& state) {
+  if (!state.partRenderCache)
+    return;
+  for (const auto& [partId, entry] : state.partRenderCache->parts)
+    ReleaseEntryAssets(state, entry);
+  state.partRenderCache->parts.clear();
+}
 
 // Renders an assembly: one asset per referenced part body, one instance per
 // occurrence. Assets are shared across occurrences of the same part.
@@ -1066,9 +1079,34 @@ bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
 } // namespace
 
 void SyncAssemblyRenderers(AppState& state) {
-  std::unordered_map<uint64_t, std::vector<SharedBody>>
-      byPart; // partId -> bodies
-  size_t palette = 0;
+  if (!state.partRenderCache)
+    state.partRenderCache = std::make_shared<PartRenderCacheStore>();
+  PartRenderCacheStore& cache = *state.partRenderCache;
+  // Which parts this sync actually drew, so entries for parts no longer in
+  // the tree are released rather than held forever.
+  std::unordered_set<uint64_t> touched;
+
+  // One submit+wait for every asset this sync uploads, instead of one per
+  // buffer. A cold 299-part build creates 1196 buffers; unbatched that is
+  // 1196 queue drains. Closed at the end of the function (and defensively by
+  // the renderers' Render()).
+  if (state.meshRenderer)
+    state.meshRenderer->BeginAssetBatch();
+  if (state.outlineRenderer)
+    state.outlineRenderer->BeginAssetBatch();
+
+  // This function has been the app's worst stall twice (per-occurrence
+  // outline uploads, then the un-cached rebuild), and both times the guess
+  // about which half was slow was wrong. The breakdown is logged, so the next
+  // regression is read rather than re-profiled.
+  using SyncClock = std::chrono::steady_clock;
+  const auto syncStart = SyncClock::now();
+  double buildMs = 0, instanceMs = 0, pickMs = 0;
+  size_t builtParts = 0, instanceCount = 0;
+  const auto elapsedMsSince = [](SyncClock::time_point t) {
+    return std::chrono::duration<double, std::milli>(SyncClock::now() - t)
+        .count();
+  };
 
   // A5: the LEAF parts of the tree, placed. A top-level part occurrence is a
   // one-element subtree, so this loop is unchanged for a flat assembly — and
@@ -1089,11 +1127,31 @@ void SyncAssemblyRenderers(AppState& state) {
       continue;
     const Occurrence& occ = *rootOcc;
 
-    auto it = byPart.find(inst.partId);
-    if (it == byPart.end()) {
-      // First time we see this part: tessellate its bodies + create assets.
-      std::vector<SharedBody> shared;
+    touched.insert(inst.partId);
+    auto it = cache.parts.find(inst.partId);
+    // A hit is only a hit at the SAME document version: a regenerated part
+    // must re-tessellate. Materials and appearances bump the version too, and
+    // they are baked into the entry, so one key covers both.
+    if (it != cache.parts.end() && it->second.docVersion != part->Version()) {
+      ReleaseEntryAssets(state, it->second);
+      cache.parts.erase(it);
+      it = cache.parts.end();
+    }
+    if (it == cache.parts.end()) {
+      const auto buildStart = SyncClock::now();
+      builtParts++;
+      // First time we see this part at this version: tessellate its bodies +
+      // create assets. Everything below is what the cache exists to skip.
+      PartRenderCacheEntry entry;
+      entry.docVersion = part->Version();
+      std::vector<SharedBody>& shared = entry.bodies;
       const auto& bodies = part->GetBodies();
+      // The fallback palette is seeded from the PART, not from the order
+      // parts happen to be encountered in. It used to be a counter running
+      // across the whole assembly, so hiding one occurrence could renumber
+      // every part after it and silently recolour unrelated geometry — and a
+      // cached colour would then disagree with a freshly built one.
+      size_t palette = static_cast<size_t>(inst.partId);
       for (const auto& body : bodies) {
         SharedBody sb;
         CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
@@ -1112,6 +1170,14 @@ void SyncAssemblyRenderers(AppState& state) {
         if (state.outlineRenderer)
           sb.outlineAssetId =
               state.outlineRenderer->CreateAsset(sb.vertices, sb.indices);
+        // Hold both assets for the CACHE, on top of whatever instances take.
+        // The teardown at the head of the next resync removes every instance;
+        // without this retain that drops the refcount to zero and destroys
+        // the upload we are trying to keep.
+        if (sb.assetId != 0)
+          state.meshRenderer->RetainAsset(sb.assetId);
+        if (sb.outlineAssetId != 0 && state.outlineRenderer)
+          state.outlineRenderer->RetainAsset(sb.outlineAssetId);
         // Resolve order: appearance > material > displayColor > palette
         // (same merge as the part-tab draw loop in AppActions).
         if (!body.material.empty() || body.appearance.Any()) {
@@ -1142,7 +1208,8 @@ void SyncAssemblyRenderers(AppState& state) {
         }
         shared.push_back(std::move(sb));
       }
-      it = byPart.emplace(inst.partId, std::move(shared)).first;
+      it = cache.parts.emplace(inst.partId, std::move(entry)).first;
+      buildMs += elapsedMsSince(buildStart);
     }
 
     // The flattened world transform, offset by the TOP-LEVEL occurrence's
@@ -1151,10 +1218,11 @@ void SyncAssemblyRenderers(AppState& state) {
     const glm::mat4 xf =
         glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
         inst.world;
-    for (size_t bi = 0; bi < it->second.size(); bi++) {
-      const SharedBody& sb = it->second[bi];
+    for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
+      const SharedBody& sb = it->second.bodies[bi];
       if (sb.assetId == 0)
         continue; // empty body
+      const auto instanceStart = SyncClock::now();
       uint32_t meshId = state.meshRenderer->AddInstance(sb.assetId, xf);
       if (sb.hasMaterial) {
         state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
@@ -1172,9 +1240,13 @@ void SyncAssemblyRenderers(AppState& state) {
         // a bracket uploads nothing at all.
         outlineId = state.outlineRenderer->AddInstance(sb.outlineAssetId, xf);
       }
+      instanceMs += elapsedMsSince(instanceStart);
+      instanceCount++;
+      const auto pickStart = SyncClock::now();
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,
                                     sb.triangleFaces, xf, sb.edges);
+      pickMs += elapsedMsSince(pickStart);
       // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
       // localXf by construction, which is what lets the drag path recompose
       // it per frame without a resync.
@@ -1197,8 +1269,8 @@ void SyncAssemblyRenderers(AppState& state) {
       if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
         continue;
       if (capColors.empty()) {
-        capColors.reserve(it->second.size());
-        for (const SharedBody& sb : it->second)
+        capColors.reserve(it->second.bodies.size());
+        for (const SharedBody& sb : it->second.bodies)
           capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
       }
       // The other sections, also in this part's space, trim this cap.
@@ -1214,10 +1286,33 @@ void SyncAssemblyRenderers(AppState& state) {
                       capColors, xf, glm::normalize(glm::vec3(planes[i])));
     }
   }
+  // Land every upload this sync recorded before anything reads the assets.
+  if (state.meshRenderer)
+    state.meshRenderer->EndAssetBatch();
+  if (state.outlineRenderer)
+    state.outlineRenderer->EndAssetBatch();
+
+  // Release what this sync did not draw. A part that left the tree — or whose
+  // last occurrence was hidden — would otherwise hold its tessellation and
+  // both GPU buffers for the life of the session. Hiding is the common case
+  // and is cheap to undo (one re-tessellation when it comes back), so this
+  // stays a strict "not drawn this sync" rule rather than an LRU.
+  for (auto it = cache.parts.begin(); it != cache.parts.end();) {
+    if (touched.count(it->first) != 0) {
+      ++it;
+      continue;
+    }
+    ReleaseEntryAssets(state, it->second);
+    it = cache.parts.erase(it);
+  }
+
   // (Highlights re-apply themselves: they are a per-frame projection of the
   // Selection now — see SyncSelectionHighlights.)
-  LOG_INFO("Assembly synced: {} occurrences",
-           state.assembly->OccurrenceCount());
+  LOG_INFO("Assembly synced: {} occurrences, {} instances, {} parts cached "
+           "({} tessellated) in {:.0f} ms [build {:.0f}, instances {:.0f}, "
+           "picking {:.0f}]",
+           state.assembly->OccurrenceCount(), instanceCount, cache.parts.size(),
+           builtParts, elapsedMsSince(syncStart), buildMs, instanceMs, pickMs);
 }
 
 // In-context editing (A4): appends the context assembly's other occurrences
@@ -1385,6 +1480,19 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
 
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
                           std::string* error) {
+  CADKernel::ImportedModel model;
+  if (!CADKernel::Instance().LoadSTEPStructured(stepPath, model)) {
+    if (error)
+      *error = "could not read '" + stepPath + "' as STEP";
+    LOG_WARN("Assembly import: could not read '{}' as STEP", stepPath);
+    return false;
+  }
+  return ImportStepAsAssembly(state, model, stepPath, error);
+}
+
+bool ImportStepAsAssembly(AppState& state,
+                          const CADKernel::ImportedModel& model,
+                          const std::string& stepPath, std::string* error) {
   const auto fail = [&](const std::string& msg) {
     if (error)
       *error = msg;
@@ -1407,31 +1515,50 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
   for (int n = 2; std::filesystem::exists(destDir); n++)
     destDir = importRoot / (asmName + "-" + std::to_string(n));
   const interchange::AssemblyImportPlan plan =
-      interchange::BuildAssemblyImportPlan(stepPath, destDir.string());
+      interchange::BuildAssemblyImportPlan(model, stepPath, destDir.string());
   if (!plan.error.empty())
     return fail(plan.error);
 
-  // Materialize: one part tab per product (an ImportFeature on the extracted
-  // sidecar), then the assembly with every occurrence placed. Deliberately
-  // not undoable — it creates documents, like File > Open. The parts land in
-  // a tab-bar folder named after the assembly so a 100-part import is one
-  // flyout, not 100 tabs.
+  // Materialize: one part tab per product, then the assembly. Split into the
+  // two steps below so the BACKGROUND import (ui/ImportJob.cpp) can run them a
+  // slice per frame and keep its progress modal alive — same code, same order,
+  // just spread over frames.
   std::vector<uint64_t> partIds;
-  for (const interchange::PlannedPart& p : plan.parts) {
-    AddPart(state, p.name);
-    PartSlot& slot = state.parts[static_cast<size_t>(state.activePart)];
-    slot.folder = asmName;
-    CreateFolder(state, asmName); // register (idempotent) so saves know it
-    auto feature = std::make_unique<ImportFeature>(p.name, p.brepPath);
-    feature->hasColor = p.hasColor;
-    feature->color = p.color;
-    state.document->AddFeature(std::move(feature));
-    partIds.push_back(slot.id);
-  }
+  for (const interchange::PlannedPart& p : plan.parts)
+    partIds.push_back(MaterializeImportedPart(state, p, asmName));
+  MaterializeImportedAssembly(state, plan, asmName, partIds);
 
+  LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", stepPath,
+           plan.parts.size(), plan.occurrences.size());
+  return true;
+}
+
+uint64_t MaterializeImportedPart(AppState& state,
+                                 const interchange::PlannedPart& p,
+                                 const std::string& asmName) {
+  // An ImportFeature on the extracted sidecar. Deliberately not undoable — it
+  // creates a document, like File > Open. The parts land in a tab-bar folder
+  // named after the assembly so a 100-part import is one flyout, not 100 tabs.
+  AddPart(state, p.name);
+  PartSlot& slot = state.parts[static_cast<size_t>(state.activePart)];
+  slot.folder = asmName;
+  CreateFolder(state, asmName); // register (idempotent) so saves know it
+  auto feature = std::make_unique<ImportFeature>(p.name, p.brepPath);
+  feature->hasColor = p.hasColor;
+  feature->color = p.color;
+  state.document->AddFeature(std::move(feature));
+  return slot.id;
+}
+
+void MaterializeImportedAssembly(AppState& state,
+                                 const interchange::AssemblyImportPlan& plan,
+                                 const std::string& asmName,
+                                 const std::vector<uint64_t>& partIds) {
   AddAssembly(state, asmName);
   bool first = true;
   for (const interchange::PlannedOccurrence& o : plan.occurrences) {
+    if (o.part >= partIds.size())
+      continue; // a part that failed to materialize takes its occurrences
     Occurrence occ;
     occ.partId = partIds[o.part];
     occ.name = o.name;
@@ -1443,26 +1570,6 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
   }
   state.assembly->BumpVersion();
   FitCameraToDocument(state);
-  LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", stepPath,
-           plan.parts.size(), plan.occurrences.size());
-  return true;
-}
-
-bool ImportCADFile(AppState& state, const std::string& path,
-                   std::string* error) {
-  std::string ext = std::filesystem::path(path).extension().string();
-  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-  if (ext == ".step" || ext == ".stp") {
-    // Probe the product structure: several placed instances is a real
-    // assembly → parts + occurrences; a lone product reads better as a
-    // feature in the active part. (The probe re-parses the file; STEP reads
-    // are cheap next to the extraction that follows.)
-    CADKernel::ImportedModel model;
-    if (CADKernel::Instance().LoadSTEPStructured(path, model) &&
-        model.instances.size() > 1)
-      return ImportStepAsAssembly(state, path, error);
-  }
-  return ImportAsFeature(state, path, error);
 }
 
 } // namespace ui

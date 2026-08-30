@@ -1,5 +1,6 @@
 #include "ui/FileDialogs.h"
 #include "ui/AssemblyActions.h"
+#include "ui/ImportJob.h"
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
@@ -279,7 +280,10 @@ void DrawBrowserWindow(AppState& state) {
                     .string();
             LOG_INFO("Loading selected file: {}", fullPath);
             std::string error;
-            if (!ImportCADFile(state, fullPath, &error))
+            // Background + progress modal (ui/ImportJob.h): a real assembly
+            // STEP takes tens of seconds, and doing it inline froze the
+            // window for all of them.
+            if (!StartImport(state, fullPath, &error))
               LOG_ERROR("Import failed: {}", error);
             state.showFileBrowser = false;
           }
@@ -345,7 +349,7 @@ void ImportFileDialog(AppState& state) {
     NFD_FreePathU8(outPath);
     LOG_INFO("Selected file: {}", filePath);
     std::string error;
-    if (!ImportCADFile(state, filePath, &error))
+    if (!StartImport(state, filePath, &error))
       LOG_ERROR("Import failed: {}", error);
   } else if (result == NFD_CANCEL) {
     LOG_DEBUG("User cancelled file dialog");

@@ -80,6 +80,9 @@ namespace ui {
 // called by SyncDocumentRenderers below.
 void SyncAssemblyRenderers(AppState& state);
 void SyncInContextGhosts(AppState& state);
+// Likewise: the per-part render cache lives with the assembly sync that fills
+// it, but DeletePart and ReplaceDocument here are what invalidate it.
+void EvictPartRenderCache(AppState& state, uint64_t partSlotId);
 
 uint64_t SelectedFeatureId(const AppState& state) {
   const SelectionItem* it = state.selection.First(SelectionItem::Kind::Feature);
@@ -874,6 +877,13 @@ bool EffectivePlaneVisibility(const AppState& state) {
 }
 
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
+  // A wholesale replacement is followed by state.parts.clear() and a reset of
+  // nextPartId, so slot ids get REUSED. A cache entry keyed on an old id
+  // would then look like a hit for an unrelated new part — and its stored
+  // docVersion could match a fresh document's, which draws the previous
+  // project's geometry. Drop it all here rather than at each of the four
+  // parts.clear() sites, where a fifth would eventually be missed.
+  ReleasePartRenderCache(state);
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
   // The active tab may have been an assembly or drawing: this replacement
@@ -1233,6 +1243,10 @@ bool DeletePart(AppState& state, size_t index, std::string* why) {
     // Activate a neighbor first so AppState always holds a live document.
     SetActivePart(state, index == 0 ? 1 : index - 1);
   }
+  // The slot id is about to stop naming anything; release its cached
+  // tessellation + GPU assets before it does, or they are held for the life
+  // of the session with no way left to reach them.
+  EvictPartRenderCache(state, doomedId);
   state.parts.erase(state.parts.begin() + static_cast<long>(index));
   // Fix up the active index after the erase.
   if (static_cast<size_t>(state.activePart) > index)
@@ -1813,6 +1827,9 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     }
 
     // Load every document into its slot; AppState holds nothing live yet.
+    // This branch never goes through ReplaceDocument, so it releases the
+    // per-part render cache itself — same id-reuse hazard.
+    ReleasePartRenderCache(state);
     state.document = nullptr;
     state.assembly = nullptr;
     state.drawing = nullptr;

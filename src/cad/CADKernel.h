@@ -214,7 +214,29 @@ public:
     std::vector<ImportedShape> products; // deduped unique geometry
     std::vector<ImportedInstance> instances;
   };
-  bool LoadSTEPStructured(const std::string& filename, ImportedModel& out);
+  // How a long STEP read reports itself and how it is stopped. Both hooks are
+  // called ON THE READING THREAD, so an implementation that a UI thread also
+  // reads must be atomic (see ui::ImportJob).
+  //
+  // A 48 MB file spends ~2-4 s in ReadFile (no progress available: OCC offers
+  // no hook there) and ~8 s in Transfer, which is reported here. `fraction` is
+  // 0..1 within the transfer phase.
+  struct ImportProgress {
+    enum class Phase {
+      ReadingFile,  // OCC offers no hook here; fraction is always < 0
+      Transferring, // XCAF transfer, with a real fraction
+    };
+    virtual ~ImportProgress() = default;
+    // Which phase, and how far into it (fraction < 0 = indeterminate).
+    virtual void OnPhase(Phase phase, double fraction) = 0;
+    // True aborts the read. Polled often — keep it trivial.
+    virtual bool Cancelled() = 0;
+  };
+
+  // `progress` may be null (the synchronous callers pass nothing). A cancelled
+  // read returns false with `out` empty, exactly like a failed one.
+  bool LoadSTEPStructured(const std::string& filename, ImportedModel& out,
+                          ImportProgress* progress = nullptr);
   // The write half: products (named, colored) + one flat assembly of
   // placed instances → a STEP with real product structure. Used by the
   // assembly-import round-trip tests; the seed of assembly STEP export.

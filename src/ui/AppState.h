@@ -19,6 +19,7 @@
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
 #include "render/FrameTimer.h"
+#include "ui/ImportJob.h"
 #include "ui/SyncJob.h"
 #include "ui/TopoJob.h"
 #include "ui/ViewportHandle.h"
@@ -50,6 +51,10 @@ class IBLTextures;
 struct GLFWwindow;
 
 namespace ui {
+
+// Per-part tessellation + GPU asset cache; see AppState::partRenderCache.
+// Defined in AppActionsInternal.h, where Vertex3D is complete.
+struct PartRenderCacheStore;
 
 struct GeometryChange {
   bool valid = false;
@@ -1158,6 +1163,11 @@ struct AppState {
   // A running fetch/push/clone (F9 C2). One at a time; PollSync joins it and
   // applies the result on the main thread.
   std::unique_ptr<SyncJob> syncJob;
+  // A background STEP import (ui/ImportJob.h) and the message left by the
+  // last failed one. Non-null = the progress modal is up and File > Import
+  // refuses a second one.
+  std::unique_ptr<ImportJob> importJob;
+  std::string importError;
   // What the last one said, kept until the next one starts, so the panel has
   // something to show instead of the message flashing past.
   std::string syncMessage;
@@ -1358,6 +1368,17 @@ struct AppState {
   // Document -> renderer sync bookkeeping
   uint64_t syncedDocumentVersion = 0;
   std::vector<DocumentRenderMesh> documentMeshes;
+  // Tessellations + GPU assets kept per referenced part ACROSS assembly
+  // resyncs, keyed on (part slot id, that part document's Version()). A
+  // resync removes every instance and re-adds them, so without this every
+  // switch back to an assembly tab re-tessellated and re-uploaded every
+  // unique part — 5.9 s on a 299-part STEP import, and the same 5.9 s for
+  // hiding a single occurrence. Opaque here on purpose: the entries hold
+  // Vertex3D, and AppState.h forward-declares MeshRenderer rather than
+  // including it. Defined in AppActionsInternal.h, filled by
+  // SyncAssemblyRenderers; a shared_ptr so an incomplete type still has a
+  // usable implicit destructor here.
+  std::shared_ptr<PartRenderCacheStore> partRenderCache;
 
   // Offline render (Render toolbar button); pumped by main.cpp.
   RenderJob renderJob;

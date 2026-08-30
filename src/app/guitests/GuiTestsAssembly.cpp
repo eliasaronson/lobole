@@ -1,5 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
 #include "ui/AssemblyActions.h"
+#include "ui/ImportJob.h"
 
 // Assembly GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -112,6 +114,144 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)0);
     IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)0);
+  };
+
+  // Switching away from an assembly tab and back must NOT rebuild it.
+  //
+  // A resync removes every instance before re-adding them, and an asset used
+  // to die with its last instance — so every return to the tab re-tessellated
+  // and re-uploaded every part. On a 299-part STEP import that was 5.9 s of
+  // frozen window, every single time, and the same 5.9 s for hiding one
+  // occurrence. AppState::partRenderCache holds the tessellation and RETAINS
+  // both renderer assets across the teardown.
+  //
+  // Asset ids are the honest witness: they are never reused (a released slot
+  // is left null and CreateAsset appends), so an id that survives the round
+  // trip proves the upload was not redone. Counting assets would not — a
+  // destroy-then-recreate lands back on the same count.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "switching_back_to_an_assembly_reuses_its_meshes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Reuse");
+    ui::SetActivePart(*s_App, asmIdx);
+    for (int i = 0; i < 2; ++i) {
+      Occurrence o;
+      o.name = "Copy " + std::to_string(i + 1);
+      o.partId = partId;
+      o.fixed = true;
+      o.position = glm::vec3(60.0f * static_cast<float>(i), 0.0f, 0.0f);
+      s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(3);
+    IM_CHECK(s_App->partRenderCache != nullptr);
+    auto entry = s_App->partRenderCache->parts.find(partId);
+    IM_CHECK(entry != s_App->partRenderCache->parts.end());
+    IM_CHECK(!entry->second.bodies.empty());
+    const uint32_t meshAsset = entry->second.bodies[0].assetId;
+    const uint32_t outlineAsset = entry->second.bodies[0].outlineAssetId;
+    IM_CHECK(meshAsset != 0);
+    IM_CHECK(outlineAsset != 0);
+
+    // Away to the part tab and back — the full teardown/rebuild path.
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(3);
+    ui::SetActivePart(*s_App, asmIdx);
+    ctx->Yield(3);
+    entry = s_App->partRenderCache->parts.find(partId);
+    IM_CHECK(entry != s_App->partRenderCache->parts.end());
+    IM_CHECK(!entry->second.bodies.empty());
+    IM_CHECK_EQ(entry->second.bodies[0].assetId, meshAsset);
+    IM_CHECK_EQ(entry->second.bodies[0].outlineAssetId, outlineAsset);
+    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
+
+    // Editing the part DOES invalidate it: the cache is keyed on the part
+    // document's version, so stale geometry can never survive a regen.
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    ui::SetActivePart(*s_App, asmIdx);
+    ctx->Yield(3);
+    entry = s_App->partRenderCache->parts.find(partId);
+    IM_CHECK(entry != s_App->partRenderCache->parts.end());
+    IM_CHECK(!entry->second.bodies.empty());
+    IM_CHECK(entry->second.bodies[0].assetId != meshAsset);
+  };
+
+  // A STEP import runs on a worker thread behind a progress modal.
+  //
+  // The whole read used to happen inline: a 48 MB / 299-product file froze
+  // the window for ~38 s with nothing on screen to say why. The parse is also
+  // what DECIDES part-vs-assembly, so that decision had to move onto the
+  // worker with it — which is the part worth a test, because a wrong answer
+  // here silently imports an assembly as one dumb solid.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_step_import_runs_in_background");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // Author a 2-product, 3-instance STEP with our own writer — no binary
+    // fixture, and it exercises both directions (the I2 round-trip rule).
+    CADKernel& k = CADKernel::Instance();
+    CADKernel::ImportedModel model;
+    // Enough products that the read spans many frames. A 2-product file
+    // finishes inside one, which would make the modal assertion below a race
+    // — and a test that sometimes catches the bug is not a gate.
+    constexpr int kProducts = 40;
+    for (int i = 0; i < kProducts; i++) {
+      const bool box = (i % 2) == 0;
+      model.products.push_back(
+          {box ? k.CreateBox(2.0, 2.0, 2.0)
+               : k.CreateCylinder(glm::vec3(0), glm::vec3(0, 0, 1), 0.5, 3.0),
+           (box ? "Widget " : "Pin ") + std::to_string(i), false,
+           glm::vec3(0.0f)});
+      model.instances.push_back(
+          {static_cast<size_t>(i),
+           glm::translate(glm::mat4(1.0f),
+                          glm::vec3(10.0f * static_cast<float>(i), 0, 0)),
+           "I" + std::to_string(i)});
+    }
+    // One product placed twice, so the import is a real assembly rather than
+    // a flat list — and the occurrence count differs from the part count.
+    model.instances.push_back(
+        {0, glm::translate(glm::mat4(1.0f), glm::vec3(0, 10, 0)), "W0 again"});
+    const auto stepPath =
+        std::filesystem::temp_directory_path() / "designer_gui_import.step";
+    IM_CHECK(k.SaveSTEPStructured(stepPath.string(), model, "Rig"));
+
+    const size_t tabsBefore = s_App->parts.size();
+    std::string error;
+    IM_CHECK(ui::StartImport(*s_App, stepPath.string(), &error));
+    // It is a JOB, not a call: nothing has been created yet and the modal is
+    // up. (If this ever fails because the import already finished, the import
+    // stopped being asynchronous — which is the regression.)
+    IM_CHECK(ui::ImportRunning(*s_App));
+    IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
+
+    // PollImport runs from the frame loop; yield until it lands. Bounded so a
+    // hang fails the test rather than wedging the suite. The modal must be up
+    // for the duration — it is drawn by DockLayout rather than a toolbar
+    // precisely so it survives the part->assembly tab switch that
+    // materialization performs halfway through.
+    bool sawModal = false;
+    for (int i = 0; i < 2000 && ui::ImportRunning(*s_App); i++) {
+      ctx->Yield();
+      if (ctx->ItemExists("//Importing STEP/Cancel###import_cancel"))
+        sawModal = true;
+    }
+    IM_CHECK(sawModal);
+    IM_CHECK(!ui::ImportRunning(*s_App));
+    IM_CHECK(s_App->importError.empty());
+
+    // A part tab per product plus the assembly, and one more occurrence than
+    // parts — i.e. the worker decided "assembly", not "one dumb solid".
+    IM_CHECK_EQ(s_App->parts.size(), tabsBefore + kProducts + 1);
+    IM_CHECK(s_App->assembly != nullptr);
+    IM_CHECK_EQ(s_App->assembly->OccurrenceCount(), (size_t)(kProducts + 1));
+    std::filesystem::remove(stepPath);
   };
 
   t = IM_REGISTER_TEST(engine, "assembly",

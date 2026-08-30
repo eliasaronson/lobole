@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -35,12 +36,31 @@ struct AssemblyImportPlan {
   std::string error; // non-empty = the plan failed; nothing was extracted
 };
 
-// Reads `stepPath` (XCAF) and extracts one centered .brep per unique product
+// Extracts one centered .brep per unique product of an ALREADY-PARSED model
 // into `destDir` (created if missing). Each occurrence's placement composes
 // the instance transform with the centering offset, so materialized parts
 // land exactly where the file put them. Non-rigid instance transforms import
 // at their rigid part (rotation+translation of the closest similarity) — in
 // practice real CAD writes rigid placements only.
+//
+// `stepPath` names the source in error messages and the log only — nothing is
+// read from it. Parsing is the caller's, because it is by far the expensive
+// half: on a 48 MB / 299-product file the XCAF read is ~12 s against ~0.9 s
+// for all of the extraction below, so a caller that already holds the model
+// (ImportCADFile probes the structure to decide part-vs-assembly) must never
+// pay for it twice.
+//
+// `onProduct(done, total)` is called after each product is extracted; return
+// false from it to abort (the plan then comes back with an error). Null by
+// default — the synchronous callers want neither progress nor cancellation.
+using ExtractionProgress = std::function<bool(size_t done, size_t total)>;
+AssemblyImportPlan
+BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
+                        const std::string& stepPath, const std::string& destDir,
+                        const ExtractionProgress& onProduct = nullptr);
+
+// Convenience overload: parse `stepPath`, then the above. For callers that do
+// not already hold the model.
 AssemblyImportPlan BuildAssemblyImportPlan(const std::string& stepPath,
                                            const std::string& destDir);
 

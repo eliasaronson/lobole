@@ -163,6 +163,81 @@ bool CopyBuffer(VkDevice device, VkCommandPool pool, VkQueue queue,
   return true;
 }
 
+StagingBatch::StagingBatch(VkDevice device, VkPhysicalDevice physicalDevice,
+                           VkCommandPool pool, VkQueue queue)
+    : m_device(device), m_physicalDevice(physicalDevice), m_pool(pool),
+      m_queue(queue) {}
+
+StagingBatch::~StagingBatch() { Flush(); }
+
+bool StagingBatch::Upload(VkDeviceSize size, const void* src,
+                          VkBufferUsageFlags usage, VkBuffer& outBuffer,
+                          VkDeviceMemory& outMemory) {
+  outBuffer = VK_NULL_HANDLE;
+  outMemory = VK_NULL_HANDLE;
+  if (size == 0 || src == nullptr)
+    return false;
+
+  // One command buffer for the whole batch, opened lazily so a batch nothing
+  // uploads into costs nothing.
+  if (m_cb == VK_NULL_HANDLE) {
+    m_cb = BeginSingleTimeCommands(m_device, m_pool);
+    if (m_cb == VK_NULL_HANDLE) {
+      m_failed = true;
+      return false;
+    }
+  }
+
+  Staged staging;
+  if (!CreateBuffer(m_device, m_physicalDevice, size,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    staging.buffer, staging.memory)) {
+    m_failed = true;
+    return false;
+  }
+
+  void* data = nullptr;
+  vkMapMemory(m_device, staging.memory, 0, size, 0, &data);
+  memcpy(data, src, static_cast<size_t>(size));
+  vkUnmapMemory(m_device, staging.memory);
+
+  if (!CreateBuffer(m_device, m_physicalDevice, size,
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuffer,
+                    outMemory)) {
+    DestroyBuffer(m_device, staging.buffer, staging.memory);
+    m_failed = true;
+    return false;
+  }
+
+  VkBufferCopy region{};
+  region.size = size;
+  vkCmdCopyBuffer(m_cb, staging.buffer, outBuffer, 1, &region);
+  // Held until Flush: the copy has not executed yet, so freeing the source now
+  // would be a use-after-free on the GPU.
+  m_staging.push_back(staging);
+  return true;
+}
+
+bool StagingBatch::Flush() {
+  if (m_cb == VK_NULL_HANDLE) {
+    const bool ok = !m_failed;
+    m_failed = false;
+    return ok;
+  }
+  // ONE submit + ONE wait for everything recorded since construction.
+  EndSingleTimeCommands(m_device, m_pool, m_queue, m_cb);
+  m_cb = VK_NULL_HANDLE;
+  for (Staged& s : m_staging)
+    DestroyBuffer(m_device, s.buffer, s.memory);
+  m_staging.clear();
+  const bool ok = !m_failed;
+  m_failed = false;
+  return ok;
+}
+
 std::vector<char> ReadFile(const std::string& path) {
   std::ifstream file(path, std::ios::ate | std::ios::binary);
   if (!file.is_open()) {

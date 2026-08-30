@@ -746,6 +746,36 @@ TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
   CHECK_THAT(glm::length(pin->position - glm::vec3(0, 10, 1.5f)),
              WithinAbs(0.0f, 1e-3f));
 
+  // The preloaded-model overload must plan IDENTICALLY to the path one. It
+  // exists so ImportCADFile can hand on the model it already parsed to decide
+  // part-vs-assembly instead of dropping it: the XCAF read is ~12 s on a
+  // 48 MB / 299-product file against ~0.9 s for all of the extraction here,
+  // so re-reading was most of the import. Same plan, one parse.
+  CADKernel::ImportedModel reloaded;
+  REQUIRE(k.LoadSTEPStructured(stepPath.string(), reloaded));
+  const auto destDir2 =
+      std::filesystem::temp_directory_path() / "designer_test_asm_out2";
+  std::filesystem::remove_all(destDir2);
+  const auto plan2 = interchange::BuildAssemblyImportPlan(
+      reloaded, stepPath.string(), destDir2.string());
+  REQUIRE(plan2.error.empty());
+  REQUIRE(plan2.parts.size() == plan.parts.size());
+  REQUIRE(plan2.occurrences.size() == plan.occurrences.size());
+  for (size_t i = 0; i < plan.parts.size(); i++) {
+    CHECK(plan2.parts[i].name == plan.parts[i].name);
+    CHECK(plan2.parts[i].hasColor == plan.parts[i].hasColor);
+    CHECK_THAT(glm::length(plan2.parts[i].color - plan.parts[i].color),
+               WithinAbs(0.0f, 1e-5f));
+  }
+  for (size_t i = 0; i < plan.occurrences.size(); i++) {
+    CHECK(plan2.occurrences[i].part == plan.occurrences[i].part);
+    CHECK(plan2.occurrences[i].name == plan.occurrences[i].name);
+    CHECK_THAT(glm::length(plan2.occurrences[i].position -
+                           plan.occurrences[i].position),
+               WithinAbs(0.0f, 1e-4f));
+  }
+
   std::filesystem::remove(stepPath);
   std::filesystem::remove_all(destDir);
+  std::filesystem::remove_all(destDir2);
 }

@@ -169,6 +169,36 @@ uint32_t MeshRenderer::AddInstance(uint32_t assetId,
   return static_cast<uint32_t>(m_instances.size());
 }
 
+void MeshRenderer::BeginAssetBatch() {
+  if (m_assetBatch || m_device == VK_NULL_HANDLE)
+    return; // already batching, or not initialized
+  m_assetBatch = std::make_unique<vkutil::StagingBatch>(
+      m_device, m_physicalDevice, m_commandPool, m_graphicsQueue);
+}
+
+void MeshRenderer::EndAssetBatch() {
+  if (!m_assetBatch)
+    return;
+  m_assetBatch->Flush();
+  m_assetBatch.reset();
+}
+
+void MeshRenderer::RetainAsset(uint32_t assetId) {
+  if (MeshAsset* asset = GetAsset(assetId))
+    asset->refCount++;
+}
+
+void MeshRenderer::ReleaseAsset(uint32_t assetId) {
+  MeshAsset* asset = GetAsset(assetId);
+  if (!asset || asset->refCount == 0)
+    return;
+  if (--asset->refCount == 0) {
+    WaitDeviceIdleOnce();
+    DestroyAssetBuffers(asset);
+    m_assets[assetId - 1].reset();
+  }
+}
+
 void MeshRenderer::RemoveInstance(uint32_t instanceId) {
   MeshInstance* instance = GetInstance(instanceId);
   if (!instance)
@@ -276,6 +306,11 @@ void MeshRenderer::WaitDeviceIdleOnce() {
 
 void MeshRenderer::Render(VkCommandBuffer commandBuffer,
                           uint32_t currentFrame) {
+  // A batch left open would mean drawing from buffers whose staging copy has
+  // not executed — garbage geometry. Never happens on the paired path; this
+  // makes "assets are uploaded before anything draws them" an invariant of the
+  // renderer rather than of every caller.
+  EndAssetBatch();
   // Recording a draw ends the "device is idle" guarantee for the batch.
   m_deviceIdle = false;
   // Update uniform buffer
@@ -931,36 +966,19 @@ bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
   // Every CreateBuffer here used to drop its bool. On an allocation failure
   // the out-params were left UNINITIALIZED and handed straight to
   // vkMapMemory — so an OOM on a large assembly read as a crash in the
-  // upload rather than as a failed upload. Checked now, and a partial
-  // failure tears down whatever was already built.
+  // upload rather than as a failed upload. StagingBatch::Upload checks and
+  // nulls both out-handles on every failure path, so that stays true.
+  //
+  // Batched when a bulk build is in progress (BeginAssetBatch), one-shot
+  // otherwise — the one-shot batch flushes in its destructor, which is the
+  // submit+wait this used to do inline.
+  vkutil::StagingBatch oneShot(m_device, m_physicalDevice, m_commandPool,
+                               m_graphicsQueue);
+  vkutil::StagingBatch& batch = m_assetBatch ? *m_assetBatch : oneShot;
   auto uploadViaStaging = [&](VkDeviceSize size, const void* src,
                               VkBufferUsageFlags usage, VkBuffer& outBuffer,
                               VkDeviceMemory& outMemory) {
-    VkBuffer staging = VK_NULL_HANDLE;
-    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, size,
-                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                              staging, stagingMemory)) {
-      return false;
-    }
-
-    void* data = nullptr;
-    vkMapMemory(m_device, stagingMemory, 0, size, 0, &data);
-    memcpy(data, src, static_cast<size_t>(size));
-    vkUnmapMemory(m_device, stagingMemory);
-
-    bool ok = vkutil::CreateBuffer(m_device, m_physicalDevice, size,
-                                   VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
-                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                   outBuffer, outMemory);
-    if (ok) {
-      ok = vkutil::CopyBuffer(m_device, m_commandPool, m_graphicsQueue, staging,
-                              outBuffer, size);
-    }
-    vkutil::DestroyBuffer(m_device, staging, stagingMemory);
-    return ok;
+    return batch.Upload(size, src, usage, outBuffer, outMemory);
   };
 
   if (!uploadViaStaging(vertexBufferSize, asset->vertices.data(),
@@ -968,6 +986,12 @@ bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
                         asset->vertexBufferMemory)) {
     LOG_ERROR("MeshRenderer: vertex buffer upload failed ({} bytes)",
               vertexBufferSize);
+    // Flush before destroying: a batch may hold a recorded copy TARGETING one
+    // of these buffers, and freeing the destination of a pending transfer is a
+    // use-after-free the moment it executes. Flush is idempotent and the next
+    // Upload opens a fresh command buffer, so an in-progress bulk build simply
+    // continues with one extra submit.
+    batch.Flush();
     DestroyAssetBuffers(asset);
     return false;
   }
@@ -978,6 +1002,7 @@ bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
                         asset->indexBufferMemory)) {
     LOG_ERROR("MeshRenderer: index buffer upload failed ({} bytes)",
               indexBufferSize);
+    batch.Flush(); // see above: the vertex copy is still pending
     DestroyAssetBuffers(asset);
     return false;
   }

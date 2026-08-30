@@ -123,6 +123,72 @@ void DrawRenderModal(AppState& state) {
   ImGui::EndPopup();
 }
 
+} // namespace
+
+// Progress for a background STEP import (ui/ImportJob.h). Same shape as the
+// render modal above: a bar, a line of text, and a Cancel that only exists
+// while cancelling is still safe.
+//
+// Not a BeginPopupModal keyed to a button press — an import can be started
+// from the menu or the file browser, so the modal opens itself whenever a job
+// is running and closes when it finishes.
+//
+// Called from DockLayout, NOT from a toolbar, and that is load-bearing.
+// ImGui builds a popup's id from the ID stack of the window that opens it,
+// and DrawToolbar is an if/else over the active tab kind inside a child
+// window — so a modal opened from the model toolbar would be orphaned the
+// moment materialization creates the assembly tab and the branch switches to
+// DrawAssemblyToolbar. Half of an import is spent on the far side of exactly
+// that switch. Same trap as a keybinding calling OpenPopup (U12).
+void DrawImportModal(AppState& state) {
+  if (!ImportRunning(state))
+    return; // not calling BeginPopupModal is what closes it
+  // Asked every frame rather than on a rising edge off a static bool. The
+  // static version desynced the moment anything reset around it (the GUI
+  // suite re-running this test was enough): it came back believing the popup
+  // was already open, so OpenPopup never fired and the import ran with no
+  // modal at all. IsPopupOpen is the actual state, so this cannot drift.
+  if (!ImGui::IsPopupOpen("Importing STEP"))
+    ImGui::OpenPopup("Importing STEP");
+
+  ImGui::SetNextWindowSize(ImVec2(360, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Importing STEP", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+
+  const ImportJob& job = *state.importJob;
+  const double fraction = job.fraction.load(std::memory_order_relaxed);
+  const auto phase =
+      static_cast<ImportJob::Phase>(job.phase.load(std::memory_order_relaxed));
+
+  ImGui::TextUnformatted(ImportStatusLine(state).c_str());
+  if (fraction >= 0.0) {
+    ImGui::ProgressBar(static_cast<float>(fraction), ImVec2(-FLT_MIN, 0));
+  } else {
+    // Indeterminate: OCC gives no hook for the file parse, and a bar sitting
+    // at 0% reads as "stuck" rather than "working".
+    ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()),
+                       ImVec2(-FLT_MIN, 0), "working");
+  }
+
+  ImGui::Spacing();
+  // Cancelling once tabs exist would leave a half-built assembly behind, so
+  // the button goes away exactly when unwinding stops being free.
+  const bool cancellable = phase != ImportJob::Phase::Materializing;
+  ImGui::BeginDisabled(!cancellable ||
+                       job.cancel.load(std::memory_order_relaxed));
+  if (ImGui::Button("Cancel###import_cancel", ImVec2(120, 0)))
+    state.importJob->cancel.store(true, std::memory_order_relaxed);
+  ImGui::EndDisabled();
+  if (!cancellable) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("finishing");
+  }
+  ImGui::EndPopup();
+}
+
+namespace {
+
 // Start a new row when the next item would not fit. U4 chose a horizontal
 // scrollbar over clipping so no button was lost — but a dogfooding round
 // measured what that costs: at 1280x720 the row overflows, and the tools

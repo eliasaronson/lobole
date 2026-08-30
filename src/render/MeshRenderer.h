@@ -4,6 +4,7 @@
 
 #include "render/ClipPlanes.h"
 #include "render/SceneRenderer.h"
+#include "render/VulkanCommon.h" // vkutil::StagingBatch (asset upload batching)
 
 #include <algorithm>
 
@@ -158,11 +159,28 @@ public:
   // Assets: shared tessellations (one GPU upload each)
   uint32_t CreateAsset(const std::vector<Vertex3D>& vertices,
                        const std::vector<uint32_t>& indices);
+
+  // Collect the uploads of many CreateAsset calls behind one submit+wait
+  // (vkutil::StagingBatch). Without this each asset drains the queue on its
+  // own, which is most of the cost of building a large assembly. Begin before
+  // a bulk build, End after; unpaired use is safe — Render() flushes any batch
+  // still open, so a draw can never see an asset whose copy has not executed.
+  void BeginAssetBatch();
+  void EndAssetBatch();
   void UpdateAsset(uint32_t assetId, const std::vector<Vertex3D>& vertices,
                    const std::vector<uint32_t>& indices);
 
+  // Keeps an asset alive with no instances referencing it, so a caller can
+  // cache the upload across rebuilds. Without this, an assembly resync — which
+  // removes every instance before re-adding them — destroys and re-uploads
+  // every tessellation, which was ~4 s of a 5.9 s tab switch on a 299-part
+  // import. Retain/Release move the same refCount AddInstance/RemoveInstance
+  // do, so the last holder (instance or retainer) frees the buffers.
+  void RetainAsset(uint32_t assetId);
+  void ReleaseAsset(uint32_t assetId);
+
   // Instances: drawn occurrences of an asset. Removing the last instance of
-  // an asset destroys the asset's buffers too.
+  // an asset destroys the asset's buffers too, unless a RetainAsset holds it.
   uint32_t AddInstance(uint32_t assetId,
                        const glm::mat4& transform = glm::mat4(1.0f));
   void RemoveInstance(uint32_t instanceId);
@@ -386,6 +404,9 @@ private:
   MeshAsset* GetAsset(uint32_t assetId);
   MeshInstance* GetInstance(uint32_t instanceId);
   bool CreateAssetBuffers(MeshAsset* asset);
+  // Open only between BeginAssetBatch/EndAssetBatch; CreateAssetBuffers uses
+  // it when set and a one-shot batch of its own otherwise.
+  std::unique_ptr<vkutil::StagingBatch> m_assetBatch;
   // See OutlineRenderer: one device wait per batch of removals, not one per
   // asset destroyed. A resync of an assembly drops every instance in a row.
   bool m_deviceIdle = false;

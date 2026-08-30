@@ -40,6 +40,7 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/CamPlayback.h"
+#include "ui/ImportJob.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SimulationActions.h"
@@ -1500,6 +1501,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
       r->SetClipPlanes(ui::SectionPlanes(g_App));
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
     ui::PumpRenderJob(g_App);
+    // Advance a background STEP import: join a finished worker, then create
+    // part tabs a slice per frame so the progress modal keeps painting.
+    ui::PollImport(g_App);
 
     // Captures hold until the camera lands: orient_to_face animates ~1 s,
     // and WantsScreenshot's own 300-call cap was tuned for 60 fps frames —
@@ -1562,6 +1566,10 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_Camera.reset();
   // Renderer teardown order mirrors the GUI exit: UnderlayRenderer's
   // Shutdown waits on the device, so it must run before CleanupVulkan.
+  // The per-part render cache holds RETAINED asset ids in the mesh and
+  // outline renderers; releasing them after the renderers are gone would free
+  // nothing and leave the buffers to a dead device. Before, not after.
+  ui::ReleasePartRenderCache(g_App);
   ShutdownSceneRenderers();
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();
@@ -2294,6 +2302,9 @@ int main(int argc, char** argv) {
     // Advance an in-flight offline render by one sample batch (the Render modal
     // shows progress; runs on the main thread with its own one-shot submits).
     ui::PumpRenderJob(g_App);
+    // Advance a background STEP import: join a finished worker, then create
+    // part tabs a slice per frame so the progress modal keeps painting.
+    ui::PollImport(g_App);
 
     // Mirror the GPU pass averages where frame_stats and the HUD read them.
     {
@@ -2465,6 +2476,10 @@ int main(int argc, char** argv) {
   // Shutdown() calls vkDeviceWaitIdle, so it has to run while g_Device is still
   // alive — before CleanupVulkan below. Omitting it left the global to destruct
   // at exit on an already-freed device -> SIGSEGV at shutdown.
+  // The per-part render cache holds RETAINED asset ids in the mesh and
+  // outline renderers; releasing them after the renderers are gone would free
+  // nothing and leave the buffers to a dead device. Before, not after.
+  ui::ReleasePartRenderCache(g_App);
   ShutdownSceneRenderers();
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();

@@ -643,34 +643,16 @@ uint32_t OutlineRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
   // threw on failure, so nothing here checked, and a throw from inside AddMesh
   // would have unwound through the render loop. 0 is already this class's
   // invalid id (ids start at 1), so failure is reportable in the return.
+  // Batched when a bulk build is in progress (BeginAssetBatch), one-shot
+  // otherwise. StagingBatch nulls both out-handles on every failure path, so
+  // the checked-return property this lambda was written for still holds.
+  vkutil::StagingBatch oneShot(m_device, m_physicalDevice, m_commandPool,
+                               m_graphicsQueue);
+  vkutil::StagingBatch& batch = m_assetBatch ? *m_assetBatch : oneShot;
   auto uploadViaStaging = [&](VkDeviceSize size, const void* src,
                               VkBufferUsageFlags usage, VkBuffer& outBuffer,
                               VkDeviceMemory& outMemory) {
-    VkBuffer staging = VK_NULL_HANDLE;
-    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, size,
-                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                              staging, stagingMemory)) {
-      return false;
-    }
-
-    void* data = nullptr;
-    vkMapMemory(m_device, stagingMemory, 0, size, 0, &data);
-    memcpy(data, src, static_cast<size_t>(size));
-    vkUnmapMemory(m_device, stagingMemory);
-
-    bool ok = vkutil::CreateBuffer(m_device, m_physicalDevice, size,
-                                   VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
-                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                   outBuffer, outMemory);
-    if (ok) {
-      ok = vkutil::CopyBuffer(m_device, m_commandPool, m_graphicsQueue, staging,
-                              outBuffer, size);
-    }
-    vkutil::DestroyBuffer(m_device, staging, stagingMemory);
-    return ok;
+    return batch.Upload(size, src, usage, outBuffer, outMemory);
   };
 
   const VkDeviceSize vertexBufferSize = sizeof(Vertex3D) * vertices.size();
@@ -686,6 +668,10 @@ uint32_t OutlineRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
                         asset->indexBufferMemory)) {
     LOG_ERROR("OutlineRenderer: asset upload failed ({} vertices, {} indices)",
               vertices.size(), indices.size());
+    // Flush first: a batch may hold a copy recorded against the buffer that
+    // DID succeed, and freeing a pending transfer's destination is a
+    // use-after-free once it executes.
+    batch.Flush();
     vkutil::DestroyBuffer(m_device, asset->vertexBuffer,
                           asset->vertexBufferMemory);
     vkutil::DestroyBuffer(m_device, asset->indexBuffer,
@@ -808,6 +794,9 @@ void OutlineRenderer::WaitDeviceIdleOnce() {
 
 void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
                              uint32_t currentFrame) {
+  // Never draw from an asset whose staging copy has not executed (see
+  // MeshRenderer::Render).
+  EndAssetBatch();
   // Anything recorded here can reference a mesh's buffers next frame, so the
   // batch guarantee ends at the first recorded draw.
   m_deviceIdle = false;
@@ -849,6 +838,43 @@ void OutlineRenderer::UpdateMesh(uint32_t meshId,
                                  const std::vector<Vertex3D>& vertices,
                                  const std::vector<uint32_t>& indices) {
   // Placeholder
+}
+
+void OutlineRenderer::BeginAssetBatch() {
+  if (m_assetBatch || m_device == VK_NULL_HANDLE)
+    return;
+  m_assetBatch = std::make_unique<vkutil::StagingBatch>(
+      m_device, m_physicalDevice, m_commandPool, m_graphicsQueue);
+}
+
+void OutlineRenderer::EndAssetBatch() {
+  if (!m_assetBatch)
+    return;
+  m_assetBatch->Flush();
+  m_assetBatch.reset();
+}
+
+void OutlineRenderer::RetainAsset(uint32_t assetId) {
+  if (assetId == 0 || assetId > m_assets.size() || !m_assets[assetId - 1])
+    return;
+  m_assets[assetId - 1]->refCount++;
+}
+
+void OutlineRenderer::ReleaseAsset(uint32_t assetId) {
+  if (assetId == 0 || assetId > m_assets.size() || !m_assets[assetId - 1])
+    return;
+  OutlineAsset& asset = *m_assets[assetId - 1];
+  if (asset.refCount <= 0)
+    return;
+  if (--asset.refCount <= 0) {
+    // Same batched wait as RemoveMesh: an in-flight frame may still hold
+    // these buffers.
+    WaitDeviceIdleOnce();
+    vkutil::DestroyBuffer(m_device, asset.vertexBuffer,
+                          asset.vertexBufferMemory);
+    vkutil::DestroyBuffer(m_device, asset.indexBuffer, asset.indexBufferMemory);
+    m_assets[assetId - 1].reset();
+  }
 }
 
 void OutlineRenderer::RemoveMesh(uint32_t meshId) {
