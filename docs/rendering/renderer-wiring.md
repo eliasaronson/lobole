@@ -1,9 +1,10 @@
 # Wiring a renderer — the plan to stop getting it wrong
 
-> Status: **step 1 DONE** (`d6dade3`, a conventions gate). **R1–R5 PLANNED**,
-> not started, ~1 session. Written after the CAM stock renderer became the
-> second renderer to ship with a full-window viewport, and costed against the
-> code rather than by feel.
+> Status: **R1–R3 DONE** (`b2f757a`, `1020252`, `2c452ae`) — one registration
+> list, one teardown list, every per-frame duty a loop, both lists gated.
+> **R4 NOT DONE**, and the plan below was wrong about it twice; see
+> [what R1–R3 changed about R4](#what-r1r3-changed-about-r4).
+> **R5 done for R1–R3** (byte-identical screenshots, all suites green).
 
 ## The bug class
 
@@ -223,6 +224,42 @@ suites are necessary and not sufficient:
   registry is not an attempt to make it uniform.
 - **Landing R1–R3 without R4.** Leaves a registry pointing at sticky state and
   a gate guarding a list that is half-gone. Do not stop there.
+
+## What R1–R3 changed about R4
+
+Two things the plan asserted turned out to be wrong, and both matter for
+whether R4 is worth doing.
+
+**1. R4 does NOT retire the step-1 gate — R2 re-pointed it, and it got
+stronger.** The plan said "there is no list left to be missing from". False:
+the REGISTRY is a hand-maintained list, and so is the teardown. The gate now
+reads `RegisterSceneRenderers()` and `ShutdownSceneRenderers()` and checks
+every `SceneRenderer` implementation appears in both — which covers *both* ways
+this bug class has actually reached a user (a silent wrong viewport, and the
+shutdown SIGSEGV). It is doing more work after R2 than before it.
+
+**2. "R1–R3 without R4 is the worst of both" was wrong.** That warning assumed
+the gate would be left guarding a vanished invariant. It isn't. R1–R3 is a
+coherent, complete state: seven lists became two, both are gated, the per-frame
+duties cannot be got wrong because nothing enumerates renderers any more, and a
+renderer built in one mode and not the other now names itself in the log at
+startup.
+
+**And R4 costs more than costed.** `SSAORenderer::RecordSSAOPasses` takes a
+`MeshRenderer&` and pulls the shadow casters AND the camera matrices out of it,
+deliberately — *"the prepasses read them here so they are guaranteed identical
+to what the main pass uses"* (MeshRenderer.h). Deleting the sticky state from
+MeshRenderer therefore means restructuring how the prepass gets its scene
+state, in the AO and shadow path, which has its own history of subtle bugs
+(the SSAO halo, `cc80f4d`'s viewport-rect sampling). That is not the ~2 h of
+mechanical edits estimated; call it half a session with real regression risk,
+and it is the part of the renderer where a mistake is hardest to see.
+
+**Where that leaves it.** R4 buys *impossible* over *guarded* — the viewport
+becoming a compile error instead of a checked convention. That is genuinely
+better, and it is no longer urgent: the three historical bugs are all caught by
+the R2/R3 gates. Worth doing on a day with a clear session and a screenshot
+budget, not as the tail of another change.
 
 ## The general shape
 
