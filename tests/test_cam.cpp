@@ -7,6 +7,9 @@
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/DraftFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -899,6 +902,165 @@ TEST_CASE("cam: adaptive is silent about a shape it cannot enter — we are not"
   INFO(tp.error);
   CHECK(tp.error.find("4 mm across") != std::string::npos);
   CHECK(tp.error.find("depths") == std::string::npos);
+}
+
+TEST_CASE("cam: an elliptical opening can be cut out", "[cam]") {
+  // Openings are not all round. The section-loop machinery that follows a
+  // wall is shape-agnostic — it works on polygons out of a Z section — so the
+  // only thing that ever decided which openings could be machined was the
+  // PICK, which admitted a planar vertical face or a vertical cylinder and
+  // nothing else. An extruded ellipse is a surface of extrusion, so it was
+  // refused with "pick a wall — a flat vertical face or a vertical cylinder".
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 200, 150, 20));
+  auto sk = std::make_unique<SketchFeature>("Cut", SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::Ellipse{glm::vec2(100.0f, 75.0f), 40.0, 22.0, 0.0});
+  doc.AddFeature(std::move(sk));
+  const uint64_t sid = doc.GetFeature(1)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Opening", sid, 30.0, ExtrudeMode::Cut));
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  // The elliptical wall: the one face that is neither planar nor cylindrical.
+  ElementRef wall;
+  for (const Body& b : doc.GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u))
+        continue; // planar: the plate's own sides and faces
+      wall = ElementRef{b.createdBy, name};
+      break;
+    }
+  REQUIRE(wall.IsSet());
+
+  const cam::WallContour contour =
+      cam::PickedWallContour(doc.GetBodies(), wall, 0.02);
+  INFO(contour.why);
+  REQUIRE(contour.ok);
+
+  // And the elliptical wall now READS as a wall everywhere, which fixes the
+  // message a person actually hits: clicking it with the pocket verb used to
+  // stop at "pick a flat face — that one is curved" (true, and no help),
+  // because the curved-face check ran before the wall guard could say the
+  // useful thing.
+  CHECK(cam::IsWallFace(doc.GetBodies(), wall));
+  {
+    cam::Setup probe = BasicSetup();
+    const cam::DerivedOp asPocket =
+        cam::DeriveOperation(probe, doc.GetBodies(), cam::OpType::Pocket, wall);
+    INFO(asPocket.why);
+    CHECK_FALSE(asPocket.ok);
+    CHECK(asPocket.why.find("FLOOR") != std::string::npos);
+    CHECK(asPocket.why.find("curved") == std::string::npos);
+  }
+
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc.GetBodies());
+  cam::Operation op;
+  op.id = 41;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Inside;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  op.targets.push_back(wall);
+  setup.operations.push_back(op);
+
+  const cam::Toolpath tp =
+      cam::Generate(setup, setup.operations[0], doc.GetBodies());
+  INFO(tp.error);
+  REQUIRE(!tp.Empty());
+  CHECK(tp.error.empty());
+
+  // And it followed the ELLIPSE: the cut path stays a tool radius inside a
+  // 80 x 44 opening, so its extents are the ellipse less the cutter, not a
+  // circle and not the bounding box.
+  double lox = 1e9, hix = -1e9, loy = 1e9, hiy = -1e9;
+  for (const cam::Move& m : tp.moves)
+    if (m.kind != cam::Move::Kind::Rapid) {
+      lox = std::min(lox, m.to.x);
+      hix = std::max(hix, m.to.x);
+      loy = std::min(loy, m.to.y);
+      hiy = std::max(hiy, m.to.y);
+    }
+  INFO("path spans x " << lox << ".." << hix << "  y " << loy << ".." << hiy);
+  CHECK_THAT(hix - lox, WithinAbs(80.0 - 6.0, 1.0)); // major less the tool
+  CHECK_THAT(hiy - loy, WithinAbs(44.0 - 6.0, 1.0)); // minor less the tool
+}
+
+TEST_CASE("cam: a splined opening can be cut out too", "[cam]") {
+  // Same gate, the other curve a sketch can draw. Nothing here is special to
+  // ellipses — the wall test asks whether the face stands vertical, not what
+  // curve swept it.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 200, 150, 20));
+  auto sk = std::make_unique<SketchFeature>("Cut", SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::BSpline{{{70.0f, 60.0f},
+                                 {95.0f, 45.0f},
+                                 {130.0f, 65.0f},
+                                 {135.0f, 95.0f},
+                                 {100.0f, 105.0f},
+                                 {70.0f, 90.0f},
+                                 {70.0f, 60.0f}},
+                                3});
+  doc.AddFeature(std::move(sk));
+  const uint64_t sid = doc.GetFeature(1)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Opening", sid, 30.0, ExtrudeMode::Cut));
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  ElementRef wall;
+  for (const Body& b : doc.GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u))
+        continue;
+      wall = ElementRef{b.createdBy, name};
+      break;
+    }
+  REQUIRE(wall.IsSet());
+  const cam::WallContour contour =
+      cam::PickedWallContour(doc.GetBodies(), wall, 0.02);
+  INFO(contour.why);
+  CHECK(contour.ok);
+}
+
+TEST_CASE("cam: a tapered wall is still refused", "[cam]") {
+  // The generalisation asks the NORMAL, not the shape, and the whole point is
+  // that it keeps every refusal the shape test made. A draughted side is the
+  // one that matters: it is curved-ish, it is nearly vertical, and a 3-axis
+  // contour cannot follow it — the depth you cut at changes where the wall is.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 60, 40, 20));
+  const uint64_t block = doc.GetFeature(0)->GetId();
+  // The -Y side of the block.
+  const ElementRef side = WallNear(doc, 30.0, 0.0);
+  REQUIRE(side.IsSet());
+  doc.AddFeature(std::make_unique<DraftFeature>(
+      "Taper", block, std::vector<ElementRef>{side}, 8.0, PlaneType::XY));
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  // After the draft that face is a plane, but a TILTED one, so FindFace's
+  // own |normal.z| test refuses it. Assert the refusal, whichever branch
+  // produces it: what must never happen is a contour coming back.
+  const ElementRef tapered = WallNear(doc, 30.0, 0.0);
+  if (tapered.IsSet()) {
+    const cam::WallContour contour =
+        cam::PickedWallContour(doc.GetBodies(), tapered, 0.02);
+    INFO(contour.why);
+    if (contour.ok) {
+      // It only counts as a pass if the face really did stay vertical (a
+      // draft that OCC declined to apply).
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      REQUIRE(doc.GetBodies()[0].shape.FacePlane(
+          *doc.GetBodies()[0].elementMap.Resolve(tapered.name), c, n, u));
+      CHECK(std::abs(n.z) < 0.01f);
+    }
+  }
 }
 
 TEST_CASE("cam: a depth pass carries on from where the last one stopped",

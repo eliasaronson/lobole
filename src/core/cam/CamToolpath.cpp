@@ -8,6 +8,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepLProp_SLProps.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
@@ -696,15 +697,29 @@ double DistanceToLoop(const std::vector<glm::dvec2>& pts, const glm::dvec2& p) {
 
 } // namespace
 
-// A picked face that is a VERTICAL CYLINDER — the wall every round opening
-// has, and the pick FacePlane-based resolution rejected outright ("pick a
-// flat face — that one is curved" for the most common opening there is,
-// R10). `onWall` is a point ON the bore's cross-section circle, which is
-// what the nearest-loop pick below needs: the axis centre would sit a full
-// radius from its own contour and lose to the 0.5 mm tolerance.
-bool FindVerticalCylinderFace(const std::vector<Body>& bodies,
-                              const ElementRef& ref, TopoDS_Face& face,
-                              glm::dvec2& onWall) {
+// A picked face that is a WALL: vertical everywhere, so a 3-axis contour can
+// follow it at any depth. Planar walls arrive through FindFace; this is
+// everything else — the cylinder of a round bore, and equally the surface of
+// extrusion an ellipse or a spline opening produces.
+//
+// Asking the SHAPE ("is it a cylinder?") was the original gate, and it was
+// the only thing that decided which openings could be machined: the
+// section-loop machinery downstream works on polygons out of a Z section and
+// never cared what curve produced them. So a round hole cut out and an
+// elliptical one was refused, for no reason that survives being looked at.
+//
+// Asking the NORMAL instead — is it horizontal over the whole face? — admits
+// any extruded curve and keeps every refusal the shape test made: a floor or
+// ceiling points at ±Z, a cone or a draughted wall tilts, a cylinder lying on
+// its side sweeps through ±Z, a sphere likewise. None of those is a contour a
+// 3-axis job can follow at a chosen depth.
+//
+// `onWall` is a point ON the wall, which is what the nearest-loop pick below
+// needs: a bore's axis centre would sit a full radius from its own contour
+// and lose to the 0.5 mm tolerance.
+bool FindVerticalWallFace(const std::vector<Body>& bodies,
+                          const ElementRef& ref, TopoDS_Face& face,
+                          glm::dvec2& onWall) {
   if (!ref.IsSet())
     return false;
   for (const Body& body : bodies) {
@@ -721,14 +736,32 @@ bool FindVerticalCylinderFace(const std::vector<Body>& bodies,
       face = TopoDS::Face(ex.Current());
       if (face.IsNull())
         return false;
-      BRepAdaptor_Surface surf(face);
-      if (surf.GetType() != GeomAbs_Cylinder)
+      double u0 = 0, u1 = 0, v0 = 0, v1 = 0;
+      BRepTools::UVBounds(face, u0, u1, v0, v1);
+      if (u1 - u0 < 1e-12 || v1 - v0 < 1e-12)
         return false;
-      const gp_Cylinder cyl = surf.Cylinder();
-      if (std::abs(cyl.Axis().Direction().Z()) < 0.99)
-        return false; // lying on its side: no 3-axis contour follows it
-      const gp_Pnt loc = cyl.Location();
-      onWall = {loc.X() + cyl.Radius(), loc.Y()};
+      BRepAdaptor_Surface surf(face);
+      BRepLProp_SLProps props(surf, 1, 1e-7);
+      // A grid rather than one sample: a surface of extrusion is vertical
+      // everywhere, but a cone is vertical along no direction at all and a
+      // single unlucky sample on a nearly-vertical draught would pass.
+      constexpr int kSamples = 5;
+      bool any = false;
+      for (int a = 0; a <= kSamples; a++)
+        for (int b = 0; b <= kSamples; b++) {
+          const double u = u0 + (u1 - u0) * a / kSamples;
+          const double v = v0 + (v1 - v0) * b / kSamples;
+          props.SetParameters(u, v);
+          if (!props.IsNormalDefined())
+            continue;
+          if (std::abs(props.Normal().Z()) > 0.01)
+            return false;
+          any = true;
+        }
+      if (!any)
+        return false; // no normal anywhere: not something to follow
+      const gp_Pnt mid = surf.Value(0.5 * (u0 + u1), 0.5 * (v0 + v1));
+      onWall = {mid.X(), mid.Y()};
       return true;
     }
     return false;
@@ -742,7 +775,7 @@ bool IsWallFace(const std::vector<Body>& bodies, const ElementRef& ref) {
   if (FindFace(bodies, ref, face, centre, normal))
     return std::abs(normal.z) < 0.01f;
   glm::dvec2 onWall(0.0);
-  return FindVerticalCylinderFace(bodies, ref, face, onWall);
+  return FindVerticalWallFace(bodies, ref, face, onWall);
 }
 
 WallContour PickedWallContour(const std::vector<Body>& bodies,
@@ -758,13 +791,15 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
       return out;
     }
     at = {centre.x, centre.y};
-  } else if (FindVerticalCylinderFace(bodies, ref, face, at)) {
-    // A bore or boss wall: the section-loop machinery below is shape-
-    // agnostic, so the round opening needs nothing more than being let in.
+  } else if (FindVerticalWallFace(bodies, ref, face, at)) {
+    // A curved wall — a bore, a boss, an elliptical or splined opening. The
+    // section-loop machinery below is shape-agnostic, so these need nothing
+    // more than being let in.
   } else {
-    out.why = "pick a wall — a flat vertical face or a vertical cylinder (a "
-              "bore or a boss); that face is neither, or not on a body this "
-              "job can machine";
+    out.why = "pick a wall — a face that stands vertical, so a contour can "
+              "follow it at depth; that one is not (a floor or ceiling, a "
+              "tapered or draughted side, or not on a body this job can "
+              "machine)";
     return out;
   }
   Bnd_Box box;
