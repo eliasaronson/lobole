@@ -196,8 +196,9 @@ tab from the model tree. Three unrelated tests had been failing on it
 spindle axis, and the app's world is Z-up since docs/up-axis.md (2026-08-28)
 — the plan view for a 3-axis job simply IS the Top view, and picking "the
 top face" from the Top view derives an operation instead of being refused as
-a wall. "Look down the spindle" remains for indexed setups, whose spindle is
-not the world's up.
+a wall. "Look down the spindle" remains for any setup whose spindle is not
+the world's up — an indexed one, and since v67 a part clamped flat that is
+not modelled that way (docs/cam/setup-frame.md).
 
 Deliberately still open at v1, and **two of the three have since shipped**
 (CAM phase 2, 2026-08-21): helix entry for pockets too small to ramp into is

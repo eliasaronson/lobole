@@ -602,6 +602,59 @@ TEST_CASE("cam stock mesh: the machined block matches the part it cut",
   CHECK(after.indices.size() > before.indices.size());
 }
 
+TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
+  // The tool glyph is a revolved profile with three hard corners: flute to
+  // shoulder, shoulder to holder, holder to cap. `Revolve` used to take a
+  // central difference across every profile point, which averages the two
+  // faces meeting at a corner into one normal — so the flat annular shoulder
+  // came out shaded as a 45-degree cone, a lit facet that does not answer to
+  // the camera the way the rest of the glyph does.
+  cam::Tool t;
+  t.number = 1;
+  t.diameter = 6.0;
+  t.fluteLength = 20.0;
+  const cam::StockMesh m = cam::BuildToolMesh(t);
+  REQUIRE(m.vertices.size() > 100);
+
+  // Somewhere on the shoulder there must be vertices whose normal is the
+  // axis itself: that is what "flat annulus facing down" means.
+  int flatDown = 0, sideways = 0;
+  for (const cam::StockVertex& v : m.vertices) {
+    const glm::vec3 n = glm::normalize(v.normal);
+    if (v.position.z > 19.0f && v.position.z < 21.0f && n.z < -0.99f)
+      flatDown++;
+    // And the holder's wall stays a wall: normals perpendicular to the axis.
+    const double r = std::hypot(v.position.x, v.position.y);
+    if (r > 6.5 && v.position.z > 25.0f && std::abs(n.z) < 0.01f)
+      sideways++;
+  }
+  INFO("flat-down " << flatDown << " sideways " << sideways);
+  CHECK(flatDown > 8);
+  CHECK(sideways > 8);
+
+  // Every normal is a unit vector — a smeared one used to come back short.
+  for (const cam::StockVertex& v : m.vertices)
+    CHECK_THAT(glm::length(v.normal), WithinAbs(1.0, 1e-4));
+
+  // A BALL nose still shades smoothly: the crease rule must not harden a
+  // sampled curve into facets.
+  cam::Tool ball = t;
+  ball.type = cam::ToolType::Ball;
+  const cam::StockMesh bm = cam::BuildToolMesh(ball);
+  int distinctTipNormals = 0;
+  float lastZ = -2.0f;
+  for (const cam::StockVertex& v : bm.vertices) {
+    if (v.position.z > 3.0f)
+      continue;
+    const float nz = glm::normalize(v.normal).z;
+    if (std::abs(nz - lastZ) > 0.02f) {
+      distinctTipNormals++;
+      lastZ = nz;
+    }
+  }
+  CHECK(distinctTipNormals > 4); // a curve, not one flat disc
+}
+
 TEST_CASE("cam stock mesh: merging keeps a machined block small", "[cam]") {
   // The reason the mesher merges at all. A machined 2.5D block is flats and
   // walls, so the triangle count must stay a small fraction of the cell

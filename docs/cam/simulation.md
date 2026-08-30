@@ -371,6 +371,22 @@ test and screenshot taken while building this was offscreen, which is why the
 geometry could be verified to 8 um and still look wrong on a real screen. The
 gate is therefore a windowed GUI test.
 
+### The tool glyph's shading (FIXED 2026-08-30)
+
+Reported from a laid-flat job (docs/cam/setup-frame.md): the holder "seems to
+have a fixed rotation against the camera". It was not the frame — the glyph is
+oriented correctly along the spindle. `Revolve` in `CamStockMesh.cpp` took a
+**central difference across every profile point** for its normals, which
+averages the two faces meeting at a corner into one. A tool profile has three
+hard corners (flute→shoulder, shoulder→holder, holder→cap), so the flat
+annular shoulder was shaded as a 45° cone: a lit facet that does not answer to
+the camera the way the rest of the glyph does. Normals are now per SEGMENT,
+blended across a joint only when the two segments agree to within a ~30°
+crease angle — so the tip's sampled curve stays round and the corners stay
+corners. Gated by `cam tool mesh: a flat shoulder is shaded flat`, which
+checks both halves: flat-down normals on the shoulder, and a ball nose that
+still shades as a curve rather than a disc.
+
 ### Still open
 
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and

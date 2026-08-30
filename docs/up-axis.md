@@ -100,8 +100,9 @@ Consequences worth stating plainly:
   table flips. (b) Saved CAM `safe_z` / stock margins were computed against
   Y-up world bodies and will mean something different. Both corpora are
   scratch projects; re-derive or accept, per Z6.
-- **CAM's bug disappears with no CAM-core change.** `BodiesInSetupFrame` at
-  `rotationA = 0` is an early-return identity (`CamToolpath.cpp:1117`), so
+- **CAM's bug disappears with no CAM-core change.** `BodiesInSetupFrame` on a
+  square setup is an early-return identity (`SetupIsSquare`; since v67 that
+  means an identity fixture frame AND `rotationA = 0` — docs/cam/setup-frame.md), so
   setup space (Z = spindle) and world space (Z = up) finally agree. Do NOT
   write the CAM-local frame workaround: it is exactly the code this deletes.
   The workaround that DID ship is GUI-side: the "Look down the spindle"

@@ -203,39 +203,63 @@ namespace {
 // One turn of a profile polyline (radius, z) about +Z. Normals come from the
 // profile's own 2D normal, so a ball nose reads as a sphere and a flat mill's
 // shoulder stays a hard edge.
+// The outward normal of one profile segment, in the (radius, z) plane.
+glm::dvec2 SegmentNormal(const glm::dvec2& from, const glm::dvec2& to) {
+  const glm::dvec2 t = to - from;
+  glm::dvec2 n(t.y, -t.x);
+  const double len = glm::length(n);
+  n = len > 1e-12 ? n / len : glm::dvec2(1.0, 0.0);
+  return n.x < 0.0 ? -n : n;
+}
+
 void Revolve(StockMesh& m, const std::vector<glm::dvec2>& profile,
              int segments) {
   if (profile.size() < 2)
     return;
   const double twoPi = 6.283185307179586;
-  const uint32_t base = static_cast<uint32_t>(m.vertices.size());
   const int rings = static_cast<int>(profile.size());
-  for (int k = 0; k < rings; k++) {
-    // The profile normal, pointing away from the axis.
-    glm::dvec2 tangent(0.0);
-    if (k == 0)
-      tangent = profile[1] - profile[0];
-    else if (k == rings - 1)
-      tangent = profile[k] - profile[k - 1];
-    else
-      tangent = profile[k + 1] - profile[k - 1];
-    glm::dvec2 n2(tangent.y, -tangent.x);
-    const double len = glm::length(n2);
-    n2 = len > 1e-12 ? n2 / len : glm::dvec2(1.0, 0.0);
-    if (n2.x < 0.0)
-      n2 = -n2;
+
+  // One normal per SEGMENT, not per profile point. The old form took a
+  // central difference across each point, which averages the two faces
+  // meeting there into one normal — fine on the tip's sampled curve, wrong
+  // at every hard corner. A tool profile has three: flute-to-shoulder,
+  // shoulder-to-holder and holder-to-cap. The flat shoulder came out shaded
+  // as a 45-degree cone, which reads as a lit facet that does not answer to
+  // the camera the way the rest of the glyph does.
+  //
+  // Points are shared (smooth) only where the two segments actually agree to
+  // within the crease angle, so the tip stays round and the corners stay
+  // corners.
+  constexpr double kCreaseCos = 0.86; // ~30 degrees
+  const auto emitRing = [&](const glm::dvec2& p, const glm::dvec2& n2) {
     for (int s = 0; s <= segments; s++) {
       const double a = twoPi * s / segments;
       const double c = std::cos(a), sn = std::sin(a);
-      m.vertices.push_back(
-          {glm::vec3(profile[k].x * c, profile[k].x * sn, profile[k].y),
-           glm::vec3(n2.x * c, n2.x * sn, n2.y)});
+      m.vertices.push_back({glm::vec3(p.x * c, p.x * sn, p.y),
+                            glm::vec3(n2.x * c, n2.x * sn, n2.y)});
     }
-  }
+  };
+
   const uint32_t stride = static_cast<uint32_t>(segments + 1);
   for (int k = 0; k + 1 < rings; k++) {
+    const glm::dvec2 nSeg = SegmentNormal(profile[k], profile[k + 1]);
+    // Blend with the neighbour across each end, but only across a soft joint.
+    glm::dvec2 nLo = nSeg, nHi = nSeg;
+    if (k > 0) {
+      const glm::dvec2 prev = SegmentNormal(profile[k - 1], profile[k]);
+      if (glm::dot(prev, nSeg) > kCreaseCos)
+        nLo = glm::normalize(prev + nSeg);
+    }
+    if (k + 2 < rings) {
+      const glm::dvec2 next = SegmentNormal(profile[k + 1], profile[k + 2]);
+      if (glm::dot(next, nSeg) > kCreaseCos)
+        nHi = glm::normalize(next + nSeg);
+    }
+    const uint32_t base = static_cast<uint32_t>(m.vertices.size());
+    emitRing(profile[k], nLo);
+    emitRing(profile[k + 1], nHi);
     for (int s = 0; s < segments; s++) {
-      const uint32_t a = base + static_cast<uint32_t>(k) * stride + s;
+      const uint32_t a = base + s;
       const uint32_t b = a + 1;
       const uint32_t c = a + stride;
       const uint32_t d = c + 1;
