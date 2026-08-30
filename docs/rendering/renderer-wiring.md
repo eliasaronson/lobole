@@ -11,7 +11,7 @@ sites across three files**, in duties that are each a hand-maintained list:
 
 | duty | sites | what a miss looks like |
 |---|---|---|
-| `Render` | **4** — windowed frame, windowed screenshot, offscreen frame, offscreen screenshot | invisible on screen, or only in screenshots |
+| `Render` | **3 blocks x 6 = 18** — the windowed frame, the windowed screenshot, the offscreen screenshot | invisible on screen, or only in screenshots |
 | `SetViewport` | **3** in `main.cpp` (two inits + resize) **+ 1** in `UI.cpp` | **drawn full-window at the wrong scale and offset** |
 | `UpdateCamera` | 2 | geometry frozen in space |
 | `SetClipPlanes` | 2 | does not section |
@@ -53,7 +53,27 @@ by deleting a line and watching it fail.
 That stops **this** list from growing a hole again. It does nothing for the
 other seven lists.
 
-## Step 2 — an ordered registry (planned, ~1 session)
+## Step 2 — an ordered registry (planned, ~half a session)
+
+**Measured before estimating, and it is cheaper than it looks.** All six scene
+renderers ALREADY have identical signatures for all five duties —
+`Render(VkCommandBuffer, uint32_t)`, `UpdateCamera(mat4, mat4)`,
+`SetClipPlanes(const ClipPlaneArray&)`, `SetViewport(int32_t, int32_t,
+uint32_t, uint32_t)`, `Shutdown()`. Only Sketch and Underlay lack
+`SetClipPlanes`, which the interface defaults to a no-op. So this is
+`: public SceneRenderer` plus `override`, with **no signature changes at
+all**.
+
+And all three `Render` blocks already list the same six in the same order —
+Mesh, Field, Stock, Outline, Underlay, Sketch — so one ordered vector
+reproduces every one of them exactly. There is no behavioural difference to
+reason about, which is the part that would have made this expensive.
+
+What collapses: ~94 wiring calls in `main.cpp` (18 `Render`, 18 `SetViewport`,
+18 `Initialize`, 18 `reset`, 12 `UpdateCamera`, 10 `SetClipPlanes`) become
+~15 loops. `MeshRenderer` keeps 15 calls nothing else has (shadow casters, AO
+and shadow-map rebinds, instance and asset management) and is untouched by
+this.
 
 Give the scene renderers one small interface and keep them in one ordered
 vector; every duty above becomes a loop instead of a list.
@@ -93,7 +113,7 @@ What it costs, honestly:
 must still register. It converts seven lists into one, which is most of the
 win, but the remaining one is still a list.
 
-## Step 3 — pass the frame state at `Render` time (planned)
+## Step 3 — pass the frame state at `Render` time (planned, ~half a session)
 
 The cure for the rest. Replace the sticky per-renderer state with an argument:
 
@@ -112,6 +132,10 @@ stale or unset viewport, because the data arrives with the call — and the four
 call sites already have all of it. Missing wiring stops being a silent visual
 defect and becomes a compile error.
 
+It also **retires the step-1 gate**: there is no list left to be missing from,
+so the conventions test that guards it should be deleted in the same change
+rather than left policing something that no longer exists.
+
 Combined with step 2 the whole per-frame contract is:
 
 ```cpp
@@ -121,7 +145,13 @@ for (SceneRenderer* r : g_Scene)
 
 Twenty sites become three: declare it, construct it, register it.
 
-**Do 2 and 3 as one piece.** Step 2 is most of the work toward step 3, and
+The one hole the refactor does not close by itself: the renderers are still
+constructed in TWO places (the offscreen path and the windowed path), so a new
+one could be registered in one and not the other. That has a one-line answer —
+assert the registry's size against the number constructed — and it is worth
+writing at the same time.
+
+**Do 2 and 3 as one piece — about a session for both.** Step 2 is most of the work toward step 3, and
 landing 2 alone leaves the sticky state in place with a registry pointed at
 it — the worst of both, since the gate from step 1 would then be checking a
 list that no longer exists.
