@@ -14,7 +14,7 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightDir;
     vec4 lightColor;
     vec4 ambientColor;
-    vec4 params;      // x = prefilter mip count
+    vec4 params;      // x = prefilter mips, y = ray far, z = AO, w = backdrop
 } ubo;
 
 // Full-resolution source HDRI (the prefilter chain's base mip is only 128x64,
@@ -32,7 +32,31 @@ vec2 dirToUV(vec3 d) {
     return vec2(u, v);
 }
 
+// World up, matching conv::kWorldUp (core/Conventions.h).
+const vec3 kWorldUp = vec3(0.0, 0.0, 1.0);
+
+// The studio backdrop (params.w != 0): what the camera sees where it sees no
+// geometry. The HDRI stays the light source and stays in every reflection —
+// it is simply not the picture's background any more. A 1024x512 photograph
+// stretched across the frame is a smear, and a part standing in a photograph
+// of a room has no scale relationship with it; a product still is shot
+// against a sweep for exactly these two reasons.
+//
+// Vertical gradient in WORLD up, so the horizon sits where the model's floor
+// is rather than sliding with the camera: dark at the base, opening out
+// above, which is what gives a sweep its depth.
+vec3 studioBackdrop(vec3 dir) {
+    const vec3 kFloor = vec3(0.055, 0.057, 0.062);
+    const vec3 kHorizon = vec3(0.20, 0.21, 0.23);
+    const vec3 kSky = vec3(0.52, 0.54, 0.58);
+    float h = clamp(dot(normalize(dir), kWorldUp), -1.0, 1.0);
+    return h < 0.0 ? mix(kHorizon, kFloor, pow(-h, 0.35))
+                   : mix(kHorizon, kSky, pow(h, 0.55));
+}
+
 void main() {
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
-    payload.radiance = textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
+    payload.radiance = ubo.params.w != 0.0
+        ? studioBackdrop(dir)
+        : textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
 }

@@ -882,8 +882,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "camera math). Needs a renderer.",
      "focus, path, views"},
     {"render_still",
-     "Path-traced still to {path} (ray tracing; needs GPU support).",
-     "ground, height, path, samples, seed, width"},
+     "Path-traced still to {path} (ray tracing; needs GPU support). "
+     "`backdrop`: studio (a neutral sweep, the default) or environment (the "
+     "HDRI itself).",
+     "backdrop, ground, height, path, samples, seed, width"},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
      "shadow_map, shadows, ssao"},
@@ -1276,9 +1278,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     uint32_t seed = p.value("seed", 1u);
     std::string path = p.value("path", std::string("render.png"));
     bool ground = p.value("ground", true); // shadow-catcher plane
+    // "studio" (default) shows a neutral sweep; "environment" shows the HDRI
+    // itself, which is what it was before there was a choice.
+    const std::string backdrop = p.value("backdrop", std::string("studio"));
+    if (backdrop != "studio" && backdrop != "environment") {
+      throw std::runtime_error("unknown backdrop: " + backdrop +
+                               "; backdrops: studio, environment");
+    }
     std::string error, warning;
-    bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
-                                      ground, &error, &warning);
+    bool ok =
+        ui::RenderStillBlocking(state, width, height, samples, path, seed,
+                                ground, &error, &warning, backdrop == "studio");
     json result = {{"ok", ok},         {"path", path},       {"width", width},
                    {"height", height}, {"samples", samples}, {"error", error}};
     // The postcondition a screenshot already carries: saying "ok" about a

@@ -24,7 +24,7 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightDir;
     vec4 lightColor;
     vec4 ambientColor;
-    vec4 params;      // x = prefilter mips, y = ray far, z = AO radius
+    vec4 params;      // x = prefilter mips, y = ray far, z = AO, w = backdrop
 } ubo;
 
 // Per-body vertex/index data reached by device address. std430 float/uint
@@ -87,6 +87,21 @@ vec2 dirToUV(vec3 d) {
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2(u, v);
+}
+
+// World up, matching conv::kWorldUp (core/Conventions.h).
+const vec3 kWorldUp = vec3(0.0, 0.0, 1.0);
+
+// The studio backdrop, identical to miss.rmiss — the shadow catcher has to
+// show the SAME surface the camera sees past it, or the shadow lands on one
+// backdrop and the frame shows another.
+vec3 studioBackdrop(vec3 dir) {
+    const vec3 kFloor = vec3(0.055, 0.057, 0.062);
+    const vec3 kHorizon = vec3(0.20, 0.21, 0.23);
+    const vec3 kSky = vec3(0.52, 0.54, 0.58);
+    float h = clamp(dot(normalize(dir), kWorldUp), -1.0, 1.0);
+    return h < 0.0 ? mix(kHorizon, kFloor, pow(-h, 0.35))
+                   : mix(kHorizon, kSky, pow(h, 0.55));
 }
 
 uint nextRand(inout uint s) {
@@ -189,7 +204,11 @@ void main() {
     // the backdrop photographic while giving bodies something to sit on. ----
     if ((g.flags & kFlagShadowCatcher) != 0u) {
         vec3 dir = normalize(gl_WorldRayDirectionEXT);
-        vec3 env = textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
+        // Whatever the camera would have seen through this point, so the
+        // plane is invisible except for what falls on it.
+        vec3 env = ubo.params.w != 0.0
+            ? studioBackdrop(dir)
+            : textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
         vec3 Lc = normalize(-ubo.lightDir.xyz);
         vec3 Lcs = coneSample(Lc, kSunCos, payload.rngState);
         float sun = traceOcclusion(worldPos + N * 0.001, Lcs, ubo.params.y) ? 0.0 : 1.0;

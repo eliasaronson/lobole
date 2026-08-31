@@ -743,12 +743,14 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   // Match the raster primary key light (conv::kKeyLightDir, toward the
   // light); store the travel direction (negated) so the shader recovers the
   // toward-light vector as -lightDir.
-  glm::vec3 toLight = conv::kKeyLightDir;
+  glm::vec3 toLight = glm::length(desc.keyLightDir) > 1e-6f
+                          ? glm::normalize(desc.keyLightDir)
+                          : conv::kKeyLightDir;
   u.lightDir = glm::vec4(-toLight, 1.8f);
   u.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f);
   u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);
   u.params = glm::vec4(static_cast<float>(desc.prefilterMips), desc.rayFar,
-                       desc.aoRadius, 0);
+                       desc.aoRadius, desc.studioBackdrop ? 1.0f : 0.0f);
 
   const VkMemoryPropertyFlags hostVisible =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |

@@ -75,6 +75,13 @@ struct RTStillDesc {
   // 3 m dock reached 2 mm. MakeStillDesc derives them from the scene.
   float rayFar = 10000.0f;
   float aoRadius = 2.0f;
+  // A neutral sweep behind the model instead of the HDRI photograph. The
+  // HDRI still lights it and still fills its reflections — it just stops
+  // being the background.
+  bool studioBackdrop = true;
+  // TOWARD the still's key light. Zero = use the shared rig
+  // (conv::kKeyLightDir), which is what the viewport draws with.
+  glm::vec3 keyLightDir{0.0f};
   uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
 };
 

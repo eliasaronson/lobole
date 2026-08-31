@@ -90,7 +90,30 @@ The `RayTracingRenderer` scaffold is ~40% real:
     reflections (roughness < 0.15) sample it instead of the 128×64 prefilter
     base — crisp chrome, sharper background. (The bundled HDRI is 1k, which
     still limits background sharpness at narrow FOVs; swapping in a 4k HDRI
-    would sharpen it further with no code change.)
+    would sharpen it further with no code change. Since the studio backdrop
+    below, that only matters when someone asks for the environment ITSELF as
+    the background.)
+  - **Studio backdrop (default, 2026-08-31)**: the camera sees a neutral
+    vertical sweep where it sees no geometry; the HDRI keeps lighting the
+    model and keeps filling its reflections. It is simply no longer the
+    picture. Two reasons, both visible in the first real render anyone did —
+    the dock, at 1024 samples: a 1024×512 photograph stretched across a
+    1280×720 frame is a smear, and a six-metre dock standing in a photograph
+    of somebody's kitchen has no scale relationship with it. The shadow
+    catcher shows the same sweep, so the two cannot disagree. `backdrop`:
+    `studio` | `environment` on `render_still`, "Studio backdrop" in the
+    modal; an unknown value is REFUSED, naming both.
+  - **The still is lit for the picture (2026-08-31)**: its key light is
+    placed 40° to the camera's left and 45° up, derived from the camera so it
+    stays off-axis from any viewpoint. The shared rig (`conv::kKeyLightDir`)
+    sits **18.7° off the default view direction** — a headlamp. It flattens
+    the form, and it throws the shadow directly behind the model where the
+    model hides it, which is why "Ground shadows" looked like it did nothing
+    (it was working; the umbra was behind the box). The viewport can live
+    with that because outlines and SSAO do its shape definition; a path
+    traced still has neither. This is the one place the still deliberately
+    departs from the raster rig, and the reason is that they are for
+    different things: the viewport is lit for working, a still for looking.
 
 ## Milestones
 

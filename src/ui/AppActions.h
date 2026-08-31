@@ -432,7 +432,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
-                         std::string* warning = nullptr);
+                         std::string* warning = nullptr,
+                         bool studioBackdrop = true);
 
 // Advances an active AppState::renderJob by one sample batch per call (the
 // non-blocking counterpart of RenderStillBlocking). Call once per UI frame on

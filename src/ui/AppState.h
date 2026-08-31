@@ -590,6 +590,9 @@ struct RenderJob {
   uint32_t done = 0; // samples traced so far
   uint32_t seed = 1;
   bool groundPlane = true; // shadow-catcher plane under the scene
+  // A neutral sweep behind the model rather than the HDRI photograph. The
+  // HDRI still lights the model and still fills its reflections.
+  bool studioBackdrop = true;
   std::string outPath;
   // Result (valid once !active after having been started)
   bool finished = false; // a render completed (success or failure)

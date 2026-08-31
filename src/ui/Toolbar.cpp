@@ -43,6 +43,7 @@ void DrawRenderModal(AppState& state) {
   static int resIdx = 0;
   static int samples = 128;
   static bool ground = true;
+  static bool studio = true;
 
   ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Render Still", nullptr,
@@ -92,6 +93,12 @@ void DrawRenderModal(AppState& state) {
     ImGui::Checkbox("Ground shadows", &ground);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Catch soft shadows on an invisible floor plane");
+    ImGui::Checkbox("Studio backdrop", &studio);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("A neutral sweep behind the model. Off shows the "
+                        "environment photograph itself, which is a 1k HDRI "
+                        "and reads as a blur at this size.");
+    }
 
     // What the ray tracer will actually be given: a part's bodies, or — on an
     // assembly tab, where `document` is null — its visible occurrences. The
@@ -115,6 +122,7 @@ void DrawRenderModal(AppState& state) {
       job.totalSamples = static_cast<uint32_t>(samples);
       job.seed = 1;
       job.groundPlane = ground;
+      job.studioBackdrop = studio;
       job.outPath = "render.png";
     }
     ImGui::EndDisabled();

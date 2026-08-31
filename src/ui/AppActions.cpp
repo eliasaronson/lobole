@@ -4139,8 +4139,9 @@ bool StillFramesGeometry(const RTStillDesc& desc, const glm::vec3& min,
 }
 
 RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
-                          uint32_t seed) {
+                          uint32_t seed, bool studioBackdrop) {
   RTStillDesc desc;
+  desc.studioBackdrop = studioBackdrop;
   desc.width = width;
   desc.height = height;
   desc.seed = seed;
@@ -4177,6 +4178,36 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
              desc.rayFar, desc.aoRadius, diag,
              glm::length(desc.cameraPos - centre));
   }
+  // The still's key light is placed OFF the camera axis. The shared rig
+  // (conv::kKeyLightDir) sits 18.7 degrees from the default view direction —
+  // a headlamp: it flattens the form, and it throws the shadow directly
+  // behind the model where the model hides it, so "Ground shadows" looked
+  // like it did nothing. The viewport can live with that (it has outlines
+  // and SSAO doing the shape definition); a path-traced still has neither
+  // and must be LIT for the picture.
+  //
+  // 40 degrees to the camera's left and 45 up, derived from the camera so it
+  // stays off-axis from any viewpoint. Left because the shadow then falls to
+  // the right, and the eye reads a form lit from the left as convex.
+  if (state.camera) {
+    const glm::vec3 toCamera =
+        glm::normalize(state.camera->GetPosition() - state.camera->GetTarget());
+    const glm::vec3 up = conv::kWorldUpF;
+    glm::vec3 right = glm::cross(toCamera, up);
+    // Looking straight down the up axis leaves no horizontal to swing about;
+    // any perpendicular will do there.
+    if (glm::length(right) < 1e-4f)
+      right = glm::cross(toCamera, glm::vec3(1.0f, 0.0f, 0.0f));
+    right = glm::normalize(right);
+    const float swing = glm::radians(40.0f);
+    const float lift = glm::radians(45.0f);
+    const glm::vec3 flat =
+        glm::normalize(toCamera - glm::dot(toCamera, up) * up);
+    const glm::vec3 swung =
+        std::cos(swing) * flat - std::sin(swing) * right; // toward its left
+    desc.keyLightDir =
+        glm::normalize(std::cos(lift) * swung + std::sin(lift) * up);
+  }
   if (state.ibl) {
     desc.environment = state.ibl->EnvironmentView();
     desc.irradiance = state.ibl->IrradianceView();
@@ -4192,7 +4223,7 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
-                         std::string* warning) {
+                         std::string* warning, bool studioBackdrop) {
   auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -4205,7 +4236,7 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   if (samples == 0)
     samples = 1;
 
-  RTStillDesc desc = MakeStillDesc(state, width, height, seed);
+  RTStillDesc desc = MakeStillDesc(state, width, height, seed, studioBackdrop);
   if (warning && state.rtSceneValid &&
       !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
     *warning = "the camera framed no geometry — the still is the backdrop "
@@ -4267,7 +4298,8 @@ void PumpRenderJob(AppState& state) {
       finish(false, "no geometry to render");
       return;
     }
-    RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed);
+    RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed,
+                                     job.studioBackdrop);
     // Saved is not the same as good: a still whose scene is entirely outside
     // the frustum is a valid PNG of the backdrop, and the modal used to
     // report that as a plain success.
