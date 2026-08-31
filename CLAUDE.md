@@ -185,8 +185,10 @@ git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/work
 ```
 `worktree-build.sh` handles the gotcha: a fresh worktree has EMPTY submodules
 (cmake fails without `git submodule update --init`). ~75s to a working binary
-(ccache-warm). Each worktree drives its own scratch port. Integrate SERIALLY:
-merge one branch to main, run suites, then the next.
+(ccache-warm). It then **picks and prints a scratch port** for that worktree
+(`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
+instances, and never 8799), so you no longer hold one in your head. Integrate
+SERIALLY: merge one branch to main, run suites, then the next.
 
 ## Crash debugging
 

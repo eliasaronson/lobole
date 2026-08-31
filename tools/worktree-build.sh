@@ -9,8 +9,11 @@
 #   - The GPU GUI suite self-serializes (tools/gui-tests-xvfb.sh flock), so
 #     concurrent suites across worktrees don't flake.
 #   - Ports: the human's dev-watch owns 8799 (the reviewed build); each
-#     worktree drives its own render instance on a SCRATCH port
-#     (tools/headless-preview.sh <port>) — pass a distinct one per worktree.
+#     worktree drives its own render instance on a SCRATCH port, and this
+#     script PICKS one and prints the command. It used to say "pass a distinct
+#     one per worktree" — a value a human had to hold, in a repo that
+#     everywhere else refuses to let one (tools/scratch_port.py asks the
+#     kernel and the announced instances, and never hands out 8799).
 #   - Integration is SERIAL: each worktree branch merges to main one at a time
 #     with full suites between merges. Parallel *implementation*, sequential
 #     *integration*. Only worth it when the work is genuinely file-disjoint
@@ -46,5 +49,11 @@ fi
 echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build (ccache shared)"
 nix-shell "$ROOT/shell.nix" --run \
   "cmake -S '$ROOT' -B '$ROOT/build' -G Ninja >/dev/null && ninja -C '$ROOT/build' $TARGETS"
-echo "worktree-build: done. Drive it with a SCRATCH port:"
-echo "  tools/headless-preview.sh <port>     # not 8799 (that's main's dev-watch)"
+echo "worktree-build: done."
+if PORT="$("$ROOT/tools/scratch_port.py")"; then
+  echo "  scratch port for this worktree: $PORT   (8799 is main's dev-watch)"
+  echo "  tools/headless-preview.sh $PORT"
+else
+  echo "  no scratch port free in 8800-8899 — pick one yourself, but not 8799"
+fi
+echo "  git worktree remove '$ROOT'          # when this branch is merged"
