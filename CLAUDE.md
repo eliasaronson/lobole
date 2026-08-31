@@ -63,14 +63,22 @@ after the sharder re-runs the whole GUI suite serially for 6 minutes:**
 
 | what | command | cost |
 |---|---|---|
-| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~85 s |
+| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~79 s |
+| **inner loop** | `tools/test-fast.sh` | **~10 s** (908 of 925) |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~100 s |
-| the python `gui` ones | `ctest -L gui -E gui_smoke -j1` | ~110 s |
+| the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
-unsharded — ~365 s against ~100 s. Exclude it (`-E gui_smoke`) whenever the
-sharder has already run, which is every time. Full verification is then
-~5 min, not ~10.
+unsharded — ~365 s against ~100 s. It keeps the `gui` label so the headless
+run excludes it; the four python ones also carry **`pygui`**, which is why the
+row above asks for a label instead of excluding `gui_smoke` by name. Full
+verification is ~5 min, not ~10.
+
+**Tags are ctest labels** (`ADD_TAGS_AS_LABELS`): `ctest -L cam`, `-L sketch`,
+`-L solver` all work. `[slow]` is the one with a rule attached — 17 tests,
+311 s of CPU between them, and `test-fast.sh` is exactly `-LE 'gui|slow'`. Tag
+a new heavy test `[slow]` where you write it; a by-name list in `tools/` used
+to do this and drifted until the "8 s" loop took 49 s.
 
 The python `gui` three went from ~46 s to ~110 s on 2026-08-25, and the cause
 is worth knowing rather than treating as drift: `remote_smoke` had silently
@@ -79,9 +87,9 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~85 s for 916 tests, of which the SIMP gate alone is ~90 s of CPU and the
-  next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
-  (11 s)**; full suite before committing. Each `nix-shell` costs
+  — ~79 s for 925 tests, of which the SIMP gate alone is 77 s of CPU and four
+  CAM clearing cases 138 s between them. **Inner loop: `tools/test-fast.sh`
+  (~10 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 241 tests in **~100 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest

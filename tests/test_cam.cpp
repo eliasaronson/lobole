@@ -1216,7 +1216,8 @@ TEST_CASE("cam: an opening too narrow to cut out says which, and how narrow",
   CHECK(tp.error.find("depths") == std::string::npos);
 }
 
-TEST_CASE("cam: an island in the picked floor is machined around", "[cam]") {
+TEST_CASE("cam: an island in the picked floor is machined around",
+          "[cam][slow]") {
   auto doc = PocketDoc(/*island=*/true);
   const cam::Setup setup = BasicSetup();
   const ElementRef floor = UpFaceAt(*doc, 12.0);
@@ -2315,7 +2316,7 @@ TEST_CASE("cam: a cone is refused a floor to clear", "[cam]") {
   }
 }
 
-TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
+TEST_CASE("cam: clearing the outline passes over holes", "[cam][slow]") {
   // A hole NARROWER than the cutter: 3 mm against a 6 mm end mill. Nothing
   // stands in it and the tool could never enter it, so crossing is harmless —
   // and going AROUND is pure waste that leaves an uncut sliver wherever the
@@ -2344,7 +2345,8 @@ TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
   CHECK(b.CutLength() < a.CutLength());
 }
 
-TEST_CASE("cam: an opening the cutter fits into is still an island", "[cam]") {
+TEST_CASE("cam: an opening the cutter fits into is still an island",
+          "[cam][slow]") {
   // `useOutline` crosses an opening because going AROUND one leaves a sliver
   // the tool can never come back to. That reasoning only holds for an opening
   // the tool cannot enter. A BIG opening is one the job removes anyway — the
@@ -2384,7 +2386,8 @@ TEST_CASE("cam: an opening the cutter fits into is still an island", "[cam]") {
   CHECK_THAT(big.CutLength(), WithinRel(crossed.CutLength(), 1e-9));
 }
 
-TEST_CASE("cam: clearing the outline still goes around material", "[cam]") {
+TEST_CASE("cam: clearing the outline still goes around material",
+          "[cam][slow]") {
   // The hazard the option must NOT open. A boss standing up from the floor
   // has the same kind of inner wire as a hole and the opposite meaning:
   // driving over one is a full-width cut at full depth into material nobody
@@ -2414,7 +2417,8 @@ TEST_CASE("cam: clearing the outline still goes around material", "[cam]") {
   CHECK_THAT(b.CutLength(), WithinRel(a.CutLength(), 1e-9));
 }
 
-TEST_CASE("cam: a floor with both keeps the boss and drops the hole", "[cam]") {
+TEST_CASE("cam: a floor with both keeps the boss and drops the hole",
+          "[cam][slow]") {
   // Both kinds of inner wire at once: the case that proves the test is on the
   // WIRE and not on the count.
   auto doc = FlangeDoc(/*holeDia=*/3.0, /*boss=*/true);
@@ -2648,7 +2652,7 @@ TEST_CASE("cam verify: a job with tabs is SAFE without being COMPLETE",
   CHECK(v.leftoverRegions >= 3); // in several small places, as tabs are
 }
 
-TEST_CASE("cam: a wall is not a gouge, whatever the grid", "[cam]") {
+TEST_CASE("cam: a wall is not a gouge, whatever the grid", "[cam][slow]") {
   // A cell centre landing on the corner of an island is inside the island for
   // the model and inside the cut for the tool — both boundary tests are
   // inclusive — so a clean job reported the island's whole height as a gouge.
@@ -2823,7 +2827,7 @@ TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
 }
 
 TEST_CASE("cam: the vendored adaptive library throws on some vertex layouts",
-          "[cam]") {
+          "[cam][slow]") {
   // Frozen because it is the reason the fallback below exists. Adaptive2d
   // throws std::out_of_range from its finishing-pass z-tagging (map::at) for
   // particular vertex layouts — not particular SHAPES: a 30 mm circle clears
@@ -3409,7 +3413,8 @@ TEST_CASE("cam verify: an unmodelled edge break says why it gouges", "[cam]") {
     CHECK(line.text.find("not in the MODEL") == std::string::npos);
 }
 
-TEST_CASE("cam: one operation at a time cuts what all of them cut", "[cam]") {
+TEST_CASE("cam: one operation at a time cuts what all of them cut",
+          "[cam][slow]") {
   // The panel regenerates ONLY the operation a user just touched — adding,
   // deleting or editing one no longer re-cuts the whole job, which used to
   // cost the slowest operation in it on every edit (one adaptive pocket

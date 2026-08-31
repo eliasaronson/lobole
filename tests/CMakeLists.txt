@@ -102,7 +102,15 @@ include(Catch)
 # Discovered cases are individually registered with ctest, so the suite can
 # run parallel (`ctest -j$(nproc)`): every case uses distinct temp filenames
 # and the golden corpus is read-only.
-catch_discover_tests(designer_tests)
+#
+# ADD_TAGS_AS_LABELS turns each case's Catch2 tags into ctest LABELS, which is
+# what makes `[slow]` self-maintaining: a heavy test opts itself out of the
+# inner loop where it is WRITTEN, by whoever knows it is heavy. The previous
+# arrangement was a by-name regex in tools/test-fast.sh, which could not know
+# about a test added here — it named only the topology/FEM gates and never
+# learned about the CAM ones, so the "8 s" inner loop had quietly become 49 s.
+# It also buys `ctest -L cam`, `-L sketch` and friends for free.
+catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS)
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
 # so the packaged binary can be identified on a display-less machine.
@@ -128,7 +136,7 @@ if(TARGET fem_gpu)
     # there is no usable compute device, but without this ctest reports those
     # skips as FAILURES — which is what a GPU-less machine (a container, a CI
     # runner) sees.
-    catch_discover_tests(femgpu_tests
+    catch_discover_tests(femgpu_tests ADD_TAGS_AS_LABELS
                          PROPERTIES RESOURCE_LOCK gpu SKIP_RETURN_CODE 4)
 endif()
 
@@ -139,6 +147,12 @@ endif()
 # passing suite it is. Set DESIGNER_NO_XVFB=1 to watch them run for real.
 set(XVFB_EXEC ${CMAKE_CURRENT_SOURCE_DIR}/../tools/xvfb-exec.sh)
 
+# `gui_smoke` is the SAME suite tools/gui-tests-xvfb.sh shards, run serially
+# and unsharded: ~365 s against ~100 s. It keeps the `gui` label so the
+# headless run (`ctest -LE gui`) still excludes it — but the four python tests
+# below also carry `pygui`, so "the python gui ones" is `ctest -L pygui`
+# rather than `ctest -L gui -E gui_smoke`. Excluding it by NAME every time was
+# knowledge where a label would do (docs/capability-review-2026-08-31.md T3).
 add_test(NAME gui_smoke COMMAND ${XVFB_EXEC} $<TARGET_FILE:designer> --gui-tests)
 set_tests_properties(gui_smoke PROPERTIES LABELS gui TIMEOUT 600)
 
@@ -146,7 +160,7 @@ set_tests_properties(gui_smoke PROPERTIES LABELS gui TIMEOUT 600)
 add_test(NAME remote_smoke
          COMMAND ${XVFB_EXEC} python3 ${CMAKE_CURRENT_SOURCE_DIR}/remote_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(remote_smoke PROPERTIES LABELS gui TIMEOUT 600)
+set_tests_properties(remote_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 600)
 
 # Screen-space rendering invariants on a real GPU: ambient occlusion must land
 # on the geometry that causes it. The renderers have no other pixel-level
@@ -156,7 +170,7 @@ add_test(NAME render_ao_smoke
          COMMAND ${XVFB_EXEC} python3
                  ${CMAKE_CURRENT_SOURCE_DIR}/render_ao_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(render_ao_smoke PROPERTIES LABELS gui TIMEOUT 300
+set_tests_properties(render_ao_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
 # Drives designer --headless --remote: no window, GPU, or display server
@@ -164,7 +178,7 @@ set_tests_properties(render_ao_smoke PROPERTIES LABELS gui TIMEOUT 300
 add_test(NAME headless_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/headless_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
+set_tests_properties(headless_smoke PROPERTIES LABELS slow TIMEOUT 300)
 
 # Drives designer --offscreen --remote: a real Vulkan renderer with NO window
 # and NO display server (the test strips DISPLAY to prove it). Needs an ICD,
@@ -174,7 +188,7 @@ set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 add_test(NAME offscreen_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/offscreen_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(offscreen_smoke PROPERTIES TIMEOUT 300
+set_tests_properties(offscreen_smoke PROPERTIES LABELS slow TIMEOUT 300
                      SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
 # The MCP server's autostart lifecycle: nothing running → it spawns
@@ -368,7 +382,7 @@ add_test(NAME render_still_reach_smoke
          COMMAND python3
                  ${CMAKE_CURRENT_SOURCE_DIR}/render_still_reach_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(render_still_reach_smoke PROPERTIES LABELS gui
+set_tests_properties(render_still_reach_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 add_test(NAME visual_export_smoke
@@ -475,5 +489,5 @@ set_tests_properties(packaging_smoke PROPERTIES TIMEOUT 60)
 add_test(NAME mcp_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(mcp_smoke PROPERTIES LABELS gui TIMEOUT 600
+set_tests_properties(mcp_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 600
                      SKIP_RETURN_CODE 77)

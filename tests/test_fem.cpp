@@ -451,7 +451,7 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
 }
 
 TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
-          "[fem][solver]") {
+          "[fem][solver][slow]") {
   // A pressurized thick tube — the one benchmark with CURVED geometry, so it
   // validates the second-order (tet10) midside projection onto curved faces.
   // a=10, b=20 mm, internal p=10 MPa, along z, length H. Both ends fully

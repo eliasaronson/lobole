@@ -90,7 +90,7 @@ void MaybeDumpStl(const fem::FemMesh& m, const std::vector<double>& density,
 #include <Eigen/SparseCore>
 
 TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
-          "[topopt][gate]") {
+          "[topopt][gate][slow]") {
   // 100 x 40 x 40 mm, 20 x 8 x 8 hexes -> 7680 tet10 (<= the ~8k gate budget).
   // A thin-but-well-resolved cantilever domain (fine in length x height, thin
   // in depth) — the classic quasi-2D setup that forms a crisp truss at a low
@@ -405,7 +405,7 @@ TEST_CASE("TopologyOptimize drives an injected linear solver (the GPU seam)",
 #ifdef HAVE_NETGEN
 
 TEST_CASE("Topo: SIMP cantilever through the real Netgen mesh path",
-          "[topopt][mesh]") {
+          "[topopt][mesh][slow]") {
   // The same problem, meshed by Netgen — catches unstructured-mesh bugs
   // (non-uniform element volumes in the OC bisection, irregular filter
   // neighborhoods). Looser tolerances; the structured case is the gate.
@@ -480,7 +480,7 @@ Document MakeTopoDoc() {
 } // namespace
 
 TEST_CASE("RunTopology optimizes the loaded body end to end",
-          "[topopt][mesh]") {
+          "[topopt][mesh][slow]") {
   Document doc = MakeTopoDoc();
   fem::Study& s = doc.GetStudies()[0];
   fem::StudyRuntime rt;
@@ -532,7 +532,7 @@ TEST_CASE("RunTopology rejects a multi-body study (v1 is single-body)",
 }
 
 TEST_CASE("Topology result persists and reloads through the directory format",
-          "[topopt][mesh][serialize]") {
+          "[topopt][mesh][serialize][slow]") {
   namespace fs = std::filesystem;
   Document doc = MakeTopoDoc();
   const uint64_t studyId = doc.GetStudies()[0].id;

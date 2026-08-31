@@ -200,7 +200,7 @@ TEST_CASE("FaceCorners refuses an ambiguous edge pair", "[kernel]") {
   }
 }
 
-TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel]") {
+TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel][slow]") {
   // The regression this exists for: FaceSnapPoints replaced three calls that
   // each mapped every edge of the WHOLE BODY — one of them once PER EDGE,
   // from inside the caller's loop over a face's edges. The mate tool resolves

@@ -1029,7 +1029,7 @@ TEST_CASE("femgpu probe: penalty ramp on a slender part", "[.][fp32floor]") {
 }
 
 TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
-          "[femgpu][cg]") {
+          "[femgpu][cg][slow]") {
   // The GPU1 verification: the same small cantilever optimized twice — the
   // built-in Eigen CG-IC vs the injected GPU solver — must land on the same
   // optimum (fp32 + Jacobi vs fp64 + IC changes the path negligibly since
