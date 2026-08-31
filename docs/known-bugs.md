@@ -250,47 +250,29 @@ Both found by the verifier on a real 2-sided job, both reproducible, neither
 fixed yet. `tools/` has the job script that reproduces them:
 `front_wall - Front.ngc` / `- Back.ngc`.
 
-### A rapid plunges to the previous depth at the RAMP ENTRY
+### A rapid plunged to the previous depth at the RAMP ENTRY (FIXED 2026-08-31)
 
-**The dangerous one.** Between depth passes a clearing operation retracts to
-safe Z, repositions, and then `G0` straight down to the *previous* pass's
-depth before ramping on. At the ramp's ENTRY point the previous pass had only
-just started descending — it was at the top of its ramp, not at depth — so
-that rapid goes through however much material the ramp had not yet removed.
-On the W170 flange recess it is 4 mm of rapid into solid MDF.
+Between depth passes a clearing operation retracted to safe Z, repositioned,
+and then `G0` straight down to the height it was about to start cutting at —
+on the reasoning, written at the ramp entry, that that height "is either the
+stock top or the depth the previous pass already cut here, so it is air".
 
-Reproduce: any pocket deep enough for two passes.
-`cam_verify` reports `rapids_through_stock` 1 per extra pass, and setting the
-stepdown so the pocket takes ONE pass takes it to 0. Front setup, op 44,
-first bad line 1580 of the posted file:
+True of a closed contour, which returns to its own entry at full depth. False
+of a POCKET, whose entry sits mid-spiral where the previous pass was still
+ramping, and false of ANY pass told to start below the stock top — a finishing
+skim after a roughing pass is exactly that. On the front_wall job it was 3 mm
+of G0 into MDF; in the golden program it was `G0 Z12` with the stock top at
+21.
 
-    G0 Z2                     <- retract
-    G0 X139.1856 Y654.7687    <- reposition to the ramp entry
-    G0 Z-4                    <- …and drop to the last depth. Nothing cut here.
-    G1 X142.844 ... Z-4.1922  <- the ramp only reaches -4 further along
+Fixed by `RapidFloor`: a rapid never goes below the STOCK TOP, above which
+there can be no material. Everything under that is left to the ramp, whose
+moves are feeds — which also keeps the rule a profile depends on, that it
+never plunges (a non-centre-cutting end mill rubs). The golden programs show
+the change as `G0 Z12` becoming a fed `G1 ... Z11.92 F200`.
 
-The code states the assumption it breaks, at the contour ramp entry
-(`CamToolpath.cpp`, "Rapid over, then down to the height we enter from: that
-is either the stock top or the depth the previous pass already cut here, so it
-is air"). For a CLOSED CONTOUR that holds — the lap returns to its own entry
-at full depth. For a POCKET it does not: the entry sits mid-spiral and the
-pass that was supposed to clear it was still ramping when it went past.
-
-Three ways to fix it, cheapest last:
-
-1. **Enter where the previous pass FINISHED.** The contour path already tries
-   this ("when the previous pass handed us its finishing point this is the
-   SAME point it retracted at"); the clearing path does not carry that point
-   through. Best result, no wasted motion, and it makes the comment true.
-2. **Rapid to the stock top and FEED down to the entry height.** Always safe,
-   costs one plunge-feed per pass, and on a deep pocket that is real time.
-3. **Rapid to `entry + clearance` and feed the last millimetre** — the
-   industry norm, and still wrong here, because the entry can have the full
-   stepdown of material above it rather than a millimetre.
-
-The gate either way: `cam_verify` must report `rapids_through_stock == 0` on a
-pocket deep enough for two passes. It reports 1 per extra pass today. It is
-NOT the `safeZ` derivation, which is correct.
+Gated by `cam: a pass never rapids to a depth nothing cleared`, which checks
+`rapids_through_stock == 0` for both shapes: a pocket deep enough for two
+passes, and a skim starting below the stock top.
 
 ### An outline contour dips into the part over a hole running beneath the face
 

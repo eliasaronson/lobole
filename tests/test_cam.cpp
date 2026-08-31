@@ -139,10 +139,16 @@ TEST_CASE("cam: an outside profile runs one tool radius clear of the part",
   // Entry RAMPS rather than plunging: a vertical plunge with a
   // non-centre-cutting end mill rubs instead of cutting. So the tool rapids
   // down to the stock top (air), then descends along the path.
+  //
+  // 21, not 20. This asserted 20 and called it the stock top; 20 is the
+  // operation's topZ, and the stock top is a millimetre above it (the block
+  // is 20 tall and the stock carries 1 mm over it). The rapid stops at the
+  // real stock top now — the lowest height that cannot hold material — and
+  // everything below is fed.
   CHECK(tp.moves[1].kind == cam::Move::Kind::Rapid);
-  CHECK_THAT(tp.moves[1].to.z, WithinAbs(20.0, 1e-9)); // stock top, not depth
+  CHECK_THAT(tp.moves[1].to.z, WithinAbs(21.0, 1e-9)); // stock top, not depth
   CHECK(tp.moves[2].kind == cam::Move::Kind::Cut);
-  CHECK(tp.moves[2].to.z < 20.0); // descending...
+  CHECK(tp.moves[2].to.z < 21.0); // descending...
   CHECK(tp.moves[2].to.z > 0.0);  // ...but not all the way in one move
   CHECK_THAT(tp.moves[2].feed, WithinRel(200.0, 1e-9)); // at plunge feed
   // No vertical plunge anywhere in a profile.
@@ -2129,6 +2135,56 @@ bool CutsOver(const cam::Toolpath& tp, double x, double y, double r) {
 }
 
 } // namespace
+
+TEST_CASE("cam: a pass never rapids to a depth nothing cleared", "[cam]") {
+  // The entry used to rapid straight to the height it starts cutting at, on
+  // the reasoning that that height "is either the stock top or the depth the
+  // previous pass already cut here, so it is air". True of a closed contour,
+  // which returns to its own entry at full depth. False of a POCKET, whose
+  // entry sits mid-spiral where the previous pass was still ramping — and
+  // false of any operation told to start BELOW the stock top, which is what a
+  // finishing skim after a roughing pass is.
+  //
+  // Both shapes here: a pocket deep enough for two passes, and a skim that
+  // starts at the roughing floor. `rapids_through_stock` must be 0 for both.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/false); // 80 x 60 pocket
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+
+  const auto rapidsFor = [&](double topZ, double stepdown) {
+    cam::Setup s = BasicSetup();
+    const cam::DerivedOp d =
+        cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket, floor);
+    REQUIRE(d.ok);
+    cam::Operation op = d.op;
+    op.id = 1;
+    op.type = cam::OpType::Pocket; // concentric, not adaptive: this is about
+                                   // the ENTRY, and both share it
+    if (topZ > 0.0)
+      op.topZ = topZ;
+    op.stepdown = stepdown;
+    s.operations.push_back(op);
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(s, doc->GetBodies());
+    REQUIRE(paths.size() == 1);
+    INFO(paths[0].error);
+    REQUIRE(paths[0].error.empty());
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+    return cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.6);
+  };
+
+  // Two depth passes: the second enters where the first was still ramping.
+  const cam::Verdict deep = rapidsFor(/*topZ=*/0.0, /*stepdown=*/2.0);
+  INFO("two passes, first bad line " << deep.firstBadLine);
+  CHECK(deep.rapidsThroughStock == 0);
+
+  // A finishing skim told to start 0.3 mm above the floor — below the stock
+  // top, so the old entry rapided through everything in between.
+  const cam::Verdict skim = rapidsFor(/*topZ=*/12.3, /*stepdown=*/4.0);
+  INFO("skim, first bad line " << skim.firstBadLine);
+  CHECK(skim.rapidsThroughStock == 0);
+}
 
 TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
   // A hole NARROWER than the cutter: 3 mm against a 6 mm end mill. Nothing

@@ -237,6 +237,43 @@ constexpr double kRampAngleDeg = 3.0;
 // A helix down to depth, for a loop too short to hold the ramp (C6,
 // docs/cam/plan.md). Descending on the toolpath itself is right when the
 // path is long; on a small pocket that lap is short and the descent gets
+// Down to where a pass starts cutting, from safe height. ONLY the part above
+// the stock is a rapid; below it the tool FEEDS.
+//
+// The old form rapided the whole way, on the reasoning (written at the ramp
+// entry) that the height it enters at "is either the stock top or the depth
+// the previous pass already cut here, so it is air". That holds for a closed
+// contour, which returns to its own entry at full depth. It does not hold for
+// a POCKET: the entry sits mid-spiral, and the pass that was meant to clear
+// it was still ramping when it went past — so the rapid went through whatever
+// that ramp had not yet removed. On the real baffle job that was 3 mm of G0
+// into MDF, which is a broken cutter (docs/known-bugs.md).
+//
+// Nothing above the stock can be material, so rapiding to the stock top is
+// always safe and costs nothing on the first pass, where the two are equal.
+// Where a pass should BEGIN its descent, given where it was asked to. Never
+// below the stock top: above that there can be no material, so the ramp then
+// cuts its way in instead of arriving already buried.
+//
+// The entry used to start at the height it was asked for, on the reasoning
+// (written at the ramp entry) that that height "is either the stock top or
+// the depth the previous pass already cut here, so it is air". True of a
+// closed contour, which returns to its own entry at full depth. False of a
+// POCKET, whose entry sits mid-spiral where the previous pass was still
+// ramping, and false of any pass told to start below the stock top — a
+// finishing skim after a roughing pass. On the real baffle job that was 3 mm
+// of G0 into MDF (docs/known-bugs.md).
+//
+// Raising the start lengthens the descent, which the ramp already bounds by
+// the loop's own perimeter — steeper than asked, still never a plunge, and a
+// profile must not plunge at all: a non-centre-cutting end mill rubs.
+// How far a pass may RAPID down before it starts cutting. Never below the
+// stock top: above that there can be no material. The descent from there to
+// the entry height is left to the ramp, whose moves are feeds.
+double RapidFloor(double entry, double stockTop, double safeZ) {
+  return std::clamp(std::max(entry, stockTop), entry, safeZ);
+}
+
 // steep, so instead the tool spirals down inside the region and the rings
 // are then cut from the middle outwards.
 //
@@ -245,7 +282,7 @@ constexpr double kRampAngleDeg = 3.0;
 // of the centre is a cut through the wall.
 void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
                double radius, double fromZ, double toZ, double safeZ,
-               double deflection) {
+               double stockTop, double deflection) {
   const double descend = fromZ - toZ;
   if (radius < 1e-9 || descend <= 1e-9)
     return;
@@ -265,7 +302,8 @@ void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
 
   const glm::dvec2 start(centre.x + radius, centre.y);
   Emit(tp, Move::Kind::Rapid, {start.x, start.y, safeZ}, 0.0);
-  Emit(tp, Move::Kind::Rapid, {start.x, start.y, fromZ}, 0.0);
+  Emit(tp, Move::Kind::Rapid,
+       {start.x, start.y, RapidFloor(fromZ, stockTop, safeZ)}, 0.0);
   for (int i = 1; i <= steps; i++) {
     const double t = static_cast<double>(i) / steps;
     const double a = 2.0 * std::numbers::pi * revolutions * t;
@@ -313,8 +351,8 @@ enum class Entry { Ramp, AtDepth };
 // travel at all.
 double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                 const std::vector<glm::dvec2>& pts, double z, double safeZ,
-                int tabCount, double tabWidth, double tabZ, double entryZ,
-                Entry entry = Entry::Ramp, double startS = 0.0) {
+                double stockTop, int tabCount, double tabWidth, double tabZ,
+                double entryZ, Entry entry = Entry::Ramp, double startS = 0.0) {
   if (pts.size() < 2)
     return startS;
   const double perimeter = Perimeter(pts);
@@ -361,7 +399,8 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   // flight back across the opening.
   Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, safeZ}, 0.0);
   const double from = std::max(entryZ, z);
-  Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, from}, 0.0);
+  Emit(tp, Move::Kind::Rapid,
+       {begin.x, begin.y, RapidFloor(from, stockTop, safeZ)}, 0.0);
 
   const double descend = from - z;
   double rampLen =
@@ -1567,6 +1606,12 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
 // follow it, once per depth pass.
 void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
                      const std::vector<Body>& bodies, Toolpath& tp) {
+  // Above this there can be no material, so it is the lowest height an entry
+  // may RAPID to; below it the descent feeds (EmitDescent).
+  glm::dvec3 stockLo(0.0), stockHi(0.0);
+  const double stockTop = StockBoundsFramed(setup, bodies, stockLo, stockHi)
+                              ? stockHi.z
+                              : setup.safeZ;
   const double radius = tool.diameter * 0.5;
   const double bottom = op.bottomZ + op.stockToLeave;
   const std::vector<double> passes = DepthPasses(op);
@@ -1642,8 +1687,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       if (resume.size() <= loop)
         resume.resize(loop + 1, 0.0);
       resume[loop] = EmitLoop(
-          tp, setup, tool, FromClipper(path), z, setup.safeZ, op.tabCount,
-          op.tabWidth, bottom + op.tabHeight,
+          tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
+          op.tabCount, op.tabWidth, bottom + op.tabHeight,
           pass == 0 ? op.topZ : passes[pass - 1], Entry::Ramp, resume[loop]);
     }
   }
@@ -1656,6 +1701,12 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
 // material inside a pocket is simply not part of the region.
 void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
                     const std::vector<Body>& bodies, Toolpath& tp) {
+  // Above this there can be no material, so it is the lowest height an entry
+  // may RAPID to; below it the descent feeds (EmitDescent).
+  glm::dvec3 stockLo(0.0), stockHi(0.0);
+  const double stockTop = StockBoundsFramed(setup, bodies, stockLo, stockHi)
+                              ? stockHi.z
+                              : setup.safeZ;
   const double radius = tool.diameter * 0.5;
   const double step = std::max(0.05, op.stepover) * tool.diameter;
   // A clicked floor face IS the region to clear, at every depth: its outer
@@ -1733,15 +1784,15 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
         centre += p;
       centre /= static_cast<double>(inner.size());
       EmitHelix(tp, tool, centre, helixRadius, std::max(entryZ, z), z,
-                setup.safeZ, kDeflection);
+                setup.safeZ, stockTop, kDeflection);
       // Inside out: the helix cleared the middle, so each ring outward steps
       // into fresh material by one step-over. Outside-in after a helix would
       // drag the tool through uncut material to reach the wall.
       for (auto it = rings.rbegin(); it != rings.rend(); ++it)
         for (Clipper2Lib::Path64& path : *it) {
           Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0,
-                   z, z, Entry::AtDepth);
+          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
+                   0, 0.0, z, z, Entry::AtDepth);
         }
       Emit(tp, Move::Kind::Rapid,
            {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
@@ -1749,8 +1800,8 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       for (Clipper2Lib::Paths64& paths : rings)
         for (Clipper2Lib::Path64& path : paths) {
           Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0,
-                   z, entryZ);
+          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
+                   0, 0.0, z, entryZ);
         }
     }
     entryZ = z;
@@ -1768,6 +1819,12 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
 // the split here rather than in a second operation type's worth of geometry.
 void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
                       const std::vector<Body>& bodies, Toolpath& tp) {
+  // Above this there can be no material, so it is the lowest height an entry
+  // may RAPID to; below it the descent feeds (EmitDescent).
+  glm::dvec3 stockLo(0.0), stockHi(0.0);
+  const double stockTop = StockBoundsFramed(setup, bodies, stockLo, stockHi)
+                              ? stockHi.z
+                              : setup.safeZ;
   if (!AdaptiveAvailable()) {
     // Not a refusal: the job still has to cut. The concentric pocket is the
     // strategy this build has, and saying so beats producing nothing.
@@ -1857,6 +1914,12 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
 // Face: clear the stock top down to topZ over the whole stock rectangle.
 void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
                   const std::vector<Body>& bodies, Toolpath& tp) {
+  // Above this there can be no material, so it is the lowest height an entry
+  // may RAPID to; below it the descent feeds (EmitDescent).
+  glm::dvec3 stockLo(0.0), stockHi(0.0);
+  const double stockTop = StockBoundsFramed(setup, bodies, stockLo, stockHi)
+                              ? stockHi.z
+                              : setup.safeZ;
   glm::dvec3 lo(0.0), hi(0.0);
   if (!StockBoundsFramed(setup, bodies, lo, hi)) {
     tp.error = "no bodies, so there is no stock to face";
@@ -1876,8 +1939,8 @@ void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
     while (!ring.empty()) {
       for (Clipper2Lib::Path64& path : ring) {
         Orient(path, op.climb, /*insideMaterial=*/true);
-        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0, z,
-                 entryZ);
+        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
+                 0, 0.0, z, entryZ);
       }
       inset += step;
       if (inset > glm::length(hi - lo))
@@ -1976,6 +2039,12 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
 void GenerateEdgeRound(const Setup& setup, const Operation& op,
                        const Tool& tool, const std::vector<Body>& bodies,
                        Toolpath& tp) {
+  // Above this there can be no material, so it is the lowest height an entry
+  // may RAPID to; below it the descent feeds (EmitDescent).
+  glm::dvec3 stockLo(0.0), stockHi(0.0);
+  const double stockTop = StockBoundsFramed(setup, bodies, stockLo, stockHi)
+                              ? stockHi.z
+                              : setup.safeZ;
   if (op.targets.empty()) {
     tp.error = "an edge break follows a wall — pick the vertical face whose "
                "top edge to round or chamfer";
@@ -2005,7 +2074,7 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
         std::abs(delta) < 1e-9 ? base : Offset(base, delta);
     for (Clipper2Lib::Path64& path : paths) {
       Orient(path, op.climb, wall.opening);
-      EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ,
+      EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
                /*tabCount=*/0, /*tabWidth=*/0.0, /*tabZ=*/0.0,
                /*entryZ=*/top);
     }
