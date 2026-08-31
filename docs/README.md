@@ -77,6 +77,17 @@ thing behind it invisible to the next person who looks.
   dead code), measured rather than estimated. All five stages shipped; the
   follow-ups at the bottom include one struck because its premise was wrong,
   which is the part worth reading.
+- **[capability-review-2026-08-31.md](capability-review-2026-08-31.md)** — the
+  outward-facing counterpart: capability walls, absent feature families, and
+  what we do worse (and better) than FreeCAD and Onshape. **Findings only,
+  nothing scheduled.** The three that are architecture rather than backlog:
+  the assembly solve has no numeric 3D solver so closed loops are
+  unassemblable, regeneration cannot cross a document boundary, and there is
+  no general mechanism for running a long operation off the frame. Its second
+  half is **a pass over the testing system** — what the harness does unusually
+  well, and seven gaps, of which the loudest is that `tools/test-fast.sh` now
+  takes 48.7 s against the ~8 s its own header claims (a by-name exclusion
+  list that never learned about the CAM gates).
 - **[cpp23-modernization.md](cpp23-modernization.md)** — the toolchain bump
   and what it bought.
 - **[ai-cad-survey-2026-08-18.md](ai-cad-survey-2026-08-18.md)** — how other

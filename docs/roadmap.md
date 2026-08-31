@@ -213,6 +213,20 @@ variables, drawings, BOM + exploded).
    part-config selection, assembly-level features, drawing section/detail
    views, FEM assembly contact, deb/rpm packaging.
 
+**Capability walls, found 2026-08-31** and recorded in
+[capability-review-2026-08-31.md](capability-review-2026-08-31.md) — findings,
+not schedule. Three are architecture rather than backlog: the assembly solve
+places by direct frame alignment with **no numeric 3D solver**, so a mechanism
+with a closed kinematic loop cannot be assembled at all (the one place a
+mature open-source competitor is now ahead); **regeneration cannot cross a
+document boundary**, which is the single missing edge behind three separately
+deferred items (cross-part linked sketches, cross-part refs in context,
+assembly-level features); and there is **no general "long operation off the
+frame" mechanism**, so four cases have three hand-rolled answers and two open
+bugs. Plus the absences worth knowing: no standard parts/fastener library, no
+user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
+surfacing or sheet metal.
+
 **Designed but unbuilt**, in full — the list is now two items:
 
 - **GPU5** ([topopt/gpu5-plan.md](topopt/gpu5-plan.md)) — fp64 iterative
