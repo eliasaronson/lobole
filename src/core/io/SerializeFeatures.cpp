@@ -24,6 +24,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <map>
 #include <string>
 
@@ -1109,8 +1111,50 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                            return isRect(c.a.entity) || isRect(c.b.entity);
                          }),
           sk->constraints.end());
-      for (const auto& [c1, c2] : legacyRects)
-        sk->AddRectangle(c1, c2);
+      // The four lines a legacy rectangle expands into get DETERMINISTIC ids,
+      // not the collision-resistant random ones AddEntity mints.
+      //
+      // A face's stable name is "<feature>/g<entityId>", so random ids here
+      // meant the same pre-v5 file loaded twice produced DIFFERENT face names
+      // for the same geometry — identical volume and bounding box, and every
+      // fillet, mate connector, dimension or CAM target keyed on one of those
+      // names pointing somewhere else. Caught by
+      // `Determinism: two independent loads agree, body for body`.
+      //
+      // Random is right where it came from: two people ADDING entities to a
+      // shared sketch offline must not mint the same id (C6, 2026-08-22). A
+      // migration is not that — it is a pure function of the bytes on disk,
+      // and two people opening the same old file must get the same answer.
+      // Ids continue past the highest already present, so they cannot collide
+      // with the ones the file carries.
+      // Past every id the FILE ever used, including the rect placeholders
+      // just erased — not merely past the surviving entities. Handing a new
+      // line the id the rectangle itself had would make an older reference to
+      // "<feature>/g<rectId>" resolve to a real edge instead of failing, which
+      // is the silent repoint this whole scheme exists to prevent.
+      uint32_t nextMigrated = 0;
+      for (const auto& e : sk->entities)
+        nextMigrated = std::max(nextMigrated, sketch::EntityId(e));
+      for (const uint32_t id : rectIds)
+        nextMigrated = std::max(nextMigrated, id);
+      for (const auto& [c1, c2] : legacyRects) {
+        const std::array<uint32_t, 4> minted = sk->AddRectangle(c1, c2);
+        for (const uint32_t from : minted) {
+          const uint32_t to = ++nextMigrated;
+          for (auto& e : sk->entities)
+            if (sketch::EntityId(e) == from)
+              sketch::SetEntityId(e, to);
+          // AddRectangle writes eight constraints over exactly these ids.
+          for (auto& c : sk->constraints) {
+            if (c.a.entity == from)
+              c.a.entity = to;
+            if (c.b.entity == from)
+              c.b.entity = to;
+            if (c.c.entity == from)
+              c.c.entity = to;
+          }
+        }
+      }
     }
     for (const auto& oj : j.value("derived_ops", json::array()))
       sk->derived.push_back(DerivedOpFromJson(oj));

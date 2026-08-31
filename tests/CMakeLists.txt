@@ -24,6 +24,7 @@ add_executable(designer_tests
     test_cadkernel.cpp
     test_sketch.cpp
     test_document.cpp
+    test_determinism.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
     test_instance_registry.cpp
