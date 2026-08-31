@@ -97,7 +97,12 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     const size_t n = std::strlen(ext);
     return path.size() > n && path.rfind(ext) == path.size() - n;
   };
-  if (hasExt(".stl")) {
+  // Consumed, not kept: one Execute uses what the importer already parsed,
+  // every later one re-reads `path` as it always did (see SeedGeometry).
+  std::unique_ptr<CADKernel::ImportedModel> seed = std::move(m_seed);
+  if (seed != nullptr) {
+    model = std::move(*seed);
+  } else if (hasExt(".stl")) {
     // Triangle mesh → B-Rep: one planar face per triangle, sewn; a closed
     // mesh arrives as a solid (LoadSTL), an open one as a surface shell.
     // Fine for print round-trips and reference geometry; organic meshes get

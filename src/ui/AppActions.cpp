@@ -5410,6 +5410,11 @@ void DeleteReferenceImageAction(AppState& state, uint32_t imageId) {
 
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      std::string* error) {
+  return ImportAsFeature(state, filename, nullptr, error);
+}
+
+bool ImportAsFeature(AppState& state, const std::string& filename,
+                     CADKernel::ImportedModel* parsed, std::string* error) {
   if (!state.document || !state.commands) {
     if (error)
       *error = "no active part document";
@@ -5419,6 +5424,11 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
   const size_t before = state.document->GetBodies().size();
   const std::string name = std::filesystem::path(filename).stem().string();
   auto feature = std::make_unique<ImportFeature>(name, filename);
+  // The import worker already read this file to decide it was a single
+  // product; hand that over rather than parse it again (ImportFeature::
+  // SeedGeometry). Only the first Execute uses it.
+  if (parsed != nullptr)
+    feature->SeedGeometry(std::move(*parsed));
   state.commands->Execute(
       std::make_unique<AddFeatureCommand>(std::move(feature)), *state.document);
 

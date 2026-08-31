@@ -65,6 +65,44 @@ TEST_CASE("ImportFeature loads a STEP file centered at origin",
   fs::remove(stepPath);
 }
 
+TEST_CASE("A seeded ImportFeature uses the caller's geometry once, then the "
+          "file again",
+          "[feature][io]") {
+  // The GUI import worker parses a STEP to decide part-vs-assembly; a
+  // single-product file would then be read a SECOND time by the feature's
+  // first regen — the whole file twice, ~12 s each at 48 MB.
+  CADShape box = CADKernel::Instance().CreateBox(glm::vec3(10, 20, 30),
+                                                 glm::vec3(12, 22, 32));
+  fs::path stepPath = TempFile("designer_test_seeded.step");
+  std::vector<CADShape> shapes{box};
+  REQUIRE(CADKernel::Instance().SaveSTEP(stepPath.string(), shapes));
+
+  CADKernel::ImportedModel parsed;
+  REQUIRE(CADKernel::Instance().LoadSTEPStructured(stepPath.string(), parsed));
+
+  Document doc;
+  auto feature = std::make_unique<ImportFeature>("part", stepPath.string());
+  feature->SeedGeometry(std::move(parsed));
+  doc.AddFeature(std::move(feature));
+
+  // Seeded or not, the result is the same import: one body, centered.
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0, 1e-6));
+  glm::vec3 mn, mx;
+  doc.GetBodies()[0].shape.GetBoundingBox(mn, mx);
+  CHECK_THAT(glm::length((mn + mx) * 0.5f), WithinAbs(0.0f, 0.1f));
+
+  // The seed is consumed, not sticky: a re-execution goes back to the file, so
+  // editing the source still updates the part. Deleting the file is how this
+  // proves the feature READ it rather than reusing the seed — and the regen
+  // prefix cache has to be dropped first, or Regenerate serves the bodies it
+  // already has and never calls Execute at all.
+  fs::remove(stepPath);
+  doc.ClearRegenCache();
+  CHECK_FALSE(doc.Regenerate());
+  CHECK(doc.GetBodies().empty());
+}
+
 TEST_CASE("ImportFeature fails cleanly on a missing file", "[feature][io]") {
   Document doc;
   doc.AddFeature(

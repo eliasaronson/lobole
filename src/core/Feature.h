@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <glm/glm.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -273,4 +274,23 @@ public:
   // directly-imported STEP don't need this (they ride the XCAF read).
   bool hasColor = false;
   glm::vec3 color{0.0f};
+
+  // Geometry the CALLER already parsed, used by the next Execute instead of
+  // re-reading `path`, then dropped.
+  //
+  // The GUI import worker parses the file to decide part-vs-assembly
+  // (ui/ImportJob.cpp) — on a single-product STEP the answer is "feature", and
+  // the feature's first Execute would then parse the very same file again.
+  // That is the whole read twice: ~12 s each on a 48 MB file.
+  //
+  // Deliberately NOT serialized and NOT sticky. A later regen re-reads the
+  // path exactly as before, so editing the source file still updates the part
+  // — the seed removes a duplicate parse, it does not change what an import
+  // means.
+  void SeedGeometry(CADKernel::ImportedModel model) {
+    m_seed = std::make_unique<CADKernel::ImportedModel>(std::move(model));
+  }
+
+private:
+  std::unique_ptr<CADKernel::ImportedModel> m_seed;
 };

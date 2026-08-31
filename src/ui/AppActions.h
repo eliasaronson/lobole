@@ -441,6 +441,14 @@ void PumpRenderJob(AppState& state);
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      std::string* error = nullptr);
 
+// Same, for a caller that has ALREADY parsed the file. The GUI import worker
+// parses it to decide part-vs-assembly (ui/ImportJob.cpp); without this a
+// single-product STEP is then read a SECOND time by the feature's first
+// regen — the whole file twice, ~12 s each at 48 MB. `parsed` is moved from,
+// and a later regen re-reads the path exactly as before.
+bool ImportAsFeature(AppState& state, const std::string& filename,
+                     CADKernel::ImportedModel* parsed, std::string* error);
+
 // Reference-image underlays (v49). Add reads/decodes the file and centres it on
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`
 // (p1 fixed; alignAxis also rotates p1->p2 onto the U axis); Delete removes it.

@@ -71,6 +71,9 @@ void Run(ImportJob* job) {
     // worker exists to move off the UI thread — so the decision moves with it.
     if (model.instances.size() <= 1) {
       job->kind = ImportJob::Kind::Feature;
+      // Carried over rather than dropped: the feature would otherwise parse
+      // the same file again on its first regen.
+      job->model = std::move(model);
       job->done.store(true, std::memory_order_release);
       return;
     }
@@ -168,16 +171,17 @@ void PollImport(AppState& state) {
     job->joined = true;
 
     const bool cancelled = job->cancel.load(std::memory_order_relaxed);
-    // One product: a feature in the active part, the same answer
-    // ImportCADFile gives. ImportFeature re-reads the file on regen — a
-    // second parse this does not avoid, but neither did the synchronous
-    // path, and a single-product file is the cheap case by definition.
+    // One product: a feature in the active part. The worker's parsed model
+    // goes with it (ImportFeature::SeedGeometry), so the first regen does not
+    // re-read the file — a LATER regen still does, which is what keeps
+    // editing the source file meaningful.
     if (!cancelled && job->error.empty() &&
         job->kind == ImportJob::Kind::Feature) {
       const std::string path = job->stepPath;
+      CADKernel::ImportedModel parsed = std::move(job->model);
       std::string featureError;
       state.importJob.reset(); // joins; nothing below touches the job
-      if (!ImportAsFeature(state, path, &featureError)) {
+      if (!ImportAsFeature(state, path, &parsed, &featureError)) {
         state.importError = featureError;
         LOG_WARN("Import failed: {}", featureError);
       } else {

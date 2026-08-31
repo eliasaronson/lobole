@@ -272,11 +272,14 @@ OCC's own documentation is not specific enough to rely on:
   shares its TShape. So the work is **grouped by TShape** and a group always
   runs on one thread — the race is impossible rather than merely absent.
 
-3. **A single-product STEP is still read twice** — once by the import worker
-   to decide part-vs-assembly, then again by `ImportFeature::Execute` on
-   regen, since the feature stores a path. Unchanged from before this round
-   (the assembly path is the one that got the fix), and it only bites on files
-   that are one big solid.
+3. **DONE.** A single-product STEP used to be read twice — once by the import
+   worker to decide part-vs-assembly, then again by `ImportFeature::Execute`.
+   The worker's parsed model now travels with the feature
+   (`ImportFeature::SeedGeometry`) and is consumed by the first Execute.
+   Deliberately not serialized and not sticky: a later re-execution re-reads
+   the path exactly as before, so editing the source file still updates the
+   part. The seed removes a duplicate parse; it does not change what an import
+   means.
 4. **The first frame after an import is still an uncovered stall.** The
    progress modal covers the parse, the extraction and the tab creation, then
    closes — and the cold assembly sync that follows is 2.6 s with nothing on
@@ -294,7 +297,23 @@ OCC's own documentation is not specific enough to rely on:
    spending anything on allocation strategy: batching the submits already took
    1.15 s off, and what is left is not obviously worth the lifetime complexity
    in `DestroyAssetBuffers`.
-6. **`MeshRenderer::CreateAsset` never reuses a released slot** — ids come
-   from `m_assets.size()` after a `push_back`, so the vector grows for the
-   life of the process. The cache makes this far rarer than it was; it is a
-   null `unique_ptr` per hole, so it is a tidiness issue, not a leak.
+6. **Renderer id slots are never reused — and should stay that way.**
+   `CreateAsset` and `AddInstance` both return `size()` after a `push_back`,
+   so a released slot is left null forever and the vectors grow for the life
+   of the process. Instances churn far more than assets (314 per sync on the
+   speaker import), which made this look like the obvious next cleanup. It is
+   not, on both counts:
+
+   - **The cost is nil.** A null slot is one 8-byte `unique_ptr`. A thousand
+     assembly syncs on a 314-instance import is 314k slots — 2.5 MB, for a
+     session far longer than anyone has.
+   - **The fix is a hazard.** Reusing an id turns a stale one from a harmless
+     no-op (it finds null) into a silent write to a DIFFERENT object.
+     `AppState::simulation.hiddenMeshes` holds instance ids across frames, and
+     it is not the only such holder — so reuse would risk hiding the wrong
+     geometry, which is precisely the class of correct-looking wrong answer
+     this codebase keeps paying for.
+
+   Doing it safely means generation-tagging ids so a stale one is *detected*,
+   which is a real robustness win but a much larger change than "reuse the
+   slot". Worth it only if something else makes it worth it — not for 2.5 MB.

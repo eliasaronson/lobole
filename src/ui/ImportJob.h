@@ -65,6 +65,9 @@ struct ImportJob {
   // join). The plan is what materialization consumes.
   interchange::AssemblyImportPlan plan;
   Kind kind = Kind::Assembly;
+  // Kind::Feature only: the geometry the worker already parsed, handed to the
+  // ImportFeature so its first regen does not read the file a second time.
+  CADKernel::ImportedModel model;
   std::string error;
 
   // Main-thread materialization cursor: how many of plan.parts have become
