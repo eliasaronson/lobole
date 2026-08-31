@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -3456,6 +3458,485 @@ TEST_CASE("cam: one operation at a time cuts what all of them cut", "[cam]") {
       REQUIRE_THAT(one.moves[i].to.z, WithinAbs(whole.moves[i].to.z, 1e-12));
     }
   }
+}
+
+// --- the front_wall section probe -------------------------------------------
+//
+// docs/known-bugs.md, "A profile cuts ONE contour at every depth, but the
+// outline changes with depth": four synthetic fixtures failed to reproduce
+// the 8 mm gouge, so the entry's own next step is to stop rebuilding the part
+// from a description and read the REAL one. This is that read.
+//
+// Hidden, and machine-bound by nature — the part is not in the repo:
+//     build/designer_tests "[frontwall]"
+//     DESIGNER_FRONT_WALL=<part dir> build/designer_tests "[frontwall]"
+//
+// It answers one question. If the outer loop of the section carries a notch
+// at the cross-dowel height and not above or below it, the fixtures were
+// missing something and "one contour at every depth" is the mechanism. If the
+// outer loop is the same at every height, the section is innocent and the
+// fault is downstream of it.
+namespace {
+
+struct LoopStats {
+  double minX = 0, maxX = 0, minY = 0, maxY = 0;
+  double area = 0; // signed *2, absolute value taken
+  size_t npts = 0;
+};
+
+LoopStats StatsOf(const cam::Loop& l) {
+  LoopStats s;
+  s.npts = l.pts.size();
+  double a2 = 0.0;
+  for (size_t i = 0; i < l.pts.size(); i++) {
+    const glm::dvec2& a = l.pts[i];
+    const glm::dvec2& b = l.pts[(i + 1) % l.pts.size()];
+    a2 += a.x * b.y - b.x * a.y;
+    s.minX = i == 0 ? a.x : std::min(s.minX, a.x);
+    s.maxX = i == 0 ? a.x : std::max(s.maxX, a.x);
+    s.minY = i == 0 ? a.y : std::min(s.minY, a.y);
+    s.maxY = i == 0 ? a.y : std::max(s.maxY, a.y);
+  }
+  s.area = std::abs(a2) * 0.5;
+  return s;
+}
+
+} // namespace
+
+TEST_CASE("cam probe: what the front_wall section does by depth",
+          "[.][frontwall]") {
+  const char* env = std::getenv("DESIGNER_FRONT_WALL");
+  const std::string dir =
+      env ? env : "/home/elias/Documents/smart_speaker.dsgn/parts/front_wall";
+  if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json")) {
+    WARN("no front_wall at " << dir << " — set DESIGNER_FRONT_WALL");
+    return;
+  }
+  auto loaded = DocumentIO::Load(dir);
+  REQUIRE(loaded.has_value());
+  std::unique_ptr<Document>& doc = *loaded;
+
+  // The saved job runs the "CNC" configuration, which SUPPRESSES the
+  // cross-dowels (19/20/21/22) precisely to dodge this bug. Configuration 0
+  // is every feature present — the bisect's "everything present" row, the one
+  // that gouges.
+  std::printf("active configuration as saved: %llu\n",
+              (unsigned long long)doc->ActiveConfiguration());
+  REQUIRE(doc->SetActiveConfiguration(0));
+  std::printf("features: %zu, bodies: %zu\n", (size_t)doc->FeatureCount(),
+              doc->GetBodies().size());
+
+  const cam::Setup* setup = nullptr;
+  for (const cam::Setup& s : doc->GetCamSetups())
+    if (s.name == "Back")
+      setup = &s;
+  REQUIRE(setup != nullptr);
+  std::printf("setup \"%s\": frame (xyzw) %.4f %.4f %.4f %.4f, origin %.3f "
+              "%.3f %.3f\n",
+              setup->name.c_str(), setup->frame.x, setup->frame.y,
+              setup->frame.z, setup->frame.w, setup->origin.x, setup->origin.y,
+              setup->origin.z);
+
+  const std::vector<Body> framed =
+      cam::BodiesInSetupFrame(*setup, doc->GetBodies());
+  REQUIRE(!framed.empty());
+  glm::vec3 lo(0.0f), hi(0.0f);
+  bool any = false;
+  for (const Body& b : framed) {
+    if (!b.shape.IsValid())
+      continue;
+    glm::vec3 bmin(0.0f), bmax(0.0f);
+    b.shape.GetBoundingBox(bmin, bmax);
+    lo = any ? glm::min(lo, bmin) : bmin;
+    hi = any ? glm::max(hi, bmax) : bmax;
+    any = true;
+  }
+  REQUIRE(any);
+  std::printf("framed bounds: x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f\n",
+              (double)lo.x, (double)hi.x, (double)lo.y, (double)hi.y,
+              (double)lo.z, (double)hi.z);
+
+  // Sweep the whole thickness. The outer loop is the one the profile follows;
+  // a notch shows as a point count and an AREA that move with depth while the
+  // bounding box may not (a slot running inward from an edge keeps the box).
+  std::printf("\n%8s %6s %6s %12s %10s %10s %10s %10s\n", "z", "loops", "npts",
+              "outer area", "minX", "maxX", "minY", "maxY");
+  const double z0 = lo.z, z1 = hi.z;
+  const int kSteps = 34;
+  for (int i = 0; i <= kSteps; i++) {
+    const double t = (double)i / kSteps;
+    // Never section exactly on a face: a plane flush with the top or bottom
+    // is a degenerate cut, and the answer there says nothing about the part.
+    const double z = z0 + (z1 - z0) * t;
+    const double zc = std::clamp(z, z0 + 0.01, z1 - 0.01);
+    const std::vector<cam::Loop> loops = cam::SectionLoops(framed, zc);
+    const cam::Loop* outer = nullptr;
+    double best = 0.0;
+    for (const cam::Loop& l : loops) {
+      const LoopStats s = StatsOf(l);
+      if (outer == nullptr || s.area > best) {
+        best = s.area;
+        outer = &l;
+      }
+    }
+    if (outer == nullptr) {
+      std::printf("%8.3f %6zu   (no loops)\n", zc, loops.size());
+      continue;
+    }
+    const LoopStats s = StatsOf(*outer);
+    std::printf("%8.3f %6zu %6zu %12.2f %10.3f %10.3f %10.3f %10.3f\n", zc,
+                loops.size(), s.npts, s.area, s.minX, s.maxX, s.minY, s.maxY);
+  }
+
+  // Then the outer loop itself, at the cross-dowel height and at a height
+  // clear of them, near the x extremes — where a 22 mm slot in from x = +-105
+  // would live. Printed as points so a notch is visible as a shape rather
+  // than inferred from a number.
+  const char* zenv = std::getenv("DESIGNER_PROBE_Z");
+  const double zProbe = zenv ? std::atof(zenv) : -8.0;
+  for (const double z : {zProbe, zProbe + 6.0}) {
+    const std::vector<cam::Loop> loops = cam::SectionLoops(framed, z);
+    const cam::Loop* outer = nullptr;
+    double best = 0.0;
+    for (const cam::Loop& l : loops) {
+      const LoopStats s = StatsOf(l);
+      if (outer == nullptr || s.area > best) {
+        best = s.area;
+        outer = &l;
+      }
+    }
+    std::printf("\n--- outer loop at z = %.3f (%zu loops) ---\n", z,
+                loops.size());
+    if (outer == nullptr)
+      continue;
+    const LoopStats s = StatsOf(*outer);
+    std::printf("    %zu points, area %.2f, x %.3f..%.3f, y %.3f..%.3f\n",
+                s.npts, s.area, s.minX, s.maxX, s.minY, s.maxY);
+    // Every vertex that is NOT on the four sides of the rectangle: exactly
+    // what a notch is made of, and nothing else survives the filter.
+    const double eps = 0.05;
+    size_t off = 0;
+    for (const glm::dvec2& p : outer->pts) {
+      const bool onEdge =
+          std::abs(p.x - s.minX) < eps || std::abs(p.x - s.maxX) < eps ||
+          std::abs(p.y - s.minY) < eps || std::abs(p.y - s.maxY) < eps;
+      if (!onEdge) {
+        std::printf("    off-rectangle vertex  %10.3f %10.3f\n", p.x, p.y);
+        off++;
+      }
+    }
+    std::printf("    %zu of %zu vertices are off the bounding rectangle\n", off,
+                s.npts);
+    // The same loop UNFILTERED around one cross-dowel, in path order: whether
+    // the notch opens onto the edge or floats inside is the whole question,
+    // and only the vertices either side of it answer it.
+    std::printf("    in path order, every vertex with y in -480..-440:\n");
+    for (size_t i = 0; i < outer->pts.size(); i++)
+      if (outer->pts[i].y > -480.0 && outer->pts[i].y < -440.0)
+        std::printf("      [%3zu] %10.3f %10.3f\n", i, outer->pts[i].x,
+                    outer->pts[i].y);
+  }
+
+  // The control, and the bisect's second row: the job's own configuration,
+  // which suppresses the cross-dowels. If the notch is theirs it goes away
+  // here, and the probe is measuring what it thinks it is.
+  REQUIRE(doc->SetActiveConfiguration(43));
+  const std::vector<Body> ctl =
+      cam::BodiesInSetupFrame(*setup, doc->GetBodies());
+  const std::vector<cam::Loop> ctlLoops = cam::SectionLoops(ctl, zProbe);
+  const cam::Loop* ctlOuter = nullptr;
+  double ctlBest = 0.0;
+  for (const cam::Loop& l : ctlLoops) {
+    const LoopStats st = StatsOf(l);
+    if (ctlOuter == nullptr || st.area > ctlBest) {
+      ctlBest = st.area;
+      ctlOuter = &l;
+    }
+  }
+  REQUIRE(ctlOuter != nullptr);
+  const LoopStats cs = StatsOf(*ctlOuter);
+  std::printf("\n--- CONTROL: configuration 43 (cross-dowels suppressed), "
+              "z = %.3f ---\n",
+              zProbe);
+  std::printf("    %zu bodies, %zu loops, outer %zu points, area %.2f, "
+              "x %.3f..%.3f\n",
+              ctl.size(), ctlLoops.size(), cs.npts, cs.area, cs.minX, cs.maxX);
+  size_t ctlNear = 0;
+  for (const glm::dvec2& p : ctlOuter->pts)
+    if (p.y > -480.0 && p.y < -440.0)
+      ctlNear++;
+  std::printf("    %zu outer vertices with y in -480..-440\n", ctlNear);
+}
+
+// The synthetic half of the same question, and the reason the 2026-08-31 fix
+// was reverted: four fixtures "failed to reproduce" the notch. This builds the
+// one that matters — a bore that opens onto a side face — in SETUP SPACE with
+// a square setup, so no framing stands between the model and the section.
+TEST_CASE("cam probe: a bore that opens onto an edge", "[.][frontwall]") {
+  auto doc = std::make_unique<Document>();
+  // The panel: 210 x 100 x 16, top at z = 0, exactly the front_wall's section.
+  doc->AddFeature(std::make_unique<BoxFeature>(
+      "Panel", glm::vec3(-105.0f, -50.0f, -16.0f), 210.0, 100.0, 16.0));
+  // The cross-dowel: a sketch on the x = +105 side face, normal +X, uAxis +Y,
+  // so V is +Z. The circle at (u, v) = (0, -8) is a bore on the mid-plane,
+  // 8 mm below the top — the real part's geometry, in the real part's way.
+  auto sk = std::make_unique<SketchFeature>(
+      "Dowel",
+      SketchPlane(glm::vec3(105.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f),
+                  glm::vec3(0.0f, 1.0f, 0.0f)));
+  sk->AddEntity(sketch::Circle{glm::vec2(0.0f, -8.0f), 4.0});
+  doc->AddFeature(std::move(sk));
+  const uint64_t sid = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<ExtrudeFeature>("Bore", sid, 22.0,
+                                                   ExtrudeMode::Cut, true));
+  REQUIRE(doc->GetBodies().size() == 1);
+  glm::vec3 bmin(0.0f), bmax(0.0f);
+  doc->GetBodies()[0].shape.GetBoundingBox(bmin, bmax);
+  std::printf("fixture bounds: x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f\n",
+              (double)bmin.x, (double)bmax.x, (double)bmin.y, (double)bmax.y,
+              (double)bmin.z, (double)bmax.z);
+
+  for (const double z : {-8.0, -2.0, -14.0}) {
+    const std::vector<cam::Loop> loops = cam::SectionLoops(doc->GetBodies(), z);
+    const cam::Loop* outer = nullptr;
+    double best = 0.0;
+    for (const cam::Loop& l : loops) {
+      const LoopStats st = StatsOf(l);
+      if (outer == nullptr || st.area > best) {
+        best = st.area;
+        outer = &l;
+      }
+    }
+    REQUIRE(outer != nullptr);
+    const LoopStats st = StatsOf(*outer);
+    // maxX is what the reverted round measured. Print it beside the two
+    // numbers that can actually see a slot cut INTO an edge.
+    std::printf("z %7.3f: %zu loops, outer %2zu points, area %10.3f, "
+                "maxX %.3f (width %.3f)\n",
+                z, loops.size(), st.npts, st.area, st.maxX, st.maxX - st.minX);
+    for (const glm::dvec2& p : outer->pts)
+      if (p.x < 104.95 && p.x > -104.95)
+        std::printf("        inboard vertex %10.3f %10.3f\n", p.x, p.y);
+  }
+}
+
+// The end of the ladder: the real job, posted and verified, gouge and all.
+// Hidden for the same reason as the section probe — the part is not in the
+// repo.  build/designer_tests "[frontwall]"
+TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
+  const char* env = std::getenv("DESIGNER_FRONT_WALL");
+  const std::string dir =
+      env ? env : "/home/elias/Documents/smart_speaker.dsgn/parts/front_wall";
+  if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json")) {
+    WARN("no front_wall at " << dir << " — set DESIGNER_FRONT_WALL");
+    return;
+  }
+  auto loaded = DocumentIO::Load(dir);
+  REQUIRE(loaded.has_value());
+  std::unique_ptr<Document>& doc = *loaded;
+  // Configuration 0 is every feature present — the cross-dowels the saved job
+  // suppresses precisely to dodge this, and the bisect's "everything present"
+  // row.
+  REQUIRE(doc->SetActiveConfiguration(0));
+
+  for (const cam::Setup& setup : doc->GetCamSetups()) {
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(setup, doc->GetBodies());
+    std::string gcode, error;
+    if (!cam::PostProcess(setup.post, setup, paths, {}, gcode, &error)) {
+      std::printf("setup \"%s\": post failed: %s\n", setup.name.c_str(),
+                  error.c_str());
+      continue;
+    }
+    const cam::Verdict v =
+        cam::VerifyGcode(gcode, setup, doc->GetBodies(), /*res=*/0.5);
+    std::printf("setup \"%s\": gouge %.3f at (%.1f, %.1f), leftover %.3f, "
+                "rapids through stock %d, cells %zu\n",
+                setup.name.c_str(), v.maxGouge, v.gougeAt.x, v.gougeAt.y,
+                v.maxLeftover, v.rapidsThroughStock, v.cells);
+    for (const cam::Toolpath& t : paths)
+      if (!t.error.empty())
+        std::printf("    op %llu: %s\n", (unsigned long long)t.operationId,
+                    t.error.c_str());
+  }
+}
+
+// --- a profile follows the projection, not the section ----------------------
+//
+// docs/known-bugs.md: a bore that opens onto a side face notches the part's
+// cross-section at its own height and nowhere else. A profile that follows
+// that notch cuts the bore's own 8 mm plus the 4 mm of solid above it and the
+// 4 mm below — measured on the real part as an 8.00 mm gouge, and reproduced
+// here in a fixture small enough to read.
+//
+// Two directions, deliberately. "Never cut a notch" would pass the first of
+// these and is wrong: a notch that reaches the operation's top IS reachable
+// and must be cut. What separates them is whether the material above it is
+// gone by the time the cutter arrives, which is exactly what the projection
+// from topZ down to the pass says.
+namespace {
+
+// The panel both fixtures start from: 210 x 100 x 16, top at z = 0.
+std::unique_ptr<Document> PanelDoc() {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>(
+      "Panel", glm::vec3(-105.0f, -50.0f, -16.0f), 210.0, 100.0, 16.0));
+  return doc;
+}
+
+// A 3 mm cutter, so an 8 mm notch stays open under the outward offset an
+// outside profile applies and the question is about the contour rather than
+// about whether the tool fits.
+cam::Setup PanelSetup() {
+  cam::Setup s;
+  s.name = "Panel";
+  s.safeZ = 5.0;
+  cam::Tool t;
+  t.number = 1;
+  t.name = "3mm flat";
+  t.diameter = 3.0;
+  t.feedCut = 900.0;
+  t.feedPlunge = 300.0;
+  t.spindleRpm = 18000.0;
+  s.tools.push_back(t);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.side = cam::Side::Outside;
+  op.topZ = 1.0; // the stock top: 16 mm panel, 1 mm relative margin above
+  op.bottomZ = -16.5;
+  op.stepdown = 4.0;
+  s.operations.push_back(op);
+  return s;
+}
+
+// Moves whose XY lands in the notch — inside x = +-103 and within 3 mm of the
+// centre line. The profile's own path runs at x = +-106.5 there (the panel
+// plus the tool radius), so nothing but an excursion into the notch can
+// satisfy both.
+size_t MovesInTheNotch(const cam::Toolpath& tp) {
+  size_t n = 0;
+  for (const cam::Move& m : tp.moves)
+    if (std::abs(m.to.x) < 103.0 && std::abs(m.to.y) < 3.0)
+      n++;
+  return n;
+}
+
+} // namespace
+
+TEST_CASE("cam: a profile never follows a notch it cannot reach", "[cam]") {
+  auto doc = PanelDoc();
+  // The cross-dowel: a bore on the x = +105 side face, 8 mm across, 22 mm in,
+  // its axis 8 mm below the top. It notches the section for z in (-12, -4)
+  // and nowhere else — 4 mm of solid above it, 4 mm below.
+  auto sk = std::make_unique<SketchFeature>(
+      "Dowel",
+      SketchPlane(glm::vec3(105.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f),
+                  glm::vec3(0.0f, 1.0f, 0.0f)));
+  sk->AddEntity(sketch::Circle{glm::vec2(0.0f, -8.0f), 4.0});
+  doc->AddFeature(std::move(sk));
+  doc->AddFeature(std::make_unique<ExtrudeFeature>(
+      "Bore", doc->GetFeature(1)->GetId(), 22.0, ExtrudeMode::Cut, true));
+  REQUIRE(doc->GetBodies().size() == 1);
+
+  // The section really does carry the notch at the bore's height and not
+  // above it — the premise, checked here so a fixture that stops reproducing
+  // fails as a fixture rather than as the rule below.
+  const auto notchedAt = [&](double z) {
+    for (const cam::Loop& l : cam::SectionLoops(doc->GetBodies(), z))
+      for (const glm::dvec2& p : l.pts)
+        if (p.x > 82.0 && p.x < 84.0)
+          return true;
+    return false;
+  };
+  REQUIRE(notchedAt(-8.0));
+  REQUIRE_FALSE(notchedAt(-2.0));
+
+  const cam::Setup setup = PanelSetup();
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  // The rule: 4 mm of solid stands over the bore, so no pass may enter it.
+  CHECK(MovesInTheNotch(paths[0]) == 0);
+
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), /*res=*/0.4);
+  INFO("gouge " << v.maxGouge << " at (" << v.gougeAt.x << ", " << v.gougeAt.y
+                << ")");
+  REQUIRE(v.cells > 0);
+  CHECK(v.maxGouge < 0.5); // one cell of quantisation at 0.4 mm
+}
+
+TEST_CASE("cam: a profile DOES follow a notch open from the top", "[cam]") {
+  auto doc = PanelDoc();
+  // The same notch, reached the other way: a bore straddling the top face at
+  // the x = +105 edge, cut 8 mm down. Nothing stands over it, so a profile
+  // must go in — the assertion that stops the rule above degenerating into
+  // "never cut a notch".
+  auto sk = std::make_unique<SketchFeature>(
+      "Slot", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 0.0f)));
+  sk->AddEntity(sketch::Circle{glm::vec2(105.0f, 0.0f), 4.0});
+  doc->AddFeature(std::move(sk));
+  doc->AddFeature(std::make_unique<ExtrudeFeature>(
+      "Notch", doc->GetFeature(1)->GetId(), 8.0, ExtrudeMode::Cut, true));
+  REQUIRE(doc->GetBodies().size() == 1);
+
+  const cam::Setup setup = PanelSetup();
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  CHECK(MovesInTheNotch(paths[0]) > 0);
+
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), /*res=*/0.4);
+  INFO("gouge " << v.maxGouge << " at (" << v.gougeAt.x << ", " << v.gougeAt.y
+                << ")");
+  CHECK(v.maxGouge < 0.5);
+}
+
+TEST_CASE("cam: a picked wall is re-resolved at every depth", "[cam]") {
+  // The same defect through the other door. `PickedWallContour` names the
+  // contour at the WALL'S OWN MID-HEIGHT, which for a 16 mm panel is z = -8 —
+  // the bore's axis, the one height whose section is notched. Picking that
+  // wall used to cut its notch at every depth.
+  auto doc = PanelDoc();
+  auto sk = std::make_unique<SketchFeature>(
+      "Dowel",
+      SketchPlane(glm::vec3(105.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f),
+                  glm::vec3(0.0f, 1.0f, 0.0f)));
+  sk->AddEntity(sketch::Circle{glm::vec2(0.0f, -8.0f), 4.0});
+  doc->AddFeature(std::move(sk));
+  doc->AddFeature(std::make_unique<ExtrudeFeature>(
+      "Bore", doc->GetFeature(1)->GetId(), 22.0, ExtrudeMode::Cut, true));
+
+  // The panel's own -Y side wall: far from the notch, so the pick is
+  // unambiguous and the contour it names is the whole outline.
+  ElementRef wall;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 centre(0.0f), normal(0.0f), x(0.0f);
+      if (!b.shape.FacePlane(index, centre, normal, x))
+        continue;
+      if (std::abs(normal.y) > 0.99f && centre.y < -49.0)
+        wall = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(wall.IsSet());
+
+  cam::Setup setup = PanelSetup();
+  setup.operations[0].targets.push_back(wall);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  CHECK(MovesInTheNotch(paths[0]) == 0);
 }
 
 #endif // HAVE_CAM

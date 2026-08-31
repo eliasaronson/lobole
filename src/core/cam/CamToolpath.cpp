@@ -100,6 +100,22 @@ void Orient(Clipper2Lib::Path64& path, bool climb, bool insideMaterial) {
     std::reverse(path.begin(), path.end());
 }
 
+// Offsetting is signed against the winding: a positive delta grows a
+// positively wound path and shrinks a negatively wound one. Callers say what
+// they mean with the sign, so every contour handed to `Offset` arrives in one
+// convention — Clipper hands the holes of a union back wound the other way,
+// and an opening IS a hole.
+void MakeCounterClockwise(Loop& l) {
+  double a2 = 0.0;
+  for (size_t i = 0; i < l.pts.size(); i++) {
+    const glm::dvec2& a = l.pts[i];
+    const glm::dvec2& b = l.pts[(i + 1) % l.pts.size()];
+    a2 += a.x * b.y - b.x * a.y;
+  }
+  if (a2 < 0.0)
+    std::reverse(l.pts.begin(), l.pts.end());
+}
+
 double Perimeter(const std::vector<glm::dvec2>& pts) {
   double total = 0.0;
   for (size_t i = 0; i + 1 < pts.size(); i++)
@@ -619,6 +635,53 @@ std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
   return loops;
 }
 
+std::vector<std::vector<Loop>>
+ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
+                  const std::vector<double>& passes, double deflection) {
+  // The material at one height as a REGION rather than a bag of wires: an
+  // even-odd union over every loop of the section, because what counts as
+  // inside is a question of nesting (inside the part is filled, inside an
+  // opening is not, inside a boss standing in that opening is again).
+  const auto materialAt = [&](double z) {
+    Clipper2Lib::Paths64 section;
+    for (const Loop& l : SectionLoops(bodies, z, deflection))
+      if (l.pts.size() >= 3)
+        section.push_back(ToClipper(l.pts));
+    return Clipper2Lib::Union(section, Clipper2Lib::FillRule::EvenOdd);
+  };
+  // A section flush with a face is degenerate or empty, so every sample is
+  // taken a hair inside the interval it stands for.
+  constexpr double kHair = 1e-3;
+  // The operation's own top belongs to every column beneath it: the first
+  // pass sweeps the material between topZ and itself, so that material
+  // constrains where it may go.
+  Clipper2Lib::Paths64 acc = materialAt(topZ - kHair);
+  std::vector<std::vector<Loop>> out;
+  out.reserve(passes.size());
+  for (const double z : passes) {
+    Clipper2Lib::Paths64 both = acc;
+    for (const Clipper2Lib::Path64& p : materialAt(z + kHair))
+      both.push_back(p);
+    // Below the model this adds nothing and `acc` stands, which is what a
+    // through cut needs: `bottomZ` is deliberately into the spoilboard, and a
+    // pass that found nothing must keep cutting the outline that was there
+    // rather than leave the part welded to the sheet.
+    acc = Clipper2Lib::Union(both, Clipper2Lib::FillRule::NonZero);
+    std::vector<Loop> loops;
+    loops.reserve(acc.size());
+    for (const Clipper2Lib::Path64& p : acc) {
+      Loop l;
+      l.pts = FromClipper(p);
+      if (l.pts.size() < 3)
+        continue;
+      l.hole = !Clipper2Lib::IsPositive(p); // Clipper winds outers positive
+      loops.push_back(std::move(l));
+    }
+    out.push_back(std::move(loops));
+  }
+  return out;
+}
+
 std::vector<double> DepthPasses(const Operation& op) {
   std::vector<double> zs;
   const double top = op.topZ;
@@ -1098,6 +1161,7 @@ WallContour PickedWallContour(const std::vector<Body>& bodies,
   }
   out.loop = *pick;
   out.opening = pick->hole;
+  out.at = at;
   out.ok = true;
   return out;
 }
@@ -1698,18 +1762,40 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   const double bottom = op.bottomZ + op.stockToLeave;
   const std::vector<double> passes = DepthPasses(op);
   std::string why;
+  // A wall names its contour by POSITION, not by value. The outline it lies
+  // on changes with depth wherever a feature opens part-way down, so the
+  // mid-height loop `PickedWallContour` returns is right at one height and
+  // wrong at the rest — the pick is re-resolved per pass below, against the
+  // projection. A floor region and a targetless cut keep their own shapes.
+  const bool wallPick =
+      !op.targets.empty() && IsWallFace(bodies, op.targets.front());
+  WallContour wall;
+  if (wallPick) {
+    wall = PickedWallContour(bodies, op.targets.front());
+    if (!wall.ok) {
+      tp.error = wall.why;
+      return;
+    }
+  }
   const Clipper2Lib::Paths64 picked =
-      TargetPaths(op, bodies, /*holesToo=*/false, tool.diameter * 0.5, why);
+      wallPick ? Clipper2Lib::Paths64{}
+               : TargetPaths(op, bodies, /*holesToo=*/false,
+                             tool.diameter * 0.5, why);
   if (!why.empty()) {
     tp.error = why;
     return;
   }
+  // The outline the cutter may follow at each depth: the part's projection
+  // from the operation's top down to that pass, NOT its cross-section there
+  // (ProjectedOutlines, and docs/known-bugs.md for the gouge that is).
+  const std::vector<std::vector<Loop>> projected =
+      ProjectedOutlines(bodies, op.topZ, passes);
   // Without a target a profile follows the part's own outline, which is what
   // "cut it out" means and is nonsense for an inside cut: offsetting the
   // perimeter INWARD by a tool radius carves a trench a whisker inside the
   // part, the full depth, all the way round. The first dogfooding round asked
   // for a slot this way and got a 15 mm gouge round the whole outline.
-  if (picked.empty() && op.side == Side::Inside) {
+  if (!wallPick && picked.empty() && op.side == Side::Inside) {
     tp.error = "an inside profile needs the contour to cut inside of — pick "
                "the wall of the opening. Without one this would follow the "
                "part's own outline and cut a trench round it.";
@@ -1730,12 +1816,29 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     const double z = passes[pass];
     std::vector<Loop> solid;
     if (picked.empty()) {
-      // Section slightly ABOVE the pass depth: exactly at the bottom face of
-      // a through-cut the section is degenerate or empty.
-      const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
-      for (const Loop& l : loops)
-        if (!l.hole)
-          solid.push_back(l);
+      if (wallPick) {
+        // The loop of THIS depth's projection that the pick lies on. It may
+        // have merged with a neighbour since the mid-height section named it;
+        // a merged boundary is the right one to follow, and proximity finds
+        // it either way.
+        const Loop* nearest = nullptr;
+        double best = std::numeric_limits<double>::max();
+        for (const Loop& l : projected[pass]) {
+          const double d = DistanceToLoop(l.pts, wall.at);
+          if (d < best) {
+            best = d;
+            nearest = &l;
+          }
+        }
+        if (nearest != nullptr)
+          solid.push_back(*nearest);
+      } else {
+        for (const Loop& l : projected[pass])
+          if (!l.hole)
+            solid.push_back(l);
+      }
+      for (Loop& l : solid)
+        MakeCounterClockwise(l);
     }
     const double delta = op.side == Side::Inside ? -(radius + op.stockToLeave)
                          : op.side == Side::On   ? 0.0

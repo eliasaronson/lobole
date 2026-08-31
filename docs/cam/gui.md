@@ -259,6 +259,22 @@ so it has to climb straight up before it travels. Both were caught by the
 existing gates rather than by looking (`cam: a pass never rapids to a depth
 nothing cleared` went to 14 the moment the retract came out).
 
+**A profile follows the part's projection, not its section (2026-08-31).**
+A cutter at depth z removes the whole column above it, so it may only travel
+where every height between the operation's top and z is waste. The contour is
+therefore the part's projection over [z, topZ] — the union of its sections —
+and not the section at z, which is a different shape wherever a feature opens
+part-way down. A cross-dowel bore opening onto a panel's side face notches the
+section at its own height and nowhere else; following that notch cut the
+bore's 8 mm plus the solid above and below it, an 8.00 mm gouge on the real
+part. `ProjectedOutlines` accumulates it down the passes; a picked wall is
+re-resolved against it per pass rather than named once at the wall's own
+mid-height. One rule serves both sides — the sweepable region is the
+complement of the projection — and it accumulates from the OPERATION's top,
+not the stock's, since that is the declaration that what is above is already
+clear. Gated in both directions: a notch under solid material is never
+entered, and a notch open from the top still is.
+
 **Backplot contrast (2026-08-31).** Pale blue on a light grey workpiece is a
 hair off the surface it is drawn on. Cut moves are amber now, plunges red,
 rapids stay muted grey — amber reads against both the part and the dark

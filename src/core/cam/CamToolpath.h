@@ -91,6 +91,12 @@ struct WallContour {
   double topZ = 0.0;    // the wall's own top …
   double bottomZ = 0.0; // … and bottom
   bool opening = false; // an inner boundary: cut INSIDE it
+  // Where on the section the pick landed. `loop` is the contour AT THE WALL'S
+  // OWN MID-HEIGHT, and an outline that changes with depth (a bore opening
+  // onto a side face notches it at its own height and nowhere else) makes
+  // that one answer wrong everywhere else — so a caller working down the
+  // depths re-resolves the contour per pass, and this is what it resolves by.
+  glm::dvec2 at{0.0, 0.0};
   bool ok = false;
   std::string why; // when !ok: what to click instead, in words
 };
@@ -98,6 +104,31 @@ struct WallContour {
 [[nodiscard]] WallContour PickedWallContour(const std::vector<Body>& bodies,
                                             const ElementRef& ref,
                                             double deflection = 0.02);
+
+// The outline a cutter may FOLLOW at each of `passes`, which is not the
+// part's cross-section there.
+//
+// A flat end mill at depth z removes the whole column above it at its
+// footprint, so it may only travel where every height between `topZ` and z is
+// waste. The governing shape is therefore the part's PROJECTION over
+// [z, topZ] — the union of its sections — and the two differ exactly where a
+// feature opens part-way down: a bore that opens onto a side face notches the
+// section at its own height and nowhere else, and a profile that follows that
+// notch cuts the bore's own depth plus the solid above and below it
+// (docs/known-bugs.md, the front_wall gouge).
+//
+// Accumulated from `topZ` DOWNWARD, which is why it is a walk rather than a
+// function of z. `topZ` and not the stock top: an operation's top is the
+// declaration that everything above it is already clear, which is what lets
+// an opening starting below the stock top be profiled at all.
+//
+// Inside and outside need no separate rule. The result carries its holes, so
+// an outside cut follows its outer boundaries and an opening follows the hole
+// it was picked in — the sweepable region is the complement of this one,
+// either way. Returns one entry per pass, in the same order.
+[[nodiscard]] std::vector<std::vector<Loop>>
+ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
+                  const std::vector<double>& passes, double deflection = 0.02);
 
 // Whether `ref` names a vertical face — the question every caller asks before
 // deciding which of the two picks above applies.

@@ -306,7 +306,7 @@ Gated by `cam: a pass never rapids to a depth nothing cleared`, which checks
 `rapids_through_stock == 0` for both shapes: a pocket deep enough for two
 passes, and a skim starting below the stock top.
 
-### A profile cuts ONE contour at every depth, but the outline changes with depth
+### A profile cut ONE contour at every depth — FIXED 2026-08-31
 
 Front_wall's cross-dowel bores are cut 22 mm deep from the x = ±105 side
 plane (`19-sketch.json` + `20-extrude.json`: two Ø8 circles at sketch
@@ -363,13 +363,120 @@ after is how this codebase gets a silent regression. The bisect stands (the
 cross-dowels, alone, 8.00 mm = 4 above the bore + 4 below); the mechanism does
 not, yet.
 
-The next person should start by dumping `SectionLoops` on the REAL front_wall
-at setup Z -8 and looking at the outer loop, rather than trying to rebuild it
-from a description. If the outer loop has a notch there, the fixtures are
-missing something; if it does not, the fault is downstream of the section and
-everything above is looking in the wrong place.
+### The section was dumped, and the fixtures were never the problem (2026-08-31)
 
-Until then the job suppresses those features, which is not a workaround: the
-machine does not make those holes — they are drilled by hand — so a CAM model
-without them is the correct one.
+That is what the paragraph above asked for, and the answer is the first of the
+two it offered: **the outer loop has the notch.** `tests/test_cam.cpp`,
+hidden, `designer_tests "[frontwall]"` (the real part is not in the repo;
+`DESIGNER_FRONT_WALL` points it elsewhere).
+
+Sectioning the real front_wall in the Back setup, outer loop, in path order at
+setup z = -8:
+
+    [3] 105.000 -465.000    <- on the edge
+    [4]  97.000 -465.000
+    [5]  83.000 -465.000    <- 22 mm in, the extrude distance
+    [6]  83.000 -457.000    <-  8 mm across, the bore diameter
+    [7]  97.000 -457.000
+    [8] 105.000 -457.000    <- back onto the edge
+
+Four of those, one per cross-dowel. They exist for z in (-12, -4) — the bore's
+own extent — and nowhere else: 24 outer vertices at z = -8, 8 at z = -2. The
+control settles it, since it is the bisect's second row run as code: with the
+job's own configuration 43 (cross-dowels suppressed) the outer loop is 8
+points with **zero** vertices anywhere near y = -461. The areas agree to the
+square millimetre — 218259.70 without the bores, 217555.70 with them, a
+difference of 704.00 = 4 x 22 x 8.
+
+So the section is right, the diagnosis above is right, and the depth
+arithmetic closes exactly: the bore spans 8 mm of a 16 mm panel, the profile
+cuts its contour over the full thickness, and 16 - 8 = the 8.00 mm `cam_verify`
+reports.
+
+**The four fixtures did not fail. The check used to judge them was blind.**
+`maxX` cannot see this defect — a slot cut INTO an edge does not move the
+bounding box, and the real part reports the same 210 mm width at every height,
+notch and all. Rebuilt as its own fixture (a 210 x 100 x 16 panel, one 8 mm
+bore 22 mm in from the side face, no setup frame), the synthetic case
+reproduces immediately:
+
+    z  -8.000: outer  8 points, area 20824.000, maxX 105.000 (width 210.000)
+    z  -2.000: outer  4 points, area 21000.000, maxX 105.000 (width 210.000)
+    z -14.000: outer  4 points, area 21000.000, maxX 105.000 (width 210.000)
+
+21000 - 20824 = 176 = 22 x 8, and the width the reverted round measured is
+210.000 on all three lines. That fixture is the failing test the revert said
+was missing, and it costs no external file.
+
+### The fix: a profile follows the projection, not the section
+
+**Reading the generator moved the diagnosis.** The op that gouges — op 87,
+"Cut out", `side: outside` — has NO targets, and the targetless branch of
+`GenerateProfile` was *already* sectioning per depth
+(`SectionLoops(bodies, z + 1e-3)`, one section per pass). So "one contour at
+every depth" described the wall-pick path but not the path that actually
+failed, and that is why the reverted change did not move the verdict: it made
+the picked path do what the failing path was already doing. **Sectioning at
+the right depth was never the fix.**
+
+The rule that is:
+
+> The contour at depth z is the part's PROJECTION from `op.topZ` down to z —
+> the union of its sections over that interval — not its section at z.
+
+A flat end mill at depth z removes the whole column above it at its footprint,
+so it may only travel where every height in [z, topZ] is waste. Two things
+made this smaller than the reverted attempt:
+
+- **It is one rule, not two.** "Union outside, intersection inside" are the
+  same statement seen from either side — the sweepable region is the
+  complement of the projection — so `ProjectedOutlines` carries its holes and
+  an outside cut follows its outer boundaries while an opening follows the
+  hole it was picked in. Implementing it twice is how one of them goes wrong.
+- **It accumulates from `op.topZ`, not the stock top.** An operation's top is
+  the declaration that everything above it is already clear, which is what
+  lets an opening that starts below the stock top be profiled at all.
+
+`ProjectedOutlines` (CamToolpath.cpp) walks the passes unioning as it goes.
+Below the model it adds nothing and the last projection stands, which is what
+a through cut needs and what the old `lastFound` was for — except that
+`lastFound` carried the last *section*, so it propagated the notch to every
+pass under the part. Three sites changed, all in `GenerateProfile`: the
+targetless branch, the wall pick (re-resolved per pass against the projection
+by proximity to `WallContour::at`, which the pick now reports), and the
+through-cut carry.
+
+**Measured, before and after, on the real front_wall with the cross-dowels
+present:**
+
+| | before | after |
+|---|---|---|
+| Back setup, `cam_verify` gouge | **8.000 mm** at (-104.3, -464.9) | **0.005 mm** at (-55.8, -506.9) |
+
+0.005 is grid quantisation, and it is somewhere else entirely.
+
+Gated by three tests in `test_cam.cpp`, and the second one is the point:
+
+- `cam: a profile never follows a notch it cannot reach` — the fixture above.
+  Before: 4 moves inside the notch, gouge 11.0 mm. After: none, gouge < 0.5.
+- `cam: a profile DOES follow a notch open from the top` — the same notch
+  reached from the top face instead, where nothing stands over it. It passes
+  before AND after, which is what stops the rule degenerating into "never cut
+  a notch".
+- `cam: a picked wall is re-resolved at every depth` — the same defect through
+  the wall pick, whose contour came from the wall's own mid-height: for a
+  16 mm panel that is z = -8, the one height whose section is notched. Before:
+  10 moves in the notch. After: none.
+
+The whole headless suite passes (925/925), CAM goldens included — the change
+is a no-op on a prismatic part and bites only where the outline moves with
+depth.
+
+**Not changed, and worth naming:** the floor-region pick (`PickedFaceRegion`,
+which pockets use) still takes one region at its own height. The same column
+argument applies to it in principle; there is no reproduction, and this file's
+own history says what changing generation without one costs.
+
+The job may now keep the cross-dowels, though suppressing them remains
+reasonable: the machine does not make those holes — they are drilled by hand.
 
