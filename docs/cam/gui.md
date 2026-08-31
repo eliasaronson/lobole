@@ -225,6 +225,22 @@ that greys its neighbours means Escape between every change of verb. The
 floating window also gained a `Tool` row: every number a verb derives is a
 fraction of the cutter, so choosing it afterwards means re-deriving.
 
+**Cutter shape reaches the toolpath (2026-08-31).** It used to stop at the
+simulation: `TipHeight` decides what a tool removes, so the verdict and the
+picture both knew a ball from a flat mill, and GENERATION did not. Measured on
+one pocket, a ball nose and a flat mill produced byte-identical paths — same
+5036.75 mm — and the ball left 160 mm² of scallop that only the verifier ever
+mentioned. Two things follow from the tip now:
+
+- **Stepover.** A flat mill's floor is flat whatever the step, so 45% of the
+  cutter stands. A ball's is not: it leaves a cusp, and the cusp decides the
+  step — `s = 2·sqrt(2·r·cusp − cusp²)`, with the cusp target 2% of the tool's
+  RADIUS so it stays right for a 1 mm ball and a 12 mm one. On a 6 mm ball
+  that is 1.7 mm against a flat mill's 2.7.
+- **A cone is refused a floor.** A V-bit or a drill point run along a floor
+  ploughs a groove as deep as the pass. There is no stepover that fixes that,
+  so pocket, face and adaptive refuse them by name and say what to use instead.
+
 **Concentric rings link at depth (2026-08-31).** Every ring of a clearing
 pass used to get a full entry — lift to safe Z, fly back along the circle,
 descend, ramp in, cut a lap — so a flange recess did that a dozen times over.

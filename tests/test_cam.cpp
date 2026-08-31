@@ -2234,6 +2234,85 @@ TEST_CASE("cam: concentric rings link at depth instead of lifting", "[cam]") {
   CHECK(v.maxGouge < 0.6);
 }
 
+TEST_CASE("cam: a ball nose steps over by the cusp it leaves", "[cam]") {
+  // A flat mill's floor is flat whatever the stepover, so 45% of the cutter
+  // stands. A ball nose leaves a cusp between passes, and the height of that
+  // cusp is what decides the step. Before this a ball cleared a pocket on
+  // exactly the flat mill's path — same length, same everything — and left
+  // 160 mm2 of scallop that only the verifier ever mentioned.
+  cam::Tool flat;
+  flat.number = 1;
+  flat.diameter = 6.0;
+  cam::Tool ball = flat;
+  ball.type = cam::ToolType::Ball;
+
+  CHECK_THAT(cam::DerivedStepover(flat), WithinAbs(0.45, 1e-9));
+  const double s = cam::DerivedStepover(ball);
+  INFO("ball stepover fraction " << s);
+  CHECK(s < 0.45); // finer than a flat mill's
+  CHECK(s > 0.02); // and not so fine it never finishes
+
+  // It really is the cusp equation: stepping `s * d` apart on a ball of
+  // radius r leaves r - sqrt(r^2 - (step/2)^2), and that must be the 2% of
+  // the radius the derivation asks for.
+  const double r = ball.diameter * 0.5;
+  const double step = s * ball.diameter;
+  const double cusp = r - std::sqrt(std::max(0.0, r * r - step * step * 0.25));
+  INFO("cusp " << cusp << " vs target " << r * 0.02);
+  CHECK_THAT(cusp, WithinRel(r * 0.02, 1e-6));
+
+  // Bigger cutter, bigger step — the rule is in the tool, not in millimetres.
+  cam::Tool big = ball;
+  big.diameter = 12.0;
+  CHECK(cam::DerivedStepover(big) * big.diameter >
+        cam::DerivedStepover(ball) * ball.diameter);
+
+  // And a derived operation picks it up rather than hard-coding 0.45.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/false);
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  cam::Setup setup = BasicSetup();
+  setup.tools[0].type = cam::ToolType::Ball;
+  const cam::DerivedOp d =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor);
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.stepover,
+             WithinAbs(cam::DerivedStepover(setup.tools[0]), 1e-9));
+}
+
+TEST_CASE("cam: a cone is refused a floor to clear", "[cam]") {
+  // A V-bit or a drill point run along a floor leaves a groove as deep as the
+  // pass, not a floor. A ball nose is fine — it leaves a cusp, and the step
+  // is sized for it — so this refuses only the shapes that have no answer.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/false);
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  for (const auto& [type, word] :
+       std::vector<std::pair<cam::ToolType, const char*>>{
+           {cam::ToolType::VBit, "V-bit"}, {cam::ToolType::Drill, "drill"}}) {
+    cam::Setup s = BasicSetup();
+    s.tools[0].type = type;
+    s.tools[0].tipAngleDeg = 90.0;
+    for (const cam::OpType op :
+         {cam::OpType::Pocket, cam::OpType::Face, cam::OpType::Adaptive}) {
+      const cam::DerivedOp d =
+          cam::DeriveOperation(s, doc->GetBodies(), op, floor);
+      INFO(word << " / op " << static_cast<int>(op) << ": " << d.why);
+      CHECK_FALSE(d.ok);
+      CHECK(d.why.find(word) != std::string::npos);
+    }
+  }
+  // Flat and ball are both allowed — the ball with a finer step.
+  for (const cam::ToolType type : {cam::ToolType::Flat, cam::ToolType::Ball}) {
+    cam::Setup s = BasicSetup();
+    s.tools[0].type = type;
+    const cam::DerivedOp d =
+        cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket, floor);
+    INFO(d.why);
+    CHECK(d.ok);
+  }
+}
+
 TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
   // A hole NARROWER than the cutter: 3 mm against a 6 mm end mill. Nothing
   // stands in it and the tool could never enter it, so crossing is harmless —

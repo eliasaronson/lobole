@@ -149,6 +149,22 @@ struct DerivedOp {
 // nothing to re-derive the others from.
 int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
 
+// How far to step over per pass, as a fraction of the cutter's diameter.
+//
+// A flat mill leaves a flat floor whatever the stepover, so the rule of thumb
+// stands: 45% of the cutter. A BALL NOSE does not — between two passes it
+// leaves a cusp, and the height of that cusp is what decides the stepover, not
+// a number of millimetres. Solving `cusp = r - sqrt(r^2 - (s/2)^2)` for the
+// step gives `s = 2*sqrt(2*r*cusp - cusp^2)`.
+//
+// The cusp target is 2% of the tool's RADIUS — derived from the cutter like
+// every other default here, so it stays right for a 1 mm ball and a 12 mm one.
+// On a 6 mm ball that is 0.06 mm of ridge and a 1.7 mm step, against the 2.7
+// a flat mill would take: slower, and the floor is the floor that was asked
+// for. Before this a ball nose cleared a pocket on exactly the flat mill's
+// path and left 160 mm2 of scallop that only the verifier ever mentioned.
+[[nodiscard]] double DerivedStepover(const Tool& tool);
+
 // Half the cutter per pass: the rule of thumb every 2.5D job starts from,
 // expressed in the TOOL so it stays right for a 1 mm cutter and a 12 mm one.
 // One derivation, three callers — the verbs, a retool, and the panel.

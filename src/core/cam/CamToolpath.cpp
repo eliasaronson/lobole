@@ -1199,6 +1199,21 @@ DerivedOp DeriveOperation(const Setup& setup,
     return out;
   }
   const Tool& tool = named != nullptr ? *named : setup.tools.front();
+  // A V-bit or a drill point is a CONE: run along a floor it leaves a groove
+  // as deep as the pass, not a floor. A ball nose is fine — it leaves a cusp,
+  // and `DerivedStepover` sizes the step so that cusp is a fifth of a percent
+  // of the cutter. A cone has no such number, so this refuses instead of
+  // cutting something plausible and wrong.
+  if ((type == OpType::Pocket || type == OpType::Face ||
+       type == OpType::Adaptive) &&
+      (tool.type == ToolType::VBit || tool.type == ToolType::Drill)) {
+    out.why = "tool " + std::to_string(tool.number) + " is a " +
+              (tool.type == ToolType::VBit ? "V-bit" : "drill") +
+              " — a cone cannot clear a floor flat, it ploughs a groove the "
+              "depth of the pass. Use a flat end mill, or a ball nose if a "
+              "scalloped floor is acceptable.";
+    return out;
+  }
   glm::dvec3 lo(0.0), hi(0.0);
   if (!StockBoundsFramed(setup, bodies, lo, hi)) {
     // Two different reasons land here now — no solid at all, and a fixed
@@ -1217,7 +1232,7 @@ DerivedOp DeriveOperation(const Setup& setup,
   // every 2.5D job starts from, expressed in the tool rather than in
   // millimetres so it stays right for a 1 mm cutter and a 12 mm one.
   op.stepdown = DerivedStepdown(tool);
-  op.stepover = 0.45;
+  op.stepover = DerivedStepover(tool);
 
   // The model's own box, as opposed to the stock's: "does this wall go all
   // the way through" is a question about the part.
@@ -1466,6 +1481,19 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies) {
     }
   }
   return moved;
+}
+
+double DerivedStepover(const Tool& tool) {
+  if (tool.type != ToolType::Ball)
+    return 0.45;
+  const double r = std::max(1e-6, tool.diameter * 0.5);
+  const double cusp = r * 0.02;
+  const double step =
+      2.0 * std::sqrt(std::max(0.0, 2.0 * r * cusp - cusp * cusp));
+  // As a fraction of the DIAMETER, which is what every reader of `stepover`
+  // multiplies by. Never wider than the flat-mill rule: a ball that stepped
+  // further than a flat mill would be cutting with its shank.
+  return std::clamp(step / tool.diameter, 0.02, 0.45);
 }
 
 bool Retool(const Setup& setup, Operation& op, int toolNumber,
