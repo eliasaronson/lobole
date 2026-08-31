@@ -405,6 +405,84 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  // Where the CUTTER points, asserted against what the RENDERER holds rather
+  // than against the caller's arithmetic. Reported three times from the real
+  // job as "the cutter is not perpendicular to the cutting surface — it almost
+  // follows the camera", and twice defended with a screenshot, which is not
+  // evidence about a matrix. `GetInstanceTransform` exists for exactly this.
+  t = IM_REGISTER_TEST(engine, "cam", "tool_glyph_points_down_the_spindle");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // A panel standing on edge, so the fixture frame is a real rotation and
+    // not the identity every other fixture in this file happens to have.
+    Doc()->AddFeature(std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0),
+                                                   210, 16, 400));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    const Body& body = Doc()->GetBodies()[0];
+    ElementRef big;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (body.shape.FacePlane(index, o, n, u) && n.y < -0.99f)
+        big = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK(big.IsSet());
+    {
+      cam::Setup* live = Doc()->FindCamSetup(setup.id);
+      cam::Tool t1;
+      t1.number = 1;
+      t1.name = "8 mm";
+      t1.diameter = 8.0;
+      t1.feedCut = 1200.0;
+      t1.feedPlunge = 400.0;
+      t1.spindleRpm = 18000.0;
+      live->tools = {t1};
+      live->frame = cam::SolveFaceUp({0.0, -1.0, 0.0}, live->frame);
+      IM_CHECK(!cam::FrameIsSquare(*live));
+      live->safeZ = cam::DeriveSafeZ(*live, Doc()->GetBodies());
+      const cam::DerivedOp derived = cam::DeriveOperation(
+          *live, Doc()->GetBodies(), cam::OpType::Profile, {});
+      IM_CHECK(derived.ok);
+      cam::Operation op = derived.op;
+      op.id = Doc()->AllocateId();
+      live->operations.push_back(op);
+    }
+    ui::RefreshCamToolpaths(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camToolpaths.empty());
+
+    IM_CHECK(ui::BeginCamPlayback(*s_App));
+    ui::SeekCamPlayback(*s_App, s_App->camTimeline.End());
+    ctx->Yield(4); // SyncCamPlayback runs per frame
+    IM_CHECK(s_App->camToolInstance != 0);
+    IM_CHECK(s_App->meshRenderer != nullptr);
+
+    const std::optional<glm::mat4> m =
+        s_App->meshRenderer->GetInstanceTransform(s_App->camToolInstance);
+    IM_CHECK(m.has_value());
+    // The glyph is revolved about ITS OWN +Z (CamStockMesh::BuildToolMesh),
+    // so column 2 of the model matrix is where the tool points in the world.
+    // It must be the spindle: the setup frame applied to +Z.
+    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    const glm::dvec3 spindle =
+        cam::SetupToModel(*live) * glm::dvec3(0.0, 0.0, 1.0);
+    const glm::vec3 drawn = glm::normalize(glm::vec3((*m)[2]));
+    const glm::vec3 want = glm::normalize(glm::vec3(spindle));
+    ctx->LogInfo("drawn  %.4f %.4f %.4f", drawn.x, drawn.y, drawn.z);
+    ctx->LogInfo("spindle %.4f %.4f %.4f", want.x, want.y, want.z);
+    IM_CHECK(glm::length(drawn - want) < 1e-4f);
+    // …and it is a pure rotation: no scale, no shear, nothing view-derived.
+    for (int c = 0; c < 3; c++)
+      IM_CHECK(std::abs(glm::length(glm::vec3((*m)[c])) - 1.0f) < 1e-4f);
+    IM_CHECK(std::abs((*m)[3][3] - 1.0f) < 1e-6f);
+
+    ui::EndCamPlayback(*s_App);
+    ctx->Yield(2);
+  };
+
   // W2/W5 (docs/cam/stock-and-origin.md): the corner the operator touches off
   // on, chosen by clicking, and honoured by the file. Before v68 `origin` was
   // a label the post never read, so "Z zero at 16.000" was a claim no line of
