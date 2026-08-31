@@ -94,4 +94,16 @@ inline const glm::vec3 kFillLightDir =
 inline const glm::vec3 kRimLightDir = glm::normalize(
     0.8f * kWorldRightF + 0.2f * kWorldUpF - 0.9f * kWorldFrontF);
 
+// …and what each light IS, beside the direction it shines from. The
+// directions moved here because three copies had drifted; the colours and
+// intensities were still inline in MeshRenderer, and StockRenderer had a
+// fourth set of directions hard-coded in its own GLSL — so the simulation's
+// block was lit from somewhere the part beside it was not. Intensity rides in
+// `.w`, as the shaders' `Light` struct expects.
+inline const glm::vec4 kKeyLight{1.0f, 0.95f, 0.8f, 1.8f};  // slightly warm
+inline const glm::vec4 kFillLight{0.8f, 0.85f, 1.0f, 0.4f}; // cool, soft
+inline const glm::vec4 kRimLight{1.0f, 1.0f, 0.9f, 0.6f};   // neutral edge
+// rgb = colour, a = intensity.
+inline const glm::vec4 kAmbientLight{0.15f, 0.17f, 0.2f, 0.8f};
+
 } // namespace conv

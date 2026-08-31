@@ -342,25 +342,16 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   // Primary directional light (main illumination from upper right). The rig
   // directions live in core/Conventions.h — the shadow map and the ray tracer
   // share the key light, and the three copies drifted before.
-  ubo.primaryLight.direction =
-      glm::vec4(conv::kKeyLightDir, 1.8f); // High intensity
-  ubo.primaryLight.color =
-      glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white
-
-  // Fill light (softer light from opposite direction to reduce harsh shadows)
-  ubo.fillLight.direction =
-      glm::vec4(conv::kFillLightDir, 0.4f); // Lower intensity
-  ubo.fillLight.color =
-      glm::vec4(0.8f, 0.85f, 1.0f, 1.0f); // Slightly cool blue fill
-
-  // Rim light (side lighting for edge definition)
-  ubo.rimLight.direction =
-      glm::vec4(conv::kRimLightDir, 0.6f);                // Medium intensity
-  ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f); // Neutral white
-
-  // Ambient light (reduced for better contrast)
-  ubo.ambientColor =
-      glm::vec4(0.15f, 0.17f, 0.2f, 0.8f); // Cool ambient with intensity
+  // The whole rig — directions, colours, intensities — is core/Conventions.h,
+  // so the stock block in the simulation is lit by the same three lights as
+  // the part beside it rather than by its own copy.
+  ubo.primaryLight.direction = glm::vec4(conv::kKeyLightDir, conv::kKeyLight.a);
+  ubo.primaryLight.color = glm::vec4(glm::vec3(conv::kKeyLight), 1.0f);
+  ubo.fillLight.direction = glm::vec4(conv::kFillLightDir, conv::kFillLight.a);
+  ubo.fillLight.color = glm::vec4(glm::vec3(conv::kFillLight), 1.0f);
+  ubo.rimLight.direction = glm::vec4(conv::kRimLightDir, conv::kRimLight.a);
+  ubo.rimLight.color = glm::vec4(glm::vec3(conv::kRimLight), 1.0f);
+  ubo.ambientColor = conv::kAmbientLight;
 
   // Section clip plane is global (same for every instance), so it rides in
   // the shared UBO rather than per-draw push constants.

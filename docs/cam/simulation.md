@@ -426,6 +426,31 @@ corners, for all four tool shapes and for the stock mesh. Cheap to check,
 impossible to eyeball, and it survived three rounds of looking at
 screenshots.
 
+### One light rig, four copies of it (2026-08-31)
+
+The stock read as though it came from a different scene than the part beside
+it, and it did: `stock.frag` carried its own three hard-coded light
+directions, `MeshRenderer.cpp` had its own inline literals, and
+`core/Conventions.h` held the `kKeyLightDir` / `kFillLightDir` /
+`kRimLightDir` the two were supposed to share. The constants had already
+drifted apart once. The directions (and now colours and intensities) live in
+`Conventions.h`; both renderers read them, `StockRenderer`'s UBO carries them
+per frame.
+
+**Matching the directions is not matching the look, and the difference is
+instructive.** Ported straight across, the stock went nearly black. The part
+is not lit by those three lights alone — most of what fills its shadowed
+faces is the IBL probe, which the stock has no descriptor for. So the stock
+gets the scene's *directions and hue* with a wrap term on key and fill and a
+lifted ambient stanza standing in for the probe: same rig, same colour
+temperature, brightness calibrated back to where the old shader had it. A
+stock face reads ~0.8 of white as it did before, but now it warms and cools
+with the same lights the part does.
+
+The honest limit: this is consistency of direction, not of illumination. A
+real match means the stock sampling the same IBL, which is a descriptor-set
+change to `StockRenderer` rather than a shader edit.
+
 ### Still open
 
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and

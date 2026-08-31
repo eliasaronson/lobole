@@ -89,10 +89,22 @@ private:
     void* mapped = nullptr;
     VkDeviceSize capacity = 0;
   };
+  struct Light {
+    glm::vec4 direction; // xyz = toward the light, w = intensity
+    glm::vec4 color;
+  };
+  // Mirrors stock.vert's UBO. The three lights are the SAME rig the part is
+  // lit by (core/Conventions.h) — this shader used to carry its own
+  // directions, so the block was lit from somewhere the model beside it was
+  // not.
   struct Ubo {
     glm::mat4 view;
     glm::mat4 proj;
     glm::vec4 clipPlanes[kMaxClipPlanes];
+    Light key;
+    Light fill;
+    Light rim;
+    glm::vec4 ambient;
   };
   // 80 bytes, inside the 128-byte floor every Vulkan implementation
   // guarantees (the wood-grain push constant already sits at that ceiling —

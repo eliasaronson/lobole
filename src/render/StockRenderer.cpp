@@ -1,5 +1,7 @@
 #include "render/StockRenderer.h"
 
+#include "core/Conventions.h"
+
 #include "render/VulkanCommon.h"
 
 #include "common/Logger.h"
@@ -230,9 +232,19 @@ void StockRenderer::Render(VkCommandBuffer commandBuffer,
     return;
   const uint32_t frame = currentFrame % kFramesInFlight;
 
-  Ubo ubo{m_view, m_proj, {}};
+  Ubo ubo{};
+  ubo.view = m_view;
+  ubo.proj = m_proj;
   for (int i = 0; i < kMaxClipPlanes; i++)
     ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
+  // The scene's own rig, not a copy — see core/Conventions.h.
+  ubo.key = {glm::vec4(conv::kKeyLightDir, conv::kKeyLight.a),
+             glm::vec4(glm::vec3(conv::kKeyLight), 1.0f)};
+  ubo.fill = {glm::vec4(conv::kFillLightDir, conv::kFillLight.a),
+              glm::vec4(glm::vec3(conv::kFillLight), 1.0f)};
+  ubo.rim = {glm::vec4(conv::kRimLightDir, conv::kRimLight.a),
+             glm::vec4(glm::vec3(conv::kRimLight), 1.0f)};
+  ubo.ambient = conv::kAmbientLight;
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));
 
   const VkDeviceSize vbytes = m_vertices.size() * sizeof(StockVertex);
