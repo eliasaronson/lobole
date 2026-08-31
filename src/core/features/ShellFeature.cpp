@@ -51,8 +51,9 @@ bool ShellFeature::Execute(RegenContext& ctx) {
     }
     removeIdx.push_back(*idx);
   }
-  // Shell needs at least one open face to hollow through (SolidWorks/Onshape
-  // semantics). A sealed hollow shell is a v2 (a manual offset+cut).
+  // Shell needs at least one open face to hollow through (the standard shell
+  // semantics in commercial CAD). A sealed hollow shell is a v2 (a manual
+  // offset+cut).
   if (removeIdx.empty()) {
     SetError("shell needs at least one open face to remove");
     return false;

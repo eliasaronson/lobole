@@ -389,7 +389,7 @@ public:
 
   // Rollback bar (R2): regeneration executes features [0, rollback) only;
   // the rest are skipped (grayed in the tree, params untouched). -1 = end.
-  // Persisted with the document, like SolidWorks' marker position.
+  // Persisted with the document, like the rollback marker in commercial CAD.
   int Rollback() const { return m_rollback; }
   void SetRollback(int index) {
     if (index < 0 || index >= static_cast<int>(m_features.size()))

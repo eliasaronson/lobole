@@ -14,7 +14,8 @@ enum class SplitKnifeKind {
 };
 
 // Divides one solid body into all the pieces a plane cuts it into, keeping
-// every piece as its own body (Onshape's splitPart; import feature-gap #1).
+// every piece as its own body (the split-part operation commercial CAD
+// provides; import feature-gap #1).
 // Boolean-Subtract removes material — this keeps both sides. OCC
 // BRepAlgoAPI_Splitter + CADShape::SplitSolids.
 //

@@ -461,7 +461,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     std::filesystem::remove_all(dir);
   };
 
-  // Folder management (Onshape-style tab folders): rename via right-click,
+  // Folder management (tab folders): rename via right-click,
   // move docs in/out via the tab context menus, and drag-drop between the
   // bar and folder buttons. Folder edits mark the project dirty even though
   // no document version changes (they live only in project.json).

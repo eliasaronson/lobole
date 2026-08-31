@@ -259,8 +259,8 @@ void Divider() {
 // belongs to. It used to be ICON_FA_CARET_DOWN in a button of its own, which
 // made it the loudest thing on the sketch bar: the glyph is drawn at the ICON
 // size (the tool icons' size) and the frame is a full tool-button frame, so a
-// hint read as a second tool. Onshape and SolidWorks both hang a small
-// unframed arrow off the icon instead.
+// hint read as a second tool. Commercial CAD hangs a small unframed arrow
+// off the icon instead.
 //
 // Sized off the FRAME, not the icon font: a caret must stay a fraction of the
 // button it is attached to at any UI scale (Theme.cpp ScaleAllSizes), which a
@@ -463,7 +463,7 @@ void DrawSketchModeToolbar(AppState& state) {
                      SketchTool t) {
     CommandButton(state, icon, id, tip, edit.tool == t);
   };
-  // A flyout group (Onshape-style): the face shows the last-picked variant —
+  // A flyout group: the face shows the last-picked variant —
   // click it to use that tool — and the caret opens a popup to switch which
   // variant the group holds. `current` persists the pick across frames. Each
   // VARIANT is its own command, so every one of them can carry a chord.

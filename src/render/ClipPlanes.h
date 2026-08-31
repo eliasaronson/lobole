@@ -14,7 +14,7 @@
 // FOUR, not eight: the shadow pass carries its planes in push constants
 // alongside a mat4 (64 bytes), and Vulkan only guarantees 128 — four planes
 // fill it exactly. Every pass then has the same limit, which is one fewer
-// thing to explain. SolidWorks offers three.
+// thing to explain. Commercial CAD typically offers three.
 inline constexpr int kMaxClipPlanes = 4;
 
 using ClipPlaneArray = std::array<glm::vec4, kMaxClipPlanes>;

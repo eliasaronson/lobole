@@ -4370,7 +4370,7 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
   };
 
   // Fully-constrained sketches read in a neutral "solved" colour; under-
-  // constrained ones stay blue (Onshape's black-vs-blue signal).
+  // constrained ones stay blue (the black-vs-blue signal CAD sketchers use).
   const glm::vec4 base = edit.dof == 0 ? glm::vec4(0.90f, 0.92f, 0.96f, 1.0f)
                                        : glm::vec4(0.55f, 0.85f, 1.00f, 1.0f);
   const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);

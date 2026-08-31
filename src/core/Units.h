@@ -9,7 +9,7 @@
 // CAD convention, and the reason this is not an application preference: a
 // part authored in inches has to display in inches for whoever opens it. The
 // system travels with the document (Document::Units, serialized), not with
-// the reader. SolidWorks additionally lets length, mass and angle be chosen
+// the reader. Commercial CAD additionally lets length, mass and angle be chosen
 // independently, and so does this — but each is then FIXED. Nothing here
 // picks a unit per value.
 //

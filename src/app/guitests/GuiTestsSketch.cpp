@@ -77,8 +77,8 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   // A flyout group is a tool button plus a DISCLOSURE CARET, and the caret
   // must stay a hint. It was ICON_FA_CARET_DOWN in a button of its own, so it
   // was drawn at the ICON size inside a full tool frame — on the sketch bar
-  // the three carets read as three more tools, twice the arrow Onshape and
-  // SolidWorks draw. Sized off the frame, it cannot come back as a glyph:
+  // the three carets read as three more tools, twice the arrow commercial CAD
+  // draws. Sized off the frame, it cannot come back as a glyph:
   // a full icon button is at least as wide as it is tall.
   t = IM_REGISTER_TEST(engine, "sketch", "a_flyout_caret_stays_a_hint");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -1199,11 +1199,12 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
-  // Placement-driven kind inference (Phase 3.7, the Onshape behavior): a
-  // point pair enters a placement stage; the cursor zone picks the kind —
-  // above/below the pair = horizontal (DistanceX), sideways = vertical
-  // (DistanceY), pulled perpendicular to the span = aligned (Distance) —
-  // and the click also places the label. Esc walks the staged ladder.
+  // Placement-driven kind inference (Phase 3.7, the mainstream CAD
+  // behavior): a point pair enters a placement stage; the cursor zone picks
+  // the kind — above/below the pair = horizontal (DistanceX), sideways =
+  // vertical (DistanceY), pulled perpendicular to the span = aligned
+  // (Distance) — and the click also places the label. Esc walks the staged
+  // ladder.
   t = IM_REGISTER_TEST(engine, "dims", "placement_zones");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -1431,8 +1432,8 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
-  // Negative dimension values flip the dimension's direction (the SW/
-  // Onshape convention): signed kinds (DistanceX/Y, Angle) move the free
+  // Negative dimension values flip the dimension's direction (the usual CAD
+  // convention): signed kinds (DistanceX/Y, Angle) move the free
   // geometry to the other side/wedge and store |v| (literals swap refs;
   // negative-evaluating exprs keep the raw signed value so regeneration
   // stays stable); DistancePL flips its side pin; unsigned kinds (aligned

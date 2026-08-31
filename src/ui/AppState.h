@@ -213,7 +213,7 @@ struct SketchEditState {
   // Dimension placement stage (Phase 3.7): armed once the tool's targets
   // resolve; a ghost dimension follows the cursor until a click commits the
   // kind + labelOffset. For a point PAIR (`dimPlacePair`) the kind switches
-  // live by cursor zone (horizontal / vertical / aligned, the Onshape
+  // live by cursor zone (horizontal / vertical / aligned, the mainstream CAD
   // behavior); fixed-kind targets (radius, point-line) place the label only.
   bool dimPlacing = false;
   bool dimPlacePair = false;

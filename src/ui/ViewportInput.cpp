@@ -110,7 +110,7 @@ void HandleViewportInput(AppState& state) {
     }
   }
 
-  // SolidWorks-style navigation drags: plain = rotate, Ctrl = pan,
+  // Standard CAD navigation drags: plain = rotate, Ctrl = pan,
   // Shift = zoom, Alt = roll. The drag starts over the viewport and keeps
   // tracking until release even if the cursor crosses a panel; modifiers
   // are re-read every frame so pressing Ctrl mid-drag switches to pan.
@@ -181,7 +181,7 @@ void HandleViewportInput(AppState& state) {
   if (state.viewportDrag != ViewportDrag::None && state.viewportDragLeft)
     return;
 
-  // SolidWorks keyboard navigation (when the UI isn't capturing keys):
+  // CAD keyboard navigation (when the UI isn't capturing keys):
   // arrows rotate (Shift = 90 degree steps), Ctrl+arrows pan, Alt+left/right
   // roll, Z / Shift+Z zoom out/in
   if (!io.WantCaptureKeyboard && !TerminalCapturesKeys(state)) {

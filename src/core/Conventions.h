@@ -25,9 +25,9 @@ namespace conv {
 // gate), so flipping kWorldUp requires re-deriving kWorldFront with it.
 //
 // Z-up, front toward -Y: the frame every convention we interoperate with
-// uses — G-code's spindle, drawing practice, FreeCAD/SolidWorks/Onshape/
-// Blender. The app was Y-up until 2026-08-28 (the renderer's habit, adopted
-// as a model convention); docs/up-axis.md is the history and the flip.
+// uses — G-code's spindle, drawing practice, and every CAD and DCC tool we
+// exchange files with. The app was Y-up until 2026-08-28 (the renderer's habit,
+// adopted as a model convention); docs/up-axis.md is the history and the flip.
 inline constexpr glm::dvec3 kWorldUp{0.0, 0.0, 1.0};
 inline constexpr glm::dvec3 kWorldFront{0.0, -1.0, 0.0};
 inline constexpr glm::dvec3 kWorldRight{1.0, 0.0, 0.0};

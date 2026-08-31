@@ -277,8 +277,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
-  // A new sketch defaults to the Select tool; letter keys switch tools (Onshape
-  // keymap: g = rectangle, m = trim).
+  // A new sketch defaults to the Select tool; letter keys switch tools (the
+  // sketch keymap: g = rectangle, m = trim).
   t = IM_REGISTER_TEST(engine, "keys", "tool_switch");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

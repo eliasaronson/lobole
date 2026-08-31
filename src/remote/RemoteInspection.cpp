@@ -1623,7 +1623,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           f["kind"] = fi->kind;
           f["area"] = fi->area;
           // Centroid: lets an importer match a specific face geometrically
-          // (Onshape shell/draft face queries -> our stable face names).
+          // (an importer's shell/draft face queries -> our stable face names).
           f["centroid"] = {fi->centroid.x, fi->centroid.y, fi->centroid.z};
           // Outward unit surface normal at the centroid: lets an agent tell a
           // +X wall from a -X wall without a separate select_face round-trip.
@@ -1646,7 +1646,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (ei->hasRadius)
             e["radius"] = ei->radius;
           // Midpoint: lets an importer match a specific edge geometrically
-          // (Onshape fillet/chamfer edge queries → our stable edge names).
+          // (an importer's fillet/chamfer edge queries → our stable edge
+          // names).
           e["midpoint"] = {ei->midpoint.x, ei->midpoint.y, ei->midpoint.z};
         }
         edges.push_back(e);

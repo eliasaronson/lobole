@@ -65,8 +65,9 @@ struct Ellipse {
 // C + rMajor·cos t·û + rMinor·sin t·v̂, radians). Like Arc it is CCW-always —
 // `endParam` is normalized so the sweep (endParam − startParam) lies in
 // (0, 2π]. `which` 0 = centre, 1 = start point, 2 = end point. This is to
-// Ellipse what Arc is to Circle (Onshape elliptical arcs; Designer has no full
-// draw tool for it in v1 — it exists for import + profile use).
+// Ellipse what Arc is to Circle (the elliptical arc commercial CAD offers;
+// Designer has no full draw tool for it in v1 — it exists for import + profile
+// use).
 struct EllipseArc {
   glm::vec2 center;
   double rMajor;
@@ -78,9 +79,10 @@ struct EllipseArc {
   bool construction = false;
 };
 // A non-rational, clamped, uniform B-spline through its control `poles`
-// (Onshape's spline entities / fitSpline; sketch phase L). `which` addresses
-// pole k, so each pole is a movable solver point (Coincident/Distance/Fixed on
-// a pole work) — the v1 "rigid net" treatment, mirroring the Ellipse centre.
+// (the fitted-spline entity a parametric import carries; sketch phase L).
+// `which` addresses pole k, so each pole is a movable solver point
+// (Coincident/Distance/Fixed on a pole work) — the v1 "rigid net"
+// treatment, mirroring the Ellipse centre.
 // The curve interpolates its first and last poles (clamped). `degree` is
 // cubic, reduced to poles-1 when there are too few poles. Weights and an
 // explicit knot vector are not stored in v1 — they are the clamped-uniform

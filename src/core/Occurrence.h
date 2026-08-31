@@ -37,7 +37,7 @@ struct Occurrence {
   glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f}; // (w,x,y,z) identity
 
   bool visible = true;
-  bool fixed = false; // Onshape-style grounded flag; anchor for the A3 solve
+  bool fixed = false; // grounded flag; the anchor for the A3 solve
 
   // Which CONFIGURATION of the referenced document this placement uses
   // (A5, v56); 0 = whatever that document's active configuration is, which

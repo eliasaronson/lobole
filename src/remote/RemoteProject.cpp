@@ -878,7 +878,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       ok = kernel.SaveSTEP(path, shapes);
     } else {
       // STL/BREP are single-shape; a whole-document export of several bodies
-      // fuses them (Onshape behavior) so one file holds the whole part.
+      // fuses them (the usual CAD behavior) so one file holds the whole part.
       CADShape shape;
       if (only >= 0) {
         shape = bodies[only].shape;

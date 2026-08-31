@@ -19,7 +19,7 @@ public:
   // Vertical field of view, degrees. 45 is a wide, cinematic lens: on a
   // metre-scale part the near end flared out against the far one and the
   // perspective read as distortion rather than depth. CAD sits narrower
-  // (SolidWorks and Onshape are near-orthographic); 30 is that look while a
+  // (commercial CAD sits near-orthographic); 30 is that look while a
   // solid still gets its depth cues.
   static constexpr float kDefaultFovDegrees = 30.0f;
 

@@ -541,7 +541,8 @@ void ReattachSketchFace(AppState& state, uint64_t sketchId,
       *state.document);
 }
 
-// Sketch-context keyboard shortcuts (Onshape keymap). Called each frame while a
+// Sketch-context keyboard shortcuts (the sketch keymap). Called each frame
+// while a
 // sketch is being edited. Guarded so keys never fire while typing in a field or
 // during a Ctrl/Alt chord (undo/redo).
 // Copies the selected entities (deduplicated) into the app clipboard.
@@ -748,12 +749,12 @@ void CommitInferredDimension(AppState& state, sketch::ConstraintKind kind,
 }
 
 // The resolved commit for a placed point-PAIR dimension (Phase 3.7): the
-// kind switches by the cursor's zone relative to the span A→B, Onshape
-// style. Cursor offset from the midpoint within ~22.5° of the span's
-// perpendicular = pulled straight off the pair → ALIGNED (Distance); else
-// mostly up/down → HORIZONTAL dimension (DistanceX, its line is horizontal);
-// mostly sideways → VERTICAL (DistanceY). Axis-parallel spans skip the
-// choice — aligned IS the axis dimension there.
+// kind switches by the cursor's zone relative to the span A→B, the way
+// commercial CAD places them. Cursor offset from the midpoint within ~22.5° of
+// the span's perpendicular = pulled straight off the pair → ALIGNED (Distance);
+// else mostly up/down → HORIZONTAL dimension (DistanceX, its line is
+// horizontal); mostly sideways → VERTICAL (DistanceY). Axis-parallel spans skip
+// the choice — aligned IS the axis dimension there.
 struct PairPlacement {
   sketch::ConstraintKind kind = sketch::ConstraintKind::Distance;
   sketch::PointRef a, b; // ordered so the solver's signed value is positive
@@ -980,7 +981,7 @@ void ResolveAccumulatedTargets(AppState& state, const SketchFeature& sketch) {
     const float cross = u.x * v.y - u.y * v.x;
     if (std::abs(cross) < 0.01f) {
       // Parallel (within tolerance): the perpendicular distance, dimensioned
-      // from an endpoint of the first line to the second (the SolidWorks
+      // from an endpoint of the first line to the second (the standard
       // parallel-distance recipe — no parallel constraint is implied).
       const auto p = TargetUV(sketch, {A.entity, 0});
       const double dist = p ? PointToLineDistance(sketch, *p, B.entity) : 0.0;
@@ -1194,7 +1195,7 @@ static void HandleCollectPhase(AppState& state, SketchFeature& sketch,
   if (edit.boxActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
     if (glm::length(edit.boxEnd - edit.boxStart) < 4.0f) {
       if (!edit.selected.empty())
-        finish(); // tap in empty space: confirm/continue (Onshape-style)
+        finish(); // tap in empty space: confirm/continue
     } else {
       const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
       auto project = [&](glm::vec2 p) {
@@ -2367,7 +2368,7 @@ void DrawSnapGlyphs(AppState& state) {
   const ImU32 accent = IM_COL32(255, 220, 120, 255);
 
   // Alignment guides: a dashed inference line from the shared vertex through
-  // the snapped point, extended a little past it (Onshape-style).
+  // the snapped point, extended a little past it.
   auto guide = [&](const std::optional<sketch::PointRef>& ref) {
     if (!ref)
       return;
@@ -2689,7 +2690,7 @@ bool ReflectPLPoint(SketchFeature& sk, const sketch::Constraint& con) {
 // Commits an edited dimension value: sets it (plus the optional driving
 // expression, empty = literal), re-solves, one undo record.
 //
-// A NEGATIVE value flips the dimension's direction (the SolidWorks/Onshape
+// A NEGATIVE value flips the dimension's direction (the usual CAD
 // convention) instead of being stored: signed kinds (DistanceX/Y, Angle)
 // swap their refs for literals — the stored value stays positive — while a
 // negative-EVALUATING expression keeps its raw signed value, because

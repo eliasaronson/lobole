@@ -4,7 +4,8 @@
 
 namespace ui {
 
-// 3D-viewport interaction (SolidWorks-style), read from ImGui input state
+// 3D-viewport interaction (the standard CAD bindings), read from ImGui input
+// state
 // once per frame:
 //   Left click          select face (Ctrl+click also aligns the camera)
 //   Middle drag         rotate | +Ctrl pan | +Shift zoom | +Alt roll

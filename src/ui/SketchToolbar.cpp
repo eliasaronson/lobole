@@ -397,7 +397,7 @@ void DrawSketchToolWindow(AppState& state) {
   switch (edit.tool) {
   case SketchTool::Mirror: {
     BeginToolWindowFrame(state, "Mirror");
-    // Clickable step rows (Onshape-style): pick which step you're editing.
+    // Clickable step rows: pick which step you're editing.
     // The active step shows in the accent color; a tap in empty viewport
     // space also advances geometry → axis.
     const auto stepRow = [&](const char* label, const std::string& value,

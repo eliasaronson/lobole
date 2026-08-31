@@ -529,9 +529,9 @@ uint32_t LoopKey(const Loop& loop) {
 
 // Groups loops into outers-with-holes by containment depth: even depth =
 // outer boundary, odd depth = hole of its immediate (deepest) container;
-// islands inside holes become outers again (Onshape behavior). Empty on
-// partially-overlapping loops — an ambiguous profile is a loud error, never
-// a guess.
+// islands inside holes become outers again (the mainstream CAD behavior).
+// Empty on partially-overlapping loops — an ambiguous profile is a loud
+// error, never a guess.
 std::vector<ProfileGroup> ClassifyLoops(const std::vector<Loop>& loops) {
   const size_t n = loops.size();
   std::vector<std::vector<glm::vec2>> polys(n);

@@ -15,7 +15,7 @@ enum class PatternKind { Mirror, Linear, Circular };
 // the id of the feature that produced it (Body::createdBy) — whole-body,
 // toponaming-free. Every instance (the seed plus its transformed copies) is
 // fused, then split back into connected solids: instances that touch merge
-// into one body, disjoint ones become separate bodies (Onshape/SolidWorks
+// into one body, disjoint ones become separate bodies (the mainstream CAD
 // behavior). The seed body is consumed into the result.
 //
 // Mirror reflects across a plane (base plane or datum plane). Linear/Circular

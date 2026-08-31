@@ -8,7 +8,7 @@
 
 namespace ui {
 
-// Onshape-style preview → accept/cancel for feature creation.
+// Preview → accept/cancel for feature creation, as commercial CAD does it.
 //
 // A pending feature is added to the Document immediately (so it regenerates,
 // renders, and is pickable) but is NOT pushed onto the undo stack until the

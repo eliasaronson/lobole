@@ -645,10 +645,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   // S2 (docs/cam/setup-frame.md): the case every other fixture in this file
   // dodges by being modelled face-up. A panel that stands upright — an
-  // imported speaker baffle, and every part that arrives from STEP or Onshape
-  // in the orientation it has in the assembly — has no level face worth
-  // zeroing on. Laying one flat is a statement about the FIXTURE, so it must
-  // work on a 3-axis machine and put no A word in the file.
+  // imported speaker baffle, and every part that arrives from STEP or a
+  // parametric import in the orientation it has in the assembly — has no level
+  // face worth zeroing on. Laying one flat is a statement about the FIXTURE, so
+  // it must work on a 3-axis machine and put no A word in the file.
   t = IM_REGISTER_TEST(engine, "cam", "upright_panel_lays_flat");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
