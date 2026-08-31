@@ -190,6 +190,20 @@ git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/work
 instances, and never 8799), so you no longer hold one in your head. Integrate
 SERIALLY: merge one branch to main, run suites, then the next.
 
+## Profiling
+
+`tools/profile.sh` — the sampling profiler, an occasional audit like
+`coverage.sh`, not part of CI. Three modes: `--test '<catch2 filter>'`,
+`--app <driver.py>` (launches a headless instance on a scratch port and
+profiles it while the script drives it), and `-- <any command>`. `perf` is
+fetched by the script rather than living in shell.nix, which is kernel-coupled.
+
+Two defaults it overrides, both of which fail in ways that look like a working
+profile: this machine is **hybrid** (P-cores and E-cores are separate PMUs), so
+the default hardware `cycles` event samples only one of them — a 27 s run came
+back with 42 samples — hence `-e cpu-clock`; and the tree is built without
+frame pointers, so `--call-graph dwarf` is the only mode with a usable stack.
+
 ## Crash debugging
 
 `main()` installs a `std::stacktrace` handler (CrashHandler.cpp) — SIGSEGV/ABRT
