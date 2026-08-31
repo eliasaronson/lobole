@@ -39,7 +39,14 @@ constexpr double kMaxStepSeconds = 0.25;
 // it is a hair off the surface it is drawn on. Amber sits far from grey in
 // hue and from the dark ground in value, and away from the blues selection
 // and sketches use.
-constexpr glm::vec4 kDoneColor(0.38f, 0.40f, 0.46f, 0.40f);
+// Done is the one that has to sit ON the workpiece, and the workpiece got
+// brighter when the stock started reading the scene's light rig — a 0.40-value
+// line at 0.40 alpha composited to 0.63 against a 0.78 surface, 0.15 apart and
+// invisible. Dark and nearly opaque instead: ~0.30 against the stock, half a
+// unit of contrast. It gives up some of its reading against the dark ground,
+// which is the right way round — a done move above the part is the one thing
+// on screen that is meant to recede.
+constexpr glm::vec4 kDoneColor(0.20f, 0.22f, 0.30f, 0.85f);
 constexpr glm::vec4 kAheadCut(1.00f, 0.55f, 0.08f, 1.00f);
 constexpr glm::vec4 kAheadRapid(0.50f, 0.52f, 0.60f, 0.55f);
 
@@ -293,7 +300,7 @@ void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
     // The cut ahead is the line the eye is following; give it the width as
     // well as the colour.
     AppendPrimLine(shown(tl.program.moves[k].to), shown(m.to),
-                   done ? 1.0f : (m.rapid ? 1.0f : 2.4f), color, out);
+                   done ? 1.4f : (m.rapid ? 1.0f : 2.4f), color, out);
   }
 }
 

@@ -451,6 +451,33 @@ The honest limit: this is consistency of direction, not of illumination. A
 real match means the stock sampling the same IBL, which is a descriptor-set
 change to `StockRenderer` rather than a shader edit.
 
+### The backplot's dim half (2026-08-31)
+
+Brightening the stock to the scene's rig broke a colour that had been
+calibrated against the old, darker stock: `kDoneColor` — the part of the file
+already cut — was value 0.40 at **alpha 0.40**, which composites to 0.63 over
+a 0.78 surface. Fifteen hundredths of contrast, on the one line that has to
+sit on the workpiece. It is 0.20/0.22/0.30 at 0.85 alpha now, ~0.30 against
+the stock, and 1.4 px rather than 1.0.
+
+The trade is deliberate: a dark line reads less well against the dark ground
+behind the part, and a *done* move above the part is the one thing on screen
+meant to recede.
+
+Worth naming as a class — **a colour is calibrated against a brightness, so
+changing a material's lighting silently decalibrates every overlay drawn on
+it.** Nothing failed; both suites stayed green through the regression. The
+three overlay colours that land on the workpiece (`kDoneColor`,
+`kAheadCut`, `kGhostLine`) are the ones to re-check whenever the stock or
+part shading moves.
+
+Also worth knowing while reading a backplot: **the path ahead of the cursor
+is usually buried.** It lies in stock that has not been cut yet, so a
+depth-tested overlay hides it, and it appears as the cutter arrives. The done
+path is visible for the mirror-image reason — it lies in material that is
+gone. This is correct, and it is why a screenshot taken down the tool axis at
+50% shows dark done-lines all round and almost no amber.
+
 ### Still open
 
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and
