@@ -207,16 +207,69 @@ void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
 
 } // namespace
 
+namespace {
+// How far the document's own geometry gets from the world origin. The
+// bounding box behind this is an OCC pass per body (BRepBndLib, no
+// triangulation), and reference geometry asks for it every frame the planes
+// are up, so the answer is cached against the document's version.
+float DocumentReach(AppState& state) {
+  const Document* doc = state.document.get();
+  if (!doc)
+    return 0.0f;
+  if (doc == state.sceneReachDoc && doc->Version() == state.sceneReachVersion)
+    return state.sceneReach;
+  float reach = 0.0f;
+  for (const auto& body : doc->GetBodies()) {
+    glm::vec3 mn, mx;
+    body.shape.GetBoundingBox(mn, mx);
+    for (int i = 0; i < 3; i++)
+      reach = std::max({reach, std::abs(mn[i]), std::abs(mx[i])});
+  }
+  state.sceneReachDoc = doc;
+  state.sceneReachVersion = doc->Version();
+  state.sceneReach = reach;
+  return reach;
+}
+
+// The next 1-2-5 step at or above `raw` — the decade ladder a ruler uses, so
+// a cell is always a number you can count in.
+float NiceStep(float raw) {
+  const float mag =
+      std::pow(10.0f, std::floor(std::log10(std::max(raw, 1e-4f))));
+  const float n = raw / mag;
+  return mag * (n <= 1.0f ? 1.0f : n <= 2.0f ? 2.0f : n <= 5.0f ? 5.0f : 10.0f);
+}
+} // namespace
+
+float ScenePlaneHalfExtent(AppState& state) {
+  // Just past the geometry: a plane you sketch on wants to reach the part's
+  // silhouette, not stop inside it.
+  return std::max(kDefaultPlaneHalfExtent, 1.1f * DocumentReach(state));
+}
+
+SketchGridMetrics SketchGridFor(AppState& state, const SketchFeature& sketch) {
+  float reach = 0.0f;
+  for (const sketch::Entity& e : sketch.entities)
+    for (const glm::vec2& p : sketch::TessellateEntity(e))
+      reach = std::max({reach, std::abs(p.x), std::abs(p.y)});
+  SketchGridMetrics g;
+  g.half = std::max({kSketchBackgroundHalfExtent, 1.25f * reach,
+                     ScenePlaneHalfExtent(state)});
+  // ~50 cells from the origin out, whatever the scale: the 50 mm default
+  // background keeps exactly its old 1 mm cells.
+  g.step = NiceStep(g.half / 50.0f);
+  return g;
+}
+
 // Builds translucent quads for the three default planes (Front/Top/Right),
 // tinted by axis; the hovered plane (0/1/2, -1 = none) is brighter.
-std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
+std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane,
+                                          float half) {
   std::vector<LineVertex3D> quads;
   if (!show)
     return quads;
 
-  // A new workspace starts farther out, so keep the default references large
-  // enough to be immediately usable without making the origin glyph dominant.
-  const float s = kDefaultPlaneHalfExtent;
+  const float s = half;
   struct PlaneDef {
     glm::vec3 u, v;
     glm::vec3 color;
@@ -250,10 +303,10 @@ void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
   }
 }
 
-void AppendSketchGrid(const SketchPlane& plane,
+void AppendSketchGrid(const SketchPlane& plane, const SketchGridMetrics& grid,
                       std::vector<LineVertex3D>& lines) {
-  const int half = static_cast<int>(kSketchBackgroundHalfExtent);
-  const float step = 1.0f; // one grid cell per unit
+  const float step = grid.step;
+  const int half = std::max(1, static_cast<int>(std::lround(grid.half / step)));
   const glm::vec3 minor(0.30f, 0.34f, 0.42f);
   const glm::vec3 major(0.45f, 0.52f, 0.65f);
   const glm::vec3 uAxisColor(0.85f, 0.40f, 0.42f); // red = U (like X)
@@ -275,9 +328,15 @@ void AppendSketchGrid(const SketchPlane& plane,
   }
 }
 
-void AppendOriginGizmo(std::vector<LineVertex3D>& lines) {
-  const float L = 1.5f;  // axis length
-  const float h = 0.22f; // arrowhead size
+void AppendOriginGizmo(const AppState& state,
+                       std::vector<LineVertex3D>& lines) {
+  // 0.065 of the orbit distance is the 1.5 mm arrow the empty workspace has
+  // always drawn (it opens at ~22 mm out), and it stays that arrow on a part
+  // a thousand times the size.
+  const float L = state.camera
+                      ? std::max(0.065f * state.camera->GetDistance(), 0.1f)
+                      : 1.5f;
+  const float h = L * 0.147f; // arrowhead, in the same proportion as before
   struct Axis {
     glm::vec3 dir, side, color;
   };
@@ -814,6 +873,9 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
   const glm::vec3 kDatumTint(0.85f, 0.62f, 0.28f); // amber, distinct from bases
+  // A datum quad has always been the smaller, secondary reference (3 against
+  // a base plane's 8); keep that ratio now that both are derived.
+  const float kDatumHalfFraction = 3.0f / kDefaultPlaneHalfExtent;
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     auto* dp = dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
     if (!dp)
@@ -822,7 +884,7 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
                             dp->GetId() == state.pendingFeatureId ||
                             dp->GetId() == SelectedFeatureId(state);
     AppendPlaneQuad(dp->OutputPlane(), kDatumTint * (emphasized ? 1.8f : 1.0f),
-                    3.0f, quads);
+                    kDatumHalfFraction * ScenePlaneHalfExtent(state), quads);
   }
 }
 
@@ -2506,11 +2568,9 @@ namespace {
 void FitCameraToBox(AppState& state, const glm::vec3& min,
                     const glm::vec3& max) {
   const glm::vec3 center = (min + max) * 0.5f;
-  const float radius = glm::length(max - min) * 0.5f;
 
-  // Distance that fits the bounding sphere in the LIMITING screen axis. The
-  // vertical half-FOV is fixed; the horizontal one is tan(fovY/2)*aspect, so
-  // in a portrait-ish viewport (aspect < 1 — e.g. the central region of a
+  // The vertical half-FOV is fixed; the horizontal one is tan(fovY/2)*aspect,
+  // so in a portrait-ish viewport (aspect < 1 — e.g. the central region of a
   // tall tiled window) the width is what gates the fit. The old radius*2.5
   // constant was exactly the vertical fit for the 45-degree FOV and silently
   // assumed a landscape viewport.
@@ -2546,11 +2606,89 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
   }
   const float usableX = 1.0f - coveredFrac;
 
-  const float tanHalfLimit = tanHalfV * std::min(1.0f, aspect * usableX);
-  const float distance =
-      std::max(1.05f * radius / std::max(tanHalfLimit, 0.05f), 1.0f);
-  cam.SetTarget(center);
-  cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f)); // let it zoom out
+  const float tanHalfH = std::max(tanHalfV * aspect * usableX, 0.05f);
+
+  // Fit the box AS IT PROJECTS, not its bounding sphere. The sphere is drawn
+  // on the box's DIAGONAL, so anything that is not a cube got framed by a
+  // circle it never fills: the smart-speaker panel (1122 x 210 x 16) opened
+  // at half the viewport height with the rest empty, and every real part
+  // needed a scroll-wheel nudge before you could work on it.
+  //
+  // Aim and standoff are solved TOGETHER, because in perspective the
+  // projected centroid of a box is not its 3D centre — the near corner
+  // swings wide. Aiming at the centre and standing off far enough for the
+  // worst corner leaves the part hugging one side with the fit "correct" and
+  // half the screen empty. Each round re-centres the projection, then scales
+  // the distance by how much of the frame it spans; four converge to well
+  // under a pixel, and the projection is re-measured against the camera's
+  // FINAL basis every time (SetTarget re-aims, so the basis moves under you).
+  const float kMargin = 1.05f; // a hair of air around the silhouette
+  const glm::vec3 corners[8] = {{min.x, min.y, min.z}, {max.x, min.y, min.z},
+                                {min.x, max.y, min.z}, {max.x, max.y, min.z},
+                                {min.x, min.y, max.z}, {max.x, min.y, max.z},
+                                {min.x, max.y, max.z}, {max.x, max.y, max.z}};
+
+  // The standoff at which no corner leaves the frame, for the aim the camera
+  // currently holds. Exact, so it can never cut the model: a corner that
+  // leans f toward the camera sees the frame at (D - f), which is what makes
+  // the near end of a long part govern.
+  const auto standoff = [&]() {
+    const glm::vec3 fwd = cam.GetForward();
+    const glm::vec3 right = cam.GetRight();
+    const glm::vec3 up = cam.GetUp();
+    const glm::vec3 aim = cam.GetTarget();
+    float d = 1.0f;
+    for (const glm::vec3& corner : corners) {
+      const glm::vec3 v = corner - aim;
+      const float toward = -glm::dot(v, fwd);
+      d = std::max({d,
+                    kMargin * std::abs(glm::dot(v, right)) / tanHalfH + toward,
+                    kMargin * std::abs(glm::dot(v, up)) / tanHalfV + toward});
+    }
+    return d;
+  };
+  // Where the box lands on screen, in NDC, from that standoff.
+  const auto projectedCentre = [&](float d) {
+    const glm::vec3 fwd = cam.GetForward();
+    const glm::vec3 right = cam.GetRight();
+    const glm::vec3 up = cam.GetUp();
+    const glm::vec3 eye = cam.GetTarget() - fwd * d;
+    float xMin = FLT_MAX, xMax = -FLT_MAX, yMin = FLT_MAX, yMax = -FLT_MAX;
+    for (const glm::vec3& corner : corners) {
+      const glm::vec3 v = corner - eye;
+      const float depth = std::max(glm::dot(v, fwd), 1e-3f);
+      const float x = glm::dot(v, right) / (depth * tanHalfH);
+      const float y = glm::dot(v, up) / (depth * tanHalfV);
+      xMin = std::min(xMin, x);
+      xMax = std::max(xMax, x);
+      yMin = std::min(yMin, y);
+      yMax = std::max(yMax, y);
+    }
+    return glm::vec2((xMin + xMax) * 0.5f, (yMin + yMax) * 0.5f);
+  };
+
+  // Aim and standoff are solved TOGETHER, because in perspective the
+  // projected centroid of a box is not its 3D centre — the near corner swings
+  // wide. Aiming at the centre and standing off far enough for the worst
+  // corner left the part hugging one side with the fit "correct" and half the
+  // screen empty (57% of the viewport for a speaker panel; 85% once centred).
+  // Each round slides the aim to where the box actually lands and takes the
+  // exact standoff for it, so the frame only ever tightens and no round of
+  // this can crop the model. It is a PAN, not a re-aim: solving it with
+  // SetTarget walked the speaker panel through 60 degrees of orbit while
+  // "fitting" it.
+  glm::vec3 target = center;
+  float distance = 1.0f;
+  for (int iter = 0; iter < 3; iter++) {
+    cam.SetPivot(target); // slides the view; SetTarget would rotate it
+    distance = standoff();
+    const glm::vec2 off = projectedCentre(distance);
+    target += cam.GetRight() * (off.x * tanHalfH * distance) +
+              cam.GetUp() * (off.y * tanHalfV * distance);
+  }
+  cam.SetPivot(target);
+  distance = standoff();
+  cam.SetTarget(target);
   cam.SetDistance(distance);
   if (coveredFrac > 0.01f) {
     // Half the covered strip, in world units at the target's depth. The
@@ -2558,10 +2696,11 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
     // window on the right. It moved the other way, which pushed the model
     // under the very window this branch exists to clear (found with the CAM
     // verbs open, docs/cam/dogfood-round.md).
-    const glm::vec3 fwd = glm::normalize(center - cam.GetPosition());
-    const glm::vec3 right = glm::normalize(glm::cross(fwd, cam.GetUp()));
+    const glm::vec3 right = cam.GetRight();
     const float halfWidthWorld = distance * tanHalfV * aspect;
-    cam.SetTarget(center + right * (halfWidthWorld * coveredFrac));
+    // Off the SOLVED aim, not the box centre — the fit above re-centred the
+    // projection, and re-deriving from the centre would throw that away.
+    cam.SetPivot(target + right * (halfWidthWorld * coveredFrac));
   }
 }
 } // namespace

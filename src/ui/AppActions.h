@@ -16,6 +16,7 @@
 #include <vector>
 
 class SketchPlane;
+class SketchFeature;
 class SplitFeature;
 class FilletFeature; // defined in core/features/FilletFeature.h
 struct RTStillDesc;  // defined in RayTracingRenderer.h
@@ -650,26 +651,52 @@ void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines);
 bool EffectivePlaneVisibility(const AppState& state);
 
 // Translucent default-plane quads (Front/Top/Right); hoveredPlane 0/1/2 is
-// brightened, -1 for none. Empty when show is false.
-std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane);
+// brightened, -1 for none. `half` is ScenePlaneHalfExtent — the same number
+// the plane PICKING uses, or the quad you can see and the quad you can click
+// are different rectangles. Empty when show is false.
+std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane,
+                                          float half);
 
 // Appends a translucent fill quad for one plane (e.g. the active sketch plane).
 void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
                      float half, std::vector<LineVertex3D>& quads);
 
-// The active sketch's work-plane fill and 1-unit grid extend this far from its
-// origin, covering normal part-scale sketches without a tiny visible patch.
+// What reference geometry measures in an EMPTY document — the floor, not the
+// answer: both are scaled up by the document's own reach below.
 inline constexpr float kSketchBackgroundHalfExtent = 50.0f;
-// Half-size of the visible default-plane quads and their plane-picking area.
 inline constexpr float kDefaultPlaneHalfExtent = 8.0f;
+
+// How far the base planes reach from the origin, and the size everything else
+// that is a REFERENCE (datum quads, the sketch background) is derived from:
+// the document's own reach, floored at the empty-workspace default. A unit
+// default has to come from what it acts on (docs/ui/u10-defaults-and-
+// refusals.md) — 8 mm planes are a speck against a 1 m speaker panel, which
+// is exactly the part you most need a plane to sketch on. Cached against the
+// document's version: the bbox under it is an OCC pass per body, and this is
+// asked for every frame the planes are up.
+float ScenePlaneHalfExtent(AppState& state);
+
+// The active sketch's grid: how far it reaches, and how big one cell is.
+struct SketchGridMetrics {
+  float half = kSketchBackgroundHalfExtent;
+  float step = 1.0f;
+};
+// Sized from the sketch's OWN entities first (the outline of a metre-tall
+// speaker is drawn before any body exists, so the document cannot answer it),
+// then the part around it. The step follows a 1-2-5 decade so the cell count
+// stays constant: a metre-scale sketch gets 20 mm cells instead of a thousand
+// 1 mm ones that read as a solid grey sheet.
+SketchGridMetrics SketchGridFor(AppState& state, const SketchFeature& sketch);
 
 // Appends grid lines for a sketch's work plane (minor/major cells + colored
 // U/V axes), so it is clear what surface you are drawing on.
-void AppendSketchGrid(const SketchPlane& plane,
+void AppendSketchGrid(const SketchPlane& plane, const SketchGridMetrics& grid,
                       std::vector<LineVertex3D>& lines);
 
 // Appends the world-origin gizmo: three arrows (X red / Y green / Z blue).
-void AppendOriginGizmo(std::vector<LineVertex3D>& lines);
+// Screen-stable like the COG marker — the origin is a MARKER, and a fixed
+// 1.5 mm arrow is invisible on anything bigger than a fastener.
+void AppendOriginGizmo(const AppState& state, std::vector<LineVertex3D>& lines);
 
 // Appends the center-of-gravity marker (C3): a small amber 3-axis cross at
 // state.cogWorld, when state.showCog is set by the mass-properties panel.

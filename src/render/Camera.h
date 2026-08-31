@@ -41,6 +41,15 @@ public:
   // view.
   void SetPosition(const glm::vec3& position);
   void SetTarget(const glm::vec3& target);
+  // Move the orbit pivot WITHOUT re-aiming: the orientation is untouched and
+  // the camera slides with the pivot, which is what a pan does. SetTarget
+  // rotates the camera to look at the new point, so framing something with it
+  // also swings the view — fitting a part must not change which way you are
+  // looking at it.
+  void SetPivot(const glm::vec3& pivot) {
+    m_pivot = pivot;
+    UpdateViewMatrix();
+  }
   void SetUp(const glm::vec3& up);
 
   void SetFOV(float fov) {

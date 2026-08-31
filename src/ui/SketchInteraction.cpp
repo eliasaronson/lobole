@@ -1308,7 +1308,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       int plane = -1;
       uint64_t datumId = 0;
       if (!hit.hit) {
-        const float halfExtent = kDefaultPlaneHalfExtent;
+        const float halfExtent = ScenePlaneHalfExtent(state);
         float bestDist = 1e30f;
         for (int i = 0; i < 3; i++) {
           SketchPlane p = DefaultPlane(i);

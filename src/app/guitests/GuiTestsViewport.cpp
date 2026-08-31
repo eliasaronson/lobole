@@ -1740,6 +1740,50 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     std::filesystem::remove_all(dir);
   };
 
+  // Fitting frames the part, and "frames" means it FILLS the viewport. The
+  // fit used to stand off the box's bounding SPHERE — its diagonal — so any
+  // part that is not a cube was framed by a circle it never fills: a
+  // 1122 x 210 x 16 speaker panel opened at half the viewport height with the
+  // rest empty, and every real part needed a scroll-wheel nudge first.
+  t = IM_REGISTER_TEST(engine, "camera", "fit_fills_the_viewport");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // The speaker panel's proportions, which is where this was found.
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Panel", glm::vec3(0), 210, 16, 1122));
+    ctx->Yield(2);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->FinishAnimation();
+    ctx->Yield(2);
+
+    glm::vec3 mn, mx;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, mn, mx));
+    ImVec2 lo(FLT_MAX, FLT_MAX), hi(-FLT_MAX, -FLT_MAX);
+    for (int c = 0; c < 8; c++) {
+      const ImVec2 p = WorldToWindow(glm::vec3(
+          (c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y, (c & 4) ? mx.z : mn.z));
+      lo.x = std::min(lo.x, p.x);
+      lo.y = std::min(lo.y, p.y);
+      hi.x = std::max(hi.x, p.x);
+      hi.y = std::max(hi.y, p.y);
+    }
+    const ImVec2 vp(s_App->viewportPos.x, s_App->viewportPos.y);
+    const ImVec2 size(s_App->viewportSize.x, s_App->viewportSize.y);
+    const float fillX = (hi.x - lo.x) / size.x;
+    const float fillY = (hi.y - lo.y) / size.y;
+    ctx->LogInfo("fit fills %.0f%% x %.0f%% of the viewport", fillX * 100.0f,
+                 fillY * 100.0f);
+
+    // Nothing is cut off...
+    IM_CHECK(lo.x >= vp.x && hi.x <= vp.x + size.x);
+    IM_CHECK(lo.y >= vp.y && hi.y <= vp.y + size.y);
+    // ...and the limiting axis reaches the edge, bar the 5% margin. The
+    // sphere fit scored 0.57 on this part; the solved one scores 0.95, which
+    // is the margin exactly. The threshold sits below that: what must never
+    // come back is a fit that frames a part at half the screen.
+    IM_CHECK_GT(std::max(fillX, fillY), 0.85f);
+  };
+
   // The camera is global, so arriving at a tab far bigger than the last one
   // used to put you inside it. The first visit to a tab frames it; after
   // that the framing is the user's.

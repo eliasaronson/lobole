@@ -28,6 +28,52 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->sketchEdit.IsEditing());
   };
 
+  // Reference geometry is sized from the part, not from a literal. The base
+  // planes were a fixed 8 mm half-extent and the sketch background a fixed
+  // 50 mm one, so on a metre-scale part — a speaker panel, a dock — the plane
+  // you were being asked to sketch on was a speck at the origin and the grid
+  // under the sketch was a postage stamp. The cell count stays put while the
+  // grid grows: 1 mm cells over a metre would be a solid grey sheet.
+  t = IM_REGISTER_TEST(engine, "sketch", "references_are_sized_by_the_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // Empty document: the old literals ARE the floor, unchanged.
+    IM_CHECK_EQ(ui::ScenePlaneHalfExtent(*s_App), ui::kDefaultPlaneHalfExtent);
+
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Panel", glm::vec3(0), 210, 16, 1122));
+    ctx->Yield(2);
+    // The plane reaches just past the geometry it is a reference for — the
+    // part runs 0..1122 from the origin the planes are centred on, so it has
+    // to span at least that, and not much more.
+    const float half = ui::ScenePlaneHalfExtent(*s_App);
+    ctx->LogInfo("plane half-extent %.0f mm for a 1122 mm part", half);
+    IM_CHECK_GT(half, 1122.0f);
+    IM_CHECK_LT(half, 2.0f * 1122.0f); // a reference, not a horizon
+
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr);
+    const ui::SketchGridMetrics grid = ui::SketchGridFor(*s_App, *sk);
+    ctx->LogInfo("grid: half %.0f mm, %.0f mm cells", grid.half, grid.step);
+    IM_CHECK_GE(grid.half, half); // covers the part it is drawn on
+    IM_CHECK_GT(grid.step, 1.0f); // not a thousand 1 mm cells
+    // ~50 cells out from the origin, less wherever the 1-2-5 rounding takes
+    // the step up a rung (worst case 2.5x, so never fewer than 20).
+    const float cells = grid.half / grid.step;
+    ctx->LogInfo("%.0f cells from the origin out", cells);
+    IM_CHECK(cells >= 20.0f && cells <= 51.0f);
+    // The step is a number you can count in (1-2-5 decade).
+    float mantissa = grid.step;
+    while (mantissa >= 10.0f)
+      mantissa /= 10.0f;
+    IM_CHECK(mantissa == 1.0f || mantissa == 2.0f || mantissa == 5.0f);
+
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+  };
+
   // A flyout group is a tool button plus a DISCLOSURE CARET, and the caret
   // must stay a hint. It was ICON_FA_CARET_DOWN in a button of its own, so it
   // was drawn at the ICON size inside a full tool frame — on the sketch bar

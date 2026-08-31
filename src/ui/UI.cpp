@@ -855,7 +855,8 @@ void DrawUI(AppState& state) {
     // shows for both). Line segments are order-independent.
     if (state.document) {
       quads = BuildPlaneQuads(EffectivePlaneVisibility(state),
-                              state.sketchEdit.hoveredPlane);
+                              state.sketchEdit.hoveredPlane,
+                              ScenePlaneHalfExtent(state));
       AppendDatumPlaneQuads(state, quads); // user datum planes (own visibility)
       overlay =
           BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
@@ -866,12 +867,15 @@ void DrawUI(AppState& state) {
       // While editing, draw a grid + subtle fill on the work plane so it's
       // clear what surface the sketch is on.
       if (SketchFeature* active = ResolveActiveSketch(state)) {
-        AppendSketchGrid(active->plane, overlay);
+        // The fill and the grid are ONE background: same extent, or the grid
+        // runs off the lit patch it is supposed to be drawn on.
+        const SketchGridMetrics grid = SketchGridFor(state, *active);
+        AppendSketchGrid(active->plane, grid, overlay);
         AppendPlaneQuad(active->plane, glm::vec3(0.30f, 0.36f, 0.48f),
-                        kSketchBackgroundHalfExtent, quads);
+                        grid.half, quads);
       }
     }
-    AppendOriginGizmo(overlay); // world origin + axes: parts and assemblies
+    AppendOriginGizmo(state, overlay);    // world origin: parts and assemblies
     AppendThreadOverlays(state, overlay); // cosmetic threads (part tabs)
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
 

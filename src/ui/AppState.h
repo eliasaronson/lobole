@@ -1365,6 +1365,15 @@ struct AppState {
   // file; the recovery modal (DrawFileBrowser) resolves it.
   std::string recoveryOffer;
 
+  // How far this document's geometry reaches from the world origin, which is
+  // what every piece of reference geometry (base planes, datum quads, the
+  // sketch grid) is sized from. Behind it is an OCC bounding box per body and
+  // it is asked for every frame the planes are up, so it is cached against
+  // the document that answered and the version it answered for.
+  const Document* sceneReachDoc = nullptr;
+  uint64_t sceneReachVersion = 0;
+  float sceneReach = 0.0f;
+
   // Document -> renderer sync bookkeeping
   uint64_t syncedDocumentVersion = 0;
   std::vector<DocumentRenderMesh> documentMeshes;
