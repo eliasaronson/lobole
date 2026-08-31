@@ -98,6 +98,13 @@ void RunTestWithReset(ImGuiTestContext* ctx);
 // rect (where the 3D scene actually renders), matching the picking math.
 ImVec2 WorldToWindow(const glm::vec3& p);
 
+// Standoff factor for a test that pins the camera to make a pick land on a
+// known pixel. Pick tolerances are in PIXELS, so what has to be pinned is the
+// MAGNIFICATION — and the same standoff shows a different amount of the model
+// through a different lens. Multiply the distance a 45-degree lens wanted by
+// this and the framing survives a change to Camera::kDefaultFovDegrees.
+float LensScale();
+
 // Click a model-toolbar icon button by its stable "###tb_*" id.
 void ToolbarClick(ImGuiTestContext* ctx, const char* tbId);
 // Create from the toolbar, then accept the preview (the real accept path).

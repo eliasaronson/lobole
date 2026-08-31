@@ -6,6 +6,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cmath>
+
 // Orbit camera. Orientation is stored as a unit quaternion about an orbit
 // `pivot` at a fixed `distance`; the world position and the up/forward/right
 // axes are all *derived* from it. Keeping orientation (not a separate up
@@ -14,12 +16,24 @@
 // leave a reset/aligned view degenerate.
 class Camera {
 public:
+  // Vertical field of view, degrees. 45 is a wide, cinematic lens: on a
+  // metre-scale part the near end flared out against the far one and the
+  // perspective read as distortion rather than depth. CAD sits narrower
+  // (SolidWorks and Onshape are near-orthographic); 30 is that look while a
+  // solid still gets its depth cues.
+  static constexpr float kDefaultFovDegrees = 30.0f;
+
   // Shared initial/reset isometric view: farther out than the previous
   // millimetre-scale framing while retaining a useful empty-workspace view.
   static glm::vec3 DefaultIsometricPosition() {
     // 14.4 along each horizontal axis, 10.8 along world up — slightly under
-    // the diagonal so the default view looks a little down at the part.
-    return glm::vec3(14.4f) - 3.6f * conv::kWorldUpF;
+    // the diagonal so the default view looks a little down at the part. Those
+    // are the numbers a 45-degree lens needed, and what you SEE from them is
+    // 1/tan(fov/2), so the standoff carries that factor: narrowing the lens
+    // must not silently zoom the empty workspace in.
+    const float lens = std::tan(glm::radians(22.5f)) /
+                       std::tan(glm::radians(0.5f * kDefaultFovDegrees));
+    return (glm::vec3(14.4f) - 3.6f * conv::kWorldUpF) * lens;
   }
 
   Camera();

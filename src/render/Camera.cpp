@@ -9,7 +9,7 @@ Camera::Camera()
     : m_pivot(0.0f, 0.0f, 0.0f), m_distance(1.0f),
       m_orientation(1.0f, 0.0f, 0.0f, 0.0f) // identity
       ,
-      m_fov(45.0f), m_aspectRatio(16.0f / 9.0f), m_nearPlane(0.1f),
+      m_fov(kDefaultFovDegrees), m_aspectRatio(16.0f / 9.0f), m_nearPlane(0.1f),
       m_farPlane(1000.0f), m_orbitSensitivity(0.005f), m_panSensitivity(0.01f),
       m_zoomSensitivity(0.1f), m_minDistance(0.5f)
       // Zoom-out clamp must exceed room scale — metre-scale parts fit at

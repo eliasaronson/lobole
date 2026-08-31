@@ -450,9 +450,19 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2);
     IM_CHECK(!s_App->sketchEdit.mirrorAxisPhase);
 
-    // A tap in empty space continues to the axis step (bottom-left, clear
-    // of the top-right session window).
-    glm::vec2 t2 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-2, -2));
+    // A tap in EMPTY SPACE continues to the axis step. +U,+V is the corner
+    // away from the session window, which sits top-right of the viewport —
+    // and the clearance is asserted, not assumed: this used to tap the other
+    // corner with a comment claiming it was clear, and narrowing the camera's
+    // FOV (which magnifies the sketch at the same distance) slid that point
+    // under the window, where the tap went to the window and the phase never
+    // advanced.
+    const glm::vec2 t2 =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 2));
+    const glm::vec4 win = s_App->toolWindowRect;
+    ctx->LogInfo("tap at %.0f,%.0f; session window %.0f,%.0f..%.0f,%.0f", t2.x,
+                 t2.y, win.x, win.y, win.z, win.w);
+    IM_CHECK(t2.x < win.x || t2.x > win.z || t2.y < win.y || t2.y > win.w);
     ctx->MouseMoveToPos(ImVec2(t2.x, t2.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -1076,10 +1086,13 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
     // Pin the camera (zoom from earlier tests changes the pick tolerances).
+    // Through LensScale, so it pins the MAGNIFICATION: 8 units of standoff
+    // frames a different amount of sketch through a different lens, and
+    // narrowing the default FOV to 30 pushed these clicks off their targets.
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(glm::vec3(0.0f));
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
-    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f * LensScale()));
     ctx->Yield(2);
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
 

@@ -118,6 +118,11 @@ void RunTestWithReset(ImGuiTestContext* ctx) {
 
 // Window position of a world point, mapped through the central-node viewport
 // rect (where the 3D scene actually renders), matching the picking math.
+float LensScale() {
+  return std::tan(glm::radians(22.5f)) /
+         std::tan(glm::radians(0.5f * s_App->camera->GetFOV()));
+}
+
 ImVec2 WorldToWindow(const glm::vec3& p) {
   const Camera& cam = *s_App->camera;
   glm::vec4 clip =
