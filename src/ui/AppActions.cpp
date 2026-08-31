@@ -3853,6 +3853,25 @@ void SyncDocumentRenderers(AppState& state) {
                                     std::move(edges)});
   }
 
+  // Reference geometry is sized from the document's reach
+  // (ScenePlaneHalfExtent), and the bounding box behind it is an OCC pass per
+  // body. Stamp it HERE, on the resync that already walks every body and
+  // tessellates it — a live edit bumps the version every frame, so computing it
+  // on demand would put a bbox pass in the frame loop of exactly the drag that
+  // can least afford one.
+  {
+    float reach = 0.0f;
+    for (const auto& body : bodies) {
+      glm::vec3 mn, mx;
+      body.shape.GetBoundingBox(mn, mx);
+      for (int i = 0; i < 3; i++)
+        reach = std::max({reach, std::abs(mn[i]), std::abs(mx[i])});
+    }
+    state.sceneReachDoc = state.document.get();
+    state.sceneReachVersion = activeVersion;
+    state.sceneReach = reach;
+  }
+
   AppendSectionCaps(state, bodies, bodyColors);
 
   // Topology shape-guide ghost (TO4): outside simulation mode, render the

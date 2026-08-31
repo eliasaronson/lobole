@@ -854,9 +854,15 @@ void DrawUI(AppState& state) {
     // no document, so build them only for a part (the world-origin gizmo below
     // shows for both). Line segments are order-independent.
     if (state.document) {
-      quads = BuildPlaneQuads(EffectivePlaneVisibility(state),
-                              state.sketchEdit.hoveredPlane,
-                              ScenePlaneHalfExtent(state));
+      // Only ask for the extent when something will USE it: behind it is an
+      // OCC bounding box per body, cached against the document version — and
+      // a live edit (a sketch drag, a preview) bumps that version every
+      // frame, so an argument evaluated whether or not the planes are drawn
+      // is a bbox pass per frame on a part that is being dragged.
+      const bool planesVisible = EffectivePlaneVisibility(state);
+      quads =
+          BuildPlaneQuads(planesVisible, state.sketchEdit.hoveredPlane,
+                          planesVisible ? ScenePlaneHalfExtent(state) : 0.0f);
       AppendDatumPlaneQuads(state, quads); // user datum planes (own visibility)
       overlay =
           BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
