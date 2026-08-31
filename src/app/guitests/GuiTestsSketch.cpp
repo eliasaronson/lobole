@@ -28,6 +28,46 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->sketchEdit.IsEditing());
   };
 
+  // A flyout group is a tool button plus a DISCLOSURE CARET, and the caret
+  // must stay a hint. It was ICON_FA_CARET_DOWN in a button of its own, so it
+  // was drawn at the ICON size inside a full tool frame — on the sketch bar
+  // the three carets read as three more tools, twice the arrow Onshape and
+  // SolidWorks draw. Sized off the frame, it cannot come back as a glyph:
+  // a full icon button is at least as wide as it is tall.
+  t = IM_REGISTER_TEST(engine, "sketch", "a_flyout_caret_stays_a_hint");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+
+    ImGuiTestItemInfo caret =
+        ctx->ItemInfo("//##DockHost/**/circlegrp/###more");
+    IM_CHECK(caret.ID != 0);
+    const float frame = ImGui::GetFrameHeight();
+    ctx->LogInfo("caret is %.0f x %.0f px, frame height %.0f",
+                 caret.RectFull.GetWidth(), caret.RectFull.GetHeight(), frame);
+    IM_CHECK_LT(caret.RectFull.GetWidth(), frame * 0.6f);
+    IM_CHECK_EQ(caret.RectFull.GetHeight(), frame); // still easy to hit
+
+    // And it still does its job: the popup switches which variant the group
+    // holds, and picking one arms that tool.
+    IM_CHECK(s_App->sketchEdit.tool != ui::SketchTool::Ellipse);
+    ctx->ItemClick("//##DockHost/**/circlegrp/###more");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK(popup != nullptr);
+    ImGuiTestItemList items;
+    ctx->GatherItems(&items, (std::string("//") + popup->Name).c_str());
+    IM_CHECK_EQ(items.size(), 2); // Circle, Ellipse
+    ctx->ItemClick(items[1]->ID);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Ellipse);
+
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+  };
+
   // The primary way a user opens a sketch now that the Create menu is gone:
   // the toolbar's sketch button arms plane-picking, then a viewport click on a
   // base-plane quad enters edit mode. The other sketch tests take the direct

@@ -18,7 +18,9 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <initializer_list>
 #include <string>
 
@@ -253,6 +255,43 @@ void Divider() {
   }
 }
 
+// The disclosure caret of a flyout group, hung off the tool button it
+// belongs to. It used to be ICON_FA_CARET_DOWN in a button of its own, which
+// made it the loudest thing on the sketch bar: the glyph is drawn at the ICON
+// size (the tool icons' size) and the frame is a full tool-button frame, so a
+// hint read as a second tool. Onshape and SolidWorks both hang a small
+// unframed arrow off the icon instead.
+//
+// Sized off the FRAME, not the icon font: a caret must stay a fraction of the
+// button it is attached to at any UI scale (Theme.cpp ScaleAllSizes), which a
+// glyph cannot do. Frameless until pointed at, so the group reads as one
+// tool with an affordance rather than two buttons.
+bool FlyoutCaret() {
+  const float h = ImGui::GetFrameHeight();
+  const float w = std::floor(h * 0.45f);
+  ImGui::SameLine(0.0f, 0.0f);
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  const bool pressed = ImGui::InvisibleButton("###more", ImVec2(w, h));
+  const bool hovered = ImGui::IsItemHovered();
+  const bool held = ImGui::IsItemActive();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  if (hovered || held) {
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
+                      ImGui::GetColorU32(held ? ImGuiCol_ButtonActive
+                                              : ImGuiCol_ButtonHovered),
+                      ImGui::GetStyle().FrameRounding);
+  }
+  // ~8 x 5 px at the default font, the size both references use.
+  const float halfW = std::max(2.0f, ImGui::GetFontSize() * 0.25f);
+  const float halfH = halfW * 0.62f;
+  const ImVec2 c(p.x + w * 0.5f, p.y + h * 0.5f);
+  dl->AddTriangleFilled(
+      ImVec2(c.x - halfW, c.y - halfH), ImVec2(c.x + halfW, c.y - halfH),
+      ImVec2(c.x, c.y + halfH),
+      ImGui::GetColorU32(ImGuiCol_Text, hovered || held ? 1.0f : 0.6f));
+  return pressed;
+}
+
 // The model-mode toolbar: create features, fit, planes.
 // The Section tool button. Shared by the part and assembly toolbars — a
 // section is a property of the VIEW, so it means the same thing on either,
@@ -458,8 +497,7 @@ void DrawSketchModeToolbar(AppState& state) {
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip(
           "%s", WithChord(state, v[current].id, v[current].label).c_str());
-    ImGui::SameLine(0.0f, 1.0f);
-    if (ImGui::Button(ICON_FA_CARET_DOWN "##more"))
+    if (FlyoutCaret())
       ImGui::OpenPopup("variants");
     if (ImGui::BeginPopup("variants")) {
       for (int i = 0; i < n; i++) {
