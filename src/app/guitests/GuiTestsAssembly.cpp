@@ -413,6 +413,57 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->KeyPress(ImGuiKey_Escape);
   };
 
+  // Right-clicking a row goes to what it references. The "Open"/"Edit"
+  // button only exists for the SELECTED occurrence and lives below the list,
+  // so reaching a part meant select-then-scroll; the row itself is where the
+  // hand already is. The menu names the KIND it will open, since a
+  // sub-assembly row and a part row take you to different sorts of tab.
+  t = IM_REGISTER_TEST(engine, "assembly", "right_click_a_row_opens_its_doc");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+
+    const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
+    ui::SetActivePart(*s_App, unitIdx);
+    Occurrence inner;
+    inner.name = "Inner";
+    inner.partId = partId;
+    inner.fixed = true;
+    const uint64_t innerId = s_App->assembly->AddOccurrence(inner);
+
+    const size_t topIdx = ui::AddAssembly(*s_App, "Top");
+    ui::SetActivePart(*s_App, topIdx);
+    Occurrence sub;
+    sub.name = "Unit 1";
+    sub.partId = s_App->parts[unitIdx].id;
+    sub.refKind = OccurrenceRef::Assembly;
+    sub.fixed = true;
+    const uint64_t subId = s_App->assembly->AddOccurrence(sub);
+    ctx->Yield(4);
+
+    // A sub-assembly row: the item says "assembly", and lands on its tab.
+    const std::string subRef = "//###Model/###occ_" + std::to_string(subId);
+    ctx->ItemClick(subRef.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    IM_CHECK(ctx->ItemExists("//$FOCUSED/Open assembly###occ_open"));
+    ctx->ItemClick("//$FOCUSED/###occ_open");
+    ctx->Yield(3);
+    IM_CHECK_EQ((size_t)s_App->activePart, unitIdx);
+
+    // ...and inside it, a PART row lands on the part tab.
+    const std::string innerRef = "//###Model/###occ_" + std::to_string(innerId);
+    ctx->ItemClick(innerRef.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    IM_CHECK(ctx->ItemExists("//$FOCUSED/Open part###occ_open"));
+    ctx->ItemClick("//$FOCUSED/###occ_open");
+    ctx->Yield(3);
+    IM_CHECK_EQ((size_t)s_App->activePart, (size_t)0);
+    IM_CHECK(s_App->parts[s_App->activePart].id == partId);
+    IM_CHECK(s_App->assembly == nullptr); // a part tab, not the assembly
+  };
+
   // Dragging a SUB-ASSEMBLY: its parts must move WITH it, keeping their
   // places inside the unit. PushOccurrenceLive used to set every mesh of the
   // dragged occurrence to the occurrence's own matrix — true when a mesh IS

@@ -19,6 +19,7 @@
 #include <cfloat>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string>
 
 namespace ui {
@@ -537,6 +538,31 @@ void DrawOccurrencePanel(AppState& state) {
         (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
     if (SelectableEllipsis(label, SelectedOccurrenceId(state) == o.id))
       SelectOccurrence(state, o.id);
+
+    // Right-click the row to go to what it references: the shortcut for the
+    // "Open"/"Edit" button below, which needs the row selected first and only
+    // shows for the selected one. Opening a row that is not the selected one
+    // would be a silent selection change, so the menu selects it too.
+    if (ImGui::BeginPopupContextItem(("###occ_ctx_" + suffix).c_str())) {
+      SelectOccurrence(state, o.id);
+      const bool isSub = o.refKind == OccurrenceRef::Assembly;
+      const std::string item =
+          std::string("Open ") + (isSub ? "assembly" : "part") + "###occ_open";
+      const std::optional<size_t> slot = RefSlotIndex(state, o);
+      if (ImGui::MenuItem(item.c_str(), nullptr, false, slot.has_value())) {
+        SetActivePart(state, *slot);
+        ImGui::EndPopup();
+        ImGui::End();
+        return; // the panel is now drawing a different document
+      }
+      // The reference dangles (its tab was closed/deleted). Say so rather
+      // than offering an Open that would quietly do nothing.
+      if (!slot && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
+                                      : "That part is not in this project");
+      }
+      ImGui::EndPopup();
+    }
   }
 
   Occurrence* sel = SelectedOccurrenceId(state)
