@@ -269,8 +269,28 @@ first bad line 1580 of the posted file:
     G0 Z-4                    <- …and drop to the last depth. Nothing cut here.
     G1 X142.844 ... Z-4.1922  <- the ramp only reaches -4 further along
 
-The fix is to rapid only to where the tool has actually been, or to feed the
-last stepdown's worth. It is NOT the `safeZ` derivation, which is correct.
+The code states the assumption it breaks, at the contour ramp entry
+(`CamToolpath.cpp`, "Rapid over, then down to the height we enter from: that
+is either the stock top or the depth the previous pass already cut here, so it
+is air"). For a CLOSED CONTOUR that holds — the lap returns to its own entry
+at full depth. For a POCKET it does not: the entry sits mid-spiral and the
+pass that was supposed to clear it was still ramping when it went past.
+
+Three ways to fix it, cheapest last:
+
+1. **Enter where the previous pass FINISHED.** The contour path already tries
+   this ("when the previous pass handed us its finishing point this is the
+   SAME point it retracted at"); the clearing path does not carry that point
+   through. Best result, no wasted motion, and it makes the comment true.
+2. **Rapid to the stock top and FEED down to the entry height.** Always safe,
+   costs one plunge-feed per pass, and on a deep pocket that is real time.
+3. **Rapid to `entry + clearance` and feed the last millimetre** — the
+   industry norm, and still wrong here, because the entry can have the full
+   stepdown of material above it rather than a millimetre.
+
+The gate either way: `cam_verify` must report `rapids_through_stock == 0` on a
+pocket deep enough for two passes. It reports 1 per extra pass today. It is
+NOT the `safeZ` derivation, which is correct.
 
 ### An outline contour dips into the part over a hole running beneath the face
 
@@ -290,5 +310,17 @@ the dowels, or only BELOW, is clean; the band THROUGH them gouges:
     Z  -6.0 -> -12.0   gouge 10.00    (through — the dowels are at -8.4)
     Z -14.0 -> -16.0   gouge 0.00     (below)
 
-So it is in the section, not the offsetting: a blind hole ending close beneath
-a face is merging with the outer boundary rather than staying an island.
+It is in the section, not the offsetting — but the first diagnosis, "a blind
+hole ending close beneath a face merges with the outer boundary", is WRONG and
+was written without a reproduction. Built as a unit test it does not
+reproduce: a 210 x 100 x 16 panel with one Ø8 hole along X ending 1.7 mm short
+of the face sections cleanly at the hole's own height — 2 loops, one outer,
+one island, outer extent unchanged. The web survives.
+
+So the real part has something the lone hole does not. The candidate is the
+INTERSECTION: on front_wall the cross-dowels run into the eight blind Ø8 dowel
+holes near the edges (their faces carry the cross-dowels' `;M20`/`;M22`
+modifiers, which is how you can tell), and the blind hole at x = ±97 already
+leaves only a 4 mm web to the edge at ±105 — the same 4 mm the contour dips.
+The next step is to model BOTH holes and section between them, not to go
+looking in the offsetting code.
