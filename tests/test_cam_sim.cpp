@@ -652,6 +652,57 @@ TEST_CASE("cam stock mesh: the machined block matches the part it cut",
   CHECK(after.indices.size() > before.indices.size());
 }
 
+TEST_CASE("cam mesh: every triangle faces the way its normals do", "[cam]") {
+  // The tool glyph was wound the opposite way to its own normals — every
+  // triangle of it. With backface culling that draws the far wall's INSIDE
+  // and culls the near one, so the cutter looked transparent and you could
+  // see down its own bore. It had always been so; a mirror-bright material
+  // and a 49 mm holder hid it, and a matte 6 mm collar did not.
+  //
+  // Cheap to check and impossible to eyeball, which is why it survived three
+  // rounds of looking at screenshots: the geometric normal of each triangle
+  // must point the same way as the vertex normals at its corners.
+  const auto wound = [](const cam::StockMesh& m) {
+    int agree = 0, disagree = 0;
+    for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+      const glm::vec3 a = m.vertices[m.indices[i]].position;
+      const glm::vec3 b = m.vertices[m.indices[i + 1]].position;
+      const glm::vec3 c = m.vertices[m.indices[i + 2]].position;
+      const glm::vec3 geo = glm::cross(b - a, c - a);
+      if (glm::length(geo) < 1e-9f)
+        continue; // a ring that closes on the axis
+      const glm::vec3 vn = m.vertices[m.indices[i]].normal +
+                           m.vertices[m.indices[i + 1]].normal +
+                           m.vertices[m.indices[i + 2]].normal;
+      (glm::dot(glm::normalize(geo), glm::normalize(vn)) > 0.0f ? agree
+                                                                : disagree)++;
+    }
+    return std::pair<int, int>{agree, disagree};
+  };
+
+  for (const cam::ToolType type : {cam::ToolType::Flat, cam::ToolType::Ball,
+                                   cam::ToolType::VBit, cam::ToolType::Drill}) {
+    cam::Tool t;
+    t.number = 1;
+    t.diameter = 8.0;
+    t.fluteLength = 25.0;
+    t.type = type;
+    const auto [agree, disagree] = wound(cam::BuildToolMesh(t));
+    INFO("tool type " << static_cast<int>(type));
+    CHECK(agree > 100);
+    CHECK(disagree == 0);
+  }
+
+  // The stock is built by a different function; check it the same way rather
+  // than assume.
+  const cam::HeightMap stock =
+      cam::MakeStock({0.0, 0.0, 0.0}, {40.0, 30.0, 20.0}, 1.0);
+  const auto [sAgree, sDisagree] = wound(cam::BuildStockMesh(stock, 0.0));
+  INFO("stock mesh: " << sAgree << " agree, " << sDisagree << " disagree");
+  CHECK(sAgree >= 12); // an uncut block merges down to six quads
+  CHECK(sDisagree == 0);
+}
+
 TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
   // The tool glyph is a revolved profile with three hard corners: flute to
   // shoulder, shoulder to holder, holder to cap. `Revolve` used to take a

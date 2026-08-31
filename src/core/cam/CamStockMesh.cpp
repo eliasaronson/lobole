@@ -263,7 +263,12 @@ void Revolve(StockMesh& m, const std::vector<glm::dvec2>& profile,
       const uint32_t b = a + 1;
       const uint32_t c = a + stride;
       const uint32_t d = c + 1;
-      m.indices.insert(m.indices.end(), {a, c, b, b, c, d});
+      // Wound to AGREE with the outward normals above. It was {a,c,b, b,c,d}
+      // — the opposite — so every face of the tool glyph was back-facing from
+      // outside and front-facing from within: the near wall culled, the far
+      // wall's interior drawn, which reads as a transparent tube. The mirror
+      // material and a 49 mm holder hid it; a matte collar did not.
+      m.indices.insert(m.indices.end(), {a, b, c, b, d, c});
     }
   }
 }

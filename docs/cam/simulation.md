@@ -408,12 +408,23 @@ a way no matrix check would catch, both found by dumping it ring by ring:
 
 330 vertices where there were 1056.
 
-What remains is a genuine perspective read, not a defect: seen from the
-spindle side the tool points AWAY from the camera, so the near holder is large
-and the far flute small, and a cylinder foreshortened like that reads as one
-lying on its side. If it still bothers, the next step is to drop the holder
-entirely and draw only the cutter — the diameter and the depth are the two
-things the glyph exists to show.
+**And then the actual bug: the glyph was inside-out.** `Revolve` wound every
+triangle the opposite way to its own normals — 0 agree, 256 disagree, the
+whole mesh — so with backface culling the near wall was culled and the far
+wall's INTERIOR drawn. The cutter looked transparent and you could see down
+its own bore. It had always been so, since the function was written; a
+mirror-bright material and a 49 mm holder hid it, and a matte 6 mm collar did
+not.
+
+That is what "it's transparent, I don't want to see the inside of it" was, and
+it is what every other explanation in this section was circling. Orientation,
+matrix, ghost flag, holder length, tip sampling — all real, none of them this.
+
+Gated by `cam mesh: every triangle faces the way its normals do`, which checks
+the geometric normal of each triangle against the vertex normals at its
+corners, for all four tool shapes and for the stock mesh. Cheap to check,
+impossible to eyeball, and it survived three rounds of looking at
+screenshots.
 
 ### Still open
 
