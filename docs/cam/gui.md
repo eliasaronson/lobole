@@ -225,6 +225,29 @@ that greys its neighbours means Escape between every change of verb. The
 floating window also gained a `Tool` row: every number a verb derives is a
 fraction of the cutter, so choosing it afterwards means re-deriving.
 
+**Concentric rings link at depth (2026-08-31).** Every ring of a clearing
+pass used to get a full entry — lift to safe Z, fly back along the circle,
+descend, ramp in, cut a lap — so a flange recess did that a dozen times over.
+A ring's neighbour starts one step-over away, through the band it is about to
+cut anyway, so there is nothing to lift over. `EmitRing` keeps the tool down
+when the next ring starts within one and a half step-overs, rotating that ring
+to begin where the tool already is; further than that (two disjoint regions at
+the same inset) it still lifts, because linking those at depth would drag the
+cutter across whatever lies between. On the real job: **121 retracts to 21**,
+same verdict.
+
+Two things the change needed that are worth knowing. A lap must be able to end
+WITHOUT retracting, or the next ring never finds the tool at depth — and once
+laps end down, the next entry's lateral rapid starts at the bottom of a cut,
+so it has to climb straight up before it travels. Both were caught by the
+existing gates rather than by looking (`cam: a pass never rapids to a depth
+nothing cleared` went to 14 the moment the retract came out).
+
+**Backplot contrast (2026-08-31).** Pale blue on a light grey workpiece is a
+hair off the surface it is drawn on. Cut moves are amber now, plunges red,
+rapids stay muted grey — amber reads against both the part and the dark
+ground, and is clear of the blues selection and sketches use.
+
 **Stock and Zero (2026-08-30, v68).** "Stock and safety" gained the two
 things a Fusion setup has and this one did not. *What the workpiece is*:
 "Around the part" (the model box plus margins — what every job had, still the

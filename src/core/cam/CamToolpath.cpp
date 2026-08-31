@@ -274,6 +274,46 @@ double RapidFloor(double entry, double stockTop, double safeZ) {
   return std::clamp(std::max(entry, stockTop), entry, safeZ);
 }
 
+// One ring of a concentric clearing pass. The tool STAYS DOWN when the next
+// ring starts within a step-over of where it already is — which, for rings
+// cut in order in one connected region, is every time after the first.
+//
+// Every ring used to get a full ramp entry: lift to safe Z, fly back along
+// the circle, descend, ramp in, cut a lap. Twelve laps of a flange recess
+// meant twelve of those, and it reads exactly as it sounds — "does one lap,
+// lifts and goes back a bit, then down and to the next circle". The link is
+// one step-over through the band the next ring is about to cut anyway, so
+// there is nothing to lift over. The distance check is what keeps it honest:
+// two DISJOINT regions at the same inset are far apart, and linking those at
+// depth would drag the cutter across whatever lies between them.
+void EmitRing(Toolpath& tp, const Setup& setup, const Tool& tool,
+              const std::vector<glm::dvec2>& pts, double z, double stockTop,
+              double step, double entryZ);
+
+// Rotate a closed loop so it begins at the point nearest `from`. A ring cut
+// straight after its neighbour should start where the tool already is, not at
+// whatever point the offsetter happened to emit first — otherwise "link at
+// depth" drags the cutter most of the way round the ring to get started.
+std::vector<glm::dvec2> StartNearest(const std::vector<glm::dvec2>& pts,
+                                     const glm::dvec2& from) {
+  if (pts.size() < 2)
+    return pts;
+  size_t best = 0;
+  double bestD = std::numeric_limits<double>::max();
+  for (size_t i = 0; i < pts.size(); i++) {
+    const double d = glm::length(pts[i] - from);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  std::vector<glm::dvec2> out;
+  out.reserve(pts.size());
+  for (size_t i = 0; i < pts.size(); i++)
+    out.push_back(pts[(best + i) % pts.size()]);
+  return out;
+}
+
 // steep, so instead the tool spirals down inside the region and the rings
 // are then cut from the middle outwards.
 //
@@ -352,7 +392,8 @@ enum class Entry { Ramp, AtDepth };
 double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                 const std::vector<glm::dvec2>& pts, double z, double safeZ,
                 double stockTop, int tabCount, double tabWidth, double tabZ,
-                double entryZ, Entry entry = Entry::Ramp, double startS = 0.0) {
+                double entryZ, Entry entry = Entry::Ramp, double startS = 0.0,
+                bool retract = true) {
   if (pts.size() < 2)
     return startS;
   const double perimeter = Perimeter(pts);
@@ -368,6 +409,8 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     lap.push_back(pts[0]);
     for (size_t i = 1; i < lap.size(); i++)
       Emit(tp, Move::Kind::Cut, {lap[i].x, lap[i].y, z}, tool.feedCut);
+    if (retract)
+      Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, safeZ}, 0.0);
     return startS;
   }
 
@@ -397,6 +440,13 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   // When the previous pass handed us its finishing point this is the SAME
   // point it retracted at, so the two rapids are a vertical hop rather than a
   // flight back across the opening.
+  // STRAIGHT UP first if the tool is still down. Laps no longer retract at
+  // their end (so a ring can link to the next at depth), which means the
+  // lateral rapid below can start from the bottom of a cut — and a rapid that
+  // climbs and travels at once travels through whatever is in the way.
+  if (!tp.moves.empty() && tp.moves.back().to.z < safeZ - 1e-9)
+    Emit(tp, Move::Kind::Rapid,
+         {tp.moves.back().to.x, tp.moves.back().to.y, safeZ}, 0.0);
   Emit(tp, Move::Kind::Rapid, {begin.x, begin.y, safeZ}, 0.0);
   const double from = std::max(entryZ, z);
   Emit(tp, Move::Kind::Rapid,
@@ -506,7 +556,11 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     prev = s;
   }
   const glm::dvec2 last = pointAt(total);
-  Emit(tp, Move::Kind::Rapid, {last.x, last.y, safeZ}, 0.0);
+  // Left DOWN when the caller says another loop follows it: a concentric
+  // clearing links ring to ring at depth, and it cannot if every lap ends by
+  // retracting. The caller retracts once when the run is done.
+  if (retract)
+    Emit(tp, Move::Kind::Rapid, {last.x, last.y, safeZ}, 0.0);
   return wrapS(startS + total);
 }
 
@@ -1791,8 +1845,8 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       for (auto it = rings.rbegin(); it != rings.rend(); ++it)
         for (Clipper2Lib::Path64& path : *it) {
           Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
-                   0, 0.0, z, z, Entry::AtDepth);
+          EmitRing(tp, setup, tool, FromClipper(path), z, stockTop, step,
+                   /*entryZ=*/z);
         }
       Emit(tp, Move::Kind::Rapid,
            {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
@@ -1800,14 +1854,38 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       for (Clipper2Lib::Paths64& paths : rings)
         for (Clipper2Lib::Path64& path : paths) {
           Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
-                   0, 0.0, z, entryZ);
+          EmitRing(tp, setup, tool, FromClipper(path), z, stockTop, step,
+                   entryZ);
         }
+      Emit(tp, Move::Kind::Rapid,
+           {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
     }
     entryZ = z;
   }
   if (tp.moves.empty() && tp.error.empty())
     tp.error = tooTight;
+}
+
+void EmitRing(Toolpath& tp, const Setup& setup, const Tool& tool,
+              const std::vector<glm::dvec2>& pts, double z, double stockTop,
+              double step, double entryZ) {
+  if (pts.size() < 2)
+    return;
+  const bool atDepth =
+      !tp.moves.empty() && std::abs(tp.moves.back().to.z - z) < 1e-9;
+  if (atDepth) {
+    const glm::dvec2 here(tp.moves.back().to.x, tp.moves.back().to.y);
+    const std::vector<glm::dvec2> rotated = StartNearest(pts, here);
+    // A step-over and a half: enough for the neighbouring ring, not enough to
+    // reach a separate region.
+    if (glm::length(rotated.front() - here) <= step * 1.5) {
+      (void)EmitLoop(tp, setup, tool, rotated, z, setup.safeZ, stockTop, 0, 0.0,
+                     z, z, Entry::AtDepth, 0.0, /*retract=*/false);
+      return;
+    }
+  }
+  (void)EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop, 0, 0.0, z,
+                 entryZ, Entry::Ramp, 0.0, /*retract=*/false);
 }
 
 void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,

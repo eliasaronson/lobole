@@ -30,9 +30,14 @@ namespace {
 // Backplot colours. Cutting moves read as "material comes off here", rapids
 // as "the tool flies here" — a rapid through the part is the mistake this
 // picture exists to make visible.
-constexpr glm::vec4 kCutColor(0.35f, 0.80f, 1.00f, 0.95f);
-constexpr glm::vec4 kPlungeColor(1.00f, 0.55f, 0.25f, 0.95f);
-constexpr glm::vec4 kRapidColor(0.55f, 0.55f, 0.62f, 0.45f);
+// Against a light grey workpiece AND a dark ground. Pale blue managed only
+// the second — on the part it sat a hair off the surface it was drawn on.
+// Amber is far from grey in hue and from the ground in value, and clear of
+// the blues that selection and sketches use; the plunge moves to red so the
+// two stay apart.
+constexpr glm::vec4 kCutColor(1.00f, 0.55f, 0.08f, 1.00f);
+constexpr glm::vec4 kPlungeColor(0.95f, 0.22f, 0.22f, 1.00f);
+constexpr glm::vec4 kRapidColor(0.50f, 0.52f, 0.60f, 0.55f);
 
 // Order matches cam::OpType. "Adaptive" is a pocket cut a different way,
 // so it reads as a strategy rather than as a separate kind of job.
@@ -193,7 +198,7 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
                                     ? kPlungeColor
                                     : kCutColor;
         AppendPrimLine(glm::vec3(shown(from)), glm::vec3(shown(m.to)),
-                       m.kind == cam::Move::Kind::Rapid ? 1.0f : 1.6f, color,
+                       m.kind == cam::Move::Kind::Rapid ? 1.0f : 2.4f, color,
                        out);
       }
       from = m.to;

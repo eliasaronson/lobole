@@ -2187,6 +2187,53 @@ TEST_CASE("cam: a pass never rapids to a depth nothing cleared", "[cam]") {
   CHECK(skim.rapidsThroughStock == 0);
 }
 
+TEST_CASE("cam: concentric rings link at depth instead of lifting", "[cam]") {
+  // Every ring of a clearing pass used to get a full entry: lift to safe Z,
+  // fly back, descend, ramp, cut a lap. Twelve laps of a flange recess is
+  // twelve of those — "does one lap, lifts and goes back a bit, then down and
+  // to the next circle". A ring's neighbour starts one step-over away through
+  // the band that ring is about to cut anyway, so there is nothing to lift
+  // over.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/false); // 80 x 60 pocket
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  cam::Setup s = BasicSetup();
+  const cam::DerivedOp d =
+      cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket, floor);
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 1;
+  op.type = cam::OpType::Pocket; // concentric, not adaptive
+  s.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(s, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+
+  // Retracts to safe height. An 80 x 60 pocket at 2.7 mm step-over takes
+  // dozens of rings over two depths; one lift per ring was 63 of them. What
+  // is left is the unavoidable ones — a new depth, and any ring far enough
+  // from the last that linking at depth would drag the cutter across
+  // something.
+  int lifts = 0;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Rapid && m.to.z >= s.safeZ - 1e-6)
+      lifts++;
+  INFO("lifts " << lifts);
+  CHECK(lifts <= 8);
+
+  // Linking must not cost safety. The whole point of leaving the tool down is
+  // that the link is one step-over through material the next ring cuts
+  // anyway — so the verdict has to be the same as before.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", s, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, s, doc->GetBodies(), 0.6);
+  INFO("gouge " << v.maxGouge << " rapids " << v.rapidsThroughStock);
+  CHECK(v.rapidsThroughStock == 0);
+  CHECK(v.maxGouge < 0.6);
+}
+
 TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
   // A hole NARROWER than the cutter: 3 mm against a 6 mm end mill. Nothing
   // stands in it and the tool could never enter it, so crossing is harmless —

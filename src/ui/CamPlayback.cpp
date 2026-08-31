@@ -34,9 +34,14 @@ constexpr double kDisplayRapidFeed = 3000.0; // mm/min
 // the tool through the part.
 constexpr double kMaxStepSeconds = 0.25;
 
-constexpr glm::vec4 kDoneColor(0.42f, 0.44f, 0.50f, 0.35f);
-constexpr glm::vec4 kAheadCut(0.35f, 0.80f, 1.00f, 0.95f);
-constexpr glm::vec4 kAheadRapid(0.55f, 0.55f, 0.62f, 0.45f);
+// The backplot has to read against BOTH the light grey of a workpiece and the
+// dark ground behind it, and pale blue only manages the second — on the part
+// it is a hair off the surface it is drawn on. Amber sits far from grey in
+// hue and from the dark ground in value, and away from the blues selection
+// and sketches use.
+constexpr glm::vec4 kDoneColor(0.38f, 0.40f, 0.46f, 0.40f);
+constexpr glm::vec4 kAheadCut(1.00f, 0.55f, 0.08f, 1.00f);
+constexpr glm::vec4 kAheadRapid(0.50f, 0.52f, 0.60f, 0.55f);
 
 // Setup space -> model space, as a matrix: the renderers want it per draw
 // rather than per point. The rotation itself is `cam::SetupToModel` — this
@@ -285,8 +290,10 @@ void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
     const glm::vec4 color = done      ? kDoneColor
                             : m.rapid ? kAheadRapid
                                       : kAheadCut;
+    // The cut ahead is the line the eye is following; give it the width as
+    // well as the colour.
     AppendPrimLine(shown(tl.program.moves[k].to), shown(m.to),
-                   done ? 1.0f : (m.rapid ? 1.0f : 1.6f), color, out);
+                   done ? 1.0f : (m.rapid ? 1.0f : 2.4f), color, out);
   }
 }
 
