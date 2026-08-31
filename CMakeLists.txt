@@ -52,6 +52,37 @@ if(ENABLE_SANITIZERS)
   message(STATUS "Sanitizers enabled (ASan + UBSan)")
 endif()
 
+# Opt-in ThreadSanitizer (cmake -DENABLE_TSAN=ON). SEPARATE from the block
+# above because TSan and ASan cannot be combined — they both instrument memory
+# accesses and the runtimes refuse to co-exist — so this is its own build tree
+# (build-tsan/), run occasionally like tools/coverage.sh rather than in CI.
+#
+# It exists because ASan and UBSan catch no data races, and the tree stopped
+# being single-threaded: STEP import runs on a worker, OCC meshing runs across
+# threads grouped by TShape, FEM studies solve async, and the remote server has
+# its own thread. The meshing work reasoned carefully about which TShapes are
+# shared and grouped so a race is impossible rather than merely absent — TSan
+# is the tool that CHECKS that reasoning instead of trusting it
+# (docs/capability-review-2026-08-31.md, P3).
+option(ENABLE_TSAN "Build with ThreadSanitizer" OFF)
+if(ENABLE_TSAN AND ENABLE_SANITIZERS)
+  message(FATAL_ERROR
+    "ENABLE_TSAN and ENABLE_SANITIZERS are mutually exclusive: ASan and TSan "
+    "cannot be linked into the same binary. Use separate build trees.")
+endif()
+if(ENABLE_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=thread)
+  # Same arrangement as the ASan block: the runtime options live IN the binary
+  # (src/common/SanitizerDefaults.cpp), so build-tsan/designer run straight
+  # from a shell behaves the same as one launched through a wrapper. Without
+  # it the first run drowns in Netgen's uninstrumented thread pool.
+  set(SANITIZER_DEFAULTS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/common/SanitizerDefaults.cpp)
+  add_compile_definitions(DESIGNER_SANITIZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                          DESIGNER_TSAN)
+  message(STATUS "ThreadSanitizer enabled")
+endif()
+
 # Opt-in GCC static analyzer (cmake -DENABLE_ANALYZER=ON). Compile-time only, no
 # run needed; emits -Wanalyzer-* warnings by path-exploring each TU (null deref,
 # use-after-free, leaks on error paths, ...). Complements the sanitizers, which

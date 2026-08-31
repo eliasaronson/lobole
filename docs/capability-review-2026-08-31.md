@@ -1,6 +1,8 @@
 # Capability + architecture review (2026-08-31)
 
-> Status: **findings only — nothing here is scheduled.** This is a read of the
+> Status: **the testing and tooling halves are partly BUILT — see "What was
+> done" at the bottom.** The capability findings (A1-A3, S1, F1) remain
+> findings only, and nothing there is scheduled. This is a read of the
 > tree against what the mainstream modellers do, taken after the CAM
 > projection fix (`286ef6b`) and prompted by "what are we missing, what is
 > badly structured, what do we do worse than FreeCAD and Onshape".
@@ -244,7 +246,7 @@ than they weigh.
 - 37.8k lines of test against 117.7k of source (~32%), across 925 headless +
   246 GUI + the python `gui` three.
 
-## T1 — The inner loop is four times slower than it says it is
+## T1 — The inner loop is four times slower than it says it is — FIXED
 
 **Measured today: `tools/test-fast.sh` takes 48.7 s.** Its own header says
 ~8 s and CLAUDE.md says 11 s.
@@ -301,7 +303,7 @@ recorded by `--record` is the shape.
 
 Best value-for-effort item in this section.
 
-## T3 — `gui_smoke` has to be excluded by hand, every time
+## T3 — `gui_smoke` has to be excluded by hand, every time — FIXED
 
 `tests/CMakeLists.txt:143` gives `gui_smoke` the label `gui` — the same label
 the sharded runner's tests carry. So `ctest -L gui` re-runs the entire GUI
@@ -323,7 +325,7 @@ A committed `docs/coverage-<date>.md` holding just the zero-covered list, per
 run, would make it a trend instead of an occasion. Both bugs found this
 session were in the "nothing has ever executed this path" class.
 
-## T5 — No property-based testing, and one property is worth more than the rest
+## T5 — No property-based testing, and one property is worth more than the rest — BUILT, and it found a bug
 
 **Regenerate the same document twice and compare the bodies.** Determinism is
 the promise that checkpoints, rollback, git merge, baked geometry and the
@@ -393,7 +395,7 @@ nobody thought to read. Introspection — `describe`/`help`/`instances`/`rpc`,
 the MCP surface, `designer_replay.py`, `coverage_matrix.py`,
 `rpc_params_scan.py` — is the best-served area in the repo.
 
-## P1 — There is no CPU profiler workflow, and every perf win so far was found by hand
+## P1 — There is no CPU profiler workflow, and every perf win so far was found by hand — FIXED
 
 `perf`, flamegraphs, Tracy, callgrind: **none appear anywhere** in `tools/`,
 `docs/` or CLAUDE.md. Every performance result this project has recorded was
@@ -434,7 +436,7 @@ Two separable fixes: **report VRAM in `frame_stats`** (cheap, immediately
 useful, and it makes the cache budget checkable), then **sub-allocate** (bigger,
 and the part that lifts the ceiling).
 
-## P3 — No ThreadSanitizer, in a tree that is now genuinely concurrent
+## P3 — No ThreadSanitizer, in a tree that is now genuinely concurrent — BUILD MODE ADDED
 
 `ENABLE_SANITIZERS` is `-fsanitize=address,undefined`. Neither catches a data
 race, and the concurrency is no longer hypothetical: STEP import on a worker,
@@ -447,7 +449,7 @@ A third sanitizer mode is a CMake option and a `ci-local.sh` flag. TSan and
 ASan cannot be combined, so it is a separate build, run occasionally like the
 coverage pass.
 
-## P4 — No GPU frame-capture workflow
+## P4 — No GPU frame-capture workflow — FIXED
 
 RenderDoc / Nsight appear nowhere. `DEV_WATCH_VALIDATE=1` covers the validation
 half well (it diagnosed the two-extruded-parts device-lost). What it does not
@@ -456,7 +458,7 @@ sub-rect bug needed — and that one shipped, and was caught later by a
 hand-written invariant test. A short recipe in `docs/rendering/` would do; the
 app is a normal Vulkan target.
 
-## P5 — Worktree scratch ports are assigned by hand
+## P5 — Worktree scratch ports are assigned by hand — FIXED
 
 `worktree-build.sh` says *"pass a distinct one per worktree"*. Everywhere else
 this repo refuses to let a human hold a value a machine could derive — the
@@ -560,3 +562,134 @@ transforms and stamps a per-mate error rather than collapsing the assembly.
    and arrangements where a picture is the medium.
 3. **Iterations-to-success in `benchmarks/`** — one more reported number,
    comparable with published work.
+
+---
+
+# What was done (2026-08-31, same night)
+
+The capability findings above (A1-A3, S1, F1) are untouched and unscheduled —
+each needs a decision this pass was not the place to make. The testing and
+tooling halves were mostly actionable without one, and this is what landed.
+
+| item | state | commit |
+|---|---|---|
+| **T1** inner loop 48.7 s -> **10.3 s** | fixed | `ae5b624` |
+| **T3** `gui_smoke` excluded by name | fixed | `ae5b624` |
+| **T5** determinism property — **found a real bug** | built + fixed | `d374679` |
+| **P1** sampling profiler | built | `9913136` |
+| **P4** GPU frame-capture recipe | written | `9784ff6` |
+| **P5** worktree picks its own port | fixed | `073aa31` |
+| **P3** TSan build mode | added | (below) |
+| **T4** coverage leaves no trace | run recorded, and it needs a fix | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
+| **T2** pixel-regression gate | NOT done — needs a decision | — |
+| **P2** GPU memory visibility | NOT done — needs a decision | — |
+| **T6** perf gates, **T7** shuffled runs | NOT done | — |
+
+## What T5 found, and why it is the item worth reading
+
+The determinism test failed on its first run, on `v03-legacy-sketch.json`.
+
+A pre-v5 rigid `"rect"` entity is expanded into four lines at load, and those
+lines came from `AddEntity`, which mints **collision-resistant random** ids. A
+face's stable name is `<feature>/g<entityId>` — so the same old file loaded
+twice produced **different face names for identical geometry**. Same volume,
+same bounding box, and every fillet, mate connector, dimension and CAM target
+keyed on one of those names pointing somewhere else.
+
+Random is right where it came from: two people ADDING entities to a shared
+sketch offline must not mint the same id (C6). A migration is not that — it is
+a pure function of the bytes on disk, and two people opening the same old file
+must get the same answer.
+
+Two things worth keeping from it. The property that caught it is the one the
+others cannot substitute for — **two independent loads**, because both
+regenerations of a single document share whatever global state exists. And the
+first fix was itself wrong in a way an existing test caught: it handed a new
+line the id the rect placeholder had just vacated, which would make an older
+reference resolve to a real edge instead of failing. A test written years
+earlier for a different reason, catching this one.
+
+## What T4 found: the coverage report is wrong in a correctable way
+
+`src/core` is at **75.0%** line coverage; `src/ui` 8.7% and `src/app` 6.1% by
+design (they need a GPU and belong to the GUI suite). 133 `src/core` functions
+across 25 files were never executed. Recorded in
+[coverage-2026-08-31.md](coverage-2026-08-31.md).
+
+The number that matters is a correction to the tool, not a gap in the code.
+**gcov writes its counters when a process exits normally, every smoke test
+stops the app with SIGTERM, and nothing handles it — so the app's own runs
+contribute nothing.** The tell is `Checkpoints.cpp`, listed with all 8
+functions "never called", while `headless_smoke.py`'s Checkpoints phase
+creates, lists, restores and error-paths them and PASSED in that same run.
+
+So the list is really "functions `designer_tests` never calls", and anything
+reachable only over the RPC surface is missing from it. Left as-is with the
+caveat stated rather than quietly trusted: the fix is a SIGTERM handler calling
+`__gcov_dump()` in coverage builds, and it wants to be a deliberate change
+rather than something bolted on at midnight.
+
+Worth reading past the false positives: the uncovered set is dominated by
+**removal and teardown paths** — `RemoveConfigurationCommand`,
+`Document::RemoveCamSetup`, `AssemblyDocument::RemoveConfiguration`,
+`SketchFeature::RemoveExternalGeometry`, `GitVault::RemoveRemote`. We test that
+things can be created and rarely that they can be removed, and removal is where
+dangling references live.
+
+## What P3 found: 28 races, all of them Netgen's
+
+Every one has `libnglib.so` on both sides; our frames appear only as the call
+site that asked Netgen to mesh (`FemStudy.cpp:182/265/369/444/521`). **Zero
+reports name our own code on both sides.** Netgen is not instrumented, so TSan
+cannot see `ngcore`'s task-scheduler happens-before edges and reads a buffer
+handed between its worker and the calling thread as an unsynchronized write.
+
+`tools/tsan-suppressions.txt` covers the library, wired through
+`__tsan_default_options` so a `build-tsan/designer` launched straight from a
+shell behaves the same as one through a wrapper — the arrangement ASan already
+uses. That suppresses a WHOLE library, which the leak list rightly refuses to
+do for OpenCASCADE, and the file states why the two differ: a leak in `libTK*`
+is usually our object we forgot to free, while a race in `libnglib` is inside a
+thread pool we neither create nor feed. Deliberately no OCC entry — OCC *is*
+called from our worker threads, a race there would be ours, and checking the
+TShape grouping is the main reason this mode exists.
+
+**Re-run with the suppressions in place: 0 warnings**, 910 s for the headless
+suite (about 12x the normal 79 s). Two non-findings to expect: `femgpu_tests`
+is a separate binary that needs building too, and `offscreen_smoke` fails
+because the app takes longer than `smoke_app.py`'s 30 s startup budget to
+report its port under instrumentation — a TSan-speed artifact, not a race.
+
+## The two that were left, and why
+
+**T2 (pixel-regression gate)** and **P2 (GPU memory)** both need a decision
+rather than more typing.
+
+T2's is where the baseline lives: exact byte equality is driver- and
+machine-specific, so a golden PNG in git would fail on anyone else's GPU. It
+needs a tolerance and a locally-recorded baseline, and choosing that shape is
+the work.
+
+P2's is a seam. `g_PhysicalDevice` is a static in `main.cpp`, unreachable from
+the RPC layer, so reporting heap budget and `maxMemoryAllocationCount` means
+deciding how the device gets exposed — a design choice in the one layer no test
+covers. The read-only query itself is trivial; the seam is not, and picking it
+at 23:30 unattended is how churn happens.
+
+## Notes for whoever picks these up
+
+- The `slow` label is **self-maintaining**: tag a heavy test `[slow]` where you
+  write it and `test-fast.sh` skips it. Do not add names to a list in `tools/`
+  again — that is precisely what drifted.
+- Two things fell out of `ADD_TAGS_AS_LABELS` for free: `ctest -L cam`,
+  `-L sketch`, `-L solver` all work now; and `fem_smoke`/`topo_smoke` turned
+  out to be running in 1.5 s and 1.2 s while still sitting in the old
+  exclusion list, which had been excluding tests that stopped being slow.
+- `tools/profile.sh` overrides two perf defaults that fail *silently* here: the
+  machine is hybrid, so the default hardware `cycles` event samples one PMU
+  (a 27 s run gave **42 samples**; `-e cpu-clock` gives 13k), and -O2 omits
+  frame pointers, so `--call-graph dwarf` is the only usable stack mode. If a
+  profile ever looks thin, check those two before believing it.
+- `tools/coverage.sh` now enters `nix-shell` itself. It previously assumed the
+  caller had, which nothing enforced and no doc stated — run outside, it died
+  at configure with "could not find glfw3".

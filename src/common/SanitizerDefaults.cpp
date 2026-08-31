@@ -1,5 +1,5 @@
-// What the sanitizers should do here, compiled INTO the binary — built only
-// when ENABLE_SANITIZERS=ON.
+// What the sanitizers should do here, compiled INTO the binary — built when
+// ENABLE_SANITIZERS=ON (ASan + UBSan) or ENABLE_TSAN=ON.
 //
 // The options used to live in wrapper scripts, which meant they applied only
 // if you launched through one. Anyone who ran build-asan/designer directly —
@@ -60,5 +60,21 @@ const char* __ubsan_default_options() {
   return "suppressions=" DESIGNER_SANITIZER_SOURCE_DIR
          "/tools/ubsan-suppressions.txt:print_stacktrace=1";
 }
+
+#ifdef DESIGNER_TSAN
+const char* __tsan_default_options() {
+  // Netgen is not instrumented, so TSan cannot see its task scheduler's
+  // happens-before edges and reports its internal parallel-for as a race —
+  // 28 of them on the first run, all with libnglib on both sides. The file
+  // says which, and why suppressing a whole library is right HERE and wrong
+  // for OpenCASCADE.
+  //
+  // history_size lifted because the default 1 keeps too few stack frames of
+  // the *previous* access to identify it, which is the half of a race report
+  // that tells you what raced with what.
+  return "suppressions=" DESIGNER_SANITIZER_SOURCE_DIR
+         "/tools/tsan-suppressions.txt:history_size=4:second_deadlock_stack=1";
+}
+#endif
 
 } // extern "C"

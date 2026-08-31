@@ -88,6 +88,11 @@ thing behind it invisible to the next person who looks.
   well, and seven gaps, of which the loudest is that `tools/test-fast.sh` now
   takes 48.7 s against the ~8 s its own header claims (a by-name exclusion
   list that never learned about the CAM gates).
+- **[coverage-2026-08-31.md](coverage-2026-08-31.md)** — the first recorded
+  `tools/coverage.sh` run: 75% of `src/core`, and the 133 functions nothing
+  executed. **Read its caveat first** — the app is SIGTERMed by every smoke
+  test and so never flushes its gcov counters, which makes anything reachable
+  only over the RPC surface read as untested when it is not.
 - **[cpp23-modernization.md](cpp23-modernization.md)** — the toolchain bump
   and what it bought.
 - **[ai-cad-survey-2026-08-18.md](ai-cad-survey-2026-08-18.md)** — how other

@@ -9,6 +9,7 @@
 #   tools/ci-local.sh --containers # just the stock-Ubuntu containers
 #   tools/ci-local.sh --image ubuntu:26.04
 #   tools/ci-local.sh --asan       # ASan+UBSan build and suite, ~6 min warm
+#   tools/ci-local.sh --tsan       # ThreadSanitizer build and suite
 #
 # Build trees live in .ci-local/ (gitignored) and are reused, so the second
 # run of a container is a rebuild of what changed rather than a fresh compile.
@@ -34,6 +35,7 @@ cd "$root"
 run_nix=1
 run_containers=1
 run_asan=0
+run_tsan=0
 run_gui=1
 only_image=""
 while [ $# -gt 0 ]; do
@@ -44,6 +46,7 @@ while [ $# -gt 0 ]; do
     # ~4-minute compile, which is too much to put in front of every
     # "did I break the build?" run.
     --asan) run_asan=1; run_nix=0; run_containers=0 ;;
+    --tsan) run_tsan=1; run_nix=0; run_containers=0 ;;
     # The GUI suite is ~95 s and needs a display; --no-gui is the escape
     # hatch for a machine without one (and for --containers, which has none).
     --no-gui) run_gui=0 ;;
@@ -147,6 +150,22 @@ if [ "$run_asan" = 1 ]; then
   nix-shell shell.nix --run "cmake --build build-asan -j$(nproc) --target designer designer_tests" > /dev/null
   run_tests asan "sanitized suite" \
     nix-shell shell.nix --run "ctest --test-dir build-asan -LE gui -j$(nproc) --output-on-failure -E '$SANITIZER_TEST_EXCLUDE'"
+fi
+
+# ---- the race job (opt-in; separate tree, ASan and TSan cannot combine) -----
+if [ "$run_tsan" = 1 ]; then
+  step "ThreadSanitizer"
+  # Its own tree because -fsanitize=thread and -fsanitize=address cannot be
+  # linked into one binary. Not part of any scheduled run: this is an
+  # occasional audit like tools/coverage.sh, aimed at the parts of the tree
+  # that stopped being single-threaded — the import worker, OCC meshing across
+  # threads, async FEM, the remote server.
+  nix-shell shell.nix --run "cmake -S . -B build-tsan -G Ninja -DENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo" > /dev/null
+  nix-shell shell.nix --run "cmake --build build-tsan -j$(nproc) --target designer designer_tests" > /dev/null
+  # -j4, not -j$(nproc): TSan multiplies each process's memory footprint, and
+  # a saturated machine turns a race hunt into a timeout hunt.
+  run_tests tsan "race suite" \
+    nix-shell shell.nix --run "ctest --test-dir build-tsan -LE gui -j4 --output-on-failure"
 fi
 
 # ---- job 2: the stock-Ubuntu containers ------------------------------------

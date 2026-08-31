@@ -1,0 +1,41 @@
+# ThreadSanitizer suppressions (tools/ci-local.sh --tsan, -DENABLE_TSAN=ON).
+#
+# The rule is the same one the leak list follows: only DEPENDENCY-OWNED
+# reports belong here, and each entry carries the reasoning for why it cannot
+# be a real finding on our side. An entry without that is a bug being silenced.
+#
+# Measured 2026-08-31, first run of the mode over the headless suite: 28
+# warnings, every one of them with libnglib.so on both sides of the race and
+# our own frames appearing only as the CALL SITE that asked Netgen to mesh
+# (FemStudy.cpp:182/265/369/444/521 — GenerateMesh and its neighbours). Zero
+# reports named our code on both sides.
+#
+# Why they are noise rather than findings: Netgen is not built with
+# -fsanitize=thread, so TSan cannot see its internal happens-before edges.
+# ngcore has its own task scheduler (ngcore::ParallelForRange, its TaskManager
+# thread pool), and its synchronization is invisible to an instrumentation
+# pass that never ran over it — so a buffer handed between its worker and the
+# calling thread reads as an unsynchronized write. `BuildEdgeList` and
+# `MeshOptimize3d::SwapImprove2` are the two that dominate, both plain
+# parallel-for bodies inside the mesher.
+#
+# This suppresses the LIBRARY, which the leak list rightly refuses to do for
+# OpenCASCADE — and the reason the two differ is worth stating. A leak inside
+# libTK* is usually OUR object that we forgot to free, so suppressing the
+# library hides our own bugs. A race inside libnglib is inside Netgen's own
+# thread pool, which we neither create nor feed: we call GenerateMesh on one
+# thread and get a mesh back. If we ever hand Netgen data from more than one
+# of our own threads, this line stops being safe — and that would be a change
+# to FemStudy, so re-read this file if you make one.
+called_from_lib:libnglib.so
+# With this line the headless suite reports 0 warnings in 910 s (about 12x the
+# normal 79 s). Two failures are expected and are not races: femgpu_tests is a
+# separate binary that has to be built too, and offscreen_smoke exceeds
+# smoke_app.py's 30 s startup budget because an instrumented app takes longer
+# than that to report its port.
+
+# Note deliberately NOT added: anything covering OpenCASCADE. OCC is called
+# from our worker threads (the STEP import worker, and the parallel
+# tessellation grouped by TShape in AssemblyActions), and a race there would
+# be ours — the grouping is what makes it impossible, and TSan checking that
+# grouping is the main reason this mode exists.
