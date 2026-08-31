@@ -119,7 +119,8 @@ the maps as `R16G16B16A16_SFLOAT` / `R16G16_SFLOAT` sampled textures (env sample
 wraps u / clamps v for the equirect back-seam; LUT clamps both), and `mesh.frag`
 does the split-sum ambient (irradiance·albedo diffuse + prefilter·(F·A+B)
 specular), with the analytic key/fill/rim lights dialed to 0.5 on top. Bundles
-`brown_photostudio_02_1k.hdr` (Poly Haven, CC0). Verified: `test_ibl` (BRDF
+`brown_photostudio_02_2k.hdr` (Poly Haven, CC0; 1k until 2026-08-31 — see
+assets/hdri/README.md for why the resolution stopped being irrelevant). Verified: `test_ibl` (BRDF
 corner ≈ (1,0), bright irradiance, decreasing mips) + dumped maps eyeballed +
 a validated render (0 VUIDs) showing gold/chrome picking up the environment.
 GPU-compute prefiltering remains a later optimization.

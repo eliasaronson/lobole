@@ -1331,8 +1331,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   // with these maps (MakeStillDesc refuses without them).
   g_IBLTextures = std::make_unique<IBLTextures>();
   {
-    const std::string hdr =
-        (RuntimePaths::DataDir() / "hdri/brown_photostudio_02_1k.hdr").string();
+    const std::string hdr = RuntimePaths::EnvironmentHdri().string();
     IBLPrecompute ibl;
     if (ibl.Build(hdr, IblCacheDir())) {
       if (!g_IBLTextures->Upload(g_Device, g_PhysicalDevice, g_Queue,
@@ -1877,8 +1876,7 @@ int main(int argc, char** argv) {
   // mesh renderer since its descriptor sets bind these textures at creation.
   g_IBLTextures = std::make_unique<IBLTextures>();
   {
-    const std::string hdr =
-        (RuntimePaths::DataDir() / "hdri/brown_photostudio_02_1k.hdr").string();
+    const std::string hdr = RuntimePaths::EnvironmentHdri().string();
     IBLPrecompute ibl;
     if (ibl.Build(hdr, IblCacheDir())) {
       if (!g_IBLTextures->Upload(g_Device, g_PhysicalDevice, g_Queue,

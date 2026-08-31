@@ -1,3 +1,4 @@
+#include "common/RuntimePaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -15,8 +16,8 @@ static bool Finite(const glm::vec4& c) {
 }
 
 TEST_CASE("IBL precompute produces sane maps from the studio HDR", "[ibl]") {
-  const std::string hdr = std::string(DESIGNER_SOURCE_DIR) +
-                          "/assets/hdri/brown_photostudio_02_1k.hdr";
+  const std::string hdr = std::string(DESIGNER_SOURCE_DIR) + "/assets/hdri/" +
+                          std::string(RuntimePaths::kEnvironmentHdriFile);
   if (!fs::exists(hdr)) {
     WARN("HDR asset missing, skipping: " << hdr);
     return;

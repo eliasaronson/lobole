@@ -50,6 +50,10 @@ std::filesystem::path DataDir() {
   return (executable / ".." / "share" / "designer").lexically_normal();
 }
 
+std::filesystem::path EnvironmentHdri() {
+  return DataDir() / "hdri" / kEnvironmentHdriFile;
+}
+
 std::filesystem::path ShaderDir() {
   const std::filesystem::path development =
       ExecutableDir() / "libraries" / "shaders";

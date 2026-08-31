@@ -618,7 +618,10 @@ include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 
 # Studio HDRI for image-based lighting, loaded at runtime relative to the
 # executable (main.cpp ExecutableDir()) — same relocatable scheme as the fonts.
-file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
+# One name, staged here and installed below; it must match
+# RuntimePaths::kEnvironmentHdriFile, which is the C++ side of the same name.
+set(DESIGNER_HDRI "brown_photostudio_02_2k.hdr")
+file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
 
 if(NOT ENABLE_TEST_ENGINE)
@@ -1009,7 +1012,7 @@ install(FILES
         "${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
-install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr"
+install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
