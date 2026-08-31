@@ -63,10 +63,16 @@ void DrawRenderModal(AppState& state) {
       job.cancel = true;
   } else {
     if (job.finished) {
-      if (job.success)
+      if (job.success) {
         ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "%s Saved: %s",
                            ICON_FA_CIRCLE_CHECK, job.resultPath.c_str());
-      else
+        // Saved is not the same as good: a still that framed nothing is a
+        // valid PNG of the backdrop, and it used to be reported as a success
+        // with no further comment.
+        if (!job.warning.empty())
+          ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s",
+                             job.warning.c_str());
+      } else
         ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "Failed: %s",
                            job.error.c_str());
       ImGui::Separator();

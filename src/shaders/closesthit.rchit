@@ -24,7 +24,7 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightDir;
     vec4 lightColor;
     vec4 ambientColor;
-    vec4 params;      // x = prefilter mip count
+    vec4 params;      // x = prefilter mips, y = ray far, z = AO radius
 } ubo;
 
 // Per-body vertex/index data reached by device address. std430 float/uint
@@ -75,7 +75,9 @@ struct Vertex {
 
 const float PI = 3.14159265359;
 const float kSunCos = 0.9994; // shadow-ray cone, ~2 degree half-angle
-const float kAORadius = 2.0;  // ambient-occlusion ray reach
+// Ambient-occlusion reach and the shadow rays' far limit both arrive in the
+// UBO (params.z / params.y), sized from the scene: as literals they were a
+// length in whatever unit the model happened to use.
 
 // Must match IBL.cpp DirToEquirectUV / mesh.frag dirToUV exactly (including
 // the world -> env swizzle: the HDRI is Y-polar, the world Z-up).
@@ -190,9 +192,9 @@ void main() {
         vec3 env = textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
         vec3 Lc = normalize(-ubo.lightDir.xyz);
         vec3 Lcs = coneSample(Lc, kSunCos, payload.rngState);
-        float sun = traceOcclusion(worldPos + N * 0.001, Lcs, 10000.0) ? 0.0 : 1.0;
+        float sun = traceOcclusion(worldPos + N * 0.001, Lcs, ubo.params.y) ? 0.0 : 1.0;
         vec3 aoDir = cosineSample(N, payload.rngState);
-        float ao = traceOcclusion(worldPos + N * 0.001, aoDir, kAORadius) ? 0.0 : 1.0;
+        float ao = traceOcclusion(worldPos + N * 0.001, aoDir, ubo.params.z) ? 0.0 : 1.0;
         const float kShadowStrength = 0.55; // how dark the umbra gets
         const float kAOStrength = 0.35;     // extra contact darkening
         float shade = mix(1.0, sun, kShadowStrength) * mix(1.0, ao, kAOStrength);
@@ -215,7 +217,7 @@ void main() {
     vec3 lightColor = ubo.lightColor.rgb * ubo.lightDir.w;
     // Jitter the shadow ray in a small cone -> penumbrae as samples accumulate.
     vec3 Ls = coneSample(L, kSunCos, payload.rngState);
-    float shadow = traceOcclusion(worldPos + N * 0.001, Ls, 10000.0) ? 0.0 : 1.0;
+    float shadow = traceOcclusion(worldPos + N * 0.001, Ls, ubo.params.y) ? 0.0 : 1.0;
     vec3 direct = directLight(N, V, L, lightColor, mat, roughness) * shadow;
 
     // ---- IBL ambient (split-sum, shared with the raster viewport) ----
@@ -241,7 +243,7 @@ void main() {
 
     // ---- Ambient occlusion: one cosine-hemisphere ray, local radius ----
     vec3 aoDir = cosineSample(N, payload.rngState);
-    float ao = traceOcclusion(worldPos + N * 0.001, aoDir, kAORadius) ? 0.0 : 1.0;
+    float ao = traceOcclusion(worldPos + N * 0.001, aoDir, ubo.params.z) ? 0.0 : 1.0;
 
     vec3 ambient = (kD * diffuseIBL + specularIBL) * ao;
 

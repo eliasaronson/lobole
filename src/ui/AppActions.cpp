@@ -4079,6 +4079,13 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
            "cache, {} tessellated here)",
            state.rayTracer->GeometryCount(), reused, meshed);
 
+  // What the ray tracer was given, for the still to size its ray limits from
+  // (MakeStillDesc). Recorded before the ground plane, which is derived from
+  // these bounds in turn.
+  state.rtSceneValid = bbMin.x <= bbMax.x;
+  state.rtSceneMin = state.rtSceneValid ? bbMin : glm::vec3(0.0f);
+  state.rtSceneMax = state.rtSceneValid ? bbMax : glm::vec3(0.0f);
+
   // Shadow-catcher ground plane: a large quad just under the scene so soft
   // shadows and AO have a surface to land on. The closest-hit shader renders it
   // as the environment darkened by occlusion, so the backdrop stays the HDRI.
@@ -4106,6 +4113,31 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   return state.rayTracer->BuildAccelerationStructures();
 }
 
+// Whether any of the scene's bounding box lands inside the still's frustum.
+// The cheap box-vs-frustum rejection: if all eight corners sit outside the
+// SAME clip plane, nothing can be in frame. It is what tells a render of the
+// backdrop from a render of the part — flatness cannot, because the backdrop
+// is an HDRI photograph and photographs are not flat.
+bool StillFramesGeometry(const RTStillDesc& desc, const glm::vec3& min,
+                         const glm::vec3& max) {
+  const glm::mat4 vp = desc.proj * desc.view;
+  int outLeft = 0, outRight = 0, outBottom = 0, outTop = 0, outNear = 0,
+      outFar = 0;
+  for (int c = 0; c < 8; c++) {
+    const glm::vec4 p =
+        vp * glm::vec4((c & 1) ? max.x : min.x, (c & 2) ? max.y : min.y,
+                       (c & 4) ? max.z : min.z, 1.0f);
+    outLeft += p.x < -p.w;
+    outRight += p.x > p.w;
+    outBottom += p.y < -p.w;
+    outTop += p.y > p.w;
+    outNear += p.z < 0.0f;
+    outFar += p.z > p.w;
+  }
+  return outLeft < 8 && outRight < 8 && outBottom < 8 && outTop < 8 &&
+         outNear < 8 && outFar < 8;
+}
+
 RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
                           uint32_t seed) {
   RTStillDesc desc;
@@ -4119,6 +4151,31 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
     desc.view = state.camera->GetViewMatrix();
     desc.proj = state.camera->GetProjectionMatrixForAspect(aspect);
     desc.cameraPos = state.camera->GetPosition();
+  }
+  // How far a ray may travel, and how far AO reaches — from the SCENE, not
+  // from a literal in the shader. Both were lengths, and the length of what
+  // was never asked: at 10000 the ray tracer could not see past 10 m, so a
+  // 6 m dock (framed from ~11 m) rendered as pure environment, and AO at
+  // 2.0 reached two millimetres of it. Call this AFTER
+  // SyncRayTracingScene — it is the bounds of what that handed over.
+  if (state.rtSceneValid) {
+    const glm::vec3 centre = 0.5f * (state.rtSceneMin + state.rtSceneMax);
+    const float diag = glm::length(state.rtSceneMax - state.rtSceneMin);
+    // Reach the far side of the scene from wherever the camera stands, plus
+    // the shadow-catcher, which is itself 10 diagonals wide (so its far
+    // corner is ~14 away); double it and nothing can fall off the end.
+    desc.rayFar =
+        2.0f * (glm::length(desc.cameraPos - centre) + 15.0f * diag) + 1.0f;
+    // The 2.0 literal was tuned on part-scale work — about 0.012 of a
+    // 170 mm part's diagonal, which is what this reproduces there.
+    desc.aoRadius = std::max(0.012f * diag, 0.01f);
+    // Logged because it is the number that was wrong: a reach shorter than
+    // the camera's own standoff renders the backdrop and nothing else, and
+    // from the picture alone that looks like a rendering bug of any kind.
+    LOG_INFO("Ray Tracing: still reach {:.0f}, AO {:.2f} (scene {:.0f} across,"
+             " camera {:.0f} away)",
+             desc.rayFar, desc.aoRadius, diag,
+             glm::length(desc.cameraPos - centre));
   }
   if (state.ibl) {
     desc.environment = state.ibl->EnvironmentView();
@@ -4134,7 +4191,8 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
 
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
-                         uint32_t seed, bool groundPlane, std::string* error) {
+                         uint32_t seed, bool groundPlane, std::string* error,
+                         std::string* warning) {
   auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -4148,6 +4206,11 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
     samples = 1;
 
   RTStillDesc desc = MakeStillDesc(state, width, height, seed);
+  if (warning && state.rtSceneValid &&
+      !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
+    *warning = "the camera framed no geometry — the still is the backdrop "
+               "only (fit the view, then render again)";
+  }
   if (!desc.irradiance)
     return fail("IBL maps unavailable");
   if (!state.rayTracer->BeginStill(desc))
@@ -4205,6 +4268,15 @@ void PumpRenderJob(AppState& state) {
       return;
     }
     RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed);
+    // Saved is not the same as good: a still whose scene is entirely outside
+    // the frustum is a valid PNG of the backdrop, and the modal used to
+    // report that as a plain success.
+    job.warning.clear();
+    if (state.rtSceneValid &&
+        !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
+      job.warning = "the camera framed no geometry — this is the backdrop "
+                    "only (Fit, then render again)";
+    }
     if (!desc.irradiance) {
       finish(false, "IBL maps unavailable");
       return;

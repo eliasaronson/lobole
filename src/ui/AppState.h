@@ -596,6 +596,10 @@ struct RenderJob {
   bool success = false;
   std::string error;
   std::string resultPath;
+  // Set when the finished picture is nearly one flat colour — which for a
+  // still means the camera saw no geometry. A render that framed nothing
+  // used to report a confident "Saved".
+  std::string warning;
 };
 
 // All state the UI reads and writes, replacing main.cpp's globals. The
@@ -1364,6 +1368,13 @@ struct AppState {
   // Non-empty: OpenProjectDialog found an autosave newer than this project
   // file; the recovery modal (DrawFileBrowser) resolves it.
   std::string recoveryOffer;
+
+  // The bounds of what SyncRayTracingScene last handed the ray tracer, so a
+  // still can size its ray limits from the scene instead of a literal.
+  // Valid only when rtSceneValid: an empty scene has no bounds to speak of.
+  glm::vec3 rtSceneMin{0.0f};
+  glm::vec3 rtSceneMax{0.0f};
+  bool rtSceneValid = false;
 
   // How far this document's geometry reaches from the world origin, which is
   // what every piece of reference geometry (base planes, datum quads, the

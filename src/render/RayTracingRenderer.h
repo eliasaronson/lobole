@@ -68,6 +68,13 @@ struct RTStillDesc {
   VkSampler envSampler = VK_NULL_HANDLE;
   VkSampler lutSampler = VK_NULL_HANDLE;
   uint32_t prefilterMips = 1;
+  // How far a ray may travel before it counts as a miss, and how far an
+  // ambient-occlusion ray reaches. Both were literals in the shaders — 10000
+  // and 2.0 — and both carry a UNIT: CAD works in millimetres, so nothing
+  // more than 10 m from the camera existed to the ray tracer, and AO on a
+  // 3 m dock reached 2 mm. MakeStillDesc derives them from the scene.
+  float rayFar = 10000.0f;
+  float aoRadius = 2.0f;
   uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
 };
 

@@ -1276,11 +1276,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     uint32_t seed = p.value("seed", 1u);
     std::string path = p.value("path", std::string("render.png"));
     bool ground = p.value("ground", true); // shadow-catcher plane
-    std::string error;
+    std::string error, warning;
     bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
-                                      ground, &error);
-    return {{"ok", ok},         {"path", path},       {"width", width},
-            {"height", height}, {"samples", samples}, {"error", error}};
+                                      ground, &error, &warning);
+    json result = {{"ok", ok},         {"path", path},       {"width", width},
+                   {"height", height}, {"samples", samples}, {"error", error}};
+    // The postcondition a screenshot already carries: saying "ok" about a
+    // picture of nothing is the confident wrong answer this codebase keeps
+    // paying for.
+    if (ok && !warning.empty())
+      result["warnings"] = json::array({warning});
+    return result;
   }
   // Part-document domain modules (disjoint method sets; order doesn't matter).
   if (doc) {

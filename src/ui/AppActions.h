@@ -426,9 +426,13 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 // (with *error set) on any failure. Used by the render_still RPC; the UI modal
 // drives BeginStill/RenderBatch itself for progress. `seed` fixes the RNG so a
 // given (scene, samples, seed) is reproducible.
+// `warning` (optional, out): non-empty when the still is a valid picture of
+// nothing — the scene's bounds fall entirely outside the camera's frustum.
+// Saved is not the same as good, and this is the difference.
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
-                         uint32_t seed, bool groundPlane, std::string* error);
+                         uint32_t seed, bool groundPlane, std::string* error,
+                         std::string* warning = nullptr);
 
 // Advances an active AppState::renderJob by one sample batch per call (the
 // non-blocking counterpart of RenderStillBlocking). Call once per UI frame on

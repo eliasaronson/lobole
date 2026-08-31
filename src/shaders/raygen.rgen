@@ -11,7 +11,7 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightDir;
     vec4 lightColor;
     vec4 ambientColor;
-    vec4 params;      // x = prefilter mip count
+    vec4 params;      // x = prefilter mips, y = ray far, z = AO radius
 } ubo;
 
 // Per-sample RNG seed data (raygen only).
@@ -57,8 +57,11 @@ void main() {
     vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0);
 
     payload.radiance = vec3(0.0);
+    // params.y, not a literal: the old 10000 was a LENGTH, and the unit is
+    // the model's. A 6 m dock has to be framed from ~11 m away, so every
+    // primary ray missed and the still came back as pure environment.
     traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xff, 0, 0, 0, origin.xyz,
-                0.001, direction.xyz, 10000.0, 0);
+                0.001, direction.xyz, ubo.params.y, 0);
 
     // Accumulate (sum); the CPU divides by the sample count on readback.
     vec3 prev = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;

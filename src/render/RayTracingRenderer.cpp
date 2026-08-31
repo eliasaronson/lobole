@@ -650,7 +650,7 @@ struct RTUniforms {
   glm::vec4 lightDir;   // xyz = travel direction, w = intensity
   glm::vec4 lightColor; // rgb = color, w unused
   glm::vec4 ambientColor;
-  glm::vec4 params; // x = prefilter mip count
+  glm::vec4 params; // x = prefilter mips, y = ray far, z = AO radius
 };
 
 glm::vec3 ACESFilm(const glm::vec3& x) {
@@ -747,7 +747,8 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   u.lightDir = glm::vec4(-toLight, 1.8f);
   u.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f);
   u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);
-  u.params = glm::vec4(static_cast<float>(desc.prefilterMips), 0, 0, 0);
+  u.params = glm::vec4(static_cast<float>(desc.prefilterMips), desc.rayFar,
+                       desc.aoRadius, 0);
 
   const VkMemoryPropertyFlags hostVisible =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |

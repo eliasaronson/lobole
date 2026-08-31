@@ -359,6 +359,18 @@ set_tests_properties(units_smoke PROPERTIES TIMEOUT 120)
 
 # Interchange X2 visual export: glTF/OBJ/PLY of a part + assembly, material
 # carry-through, instancing. Headless (no display).
+# The path-traced still must reach the whole part: the ray far limit was a
+# hard-coded 10000 in raygen.rgen, and that is a LENGTH — anything more than
+# ten metres from the camera was invisible, so a 3 m dock (framed from ~11 m)
+# rendered as pure backdrop and the app called it a successful save. Needs a
+# GPU with ray tracing; skips (77) where there is none.
+add_test(NAME render_still_reach_smoke
+         COMMAND python3
+                 ${CMAKE_CURRENT_SOURCE_DIR}/render_still_reach_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_still_reach_smoke PROPERTIES LABELS gui
+                     TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 add_test(NAME visual_export_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/visual_export_smoke.py
                  $<TARGET_FILE:designer>)
