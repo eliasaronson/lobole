@@ -479,6 +479,19 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK(std::abs(glm::length(glm::vec3((*m)[c])) - 1.0f) < 1e-4f);
     IM_CHECK(std::abs((*m)[3][3] - 1.0f) < 1e-6f);
 
+    // And it is OPAQUE. A ghosted instance draws alpha-blended with depth
+    // writes off, so it occludes nothing — you see its own far wall through
+    // its near one, which is what made the glyph read as a shape lying on its
+    // side that half-followed the camera. `ghost` used to be sticky across
+    // SetInstanceMaterial, so anything ever ghosted stayed that way.
+    IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(s_App->camToolInstance));
+    s_App->meshRenderer->SetInstanceGhost(s_App->camToolInstance, 0.3f);
+    IM_CHECK(s_App->meshRenderer->IsInstanceGhost(s_App->camToolInstance));
+    s_App->meshRenderer->SetMeshMaterial(s_App->camToolInstance,
+                                         glm::vec3(0.8f),
+                                         glm::vec4(0.0f, 0.6f, 0.3f, 0.04f));
+    IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(s_App->camToolInstance));
+
     ui::EndCamPlayback(*s_App);
     ctx->Yield(2);
   };

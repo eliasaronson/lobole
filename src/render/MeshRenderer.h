@@ -189,6 +189,11 @@ public:
   // the RENDERER's state rather than recomputing the caller's arithmetic —
   // the difference between testing the path and testing the test.
   std::optional<glm::mat4> GetInstanceTransform(uint32_t instanceId) const;
+  // Whether an instance draws in the ghost pass — alpha-blended with depth
+  // writes OFF, so it occludes nothing. Exposed for the same reason as
+  // GetInstanceTransform: a test should read the renderer's state rather than
+  // trust that a setter did what its comment says.
+  [[nodiscard]] bool IsInstanceGhost(uint32_t instanceId) const;
   void SetInstanceColor(uint32_t instanceId, const glm::vec3& albedo);
   // Albedo + PBR params in one shot. params is (metallic, roughness,
   // specular, reflectance).

@@ -274,35 +274,49 @@ Gated by `cam: a pass never rapids to a depth nothing cleared`, which checks
 `rapids_through_stock == 0` for both shapes: a pocket deep enough for two
 passes, and a skim starting below the stock top.
 
-### An outline contour dips into the part over a hole running beneath the face
+### A profile cuts ONE contour at every depth, but the outline changes with depth
 
-A cross-dowel hole runs parallel to the panel edge, ending ~1.7 mm short of
-it. Where the section plane passes through that hole, the outer contour dips
-about 4 mm into the panel, and the profile then takes a full-depth bite out of
-the edge.
+Front_wall's cross-dowel bores are cut 22 mm deep from the x = ±105 side
+plane (`19-sketch.json` + `20-extrude.json`: two Ø8 circles at sketch
+(-8, ±461), `distance: 22.0`, `mode: cut`). 22 mm from a face 105 out means
+they OPEN ONTO that face — measured, the side face loses 100.53 mm² to them,
+which is exactly two Ø8 circles (2 · π · 4² = 100.53).
 
-Reproduce: front_wall, Back setup, the 210 mm outline. `cam_verify` reports a
-16 mm gouge at setup XY (-104.3, -464.9) — both dowel positions, both edges.
-It is NOT tool fit (a 3 mm cutter gouges identically) and NOT
-`PickedWallContour` (a targetless "cut out the whole part", which sections the
-model instead, gouges at the same point). Cutting only the depth band ABOVE
-the dowels, or only BELOW, is clean; the band THROUGH them gouges:
+So at the bores' own height the panel's outline genuinely has two 8 mm slots
+running 22 mm in from each edge, and above and below that height it does not.
+`PickedWallContour` takes ONE contour and cuts it at every depth — the
+behaviour is documented ("a wall names one contour at every depth", which is
+right for a through opening that has no floor to click) — so the slot contour
+gets cut through the whole 16 mm thickness, removing the 4 mm of material
+above the bore and the 4 mm below it.
 
-    Z   0.0 ->  -4.0   gouge 0.00     (above)
-    Z  -6.0 -> -12.0   gouge 10.00    (through — the dowels are at -8.4)
-    Z -14.0 -> -16.0   gouge 0.00     (below)
+That is the gouge, and the arithmetic matches: `cam_verify` reports **8.00 mm**,
+which is 4 + 4. A targetless "cut out the whole part" reports the same 8 mm,
+so it is not the wall pick.
 
-It is in the section, not the offsetting — but the first diagnosis, "a blind
-hole ending close beneath a face merges with the outer boundary", is WRONG and
-was written without a reproduction. Built as a unit test it does not
-reproduce: a 210 x 100 x 16 panel with one Ø8 hole along X ending 1.7 mm short
-of the face sections cleanly at the hole's own height — 2 loops, one outer,
-one island, outer extent unchanged. The web survives.
+Bisected on the real part, rebuilding the job for each case:
 
-So the real part has something the lone hole does not. The candidate is the
-INTERSECTION: on front_wall the cross-dowels run into the eight blind Ø8 dowel
-holes near the edges (their faces carry the cross-dowels' `;M20`/`;M22`
-modifiers, which is how you can tell), and the blind hole at x = ±97 already
-leaves only a 4 mm web to the edge at ±105 — the same 4 mm the contour dips.
-The next step is to model BOTH holes and section between them, not to go
-looking in the offsetting code.
+    everything present            gouge 8.00 at (-104.2, -464.6)
+    cross-dowels 19/20 out        gouge 8.00 at (-104.2, -464.6)
+    cross-dowels 21/22 out        gouge 8.00 at ( 103.8, -464.6)   <- other edge
+    ALL FOUR cross-dowels out     gouge 0.00
+    chamfer 42 out                gouge 8.00
+    blind dowels 17/18 out        gouge 8.00
+
+So: the cross-dowels alone, neither the chamfer nor the blind holes, and not
+their intersection. Two earlier diagnoses were wrong and are struck: it is not
+the section merging a hole with the boundary (a lone hole 1.7 mm beneath a
+face sections cleanly — 2 loops, outer extent unchanged), and it is not the
+two holes intersecting (built as a fixture, also clean). The section is right
+throughout; what is wrong is using one section for every depth.
+
+**The fix** is to section per depth pass for a profile, as the clearing ops
+already do, and to keep the single-contour path only for the case it exists
+for — a wall with no floor, where the contour genuinely is the same all the
+way down. The gate is this part: an outline profile over a panel with a bore
+opening onto its edge must report zero gouge.
+
+Until then the job suppresses those features, which is not a workaround: the
+machine does not make those holes — they are drilled by hand — so a CAM model
+without them is the correct one.
+

@@ -234,10 +234,18 @@ MeshRenderer::GetInstanceTransform(uint32_t instanceId) const {
   return inst ? std::optional<glm::mat4>(inst->transform) : std::nullopt;
 }
 
+bool MeshRenderer::IsInstanceGhost(uint32_t instanceId) const {
+  if (instanceId == 0 || instanceId > m_instances.size())
+    return false;
+  const auto& instance = m_instances[instanceId - 1];
+  return instance && instance->ghost;
+}
+
 void MeshRenderer::SetInstanceColor(uint32_t instanceId,
                                     const glm::vec3& albedo) {
   if (MeshInstance* instance = GetInstance(instanceId)) {
     instance->baseColor = glm::vec4(albedo, 1.0f);
+    instance->ghost = false; // see SetInstanceMaterial
   }
 }
 
@@ -247,6 +255,13 @@ void MeshRenderer::SetInstanceMaterial(uint32_t instanceId,
   if (MeshInstance* instance = GetInstance(instanceId)) {
     instance->baseColor = glm::vec4(albedo, 1.0f);
     instance->materialParams = params;
+    // Opaque again, in the pass as well as in the alpha. `ghost` used to be
+    // sticky: an instance ever ghosted stayed in the alpha-blended,
+    // depth-write-OFF pipeline for the rest of its life, at full opacity, so
+    // it never occluded anything and you could see its own far side through
+    // its near wall. `SetInstanceGhost`'s contract already says to call it
+    // AFTER this ("those reset baseColor.a to 1"); this finishes the job.
+    instance->ghost = false;
   }
 }
 
