@@ -181,10 +181,11 @@ void ApplyExplodeTransforms(AppState& state);
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
                           std::string* error);
 
-// Same, for a caller that already parsed the file (ImportCADFile probes the
-// structure to choose this path). `stepPath` names the source in messages and
-// the log; nothing is read from it. Parsing dominates the cost of an import,
-// so a caller holding the model must never re-read the file.
+// Same, for a caller that already parsed the file (the GUI import worker in
+// ui/ImportJob.cpp probes the structure to choose this path). `stepPath` names
+// the source in messages and the log; nothing is read from it. Parsing
+// dominates the cost of an import, so a caller holding the model must never
+// re-read the file.
 bool ImportStepAsAssembly(AppState& state,
                           const CADKernel::ImportedModel& model,
                           const std::string& stepPath, std::string* error);

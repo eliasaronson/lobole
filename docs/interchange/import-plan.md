@@ -228,8 +228,9 @@ all 314 instances):
   hold them across the teardown. **The eviction rule matters as much as the
   cache**: a strict "release anything not drawn this sync" made two assembly
   tabs thrash (alternating two 299-part assemblies re-tessellated all 299 every
-  switch, 4.2 s each), so it is an LRU against a device-memory budget,
-  never evicting what the current sync draws.
+  switch, 4.2 s each), so it is an LRU against a device-memory budget
+  (`kPartRenderCacheBudgetBytes`, 256 MB), never evicting what the current
+  sync draws.
 - **Every buffer upload drained the queue.** `vkutil::CopyBuffer` ends in a
   `vkQueueWaitIdle`; a cold build of this file creates 1196 buffers.
   `vkutil::StagingBatch` puts them behind one submit (−1.1 s cold).

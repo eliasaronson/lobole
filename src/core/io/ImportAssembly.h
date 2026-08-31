@@ -47,8 +47,8 @@ struct AssemblyImportPlan {
 // read from it. Parsing is the caller's, because it is by far the expensive
 // half: on a 48 MB / 299-product file the XCAF read is ~12 s against ~0.9 s
 // for all of the extraction below, so a caller that already holds the model
-// (ImportCADFile probes the structure to decide part-vs-assembly) must never
-// pay for it twice.
+// (the GUI import worker in ui/ImportJob.cpp probes the structure to decide
+// part-vs-assembly) must never pay for it twice.
 //
 // `onProduct(done, total)` is called after each product is extracted; return
 // false from it to abort (the plan then comes back with an error). Null by

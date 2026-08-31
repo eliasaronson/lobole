@@ -245,6 +245,11 @@ New `src/render/VulkanCommon.{h,cpp}`, free functions, one contract each:
 - `CreateBuffer(dev, phys, size, usage, props, VkBuffer&, VkDeviceMemory&)`
   → `bool`, out-params set to `VK_NULL_HANDLE` on **every** failure path
 - `DestroyBuffer`, `CopyBuffer`, `BeginSingleTimeCommands`/`EndSingleTimeCommands`
+- (added 2026-08-30) `StagingBatch` — many device-local uploads behind ONE
+  submit and one wait, because `CopyBuffer` drains the queue per buffer and a
+  299-part assembly builds 1196 of them. It also replaced the `uploadViaStaging`
+  lambda that `MeshRenderer` and `OutlineRenderer` each carried a copy of, which
+  is the same duplication this stage exists to remove.
 - `LoadShaderModule(dev, spvName)` — one style, resolving through
   `RuntimePaths::ShaderDir()`
 

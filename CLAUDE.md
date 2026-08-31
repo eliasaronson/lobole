@@ -64,11 +64,11 @@ after the sharder re-runs the whole GUI suite serially for 6 minutes:**
 | what | command | cost |
 |---|---|---|
 | headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~85 s |
-| GUI | `./tools/gui-tests-xvfb.sh` | ~90 s |
+| GUI | `./tools/gui-tests-xvfb.sh` | ~100 s |
 | the python `gui` ones | `ctest -L gui -E gui_smoke -j1` | ~110 s |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
-unsharded — ~365 s against ~90 s. Exclude it (`-E gui_smoke`) whenever the
+unsharded — ~365 s against ~100 s. Exclude it (`-E gui_smoke`) whenever the
 sharder has already run, which is every time. Full verification is then
 ~5 min, not ~10.
 
@@ -79,11 +79,11 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~85 s for 864 tests, of which the SIMP gate alone is ~90 s of CPU and the
+  — ~85 s for 916 tests, of which the SIMP gate alone is ~90 s of CPU and the
   next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
   (11 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 222 tests in **~90 s**
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 241 tests in **~100 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
   (11 s), `--serial` for debugging. Still **flock-serialized** machine-wide,
