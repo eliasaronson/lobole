@@ -7,6 +7,38 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## The viewport tears on the external monitor (environment, not the app)
+
+Reported 2026-08-31 while reviewing the 30-degree lens, and worth recording
+because the obvious suspect — the swapchain — is the wrong one. Outside
+`--gui-tests` the app requests `VK_PRESENT_MODE_FIFO_KHR` and nothing else
+(main.cpp:884; `g_DisableVSync = args.runGuiTests`), which is vsync.
+
+**Root cause is the path AFTER the app hands the frame over.** This machine
+renders Designer on the discrete GPU (`Selected GPU: NVIDIA GeForce RTX 4060
+Laptop GPU`, the deliberate preference — RT needs it) while X drives the
+display through `modesetting` on the Intel Arc iGPU. So every frame crosses
+GPUs by PRIME offload and is then blitted to scanout by X, with no compositor
+running (i3 on bare X11) and no `TearFree`. FIFO governs the first handoff;
+nothing syncs the last one. `nvidia_drm` is not even loaded, so there is no
+PRIME sync either.
+
+**Impact:** a tear line while orbiting, on the EXTERNAL monitor only — with
+two outputs and no compositor, X syncs to one CRTC and the other tears
+whatever it does. The internal panel also sits at 60 Hz while its mode list
+offers 165, which makes the artifact three times longer-lived than it needs
+to be. The 30-degree lens did not cause this: it made it more visible, by
+filling more of the screen and so putting the part's edges — where a tear
+line is easiest to see — further out.
+
+**Fix is environment-side, and the user has chosen to leave it:**
+`Option "TearFree" "true"` on the modesetting device section (NixOS:
+`services.xserver.deviceSection`), or picom with `vSync`, or eDP-1 at 165 Hz,
+or Preferences > Graphics device > Intel Arc to drop the cross-GPU hop (costs
+the 4060's speed and ray tracing — a diagnostic, not a home). Nothing to
+change in the renderer; do not go looking at present modes again.
+
+
 ## Generating an adaptive pocket takes ~7 s on the UI thread
 
 Measured 2026-08-26 on the saved baffle job (`scratch/w170s-alto`, a

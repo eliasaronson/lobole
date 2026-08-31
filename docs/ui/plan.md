@@ -341,6 +341,68 @@ autosave and (2026-08-20) the terminal panel as its first tenants, which took
 render quality and font size out of the View menu where they reset on every
 launch.
 
+## Real-part view round — SHIPPED 2026-08-31
+
+One report, from opening the Marsliden dock and `smart_speaker.dsgn`: parts
+open too small, the planes and the sketch background are specks, and the
+sketch bar's flyout arrows are ugly. Four things, all of them the same
+mistake — a number that should have come from the part, or from the button it
+hangs off, written as a literal instead.
+
+- **Flyout carets** (`c720409`): the disclosure arrow on the sketch bar's
+  circle/rectangle/arc groups was `ICON_FA_CARET_DOWN` in a button of its
+  own, so it was drawn at the ICON size inside a full tool frame — three
+  hints reading as three tools, twice the arrow Onshape and SolidWorks draw.
+  Now drawn by hand and sized off the FRAME (0.45 of its height, an ~8x5 px
+  triangle), frameless until hovered: 11 px against a 26 px frame, gated by
+  `sketch/a_flyout_caret_stays_a_hint`.
+- **Fit fills the frame** (`63a36be`): the camera stood off the box's
+  bounding SPHERE — its diagonal — so anything that is not a cube was framed
+  by a circle it never fills; the speaker's 1122 x 210 x 16 panel opened at
+  57% of the viewport. Aim and standoff are now solved together, because in
+  perspective the projected centroid of a box is not its 3D centre: each
+  round slides the aim to where the box actually lands and takes the exact
+  standoff for that aim, so the frame only tightens and no round can crop the
+  model. 95% of the viewport, gated by `camera/fit_fills_the_viewport`.
+  Fitting SLIDES the view (`Camera::SetPivot`) — solving it with `SetTarget`,
+  which re-aims, walked the panel through 60 degrees of orbit while
+  "fitting" it.
+- **Reference geometry is sized by the part** (`63a36be`): base planes were a
+  fixed 8 mm half-extent, datum quads 3 mm, the sketch background 50 mm with
+  1 mm cells, the origin arrows 1.5 mm. All four now derive from what they
+  act on, with the old literals kept as the empty-workspace floor, and the
+  grid's step follows a 1-2-5 decade so the cell count holds at ~50 instead
+  of drawing a thousand 1 mm cells into a solid grey sheet. The drawn quad
+  and the PICKABLE quad read one number, or you can click a plane you cannot
+  see. Gated by `sketch/references_are_sized_by_the_part`.
+- **A 30-degree lens** (`a27bc4f`): 45 vertical is cinematic — on a
+  metre-scale part the near end flared against the far one and the
+  perspective read as distortion. `Camera::kDefaultFovDegrees` is the one
+  place the number lives, and the default view's standoff carries the
+  1/tan(fov/2) factor so the empty workspace frames exactly what it framed
+  before.
+- **The reach is stamped by the resync** (`a37d7e2`): the extent behind the
+  planes is an OCC bounding box per body, cached against the document
+  version — which a live edit bumps every frame. It now rides the resync that
+  already walks every body.
+
+Two GUI tests were calibrated to the old lens, and both were passing by luck.
+`dims/dimension_tool_infers` pinned a camera DISTANCE to land a click on a
+known pixel, but pick tolerances are in PIXELS and the same standoff frames a
+different amount of model through a different lens — `LensScale()` in
+GuiTestsCommon is that factor. `mirror/box_select_and_tap_advances` tapped a
+point its comment called clear of the session window; the magnified sketch
+slid it under the window at (937,204) against a window at (920,89)-(1268,225),
+so the tap went to the window. It now taps the far corner and ASSERTS the
+clearance. **That stray click is also what opened a GTK file picker on the
+user's desktop mid-suite** — it landed on `###tb_sk_image`, and the xdg
+portal is a D-Bus service in their session, so Xvfb does not contain it.
+
+Not a defect, but found here and worth not re-diagnosing: the screen tearing
+this round appeared to cause. It was always there, and the narrower lens only
+made it more visible by putting the part's edges further out. See
+[known-bugs.md](../known-bugs.md).
+
 ## GUI coverage
 
 **Audited 2026-08-14** — [gui-coverage.md](gui-coverage.md). Which features a

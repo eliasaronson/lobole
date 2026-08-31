@@ -128,3 +128,34 @@ nothing" instead of quietly cutting air.
 
 Recorded in `CLAUDE.md`, and enforced for creation tools by the `defaults/*`
 suite.
+
+### Later instances (2026-08-31)
+
+The rule was written about tool DEFAULTS. It applies just as squarely to
+reference geometry, which this round never looked at — four more literals,
+found by opening a metre-scale part (`smart_speaker.dsgn`) and the Marsliden
+dock:
+
+| Default | What it did |
+|---|---|
+| base planes, half-extent `8` | a 16 mm speck at the origin of a 1122 mm part — the plane you most need to sketch on |
+| datum quads, half `3` | same, smaller |
+| sketch background, half `50` with `1` mm cells | a postage stamp under a 1022 mm sketch; at any size that reached the part it would have been a thousand cells of solid grey |
+| origin gizmo, `1.5` mm arrows | invisible on anything bigger than a fastener |
+
+All four now derive from the document's reach (`ScenePlaneHalfExtent`), with
+the old literals as the empty-workspace FLOOR, and the grid's step follows a
+1-2-5 decade so the cell count is what stays fixed rather than the cell size.
+Gated by `sketch/references_are_sized_by_the_part`. Two lessons beyond the
+rule itself:
+
+- **The number the user sees and the number the code picks against must be
+  one number.** The drawn plane quad and the plane-PICKING rectangle read
+  separate copies of the constant; deriving only one of them would have made
+  a plane you can click but not see.
+- **A derived default can cost what a literal did not.** The reach comes from
+  an OCC bounding box per body, and a live edit bumps the document version
+  every frame, so the first cut of this put a bbox pass in the frame loop of
+  a drag. It rides the renderer resync instead (`a37d7e2`).
+
+See [plan.md](plan.md), "Real-part view round".

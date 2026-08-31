@@ -89,7 +89,13 @@ moves onto `Flatten`):
 7. Assembly drawing views (HLR walk in core/drawing).
 8. GUI occurrence panel (OccurrencePanel.cpp): a sub-assembly occurrence
    renders as ONE row with a kind tag and an "Open" that activates its
-   tab; no tree expansion in v1.
+   tab; no tree expansion in v1. **2026-08-31**: right-clicking ANY row
+   opens what it references — the "Open"/"Edit" button only exists for the
+   SELECTED occurrence and sits below the transform fields, so reaching a
+   part meant select, then scroll. The menu item names the kind it will open
+   (a part tab and an assembly tab are different places to land) and is
+   disabled with a reason when the reference dangles, rather than offering an
+   Open that quietly does nothing. `assembly/right_click_a_row_opens_its_doc`.
 9. **Offline path-traced render** — `SyncRayTracingScene`
    (AppActions.cpp:2982) walks occurrences itself; a nested assembly would
    otherwise ray-trace only its top-level parts. The assembly Render button
