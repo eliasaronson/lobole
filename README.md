@@ -321,16 +321,9 @@ those in its own license. The distributable notice is also available as
 
 ### Trademarks
 
-Onshape®, Onshape Full-Cloud CAD® and FeatureScript™ are trademarks of PTC
-Inc.; SolidWorks of Dassault Systèmes; Fusion 360 of Autodesk, Inc.; FreeCAD
-is a trademark of the FreeCAD project. Designer is **not affiliated with,
-endorsed by, or sponsored by** any of them.
-
-Where a name is not needed it is not used — this project is described on its
-own terms, not by comparison. What remains is referential: the importer that
-reads Onshape documents, the file formats and APIs it interoperates with, and
-prior art cited in the design documents under `docs/`. No third-party logos or
-branding are used, and no compatibility or certification is claimed.
+Other CAD products named in this repository are trademarks of their owners, and
+Designer is **not affiliated with, endorsed by, or sponsored by** any of them.
+Where those names are used, and why — see [`TRADEMARKS.md`](TRADEMARKS.md).
 
 ### Third-party components
 
