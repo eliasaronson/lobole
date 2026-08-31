@@ -325,6 +325,12 @@ json OpJson(const cam::Operation& op) {
             {"top_z", op.topZ},
             {"bottom_z", op.bottomZ},
             {"stepdown", op.stepdown},
+            // Both settable since they landed and neither reported, so a
+            // script could state a boundary and an allowance it could not
+            // then read back — and a job built over the RPC could not be
+            // checked against the one the panel shows.
+            {"stock_to_leave", op.stockToLeave},
+            {"use_outline", op.useOutline},
             {"enabled", op.enabled}};
   if (op.type == cam::OpType::EdgeRound) {
     j["edge_size"] = op.edgeSize;

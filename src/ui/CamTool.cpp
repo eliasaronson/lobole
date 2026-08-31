@@ -165,9 +165,10 @@ constexpr Verb kVerbs[] = {
     {"Drill a hole", "###cam_verb_drill", cam::OpType::Drill,
      PickSlot::CamDrillHole, "Click the inside of the hole to drill",
      "Drill a hole that is already in the model: click its cylindrical wall "
-     "and the depth comes from the hole's own extent. Peck by peck, on the "
-     "hole's own axis — not a helix, so the tool has to be able to plunge. "
-     "The verb stays armed, so a bolt circle is one click per hole."},
+     "and the depth comes from the hole's own extent. ONE plunge on the "
+     "hole's own axis at the tool's plunge feed — no pecking and no helix, so "
+     "the tool has to be able to plunge the full depth and clear its own "
+     "chips. The verb stays armed, so a bolt circle is one click per hole."},
     {"Break an edge", "###cam_verb_edge", cam::OpType::EdgeRound,
      PickSlot::CamEdgeWall, "Click the wall whose top edge to round or chamfer",
      "Follow a wall's top edge with a shaped cutter: a ball nose rounds it "

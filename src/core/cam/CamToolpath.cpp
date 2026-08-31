@@ -476,7 +476,10 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
 double Toolpath::CutLength() const {
   double total = 0.0;
   for (size_t i = 1; i < moves.size(); i++)
-    if (moves[i].kind == Move::Kind::Cut)
+    // Plunges too. A plunge IS cutting — `CuttingMinutes` has always counted
+    // one, reading the feed off the move — so leaving it out here made a job
+    // of drilled holes report 0 mm of cutting and a real number of minutes.
+    if (moves[i].kind == Move::Kind::Cut || moves[i].kind == Move::Kind::Plunge)
       total += glm::length(moves[i].to - moves[i - 1].to);
   return total;
 }

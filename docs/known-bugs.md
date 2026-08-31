@@ -243,3 +243,52 @@ The fix would be either an action that leaves focus in place, or a `key_chars`
 action to pair with `item_click`. Neither is needed by anything today, which is
 why this is filed rather than fixed.
 
+
+## CAM: two defects found machining the smart_speaker front_wall (2026-08-31)
+
+Both found by the verifier on a real 2-sided job, both reproducible, neither
+fixed yet. `tools/` has the job script that reproduces them:
+`front_wall - Front.ngc` / `- Back.ngc`.
+
+### A rapid plunges to the previous depth at the RAMP ENTRY
+
+**The dangerous one.** Between depth passes a clearing operation retracts to
+safe Z, repositions, and then `G0` straight down to the *previous* pass's
+depth before ramping on. At the ramp's ENTRY point the previous pass had only
+just started descending — it was at the top of its ramp, not at depth — so
+that rapid goes through however much material the ramp had not yet removed.
+On the W170 flange recess it is 4 mm of rapid into solid MDF.
+
+Reproduce: any pocket deep enough for two passes.
+`cam_verify` reports `rapids_through_stock` 1 per extra pass, and setting the
+stepdown so the pocket takes ONE pass takes it to 0. Front setup, op 44,
+first bad line 1580 of the posted file:
+
+    G0 Z2                     <- retract
+    G0 X139.1856 Y654.7687    <- reposition to the ramp entry
+    G0 Z-4                    <- …and drop to the last depth. Nothing cut here.
+    G1 X142.844 ... Z-4.1922  <- the ramp only reaches -4 further along
+
+The fix is to rapid only to where the tool has actually been, or to feed the
+last stepdown's worth. It is NOT the `safeZ` derivation, which is correct.
+
+### An outline contour dips into the part over a hole running beneath the face
+
+A cross-dowel hole runs parallel to the panel edge, ending ~1.7 mm short of
+it. Where the section plane passes through that hole, the outer contour dips
+about 4 mm into the panel, and the profile then takes a full-depth bite out of
+the edge.
+
+Reproduce: front_wall, Back setup, the 210 mm outline. `cam_verify` reports a
+16 mm gouge at setup XY (-104.3, -464.9) — both dowel positions, both edges.
+It is NOT tool fit (a 3 mm cutter gouges identically) and NOT
+`PickedWallContour` (a targetless "cut out the whole part", which sections the
+model instead, gouges at the same point). Cutting only the depth band ABOVE
+the dowels, or only BELOW, is clean; the band THROUGH them gouges:
+
+    Z   0.0 ->  -4.0   gouge 0.00     (above)
+    Z  -6.0 -> -12.0   gouge 10.00    (through — the dowels are at -8.4)
+    Z -14.0 -> -16.0   gouge 0.00     (below)
+
+So it is in the section, not the offsetting: a blind hole ending close beneath
+a face is merging with the outer boundary rather than staying an island.
