@@ -310,11 +310,32 @@ face sections cleanly — 2 loops, outer extent unchanged), and it is not the
 two holes intersecting (built as a fixture, also clean). The section is right
 throughout; what is wrong is using one section for every depth.
 
-**The fix** is to section per depth pass for a profile, as the clearing ops
-already do, and to keep the single-contour path only for the case it exists
-for — a wall with no floor, where the contour genuinely is the same all the
-way down. The gate is this part: an outline profile over a panel with a bore
-opening onto its edge must report zero gouge.
+**Attempted and reverted, 2026-08-31.** Sectioning per depth is the right
+rule — FreeCAD does exactly that, and `Profile.areaOpUseProjection` returns
+True where `PocketBase`'s returns False, so a profile is meant to use the
+projection down the depths and a pocket is not. `PickedWallContour` gained an
+`atZ` and the profile asked for the contour at each pass; measured on the real
+part, that DID narrow the damage — the notch is entered at one depth instead
+of all four — and the verdict did not move, because a height-map verifier
+counts the whole column the tool sweeps to reach that depth. Accumulating the
+reachable outline down the passes (union outside, intersection inside) is the
+next step and did not work either.
+
+It was reverted rather than left in, for a reason worth recording: **four
+attempts at a synthetic reproduction all failed.** A lone blind hole 1.7 mm
+beneath a face sections cleanly. Two intersecting holes section cleanly. A
+bore modelled to open onto an edge reports `maxX = 210` at every height — no
+slot at all. Whatever the real part does, it is not what any of those
+fixtures do, and changing generation with no test that fails before and passes
+after is how this codebase gets a silent regression. The bisect stands (the
+cross-dowels, alone, 8.00 mm = 4 above the bore + 4 below); the mechanism does
+not, yet.
+
+The next person should start by dumping `SectionLoops` on the REAL front_wall
+at setup Z -8 and looking at the outer loop, rather than trying to rebuild it
+from a description. If the outer loop has a notch there, the fixtures are
+missing something; if it does not, the fault is downstream of the section and
+everything above is looking in the wrong place.
 
 Until then the job suppresses those features, which is not a workaround: the
 machine does not make those holes — they are drilled by hand — so a CAM model
