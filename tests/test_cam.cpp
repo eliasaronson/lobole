@@ -2131,10 +2131,13 @@ bool CutsOver(const cam::Toolpath& tp, double x, double y, double r) {
 } // namespace
 
 TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
-  // Nothing stands in a hole, so the cutter may cross it. Going AROUND one
-  // leaves an uncut sliver wherever it nearly touches the pocket wall — a gap
-  // the tool can never come back to.
-  auto doc = FlangeDoc(/*holeDia=*/16.0, /*boss=*/false);
+  // A hole NARROWER than the cutter: 3 mm against a 6 mm end mill. Nothing
+  // stands in it and the tool could never enter it, so crossing is harmless —
+  // and going AROUND is pure waste that leaves an uncut sliver wherever the
+  // hole nearly touches the pocket wall, a gap the tool can never come back
+  // to. (A hole the cutter DOES fit into is a different question, and the
+  // next case answers it.)
+  auto doc = FlangeDoc(/*holeDia=*/3.0, /*boss=*/false);
   const ElementRef floor = PocketFloorRef(*doc);
   REQUIRE(floor.IsSet());
 
@@ -2146,40 +2149,54 @@ TEST_CASE("cam: clearing the outline passes over holes", "[cam]") {
   REQUIRE(a.error.empty());
   REQUIRE(b.error.empty());
 
-  // The hole is at (60, 45) with a radius of 8. Going AROUND it keeps the
-  // cutter's centre at least 11 mm out (8 + the tool radius), so anything
-  // inside 6 mm of the centre means the path crossed it.
-  CHECK(CutsOver(b, 60.0, 45.0, 6.0));
-  CHECK_FALSE(CutsOver(a, 60.0, 45.0, 6.0));
-  // SHORTER, not longer. Weaving around an island costs more than crossing
-  // it: the detour is extra contour on every depth pass, and the sliver it
-  // leaves behind is not cut by any of it.
+  // The hole is at (60, 45). Only the outline path crosses it.
+  CHECK(CutsOver(b, 60.0, 45.0, 3.0));
+  CHECK_FALSE(CutsOver(a, 60.0, 45.0, 1.0));
+  // SHORTER, not longer. Weaving around costs more than crossing: the detour
+  // is extra contour on every depth pass, and the sliver it leaves behind is
+  // not cut by any of it.
   INFO("around " << a.CutLength() << " over " << b.CutLength());
   CHECK(b.CutLength() < a.CutLength());
+}
 
-  // A hole NARROWER than the cutter. The tool cannot enter it whatever it
-  // does, so crossing is harmless — and going AROUND is pure waste: extra
-  // motion to avoid a 3 mm circle a 6 mm cutter could never have reached
-  // into. Measured, the outline path is the shorter one, which is the answer
-  // to "what happens if the hole is smaller than the cutter": nothing bad,
-  // and slightly less of it.
-  auto small = FlangeDoc(/*holeDia=*/3.0, /*boss=*/false); // vs a 6 mm cutter
-  const ElementRef smallFloor = PocketFloorRef(*small);
-  REQUIRE(smallFloor.IsSet());
-  const cam::Toolpath sa =
-      cam::GenerateAll(PocketJob(*small, smallFloor, /*useOutline=*/false),
-                       small->GetBodies())[0];
-  const cam::Toolpath sb =
-      cam::GenerateAll(PocketJob(*small, smallFloor, /*useOutline=*/true),
-                       small->GetBodies())[0];
-  REQUIRE(sa.error.empty());
-  REQUIRE(sb.error.empty());
-  INFO("small: around " << sa.CutLength() << " over " << sb.CutLength());
-  CHECK(sb.CutLength() <= sa.CutLength());
-  // Both hole sizes clear the SAME outline once their island is dropped, which
-  // is the point: with nothing standing in it, the size of the opening stops
-  // being something the clearing has to know about.
-  CHECK_THAT(sb.CutLength(), WithinRel(b.CutLength(), 1e-9));
+TEST_CASE("cam: an opening the cutter fits into is still an island", "[cam]") {
+  // `useOutline` crosses an opening because going AROUND one leaves a sliver
+  // the tool can never come back to. That reasoning only holds for an opening
+  // the tool cannot enter. A BIG opening is one the job removes anyway — the
+  // driver cutout through the middle of a flange recess — and clearing across
+  // it is time spent cutting air over a hole that is about to be there.
+  //
+  // So size decides: an opening the cutter fits inside stays an island and
+  // the clearing goes round it; one it cannot enter is crossed.
+  auto doc = FlangeDoc(/*holeDia=*/16.0, /*boss=*/false); // vs a 6 mm cutter
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  const cam::Toolpath big = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/true), doc->GetBodies())[0];
+  INFO(big.error);
+  REQUIRE(big.error.empty());
+  CHECK_FALSE(CutsOver(big, 60.0, 45.0, 6.0)); // round it: the tool fits in
+
+  // …and the same option on an opening NARROWER than the cutter still crosses
+  // it, which is the case it was added for.
+  auto small = FlangeDoc(/*holeDia=*/3.0, /*boss=*/false);
+  const ElementRef sf = PocketFloorRef(*small);
+  REQUIRE(sf.IsSet());
+  const cam::Toolpath thin = cam::GenerateAll(
+      PocketJob(*small, sf, /*useOutline=*/true), small->GetBodies())[0];
+  REQUIRE(thin.error.empty());
+  CHECK(CutsOver(thin, 60.0, 45.0, 3.0));
+
+  // Crossing the small one is still the cheaper path…
+  const cam::Toolpath around = cam::GenerateAll(
+      PocketJob(*small, sf, /*useOutline=*/false), small->GetBodies())[0];
+  CHECK(thin.CutLength() <= around.CutLength());
+  // …and going round the big one is cheaper than crossing it, which is the
+  // waste this rule exists to stop.
+  const cam::Toolpath crossed = cam::GenerateAll(
+      PocketJob(*doc, floor, /*useOutline=*/false), doc->GetBodies())[0];
+  INFO("island " << big.CutLength() << " vs all-round " << crossed.CutLength());
+  CHECK_THAT(big.CutLength(), WithinRel(crossed.CutLength(), 1e-9));
 }
 
 TEST_CASE("cam: clearing the outline still goes around material", "[cam]") {
@@ -2215,14 +2232,14 @@ TEST_CASE("cam: clearing the outline still goes around material", "[cam]") {
 TEST_CASE("cam: a floor with both keeps the boss and drops the hole", "[cam]") {
   // Both kinds of inner wire at once: the case that proves the test is on the
   // WIRE and not on the count.
-  auto doc = FlangeDoc(/*holeDia=*/16.0, /*boss=*/true);
+  auto doc = FlangeDoc(/*holeDia=*/3.0, /*boss=*/true);
   const ElementRef floor = PocketFloorRef(*doc);
   REQUIRE(floor.IsSet());
   const cam::Toolpath b = cam::GenerateAll(
       PocketJob(*doc, floor, /*useOutline=*/true), doc->GetBodies())[0];
   INFO(b.error);
   REQUIRE(b.error.empty());
-  CHECK(CutsOver(b, 60.0, 45.0, 6.0));       // over the hole
+  CHECK(CutsOver(b, 60.0, 45.0, 3.0));       // over the hole
   CHECK_FALSE(CutsOver(b, 44.0, 34.0, 5.0)); // around the boss
 }
 

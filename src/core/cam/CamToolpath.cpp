@@ -1489,7 +1489,7 @@ constexpr double kIslandProbe = 0.05;
 // caller's signal to fall back to sectioning the model.
 Clipper2Lib::Paths64 TargetPaths(const Operation& op,
                                  const std::vector<Body>& bodies, bool holesToo,
-                                 std::string& error) {
+                                 double toolRadius, std::string& error) {
   if (op.targets.empty())
     return {};
   // A wall names one contour at every depth — the case an opening that goes
@@ -1533,11 +1533,28 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
     const Clipper2Lib::Paths64 standing =
         Clipper2Lib::Union(section, Clipper2Lib::FillRule::EvenOdd);
     Clipper2Lib::Paths64 keep;
-    for (const Clipper2Lib::Path64& island : islands)
-      if (!Clipper2Lib::Intersect(Clipper2Lib::Paths64{island}, standing,
+    for (const Clipper2Lib::Path64& island : islands) {
+      const bool material =
+          !Clipper2Lib::Intersect(Clipper2Lib::Paths64{island}, standing,
                                   Clipper2Lib::FillRule::NonZero)
-               .empty())
+               .empty();
+      // Something stands in it: an island, always, whatever the option says.
+      if (material) {
         keep.push_back(island);
+        continue;
+      }
+      // Nothing stands in it — but SIZE decides whether crossing is a favour
+      // or a waste. An opening the cutter cannot enter is not an obstacle it
+      // can go round: the detour only leaves a sliver. An opening it CAN
+      // enter is a hole the job removes anyway, and clearing across it is
+      // time spent cutting air — the whole middle of a flange recess, when
+      // the driver cutout takes that middle out regardless.
+      const Clipper2Lib::Paths64 room = Clipper2Lib::InflatePaths(
+          Clipper2Lib::Paths64{island}, -toolRadius * kScale,
+          Clipper2Lib::JoinType::Round, Clipper2Lib::EndType::Polygon);
+      if (!room.empty())
+        keep.push_back(island); // the tool fits inside: go around it
+    }
     islands = std::move(keep);
     if (islands.empty())
       return outer;
@@ -1555,7 +1572,7 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   const std::vector<double> passes = DepthPasses(op);
   std::string why;
   const Clipper2Lib::Paths64 picked =
-      TargetPaths(op, bodies, /*holesToo=*/false, why);
+      TargetPaths(op, bodies, /*holesToo=*/false, tool.diameter * 0.5, why);
   if (!why.empty()) {
     tp.error = why;
     return;
@@ -1645,7 +1662,7 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
   // wire is the pocket wall and its inner wires are islands (docs/cam/gui.md).
   std::string why;
   const Clipper2Lib::Paths64 picked =
-      TargetPaths(op, bodies, /*holesToo=*/true, why);
+      TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5, why);
   if (!why.empty()) {
     tp.error = why;
     return;
@@ -1760,7 +1777,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
   }
   std::string why;
   const Clipper2Lib::Paths64 picked =
-      TargetPaths(op, bodies, /*holesToo=*/true, why);
+      TargetPaths(op, bodies, /*holesToo=*/true, tool.diameter * 0.5, why);
   if (!why.empty()) {
     tp.error = why;
     return;

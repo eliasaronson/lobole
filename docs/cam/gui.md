@@ -148,6 +148,14 @@ Measured, dropping a true island makes the path SHORTER as well as complete:
 weaving around one is extra contour on every depth pass, and the sliver it
 leaves is not cut by any of it.
 
+**…and an opening the cutter FITS INTO is still an island (2026-08-31).**
+`Over openings` crossed every opening, which is right for one the tool cannot
+enter — the detour only leaves a sliver — and wasteful for one it can. On a
+speaker baffle the flange recess is Ø187.3 with the Ø146.4 driver cutout
+through its middle: clearing across that middle is minutes of cutting over a
+hole the job removes anyway. Size decides now. On the real part it took the
+front side from 26.0 m of cutting to 10.8 m, with the same verdict.
+
 **A hole is not an island — `Over openings` (2026-08-30).** A pocket takes its
 boundary from the picked face's wires: the outer one is where to stop, every
 inner one an island to go around. Right for material standing in the pocket,
