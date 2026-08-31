@@ -211,6 +211,12 @@ print a symbolized stack to stderr → the dev-watch log. `designer --crash-test
 exercises it. `DEV_WATCH_VALIDATE=1 tools/dev-watch.sh` turns on Vulkan
 sync/GPU-assisted validation (slow; for device-lost/OOB bugs).
 
+**GPU:** two different questions — "did we use Vulkan correctly" (validation
+layers, above) and "what did this frame actually draw" (a RenderDoc capture:
+`nix-shell -p renderdoc --run qrenderdoc`, launch `build/designer` from inside
+nix-shell). docs/rendering/gpu-debugging.md says which answers which and what
+to look at; neither reports device memory, which nothing does yet.
+
 ## Architecture pointers (edit the domain module, not the monolith)
 
 - RPC handlers: `src/remote/Remote{Modeling,Assembly,Inspection,…}.cpp`

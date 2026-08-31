@@ -32,7 +32,7 @@ thing behind it invisible to the next person who looks.
 | [ui/](ui/plan.md) | selection, tools, layout | `u1`, `u7`–`u13` rounds (`u12` keybindings, `u13` chrome + units), `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `direct-manipulation.md` (preview drag handles), `terminal-panel.md` (an embedded terminal for Claude Code), `gui-coverage.md`, `coverage-matrix.md` (**generated** — interactive tools x tab kinds, the asymmetry that keeps costing bugs), `gui-test-isolation.md` (why any shard partition must be valid), `dims-and-assembly-measure.md` |
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `measure-v2.md` (measure reopened, in flight), `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
 | [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
-| [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md` |
+| [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md`, `gpu-debugging.md` (validation layers vs. a frame capture — which question each answers), `renderer-wiring.md` |
 | [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs |
 | [simulation/](simulation/plan.md) | FEM | see also `ui/u11-simulation-setup.md` |
 | [drawings/](drawings/plan.md) | 2D drafting | `guide.md` (the workflow) |

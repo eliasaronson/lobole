@@ -22,6 +22,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Self-wrap in nix-shell, like tools/test-fast.sh: cmake outside it cannot find
+# glfw3/OCC/vulkan and the run dies at configure. This script used to expect the
+# caller to have entered one, which is a rule nothing enforced and the docs did
+# not state.
+if [ -z "${IN_NIX_SHELL:-}" ]; then
+  exec nix-shell "$ROOT/shell.nix" --run "'$0' $*"
+fi
+
 BUILD="${1:-$ROOT/build-coverage}"
 [ "${1:-}" = "--report-only" ] && BUILD="$ROOT/build-coverage"
 
