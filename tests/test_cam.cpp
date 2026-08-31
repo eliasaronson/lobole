@@ -4,6 +4,7 @@
 #include "core/Feature.h"
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamPost.h"
+#include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/features/BooleanFeature.h"

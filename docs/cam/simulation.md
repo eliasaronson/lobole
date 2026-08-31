@@ -387,6 +387,34 @@ corners. Gated by `cam tool mesh: a flat shoulder is shaded flat`, which
 checks both halves: flat-down normals on the shoulder, and a ball nose that
 still shades as a curve rather than a disc.
 
+### The tool glyph, again (2026-08-31)
+
+Still reading as "strange" after the matte fix and after the orientation was
+measured off the renderer's own matrix (correct: drawn axis == the spindle,
+pure rotation, opaque, depth-tested). Two things about the MESH were wrong in
+a way no matrix check would catch, both found by dumping it ring by ring:
+
+- **The holder was a slug.** `flutes + max(20, r*6)` gave 49 mm of Ø16 for an
+  8 mm cutter — longer than most of what it was cutting. Its length carries no
+  information; the FLUTE's length is the depth capability and is drawn at full
+  size. What it cost was occlusion, and a long near object under a wide
+  perspective FOV swings its apparent axis far more than it turns. It is a
+  6 mm collar now.
+- **A flat tip was sampled twelve times.** `TipHeight` is 0 across a flat end
+  mill, so twelve tip steps put twelve segments at the SAME height — 24
+  coincident rings of 33 vertices for a disc two triangles could draw, three
+  quarters of the mesh. Sampled only for the shapes that have one (ball, V,
+  drill).
+
+330 vertices where there were 1056.
+
+What remains is a genuine perspective read, not a defect: seen from the
+spindle side the tool points AWAY from the camera, so the near holder is large
+and the far flute small, and a cylinder foreshortened like that reads as one
+lying on its side. If it still bothers, the next step is to drop the holder
+entirely and draw only the cutter — the diameter and the depth are the two
+things the glyph exists to show.
+
 ### Still open
 
 - The stock re-meshes whole on every advance. It is 1–2 ms on a plate and

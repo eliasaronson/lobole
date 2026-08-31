@@ -665,6 +665,12 @@ TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
   t.fluteLength = 20.0;
   const cam::StockMesh m = cam::BuildToolMesh(t);
   REQUIRE(m.vertices.size() > 100);
+  // Measured off the mesh, not copied from the geometry: the holder got
+  // shorter and narrower and a hard-coded radius took this test to zero
+  // matches without the SHAPE being any different.
+  double holderR = 0.0;
+  for (const cam::StockVertex& v : m.vertices)
+    holderR = std::max<double>(holderR, std::hypot(v.position.x, v.position.y));
 
   // Somewhere on the shoulder there must be vertices whose normal is the
   // axis itself: that is what "flat annulus facing down" means.
@@ -675,7 +681,7 @@ TEST_CASE("cam tool mesh: a flat shoulder is shaded flat", "[cam]") {
       flatDown++;
     // And the holder's wall stays a wall: normals perpendicular to the axis.
     const double r = std::hypot(v.position.x, v.position.y);
-    if (r > 6.5 && v.position.z > 25.0f && std::abs(n.z) < 0.01f)
+    if (r > holderR - 0.01 && v.position.z > 20.5f && std::abs(n.z) < 0.01f)
       sideways++;
   }
   INFO("flat-down " << flatDown << " sideways " << sideways);

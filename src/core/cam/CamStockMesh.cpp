@@ -274,17 +274,30 @@ StockMesh BuildToolMesh(const Tool& tool) {
   StockMesh mesh;
   const double r = std::max(0.05, tool.diameter * 0.5);
   const double flutes = std::max(r, tool.fluteLength);
-  // A holder wide enough to read as one, and long enough to be in the way if
-  // it is going to be (S6 will make that a check rather than a look).
-  const double holderR = std::max(r * 1.8, r + 4.0);
-  const double holderZ = flutes + std::max(20.0, r * 6.0);
+  // A holder wide enough to read as one, and SHORT. It used to run
+  // `flutes + max(20, r*6)` — 49 mm of Ø16 slug for an 8 mm cutter, longer
+  // than most of what it was cutting. Its length carries no information (the
+  // FLUTE's length is the depth capability, and that is drawn at full size);
+  // what it cost was occlusion, and a long near object under a wide
+  // perspective FOV that swings its apparent axis far more than it turns —
+  // which is what made the glyph read as a shape lying on its side that
+  // half-followed the camera.
+  const double holderR = std::max(r * 1.6, r + 2.0);
+  const double holderZ = flutes + std::max(4.0, r * 1.5);
 
   std::vector<glm::dvec2> profile;
   profile.push_back({0.0, 0.0});
-  // The tip, sampled from the same function the removal uses.
-  constexpr int kTipSteps = 12;
-  for (int i = 1; i <= kTipSteps; i++) {
-    const double d = r * i / kTipSteps;
+  // The tip, sampled from the same function the removal uses — but only when
+  // there is a shape to sample. A FLAT end mill's tip is one straight step to
+  // the rim; sampling it in twelve put twelve segments at the same height,
+  // 24 coincident rings of 33 vertices each, for a disc two triangles could
+  // draw. It was three quarters of the mesh.
+  const bool shaped = tool.type == ToolType::Ball ||
+                      tool.type == ToolType::VBit ||
+                      tool.type == ToolType::Drill;
+  const int tipSteps = shaped ? 12 : 1;
+  for (int i = 1; i <= tipSteps; i++) {
+    const double d = r * i / tipSteps;
     profile.push_back({d, TipHeight(tool, d)});
   }
   profile.push_back({r, flutes});
