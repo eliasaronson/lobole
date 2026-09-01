@@ -14,8 +14,7 @@
 > [../capability-review-2026-08-31.md](../capability-review-2026-08-31.md)
 > under "F1 in detail"; this doc is the build.
 >
-> The roadmap lists sixteen workstreams and calls them all v1-complete.
-> Whether this becomes a seventeenth or stays a follow-on is not decided here —
+> It became the roadmap's **seventeenth workstream**, v1-complete;
 > roadmap.md is authoritative for status.
 
 ## Why

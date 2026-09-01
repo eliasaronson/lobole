@@ -250,7 +250,13 @@ Everything else in P1 is plumbing.
 
 - **Per-component exclusions** (Onshape's "parts to exclude", for keeping
   fasteners whole). Wanted eventually; it needs a per-section occurrence set
-  and a rendering path that skips clipping for chosen instances.
+  and a rendering path that skips clipping for chosen instances. **Concrete
+  since 2026-09-01**: assemblies now actually contain fasteners
+  ([../parts/plan.md](../parts/plan.md)), and a section through a bolted joint
+  cuts the bolt in half — which drafting convention says it should not. The
+  set to exclude is also derivable rather than picked: a part whose whole
+  feature list is one Fastener is exactly the thing to leave whole
+  (`SoleFastenerOf`, the same predicate the BOM uses for bought-vs-made).
 - **Hatched cut faces** — a drawing convention; drawing views already section
   independently.
 - **Section in drawings** — `docs/drawings/` owns that.

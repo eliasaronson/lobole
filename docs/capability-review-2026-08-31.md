@@ -2,9 +2,12 @@
 
 > Status: **the testing and tooling halves are DONE — all twelve items closed
 > by 2026-09-01, four of them by being retracted.** See "What was done" at the
-> bottom for the table and the corrections. The capability findings (A1-A3,
-> S1, F1) remain findings only, and nothing there is scheduled. This is a read
-> of the
+> bottom for the table and the corrections. **F1 then shipped complete the
+> same day** ([parts/plan.md](parts/plan.md), phases 1-5, formats v69+v70) —
+> and the "F1 in detail" section below has its own corrections block, because
+> three of the things it argued for turned out to be wrong once built. The
+> remaining capability findings (A1-A3, S1) are findings only and nothing
+> there is scheduled. This is a read of the
 > tree against what the mainstream modellers do, taken after the CAM
 > projection fix (`286ef6b`) and prompted by "what are we missing, what is
 > badly structured, what do we do worse than FreeCAD and Onshape".
@@ -160,10 +163,11 @@ the next feature that extends either one.
 
 Ordered by what I would actually care about, not by size.
 
-- **A standard parts / fastener library.** Absent entirely. See the section
-  below — the justification originally written here ("every assembly dogfood
-  round hand-modelled its screws") was wrong, and what is actually true is a
-  better argument. **Planned 2026-09-01: [parts/plan.md](parts/plan.md).**
+- **A standard parts / fastener library.** ~~Absent entirely.~~ **SHIPPED
+  2026-09-01: [parts/plan.md](parts/plan.md)**, phases 1-5 in one day. See the
+  section below — the justification originally written here ("every assembly
+  dogfood round hand-modelled its screws") was wrong, and what is actually
+  true is a better argument.
 - **User-definable feature types.** `kFeatureTypes` (SerializeFeatures.cpp) is
   a compile-time C++ table, so extending the modelling vocabulary means
   recompiling the application. FreeCAD has Python workbenches; Onshape has
@@ -214,8 +218,10 @@ Not a schedule — a preference order, with the reasoning:
 1. **A1 (assembly solver)** — a hard capability wall rather than a soft one, a
    competitor has passed us on it, the prerequisites are in the tree, and it
    does not endanger the determinism guarantees.
-2. **F1's standard parts library** — cheap, immediately useful in every
-   assembly round, no kernel risk.
+2. ~~**F1's standard parts library**~~ — **done 2026-09-01.** The estimate held
+   ("cheap, no kernel risk"): the expensive-looking half, the geometry, was
+   four head profiles at a few lines each. What actually cost time was the
+   traversal — twice — and it is the part this section did not mention.
 3. **A3** — as a by-product of fixing the CAM adaptive freeze, which is owed
    anyway.
 4. **A2** — the biggest unlock and the biggest risk; wants its own design doc
@@ -881,6 +887,46 @@ summaries"); it arrived here from a different direction.
 
 # F1 in detail — a standard parts library (2026-09-01)
 
+> **Built the same day, phases 1-5.** Everything below is the survey and the
+> argument as written *before* the build; it is kept because the survey is the
+> reusable part and because three of its conclusions were wrong in ways worth
+> keeping visible. The corrections are in the next section, and
+> [parts/plan.md](parts/plan.md) is authoritative for what exists.
+
+## What this section got wrong, corrected by building it
+
+Three of them, all in the same direction: this section reasoned about the
+interface from the outside and the geometry corrected it from the inside.
+
+- **"drive — CHOSEN".** The table below lists head and drive as choices. The
+  drive is not one: you do not order an ISO 4762 with a torx drive, you order
+  an **ISO 14579**. The standard fixes the head, the recess, and whether the
+  nominal length is measured over the head or under it — a fastener is a
+  catalogue item, not a configuration of one. So `drive` defaults to the
+  standard's own and a disagreeing one is refused naming the standard that has
+  it. Of the four fields this section expected a form to need, `standard` is
+  the one left.
+- **"pick a hole in an assembly — a cylindrical face".** A cylindrical face
+  has an axis but **no direction**, so it cannot say which end the head goes
+  on. The pick is the **rim**: a circular edge, which answers both in one
+  gesture and is the same motion as picking an edge to fillet.
+- **"derive once at placement, store the value".** It does not need to. A
+  placed fastener's position and orientation ARE its rim and its axis, so
+  `check_fasteners` re-traverses from scratch — which stores nothing, cannot
+  itself go stale, and also checks a fastener nobody derived. The
+  cross-document catch is real; the remedy this section proposed was heavier
+  than the problem.
+
+And the thing this section did not anticipate at all, which is where the time
+went: **a ray straight down a hole's axis hits nothing.** The hole is a void
+and every plate the screw passes through has one on that line by construction
+— the material a screw spans is *beside* the hole. The probe is a bundle of
+four rays offset outside the bore, plus a second on-axis ray whose *blockage*
+is what separates a blind hole from two holes that do not line up.
+
+The `add_fastener` sketch further down (`type:`/`head:`) is not the shipped
+signature either; `describe`/`help` are authoritative.
+
 ## The justification, corrected
 
 This review said the dogfood rounds "hand-modelled their screws". Checked, and
@@ -1021,7 +1067,10 @@ Not a hedge — each half is justified by something measured.
   `inch_screw_hole_chart.csv` (a tap drill per inch size) and **no metric
   clearance table at all**. That makes bd_warehouse mandatory for
   [modeling/hole-standards.md](modeling/hole-standards.md) regardless of what
-  happens to F1.
+  happens to F1. (`clearance_hole_sizes.csv` was in fact vendored *by* F1,
+  metric rows only — upstream's imperial columns are fractional drill
+  designations like `17/64` rather than numbers — because a fastener derived
+  from a plain bore needs the table read backwards.)
 - the **geometry approach** as a reference — 7-line profiles on OCCT, the
   kernel we already use.
 

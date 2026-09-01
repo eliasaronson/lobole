@@ -17,6 +17,24 @@ one was hands-on GUI, and the dock round mixed both. That mix matters: the GUI
 and the scripting interface fail in different places, and only the dock round
 (where the same model was built both ways) surfaced the ones that need both.
 
+### Owed: a round with fasteners in it
+
+Standard parts shipped 2026-09-01 ([parts/plan.md](parts/plan.md)) and **no
+round has used them on a real object**. It was built and verified — test
+plates, measured volumes against the standards' own tables, rendered and
+looked at — but that is testing, and this file exists because testing and
+building find different bugs.
+
+Worth saying out loud, because the feature's own justification is about the
+rounds: every assembly in this file is missing its fasteners, so its BOM, its
+mass and its contact checks were all reporting confidently about an incomplete
+model. Whether the fix actually fixes that is a claim only a round can settle.
+The obvious candidate is the dock — 17 parts, a bought-parts note listing
+"deck screws, bolts, straps" that no body corresponds to. What to watch:
+whether picking rims is a workable gesture at that count, whether "Standard
+parts" as one tab-bar folder holds up across a dozen specs, and whether
+`check_fasteners` says anything useful once a real model has moved under it.
+
 ---
 
 ## 2026-08-23 (d) — a bill of materials and an exploded view, by clicking

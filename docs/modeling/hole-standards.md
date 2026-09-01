@@ -1,9 +1,15 @@
 # A hole knows what it is for — plan
 
-> Status: **planned, not built.** Found 2026-09-01 while surveying open parts
-> libraries for F1 (capability-review-2026-08-31.md). It is the cheapest item
-> that survey turned up and it is **independent of F1** — no fastener library
-> has to exist for this to be worth doing.
+> Status: **planned, not built — and cheaper now than when this was written.**
+> Found 2026-09-01 while surveying open parts libraries for F1
+> (capability-review-2026-08-31.md). It was the cheapest item that survey
+> turned up, and F1 shipping the same day paid for three quarters of it
+> without meaning to: see "What F1 already built" below.
+>
+> It was written as **independent of F1** — no fastener library has to exist
+> for this to be worth doing — and that is still true. What changed is the
+> other direction: **F1 now has two refusals waiting on this**, listed at the
+> bottom.
 
 ## The gap
 
@@ -67,10 +73,11 @@ drilled for.
 
 ## Cost, and what to watch
 
-Small: a CSV parser, a lookup, one optional field on `HoleFeature`, a format
-bump with a golden, and the GUI's hole dialog gaining a size dropdown beside
-the diameter field. The generator work that makes F1 expensive is entirely
-absent here.
+Small, and smaller since F1: the CSV parser and the clearance table exist
+(see below), so what is left is one optional field on `HoleFeature`, the two
+tables F1 had no use for, a format bump with a golden, and the GUI's hole
+dialog gaining a size dropdown beside the diameter field. The generator work
+that made F1 look expensive is entirely absent here.
 
 Two things to get right:
 
@@ -83,9 +90,45 @@ Two things to get right:
   preserved; the vendored CSVs need a header saying where they came from, and
   `THIRD_PARTY.md` needs the entry.
 
-## Why this is not part of F1
+## What F1 already built (2026-09-01)
 
-F1 is a parts library: generated fastener bodies, a placement UI, BOM
-integration. This is three CSVs and a lookup on a feature that already ships.
-They are related in subject and unrelated in cost, and tying them together
-would delay the cheap one behind the expensive one.
+Keeping the two apart was right — the cheap one did not wait behind the
+expensive one — but F1 needed the same table for its own reasons and left most
+of this sitting there:
+
+| this plan needs | state |
+|---|---|
+| a CSV parser | **done** — `core/parts/FastenerTable`, multi-table, refuses a malformed file naming the line |
+| `clearance_hole_sizes.csv` vendored | **done** — metric rows, provenance header |
+| the Apache NOTICE + `THIRD_PARTY.md` entry | **done** |
+| the size -> diameter lookup | **done** — `parts::Dimensions("clearance_hole_sizes", "M6")` |
+| the diameter -> size lookup | **done** — `parts::ThreadForClearance`, and it refuses a diameter matching nothing rather than snapping to the nearest |
+| `tap_hole_sizes.csv`, `drill_sizes.csv` | not vendored — F1 had no use for them |
+| an optional `fit` field on `HoleFeature` | not built |
+| format bump + golden | not done |
+| the hole dialog's size dropdown | not built |
+
+So what is left is the part that was always the point: **the hole recording
+what it is for**, rather than the lookup that feeds it.
+
+## What F1 is waiting on from here
+
+Two refusals in the shipped fastener code exist only because a hole does not
+say what it is for:
+
+- **A countersunk screw cannot be fitted to a picked rim.** `fit_fastener`
+  refuses `iso10642` outright, because the rim you would pick on a plain bore
+  is the bore's — the countersink is not modelled, so the head would end up
+  inside solid material. A hole that carried its countersink would make this a
+  normal case instead of a refusal.
+- **A blind hole's thread is assumed, not known.** `fit_fastener` checks there
+  is at least one diameter of depth to engage, but nothing can tell a *tapped*
+  blind hole from a *clearance* one drilled to the same depth — and a machine
+  screw has nothing to bite in the second. The diameters are not close (M6 taps
+  at 5.0 against clearances of 6.4/6.6/7.0), so this is decidable the moment
+  the hole says which it is.
+
+And one thing that would get sharper rather than newly possible: `fit_fastener`
+derives its size by reading the clearance table BACKWARDS from the bore
+diameter. That works, and it is an inference — a hole that states `M6 normal`
+outright makes it a fact.

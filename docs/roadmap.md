@@ -37,8 +37,9 @@ testability (geometry ops unit-testable without a GUI).
 ## Current state (2026-08-25)
 
 The app is a working parametric CAD with assemblies, simulation and drawings;
-**all sixteen workstreams are v1-complete** (see the table below), and the
-work since mid-July has been breadth-then-hardening rather than new pillars.
+**all seventeen workstreams are v1-complete** (see the table below — standard
+parts became the seventeenth on 2026-09-01), and the work since mid-July has
+been breadth-then-hardening rather than new pillars.
 What that means concretely:
 
 **Modeling & core:** the full modeling loop (sketch → extrude → sketch-on-a-face → cut)
@@ -119,6 +120,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 14. Configurations | [configurations/plan.md](configurations/plan.md) | **v1 complete (C0–C4; format v31)** — parametric families: part configs (variable overrides as expressions + feature suppression, applied by regenerating against an override symbol table) and assembly configs (occurrence suppression); persisted active config; RPC/MCP (`remote/RemoteConfigurations.cpp`) + GUI panels. Follow-on: per-occurrence part-config selection |
 | 15. Topology optimization | [topopt/plan.md](topopt/plan.md) + [guide.md](topopt/guide.md) | **v1 complete + GPU0–GPU4** — SIMP density optimization on the tet10 mesh, multigrid V-cycle by default, GPU energies and a warm-solve cap (0.55 s/iter at 13.6k tets, ~6x the CPU path); results persist (format v33) with a re-modeling ghost overlay. GPU design notes in `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md`. **Known limit (2026-08-24):** the fp32 GPU solver cannot solve a slender bending part — kappa reaches 2.7e+08 where seven digits cannot work — so those fall back to the CPU and run at CPU speed. Measured, with the cheaper fixes tried and rejected, in `plan.md`; the fix is designed but unbuilt in `gpu5-plan.md` |
 | 16. Packaging & distribution | [packaging/plan.md](packaging/plan.md) | **Flatpak shipped** (built and GPU-tested on a real NVIDIA card, `packaging/flatpak/` + `tools/flatpak-build.sh`); `nix run` + Cachix for developers; nix-bundle AppImage is HEADLESS-ONLY (the GUI build was tested and rejected — glibc vs GPU driver). deb/rpm/Snap/macOS/Windows deferred; the Windows port itself is a proven spike (`packaging/windows/`) |
+| 17. Standard parts (fasteners) | [parts/plan.md](parts/plan.md) | **v1 complete (F1 p1-5; formats v69, v70)** — seven vendored ISO standards (socket cap, hexalobular, hex head, countersunk, button; hex nut; plain washer) read from dimension tables rather than typed, so an unstocked size is REFUSED naming the nearest that are. A fastener is a PART placed as an OCCURRENCE (one document per spec, so `bom` aggregates without knowing about fasteners; refused on a part tab, where CAM would machine it). Pick a hole's **rim** and everything derives: size from the bore read backwards out of the clearance table, length from the stack the axis passes through — washers and nut included, since they change the answer by two nominal lengths. `check_fasteners` re-derives every placed one against the stack it is IN, storing nothing to do it. `fastener_callout` puts the designation on a drawing. Deferred: Phillips (a cruciform drawn as a hexagon is the substitution this refuses), a countersunk screw on a plain bore (waits on [modeling/hole-standards.md](modeling/hole-standards.md)), and balloons + an on-sheet parts list (a workstream, not polish) |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
 differentiators — the reason this project exists rather than being a worse
