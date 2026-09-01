@@ -4097,17 +4097,27 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     // point (no coplanar fizz).
     const glm::vec3 n = conv::kWorldUpF;
     const float floorH = glm::dot(bbMin, n) - 0.001f * diag;
-    const glm::vec3 base = center - glm::dot(center, n) * n + floorH * n;
-    const glm::vec3 a = half * conv::kWorldRightF;
-    const glm::vec3 b = half * conv::kWorldFrontF;
-    std::vector<Vertex3D> quad = {
-        {base - a - b, n},
-        {base + a - b, n},
-        {base + a + b, n},
-        {base - a + b, n},
-    };
-    std::vector<uint32_t> quadIdx = {0, 1, 2, 0, 2, 3};
-    state.rayTracer->AddGeometry(quad, quadIdx, 0, RT_GEOM_SHADOW_CATCHER);
+    // A floor the camera is UNDER is not a floor, it is a lid. The plane is
+    // opaque from both sides, so from below it hid the model and left only
+    // its shadow lying on the underside — a render of a dock that is just a
+    // dock-shaped smudge (2026-09-01). Nothing sits on a floor you are
+    // looking up at, so there is nothing for it to catch.
+    if (state.camera && glm::dot(state.camera->GetPosition(), n) <= floorH) {
+      LOG_INFO("Ray Tracing: no shadow catcher — the camera is below the "
+               "scene's floor");
+    } else {
+      const glm::vec3 base = center - glm::dot(center, n) * n + floorH * n;
+      const glm::vec3 a = half * conv::kWorldRightF;
+      const glm::vec3 b = half * conv::kWorldFrontF;
+      std::vector<Vertex3D> quad = {
+          {base - a - b, n},
+          {base + a - b, n},
+          {base + a + b, n},
+          {base - a + b, n},
+      };
+      std::vector<uint32_t> quadIdx = {0, 1, 2, 0, 2, 3};
+      state.rayTracer->AddGeometry(quad, quadIdx, 0, RT_GEOM_SHADOW_CATCHER);
+    }
   }
 
   return state.rayTracer->BuildAccelerationStructures();

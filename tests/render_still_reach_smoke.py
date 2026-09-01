@@ -108,6 +108,22 @@ def main():
         expect(r2.get("ok"), "a still of nothing still writes a file")
         expect(bool(r2.get("warnings")),
                "a still that framed no geometry says so")
+
+        # Looking UP at the model, the shadow catcher must not be a lid. The
+        # plane is opaque from both sides, so a camera below the scene's floor
+        # got a picture of the underside of the floor with the model's shadow
+        # lying on it, and nothing else (2026-09-01).
+        d.request("fit_view", {})
+        d.request("set_camera", {"target": [0, 0, 0],
+                                 "eye": [9000, 9000, -6000]})
+        under = os.path.join(scratch, "under.png")
+        r3 = d.request("render_still", {"path": under, "width": 160,
+                                        "height": 90, "samples": 4,
+                                        "ground": True})
+        expect(r3.get("ok"), "a still from below renders")
+        expect(any("below the scene's floor" in ln for ln in
+                   app.log().splitlines()),
+               "and drops the shadow catcher rather than looking up at it")
         return 0
     finally:
         app.terminate()

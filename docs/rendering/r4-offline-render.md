@@ -103,6 +103,17 @@ The `RayTracingRenderer` scaffold is ~40% real:
     catcher shows the same sweep, so the two cannot disagree. `backdrop`:
     `studio` | `environment` on `render_still`, "Studio backdrop" in the
     modal; an unknown value is REFUSED, naming both.
+  - **The shadow catcher is not a lid (2026-09-01)**: the plane is opaque
+    from both sides, so a camera below the scene's floor got a picture of the
+    floor's underside with the model's shadow lying on it — the model itself
+    hidden behind it. Nothing sits on a floor you are looking up at, so the
+    catcher is simply not added when the camera is under it. (The alternative,
+    an any-hit shader that ignores back-face intersections, is the general
+    fix and costs an SBT hit group; this is the case that actually happens.)
+  - **Resolutions to 4K (2026-09-01)**: the list stopped at 1920x1080 while
+    the machine it was written on has a 3200x2000 panel, so the largest
+    available still was upscaled 1.7x on opening and read as a
+    low-resolution picture of a high-resolution model.
   - **The still is lit for the picture (2026-08-31)**: its key light is
     placed 40° to the camera's left and 45° up, derived from the camera so it
     stays off-axis from any viewpoint. The shared rig (`conv::kKeyLightDir`)

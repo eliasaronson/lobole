@@ -36,11 +36,16 @@ void DrawRenderModal(AppState& state) {
     const char* label;
     uint32_t w, h;
   };
-  static const Res kRes[] = {{"1280 x 720", 1280, 720},
-                             {"1920 x 1080", 1920, 1080},
-                             {"960 x 540", 960, 540},
-                             {"640 x 480", 640, 480}};
-  static int resIdx = 0;
+  // Ordered biggest first, because the complaint about a still is almost
+  // always that it is too small: the list stopped at 1920x1080, and this
+  // machine's own panel is 3200x2000, so even the largest render was being
+  // upscaled 1.7x the moment anyone opened it full-screen and it read as a
+  // low-resolution picture of a high-resolution model.
+  static const Res kRes[] = {
+      {"3840 x 2160 (4K)", 3840, 2160}, {"2560 x 1440", 2560, 1440},
+      {"1920 x 1080", 1920, 1080},      {"1280 x 720", 1280, 720},
+      {"960 x 540", 960, 540},          {"640 x 480", 640, 480}};
+  static int resIdx = 2; // 1920 x 1080, the old default
   static int samples = 128;
   static bool ground = true;
   static bool studio = true;
