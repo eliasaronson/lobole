@@ -82,6 +82,7 @@ constexpr MethodDoc kCamMethods[] = {
      "Change a setup {id, name?, post?, safe_z?, lay_face_up?: {feature_id, "
      "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?, "
      "origin_at?: stock_min|stock_centre|model_min, "
+     "order?: authored|tool|part, "
      "stock?: {mode?: relative|fixed, size?: [x,y,z], place?: [x,y,z], "
      "margin?: [x,y,z], bottom_margin?}} or "
      "one of its "
@@ -105,8 +106,8 @@ constexpr MethodDoc kCamMethods[] = {
      "workpiece the sheet you own (size + place, where the part sits in it) "
      "rather than a shrink-wrap of the part; a sheet smaller than the part is "
      "refused, naming the axis and the shortfall.",
-     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, name, origin_at, "
-     "post, rotation_a, safe_z, stock, tool"},
+     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, name, order, "
+     "origin_at, post, rotation_a, safe_z, stock, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: "
@@ -636,7 +637,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                   setup.originAt == cam::OriginAt::StockCentre ? "stock_centre"
                   : setup.originAt == cam::OriginAt::ModelMin  ? "model_min"
                                                                : "stock_min"},
-                 {"fit_arcs", setup.fitArcs}};
+                 {"fit_arcs", setup.fitArcs},
+                 {"order", setup.order == cam::OrderOutputBy::Tool ? "tool"
+                           : setup.order == cam::OrderOutputBy::Part
+                               ? "part"
+                               : "authored"}};
       if (setup.topFace.IsSet())
         sj["top_face"] = {{"feature_id", setup.topFace.ref.featureId},
                           {"element", setup.topFace.ref.name},
@@ -747,6 +752,21 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     if (p.contains("fit_arcs"))
       setup.fitArcs = p.at("fit_arcs").get<bool>();
+    if (p.contains("order")) {
+      // Refused, never substituted: a job that posts in a different order
+      // than it says is a broken cutter, and every plausible substitute here
+      // produces a file that looks right.
+      const std::string o = p.at("order").get<std::string>();
+      if (o == "authored")
+        setup.order = cam::OrderOutputBy::Authored;
+      else if (o == "tool")
+        setup.order = cam::OrderOutputBy::Tool;
+      else if (o == "part")
+        setup.order = cam::OrderOutputBy::Part;
+      else
+        throw std::runtime_error("unknown order '" + o +
+                                 "'; use authored, tool or part");
+    }
     if (p.contains("tool")) {
       const json& tj = p.at("tool");
       const int number = tj.value("number", 1);

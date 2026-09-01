@@ -181,6 +181,27 @@ struct Operation {
   bool enabled = true;
 };
 
+// In what ORDER the operations cut.
+//
+// With one part, authoring order IS cutting order and nobody needs this.
+// With four, the natural authoring order is per part, and the post emits a
+// tool change on every change of tool number -- so a four-part sheet
+// authored the obvious way changes tools four times per tool instead of
+// once. FreeCAD makes this a job property for the same reason
+// (`OrderOutputBy`, and build_postlist_by_tool says "to minimize tool
+// changes" in its own docstring); BambuStudio reaches it from the
+// 3D-printing side with a per-plate print sequence.
+enum class OrderOutputBy {
+  // The order they were written in. The default, and byte-for-byte what this
+  // app posted before the field existed.
+  Authored,
+  // Group by tool number: one tool change per tool.
+  Tool,
+  // Finish each part before starting the next -- what you want when a part
+  // may break free and you would rather lose one than four.
+  Part,
+};
+
 // --- the setup ------------------------------------------------------------
 
 // Stock: what is in the vise before the first cut. Derived from the model's
@@ -284,6 +305,10 @@ struct Setup {
   // not been laid out -- everything at the origin, which is the honest
   // reading of "nobody has said".
   std::vector<Placement> placements;
+
+  // In what order the operations cut, and whether the post writes one file
+  // per group. Properties of the JOB, like `post` and `fitArcs`.
+  OrderOutputBy order = OrderOutputBy::Authored;
 
   std::vector<Tool> tools;
   std::vector<Operation> operations;

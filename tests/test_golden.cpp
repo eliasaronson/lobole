@@ -203,6 +203,27 @@ void AssertJobParts(const cam::JobDocument& job, const nlohmann::json& expect) {
           got.push_back(t.jobPartId);
     CHECK(got == want);
   }
+  // What order it CUTS in (v75), and the order that produces. Both, because
+  // the field is only worth having if it reaches the list the post walks.
+  if (expect.contains("cam_order")) {
+    const std::string want = expect.at("cam_order").get<std::string>();
+    REQUIRE(!job.GetSetups().empty());
+    const cam::OrderOutputBy o = job.GetSetups()[0].order;
+    const std::string got = o == cam::OrderOutputBy::Tool   ? "tool"
+                            : o == cam::OrderOutputBy::Part ? "part"
+                                                            : "authored";
+    CHECK(got == want);
+  }
+  if (expect.contains("cam_cutting_order")) {
+    const auto want =
+        expect.at("cam_cutting_order").get<std::vector<uint64_t>>();
+    REQUIRE(!job.GetSetups().empty());
+    const cam::Setup& s = job.GetSetups()[0];
+    std::vector<uint64_t> got;
+    for (size_t i : cam::CuttingOrder(s))
+      got.push_back(s.operations[i].id);
+    CHECK(got == want);
+  }
   if (expect.contains("job_placements")) {
     const auto& want = expect.at("job_placements");
     std::vector<cam::Placement> got;

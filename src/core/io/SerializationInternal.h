@@ -17,7 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    74; // v74: a job holds MORE THAN ONE part, which is what the job document
+    75; // v75: a setup says in what ORDER it cuts (`order`:
+        //      authored|tool|part). With one part authoring order IS
+        //      cutting order; with four, authoring per part means a tool
+        //      change per part per tool. Omitted at `authored`, which is
+        //      byte-for-byte what this app posted before -- the bump is for
+        //      reading, where an older build would cut a file that says
+        //      "tool" in the order it was written, which is a different
+        //      program (docs/cam/job-document.md J5).
+        // (v74: a job holds MORE THAN ONE part, which is what the job document
         //      was for. A machining selection names the part it is on
         //      (`part` beside `feature_id`/`element`), because two parts in
         //      one job can own the same element name; and a setup carries

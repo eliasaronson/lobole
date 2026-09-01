@@ -88,6 +88,31 @@ cam::Side SideFromName(const std::string& s) {
   return cam::Side::Outside;
 }
 
+// In what order the operations cut (v75). An unknown string is REFUSED
+// naming the three: a job that silently posts in a different order than it
+// says is a broken cutter, not a wrong-looking drawing.
+const char* OrderName(cam::OrderOutputBy o) {
+  switch (o) {
+  case cam::OrderOutputBy::Tool:
+    return "tool";
+  case cam::OrderOutputBy::Part:
+    return "part";
+  default:
+    return "authored";
+  }
+}
+
+cam::OrderOutputBy OrderFromName(const std::string& s) {
+  if (s == "authored")
+    return cam::OrderOutputBy::Authored;
+  if (s == "tool")
+    return cam::OrderOutputBy::Tool;
+  if (s == "part")
+    return cam::OrderOutputBy::Part;
+  throw std::runtime_error("unknown cutting order '" + s +
+                           "'; use authored, tool or part");
+}
+
 // A machining selection: the element, and which part of the job it is on
 // (v73). `part` is omitted for a single-part job, where 0 is unambiguous --
 // the one part -- so those files keep the shape they had.
@@ -177,6 +202,8 @@ json CamSetupToJson(const cam::Setup& setup) {
     j["tools"].push_back(std::move(tj));
   }
 
+  if (setup.order != cam::OrderOutputBy::Authored)
+    j["order"] = OrderName(setup.order);
   // Where each part sits in the stock (v73). Omitted when nothing has been
   // laid out, so a one-part job re-saves exactly as it did.
   if (!setup.placements.empty()) {
@@ -320,6 +347,8 @@ cam::Setup CamSetupFromJson(const json& j) {
     t.tipAngleDeg = tj.value("tip_angle", 90.0);
     setup.tools.push_back(std::move(t));
   }
+  if (j.contains("order"))
+    setup.order = OrderFromName(j.at("order").get<std::string>());
   for (const json& pj : j.value("placements", json::array())) {
     cam::Placement p;
     p.id = pj.value("id", uint64_t{0});

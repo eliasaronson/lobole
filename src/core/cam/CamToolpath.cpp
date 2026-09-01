@@ -2498,6 +2498,43 @@ std::vector<PlacementFit> CheckPlacements(const Setup& setup,
   return out;
 }
 
+std::vector<size_t> CuttingOrder(const Setup& setup) {
+  std::vector<size_t> idx;
+  idx.reserve(setup.operations.size());
+  for (size_t i = 0; i < setup.operations.size(); i++)
+    idx.push_back(i);
+  if (setup.order == OrderOutputBy::Authored)
+    return idx;
+
+  // The key each operation groups by. An operation with no target belongs to
+  // no part -- facing the stock is about the workpiece, not about any one
+  // thing on it -- and 0 sorts it first, which is where a facing pass goes
+  // anyway.
+  const auto key = [&](size_t i) -> uint64_t {
+    const Operation& op = setup.operations[i];
+    if (setup.order == OrderOutputBy::Tool)
+      return static_cast<uint64_t>(op.toolNumber);
+    return op.targets.empty() ? 0 : op.targets.front().jobPartId;
+  };
+  // Group in FIRST-APPEARANCE order rather than by sorting the key: a tool
+  // table is not ordered by how early each cutter is wanted, and reordering
+  // to 1,2,3 would move a roughing pass after a finishing one that happens
+  // to use a lower number.
+  std::vector<uint64_t> seen;
+  std::vector<size_t> out;
+  out.reserve(idx.size());
+  for (size_t i : idx) {
+    const uint64_t k = key(i);
+    if (std::find(seen.begin(), seen.end(), k) == seen.end())
+      seen.push_back(k);
+  }
+  for (uint64_t k : seen)
+    for (size_t i : idx)
+      if (key(i) == k)
+        out.push_back(i);
+  return out;
+}
+
 std::string PlacementRefusal(const Setup& setup,
                              const std::vector<Body>& bodies) {
   for (size_t i = 0; i < setup.placements.size(); i++)
@@ -2542,10 +2579,16 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
   // body, and doing it per operation was both slower and a place for two
   // operations to disagree.
   const std::vector<Body> framed = BodiesInSetupFrame(setup, bodies);
+  // Cutting order, not authoring order -- and applied HERE, so the backplot,
+  // the simulation, the verifier and the posted file all walk the same list.
+  // Two orders would be a picture that can disagree with the file, which the
+  // CAM plan refuses on principle.
   std::vector<Toolpath> out;
-  for (const Operation& op : setup.operations)
+  for (size_t i : CuttingOrder(setup)) {
+    const Operation& op = setup.operations[i];
     if (op.enabled)
       out.push_back(GenerateFramed(setup, op, framed));
+  }
   return out;
 }
 

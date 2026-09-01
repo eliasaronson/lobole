@@ -4254,3 +4254,87 @@ TEST_CASE("cam job: relative stock is drawn around every placed part",
   CHECK(cam::PlacementRefusal(setup, bodies).find("on top of each other") !=
         std::string::npos);
 }
+
+TEST_CASE("cam job: what order it cuts in", "[cam][job]") {
+  // With one part, authoring order IS cutting order and this field would
+  // never have been noticed. With four it is the difference between one tool
+  // change per tool and one per part per tool -- CamPost emits a change on
+  // every change of tool number, so the natural authoring order (per part)
+  // is the expensive one (docs/cam/job-document.md J5).
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+
+  // Authored per part, which is how anyone would build it: rough A, finish
+  // A, rough B, finish B -- four tool changes for two tools.
+  struct Row {
+    uint64_t part;
+    int tool;
+  };
+  const Row rows[] = {{pa, 1}, {pa, 2}, {pb, 1}, {pb, 2}};
+  for (const Row& r : rows) {
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.toolNumber = r.tool;
+    op.targets.push_back(cam::Target{r.part, ElementRef{1, "1/face0"}});
+    setup.operations.push_back(op);
+  }
+
+  auto toolsOf = [&]() {
+    std::vector<int> out;
+    for (size_t i : cam::CuttingOrder(setup))
+      out.push_back(setup.operations[i].toolNumber);
+    return out;
+  };
+  auto partsOf = [&]() {
+    std::vector<uint64_t> out;
+    for (size_t i : cam::CuttingOrder(setup))
+      out.push_back(setup.operations[i].targets.front().jobPartId);
+    return out;
+  };
+
+  CHECK(toolsOf() == std::vector<int>{1, 2, 1, 2}); // authored: as written
+
+  setup.order = cam::OrderOutputBy::Tool;
+  CHECK(toolsOf() == std::vector<int>{1, 1, 2, 2}); // one change per tool
+  CHECK(partsOf() == std::vector<uint64_t>{pa, pb, pa, pb});
+
+  setup.order = cam::OrderOutputBy::Part;
+  CHECK(partsOf() == std::vector<uint64_t>{pa, pa, pb, pb});
+  CHECK(toolsOf() == std::vector<int>{1, 2, 1, 2}); // stable within a part
+}
+
+TEST_CASE("cam job: grouping keeps first-appearance order", "[cam][job]") {
+  // Grouped, not SORTED. A tool table is not ordered by how early each
+  // cutter is wanted, so sorting the key would move a roughing pass after a
+  // finishing one that happens to carry a lower number.
+  cam::JobDocument job;
+  cam::Setup& setup = job.AddSetup("Sheet");
+  for (int tool : {7, 3, 7, 3}) {
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.toolNumber = tool;
+    setup.operations.push_back(op);
+  }
+  setup.order = cam::OrderOutputBy::Tool;
+  std::vector<int> got;
+  for (size_t i : cam::CuttingOrder(setup))
+    got.push_back(setup.operations[i].toolNumber);
+  CHECK(got == std::vector<int>{7, 7, 3, 3}); // 7 first: it was wanted first
+}
+
+TEST_CASE("cam job: an unknown cutting order is refused", "[cam][job]") {
+  // The rule this project applies everywhere: a job that silently posts in
+  // an order other than the one it names is a broken cutter, and every
+  // plausible substitute produces a file that looks right.
+  const std::string bad = R"({"format":"designer-document","version":75,
+    "kind":"job","cam":[{"id":1,"name":"J","order":"fixture"}]})";
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_bad_order.json";
+  std::ofstream(path) << bad;
+  auto loaded = DocumentIO::LoadJob(path.string());
+  REQUIRE_FALSE(loaded.has_value());
+  CHECK(loaded.error().find("authored, tool or part") != std::string::npos);
+  std::filesystem::remove(path);
+}

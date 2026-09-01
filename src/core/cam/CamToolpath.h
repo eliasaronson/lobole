@@ -256,6 +256,15 @@ struct PlacementFit {
 [[nodiscard]] std::vector<PlacementFit>
 CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 
+// The operations of `setup` in the order they should CUT, as indices into
+// `setup.operations`. Authoring order is what the user typed; this is what
+// the machine does, and the two stop being the same thing the moment a job
+// holds more than one part.
+//
+// Stable within a group, so the authored order still decides everything the
+// grouping does not.
+[[nodiscard]] std::vector<size_t> CuttingOrder(const Setup& setup);
+
 // Why this setup cannot be cut as laid out, or "" when it can. Separate from
 // StockRefusal, which is about the workpiece: this is about the ARRANGEMENT.
 //
