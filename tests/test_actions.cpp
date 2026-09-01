@@ -40,6 +40,8 @@
 #include "core/Occurrence.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/HoleFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -818,6 +820,106 @@ TEST_CASE("A circular edge that is the end of a solid is not a hole",
   CHECK(fit.why.find("Axle") != std::string::npos);
   // And not "-0 mm out", which is what the old message measured it at.
   CHECK(fit.why.find("-0 mm") == std::string::npos);
+}
+
+TEST_CASE("A hole that says what it is for is believed over its diameter",
+          "[actions][parts]") {
+  // The payoff hole-standards.md was written for, and the refusal F1 promised
+  // and could not make. A blind CLEARANCE hole and a blind TAPPED hole look
+  // identical to a traversal — same axis, same depth — and a machine screw
+  // has nothing to bite in the first. Only the hole can say which it is.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const auto plate = [&](const char* name, const char* fitKind) {
+    const size_t tab = ui::AddPart(state, name);
+    ui::SetActivePart(state, tab);
+    Document& doc = *state.document;
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        name, glm::vec3(-30.0f, -30.0f, 0.0f), 60.0, 60.0, 20.0));
+    // On the plate's top face: the hole drills along -normal, i.e. down.
+    auto sketch = std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f)));
+    sketch::Point centre;
+    centre.p = glm::vec2(0.0f, 0.0f);
+    centre.id = 1;
+    sketch->entities.push_back(centre);
+    doc.AddFeature(std::move(sketch));
+    // AFTER adding: the document assigns the id, so asking before gives 0 and
+    // the hole then reports a missing sketch.
+    const uint64_t sketchId = doc.GetFeatures().back()->GetId();
+    auto hole = std::make_unique<HoleFeature>("Drill", sketchId,
+                                              HoleKind::Simple, 1.0, 12.0);
+    hole->fitThread = "M6";
+    hole->fitKind = fitKind;
+    doc.AddFeature(std::move(hole));
+    const auto* made =
+        dynamic_cast<const HoleFeature*>(doc.GetFeatures().back().get());
+    INFO(made->GetError());
+    REQUIRE(made->GetError().empty());
+    return std::make_pair(tab, made->diameter);
+  };
+
+  // The fit DERIVED the bore: 6.6 for a normal clearance, 5.0 tapped.
+  const auto [clearTab, clearDia] = plate("Clearance", "normal");
+  CHECK_THAT(clearDia, WithinAbs(6.6, 1e-9));
+  const auto [tapTab, tapDia] = plate("Tapped", "tapped");
+  CHECK_THAT(tapDia, WithinAbs(5.0, 1e-9));
+
+  const auto topRimOf = [&](size_t tab) {
+    ui::SetActivePart(state, tab);
+    const Body& body = state.document->GetBodies().front();
+    ElementRef rim;
+    double best = -1e9;
+    for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+      const std::optional<Measure::EdgeInfo> edge =
+          Measure::DescribeEdgeAt(body, index);
+      if (!edge || edge->kind != "circle")
+        continue;
+      if (edge->midpoint.z > best) {
+        best = edge->midpoint.z;
+        rim = ElementRef{body.createdBy, mapped};
+      }
+    }
+    return rim;
+  };
+  const ElementRef clearRim = topRimOf(clearTab);
+  const ElementRef tapRim = topRimOf(tapTab);
+  REQUIRE(clearRim.IsSet());
+  REQUIRE(tapRim.IsSet());
+
+  ui::FastenerRequest dry;
+  dry.dryRun = true;
+
+  // The TAPPED one takes a screw, and its size is a FACT out of the hole
+  // rather than a diameter read backwards — 5.0 is no clearance size at all,
+  // so the backwards lookup would have refused it outright.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Tapped rig"));
+  Occurrence t;
+  t.partId = state.parts[tapTab].id;
+  t.name = "Tapped";
+  const uint64_t tapOcc = state.assembly->AddOccurrence(t);
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{tapOcc, tapRim}, dry);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  CHECK(fit.size == "M6");
+  CHECK(fit.clearance == "tapped");
+  CHECK(fit.blind);
+
+  // The CLEARANCE one is the same shape and holds nothing, and now says so.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Clearance rig"));
+  Occurrence c;
+  c.partId = state.parts[clearTab].id;
+  c.name = "Clearance";
+  const uint64_t clearOcc = state.assembly->AddOccurrence(c);
+  fit = ui::FitFastenerToHole(state, ui::RimPick{clearOcc, clearRim}, dry);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("CLEARANCE hole") != std::string::npos);
+  CHECK(fit.why.find("nothing to bite") != std::string::npos);
 }
 
 TEST_CASE("A rim on two placements of one part names which",

@@ -1,0 +1,53 @@
+# Vendored from bd_warehouse (github.com/gumyr/bd_warehouse),
+# src/bd_warehouse/data/tap_hole_sizes.csv, Apache-2.0. METRIC ROWS ONLY:
+# upstream also carries 53 imperial rows whose drill columns are fractional
+# and number designations ("3/64", "#55") rather than millimetres, which is
+# also why bd_warehouse ships drill_sizes.csv and we do not need it.
+# See THIRD_PARTY.md and docs/modeling/hole-standards.md.
+Size,Soft,Hard
+M1.5-0.35,1.15,1.25
+M1.6-0.35,1.25,1.35
+M1.8-0.35,1.45,1.55
+M2-0.45,1.55,1.7
+M2-0.4,1.6,1.75
+M2.2-0.45,1.75,1.9
+M2.5-0.45,2.05,2.2
+M3-0.6,2.4,2.6
+M3-0.5,2.5,2.7
+M3.5-0.6,2.9,3.1
+M4-0.75,3.25,3.5
+M4-0.7,3.3,3.5
+M4.5-0.75,3.75,4
+M5-1,4,4.4
+M5-0.9,4.1,4.4
+M5-0.8,4.2,4.5
+M5.5-0.9,4.6,4.9
+M6-1,5,5.4
+M6-0.75,5.25,5.5
+M7-1.0,6,6.4
+M7-0.75,6.25,6.5
+M8-1.25,6.8,7.2
+M8-1,7,7.4
+M9-1.25,7.8,8.2
+M9-1,8,8.4
+M10-1.5,8.5,9
+M10-1.25,8.8,9.2
+M10-1,9,9.4
+M11-1.5,9.5,10
+M12-1.75,10.3,10.9
+M12-1.5,10.5,11
+M12-1.25,10.8,11.2
+M14-2,12.1,12.7
+M14-1.5,12.5,13
+M14-1.25,12.8,13.2
+M15-1.5,13.5,14
+M16-2,14,14.75
+M16-1.5,14.5,15
+M17-1.5,15.5,16
+M18-2.5,15.5,16.5
+M18-2,16,16.75
+M18-1.5,16.5,17
+M19-2.5,16.5,17.5
+M20-2.5,17.5,18.5
+M21-2,18,18.5
+M22-2.5,18.5,19

@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    70; // v70: seven fastener standards instead of one (nuts, washers, hex
+    71; // v71: a Hole records what it is FOR — `fit: {thread, kind, pitch?}`
+        //      — and the diameter is DERIVED from it, so a clearance hole
+        //      stops being a number somebody looked up once. Additive and
+        //      optional: a hole without one serializes exactly as before
+        //      (docs/modeling/hole-standards.md).
+        // (v70: seven fastener standards instead of one (nuts, washers, hex
         //      and countersunk and button heads, a hexalobular drive), the
         //      drive DEFAULTED to the one its standard is made with rather
         //      than to "hex", and the `fastener_callout` drawing dimension.

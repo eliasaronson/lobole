@@ -31,6 +31,7 @@
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
+#include "core/parts/FastenerTable.h"
 #include "render/Camera.h"
 #include "ui/AppActions.h" // BodyProducers
 
@@ -1382,8 +1383,56 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       }
       CommitDiscrete(state, feature, before, index, commit);
     }
+    // What the hole is FOR (docs/modeling/hole-standards.md). Chosen from the
+    // vendored table's own list, so the picker cannot offer a size the lookup
+    // would refuse — and picking one DERIVES the diameter, which is why the
+    // diameter row goes read-only rather than staying an editable number that
+    // the next regeneration would silently overwrite.
+    {
+      static std::vector<std::string> sizes; // the table is immutable
+      if (sizes.empty()) {
+        sizes.push_back("(plain diameter)");
+        for (const std::string& sz : parts::ClearanceSizes(nullptr))
+          sizes.push_back(sz);
+      }
+      std::vector<const char*> items;
+      items.reserve(sizes.size());
+      for (const std::string& sz : sizes)
+        items.push_back(sz.c_str());
+      int pick = 0;
+      for (size_t i = 1; i < sizes.size(); i++)
+        if (sizes[i] == ho->fitThread)
+          pick = static_cast<int>(i);
+      if (LabeledCombo("Drilled for", &pick, items.data(),
+                       static_cast<int>(items.size()))) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*ho);
+        ho->fitThread = pick == 0 ? std::string{} : sizes[pick];
+        if (!ho->fitThread.empty() && ho->fitKind.empty())
+          ho->fitKind = "normal"; // the fit a clearance hole is unless said
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+      if (!ho->fitThread.empty()) {
+        const char* fits[] = {"close", "normal", "loose", "tapped"};
+        int f = 1;
+        for (int i = 0; i < 4; i++)
+          if (ho->fitKind == fits[i])
+            f = i;
+        if (LabeledCombo("Fit", &f, fits, 4)) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*ho);
+          ho->fitKind = fits[f];
+          CommitDiscrete(state, feature, before, index, commit);
+        }
+      }
+    }
+    ImGui::BeginDisabled(!ho->fitThread.empty());
     ExprDim(state, feature, index, commit, "Diameter", ho->diameterExpr,
             ho->diameter);
+    ImGui::EndDisabled();
+    if (!ho->fitThread.empty() &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip("Derived from the fit — set 'Drilled for' back to a "
+                        "plain diameter to type one");
+    }
     HandleEdit(state, feature, ImGui::Checkbox("Through all", &ho->through),
                index, commit);
     if (!ho->through)

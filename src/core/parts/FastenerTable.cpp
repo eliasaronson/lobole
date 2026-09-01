@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -525,6 +526,107 @@ std::optional<std::string> TextField(const std::string& stem,
     return std::nullopt;
   }
   return field->second;
+}
+
+std::string FitName(Fit fit) {
+  switch (fit) {
+  case Fit::Close:
+    return "close";
+  case Fit::Normal:
+    return "normal";
+  case Fit::Loose:
+    return "loose";
+  case Fit::Tapped:
+    return "tapped";
+  }
+  return "normal";
+}
+
+std::optional<Fit> FitFromName(const std::string& name) {
+  if (name == "close")
+    return Fit::Close;
+  if (name == "normal")
+    return Fit::Normal;
+  if (name == "loose")
+    return Fit::Loose;
+  if (name == "tapped")
+    return Fit::Tapped;
+  return std::nullopt;
+}
+
+std::optional<double> CoarsePitch(const std::string& size, std::string* error) {
+  // ISO 4762 carries `P` for every size it stocks, and the coarse pitch of a
+  // metric thread does not depend on which fastener it is on — so this reads
+  // the standard already vendored rather than tabulating the same numbers a
+  // second time somewhere they could disagree.
+  const auto dims = Dimensions("iso4762", size, error);
+  if (!dims)
+    return std::nullopt;
+  const auto it = dims->find("P");
+  if (it == dims->end()) {
+    if (error)
+      *error = size + " has no pitch in the vendored tables";
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+std::optional<double> HoleDiameter(const std::string& thread, Fit fit,
+                                   double pitch, std::string* error) {
+  if (fit != Fit::Tapped) {
+    const auto fits = Dimensions("clearance_hole_sizes", thread, error);
+    if (!fits)
+      return std::nullopt;
+    // The column names ARE the fit names, capitalised as the table writes
+    // them. Matching on the table's own words rather than an index means a
+    // re-vendor that adds a column cannot silently shift the meaning.
+    const std::string column = fit == Fit::Close   ? "Close"
+                               : fit == Fit::Loose ? "Loose"
+                                                   : "Normal";
+    const auto it = fits->find(column);
+    if (it == fits->end()) {
+      if (error)
+        *error = "the clearance table has no " + column + " fit for " + thread;
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  // Tapped: the drill depends on the PITCH as well as the size, and the two
+  // are one key in the table ("M6-1"). A hole tapped to the wrong one taps
+  // badly rather than looking wrong, which is why the pitch is derived from
+  // the standard when it is not given rather than assumed to be 1.
+  double p = pitch;
+  if (p <= 0.0) {
+    const std::optional<double> coarse = CoarsePitch(thread, error);
+    if (!coarse)
+      return std::nullopt;
+    p = *coarse;
+  }
+  std::ostringstream key;
+  key << thread << "-";
+  // "M6-1", not "M6-1.000000": the table's keys are written the way a person
+  // writes a pitch.
+  if (std::abs(p - std::round(p)) < 1e-9)
+    key << static_cast<long long>(std::llround(p));
+  else
+    key << p;
+  const auto row = Dimensions("tap_hole_sizes", key.str(), error);
+  if (!row)
+    return std::nullopt;
+  const auto it = row->find("Soft");
+  if (it == row->end()) {
+    if (error)
+      *error = "the tap table has no drill for " + key.str();
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+std::vector<std::string> ClearanceSizes(std::string* error) {
+  const TableFile* file = Load("clearance_hole_sizes", error);
+  return file == nullptr ? std::vector<std::string>{}
+                         : file->tables.front().order;
 }
 
 void SetDataDirForTesting(const std::string& dir) {

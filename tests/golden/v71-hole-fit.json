@@ -1,0 +1,74 @@
+{
+  "format": "designer-document",
+  "version": 71,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Plate",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 40,
+      "height": 40,
+      "depth": 10
+    },
+    {
+      "type": "Sketch",
+      "name": "Centres",
+      "id": 2,
+      "next_entity_id": 3,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          10
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "point",
+          "id": 1,
+          "p": [
+            10,
+            20
+          ]
+        },
+        {
+          "type": "point",
+          "id": 2,
+          "p": [
+            30,
+            20
+          ]
+        }
+      ],
+      "constraints": []
+    },
+    {
+      "type": "Hole",
+      "name": "Clearance",
+      "id": 3,
+      "sketch_id": 2,
+      "hole_kind": "simple",
+      "diameter": 1.0,
+      "depth": 12.0,
+      "fit": {
+        "thread": "M6",
+        "kind": "normal"
+      }
+    }
+  ]
+}

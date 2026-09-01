@@ -37,6 +37,21 @@ public:
   HoleKind kind = HoleKind::Simple;
   double diameter = 1.0;
   std::string diameterExpr;
+
+  // What the hole is FOR (docs/modeling/hole-standards.md).
+  //
+  // Empty means the same hole this feature has always cut: a raw diameter,
+  // and nothing downstream knows whether 6.6 is a clearance hole for an M6 or
+  // a 6.6 mm hole that happens to be the same size. Set, `diameter` is
+  // DERIVED from it at regeneration — the U10 rule, a default carrying a unit
+  // comes from what it acts on — and changing the thread re-derives it.
+  //
+  // The pitch matters only for a tapped hole and only because the drill
+  // depends on it (M6 coarse taps to 5.0, M6 fine to 5.25). 0 means the
+  // coarse pitch, read out of the vendored standard rather than assumed.
+  std::string fitThread; // "M6"; empty = a plain diameter, as before
+  std::string fitKind;   // close | normal | loose | tapped
+  double fitPitch = 0.0; // mm; 0 = coarse, and only read when tapped
   double depth = 1.0; // bore depth; `through` overrides it
   std::string depthExpr;
   bool through = false; // drill far enough to pierce any body below

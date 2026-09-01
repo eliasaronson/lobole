@@ -851,9 +851,19 @@ json FeatureToJson(const Feature& feature) {
     j["hole_kind"] = ho->kind == HoleKind::Counterbore   ? "counterbore"
                      : ho->kind == HoleKind::Countersink ? "countersink"
                                                          : "simple";
+    // The diameter is written either way — it is what the kernel cut, and a
+    // reader that knows nothing about fits still gets a correct hole. When a
+    // fit is recorded it is ALSO the thing that derives it on the next
+    // regeneration, so the two cannot drift.
     j["diameter"] = ho->diameter;
     if (!ho->diameterExpr.empty())
       j["diameter_expr"] = ho->diameterExpr;
+    if (!ho->fitThread.empty()) {
+      nlohmann::json fit = {{"thread", ho->fitThread}, {"kind", ho->fitKind}};
+      if (ho->fitPitch > 0.0)
+        fit["pitch"] = ho->fitPitch; // omitted = the coarse pitch
+      j["fit"] = fit;
+    }
     j["depth"] = ho->depth;
     if (!ho->depthExpr.empty())
       j["depth_expr"] = ho->depthExpr;
@@ -974,7 +984,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Hole", 21,
      "hole_kind: simple|counterbore|countersink, sketch_id (point centres; "
      "drills along -plane normal), diameter (+_expr), depth (+_expr), "
-     "through?, cb_diameter?, cb_depth?, cs_diameter?, cs_depth?"},
+     "through?, cb_diameter?, cb_depth?, cs_diameter?, cs_depth?; "
+     "fit?: {thread: \"M6\", kind: close|normal|loose|tapped, pitch?} — what "
+     "the hole is FOR, which DERIVES the diameter (6.6 for an M6 normal "
+     "clearance, 5.0 tapped) and is what a drawing callout and a fastener "
+     "check read (docs/modeling/hole-standards.md)"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},
@@ -1492,6 +1506,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ho->cbDepth = j.value("cb_depth", 0.5);
     ho->csDiameter = j.value("cs_diameter", 2.0);
     ho->csDepth = j.value("cs_depth", 0.5);
+    if (j.contains("fit")) { // v71
+      const auto& fit = j.at("fit");
+      ho->fitThread = fit.value("thread", std::string{});
+      ho->fitKind = fit.value("kind", std::string("normal"));
+      ho->fitPitch = fit.value("pitch", 0.0);
+    }
     out = std::move(ho);
   } else if (type == "Draft") { // v22
     std::vector<ElementRef> refs;

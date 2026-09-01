@@ -1,6 +1,6 @@
 # A hole knows what it is for — plan
 
-> Status: **planned, not built — and cheaper now than when this was written.**
+> Status: **BUILT 2026-09-01** (format v71).
 > Found 2026-09-01 while surveying open parts libraries for F1
 > (capability-review-2026-08-31.md). It was the cheapest item that survey
 > turned up, and F1 shipping the same day paid for three quarters of it
@@ -90,7 +90,31 @@ Two things to get right:
   preserved; the vendored CSVs need a header saying where they came from, and
   `THIRD_PARTY.md` needs the entry.
 
-## What F1 already built (2026-09-01)
+## What building it corrected
+
+- **Two tables, not three.** 53 of `tap_hole_sizes.csv`'s 100 rows are
+  imperial, and their drill columns are fractional and number designations
+  ("3/64", "#55") rather than millimetres — the same shape that made the
+  clearance table metric-only. Vendoring the metric rows makes
+  `drill_sizes.csv` unnecessary: decoding those designations is its entire
+  job. The plan budgeted for 298 rows across three files and needed 46 across
+  one.
+- **The pitch is derived, not asked for.** A tapped hole's key is `M6-1`, and
+  the plan noted the trap. What it did not say is where the coarse pitch comes
+  from: the vendored standards already carry `P` for every size, so
+  `CoarsePitch` reads ISO 4762 rather than tabulating the same numbers
+  somewhere they could drift. "M6" on its own means the coarse pitch
+  everywhere in engineering, and now it means it here too.
+- **The derivation belongs in `Execute`, not at the call site.** A diameter
+  computed where the hole is created is a number typed once from a table. In
+  `Execute` it survives undo, a reload, a configuration override and an
+  expression — everything that rebuilds a feature.
+- **The GUI's diameter row goes READ-ONLY under a fit**, rather than staying
+  an editable number the next regeneration would silently overwrite. The size
+  picker is built from the vendored table's own list, so it cannot offer a
+  size the lookup would then refuse.
+
+## What F1 had already built
 
 Keeping the two apart was right — the cheap one did not wait behind the
 expensive one — but F1 needed the same table for its own reasons and left most
@@ -111,24 +135,31 @@ of this sitting there:
 So what is left is the part that was always the point: **the hole recording
 what it is for**, rather than the lookup that feeds it.
 
-## What F1 is waiting on from here
+## What it unlocked in F1
 
-Two refusals in the shipped fastener code exist only because a hole does not
-say what it is for:
+`fit_fastener` now ASKS THE HOLE FIRST and falls back to reading the diameter
+backwards only when it has nothing to ask. That matters more than it sounds:
+the dock round measured the backwards lookup and found 48% of whole
+millimetres from 1 to 160 are some size's clearance, so it is an inference
+that rarely refuses. A recorded fit is a fact.
 
-- **A countersunk screw cannot be fitted to a picked rim.** `fit_fastener`
+**The blind-hole refusal the plan promised now works**, and it could not
+before:
+
+    the blind hole in Bracket is a normal CLEARANCE hole for M6, not a tapped
+    one — a machine screw has nothing to bite in it. Tap it, or put a nut on
+    the far side.
+
+A blind clearance hole and a blind tapped hole are identical to a traversal —
+same axis, same depth — so nothing but the hole could tell them apart.
+
+Still waiting, and unchanged by this:
+
+- **A countersunk screw still cannot be fitted to a picked rim.** `fit_fastener`
   refuses `iso10642` outright, because the rim you would pick on a plain bore
   is the bore's — the countersink is not modelled, so the head would end up
   inside solid material. A hole that carried its countersink would make this a
   normal case instead of a refusal.
-- **A blind hole's thread is assumed, not known.** `fit_fastener` checks there
-  is at least one diameter of depth to engage, but nothing can tell a *tapped*
-  blind hole from a *clearance* one drilled to the same depth — and a machine
-  screw has nothing to bite in the second. The diameters are not close (M6 taps
-  at 5.0 against clearances of 6.4/6.6/7.0), so this is decidable the moment
-  the hole says which it is.
-
-And one thing that would get sharper rather than newly possible: `fit_fastener`
-derives its size by reading the clearance table BACKWARDS from the bore
-diameter. That works, and it is an inference — a hole that states `M6 normal`
-outright makes it a fact.
+  (`hole_kind: countersink` records the geometry, but nothing says the
+  countersink is FOR the screw's head; that is a second question this did not
+  answer.)

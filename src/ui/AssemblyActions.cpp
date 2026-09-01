@@ -13,6 +13,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/drawing/DrawingCallout.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
@@ -23,6 +24,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
 #include "core/io/ImportAssembly.h"
@@ -2143,13 +2145,27 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   glm::vec3 axis = chosen->axis;
   const double radius = chosen->radius;
 
-  // Which size the hole is for, read backwards out of the clearance table.
+  // Which size the hole is for. ASK IT FIRST: a hole that records its fit
+  // states the answer outright, and reading a diameter backwards out of the
+  // clearance table only guesses at it — a guess the dock round showed is
+  // weak, since 48% of whole millimetres from 1 to 160 are some size's
+  // clearance and a Ø32 ladder rung reads as an M30
+  // (docs/modeling/hole-standards.md).
   std::string why;
-  const auto thread = parts::ThreadForClearance(radius * 2.0, &why);
-  if (!thread)
-    return fail(why);
-  fit.size = thread->first;
-  fit.clearance = thread->second;
+  const HoleFeature* drilled =
+      drawing::FindHoleForRef(*chosen->inst->part, rim.element.name, radius);
+  bool tapped = false;
+  if (drilled != nullptr && !drilled->fitThread.empty()) {
+    fit.size = drilled->fitThread;
+    fit.clearance = drilled->fitKind;
+    tapped = drilled->fitKind == "tapped";
+  } else {
+    const auto thread = parts::ThreadForClearance(radius * 2.0, &why);
+    if (!thread)
+      return fail(why);
+    fit.size = thread->first;
+    fit.clearance = thread->second;
+  }
 
   // Down the axis, from the rim. The direction is chosen by which way there is
   // material to pass through: an axis has no sign, and picking the wrong one
@@ -2285,6 +2301,14 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // A blind hole bounds the length from ABOVE: the screw must not bottom
     // out. Take the longest stocked length that fits, which is also the most
     // thread engaged.
+    // A blind hole a screw can bite in is a TAPPED one. A clearance hole of
+    // the same depth looks identical and holds nothing — the plan promised
+    // this refusal and could not make it until a hole could say which it is.
+    if (drilled != nullptr && !drilled->fitThread.empty() && !tapped)
+      return fail("the blind hole in " + blocking->part + " is a " +
+                  fit.clearance + " CLEARANCE hole for " + fit.size +
+                  ", not a tapped one — a machine screw has nothing to bite "
+                  "in it. Tap it, or put a nut on the far side.");
     const double engagement = *parts::NominalDiameter(fit.size); // ~1x d
     fit.grip = underHead + blocked;
     if (into < engagement)

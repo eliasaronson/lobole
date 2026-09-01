@@ -1,5 +1,7 @@
 #include "core/features/HoleFeature.h"
 
+#include "core/parts/FastenerTable.h"
+
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
 #include "core/BodyMode.h"
@@ -21,6 +23,28 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   if (!sk) {
     SetError("hole needs a sketch of points (missing or suppressed)");
     return false;
+  }
+  // A recorded fit DERIVES the diameter (docs/modeling/hole-standards.md).
+  // Done here rather than at the call site so it survives everything that
+  // rebuilds a feature — undo, a reload, a configuration override, an
+  // expression on the thread — instead of being a number somebody typed once
+  // from a table and never re-derived.
+  if (!fitThread.empty()) {
+    const std::optional<parts::Fit> fit = parts::FitFromName(fitKind);
+    if (!fit) {
+      SetError("\"" + fitKind +
+               "\" is not a fit — a hole is drilled close, normal or loose "
+               "for a clearance, or tapped for a thread");
+      return false;
+    }
+    std::string why;
+    const std::optional<double> bore =
+        parts::HoleDiameter(fitThread, *fit, fitPitch, &why);
+    if (!bore) {
+      SetError(why);
+      return false;
+    }
+    diameter = *bore;
   }
   if (diameter <= 1e-9 || (!through && depth <= 1e-9)) {
     SetError("hole diameter and depth must be positive");

@@ -136,10 +136,10 @@ checked against (docs/parts/plan.md).
 
 ## bd_warehouse — clearance-hole table
 
-`assets/parts/clearance_hole_sizes.csv`
+`assets/parts/clearance_hole_sizes.csv`, `tap_hole_sizes.csv`
 
 Vendored from https://github.com/gumyr/bd_warehouse
-(`src/bd_warehouse/data/clearance_hole_sizes.csv`), **Apache-2.0**, metric rows
+(`src/bd_warehouse/data/`), **Apache-2.0**, metric rows
 only — upstream also carries imperial sizes whose columns are fractional drill
 designations ("17/64") rather than numbers. Data only; no code is taken. It is
 what lets a plain 6.6 mm hole be read back as "an M6 normal clearance"

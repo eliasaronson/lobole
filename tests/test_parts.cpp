@@ -242,7 +242,7 @@ TEST_CASE("parts: the shipped tables all load", "[parts]") {
   for (const char* standard :
        {"iso4762def", "iso4032def", "iso7089def", "iso888length", "iso4757def",
         "iso10664def", "iso14579def", "iso4017head", "iso10642def",
-        "iso7380def", "clearance_hole_sizes"}) {
+        "iso7380def", "clearance_hole_sizes", "tap_hole_sizes"}) {
     INFO(standard << ": " << error);
     CHECK(parts::Load(standard, &error) != nullptr);
   }
@@ -261,7 +261,7 @@ TEST_CASE("parts: the build stages the tables where the app looks", "[parts]") {
   for (const char* standard :
        {"iso4762def", "iso4032def", "iso7089def", "iso888length", "iso4757def",
         "iso10664def", "iso14579def", "iso4017head", "iso10642def",
-        "iso7380def", "clearance_hole_sizes"}) {
+        "iso7380def", "clearance_hole_sizes", "tap_hole_sizes"}) {
     INFO(standard);
     CHECK(fs::exists(staged / (std::string(standard) + ".csv")));
   }
@@ -673,6 +673,56 @@ TEST_CASE("parts: a grip a hair over a nominal length snaps to it", "[parts]") {
   // treatment, for the same reason and with the same limit.
   CHECK(parts::SnapLengthDown("iso4762", "M8", 19.9999995, &error) == 20.0);
   CHECK(parts::SnapLengthDown("iso4762", "M8", 19.5, &error) == 16.0);
+}
+
+TEST_CASE("parts: a hole knows what it is for", "[parts]") {
+  // docs/modeling/hole-standards.md. The other direction from
+  // ThreadForClearance: given the intent, the number — so "a clearance hole
+  // for an M6, normal fit" stops being 6.6 that somebody had to know, look up
+  // and type.
+  const SourceTables tables;
+  std::string error;
+
+  CHECK(parts::HoleDiameter("M6", parts::Fit::Close, 0.0, &error) == 6.4);
+  CHECK(parts::HoleDiameter("M6", parts::Fit::Normal, 0.0, &error) == 6.6);
+  CHECK(parts::HoleDiameter("M6", parts::Fit::Loose, 0.0, &error) == 7.0);
+
+  // Tapped is a different table and a different question: the drill depends
+  // on the PITCH as well as the size, and the two are one key ("M6-1").
+  CHECK(parts::HoleDiameter("M6", parts::Fit::Tapped, 0.0, &error) == 5.0);
+  CHECK(parts::HoleDiameter("M6", parts::Fit::Tapped, 0.75, &error) == 5.25);
+  // Which is why the pitch is not assumed: a fine M6 taps to a quarter of a
+  // millimetre bigger, and getting it wrong taps BADLY rather than looking
+  // wrong.
+  CHECK(parts::HoleDiameter("M6", parts::Fit::Tapped, 0.0, &error) !=
+        parts::HoleDiameter("M6", parts::Fit::Tapped, 0.75, &error));
+
+  // The coarse pitch comes from the standard already vendored, not from a
+  // second table of the same numbers that could disagree with it.
+  CHECK(parts::CoarsePitch("M6", &error) == 1.0);
+  CHECK(parts::CoarsePitch("M8", &error) == 1.25);
+
+  // And a tapped hole is nothing like the clearance hole for the same thread
+  // — 5.0 against 6.4/6.6/7.0 — which is what lets a check tell a tapped
+  // blind hole from a clearance one drilled to the same depth.
+  CHECK(*parts::HoleDiameter("M6", parts::Fit::Tapped, 0.0, &error) <
+        *parts::HoleDiameter("M6", parts::Fit::Close, 0.0, &error) - 1.0);
+
+  // Refused, never rounded to a neighbour.
+  error.clear();
+  CHECK_FALSE(
+      parts::HoleDiameter("M7.3", parts::Fit::Normal, 0.0, &error).has_value());
+  INFO(error);
+  CHECK_THAT(error, ContainsSubstring("nearest stocked"));
+  error.clear();
+  CHECK_FALSE(
+      parts::HoleDiameter("M6", parts::Fit::Tapped, 0.9, &error).has_value());
+  INFO(error);
+  CHECK_THAT(error, ContainsSubstring("M6-0.9"));
+
+  CHECK(parts::FitFromName("tapped") == parts::Fit::Tapped);
+  CHECK_FALSE(parts::FitFromName("snug").has_value());
+  CHECK(parts::FitName(parts::Fit::Loose) == "loose");
 }
 
 TEST_CASE("parts: a non-preferred size is a size, not a refusal", "[parts]") {

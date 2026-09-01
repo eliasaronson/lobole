@@ -164,6 +164,48 @@ ThreadForClearance(double diameter, std::string* error);
                                                    const std::string& column,
                                                    std::string* error);
 
+// --- what a hole is FOR (docs/modeling/hole-standards.md) -------------------
+//
+// The other direction from ThreadForClearance: given the intent, the number.
+// "A clearance hole for an M6, normal fit" is 6.6, and a person should not
+// have to know that, look it up, and type it — which is the same U10 argument
+// the fastener's length rests on. The diameter stays the thing the kernel
+// cuts; the FIT is what the document remembers.
+
+// How loose a clearance hole is. Spelled the way the vendored table's columns
+// are, because those are the words a machinist uses.
+enum class Fit { Close, Normal, Loose, Tapped };
+[[nodiscard]] std::string FitName(Fit fit);
+[[nodiscard]] std::optional<Fit> FitFromName(const std::string& name);
+
+// The COARSE pitch of a metric thread, from the fastener tables' own `P`
+// column. Derived rather than tabulated again: "M6" on its own means the
+// coarse pitch everywhere in engineering, and the vendored standards already
+// say what that is.
+[[nodiscard]] std::optional<double> CoarsePitch(const std::string& size,
+                                                std::string* error);
+
+// The hole to drill for `thread` at `fit`, in millimetres.
+//
+// `pitch` is only consulted for Tapped, where the drill depends on it as well
+// as on the nominal size (M6 is 1.0 coarse and 0.75 fine, and they tap to
+// different holes). 0 means the coarse pitch. A tapped hole is sized for
+// roughly 75% thread — the `Soft` column, which is the conventional default;
+// the table's `Hard` column exists for the shallower engagement a hard
+// material wants and is not offered yet.
+//
+// Refused, never rounded: a size the table does not carry is named against
+// what it does, because a hole drilled to a plausible-but-wrong number looks
+// exactly like a correct one.
+[[nodiscard]] std::optional<double> HoleDiameter(const std::string& thread,
+                                                 Fit fit, double pitch,
+                                                 std::string* error);
+
+// Every thread the clearance table carries, in FILE order (M1 before M10).
+// For a size picker: the list IS the vendored scope, so a picker built from
+// it cannot offer a size the lookup would then refuse.
+[[nodiscard]] std::vector<std::string> ClearanceSizes(std::string* error);
+
 // Test seam: point the loader at a directory other than the installed one.
 // Empty restores the default (RuntimePaths::PartsDir()). Clears the cache.
 void SetDataDirForTesting(const std::string& dir);
