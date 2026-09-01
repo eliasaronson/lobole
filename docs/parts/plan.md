@@ -130,6 +130,82 @@ Scripted twin, deriving identically:
     add_fastener {target: {feature_id, element}, standard: "iso4762",
                   drive: "hex"}
 
+### The pick is an EDGE, not a face
+
+A cylindrical face has an axis but no direction, so "which end does the head go
+on" is not answerable from it. A **circular edge** answers both: it is the rim
+the head sits against, and `Measure` already reports `kind: "circle"` with a
+`radius` and an `axis` for one. Same gesture as picking an edge to fillet.
+
+So: **pick the rim you want the head against.** One pick, unambiguous
+direction, no camera inference and no flip button to get wrong.
+
+### Deriving the stack, and the four cases that break the naive version
+
+From that edge, cast along the axis, inward, through the flattened assembly.
+What comes back decides everything — and the interesting part is that the
+awkward cases are all *findings* rather than obstacles.
+
+**A gap between two parts.** The ray passes through air. Two meanings, and
+nothing in the geometry distinguishes them: a real gap (an unmodelled gasket,
+parts drawn apart before clamping) or a **defect** — the floating mount plate
+that cost a dogfooding round, 35 mm apart and invisible at render distance
+because confirmation bias filled it in.
+
+So do not guess. **Span it, and decompose the answer in the summary:**
+
+    M6x45 — grip 41.5: Plate 12.0, gap 3.0, Bracket 26.5
+
+If the gap is a mistake, the fastener length is the thing that makes it
+visible. And `contact_report` already reports unintended gaps independently, so
+the two agree rather than one silently absorbing the other.
+
+**A blind hole.** The ray terminates inside a part. Then length is the parts
+above plus **thread engagement** into the last one, and engagement is a rule
+rather than a table — roughly 1x diameter into steel, 1.5-2x into aluminium or
+plastic. Per-body materials already exist, so that is derived, not typed.
+
+A check falls out of it: a blind hole that is a **clearance** hole rather than
+a tapped one has nothing for a machine screw to bite. With
+[../modeling/hole-standards.md](../modeling/hole-standards.md) the hole says
+which outright; without it the diameter tells you, from the same vendored
+tables (M6 tap drill 5.0 against clearances of 6.4/6.6/7.0 — not a close call).
+Refuse, naming the two ways out: tap it, or put a nut on the far side.
+
+**The holes do not line up.** The ray hits a part's *material* instead of its
+hole. That is a real defect, and refusing with "the hole in Bracket is 2.3 mm
+off this axis" is worth far more than quietly generating a bolt through solid
+metal.
+
+**A hole that goes nowhere.** The ray exits without entering anything: a
+surface feature, not a joint. Refuse and say so.
+
+### Two picks, but only when you want them
+
+Selecting both the start and the end rim is two picks for something derivable,
+and it does not solve the hard half — you still need what lies between them for
+the grip and for the clash check. So: **one pick derives, a second optional
+pick overrides the far end.** The same shape as CAM, where a picked wall and a
+targetless "cut out the whole part" are both legitimate.
+
+### Length snaps to a stocked size
+
+The derived grip is 22.7 mm; screws are made in 20, 25, 30.
+`nominal_screw_lengths.csv` carries the list per type (DIN 931: 12, 16, 20, 25,
+… 300), so the derived number is **snapped to the shortest stocked length that
+still satisfies the rule** — full grip plus protrusion for a through bolt, grip
+plus engagement for a blind one. If no stocked length fits, refuse naming the
+range rather than inventing one: a screw at a length nobody makes is the
+plausible-and-wrong answer, and it looks perfect in the viewport.
+
+### What v1 does not place
+
+The **nut and washers**. A through bolt needs them, and "complete the joint"
+(screw + washer + nut, all derived from the same ray) is the obvious follow-on
+— but it multiplies the placement rules before the single-fastener ones have
+been used in anger. v1 places one fastener per pick; the far-side nut is a
+second pick on the far rim.
+
 ### The cross-document catch
 
 Deriving length from the plate stack is a dependency on other documents'
@@ -150,9 +226,12 @@ regen's input surface for.
    document → an occurrence, for the socket head cap screw (ISO 4762, hex
    drive). RPC only, no GUI. This is where the architectural claims get tested:
    part-per-spec, folder placement, BOM aggregation, refusal on a part tab.
-3. **Derive from a hole.** The pick, the size lookup (forward and backward),
-   the stack traversal for length, and the staleness report. GUI verb + the
-   `add_fastener` RPC.
+3. **Derive from a hole.** The edge pick, the size lookup (forward and
+   backward), the axis ray and its stack decomposition, length snapping to a
+   stocked size, and the staleness report. GUI verb + the `add_fastener` RPC.
+   The four awkward cases above — gap, blind, misaligned, nowhere — are each a
+   refusal or a reported decomposition, and each wants its own test: they are
+   the reason this phase is bigger than it looks.
 4. **Breadth.** Nuts and washers, then the remaining head types and drives, one
    vendored file at a time. Each is a profile and a table row — the survey
    measured a socket head cap screw's entire head at seven lines.
