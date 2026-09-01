@@ -45,6 +45,7 @@
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/FeatureTreePanel.h"
+#include "ui/FileDialogs.h"
 #include "ui/Overlays.h"
 #include "ui/TerminalPanel.h"
 
@@ -709,6 +710,56 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
 }
 
 } // namespace
+
+TEST_CASE("Save works from every kind of tab, not just a part", "[actions]") {
+  // Reported 2026-09-01 from a real session: File > Save and File > Save As
+  // did nothing and opened no dialog, while File > Open opened one — which
+  // read as a broken dialog and was a broken GUARD. Both save paths tested
+  // `state.document`, and that is NULL on an assembly or a drawing tab
+  // (AddAssembly/AddDrawing null it), so you could build a whole assembly,
+  // press Ctrl+S, and get no file and no message.
+  //
+  // Driven through ui::SaveProjectAction — the same entry the menu item and
+  // the Ctrl+S binding both call — with a project path already set, so it
+  // takes the save-in-place branch and never reaches a native dialog. That
+  // matters here beyond speed: a stray dialog in a test run puts a real file
+  // picker on the developer's desktop.
+  namespace fs = std::filesystem;
+
+  const auto saveFrom = [](const std::string& what, auto&& openTab) {
+    ui::AppState state;
+    state.document = std::make_unique<Document>();
+    state.commands = std::make_unique<CommandStack>();
+    ui::EnsureParts(state);
+    state.document->AddFeature(std::make_unique<BoxFeature>(
+        "Block", glm::vec3(0.0f), 10.0, 10.0, 10.0));
+
+    const fs::path dir =
+        fs::temp_directory_path() / ("designer_save_" + what + "_tab");
+    fs::remove_all(dir);
+    // Stamped against a path that does not exist yet, so the F8 "changed on
+    // disk" guard has nothing to complain about and the write goes through.
+    ui::MarkProjectSaved(state, dir.string(), "save");
+
+    openTab(state);
+    ui::SaveProjectAction(state);
+
+    INFO("saving from a " << what << " tab wrote nothing to " << dir);
+    const bool wrote = fs::exists(dir);
+    fs::remove_all(dir);
+    return wrote;
+  };
+
+  CHECK(saveFrom("part", [](ui::AppState&) {}));
+  CHECK(saveFrom("assembly", [](ui::AppState& state) {
+    ui::SetActivePart(state, ui::AddAssembly(state, "Assembly"));
+    REQUIRE(state.document == nullptr); // the condition that broke it
+  }));
+  CHECK(saveFrom("drawing", [](ui::AppState& state) {
+    ui::SetActivePart(state, ui::AddDrawing(state, "Drawing"));
+    REQUIRE(state.document == nullptr);
+  }));
+}
 
 TEST_CASE(
     "A joint is derived whole: washers, nut and a length that covers them",

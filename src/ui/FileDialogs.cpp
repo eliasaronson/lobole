@@ -31,6 +31,24 @@ namespace {
 // a GTK file chooser opens, so native dialogs must be probed before use.
 // ---------------------------------------------------------------------------
 
+// Whether there is anything at all to write.
+//
+// NOT `!state.document`, which is what Save and Save As guarded on until
+// 2026-09-01. A project is more than its active tab, and `state.document` is
+// NULL on an assembly or a drawing tab — AddAssembly and AddDrawing null it,
+// because those tabs hold a different kind of document. So the guard meant
+// Save and Save As did nothing, silently, anywhere except a part tab: you
+// could build a whole assembly, press Ctrl+S, and get no dialog, no file and
+// no message. Open Project was unaffected, which is why it looked like a
+// dialog bug rather than a save bug.
+//
+// `SaveProject` itself never needed this — it walks the slots and writes every
+// document, and works perfectly well from any tab.
+bool NothingToSave(const AppState& state) {
+  return state.parts.empty() && !state.document && !state.assembly &&
+         !state.drawing;
+}
+
 // Load `path` (a project or a recovery sidecar) into the app.
 void OpenProjectFile(AppState& state, const std::string& path) {
   if (auto loaded = DocumentIO::Load(path)) {
@@ -402,8 +420,10 @@ void OpenProjectDialog(AppState& state) {
 }
 
 void SaveProjectDialog(AppState& state) {
-  if (!state.document)
+  if (NothingToSave(state)) {
+    LOG_WARN("Save As: there is no document to save");
     return;
+  }
   if (!NativeDialogsSafe())
     return;
   nfdu8char_t* outPath = nullptr;
@@ -570,8 +590,10 @@ void ExportBomDialog(AppState&) {
 #endif
 
 void SaveProjectAction(AppState& state) {
-  if (!state.document)
+  if (NothingToSave(state)) {
+    LOG_WARN("Save: there is no document to save");
     return;
+  }
   if (state.projectPath.empty()) {
     SaveProjectDialog(state); // first save: pick a home
     return;
