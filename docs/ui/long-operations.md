@@ -146,6 +146,67 @@ That last part shapes the work:
   becomes a smaller change against a smaller problem — measure before building
   both.
 
+## Two things this is NOT, and the escape hatch it needs
+
+Asked directly whether a job registry is the right shape at all, or whether the
+render thread should be separated instead. Both worth answering here, because
+the answers bound what this plan is.
+
+### A render thread would not fix any of this
+
+The five jobs are TASK parallelism; a render thread is frame-loop structure.
+None of the measured stalls — 7 s adaptive pocket, 5.9 s resync, 259 s open —
+is present-bound, so separating render fixes none of them.
+
+With an immediate-mode UI it would be actively worse. ImGui rebuilds the
+interface every frame from `AppState` on the main thread, so during a 7 s
+generate a render thread keeps presenting the LAST frame: a smooth,
+responsive-looking window that ignores every click. An honest freeze is better
+than that. And the responsiveness people reach for a render thread to get is
+precisely what moving the work off the main thread gives — for real, not
+cosmetically.
+
+Four more reasons specific to this tree: the renderers read `AppState` and the
+`Document` directly, so threading them means snapshotting their whole input
+surface per frame; the idle throttle already rests at ~10 Hz, which moots most
+of the benefit; Vulkan resource lifetime gets much harder in a codebase that
+has already shipped a device-lost from freeing an in-use buffer; and frame
+timing already says the GPU is not where the time goes.
+
+**One future candidate, and it is not the viewport.** `RenderJob`, the offline
+path tracer, has no thread at all — it slices on the MAIN thread. That is real
+render work stealing main-thread time, and it is the one place a background
+render thread would earn itself. Not now.
+
+**What others do**, for calibration: Blender's `WM_jobs_*` is almost exactly
+the shape below — named job types, progress, cancel, one of a kind at a time —
+with `BLI_task` pools for parallelism inside a job and the UI on one thread.
+FreeCAD is the counterexample: ad-hoc `QThread`/`QtConcurrent` per feature and
+a lot of modal dialogs. Games separate render because they are present-bound
+against a fixed budget; an app that rests at 10 Hz is not.
+
+### Data parallelism is a different mechanism, and is also duplicated
+
+A job is a user-visible operation. How one job uses the cores is a separate
+question, and it already has two hand-rolled answers:
+`AssemblyActions.cpp:1121` (parallel tessellation — half the cores capped at 8,
+with a hard-won note about oversubscribing a mesher that is already internally
+parallel, and about OCC's per-thread signal handler) and `IBL.cpp:114`. Each
+builds and joins its own `std::vector<std::thread>`.
+
+That wants a shared pool eventually. It is **not** this plan, and conflating
+the two is how a job registry turns into a scheduler nobody can reason about.
+Named here so the next person does not solve it by widening `Job`.
+
+### The escape hatch for uninterruptible work
+
+This plan accepts coarse cancel because libarea's `Execute` has no
+interruption points. If that proves unacceptable, the answer is the one IDEs
+use for language servers: run it in a **separate process** and kill it. That is
+genuine cancellation of third-party code that offers none, at the cost of
+serialising the input and output across a pipe. Written down now so it is a
+considered fallback rather than a rediscovery.
+
 ## Out of scope
 
 **Regeneration itself.** `Document::Regenerate` is synchronous on the calling
