@@ -10,6 +10,12 @@
 > clearing and an indexed 4th axis, see
 > [Phase 2](#phase-2--what-v1-deferred-designed). A **cutting simulation**
 > built on C5's height map is BUILT — see [simulation.md](simulation.md).
+> **A setup is no longer part of the part**: since v73 it lives in a JOB
+> document that references parts and says how they are cut, which is what
+> makes a job about more than one of them — see
+> [job-document.md](job-document.md). Everything below still describes the
+> generator, the post and the verifier accurately; only the object that owns
+> a setup moved.
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
 > **4th (rotary) axis** is an addition rather than a redesign. Continuous

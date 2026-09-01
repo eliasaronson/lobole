@@ -22,6 +22,13 @@ said is *"this baffle comes out of a 2440 × 1220 × 18 sheet"*. So a job is
 always framed on one part, and nesting, sheet goods and off-cuts are
 unexpressible.
 
+> **Half of that outlived W3.** Fixed stock (W3, below) said the size, but
+> `stock.place` positioned the sheet AROUND the part, so moving a part
+> dragged the sheet with it — a shrink-wrap wearing a size. A job holding
+> more than one part is what finally made a sheet a real object: once
+> anything is PLACED, fixed stock is anchored at the setup origin and the
+> parts are arranged on it ([job-document.md](job-document.md) J4).
+
 **The work origin is a label, not a number.** `setup.origin` takes its Z from
 the picked top face and is **never subtracted from an emitted coordinate** —
 grep the engine. X and Y are hard `0.0` and nothing can set them. The file is

@@ -140,6 +140,16 @@ the *pick* wrote `rotationA`. The value of doing it explicitly is the test.
 *Gate:* a setup with a rotated frame and no rotary posts **zero** `A` words,
 in both dialects.
 
+> **Still true, and now one of two things a setup says about position.**
+> Since v73 a setup also carries `placements`: where each part sits in the
+> stock, in-plane (a position and a spin about Z). The split holds — `frame`
+> is how a part is CLAMPED, `rotationA` is what the MACHINE does, and a
+> placement is where on the bed — and in-plane is deliberate: anything out of
+> plane is what `frame` already says, and two ways to tilt a part is this
+> document's own lesson. A job whose parts need DIFFERENT fixturing is not
+> yet expressible; that is the per-part frame in
+> [job-document.md](job-document.md), which is not built.
+
 ### S4 — many setups, one part (~1 session)
 
 `Document` already holds `std::vector<cam::Setup>` with add/find/remove

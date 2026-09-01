@@ -1,6 +1,8 @@
 # The job is not part of the part (J1–J9)
 
-> Status: **PLANNED 2026-09-01.** Nothing built. Supersedes the implicit
+> Status: **J1–J6 SHIPPED 2026-09-01/02** (formats v73, v74, v75) — see
+> [As built](#as-built), which also lists what did NOT ship, including the
+> per-part fixturing frame this plan argued hardest for. Supersedes the implicit
 > assumption in [plan.md](plan.md) that a `cam::Setup` belongs to the part it
 > cuts. Surveyed against FreeCAD CAM and the two slicers in
 > `~/Documents/CAD` on 2026-09-01 — see [What the survey
@@ -375,4 +377,69 @@ ships first.
 
 ## As built
 
-_(nothing yet)_
+**J1–J6 SHIPPED 2026-09-01/02** (v73, v74, v75). J7 and J8 landed inside the
+phases that needed them rather than as steps of their own; J9 is this
+section and the notes in plan.md, stock-and-origin.md and setup-frame.md.
+
+| | what shipped | where |
+|---|---|---|
+| J1+J2 | `cam::JobDocument`, `DocKind::Job`, the tab, `jobs/<name>/index.json`, and `ui::JobBodies` standing where `document->GetBodies()` stood at 32 call sites | v73 |
+| J3 | N parts per job, `cam::Target{jobPartId, ref}`, `Placement{pos, rotZdeg, enabled}`, placement composed in `BodiesInSetupFrame` | v74 |
+| J4 | a laid-out fixed sheet anchored at the setup origin; `cam::Fit` in three states + overlap, `check_layout`, refusal at the post | — |
+| J5 | `OrderOutputBy{Authored, Tool, Part}`, applied in `GenerateAll` | v75 |
+| J6 | `machine_part` and the CAM button; the Parts panel section; a job tab that draws its parts laid out | — |
+
+### What the gates caught, and it was most of the interesting bugs
+
+Every one of these was invisible from the outside and named by a test that
+already existed:
+
+- **`rpc_gate_smoke`** — all twelve `cam_*` RPCs were part-gated, and `doc`
+  is null on a job tab by definition. Exactly the trap RemoteServer.cpp
+  documents: the gate is a list kept apart from the handlers.
+- **`rpc_params_gate`** — `set_cam_setup` grew `order` and its describe row
+  did not.
+- **`test_conventions`** — the placement drag bypassed `ui::ExprInput`, so it
+  would have read "10/2" as 10.
+- **The GUI suite, shuffled** — twice. A CAM tool window left open with no
+  job covered the viewport and ate a later test's clicks; and dropping a
+  leftover job tab AFTER resetting the camera let the tab switch re-fit it,
+  so a sketch trim two tests later previewed the wrong span, perfectly.
+
+The tool that answers "is this a flake or an order dependence" was itself
+broken — the archived `reproduce.sh` wrote a literal `\n` and ran without
+xvfb, so it printed the app's help and exited 0, which reads as "the flake
+went away". Fixed first, and it paid for itself twice within the hour.
+
+### Design decisions that changed on contact
+
+**The stock had to stop following the part.** J4 was written as "relative
+stock spans every placed part", which was already true. The real blocker was
+that `stock.place` positions a fixed sheet AROUND the part, so a placement
+just dragged the sheet along and nothing could ever be off the edge. A
+laid-out sheet is anchored at the setup origin now; Z keeps the `place`
+derivation, because thickness is a fact about the board.
+
+**Instances are held but not cut.** The model takes several placements per
+part, the way every slicer does. The generator resolves a region to the
+first body that answers, so the second copy would be silently skipped —
+`cam::PlacementRefusal` says so instead. Wiring the generator to cut repeats
+is the obvious next piece.
+
+### Not built
+
+- **Per-part fixturing.** The plan argued hardest for moving `frame` from the
+  Setup to the Placement, and it is the one decision that did not ship.
+  `frame` is still per-setup, so a job whose parts need to be clamped
+  DIFFERENTLY — a speaker cabinet's baffle, sides and back, each modelled in
+  its assembly orientation and all cut from one sheet — still needs a setup
+  each. The argument stands and the seam is ready (a placement already
+  carries the in-plane half); it is a day's work and a version bump.
+- **`split_output`**, one file per group. The ordering is what makes it
+  meaningful and the ordering is in.
+- **Dragging a placement in the viewport.** Numbers in the panel today; the
+  assembly occurrence gizmo (A2.5) is the thing to reuse.
+- **Staleness per part in the GUI.** `list_job_parts` reports a missing
+  source and the panel says so; a source that has merely MOVED ON is not
+  reported yet, which is the `DrawingSourceVersion` half of the contract.
+- **Auto-arrange**, and everything else in [Not this](#not-this).
