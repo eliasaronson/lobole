@@ -493,9 +493,13 @@ expensive to discover with twenty.
   the standard's own numbers — head diameter, head height, socket size, thread
   length — because the vendored row IS the specification. This is the check
   that matters; the geometry is a means to it.
-- **Mass, in real numbers.** An M6x20 steel socket cap screw is about 4.5 g.
-  A test that asserts it catches a unit error, a wrong density and a
-  half-scale profile at once.
+- **Mass, in real numbers** — and the figure this line first carried, "about
+  4.5 g", was WRONG, which is why the gate is analytic instead. A generated
+  steel M6x20 is 7.6 g: a cosmetic thread is a full-diameter shank, so the
+  model is an upper bound on a catalogue's ~6 g. The test checks the volume
+  against head + shank − socket computed from the table's own numbers, so it
+  still catches a unit error, a wrong density and a half-scale profile —
+  without pinning a remembered mass that was never right.
 - **Refusals**: unknown size, unknown standard, unknown drive, and a fastener
   on a part tab — each naming what is accepted (`rpc_gate_smoke`,
   `strict_inputs_smoke`).
@@ -503,11 +507,12 @@ expensive to discover with twenty.
 - **Staleness**: a fastener whose stack has changed reports it rather than
   silently keeping its old length — `check_fasteners`, gated in
   `test_actions.cpp` by moving a plate out from under a placed joint.
-- Format bump + golden + the format.md history row, per policy. v69 for the
-  feature, v70 for the seven standards and the callout. The corpus holds no
-  drawing documents, so the new dim kind is gated by `test_drawing.cpp`
-  instead of by a golden — said here rather than left as a gap someone has to
-  rediscover.
+- Format bump + golden + the format.md history row, per policy. Four of them
+  in the end: v69 the feature, v70 the seven standards and the callout, v71 a
+  hole recording what it is for, v72 an occurrence riding on another. The
+  corpus holds no drawing documents, so the `fastener_callout` dim kind is
+  gated by `test_drawing.cpp` instead of by a golden — said here rather than
+  left as a gap someone has to rediscover.
 
 ## Follow-ups
 

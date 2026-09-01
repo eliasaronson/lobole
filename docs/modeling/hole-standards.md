@@ -127,13 +127,13 @@ of this sitting there:
 | the Apache NOTICE + `THIRD_PARTY.md` entry | **done** |
 | the size -> diameter lookup | **done** — `parts::Dimensions("clearance_hole_sizes", "M6")` |
 | the diameter -> size lookup | **done** — `parts::ThreadForClearance`, and it refuses a diameter matching nothing rather than snapping to the nearest |
-| `tap_hole_sizes.csv`, `drill_sizes.csv` | not vendored — F1 had no use for them |
-| an optional `fit` field on `HoleFeature` | not built |
-| format bump + golden | not done |
-| the hole dialog's size dropdown | not built |
+| `tap_hole_sizes.csv` | **done** — metric rows; `drill_sizes.csv` turned out unnecessary (see above) |
+| an optional `fit` field on `HoleFeature` | **done** — derived in `Execute`, so it survives undo, reload and configuration overrides |
+| format bump + golden | **done** — v71, with the golden's volume computed analytically |
+| the hole dialog's size dropdown | **done** — plus a Fit picker, and the diameter row goes read-only under one |
 
-So what is left is the part that was always the point: **the hole recording
-what it is for**, rather than the lookup that feeds it.
+So the part that was always the point — **the hole recording what it is
+for** — is what shipped; the lookup that feeds it was already there.
 
 ## What it unlocked in F1
 
@@ -153,13 +153,11 @@ before:
 A blind clearance hole and a blind tapped hole are identical to a traversal —
 same axis, same depth — so nothing but the hole could tell them apart.
 
-Still waiting, and unchanged by this:
-
-- **A countersunk screw still cannot be fitted to a picked rim.** `fit_fastener`
-  refuses `iso10642` outright, because the rim you would pick on a plain bore
-  is the bore's — the countersink is not modelled, so the head would end up
-  inside solid material. A hole that carried its countersink would make this a
-  normal case instead of a refusal.
-  (`hole_kind: countersink` records the geometry, but nothing says the
-  countersink is FOR the screw's head; that is a second question this did not
-  answer.)
+**And the countersunk refusal went too**, later the same day
+([../parts/f1-loose-ends.md](../parts/f1-loose-ends.md)). `fit_fastener`
+refused `iso10642` outright because "the rim you pick is a plain bore's"; with
+a recorded thread, and `FindHoleForRef` already matching a picked circle
+against the COUNTERSINK radius as well as the bore, all three questions it was
+standing in for became answerable — is the hole countersunk, is this the
+countersink's rim or the bore's, and is the countersink deep enough for the
+head.
