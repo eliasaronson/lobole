@@ -271,6 +271,10 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
 // product, not a by-product — a gap in the stack is either an unmodelled
 // gasket or a defect, and printing "Plate 12.0, gap 3.0, Bracket 26.5" is what
 // makes the second kind visible (docs/parts/plan.md, phase 3).
+// PlannedPart is declared in AppState.h: the tool's own state holds a plan
+// (it is what the ghost draws), and AppState.h is the header this one
+// includes rather than the other way round.
+
 struct FastenerFit {
   bool ok = false;
   std::string why;         // when !ok, decision-complete
@@ -286,6 +290,10 @@ struct FastenerFit {
   // it did not hear about.
   std::vector<uint64_t> placed;
   std::vector<std::string> parts; // their designations, in the same order
+  // What Place WOULD do, filled on a dry run as well as a real one: screw
+  // first, then the washers, then the nut. The commit path walks this rather
+  // than recomputing the same arithmetic a second time.
+  std::vector<PlannedPart> plan;
 };
 
 // What to put on the axis (docs/parts/plan.md, phase 4).

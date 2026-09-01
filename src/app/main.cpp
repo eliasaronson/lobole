@@ -41,6 +41,7 @@
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/CamPlayback.h"
+#include "ui/FastenerTool.h"
 #include "ui/ImportJob.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
@@ -1499,6 +1500,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
     ui::SyncFieldRenderer(g_App);
     ui::TickCamPlayback(g_App, now);
     ui::SyncCamPlayback(g_App);
+    // Per frame on purpose: the resyncs are version-gated and
+    // picking a rim or ticking a washer bumps no version.
+    ui::SyncFastenerGhost(g_App);
     ui::SyncSelectionHighlights(g_App);
     if (g_ShadowRenderer && g_MeshRenderer &&
         g_ShadowRenderer->SetResolution((uint32_t)g_App.shadowMapSize)) {
@@ -2289,6 +2293,9 @@ int main(int argc, char** argv) {
     ui::SyncFieldRenderer(g_App);
     ui::TickCamPlayback(g_App, glfwGetTime());
     ui::SyncCamPlayback(g_App);
+    // Per frame on purpose: the resyncs are version-gated and
+    // picking a rim or ticking a washer bumps no version.
+    ui::SyncFastenerGhost(g_App);
 
     // S3 render-quality settings (View > Render Quality / set_render_options
     // RPC): recreate the GPU targets when they change. Both helpers wait for

@@ -1,6 +1,6 @@
 # Seeing the fastener before you place it — plan (F1 p7)
 
-> Status: **planned, not built.** Written 2026-09-01 from use: *"different ISO
+> Status: **BUILT 2026-09-01**, all four phases. Written 2026-09-01 from use: *"different ISO
 > standards does not tell me much"*, with a screenshot of four buttons reading
 > ISO 4762 / ISO 14579 / ISO 4017 / ISO 7380 and nothing else. Every mechanism
 > named below was checked against the source.
@@ -108,6 +108,25 @@ outright: *"Cheap and idempotent — call it every frame."* One
 Phase 2 is worth doing even if 3 is dropped: it makes `fit_fastener`'s
 `dry_run` complete, and an agent asking "what would this do" currently gets an
 answer missing the position.
+
+## What building it corrected
+
+- **`render_still` cannot see it, and that is correct.** The first attempt to
+  eyeball the ghost used `render_still` and came back with the plate and no
+  screw, which looked like the preview failing to render. It is the OFFLINE
+  RAYTRACER: it draws the model, not the raster overlays. `screenshot` (the
+  viewport grab) is the tool for anything living in the raster passes —
+  ghosts, highlights, the backplot.
+- **The first tint was wrong, and only looking showed it.** A near-neutral
+  grey-blue at alpha 0.45 — roughly what steel is — read as washed-out
+  geometry against a white plate rather than as a preview. It is now
+  distinctly blue, like the topology shape-guide ghost. The instance-count
+  test passed either way; the house rule about actually looking at renders is
+  what caught it.
+- **A tab switch disarms the pick but leaves the session open.**
+  `SetActivePart` cancels pending work and clears `slotPick`, so coming back
+  to the assembly tab gives a tool window with nothing armed. Harmless — the
+  Pick rim button re-arms — but it cost a confused debugging pass.
 
 ## Out of scope
 

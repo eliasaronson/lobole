@@ -986,8 +986,28 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK_STR_EQ(s_App->fastenerTool.standard.c_str(), "iso7380");
 
+    // The GHOST: a translucent joint in the hole BEFORE anything is placed,
+    // because "ISO 7380" says nothing about what you are getting. Its count
+    // tracks what is TICKED, which is the assertion that catches a preview
+    // showing a bare screw while the checkboxes promise washers and a nut.
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->fastenerTool.plan.size(), (size_t)2); // screw + nut
+    IM_CHECK_EQ(s_App->fastenerGhostInstances.size(),
+                s_App->fastenerTool.plan.size());
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_washer_head");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->fastenerTool.plan.size(), (size_t)3);
+    IM_CHECK_EQ(s_App->fastenerGhostInstances.size(), (size_t)3);
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_washer_head");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->fastenerGhostInstances.size(), (size_t)2);
+
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_place");
     ctx->Yield(4);
+    // Placing clears the pick and re-arms, so the preview goes with it —
+    // a ghost still hanging in the hole next to the real screw would read
+    // as a double-placement.
+    IM_CHECK(s_App->fastenerGhostInstances.empty());
     // The screw and its nut, and the session is STILL OPEN with the rim
     // cleared and the pick re-armed: holes come in patterns.
     IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), before + 2);
@@ -998,6 +1018,10 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_done");
     ctx->Yield(2);
     IM_CHECK(!s_App->fastenerTool.open);
+    // And it goes when the session does — a ghost that outlives its tool
+    // haunts whatever document you switch to next.
+    ctx->Yield(2);
+    IM_CHECK(s_App->fastenerGhostInstances.empty());
 
     // And the other half: a stack that moved under a placed screw has to be
     // ASKED about, because deriving a length from other documents' geometry

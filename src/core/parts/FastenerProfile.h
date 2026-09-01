@@ -70,6 +70,15 @@ struct Profile {
 
 [[nodiscard]] const std::vector<Profile>& AllProfiles();
 
+// A few words for what the thing IS, derived from the head and the drive
+// rather than written out again: "socket cap, hex key", "hex head, spanner".
+//
+// Because a catalogue number is not a description. The tool asks one question
+// — which standard — and answered it with ISO 4762 / ISO 14579 / ISO 4017 /
+// ISO 7380, which says nothing about the only thing the choice is about. The
+// long form is `what`; this is the short form a button can carry.
+[[nodiscard]] std::string ShortDescription(const Profile& profile);
+
 [[nodiscard]] std::string DriveName(Drive drive);
 [[nodiscard]] std::optional<Drive> DriveFromName(const std::string& name);
 

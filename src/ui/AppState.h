@@ -698,6 +698,24 @@ struct PartSlot {
 // features/occurrences/mates by id, geometry by stable element name — never
 // by mesh/face index (mesh ids change on every regen). Renderer highlights
 // are a per-frame projection of this set, not parallel state.
+// One piece of a fastener joint and where it goes (docs/parts/preview-plan.md).
+//
+// Here rather than in AssemblyActions.h — which is where it belongs by
+// subject — because the TOOL's own state holds a plan and the ghost draws it,
+// and AssemblyActions.h includes this header rather than the reverse.
+//
+// The fit worked all of this out and then used it only at commit time, so a
+// dry run reported the SPEC but not the PLACEMENT: an answer missing the half
+// a preview needs, and a slightly dishonest one for an agent asking "what
+// would this do".
+struct PlannedPart {
+  std::string standard; // "iso4762", "iso7089", "iso4032"
+  std::string size;     // "M12"
+  double length = 0.0;  // 0 for a nut or a washer
+  glm::vec3 position{0.0f};
+  glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct SelectionItem {
   enum class Kind : uint8_t {
     Face,
@@ -1179,7 +1197,16 @@ struct AppState {
     std::string summary;
     std::string why;
     int placed = 0; // how many this session has put in, for the tally
+    // What Place would put where, from the last dry run. Drives the ghost.
+    std::vector<PlannedPart> plan;
   } fastenerTool;
+
+  // The translucent preview of the joint about to be placed, and the key it
+  // was built from. Tracked APART from documentMeshes, like topoGhostInstance
+  // — a ghost left in that list survives a tab switch and haunts a document
+  // that cannot explain it.
+  std::vector<uint32_t> fastenerGhostInstances;
+  std::string fastenerGhostKey;
 
   // The last "Check fasteners" answer, as the panel shows it (F1 p6 phase 4).
   // Kept here rather than in a static local inside the draw function: a

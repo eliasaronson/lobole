@@ -51,6 +51,33 @@ std::string KnownStandards() {
   return out;
 }
 
+std::string ShortDescription(const Profile& profile) {
+  const char* head = "";
+  switch (profile.head) {
+  case Head::SocketCap:
+    head = "socket cap";
+    break;
+  case Head::HexHead:
+    head = "hex head";
+    break;
+  case Head::Countersunk:
+    head = "countersunk";
+    break;
+  case Head::Button:
+    head = "button head";
+    break;
+  case Head::None:
+    return profile.what; // a nut or a washer has no head to describe
+  }
+  // What you turn it with, which is the other half of the choice — and the
+  // half a catalogue number hides completely. "spanner" rather than "none":
+  // an external hex is not the absence of a drive.
+  const char* turned = profile.drive == Drive::Hex    ? "hex key"
+                       : profile.drive == Drive::Torx ? "torx"
+                                                      : "spanner";
+  return std::string(head) + ", " + turned;
+}
+
 std::string DriveName(Drive drive) {
   switch (drive) {
   case Drive::Hex:

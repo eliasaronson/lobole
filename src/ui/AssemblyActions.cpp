@@ -2310,48 +2310,48 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     head << ", nut " << nutHeight;
   fit.summary = head.str();
 
-  if (request.dryRun) {
-    fit.ok = true;
-    return fit;
-  }
-
-  // Placement. Every fastener is built with its bearing face on z = 0 and its
-  // body below, so all four of these are the same two questions: where is the
+  // WHERE each piece goes, worked out whether or not anything is placed.
+  // Every fastener is built with its bearing face on z = 0 and its body
+  // below, so all four of these are the same two questions: where is the
   // face, and which way is "away from the material".
   const glm::vec3 into = -axis;          // down the hole
   const glm::quat down = AlignZTo(into); // head end: body points back out
   const glm::quat up = AlignZTo(axis); // far end: body points out the far side
   const glm::vec3 exit = centre + into * static_cast<float>(LastExit(stack));
 
-  const auto place = [&](const std::string& standard, double partLength,
-                         const glm::vec3& at,
-                         const glm::quat& orientation) -> bool {
-    // The drive is the SCREW's: a washer has no recess, and handing it one
-    // would be refused by the standard that does not have it.
-    const bool isScrew = standard == request.standard;
-    const uint64_t id = AddFastener(state, standard, fit.size, partLength,
-                                    isScrew ? request.drive : std::string{}, at,
-                                    orientation, &fit.why);
+  fit.plan.push_back({request.standard, fit.size, fit.length,
+                      centre - into * static_cast<float>(underHead), down});
+  if (underHead > 0.0)
+    fit.plan.push_back({request.washer, fit.size, 0.0, centre, down});
+  if (underNut > 0.0)
+    fit.plan.push_back({request.washer, fit.size, 0.0, exit, up});
+  if (!request.nut.empty())
+    fit.plan.push_back({request.nut, fit.size, 0.0,
+                        exit + axis * static_cast<float>(-underNut), up});
+
+  if (request.dryRun) {
+    fit.ok = true;
+    return fit;
+  }
+
+  // The commit just walks the plan. It used to recompute the same arithmetic
+  // a second time, which is how a preview and a placement come to disagree.
+  for (size_t i = 0; i < fit.plan.size(); i++) {
+    const PlannedPart& part = fit.plan[i];
+    // The drive is the SCREW's — it is first — because a washer has no recess
+    // and handing it one is refused by the standard that does not have it.
+    const uint64_t id =
+        AddFastener(state, part.standard, part.size, part.length,
+                    i == 0 ? request.drive : std::string{}, part.position,
+                    part.orientation, &fit.why);
     if (id == 0)
-      return false;
+      return fail(fit.why);
     fit.placed.push_back(id);
     for (const Occurrence& o : state.assembly->GetOccurrences())
       if (o.id == id)
         fit.parts.push_back(o.name);
-    return true;
-  };
-
-  if (!place(request.standard, fit.length,
-             centre - into * static_cast<float>(underHead), down))
-    return fail(fit.why);
+  }
   fit.occurrence = fit.placed.front();
-  if (underHead > 0.0 && !place(request.washer, 0.0, centre, down))
-    return fail(fit.why);
-  if (underNut > 0.0 && !place(request.washer, 0.0, exit, up))
-    return fail(fit.why);
-  if (!request.nut.empty() &&
-      !place(request.nut, 0.0, exit + axis * static_cast<float>(-underNut), up))
-    return fail(fit.why);
 
   fit.ok = true;
   return fit;

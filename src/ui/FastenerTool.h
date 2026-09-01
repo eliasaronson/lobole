@@ -38,4 +38,15 @@ void RefreshFastenerFit(AppState& state);
 
 void DrawFastenerToolWindow(AppState& state);
 
+// The translucent joint about to be placed, pushed at the renderer.
+//
+// **Called every frame**, and that is the point rather than an accident. The
+// document and assembly resyncs are VERSION-GATED, and what this preview
+// depends on — a rim picked, a checkbox toggled, a standard chosen — bumps no
+// version at all. Hung inside a resync the ghost would appear only when
+// something else happened to change, which reads as a flaky preview rather
+// than as a misplaced call. So it follows SyncCamPlayback: cheap, idempotent,
+// per frame, and it rebuilds only when the plan it is drawing changes.
+void SyncFastenerGhost(AppState& state);
+
 } // namespace ui

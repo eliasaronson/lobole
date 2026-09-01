@@ -1,11 +1,17 @@
 #include "ui/FastenerTool.h"
 
+#include "cad/CADMeshConverter.h"
+#include "core/Document.h"
+#include "core/features/FastenerFeature.h"
 #include "core/parts/FastenerProfile.h"
+#include "render/MeshRenderer.h"
 #include "ui/AssemblyActions.h"
 #include "ui/FeatureEditor.h"  // PickSlot, kFastenerToolSlot
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame
 
 #include "imgui.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace ui {
 
@@ -58,6 +64,7 @@ void OpenFastenerTool(AppState& state) {
 
 void CloseFastenerTool(AppState& state) {
   state.fastenerTool.open = false;
+  state.fastenerTool.plan.clear(); // SyncFastenerGhost drops the instances
   if (state.slotPick.featureId == kFastenerToolSlot)
     state.slotPick = {};
 }
@@ -67,6 +74,7 @@ void RefreshFastenerFit(AppState& state) {
   tool.ok = false;
   tool.summary.clear();
   tool.why.clear();
+  tool.plan.clear();
   if (!tool.rimElement.IsSet())
     return;
   const FastenerFit fit =
@@ -75,6 +83,7 @@ void RefreshFastenerFit(AppState& state) {
   tool.ok = fit.ok;
   tool.summary = fit.summary;
   tool.why = fit.why;
+  tool.plan = fit.plan;
 }
 
 void FastenerRimPicked(AppState& state, const SelectionItem& item) {
@@ -89,6 +98,80 @@ void FastenerRimPicked(AppState& state, const SelectionItem& item) {
   state.fastenerTool.rimElement = item.element;
   state.slotPick = {}; // filled; the window now offers Place
   RefreshFastenerFit(state);
+}
+
+namespace {
+
+// What the ghost is currently drawing, as a string. Compared rather than
+// diffed: four parts is not worth a smarter reconciliation, and a key that
+// covers every input means no drift is possible.
+std::string GhostKey(const std::vector<PlannedPart>& plan) {
+  std::string key;
+  for (const PlannedPart& p : plan) {
+    key += p.standard + "/" + p.size + "/" + std::to_string(p.length) + "@";
+    key += std::to_string(p.position.x) + "," + std::to_string(p.position.y) +
+           "," + std::to_string(p.position.z) + ";";
+    key += std::to_string(p.orientation.w) + "," +
+           std::to_string(p.orientation.x) + "," +
+           std::to_string(p.orientation.y) + "," +
+           std::to_string(p.orientation.z) + "|";
+  }
+  return key;
+}
+
+void ClearFastenerGhost(AppState& state) {
+  if (state.meshRenderer)
+    for (const uint32_t id : state.fastenerGhostInstances)
+      state.meshRenderer->RemoveInstance(id);
+  state.fastenerGhostInstances.clear();
+  state.fastenerGhostKey.clear();
+}
+
+} // namespace
+
+void SyncFastenerGhost(AppState& state) {
+  const AppState::FastenerTool& tool = state.fastenerTool;
+  const bool wanted =
+      tool.open && tool.ok && !tool.plan.empty() && state.meshRenderer;
+  if (!wanted) {
+    if (!state.fastenerGhostInstances.empty())
+      ClearFastenerGhost(state);
+    return;
+  }
+  const std::string key = GhostKey(tool.plan);
+  if (key == state.fastenerGhostKey)
+    return; // nothing moved; the every-frame path does nothing, as designed
+  ClearFastenerGhost(state);
+
+  // The same probe AddFastener uses to let the table refuse before a tab
+  // exists: build the feature in a scratch document and read its body.
+  // Distinctly BLUE, like the topology shape-guide ghost, rather than the
+  // grey-blue a steel screw nearly is. Looked at against a white plate the
+  // near-neutral tint read as washed-out geometry rather than as a preview,
+  // which is the one thing a preview must not do.
+  const glm::vec3 kGhostTint(0.35f, 0.62f, 1.0f);
+  for (const PlannedPart& part : tool.plan) {
+    Document scratch;
+    scratch.AddFeature(std::make_unique<FastenerFeature>(
+        "", part.standard, part.size, part.length));
+    if (scratch.GetBodies().empty())
+      continue; // the fit already reported why; a ghost does not re-refuse
+    const CADShape::Mesh mesh =
+        scratch.GetBodies().front().shape.GenerateMesh(0.1);
+    if (mesh.vertices.empty())
+      continue;
+    const uint32_t asset = state.meshRenderer->CreateAsset(
+        CADMeshConverter::ConvertCADMeshToVertices(mesh), mesh.indices);
+    if (asset == 0)
+      continue;
+    const glm::mat4 xf = glm::translate(glm::mat4(1.0f), part.position) *
+                         glm::mat4_cast(part.orientation);
+    const uint32_t id = state.meshRenderer->AddInstance(asset, xf);
+    state.meshRenderer->SetInstanceColor(id, kGhostTint);
+    state.meshRenderer->SetInstanceGhost(id, 0.55f); // after colour: sets alpha
+    state.fastenerGhostInstances.push_back(id);
+  }
+  state.fastenerGhostKey = key;
 }
 
 void DrawFastenerToolWindow(AppState& state) {
@@ -128,19 +211,22 @@ void DrawFastenerToolWindow(AppState& state) {
   // in the CAM work-origin work. One stable id per standard.
   bool changed = false;
   const std::vector<const parts::Profile*> standards = OfferedStandards();
-  for (size_t i = 0; i < standards.size(); i++) {
-    if (i % 2 != 0)
-      ImGui::SameLine();
-    const parts::Profile& p = *standards[i];
+  for (const parts::Profile* profile : standards) {
+    const parts::Profile& p = *profile;
     const bool active = tool.standard == p.name;
     ImGui::BeginDisabled(active);
-    const std::string id = p.designation + "###fastener_std_" + p.name;
-    if (ImGui::Button(id.c_str())) {
+    // The DESIGNATION and what it is, on one full-width row each. Four
+    // buttons reading ISO 4762 / ISO 14579 / ISO 4017 / ISO 7380 said nothing
+    // about the only thing the choice decides — reported from use — and the
+    // words were already in the profile table, reachable only by hovering.
+    const std::string id = p.designation + ":  " + parts::ShortDescription(p) +
+                           "###fastener_std_" + p.name;
+    if (ImGui::Button(id.c_str(), ImVec2(-FLT_MIN, 0.0f))) {
       tool.standard = p.name;
       changed = true;
     }
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered())
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
       ImGui::SetTooltip("%s", p.what.c_str());
   }
 
