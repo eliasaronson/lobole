@@ -334,8 +334,7 @@ void DrawFastenerToolWindow(AppState& state) {
                           RequestOf(tool, /*dryRun=*/false));
     if (fit.ok) {
       tool.placed++;
-      if (fit.mate != 0)
-        tool.joined++;
+      tool.joined += static_cast<int>(fit.mates.size());
       // Straight back to picking. A flange of eight bolts is eight clicks,
       // not eight trips to the toolbar — and the options carry over, because
       // the next hole in a pattern takes the same screw.

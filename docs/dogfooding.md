@@ -17,6 +17,70 @@ one was hands-on GUI, and the dock round mixed both. That mix matters: the GUI
 and the scripting interface fail in different places, and only the dock round
 (where the same model was built both ways) surfaced the ones that need both.
 
+## 2026-09-01 — alternator casing (the far-end pick, and what a bolt is for)
+
+Source: `scratch/build_alternator.py` — four rings (slip-ring-end housing,
+stator, drive-end housing, and the cast rib behind the flange), three M8
+through-bolts on a Ø104 circle, built and bolted entirely over the RPC
+against a headless instance. Chosen because it is the object the second pick
+exists for: **the bolt-circle axis carries straight on into the rib**, which
+the bolts do not clamp and must not be sized to span. Sized to the whole
+axis a bolt here is 95 mm, and nobody makes an M8 that long.
+
+### The second pick worked, and then earned three fixes
+
+The derivation was already right — one pick derives, a second truncates —
+and the summary says what it stopped short of:
+
+    M8x65 — grip 65: washer 1.6, SRE housing 15, Stator 25, DE housing 15,
+                     washer 1.6, nut 6.8; the axis carries on into DE rib
+
+What the model found that a two-plate fixture could not:
+
+- **`check_fasteners` cried wolf on three correct bolts.** It re-derived the
+  UNTRUNCATED stack and called each one 21.6 mm short, because the axis runs
+  into the rib. A joint ends at its NUT — that is what a nut is — and the
+  nut's own placement says where, so the check needed nothing stored to
+  respect a far-end override. **A check that fires on a correct model is
+  worse than no check.**
+- **That rule then swallowed a real fault**, found by the test suite rather
+  than the model: move a plate out from under its hardware and the screw
+  still reaches its own nut, so nothing complained. A part that STARTS before
+  the nut and CONTINUES past it has the nut embedded in it; there is no
+  correct model shaped like that, and it is now its own finding.
+- **The nut rode the wrong casting.** "The far end" was read as the last thing
+  on the AXIS, not the last thing the JOINT reaches — so with a second pick in
+  play the nuts attached to the rib, a part they never touch. Silent: they sat
+  in the right place until something moved.
+
+### And the thing the round was not looking for
+
+Three bolts, four rings, and **no mates at all**. The hardware followed its
+parts (that shipped the same day) but the parts were free of each other, so
+the assembly a person would call bolted together was, to the solver, four
+loose rings. Reported from the app in the same session — *"did we not build
+the mate for the fasteners?"*, then *"I also don't see the mates in the mate
+list"* — and this model is what showed the first fix was still wrong: mating
+the two ENDS of a joint leaves **the stator, clamped between two housings and
+joined to neither**, exactly the reported bug one layer in. Mating every
+interface the joint spans gives two mates for three bolts here, chained, no
+loop, and nothing moves when it solves.
+
+### Also confirmed working
+
+The recorded hole fit (`{thread: M8, kind: normal}`) meant every size came
+from a fact rather than from reading Ø9 backwards; `interference` found the
+three nuts 562 mm³ inside the rib apiece, which nothing else did, and the
+spotface that fixes it is in the model because the check insisted; and one
+`Hole` feature over a three-point sketch drilled a whole bolt circle.
+
+### Papercut, unfixed
+
+`add_feature` refuses `cb_depth` on a *simple* hole — correct, and the field
+check is scoped to what the built feature serializes — but the message names
+the field rather than the pair of them, so the fix ("only send cb_* for a
+counterbore") is a guess the first time.
+
 ## 2026-09-01 — bolting the dock
 
 **Why here:** standard parts (F1) shipped built and verified but never USED,

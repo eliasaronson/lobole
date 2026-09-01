@@ -231,8 +231,15 @@ this codebase has already paid for once each.
   own plan: [preview-plan.md](preview-plan.md). The live summary states the
   answer in numbers, which turned out not to be enough when the question is
   which HEAD you are getting.
-- **The second pick that overrides the far end.** Designed in
-  [plan.md](plan.md), unbuilt, and no real model has wanted it yet.
+- ~~**The second pick that overrides the far end.**~~ **BUILT 2026-09-01.** A
+  real model wanted it the day this was written: an alternator casing, where
+  the bolt circle runs on past the flange into a cast rib the through-bolts do
+  not clamp (docs/dogfooding.md). It shipped over the RPC first and had no GUI
+  at all until that was noticed from use — *"did you add a GUI path for the
+  override far end?"* — which is the same shape of gap as a control that is
+  drawn and does nothing, seen from the other side. The row appears under
+  Hole once a rim gives it an axis to mean something on, with a Clear, and a
+  pick off the axis or on the head's side is refused in the window.
 - **Folding hardware in the Occurrences tree.** Two bolted joints put eight
   fastener rows in a ten-row list — real, and a tree change rather than a
   verb change. Its own item.

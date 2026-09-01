@@ -76,14 +76,19 @@ So placing a fastener now ALSO adds one **fastened mate between the two parts
 it clamps** — the part the head bears on to the part the axis leaves last.
 Three things make that cheap rather than the cost the bullets feared:
 
-- **One mate per PAIR, not per bolt.** A second bolt between two parts a first
-  already joined would close a loop, and this solver reports loops as errors
-  rather than solving them. `assembly::MatesConnect` asks whether the two are
-  already connected through the mate graph, and adds nothing when they are.
-  A fifty-bolt dock is not two hundred rows; it is one row per pair of parts
-  that touch. `fit_fastener` returns `mate: 0` to say so, and the tool window
-  tallies *"8 placed, 1 joined"* — the difference being the interesting
-  number.
+- **One mate per INTERFACE, not per bolt.** A joint through three parts is two
+  interfaces, and a second bolt across an interface a first already joined
+  would close a loop, which this solver reports as an error rather than
+  solving. `assembly::MatesConnect` asks whether the two are already connected
+  through the mate graph and adds nothing when they are. A fifty-bolt dock is
+  not two hundred rows; it is one row per pair of parts that touch.
+  `fit_fastener` returns `mate: 0` to say so, and the tool window tallies
+  *"8 placed, 1 joined"* — the difference being the interesting number.
+
+  Mating only the two ENDS of a joint was the first attempt and was the
+  reported bug one layer in: the alternator's stator is clamped between two
+  housings and was joined to neither, so dragging a housing left it behind.
+  Consecutive pairs are a chain, so the fix is still a tree.
 - **The mate MOVES NOTHING.** The bullet above is right that a mate placed by
   frame alignment relocates things — so the DOFs are measured rather than
   assumed. Both connector frames are resolved through the same
@@ -93,13 +98,14 @@ Three things make that cheap rather than the cost the bullets feared:
   person put them, and a mate that "corrects" them breaks the model it was
   meant to record. Gated by a test that solves and compares the full relative
   transform, not just a position.
-- **It anchors on faces the traversal already walked.** The head's bearing
-  plane and the plane the axis leaves last, found by normal and distance along
-  the axis — no new picking, no new geometry, and nothing stored that the
-  fastener did not already know.
+- **It anchors on faces the traversal already walked.** Where the axis LEAVES
+  one part and where it ENTERS the next — the two faces that touch, which is
+  the interface a person would have picked by hand. Found by normal and
+  distance along the axis: no new picking, no new geometry, and nothing stored
+  that the fastener did not already know.
 
-The mate reads as what it is in the list: `Bolted`, fastened, *Bar A's top
-face to Bar B's bottom face*. If a person deletes it, the joint is free again;
+The mate reads as what it is in the list: `Bolted`, fastened, *Bar A's bottom
+face to Bar B's top face*. If a person deletes it, the joint is free again;
 that is the right escape hatch and it costs nothing to have.
 
 ### The proposal: an attachment

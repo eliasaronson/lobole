@@ -110,11 +110,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "behind it would otherwise be sized to span the lot. It truncates rather "
      "than replaces: everything between the two picks is still traversed, so "
      "the washers and the nut are still found. "
-     "Placing also MATES the two parts the bolt clamps (returned as `mate`), "
-     "so dragging one carries the other instead of tearing the joint in half "
-     "— once per pair, since a second bolt between parts already held would "
-     "close a loop the solver reports as over-constrained. `mate` is 0 when "
-     "there was nothing new to join.",
+     "Placing also MATES the parts the bolt clamps (returned as `mates`), so "
+     "dragging one carries the rest instead of tearing the joint in half. One "
+     "per INTERFACE it spans — a bolt through three parts makes two, chained, "
+     "so the one in the middle is held too — and once per interface, since a "
+     "second bolt across one already joined would close a loop the solver "
+     "reports as over-constrained. `mates` is empty when there was nothing "
+     "new to join.",
      "drive, dry_run, far_end, nut, rim, standard, washer, washer_under_head, "
      "washer_under_nut"},
     {"bom",
@@ -224,12 +226,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"summary", fit.summary},
                 {"placed", fit.placed},
                 {"parts", fit.parts},
-                // The joint, not the hardware: the mate that now holds the
-                // two clamped parts to each other. 0 when the pair was
-                // already held — the second bolt through one bracket adds
-                // no second mate, and saying so is how a caller can tell
-                // that from a failure to make one.
-                {"mate", fit.mate}};
+                // The joint, not the hardware: the mates that now hold the
+                // clamped parts to each other, one per interface the bolt
+                // spans. EMPTY when they were already held — the second bolt
+                // through one bracket adds nothing, and saying so is how a
+                // caller tells that from a failure to make one.
+                {"mates", fit.mates}};
   }
   if (m == "add_fastener") {
     glm::vec3 position(0.0f);

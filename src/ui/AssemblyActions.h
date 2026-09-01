@@ -313,11 +313,11 @@ struct FastenerFit {
   // first, then the washers, then the nut. The commit path walks this rather
   // than recomputing the same arithmetic a second time.
   std::vector<PlannedPart> plan;
-  // The mate the joint became, when the fastener clamps two DIFFERENT parts
-  // that nothing already held together. 0 otherwise — including the ordinary
-  // second bolt through a pair the first one already mated, which is not a
-  // failure (docs/parts/f1-loose-ends.md).
-  uint64_t mate = 0;
+  // The mates the joint became: one per INTERFACE it spans that nothing
+  // already held together — two for a bolt through three parts. Empty is the
+  // ordinary case for a second bolt through a stack the first one already
+  // joined, and is not a failure (docs/parts/f1-loose-ends.md).
+  std::vector<uint64_t> mates;
 };
 
 // What to put on the axis (docs/parts/plan.md, phase 4).

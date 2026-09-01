@@ -1131,7 +1131,7 @@ TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
       ui::FitFastenerToHole(state, ui::RimPick{topOcc, topRims[0]}, request);
   INFO(fit.why);
   REQUIRE(fit.ok);
-  REQUIRE(fit.mate != 0);
+  REQUIRE(fit.mates.size() == 1);
   REQUIRE(state.assembly->GetMates().size() == 1);
 
   // Placing a fastener must not MOVE anything. The mate records the pose the
@@ -1175,9 +1175,40 @@ TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
       ui::FitFastenerToHole(state, ui::RimPick{topOcc, topRims[1]}, request);
   INFO(second.why);
   REQUIRE(second.ok);
-  CHECK(second.mate == 0);
+  CHECK(second.mates.empty());
   CHECK(state.assembly->GetMates().size() == 1);
   CHECK(ui::SolveActiveAssembly(state) == 0);
+  // A part clamped in the MIDDLE of the stack is joined too. The alternator's
+  // stator sits between two housings and is bolted to neither, which is the
+  // same report one layer in: mating only the two ENDS of a joint leaves
+  // whatever it clamps between them floating. Consecutive pairs are a chain,
+  // so this is still a tree the solver places rather than a loop it refuses.
+  MakeMultiBorePlate(state, "Middle", 8.0, 6.6, bores);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Sandwich"));
+  const uint64_t s1 = place("Top", glm::vec3(0.0f));
+  const uint64_t s2 = place("Middle", glm::vec3(0.0f, 0.0f, -8.0f));
+  const uint64_t s3 = place("Bottom", glm::vec3(0.0f, 0.0f, -34.0f));
+  const ui::FastenerFit sandwich =
+      ui::FitFastenerToHole(state, ui::RimPick{s1, topRims[0]}, request);
+  INFO(sandwich.why);
+  REQUIRE(sandwich.ok);
+  CHECK(sandwich.mates.size() == 2);             // one per interface
+  CHECK(state.assembly->GetMates().size() == 2); // Top-Middle, Middle-Bottom
+  CHECK(ui::SolveActiveAssembly(state) == 0);
+  const auto sWorld = [&](uint64_t id) {
+    return ui::OccurrenceMatrix(*state.assembly->FindById(id));
+  };
+  const glm::mat4 midWas = glm::inverse(sWorld(s1)) * sWorld(s2);
+  const glm::mat4 lowWas = glm::inverse(sWorld(s1)) * sWorld(s3);
+  state.assembly->FindById(s1)->position += glm::vec3(4.0f, 0.0f, 7.0f);
+  CHECK(ui::SolveActiveAssembly(state) == 0);
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++) {
+      CHECK_THAT((glm::inverse(sWorld(s1)) * sWorld(s2))[c][r],
+                 WithinAbs(midWas[c][r], 1e-3));
+      CHECK_THAT((glm::inverse(sWorld(s1)) * sWorld(s3))[c][r],
+                 WithinAbs(lowWas[c][r], 1e-3));
+    }
 }
 
 TEST_CASE("A placed fastener rides on the part it bears on",

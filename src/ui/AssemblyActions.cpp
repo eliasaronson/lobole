@@ -62,6 +62,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -2188,13 +2189,20 @@ std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
   return best;
 }
 
-// Hold the two parts a fastener clamps to each other: a fastened mate between
-// them, in the pose they are ALREADY in (docs/parts/f1-loose-ends.md).
+// Hold two parts a fastener clamps to each other: a fastened mate across the
+// interface between them, in the pose they are ALREADY in
+// (docs/parts/f1-loose-ends.md).
 //
 // Attaching the hardware to the parts makes the screw follow its plate. It
 // does not make the plates follow each other, so before this a bolted joint
 // tore open the moment either part was dragged — and the Mates list, where a
 // person looks to see what holds an assembly together, stayed empty.
+//
+// `tA` is where the axis LEAVES a and `tB` where it ENTERS b: the two faces
+// that touch, which is the interface a person would have picked by hand. A
+// gap between them is not an error here — it is an unmodelled gasket or a
+// defect, the traversal already says which in the summary, and the mate holds
+// whatever is actually there.
 //
 // The DOFs are MEASURED, never assumed: both connector frames are resolved
 // through the same ConnectorLocalFrame the solver uses, and flip/rotation/
@@ -2203,30 +2211,30 @@ std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
 // are already where the person put them and a mate that "corrects" them is
 // a mate that breaks the model it was meant to record.
 //
-// Returns the mate's id, or 0 if the geometry could not name both faces —
-// no mate is better than a wrong one, and the fastener itself is placed
-// either way.
-uint64_t JoinClampedParts(AppState& state, const assembly::FlatInstance& head,
-                          const assembly::FlatInstance& far,
-                          const glm::vec3& centre, const glm::vec3& axis,
-                          double lastExit) {
+// Returns the mate's id, or 0 if the geometry could not name both faces or
+// the two frames are not square to one axis — no mate is better than a wrong
+// one, and the fastener itself is placed either way.
+uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
+                             double tA, const assembly::FlatInstance& b,
+                             double tB, const glm::vec3& centre,
+                             const glm::vec3& axis) {
   const glm::vec3 into = -axis;
-  const std::optional<ElementRef> headFace =
-      FaceAcrossAxis(head, centre, into, 0.0, axis);
-  const std::optional<ElementRef> farFace =
-      FaceAcrossAxis(far, centre, into, lastExit, into);
-  if (!headFace || !farFace)
+  const std::optional<ElementRef> faceA =
+      FaceAcrossAxis(a, centre, into, tA, into);
+  const std::optional<ElementRef> faceB =
+      FaceAcrossAxis(b, centre, into, tB, axis);
+  if (!faceA || !faceB)
     return 0;
 
   Mate mate;
   mate.type = MateType::Fastened;
   mate.name = "Bolted";
-  mate.a.occurrenceId = head.rootOccurrenceId;
-  mate.a.innerPath = head.innerIds;
-  mate.a.anchor.face = *headFace;
-  mate.b.occurrenceId = far.rootOccurrenceId;
-  mate.b.innerPath = far.innerIds;
-  mate.b.anchor.face = *farFace;
+  mate.a.occurrenceId = a.rootOccurrenceId;
+  mate.a.innerPath = a.innerIds;
+  mate.a.anchor.face = *faceA;
+  mate.b.occurrenceId = b.rootOccurrenceId;
+  mate.b.innerPath = b.innerIds;
+  mate.b.anchor.face = *faceB;
 
   const assembly::PartResolver resolve =
       [&state](uint64_t partId) -> const Document* {
@@ -2677,12 +2685,22 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
       into * static_cast<float>(truncate > 0.0 ? truncate : LastExit(stack));
 
   // Which occurrence each piece rides on. The head end bears on the part the
-  // rim was picked in; the far end on whatever the axis leaves last.
+  // rim was picked in; the far end on the last part the JOINT reaches.
+  //
+  // "The joint", not "the axis": with a second pick the two differ, and the
+  // difference is the whole reason the second pick exists. Measured on the
+  // alternator, where the bolt circle runs on into a cast rib the bolts stop
+  // short of — taking the axis's last segment attached the nut to the RIB,
+  // which is a part it never touches, so the nut followed the wrong casting
+  // and the joint made no mate at all (there is no face on the rib at the
+  // flange's back).
   const uint64_t headOn = chosen->inst->rootOccurrenceId;
+  const double joinEnds =
+      truncate > 0.0 ? truncate : std::numeric_limits<double>::max();
   uint64_t farOn = headOn;
   double farthest = 0.0;
   for (const parts::StackSegment& seg : stack)
-    if (seg.exit > farthest) {
+    if (seg.exit > farthest && seg.exit <= joinEnds + 1e-3) {
       farthest = seg.exit;
       farOn = seg.occurrence;
     }
@@ -2725,25 +2743,55 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
 
   // And the joint itself. Placing the hardware is not the same as holding the
   // parts together: the screw rides its plate, the nut rides the far one, and
-  // until this the two plates were still free of each other — drag one and
-  // the bolt tore in half.
+  // until this the parts were still free of each other — drag one and the
+  // bolt tore in half.
   //
-  // Once per PAIR, not once per bolt. A second bolt between two flanges that
-  // a first already joined closes a loop in the mate graph, and this solver
-  // reports a loop as over-constrained rather than solving it. So three bolts
-  // through one bracket make one mate, and the two that add nothing say so by
-  // adding nothing.
-  if (headOn != farOn &&
-      !assembly::MatesConnect(*state.assembly, headOn, farOn)) {
-    const assembly::FlatInstance* farInst = nullptr;
-    for (const assembly::FlatInstance& inst : flat)
-      if (inst.rootOccurrenceId == farOn && inst.part != nullptr) {
-        farInst = &inst;
-        break;
-      }
-    if (farInst != nullptr)
-      fit.mate = JoinClampedParts(state, *chosen->inst, *farInst, centre, axis,
-                                  truncate > 0.0 ? truncate : LastExit(stack));
+  // Every INTERFACE the joint spans, not just its two ends. Three plates
+  // bolted together are two interfaces, and mating only the outer two leaves
+  // the middle one floating — the alternator's stator, clamped between two
+  // housings and joined to neither, which is the reported bug one layer in.
+  // Consecutive pairs are a chain, so this stays a tree the solver can place.
+  //
+  // Once per PAIR, never once per bolt. A second bolt across an interface a
+  // first already joined would close a loop, and this solver reports a loop
+  // as over-constrained rather than solving it. So three bolts through one
+  // flange add nothing after the first, and say so by adding nothing.
+  {
+    const auto instFor = [&](uint64_t occ) -> const assembly::FlatInstance* {
+      for (const assembly::FlatInstance& inst : flat)
+        if (inst.rootOccurrenceId == occ && inst.part != nullptr)
+          return &inst;
+      return nullptr;
+    };
+    // The parts the joint actually spans, in axis order — hardware excluded
+    // (a washer from an earlier bolt down this same hole is not a part being
+    // clamped) and everything past a second pick's cut left out, because
+    // that is precisely what the second pick said.
+    std::vector<const parts::StackSegment*> spanned;
+    for (const parts::StackSegment& seg : stack) {
+      if (seg.exit > joinEnds + 1e-3)
+        continue;
+      if (SoleFastenerOf(PartDocById(state, seg.partId)) != nullptr)
+        continue;
+      if (!spanned.empty() && spanned.back()->occurrence == seg.occurrence)
+        continue;
+      spanned.push_back(&seg);
+    }
+    for (size_t i = 0; i + 1 < spanned.size(); i++) {
+      const parts::StackSegment& near = *spanned[i];
+      const parts::StackSegment& next = *spanned[i + 1];
+      if (near.occurrence == next.occurrence ||
+          assembly::MatesConnect(*state.assembly, near.occurrence,
+                                 next.occurrence))
+        continue;
+      const assembly::FlatInstance* a = instFor(near.occurrence);
+      const assembly::FlatInstance* b = instFor(next.occurrence);
+      if (a == nullptr || b == nullptr)
+        continue;
+      if (const uint64_t id = JoinAcrossInterface(state, *a, near.exit, *b,
+                                                  next.enter, centre, axis))
+        fit.mates.push_back(id);
+    }
   }
 
   fit.ok = true;
