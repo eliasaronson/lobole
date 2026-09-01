@@ -282,10 +282,18 @@ for c in $(seq 1 "$i"); do
       echo "# ${SEEDLINE:-not shuffled: the order is the filter order}"
       echo "#"
       echo "# Reproduce THIS process — same tests, same order:"
-      echo "cd '$ROOT/build' && ./designer --gui-tests --hidden \\"
+      # A shard runs under xvfb-run, so the reproduction has to as well:
+      # without a display the app prints its help and exits, which reads as
+      # "the bug went away".
+      echo "cd '$ROOT/build' && $XVFB_RUN -a ./designer --gui-tests --hidden \\"
       printf "  --gui-test-filter '%s'" "$(sed -n "${c}p" "$WORK/filters")"
       if [ -n "$SEEDLINE" ]; then
-        printf " \\\n  --gui-test-shuffle %s" \
+        # Two statements, not one printf: `printf " \\\n"` puts a LITERAL
+        # backslash-n in the file (bash leaves \n alone in double quotes, and
+        # printf then renders the pair), so every archived script ever written
+        # ended in an argument the app could not parse.
+        echo " \\"
+        printf "  --gui-test-shuffle %s" \
           "$(echo "$SEEDLINE" | sed -n 's/.*seed[ =]*\([0-9]*\).*/\1/p')"
       fi
       echo
