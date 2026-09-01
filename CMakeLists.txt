@@ -277,6 +277,7 @@ set(core_sources
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/io/GeometryCache.cpp
+    src/core/parts/AxisStack.cpp
     src/core/parts/FastenerTable.cpp
     src/core/io/AtomicWrite.cpp
     src/core/io/Settings.cpp

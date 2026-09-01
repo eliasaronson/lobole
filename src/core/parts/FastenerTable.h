@@ -105,6 +105,26 @@ LengthRange(const std::string& stem, const std::string& size,
 // and take the thread diameter as read, because it is the size's own name.
 [[nodiscard]] std::optional<double> NominalDiameter(const std::string& size);
 
+// Which thread a clearance hole of this diameter is for, and how loose a fit
+// it is: {"M6", "Normal"}. nullopt when no stocked clearance matches.
+//
+// The BACKWARD lookup, and the reason a plain hole is enough to derive a
+// fastener from. A hole drilled 6.6 mm is an M6 normal clearance and the model
+// need not have said so — the same table that would size the hole answers what
+// the hole was for. A diameter matching nothing is refused rather than snapped
+// to the nearest, because "6.5 is nearly M6" is exactly the substitution that
+// puts an M6 screw in a hole somebody drilled for something else.
+[[nodiscard]] std::optional<std::pair<std::string, std::string>>
+ThreadForClearance(double diameter, std::string* error);
+
+// The LONGEST nominal length that is at most `available`, for a blind hole:
+// the screw must not bottom out, so it is bounded from above rather than
+// below. nullopt with a refusal when nothing short enough exists.
+[[nodiscard]] std::optional<double> SnapLengthDown(const std::string& stem,
+                                                   const std::string& size,
+                                                   double available,
+                                                   std::string* error);
+
 // Test seam: point the loader at a directory other than the installed one.
 // Empty restores the default (RuntimePaths::PartsDir()). Clears the cache.
 void SetDataDirForTesting(const std::string& dir);

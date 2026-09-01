@@ -1,8 +1,9 @@
 # Standard parts — plan (F1)
 
-> Status: **phases 1 and 2 SHIPPED 2026-09-01** — the tables and their
-> refusals, then the `Fastener` feature (format v69), the generated
-> part-per-spec and the `add_fastener` RPC. Phases 3-5 planned. Written 2026-09-01 from a survey of the open
+> Status: **phases 1-3 SHIPPED 2026-09-01** — the tables and their refusals,
+> the `Fastener` feature (format v69) placed as an occurrence, and now the
+> derivation: pick a hole's rim and the size and length follow. Phases 4-5
+> (breadth, polish) planned. Written 2026-09-01 from a survey of the open
 > libraries, both of which were cloned to `~/Documents/CAD/parts/` and read
 > rather than judged from their websites. The survey, the source comparison and
 > the interface argument live in
@@ -326,12 +327,39 @@ regen's input surface for.
    cylinder + shank cylinder − hexagonal socket = 970.21 mm³ for an M6x20 —
    rather than against a remembered mass, which is a figure this plan had
    wrong ("about 4.5 g").
-3. **Derive from a hole.** The edge pick, the size lookup (forward and
-   backward), the axis ray and its stack decomposition, length snapping to a
-   stocked size, and the staleness report. GUI verb + the `add_fastener` RPC.
-   The four awkward cases above — gap, blind, misaligned, nowhere — are each a
-   refusal or a reported decomposition, and each wants its own test: they are
-   the reason this phase is bigger than it looks.
+3. **Derive from a hole.** — **SHIPPED.** `parts::TraverseAxis`,
+   `ui::FitFastenerToHole`, the `fit_fastener` RPC (with `dry_run`), and the
+   four cases each gated in `test_actions.cpp`.
+
+   **The design was wrong and the geometry corrected it.** A ray straight down
+   the hole's axis hits NOTHING: the hole is a void, and every plate the screw
+   passes through has one on that line by construction. The material a screw
+   spans is *beside* the hole. So the probe is a bundle of four rays offset
+   just outside the bore wall — four rather than one because a hole near an
+   edge has material on some sides and not others.
+
+   **And then that was not enough either.** The off-axis bundle measures PLATE
+   THICKNESS, which is a different question from what STOPS the screw: it
+   reported a blind hole 8 mm into a 20 mm plate as a 20 mm through joint, and
+   a plate whose hole was 20 mm off the axis as perfectly fine. Both need the
+   on-axis ray the bundle deliberately does not cast. So there are two probes,
+   and the classification falls out of comparing them:
+
+   | on-axis | means |
+   |---|---|
+   | nothing | a through joint; the screw spans the stack |
+   | blocked inside the LAST part, past its face | a blind hole; length snaps DOWN so it cannot bottom out |
+   | blocked AT a part's face | that part has no hole on this axis — a misalignment, refused |
+   | blocked in an EARLIER part | its hole does not go through, refused |
+
+   Distinguishing the last two matters more than it looks: told "the hole is
+   0 mm deep" a person goes looking for a drilling depth, when what is wrong is
+   that two holes do not line up.
+
+   Measured on a real stack: `M6x45 — grip 41: Top 12, gap 3, Bottom 26`. The
+   size is read backwards out of the clearance table (Ø6.6 is an M6 normal),
+   41 mm of grip snaps up to the 45 that ISO 4762 is made in, and the gap is
+   named rather than silently absorbed.
 4. **Breadth.** Nuts and washers, then the remaining head types and drives, one
    vendored file at a time. Each is a profile and a table row — the survey
    measured a socket head cap screw's entire head at seven lines.

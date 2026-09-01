@@ -36,8 +36,10 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/drawing/DrawingDocument.h"
+#include "core/features/BooleanFeature.h"
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -657,4 +659,134 @@ TEST_CASE("A fastener is one part per spec, placed in an assembly",
   INFO(error);
   CHECK(error.find("M6 and M8") != std::string::npos);
   CHECK(state.parts.size() == partsBefore);
+}
+
+namespace {
+
+// A plate with a bore down its Z axis, as its own part slot. `boreDepth` < 0
+// drills through; `boreX` offsets the hole so a stack can be misaligned.
+struct DrilledPlate {
+  uint64_t partId = 0;
+  ElementRef topRim;
+};
+
+DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
+                       double thickness, double boreDia, double boreDepth,
+                       double boreX) {
+  const size_t tab = ui::AddPart(state, name);
+  ui::SetActivePart(state, tab);
+  Document& doc = *state.document;
+  doc.AddFeature(std::make_unique<BoxFeature>(
+      name, glm::vec3(-30.0f, -30.0f, 0.0f), 60.0, 60.0, thickness));
+  const double z0 = boreDepth < 0.0 ? -1.0 : thickness - boreDepth;
+  const double h = boreDepth < 0.0 ? thickness + 2.0 : boreDepth + 0.001;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Bore",
+      glm::vec3(static_cast<float>(boreX), 0.0f, static_cast<float>(z0)),
+      glm::vec3(0, 0, 1), boreDia / 2, h));
+  doc.AddFeature(std::make_unique<BooleanFeature>(
+      "Drill", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+
+  DrilledPlate out;
+  out.partId = state.parts[tab].id;
+  // The rim is the highest circular edge: the one a head would sit on.
+  const Body& body = doc.GetBodies().front();
+  double best = -1e9;
+  // edgeNames, not names: faces and edges have separate index spaces, and
+  // DescribeEdgeAt on a face index is a different edge or none.
+  for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+    const std::optional<Measure::EdgeInfo> edge =
+        Measure::DescribeEdgeAt(body, index);
+    if (!edge || edge->kind != "circle")
+      continue;
+    if (edge->midpoint.z > best) {
+      best = edge->midpoint.z;
+      out.topRim = ElementRef{body.createdBy, mapped};
+    }
+  }
+  return out;
+}
+
+} // namespace
+
+TEST_CASE(
+    "A fastener derives its size and length from the hole it is picked in",
+    "[actions][parts]") {
+  // Phase 3 of docs/parts/plan.md, and the four cases that decide whether
+  // "derive from the hole" is a real interface or a demo. Each is a finding
+  // rather than an obstacle: what the geometry cannot disambiguate gets
+  // reported, and what it can rules a fastener out gets refused by name.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
+  MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
+  const DrilledPlate blind = MakePlate(state, "Blind", 20.0, 6.6, 8.0, 0.0);
+  const DrilledPlate off = MakePlate(state, "Off", 10.0, 6.6, -1.0, 0.0);
+  MakePlate(state, "Skew", 10.0, 6.6, -1.0, 20.0);
+
+  const auto place = [&](const char* part, glm::vec3 at) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    state.assembly->AddOccurrence(occ);
+  };
+
+  // 1. Two plates with a 3 mm gap. The gap is SPANNED and named: it is either
+  //    an unmodelled gasket or two parts that were meant to touch, and the
+  //    geometry cannot tell those apart — so the summary says so and the
+  //    length covers it.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Gap"));
+  place("Top", glm::vec3(0.0f, 0.0f, 3.0f));
+  place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, top.topRim, "iso4762def", "hex", true);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  CHECK(fit.size == "M6"); // read back out of the clearance table
+  CHECK(fit.clearance == "Normal");
+  CHECK_THAT(fit.grip, WithinAbs(41.0, 1e-3)); // 12 + 3 + 26
+  CHECK_FALSE(fit.blind);
+  CHECK(fit.summary.find("gap 3") != std::string::npos);
+  // 41 is not a length screws are made in; 45 is the next one that is.
+  CHECK_THAT(fit.length, WithinAbs(45.0, 1e-9));
+
+  // 2. A blind hole 8 mm into a 20 mm plate. The length is bounded from ABOVE
+  //    — a screw that bottoms out clamps nothing — so it snaps DOWN, and the
+  //    off-axis probe's 20 mm of plate is not the answer.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Blind"));
+  place("Blind", glm::vec3(0.0f));
+  fit = ui::FitFastenerToHole(state, blind.topRim, "iso4762def", "hex", true);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  CHECK(fit.blind);
+  CHECK_THAT(fit.grip, WithinAbs(8.0, 1e-3));
+  CHECK_THAT(fit.length, WithinAbs(8.0, 1e-9));
+
+  // 3. The second plate's hole is 20 mm off the axis. Refused, and named as a
+  //    misalignment rather than as a shallow hole: told "the hole is 0 mm
+  //    deep" a person goes looking for a drilling depth.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Skewed"));
+  place("Off", glm::vec3(0.0f));
+  place("Skew", glm::vec3(0.0f, 0.0f, -10.0f));
+  fit = ui::FitFastenerToHole(state, off.topRim, "iso4762def", "hex", true);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("not lined up") != std::string::npos);
+  CHECK(fit.why.find("Skew") != std::string::npos);
+
+  // 4. A rim that is not a rim. A cylindrical FACE has an axis and no
+  //    direction, which is why the pick is an edge — and asking with one is
+  //    refused rather than guessed at.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bad"));
+  place("Top", glm::vec3(0.0f));
+  fit = ui::FitFastenerToHole(state, ElementRef{top.topRim.featureId, "nope"},
+                              "iso4762def", "hex", true);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("RIM") != std::string::npos);
 }

@@ -81,6 +81,19 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "mass. Optional {position, orientation} place it; deriving those from a "
      "picked hole is not built yet.",
      "drive, length, orientation, position, size, standard"},
+    {"fit_fastener",
+     "Derive a fastener from a picked hole RIM and place it "
+     "(docs/parts/plan.md). `rim` is a circular EDGE — the one the head sits "
+     "against; a cylindrical face has an axis but no direction and cannot say "
+     "which end it goes in from. The SIZE comes from the hole's own diameter "
+     "(the clearance table read backwards) and the LENGTH from the stack the "
+     "axis passes through, snapped to a length that size is made in. Returns "
+     "{size, clearance, grip_mm, length_mm, blind, summary} — the summary "
+     "decomposes the stack (\"Plate 12.0, gap 3.0, Bracket 26.5\"), because a "
+     "gap is either an unmodelled gasket or two parts that were meant to "
+     "touch, and saying so is what makes the second visible. "
+     "{dry_run: true} derives without placing.",
+     "drive, dry_run, rim, standard"},
     {"bom", "Bill of materials (aggregated part counts, masses).", ""},
     {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",
@@ -137,6 +150,21 @@ std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
 
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
+  if (m == "fit_fastener") {
+    ElementRef rim;
+    const auto& r = p.at("rim");
+    rim.featureId = r.at("feature_id").get<uint64_t>();
+    rim.name = r.at("element").get<std::string>();
+    const ui::FastenerFit fit = ui::FitFastenerToHole(
+        state, rim, p.value("standard", std::string("iso4762def")),
+        p.value("drive", std::string("hex")), p.value("dry_run", false));
+    if (!fit.ok)
+      throw std::runtime_error(fit.why);
+    return json{{"occurrence", fit.occurrence}, {"size", fit.size},
+                {"clearance", fit.clearance},   {"grip_mm", fit.grip},
+                {"length_mm", fit.length},      {"blind", fit.blind},
+                {"summary", fit.summary}};
+  }
   if (m == "add_fastener") {
     glm::vec3 position(0.0f);
     if (p.contains("position")) {

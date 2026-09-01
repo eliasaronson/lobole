@@ -375,6 +375,59 @@ std::optional<double> SnapLength(const std::string& stem,
   return std::nullopt;
 }
 
+std::optional<double> SnapLengthDown(const std::string& stem,
+                                     const std::string& size, double available,
+                                     std::string* error) {
+  const std::vector<double> lengths = NominalLengths(stem, error);
+  if (lengths.empty())
+    return std::nullopt;
+  const std::optional<std::pair<double, double>> range =
+      LengthRange(stem, size, nullptr);
+  std::optional<double> best;
+  for (const double length : lengths) {
+    if (length > available)
+      break;
+    if (range && (length < range->first || length > range->second))
+      continue;
+    best = length;
+  }
+  if (!best && error) {
+    std::ostringstream why;
+    why.precision(4);
+    why << "no " << size << " is made short enough to fit " << available
+        << " mm";
+    if (range)
+      why << " — the shortest is " << range->first << " mm";
+    *error = why.str();
+  }
+  return best;
+}
+
+std::optional<std::pair<std::string, std::string>>
+ThreadForClearance(double diameter, std::string* error) {
+  const TableFile* file = Load("clearance_hole_sizes", error);
+  if (file == nullptr)
+    return std::nullopt;
+  const Table& table = file->tables.front();
+  // Exact to a hundredth of a millimetre: these are drilled sizes, and the
+  // tolerance is there to absorb a float round trip, not to let a 6.5 mm hole
+  // pass as an M6 clearance.
+  constexpr double kTol = 0.005;
+  for (const std::string& size : table.order)
+    for (const auto& [fit, value] : table.rows.at(size))
+      if (std::abs(value - diameter) < kTol)
+        return std::make_pair(size, fit);
+  if (error) {
+    std::ostringstream why;
+    why.precision(4);
+    why << "no standard clearance hole is " << diameter
+        << " mm across — that is not a size anything is drilled to, so which "
+           "fastener it is for cannot be read from it. Say the size outright.";
+    *error = why.str();
+  }
+  return std::nullopt;
+}
+
 std::optional<double> NominalDiameter(const std::string& size) {
   return KeyNumber(size);
 }

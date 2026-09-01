@@ -27,6 +27,8 @@
 #include "core/io/GitVault.h"
 #include "core/io/ImportAssembly.h"
 #include "core/io/Serialization.h"
+#include "core/parts/AxisStack.h"
+#include "core/parts/FastenerTable.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "render/IBLTextures.h"
@@ -1808,6 +1810,208 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
   occ.position = position;
   occ.orientation = orientation;
   return state.assembly->AddOccurrence(occ);
+}
+
+namespace {
+// Millimetres as a person writes them: "12 mm", "3.5 mm" — not the six
+// decimal places std::to_string gives, which makes a refusal read like a
+// stack trace.
+std::string Mm(double v) {
+  std::ostringstream out;
+  out.precision(4);
+  out << v << " mm";
+  return out.str();
+}
+} // namespace
+
+FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
+                              const std::string& standard,
+                              const std::string& drive, bool dryRun) {
+  FastenerFit fit;
+  const auto fail = [&](const std::string& why) -> FastenerFit {
+    fit.ok = false;
+    fit.why = why;
+    return fit;
+  };
+  if (state.assembly == nullptr)
+    return fail("a fastener goes in an ASSEMBLY — switch to the assembly tab "
+                "and pick the rim of the hole it passes through");
+
+  // Every placed leaf, once: the rim is on one of them and the stack is made
+  // of the rest.
+  const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
+  std::vector<parts::PlacedBody> placed;
+  glm::vec3 centre(0.0f), axis(0.0f);
+  double radius = 0.0;
+  bool foundRim = false;
+  for (const assembly::FlatInstance& inst : flat) {
+    if (inst.part == nullptr || !inst.visible)
+      continue;
+    for (const Body& body : inst.part->GetBodies()) {
+      parts::PlacedBody pb;
+      pb.body = &body;
+      pb.world = inst.world;
+      pb.part = inst.path.empty() ? body.name : inst.path;
+      pb.partId = inst.partId;
+      placed.push_back(pb);
+    }
+    if (foundRim)
+      continue;
+    // The rim, in the frame the assembly puts it in. Described in the part's
+    // own space and then placed, because that is where the ElementRef means
+    // something.
+    const std::optional<Measure::Element> element =
+        Measure::Describe(inst.part->GetBodies(), rim);
+    if (!element || element->kind != "edge" || element->shape != "circle" ||
+        !element->hasRadius || !element->hasAxis)
+      continue;
+    const std::optional<glm::vec3> local =
+        Measure::CentreOf(inst.part->GetBodies(), rim);
+    if (!local)
+      continue;
+    centre = glm::vec3(inst.world * glm::vec4(*local, 1.0f));
+    axis =
+        glm::normalize(glm::vec3(inst.world * glm::vec4(element->axis, 0.0f)));
+    radius = element->radius;
+    foundRim = true;
+  }
+  if (!foundRim)
+    return fail("pick the RIM of the hole — a circular edge, the one the head "
+                "sits against. A cylindrical face has an axis but no "
+                "direction, so it cannot say which end the fastener goes in "
+                "from; the rim says both.");
+
+  // Which size the hole is for, read backwards out of the clearance table.
+  std::string why;
+  const auto thread = parts::ThreadForClearance(radius * 2.0, &why);
+  if (!thread)
+    return fail(why);
+  fit.size = thread->first;
+  fit.clearance = thread->second;
+
+  // Down the axis, from the rim. The direction is chosen by which way there is
+  // material to pass through: an axis has no sign, and picking the wrong one
+  // would send the screw out into space.
+  const double reach = 10000.0;
+  std::vector<parts::StackSegment> stack = parts::TraverseAxis(
+      placed, glm::dvec3(centre), glm::dvec3(-axis), radius, reach);
+  if (stack.empty()) {
+    axis = -axis; // an axis has no sign; take the way with material in it
+    stack = parts::TraverseAxis(placed, glm::dvec3(centre), glm::dvec3(-axis),
+                                radius, reach);
+  }
+  if (stack.empty())
+    return fail("nothing lies along that hole's axis — the rim was picked on "
+                "a surface feature rather than on a joint, so there is no "
+                "stack for a fastener to span");
+
+  // The decomposition. Gaps are SPANNED and named rather than silently added:
+  // a gap is either an unmodelled gasket or two parts that were meant to touch
+  // and do not, and the geometry cannot tell those apart. Saying so is what
+  // makes the second kind visible; contact_report reports it independently.
+  std::ostringstream summary;
+  summary.precision(4);
+  double previousExit = 0.0;
+  bool first = true;
+  for (const parts::StackSegment& seg : stack) {
+    if (!first && seg.enter - previousExit > 1e-3)
+      summary << ", gap " << (seg.enter - previousExit);
+    summary << (first ? "" : ", ") << seg.part << " " << seg.thickness();
+    previousExit = seg.exit;
+    first = false;
+  }
+  // The bundle above measured PLATE THICKNESS. What stops the screw is a
+  // different question, and needs the on-axis ray the bundle deliberately does
+  // not cast: anything solid ON the axis is either a blind hole's floor or a
+  // plate whose hole does not line up, and telling those apart is the
+  // difference between an M6x8 and a bolt through solid metal.
+  const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
+      placed, glm::dvec3(centre), glm::dvec3(-axis), 0.0, reach);
+
+  std::optional<double> length;
+  if (onAxis.empty()) {
+    // Clear all the way: a through joint, and the screw spans the lot.
+    fit.grip = stack.back().exit;
+    length = parts::SnapLength(standard, fit.size, fit.grip, &why);
+  } else {
+    const double blocked = onAxis.front().enter;
+    // Which plate the obstruction is in. The LAST one means a blind hole —
+    // the screw threads into it. An EARLIER one means the axis runs into
+    // material it should have passed through, which is a misalignment and a
+    // refusal, because the alternative is a bolt drawn through solid metal.
+    const parts::StackSegment* blocking = nullptr;
+    for (const parts::StackSegment& seg : stack)
+      if (blocked >= seg.enter - 1e-6 && blocked <= seg.exit + 1e-6)
+        blocking = &seg;
+    if (blocking == nullptr)
+      return fail("something solid sits on this hole's axis " + Mm(blocked) +
+                  " out, clear of every plate the hole passes through — a "
+                  "fastener cannot reach past it");
+
+    // Blocked at a part's ENTRY FACE means that part has no hole on this axis
+    // at all, whether or not it is the last in the stack. That is a
+    // misalignment, and it is worth separating from a blind hole: told "the
+    // hole is 0 mm deep" a person goes looking for a drilling depth, when what
+    // is wrong is that two holes do not line up.
+    const double into = blocked - blocking->enter;
+    if (into < 1e-3)
+      return fail("there is no hole on this axis in " + blocking->part +
+                  " — the axis meets its face " + Mm(blocked) +
+                  " out and stops. Its hole is not lined up with this one, so "
+                  "a fastener here would pass through solid material.");
+    if (blocking->partId != stack.back().partId)
+      return fail("the axis runs into " + blocking->part + " " + Mm(into) +
+                  " in — its hole does not go all the way through, so a "
+                  "fastener cannot reach the parts beyond it.");
+
+    fit.blind = true;
+    // A blind hole bounds the length from ABOVE: the screw must not bottom
+    // out. Take the longest stocked length that fits, which is also the most
+    // thread engaged.
+    const double above = blocking->enter; // everything before the tapped part
+    const double engagement = *parts::NominalDiameter(fit.size); // ~1x d
+    fit.grip = blocked;
+    if (into < engagement)
+      return fail("the hole is only " + Mm(into) + " deep in " +
+                  blocking->part + ", which is less than the " +
+                  Mm(engagement) + " of thread an " + fit.size +
+                  " needs to hold. Drill deeper, or use a smaller size.");
+    (void)above;
+    length = parts::SnapLengthDown(standard, fit.size, blocked, &why);
+  }
+  if (!length)
+    return fail(why + " (the stack is " + summary.str() + ")");
+  fit.length = *length;
+
+  std::ostringstream head;
+  head.precision(4);
+  head << fit.size << "x" << fit.length << " — grip " << fit.grip << ": "
+       << summary.str();
+  fit.summary = head.str();
+
+  if (dryRun) {
+    fit.ok = true;
+    return fit;
+  }
+  // Head-down at the rim, looking along the hole: the feature is built with
+  // the head's rim on z = 0, so placing it is a rotation from +Z to the axis.
+  // +Z (the feature's own shank direction) rotated onto the hole's axis.
+  // Written out rather than pulled from glm's experimental quaternion header,
+  // which this file does not otherwise need and which errors unless a global
+  // GLM_ENABLE_EXPERIMENTAL is defined.
+  const glm::vec3 from(0.0f, 0.0f, 1.0f), to = -axis;
+  const float dot = glm::dot(from, to);
+  glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+  if (dot < -0.999999f) {
+    orientation = glm::quat(0.0f, 1.0f, 0.0f, 0.0f); // 180 degrees about X
+  } else if (dot < 0.999999f) {
+    const glm::vec3 c = glm::cross(from, to);
+    orientation = glm::normalize(glm::quat(1.0f + dot, c.x, c.y, c.z));
+  }
+  fit.occurrence = AddFastener(state, standard, fit.size, fit.length, drive,
+                               centre, orientation, &fit.why);
+  fit.ok = fit.occurrence != 0;
+  return fit;
 }
 
 uint64_t MaterializeImportedPart(AppState& state,

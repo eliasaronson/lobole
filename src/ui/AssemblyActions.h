@@ -222,6 +222,40 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& drive, const glm::vec3& position,
                      const glm::quat& orientation, std::string* error);
 
+// What deriving a fastener from a picked hole worked out, whether or not it
+// could place one. Returned so the caller can SAY it: the decomposition is the
+// product, not a by-product — a gap in the stack is either an unmodelled
+// gasket or a defect, and printing "Plate 12.0, gap 3.0, Bracket 26.5" is what
+// makes the second kind visible (docs/parts/plan.md, phase 3).
+struct FastenerFit {
+  bool ok = false;
+  std::string why;         // when !ok, decision-complete
+  std::string summary;     // "M6x25 — grip 22.7: Plate 12.0, gap 3.0, …"
+  std::string size;        // derived, e.g. "M6"
+  std::string clearance;   // "Close" | "Normal" | "Loose", from the hole
+  double grip = 0.0;       // material + gaps the screw must span
+  double length = 0.0;     // snapped to a stocked nominal
+  bool blind = false;      // the last thing the axis met has no far side
+  uint64_t occurrence = 0; // 0 when nothing was placed
+};
+
+// Derive a fastener from a picked hole RIM and place it (phase 3).
+//
+// `rim` names a circular edge — the rim the head sits against. A cylindrical
+// face has an axis but no direction, so it cannot say which end the head goes
+// on; a rim answers both in one pick, and it is the same gesture as picking an
+// edge to fillet.
+//
+// Everything but the head style is then derived: the SIZE from the hole's own
+// diameter (the clearance table read backwards), the LENGTH from the stack the
+// axis passes through, snapped to a length that size is actually made in.
+//
+// `dryRun` derives and explains without placing, which is what a GUI preview
+// and a "what would this be" query both want.
+FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
+                              const std::string& standard,
+                              const std::string& drive, bool dryRun);
+
 uint64_t MaterializeImportedPart(AppState& state,
                                  const interchange::PlannedPart& part,
                                  const std::string& asmName);
