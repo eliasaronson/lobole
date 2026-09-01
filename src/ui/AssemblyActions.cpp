@@ -205,6 +205,11 @@ double LastExit(const std::vector<parts::StackSegment>& stack) {
 std::string Mm(double v) {
   std::ostringstream out;
   out.precision(4);
+  // -0.0 prints as "-0", and a refusal reading "the axis meets its face -0 mm
+  // out" reads as a broken message rather than a measurement. (-0.0 == 0.0 is
+  // true, so this assignment is what normalises the sign.)
+  if (v == 0.0)
+    v = 0.0;
   out << v << " mm";
   return out.str();
 }
@@ -2203,6 +2208,22 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     length = parts::SnapLength(request.standard, fit.size, fit.grip, &why);
   } else {
     const double blocked = onAxis.front().enter;
+    // Material ON the axis, right at the rim: this is not a hole at all. It
+    // is the end of a SOLID — a boss, a pin, a shaft — whose end cap has a
+    // circular edge like any bore does.
+    //
+    // Found by dogfooding the dock (docs/dogfooding.md): every circular edge
+    // in a 49-part assembly was one of these, and the refusal a person got
+    // was about plates and reaching past things, which never once said "that
+    // is a solid". A circular edge is not a hole, and on a real model it
+    // usually is not.
+    if (blocked < 1e-6)
+      return fail("that circular edge is the end of a SOLID, not a hole — the "
+                  "axis runs straight into " +
+                  onAxis.front().part +
+                  " from the rim. A boss, a pin and a bore all have a circle "
+                  "at the end; pick the rim of one a fastener can pass "
+                  "through.");
     // Which plate the obstruction is in. The LAST one means a blind hole —
     // the screw threads into it. An EARLIER one means the axis runs into
     // material it should have passed through, which is a misalignment and a

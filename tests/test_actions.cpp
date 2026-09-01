@@ -711,6 +711,66 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
 
 } // namespace
 
+TEST_CASE("A circular edge that is the end of a solid is not a hole",
+          "[actions][parts]") {
+  // From the dock round (docs/dogfooding.md): a 49-part assembly whose every
+  // circular edge was the end cap of a SOLID — a roller axle, a ladder rung,
+  // a hinge pin, a mooring eye. Not one hole. The verb takes any circular
+  // edge as a rim, so all of them were pickable, and the refusal a person got
+  // talked about plates and reaching past things and never once said "that is
+  // a solid, not a hole".
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  // A plate with a PIN standing on it, rather than a bore through it.
+  const size_t tab = ui::AddPart(state, "Axle");
+  ui::SetActivePart(state, tab);
+  Document& doc = *state.document;
+  doc.AddFeature(std::make_unique<BoxFeature>(
+      "Plate", glm::vec3(-30.0f, -30.0f, 0.0f), 60.0, 60.0, 10.0));
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Pin", glm::vec3(0.0f, 0.0f, 10.0f), glm::vec3(0, 0, 1), 3.3, 40.0));
+  doc.AddFeature(std::make_unique<BooleanFeature>(
+      "Weld", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+      BooleanOp::Union));
+
+  // The pin's free end: a circle of exactly the diameter an M6 clearance hole
+  // would be, so the size lookup happily agrees it is one.
+  const Body& body = doc.GetBodies().front();
+  ElementRef tip;
+  double best = -1e9;
+  for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+    const std::optional<Measure::EdgeInfo> edge =
+        Measure::DescribeEdgeAt(body, index);
+    if (!edge || edge->kind != "circle")
+      continue;
+    if (edge->midpoint.z > best) {
+      best = edge->midpoint.z;
+      tip = ElementRef{body.createdBy, mapped};
+    }
+  }
+  REQUIRE(tip.IsSet());
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Rig"));
+  Occurrence occ;
+  occ.partId = state.parts[tab].id;
+  occ.name = "Axle";
+  const uint64_t id = state.assembly->AddOccurrence(occ);
+
+  ui::FastenerRequest dry;
+  dry.dryRun = true;
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{id, tip}, dry);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("end of a SOLID") != std::string::npos);
+  CHECK(fit.why.find("Axle") != std::string::npos);
+  // And not "-0 mm out", which is what the old message measured it at.
+  CHECK(fit.why.find("-0 mm") == std::string::npos);
+}
+
 TEST_CASE("A rim on two placements of one part names which",
           "[actions][parts]") {
   // The bug the click path would have hit on its first try, found while

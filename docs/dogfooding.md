@@ -17,10 +17,105 @@ one was hands-on GUI, and the dock round mixed both. That mix matters: the GUI
 and the scripting interface fail in different places, and only the dock round
 (where the same model was built both ways) surfaced the ones that need both.
 
-### Owed: a round with fasteners in it
+## 2026-09-01 — bolting the dock
 
-Standard parts shipped 2026-09-01 ([parts/plan.md](parts/plan.md)) and **no
-round has used them on a real object**. It was built and verified — test
+**Why here:** standard parts (F1) shipped built and verified but never USED,
+and this file exists because testing and building find different bugs. The
+object was the real one: `scratch/marsliden-dock.json`, the 3 x 2 m barrel
+dock — 49 occurrences in the Dock sub-assembly alone.
+
+### The dock has no fastener holes. Not one.
+
+Every circular edge in it is the end of a SOLID: the roller carriage's Ø20
+axle, the bathing ladder's Ø32 rungs, the gangway's Ø24 hinge pin, a Ø60
+mooring eye, the barrels themselves. The "deck screws, bolts, straps" in the
+bought-parts note correspond to no geometry at all — the timber is butted and
+screwed, and neither the fastener nor the hole was ever modelled.
+
+So the verb was **unreachable on the project's largest real assembly**, and
+that sharpens F1's own justification. The plan said "holes are modelled,
+fasteners are omitted". On this model neither is.
+
+### A circular edge is not a hole — and on a real model it usually is not
+
+This is the finding worth the round. The verb takes any circular edge as a
+rim, so all of those solid ends were pickable, and the refusal a person got
+was:
+
+    something solid sits on this hole's axis -0 mm out, clear of every plate
+    the hole passes through — a fastener cannot reach past it
+
+which talks about plates and reaching past things and never once says *that is
+a solid, not a hole*. (Also "-0 mm": a real negative zero, which reads as a
+broken message rather than a measurement.)
+
+Both fixed, both gated. Material on the axis AT the rim is now recognised for
+what it is and named: *"that circular edge is the end of a SOLID, not a hole —
+the axis runs straight into Roller carriage from the rim."*
+
+### Reading a diameter backwards is far weaker than the plan claimed
+
+F1 said a plain hole "is looked up in the same table BACKWARDS ('that is an M6
+normal clearance') **or refused when it matches nothing**". Measured against
+the vendored table: 56 sizes, 111 distinct clearance diameters spanning
+1.1-165, and **48% of every whole millimetre from 1 to 160 is one of them** —
+every single integer from 15 to 40.
+
+So it hardly ever refuses. Sweeping four real projects for "clearance-sized"
+circles returned nine families and **every one was a false positive**: an
+axle, ladder rungs, a hinge pin, a speaker cutout, a bass-reflex port bore.
+A Ø32 ladder rung reads as an M30 clearance; a Ø24 hinge pin as an M22.
+
+The inference is sound for small metric sizes, where the fits are odd numbers
+(M6 -> 6.4/6.6/7.0). It is close to worthless above about M12, where the
+clearances are plain integers. What actually saves it today is the traversal
+refusing afterwards — and the solid-end fix above, which now rejects most of
+these before the size is ever read.
+
+**This is the strongest argument yet for
+[modeling/hole-standards.md](modeling/hole-standards.md)**: a hole that records
+`M12 normal` outright removes the guess instead of narrowing it.
+
+### Once a real joint exists, the verb is good
+
+`scratch/build_dock_bolted.py` drills the one joint that is unambiguous and
+repeated — 3 barrel bunks x 2 stringers, meeting face to face, through-bolted
+M12 — and places the bolts. Six joints from six picks:
+
+    M12x110 — grip 105.8: washer 2.5, Bunk 2 45, Stringer 1 45, washer 2.5, nut 10.8
+
+It names WHICH stringer each bolt lands on, which is the decomposition earning
+its keep on a model where three bunks and two stringers are five placements of
+two parts. The occurrence has to be passed with every rim and that is the
+point: without it the fit is refused as ambiguous, which is exactly the bug
+found while planning the click path.
+
+24 fastener occurrences, 3 generated part documents, 0.87 kg of hardware on a
+261.8 kg dock, `check_fasteners` clean. Result:
+`scratch/marsliden-dock-bolted.dsgn`.
+
+### Smaller things
+
+- `save_project` to a `.json` path on a multi-document project refuses well,
+  naming the extension to use. Good refusal; no change wanted.
+- Drilling the PART rather than the assembly gave all six crossings from two
+  edits, which is the parametric model doing its job and worth saying because
+  the fastener verb is per-occurrence and the contrast is stark.
+
+### What this round did NOT settle
+
+Whether a fastener should be MATED rather than positioned
+([parts/plan.md](parts/plan.md), Follow-ups). Nothing here moved a part after
+bolting it, so the question is still open on evidence.
+
+---
+
+### Owed: a round with fasteners in it — DONE 2026-09-01, see above
+
+Standard parts shipped 2026-09-01 ([parts/plan.md](parts/plan.md)) and no
+round had used them on a real object. **The round ran the same day** — see
+"bolting the dock" below; what it found is summarised there and the two
+defects it turned up are fixed. It was built and verified — test
 plates, measured volumes against the standards' own tables, rendered and
 looked at — but that is testing, and this file exists because testing and
 building find different bugs.
