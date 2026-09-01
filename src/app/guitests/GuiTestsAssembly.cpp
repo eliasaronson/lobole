@@ -976,6 +976,30 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // 20 mm of plate, and 20 is a length an M6 is made in.
     IM_CHECK_STR_EQ(s_App->fastenerTool.summary.substr(0, 6).c_str(), "M6x20 ");
 
+    // The OPTIONAL second pick, which had no GUI at all until it was asked
+    // for: "did you add a GUI path for the override far end?". It appears
+    // only once a rim gives it an axis to mean something on, and clicking it
+    // arms the tool's OTHER slot rather than re-arming the rim.
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_far");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kFastenerToolSlot);
+    IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::FastenerFarEnd);
+    // Answering it with the rim the joint STARTS at is refused with a reason,
+    // in the window, rather than silently accepted as a zero-length joint.
+    ctx->MouseMoveToPos(WorldToWindow(rim));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    IM_CHECK(s_App->fastenerTool.farElement.IsSet());
+    IM_CHECK(!s_App->fastenerTool.ok);
+    IM_CHECK(s_App->fastenerTool.why.find("head's side") != std::string::npos);
+    // And Clear puts it back, which is the whole reason the row has one: a
+    // second pick you cannot take back is a tool you have to close and reopen.
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_far_clear");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->fastenerTool.farElement.IsSet());
+    IM_CHECK(s_App->fastenerTool.ok);
+
     // The joint options are addressable — buttons and checkboxes, never a
     // bare combo, which gathers with an empty label and cannot be reached.
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_nut");
@@ -1014,6 +1038,14 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->fastenerTool.open);
     IM_CHECK(!s_App->fastenerTool.rimElement.IsSet());
     IM_CHECK_EQ(s_App->fastenerTool.placed, 1);
+    // And the JOINT, which is what a bolt is for: the two plates are now
+    // mated to each other, so dragging one carries the other instead of
+    // tearing the joint in half. Reported twice from use on 2026-09-01 —
+    // "did we not build the mate for the fasteners?", then "I also don't see
+    // the mates in the mate list" — so the tally says it in the tool's own
+    // window as well as putting it where a person looks for it.
+    IM_CHECK_EQ(s_App->fastenerTool.joined, 1);
+    IM_CHECK_EQ(s_App->assembly->GetMates().size(), (size_t)1);
 
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_done");
     ctx->Yield(2);
@@ -1050,7 +1082,12 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//###Model/Check fasteners###bom_check_fasteners");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->fastenerChecks.size(), (size_t)1);
-    IM_CHECK(s_App->fastenerChecks[0].find("too short") != std::string::npos);
+    // What it complains ABOUT changed with the alternator round and is worth
+    // reading rather than pattern-matching: a joint now ends at its NUT, so
+    // this screw still reaches its own nut and "too short" is no longer true.
+    // The plate slid over the hardware, which leaves the nut inside it.
+    IM_CHECK(s_App->fastenerChecks[0].find("nut buried in") !=
+             std::string::npos);
   };
 
   // A project variable is edited from an assembly tab, by clicking.

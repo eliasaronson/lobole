@@ -1203,7 +1203,17 @@ struct AppState {
     bool ok = false;
     std::string summary;
     std::string why;
+    // The optional second pick: where the joint ENDS. Unset means "the axis
+    // runs to the end of whatever is on it", which is the ordinary case and
+    // stays one click.
+    ElementRef farElement;
+    uint64_t farOccurrence = 0;
     int placed = 0; // how many this session has put in, for the tally
+    // How many of them JOINED two parts that nothing already held. Counted
+    // apart from `placed` because the difference is the interesting number:
+    // eight bolts through one flange make one joint, and a tally that said
+    // "8" for both would be claiming eight constraints that do not exist.
+    int joined = 0;
     // What Place would put where, from the last dry run. Drives the ghost.
     std::vector<PlannedPart> plan;
   } fastenerTool;

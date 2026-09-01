@@ -27,9 +27,15 @@ void CloseFastenerTool(AppState& state);
 // placement, so a pattern of holes is a row of clicks.
 void ArmFastenerRim(AppState& state);
 
-// Routed from SlotPickClicked for kFastenerToolSlot. An assembly Edge item
-// carries the occurrence in `id`, which is exactly what tells two placements
-// of one part apart — the thing an ElementRef alone cannot do.
+// Arm the OPTIONAL second pick: where the joint ends. One pick derives; a
+// second overrides the far end, for an axis that carries on past the joint
+// into material the fastener was never meant to span (docs/parts/plan.md).
+void ArmFastenerFarEnd(AppState& state);
+
+// Routed from SlotPickClicked for kFastenerToolSlot — for BOTH of the tool's
+// slots, which the armed slot tells apart. An assembly Edge item carries the
+// occurrence in `id`, which is exactly what tells two placements of one part
+// apart — the thing an ElementRef alone cannot do.
 void FastenerRimPicked(AppState& state, const SelectionItem& item);
 
 // Re-derive what Place would do. Walks the assembly along the rim's axis, so

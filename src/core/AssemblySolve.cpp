@@ -11,6 +11,7 @@
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace assembly {
 
@@ -498,6 +499,33 @@ int ApplyAttachments(AssemblyDocument& asmDoc) {
     }
   }
   return moved;
+}
+
+bool MatesConnect(const AssemblyDocument& asmDoc, uint64_t a, uint64_t b) {
+  if (a == 0 || b == 0)
+    return false;
+  if (a == b)
+    return true;
+  std::unordered_set<uint64_t> seen{a};
+  std::vector<uint64_t> frontier{a};
+  while (!frontier.empty()) {
+    const uint64_t at = frontier.back();
+    frontier.pop_back();
+    for (const Mate& m : asmDoc.GetMates()) {
+      uint64_t other = 0;
+      if (m.a.occurrenceId == at)
+        other = m.b.occurrenceId;
+      else if (m.b.occurrenceId == at)
+        other = m.a.occurrenceId;
+      if (other == 0)
+        continue;
+      if (other == b)
+        return true;
+      if (seen.insert(other).second)
+        frontier.push_back(other);
+    }
+  }
+  return false;
 }
 
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,

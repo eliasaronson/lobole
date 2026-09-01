@@ -41,6 +41,7 @@ FastenerRequest RequestOf(const AppState::FastenerTool& tool, bool dryRun) {
   r.washerUnderHead = tool.washerUnderHead;
   r.washerUnderNut = tool.washerUnderNut;
   r.dryRun = dryRun;
+  r.farEnd = RimPick{tool.farOccurrence, tool.farElement};
   return r;
 }
 
@@ -52,6 +53,15 @@ void ArmFastenerRim(AppState& state) {
                     /*multi=*/false,
                     "Pick the rim of the hole — the circular edge the head "
                     "sits against"};
+}
+
+void ArmFastenerFarEnd(AppState& state) {
+  state.slotPick = {
+      kFastenerToolSlot, static_cast<int>(PickSlot::FastenerFarEnd),
+      SelectionKindBit(SelectionItem::Kind::Edge),
+      /*multi=*/false,
+      "Pick the rim where the joint ENDS — the far face the nut or the last "
+      "thread bears on"};
 }
 
 void OpenFastenerTool(AppState& state) {
@@ -87,16 +97,30 @@ void RefreshFastenerFit(AppState& state) {
 }
 
 void FastenerRimPicked(AppState& state, const SelectionItem& item) {
+  const bool farEnd =
+      state.slotPick.slot == static_cast<int>(PickSlot::FastenerFarEnd);
   if (item.kind != SelectionItem::Kind::Edge || !item.element.IsSet()) {
     // The pipeline only offers what the slot asked for, so this is a
     // belt-and-braces case; say why rather than swallowing the click (U10).
-    state.slotPick.miss = "that is not a circular edge — pick the rim of the "
-                          "hole, the edge the head sits against";
+    state.slotPick.miss =
+        farEnd ? "that is not a circular edge — pick the rim where the joint "
+                 "ends, on the far face"
+               : "that is not a circular edge — pick the rim of the hole, the "
+                 "edge the head sits against";
     return;
   }
-  state.fastenerTool.rimOccurrence = item.id;
-  state.fastenerTool.rimElement = item.element;
+  if (farEnd) {
+    state.fastenerTool.farOccurrence = item.id;
+    state.fastenerTool.farElement = item.element;
+  } else {
+    state.fastenerTool.rimOccurrence = item.id;
+    state.fastenerTool.rimElement = item.element;
+  }
   state.slotPick = {}; // filled; the window now offers Place
+  // A far end that is not on this hole's axis, or is on the head's side of
+  // it, is REFUSED by the fit and the refusal lands in `why` — where the
+  // window already shows it. Storing the pick and letting the derivation
+  // judge it beats a second copy of the geometry test here.
   RefreshFastenerFit(state);
 }
 
@@ -188,7 +212,12 @@ void DrawFastenerToolWindow(AppState& state) {
     return;
   }
 
-  const bool armed = state.slotPick.featureId == kFastenerToolSlot;
+  const bool armedRim =
+      state.slotPick.featureId == kFastenerToolSlot &&
+      state.slotPick.slot == static_cast<int>(PickSlot::FastenerRim);
+  const bool armedFar =
+      state.slotPick.featureId == kFastenerToolSlot &&
+      state.slotPick.slot == static_cast<int>(PickSlot::FastenerFarEnd);
   const bool havePick = tool.rimElement.IsSet();
 
   ImGui::TextDisabled("Hole");
@@ -196,13 +225,41 @@ void DrawFastenerToolWindow(AppState& state) {
                              : "Pick rim###fastener_pick"))
     ArmFastenerRim(state);
   ImGui::SameLine();
-  if (armed)
+  if (armedRim)
     ImGui::TextDisabled("click a hole's rim…");
   else if (havePick)
     ImGui::Text("occurrence %llu",
                 static_cast<unsigned long long>(tool.rimOccurrence));
   else
     ImGui::TextDisabled("nothing picked");
+
+  // The optional SECOND pick, offered only once there is an axis for it to
+  // mean something on. One pick derives — that is the verb — and this is for
+  // the case the derivation cannot see: an axis that carries on past the
+  // joint into material the fastener was never meant to span, which is what
+  // an alternator's bolt circle running into a cast rib looks like
+  // (docs/dogfooding.md). Not shown before the rim, because a control that
+  // cannot do anything yet is the defect this suite exists to catch (U10).
+  if (havePick) {
+    if (ImGui::Button(tool.farElement.IsSet() ? "Re-pick far end###fastener_far"
+                                              : "Pick far end###fastener_far"))
+      ArmFastenerFarEnd(state);
+    ImGui::SameLine();
+    if (armedFar) {
+      ImGui::TextDisabled("click the rim it ends at…");
+    } else if (tool.farElement.IsSet()) {
+      ImGui::Text("ends at occurrence %llu",
+                  static_cast<unsigned long long>(tool.farOccurrence));
+      ImGui::SameLine();
+      if (ImGui::Button("Clear###fastener_far_clear")) {
+        tool.farElement = {};
+        tool.farOccurrence = 0;
+        RefreshFastenerFit(state);
+      }
+    } else {
+      ImGui::TextDisabled("ends where the axis does");
+    }
+  }
 
   ImGui::Separator();
   ImGui::TextDisabled("Screw");
@@ -277,11 +334,18 @@ void DrawFastenerToolWindow(AppState& state) {
                           RequestOf(tool, /*dryRun=*/false));
     if (fit.ok) {
       tool.placed++;
+      if (fit.mate != 0)
+        tool.joined++;
       // Straight back to picking. A flange of eight bolts is eight clicks,
       // not eight trips to the toolbar — and the options carry over, because
       // the next hole in a pattern takes the same screw.
       tool.rimElement = {};
       tool.rimOccurrence = 0;
+      // The far end goes with the rim it belonged to: it names an element on
+      // a specific axis, and carrying it to the next hole would truncate a
+      // joint against a face that is nowhere near it.
+      tool.farElement = {};
+      tool.farOccurrence = 0;
       tool.summary.clear();
       tool.ok = false;
       ArmFastenerRim(state);
@@ -296,7 +360,14 @@ void DrawFastenerToolWindow(AppState& state) {
     CloseFastenerTool(state);
   if (tool.placed > 0) {
     ImGui::SameLine();
-    ImGui::TextDisabled("%d placed", tool.placed);
+    // Say the JOINT happened, in the tool's own window. A mate that only
+    // shows up if you think to look at the Mates list is a mate nobody knows
+    // was made — the same "report it where you did it" rule the mutating
+    // RPCs follow.
+    if (tool.joined > 0)
+      ImGui::TextDisabled("%d placed, %d joined", tool.placed, tool.joined);
+    else
+      ImGui::TextDisabled("%d placed", tool.placed);
   }
 
   ImGui::End();

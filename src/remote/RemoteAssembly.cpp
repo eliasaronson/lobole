@@ -103,8 +103,19 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "the plates and then fitted with washers is too short and looks right. "
      "A nut is refused on a blind hole. `standard` picks the screw: iso4762 "
      "(hex socket cap), iso14579 (torx socket cap), iso7380 (button), "
-     "iso4017 (hex head); the drive follows the standard, so leave it empty.",
-     "drive, dry_run, nut, rim, standard, washer, washer_under_head, "
+     "iso4017 (hex head); the drive follows the standard, so leave it empty. "
+     "The optional SECOND pick, `far_end` ({feature_id, element, "
+     "occurrence?}), says where the joint ENDS when the axis carries on past "
+     "it — a bolt through a housing flange whose line continues into a boss "
+     "behind it would otherwise be sized to span the lot. It truncates rather "
+     "than replaces: everything between the two picks is still traversed, so "
+     "the washers and the nut are still found. "
+     "Placing also MATES the two parts the bolt clamps (returned as `mate`), "
+     "so dragging one carries the other instead of tearing the joint in half "
+     "— once per pair, since a second bolt between parts already held would "
+     "close a loop the solver reports as over-constrained. `mate` is 0 when "
+     "there was nothing new to join.",
+     "drive, dry_run, far_end, nut, rim, standard, washer, washer_under_head, "
      "washer_under_nut"},
     {"bom",
      "Bill of materials (aggregated part counts, masses). A row generated "
@@ -194,6 +205,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     request.nut = p.value("nut", std::string{});
     request.washerUnderHead = p.value("washer_under_head", false);
     request.washerUnderNut = p.value("washer_under_nut", false);
+    if (p.contains("far_end")) {
+      const auto& e = p.at("far_end");
+      request.farEnd.element.featureId = e.at("feature_id").get<uint64_t>();
+      request.farEnd.element.name = e.at("element").get<std::string>();
+      request.farEnd.occurrence = e.value("occurrence", uint64_t{0});
+    }
     request.dryRun = p.value("dry_run", false);
     const ui::FastenerFit fit = ui::FitFastenerToHole(state, rim, request);
     if (!fit.ok)
@@ -206,7 +223,13 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"blind", fit.blind},
                 {"summary", fit.summary},
                 {"placed", fit.placed},
-                {"parts", fit.parts}};
+                {"parts", fit.parts},
+                // The joint, not the hardware: the mate that now holds the
+                // two clamped parts to each other. 0 when the pair was
+                // already held — the second bolt through one bracket adds
+                // no second mate, and saying so is how a caller can tell
+                // that from a failure to make one.
+                {"mate", fit.mate}};
   }
   if (m == "add_fastener") {
     glm::vec3 position(0.0f);

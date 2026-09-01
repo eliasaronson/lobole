@@ -397,7 +397,69 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
     // Everything the shank has to reach through, WASHERS AND NUT INCLUDED:
     // they are occurrences on the same axis, so re-traversing finds them the
     // same way it found them when the length was derived.
-    const double grip = LastExit(stack);
+    //
+    // Bounded by its OWN NUT when it has one. A joint ends where its nut
+    // ends — that is what a nut is — and the axis beyond is somebody else's
+    // material. Without this the check re-derived the untruncated stack and
+    // called three correctly sized alternator through-bolts 21.6 mm short,
+    // because the bolt-circle line carries on into a cast rib the bolts were
+    // deliberately not spanning (docs/dogfooding.md). A check that cries wolf
+    // on a correct model is worse than no check.
+    //
+    // Derived rather than recorded: the nut's own placement says where the
+    // joint ends, so a far-end override needs to store nothing to be
+    // respected here.
+    double grip = LastExit(stack);
+    double nutEnds = 0.0;
+    const auto riderOn = [&](uint64_t occurrence) -> const parts::Profile* {
+      for (size_t b = 0; b < all.size(); b++)
+        if (all[b].occurrence == occurrence)
+          if (const FastenerFeature* f = SoleFastenerOf(flat[owner[b]].part))
+            return parts::ProfileFor(f->standard);
+      return nullptr;
+    };
+    for (const parts::StackSegment& seg : stack) {
+      const parts::Profile* rider = riderOn(seg.occurrence);
+      if (rider != nullptr && rider->kind == parts::Kind::Nut) {
+        grip = seg.exit;
+        nutEnds = seg.exit;
+      }
+    }
+
+    // A nut BURIED IN A PART, which is the other way a joint comes apart and
+    // which the rule above would otherwise hide. Bounding the grip at the nut
+    // says "the joint ends here" — true only while the nut is clear of the
+    // parts. Move a plate in a redesign and leave the hardware behind and the
+    // nut ends up INSIDE it: the screw still reaches its own nut, so the
+    // length is not what is wrong and nothing else here would say a word.
+    //
+    // Straddling is the test, not "material beyond the nut". Material beyond
+    // a nut is ordinary — the alternator's bolt circle runs on into a cast
+    // rib the bolts deliberately do not span — but a part that STARTS before
+    // the nut ends and CONTINUES past it has the nut embedded in it, and
+    // there is no correct model that looks like that.
+    if (nutEnds > 0.0) {
+      for (const parts::StackSegment& seg : stack) {
+        if (riderOn(seg.occurrence) != nullptr)
+          continue; // hardware; the nut cannot be buried in its own washer
+        if (seg.enter >= nutEnds - 1e-3 || seg.exit <= nutEnds + 1e-3)
+          continue;
+        finding.why = "has its nut buried in " + seg.part +
+                      ": that part runs "
+                      "from " +
+                      Mm(seg.enter) + " to " + Mm(seg.exit) +
+                      " down the axis and the nut ends at " + Mm(nutEnds) +
+                      ", so the nut is inside the material instead of "
+                      "bearing on it and the joint clamps nothing. Something "
+                      "moved out from under this fastener — re-fit it from "
+                      "the rim.";
+        break;
+      }
+      if (!finding.why.empty()) {
+        out.push_back(finding);
+        continue;
+      }
+    }
     if (screw->length < grip - 1e-3) {
       finding.why = "is " + Mm(grip - screw->length) +
                     " too short: its stack is now " + Mm(grip) + " and it is " +
@@ -1086,7 +1148,22 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       SolveActiveAssembly(state);
       return true; // solve already repositioned + resynced
     }
+    // A FREE drag moves the occurrence directly and never solves — which is
+    // where riders were being left behind, because ApplyAttachments runs at
+    // the end of the solve. Reported from use: a bar dragged away from its
+    // bolt, with the nut still hanging in the air where the joint was.
+    //
+    // Re-seated here rather than by solving: a free drag has nothing to
+    // solve, and the composition is a few matrix multiplies per rider.
+    for (const Occurrence& rider : state.assembly->GetOccurrences())
+      if (rider.attachedTo == occ->id) {
+        assembly::ApplyAttachments(*state.assembly);
+        break;
+      }
     PushOccurrenceLive(state, occ->id);
+    for (const Occurrence& rider : state.assembly->GetOccurrences())
+      if (rider.attachedTo == occ->id)
+        PushOccurrenceLive(state, rider.id);
     return true;
   }
 
@@ -2058,6 +2135,139 @@ std::optional<double> CompanionDim(const std::string& standard,
   *why = profile->designation + " " + size + " has no thickness to stack";
   return std::nullopt;
 }
+
+// The planar face an axis crosses at `t`, named the way a mate connector
+// wants it: whose body owns it, and the face's mapped name.
+//
+// A bolt joins two parts, and a mate between parts anchors on FACES — so the
+// joint a fastener makes has to be found in the same geometry its traversal
+// already walked. Perpendicular to the axis, at the right distance along it,
+// facing `outward`.
+//
+// Coplanar candidates (a stepped part has them) are broken by centroid
+// distance to the axis, and it is worth saying why that crude tiebreak is
+// enough: every face in the running is in the SAME PLANE, so picking the
+// other one moves nothing — the mate's in-plane dx/dy absorb the difference
+// and the joint holds identically. The tiebreak decides which face the mate
+// is LABELLED with, not where anything ends up.
+std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
+                                         const glm::vec3& origin,
+                                         const glm::vec3& along, double t,
+                                         const glm::vec3& outward) {
+  if (inst.part == nullptr)
+    return std::nullopt;
+  constexpr float kSquare = 0.999f; // perpendicular enough to the axis
+  constexpr float kOnPlane = 0.05f; // mm off the expected station
+  const glm::vec3 at = origin + along * static_cast<float>(t);
+  std::optional<ElementRef> best;
+  float nearest = 0.0f;
+  for (const Body& body : inst.part->GetBodies()) {
+    for (const auto& [faceIndex, name] : body.elementMap.names) {
+      glm::vec3 o, n, xHint;
+      if (!body.shape.FacePlane(faceIndex, o, n, xHint))
+        continue; // not planar: FaceAxis would answer, a bolt face is a plane
+      const glm::vec3 nw =
+          glm::normalize(glm::vec3(inst.world * glm::vec4(n, 0.0f)));
+      if (glm::dot(nw, outward) < kSquare)
+        continue;
+      const glm::vec3 ow = glm::vec3(inst.world * glm::vec4(o, 1.0f));
+      if (std::abs(glm::dot(ow - at, along)) > kOnPlane)
+        continue;
+      const auto info = Measure::DescribeFaceAt(body, faceIndex);
+      if (!info)
+        continue;
+      const glm::vec3 c =
+          glm::vec3(inst.world * glm::vec4(info->centroid, 1.0f)) - at;
+      const float off = glm::length(c - glm::dot(c, along) * along);
+      if (best && off >= nearest)
+        continue;
+      best = ElementRef{body.createdBy, name};
+      nearest = off;
+    }
+  }
+  return best;
+}
+
+// Hold the two parts a fastener clamps to each other: a fastened mate between
+// them, in the pose they are ALREADY in (docs/parts/f1-loose-ends.md).
+//
+// Attaching the hardware to the parts makes the screw follow its plate. It
+// does not make the plates follow each other, so before this a bolted joint
+// tore open the moment either part was dragged — and the Mates list, where a
+// person looks to see what holds an assembly together, stayed empty.
+//
+// The DOFs are MEASURED, never assumed: both connector frames are resolved
+// through the same ConnectorLocalFrame the solver uses, and flip/rotation/
+// offset/dx/dy come out of the transform between them. So the solve that
+// follows moves nothing — which is the whole requirement, since the parts
+// are already where the person put them and a mate that "corrects" them is
+// a mate that breaks the model it was meant to record.
+//
+// Returns the mate's id, or 0 if the geometry could not name both faces —
+// no mate is better than a wrong one, and the fastener itself is placed
+// either way.
+uint64_t JoinClampedParts(AppState& state, const assembly::FlatInstance& head,
+                          const assembly::FlatInstance& far,
+                          const glm::vec3& centre, const glm::vec3& axis,
+                          double lastExit) {
+  const glm::vec3 into = -axis;
+  const std::optional<ElementRef> headFace =
+      FaceAcrossAxis(head, centre, into, 0.0, axis);
+  const std::optional<ElementRef> farFace =
+      FaceAcrossAxis(far, centre, into, lastExit, into);
+  if (!headFace || !farFace)
+    return 0;
+
+  Mate mate;
+  mate.type = MateType::Fastened;
+  mate.name = "Bolted";
+  mate.a.occurrenceId = head.rootOccurrenceId;
+  mate.a.innerPath = head.innerIds;
+  mate.a.anchor.face = *headFace;
+  mate.b.occurrenceId = far.rootOccurrenceId;
+  mate.b.innerPath = far.innerIds;
+  mate.b.anchor.face = *farFace;
+
+  const assembly::PartResolver resolve =
+      [&state](uint64_t partId) -> const Document* {
+    return PartDocById(state, partId);
+  };
+  const assembly::AssemblyResolver asmResolve = AssemblyResolverFor(state);
+  const auto fa = assembly::ConnectorLocalFrame(mate.a, *state.assembly,
+                                                resolve, nullptr, asmResolve);
+  const auto fb = assembly::ConnectorLocalFrame(mate.b, *state.assembly,
+                                                resolve, nullptr, asmResolve);
+  const Occurrence* occA = state.assembly->FindById(mate.a.occurrenceId);
+  const Occurrence* occB = state.assembly->FindById(mate.b.occurrenceId);
+  if (!fa || !fb || occA == nullptr || occB == nullptr)
+    return 0;
+
+  // What the solver will compose: world(b's frame) = world(a's frame) · adjust.
+  const glm::mat4 wa = OccurrenceMatrix(*occA) * *fa;
+  const glm::mat4 wb = OccurrenceMatrix(*occB) * *fb;
+  const glm::mat4 rel = glm::inverse(wa) * wb;
+
+  // Read the mate's DOFs off `rel`. A fastened adjust is T(dx,dy,offset) ·
+  // Rz(rotation) · [Rx(180)], and both frames' Z lie along the same hole
+  // axis, so it can express this transform exactly — but only if it really
+  // is of that form, which the check below insists on rather than assumes.
+  mate.flipped = rel[2][2] < 0.0f;
+  mate.rotation = std::atan2(rel[0][1], rel[0][0]);
+  mate.dx = rel[3][0];
+  mate.dy = rel[3][1];
+  mate.offset = rel[3][2];
+  glm::mat4 adjust(1.0f);
+  adjust = glm::translate(adjust, glm::vec3(mate.dx, mate.dy, mate.offset));
+  adjust = glm::rotate(adjust, mate.rotation, glm::vec3(0.0f, 0.0f, 1.0f));
+  if (mate.flipped)
+    adjust = glm::rotate(adjust, glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++)
+      if (std::abs(adjust[c][r] - rel[c][r]) > 1e-3f)
+        return 0; // the two faces are not square to one axis: say nothing
+
+  return state.assembly->AddMate(mate);
+}
 } // namespace
 
 FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
@@ -2247,15 +2457,68 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // a gap is either an unmodelled gasket or two parts that were meant to touch
   // and do not, and the geometry cannot tell those apart. Saying so is what
   // makes the second kind visible; contact_report reports it independently.
+  // The optional SECOND pick: where the joint ends, when the axis carries on
+  // past it. Resolved the same way the rim was, then projected onto the axis
+  // — a point off the line is a mis-pick and says so rather than silently
+  // sizing the screw to its shadow.
+  double truncate = 0.0; // 0 = span everything on the axis
+  if (request.farEnd.element.IsSet()) {
+    const assembly::FlatInstance* on = nullptr;
+    std::optional<glm::vec3> local;
+    for (const assembly::FlatInstance& inst : flat) {
+      if (inst.part == nullptr || !inst.visible)
+        continue;
+      if (request.farEnd.occurrence != 0 &&
+          inst.rootOccurrenceId != request.farEnd.occurrence)
+        continue;
+      if (const std::optional<glm::vec3> c = Measure::CentreOf(
+              inst.part->GetBodies(), request.farEnd.element)) {
+        on = &inst;
+        local = c;
+        break;
+      }
+    }
+    if (!local)
+      return fail("the far end you picked is not on any visible part — pick "
+                  "the rim the fastener should stop at");
+    const glm::vec3 end = glm::vec3(on->world * glm::vec4(*local, 1.0f));
+    const glm::vec3 alongAxis = end - centre;
+    truncate = glm::dot(alongAxis, -axis);
+    const double offLine =
+        glm::length(alongAxis - (-axis) * static_cast<float>(truncate));
+    if (offLine > 1.0)
+      return fail("that far end is " + Mm(offLine) +
+                  " off this hole's axis — the second pick says where the "
+                  "joint ENDS, so it has to be on the same line as the rim "
+                  "you started from.");
+    if (truncate <= 1e-3)
+      return fail("that far end is on the head's side of the rim — it names "
+                  "where the fastener stops, which has to be past where it "
+                  "starts.");
+  }
+
   std::ostringstream summary;
   summary.precision(4);
   double previousExit = 0.0;
   bool first = true;
+  std::string beyond; // what the axis carries on into, past the second pick
   for (const parts::StackSegment& seg : stack) {
+    // Past the second pick: named, but not counted. Listing it as part of the
+    // joint made the summary's own numbers add up to something other than the
+    // grip beside them — found the first time a real casing was bolted, where
+    // "grip 65: ... DE rib 30 ..." totalled 95.
+    if (truncate > 0.0 && seg.enter >= truncate - 1e-6) {
+      beyond += (beyond.empty() ? "" : ", ") + seg.part;
+      continue;
+    }
     if (!first && seg.enter - previousExit > 1e-3)
       summary << ", gap " << (seg.enter - previousExit);
-    summary << (first ? "" : ", ") << seg.part << " " << seg.thickness();
-    previousExit = seg.exit;
+    const double within =
+        (truncate > 0.0 ? std::min(seg.exit, truncate) : seg.exit) - seg.enter;
+    summary << (first ? "" : ", ") << seg.part << " " << within;
+    if (truncate > 0.0 && seg.exit > truncate + 1e-6)
+      summary << " (of " << seg.thickness() << ")";
+    previousExit = std::min(seg.exit, truncate > 0.0 ? truncate : seg.exit);
     first = false;
   }
   // The bundle above measured PLATE THICKNESS. What stops the screw is a
@@ -2309,7 +2572,11 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // "Enough" is the nut's own height, which is the shortest length at which
     // every one of its threads is engaged; a nut hanging off the last two is
     // the failure this rule exists to prevent.
-    fit.grip = underHead + LastExit(stack) + underNut + nutHeight;
+    // Truncated at the second pick when there is one: everything between the
+    // two is still in the stack, so the washers and the nut are still found —
+    // only the far END moves in.
+    const double spans = truncate > 0.0 ? truncate : LastExit(stack);
+    fit.grip = underHead + spans + underNut + nutHeight;
     length = parts::SnapLength(request.standard, fit.size, fit.grip, &why);
   } else {
     const double blocked = onAxis.front().enter;
@@ -2392,6 +2659,10 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     head << ", washer " << underNut;
   if (nutHeight > 0.0)
     head << ", nut " << nutHeight;
+  // Naming what the joint deliberately stops short of is the confirmation
+  // that the second pick did what you meant by it.
+  if (!beyond.empty())
+    head << "; the axis carries on into " << beyond;
   fit.summary = head.str();
 
   // WHERE each piece goes, worked out whether or not anything is placed.
@@ -2401,7 +2672,9 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const glm::vec3 into = -axis;          // down the hole
   const glm::quat down = AlignZTo(into); // head end: body points back out
   const glm::quat up = AlignZTo(axis); // far end: body points out the far side
-  const glm::vec3 exit = centre + into * static_cast<float>(LastExit(stack));
+  const glm::vec3 exit =
+      centre +
+      into * static_cast<float>(truncate > 0.0 ? truncate : LastExit(stack));
 
   // Which occurrence each piece rides on. The head end bears on the part the
   // rim was picked in; the far end on whatever the axis leaves last.
@@ -2449,6 +2722,29 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
         fit.parts.push_back(o.name);
   }
   fit.occurrence = fit.placed.front();
+
+  // And the joint itself. Placing the hardware is not the same as holding the
+  // parts together: the screw rides its plate, the nut rides the far one, and
+  // until this the two plates were still free of each other — drag one and
+  // the bolt tore in half.
+  //
+  // Once per PAIR, not once per bolt. A second bolt between two flanges that
+  // a first already joined closes a loop in the mate graph, and this solver
+  // reports a loop as over-constrained rather than solving it. So three bolts
+  // through one bracket make one mate, and the two that add nothing say so by
+  // adding nothing.
+  if (headOn != farOn &&
+      !assembly::MatesConnect(*state.assembly, headOn, farOn)) {
+    const assembly::FlatInstance* farInst = nullptr;
+    for (const assembly::FlatInstance& inst : flat)
+      if (inst.rootOccurrenceId == farOn && inst.part != nullptr) {
+        farInst = &inst;
+        break;
+      }
+    if (farInst != nullptr)
+      fit.mate = JoinClampedParts(state, *chosen->inst, *farInst, centre, axis,
+                                  truncate > 0.0 ? truncate : LastExit(stack));
+  }
 
   fit.ok = true;
   return fit;

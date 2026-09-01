@@ -267,6 +267,24 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
                      const glm::quat& orientation, std::string* error,
                      uint64_t ridesOn = 0);
 
+// The rim, as a pick names it: WHICH occurrence, and which circular edge on
+// it (docs/parts/gui-plan.md, phase 1).
+//
+// The occurrence is not decoration. Every occurrence of one part shares every
+// element name, so an ElementRef alone does not name a rim in an assembly —
+// it names one rim per placement. Resolving it by taking the first match,
+// which is what this did until 2026-09-01, puts the fastener at the near end
+// of a joint made of two occurrences of the same plate. That is the ordinary
+// case, and the wrongness is silent.
+//
+// 0 means "infer", and infers only when there is nothing to infer between: a
+// rim that resolves on several occurrences with no occurrence given is
+// REFUSED naming them, not guessed at. A viewport pick always carries one.
+struct RimPick {
+  uint64_t occurrence = 0;
+  ElementRef element;
+};
+
 // What deriving a fastener from a picked hole worked out, whether or not it
 // could place one. Returned so the caller can SAY it: the decomposition is the
 // product, not a by-product — a gap in the stack is either an unmodelled
@@ -295,6 +313,11 @@ struct FastenerFit {
   // first, then the washers, then the nut. The commit path walks this rather
   // than recomputing the same arithmetic a second time.
   std::vector<PlannedPart> plan;
+  // The mate the joint became, when the fastener clamps two DIFFERENT parts
+  // that nothing already held together. 0 otherwise — including the ordinary
+  // second bolt through a pair the first one already mated, which is not a
+  // failure (docs/parts/f1-loose-ends.md).
+  uint64_t mate = 0;
 };
 
 // What to put on the axis (docs/parts/plan.md, phase 4).
@@ -313,25 +336,22 @@ struct FastenerRequest {
   // Refused on a blind hole, where there is no far side to put one on.
   std::string nut;
   std::string washer = "iso7089";
+  // WHERE THE JOINT ENDS, when the axis carries on past it.
+  //
+  // One pick derives; this is the second, and it is optional because most
+  // joints do not need it — the stack the axis passes through IS the joint.
+  // It stops being true the moment the axis continues into something the
+  // fastener is not clamping: a bolt through a housing flange whose line
+  // carries on through a boss behind it would otherwise be sized to span the
+  // lot, and a screw twice as long as it should be looks entirely reasonable
+  // in a viewport.
+  //
+  // Names a rim like the first pick does. It TRUNCATES rather than replaces:
+  // everything between the two picks is still traversed, because the grip and
+  // the far-side hardware still depend on what is in there
+  // (docs/parts/plan.md, "Two picks, but only when you want them").
+  RimPick farEnd;
   bool dryRun = false; // derive and explain without placing
-};
-
-// The rim, as a pick names it: WHICH occurrence, and which circular edge on
-// it (docs/parts/gui-plan.md, phase 1).
-//
-// The occurrence is not decoration. Every occurrence of one part shares every
-// element name, so an ElementRef alone does not name a rim in an assembly —
-// it names one rim per placement. Resolving it by taking the first match,
-// which is what this did until 2026-09-01, puts the fastener at the near end
-// of a joint made of two occurrences of the same plate. That is the ordinary
-// case, and the wrongness is silent.
-//
-// 0 means "infer", and infers only when there is nothing to infer between: a
-// rim that resolves on several occurrences with no occurrence given is
-// REFUSED naming them, not guessed at. A viewport pick always carries one.
-struct RimPick {
-  uint64_t occurrence = 0;
-  ElementRef element;
 };
 
 // Derive a fastener from a picked hole RIM and place it (phase 3).

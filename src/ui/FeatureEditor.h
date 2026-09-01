@@ -46,6 +46,10 @@ enum class PickSlot : int {
   CamEdgeWall,       // CAM R15: the wall whose top edge to round or chamfer
   CamDrillHole,      // CAM: the cylindrical face of a hole to drill
   FastenerRim,       // F1 p6: the circular EDGE a fastener's head sits on
+  // The optional SECOND pick: where the joint ENDS, when the axis carries on
+  // past it into material the fastener is not meant to span. Same session and
+  // same sentinel as FastenerRim — one tool, two slots.
+  FastenerFarEnd,
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

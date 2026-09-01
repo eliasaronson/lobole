@@ -56,6 +56,52 @@ this costs:
 - **A mate implies a solve.** Two hundred rigid leaves is two hundred nodes in
   a graph that exists to answer a question fasteners do not ask.
 
+#### And what that argument got wrong (corrected 2026-09-01)
+
+Every bullet above is true **of the hardware**, and all three still hold: the
+screw, its washers and its nut are attached, not mated, for exactly those
+reasons. What the argument missed is that it answers the wrong question. It
+asks how the SCREW should be held, and never asks what the screw is FOR.
+
+A bolt joins two parts to each other. Attaching the head end to the near part
+and the nut end to the far one left the two parts as free of each other as
+they had ever been — so the first thing tried after this shipped was rotating
+one bar, and the joint tore in half with the screw riding one side and the nut
+the other. Reported the same day, twice: *"Did we not build the mate for the
+fasteners?"*, and then *"I also don't see the mates in the mate list"* —
+which is the second half of it. The Mates list is where a person looks to see
+what holds an assembly together, and a bolted assembly's was empty.
+
+So placing a fastener now ALSO adds one **fastened mate between the two parts
+it clamps** — the part the head bears on to the part the axis leaves last.
+Three things make that cheap rather than the cost the bullets feared:
+
+- **One mate per PAIR, not per bolt.** A second bolt between two parts a first
+  already joined would close a loop, and this solver reports loops as errors
+  rather than solving them. `assembly::MatesConnect` asks whether the two are
+  already connected through the mate graph, and adds nothing when they are.
+  A fifty-bolt dock is not two hundred rows; it is one row per pair of parts
+  that touch. `fit_fastener` returns `mate: 0` to say so, and the tool window
+  tallies *"8 placed, 1 joined"* — the difference being the interesting
+  number.
+- **The mate MOVES NOTHING.** The bullet above is right that a mate placed by
+  frame alignment relocates things — so the DOFs are measured rather than
+  assumed. Both connector frames are resolved through the same
+  `ConnectorLocalFrame` the solver uses, and flip/rotation/offset/dx/dy come
+  out of the transform between them. The solve that follows a placement is a
+  no-op, which is the whole requirement: the parts are already where the
+  person put them, and a mate that "corrects" them breaks the model it was
+  meant to record. Gated by a test that solves and compares the full relative
+  transform, not just a position.
+- **It anchors on faces the traversal already walked.** The head's bearing
+  plane and the plane the axis leaves last, found by normal and distance along
+  the axis — no new picking, no new geometry, and nothing stored that the
+  fastener did not already know.
+
+The mate reads as what it is in the list: `Bolted`, fastened, *Bar A's top
+face to Bar B's bottom face*. If a person deletes it, the joint is free again;
+that is the right escape hatch and it costs nothing to have.
+
 ### The proposal: an attachment
 
 `Occurrence` gains **`attachedTo`** — the id of the occurrence it rides on —

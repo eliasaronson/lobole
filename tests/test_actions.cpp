@@ -673,6 +673,7 @@ namespace {
 struct DrilledPlate {
   uint64_t partId = 0;
   ElementRef topRim;
+  ElementRef bottomRim; // the far face's rim, for a second pick
 };
 
 DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
@@ -695,9 +696,11 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
 
   DrilledPlate out;
   out.partId = state.parts[tab].id;
-  // The rim is the highest circular edge: the one a head would sit on.
+  // The rim is the highest circular edge: the one a head would sit on. The
+  // LOWEST is the far face's, which is what a second pick names.
   const Body& body = doc.GetBodies().front();
   double best = -1e9;
+  double worst = 1e9;
   // edgeNames, not names: faces and edges have separate index spaces, and
   // DescribeEdgeAt on a face index is a different edge or none.
   for (const auto& [index, mapped] : body.elementMap.edgeNames) {
@@ -709,8 +712,61 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
       best = edge->midpoint.z;
       out.topRim = ElementRef{body.createdBy, mapped};
     }
+    if (edge->midpoint.z < worst) {
+      worst = edge->midpoint.z;
+      out.bottomRim = ElementRef{body.createdBy, mapped};
+    }
   }
   return out;
+}
+
+// A plate with SEVERAL holes through it, and the top rim of each in the order
+// the bores were asked for. MakePlate's single bore cannot say what a second
+// bolt between the same two parts should do, which is the whole question a
+// mate-per-joint rule has to answer.
+std::vector<ElementRef> MakeMultiBorePlate(ui::AppState& state,
+                                           const std::string& name,
+                                           double thickness, double boreDia,
+                                           const std::vector<double>& boreXs) {
+  const size_t tab = ui::AddPart(state, name);
+  ui::SetActivePart(state, tab);
+  Document& doc = *state.document;
+  doc.AddFeature(std::make_unique<BoxFeature>(
+      name, glm::vec3(-30.0f, -30.0f, 0.0f), 60.0, 60.0, thickness));
+  uint64_t solid = doc.GetFeature(0)->GetId();
+  for (size_t i = 0; i < boreXs.size(); i++) {
+    doc.AddFeature(std::make_unique<CylinderFeature>(
+        "Bore " + std::to_string(i),
+        glm::vec3(static_cast<float>(boreXs[i]), 0.0f, -1.0f),
+        glm::vec3(0, 0, 1), boreDia / 2, thickness + 2.0));
+    const uint64_t bore = doc.GetFeatures().back()->GetId();
+    doc.AddFeature(std::make_unique<BooleanFeature>(
+        "Drill " + std::to_string(i), solid, bore, BooleanOp::Subtract));
+    solid = doc.GetFeatures().back()->GetId();
+  }
+
+  std::vector<ElementRef> rims(boreXs.size());
+  std::vector<double> best(boreXs.size(), -1e9);
+  const Body& body = doc.GetBodies().front();
+  for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+    const std::optional<Measure::EdgeInfo> edge =
+        Measure::DescribeEdgeAt(body, index);
+    if (!edge || edge->kind != "circle")
+      continue;
+    const std::optional<glm::vec3> centre =
+        Measure::CentreOf(doc.GetBodies(), ElementRef{body.createdBy, mapped});
+    if (!centre)
+      continue;
+    for (size_t i = 0; i < boreXs.size(); i++) {
+      if (std::abs(centre->x - boreXs[i]) > 1e-3)
+        continue;
+      if (centre->z > best[i]) {
+        best[i] = centre->z;
+        rims[i] = ElementRef{body.createdBy, mapped};
+      }
+    }
+  }
+  return rims;
 }
 
 } // namespace
@@ -822,6 +878,95 @@ TEST_CASE("A circular edge that is the end of a solid is not a hole",
   CHECK(fit.why.find("Axle") != std::string::npos);
   // And not "-0 mm out", which is what the old message measured it at.
   CHECK(fit.why.find("-0 mm") == std::string::npos);
+}
+
+TEST_CASE("A second pick says where the joint ends", "[actions][parts]") {
+  // docs/parts/plan.md, "Two picks, but only when you want them". The stack
+  // the axis passes through IS the joint — until the axis carries on into
+  // something the fastener is not clamping, and then a screw sized to span
+  // the lot is twice as long as it should be and looks entirely reasonable.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  // Two flanges to bolt together, and a BOSS further down the same axis that
+  // the bolt has no business reaching.
+  const DrilledPlate front = MakePlate(state, "Front", 12.0, 6.6, -1.0, 0.0);
+  const DrilledPlate rear = MakePlate(state, "Rear", 12.0, 6.6, -1.0, 0.0);
+  MakePlate(state, "Boss", 40.0, 6.6, -1.0, 0.0);
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Housing"));
+  const auto place = [&](const char* part, float z) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = glm::vec3(0.0f, 0.0f, z);
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t frontOcc = place("Front", 0.0f); // z 0..12
+  const uint64_t rearOcc = place("Rear", -12.0f); // z -12..0
+  place("Boss", -52.0f);                          // z -52..-12
+
+  ui::FastenerRequest req;
+  req.dryRun = true;
+
+  // Without the second pick it spans everything on the axis — both flanges
+  // AND the boss behind them — and here that is not merely oversized, it is
+  // unbuildable: 64 mm is past the longest M6 anybody makes. Which is a
+  // sharper argument for the second pick than "the screw is a bit long".
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{frontOcc, front.topRim}, req);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("no nominal length reaches 64") != std::string::npos);
+  CHECK(fit.why.find("Boss 40") !=
+        std::string::npos); // it says what it spanned
+
+  // With it, the joint ends at the rear flange's far face — and everything
+  // between the two picks is still traversed, so the summary still names
+  // both flanges.
+  req.farEnd = ui::RimPick{rearOcc, rear.bottomRim};
+  fit = ui::FitFastenerToHole(state, ui::RimPick{frontOcc, front.topRim}, req);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  CHECK_THAT(fit.grip, WithinAbs(24.0, 1e-3)); // the two flanges only
+  CHECK(fit.summary.find("Front") != std::string::npos);
+  CHECK(fit.summary.find("Rear") != std::string::npos);
+  // The summary must agree with the grip beside it. Found on a real casing:
+  // it kept listing the part past the cut, so "grip 65: ... DE rib 30 ..."
+  // showed numbers totalling 95 — the decomposition is the product, and one
+  // that does not add up is worse than none.
+  const std::string listed = fit.summary.substr(0, fit.summary.find(';'));
+  CHECK(listed.find("Boss") == std::string::npos);
+  // But the axis DOES carry on, and saying into what is the confirmation
+  // that the second pick did what you meant.
+  CHECK(fit.summary.find("carries on into Boss") != std::string::npos);
+  // 24 is a length an M6 is made in; 64 would have been a 65.
+  CHECK_THAT(fit.length, WithinAbs(25.0, 1e-9));
+
+  // A far end that is not on the axis is a mis-pick, and says which.
+  const DrilledPlate off = MakePlate(state, "Off", 10.0, 6.6, -1.0, 25.0);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Skew rig"));
+  const uint64_t f2 = place("Front", 0.0f);
+  const uint64_t offOcc = place("Off", -30.0f);
+  ui::FastenerRequest bad;
+  bad.dryRun = true;
+  bad.farEnd = ui::RimPick{offOcc, off.topRim};
+  fit = ui::FitFastenerToHole(state, ui::RimPick{f2, front.topRim}, bad);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("off this hole's axis") != std::string::npos);
+
+  // And one on the head's side of the rim: it names where the fastener
+  // STOPS, which has to be past where it starts.
+  ui::FastenerRequest backwards;
+  backwards.dryRun = true;
+  backwards.farEnd = ui::RimPick{f2, front.topRim};
+  fit = ui::FitFastenerToHole(state, ui::RimPick{f2, front.topRim}, backwards);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("head's side") != std::string::npos);
 }
 
 TEST_CASE("A countersunk screw needs a countersunk hole", "[actions][parts]") {
@@ -941,6 +1086,100 @@ TEST_CASE("A countersunk screw needs a countersunk hole", "[actions][parts]") {
   CHECK(fit.why.find("bears on the cone") != std::string::npos);
 }
 
+TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
+  // Reported from use 2026-09-01, twice: "Did we not build the mate for the
+  // fasteners?", then "I also don't see the mates in the mate list".
+  //
+  // The hardware WAS following its plate — attachment worked. What was
+  // missing is the thing a bolt is actually for: it holds the two parts to
+  // EACH OTHER. Rotating one bar was still legal, so the joint tore open with
+  // the screw riding one half and the nut the other, and the place a person
+  // looks to see what holds an assembly together was empty.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const std::vector<double> bores{-15.0, 15.0};
+  const std::vector<ElementRef> topRims =
+      MakeMultiBorePlate(state, "Top", 12.0, 6.6, bores);
+  MakeMultiBorePlate(state, "Bottom", 26.0, 6.6, bores);
+  REQUIRE(topRims.size() == 2);
+  REQUIRE(topRims[0].IsSet());
+  REQUIRE(topRims[1].IsSet());
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  const auto place = [&](const char* part, glm::vec3 at) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t topOcc = place("Top", glm::vec3(0.0f));
+  const uint64_t bottomOcc = place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+
+  const auto occOf = [&](uint64_t id) { return state.assembly->FindById(id); };
+  const auto worldOf = [&](uint64_t id) {
+    return ui::OccurrenceMatrix(*occOf(id));
+  };
+  const glm::mat4 before = glm::inverse(worldOf(topOcc)) * worldOf(bottomOcc);
+
+  ui::FastenerRequest request;
+  request.nut = "iso4032";
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, topRims[0]}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.mate != 0);
+  REQUIRE(state.assembly->GetMates().size() == 1);
+
+  // Placing a fastener must not MOVE anything. The mate records the pose the
+  // parts are already in, so the solve that follows is a no-op — a mate that
+  // "corrects" a person's placement is a mate that breaks the model it was
+  // meant to record.
+  CHECK(ui::SolveActiveAssembly(state) == 0);
+  const glm::mat4 placedAt = glm::inverse(worldOf(topOcc)) * worldOf(bottomOcc);
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++)
+      CHECK_THAT(placedAt[c][r], WithinAbs(before[c][r], 1e-3));
+
+  // Now the point: move ONE bar and the other comes with it. Rotation as well
+  // as translation, because a mate that only held the offset would have let
+  // the joint twist, and twisting is exactly what the report showed.
+  Occurrence* top = occOf(topOcc);
+  top->position += glm::vec3(0.0f, 5.0f, 3.0f);
+  top->orientation =
+      glm::angleAxis(glm::radians(-21.432f), glm::vec3(0, 0, 1)) *
+      top->orientation;
+  CHECK(ui::SolveActiveAssembly(state) == 0);
+
+  const glm::mat4 after = glm::inverse(worldOf(topOcc)) * worldOf(bottomOcc);
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++)
+      CHECK_THAT(after[c][r], WithinAbs(before[c][r], 1e-3));
+
+  // And the hardware rode along with its own half, so the joint is whole.
+  const glm::vec3 axisAfter =
+      glm::vec3(worldOf(topOcc) * glm::vec4(0, 0, 1, 0));
+  const glm::vec3 screwToNut =
+      occOf(fit.placed.front())->position - occOf(fit.placed.back())->position;
+  CHECK_THAT(glm::length(glm::cross(glm::normalize(screwToNut), axisAfter)),
+             WithinAbs(0.0, 1e-3));
+
+  // A SECOND bolt between the same two parts adds no second mate. Every mate
+  // between an already-connected pair closes a loop, and this solver reports
+  // a loop as over-constrained rather than solving it: three bolts through
+  // one bracket are one joint, not three conflicting ones.
+  const ui::FastenerFit second =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, topRims[1]}, request);
+  INFO(second.why);
+  REQUIRE(second.ok);
+  CHECK(second.mate == 0);
+  CHECK(state.assembly->GetMates().size() == 1);
+  CHECK(ui::SolveActiveAssembly(state) == 0);
+}
+
 TEST_CASE("A placed fastener rides on the part it bears on",
           "[actions][parts]") {
   // Reported from use: "I get surprised by the parts and fasteners being
@@ -949,8 +1188,10 @@ TEST_CASE("A placed fastener rides on the part it bears on",
   // occurrence) AND did not follow its plate, because the solver leaves an
   // unmated occurrence untouched. Neither held nor carried.
   //
-  // Not a mate: a fastener is a zero-DOF leaf, so this is a composition
-  // (docs/parts/f1-loose-ends.md).
+  // Not a mate: the HARDWARE is a zero-DOF leaf, so this is a composition
+  // (docs/parts/f1-loose-ends.md). The joint between the two PARTS is a mate,
+  // and it took a second report to see that — see "A bolt through two parts
+  // mates them" below.
   ui::AppState state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -1315,6 +1556,14 @@ TEST_CASE(
   // redesign and the joint is left behind. Deriving a length from other
   // documents' geometry cannot be a live binding (A2), so what this has to do
   // is SAY so rather than quietly keep the number it was fitted with.
+  //
+  // What it says changed with the alternator round, and the change is the
+  // point rather than a weakening. A joint now ends at its NUT — the check
+  // was calling three correctly sized through-bolts short because the axis
+  // ran on into a rib they never spanned — and under that rule this screw
+  // does reach its own nut, so "too short" is no longer the true complaint.
+  // The true one is that the plate slid over the hardware: the nut is now
+  // 15 mm INSIDE the bottom plate, bearing on nothing.
   for (Occurrence& o : state.assembly->GetOccurrences())
     if (o.name == "Bottom")
       o.position.z -= 15.0f;
@@ -1323,8 +1572,8 @@ TEST_CASE(
   REQUIRE(stale.size() == 1);
   INFO(stale[0].why);
   CHECK(stale[0].part == "ISO 4762 M6x50");
-  CHECK(stale[0].why.find("too short") != std::string::npos);
-  CHECK(stale[0].why.find("4.6 mm") != std::string::npos);
+  CHECK(stale[0].why.find("nut buried in Bottom") != std::string::npos);
+  CHECK(stale[0].why.find("clamps nothing") != std::string::npos);
 
   // A nut on a blind hole has nothing to thread onto. Refused by name: the
   // alternative is a nut floating inside the plate, which is invisible from
