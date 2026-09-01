@@ -41,6 +41,7 @@
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/Overlays.h"
 #include "ui/TerminalPanel.h"
@@ -592,4 +593,68 @@ TEST_CASE("duplicating a tab you are not looking at copies that tab",
   CHECK(state.document->FeatureCount() == 1); // Part 1's box, not Part 2's none
   // A copy lands in its original's folder rather than loose on the bar.
   CHECK(state.parts[copy].folder == "Imported");
+}
+
+TEST_CASE("A fastener is one part per spec, placed in an assembly",
+          "[actions][parts]") {
+  // The architectural claims of docs/parts/plan.md phase 2, which is the
+  // phase that exists to test them: if part-per-spec is the wrong shape it is
+  // cheap to discover with one fastener type and expensive with twenty.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  // A part tab REFUSES, and not for tidiness: CAM generates over the active
+  // part's bodies, so a screw there would be machined.
+  std::string error;
+  CHECK(ui::AddFastener(state, "iso4762def", "M6", 20.0, "hex", glm::vec3(0.0f),
+                        glm::quat(1, 0, 0, 0), &error) == 0);
+  INFO(error);
+  CHECK(error.find("ASSEMBLY") != std::string::npos);
+
+  const size_t asmTab = ui::AddAssembly(state, "Joint");
+  ui::SetActivePart(state, asmTab);
+  REQUIRE(state.assembly != nullptr);
+
+  // Eight of one spec and one of another: NINE occurrences, TWO parts.
+  for (int i = 0; i < 8; i++) {
+    error.clear();
+    const uint64_t id =
+        ui::AddFastener(state, "iso4762def", "M6", 20.0, "hex",
+                        glm::vec3(static_cast<float>(i) * 12.0f, 0.0f, 0.0f),
+                        glm::quat(1, 0, 0, 0), &error);
+    INFO(error);
+    CHECK(id != 0);
+  }
+  CHECK(ui::AddFastener(state, "iso4762def", "M8", 30.0, "hex", glm::vec3(0.0f),
+                        glm::quat(1, 0, 0, 0), &error) != 0);
+  CHECK(state.assembly->OccurrenceCount() == 9);
+
+  size_t generated = 0;
+  for (const ui::PartSlot& slot : state.parts)
+    if (slot.folder == ui::kStandardPartsFolder)
+      generated++;
+  // Two, not nine: the eight identical screws share one document, which is
+  // what makes `bom` aggregate them without knowing anything about fasteners,
+  // and what keeps a project from growing a tab per screw.
+  CHECK(generated == 2);
+  CHECK(ui::PartIdByName(state, "ISO 4762 M6x20") != 0);
+  CHECK(ui::PartIdByName(state, "ISO 4762 M8x30") != 0);
+
+  // Placing one did not leave the caller on some other tab. A tab switch
+  // nobody asked for reads as a bug, and the importer's own pattern switches
+  // twice on the way through.
+  CHECK(state.assembly != nullptr);
+  CHECK(state.activePart == static_cast<int>(asmTab));
+
+  // The refusal reaches through the placement layer intact, and no half-made
+  // part is left behind when it fires.
+  const size_t partsBefore = state.parts.size();
+  error.clear();
+  CHECK(ui::AddFastener(state, "iso4762def", "M7", 20.0, "hex", glm::vec3(0.0f),
+                        glm::quat(1, 0, 0, 0), &error) == 0);
+  INFO(error);
+  CHECK(error.find("M6 and M8") != std::string::npos);
+  CHECK(state.parts.size() == partsBefore);
 }

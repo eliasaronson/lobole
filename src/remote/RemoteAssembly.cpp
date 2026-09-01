@@ -70,6 +70,17 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly", "Run the mate solver; returns satisfied/errored mates.",
      ""},
+    {"add_fastener",
+     "Place a standard fastener in the active assembly (docs/parts/plan.md). "
+     "Every dimension but the length is READ from the vendored table for that "
+     "standard, so an unstocked size is refused naming the nearest that are. "
+     "One generated part per distinct spec, named as its BOM designation "
+     "(\"ISO 4762 M6x20\") and reused by every occurrence of it, so `bom` "
+     "aggregates without knowing about fasteners. Refused on a part tab: a "
+     "screw body there would be machined by CAM and counted as the part's own "
+     "mass. Optional {position, orientation} place it; deriving those from a "
+     "picked hole is not built yet.",
+     "drive, length, orientation, position, size, standard"},
     {"bom", "Bill of materials (aggregated part counts, masses).", ""},
     {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",
@@ -126,6 +137,32 @@ std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
 
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
+  if (m == "add_fastener") {
+    glm::vec3 position(0.0f);
+    if (p.contains("position")) {
+      const auto& v = p.at("position");
+      position = glm::vec3(v.at(0).get<float>(), v.at(1).get<float>(),
+                           v.at(2).get<float>());
+    }
+    glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+    if (p.contains("orientation")) {
+      const auto q = p.at("orientation");
+      orientation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
+                              q.at(1).get<float>(), q.at(2).get<float>());
+    }
+    std::string error;
+    const uint64_t id = ui::AddFastener(
+        state, p.value("standard", std::string("iso4762def")),
+        p.at("size").get<std::string>(), p.at("length").get<double>(),
+        p.value("drive", std::string("hex")), position, orientation, &error);
+    if (id == 0)
+      throw std::runtime_error(error);
+    std::string placed;
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      if (o.id == id)
+        placed = o.name;
+    return json{{"occurrence", id}, {"part", placed}};
+  }
   if (m == "add_occurrence") {
     // Places a part OR another assembly (A5) in the active assembly. `part`
     // is its NAME, resolved to a stable slot id; optional `transform` =

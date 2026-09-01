@@ -62,3 +62,12 @@ public:
   // looks fine in the viewport.
   std::string drive = "hex";
 };
+
+// A note on MASS, because a number that is 25% off looks like a bug rather
+// than a modelling choice. The shank is a plain cylinder at the nominal
+// diameter — a COSMETIC thread, which is what this codebase already does and
+// what bd_warehouse defaults to, because generating a real helix is expensive.
+// A real thread removes material, so the generated mass is an UPPER BOUND: a
+// steel M6x20 comes out at 7.6 g against a catalogue's ~6 g. That is the right
+// error to have (a joint is never lighter than the model says) and it is worth
+// knowing before comparing against a supplier's figure.

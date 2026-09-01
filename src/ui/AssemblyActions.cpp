@@ -21,6 +21,7 @@
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
@@ -1746,6 +1747,67 @@ bool ImportStepAsAssembly(AppState& state,
   LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", stepPath,
            plan.parts.size(), plan.occurrences.size());
   return true;
+}
+
+uint64_t AddFastener(AppState& state, const std::string& standard,
+                     const std::string& size, double length,
+                     const std::string& drive, const glm::vec3& position,
+                     const glm::quat& orientation, std::string* error) {
+  const auto fail = [&](const std::string& why) -> uint64_t {
+    if (error)
+      *error = why;
+    return 0;
+  };
+  if (state.assembly == nullptr)
+    return fail("a fastener is a bought part placed in an ASSEMBLY, not "
+                "geometry in a part — on a part tab it would be machined by "
+                "CAM, counted as the part's own mass, and reported by "
+                "check_geometry as a disconnected body. Switch to an assembly "
+                "tab (set_active_part) and place it there.");
+
+  // Built once, off to the side, purely to name the spec and to let the table
+  // refuse an unstocked one BEFORE a document exists for it. A refusal that
+  // arrives after a tab has been created leaves the tab behind.
+  FastenerFeature probe("", standard, size, length);
+  probe.drive = drive;
+  {
+    Document scratch;
+    auto copy = std::make_unique<FastenerFeature>(probe);
+    scratch.AddFeature(std::move(copy));
+    if (scratch.GetBodies().empty())
+      return fail(scratch.GetFeature(0)->GetError());
+  }
+  const std::string designation = probe.Designation();
+
+  // One part per spec: an existing one with this designation is THE part, and
+  // every occurrence of it aggregates in the BOM for free.
+  uint64_t partId = PartIdByName(state, designation);
+  if (partId == 0) {
+    const int assemblyTab = state.activePart;
+    AddPart(state, designation); // switches tabs, like the importer's
+    PartSlot& slot = state.parts[static_cast<size_t>(state.activePart)];
+    slot.folder = kStandardPartsFolder;
+    CreateFolder(state, kStandardPartsFolder);
+    partId = slot.id;
+    auto feature = std::make_unique<FastenerFeature>(probe);
+    feature->SetName(designation);
+    state.document->AddFeature(std::move(feature));
+    // Back to the assembly the caller was on: creating the part is a side
+    // effect of placing one, and a tab switch the caller did not ask for is
+    // the kind of thing that reads as a bug.
+    if (assemblyTab >= 0 && assemblyTab < static_cast<int>(state.parts.size()))
+      SetActivePart(state, static_cast<size_t>(assemblyTab));
+  }
+  if (state.assembly == nullptr)
+    return fail("could not return to the assembly after creating " +
+                designation);
+
+  Occurrence occ;
+  occ.partId = partId;
+  occ.name = designation;
+  occ.position = position;
+  occ.orientation = orientation;
+  return state.assembly->AddOccurrence(occ);
 }
 
 uint64_t MaterializeImportedPart(AppState& state,

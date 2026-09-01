@@ -195,6 +195,33 @@ bool ImportStepAsAssembly(AppState& state,
 // so the background import (ui/ImportJob.cpp) can run the first a slice per
 // frame while its progress modal keeps painting. Returns the new part's slot
 // id; the ids, in plan order, are what MaterializeImportedAssembly places.
+// The tab-bar folder generated standard parts live in. One name, here: a
+// project with five sizes across four lengths is twenty documents, and a tab
+// bar nobody can find their own part in is a failure discovered late and
+// blamed on something else (docs/parts/plan.md).
+inline constexpr const char* kStandardPartsFolder = "Standard parts";
+
+// Place a standard fastener in the ACTIVE ASSEMBLY (docs/parts/plan.md,
+// phase 2). Returns the new occurrence's id, or 0 with `error` filled.
+//
+// One generated part document per distinct (standard, size, length, drive),
+// reused by every occurrence of that spec and named as its BOM designation —
+// so `bom` counts eight identical screws as one line of quantity 8 without
+// knowing anything about fasteners, and mass follows from the material.
+//
+// Refused on a part tab, and not for tidiness: CAM generates toolpaths over
+// the ACTIVE PART's bodies, so a screw body sitting in a part would be
+// sectioned, stocked around and cut; mass and BOM would count it as the part
+// rather than as a bought item; and check_geometry would flag it as a
+// disconnected component, correctly.
+//
+// This phase places where it is told. Deriving the size and length from a
+// picked hole — which is the point of the feature — is phase 3.
+uint64_t AddFastener(AppState& state, const std::string& standard,
+                     const std::string& size, double length,
+                     const std::string& drive, const glm::vec3& position,
+                     const glm::quat& orientation, std::string* error);
+
 uint64_t MaterializeImportedPart(AppState& state,
                                  const interchange::PlannedPart& part,
                                  const std::string& asmName);

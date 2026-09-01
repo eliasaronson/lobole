@@ -757,13 +757,14 @@ static const std::set<std::string> kNoPartDoc = {
     "add_drawing_dim", "remove_drawing_dim", "list_drawing_dims",
     "add_drawing_note", "remove_drawing_note", "list_drawing_notes",
     "new_project", "save_project", "open_project", "add_occurrence",
-    "remove_occurrence", "list_occurrences", "set_occurrence_transform",
-    "set_occurrence_visible", "set_occurrence_fixed", "rename_occurrence",
-    "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
-    "select_occurrence", "set_occurrence_configuration", "solve_assembly",
-    "bom", "export_bom", "edit_in_context", "add_exploded_view",
-    "remove_exploded_view", "list_exploded_views", "set_explode_step",
-    "auto_explode", "set_explode",
+    // A fastener is placed in an assembly, where `doc` is null by definition.
+    "add_fastener", "remove_occurrence", "list_occurrences",
+    "set_occurrence_transform", "set_occurrence_visible",
+    "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
+    "remove_mate", "list_mates", "select_mate", "select_occurrence",
+    "set_occurrence_configuration", "solve_assembly", "bom", "export_bom",
+    "edit_in_context", "add_exploded_view", "remove_exploded_view",
+    "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
     // export_visual works on a part OR an assembly (occurrence walk).
     "export_visual",
     // Clearing the compare_geometry overlay must work from any tab — the

@@ -1,7 +1,8 @@
 # Standard parts — plan (F1)
 
-> Status: **phase 1 SHIPPED 2026-09-01** (the tables, the lookups and the
-> refusals — no geometry); phases 2-5 planned. Written 2026-09-01 from a survey of the open
+> Status: **phases 1 and 2 SHIPPED 2026-09-01** — the tables and their
+> refusals, then the `Fastener` feature (format v69), the generated
+> part-per-spec and the `add_fastener` RPC. Phases 3-5 planned. Written 2026-09-01 from a survey of the open
 > libraries, both of which were cloned to `~/Documents/CAD/parts/` and read
 > rather than judged from their websites. The survey, the source comparison and
 > the interface argument live in
@@ -299,10 +300,32 @@ regen's input surface for.
 
    One expectation of mine was also wrong rather than the data: `s_mean` is
    the MIDDLE of the socket's tolerance band, so an M6's 5 mm hex reads 5.06.
-2. **One fastener, end to end.** `Fastener` feature → a generated part
-   document → an occurrence, for the socket head cap screw (ISO 4762, hex
-   drive). RPC only, no GUI. This is where the architectural claims get tested:
-   part-per-spec, folder placement, BOM aggregation, refusal on a part tab.
+2. **One fastener, end to end.** — **SHIPPED.** `FastenerFeature` (format
+   v69, golden at that version), `ui::AddFastener`, the `add_fastener` RPC,
+   and the claims measured rather than asserted: nine occurrences of two specs
+   make **two** part documents, `bom` reports quantity 8 for the repeated one
+   without knowing anything about fasteners, and a part tab refuses.
+
+   Three things the build corrected:
+
+   - **Mass needs the material SLUG, not its name.** `MassProps` resolves
+     through `MaterialLibrary::FromSlug`, so a body tagged "Steel" reads as
+     unknown density and the BOM says "mass unknown". Found by reading the BOM
+     rather than the field — which is the whole reason mass is one of the two
+     arguments for this feature.
+   - **`RuntimePaths::DataDir()` only looked beside the executable**, so
+     `build/tests/designer_tests` could not find `build/assets`. A golden
+     carrying a Fastener regenerated to zero bodies in the test binary and to a
+     screw in the app. It now also looks one level up.
+   - **The generated mass is an UPPER BOUND.** A cosmetic thread is a full
+     -diameter shank, so a steel M6x20 comes out at 7.6 g against a
+     catalogue's ~6 g. The right error to have, and worth stating before
+     someone compares against a supplier and files a bug.
+
+   The volume is gated analytically against the table's own numbers — head
+   cylinder + shank cylinder − hexagonal socket = 970.21 mm³ for an M6x20 —
+   rather than against a remembered mass, which is a figure this plan had
+   wrong ("about 4.5 g").
 3. **Derive from a hole.** The edge pick, the size lookup (forward and
    backward), the axis ray and its stack decomposition, length snapping to a
    stocked size, and the staleness report. GUI verb + the `add_fastener` RPC.
