@@ -123,6 +123,16 @@ bugs rather than missing features. The recommendation is small and concrete:
 fourth bespoke worker** — a job with a progress state, a cancel, and a row in
 the panel that owns it. `mesh_study` is then the first free adopter.
 
+**Planned 2026-09-01: [ui/long-operations.md](ui/long-operations.md)** — and
+reading the implementations changed the entry. There are **five**, not four
+(`RenderJob` and `SyncJob` were missed), and two of them have live bugs that
+have nothing to do with duplication: `PollSync` sits inside a collapsed
+`TreeNode`, so a push never completes if the Sharing section is shut, and the
+study polls run only while the Simulation panel is drawn, so leaving that mode
+strands a solve until an RPC client reaps it. Both are one-line fixes and the
+plan says to make them first, independently — holding a bug fix hostage to a
+refactor delays both.
+
 ---
 
 ## S1 — Two files outran the god-file refactor
