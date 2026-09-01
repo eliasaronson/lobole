@@ -457,14 +457,19 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
 }
 
 void DrawCamToolWindow(AppState& state) {
-  BeginToolWindowFrame(state, "CAM");
+  // The session belongs to the JOB (v73), so without one there is nothing to
+  // draw and nothing to keep open. It used to say "switch to a part tab" and
+  // stay up, which is now both wrong and expensive: a floating tool window
+  // over the viewport eats the clicks of whatever the user does next -- it
+  // was a sketch trim, two tests later in a shuffled GUI run.
   if (!state.job) {
-    ImGui::TextWrapped("CAM cuts a part. Switch to a part tab.");
-    if (ImGui::Button("Done###cam_tool_done"))
-      state.camToolOpen = false;
-    ImGui::End();
+    state.camToolOpen = false;
+    state.camGhostOp = 0;
+    if (state.slotPick.featureId == kCamToolSlot)
+      state.slotPick = {};
     return;
   }
+  BeginToolWindowFrame(state, "CAM");
 
   cam::Setup* setup = ActiveCamSetup(state);
   const bool armed = state.slotPick.featureId == kCamToolSlot;

@@ -749,7 +749,23 @@ bool StockBoundsFramed(const Setup& setup, const std::vector<Body>& bodies,
     // SMALLER than the part is refused rather than quietly grown, because a
     // grown one is a job that looks fine and cannot be cut from the material
     // in the room (see StockRefusal).
+    //
+    // ...unless the parts have been LAID OUT. `place` and a per-part
+    // placement are two ways to say where a part sits in the sheet, and they
+    // fight: with the sheet derived from the parts, moving a part drags the
+    // sheet along, so nothing could ever be off the edge and "the sheet you
+    // actually own" (W3) was still a shrink-wrap in disguise. Once anything
+    // is placed, the sheet is a real object at a known place -- anchored in
+    // X and Y at the setup origin, which is the corner you touch off on --
+    // and the parts are arranged ON it. Z keeps the `place` derivation:
+    // thickness is still a fact about the board, not about the layout.
+    const bool laidOut = !setup.placements.empty();
     for (int a = 0; a < 3; a++) {
+      if (laidOut && a < 2) {
+        min[a] = 0.0;
+        max[a] = s.size[a];
+        continue;
+      }
       const double extent = hi[a] - lo[a];
       if (s.size[a] < extent - kStockFit)
         return false;
@@ -2409,7 +2425,81 @@ Toolpath Generate(const Setup& setup, const Operation& op,
   return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies));
 }
 
-std::string PlacementRefusal(const Setup& setup) {
+namespace {
+// The XY footprint of one placed part, in setup space.
+struct Foot {
+  bool ok = false;
+  glm::dvec3 lo{0.0}, hi{0.0};
+};
+
+Foot FootOf(const Setup& setup, const std::vector<Body>& framed,
+            uint64_t jobPartId) {
+  std::vector<Body> mine;
+  for (const Body& b : framed)
+    if (b.jobPartId == jobPartId)
+      mine.push_back(b);
+  (void)setup;
+  Foot f;
+  f.ok = ModelBoundsFramed(mine, f.lo, f.hi);
+  return f;
+}
+
+bool OverlapsXY(const Foot& a, const Foot& b) {
+  const double eps = 1e-6;
+  return a.lo.x < b.hi.x - eps && b.lo.x < a.hi.x - eps &&
+         a.lo.y < b.hi.y - eps && b.lo.y < a.hi.y - eps;
+}
+} // namespace
+
+std::vector<PlacementFit> CheckPlacements(const Setup& setup,
+                                          const std::vector<Body>& bodies) {
+  std::vector<PlacementFit> out;
+  if (setup.placements.empty())
+    return out;
+  const std::vector<Body> framed = BodiesInSetupFrame(setup, bodies);
+  glm::dvec3 stockLo(0.0), stockHi(0.0);
+  const bool haveStock = StockBoundsFramed(setup, framed, stockLo, stockHi);
+
+  std::vector<Foot> feet;
+  feet.reserve(setup.placements.size());
+  for (const Placement& p : setup.placements)
+    feet.push_back(FootOf(setup, framed, p.jobPartId));
+
+  for (size_t i = 0; i < setup.placements.size(); i++) {
+    const Placement& p = setup.placements[i];
+    PlacementFit fit;
+    fit.placementId = p.id;
+    fit.jobPartId = p.jobPartId;
+    // A disabled placement is not cut, so it is not in anyone's way and
+    // nothing is asked of it.
+    if (!p.enabled || !feet[i].ok) {
+      out.push_back(std::move(fit));
+      continue;
+    }
+    if (haveStock && setup.stock.mode == StockMode::Fixed) {
+      const bool anyIn = feet[i].lo.x < stockHi.x && stockLo.x < feet[i].hi.x &&
+                         feet[i].lo.y < stockHi.y && stockLo.y < feet[i].hi.y;
+      const bool allIn = feet[i].lo.x >= stockLo.x - kStockFit &&
+                         feet[i].hi.x <= stockHi.x + kStockFit &&
+                         feet[i].lo.y >= stockLo.y - kStockFit &&
+                         feet[i].hi.y <= stockHi.y + kStockFit;
+      fit.fit = allIn   ? Fit::Inside
+                : anyIn ? Fit::PartlyOutside
+                        : Fit::FullyOutside;
+    }
+    for (size_t k = 0; k < setup.placements.size(); k++) {
+      if (k == i || !setup.placements[k].enabled || !feet[k].ok)
+        continue;
+      if (OverlapsXY(feet[i], feet[k]))
+        fit.overlaps.push_back(setup.placements[k].id);
+    }
+    out.push_back(std::move(fit));
+  }
+  return out;
+}
+
+std::string PlacementRefusal(const Setup& setup,
+                             const std::vector<Body>& bodies) {
   for (size_t i = 0; i < setup.placements.size(); i++)
     for (size_t k = i + 1; k < setup.placements.size(); k++)
       if (setup.placements[i].jobPartId == setup.placements[k].jobPartId &&
@@ -2418,6 +2508,17 @@ std::string PlacementRefusal(const Setup& setup) {
                "yet -- the second copy would be skipped and the file would "
                "look right. Disable one placement, or give the copies their "
                "own job parts";
+  for (const PlacementFit& f : CheckPlacements(setup, bodies)) {
+    if (f.fit == Fit::FullyOutside)
+      return "a part is not on the stock at all -- place it, or take it out "
+             "of this setup";
+    if (f.fit == Fit::PartlyOutside)
+      return "a part hangs over the edge of the stock: the cut would run off "
+             "the workpiece. Move it, or use a bigger sheet";
+    if (!f.overlaps.empty())
+      return "two parts are placed on top of each other -- whichever is cut "
+             "second is cut out of the first one's offcut. Move one";
+  }
   return "";
 }
 
@@ -2425,7 +2526,7 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
                                   const std::vector<Body>& bodies) {
   // An arrangement we cannot honestly cut stops here, in every operation's
   // own error, rather than at the machine.
-  if (const std::string why = PlacementRefusal(setup); !why.empty()) {
+  if (const std::string why = PlacementRefusal(setup, bodies); !why.empty()) {
     std::vector<Toolpath> refused;
     for (const Operation& op : setup.operations)
       if (op.enabled) {

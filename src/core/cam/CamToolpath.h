@@ -227,16 +227,51 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
                                         OpType type, const Target& target,
                                         int toolNumber = 0);
 
+// Where a placed part sits with respect to the stock. Three states, not two:
+// a part hanging over the sheet edge and a part that is not on the sheet at
+// all are different mistakes, and the second is usually "I forgot to place
+// it". PrusaSlicer draws the same distinction
+// (ModelInstancePVS_{Inside,Partly_Outside,Fully_Outside}, set by
+// Print::validate()), and so does BambuStudio per plate.
+enum class Fit { Inside, PartlyOutside, FullyOutside };
+
+struct PlacementFit {
+  uint64_t placementId = 0;
+  uint64_t jobPartId = 0;
+  Fit fit = Fit::Inside;
+  // Placement ids whose footprint this one runs into. Two parts in one sheet
+  // occupying the same rectangle is scrap, and it is invisible in a backplot
+  // that draws both.
+  std::vector<uint64_t> overlaps;
+};
+
+// Check the ARRANGEMENT, at the moment someone asks -- not while they drag.
+// A sheet is laid out THROUGH states like these; blocking the drag makes the
+// intermediate ones impossible to pass through, which is why both slicers
+// compute a state and let you move freely. The refusal belongs at the post,
+// where the mistake becomes G-code.
+//
+// `Fit` is only ever Inside for relative stock, which is derived FROM the
+// parts: nothing can be outside a box drawn around it.
+[[nodiscard]] std::vector<PlacementFit>
+CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
+
 // Why this setup cannot be cut as laid out, or "" when it can. Separate from
 // StockRefusal, which is about the workpiece: this is about the ARRANGEMENT.
 //
-// Today it catches exactly one thing, and catching it is the point: a part
-// placed TWICE in one setup -- four of the same bracket nested in a sheet.
-// The data model holds it (a placement per copy, the way every slicer models
-// instances) and the generator does not cut it yet: a region resolves to the
-// first body that answers, so the second copy would be silently skipped and
-// the file would look right. Refuse instead.
-[[nodiscard]] std::string PlacementRefusal(const Setup& setup);
+// Three things, each of which would otherwise produce a file that looks
+// right:
+//
+//   - a part placed TWICE. The data model holds it (a placement per copy, the
+//     way every slicer models instances) and the generator does not cut it
+//     yet: a region resolves to the first body that answers, so the second
+//     copy is silently skipped;
+//   - a part off the sheet, wholly or partly -- named separately, because
+//     "hanging over the edge" and "not on it at all" are different mistakes;
+//   - two parts occupying the same rectangle, which a backplot drawing both
+//     cannot show you.
+[[nodiscard]] std::string PlacementRefusal(const Setup& setup,
+                                           const std::vector<Body>& bodies);
 
 // --- C9: the setup frame (indexed 4th axis) --------------------------------
 

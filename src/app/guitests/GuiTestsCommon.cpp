@@ -37,6 +37,16 @@ Document* CamPart() {
 // each test makes full-suite runs behave like isolated ones. Registered as a
 // TestFunc wrapper below, so individual tests don't have to opt in.
 void ResetAppForTest() {
+  // FIRST, before the camera: a CAM test leaves a JOB tab behind (v73: setups
+  // live on a job, not on the part), and the next test then opens on it,
+  // where `document` is null. Dropping them switches tabs, and a tab switch
+  // can FIT the camera — so doing it after the reset below left the next
+  // test's screen coordinates pointing somewhere else, which is how a sketch
+  // trim two tests later failed with a perfectly good preview of the wrong
+  // span.
+  for (size_t i = s_App->parts.size(); i-- > 0;)
+    if (s_App->parts[i].kind == ui::DocKind::Job)
+      ui::DeletePart(*s_App, i);
   if (s_App->camera) {
     s_App->camera->StopAnimation();
     s_App->camera->SetPosition(
@@ -58,15 +68,6 @@ void ResetAppForTest() {
   s_App->settingsDirtyAt = -1.0;
   s_App->settingsWindowOpen = false;
   ui::ApplySettings(*s_App);
-  // A CAM test leaves a JOB tab behind (v73: setups live on a job, not on the
-  // part), and the next test then OPENS on it — where `document` is null, so
-  // a test that starts by building a part silently builds it into the
-  // previous test's part while looking at the previous test's job. A job is
-  // the only tab kind a test creates as a side effect of doing its work, so
-  // the reset drops them and returns to the first part.
-  for (size_t i = s_App->parts.size(); i-- > 0;)
-    if (s_App->parts[i].kind == ui::DocKind::Job)
-      ui::DeletePart(*s_App, i);
   s_App->selection.Clear();
   s_App->sketchEdit = {};
   s_App->sketchDrag = {};

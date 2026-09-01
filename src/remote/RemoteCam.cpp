@@ -47,6 +47,14 @@ constexpr MethodDoc kCamMethods[] = {
      "has changed since the job last saw it (`stale`), and where each sits in "
      "each setup.",
      ""},
+    {"check_layout",
+     "How the parts are arranged in the stock {setup?}: per placement, "
+     "whether it is `inside` the stock, `partly_outside` (hanging over an "
+     "edge) or `fully_outside` (not on it at all), and which other placements "
+     "it runs into. Computed when asked, not while you drag: a sheet is laid "
+     "out THROUGH states like these. The refusal lands at cam_toolpath and "
+     "cam_post, where the mistake becomes G-code.",
+     "setup"},
     {"set_job_placement",
      "Where a part sits in the stock {setup, part, pos?: [x,y], rot_z?, "
      "enabled?}. In-plane only: anything out of plane is what the setup's "
@@ -517,6 +525,35 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       out.push_back(std::move(pj));
     }
     return json{{"parts", std::move(out)}};
+  }
+
+  if (m == "check_layout") {
+    json out = json::array();
+    for (cam::Setup& setup : job->GetSetups()) {
+      if (p.contains("setup") && setup.id != p.at("setup").get<uint64_t>())
+        continue;
+      const std::vector<Body>& bodies = ui::JobBodies(state);
+      json fits = json::array();
+      for (const cam::PlacementFit& f : cam::CheckPlacements(setup, bodies)) {
+        json fj = {{"placement", f.placementId},
+                   {"part", f.jobPartId},
+                   {"fit", f.fit == cam::Fit::Inside ? "inside"
+                           : f.fit == cam::Fit::PartlyOutside
+                               ? "partly_outside"
+                               : "fully_outside"}};
+        if (!f.overlaps.empty())
+          fj["overlaps"] = f.overlaps;
+        fits.push_back(std::move(fj));
+      }
+      json sj = {{"setup", setup.id},
+                 {"name", setup.name},
+                 {"placements", std::move(fits)}};
+      const std::string why = cam::PlacementRefusal(setup, bodies);
+      if (!why.empty())
+        sj["refusal"] = why;
+      out.push_back(std::move(sj));
+    }
+    return json{{"setups", std::move(out)}};
   }
 
   if (m == "set_job_placement") {

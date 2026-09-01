@@ -760,9 +760,9 @@ static const std::set<std::string> kNoPartDoc = {
     // stopped being part of the part, so `doc` is null by definition wherever
     // a CAM handler runs. It refuses for itself, naming how to make a job.
     "machine_part", "add_job_part", "remove_job_part", "list_job_parts",
-    "set_job_placement", "add_cam_setup", "list_cam_setups", "set_cam_setup",
-    "remove_cam_setup", "add_cam_op", "cam_derive_op", "set_cam_op",
-    "move_cam_op", "remove_cam_op", "cam_verify", "cam_simulate",
+    "set_job_placement", "check_layout", "add_cam_setup", "list_cam_setups",
+    "set_cam_setup", "remove_cam_setup", "add_cam_op", "cam_derive_op",
+    "set_cam_op", "move_cam_op", "remove_cam_op", "cam_verify", "cam_simulate",
     "cam_toolpath", "cam_post", "new_project", "save_project", "open_project",
     "add_occurrence",
     // A fastener is placed in an assembly, where `doc` is null by definition.

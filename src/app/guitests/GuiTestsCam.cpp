@@ -271,6 +271,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
+    MakeJob(); // the tool window is a job-tab session (v73)
+    ctx->Yield(2);
     s_App->camToolOpen = true;
     ctx->Yield(4); // one frame to size it, one to place it against that size
 

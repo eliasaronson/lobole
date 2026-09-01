@@ -4098,7 +4098,7 @@ TEST_CASE("cam job: a part placed twice is refused, not half cut",
     p.pos = {i * 100.0, 0.0};
     setup.placements.push_back(p);
   }
-  const std::string why = cam::PlacementRefusal(setup);
+  const std::string why = cam::PlacementRefusal(setup, {});
   CHECK(why.find("twice") != std::string::npos);
 
   // And it reaches the toolpaths, not just a checker nobody calls.
@@ -4112,7 +4112,7 @@ TEST_CASE("cam job: a part placed twice is refused, not half cut",
 
   // Disabling one is the way out, and it works.
   setup.placements[1].enabled = false;
-  CHECK(cam::PlacementRefusal(setup).empty());
+  CHECK(cam::PlacementRefusal(setup, {}).empty());
 }
 
 TEST_CASE("cam job: dropping a part takes its placements and targets",
@@ -4144,4 +4144,113 @@ TEST_CASE("cam job: dropping a part takes its placements and targets",
   CHECK(after.operations[0].targets.size() == 1);
   CHECK(after.operations[1].targets.empty()); // its only target went with B
   CHECK(!after.topFace.IsSet());              // and so did Z zero
+}
+
+TEST_CASE("cam job: a part off the sheet is a state, then a refusal",
+          "[cam][job]") {
+  // The first draft of the job plan made this a refusal at DRAG time. Both
+  // slicers do it the other way -- a state per placement, computed when
+  // asked -- and they are right: a sheet is laid out THROUGH the states
+  // where a part is half off the edge, and blocking the drag makes the
+  // layout impossible to reach. So: three states here, and the refusal at
+  // the post, where the mistake becomes G-code.
+  Document a;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+
+  cam::JobDocument job;
+  const uint64_t part = job.AddPart(1, "A");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  // A sheet you actually own: 200 x 200, the part referenced from its corner.
+  setup.stock.mode = cam::StockMode::Fixed;
+  setup.stock.size = {200.0, 200.0, 12.0};
+  setup.stock.place = {0.0, 0.0, 1.0};
+
+  std::vector<Body> bodies;
+  for (const Body& b : a.GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = part;
+  }
+
+  cam::Placement place;
+  place.id = job.AllocateId();
+  place.jobPartId = part;
+  setup.placements.push_back(place);
+
+  auto fitOf = [&]() {
+    const std::vector<cam::PlacementFit> f =
+        cam::CheckPlacements(setup, bodies);
+    REQUIRE(f.size() == 1);
+    return f[0].fit;
+  };
+
+  CHECK(fitOf() == cam::Fit::Inside);
+  CHECK(cam::PlacementRefusal(setup, bodies).empty());
+
+  // Hanging over the edge: the cut runs off the workpiece.
+  setup.placements[0].pos = {180.0, 0.0};
+  CHECK(fitOf() == cam::Fit::PartlyOutside);
+  CHECK(cam::PlacementRefusal(setup, bodies).find("hangs over") !=
+        std::string::npos);
+
+  // Not on it at all is a DIFFERENT mistake, and usually a different fix.
+  setup.placements[0].pos = {900.0, 0.0};
+  CHECK(fitOf() == cam::Fit::FullyOutside);
+  CHECK(cam::PlacementRefusal(setup, bodies).find("not on the stock") !=
+        std::string::npos);
+
+  // A placement that is not cut this run is not asked to fit.
+  setup.placements[0].enabled = false;
+  CHECK(fitOf() == cam::Fit::Inside);
+  CHECK(cam::PlacementRefusal(setup, bodies).empty());
+}
+
+TEST_CASE("cam job: relative stock is drawn around every placed part",
+          "[cam][job]") {
+  // The other half of "the stock is the sheet": relative stock spans the
+  // whole arrangement, so nothing can be outside it by construction -- and
+  // adding a second part grows the workpiece rather than cropping it.
+  Document a, b;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+  b.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 40, 30, 10));
+
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  std::vector<Body> bodies;
+  for (const Body& body : a.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pa;
+  }
+  for (const Body& body : b.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pb;
+  }
+  for (uint64_t part : {pa, pb}) {
+    cam::Placement p;
+    p.id = job.AllocateId();
+    p.jobPartId = part;
+    if (part == pb)
+      p.pos = {300.0, 0.0};
+    setup.placements.push_back(p);
+  }
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK(hi.x - lo.x > 330.0); // both parts plus their margins
+  for (const cam::PlacementFit& f : cam::CheckPlacements(setup, bodies))
+    CHECK(f.fit == cam::Fit::Inside);
+
+  // Stacked, though, is scrap either way: whichever is cut second comes out
+  // of the first one's offcut.
+  setup.placements[1].pos = {0.0, 0.0};
+  const std::vector<cam::PlacementFit> fits =
+      cam::CheckPlacements(setup, bodies);
+  REQUIRE(fits.size() == 2);
+  CHECK(fits[0].overlaps.size() == 1);
+  CHECK(cam::PlacementRefusal(setup, bodies).find("on top of each other") !=
+        std::string::npos);
 }
