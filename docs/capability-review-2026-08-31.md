@@ -160,11 +160,10 @@ the next feature that extends either one.
 
 Ordered by what I would actually care about, not by size.
 
-- **A standard parts / fastener library.** Absent entirely, and the cheapest
-  high-value gap here: it is data plus a placement UI, no kernel work. Every
-  assembly dogfood round so far (C-clamp, Marsliden dock, W 170 S speaker)
-  hand-modelled its screws. FreeCAD has FastenersWB; Onshape ships a large
-  standard content library.
+- **A standard parts / fastener library.** Absent entirely. See the section
+  below — the justification originally written here ("every assembly dogfood
+  round hand-modelled its screws") was wrong, and what is actually true is a
+  better argument.
 - **User-definable feature types.** `kFeatureTypes` (SerializeFeatures.cpp) is
   a compile-time C++ table, so extending the modelling vocabulary means
   recompiling the application. FreeCAD has Python workbenches; Onshape has
@@ -817,9 +816,9 @@ its correction above. Asking whether it beat an external monitor was the right
 question: most of it did not, and the part that was unique to us was answering
 a ceiling that measurement showed does not exist.
 
-## Four corrections, and the pattern in them
+## Five corrections, and the pattern in them
 
-Four of the twelve did not survive being checked, and they failed the same way
+Five claims did not survive being checked, and they failed the same way
 every time — a claim argued from inference where the measurement was cheap.
 Recorded together because the pattern is more useful than any of them:
 
@@ -829,6 +828,7 @@ Recorded together because the pattern is more useful than any of them:
 | **T6** | three perf wins asserted nowhere, so they can regress silently | All four are gated — `LastRegenStats().executed`, a file-deletion test, asset-id identity, six pacer cases — and the asset-id gate is better than the counting one proposed. |
 | **T4** | the app is SIGTERMed so gcov never flushes | It exits cleanly on SIGTERM (`HeadlessMain.cpp:67`, `main.cpp:1471`) and there is a smoke phase asserting exit 0. And `Checkpoints.cpp` at 0% is the no-git fallback, genuinely unreached — the tool was right. |
 | **T2** | driver variance forces a tolerance | lavapipe is bit-reproducible across processes. Key the baseline to the device and exact equality works. |
+| **F1** | every dogfood round "hand-modelled its screws" | None did. The C-clamp's screw is a designed part, the dock's fasteners exist only in a bought-parts note, the speaker's cross-dowels are drilled by hand. Holes are modelled, fasteners are OMITTED — a better argument, and a different one. |
 
 Two of these — P2 and T4 — had code written for them before the check was run,
 and both were reverted. That is the cost of the habit, and it is small compared
@@ -876,3 +876,92 @@ summaries"); it arrived here from a different direction.
 - `tools/coverage.sh` now enters `nix-shell` itself. It previously assumed the
   caller had, which nothing enforced and no doc stated — run outside, it died
   at configure with "could not find glfw3".
+
+---
+
+# F1 in detail — a standard parts library (2026-09-01)
+
+## The justification, corrected
+
+This review said the dogfood rounds "hand-modelled their screws". Checked, and
+they did not — in either direction:
+
+- **C-clamp**: its `Screw` is a revolved M10 shaft with a ball nose and a
+  tommy head with a cross-hole (`scratch/build_c_clamp.py:259`). That is a
+  *designed component of the clamp*, not a standard fastener. A parts library
+  would not have helped.
+- **Marsliden dock**: "deck screws, bolts, straps" appear only in the
+  bought-parts note (`build_dock.py:487`). No fastener body exists anywhere in
+  the script.
+- **W 170 S speaker**: the cross-dowel BORES are modelled; the cross-dowels
+  are not — `known-bugs.md` records that they "are drilled by hand", so a CAM
+  model without them is the correct one.
+
+The real pattern is **holes are modelled, fasteners are omitted**, consistently
+across all three. Which is a better argument than tedium, and a different one:
+
+> Every assembly we have built is missing its fasteners, so the BOM, the mass
+> properties, and every contact and interference check are blind to them.
+
+That is a correctness gap in the checks this project is otherwise unusually
+good at, not a convenience gap. A bolted joint you cannot ask "does the bolt
+reach, is there clearance, is it in the BOM" about is exactly the kind of
+silent wrongness `contact_report` and `compare_geometry` exist to prevent.
+
+## What is available (surveyed 2026-09-01)
+
+| project | licence | data | geometry | state |
+|---|---|---|---|---|
+| **bd_warehouse** | **Apache-2.0** | **CSV tables in-repo** | procedural, revolved profiles, **on OCCT** | active |
+| FreeCAD FastenersWB | GPL-2.0-**or-later** | `FsData/`, CSV-ish | procedural, via FreeCAD's Python API | very active (v0.5.65, 2026-08-29) |
+| BOLTS | GPL-3.0 | YAML | per-CAD backends | dormant, repo redirected |
+| FreeCAD-library | mixed | bundled FCStd/STEP | none — static assets | its screws are cylinders at nominal diameter |
+| McMaster-Carr / TraceParts | free download, **not open** | STEP | — | redistribution restricted |
+
+**bd_warehouse** is the fit: Apache-2.0 is one-way compatible into AGPL-3.0, and
+it generates on **OCCT**, the kernel we already use, so the approach transfers
+directly. Coverage is 13 screw types, 6 nut types, 4 washer types across ISO
+4014/4017/4762/7380/2009, DIN 1587/1665/557/967 and ASME B18.3/B18.6.3, M1.6 to
+M52 plus imperial, with `IsoThread`/`AcmeThread` generators.
+
+(FastenersWB's "or later" is what makes it usable at all — GPL-2.0-only would
+be incompatible with AGPL-3.0. Checked rather than assumed.)
+
+## Vendor the data, do not import the parts
+
+The obvious alternative is "build importers and let users bring their own STEP
+files". That is worth rejecting explicitly, because **it is already the status
+quo**: STEP import shipped with I1/I2, and any user can already pull an M6 cap
+screw from McMaster-Carr today. The reason F1 is on this list is that doing so
+does not help.
+
+An imported fastener is an opaque solid. It has no size parameter, so changing
+M6 to M8 means going back to the website; it does not participate in the
+expression system, so a bolt cannot be driven by the plate thickness it passes
+through; and its faces carry names from an import rather than from a feature,
+so a mate or a CAM selection on it is anchored to something nobody chose.
+
+A generated fastener is a `Feature` like any other: it regenerates, its faces
+have stable element names, its size is an expression, and it appears in the BOM
+with the designation a supplier would recognise. That difference is the whole
+feature.
+
+So: **vendor the CSVs, write our own generator.** The expensive, valuable part
+of these projects is the curated dimension data — checked against the standards
+by people who cared. The geometry is a few revolved profiles per type, which is
+exactly what this codebase's feature layer already does well, and writing it
+ourselves avoids a Python runtime dependency and a coupling to build123d's API.
+
+Two notes on the data. ISO and DIN *documents* are copyrighted; the dimensional
+tables are facts, and every project above publishes them — Apache-2.0 covers
+bd_warehouse's compilation of them, and its NOTICE has to travel with them.
+And a vendored table is a fixed scope by definition: the size range we ship is
+the size range users get, so the generator should refuse an unknown size by
+name rather than interpolate one.
+
+## What this does not cover
+
+Bearings, extrusions, motors, o-rings. `NopSCADlib` has many of them but is GPL
+and OpenSCAD-native, so it would be a data-mining exercise rather than a
+dependency. Fasteners are the right first scope regardless — they are what
+every assembly we have built is missing.
