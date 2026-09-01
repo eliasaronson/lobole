@@ -59,6 +59,50 @@ size is REFUSED naming what is stocked rather than interpolated — a screw
 interpolated to a size nobody makes is the plausible-and-wrong answer this
 codebase refuses everywhere else.
 
+### Where the data lives, and how it is found
+
+`assets/parts/`, following the pattern the HDRI and the fonts already use:
+CMake copies it to `${CMAKE_BINARY_DIR}/assets/parts` for a development build
+and installs it to `share/designer/parts`, and `RuntimePaths::DataDir()`
+resolves either (with `DESIGNER_DATA_DIR` overriding both). A
+`RuntimePaths::PartsDir()` beside `EnvironmentHdri()` is the one place the
+subdirectory name is written, for the reason that comment already gives: the
+HDRI filename had been spelled out at six sites before it was centralised.
+
+The files keep their upstream names (`iso4762def.csv`, `iso888length.csv`) so
+a diff against the source is possible, with a provenance header prepended.
+
+**Missing data is a refusal, not an empty result.** A build that cannot find
+its tables says so, naming the path it looked in. A fastener that silently
+comes back as nothing is the failure this codebase spends most of its
+conventions preventing.
+
+### The shape of the vendored tables
+
+FastenersWB's files are CSV with a quoted table name on line 1 and the header
+on line 2:
+
+    "ISO4762def"
+    "Dia","P","b","dk_max","da","ds_min","e","lf","k","r","s_mean","t","v","dw","w"
+    "M1.6",0.35,15.0,3.0,2.0,1.46,1.73,0.34,1.6,0.1,1.56,0.7,0.16,2.72,0.55
+
+84 sizes for ISO 4762 alone. The **key is the `Dia` column** — `"M6"` — with
+pitch as its own column `P`, which is better than folding the pitch into the
+key: a fine-pitch variant is another row, not a different naming convention.
+
+Lengths come from `iso888length.csv`, the nominal length series (63 entries,
+2 mm upward) — that is what a derived grip snaps to. Which lengths a given
+type is actually *made* in is a refinement, and bd_warehouse's
+`nominal_screw_lengths.csv` has it per type when that matters.
+
+### Material, because mass is one of the reasons to do this
+
+A generated fastener carries a material — steel by default, since that is what
+an unmarked screw is — and settable per placement, because "the BOM and mass
+are blind to the hardware" is one of the two arguments for building this at
+all. A fastener with no material would leave `mass_properties` exactly as
+wrong as it is today, in a more convincing way.
+
 ## The model
 
 **A fastener is a PART, placed as an OCCURRENCE.** Not a body inside your part,
