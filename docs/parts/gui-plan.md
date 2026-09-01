@@ -1,6 +1,7 @@
 # Placing a fastener by clicking — plan (F1 p6)
 
-> Status: **planned, not built.** Written 2026-09-01 after phases 1-5 shipped
+> Status: **BUILT 2026-09-01, all four phases.** Written 2026-09-01 after
+> phases 1-5 shipped
 > ([plan.md](plan.md)) and after the first real assembly went through the
 > feature over RPC. Everything below was checked against the source rather
 > than assumed; the mechanisms it leans on are named by their real symbols so
@@ -126,6 +127,37 @@ in it either. Assembly verbs are covered by their own tests. Worth saying,
 because "add a row to kToolCases" is the wrong instinct here and would fail in
 a confusing way.
 
+## What building it corrected
+
+- **The ambiguity is wider than "the same part twice".** An element name is
+  unique within a DOCUMENT, so it is shared not only by every placement of one
+  part but by **every part built the same way** — two plates drawn with the
+  same three features carry the same feature ids and the same mapped names.
+  The first version of the refusal said "N placements of the same part" and
+  was wrong on the project's own test fixture. So an occurrence is not a
+  tie-breaker for a repeated part; it is part of what names a rim in an
+  assembly at all.
+- **A tool-session sentinel must be registered in TWO places.** Routing a pick
+  (`SlotPickClicked`) is the obvious one. The other is the per-frame validity
+  chain in `ViewportInput.cpp`, which asks "is this armed slot still real" and
+  falls through to *is it a feature in the active document* — never true on an
+  assembly tab. An unregistered sentinel is therefore disarmed the same frame
+  it is armed, and the tool silently ignores every click. That chain is now
+  the third list to have been the thing that was missed, and it carries a
+  comment saying so.
+- **`widget_ids_lint` catches a duplicated `###id` in one file**, including
+  two that can never be submitted in the same frame (the no-assembly early
+  return and the main body both had a Done button). Worth knowing before
+  writing a tool window rather than after.
+- **Head-on, a rim pick is ambiguous.** Looking straight down a bore, every
+  rim in the stack projects onto the same circle, and the picker handed back
+  the bottom rim of the LOWEST plate — 20 mm behind the cursor. The rim pick
+  exists to say which end the head goes on, and that is the one view where it
+  cannot. Orbiting resolves it, so it is unlikely to survive contact with a
+  person; recorded in known-bugs.md because the failure reads as a placement
+  bug rather than a picking one, and the fix (rank edge candidates by
+  distance along the ray) touches every edge pick in the app.
+
 ## Phases
 
 1. **The occurrence fix.** `FitFastenerToHole` resolves against the picked
@@ -144,6 +176,11 @@ a confusing way.
    warnings already are. Cheap — an hour — and arguably worth more than the
    placement verb: placing a fastener has a workable script path, a wrong one
    going unnoticed does not.
+
+   Its answer lives on the `AppState` rather than in a static local inside the
+   draw function. A static would be shared by every document the process
+   opens and invisible to a test — for a check whose whole job is to be SEEN,
+   the wrong pair of properties.
 
 Phases 1 and 4 are each independently worth shipping. Phase 2 is the bulk.
 

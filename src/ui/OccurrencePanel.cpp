@@ -504,6 +504,31 @@ void DrawBomSection(AppState& state) {
     ImGui::SetTooltip("Needs a system file dialog (unavailable here) - use "
                       "export_bom over the script API");
   }
+
+  // Every placed fastener, re-derived against the stack it is IN
+  // (docs/parts/gui-plan.md, phase 4). Next to the BOM because that is where
+  // a person looks at what the assembly is MADE of, and because the answer
+  // has the same shape as the mass warnings above it.
+  //
+  // On demand rather than every frame: it walks the whole assembly along a
+  // ray per fastener. And ON DEMAND rather than never — a length derived
+  // from other documents' geometry cannot be a live binding (A2), so a stack
+  // that moved under a screw has to be asked about. Until now it could only
+  // be asked over the script API, which means in practice it was not.
+  if (ImGui::Button("Check fasteners###bom_check_fasteners")) {
+    state.fastenerChecks.clear();
+    for (const FastenerCheck& c : CheckFasteners(state))
+      state.fastenerChecks.push_back(c.part + " " + c.why);
+    state.fastenerChecked = true;
+  }
+  if (state.fastenerChecked) {
+    if (state.fastenerChecks.empty()) {
+      ImGui::TextDisabled("Every fastener still fits its stack.");
+    } else {
+      for (const std::string& w : state.fastenerChecks)
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "%s", w.c_str());
+    }
+  }
 }
 
 void DrawOccurrencePanel(AppState& state) {

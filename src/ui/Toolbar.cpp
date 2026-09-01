@@ -8,6 +8,7 @@
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/Commands.h"
+#include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
 #include "ui/Placement.h"
@@ -845,6 +846,13 @@ void DrawAssemblyToolbar(AppState& state) {
           "Planar mate (slide in a plane)", MateType::Planar);
   mateBtn(ICON_FA_CIRCLE_DOT "###tb_mate_ball", "assembly.mate_ball",
           "Ball mate (free rotation)", MateType::Ball);
+  Divider();
+  // A standard part is placed the way a mate is made: pick geometry, and the
+  // numbers derive from it (docs/parts/gui-plan.md).
+  CommandButton(state, ICON_FA_SCREWDRIVER "###tb_fastener",
+                "assembly.fastener",
+                "Fastener (pick a hole's rim; size and length derive)",
+                state.fastenerTool.open);
   Divider();
   CommandButton(state,
                 ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_asm_fit",

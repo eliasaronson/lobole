@@ -8,6 +8,7 @@
 #include "render/Camera.h"
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
@@ -571,6 +572,13 @@ const std::vector<Command>& Table() {
     mate("assembly.mate_cylindrical", MateType::Cylindrical);
     mate("assembly.mate_planar", MateType::Planar);
     mate("assembly.mate_ball", MateType::Ball);
+    // Standard parts (docs/parts/gui-plan.md). Enabled on any assembly tab,
+    // including an empty one: opening it with nothing to pick is not a
+    // mistake to prevent, it is the tool asking for its one input, and the
+    // window says so with Place disabled (U10).
+    add(
+        "assembly.fastener", [](AppState& s) { return s.assembly != nullptr; },
+        [](AppState& s) { OpenFastenerTool(s); });
 
     // ----------------------------------------------------------- Drawing
     add("drawing.add_view", nullptr,

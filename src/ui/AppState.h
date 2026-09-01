@@ -1153,6 +1153,41 @@ struct AppState {
     uint64_t viewId = 0;       // the view the first pick fixed
     std::vector<ProjRef> refs; // picked so far
   } dimTool;
+
+  // The fastener session (F1 p6, docs/parts/gui-plan.md). One pick and one
+  // choice: the rim says which hole and which way round, the standard says
+  // what kind of screw, and the size and length derive from the geometry.
+  //
+  // It STAYS OPEN across placements and re-arms the rim pick, because holes
+  // come in patterns and a flange of eight bolts should be eight clicks. That
+  // differs from the mate session, which ends when both connectors are
+  // filled — a deliberate difference, not an oversight.
+  struct FastenerTool {
+    bool open = false;
+    // The picked rim. `element` unset means nothing is picked yet, which is
+    // the state the tool opens in and the one that must refuse VISIBLY (U10).
+    uint64_t rimOccurrence = 0;
+    ElementRef rimElement;
+    std::string standard = "iso4762";
+    std::string nut; // "" = no nut
+    bool washerUnderHead = false;
+    bool washerUnderNut = false;
+    // The last dry run: what Place would do, or why it cannot. Recomputed
+    // when the pick or an option changes rather than per frame — it walks the
+    // whole assembly along a ray.
+    bool ok = false;
+    std::string summary;
+    std::string why;
+    int placed = 0; // how many this session has put in, for the tally
+  } fastenerTool;
+
+  // The last "Check fasteners" answer, as the panel shows it (F1 p6 phase 4).
+  // Kept here rather than in a static local inside the draw function: a
+  // static would be shared by every document the process opens, and it would
+  // be unobservable to a test — which for a check whose whole job is to be
+  // SEEN is the wrong pair of properties.
+  std::vector<std::string> fastenerChecks;
+  bool fastenerChecked = false;
   uint64_t dimDrag = 0; // id of the dimension whose label is being dragged
 
   SketchEditState sketchEdit;

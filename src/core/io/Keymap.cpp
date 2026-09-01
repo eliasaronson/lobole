@@ -283,6 +283,9 @@ const Binding kDefaults[] = {
      "Cylindrical mate (spin + slide)", "Mates", "4"},
     {"assembly.mate_planar", Context::Assembly, "Planar mate", "Mates", "5"},
     {"assembly.mate_ball", Context::Assembly, "Ball mate", "Mates", "6"},
+    // Standard parts. "F" for fastener; the mate verbs own 1-6.
+    {"assembly.fastener", Context::Assembly, "Fastener (pick a hole's rim)",
+     "Standard parts", "F"},
 
     // --------------------------------------------------------------- Drawing
     {"drawing.add_view", Context::Drawing, "Add view", "Sheet", "I"},

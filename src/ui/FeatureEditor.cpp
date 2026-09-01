@@ -2,6 +2,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
+#include "ui/FastenerTool.h"
 #include <functional>
 #include <utility>
 
@@ -1121,6 +1122,12 @@ void SlotPickClicked(AppState& state, const SelectionItem& item,
   }
   if (state.slotPick.featureId == kSectionToolSlot) {
     SectionFacePicked(state, item);
+    return;
+  }
+  if (state.slotPick.featureId == kFastenerToolSlot) {
+    // A fastener is an OCCURRENCE in the assembly, not a feature in any
+    // document, so it needs the sentinel like CAM and the mate session.
+    FastenerRimPicked(state, item);
     return;
   }
   if (state.slotPick.featureId == kMateSessionSlot) {

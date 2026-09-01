@@ -603,6 +603,7 @@ set(app_sources
     src/ui/PerfHud.cpp
     src/ui/TerminalPanel.cpp
     src/ui/SketchToolbar.cpp
+    src/ui/FastenerTool.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
     src/ui/AssemblyActions.cpp

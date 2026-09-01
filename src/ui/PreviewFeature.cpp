@@ -14,6 +14,7 @@
 #include "core/features/SketchFeature.h" // occurrence names (measure rows)
 #include "ui/AppActions.h"               // SelectFeature
 #include "ui/CamTool.h"                  // DrawCamToolWindow (CAM verbs)
+#include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h"
 #include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
 #include "ui/Theme.h"         // ElevatedWindowBorder, DrawWindowShadow
@@ -556,6 +557,8 @@ void DrawToolWindow(AppState& state) {
       DrawSectionToolWindow(state);
     else if (state.camToolOpen)
       DrawCamToolWindow(state); // the CAM verbs (docs/cam/gui.md G2)
+    else if (state.fastenerTool.open)
+      DrawFastenerToolWindow(state); // docs/parts/gui-plan.md
     return;
   }
 

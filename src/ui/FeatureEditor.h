@@ -43,6 +43,7 @@ enum class PickSlot : int {
   CamLayFaceUp,      // CAM S2: the face to clamp facing the spindle (fixture)
   CamEdgeWall,       // CAM R15: the wall whose top edge to round or chamfer
   CamDrillHole,      // CAM: the cylindrical face of a hole to drill
+  FastenerRim,       // F1 p6: the circular EDGE a fastener's head sits on
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —
@@ -58,6 +59,11 @@ inline constexpr uint64_t kSectionToolSlot = ~1ull;
 // And the CAM tool session (docs/cam/gui.md). CAM setups are document
 // objects, not features, so its picks need a sentinel too.
 inline constexpr uint64_t kCamToolSlot = ~2ull;
+
+// And the fastener session (docs/parts/gui-plan.md). A fastener is an
+// OCCURRENCE in the assembly, not a feature in any document, so it needs the
+// same treatment. SlotPickClicked routes these to FastenerRimPicked.
+inline constexpr uint64_t kFastenerToolSlot = ~3ull;
 
 // A tool's pick slots, declaratively (U7): the ordered list drives arming
 // (kinds/prompt come from here, not the draw site), viewport routing, and —

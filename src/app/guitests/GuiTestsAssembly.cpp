@@ -793,6 +793,136 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).
+  // A fastener is placed by clicking a hole's rim (docs/parts/gui-plan.md).
+  //
+  // The whole verb: arm from the toolbar, click the rim in the viewport, and
+  // the size and the length derive from what was clicked. Clicked all the way
+  // through — including the rim, at a point computed from the fixture's own
+  // geometry — because the thing being tested is that a person can reach it.
+  t = IM_REGISTER_TEST(engine, "parts",
+                       "a_fastener_is_placed_by_picking_a_rim");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+
+    // A 60 x 60 x 10 plate with a 6.6 bore — an M6 normal clearance, which is
+    // what makes the size derivable. Built through the document API: the
+    // fixture is not what is under test.
+    Document& doc = *Doc();
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        "Plate", glm::vec3(-30.0f, -30.0f, 0.0f), 60.0, 60.0, 10.0));
+    doc.AddFeature(std::make_unique<CylinderFeature>(
+        "Bore", glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0, 0, 1), 3.3, 12.0));
+    doc.AddFeature(std::make_unique<BooleanFeature>(
+        "Drill", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+        BooleanOp::Subtract));
+    doc.GetFeature(2)->SetMaterial("steel");
+    doc.Regenerate();
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Joint");
+    ui::SetActivePart(*s_App, asmIdx);
+    for (int i = 0; i < 2; ++i) {
+      Occurrence o;
+      o.name = "Plate " + std::to_string(i + 1);
+      o.partId = partId;
+      o.fixed = true;
+      o.position = glm::vec3(0.0f, 0.0f, i == 0 ? 0.0f : -10.0f);
+      s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(4);
+    const size_t before = s_App->assembly->GetOccurrences().size();
+    IM_CHECK_EQ(before, (size_t)2);
+
+    // Look at the top rim from an ANGLE, not down the bore. Head-on, all four
+    // rims in the stack project onto the same circle and the picker can hand
+    // back the far one — which is a real ambiguity, recorded in
+    // known-bugs.md, and not what this test is about.
+    const glm::vec3 rim(3.3f, 0.0f, 10.0f); // a point ON the top rim circle
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(rim);
+    s_App->camera->SetUp(glm::vec3(0, 0, 1));
+    s_App->camera->SetPosition(rim + glm::vec3(26.0f, -26.0f, 26.0f));
+    ctx->Yield(3);
+
+    // Arm it from the toolbar, and with nothing picked Place must be REFUSED
+    // rather than absent or silently inert (U10) — the same rule that caught
+    // File > Save doing nothing on this very tab.
+    ToolbarClick(ctx, "###tb_fastener");
+    ctx->Yield(2);
+    IM_CHECK(s_App->fastenerTool.open);
+    {
+      const ImGuiTestItemInfo place =
+          ctx->ItemInfo("//Fastener###ToolWindow/###fastener_place");
+      IM_CHECK((place.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+    }
+
+    // The rim, in the viewport.
+    ctx->MouseMoveToPos(WorldToWindow(rim));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(3);
+    IM_CHECK(s_App->fastenerTool.rimElement.IsSet());
+    IM_CHECK(s_App->fastenerTool.rimOccurrence != 0);
+    IM_CHECK(s_App->fastenerTool.ok);
+    // 20 mm of plate, and 20 is a length an M6 is made in.
+    IM_CHECK_STR_EQ(s_App->fastenerTool.summary.substr(0, 6).c_str(), "M6x20 ");
+
+    // The joint options are addressable — buttons and checkboxes, never a
+    // bare combo, which gathers with an empty label and cannot be reached.
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_nut");
+    ctx->Yield(2);
+    IM_CHECK(s_App->fastenerTool.ok);
+    IM_CHECK(s_App->fastenerTool.summary.find("nut") != std::string::npos);
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_std_iso7380");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->fastenerTool.standard.c_str(), "iso7380");
+
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_place");
+    ctx->Yield(4);
+    // The screw and its nut, and the session is STILL OPEN with the rim
+    // cleared and the pick re-armed: holes come in patterns.
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), before + 2);
+    IM_CHECK(s_App->fastenerTool.open);
+    IM_CHECK(!s_App->fastenerTool.rimElement.IsSet());
+    IM_CHECK_EQ(s_App->fastenerTool.placed, 1);
+
+    ctx->ItemClick("//Fastener###ToolWindow/###fastener_done");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->fastenerTool.open);
+
+    // And the other half: a stack that moved under a placed screw has to be
+    // ASKED about, because deriving a length from other documents' geometry
+    // cannot be a live binding (A2). Until this button existed the question
+    // could only be put over the script API, which means in practice nobody
+    // put it.
+    const auto showPanel = [&](const char* title) {
+      ImGuiWindow* w = ImGui::FindWindowByName(title);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    };
+    showPanel(ui::kPanelModel);
+    ctx->ItemClick("//###Model/Bill of materials###bom_header");
+    ctx->Yield(2);
+    ctx->ItemClick("//###Model/Check fasteners###bom_check_fasteners");
+    ctx->Yield(2);
+    IM_CHECK(s_App->fastenerChecked);
+    IM_CHECK(s_App->fastenerChecks.empty()); // nothing has moved yet
+
+    for (Occurrence& o : s_App->assembly->GetOccurrences())
+      if (o.name == "Plate 2")
+        o.position.z -= 15.0f;
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+    ctx->ItemClick("//###Model/Check fasteners###bom_check_fasteners");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->fastenerChecks.size(), (size_t)1);
+    IM_CHECK(s_App->fastenerChecks[0].find("too short") != std::string::npos);
+  };
+
   // A project variable is edited from an assembly tab, by clicking.
   //
   // Reported 2026-09-01: File > Save did nothing on an assembly tab because
