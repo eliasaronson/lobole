@@ -13,13 +13,24 @@
 # there is no per-test overhead to trim; the fix is to run several at once.
 #
 # Usage:
-#   ./tools/gui-tests-xvfb.sh              # whole suite, 4 shards  (~90 s)
+#   ./tools/gui-tests-xvfb.sh              # whole suite, 4 shards, SHUFFLED
 #   ./tools/gui-tests-xvfb.sh --fast       # ...minus the slowest   (~70 s)
 #   ./tools/gui-tests-xvfb.sh -j 8         # more shards
 #   ./tools/gui-tests-xvfb.sh --serial     # one process (~335 s), for debugging
 #   ./tools/gui-tests-xvfb.sh -f fillet    # only matching cases, one process
 #   ./tools/gui-tests-xvfb.sh -L gui       # all GUI-labeled ctest tests
+#   ./tools/gui-tests-xvfb.sh --shuffle 12345  # replay a recorded seed
+#   ./tools/gui-tests-xvfb.sh --in-order   # the declared order, no shuffle
 #   ./tools/gui-tests-xvfb.sh --record-times   # refresh gui-test-times.txt
+#
+# Shuffled BY DEFAULT since 2026-09-01, with the seed printed. The suite has a
+# history of order-dependent failures — three different tests in one day, each
+# failing in a sharded run and passing on the next — and every hunt for them
+# has stalled at the same place: the failure is reproducible only from its
+# seed, and nobody ran shuffled locally, so no seed was ever generated. CI has
+# shuffled since d1396b5; this makes every developer run generate one too.
+# The cost is that a bare re-run is a DIFFERENT order — replay with
+# `--shuffle <seed>`, which the run prints, or use `--in-order`.
 #
 # ALWAYS run the whole suite before committing: --fast means fewer tests, not
 # weaker ones.
@@ -84,8 +95,8 @@ run_shard() {
 SHARDS=4
 SLOWER_THAN=""
 RECORD=0
-SHUFFLE=0
-SEED=0   # 0 = the binary picks one per shard and prints it
+SHUFFLE=1  # on by default; --in-order turns it off
+SEED=0     # 0 = pick one below, so a whole run replays from ONE number
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --shuffle)
@@ -93,9 +104,16 @@ while [ "$#" -gt 0 ]; do
       # own sake: it is that an order dependency then fails on some run rather
       # than lying dormant until the time-balanced partition reshuffles and
       # takes an unrelated test down with it.
+      #
+      # Now the default, so the flag's remaining job is REPLAY: `--shuffle
+      # <seed>` reproduces a run exactly.
       SHUFFLE=1
       if [ -n "${2:-}" ] && [ "${2#-}" = "$2" ]; then SEED="$2"; shift; fi
       shift ;;
+    --in-order)
+      # The declared order. For bisecting a failure down to a pair, where a
+      # changing order is noise rather than signal.
+      SHUFFLE=0; shift ;;
     --fast) SLOWER_THAN="$FAST_LIMIT"; shift ;;
     --serial) SHARDS=1; shift ;;
     -j) SHARDS="$2"; shift 2 ;;
@@ -172,18 +190,23 @@ sed -n 's/^# estimated/estimated/p' "$WORK/info"
 # ("X connection to :125 broken"). The PID keeps two runs apart if the lock
 # is ever bypassed.
 BASE=$(( 100 + ($$ % 300) ))
+
+# One base seed for the whole run, chosen here rather than letting each shard
+# pick its own: four independent seeds mean four numbers to keep, and the
+# thing that has to survive a failure is ONE number a person can paste back.
+# Shard N runs with SEED+N, so `--shuffle <SEED>` reproduces every shard.
+if [ "$SHUFFLE" = "1" ] && [ "$SEED" = "0" ]; then
+  SEED=$(od -An -N4 -tu4 < /dev/urandom | tr -d ' ')
+  SEED=$(( SEED % 1000000 ))
+fi
 i=0
 while read -r filter; do
   i=$((i + 1))
   SHUFFLE_ARG=""
   if [ "$SHUFFLE" = "1" ]; then
-    # A distinct seed per shard, derived from one base so a whole run is
-    # replayable: --shuffle <SEED> reproduces every shard exactly.
-    if [ "$SEED" = "0" ]; then
-      SHUFFLE_ARG="--gui-test-shuffle"
-    else
-      SHUFFLE_ARG="--gui-test-shuffle $((SEED + i))"
-    fi
+    # A distinct seed per shard, derived from ONE base so a whole run replays
+    # from a single number: --shuffle <SEED> reproduces every shard exactly.
+    SHUFFLE_ARG="--gui-test-shuffle $((SEED + i))"
   fi
   ( run_shard "$((BASE + i))" "$filter" "$WORK/state$i" "$SHUFFLE_ARG" \
       > "$WORK/shard$i.log" 2>&1
@@ -195,6 +218,11 @@ ELAPSED=$(( $(date +%s) - START ))
 
 if [ "$SHUFFLE" = "1" ]; then
   grep -h "shuffled order, seed" "$WORK"/shard*.log 2>/dev/null || true
+  # The one number that reproduces this whole run. Printed on every run, pass
+  # or fail, because the failure you want to replay is the one you did not
+  # know was coming — and a seed recovered after the fact is the thing three
+  # separate order-dependency hunts did not have.
+  echo "  shuffled: base seed $SEED   (replay: --shuffle $SEED)"
 fi
 
 # Every shard's result, and the total: a filter that quietly matched nothing

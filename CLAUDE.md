@@ -94,7 +94,11 @@ buys back the coverage.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 241 tests in **~100 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
-  (11 s), `--serial` for debugging. Still **flock-serialized** machine-wide,
+  (11 s), `--serial` for debugging, `--in-order` to switch the shuffle off.
+  **Shuffled by default** since 2026-09-01, printing one base seed that
+  replays the whole run (`--shuffle <seed>`) — three order-dependent failures
+  went undiagnosed because nobody ran shuffled locally, so no seed existed.
+  Still **flock-serialized** machine-wide,
   so concurrent runs (parallel agents) are safe — the shards are one suite.
   The runner asserts every listed test ran, so a bad partition fails loudly
   instead of skipping tests. `--record-times` refreshes the balance data.

@@ -354,14 +354,26 @@ copy: it asserts the *shape* of the cost rather than an absolute millisecond
 count, so it survives a slower machine. Not arguing for perf CI — arguing that
 the three biggest wins deserve the FaceSnapPoints treatment.
 
-## T7 — The order-dependent GUI failures are still undiagnosed
+## T7 — The order-dependent GUI failures are still undiagnosed — HABIT FIXED
 
 Existing entry in [known-bugs.md](known-bugs.md); repeated here only because
-this pass is about the harness. The infrastructure is now correct — shuffle
-with a recorded seed, and a failing shard archived with its filter and a
-`reproduce.sh`. What is missing is the habit: nothing runs the suite shuffled
-outside CI, so the seed that would make one reproducible is never generated
-locally.
+this pass is about the harness. The infrastructure was already correct —
+shuffle with a recorded seed, and a failing shard archived with its filter and
+a `reproduce.sh`. What was missing was the habit: nothing ran the suite
+shuffled outside CI, so the seed that would make a failure reproducible was
+never generated locally.
+
+**Fixed 2026-09-01**: `gui-tests-xvfb.sh` shuffles by default and prints ONE
+base seed for the run (shard N gets `seed+N`), so a failure is replayable from
+a single number a person can paste back rather than four they would have to
+notice and keep. `--in-order` switches it off for bisecting a pair, where a
+changing order is noise. Verified: a fresh run printed `base seed 646219`,
+`--shuffle 646219` reproduced all four shard seeds exactly, and the suite is
+247/247 either way.
+
+The cost, stated because it is a real one: a bare re-run is now a DIFFERENT
+order, so "it passed the second time" no longer means what it used to. That is
+the point — it is exactly the re-run that destroyed the evidence three times.
 
 ## Order I would take these
 
