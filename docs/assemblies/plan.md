@@ -154,9 +154,14 @@ faces via toponaming refs, or on datums), with one mate type per connection
 assemblies solve by **direct frame alignment** — no global numeric solver —
 because each mate fully or partially fixes one occurrence relative to another;
 a sequential placement pass handles trees of mates, and only genuine loops
-(rare in practice) need an iterative solve, which v1 can simply report as
-over-constrained. This dodges writing/embedding a 3D constraint solver (PlaneGCS
-is 2D-only) for the 95% case. Degrees-of-freedom display + drag-within-mate
+(rare in practice) need an iterative solve, which v1 simply reported as
+over-constrained. This dodged writing/embedding a 3D constraint solver
+(PlaneGCS is 2D-only) for the 95% case.
+
+**A6 closed the other 5%** without giving that up: because a mate stores its
+own DOF, the joint coordinate vector was already in the document, so the
+numeric pass wraps the A3 walk rather than replacing it — a loop-free assembly
+still never touches a solver. docs/assemblies/a6-loop-solver-plan.md. Degrees-of-freedom display + drag-within-mate
 (spin a revolute) is the payoff feature.
 
 ### A4 — Assembly features & beyond — **v1 SHIPPED (July 2026)** — [design: a4-design.md](a4-design.md)

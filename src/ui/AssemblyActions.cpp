@@ -186,9 +186,9 @@ bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
   return true;
 }
 
-int SolveActiveAssembly(AppState& state) {
+assembly::SolveReport SolveActiveAssemblyReport(AppState& state) {
   if (!state.assembly)
-    return 0;
+    return {};
   const assembly::PartResolver resolve =
       [&state](uint64_t partId) -> const Document* {
     return PartDocById(state, partId);
@@ -210,7 +210,11 @@ int SolveActiveAssembly(AppState& state) {
   for (const auto& [slotId, version] : assembly::SubtreeVersions(
            *state.assembly, PartResolverFor(state), AssemblyResolverFor(state)))
     state.solvedPartVersions[slotId] = version;
-  return rep.erroredMates;
+  return rep;
+}
+
+int SolveActiveAssembly(AppState& state) {
+  return SolveActiveAssemblyReport(state).erroredMates;
 }
 
 bool AssemblyPartsStale(AppState& state) {

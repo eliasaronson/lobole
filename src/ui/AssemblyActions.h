@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/AssemblySolve.h"
+
 #include "cad/MeshExport.h"
 #include "core/io/ImportAssembly.h"
 #include "render/MeshRenderer.h"
@@ -96,6 +98,12 @@ void SelectOccurrence(AppState& state, uint64_t occId);
 // resyncs. No-op without an active assembly. Call after any mate/occurrence
 // edit and after loading. Returns the number of mates left in an error state.
 int SolveActiveAssembly(AppState& state);
+
+// The SAME pass, reporting everything it learned rather than just the error
+// count: A6's loop closure, remaining degrees of freedom, and which mates were
+// redundant-but-consistent. Additive — SolveActiveAssembly is this narrowed to
+// `erroredMates`, which is all its existing callers ever wanted.
+assembly::SolveReport SolveActiveAssemblyReport(AppState& state);
 
 // Part→assembly change propagation (A4): true when any part referenced by the
 // active assembly has regenerated since the assembly's last solve (compared

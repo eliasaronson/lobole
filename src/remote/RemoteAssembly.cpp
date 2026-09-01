@@ -68,7 +68,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates", "List mates with status/errors.", ""},
     {"select_mate", "Select a mate in the UI.", "id"},
-    {"solve_assembly", "Run the mate solver; returns satisfied/errored mates.",
+    {"solve_assembly",
+     "Run the mate solver. Returns the per-mate status plus, for an assembly "
+     "with mate loops, how many degrees of freedom are left, whether every "
+     "loop closed and by how much it missed, and which mates were redundant "
+     "but consistent (three bolts through a flange: satisfied, saying nothing "
+     "new — not an error).",
      ""},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/plan.md). "
@@ -636,7 +641,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
-    const int errored = ui::SolveActiveAssembly(state);
+    const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
       json mj = {{"id", mate.id}, {"name", mate.name}};
@@ -644,7 +649,20 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         mj["error"] = mate.error;
       arr.push_back(mj);
     }
-    return json{{"errored_mates", errored}, {"mates", arr}};
+    // A6: report what the loop pass found HERE, in the mutating call's own
+    // response, rather than leaving it for a get_state the caller has to know
+    // to poll (the regen-honesty rule).
+    json out{{"errored_mates", rep.erroredMates},
+             {"placed", rep.placed},
+             {"mates", arr}};
+    if (rep.loopMates > 0) {
+      out["loop_mates"] = rep.loopMates;
+      out["dof"] = rep.dof;
+      out["loops_closed"] = rep.loopsClosed;
+      out["residual_mm"] = rep.residualMm;
+      out["redundant_mates"] = rep.redundantMates;
+    }
+    return out;
   }
   if (m == "add_exploded_view") {
     // params: {name?} — appends an empty view. Returns its id.

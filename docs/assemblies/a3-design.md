@@ -168,13 +168,18 @@ loop-*detecting* rather than loop-*solving*:
    one side placed computes the other side's transform by the alignment
    formula and marks it placed. Repeat to fixpoint (each pass places ≥1
    occurrence or stops).
-3. **Loops / conflicts**: a mate whose *both* sides are already placed is
-   checked, not solved — if the placed frames satisfy it within tolerance it
-   is redundant (fine); otherwise the mate gets an **error state**
-   ("over-constrained") and placements stand. Same story for a second mate
-   reaching an already-placed occurrence. v1 reports; it does not iterate.
-   (This is the plan's bet: most assemblies are mate *trees*; genuine loops
-   are rare and can be an explicit later milestone.)
+3. **Loops / conflicts**: a mate whose *both* sides are already placed does
+   not place anything — it closes a loop. **A6 now solves these**: the walk
+   records the spanning forest and this cut set, and `SolveLoops` closes them
+   numerically in joint coordinates, reporting remaining DOF, redundant-but-
+   consistent mates, and — for a loop that genuinely cannot close — how far
+   off it is in mm. See docs/assemblies/a6-loop-solver-plan.md.
+
+   *A3's original behaviour, for the record:* the two frames were compared and
+   the mate stamped "over-constrained (mate loop conflict)" if they disagreed
+   by more than 1e-3. That could not tell three consistent bolts through a
+   flange from a mechanism that really conflicts, and it reported 0.02 mm and
+   3 mm with the same words.
 4. Solved transforms are written back to the occurrences (`position` +
    `orientation`) and `BumpVersion()` triggers the existing version-gated
    renderer resync (`SyncDocumentRenderers`, `src/ui/AppActions.cpp:958-985`).
@@ -358,8 +363,10 @@ cylinders → suggest revolute, two planes → fastened).
   corners, face center picker) — **the priority UX item of "rest of A3"**,
   likely alongside A2.5 (hover markers + drag handles share the interactive
   layer). Additive: anchor gains a qualifier next to its `ElementRef`.
-- **Loop solving** — v1 detects + reports over-constrained; an iterative
-  solve over genuine mate loops is a later milestone if real models demand it.
+- **Loop solving** — SHIPPED as A6 (docs/assemblies/a6-loop-solver-plan.md).
+  Real models demanded it within the year: `add_fastener` had to drop the
+  mates for the second and third bolt through a flange, because a mate between
+  an already-connected pair was reported over-constrained.
 - **Expression-driven `rotation`/`offset`** — assemblies have no variable
   table yet; when one exists, the `_expr` twin pattern applies unchanged.
 - **Explicit named mate connectors** (as reusable features) and **datum

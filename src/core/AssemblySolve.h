@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/AssemblyLoopSolve.h"
 #include "core/Occurrence.h"
 
 #include <glm/glm.hpp>
@@ -37,6 +38,18 @@ using AssemblyResolver =
 struct SolveReport {
   int placed = 0;       // occurrences positioned by a mate (excludes anchors)
   int erroredMates = 0; // mates left in an error state this solve
+
+  // ---- A6: what the numeric loop pass found -------------------------------
+  // All zero/empty on a loop-free assembly, which never enters that pass.
+  int loopMates = 0;       // mates that closed a loop (the cut set)
+  int dof = 0;             // degrees of freedom left in the looped components
+  bool loopsClosed = true; // every loop reached its tolerance
+  double residualMm = 0.0; // worst remaining closure error, mm
+  // Mates whose constraint rows were dependent but CONSISTENT — the third
+  // and fourth bolt through a flange. Not an error: they are satisfied, they
+  // just say nothing new. Named rather than counted, because the point is to
+  // let a human see WHICH.
+  std::vector<uint64_t> redundantMates;
 };
 
 // The connector's local frame in its part's coordinates (columns X, Y, Z,

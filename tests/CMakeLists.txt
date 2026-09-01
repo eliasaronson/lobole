@@ -42,6 +42,7 @@ add_executable(designer_tests
     test_window_geometry.cpp
     test_assembly.cpp
     test_assembly_solve.cpp
+    test_assembly_loops.cpp
     test_measure.cpp
     test_materials.cpp
     test_shell.cpp
@@ -294,6 +295,13 @@ add_test(NAME assembly_mates_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_mates_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_mates_smoke PROPERTIES TIMEOUT 120)
+
+# Assemblies A6 mate loops: what solve_assembly reports about a loop -- DOF,
+# closure, which mates are redundant-but-consistent. Headless (no display).
+add_test(NAME assembly_loops_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_loops_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assembly_loops_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A4 propagation: editing a part re-solves the assembly on tab
 # activation, without an explicit solve_assembly. Headless (no display).

@@ -267,6 +267,7 @@ set(core_sources
     src/core/Units.cpp
     src/core/Occurrence.cpp
     src/core/AssemblySolve.cpp
+    src/core/AssemblyLoopSolve.cpp
     src/core/drawing/DrawingProjection.cpp
     src/core/drawing/DrawingDocument.cpp
     src/core/cam/JobDocument.cpp
@@ -516,6 +517,12 @@ if(Eigen3_FOUND)
     target_link_libraries(designer_core PUBLIC Eigen3::Eigen)
     target_compile_definitions(designer_core PUBLIC HAVE_FEM_SOLVER)
     set(HAVE_FEM_SOLVER ON)
+    # A6's mate-loop solve (AssemblyLoopSolve.cpp) also needs Eigen, but it is
+    # not the FEM solver and must not be gated on it — its own name, so that
+    # dropping one never silently disables the other. Absent it, mate loops
+    # are reported exactly as A3 reported them.
+    target_compile_definitions(designer_core PUBLIC HAVE_EIGEN)
+    set(HAVE_EIGEN ON)
 endif()
 # Spectra: header-only sparse eigensolver for FEM modal analysis. Optional,
 # gated HAVE_SPECTRA on the HAVE_FEM_SOLVER template: absent it, static FEM still

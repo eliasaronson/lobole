@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -322,13 +324,11 @@ glm::mat4 FrameMatrix(const glm::vec3& origin, const glm::vec3& xHint,
 // planar faces oppose normals. For a fastened mate with no flip and zero DOF
 // this is the identity ⇒ the two frames coincide exactly.
 glm::mat4 MateAdjust(const Mate& m) {
-  glm::mat4 a(1.0f);
-  a = glm::translate(a, glm::vec3(m.dx, m.dy, m.offset));
-  a = glm::rotate(a, m.rotation, glm::vec3(0.0f, 0.0f, 1.0f));
-  a *= glm::mat4_cast(m.ballRotation);
-  if (m.flipped)
-    a = glm::rotate(a, glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
-  return a;
+  // ONE definition of this composition, in AssemblyLoopSolve — the loop solver
+  // evaluates the same transform thousands of times per solve, and a second
+  // copy of a transform in this codebase has drifted from the first before.
+  return MateAdjustFor(m.flipped, m.rotation, m.offset, m.dx, m.dy,
+                       m.ballRotation);
 }
 
 void Decompose(const glm::mat4& m, glm::vec3& position,
@@ -337,17 +337,12 @@ void Decompose(const glm::mat4& m, glm::vec3& position,
   orientation = glm::normalize(glm::quat_cast(glm::mat3(m)));
 }
 
-// Max absolute element difference — a cheap rigid-transform equality test for
-// the loop-consistency check (world-scale, so a millimetre-ish tolerance).
-float MaxDiff(const glm::mat4& a, const glm::mat4& b) {
-  float d = 0.0f;
-  for (int c = 0; c < 4; c++)
-    for (int r = 0; r < 4; r++)
-      d = std::max(d, std::abs(a[c][r] - b[c][r]));
-  return d;
+// Short, stable rendering of a millimetre figure for a mate error message.
+std::string FormatMm(double mm) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.4g", mm);
+  return buf;
 }
-
-constexpr float kConsistencyTol = 1e-3f;
 
 } // namespace
 
@@ -581,10 +576,39 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   std::unordered_map<uint64_t, glm::mat4> world;
   const auto isPlaced = [&](uint64_t occId) { return world.count(occId) != 0; };
 
+  // A6: the same propagation, now recording the SHAPE of the walk — which
+  // mates placed something (the spanning forest), which found both ends
+  // already placed (the cut set, one per loop), and where each component got
+  // pinned. A loop-free assembly produces an EMPTY cut set and nothing below
+  // this block runs at all, so its placement stays closed-form and identical.
+  LoopProblem loop;
+  loop.mates.resize(asmDoc.GetMates().size());
+  for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
+    const Mate& m = asmDoc.GetMates()[i];
+    LoopMate& lm = loop.mates[i];
+    lm.id = m.id;
+    lm.type = m.type;
+    lm.aOcc = m.a.occurrenceId;
+    lm.bOcc = m.b.occurrenceId;
+    lm.fa = frames[i].fa;
+    lm.fb = frames[i].fb;
+    lm.flipped = m.flipped;
+    lm.rotation = m.rotation;
+    lm.offset = m.offset;
+    lm.dx = m.dx;
+    lm.dy = m.dy;
+    lm.ballRotation = m.ballRotation;
+  }
+  std::vector<bool> classified(asmDoc.GetMates().size(), false);
+  const auto pin = [&](uint64_t occId, const glm::mat4& at) {
+    world[occId] = at;
+    loop.anchor.emplace_back(occId, at);
+  };
+
   // Anchors: every `fixed` occurrence starts at its stored transform.
   for (const Occurrence& o : asmDoc.GetOccurrences())
     if (o.fixed)
-      world[o.id] = OccMatrix(o);
+      pin(o.id, OccMatrix(o));
 
   // Propagate to a fixpoint, anchoring the lowest-id occurrence of each
   // still-unplaced floating component in between.
@@ -605,23 +629,22 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
           // b's connector frame = a's connector world frame · adjust.
           const glm::mat4 wa = world[aId] * frames[i].fa;
           world[bId] = wa * adjust * glm::inverse(frames[i].fb);
+          loop.tree.push_back({i, aId, bId, false});
+          classified[i] = true;
           progress = true;
         } else if (bP && !aP) {
           const glm::mat4 wb = world[bId] * frames[i].fb;
           world[aId] = wb * glm::inverse(adjust) * glm::inverse(frames[i].fa);
+          loop.tree.push_back({i, bId, aId, true});
+          classified[i] = true;
           progress = true;
-        } else if (aP && bP) {
-          // Loop / redundant mate: check consistency, don't re-place.
-          if (!mate.error.empty())
-            continue; // already flagged
-          const glm::mat4 wa = world[aId] * frames[i].fa;
-          const glm::mat4 wbExpected = wa * adjust;
-          const glm::mat4 wbActual = world[bId] * frames[i].fb;
-          if (MaxDiff(wbExpected, wbActual) > kConsistencyTol) {
-            asmDoc.GetMates()[i].error =
-                "over-constrained (mate loop conflict)";
-            report.erroredMates++;
-          }
+        } else if (aP && bP && !classified[i]) {
+          // Both ends already placed: this mate CLOSES A LOOP. A6 collects it
+          // instead of judging it here — comparing the two frames could only
+          // ever say "over-constrained", which cannot tell three consistent
+          // bolts through a flange from a mechanism that genuinely conflicts.
+          classified[i] = true;
+          loop.cut.push_back(i);
         }
       }
     }
@@ -642,11 +665,56 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     if (floatingAnchor == 0)
       break;
     if (const Occurrence* o = asmDoc.FindById(floatingAnchor))
-      world[floatingAnchor] = OccMatrix(*o);
+      pin(floatingAnchor, OccMatrix(*o));
     else
       break; // shouldn't happen (mate referenced a real occurrence)
   }
 
+  // ---- A6: close the loops --------------------------------------------------
+  report.loopMates = static_cast<int>(loop.cut.size());
+  if (!loop.cut.empty()) {
+    const LoopSolution closed = SolveLoops(loop);
+    if (!closed.unavailable.empty()) {
+      // No Eigen in this build. Say so on every mate that closes a loop —
+      // an unsolved loop placed anyway would look right and be wrong.
+      for (size_t idx : loop.cut) {
+        asmDoc.GetMates()[idx].error = closed.unavailable;
+        report.erroredMates++;
+      }
+      report.loopsClosed = false;
+    } else {
+      report.dof = closed.dof;
+      report.residualMm = closed.residualMm;
+      report.loopsClosed = closed.converged;
+      report.redundantMates = closed.redundant;
+      world = closed.world;
+
+      // A mate inside a loop has OUTPUT DOF now: turn the crank and the
+      // rocker follows. Written back so the file reopens where it converged
+      // — and only for mates the loop pass actually saw, so a loop-free
+      // document is still never dirtied by a solve.
+      for (size_t i = 0;
+           i < closed.solved.size() && i < asmDoc.GetMates().size(); i++) {
+        Mate& m = asmDoc.GetMates()[i];
+        const LoopMate& s = closed.solved[i];
+        m.rotation = s.rotation;
+        m.offset = s.offset;
+        m.dx = s.dx;
+        m.dy = s.dy;
+        m.ballRotation = s.ballRotation;
+      }
+
+      // Only a loop that could NOT close is an error, and it says by how
+      // much. The old check reported 0.02 mm and 3 mm with the same words.
+      for (uint64_t id : closed.conflicting) {
+        if (Mate* m = asmDoc.FindMateById(id)) {
+          m->error = "loop does not close (off by " +
+                     FormatMm(closed.residualMm) + " mm)";
+          report.erroredMates++;
+        }
+      }
+    }
+  }
   // Write solved transforms back to the non-`fixed` occurrences. Anchors keep
   // their stored transform (their world entry equals it); unmated occurrences
   // have no world entry and are untouched.
