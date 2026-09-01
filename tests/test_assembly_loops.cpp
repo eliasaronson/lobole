@@ -399,3 +399,76 @@ TEST_CASE("Two rails on one slide leave a degree of freedom",
   // They had to meet somewhere.
   CHECK_THAT(s.solved[0].offset, WithinAbs(s.solved[1].offset, 1e-4));
 }
+
+TEST_CASE("Independent loops are solved independently",
+          "[assembly][solve][loops]") {
+  // Two separate carriages, each on its own pair of rails. They share no
+  // occurrence, so they are two components and must not be assembled into one
+  // system — a Jacobian spanning both is quadratic in the size of the model
+  // for loops that are each four parts wide.
+  const auto rail = [](uint64_t id, uint64_t a, uint64_t b, float seed) {
+    assembly::LoopMate m;
+    m.id = id;
+    m.type = MateType::Slider;
+    m.aOcc = a;
+    m.bOcc = b;
+    m.flipped = false;
+    m.offset = seed;
+    return m;
+  };
+  assembly::LoopProblem p;
+  p.mates.push_back(rail(1, 10, 20, 0.0f));
+  p.mates.push_back(rail(2, 10, 20, 10.0f));
+  p.mates.push_back(rail(3, 30, 40, 0.0f));
+  p.mates.push_back(rail(4, 30, 40, -6.0f));
+  p.tree.push_back({0, 10, 20, false});
+  p.tree.push_back({2, 30, 40, false});
+  p.cut.push_back(1);
+  p.cut.push_back(3);
+  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.anchor.emplace_back(30, glm::mat4(1.0f));
+
+  const assembly::LoopSolution s = assembly::SolveLoops(p);
+  REQUIRE(s.unavailable.empty());
+  CHECK(s.converged);
+  CHECK(s.conflicting.empty());
+  CHECK(s.dof == 2); // one per carriage, summed over the components
+  // Each pair met on its own, and neither was dragged toward the other.
+  CHECK_THAT(s.solved[0].offset, WithinAbs(s.solved[1].offset, 1e-4));
+  CHECK_THAT(s.solved[2].offset, WithinAbs(s.solved[3].offset, 1e-4));
+  CHECK(s.world.count(20) == 1);
+  CHECK(s.world.count(40) == 1);
+}
+
+TEST_CASE("A loop leaves a mate tree elsewhere in the document alone",
+          "[assembly][solve][loops]") {
+  // Two disjoint groups: one with a loop, one a plain tree. The loop pass
+  // only returns placements for components it actually solved, so Solve has
+  // to MERGE them over what the walk produced — replacing would silently
+  // strand every occurrence in the other group at its stored transform.
+  auto box = BuildBox();
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  const uint64_t a = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+  const uint64_t b = asmDoc.AddOccurrence(MakeOcc(1, {50, 50, 50}));
+  const uint64_t c = asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+  const uint64_t d = asmDoc.AddOccurrence(MakeOcc(1, {90, 90, 90}));
+  asmDoc.AddMate(OriginMate(a, b)); // the looped group
+  asmDoc.AddMate(OriginMate(a, b));
+  asmDoc.AddMate(OriginMate(c, d)); // an untouched tree
+
+  const assembly::SolveReport r = assembly::Solve(asmDoc, resolve);
+  CHECK(r.loopMates == 1);
+  CHECK(r.loopsClosed);
+  CHECK(r.erroredMates == 0);
+
+  // Both followers were pulled onto their anchors: the one in the loop AND
+  // the one in the tree.
+  const Occurrence* ob = asmDoc.FindById(b);
+  const Occurrence* od = asmDoc.FindById(d);
+  REQUIRE(ob != nullptr);
+  REQUIRE(od != nullptr);
+  CHECK(glm::length(ob->position) < 1e-3f);
+  CHECK(glm::length(od->position) < 1e-3f);
+}

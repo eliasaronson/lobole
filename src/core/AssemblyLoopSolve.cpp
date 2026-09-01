@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 #ifdef HAVE_EIGEN
 #include <Eigen/Dense>
@@ -317,7 +318,11 @@ EvaluateTree(const LoopProblem& problem, const std::vector<LoopMate>& mates) {
 
 #ifdef HAVE_EIGEN
 
-LoopSolution SolveLoops(const LoopProblem& problem) {
+namespace {
+
+// Solves ONE connected component. SolveLoops below partitions first, so this
+// never sees unknowns that cannot influence its residuals.
+LoopSolution SolveComponent(const LoopProblem& problem) {
   LoopSolution sol;
   if (problem.cut.empty())
     return sol; // loop-free: the caller keeps its closed-form path
@@ -469,6 +474,102 @@ LoopSolution SolveLoops(const LoopProblem& problem) {
       sol.redundant.push_back(id);
   }
 
+  return sol;
+}
+
+// Connected components of the mate graph, each as a standalone problem, with
+// a map back to the parent's mate indices.
+struct Component {
+  LoopProblem sub;
+  std::vector<size_t> mateIndex; // sub index -> index in the parent
+};
+
+std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
+  // Union-find over occurrence ids; every mate joins its two sides.
+  std::unordered_map<uint64_t, uint64_t> parent;
+  const std::function<uint64_t(uint64_t)> find = [&](uint64_t x) -> uint64_t {
+    auto it = parent.find(x);
+    if (it == parent.end() || it->second == x)
+      return x;
+    const uint64_t root = find(it->second);
+    parent[x] = root; // path compression
+    return root;
+  };
+  const auto unite = [&](uint64_t a, uint64_t b) {
+    parent.emplace(a, a);
+    parent.emplace(b, b);
+    const uint64_t ra = find(a), rb = find(b);
+    if (ra != rb)
+      parent[ra] = rb;
+  };
+  for (const LoopMate& m : p.mates)
+    unite(m.aOcc, m.bOcc);
+
+  std::unordered_map<uint64_t, size_t> slot; // component root -> index
+  std::vector<Component> out;
+  const auto slotFor = [&](uint64_t occ) -> size_t {
+    const uint64_t root = find(occ);
+    const auto it = slot.find(root);
+    if (it != slot.end())
+      return it->second;
+    slot[root] = out.size();
+    out.emplace_back();
+    return out.size() - 1;
+  };
+
+  std::vector<size_t> subIndexOf(p.mates.size(), 0);
+  for (size_t i = 0; i < p.mates.size(); i++) {
+    Component& c = out[slotFor(p.mates[i].aOcc)];
+    subIndexOf[i] = c.sub.mates.size();
+    c.sub.mates.push_back(p.mates[i]);
+    c.mateIndex.push_back(i);
+  }
+  for (const LoopTreeEdge& e : p.tree) {
+    Component& c = out[slotFor(e.from)];
+    c.sub.tree.push_back({subIndexOf[e.mate], e.from, e.to, e.reversed});
+  }
+  for (size_t i : p.cut)
+    out[slotFor(p.mates[i].aOcc)].sub.cut.push_back(subIndexOf[i]);
+  for (const auto& [occ, at] : p.anchor)
+    out[slotFor(occ)].sub.anchor.emplace_back(occ, at);
+  return out;
+}
+
+} // namespace
+
+LoopSolution SolveLoops(const LoopProblem& problem) {
+  LoopSolution sol;
+  if (problem.cut.empty())
+    return sol;
+
+  // Partition first. Without it, one small loop in a large assembly still
+  // builds a Jacobian with a column per mate in the WHOLE document, and each
+  // column costs a full tree walk — quadratic in the size of the model for a
+  // loop that involves four parts. Independent loops also stay independent:
+  // ten of them are ten small solves, not one system ten times as wide.
+  sol.solved = problem.mates;
+  for (const Component& c : SplitIntoComponents(problem)) {
+    if (c.sub.cut.empty())
+      continue; // a mate TREE: the caller's closed-form placement stands
+    const LoopSolution part = SolveComponent(c.sub);
+    if (!part.unavailable.empty())
+      return part;
+    sol.ran = true;
+    sol.iterations = std::max(sol.iterations, part.iterations);
+    sol.dof += part.dof;
+    sol.residualMm = std::max(sol.residualMm, part.residualMm);
+    sol.converged = sol.ran && (sol.conflicting.empty() && part.converged &&
+                                (sol.residualMm < kCloseTolMm));
+    for (uint64_t id : part.redundant)
+      sol.redundant.push_back(id);
+    for (uint64_t id : part.conflicting)
+      sol.conflicting.push_back(id);
+    for (size_t i = 0; i < part.solved.size(); i++)
+      sol.solved[c.mateIndex[i]] = part.solved[i];
+    for (const auto& [id, m] : part.world)
+      sol.world[id] = m;
+  }
+  sol.converged = sol.conflicting.empty() && sol.residualMm < kCloseTolMm;
   return sol;
 }
 

@@ -687,7 +687,11 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       report.residualMm = closed.residualMm;
       report.loopsClosed = closed.converged;
       report.redundantMates = closed.redundant;
-      world = closed.world;
+      // MERGE, never replace: the loop pass returns placements only for the
+      // components that actually had a loop, so an occurrence in a mate tree
+      // elsewhere in the document must keep the one the walk just gave it.
+      for (const auto& [id, m] : closed.world)
+        world[id] = m;
 
       // A mate inside a loop has OUTPUT DOF now: turn the crank and the
       // rocker follows. Written back so the file reopens where it converged

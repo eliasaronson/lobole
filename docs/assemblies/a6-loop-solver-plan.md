@@ -248,3 +248,34 @@ property of the seed, not the mechanism. So the branch is a *user-visible*
 thing a mechanism has, and any future drag stage must track the branch it was
 given rather than re-solving from scratch — `test_assembly_loops.cpp`'s "A
 four-bar seeded on a branch stays on it" is the guard on that.
+
+## Partitioning, and what it costs (measured 2026-09-01)
+
+`SolveLoops` splits the mate graph into connected components and solves each
+looped one on its own. This is not a micro-optimisation. Without it, one small
+loop anywhere in a document puts a column in the Jacobian for EVERY mate in
+that document, and each column costs a full tree walk — quadratic in the size
+of the model for a loop four parts wide. Independent loops also stay
+independent: ten of them are ten small solves rather than one system ten times
+as wide.
+
+Measured over the wire (`solve_assembly`, headless, sliders on origin anchors):
+
+| assembly | solve |
+|---|---|
+| 200 occurrences, 199 mates, no loop | 2.5 ms (closed-form path, no solver) |
+| 200-mate tree + a **disjoint** 2-mate loop | 2.6 ms, `dof=1` |
+| 200 occurrences chained, 1 loop **in that chain** | 8.2 ms, `dof=199` |
+| 50 occurrences chained, 1 loop in the chain | 2.5 ms, `dof=49` |
+
+The third row is honest rather than disappointing: a chain of 200 sliders
+closed by one mate genuinely is a 200-unknown problem with 199 degrees of
+freedom, and partitioning cannot help because it is one component. The second
+row is the shape partitioning exists for, and it costs the same as no loop at
+all.
+
+A consequence worth stating: because the loop pass returns placements only for
+the components it solved, `assembly::Solve` MERGES them into the walk's result
+instead of replacing it. Replacing would strand every occurrence in every other
+component at its stored transform — a silent wrong answer, guarded by "A loop
+leaves a mate tree elsewhere in the document alone".
