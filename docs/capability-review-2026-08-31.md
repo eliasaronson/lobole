@@ -1012,6 +1012,99 @@ approach from one, and ISO 4757 / ISO 10664 from the other.
 
 Neither does **Pozidriv**, which is worth knowing before promising it.
 
+## Recommendation: both, for different things
+
+Not a hedge — each half is justified by something measured.
+
+**From bd_warehouse (Apache-2.0):**
+- the **hole tables**, which are unique to it. FastenersWB has only
+  `inch_screw_hole_chart.csv` (a tap drill per inch size) and **no metric
+  clearance table at all**. That makes bd_warehouse mandatory for
+  [modeling/hole-standards.md](modeling/hole-standards.md) regardless of what
+  happens to F1.
+- the **geometry approach** as a reference — 7-line profiles on OCCT, the
+  kernel we already use.
+
+**From FastenersWB (GPL-2.0-or-later):**
+- the **fastener dimensions**: 8060 rows against 1798, 93 ISO standards, and
+  one file per standard, which suits vendoring selectively — start with four
+  types, add the fifth file when someone needs it.
+- the **recess standards**, `iso4757def.csv` (Phillips) and `iso10664def.csv`
+  (Torx), which bd_warehouse admits it approximates.
+
+If forced to one source for the fastener half it is **FastenersWB**: more data,
+better recesses, and a per-standard layout that suits selective vendoring.
+bd_warehouse's only fastener-side advantage is its schema, and a vendored table
+gets reshaped to our own conventions anyway.
+
+## What the interface should be — derived, not a form
+
+The tempting shape is a dialog: pick thread, length, head, drive, press Add.
+Three of those four should not be asked for, and the reason is a rule this
+codebase already enforces
+([ui/u10-defaults-and-refusals.md](ui/u10-defaults-and-refusals.md)):
+
+> A default carrying a unit — mm, degrees, a scale, a position — must be
+> derived from what it acts on, never a literal.
+
+A screw length typed into a box is exactly that literal. It is right for the
+stack the person had in mind and wrong for every other one, and — the part that
+matters — a screw of the wrong length **looks correct in the viewport**. So:
+
+| | how |
+|---|---|
+| **thread size** | DERIVED from the hole picked |
+| **length** | DERIVED from the stack the hole passes through, plus the nut/washer if placed |
+| head type | CHOSEN — taste and standard, no geometry can imply it |
+| drive | CHOSEN — likewise, though the standard often fixes it |
+
+This is CAM's verb model applied to fasteners ([cam/gui.md](cam/gui.md)): click
+the thing, the numbers derive, two clicks and it is placed. It also composes
+with the hole plan — a hole that recorded `fit: {thread: M6, kind: normal}`
+tells the fastener its size exactly, and a plain Ø6.6 hole can be looked up in
+the same table BACKWARDS ("that is an M6 normal clearance") or refused when it
+matches nothing.
+
+**The cross-document catch, and how to live with it.** Deriving length from the
+plate stack is a dependency on other documents' geometry, which regeneration
+cannot express (**A2**). Resolve it the way CAM resolves its work origin:
+derive **once at placement**, store the value, and make a stale one *reported*
+rather than silently wrong — the assembly can offer "re-fit fasteners" the same
+way A4 propagates part changes. A fastener whose stack has changed under it is
+a fact worth surfacing, not a live binding worth widening regen for.
+
+## Where it goes: assemblies, and refuse on a part tab
+
+A fastener is a **part**, placed as an **occurrence**. Not a body inside your
+part, and the reason is not tidiness:
+
+- **CAM would machine it.** Toolpath generation runs over the active part's
+  bodies (`doc->GetBodies()`), so a screw body sitting in a part tab gets
+  sectioned, stocked around and cut.
+- **Mass and BOM would count it as your part**, rather than as a bought item
+  with a supplier designation.
+- **`check_geometry` would flag it**, correctly — a loose screw body is a
+  disconnected component of a multi-body part, which is the exact defect that
+  check exists to catch.
+
+So placing one on a part tab is REFUSED, naming why and what to do instead.
+That is the house rule and here it also happens to be the only safe answer.
+
+## Where you add it from
+
+Primary: **pick a hole in an assembly** — a cylindrical face — and the fastener
+verb derives its size and length from it. One pick, one choice of head, done.
+
+The toolbar path with no pick has nothing to derive from, so by U10 it must
+either place something defensible or refuse visibly. Refusing is right here:
+"pick the hole this fastener goes through" names the missing input, and there
+is no honest default for a screw with no hole.
+
+Scripted twin, deriving identically:
+
+    add_fastener {target: {feature_id, element}, type: "iso4762",
+                  drive: "hex", head: "socket_cap"}
+
 ## The cheapest thing in this survey is not a fastener
 
 `clearance_hole_sizes.csv`, `tap_hole_sizes.csv` and `drill_sizes.csv` —
