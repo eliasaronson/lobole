@@ -24,6 +24,11 @@ public:
                PlaneType neutralPlane = PlaneType::XY);
 
   std::string TypeName() const override { return "Draft"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<DraftFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   [[nodiscard]] std::string WhyIncomplete() const override {

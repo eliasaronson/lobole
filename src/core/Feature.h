@@ -110,6 +110,17 @@ public:
 
   virtual std::string TypeName() const = 0;
 
+  // A deep copy of this feature — id, name, material and all. The one
+  // deep-copy path there is: duplicating a tab clones the document, which
+  // clones every feature through here. PURE virtual on purpose, so a new
+  // feature type cannot arrive without one; a runtime table could be
+  // forgotten, and the copy would then silently lose that feature.
+  // Every concrete feature is a plain value (no owning pointers), so each
+  // override is `make_unique<T>(*this)`. Cached geometry (a cut tool's
+  // shape/element map) comes along and is overwritten by the clone's first
+  // regeneration — harmless either way.
+  [[nodiscard]] virtual std::unique_ptr<Feature> Clone() const = 0;
+
   // Applies this feature to the model. Returns false on failure, which
   // aborts regeneration of subsequent features.
   virtual bool Execute(RegenContext& ctx) = 0;
@@ -201,6 +212,11 @@ public:
              double height, double depth);
 
   std::string TypeName() const override { return "Box"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<BoxFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   // Expression-driven dimensions, like every other feature that carries a
@@ -225,6 +241,11 @@ public:
                 double radius);
 
   std::string TypeName() const override { return "Sphere"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<SphereFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitExprs(const ExprVisitor& visit) override {
@@ -242,6 +263,11 @@ public:
                   const glm::vec3& direction, double radius, double height);
 
   std::string TypeName() const override { return "Cylinder"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<CylinderFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitExprs(const ExprVisitor& visit) override {
@@ -261,8 +287,19 @@ public:
 class ImportFeature : public Feature {
 public:
   ImportFeature(const std::string& name, const std::string& path);
+  // Everything but the parse seed below: that is a one-shot hand-off the next
+  // Execute drops, so a copy re-reads `path` exactly as a reloaded document
+  // does. The compiler cannot write this one — m_seed is an owning pointer.
+  ImportFeature(const ImportFeature& other)
+      : Feature(other), path(other.path), hasColor(other.hasColor),
+        color(other.color) {}
 
   std::string TypeName() const override { return "Import"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<ImportFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   // .step/.stp (structured), .brep (exact sidecar), or .stl (triangle mesh,

@@ -31,6 +31,11 @@ public:
                Curve3DKind kind = Curve3DKind::FitSpline);
 
   std::string TypeName() const override { return "Curve3D"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<CurveFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
   void VisitExprs(const ExprVisitor& visit) override;
 

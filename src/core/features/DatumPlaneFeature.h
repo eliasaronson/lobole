@@ -25,6 +25,11 @@ public:
                     DatumPlaneKind kind = DatumPlaneKind::Offset);
 
   [[nodiscard]] std::string TypeName() const override { return "DatumPlane"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<DatumPlaneFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitExprs(const ExprVisitor& visit) override {

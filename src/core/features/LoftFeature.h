@@ -26,6 +26,11 @@ public:
               ExtrudeMode mode = ExtrudeMode::NewBody);
 
   std::string TypeName() const override { return "Loft"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<LoftFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   std::vector<uint64_t> sketchIds; // >= 2 sections, in order

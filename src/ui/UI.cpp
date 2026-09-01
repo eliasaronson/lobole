@@ -551,6 +551,15 @@ void DrawPartTabs(AppState& state) {
       }
       ImGui::EndMenu();
     };
+    // Duplicate/delete menu items shared by top-level tabs and flyout entries.
+    const auto duplicateMenuItem = [&](size_t i) {
+      const char* label =
+          state.parts[i].kind == DocKind::Assembly  ? "Duplicate assembly"
+          : state.parts[i].kind == DocKind::Drawing ? "Duplicate drawing"
+                                                    : "Duplicate part";
+      if (ImGui::MenuItem(label))
+        DuplicateDocument(state, i);
+    };
     // Delete menu item shared by top-level tabs and flyout entries.
     const auto deleteMenuItem = [&](size_t i) {
       const char* label =
@@ -621,6 +630,7 @@ void DrawPartTabs(AppState& state) {
       if (ImGui::BeginPopupContextItem(
               ("##pctx" + std::to_string(i)).c_str())) {
         moveToFolderMenu(i);
+        duplicateMenuItem(i);
         deleteMenuItem(i);
         ImGui::EndPopup();
       }
@@ -683,6 +693,7 @@ void DrawPartTabs(AppState& state) {
             if (ImGui::MenuItem("Move out of folder"))
               MoveToFolder(state, i, "");
             moveToFolderMenu(i);
+            duplicateMenuItem(i);
             deleteMenuItem(i);
             ImGui::EndPopup();
           }

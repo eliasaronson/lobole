@@ -48,6 +48,21 @@ void EvaluateParameterTable(
 // never on geometry directly.
 class Document {
 public:
+  Document() = default;
+  // Deep copy: every feature is cloned (Feature::Clone), and so is everything
+  // else the document IS — parameters, studies, CAM setups, configurations,
+  // assets, units, rollback. What it merely CACHED (bodies, baked geometry,
+  // the regen cache) is not copied; the copy regenerates itself, so the only
+  // cost of duplicating a heavy part is one rebuild.
+  //
+  // The copy is a NEW document, not the same one twice: it gets a fresh
+  // InstanceId() and starts at version 0. Sharing an instance id would put us
+  // straight back into the autosave bug this file's InstanceId() comment
+  // describes. Copy-ASSIGNMENT stays deleted (that const member) — a document
+  // is replaced by swapping the pointer to it, never overwritten in place.
+  Document(const Document& other);
+  Document& operator=(const Document&) = delete;
+
   size_t FeatureCount() const { return m_features.size(); }
   Feature* GetFeature(size_t index);
   const std::vector<std::unique_ptr<Feature>>& GetFeatures() const {

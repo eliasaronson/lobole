@@ -27,6 +27,11 @@ public:
   PatternFeature(const std::string& name, PatternKind kind, uint64_t sourceId);
 
   [[nodiscard]] std::string TypeName() const override { return "Pattern"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<PatternFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
 private:

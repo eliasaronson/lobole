@@ -18,6 +18,11 @@ public:
              bool flipDirection = false, uint64_t bodyId = 0);
 
   std::string TypeName() const override { return "Rib"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<RibFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
   void VisitExprs(const ExprVisitor& visit) override {
     visit(thicknessExpr, thickness);

@@ -56,6 +56,11 @@ public:
                uint64_t pathSketchId, ExtrudeMode mode = ExtrudeMode::NewBody);
 
   std::string TypeName() const override { return "Sweep"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<SweepFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   uint64_t profileSketchId = 0;

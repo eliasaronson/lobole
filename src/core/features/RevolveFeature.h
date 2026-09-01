@@ -21,6 +21,11 @@ public:
                  ExtrudeMode mode, bool reversed = false);
 
   [[nodiscard]] std::string TypeName() const override { return "Revolve"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<RevolveFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitExprs(const ExprVisitor& visit) override {

@@ -21,6 +21,11 @@ public:
   RefineFeature(const std::string& name, uint64_t bodyId);
 
   [[nodiscard]] std::string TypeName() const override { return "Refine"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<RefineFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   uint64_t bodyId = 0; // producing-feature id of the body to refine

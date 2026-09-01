@@ -711,6 +711,10 @@ public:
 
   std::string TypeName() const override { return "Sketch"; }
 
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<SketchFeature>(*this);
+  }
+
   // Contributes no bodies, but when any dimension is expression-driven the
   // sketch re-solves here so downstream consumers (extrudes) see geometry
   // matching the current parameter values. A failed solve keeps the last

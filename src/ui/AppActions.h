@@ -59,6 +59,16 @@ void EnsureParts(AppState& state, const std::string& firstName = "Part 1");
 size_t AddPart(AppState& state, const std::string& name);
 size_t AddAssembly(AppState& state, const std::string& name);
 size_t AddDrawing(AppState& state, const std::string& name);
+// Appends a copy of the tab at `index` — same kind, same contents, a new
+// stable id and a name nothing else has taken ("Part 1 copy") — and switches
+// to it. Returns the new tab's index, or SIZE_MAX if `index` names no tab.
+//
+// The copy is independent: a part's features are cloned and regenerated, and
+// its undo history is NOT copied (that history describes the original). What
+// the copy still POINTS at is unchanged — a copied assembly places the same
+// parts, a copied drawing draws the same source document — and nothing
+// pointing at the original is repointed at the copy.
+size_t DuplicateDocument(AppState& state, size_t index);
 void SetActivePart(AppState& state, size_t index);
 // Closes a tab. Refused (with the reason in `why`) for the last tab, or
 // while any assembly still places this part or assembly — a dangling

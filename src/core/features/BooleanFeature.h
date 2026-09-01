@@ -20,6 +20,11 @@ public:
                  BooleanOp op);
 
   [[nodiscard]] std::string TypeName() const override { return "Boolean"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<BooleanFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   [[nodiscard]] std::string WhyIncomplete() const override {

@@ -25,6 +25,11 @@ public:
                std::vector<ElementRef> openFaces, double thickness);
 
   std::string TypeName() const override { return "Shell"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<ShellFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitExprs(const ExprVisitor& visit) override {

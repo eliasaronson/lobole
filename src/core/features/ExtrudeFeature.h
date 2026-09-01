@@ -31,6 +31,11 @@ public:
                  ExtrudeMode mode, bool reversed = false);
 
   std::string TypeName() const override { return "Extrude"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<ExtrudeFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
   const CADShape* CutToolShape() const override {
     return mode == ExtrudeMode::Cut && m_cutTool.IsValid() ? &m_cutTool

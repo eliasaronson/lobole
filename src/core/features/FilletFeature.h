@@ -28,6 +28,11 @@ public:
   std::string TypeName() const override {
     return op == EdgeBlendOp::Chamfer ? "Chamfer" : "Fillet";
   }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<FilletFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   [[nodiscard]] std::string WhyIncomplete() const override {

@@ -1076,6 +1076,30 @@ void ResetActiveTabUiState(AppState& state) {
   state.measure = MeasureState{};
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
+
+// Defined further down, beside the other tab-slot plumbing: a slot's document
+// whether it is the active tab (AppState holds it) or a stashed one.
+Document* SlotDoc(AppState& state, size_t i);
+AssemblyDocument* SlotAssembly(AppState& state, size_t i);
+DrawingDocument* SlotDrawing(AppState& state, size_t i);
+
+// A tab name nothing else has taken: "<source> copy", then "<source> copy 2".
+// A copy cannot inherit its original's name — names ADDRESS tabs (the RPC
+// refuses a duplicate outright) and each one becomes that document's directory
+// when the project is saved, so two of them is two documents writing to one
+// place.
+std::string FreshCopyName(const AppState& state, const std::string& source) {
+  const auto taken = [&state](const std::string& name) {
+    for (const PartSlot& slot : state.parts)
+      if (slot.name == name)
+        return true;
+    return false;
+  };
+  std::string candidate = source + " copy";
+  for (int n = 2; taken(candidate); n++)
+    candidate = source + " copy " + std::to_string(n);
+  return candidate;
+}
 } // namespace
 
 void EnsureParts(AppState& state, const std::string& firstName) {
@@ -1170,6 +1194,71 @@ size_t AddDrawing(AppState& state, const std::string& name) {
   state.projectMetaDirty = true;
   ResetActiveTabUiState(state);
   return state.parts.size() - 1;
+}
+
+size_t DuplicateDocument(AppState& state, size_t index) {
+  EnsureParts(state);
+  if (index >= state.parts.size())
+    return SIZE_MAX;
+  const PartSlot& source = state.parts[index];
+
+  PartSlot slot;
+  slot.id = state.nextPartId++;
+  slot.name = FreshCopyName(state, source.name);
+  slot.kind = source.kind;
+  // The copy lands where the original lives: a part duplicated inside an
+  // imported assembly's folder belongs in that folder, not loose on the bar.
+  slot.folder = source.folder;
+  // Read through the slot accessors, so duplicating the tab you are LOOKING at
+  // (its document lives in AppState, not in its slot) is the same code path as
+  // duplicating any other.
+  switch (source.kind) {
+  case DocKind::Part: {
+    const Document* doc = SlotDoc(state, index);
+    if (!doc)
+      return SIZE_MAX;
+    // Deep copy: features cloned, geometry regenerated (Document's copy
+    // constructor). The copy inherits the project scope pointers from the
+    // original, so its expressions resolve project variables immediately.
+    slot.doc = std::make_unique<Document>(*doc);
+    // A fresh, EMPTY undo stack. The original's history describes edits to a
+    // document that is not this one; offering to undo them here would undo
+    // them into the copy.
+    slot.commands = std::make_unique<CommandStack>();
+    break;
+  }
+  case DocKind::Assembly: {
+    const AssemblyDocument* asmDoc = SlotAssembly(state, index);
+    if (!asmDoc)
+      return SIZE_MAX;
+    // Occurrences keep referencing the same PARTS (by stable id) — duplicating
+    // an assembly copies the arrangement, it does not fork the parts in it.
+    // Mates and exploded views reference occurrences inside the copy, so they
+    // need no repointing.
+    slot.assembly = std::make_unique<AssemblyDocument>(*asmDoc);
+    break;
+  }
+  case DocKind::Drawing: {
+    const DrawingDocument* dwg = SlotDrawing(state, index);
+    if (!dwg)
+      return SIZE_MAX;
+    // Views carry a sourceDocId, so the copy draws the same part. Its
+    // projected geometry is NOT copied: SetActivePart below projects a drawing
+    // whose render cache is empty, which is one re-projection instead of a
+    // second cache to keep honest.
+    slot.drawing = std::make_unique<DrawingDocument>(*dwg);
+    break;
+  }
+  }
+
+  state.parts.push_back(std::move(slot));
+  // Which documents the project HAS lives in project.json, not in any document
+  // version — without this the project reads clean with a new tab in it.
+  state.projectMetaDirty = true;
+  const size_t added = state.parts.size() - 1;
+  // Switch to it the way any other tab switch happens: solve, project, frame.
+  SetActivePart(state, added);
+  return added;
 }
 
 void SnapshotDrawing(AppState& state) {

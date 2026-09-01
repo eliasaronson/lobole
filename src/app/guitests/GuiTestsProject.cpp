@@ -320,6 +320,44 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->parts[3].kind == ui::DocKind::Drawing);
   };
 
+  // Right-click a tab > Duplicate. Worth clicking rather than testing
+  // ui::DuplicateDocument alone (test_actions.cpp does that): the item appears
+  // in TWO menus — a top-level tab's and a folder flyout entry's — and a
+  // duplicate that is only reachable on one of them is the bug.
+  t = IM_REGISTER_TEST(engine, "tabs", "duplicate_from_context_menu");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // something to copy
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->document->FeatureCount(), (size_t)1);
+
+    ctx->ItemClick("//##PartTabs/**/###part0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Duplicate part");
+    ctx->Yield(2);
+
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->activePart, 1); // the copy is what you are now on
+    IM_CHECK_EQ(s_App->parts[1].name, std::string("Part 1 copy"));
+    IM_CHECK(s_App->document != nullptr);
+    IM_CHECK_EQ(s_App->document->FeatureCount(), (size_t)1); // the box came too
+    IM_CHECK(ui::ProjectDirty(*s_App)); // a new tab is a project change
+
+    // The same item on an assembly names its kind, and reaches the copy
+    // through a folder flyout — the second menu it has to be in.
+    ui::AddAssembly(*s_App, "Rig");
+    s_App->parts.back().folder = "Rigs";
+    ctx->Yield(2);
+    ctx->ItemClick("//##PartTabs/**/###folderRigs");
+    ctx->ItemClick("//$FOCUSED/###fpart2", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Duplicate assembly");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)4);
+    IM_CHECK(s_App->parts[3].kind == ui::DocKind::Assembly);
+    IM_CHECK_EQ(s_App->parts[3].name, std::string("Rig copy"));
+    // A copy made inside a folder belongs in that folder.
+    IM_CHECK_EQ(s_App->parts[3].folder, std::string("Rigs"));
+  };
+
   // U13b: enough documents to overrun the bar, which the Marsliden dock (17)
   // does at 1280x720. Three properties, none of which held before:
   //

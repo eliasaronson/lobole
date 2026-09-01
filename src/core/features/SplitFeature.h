@@ -42,6 +42,11 @@ public:
   SplitFeature(const std::string& name, uint64_t bodyId);
 
   [[nodiscard]] std::string TypeName() const override { return "Split"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<SplitFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   [[nodiscard]] std::string WhyIncomplete() const override {

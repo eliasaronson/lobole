@@ -22,6 +22,11 @@ public:
               ExtrudeMode mode = ExtrudeMode::NewBody);
 
   std::string TypeName() const override { return "Pipe"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<PipeFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
   void VisitExprs(const ExprVisitor& visit) override;
 

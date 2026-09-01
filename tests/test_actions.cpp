@@ -37,6 +37,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Occurrence.h"
+#include "core/drawing/DrawingDocument.h"
 #include "core/features/SplitFeature.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -467,4 +468,128 @@ TEST_CASE("feature tree rows carry a badge, not just a colour",
     const std::string suppressedOnly = ui::FeatureRowBadge(*f, false);
     CHECK(suppressedAndBroken == suppressedOnly);
   }
+}
+
+// ---------------------------------------------------------------------------
+// DuplicateDocument — the bottom tab bar's right-click Duplicate
+//
+// A duplicate is only useful if it is INDEPENDENT (editing the copy leaves the
+// original alone) while what it POINTS AT is not: a copied assembly places the
+// same parts, not forked ones. Both halves are checked here; the click path
+// that reaches this function is a GUI test.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a duplicated part is an independent copy of the original",
+          "[actions][tabs][duplicate]") {
+  ui::AppState state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0.0f), 10, 20, 30);
+  state.document->SetParameter("w", "10");
+  const uint64_t sourceId = state.parts[state.activePart].id;
+
+  const size_t copy = ui::DuplicateDocument(state, 0);
+  REQUIRE(copy == 1);
+  REQUIRE(state.parts.size() == 2);
+  CHECK(state.activePart == 1); // duplicating switches to the copy
+  CHECK(state.parts[1].kind == ui::DocKind::Part);
+  // A name of its own: the RPC refuses a duplicate name, and the name is the
+  // document's directory on save.
+  CHECK(state.parts[1].name == "Part 1 copy");
+  CHECK(state.parts[1].id != sourceId);
+
+  // Same recipe, same geometry, its own document.
+  REQUIRE(state.document != nullptr);
+  CHECK(state.document->FeatureCount() == 1);
+  REQUIRE(state.document->GetBodies().size() == 1);
+  CHECK(state.document->InstanceId() !=
+        state.parts[0].doc->InstanceId()); // the original is stashed now
+  CHECK(state.document->FindParameter("w") != nullptr);
+
+  // Independent: an edit to the copy does not reach the original.
+  AddBox(*state.document, glm::vec3(50.0f), 5, 5, 5);
+  CHECK(state.document->FeatureCount() == 2);
+  CHECK(state.parts[0].doc->FeatureCount() == 1);
+  // ...and its undo stack is its own, and empty: undoing here must not undo
+  // edits that were made to the other document.
+  REQUIRE(state.commands != nullptr);
+  CHECK_FALSE(state.commands->CanUndo());
+
+  // A second copy cannot take the first one's name either.
+  REQUIRE(ui::DuplicateDocument(state, 0) == 2);
+  CHECK(state.parts[2].name == "Part 1 copy 2");
+}
+
+TEST_CASE("a duplicated assembly places the same parts",
+          "[actions][tabs][duplicate][assembly]") {
+  ui::AppState state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0.0f), 10, 10, 10);
+  const uint64_t partId = state.parts[state.activePart].id;
+
+  ui::AddAssembly(state, "Asm");
+  Occurrence occ;
+  occ.partId = partId;
+  occ.name = "a";
+  state.assembly->AddOccurrence(occ);
+  const size_t asmIndex = static_cast<size_t>(state.activePart);
+
+  const size_t copy = ui::DuplicateDocument(state, asmIndex);
+  REQUIRE(copy == 2);
+  CHECK(state.parts[copy].kind == ui::DocKind::Assembly);
+  CHECK(state.parts[copy].name == "Asm copy");
+  REQUIRE(state.assembly != nullptr);
+  REQUIRE(state.assembly->OccurrenceCount() == 1);
+  // The point: the copy places the ORIGINAL part. Duplicating an assembly
+  // copies the arrangement; it does not fork the parts arranged in it.
+  CHECK(state.assembly->GetOccurrences()[0].partId == partId);
+
+  // And adding to the copy leaves the original assembly alone.
+  state.assembly->AddOccurrence(occ);
+  CHECK(state.assembly->OccurrenceCount() == 2);
+  REQUIRE(state.parts[asmIndex].assembly != nullptr);
+  CHECK(state.parts[asmIndex].assembly->OccurrenceCount() == 1);
+}
+
+TEST_CASE("a duplicated drawing draws the same source document",
+          "[actions][tabs][duplicate][drawing]") {
+  ui::AppState state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0.0f), 10, 10, 10);
+  const uint64_t partId = state.parts[state.activePart].id;
+
+  ui::AddDrawing(state, "Sheet");
+  DrawingView view;
+  view.sourceDocId = partId;
+  view.scale = 0.5;
+  state.drawing->AddView(view);
+  const size_t sheetIndex = static_cast<size_t>(state.activePart);
+
+  const size_t copy = ui::DuplicateDocument(state, sheetIndex);
+  REQUIRE(copy == 2);
+  CHECK(state.parts[copy].kind == ui::DocKind::Drawing);
+  CHECK(state.parts[copy].name == "Sheet copy");
+  REQUIRE(state.drawing != nullptr);
+  REQUIRE(state.drawing->ViewCount() == 1);
+  // Views reference their source by stable document id, so the copy draws the
+  // same part — it does not draw the drawing it was copied from.
+  CHECK(state.drawing->GetViews()[0].sourceDocId == partId);
+  CHECK(state.drawing->GetViews()[0].scale == 0.5);
+}
+
+TEST_CASE("duplicating a tab you are not looking at copies that tab",
+          "[actions][tabs][duplicate]") {
+  // The active tab's document lives in AppState and every other one in its
+  // slot — the copy has to come from the right place either way.
+  ui::AppState state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0.0f), 10, 10, 10);
+  ui::MoveToFolder(state, 0, "Imported");
+
+  ui::AddPart(state, "Part 2"); // now active; Part 1 is stashed
+  REQUIRE(state.activePart == 1);
+  REQUIRE(state.document->FeatureCount() == 0);
+
+  const size_t copy = ui::DuplicateDocument(state, 0);
+  REQUIRE(copy == 2);
+  CHECK(state.parts[copy].name == "Part 1 copy");
+  REQUIRE(state.document != nullptr);
+  CHECK(state.document->FeatureCount() == 1); // Part 1's box, not Part 2's none
+  // A copy lands in its original's folder rather than loose on the bar.
+  CHECK(state.parts[copy].folder == "Imported");
 }

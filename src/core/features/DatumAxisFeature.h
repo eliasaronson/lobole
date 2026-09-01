@@ -20,6 +20,11 @@ public:
                    DatumAxisKind kind = DatumAxisKind::TwoPoints);
 
   [[nodiscard]] std::string TypeName() const override { return "DatumAxis"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<DatumAxisFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   [[nodiscard]] const glm::vec3& Origin() const { return m_origin; }

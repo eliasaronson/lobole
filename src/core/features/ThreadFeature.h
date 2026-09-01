@@ -18,6 +18,11 @@ public:
                 std::string designation, double pitch);
 
   std::string TypeName() const override { return "Thread"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<ThreadFeature>(*this);
+  }
+
   bool Execute(RegenContext& ctx) override;
   void VisitExprs(const ExprVisitor& visit) override {
     visit(lengthExpr, length);
