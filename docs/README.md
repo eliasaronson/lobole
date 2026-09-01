@@ -67,7 +67,11 @@ thing behind it invisible to the next person who looks.
   (`launch_app()`): it binds a kernel-chosen port in the process that keeps
   it, so there is no pick-then-hand-off race, and it keeps the app's log and
   prints it on failure. `config_isolation_lint.py` fails any script that
-  spawns the binary directly.
+  spawns the binary directly. On a failure it also **archives** the log, the
+  traceback and a `reproduce.sh` to
+  `$XDG_STATE_HOME/designer/smoke-failures/<stamp>-<test>/` — ctest's own
+  `LastTest.log` is overwritten by the next run, so re-running an intermittent
+  failure used to destroy the only record of it.
 - `tests/rpc_params_gate.py` keeps `describe`'s parameter schema honest
   against what each handler actually reads (`tools/rpc_params_scan.py`).
 - `tests/test_actions.cpp` is where UI *logic* is pinned headlessly — read its

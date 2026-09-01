@@ -51,6 +51,7 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 import tempfile
 import time
 
@@ -178,9 +179,60 @@ def launch(binary, extra_args=(), env=None, timeout=30.0, headless=True):
         if said:
             print("--- designer log ---\n" + said + "\n--- end ---",
                   file=sys.stderr)
+        _archive_failure(said)
         raise
     finally:
         app.close()
+
+
+def _archive_failure(app_log):
+    """Keep a failing run's evidence somewhere the next run cannot destroy.
+
+    ctest writes a test's output to Testing/Temporary/LastTest.log and the
+    NEXT run overwrites it. So the natural response to an intermittent failure
+    — run it again — deletes the only record of what happened, and the answer
+    is another round of guessing. `fem_async_smoke` has failed three times
+    across a month and has never once been diagnosed, for exactly this reason.
+
+    The GUI suite hit the same wall and solved it the same way
+    (tools/gui-tests-xvfb.sh archives a failing shard with its filter and
+    seed). This is that, for the python smokes: the app's own log plus the
+    traceback, under a per-run stamp, capped so old ones cannot accumulate.
+
+    Never raises: a test that fails must report ITS failure, not a filesystem
+    error from the code trying to write the failure down.
+    """
+    try:
+        name = os.path.basename(sys.argv[0]).removesuffix(".py") or "smoke"
+        root = os.path.join(
+            os.environ.get("XDG_STATE_HOME",
+                           os.path.expanduser("~/.local/state")),
+            "designer", "smoke-failures")
+        os.makedirs(root, exist_ok=True)
+        # Keep the last 20; past that the oldest are noise, same rule the GUI
+        # archive follows.
+        entries = sorted(
+            (os.path.join(root, d) for d in os.listdir(root)),
+            key=lambda p: os.path.getmtime(p), reverse=True)
+        for old in entries[19:]:
+            shutil.rmtree(old, ignore_errors=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        out = os.path.join(root, f"{stamp}-{name}")
+        os.makedirs(out, exist_ok=True)
+        if app_log:
+            with open(os.path.join(out, "designer.log"), "w") as f:
+                f.write(app_log)
+        with open(os.path.join(out, "traceback.txt"), "w") as f:
+            traceback.print_exc(file=f)
+        with open(os.path.join(out, "reproduce.sh"), "w") as f:
+            f.write("#!/bin/sh\n# The command that produced this failure.\n"
+                    f"# Intermittent? Run it in a loop, and under load:\n"
+                    f"#   tools/with-cpu-load.sh -n $(nproc) -- <this>\n"
+                    + " ".join(sys.argv) + "\n")
+        os.chmod(os.path.join(out, "reproduce.sh"), 0o755)
+        print(f"--- evidence kept in {out} ---", file=sys.stderr)
+    except Exception:
+        pass
 
 
 def _spawn(binary, extra_args, env, timeout, headless):

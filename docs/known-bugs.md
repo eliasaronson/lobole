@@ -141,15 +141,43 @@ code path through the sync — which is where staleness bugs live.
 ~4 s is OCC tessellating 299 parts serially. See the follow-ups in
 docs/interchange/import-plan.md.
 
-## `fem_async_smoke` fails under machine saturation (twice on 2026-08-26)
+## `fem_async_smoke` fails rarely, and has never been diagnosed
 
-Both failures happened while the GUI shards and `ctest -j$(nproc)` ran
-CONCURRENTLY (one invocation launched both); it passes immediately alone and
-in normally-loaded full runs. Async solve polled against a wall clock + a
-saturated machine is the familiar shape — but unlike the old fem_smoke
-story, the L8 launcher now keeps the app log, so the next failure is
-diagnosable instead of folklore. Not yet earned the "flaky" label; rerun,
-and read the log if it happens OUTSIDE a double-suite invocation.
+Twice on 2026-08-26 while the GUI shards and `ctest -j$(nproc)` ran
+CONCURRENTLY (one invocation launched both), and **once more on 2026-09-01**
+in a plain `-j8` run. It passes immediately alone and in normally-loaded full
+runs. Async solve polled against a wall clock + a saturated machine is the
+familiar shape.
+
+**Investigated 2026-09-01 and NOT reproduced.** Three runs under 22 CPU
+burners (`tools/with-cpu-load.sh`) took it from 1.5 s to 3.6-4.9 s — a 3x
+slowdown against wall-clock cliffs that sit 60-200x away. Pure CPU saturation
+is not the mechanism; the two original failures shared the machine with the
+GUI shards, which add GPU contention, four Xvfb servers and real memory
+pressure, and that storm was not recreated.
+
+**Why it has never been diagnosed, which is the actual finding.** ctest writes
+a test's output to `Testing/Temporary/LastTest.log` and the NEXT run overwrites
+it. So the natural response to an intermittent failure — run it again — deletes
+the only record. That happened again on 2026-09-01: the failure was seen, the
+suite was re-run to check, and the text was gone. The GUI suite hit this exact
+wall and fixed it by archiving a failing shard; the python smokes had no
+equivalent.
+
+**They do now.** `smoke_app.py` writes the app's log, the traceback and a
+`reproduce.sh` to `$XDG_STATE_HOME/designer/smoke-failures/<stamp>-<test>/` on
+any failure, capped at 20, in a directory no later run touches. The next
+occurrence is diagnosable instead of another round of inference.
+
+**One exposure removed while looking**, justified on its own merits: the test's
+reference solve called blocking `run_study` with no timeout override, so it
+rode the client's 60 s default — the exact trap `designer_remote.request`'s
+docstring warns about, and a failure there would have read as "the async test
+is flaky" while being in the half that is not under test. It passes 600 now.
+
+**Not split**, deliberately: it is already the slow half, split out of
+`fem_smoke` on 2026-08-25, and splitting further would multiply app launches
+rather than reduce exposure.
 
 ---
 

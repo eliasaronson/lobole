@@ -40,7 +40,15 @@ def main():
             study, _, _, _ = build_bar(d)
 
             # The synchronous answer, to compare the worker's against.
-            sync = d.call("run_study", study=study)
+            #
+            # An explicit timeout, because the client's default is 60 s and
+            # this call blocks for the whole solve. designer_remote.request's
+            # own docstring names the trap: a solve that outlives the default
+            # kills the client mid-call while the server finishes anyway,
+            # which reads as a hang followed by a mystery. Here it would read
+            # as "the async test is flaky", which is worse — the failure would
+            # be in the half that is not being tested.
+            sync = d.request("run_study", {"study": study}, timeout=600)
             expect(sync["elements"] > 0, "solved a mesh")
             sigma = sync["max_von_mises_mpa"]["value"]
             expect(sigma > 0, f"a positive von Mises came back: {sigma}")
