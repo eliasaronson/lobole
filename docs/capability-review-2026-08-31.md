@@ -972,6 +972,46 @@ thread, so the pragmatic default matches what we do today; `thread.py` (1663
 lines) is only interesting if the roadmap's modelled-thread stretch flag is
 ever pulled.
 
+## Head shapes and drive types — two axes, both covered
+
+Worth separating, because they are independent: the **head shape** is the outer
+form (socket cap, button, countersunk, pan, cheese, hex) and the **drive** is
+the tool interface cut into it (hex socket/Allen, Phillips, Torx, slot,
+Robertson). A pan head can be Phillips or Torx; the standard says which.
+
+Both libraries model both axes, and both do it the same way — the drive is
+**data**, not a class:
+
+| drive | bd_warehouse | FastenersWB |
+|---|---|---|
+| slot | `slot_recess` | `makeSlotRecess` |
+| hex socket (Allen) | `hex_recess` | `makeHexRecess` |
+| Phillips (type H) | `cross_recess`, PH0-PH4 | `makeHCrossRecess`, 0-4 |
+| Torx (hexalobular) | `hexalobular_recess` | `makeHexalobularRecess` |
+| Robertson (square) | `square_recess`, R0-R3 | — |
+| Pozidriv (type Z) | — | — |
+
+bd_warehouse selects the recess from a `recess` COLUMN in the size table, so
+ISO 7045 rows carry `PH0`-`PH4`, ISO 14580/14581/14583 carry `T6`-`T50`, and
+ASME B18.6.3 carries `R0`-`R3`. The drive comes from the standard's own table
+rather than from a flag someone sets — which is the right shape, and the one to
+copy.
+
+**One provenance difference that matters if either is vendored.** FastenersWB
+reads its Phillips geometry from `iso4757def.csv` and its Torx from
+`iso10664def.csv` — the actual recess standards, per drive size. bd_warehouse
+hard-codes two dicts and says so in a comment:
+
+    Note: the following dimensions are somewhat simplified to a single
+    value per drive size instead of unique sizes for each fastener
+
+So for the recesses specifically, **FastenersWB has the better data** and
+bd_warehouse has an admitted approximation. That reinforces "bd_warehouse as
+the model, FastenersWB as the quarry": take the schema and the profile
+approach from one, and ISO 4757 / ISO 10664 from the other.
+
+Neither does **Pozidriv**, which is worth knowing before promising it.
+
 ## The cheapest thing in this survey is not a fastener
 
 `clearance_hole_sizes.csv`, `tap_hole_sizes.csv` and `drill_sizes.csv` —
@@ -988,6 +1028,11 @@ web search, every time.
 That is 298 rows of vendored data against a feature that **already exists**,
 with no new geometry, no new feature type and no library. It is independent of
 F1 entirely and worth doing whether or not the fastener library is ever built.
+
+**Planned separately: [modeling/hole-standards.md](modeling/hole-standards.md)**
+— deliberately not folded into F1, because they are related in subject and
+unrelated in cost, and tying them together would delay the cheap one behind the
+expensive one.
 
 ## Vendor the data, do not import the parts
 

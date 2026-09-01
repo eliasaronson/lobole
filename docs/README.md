@@ -25,7 +25,7 @@ thing behind it invisible to the next person who looks.
 | Area | Start at | Also inside |
 |---|---|---|
 | [sketching/](sketching/plan.md) | the 2D constraint sketcher | `phase-*.md` per phase; `copy-links.md`, `reference-image-plan.md` |
-| [modeling/](modeling/plan.md) | 3D features | `toponaming.md` + `toponaming-design.md` (persistent face/edge refs), `m3-extrude.md`, `curves-3d-plan.md`, `thread-rib.md`, `regeneration.md` |
+| [modeling/](modeling/plan.md) | 3D features | `toponaming.md` + `toponaming-design.md` (persistent face/edge refs), `m3-extrude.md`, `curves-3d-plan.md`, `thread-rib.md`, `regeneration.md`, `hole-standards.md` (**planned** — a hole that knows it is an M6 clearance, from 298 rows of vendored table) |
 | [variables/](variables/plan.md) | parameters + expressions | |
 | [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent) |
 | [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `f7-merge-and-conflicts.md`, `f8-external-changes.md`, `f9-collaboration.md`, `f10-autosave-the-project.md`, `f11-seeing-what-changed.md`, `f7-handoff.md`, `collab-dogfood.md`, `baked-geometry.md`, `format.md` |
