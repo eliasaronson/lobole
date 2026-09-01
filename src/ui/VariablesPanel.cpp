@@ -119,13 +119,21 @@ void DrawVariablesPanel(AppState& state) {
   // first appearance (fresh layout builds select the last-appearing tab).
   ImGui::Begin(kPanelVariables, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   PanelHeading(kPanelVariables);
-  if (!state.document) {
-    ImGui::End();
-    return;
-  }
-  Document& doc = *state.document;
+  // NOT `if (!state.document) return`, which is what this did until
+  // 2026-09-01 — the same defect that made File > Save a silent no-op
+  // everywhere but a part tab. `state.document` is NULL on an assembly or a
+  // drawing tab, and PROJECT variables live on the AppState, are undoable
+  // ACROSS tabs and drive every part. Bailing here made the one scope that
+  // spans the project uneditable from two of the three kinds of tab, with a
+  // blank panel and no reason given.
+  //
+  // Only the part-local half needs a document, so only the part-local half
+  // asks for one. The units section does too: units are a property of a
+  // document, not of the project.
+  Document* doc = state.document.get();
 
-  DrawUnitsSection(state, doc);
+  if (doc)
+    DrawUnitsSection(state, *doc);
 
   static CellEdit edit;
   // Rename/delete refusals; shown under the table until the next action.
@@ -182,7 +190,7 @@ void DrawVariablesPanel(AppState& state) {
     } else {
       state.commands->Execute(
           std::make_unique<SetVariableCommand>(r.param.name, expr, comment),
-          doc);
+          *doc);
     }
   };
 
@@ -224,8 +232,9 @@ void DrawVariablesPanel(AppState& state) {
     std::vector<VarRow> rows;
     for (const Parameter& p : state.projectParameters)
       rows.push_back({p, true});
-    for (const Parameter& p : doc.GetParameters())
-      rows.push_back({p, false});
+    if (doc)
+      for (const Parameter& p : doc->GetParameters())
+        rows.push_back({p, false});
 
     for (int i = 0; i < static_cast<int>(rows.size()); i++) {
       const VarRow& r = rows[i];
@@ -299,7 +308,7 @@ void DrawVariablesPanel(AppState& state) {
                               : state.commands->Execute(
                                     std::make_unique<RenameVariableCommand>(
                                         p.name, newName),
-                                    doc);
+                                    *doc);
           if (ok) {
             actionError.clear();
           } else {
@@ -360,11 +369,11 @@ void DrawVariablesPanel(AppState& state) {
         const bool ok =
             r.isProject
                 ? RemoveProjectVariable(state, p.name, &refs)
-                : (refs = doc.FindParameterReferences(p.name),
+                : (refs = doc->FindParameterReferences(p.name),
                    refs.empty() &&
                        state.commands->Execute(
                            std::make_unique<DeleteVariableCommand>(p.name),
-                           doc));
+                           *doc));
         if (ok) {
           actionError.clear();
         } else {

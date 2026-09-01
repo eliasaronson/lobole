@@ -793,6 +793,55 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).
+  // A project variable is edited from an assembly tab, by clicking.
+  //
+  // Reported 2026-09-01: File > Save did nothing on an assembly tab because
+  // it guarded on `state.document`, which is NULL there. The Variables panel
+  // had the same guard and the same shape of bug — project variables live on
+  // the AppState, are undoable across tabs and drive every part, and the
+  // panel went blank on two of the three kinds of tab with no reason given.
+  // Clicked rather than called, because the whole defect was that the widget
+  // was not drawn.
+  t = IM_REGISTER_TEST(engine, "variables",
+                       "project_scope_is_editable_on_an_"
+                       "assembly_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+
+    const auto showPanel = [&](const char* title) {
+      ImGuiWindow* w = ImGui::FindWindowByName(title);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    };
+
+    // Onto an assembly tab, where state.document is null by construction.
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    ctx->Yield(2);
+    IM_CHECK(s_App->document == nullptr);
+
+    // The panel is not blank: its one button works and the row it creates is
+    // addressable and editable, from here.
+    showPanel(ui::kPanelVariables);
+    ctx->ItemClick("//###Variables/+ Add variable");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectParameters.size(), (size_t)1);
+    ctx->ItemInputValue("//###Variables/###vars_table/###var_name_project_var1",
+                        "span");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###Variables/###vars_table/###var_expr_project_span",
+                        "42");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectParameters.size(), (size_t)1);
+    IM_CHECK_STR_EQ(s_App->projectParameters[0].name.c_str(), "span");
+    IM_CHECK_STR_EQ(s_App->projectParameters[0].expression.c_str(), "42");
+
+    showPanel(ui::kPanelModel); // or the next test starts on the wrong tab
+  };
+
   t = IM_REGISTER_TEST(engine, "configs", "a_parametric_family_by_clicking");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

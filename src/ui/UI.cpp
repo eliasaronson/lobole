@@ -805,13 +805,21 @@ void DrawUI(AppState& state) {
     } else {
       DrawFeatureTreePanel(state);
     }
-    DrawVariablesPanel(state);
     DrawConfigurationsPanel(state);
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
   }
+  // Variables spans the whole project, so it is drawn on every kind of tab.
+  // It was inside the part-only branch above until 2026-09-01, and that is
+  // the same defect that made File > Save a silent no-op outside a part tab:
+  // PROJECT-scope variables live on the AppState, are undoable ACROSS tabs
+  // and drive every part, so gating them on the active tab holding a part
+  // made the one scope that spans the project unreachable from two of the
+  // three kinds of tab. The panel itself skips the part-local half and the
+  // units section when there is no document.
+  DrawVariablesPanel(state);
   // Outside the tab-kind branches on purpose: a version is a property of the
   // PROJECT, so the history reads the same from a part, an assembly or a
   // drawing tab (F6).
