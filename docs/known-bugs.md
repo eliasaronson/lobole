@@ -197,6 +197,14 @@ The first (`terminal/off_by_default_docks_right_on`) was diagnosed to a window
 left `Hidden` after a dock-layout rebuild, went away without anyone
 identifying the fix, and is withdrawn below. This one is not diagnosed at all.
 
+**Made findable 2026-09-01** (`24857e9`): `gui-tests-xvfb.sh` now shuffles by
+DEFAULT and prints one base seed that replays the whole run. Every hunt for
+this stalled at the same place — the failure is reproducible only from its
+seed, CI has shuffled since `d1396b5`, and nobody ran shuffled locally, so no
+seed was ever generated where the failures were actually being seen. The cost
+is that a bare re-run is now a different order, which is the point: that re-run
+is what destroyed the evidence three times.
+
 **Hunted 2026-08-25, and not caught.** Five shuffled runs — three idle, two
 under a concurrent headless suite, seeds recorded — all passed 215/215. The
 class did not reproduce on demand, so it stays open and undiagnosed. What the
@@ -321,10 +329,13 @@ plunge straight into the part still reports a gouge and fails `Safe()`.
 
 ---
 
-## CAM: two defects found machining the smart_speaker front_wall (2026-08-31)
+## CAM: two defects found machining the smart_speaker front_wall — BOTH FIXED
 
-Both found by the verifier on a real 2-sided job, both reproducible, neither
-fixed yet. `tools/` has the job script that reproduces them:
+Both found by the verifier on a real 2-sided job, both reproducible. **The
+rapid was fixed 2026-08-31 and the profile contour on the same day** (`286ef6b`
+— a profile follows the part's projection, not its section); a third defect
+found while confirming those, the verifier calling every through cut a gouge,
+is the entry above. `tools/` has the job script that reproduces them:
 `front_wall - Front.ngc` / `- Back.ngc`.
 
 ### A rapid plunged to the previous depth at the RAMP ENTRY (FIXED 2026-08-31)

@@ -214,8 +214,10 @@ variables, drawings, BOM + exploded).
    views, FEM assembly contact, deb/rpm packaging.
 
 **Capability walls, found 2026-08-31** and recorded in
-[capability-review-2026-08-31.md](capability-review-2026-08-31.md) — findings,
-not schedule. Three are architecture rather than backlog: the assembly solve
+[capability-review-2026-08-31.md](capability-review-2026-08-31.md). Its
+**testing and tooling halves are done** (all twelve items closed by
+2026-09-01, four of them by being retracted after measurement); the capability
+findings below remain findings, not schedule. Three are architecture rather than backlog: the assembly solve
 places by direct frame alignment with **no numeric 3D solver**, so a mechanism
 with a closed kinematic loop cannot be assembled at all (the one place a
 mature open-source competitor is now ahead); **regeneration cannot cross a

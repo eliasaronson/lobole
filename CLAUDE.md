@@ -63,8 +63,8 @@ after the sharder re-runs the whole GUI suite serially for 6 minutes:**
 
 | what | command | cost |
 |---|---|---|
-| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~79 s |
-| **inner loop** | `tools/test-fast.sh` | **~10 s** (908 of 925) |
+| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~79 s (937) |
+| **inner loop** | `tools/test-fast.sh` | **~10 s** (919 of 937) |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~100 s |
 | the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 
@@ -75,8 +75,8 @@ row above asks for a label instead of excluding `gui_smoke` by name. Full
 verification is ~5 min, not ~10.
 
 **Tags are ctest labels** (`ADD_TAGS_AS_LABELS`): `ctest -L cam`, `-L sketch`,
-`-L solver` all work. `[slow]` is the one with a rule attached — 17 tests,
-311 s of CPU between them, and `test-fast.sh` is exactly `-LE 'gui|slow'`. Tag
+`-L solver` all work. `[slow]` is the one with a rule attached — 18 tests,
+~310 s of CPU between them, and `test-fast.sh` is exactly `-LE 'gui|slow'`. Tag
 a new heavy test `[slow]` where you write it; a by-name list in `tools/` used
 to do this and drifted until the "8 s" loop took 49 s.
 
@@ -87,7 +87,7 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~79 s for 925 tests, of which the SIMP gate alone is 77 s of CPU and four
+  — ~79 s for 937 tests, of which the SIMP gate alone is 77 s of CPU and four
   CAM clearing cases 138 s between them. **Inner loop: `tools/test-fast.sh`
   (~10 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.

@@ -1,8 +1,10 @@
 # Capability + architecture review (2026-08-31)
 
-> Status: **the testing and tooling halves are partly BUILT — see "What was
-> done" at the bottom.** The capability findings (A1-A3, S1, F1) remain
-> findings only, and nothing there is scheduled. This is a read of the
+> Status: **the testing and tooling halves are DONE — all twelve items closed
+> by 2026-09-01, four of them by being retracted.** See "What was done" at the
+> bottom for the table and the corrections. The capability findings (A1-A3,
+> S1, F1) remain findings only, and nothing there is scheduled. This is a read
+> of the
 > tree against what the mainstream modellers do, taken after the CAM
 > projection fix (`286ef6b`) and prompted by "what are we missing, what is
 > badly structured, what do we do worse than FreeCAD and Onshape".
@@ -446,14 +448,12 @@ The cost, stated because it is a real one: a bare re-run is now a DIFFERENT
 order, so "it passed the second time" no longer means what it used to. That is
 the point — it is exactly the re-run that destroyed the evidence three times.
 
-## Order I would take these
+## Order I would take these — all done, 2026-08-31/09-01
 
-1. **T1** — trivial, and it is charging every edit made today.
-2. **T3** — a label; smaller than T1 and removes a documented footgun.
-3. **T2** — the real coverage hole, and the one that needs actual design.
-4. **T5's determinism property** — small, and it guards the largest assumption
-   in the codebase.
-5. **T4**, **T6**, **T7** — habits and gates rather than code.
+Kept as written, because the order was mostly right and one entry of it was
+not. T1, T3, T5, T7, T2 and T4 landed as described. **T6 was withdrawn**: the
+gates it asked for already existed, in a better form than it proposed. What the
+list got wrong is the confidence, not the sequence.
 
 ---
 
@@ -600,12 +600,13 @@ only as a comment.
 
 Trivial, and it removes the one manual step in the parallel-work setup.
 
-## Order
+## Order — all done, 2026-09-01
 
-**P5** is minutes. **P1** next — it multiplies every future performance round.
-**P2's `frame_stats` half** is cheap and closes a blind spot; the sub-allocator
-waits for a part big enough to need it. **P3** and **P4** are occasional-audit
-tools, like `coverage.sh` — worth having, not worth scheduling.
+P5, P1, P3 and P4 landed as described. **P2 did not**: its `frame_stats` half
+turned out to duplicate `nvidia-smi`, and the ceiling underneath it does not
+exist on any device we target, so the sub-allocator this section called "the
+part that lifts the ceiling" is not needed. What shipped instead is fifteen
+lines that measure the thing the review had only inferred.
 
 ---
 
@@ -710,11 +711,11 @@ tooling halves were mostly actionable without one, and this is what landed.
 | **P1** sampling profiler | built | `9913136` |
 | **P4** GPU frame-capture recipe | written | `9784ff6` |
 | **P5** worktree picks its own port | fixed | `073aa31` |
-| **P3** TSan build mode | added | (below) |
-| **T4** coverage leaves no trace | run recorded; its caveat later retracted | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
-| **T2** pixel-regression gate | built | (below) |
-| **P2** GPU memory visibility | done — and the finding was WRONG | (below) |
-| **T6** perf gates | WITHDRAWN — already gated, better than proposed | — |
+| **P3** TSan build mode | added, 0 races of ours | `0c35d65` |
+| **T4** coverage leaves no trace | run recorded; caveat retracted | `0c35d65`, `b864c45` |
+| **T2** pixel-regression gate | built | `f43db7a` |
+| **P2** GPU memory visibility | done — and the finding was WRONG | `6dbf936` |
+| **T6** perf gates | WITHDRAWN — already gated, better than proposed | `59f60fd` |
 | **T7** shuffled runs | fixed | `24857e9` |
 
 ## What T5 found, and why it is the item worth reading
@@ -805,6 +806,48 @@ P2 was left for a seam decision and then **turned out not to need one** — see
 its correction above. Asking whether it beat an external monitor was the right
 question: most of it did not, and the part that was unique to us was answering
 a ceiling that measurement showed does not exist.
+
+## Four corrections, and the pattern in them
+
+Four of the twelve did not survive being checked, and they failed the same way
+every time — a claim argued from inference where the measurement was cheap.
+Recorded together because the pattern is more useful than any of them:
+
+| item | the claim | what measuring showed |
+|---|---|---|
+| **P2** | `maxMemoryAllocationCount` is "commonly 4096", so a ~1000-part ceiling | Every device we target reports **4294967295**. No ceiling; the sub-allocator is not needed. The number came from the Vulkan spec FLOOR, never read from a device. |
+| **T6** | three perf wins asserted nowhere, so they can regress silently | All four are gated — `LastRegenStats().executed`, a file-deletion test, asset-id identity, six pacer cases — and the asset-id gate is better than the counting one proposed. |
+| **T4** | the app is SIGTERMed so gcov never flushes | It exits cleanly on SIGTERM (`HeadlessMain.cpp:67`, `main.cpp:1471`) and there is a smoke phase asserting exit 0. And `Checkpoints.cpp` at 0% is the no-git fallback, genuinely unreached — the tool was right. |
+| **T2** | driver variance forces a tolerance | lavapipe is bit-reproducible across processes. Key the baseline to the device and exact equality works. |
+
+Two of these — P2 and T4 — had code written for them before the check was run,
+and both were reverted. That is the cost of the habit, and it is small compared
+with shipping either.
+
+The same shape produced the session's first correction, in CAM: "four synthetic
+fixtures failed to reproduce it" turned out to mean the fixtures reproduced it
+and `maxX` could not see a slot cut into an edge. The 2026-08-25 audit already
+recorded this lesson once ("plan against what you watched happen, not against
+summaries"); it arrived here from a different direction.
+
+## Findings this work turned up, not yet actioned
+
+- **The no-git checkpoint fallback is untested** (`Checkpoints.cpp`, all 8
+  functions). Reached only when `ui::CanVersionProject` is false, which no test
+  machine is. Either a test that hides git from the app, or a note saying the
+  fallback is accepted as unverified.
+- **Removal and teardown paths are the uncovered shape.**
+  `RemoveConfigurationCommand`, `Document::RemoveCamSetup`,
+  `AssemblyDocument::RemoveConfiguration`,
+  `SketchFeature::RemoveExternalGeometry`, `GitVault::RemoveRemote`. We test
+  that things can be created and rarely that they can be removed.
+- **Two TSan residuals**, both invocation rather than defect: `femgpu_tests` is
+  a separate binary that has to be built too, and `offscreen_smoke` exceeds
+  `smoke_app.py`'s 30 s startup budget because an instrumented app is slower
+  than that to report its port.
+- **Three heavy tests hit ctest timeouts under coverage instrumentation**, so
+  their paths are partly unmeasured. The timeouts are sized for the normal
+  build.
 
 ## Notes for whoever picks these up
 
