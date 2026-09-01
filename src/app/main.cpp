@@ -39,6 +39,7 @@
 #include "render/VulkanCommon.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CamPlayback.h"
 #include "ui/ImportJob.h"
 #include "ui/SelectionPipeline.h"
@@ -1510,10 +1511,10 @@ static int RunOffscreen(const CommandLineArgs& args) {
     for (SceneRenderer* r : g_Scene)
       r->SetClipPlanes(ui::SectionPlanes(g_App));
     g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
-    ui::PumpRenderJob(g_App);
-    // Advance a background STEP import: join a finished worker, then create
-    // part tabs a slice per frame so the progress modal keeps painting.
-    ui::PollImport(g_App);
+    // Every long-running operation, from one place (ui/BackgroundJobs.h):
+    // whether a background job can finish must not depend on which panel is
+    // open, which is what two of them used to depend on.
+    ui::PollBackgroundJobs(g_App);
 
     // Captures hold until the camera lands: orient_to_face animates ~1 s,
     // and WantsScreenshot's own 300-call cap was tuned for 60 fps frames —
@@ -2308,12 +2309,8 @@ int main(int argc, char** argv) {
     if (g_FieldRenderer)
       g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
 
-    // Advance an in-flight offline render by one sample batch (the Render modal
-    // shows progress; runs on the main thread with its own one-shot submits).
-    ui::PumpRenderJob(g_App);
-    // Advance a background STEP import: join a finished worker, then create
-    // part tabs a slice per frame so the progress modal keeps painting.
-    ui::PollImport(g_App);
+    // Every long-running operation, from one place (ui/BackgroundJobs.h).
+    ui::PollBackgroundJobs(g_App);
 
     // Mirror the GPU pass averages where frame_stats and the HUD read them.
     {

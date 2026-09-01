@@ -1,5 +1,7 @@
 #include "app/HeadlessMain.h"
 
+#include "ui/BackgroundJobs.h"
+
 #include "common/Logger.h"
 #include "core/Command.h"
 #include "core/Document.h"
@@ -77,6 +79,11 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
 
   while (!g_stopRequested) {
     server.ProcessPending(state);
+    // Every long-running operation, from one place (ui/BackgroundJobs.h). The
+    // RPC handlers poll too — a handler must apply a finished result before it
+    // answers a question about it — but a job must also be able to finish
+    // while no client is asking.
+    ui::PollBackgroundJobs(state);
     // The PROJECT, not the open tab (F10) — same fix as the windowed loop.
     ui::AutosaveProject(state, autosaver, seconds());
     std::this_thread::sleep_for(std::chrono::milliseconds(2));

@@ -1,6 +1,7 @@
 # Long operations off the frame — plan (A3)
 
-> Status: **planned, not built.** Written 2026-09-01 after reading all five
+> Status: **step 0 SHIPPED 2026-09-01** (the two bugs, and the single poll
+> entry point they needed); phases 1-4 planned. Written after reading all five
 > existing implementations, which is what changed the plan: the review
 > (capability-review-2026-08-31.md, A3) said there were four cases with three
 > hand-rolled answers. There are **five**, and reading them turned up two live
@@ -50,6 +51,29 @@ a person clicking.
 line, and holding a one-line bug fix hostage to a refactor is how both get
 delayed. They also make the case for the rest of this document better than any
 argument about duplication does.
+
+### Shipped 2026-09-01
+
+`ui::PollBackgroundJobs` (`src/ui/BackgroundJobs.h`) joins whatever finished,
+applies it, and advances whatever is sliced. The app's **three** loops call it
+once each — the windowed frame loop, the `--offscreen` frame loop, and the
+`--headless` pump — and nothing under `src/ui` calls the individual polls any
+more. The headless pump did not poll at all before, so a job there could only
+finish when a client happened to ask; the RPC handlers keep their own polls,
+deliberately, because a handler must apply a finished result before it answers
+a question about it.
+
+Gated by `a background job is polled by the loop, never by a panel`
+(`test_conventions.cpp`), which scans `src/ui` for calls to any of the five
+joins. This is checked rather than remembered because the mistake is invisible
+in review — a poll call looks equally at home in a draw function. Verified by
+sabotage: putting `PollSync` back into the History panel fails it with
+"src/ui/HistoryPanel.cpp calls PollSync".
+
+**One case this does NOT fix**, named rather than left to be rediscovered: the
+FEM polls need a `Document`, so a solve started on a part tab is still not
+reaped while an assembly tab is active. That needs the job to stop being
+addressed by "the active document", which is phase 3's business.
 
 ## The mechanism
 

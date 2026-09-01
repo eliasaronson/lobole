@@ -230,9 +230,9 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
   ImGui::SeparatorText("Optimization");
 
-  // Store a finished run (the GUI's per-frame join point).
-  PollTopologyRun(state, *doc);
-  PollStudyRun(state, *doc);
+  // No poll here any more: this panel is drawn only in Simulation mode, so
+  // leaving that mode stranded a finished solve until you came back. Every
+  // loop polls instead (ui/BackgroundJobs.h); this panel only reads.
   const TopoRunStatus st = GetTopologyStatus(state, s.id);
   if (st.running) {
     const float frac =
@@ -357,7 +357,8 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // call the blocking RunStudyAndCache straight from the draw, so the whole
   // app — not just this panel — stopped answering for the length of a solve,
   // with no progress and nothing to cancel. On a real part that is a hang.
-  PollStudyRun(state, *doc);
+  // (The join happens in ui::PollBackgroundJobs, once per loop iteration —
+  // not here, where it only ran while this panel was on screen.)
   const StudyRunStatus run = GetStudyRunStatus(state, s.id);
   if (run.running) {
     ImGui::TextColored(kMuted, ICON_FA_HOURGLASS_HALF " Solving... %.0fs",

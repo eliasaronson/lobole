@@ -174,6 +174,54 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("a background job is polled by the loop, never by a panel",
+          "[convention]") {
+  // Whether a long-running operation can FINISH must not depend on which
+  // panel is open. It used to, twice (docs/ui/long-operations.md):
+  //
+  //   PollSync was called inside `if (ImGui::TreeNode("Sharing"))`, so
+  //   collapsing that section during a push meant nothing ever joined the
+  //   worker — the operation finished and the app never found out.
+  //
+  //   PollTopologyRun/PollStudyRun were called from DrawTopoResults, drawn
+  //   only in Simulation mode, so leaving that mode stranded a finished solve.
+  //   An RPC client still reaped it, which is why it survived every scripted
+  //   test and only bit a person clicking.
+  //
+  // Both are the same mistake and it is invisible in review — a poll call
+  // looks equally at home in a draw function. So it is checked here rather
+  // than remembered: the joins live in ui/BackgroundJobs.cpp, which the three
+  // loops call once each, and nothing under src/ui may call them directly.
+  //
+  // The REMOTE layer is deliberately exempt: a handler must apply a finished
+  // result before it answers a question about it, so it polls on the way in.
+  const std::vector<std::string> joins = {"PollSync", "PollImport",
+                                          "PollTopologyRun", "PollStudyRun",
+                                          "PumpRenderJob"};
+  std::vector<std::string> offenders;
+  for (const SourceFile& f : SourcesUnder("src/ui", ".cpp")) {
+    if (f.path.filename() == "BackgroundJobs.cpp")
+      continue; // the one place they belong
+    for (const std::string& join : joins) {
+      // The definition itself is not a call: skip the file that defines it.
+      const std::string definition = "void " + join + "(";
+      if (f.text.find(definition) != std::string::npos)
+        continue;
+      if (f.text.find(join + "(") != std::string::npos)
+        offenders.push_back(Relative(f.path) + " calls " + join);
+    }
+  }
+  INFO("Poll these from ui::PollBackgroundJobs, which every loop already "
+       "calls, not from a draw function that may not run:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + "\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("every scene renderer is in the draw-order registry",
           "[convention]") {
   // One list is left after the wiring refactor — `RegisterSceneRenderers` in

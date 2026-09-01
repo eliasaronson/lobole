@@ -683,7 +683,10 @@ void DrawHistoryPanel(AppState& state) {
   ImGui::Separator();
   if (ImGui::TreeNode("Sharing")) {
     RefreshRemotes(state, false);
-    PollSync(state);
+    // PollSync is NOT called here any more. It used to be, inside this
+    // TreeNode — so collapsing "Sharing", or closing the panel, during a push
+    // meant nothing ever joined the worker. Every loop now polls it
+    // (ui/BackgroundJobs.h); this section only READS the state.
 
     if (state.remotes.empty()) {
       ImGui::TextWrapped("This project has no remote. Add one to share it "
