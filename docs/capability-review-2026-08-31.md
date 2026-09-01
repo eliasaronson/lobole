@@ -918,14 +918,76 @@ silent wrongness `contact_report` and `compare_geometry` exist to prevent.
 | FreeCAD-library | mixed | bundled FCStd/STEP | none — static assets | its screws are cylinders at nominal diameter |
 | McMaster-Carr / TraceParts | free download, **not open** | STEP | — | redistribution restricted |
 
-**bd_warehouse** is the fit: Apache-2.0 is one-way compatible into AGPL-3.0, and
-it generates on **OCCT**, the kernel we already use, so the approach transfers
-directly. Coverage is 13 screw types, 6 nut types, 4 washer types across ISO
-4014/4017/4762/7380/2009, DIN 1587/1665/557/967 and ASME B18.3/B18.6.3, M1.6 to
-M52 plus imperial, with `IsoThread`/`AcmeThread` generators.
-
 (FastenersWB's "or later" is what makes it usable at all — GPL-2.0-only would
 be incompatible with AGPL-3.0. Checked rather than assumed.)
+
+## Read, not surveyed (clones in `~/Documents/CAD/parts/`)
+
+The web summaries were not enough to choose, so both live candidates were
+cloned and read — the same method the CAM survey used, and it changed the
+answer. **Neither is best outright. They are best at different halves.**
+
+| | bd_warehouse | FastenersWB |
+|---|---|---|
+| licence | Apache-2.0 | GPL-2.0-or-later |
+| data | 65 CSVs, **1798 rows** | 192 CSVs, **8060 rows** |
+| breadth | 13 screw + 6 nut + 4 washer types | **93 ISO, 37 DIN, 32 ASME** standard files |
+| schema | one file per FAMILY, columns namespaced by standard | one file per STANDARD |
+| geometry | **OCCT**, via build123d | FreeCAD's Python API |
+| transferable | directly | the approach only |
+
+**bd_warehouse is the model.** Its schema is the better idea — one table per
+fastener family with columns namespaced by standard, blanks where a standard
+does not reach that size:
+
+    Size,iso4762:dk ,iso4762:k ,iso4762:s ,…,asme_b18.3:dk ,…
+    M1.6-0.35,3.14,1.6,1.5,…,,,,
+
+so ISO 4762 and ASME B18.3 share one file and one lookup. (Note the trailing
+spaces in those column names — a parser has to strip them.)
+
+And the geometry cost is confirmed rather than assumed. The entire head of a
+socket head cap screw:
+
+    def head_profile(self):
+        dk, k = (self.screw_data[p] for p in ["dk", "k"])
+        with BuildSketch(Plane.XZ) as profile:
+            Rectangle(dk / 2, k, align=Align.MIN)
+            fillet(profile.vertices()…[-1], k * 0.075)
+        return profile.sketch.face()
+
+Seven lines: read two numbers from the CSV row, draw a rectangle, fillet a
+vertex. The shaft, recess and countersink come from shared base-class helpers.
+`fastener.py` is 4128 lines but almost all of it is docstrings and the shared
+`Screw` machinery — the per-type work really is a profile.
+
+**FastenersWB is the quarry.** It has **4.5x the data** and far broader
+standard coverage, and its one-file-per-standard layout is easier to vendor
+selectively. When bd_warehouse's coverage runs out, that is where the next
+table comes from. Both licences are fine for an AGPL-3.0 app.
+
+**On threads:** bd_warehouse defaults to `simple=True` and does NOT generate
+the helical thread, because it is expensive. Designer already has a cosmetic
+thread, so the pragmatic default matches what we do today; `thread.py` (1663
+lines) is only interesting if the roadmap's modelled-thread stretch flag is
+ever pulled.
+
+## The cheapest thing in this survey is not a fastener
+
+`clearance_hole_sizes.csv`, `tap_hole_sizes.csv` and `drill_sizes.csv` —
+**298 rows** between them:
+
+    Size,Close,Normal,Loose
+    M6,6.4,6.6,7.0
+
+Designer's `Hole` feature takes a raw `diameter` (`hole_kind:
+simple|counterbore|countersink, diameter, depth, …`). There is no "clearance
+hole for M6, normal fit" — the number is typed by hand, from memory or a
+web search, every time.
+
+That is 298 rows of vendored data against a feature that **already exists**,
+with no new geometry, no new feature type and no library. It is independent of
+F1 entirely and worth doing whether or not the fastener library is ever built.
 
 ## Vendor the data, do not import the parts
 
