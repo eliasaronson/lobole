@@ -11,6 +11,7 @@
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
+#include "ui/JobActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem
 #include "ui/SimulationActions.h"
@@ -182,6 +183,20 @@ bool HasBody(AppState& s) {
   return s.document && !s.document->GetBodies().empty();
 }
 bool IdleBody(AppState& s) { return Idle(s) && HasBody(s); }
+// CAM works on a JOB tab since v73, where `document` is null by definition,
+// so the CAM verbs cannot ask HasBody any more -- they ask whether the job
+// has anything to cut. The command id stays `part.cam`: it is what a user's
+// keybinding names, and renaming it would silently drop theirs.
+bool HasJobBody(AppState& s) {
+#ifdef HAVE_CAM
+  // Either a job with something to cut, or a part that could BE one: pressing
+  // this on a part is how you get a job in the first place.
+  return (s.job != nullptr && !JobBodies(s).empty()) || HasBody(s);
+#else
+  (void)s;
+  return false;
+#endif
+}
 bool HasProfile(AppState& s) { return Idle(s) && ClosedProfileSketch(s); }
 size_t Producers(AppState& s) {
   return s.document
@@ -450,8 +465,16 @@ const std::vector<Command>& Table() {
     add("part.split", IdleBody, [](AppState& s) { CreateSplit(s); });
     add("part.refine", IdleBody, [](AppState& s) { CreateRefine(s); });
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
-    add("part.cam", HasBody, [](AppState& s) {
+    add("part.cam", HasJobBody, [](AppState& s) {
 #ifdef HAVE_CAM
+      // On a PART tab this is "machine this part": get to the job that cuts
+      // it -- making one if there is none -- and then open the session. That
+      // one click is what keeps CAM's move onto its own document from turning
+      // the common case into a ritual (docs/cam/job-document.md).
+      if (s.job == nullptr && s.document != nullptr && !s.parts.empty()) {
+        OpenJobForPart(s, s.parts[static_cast<size_t>(s.activePart)].id);
+        s.camToolOpen = false; // a fresh tab opens the session below
+      }
       s.camToolOpen = !s.camToolOpen;
       if (!s.camToolOpen) {
         s.camGhostOp = 0;

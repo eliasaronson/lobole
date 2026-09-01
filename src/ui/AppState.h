@@ -8,6 +8,7 @@
 #include "core/cam/CamSim.h"      // the cutting simulation cursor + stock
 #include "core/cam/CamToolpath.h" // cam::FaceRegion (the ghost/hover cache)
 #include "core/cam/CamVerify.h"   // cam::VerdictLine (the G4 verdict, in words)
+#include "core/cam/JobDocument.h" // the job tab: parts placed + setups
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
@@ -609,10 +610,12 @@ struct RenderJob {
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
 // main.cpp manages alongside the Vulkan context.
-// The kind of document a project tab holds (A2/drawings). A part is a feature
-// list that builds bodies; an assembly is an occurrence list that places other
-// parts; a drawing projects a part or assembly onto a 2D sheet.
-enum class DocKind { Part, Assembly, Drawing };
+// The kind of document a project tab holds (A2/drawings/CAM jobs). A part is
+// a feature list that builds bodies; an assembly is an occurrence list that
+// places other parts; a drawing projects a part or assembly onto a 2D sheet;
+// a job says how parts are cut out of a piece of stock
+// (docs/cam/job-document.md).
+enum class DocKind { Part, Assembly, Drawing, Job };
 
 // One document of a project (assemblies A1/A2). The ACTIVE tab's
 // document/assembly/commands live in AppState (so all existing single-document
@@ -633,6 +636,11 @@ struct AssemblyHistory {
 // Snapshot-based undo for a drawing tab (the AssemblyHistory pattern): a
 // drawing is a small setup object (sheet + a few views/dims), so each edit
 // pushes a full copy rather than generalizing the Document-only Command stack.
+struct JobHistory {
+  std::vector<cam::JobDocument> undo;
+  std::vector<cam::JobDocument> redo;
+};
+
 struct DrawingHistory {
   std::vector<DrawingDocument> undo;
   std::vector<DrawingDocument> redo;
@@ -677,9 +685,11 @@ struct PartSlot {
   std::unique_ptr<Document> doc; // part: null while this tab is active
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
   std::unique_ptr<DrawingDocument> drawing;   // drawing: null while active
+  std::unique_ptr<cam::JobDocument> job;      // job: null while active
   std::unique_ptr<CommandStack> commands;     // null while active (parts only)
   AssemblyHistory history;       // assembly undo/redo (stashed here)
   DrawingHistory drawingHistory; // drawing undo/redo (stashed here)
+  JobHistory jobHistory;         // job undo/redo (stashed here)
   // Projected view geometry for a stashed drawing tab (D2). Kept across tab
   // switches so re-entering a drawing doesn't silently re-project — staleness
   // is only cleared by an explicit update (the FEM rule).
@@ -807,6 +817,16 @@ struct AppState {
   // documents onto a 2D sheet — no feature list, no occurrences.
   std::unique_ptr<DrawingDocument> drawing;
   DrawingHistory drawingHistory;
+  // Active job tab: the CAM setups used to live on the part Document, which
+  // made every job about one part (docs/cam/job-document.md).
+  std::unique_ptr<cam::JobDocument> job;
+  JobHistory jobHistory;
+  // The active job's assembled bodies and the key they were built at
+  // (ui::JobBodies). Derived, never serialized: this is where
+  // `document->GetBodies()` used to be read from, and some of those reads are
+  // per-frame.
+  std::vector<Body> jobBodies;
+  uint64_t jobBodiesKey = 0;
   // Part→assembly change propagation (A4): {partId → Document::Version()}
   // stamped at the active assembly's last solve. AssemblyPartsStale compares
   // against these on tab activation, so a part edit re-solves mates

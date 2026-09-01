@@ -1,0 +1,23 @@
+{
+  "part": "v67-cam-setup-frame.json",
+  "cam_op_sides": [
+    "outside"
+  ],
+  "cam_op_types": [
+    "profile"
+  ],
+  "cam_tool_types": [
+    "flat"
+  ],
+  "cam_setup_frames": [
+    [
+      -0.7071067811865476,
+      0.0,
+      0.0,
+      0.7071067811865476
+    ]
+  ],
+  "cam_setup_rotary": [
+    false
+  ]
+}

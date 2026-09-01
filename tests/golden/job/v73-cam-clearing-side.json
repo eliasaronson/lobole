@@ -1,0 +1,73 @@
+{
+  "format": "designer-document",
+  "version": 73,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 1,
+      "name": "Part"
+    }
+  ],
+  "cam": [
+    {
+      "id": 2,
+      "name": "Clearing side",
+      "post": "mach3",
+      "safe_z": 25.0,
+      "stock": {
+        "margin": [
+          2.0,
+          2.0,
+          1.0
+        ],
+        "bottom_margin": 1.0
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm flat",
+          "diameter": 6.0,
+          "flutes": 2,
+          "flute_length": 20.0,
+          "feed_cut": 600.0,
+          "feed_plunge": 200.0,
+          "spindle_rpm": 12000.0
+        }
+      ],
+      "operations": [
+        {
+          "id": 3,
+          "name": "Outline",
+          "type": "profile",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 0.0,
+          "stepdown": 4.0,
+          "side": "outside"
+        },
+        {
+          "id": 4,
+          "name": "Clear",
+          "type": "pocket",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 5.0,
+          "side": "inside",
+          "stepover": 0.4
+        },
+        {
+          "id": 5,
+          "name": "Rough",
+          "type": "adaptive",
+          "tool": 1,
+          "top_z": 10.0,
+          "bottom_z": 4.0,
+          "side": "inside",
+          "stepover": 0.25
+        }
+      ],
+      "fit_arcs": true
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "part": "v63-cam-zero-face.json",
+  "cam_op_sides": [
+    "inside"
+  ],
+  "cam_top_face": "1/face5"
+}

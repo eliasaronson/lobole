@@ -1329,6 +1329,9 @@ def main():
         d.call("add_feature", feature={
             "type": "Box", "name": "Plate", "position": [0, 0, 0],
             "width": 40, "height": 30, "depth": 20})
+        # A setup lives in a JOB document since v73, so machining a part is
+        # two steps: make the job, then add setups on it.
+        d.call("machine_part")
         cam_setup = d.call("add_cam_setup", name="Job")["id"]
         for kind in ("profile", "pocket", "face", "drill", "adaptive"):
             op = d.call("add_cam_op", setup=cam_setup, type=kind,
@@ -1363,7 +1366,7 @@ def main():
         d.call("add_feature", feature={
             "type": "Extrude", "name": "Pocket", "sketch_id": sk,
             "distance": 11.0, "mode": "cut", "reversed": True})
-        ell_setup = d.call("add_cam_setup", name="Ellipse")["id"]
+        # Faces are picked on the PART, before the job tab takes over.
         floor = None
         for body in d.call("list_elements")["bodies"]:
             for f in body["faces"]:
@@ -1373,6 +1376,8 @@ def main():
                     floor = {"feature_id": body["created_by"],
                              "element": f["name"]}
         expect(floor is not None, "the elliptical pocket has a floor to click")
+        d.call("machine_part")
+        ell_setup = d.call("add_cam_setup", name="Ellipse")["id"]
         op = d.call("add_cam_op", setup=ell_setup, type="pocket", tool=1,
                     target=floor)
         expect(op["side"] == "inside", f"a pocket clears inside: {op}")
@@ -1389,6 +1394,7 @@ def main():
         d.call("add_feature", feature={
             "type": "Box", "name": "Plate", "position": [0, 0, 0],
             "width": 40, "height": 30, "depth": 20})
+        d.call("machine_part")
         cam_setup = d.call("add_cam_setup", name="Job")["id"]
         # Arc fitting is a property of the machine, so it persists and the
         # posted file honours it (C7).
@@ -1424,6 +1430,10 @@ def main():
             raise AssertionError("targetless drill derive must refuse")
         except RuntimeError as e:
             expect("pass targets" in str(e), f"drill refusal teaches: {e}")
+        # A job is a second document in the project, so the phases below --
+        # which count tabs and lean on the single-document .json form -- start
+        # from a clean one rather than inheriting this one.
+        d.call("new_project")
 
         phase("Tab addressing, duplicate names, the .json refusal")
         # R4/R5/R16 (2026-08-26). Names address tabs, so duplicates refuse;

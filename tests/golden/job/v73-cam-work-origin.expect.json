@@ -1,0 +1,36 @@
+{
+  "part": "v68-cam-work-origin.json",
+  "cam_op_sides": [
+    "outside"
+  ],
+  "cam_op_types": [
+    "profile"
+  ],
+  "cam_tool_types": [
+    "flat"
+  ],
+  "cam_setup_rotary": [
+    false
+  ],
+  "cam_stock_boxes": [
+    {
+      "min": [
+        -200.0,
+        -140.0,
+        0.0
+      ],
+      "max": [
+        400.0,
+        260.0,
+        18.0
+      ]
+    }
+  ],
+  "cam_origins": [
+    [
+      100.0,
+      60.0,
+      18.0
+    ]
+  ]
+}

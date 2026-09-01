@@ -11,6 +11,7 @@
 #include "ui/AppState.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
+#include "ui/JobActions.h"
 
 #include <algorithm>
 #include <fstream>
@@ -22,6 +23,13 @@ using nlohmann::json;
 namespace {
 
 constexpr MethodDoc kCamMethods[] = {
+    {"machine_part",
+     "Make a JOB for a part and switch to it {part?: id or name (default: the "
+     "open part), name?}. A job is a document of its own since v73 -- it "
+     "REFERENCES parts and says how they are cut -- so this is the one step "
+     "from a part you have open to a tab you can add setups on. Returns the "
+     "job's tab id and the job part it holds.",
+     "part, name"},
     {"add_cam_setup",
      "Add a milling setup {name?, post?: mach3|linuxcnc, safe_z?}; returns "
      "its id and the safe_z derived for it. A setup arrives with one 6 mm "
@@ -224,8 +232,8 @@ cam::OpType TypeFrom(const std::string& s) {
   throw std::runtime_error("unknown operation type '" + s + "'; use " + known);
 }
 
-cam::Setup& RequireSetup(Document& doc, uint64_t id) {
-  cam::Setup* setup = doc.FindCamSetup(id);
+cam::Setup& RequireSetup(cam::JobDocument& job, uint64_t id) {
+  cam::Setup* setup = job.FindSetup(id);
   if (setup == nullptr)
     throw std::runtime_error("no CAM setup with id " + std::to_string(id) +
                              "; list_cam_setups shows the ones that exist");
@@ -242,8 +250,9 @@ cam::PostOptions PostOptsOf(const cam::Setup& setup) {
 }
 
 // The setup that owns an operation, plus the operation itself.
-std::pair<cam::Setup*, cam::Operation*> FindOp(Document& doc, uint64_t opId) {
-  for (cam::Setup& setup : doc.GetCamSetups())
+std::pair<cam::Setup*, cam::Operation*> FindOp(cam::JobDocument& job,
+                                               uint64_t opId) {
+  for (cam::Setup& setup : job.GetSetups())
     for (cam::Operation& op : setup.operations)
       if (op.id == opId)
         return {&setup, &op};
@@ -254,8 +263,9 @@ std::pair<cam::Setup*, cam::Operation*> FindOp(Document& doc, uint64_t opId) {
 // was then the verb ("pocket"), and the derivation has already turned it into
 // the strategy the geometry calls for ("adaptive", C8). Applying the verb over
 // the top threw that away and cut a deep pocket in concentric rings.
-void ApplyOpFields(Document& doc, const cam::Setup& setup, cam::Operation& op,
-                   const RpcParams& p, bool keepType = false) {
+void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
+                   cam::Operation& op, const RpcParams& p,
+                   bool keepType = false) {
   if (p.contains("type") && !keepType)
     op.type = TypeFrom(p.at("type").get<std::string>());
   if (p.contains("name"))
@@ -309,7 +319,7 @@ void ApplyOpFields(Document& doc, const cam::Setup& setup, cam::Operation& op,
       op.targets.push_back(std::move(ref));
     }
   }
-  (void)doc;
+  (void)state;
 }
 
 json ToolJson(const cam::Tool& t) {
@@ -371,20 +381,65 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       ours = true;
   if (!ours)
     return std::nullopt;
-  if (doc == nullptr)
+  (void)doc;
+
+  if (m == "machine_part") {
+    // Resolved BEFORE the tab switch: `state.document` is null on a job tab,
+    // so "the open part" has to mean the one that was open when asked.
+    uint64_t sourceId = 0;
+    std::string sourceName;
+    if (p.contains("part")) {
+      const nlohmann::json& pj = p.at("part");
+      for (const ui::PartSlot& slot : state.parts) {
+        if (slot.kind != ui::DocKind::Part)
+          continue;
+        const bool match = pj.is_string() ? slot.name == pj.get<std::string>()
+                                          : slot.id == pj.get<uint64_t>();
+        if (match) {
+          sourceId = slot.id;
+          sourceName = slot.name;
+        }
+      }
+      if (sourceId == 0)
+        throw std::runtime_error("no part called '" + pj.dump() +
+                                 "'; list_documents shows them");
+    } else {
+      const ui::PartSlot& active = state.parts[state.activePart];
+      if (active.kind != ui::DocKind::Part)
+        throw std::runtime_error(
+            "machine_part needs a part; pass `part` or switch to a part tab");
+      sourceId = active.id;
+      sourceName = active.name;
+    }
+    const size_t tab =
+        ui::CreateJobForPart(state, sourceId, p.value("name", std::string()));
+    cam::JobDocument* made = ui::ActiveJob(state);
+    if (made == nullptr || made->GetParts().empty())
+      throw std::runtime_error("could not create a job for '" + sourceName +
+                               "'");
+    return json{{"id", state.parts[tab].id},
+                {"name", state.parts[tab].name},
+                {"part", json{{"id", made->GetParts()[0].id},
+                              {"source", sourceId},
+                              {"name", sourceName}}}};
+  }
+
+  cam::JobDocument* job = ui::ActiveJob(state);
+  if (job == nullptr)
     throw std::runtime_error(
-        "CAM works on a part; switch to a part tab (a setup cuts one model)");
-  (void)state;
+        "CAM works on a job, not a part: a setup stopped being part of the "
+        "part in v73. `machine_part` makes a job from the part you have open "
+        "and switches to it");
 
   if (m == "add_cam_setup") {
-    cam::Setup& setup = doc->AddCamSetup(p.value("name", std::string()));
-    (void)cam::RecomputeOrigin(setup, doc->GetBodies());
+    cam::Setup& setup = job->AddSetup(p.value("name", std::string()));
+    (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     // Safe Z clear of the stock, exactly as the panel does it. Without this
     // an RPC-built job kept the struct's bare 5 mm, which sits INSIDE any
     // stock taller than that: the first dogfooding round over the RPC
     // produced 68 rapids through material on an 18 mm plate. The GUI got
     // this fix in the G-round; this door did not.
-    setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+    setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
     if (p.contains("post")) {
       const std::string post = p.at("post").get<std::string>();
       if (!cam::PostExists(post))
@@ -401,7 +456,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "list_cam_setups") {
     json out = json::array();
-    for (const cam::Setup& setup : doc->GetCamSetups()) {
+    for (const cam::Setup& setup : job->GetSetups()) {
       json sj = {{"id", setup.id},
                  {"name", setup.name},
                  {"post", setup.post},
@@ -431,7 +486,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       for (const cam::Operation& op : setup.operations)
         sj["operations"].push_back(OpJson(op));
       glm::dvec3 lo(0.0), hi(0.0);
-      if (cam::StockBounds(setup, doc->GetBodies(), lo, hi))
+      if (cam::StockBounds(setup, ui::JobBodies(state), lo, hi))
         sj["stock"] = {{"min", {lo.x, lo.y, lo.z}},
                        {"max", {hi.x, hi.y, hi.z}}};
       out.push_back(std::move(sj));
@@ -440,7 +495,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "set_cam_setup") {
-    cam::Setup& setup = RequireSetup(*doc, p.at("id").get<uint64_t>());
+    cam::Setup& setup = RequireSetup(*job, p.at("id").get<uint64_t>());
     if (p.contains("name"))
       setup.name = p.at("name").get<std::string>();
     if (p.contains("post")) {
@@ -506,7 +561,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       ref.name = fj.at("element").get<std::string>();
       glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
       bool found = false;
-      for (const Body& body : doc->GetBodies()) {
+      for (const Body& body : ui::JobBodies(state)) {
         if (body.createdBy != ref.featureId)
           continue;
         const std::optional<int> idx = body.elementMap.Resolve(ref.name);
@@ -518,16 +573,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "no planar face '" + ref.name + "' on feature " +
             std::to_string(ref.featureId) + " — lay_face_up needs a flat face");
       setup.frame = cam::SolveFaceUp(glm::dvec3(normal), setup.frame);
-      setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+      setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
     }
     // The other side of the part, derived from this frame rather than typed.
     if (p.value("flip", false)) {
       setup.frame = cam::FlipFrame(setup.frame);
-      setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+      setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
     }
     // Anything above can have moved the stock box, and the work origin is
     // derived from it — as is every coordinate the post writes.
-    (void)cam::RecomputeOrigin(setup, doc->GetBodies());
+    (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     if (p.contains("fit_arcs"))
       setup.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("tool")) {
@@ -560,13 +615,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "remove_cam_setup") {
     const uint64_t id = p.at("id").get<uint64_t>();
-    if (!doc->RemoveCamSetup(id))
+    if (!job->RemoveSetup(id))
       throw std::runtime_error("no CAM setup with id " + std::to_string(id));
     return json::object();
   }
 
   if (m == "add_cam_op" || m == "cam_derive_op") {
-    cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
+    cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
     if (p.contains("tool"))
@@ -589,7 +644,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       target.featureId = tj.value("feature_id", uint64_t{0});
       target.name = tj.value("element", std::string());
       const cam::DerivedOp derived = cam::DeriveOperation(
-          setup, doc->GetBodies(), type, target, op.toolNumber);
+          setup, ui::JobBodies(state), type, target, op.toolNumber);
       if (!derived.ok)
         throw std::runtime_error(derived.why);
       const int tool = op.toolNumber;
@@ -599,7 +654,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // Anything stated explicitly still wins — the derivation is a starting
     // point, not a cage. (To force a strategy on a derived operation, set it
     // afterwards with set_cam_op.)
-    ApplyOpFields(*doc, setup, op, p, /*keepType=*/derive);
+    ApplyOpFields(state, setup, op, p, /*keepType=*/derive);
     // A clearing operation clears INSIDE its boundary; the struct's Outside
     // default is a profile's notion and means "nothing to cut" here.
     if (!p.contains("side") && !derive &&
@@ -610,7 +665,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 std::to_string(setup.operations.size() + 1);
     if (m == "cam_derive_op")
       return json{{"derived", derive}, {"operation", OpJson(op)}};
-    op.id = doc->AllocateId();
+    op.id = job->AllocateId();
     setup.operations.push_back(op);
     json out = OpJson(op);
     out["derived"] = derive;
@@ -618,17 +673,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "set_cam_op") {
-    auto [setup, op] = FindOp(*doc, p.at("id").get<uint64_t>());
+    auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");
-    ApplyOpFields(*doc, *setup, *op, p);
+    ApplyOpFields(state, *setup, *op, p);
     return json{{"id", op->id}};
   }
 
   if (m == "move_cam_op") {
     const uint64_t id = p.at("id").get<uint64_t>();
     const size_t to = p.at("to").get<size_t>();
-    for (cam::Setup& setup : doc->GetCamSetups())
+    for (cam::Setup& setup : job->GetSetups())
       for (const cam::Operation& op : setup.operations)
         if (op.id == id) {
           if (!cam::MoveOperation(setup, id, to))
@@ -646,7 +701,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "remove_cam_op") {
     const uint64_t id = p.at("id").get<uint64_t>();
-    for (cam::Setup& setup : doc->GetCamSetups()) {
+    for (cam::Setup& setup : job->GetSetups()) {
       auto& ops = setup.operations;
       for (auto it = ops.begin(); it != ops.end(); ++it) {
         if (it->id == id) {
@@ -659,16 +714,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "cam_verify") {
-    const cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
+    const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     const std::vector<cam::Toolpath> paths =
-        cam::GenerateAll(setup, doc->GetBodies());
+        cam::GenerateAll(setup, ui::JobBodies(state));
     std::string gcode, error;
     if (!cam::PostProcess(setup.post, setup, paths, PostOptsOf(setup), gcode,
                           &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
     const cam::Verdict v =
-        cam::VerifyGcode(gcode, setup, doc->GetBodies(), res);
+        cam::VerifyGcode(gcode, setup, ui::JobBodies(state), res);
     const double tol = res * 1.5; // one cell of quantisation, plus slack
     // The same sentences the panel shows. A verdict that reads as a row of
     // numbers over the RPC and as English in the GUI is two verdicts, and the
@@ -719,7 +774,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       return json{{"open", false}};
     }
     const cam::Setup& setup =
-        RequireSetup(*doc, p.contains("setup") ? p.at("setup").get<uint64_t>()
+        RequireSetup(*job, p.contains("setup") ? p.at("setup").get<uint64_t>()
                                                : state.camActiveSetup);
     if (p.contains("resolution"))
       state.camSimRes = std::clamp(p.at("resolution").get<double>(), 0.05, 5.0);
@@ -787,9 +842,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "cam_toolpath" || m == "cam_post") {
-    const cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
+    const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     const std::vector<cam::Toolpath> paths =
-        cam::GenerateAll(setup, doc->GetBodies());
+        cam::GenerateAll(setup, ui::JobBodies(state));
 
     // An explicit top_z below the stock top means every entry RAPID passes
     // through material — the verifier catches it later as "rapid through
@@ -798,7 +853,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // the stock top; only typed depths can get this wrong.)
     json warnings = json::array();
     glm::dvec3 stockLo(0.0), stockHi(0.0);
-    if (cam::StockBounds(setup, doc->GetBodies(), stockLo, stockHi)) {
+    if (cam::StockBounds(setup, ui::JobBodies(state), stockLo, stockHi)) {
       const auto zfmt = [](double v) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.4g", v);

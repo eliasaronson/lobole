@@ -64,6 +64,7 @@ void EnsureParts(AppState& state, const std::string& firstName = "Part 1");
 size_t AddPart(AppState& state, const std::string& name);
 size_t AddAssembly(AppState& state, const std::string& name);
 size_t AddDrawing(AppState& state, const std::string& name);
+size_t AddJob(AppState& state, const std::string& name);
 // Appends a copy of the tab at `index` — same kind, same contents, a new
 // stable id and a name nothing else has taken ("Part 1 copy") — and switches
 // to it. Returns the new tab's index, or SIZE_MAX if `index` names no tab.

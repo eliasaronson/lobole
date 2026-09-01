@@ -1127,7 +1127,12 @@ const ToolSession kToolSessions[] = {
        return s.document != nullptr && s.sectionToolOpen;
      },
      [](AppState& s, const SelectionItem& i) { SectionFacePicked(s, i); }},
-    {kCamToolSlot, [](const AppState& s) { return s.document != nullptr; },
+    // A CAM pick lives as long as the JOB does, not the part document: since
+    // v73 a setup belongs to a job tab, where `document` is null by
+    // definition. Asking the old question disarmed the pick in the same frame
+    // it was armed — silently, which is the exact failure this table's own
+    // comment was written about.
+    {kCamToolSlot, [](const AppState& s) { return s.job != nullptr; },
      [](AppState& s, const SelectionItem& i) { CamFacePicked(s, i); }},
     {kFastenerToolSlot,
      [](const AppState& s) {

@@ -1,5 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "ui/JobActions.h"
+
 #ifdef HAVE_CAM
 #include "render/StockRenderer.h"
 #include "ui/CamPlayback.h"
@@ -18,19 +20,19 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "new_document_takes_the_job_with_it");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     cam::Operation op;
-    op.id = Doc()->AllocateId();
+    op.id = Job()->AllocateId();
     op.type = cam::OpType::Profile;
     op.topZ = 13.0;
     op.bottomZ = -1.0;
-    Doc()->FindCamSetup(setup.id)->operations.push_back(op);
+    Job()->FindSetup(setup.id)->operations.push_back(op);
     ctx->Yield(2);
-    for (const Body& b : Doc()->GetBodies())
+    for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f) {
@@ -42,14 +44,18 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         }
       }
     ctx->Yield(2);
-    IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+    IM_CHECK(Job()->FindSetup(setup.id)->topFace.IsSet());
     IM_CHECK(!s_App->camToolpaths.empty());
     // Now throw the document away.
     ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
     ctx->Yield();
     ctx->MenuClick("File/New");
     ctx->Yield(3);
-    IM_CHECK(Doc()->GetCamSetups().empty()); // the whole job went with it
+    // The whole JOB went with it, not just its setups: since v73 a job is a
+    // document of its own, so File > New leaves none at all. Leaving one
+    // behind is what made the panel offer to post G-code for a part that no
+    // longer existed.
+    IM_CHECK(Job() == nullptr);
     IM_CHECK(s_App->camToolpaths.empty());
     IM_CHECK(s_App->camVerdict.empty());
     IM_CHECK_EQ(s_App->camActiveSetup, (uint64_t)0);
@@ -59,15 +65,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "pick_top_face_sets_z_zero");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     ctx->Yield(2);
     // Says so rather than assuming 0 — and says it on the SETUP, so a job
     // reopened from its own file still knows where Z zero came from.
-    IM_CHECK(!Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+    IM_CHECK(!Job()->FindSetup(setup.id)->topFace.IsSet());
 
     ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
     ctx->Yield();
@@ -77,7 +83,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // the top is the statement that the part is clamped with it up, so the
     // pick clamps it and takes Z zero from it — one click where the refusal
     // cost three. It must SAY that it re-clamped.
-    const Body& body = Doc()->GetBodies()[0];
+    const Body& body = CamPart()->GetBodies()[0];
     ui::SelectionItem side;
     side.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
@@ -91,8 +97,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       ui::CamFacePicked(*s_App, side);
       ctx->Yield(2);
       IM_CHECK(s_App->slotPick.miss.empty());
-      IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
-      IM_CHECK(!cam::FrameIsSquare(*Doc()->FindCamSetup(setup.id)));
+      IM_CHECK(Job()->FindSetup(setup.id)->topFace.IsSet());
+      IM_CHECK(!cam::FrameIsSquare(*Job()->FindSetup(setup.id)));
       IM_CHECK(!s_App->camNote.empty()); // "laid the part flat on that face"
     }
 
@@ -110,9 +116,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(top.element.IsSet());
     ui::CamFacePicked(*s_App, top);
     ctx->Yield(2);
-    IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+    IM_CHECK(Job()->FindSetup(setup.id)->topFace.IsSet());
     IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0); // slot disarmed
-    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK(live != nullptr);
     IM_CHECK(std::abs(live->origin.z - 12.0) < 1e-6); // the plate's top
     // The pick says where Z zero is, and NOTHING about how much material sits
@@ -121,7 +127,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // to set the job up (docs/cam/dogfood-round.md, round 2).
     IM_CHECK(std::abs(live->stock.margin.z - 1.0) < 1e-9);
     const cam::DerivedOp face = cam::DeriveOperation(
-        *live, Doc()->GetBodies(), cam::OpType::Face, ElementRef{});
+        *live, CamPart()->GetBodies(), cam::OpType::Face, ElementRef{});
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 
@@ -139,21 +145,21 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     // A job with a toolpath, so the whole panel draws — Save G-code only
     // appears once something has been generated.
     cam::Operation op;
-    op.id = Doc()->AllocateId();
+    op.id = Job()->AllocateId();
     op.name = "Outline";
     op.type = cam::OpType::Profile;
     op.topZ = 13.0;
     op.bottomZ = -1.0;
     op.stepdown = 4.0;
-    Doc()->FindCamSetup(setup.id)->operations.push_back(op);
+    Job()->FindSetup(setup.id)->operations.push_back(op);
     ui::RefreshCamToolpaths(*s_App);
     ctx->Yield(2);
     IM_CHECK(!s_App->camToolpaths.empty());
@@ -195,32 +201,32 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     for (int i = 0; i < 2; i++) {
       cam::Operation op;
-      op.id = Doc()->AllocateId();
+      op.id = Job()->AllocateId();
       op.name = "Op " + std::to_string(i);
       op.type = cam::OpType::Profile;
       op.topZ = 13.0;
       op.bottomZ = -1.0;
-      Doc()->FindCamSetup(setup.id)->operations.push_back(op);
+      Job()->FindSetup(setup.id)->operations.push_back(op);
     }
     s_App->camToolOpen = true;
     ctx->Yield(4);
-    IM_CHECK_EQ(Doc()->FindCamSetup(setup.id)->operations.size(), (size_t)2);
+    IM_CHECK_EQ(Job()->FindSetup(setup.id)->operations.size(), (size_t)2);
 
-    const uint64_t first = Doc()->FindCamSetup(setup.id)->operations[0].id;
+    const uint64_t first = Job()->FindSetup(setup.id)->operations[0].id;
     // The row PushID's the operation's id as an int, which "$$<n>" addresses.
     const std::string ref = "//CAM###ToolWindow/$$" +
                             std::to_string(static_cast<int>(first)) +
                             "/###rmop";
     ctx->ItemClick(ref.c_str());
     ctx->Yield(3);
-    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
     IM_CHECK(live->operations[0].id != first);
     s_App->camToolOpen = false;
@@ -235,7 +241,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "fit_keeps_the_model_clear_of_the_tool");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
     s_App->camToolOpen = true;
@@ -262,7 +268,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "tool_window_follows_the_viewport");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
     s_App->camToolOpen = true;
@@ -302,10 +308,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "look_down_the_spindle");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     s_App->camToolOpen = true;
     ctx->Yield(3);
@@ -325,7 +331,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // Indexed: the table has turned 90 degrees about X, so the spindle now
     // looks down the part's +Y. Verifying against the WORLD axes here would
     // pass for a job cut in the wrong frame.
-    Doc()->FindCamSetup(setup.id)->rotationA = 90.0;
+    Job()->FindSetup(setup.id)->rotationA = 90.0;
     ctx->Yield(2);
     s_App->camera->SnapToView(glm::normalize(glm::vec3(1, 1, 0.2f)),
                               glm::vec3(0, 1, 0));
@@ -333,8 +339,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//CAM###ToolWindow/###cam_view_spindle");
     ctx->Yield(150);
     fwd = glm::normalize(s_App->camera->GetForward());
-    const glm::dvec3 spindle = cam::FromSetupSpace(
-        *Doc()->FindCamSetup(setup.id), glm::dvec3(0, 0, 1));
+    const glm::dvec3 spindle =
+        cam::FromSetupSpace(*Job()->FindSetup(setup.id), glm::dvec3(0, 0, 1));
     const glm::vec3 want = -glm::normalize(glm::vec3(spindle));
     IM_CHECK(glm::length(fwd - want) < 0.03f);
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
@@ -348,15 +354,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     // Upright panel again: its big faces are the ones worth machining and
     // none of them is level as modelled.
-    Doc()->AddFeature(std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0),
-                                                   210, 16, 400));
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     s_App->camToolOpen = true;
     ctx->Yield(3);
 
-    const Body& body = Doc()->GetBodies()[0];
+    const Body& body = CamPart()->GetBodies()[0];
     ui::SelectionItem big;
     big.kind = ui::SelectionItem::Kind::Face;
     for (const auto& [index, name] : body.elementMap.names) {
@@ -368,11 +374,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // ONE pick: it clamps the part flat AND takes Z zero from that face. This
     // used to be a refusal the user had to translate into two more clicks.
-    IM_CHECK(cam::FrameIsSquare(*Doc()->FindCamSetup(setup.id)));
+    IM_CHECK(cam::FrameIsSquare(*Job()->FindSetup(setup.id)));
     ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(3);
-    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK(s_App->slotPick.miss.empty());
     IM_CHECK(!cam::FrameIsSquare(*live)); // laid flat by the same click
     IM_CHECK(live->topFace.IsSet());      // …and Z zero came from it
@@ -383,7 +389,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(3);
-    live = Doc()->FindCamSetup(setup.id);
+    live = Job()->FindSetup(setup.id);
     IM_CHECK(glm::length(live->frame - after) < 1e-9);
 
     // A verb stays armed after it lands, so a part with several holes is
@@ -391,7 +397,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(3);
-    live = Doc()->FindCamSetup(setup.id);
+    live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
     IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamPocketFloor);
@@ -400,7 +406,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // …and a second face lands a second operation with no verb press.
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(3);
-    IM_CHECK_EQ(Doc()->FindCamSetup(setup.id)->operations.size(), (size_t)2);
+    IM_CHECK_EQ(Job()->FindSetup(setup.id)->operations.size(), (size_t)2);
     s_App->slotPick = {};
     s_App->camToolOpen = false;
   };
@@ -415,14 +421,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     // A panel standing on edge, so the fixture frame is a real rotation and
     // not the identity every other fixture in this file happens to have.
-    Doc()->AddFeature(std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0),
-                                                   210, 16, 400));
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     ctx->Yield(2);
 
-    const Body& body = Doc()->GetBodies()[0];
+    const Body& body = CamPart()->GetBodies()[0];
     ElementRef big;
     for (const auto& [index, name] : body.elementMap.names) {
       glm::vec3 o(0.0f), n(0.0f), u(0.0f);
@@ -431,7 +437,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK(big.IsSet());
     {
-      cam::Setup* live = Doc()->FindCamSetup(setup.id);
+      cam::Setup* live = Job()->FindSetup(setup.id);
       cam::Tool t1;
       t1.number = 1;
       t1.name = "8 mm";
@@ -442,12 +448,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       live->tools = {t1};
       live->frame = cam::SolveFaceUp({0.0, -1.0, 0.0}, live->frame);
       IM_CHECK(!cam::FrameIsSquare(*live));
-      live->safeZ = cam::DeriveSafeZ(*live, Doc()->GetBodies());
+      live->safeZ = cam::DeriveSafeZ(*live, CamPart()->GetBodies());
       const cam::DerivedOp derived = cam::DeriveOperation(
-          *live, Doc()->GetBodies(), cam::OpType::Profile, {});
+          *live, CamPart()->GetBodies(), cam::OpType::Profile, {});
       IM_CHECK(derived.ok);
       cam::Operation op = derived.op;
-      op.id = Doc()->AllocateId();
+      op.id = Job()->AllocateId();
       live->operations.push_back(op);
     }
     ui::RefreshCamToolpaths(*s_App);
@@ -466,7 +472,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // The glyph is revolved about ITS OWN +Z (CamStockMesh::BuildToolMesh),
     // so column 2 of the model matrix is where the tool points in the world.
     // It must be the spindle: the setup frame applied to +Z.
-    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
     const glm::dvec3 spindle =
         cam::SetupToModel(*live) * glm::dvec3(0.0, 0.0, 1.0);
     const glm::vec3 drawn = glm::normalize(glm::vec3((*m)[2]));
@@ -503,19 +509,19 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "work_origin_is_where_it_says");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     ctx->Yield(2);
 
     // A fresh setup already has an origin, DERIVED — not (0,0,0), which is a
     // literal sitting where the defaults rule wants a derivation.
-    cam::Setup* live = Doc()->FindCamSetup(setup.id);
-    IM_CHECK(cam::RecomputeOrigin(*live, Doc()->GetBodies()));
+    cam::Setup* live = Job()->FindSetup(setup.id);
+    IM_CHECK(cam::RecomputeOrigin(*live, CamPart()->GetBodies()));
     glm::dvec3 lo(0.0), hi(0.0);
-    IM_CHECK(cam::StockBounds(*live, Doc()->GetBodies(), lo, hi));
+    IM_CHECK(cam::StockBounds(*live, CamPart()->GetBodies(), lo, hi));
     IM_CHECK(std::abs(live->origin.x - lo.x) < 1e-9);
     IM_CHECK(std::abs(live->origin.y - lo.y) < 1e-9);
     IM_CHECK(std::abs(live->origin.z - hi.z) < 1e-9);
@@ -528,11 +534,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // Move zero to the stock's centre by clicking, and the origin follows.
-    Doc()->FindCamSetup(setup.id)->originAt = cam::OriginAt::StockCentre;
-    IM_CHECK(cam::RecomputeOrigin(*Doc()->FindCamSetup(setup.id),
-                                  Doc()->GetBodies()));
+    Job()->FindSetup(setup.id)->originAt = cam::OriginAt::StockCentre;
+    IM_CHECK(cam::RecomputeOrigin(*Job()->FindSetup(setup.id),
+                                  CamPart()->GetBodies()));
     ctx->Yield(2);
-    live = Doc()->FindCamSetup(setup.id);
+    live = Job()->FindSetup(setup.id);
     IM_CHECK(std::abs(live->origin.x - (lo.x + hi.x) * 0.5) < 1e-6);
 
     // And the FILE measures from it: post a real operation and read the
@@ -542,7 +548,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ctx->ItemClick("###cam_generate");
     ctx->Yield(5);
-    live = Doc()->FindCamSetup(setup.id);
+    live = Job()->FindSetup(setup.id);
     IM_CHECK(!live->operations.empty());
     if (!s_App->camToolpaths.empty()) {
       std::string gcode, error;
@@ -559,6 +565,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK(sawOffset); // the file is NOT in model coordinates any more
     }
 
+    // The Model panel belongs to a PART tab; step off the job before handing
+    // the shared dock node back (v73).
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
     if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
       ctx->ItemClick(modelWin->TabId);
     ctx->Yield(2);
@@ -572,10 +582,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "operation_tool_and_order");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     {
       cam::Tool big;
@@ -586,11 +596,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       small.number = 2;
       small.name = "3 mm flat";
       small.diameter = 3.0;
-      cam::Setup* live = Doc()->FindCamSetup(setup.id);
+      cam::Setup* live = Job()->FindSetup(setup.id);
       live->tools = {big, small};
       for (int i = 0; i < 2; i++) {
         cam::Operation op;
-        op.id = Doc()->AllocateId();
+        op.id = Job()->AllocateId();
         op.name = i == 0 ? "First" : "Second";
         op.type = cam::OpType::Profile;
         op.toolNumber = 1;
@@ -606,7 +616,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
 
-    cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    cam::Setup* live = Job()->FindSetup(setup.id);
     const uint64_t firstId = live->operations[0].id;
     const uint64_t secondId = live->operations[1].id;
 
@@ -618,7 +628,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // Only one Advanced is open, so exactly one T2 button is visible.
     ctx->ItemClick("**/###optool_t2");
     ctx->Yield(3);
-    live = Doc()->FindCamSetup(setup.id);
+    live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations[0].toolNumber, 2);
     // And the stepdown followed the cutter: half of 3, not half of 6. A pass
     // derived for a 6 mm tool is a full-diameter plunge for a 3 mm one.
@@ -632,12 +642,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const std::string dragB = "**/$$" + std::to_string(secondId) + "/###drag";
     ctx->ItemDragAndDrop(dragB.c_str(), dragA.c_str());
     ctx->Yield(3);
-    live = Doc()->FindCamSetup(setup.id);
+    live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations.size(), (size_t)2);
     IM_CHECK_EQ(live->operations[0].id, secondId);
     IM_CHECK_EQ(live->operations[1].id, firstId);
 
-    // Hand the shared dock node back before anything can fail below.
+    // Hand the shared dock node back before anything can fail below. The
+    // Model panel belongs to a PART tab, so step off the job first -- since
+    // v73 this test ends on one, and its tab has no model tree to click.
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
     if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
       ctx->ItemClick(modelWin->TabId);
     ctx->Yield(2);
@@ -653,17 +667,17 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     // 210 wide, 16 THICK, 400 tall: standing on edge, like a real baffle.
-    Doc()->AddFeature(std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0),
-                                                   210, 16, 400));
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
     s_App->camToolOpen = true;
     ctx->Yield(3);
 
     // Find the big face — the one anyone would machine. Its normal is along
     // Y, so no amount of 2.5D can touch it as the part is modelled.
-    const Body& body = Doc()->GetBodies()[0];
+    const Body& body = CamPart()->GetBodies()[0];
     ui::SelectionItem big;
     big.kind = ui::SelectionItem::Kind::Face;
     double best = 0.0;
@@ -687,7 +701,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::ArmCamPick(*s_App, ui::PickSlot::CamLayFaceUp, "Click the face");
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(3);
-    const cam::Setup* laid = Doc()->FindCamSetup(setup.id);
+    const cam::Setup* laid = Job()->FindSetup(setup.id);
     IM_CHECK(!cam::FrameIsSquare(*laid));
     IM_CHECK(!laid->hasRotaryAxis);
     IM_CHECK(s_App->slotPick.miss.empty());
@@ -697,13 +711,13 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(3);
     IM_CHECK(s_App->slotPick.miss.empty());
-    IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
+    IM_CHECK(Job()->FindSetup(setup.id)->topFace.IsSet());
 
     // A real operation on it, and a file with no A word in it.
     ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
     ui::CamFacePicked(*s_App, big);
     ctx->Yield(5);
-    const cam::Setup* job = Doc()->FindCamSetup(setup.id);
+    const cam::Setup* job = Job()->FindSetup(setup.id);
     IM_CHECK(!job->operations.empty());
     IM_CHECK(!s_App->camToolpaths.empty());
     for (const cam::Toolpath& tp : s_App->camToolpaths)
@@ -724,17 +738,21 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "the_first_pick_makes_the_setup");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    IM_CHECK(Doc()->GetCamSetups().empty());
+    // A job with no setups: since v73 the job is the document CAM works on,
+    // and it arrives empty. The claim under test is unchanged -- the first
+    // ACTION makes the setup, not opening the window.
+    IM_CHECK(MakeJob()->GetSetups().empty());
+    ctx->Yield(2);
 
     // Opening the window is not an edit: look and close, and the document is
     // as it was.
     ToolbarClick(ctx, "###tb_cam");
     ctx->Yield(3);
     IM_CHECK(s_App->camToolOpen);
-    IM_CHECK(Doc()->GetCamSetups().empty());
+    IM_CHECK(Job()->GetSetups().empty());
 
     // The first pick is. (The viewport click routes here through
     // SlotPickClicked; calling it directly keeps the test off the camera.)
@@ -742,7 +760,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     ui::SelectionItem top;
     top.kind = ui::SelectionItem::Kind::Face;
-    for (const Body& b : Doc()->GetBodies())
+    for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f)
@@ -752,8 +770,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::CamFacePicked(*s_App, top);
     ctx->Yield(3);
 
-    IM_CHECK_EQ(Doc()->GetCamSetups().size(), (size_t)1);
-    const cam::Setup& made = Doc()->GetCamSetups()[0];
+    IM_CHECK_EQ(Job()->GetSetups().size(), (size_t)1);
+    const cam::Setup& made = Job()->GetSetups()[0];
     IM_CHECK(made.topFace.IsSet());
     IM_CHECK(std::abs(made.origin.z - 12.0) < 1e-6); // the plate's top
     IM_CHECK(s_App->slotPick.miss.empty());          // it took, not refused
@@ -764,14 +782,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     // A plate with a pocket cleared from its top down to z = 12.
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
-    const uint64_t plate = Doc()->GetFeature(0)->GetId();
-    Doc()->AddFeature(std::make_unique<BoxFeature>(
+    const uint64_t plate = CamPart()->GetFeature(0)->GetId();
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
         "Void", glm::vec3(15, 10, 12), 30, 20, 20));
-    const uint64_t voidId = Doc()->GetFeature(1)->GetId();
-    Doc()->AddFeature(std::make_unique<BooleanFeature>("Pocket", plate, voidId,
-                                                       BooleanOp::Subtract));
+    const uint64_t voidId = CamPart()->GetFeature(1)->GetId();
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Pocket", plate, voidId, BooleanOp::Subtract));
     ctx->Yield(2);
 
     // Click 1: the verb. The toolbar opens the session; no setup exists yet,
@@ -779,7 +797,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ToolbarClick(ctx, "###tb_cam");
     ctx->Yield(2);
     IM_CHECK(s_App->camToolOpen);
-    IM_CHECK(Doc()->GetCamSetups().empty());
+    IM_CHECK(Job()->GetSetups().empty());
     ctx->ItemClick("//CAM###ToolWindow/###cam_verb_pocket");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
@@ -791,11 +809,12 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // silently turned into a depth. Since R10 a vertical cylinder IS a wall
     // (that is how round openings are cut), so the refusal is the pocket
     // wall-guard's "click the pocket's FLOOR", not the old "curved".
-    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
         "Post", glm::vec3(200, 0, 0), glm::vec3(0, 0, 1), 5.0, 10.0));
     ctx->Yield(2);
-    for (const Body& b : Doc()->GetBodies()) {
-      if (b.createdBy != Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetId())
+    for (const Body& b : CamPart()->GetBodies()) {
+      if (b.createdBy !=
+          CamPart()->GetFeature(CamPart()->FeatureCount() - 1)->GetId())
         continue;
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
@@ -817,7 +836,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     ui::SelectionItem floor;
     floor.kind = ui::SelectionItem::Kind::Face;
-    for (const Body& b : Doc()->GetBodies())
+    for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
@@ -904,7 +923,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_an_edge_break");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
     ctx->Yield(2);
 
@@ -917,7 +936,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // A wall of the plate — any vertical face.
     ui::SelectionItem wall;
     wall.kind = ui::SelectionItem::Kind::Face;
-    for (const Body& b : Doc()->GetBodies())
+    for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
         if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f)
@@ -961,14 +980,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "incremental_toolpaths_never_go_stale");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
-    const uint64_t plate = Doc()->GetFeature(0)->GetId();
-    Doc()->AddFeature(std::make_unique<BoxFeature>(
+    const uint64_t plate = CamPart()->GetFeature(0)->GetId();
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
         "Void", glm::vec3(15, 10, 14), 30, 20, 20));
-    const uint64_t voidId = Doc()->GetFeature(1)->GetId();
-    Doc()->AddFeature(std::make_unique<BooleanFeature>("Pocket", plate, voidId,
-                                                       BooleanOp::Subtract));
+    const uint64_t voidId = CamPart()->GetFeature(1)->GetId();
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Pocket", plate, voidId, BooleanOp::Subtract));
     ctx->Yield(2);
 
     // Same shape as the full pass: same operations, same order, same moves.
@@ -976,7 +995,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       const cam::Setup* live = ui::ActiveCamSetup(*s_App);
       IM_CHECK(live != nullptr);
       const std::vector<cam::Toolpath> full =
-          cam::GenerateAll(*live, Doc()->GetBodies());
+          cam::GenerateAll(*live, CamPart()->GetBodies());
       ctx->LogDebug("%s: cached %d, full %d", when,
                     (int)s_App->camToolpaths.size(), (int)full.size());
       IM_CHECK_EQ(s_App->camToolpaths.size(), full.size());
@@ -995,7 +1014,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // part cut out.
     ui::SelectionItem floor;
     floor.kind = ui::SelectionItem::Kind::Face;
-    for (const Body& b : Doc()->GetBodies())
+    for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
         if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
@@ -1012,7 +1031,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     ui::SelectionItem wall;
     wall.kind = ui::SelectionItem::Kind::Face;
-    for (const Body& b : Doc()->GetBodies())
+    for (const Body& b : CamPart()->GetBodies())
       for (const auto& [index, name] : b.elementMap.names) {
         glm::vec3 o(0.0f), n(0.0f), u(0.0f);
         if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f)
@@ -1050,11 +1069,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
 
-    cam::Setup& setup = Doc()->AddCamSetup("Side A");
+    cam::Setup& setup = MakeJob()->AddSetup("Side A");
     setup.safeZ = 20.0;
     s_App->camActiveSetup = setup.id;
     ctx->Yield(2);
@@ -1075,7 +1094,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//CAM###CamPanel");
     ctx->ItemClick("###cam_add_op");
     ctx->Yield(2);
-    cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK(live != nullptr);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
     const cam::Operation& op = live->operations[0];
@@ -1106,10 +1125,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // selected covers the model tree for everything after it in the shard —
     // which is how a stale assertion here broke tree/context_rename two
     // tests later. Everything below asserts on app state, not on widgets.
-    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel)) {
-      ctx->ItemClick(modelWin->TabId);
-      ctx->Yield(2);
-    }
+    // Only when there IS one to hand back to: the Model panel belongs to a
+    // part tab, and since v73 this test runs on a JOB tab, where the CAM
+    // panel does not share a node with it (`ItemClick` on an absent tab is a
+    // hard failure, not a no-op). The job tab itself goes away in
+    // ResetAppForTest, which is what leaves the next test on a part.
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      if (ctx->ItemInfo(modelWin->TabId, ImGuiTestOpFlags_NoError).ID != 0) {
+        ctx->ItemClick(modelWin->TabId);
+        ctx->Yield(2);
+      }
     IM_CHECK(!s_App->camToolpaths.empty());
     IM_CHECK(s_App->camToolpaths[0].error.empty());
     IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
@@ -1128,7 +1153,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         entry = m.to;
         break;
       }
-    const cam::Setup* job = Doc()->FindCamSetup(s_App->camActiveSetup);
+    const cam::Setup* job = Job()->FindSetup(s_App->camActiveSetup);
     IM_CHECK(job != nullptr && !job->tools.empty());
     const float radius = (float)(job->tools.front().diameter * 0.5);
     int onRing = 0;
@@ -1161,10 +1186,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "cam", "simulation_plays_and_gives_it_back");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    Doc()->AddFeature(
+    CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
-    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
     setup.safeZ = 20.0;
     s_App->camActiveSetup = setup.id;
     ctx->Yield(2);
@@ -1258,10 +1283,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(mid < s_App->camCursor);
 
     // Hand the dock node back before the assertions that could fail late.
-    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel)) {
-      ctx->ItemClick(modelWin->TabId);
-      ctx->Yield(2);
-    }
+    // Only when there IS one to hand back to: the Model panel belongs to a
+    // part tab, and since v73 this test runs on a JOB tab, where the CAM
+    // panel does not share a node with it (`ItemClick` on an absent tab is a
+    // hard failure, not a no-op). The job tab itself goes away in
+    // ResetAppForTest, which is what leaves the next test on a part.
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      if (ctx->ItemInfo(modelWin->TabId, ImGuiTestOpFlags_NoError).ID != 0) {
+        ctx->ItemClick(modelWin->TabId);
+        ctx->Yield(2);
+      }
 
     // Closing gives everything back: no session state, no stock mesh, and no
     // tool instance left in the renderer. This is the U11 class — a mode that

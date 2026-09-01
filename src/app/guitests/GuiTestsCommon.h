@@ -77,6 +77,22 @@ extern ui::AppState* s_App;
 
 Document* Doc();
 
+// --- CAM tests: the job tab (docs/cam/job-document.md) ---------------------
+//
+// CAM setups moved off the part Document onto a job document of their own, so
+// a CAM test now builds a part and then MACHINES it: two tabs, not one.
+
+// The active job, or null when the active tab is not a job.
+cam::JobDocument* Job();
+// The active job, creating one for the active PART if there is none. Every
+// CAM test starts by building a part and cutting it, which is exactly what
+// ui::CreateJobForPart does in a step.
+cam::JobDocument* MakeJob();
+// The part being machined: the active document on a part tab, the job's first
+// source part on a job tab. A CAM test builds one part and cuts it, so this
+// stays a single answer either side of MakeJob().
+Document* CamPart();
+
 // Between-test reset. The ImGui Test Engine runs every test back to back in
 // one process, so state a test leaves behind leaks into the next one — most
 // harmful is the camera zoom: a viewport-click test that passes alone fails

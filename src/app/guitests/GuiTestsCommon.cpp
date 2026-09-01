@@ -1,9 +1,33 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "ui/AppActions.h"
+#include "ui/JobActions.h"
+
 // Tests run inside the live application and reach it through the AppState.
 ui::AppState* s_App = nullptr;
 
 Document* Doc() { return s_App->document.get(); }
+
+cam::JobDocument* Job() { return ui::ActiveJob(*s_App); }
+
+cam::JobDocument* MakeJob() {
+  if (s_App->job)
+    return s_App->job.get();
+  if (s_App->parts.empty())
+    return nullptr;
+  ui::CreateJobForPart(*s_App, s_App->parts[s_App->activePart].id);
+  return s_App->job.get();
+}
+
+Document* CamPart() {
+  if (s_App->document)
+    return s_App->document.get();
+  if (const cam::JobDocument* job = ui::ActiveJob(*s_App))
+    for (const cam::JobPart& part : job->GetParts())
+      if (Document* d = ui::JobSourceDocument(*s_App, part.sourceDocId))
+        return d;
+  return nullptr;
+}
 
 // Between-test reset. The ImGui Test Engine runs every test back to back in one
 // process, so state a test leaves behind leaks into the next one — most harmful
@@ -34,6 +58,15 @@ void ResetAppForTest() {
   s_App->settingsDirtyAt = -1.0;
   s_App->settingsWindowOpen = false;
   ui::ApplySettings(*s_App);
+  // A CAM test leaves a JOB tab behind (v73: setups live on a job, not on the
+  // part), and the next test then OPENS on it — where `document` is null, so
+  // a test that starts by building a part silently builds it into the
+  // previous test's part while looking at the previous test's job. A job is
+  // the only tab kind a test creates as a side effect of doing its work, so
+  // the reset drops them and returns to the first part.
+  for (size_t i = s_App->parts.size(); i-- > 0;)
+    if (s_App->parts[i].kind == ui::DocKind::Job)
+      ui::DeletePart(*s_App, i);
   s_App->selection.Clear();
   s_App->sketchEdit = {};
   s_App->sketchDrag = {};

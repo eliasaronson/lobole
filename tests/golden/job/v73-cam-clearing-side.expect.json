@@ -1,0 +1,8 @@
+{
+  "part": "v62-cam-clearing-side.json",
+  "cam_op_sides": [
+    "outside",
+    "inside",
+    "inside"
+  ]
+}

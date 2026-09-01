@@ -36,12 +36,13 @@ namespace {
 // nothing — and produced no toolpath. v60-cam-arcs.json is a real pre-fix
 // file whose pocket and adaptive ops carry no `side` key, which makes it the
 // document the migration has to repair (docs/cam/dogfood-round.md).
-void AssertCamSides(const Document& doc, const nlohmann::json& expect) {
+void AssertCamSides(const std::vector<cam::Setup>& setups,
+                    const nlohmann::json& expect) {
   if (!expect.contains("cam_op_sides"))
     return;
   const auto want = expect.at("cam_op_sides").get<std::vector<std::string>>();
   std::vector<std::string> got;
-  for (const cam::Setup& setup : doc.GetCamSetups())
+  for (const cam::Setup& setup : setups)
     for (const cam::Operation& op : setup.operations)
       got.push_back(op.side == cam::Side::Inside ? "inside"
                     : op.side == cam::Side::On   ? "on"
@@ -57,12 +58,13 @@ void AssertCamSides(const Document& doc, const nlohmann::json& expect) {
 // reloads as a flat mill is a chamfer that reloads as a square step, and an
 // edge break that reloads as a profile is a full-depth cut round the part —
 // both are the silent substitution this project refuses, so both are gated.
-void AssertCamShapes(const Document& doc, const nlohmann::json& expect) {
+void AssertCamShapes(const std::vector<cam::Setup>& setups,
+                     const nlohmann::json& expect) {
   if (expect.contains("cam_tool_types")) {
     const auto want =
         expect.at("cam_tool_types").get<std::vector<std::string>>();
     std::vector<std::string> got;
-    for (const cam::Setup& setup : doc.GetCamSetups())
+    for (const cam::Setup& setup : setups)
       for (const cam::Tool& t : setup.tools)
         got.push_back(t.type == cam::ToolType::Ball    ? "ball"
                       : t.type == cam::ToolType::VBit  ? "vbit"
@@ -77,7 +79,7 @@ void AssertCamShapes(const Document& doc, const nlohmann::json& expect) {
   if (expect.contains("cam_op_types")) {
     const auto want = expect.at("cam_op_types").get<std::vector<std::string>>();
     std::vector<std::string> got;
-    for (const cam::Setup& setup : doc.GetCamSetups())
+    for (const cam::Setup& setup : setups)
       for (const cam::Operation& op : setup.operations)
         got.push_back(op.type == cam::OpType::EdgeRound  ? "edge_round"
                       : op.type == cam::OpType::Pocket   ? "pocket"
@@ -99,15 +101,17 @@ void AssertCamShapes(const Document& doc, const nlohmann::json& expect) {
 // reloads as a shrink-wrap, or an origin that reloads at the model origin, is
 // a file whose numbers are all offset by however much the box moved — and the
 // part comes out looking right in the viewport either way.
-void AssertCamStock(const Document& doc, const nlohmann::json& expect) {
+void AssertCamStock(const std::vector<cam::Setup>& setups,
+                    const std::vector<Body>& bodies,
+                    const nlohmann::json& expect) {
   if (expect.contains("cam_stock_boxes")) {
     const auto& want = expect.at("cam_stock_boxes");
     size_t i = 0;
-    for (const cam::Setup& setup : doc.GetCamSetups()) {
+    for (const cam::Setup& setup : setups) {
       REQUIRE(i < want.size());
       glm::dvec3 lo(0.0), hi(0.0);
       INFO("setup " << i);
-      REQUIRE(cam::StockBounds(setup, doc.GetBodies(), lo, hi));
+      REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
       for (int c = 0; c < 3; c++) {
         CHECK_THAT(lo[c], Catch::Matchers::WithinAbs(
                               want[i]["min"][c].get<double>(), 1e-6));
@@ -122,13 +126,13 @@ void AssertCamStock(const Document& doc, const nlohmann::json& expect) {
     const auto want =
         expect.at("cam_origins").get<std::vector<std::vector<double>>>();
     size_t i = 0;
-    for (const cam::Setup& setup : doc.GetCamSetups()) {
+    for (const cam::Setup& setup : setups) {
       REQUIRE(i < want.size());
       INFO("setup " << i);
       // Recomputed rather than read: the origin is DERIVED, and the golden
       // asserts the derivation still lands where the file said it did.
       cam::Setup copy = setup;
-      REQUIRE(cam::RecomputeOrigin(copy, doc.GetBodies()));
+      REQUIRE(cam::RecomputeOrigin(copy, bodies));
       for (int c = 0; c < 3; c++)
         CHECK_THAT(copy.origin[c], Catch::Matchers::WithinAbs(
                                        want[i][static_cast<size_t>(c)], 1e-6));
@@ -144,12 +148,13 @@ void AssertCamStock(const Document& doc, const nlohmann::json& expect) {
 // in. And the rotary flag is what keeps an A word out of a 3-axis file: the
 // two were one number until docs/cam/setup-frame.md separated them, and a
 // golden is how the separation stays separated.
-void AssertCamFrames(const Document& doc, const nlohmann::json& expect) {
+void AssertCamFrames(const std::vector<cam::Setup>& setups,
+                     const nlohmann::json& expect) {
   if (expect.contains("cam_setup_frames")) {
     const auto want =
         expect.at("cam_setup_frames").get<std::vector<std::vector<double>>>();
     std::vector<std::vector<double>> got;
-    for (const cam::Setup& setup : doc.GetCamSetups())
+    for (const cam::Setup& setup : setups)
       got.push_back({setup.frame.x, setup.frame.y, setup.frame.z,
                      setup.frame.w}); // [x, y, z, w], as written
     REQUIRE(got.size() == want.size());
@@ -165,7 +170,7 @@ void AssertCamFrames(const Document& doc, const nlohmann::json& expect) {
   if (expect.contains("cam_setup_rotary")) {
     const auto want = expect.at("cam_setup_rotary").get<std::vector<bool>>();
     std::vector<bool> got;
-    for (const cam::Setup& setup : doc.GetCamSetups())
+    for (const cam::Setup& setup : setups)
       got.push_back(setup.hasRotaryAxis);
     REQUIRE(got.size() == want.size());
     for (size_t i = 0; i < got.size(); i++) {
@@ -178,12 +183,12 @@ void AssertCamFrames(const Document& doc, const nlohmann::json& expect) {
 // Which face Z zero was picked from. On the SETUP, so a job reopened from its
 // own file still knows — the panel used to ask a session field and answered
 // "Z zero is not set yet" about an origin it had saved and was using.
-void AssertCamTopFace(const Document& doc, const nlohmann::json& expect) {
+void AssertCamTopFace(const std::vector<cam::Setup>& setups,
+                      const nlohmann::json& expect) {
   if (!expect.contains("cam_top_face"))
     return;
-  REQUIRE(!doc.GetCamSetups().empty());
-  CHECK(doc.GetCamSetups()[0].topFace.name ==
-        expect.at("cam_top_face").get<std::string>());
+  REQUIRE(!setups.empty());
+  CHECK(setups[0].topFace.name == expect.at("cam_top_face").get<std::string>());
 }
 
 // The document's display units (v64). Optional, like the CAM assertions:
@@ -239,11 +244,80 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
 // the assembly-schema ones in tests/golden/assembly/, and forgetting the
 // second is not hypothetical: the audit that produced this test first
 // reported v65's golden MISSING because it looked only in the first.
+// The JOB corpus (v73, docs/cam/job-document.md). CAM setups left the part
+// document, so the assertions that used to ride on a part golden ride here.
+//
+// A job owns no geometry, and two of the assertions -- the stock box and the
+// derived origin -- are claims ABOUT geometry. So each job golden's expect
+// file names the part golden whose bodies its setups cut; without that pairing
+// the only honest thing left to check would be that the JSON round-trips,
+// which is the half that never caught anything.
+//
+// The setups inside these files are the historical ones, verbatim, including
+// the key shapes that predate their own repairs: v73-cam-arcs.json still has
+// a pocket with no `side` key, which is the exact document
+// docs/cam/dogfood-round.md's migration exists for.
+TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
+  const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  const fs::path dir = root / "job";
+  REQUIRE(fs::exists(dir));
+
+  std::vector<fs::path> goldens;
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    const fs::path& p = entry.path();
+    if (p.extension() == ".json" && !p.stem().string().ends_with(".expect"))
+      goldens.push_back(p);
+  }
+  std::sort(goldens.begin(), goldens.end());
+  CHECK(goldens.size() >= 6); // one per CAM era that had a golden
+
+  for (const fs::path& golden : goldens) {
+    DYNAMIC_SECTION(golden.filename().string()) {
+      fs::path expectPath = golden;
+      expectPath.replace_extension(".expect.json");
+      REQUIRE(fs::exists(expectPath));
+      nlohmann::json expect;
+      std::ifstream(expectPath) >> expect;
+
+      auto job = DocumentIO::LoadJob(golden.string());
+      REQUIRE(job.has_value());
+      REQUIRE((*job) != nullptr);
+
+      // The bodies these setups cut, from the paired part golden.
+      std::vector<Body> bodies;
+      if (expect.contains("part")) {
+        const fs::path partPath = root / expect.at("part").get<std::string>();
+        auto part = testio::Load(partPath.string());
+        REQUIRE(part != nullptr);
+        bodies = part->GetBodies();
+      }
+
+      auto check = [&](const cam::JobDocument& j) {
+        AssertCamSides(j.GetSetups(), expect);
+        AssertCamTopFace(j.GetSetups(), expect);
+        AssertCamShapes(j.GetSetups(), expect);
+        AssertCamFrames(j.GetSetups(), expect);
+        AssertCamStock(j.GetSetups(), bodies, expect);
+      };
+      check(**job);
+
+      // Round-trip through the CURRENT writer: migrations must compose.
+      const fs::path tmp = fs::temp_directory_path() /
+                           ("golden_job_rt_" + golden.filename().string());
+      REQUIRE(DocumentIO::SaveJob(**job, tmp.string()).has_value());
+      auto reloaded = DocumentIO::LoadJob(tmp.string());
+      REQUIRE(reloaded.has_value());
+      check(**reloaded);
+      fs::remove(tmp);
+    }
+  }
+}
+
 TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
   const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
   int newest = 0;
   std::string newestFile;
-  for (const fs::path& dir : {root, root / "assembly"}) {
+  for (const fs::path& dir : {root, root / "assembly", root / "job"}) {
     if (!fs::exists(dir))
       continue;
     for (const auto& entry : fs::directory_iterator(dir)) {
@@ -271,7 +345,8 @@ TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
                             << DocumentIO::DocumentFormatVersion()
                             << ". A kVersion bump ships a golden AT that "
                                "version — tests/golden/ for a document, "
-                               "tests/golden/assembly/ for assembly schema.");
+                               "tests/golden/assembly/ for assembly schema, "
+                               "tests/golden/job/ for a CAM job.");
   CHECK(newest == DocumentIO::DocumentFormatVersion());
 }
 
@@ -338,11 +413,6 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       auto doc = testio::Load(golden.string());
       REQUIRE((doc != nullptr && error.empty()));
       AssertMatchesExpect(*doc, expect);
-      AssertCamSides(*doc, expect);
-      AssertCamTopFace(*doc, expect);
-      AssertCamShapes(*doc, expect);
-      AssertCamFrames(*doc, expect);
-      AssertCamStock(*doc, expect);
       AssertUnits(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
@@ -352,11 +422,6 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       auto reloaded = testio::Load(tmp.string());
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
-      AssertCamSides(*reloaded, expect);
-      AssertCamTopFace(*reloaded, expect);
-      AssertCamShapes(*reloaded, expect);
-      AssertCamFrames(*reloaded, expect);
-      AssertCamStock(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove(tmp);
     }
@@ -393,11 +458,6 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       auto reloaded = testio::Load(proj.string());
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
-      AssertCamSides(*reloaded, expect);
-      AssertCamTopFace(*reloaded, expect);
-      AssertCamShapes(*reloaded, expect);
-      AssertCamFrames(*reloaded, expect);
-      AssertCamStock(*reloaded, expect);
       AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove_all(proj);
     }

@@ -16,6 +16,7 @@
 #include "ui/CamTool.h"
 #include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h"
+#include "ui/JobActions.h"
 #include "ui/SelectionPipeline.h"
 
 #include "IconsFontAwesome6.h"
@@ -48,9 +49,9 @@ const char* kOpTypes[] = {"Profile", "Pocket",   "Face",
 } // namespace
 
 cam::Setup* ActiveCamSetup(AppState& state) {
-  if (!state.document)
+  if (!state.job)
     return nullptr;
-  std::vector<cam::Setup>& setups = state.document->GetCamSetups();
+  std::vector<cam::Setup>& setups = state.job->GetSetups();
   if (setups.empty())
     return nullptr;
   for (cam::Setup& s : setups)
@@ -63,14 +64,14 @@ cam::Setup* ActiveCamSetup(AppState& state) {
 void RefreshCamToolpaths(AppState& state) {
   state.camToolpaths.clear();
   cam::Setup* setup = ActiveCamSetup(state);
-  if (setup == nullptr || !state.document)
+  if (setup == nullptr || !state.job)
     return;
-  state.camToolpaths = cam::GenerateAll(*setup, state.document->GetBodies());
+  state.camToolpaths = cam::GenerateAll(*setup, ui::JobBodies(state));
 }
 
 void RefreshCamToolpath(AppState& state, uint64_t opId) {
   cam::Setup* setup = ActiveCamSetup(state);
-  if (setup == nullptr || !state.document || opId == 0)
+  if (setup == nullptr || !state.job || opId == 0)
     return;
   const cam::Operation* op = nullptr;
   for (const cam::Operation& candidate : setup->operations)
@@ -86,7 +87,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
     DropCamToolpath(state, opId);
     return;
   }
-  cam::Toolpath fresh = cam::Generate(*setup, *op, state.document->GetBodies());
+  cam::Toolpath fresh = cam::Generate(*setup, *op, ui::JobBodies(state));
   for (cam::Toolpath& existing : state.camToolpaths)
     if (existing.operationId == opId) {
       existing = std::move(fresh);
@@ -220,25 +221,25 @@ void DrawCamPanel(AppState& state) {
     return;
   }
   PanelHeading(kPanelCam);
-  if (!state.document) {
+  if (!state.job) {
     ImGui::TextWrapped("CAM works on a part — a setup cuts one model. Switch "
                        "to a part tab.");
     ImGui::End();
     return;
   }
 
-  std::vector<cam::Setup>& setups = state.document->GetCamSetups();
+  std::vector<cam::Setup>& setups = state.job->GetSetups();
   if (setups.empty()) {
     ImGui::TextWrapped("A setup describes how to cut this part: stock, tools "
                        "and operations. It changes nothing about the model.");
     ImGui::Spacing();
     if (ImGui::Button("Add setup###cam_add_setup")) {
-      cam::Setup& fresh = state.document->AddCamSetup();
+      cam::Setup& fresh = state.job->AddSetup();
       state.camActiveSetup = fresh.id;
-      (void)cam::RecomputeOrigin(fresh, state.document->GetBodies());
+      (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
       // Safe Z clear of the stock, not the struct's bare 5 mm — which sits
       // inside anything taller than that (docs/cam/gui.md).
-      fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
+      fresh.safeZ = cam::DeriveSafeZ(fresh, ui::JobBodies(state));
       state.camSafeZEdit = static_cast<float>(fresh.safeZ);
       // CAM edits live in the document but bump no document version (the
       // same as study edits), so this is what keeps the save prompt honest.
@@ -278,10 +279,10 @@ void DrawCamPanel(AppState& state) {
   }
   ImGui::SameLine();
   if (ImGui::SmallButton("+###cam_add_setup2")) {
-    cam::Setup& fresh = state.document->AddCamSetup();
+    cam::Setup& fresh = state.job->AddSetup();
     state.camActiveSetup = fresh.id;
-    (void)cam::RecomputeOrigin(fresh, state.document->GetBodies());
-    fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
+    (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
+    fresh.safeZ = cam::DeriveSafeZ(fresh, ui::JobBodies(state));
     state.camSafeZEdit = static_cast<float>(fresh.safeZ);
     state.projectMetaDirty = true;
     ImGui::End();
@@ -293,7 +294,7 @@ void DrawCamPanel(AppState& state) {
   // then has to be kept in step with the original by hand
   // (docs/cam/setup-frame.md S4).
   if (ImGui::SmallButton("Flip###cam_flip_setup")) {
-    cam::Setup& other = state.document->AddCamSetup(setup->name + " (back)");
+    cam::Setup& other = state.job->AddSetup(setup->name + " (back)");
     // Carry the MACHINE and the material across — they did not change when
     // the part was turned over. Operations do not come: they are what the
     // other side is for.
@@ -305,8 +306,8 @@ void DrawCamPanel(AppState& state) {
     other.rapidFeed = setup->rapidFeed;
     other.hasRotaryAxis = setup->hasRotaryAxis;
     other.originAt = setup->originAt;
-    other.safeZ = cam::DeriveSafeZ(other, state.document->GetBodies());
-    (void)cam::RecomputeOrigin(other, state.document->GetBodies());
+    other.safeZ = cam::DeriveSafeZ(other, ui::JobBodies(state));
+    (void)cam::RecomputeOrigin(other, ui::JobBodies(state));
     state.camActiveSetup = other.id;
     state.camSafeZEdit = static_cast<float>(other.safeZ);
     state.projectMetaDirty = true;
@@ -318,7 +319,7 @@ void DrawCamPanel(AppState& state) {
                         "operations yet.");
   ImGui::SameLine();
   if (ImGui::SmallButton("x###cam_del_setup")) {
-    state.document->RemoveCamSetup(setup->id);
+    state.job->RemoveSetup(setup->id);
     state.camActiveSetup = 0;
     state.camToolpaths.clear();
     state.projectMetaDirty = true;
@@ -426,7 +427,7 @@ void DrawCamPanel(AppState& state) {
       if (setup->stock.mode == cam::StockMode::Fixed &&
           setup->stock.size == glm::dvec3(0.0)) {
         glm::dvec3 lo(0.0), hi(0.0);
-        if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi))
+        if (cam::StockBounds(*setup, ui::JobBodies(state), lo, hi))
           setup->stock.size = hi - lo;
       }
       dirty = true;
@@ -448,7 +449,7 @@ void DrawCamPanel(AppState& state) {
       ImGui::SameLine();
       ImGui::TextDisabled("mm");
       const std::string refusal =
-          cam::StockRefusal(*setup, state.document->GetBodies());
+          cam::StockRefusal(*setup, ui::JobBodies(state));
       if (!refusal.empty()) {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
@@ -518,7 +519,7 @@ void DrawCamPanel(AppState& state) {
     setup->safeZ = state.camSafeZEdit;
     // The stock box may have moved, and the work origin is derived from it —
     // so is every coordinate in the posted file.
-    (void)cam::RecomputeOrigin(*setup, state.document->GetBodies());
+    (void)cam::RecomputeOrigin(*setup, ui::JobBodies(state));
   } else
     state.camSafeZEdit = static_cast<float>(setup->safeZ);
 
@@ -939,10 +940,10 @@ void DrawCamPanel(AppState& state) {
     // than from the cutter. A refusal is shown rather than an operation that
     // cannot cut (the u10 rule).
     const cam::DerivedOp derived = cam::DeriveOperation(
-        *setup, state.document->GetBodies(), cam::OpType::Profile, {});
+        *setup, ui::JobBodies(state), cam::OpType::Profile, {});
     if (derived.ok) {
       cam::Operation op = derived.op;
-      op.id = state.document->AllocateId();
+      op.id = state.job->AllocateId();
       op.name = "Operation " + std::to_string(setup->operations.size() + 1);
       setup->operations.push_back(op);
       state.camRefusal.clear();

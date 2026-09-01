@@ -17,7 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    72; // v72: an occurrence can RIDE ON another (`attached_to` +
+    73; // v73: CAM setups are no longer part of the part. They live in a JOB
+        //      document of their own (`kind: "job"` -- a parts list plus the
+        //      setups that cut them), which is what makes a job about more
+        //      than one part: four brackets out of one sheet used to be
+        //      inexpressible (docs/cam/job-document.md). BREAKING for any
+        //      document carrying `cam`: a part's setups are not migrated,
+        //      because the job they belong in is a document that did not
+        //      exist. No users, so no migration (CLAUDE.md).
+        // (v72: an occurrence can RIDE ON another (`attached_to` +
         //      `attach_offset`/`attach_rotation`), so a fastener travels with
         //      the part it is bolted to and cannot be dragged out of its hole
         //      on its own. Composition, not a mate: no solver sees it

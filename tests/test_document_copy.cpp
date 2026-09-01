@@ -31,7 +31,7 @@ static const SketchPlane kXY(PlaneType::XY);
 
 // A document carrying one of everything that persists: two features (one
 // referencing the other by id), a parameter driving a dimension, a
-// configuration, a study, a CAM setup, an embedded asset, non-default units,
+// configuration, a study, an embedded asset, non-default units,
 // a rollback and an active configuration.
 std::unique_ptr<Document> BuildLoadedDocument() {
   auto doc = std::make_unique<Document>();
@@ -56,10 +56,6 @@ std::unique_ptr<Document> BuildLoadedDocument() {
 
   fem::Study& study = doc->AddStudy("Bend");
   study.meshSize = 4.0;
-
-  cam::Setup& setup = doc->AddCamSetup("Side A");
-  setup.post = "linuxcnc";
-  setup.safeZ = 9.5;
 
   doc->SetAsset("underlay.png", {1, 2, 3, 4, 5});
   doc->SetUnits({units::Length::Inch, units::Mass::Gram, units::Angle::Radian});

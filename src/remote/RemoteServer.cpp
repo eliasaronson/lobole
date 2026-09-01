@@ -756,7 +756,14 @@ static const std::set<std::string> kNoPartDoc = {
     "list_drawing_views", "export_drawing", "list_drawing_geometry",
     "add_drawing_dim", "remove_drawing_dim", "list_drawing_dims",
     "add_drawing_note", "remove_drawing_note", "list_drawing_notes",
-    "new_project", "save_project", "open_project", "add_occurrence",
+    // CAM works on a JOB tab since v73 (docs/cam/job-document.md): a setup
+    // stopped being part of the part, so `doc` is null by definition wherever
+    // a CAM handler runs. It refuses for itself, naming how to make a job.
+    "machine_part", "add_cam_setup", "list_cam_setups", "set_cam_setup",
+    "remove_cam_setup", "add_cam_op", "cam_derive_op", "set_cam_op",
+    "move_cam_op", "remove_cam_op", "cam_verify", "cam_simulate",
+    "cam_toolpath", "cam_post", "new_project", "save_project", "open_project",
+    "add_occurrence",
     // A fastener is placed in an assembly, where `doc` is null by definition.
     "add_fastener", "fit_fastener", "check_fasteners", "remove_occurrence",
     "list_occurrences", "set_occurrence_transform", "set_occurrence_visible",

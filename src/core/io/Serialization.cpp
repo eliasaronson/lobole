@@ -442,15 +442,6 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           fs::remove(entry.path(), ec);
       }
     }
-    // CAM setups (v58): inline in index.json, not a file each. They are
-    // parameters (a few hundred bytes), and index.json is as diffable as any
-    // other file in the directory — studies earned their own files by
-    // carrying meshes, and a setup carries none.
-    if (!doc.GetCamSetups().empty()) {
-      index["cam"] = json::array();
-      for (const cam::Setup& setup : doc.GetCamSetups())
-        index["cam"].push_back(CamSetupToJson(setup));
-    }
     // Configurations (v31): file-per-config under configurations/, id list in
     // the index (the active id is in the envelope). Absent when none, so a
     // pre-v31 document re-saves byte-identically.
@@ -697,10 +688,6 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
               id, StudyResultFromJson(ParseProjectFile(rit->second)));
         }
       }
-    }
-    for (const auto& cj : index.value("cam", json::array())) { // v58
-      doc->GetCamSetups().push_back(CamSetupFromJson(cj));
-      doc->EnsureNextIdAtLeast(doc->GetCamSetups().back().id + 1);
     }
     // Configurations (v31): id-prefix files under configurations/, index order.
     {
@@ -1028,13 +1015,6 @@ static bool SaveImpl(const Document& doc, const std::string& path,
       for (const fem::Study& s : doc.GetStudies())
         j["studies"].push_back(StudyToJson(s));
     }
-    // CAM setups (v58), inline in both formats: a setup is parameters, not a
-    // mesh, so it does not earn a file of its own the way a study does.
-    if (!doc.GetCamSetups().empty()) {
-      j["cam"] = json::array();
-      for (const cam::Setup& setup : doc.GetCamSetups())
-        j["cam"].push_back(CamSetupToJson(setup));
-    }
     // Configurations (v31), inline (the active id is in the envelope above).
     if (!doc.GetConfigurations().empty()) {
       j["configurations"] = json::array();
@@ -1125,10 +1105,6 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
         doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
     for (const auto& sj : j.value("studies", json::array())) { // v29
       doc->RestoreStudy(StudyFromJson(sj));
-    }
-    for (const auto& cj : j.value("cam", json::array())) { // v58
-      doc->GetCamSetups().push_back(CamSetupFromJson(cj));
-      doc->EnsureNextIdAtLeast(doc->GetCamSetups().back().id + 1);
     }
     for (const auto& cj : j.value("configurations", json::array())) { // v31
       doc->RestoreConfiguration(ConfigurationFromJson(cj));
@@ -1723,6 +1699,145 @@ LoadDrawing(const std::string& path) {
   std::string error;
   if (auto doc = LoadDrawingImpl(path, &error))
     return doc;
+  return std::unexpected(error);
+}
+
+// ---- Jobs (docs/cam/job-document.md) --------------------------------------
+
+namespace {
+
+json JobEnvelope() {
+  json j;
+  j["format"] = kFormat;
+  j["version"] = kVersion;
+  j["kind"] = "job";
+  return j;
+}
+
+// The whole document, in one object. A job is a parts list and a few setups:
+// nothing here carries a mesh, so nothing earns a file of its own and the
+// directory and single-file forms differ only in where this lands.
+json JobBodyJson(const cam::JobDocument& job) {
+  json j = JobEnvelope();
+  j["parts"] = json::array();
+  for (const cam::JobPart& p : job.GetParts())
+    j["parts"].push_back(
+        json{{"id", p.id}, {"source", p.sourceDocId}, {"name", p.name}});
+  j["cam"] = json::array();
+  for (const cam::Setup& setup : job.GetSetups())
+    j["cam"].push_back(CamSetupToJson(setup));
+  return j;
+}
+
+// The id counter is restored from the highest id actually present rather
+// than from a stored `next_id`: a counter written to disk and an id written
+// to disk can disagree, and only one of them is checkable.
+std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
+  auto job = std::make_unique<cam::JobDocument>();
+  uint64_t maxId = 0;
+  for (const json& pj : j.value("parts", json::array())) {
+    cam::JobPart part;
+    part.id = pj.value("id", uint64_t{0});
+    part.sourceDocId = pj.value("source", uint64_t{0});
+    part.name = pj.value("name", std::string{});
+    maxId = std::max(maxId, part.id);
+    job->GetParts().push_back(std::move(part));
+  }
+  for (const json& cj : j.value("cam", json::array())) {
+    cam::Setup setup = CamSetupFromJson(cj);
+    maxId = std::max(maxId, setup.id);
+    for (const cam::Operation& op : setup.operations)
+      maxId = std::max(maxId, op.id);
+    job->GetSetups().push_back(std::move(setup));
+  }
+  job->EnsureNextIdAtLeast(maxId + 1);
+  return job;
+}
+
+bool CheckJobEnvelope(const json& j, const std::string& where,
+                      std::string* error) {
+  if (j.value("format", "") != kFormat) {
+    if (error)
+      *error = "Not a designer document: " + where;
+    return false;
+  }
+  if (j.value("version", 0) > kVersion) {
+    if (error)
+      *error = "Document version is newer than this build supports";
+    return false;
+  }
+  if (j.value("kind", "part") != "job") {
+    if (error)
+      *error = "This is a " + j.value("kind", "part") + ", not a job: " + where;
+    return false;
+  }
+  return true;
+}
+
+bool SaveJobImpl(const cam::JobDocument& job, const std::string& path,
+                 std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  const bool dirForm = IsDirFormatPath(normalized);
+  try {
+    std::filesystem::path target(normalized);
+    if (dirForm) {
+      std::filesystem::create_directories(target);
+      target /= "index.json";
+    }
+    if (!WriteTextAtomic(target, JobBodyJson(job).dump(2) + "\n", error))
+      return false;
+    LOG_INFO("Saved job ({} parts, {} setups) to {}", job.PartCount(),
+             job.SetupCount(), path);
+    return true;
+  } catch (const std::exception& e) {
+    if (error)
+      *error = e.what();
+    LOG_ERROR("Failed to save job to {}: {}", path, e.what());
+    return false;
+  }
+}
+
+std::unique_ptr<cam::JobDocument> LoadJobImpl(const std::string& path,
+                                              std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  const std::filesystem::path file =
+      IsDirFormatPath(normalized)
+          ? std::filesystem::path(normalized) / "index.json"
+          : std::filesystem::path(path);
+  try {
+    std::ifstream in(file);
+    if (!in) {
+      if (error)
+        *error = "Cannot open file: " + file.string();
+      return nullptr;
+    }
+    json j = ParseProjectFile(file);
+    if (!CheckJobEnvelope(j, file.string(), error))
+      return nullptr;
+    return JobFromBodyJson(j);
+  } catch (const std::exception& e) {
+    if (error)
+      *error = e.what();
+    LOG_ERROR("Failed to load job from {}: {}", file.string(), e.what());
+    return nullptr;
+  }
+}
+
+} // namespace
+
+std::expected<void, std::string> SaveJob(const cam::JobDocument& job,
+                                         const std::string& path) {
+  std::string error;
+  if (SaveJobImpl(job, path, &error))
+    return {};
+  return std::unexpected(error);
+}
+
+std::expected<std::unique_ptr<cam::JobDocument>, std::string>
+LoadJob(const std::string& path) {
+  std::string error;
+  if (auto job = LoadJobImpl(path, &error))
+    return job;
   return std::unexpected(error);
 }
 

@@ -2,6 +2,7 @@
 
 #include "core/Document.h"
 #include "core/Occurrence.h"
+#include "core/cam/JobDocument.h"
 #include "core/drawing/DrawingDocument.h"
 
 #include <nlohmann/json.hpp>
@@ -119,6 +120,16 @@ Configuration ConfigurationFromJson(const nlohmann::json& j);
 SaveDrawing(const DrawingDocument& drawing, const std::string& path);
 [[nodiscard]] std::expected<std::unique_ptr<DrawingDocument>, std::string>
 LoadDrawing(const std::string& path);
+
+// Job (de)serialization: the CAM job document (docs/cam/job-document.md),
+// discriminated by `kind: "job"`. Unlike a part or a drawing the two on-disk
+// forms carry the SAME body — a job is a parts list and a few setups, none of
+// which earns a file of its own — so only the filename differs (`index.json`
+// inside a directory, or the named file).
+[[nodiscard]] std::expected<void, std::string>
+SaveJob(const cam::JobDocument& job, const std::string& path);
+[[nodiscard]] std::expected<std::unique_ptr<cam::JobDocument>, std::string>
+LoadJob(const std::string& path);
 
 // Single-view / single-dim (de)serialization; used for the dir-format files
 // and to echo views/dims from the RPCs. Throw on malformed input.

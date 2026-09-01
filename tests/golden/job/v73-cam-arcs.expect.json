@@ -1,0 +1,8 @@
+{
+  "part": "v60-cam-arcs.json",
+  "cam_op_sides": [
+    "outside",
+    "inside",
+    "inside"
+  ]
+}

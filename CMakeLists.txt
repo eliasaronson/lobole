@@ -269,6 +269,7 @@ set(core_sources
     src/core/AssemblySolve.cpp
     src/core/drawing/DrawingProjection.cpp
     src/core/drawing/DrawingDocument.cpp
+    src/core/cam/JobDocument.cpp
     src/core/drawing/DrawingExport.cpp
     src/core/drawing/DrawingDimension.cpp
     src/core/drawing/DrawingValidate.cpp
@@ -607,6 +608,7 @@ set(app_sources
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
     src/ui/AssemblyActions.cpp
+    src/ui/JobActions.cpp
     src/ui/SimulationActions.cpp
     src/ui/FeatureEditor.cpp
     src/ui/ExprInput.cpp

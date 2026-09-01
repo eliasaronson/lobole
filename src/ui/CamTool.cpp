@@ -9,6 +9,7 @@
 #include "core/cam/CamVerify.h"
 #include "ui/AppActions.h" // AppendPrimLine/Dot, WorldToScreen
 #include "ui/CamPanel.h"
+#include "ui/JobActions.h"
 
 #include "render/Camera.h"
 #include "ui/FeatureEditor.h"
@@ -78,7 +79,10 @@ const cam::FaceRegion& CachedRegion(AppState& state,
                                     AppState::CamRegionCache& cache,
                                     const cam::Setup& setup,
                                     const ElementRef& ref) {
-  const uint64_t version = state.document ? state.document->Version() : 0;
+  const std::vector<Body>& bodies = ui::JobBodies(state);
+  // The cache key is what the bodies were assembled from, not one document's
+  // version: a job's geometry moves when any of its parts does.
+  const uint64_t version = state.jobBodiesKey;
   const bool sameRef =
       cache.ref.featureId == ref.featureId && cache.ref.name == ref.name;
   if (cache.documentVersion != version || cache.setupId != setup.id ||
@@ -89,12 +93,10 @@ const cam::FaceRegion& CachedRegion(AppState& state,
     cache.rotationA = setup.rotationA;
     cache.frame = setup.frame;
     cache.ref = ref;
-    cache.region =
-        state.document
-            ? cam::PickedFaceRegion(
-                  cam::BodiesInSetupFrame(setup, state.document->GetBodies()),
-                  ref)
-            : cam::FaceRegion{};
+    cache.region = bodies.empty()
+                       ? cam::FaceRegion{}
+                       : cam::PickedFaceRegion(
+                             cam::BodiesInSetupFrame(setup, bodies), ref);
   }
   return cache.region;
 }
@@ -112,7 +114,7 @@ void OperationGhost(AppState& state, const cam::Setup& setup,
     loops = region.loops;
   } else {
     const std::vector<Body> bodies =
-        cam::BodiesInSetupFrame(setup, state.document->GetBodies());
+        cam::BodiesInSetupFrame(setup, ui::JobBodies(state));
     glm::dvec3 lo(0.0), hi(0.0);
     if (!cam::StockBounds(setup, bodies, lo, hi))
       return;
@@ -202,14 +204,14 @@ namespace {
 // window and closing it again should not leave an empty setup in a document
 // and mark it dirty.
 cam::Setup* EnsureCamSetup(AppState& state) {
-  if (!state.document)
+  if (!state.job)
     return nullptr;
   if (cam::Setup* setup = ActiveCamSetup(state))
     return setup;
-  cam::Setup& fresh = state.document->AddCamSetup();
+  cam::Setup& fresh = state.job->AddSetup();
   state.camActiveSetup = fresh.id;
-  (void)cam::RecomputeOrigin(fresh, state.document->GetBodies());
-  fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
+  (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
+  fresh.safeZ = cam::DeriveSafeZ(fresh, ui::JobBodies(state));
   state.camSafeZEdit = static_cast<float>(fresh.safeZ);
   state.projectMetaDirty = true;
   return &fresh;
@@ -221,19 +223,19 @@ cam::Setup* EnsureCamSetup(AppState& state) {
 bool CreateVerbOperation(AppState& state, cam::OpType type,
                          const ElementRef& target) {
   state.camRefusal.clear();
-  if (!state.document)
+  if (!state.job)
     return false;
   cam::Setup* setup = EnsureCamSetup(state);
   if (setup == nullptr)
     return false;
   const cam::DerivedOp derived = cam::DeriveOperation(
-      *setup, state.document->GetBodies(), type, target, state.camVerbTool);
+      *setup, ui::JobBodies(state), type, target, state.camVerbTool);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return false;
   }
   cam::Operation op = derived.op;
-  op.id = state.document->AllocateId();
+  op.id = state.job->AllocateId();
   setup->operations.push_back(op);
   state.camGhostOp = op.id;
   state.projectMetaDirty = true;
@@ -249,10 +251,10 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
 // The picked face's plane, in MODEL space. Both orientation picks need it,
 // and neither wants the setup frame applied — the whole point is to work out
 // what the frame should become.
-bool PickedFaceNormal(const Document& doc, const ElementRef& ref,
+bool PickedFaceNormal(const std::vector<Body>& bodies, const ElementRef& ref,
                       glm::vec3& normal) {
   glm::vec3 centre(0.0f), uAxis(0.0f);
-  for (const Body& body : doc.GetBodies()) {
+  for (const Body& body : bodies) {
     if (body.createdBy != ref.featureId)
       continue;
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
@@ -269,14 +271,13 @@ bool PickedFaceNormal(const Document& doc, const ElementRef& ref,
 void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
   if (setup.topFace.IsSet()) {
     const cam::FaceRegion region = cam::PickedFaceRegion(
-        cam::BodiesInSetupFrame(setup, state.document->GetBodies()),
-        setup.topFace);
+        cam::BodiesInSetupFrame(setup, ui::JobBodies(state)), setup.topFace);
     // The face that was level is not level any more: this orientation cannot
     // keep that Z zero, and pretending otherwise is worse than asking again.
     if (!region.ok)
       setup.topFace = {};
   }
-  (void)cam::RecomputeOrigin(setup, state.document->GetBodies());
+  (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
 }
 
 // Everything that has to follow the setup's orientation changing — and it
@@ -287,8 +288,8 @@ void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
 void CamOrientationChanged(AppState& state, cam::Setup& setup) {
   const bool hadZero = setup.topFace.IsSet();
   ReZeroFromTopFace(state, setup);
-  const int moved = cam::RederiveDepths(setup, state.document->GetBodies());
-  setup.safeZ = cam::DeriveSafeZ(setup, state.document->GetBodies());
+  const int moved = cam::RederiveDepths(setup, ui::JobBodies(state));
+  setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
   state.camSafeZEdit = static_cast<float>(setup.safeZ);
 
   std::string note;
@@ -310,7 +311,7 @@ void CamOrientationChanged(AppState& state, cam::Setup& setup) {
 
 void CamFacePicked(AppState& state, const SelectionItem& item) {
   const PickSlot slot = static_cast<PickSlot>(state.slotPick.slot);
-  if (!item.element.IsSet() || !state.document) {
+  if (!item.element.IsSet() || !state.job) {
     state.slotPick.miss = "that is not a face this job can use";
     return;
   }
@@ -330,7 +331,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // flip that machines the back off a reference you have already set.
     bool reclamped = false;
     glm::vec3 normal(0.0f);
-    if (PickedFaceNormal(*state.document, item.element, normal)) {
+    if (PickedFaceNormal(ui::JobBodies(state), item.element, normal)) {
       const glm::dquat want =
           cam::SolveFaceUp(glm::dvec3(normal), setup->frame);
       if (std::abs(glm::dot(want, setup->frame)) < 1.0 - 1e-9) {
@@ -339,8 +340,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
       }
     }
     const cam::FaceRegion region = cam::PickedFaceRegion(
-        cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
-        item.element);
+        cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)), item.element);
     if (!region.ok) {
       state.slotPick.miss = region.why;
       return;
@@ -357,11 +357,10 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     setup->topFace = item.element;
     // Through the ONE derivation, so a Z zero picked here and a work origin
     // set from the panel cannot disagree about where the file's zero is.
-    (void)cam::RecomputeOrigin(*setup, state.document->GetBodies());
+    (void)cam::RecomputeOrigin(*setup, ui::JobBodies(state));
     state.camNote.clear();
     if (reclamped) {
-      const int moved =
-          cam::RederiveDepths(*setup, state.document->GetBodies());
+      const int moved = cam::RederiveDepths(*setup, ui::JobBodies(state));
       state.camNote = "laid the part flat on that face";
       if (moved > 0)
         state.camNote +=
@@ -370,12 +369,12 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     }
     // The stock just moved, so the rapid height that cleared the old one may
     // now be inside the new one.
-    setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());
+    setup->safeZ = cam::DeriveSafeZ(*setup, ui::JobBodies(state));
     state.camSafeZEdit = static_cast<float>(setup->safeZ);
     // Operations that started above the stock come down to it — never up: an
     // operation asked for a shallower top than the stock is a choice.
     glm::dvec3 lo(0.0), hi(0.0);
-    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi))
+    if (cam::StockBounds(*setup, ui::JobBodies(state), lo, hi))
       for (cam::Operation& op : setup->operations)
         if (op.topZ > hi.z)
           op.topZ = hi.z;
@@ -396,7 +395,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     if (setup == nullptr)
       return;
     glm::vec3 normal(0.0f);
-    if (!PickedFaceNormal(*state.document, item.element, normal)) {
+    if (!PickedFaceNormal(ui::JobBodies(state), item.element, normal)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }
@@ -415,7 +414,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     if (setup == nullptr)
       return;
     glm::vec3 normal(0.0f);
-    if (!PickedFaceNormal(*state.document, item.element, normal)) {
+    if (!PickedFaceNormal(ui::JobBodies(state), item.element, normal)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }
@@ -455,7 +454,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
 
 void DrawCamToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "CAM");
-  if (!state.document) {
+  if (!state.job) {
     ImGui::TextWrapped("CAM cuts a part. Switch to a part tab.");
     if (ImGui::Button("Done###cam_tool_done"))
       state.camToolOpen = false;
@@ -566,7 +565,7 @@ void DrawCamToolWindow(AppState& state) {
     // previous zoom gave a plan view of four square millimetres if that is
     // where you happened to be.
     glm::dvec3 lo(0.0), hi(0.0);
-    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi)) {
+    if (cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
       // StockBounds reports the box in SETUP space; the camera lives in model
       // space, so every corner comes back through the frame.
       glm::vec3 mn(std::numeric_limits<float>::max());
@@ -782,7 +781,7 @@ void DrawCamToolWindow(AppState& state) {
 
 void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
                             std::vector<LineVertex3D>& quads) {
-  if (!state.document)
+  if (!state.job)
     return;
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
@@ -794,7 +793,7 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
   // box is clutter over the model you are drawing.
   glm::dvec3 lo(0.0), hi(0.0);
   if (session && state.camShowStock &&
-      cam::StockBounds(*setup, state.document->GetBodies(), lo, hi)) {
+      cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
     const std::vector<glm::dvec2> rect = {
         {lo.x, lo.y}, {hi.x, lo.y}, {hi.x, hi.y}, {lo.x, hi.y}};
     LoopLines(rect, lo.z, 1.0f, kStockLine, prims);
@@ -828,7 +827,7 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
 }
 
 void DrawCamLabels(AppState& state) {
-  if (!state.camToolOpen || !state.document || state.camGhostOp == 0)
+  if (!state.camToolOpen || !state.job || state.camGhostOp == 0)
     return;
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
@@ -837,8 +836,7 @@ void DrawCamLabels(AppState& state) {
   if (op == nullptr || op->targets.empty())
     return;
   const cam::FaceRegion region = cam::PickedFaceRegion(
-      cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
-      op->targets[0]);
+      cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)), op->targets[0]);
   if (!region.ok || region.loops.empty() || region.loops[0].pts.empty())
     return;
 
@@ -865,7 +863,7 @@ void DrawCamLabels(AppState& state) {
 void RunCamVerification(AppState& state) {
   state.camVerdict.clear();
   state.camLeftover.clear();
-  if (!state.document || state.camToolpaths.empty())
+  if (!state.job || state.camToolpaths.empty())
     return;
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
@@ -882,7 +880,7 @@ void RunCamVerification(AppState& state) {
   // enough that the check runs while the user is still looking at the button.
   constexpr double kRes = 0.4;
   const cam::Inspection insp =
-      cam::Inspect(gcode, *setup, state.document->GetBodies(), kRes);
+      cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes);
   if (!insp.ok)
     return;
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and

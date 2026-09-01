@@ -292,19 +292,23 @@ TEST_CASE("cam: refusals are specific, not silent", "[cam]") {
 }
 
 TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
-  // Setups are document objects (v58). They describe how to cut the model and
-  // change nothing about it, so they must NOT touch the regen chain hash — a
-  // new operation rebuilding the geometry would be a bug with a long tail.
+  // Setups are document objects (v58), and since v73 they are objects of a
+  // JOB document rather than of the part (docs/cam/job-document.md). They
+  // describe how to cut the model and change nothing about it, so they must
+  // NOT touch the regen chain hash — a new operation rebuilding the geometry
+  // would be a bug with a long tail. Structural now that the setups live
+  // elsewhere entirely, and still the claim worth asserting.
   auto doc = BlockDoc();
   const size_t hashBefore = doc->TipChainHash();
 
-  cam::Setup& setup = doc->AddCamSetup("Side A");
+  cam::JobDocument job;
+  cam::Setup& setup = job.AddSetup("Side A");
   setup.post = "linuxcnc";
   setup.safeZ = 12.5;
   setup.tools[0].diameter = 3.175;
   setup.tools[0].feedCut = 450.0;
   cam::Operation op;
-  op.id = doc->AllocateId();
+  op.id = job.AllocateId();
   op.name = "Outline";
   op.type = cam::OpType::Profile;
   op.topZ = 20.0;
@@ -318,10 +322,10 @@ TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
 
   const std::filesystem::path path =
       std::filesystem::temp_directory_path() / "cam_roundtrip.json";
-  REQUIRE(DocumentIO::Save(*doc, path.string()).has_value());
-  auto back = DocumentIO::Load(path.string());
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
   REQUIRE(back.has_value());
-  const std::vector<cam::Setup>& setups = (*back)->GetCamSetups();
+  const std::vector<cam::Setup>& setups = (*back)->GetSetups();
   REQUIRE(setups.size() == 1);
   CHECK(setups[0].name == "Side A");
   CHECK(setups[0].post == "linuxcnc");
@@ -2872,13 +2876,11 @@ TEST_CASE("cam: a clearing operation keeps its side across a save", "[cam]") {
   // file clearing OUTSIDE its boundary, where there is nothing, and produced
   // no toolpath at all. A job that worked before the save did not work after
   // it (docs/cam/dogfood-round.md).
-  Document doc;
-  doc.AddFeature(
-      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 40, 30, 10));
-  cam::Setup& s = doc.AddCamSetup("Job");
+  cam::JobDocument job;
+  cam::Setup& s = job.AddSetup("Job");
   for (const cam::OpType type : {cam::OpType::Pocket, cam::OpType::Adaptive}) {
     cam::Operation op;
-    op.id = doc.AllocateId();
+    op.id = job.AllocateId();
     op.type = type;
     op.side = cam::Side::Inside;
     op.topZ = 10.0;
@@ -2887,10 +2889,10 @@ TEST_CASE("cam: a clearing operation keeps its side across a save", "[cam]") {
   }
   const std::filesystem::path path =
       std::filesystem::temp_directory_path() / "cam_clearing_side.json";
-  REQUIRE(DocumentIO::Save(doc, path.string()).has_value());
-  auto back = DocumentIO::Load(path.string());
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
   REQUIRE(back.has_value());
-  const std::vector<cam::Setup>& setups = (*back)->GetCamSetups();
+  const std::vector<cam::Setup>& setups = (*back)->GetSetups();
   REQUIRE(setups.size() == 1);
   REQUIRE(setups[0].operations.size() == 2);
   for (const cam::Operation& op : setups[0].operations)
@@ -2901,18 +2903,17 @@ TEST_CASE("cam: a clearing operation keeps its side across a save", "[cam]") {
   // depends on the type, so those files repair themselves rather than asking
   // anyone to re-make a job. (tests/golden/v60-cam-arcs.json is a real one.)
   const std::string old = R"({"format":"designer-document","version":61,
-    "features":[{"type":"Box","name":"P","id":1,"position":[0,0,0],
-                 "width":40,"height":30,"depth":10}],
+    "kind":"job",
     "cam":[{"id":2,"name":"J","operations":[
       {"id":3,"type":"adaptive","tool":1,"top_z":10,"bottom_z":4},
       {"id":4,"type":"profile","tool":1,"top_z":10,"bottom_z":0}]}]})";
   const std::filesystem::path oldPath =
       std::filesystem::temp_directory_path() / "cam_clearing_side_old.json";
   std::ofstream(oldPath) << old;
-  auto migrated = DocumentIO::Load(oldPath.string());
+  auto migrated = DocumentIO::LoadJob(oldPath.string());
   REQUIRE(migrated.has_value());
   const std::vector<cam::Operation>& ops =
-      (*migrated)->GetCamSetups()[0].operations;
+      (*migrated)->GetSetups()[0].operations;
   REQUIRE(ops.size() == 2);
   CHECK(ops[0].side == cam::Side::Inside);  // a clearing op clears inside
   CHECK(ops[1].side == cam::Side::Outside); // a profile's default is its own
@@ -2974,12 +2975,10 @@ TEST_CASE("cam: asking for adaptive derives the pocket it is", "[cam]") {
 TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
   // v59: a new OpType is a format change, so it needs the round trip and the
   // golden pair that go with one.
-  Document doc;
-  doc.AddFeature(
-      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 40, 30, 10));
-  cam::Setup& s = doc.AddCamSetup("Job");
+  cam::JobDocument job;
+  cam::Setup& s = job.AddSetup("Job");
   cam::Operation op;
-  op.id = doc.AllocateId();
+  op.id = job.AllocateId();
   op.name = "Rough";
   op.type = cam::OpType::Adaptive;
   op.topZ = 10.0;
@@ -2989,10 +2988,10 @@ TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
 
   const std::filesystem::path path =
       std::filesystem::temp_directory_path() / "cam_adaptive_roundtrip.json";
-  REQUIRE(DocumentIO::Save(doc, path.string()).has_value());
-  auto back = DocumentIO::Load(path.string());
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
   REQUIRE(back.has_value());
-  const std::vector<cam::Setup>& setups = (*back)->GetCamSetups();
+  const std::vector<cam::Setup>& setups = (*back)->GetSetups();
   REQUIRE(setups.size() == 1);
   REQUIRE(setups[0].operations.size() == 1);
   CHECK(setups[0].operations[0].type == cam::OpType::Adaptive);
@@ -3344,23 +3343,23 @@ TEST_CASE("cam: a tool's shape survives a save and reload", "[cam]") {
   const std::filesystem::path path =
       std::filesystem::temp_directory_path() / "designer_cam_toolshape.json";
   {
-    auto doc = BlockDoc();
-    cam::Setup& setup = doc->AddCamSetup();
+    cam::JobDocument job;
+    cam::Setup& setup = job.AddSetup();
     setup.name = "Job";
     setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 60.0)};
     cam::Operation op;
-    op.id = doc->AllocateId();
+    op.id = job.AllocateId();
     op.type = cam::OpType::EdgeRound;
     op.topZ = 20.0;
     op.bottomZ = 16.0;
     op.edgeSize = 2.5;
     setup.operations.push_back(op);
-    REQUIRE(DocumentIO::Save(*doc, path.string()).has_value());
+    REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
   }
-  auto loaded = DocumentIO::Load(path.string());
+  auto loaded = DocumentIO::LoadJob(path.string());
   REQUIRE(loaded.has_value());
-  REQUIRE((*loaded)->GetCamSetups().size() == 1);
-  const cam::Setup& setup = (*loaded)->GetCamSetups()[0];
+  REQUIRE((*loaded)->GetSetups().size() == 1);
+  const cam::Setup& setup = (*loaded)->GetSetups()[0];
   REQUIRE(setup.tools.size() == 1);
   // A V-bit that reloads as a flat mill is a chamfer that reloads as a
   // square step — the substitution this project refuses everywhere else.
@@ -3531,8 +3530,19 @@ TEST_CASE("cam probe: what the front_wall section does by depth",
   std::printf("features: %zu, bodies: %zu\n", (size_t)doc->FeatureCount(),
               doc->GetBodies().size());
 
+  // Since v73 the setups live in a JOB document, not in the part, so this
+  // probe needs to be pointed at one. Warn rather than iterate nothing: a
+  // diagnostic that silently examines an empty list is worse than one that
+  // says it has nothing to examine.
+  const char* jobEnv = std::getenv("DESIGNER_FRONT_WALL_JOB");
+  if (jobEnv == nullptr) {
+    WARN("set DESIGNER_FRONT_WALL_JOB to a job document to probe its setups");
+    return;
+  }
+  auto loadedJob = DocumentIO::LoadJob(jobEnv);
+  REQUIRE(loadedJob.has_value());
   const cam::Setup* setup = nullptr;
-  for (const cam::Setup& s : doc->GetCamSetups())
+  for (const cam::Setup& s : (*loadedJob)->GetSetups())
     if (s.name == "Back")
       setup = &s;
   REQUIRE(setup != nullptr);
@@ -3744,7 +3754,14 @@ TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
   // row.
   REQUIRE(doc->SetActiveConfiguration(0));
 
-  for (const cam::Setup& setup : doc->GetCamSetups()) {
+  const char* jobEnv = std::getenv("DESIGNER_FRONT_WALL_JOB");
+  if (jobEnv == nullptr) {
+    WARN("set DESIGNER_FRONT_WALL_JOB to a job document to post its setups");
+    return;
+  }
+  auto loadedJob = DocumentIO::LoadJob(jobEnv);
+  REQUIRE(loadedJob.has_value());
+  for (const cam::Setup& setup : (*loadedJob)->GetSetups()) {
     const std::vector<cam::Toolpath> paths =
         cam::GenerateAll(setup, doc->GetBodies());
     std::string gcode, error;

@@ -1,0 +1,13 @@
+{
+  "part": "v66-cam-tool-shape.json",
+  "cam_op_sides": [
+    "outside"
+  ],
+  "cam_op_types": [
+    "edge_round"
+  ],
+  "cam_tool_types": [
+    "vbit",
+    "ball"
+  ]
+}

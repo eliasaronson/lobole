@@ -10,6 +10,7 @@
 #include "render/StockRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h" // ActiveCamSetup, PostOpts
+#include "ui/JobActions.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -102,7 +103,7 @@ void DropToolInstance(AppState& state) {
 
 bool BeginCamPlayback(AppState& state) {
   state.camPlaybackRefusal.clear();
-  if (!state.document) {
+  if (!state.job) {
     state.camPlaybackRefusal = "A simulation needs a part. Switch to a part "
                                "tab.";
     return false;
@@ -129,7 +130,7 @@ bool BeginCamPlayback(AppState& state) {
   }
 
   glm::dvec3 lo(0.0), hi(0.0);
-  if (!cam::StockBounds(*setup, state.document->GetBodies(), lo, hi)) {
+  if (!cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
     state.camPlaybackRefusal =
         "This setup has no stock to cut — the model has no size.";
     return false;
@@ -225,8 +226,7 @@ void SyncCamPlayback(AppState& state) {
     state.camStockDrawnRevision = state.camStockSim.Revision();
     glm::dvec3 lo(0.0), hi(0.0);
     const double floorZ =
-        cam::StockBounds(*setup, state.document->GetBodies(), lo, hi) ? lo.z
-                                                                      : 0.0;
+        cam::StockBounds(*setup, ui::JobBodies(state), lo, hi) ? lo.z : 0.0;
     const cam::StockMesh mesh =
         cam::BuildStockMesh(state.camStockSim.Stock(), floorZ);
     std::vector<StockVertex> verts;

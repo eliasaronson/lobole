@@ -964,10 +964,17 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // an assembly tab hit exactly that).
   state.assembly = nullptr;
   state.drawing = nullptr;
+  state.job = nullptr;
   state.assemblyHistory = {};
   state.drawingHistory = {};
+  state.jobHistory = {};
   state.drawingRenders.clear();
   state.drawingRendersVersion = 0;
+  // The job's assembled bodies are keyed on document ids that this
+  // replacement is about to reuse, so a stale cache reads as a hit for an
+  // unrelated part -- the same trap ReleasePartRenderCache exists for.
+  state.jobBodies.clear();
+  state.jobBodiesKey = 0;
   state.solvedPartVersions.clear();
   // Phase V: a wholesale replacement (File > New, Open flat, checkpoint/history
   // restore) collapses the project to this single part, so ITS parameters
@@ -1026,9 +1033,11 @@ void StashActive(AppState& state) {
   slot.doc = std::move(state.document);
   slot.assembly = std::move(state.assembly);
   slot.drawing = std::move(state.drawing);
+  slot.job = std::move(state.job);
   slot.commands = std::move(state.commands);
   slot.history = std::move(state.assemblyHistory);
   slot.drawingHistory = std::move(state.drawingHistory);
+  slot.jobHistory = std::move(state.jobHistory);
   slot.drawingRenders = std::move(state.drawingRenders);
   state.drawingRenders.clear(); // moved-from: guarantee empty
   slot.drawingRendersVersion = state.drawingRendersVersion;
@@ -1044,9 +1053,11 @@ void ActivateSlot(AppState& state, size_t index) {
   state.document = std::move(slot.doc);
   state.assembly = std::move(slot.assembly);
   state.drawing = std::move(slot.drawing);
+  state.job = std::move(slot.job);
   state.commands = std::move(slot.commands);
   state.assemblyHistory = std::move(slot.history);
   state.drawingHistory = std::move(slot.drawingHistory);
+  state.jobHistory = std::move(slot.jobHistory);
   state.drawingRenders = std::move(slot.drawingRenders);
   slot.drawingRenders.clear();
   state.drawingRendersVersion = slot.drawingRendersVersion;
@@ -1139,6 +1150,7 @@ size_t AddPart(AppState& state, const std::string& name) {
   state.document->SetProjectParameters(&state.projectParameters);
   state.assembly = nullptr;
   state.drawing = nullptr;
+  state.job = nullptr;
   state.commands = std::make_unique<CommandStack>();
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -1165,6 +1177,7 @@ size_t AddAssembly(AppState& state, const std::string& name) {
   state.document = nullptr;
   state.assembly = std::make_unique<AssemblyDocument>();
   state.drawing = nullptr;
+  state.job = nullptr;
   state.commands = nullptr;
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -1191,6 +1204,7 @@ size_t AddDrawing(AppState& state, const std::string& name) {
   state.document = nullptr;
   state.assembly = nullptr;
   state.drawing = std::make_unique<DrawingDocument>();
+  state.job = nullptr;
   state.commands = nullptr;
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -1198,6 +1212,34 @@ size_t AddDrawing(AppState& state, const std::string& name) {
   slot.id = state.nextPartId++;
   slot.name = name;
   slot.kind = DocKind::Drawing;
+  state.parts.push_back(std::move(slot));
+  state.activePart = static_cast<int>(state.parts.size()) - 1;
+  // Which documents the project HAS lives in project.json, not in any
+  // document version — so without this the project reads clean with a brand
+  // new (still empty) tab in it, and closing loses the tab with no prompt.
+  state.projectMetaDirty = true;
+  ResetActiveTabUiState(state);
+  return state.parts.size() - 1;
+}
+
+size_t AddJob(AppState& state, const std::string& name) {
+  EnsureParts(state);
+  CancelPendingFeature(state); // before StashActive — see SetActivePart
+  StashActive(state);
+  // Create and activate the new job. Undo is a snapshot stack (the drawing
+  // pattern): a job is a parts list and a few setups, small enough that a
+  // full copy per edit beats generalizing the Document-only CommandStack.
+  state.document = nullptr;
+  state.assembly = nullptr;
+  state.drawing = nullptr;
+  state.job = std::make_unique<cam::JobDocument>();
+  state.commands = nullptr;
+  state.lastSavedVersion = 0;
+  state.solvedPartVersions.clear();
+  PartSlot slot;
+  slot.id = state.nextPartId++;
+  slot.name = name;
+  slot.kind = DocKind::Job;
   state.parts.push_back(std::move(slot));
   state.activePart = static_cast<int>(state.parts.size()) - 1;
   // Which documents the project HAS lives in project.json, not in any
@@ -1494,6 +1536,11 @@ AssemblyDocument* SlotAssembly(AppState& state, size_t i) {
 DrawingDocument* SlotDrawing(AppState& state, size_t i) {
   return static_cast<int>(i) == state.activePart ? state.drawing.get()
                                                  : state.parts[i].drawing.get();
+}
+// A job slot's document, active or stashed. Null for every other kind.
+cam::JobDocument* SlotJob(AppState& state, size_t i) {
+  return static_cast<int>(i) == state.activePart ? state.job.get()
+                                                 : state.parts[i].job.get();
 }
 } // namespace
 
@@ -1909,9 +1956,11 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
       const PartSlot& slot = state.parts[i];
       const char* sub = slot.kind == DocKind::Assembly  ? "assemblies/"
                         : slot.kind == DocKind::Drawing ? "drawings/"
+                        : slot.kind == DocKind::Job     ? "jobs/"
                                                         : "parts/";
       const char* type = slot.kind == DocKind::Assembly  ? "assembly"
                          : slot.kind == DocKind::Drawing ? "drawing"
+                         : slot.kind == DocKind::Job     ? "job"
                                                          : "part";
       const fs::path docDir = dir / sub / slot.name;
       fs::create_directories(docDir);
@@ -1922,6 +1971,9 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
         break;
       case DocKind::Drawing:
         r = DocumentIO::SaveDrawing(*SlotDrawing(state, i), docDir.string());
+        break;
+      case DocKind::Job:
+        r = DocumentIO::SaveJob(*SlotJob(state, i), docDir.string());
         break;
       case DocKind::Part:
         r = DocumentIO::Save(*SlotDoc(state, i), docDir.string());
@@ -2036,6 +2088,15 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
           return false;
         }
         slot.drawing = std::move(*r);
+      } else if (type == "job") {
+        slot.kind = DocKind::Job;
+        auto r = DocumentIO::LoadJob(dir);
+        if (!r) {
+          if (error)
+            *error = r.error();
+          return false;
+        }
+        slot.job = std::move(*r);
       } else {
         slot.kind = DocKind::Part;
         auto r = DocumentIO::Load(dir);
@@ -2240,6 +2301,8 @@ bool WriteSidecarAtomic(AppState& state, size_t slot, const fs::path& target,
     r = DocumentIO::SaveAssembly(*a, tmp.string());
   else if (DrawingDocument* dr = SlotDrawing(state, slot))
     r = DocumentIO::SaveDrawing(*dr, tmp.string());
+  else if (cam::JobDocument* j = SlotJob(state, slot))
+    r = DocumentIO::SaveJob(*j, tmp.string());
   else
     return false;
   if (!r) {
@@ -2263,6 +2326,7 @@ std::string SlotDir(const AppState& state, size_t i) {
   const PartSlot& slot = state.parts[i];
   const char* sub = slot.kind == DocKind::Assembly  ? "assemblies/"
                     : slot.kind == DocKind::Drawing ? "drawings/"
+                    : slot.kind == DocKind::Job     ? "jobs/"
                                                     : "parts/";
   return std::string(sub) + slot.name;
 }
@@ -2445,6 +2509,11 @@ bool RecoverProject(AppState& state, const std::string& path,
         if (!loaded)
           continue;
         (active ? state.drawing : slot.drawing) = std::move(*loaded);
+      } else if (folder == "jobs" && slot.kind == DocKind::Job) {
+        auto loaded = DocumentIO::LoadJob(file.string());
+        if (!loaded)
+          continue;
+        (active ? state.job : slot.job) = std::move(*loaded);
       } else {
         continue;
       }

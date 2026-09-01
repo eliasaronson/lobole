@@ -32,7 +32,7 @@ uint64_t Document::NextInstanceId() {
 // diff rather than as a duplicated tab quietly missing something.
 Document::Document(const Document& other)
     : m_assets(other.m_assets), m_parameters(other.m_parameters),
-      m_studies(other.m_studies), m_camSetups(other.m_camSetups),
+      m_studies(other.m_studies),
       // Solved results cost minutes and are not derivable from the feature
       // list, so they travel with the copy (re-stamped below).
       m_studyRuntime(other.m_studyRuntime),
@@ -364,45 +364,6 @@ fem::Study* Document::FindStudy(uint64_t id) {
       return &s;
   }
   return nullptr;
-}
-
-const cam::Setup* Document::FindCamSetup(uint64_t id) const {
-  for (const cam::Setup& s : m_camSetups)
-    if (s.id == id)
-      return &s;
-  return nullptr;
-}
-
-cam::Setup* Document::FindCamSetup(uint64_t id) {
-  for (cam::Setup& s : m_camSetups)
-    if (s.id == id)
-      return &s;
-  return nullptr;
-}
-
-cam::Setup& Document::AddCamSetup(const std::string& name) {
-  cam::Setup setup;
-  setup.id = m_nextId++;
-  setup.name =
-      name.empty() ? ("Setup " + std::to_string(m_camSetups.size() + 1)) : name;
-  // One tool by default, because a setup with no tools can produce nothing
-  // and the first thing anyone does is add a 6 mm end mill.
-  cam::Tool tool;
-  tool.number = 1;
-  tool.name = "6 mm flat";
-  setup.tools.push_back(tool);
-  m_camSetups.push_back(std::move(setup));
-  return m_camSetups.back();
-}
-
-bool Document::RemoveCamSetup(uint64_t id) {
-  for (auto it = m_camSetups.begin(); it != m_camSetups.end(); ++it) {
-    if (it->id == id) {
-      m_camSetups.erase(it);
-      return true;
-    }
-  }
-  return false;
 }
 
 fem::Study& Document::AddStudy(const std::string& name) {
