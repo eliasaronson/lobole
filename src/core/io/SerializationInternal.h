@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    68; // v68: cam operation `use_outline` (clear the face's outline,
+    69; // v69: the Fastener feature — a standard part built from a vendored
+        //      dimension table (docs/parts/plan.md), carrying only what the
+        //      table cannot give it: which standard, which size, how long
+        // (v68: cam operation `use_outline` (clear the face's outline,
         //      passing over its openings rather than around them);
         //      the cam work origin is DERIVED from a named corner
         // (`origin_at`) and the post subtracts it; fixed-size stock

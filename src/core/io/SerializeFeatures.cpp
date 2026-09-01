@@ -8,6 +8,7 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
@@ -653,6 +654,14 @@ json FeatureToJson(const Feature& feature) {
       j["radius_expr"] = cyl->radiusExpr;
     if (!cyl->heightExpr.empty())
       j["height_expr"] = cyl->heightExpr;
+  } else if (auto* fastener = dynamic_cast<const FastenerFeature*>(&feature)) {
+    j["standard"] = fastener->standard;
+    j["size"] = fastener->size;
+    j["length"] = fastener->length;
+    if (!fastener->lengthExpr.empty())
+      j["length_expr"] = fastener->lengthExpr;
+    if (fastener->drive != "hex") // omit the default
+      j["drive"] = fastener->drive;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
@@ -912,6 +921,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Cylinder", 1,
      "center [x,y,z] (base), direction [x,y,z], radius (+_expr), "
      "height (+_expr)"},
+    {"Fastener", 69,
+     "standard (vendored table stem, e.g. iso4762def), size (a key in it, "
+     "e.g. M6), length (+_expr) mm under the head, drive?: hex. Every other "
+     "dimension is READ from the table — an unstocked size is refused naming "
+     "the nearest that are stocked (docs/parts/plan.md)"},
     {"Import", 1, "path (STEP/STL/BREP file)"},
     {"DatumPlane", 1,
      "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
@@ -1260,6 +1274,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     cyl->radiusExpr = j.value("radius_expr", std::string{});
     cyl->heightExpr = j.value("height_expr", std::string{});
     out = std::move(cyl);
+  } else if (type == "Fastener") {
+    auto fastener = std::make_unique<FastenerFeature>(
+        name, j.at("standard").get<std::string>(),
+        j.at("size").get<std::string>(), j.at("length").get<double>());
+    fastener->lengthExpr = j.value("length_expr", std::string{});
+    fastener->drive = j.value("drive", std::string("hex"));
+    out = std::move(fastener);
   } else if (type == "Import") {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());

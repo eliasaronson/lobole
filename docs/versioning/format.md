@@ -137,6 +137,7 @@ record of bumps and the corpus as a sample of them, not a mirror.
 | 66 | (R13/R15) | Drawing `notes` (text + optional leader, per sheet); CAM tool `tool_type`/`tip_angle` and the `edge_round` operation (`edge_size`) |
 | 67 | (S1–S5) | The CAM setup's fixture `frame` (how the part is clamped) and `has_rotary_axis` — split out of `rotation_a`, which had been answering both questions (docs/cam/setup-frame.md) |
 | 68 | (W1–W6) | The CAM work origin is DERIVED from a named corner (`origin_at`) and the post SUBTRACTS it, so a file's zero is where the operator touches off; fixed-size stock (`stock.mode`/`size`/`place`) for sheet goods (docs/cam/stock-and-origin.md) |
+| 69 | (F1 p2) | The `Fastener` feature: a standard part built from a vendored dimension table rather than typed numbers. It carries only what the table cannot give it — `standard`, `size`, `length` — and every other dimension is READ, so an unstocked size is refused naming the nearest that are (docs/parts/plan.md) |
 
 ## The directory format (F3, default for new saves)
 

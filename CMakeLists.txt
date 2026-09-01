@@ -293,6 +293,7 @@ set(core_sources
     src/core/sketch/SketchInference.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/features/ExtrudeFeature.cpp
+    src/core/features/FastenerFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
     src/core/BodyMode.cpp
     src/core/features/RevolveFeature.cpp

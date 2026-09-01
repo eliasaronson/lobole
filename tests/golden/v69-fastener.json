@@ -1,0 +1,14 @@
+{
+  "features": [
+    {
+      "id": 1,
+      "length": 20.0,
+      "name": "Screw",
+      "size": "M6",
+      "standard": "iso4762def",
+      "type": "Fastener"
+    }
+  ],
+  "format": "designer-document",
+  "version": 69
+}

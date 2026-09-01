@@ -47,6 +47,17 @@ std::filesystem::path DataDir() {
   if (std::filesystem::is_directory(development))
     return development;
 
+  // One level up, for a binary that lives UNDER the staging root rather than
+  // in it: build/tests/designer_tests has to find build/assets. Added when a
+  // golden document carrying a Fastener regenerated to zero bodies in the test
+  // binary and to a screw in the app — the data was staged correctly and only
+  // the finder was short. An installed /usr/bin/designer looks for /usr/assets
+  // here, does not find it, and falls through to share/designer as before.
+  const std::filesystem::path parent =
+      (executable / ".." / "assets").lexically_normal();
+  if (std::filesystem::is_directory(parent))
+    return parent;
+
   return (executable / ".." / "share" / "designer").lexically_normal();
 }
 

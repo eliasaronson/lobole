@@ -97,6 +97,14 @@ LengthRange(const std::string& stem, const std::string& size,
                                                double required,
                                                std::string* error);
 
+// The nominal diameter a metric size names: 6 from "M6", 1.6 from "M1.6".
+// nullopt for anything that is not a letter prefix and a number, which is what
+// a drive size ("T20") and a typo both look like.
+//
+// This is the one dimension NOT in the tables: they give head and socket sizes
+// and take the thread diameter as read, because it is the size's own name.
+[[nodiscard]] std::optional<double> NominalDiameter(const std::string& size);
+
 // Test seam: point the loader at a directory other than the installed one.
 // Empty restores the default (RuntimePaths::PartsDir()). Clears the cache.
 void SetDataDirForTesting(const std::string& dir);

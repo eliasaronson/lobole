@@ -3,9 +3,13 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "common/RuntimePaths.h"
+#include "core/Document.h"
+#include "core/features/FastenerFeature.h"
+#include "core/io/Serialization.h"
 #include "core/parts/FastenerTable.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -248,4 +252,127 @@ TEST_CASE("parts: the build stages the tables where the app looks", "[parts]") {
     INFO(standard);
     CHECK(fs::exists(staged / (std::string(standard) + ".csv")));
   }
+}
+
+// --- the generated body ------------------------------------------------------
+
+TEST_CASE("parts: a generated screw measures what the standard says",
+          "[parts]") {
+  // The check that matters, and the reason the tables are vendored at all: the
+  // body is compared against the ROW it was built from, so this is a test
+  // against ISO 4762 rather than against itself. Every number below is read
+  // out of the table at runtime — hard-coding them here would test that the
+  // generator agrees with a copy of the data, which is a weaker claim.
+  const SourceTables tables;
+  std::string error;
+  const auto dims = parts::Dimensions("iso4762def", "M6", &error);
+  INFO(error);
+  REQUIRE(dims.has_value());
+  const double dk = dims->at("dk_max"), k = dims->at("k");
+  const double s = dims->at("s_mean"), t = dims->at("t");
+  const double length = 20.0, nominal = 6.0;
+
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<FastenerFeature>("Screw", "iso4762def", "M6", length));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& screw = doc.GetBodies()[0];
+  REQUIRE(screw.shape.IsValid());
+
+  // The head is dk across and k tall, and the shank runs `length` from under
+  // it: a body that is the right volume but the wrong shape would pass a mass
+  // check and fail this.
+  glm::vec3 lo(0.0f), hi(0.0f);
+  screw.shape.GetBoundingBox(lo, hi);
+  CHECK_THAT(hi.x - lo.x, WithinAbs(dk, 1e-3));
+  CHECK_THAT(hi.y - lo.y, WithinAbs(dk, 1e-3));
+  CHECK_THAT(hi.z - lo.z, WithinAbs(length + k, 1e-3));
+  // Built head-down: the rim of the head is z = 0, which is the face that
+  // lands on a picked rim in phase 3.
+  CHECK_THAT(lo.z, WithinAbs(-k, 1e-3));
+
+  // And the volume, analytically: a head cylinder plus a shank cylinder minus
+  // a hexagonal socket of `t` deep. A half-scale profile, a radius used as a
+  // diameter or a socket cut to the wrong depth each move this.
+  constexpr double kPi = 3.14159265358979323846;
+  const double head = kPi * (dk / 2) * (dk / 2) * k;
+  const double shank = kPi * (nominal / 2) * (nominal / 2) * length;
+  const double socket = s * s * std::sqrt(3.0) / 2.0 * t; // regular hexagon
+  CHECK_THAT(screw.shape.Volume(), WithinAbs(head + shank - socket, 0.5));
+
+  // The designation is what the BOM and a purchase order say.
+  const auto* feature = dynamic_cast<const FastenerFeature*>(doc.GetFeature(0));
+  REQUIRE(feature != nullptr);
+  CHECK(feature->Designation() == "ISO 4762 M6x20");
+}
+
+TEST_CASE("parts: a screw the standard does not stock builds nothing, loudly",
+          "[parts]") {
+  // The refusal reaching a feature. A fastener that quietly came back empty
+  // would leave an assembly a screw short with nothing to read, which is the
+  // shape of every bug this project's conventions exist to prevent.
+  const SourceTables tables;
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<FastenerFeature>("Screw", "iso4762def", "M7", 20.0));
+  CHECK(doc.GetBodies().empty());
+  REQUIRE(doc.FeatureCount() == 1);
+  INFO(doc.GetFeature(0)->GetError());
+  CHECK_THAT(doc.GetFeature(0)->GetError(),
+             ContainsSubstring("nearest stocked are M6 and M8"));
+
+  // A length nobody would make, and a drive this build does not generate:
+  // each refuses by name rather than producing something plausible.
+  Document zero;
+  zero.AddFeature(
+      std::make_unique<FastenerFeature>("Screw", "iso4762def", "M6", 0.0));
+  CHECK(zero.GetBodies().empty());
+  CHECK_THAT(zero.GetFeature(0)->GetError(), ContainsSubstring("needs a "
+                                                               "length"));
+
+  Document drive;
+  auto phillips =
+      std::make_unique<FastenerFeature>("Screw", "iso4762def", "M6", 20.0);
+  phillips->drive = "ph2";
+  drive.AddFeature(std::move(phillips));
+  CHECK(drive.GetBodies().empty());
+  INFO(drive.GetFeature(0)->GetError());
+  CHECK_THAT(drive.GetFeature(0)->GetError(),
+             ContainsSubstring("is not generated yet"));
+
+  // A standard that describes something else entirely: ISO 7089 is a washer
+  // and has no head or socket to build a screw from.
+  Document washer;
+  washer.AddFeature(
+      std::make_unique<FastenerFeature>("Screw", "iso7089def", "M6", 20.0));
+  CHECK(washer.GetBodies().empty());
+  INFO(washer.GetFeature(0)->GetError());
+  CHECK_THAT(washer.GetFeature(0)->GetError(),
+             ContainsSubstring("does not describe one"));
+}
+
+TEST_CASE("parts: a fastener round-trips through the document format",
+          "[parts][serialization]") {
+  const SourceTables tables;
+  Document doc;
+  auto screw =
+      std::make_unique<FastenerFeature>("Screw", "iso4762def", "M8", 30.0);
+  screw->lengthExpr = "plate * 2";
+  doc.AddFeature(std::move(screw));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const double volume = doc.GetBodies()[0].shape.Volume();
+
+  const nlohmann::json j = DocumentIO::FeatureToJson(*doc.GetFeature(0));
+  CHECK(j.at("type") == "Fastener");
+  CHECK(j.at("standard") == "iso4762def");
+  CHECK(j.at("size") == "M8");
+  CHECK(j.at("length_expr") == "plate * 2");
+  // The default drive is omitted rather than written, like every other
+  // defaulted field in this format.
+  CHECK_FALSE(j.contains("drive"));
+
+  Document reloaded;
+  reloaded.AddFeature(DocumentIO::FeatureFromJson(j));
+  REQUIRE(reloaded.GetBodies().size() == 1);
+  CHECK_THAT(reloaded.GetBodies()[0].shape.Volume(), WithinAbs(volume, 1e-6));
 }

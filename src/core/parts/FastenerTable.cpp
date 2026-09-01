@@ -375,6 +375,10 @@ std::optional<double> SnapLength(const std::string& stem,
   return std::nullopt;
 }
 
+std::optional<double> NominalDiameter(const std::string& size) {
+  return KeyNumber(size);
+}
+
 void SetDataDirForTesting(const std::string& dir) {
   std::lock_guard<std::mutex> lock(g_mutex);
   g_dataDirOverride = dir;
