@@ -10,6 +10,7 @@
 #include "core/drawing/DrawingRender.h"
 #include "core/drawing/DrawingValidate.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/FastenerFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Format.h"
@@ -254,6 +255,65 @@ ProjRef EdgeRef(uint64_t fid, const std::string& name) {
 }
 
 } // namespace
+
+TEST_CASE("A fastener callout names the standard part it points at",
+          "[drawing][dimension][parts]") {
+  // Phase 5 of docs/parts/plan.md. The text is not composed here and not
+  // typed by anyone: it is the occurrence's own Fastener feature's
+  // designation, which is the same string the BOM and a purchase order carry.
+  // A drawing that says "M6x50" while the BOM says "M6x45" is the exact
+  // divergence a derived callout exists to prevent.
+  drawing::SheetView view = DimTestView();
+  view.curves[2].sourceId = 42; // the circle belongs to occurrence 42
+
+  Document screwDoc;
+  screwDoc.AddFeature(
+      std::make_unique<FastenerFeature>("Screw", "iso4762", "M6", 50.0));
+  Document plateDoc;
+  plateDoc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0.0f), 10.0, 10.0, 10.0));
+
+  drawing::DimContext ctx;
+  ctx.occurrenceDoc = [&](uint64_t id) -> const Document* {
+    return id == 42 ? &screwDoc : &plateDoc;
+  };
+
+  ProjRef ref = EdgeRef(2, "hole");
+  ref.occurrenceId = 42;
+  auto rd = drawing::ResolveDim(MakeDim(DrawingDimKind::FastenerCallout, {ref}),
+                                view, ctx);
+  REQUIRE(rd.resolved);
+  CHECK(rd.leader);
+  CHECK(rd.text == "ISO 4762 M6x50");
+  // Anchored on the picked edge, whatever it is. A screw is a circle from
+  // above and two lines from the side, so a callout that only worked on a
+  // circle could not be placed on the section anybody actually draws.
+  CHECK(rd.center.x == Catch::Approx(10.0));
+
+  // Everything that could make it name the WRONG part leaves it dangling
+  // instead, which is the hole callout's rule: a drawing with a visible gap
+  // beats one that confidently labels a screw that is not there.
+  SECTION("an occurrence that is not a bought fastener") {
+    ProjRef plate = EdgeRef(2, "hole");
+    plate.occurrenceId = 7; // resolves to the plate
+    view.curves[2].sourceId = 7;
+    CHECK_FALSE(
+        drawing::ResolveDim(MakeDim(DrawingDimKind::FastenerCallout, {plate}),
+                            view, ctx)
+            .resolved);
+  }
+  SECTION("a PART view, which has no occurrence to name") {
+    CHECK_FALSE(drawing::ResolveDim(MakeDim(DrawingDimKind::FastenerCallout,
+                                            {EdgeRef(2, "hole")}),
+                                    view, ctx)
+                    .resolved);
+  }
+  SECTION("no resolver at all") {
+    CHECK_FALSE(drawing::ResolveDim(
+                    MakeDim(DrawingDimKind::FastenerCallout, {ref}), view)
+                    .resolved);
+  }
+}
 
 TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
   const drawing::SheetView view = DimTestView();

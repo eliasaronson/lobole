@@ -472,6 +472,19 @@ ThreadForClearance(double diameter, std::string* error) {
   return std::nullopt;
 }
 
+std::optional<double> WidestClearance(const std::string& size,
+                                      std::string* error) {
+  const auto fits = Dimensions("clearance_hole_sizes", size, error);
+  if (!fits)
+    return std::nullopt;
+  std::optional<double> widest;
+  for (const auto& [fit, value] : *fits)
+    widest = widest ? std::max(*widest, value) : value;
+  if (!widest && error)
+    *error = "the clearance table has no fit for " + size;
+  return widest;
+}
+
 std::optional<double> NominalDiameter(const std::string& size) {
   return KeyNumber(size);
 }

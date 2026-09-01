@@ -1,10 +1,13 @@
 # Standard parts — plan (F1)
 
-> Status: **phases 1-4 SHIPPED 2026-09-01** — the tables and their refusals,
-> the `Fastener` feature (format v69) placed as an occurrence, the derivation
-> (pick a hole's rim and the size and length follow), and seven standards
-> covering the whole joint. Phase 5 (polish) planned. Written 2026-09-01 from
-> a survey of the open
+> Status: **COMPLETE — phases 1-5 SHIPPED 2026-09-01.** The tables and their
+> refusals; the `Fastener` feature (v69) placed as an occurrence; the
+> derivation — pick a hole's rim and the size and length follow; seven
+> standards covering the whole joint (v70); and the polish: the BOM tells
+> bought from made, `check_fasteners` reports a stack that changed under a
+> screw, and a drawing callout names the part.
+>
+> Written 2026-09-01 from a survey of the open
 > libraries, both of which were cloned to `~/Documents/CAD/parts/` and read
 > rather than judged from their websites. The survey, the source comparison and
 > the interface argument live in
@@ -432,8 +435,47 @@ regen's input surface for.
    blind hole, a washer standard that is not a washer, and Phillips, whose
    vendored table is still unused because a cruciform drawn as a hexagon is
    the substitution this whole document is about.
-5. **Polish.** BOM designation column, the drawing callout, and whatever the
-   first real assembly asks for.
+5. **Polish.** — **SHIPPED.** Format v70 (golden + history row): the BOM knows
+   a bought part from a made one, `check_fasteners` closes the staleness gate,
+   and `fastener_callout` puts the designation on a drawing.
+
+   - **Bought vs made, derived.** A `BomRow` carries `standard` and
+     `designation` when the part's whole feature list is one Fastener — which
+     stays right when the tab is renamed, where a stored flag would not. They
+     go in the CSV, where a purchaser reads them, and in the row tooltip.
+     There is deliberately **no sixth column**: the panel already clips at
+     five in a 210 px dock (three parts all reading "Gang" is what drove the
+     adaptive layout), and a fastener's part name IS its designation, so the
+     column would repeat column one while narrowing every other cell.
+   - **The staleness gate, with nothing stored.** The plan expected to
+     "derive once at placement, store the value". It does not need to: a
+     placed fastener's position and orientation ARE its rim and its axis, so
+     `check_fasteners` re-traverses from scratch and compares. That also
+     checks a fastener nobody derived, which a stored record could not, and it
+     finds the washers and nut the same way the fit did — they are occurrences
+     on the same axis.
+   - **`stack.back()` is not the last thing on the axis.** `TraverseAxis`
+     orders by where each solid is ENTERED, which stops matching where it is
+     LEFT as soon as anything overlaps: a plate moved down past a nut is
+     entered after the washer and left after the nut. Reading the end of the
+     ordered list said a stale screw still reached — the exact case the check
+     exists for. Both the check and the fit now take the maximum exit.
+   - **A placed fastener does not know its hole.** It knows its size, so the
+     probe is offset past the LOOSEST clearance that size is drilled to. A
+     ray at the thread radius runs down the inside of the bore and finds no
+     material at all, which is how this was found; a hole wider than "Loose"
+     makes the check cry wolf, which is the right way round.
+   - **`length` was required by the loader**, so a nut and a washer were
+     unreachable through `add_feature` while the feature itself built them
+     perfectly well. Whether a length means anything is the standard's
+     business; `Execute` still refuses a screw without one.
+   - **The drawing callout is a leader, not a balloon.** `fastener_callout`
+     names the occurrence's own designation — the same string the BOM carries,
+     so a drawing cannot say M6x50 while the parts list says M6x45. Anchored
+     on whatever edge is picked rather than on a circle, because a screw is a
+     circle from above and two lines on the section anybody actually draws.
+     Balloons and a parts-list block on the sheet are the other half of
+     assembly drafting and are NOT this: they are a workstream, not polish.
 
 Phases 1 and 2 are the ones that decide whether this is right. If part-per-spec
 turns out to be wrong, it is cheap to discover with one fastener type and
@@ -453,8 +495,13 @@ expensive to discover with twenty.
   `strict_inputs_smoke`).
 - **BOM aggregation**: eight identical screws are one line with quantity 8.
 - **Staleness**: a fastener whose stack has changed reports it rather than
-  silently keeping its old length.
-- Format bump + golden + the format.md history row, per policy.
+  silently keeping its old length — `check_fasteners`, gated in
+  `test_actions.cpp` by moving a plate out from under a placed joint.
+- Format bump + golden + the format.md history row, per policy. v69 for the
+  feature, v70 for the seven standards and the callout. The corpus holds no
+  drawing documents, so the new dim kind is gated by `test_drawing.cpp`
+  instead of by a golden — said here rather than left as a gap someone has to
+  rediscover.
 
 ## Out of scope
 

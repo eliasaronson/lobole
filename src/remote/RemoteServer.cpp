@@ -758,8 +758,8 @@ static const std::set<std::string> kNoPartDoc = {
     "add_drawing_note", "remove_drawing_note", "list_drawing_notes",
     "new_project", "save_project", "open_project", "add_occurrence",
     // A fastener is placed in an assembly, where `doc` is null by definition.
-    "add_fastener", "fit_fastener", "remove_occurrence", "list_occurrences",
-    "set_occurrence_transform", "set_occurrence_visible",
+    "add_fastener", "fit_fastener", "check_fasteners", "remove_occurrence",
+    "list_occurrences", "set_occurrence_transform", "set_occurrence_visible",
     "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
     "remove_mate", "list_mates", "select_mate", "select_occurrence",
     "set_occurrence_configuration", "solve_assembly", "bom", "export_bom",

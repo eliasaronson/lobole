@@ -2,6 +2,7 @@
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
+#include "core/Document.h"
 #include "core/ElementHistory.h"
 #include "core/parts/FastenerProfile.h"
 #include "core/parts/FastenerTable.h"
@@ -110,6 +111,12 @@ CADShape TorxPrism(double A, double B, double Re, double base, double height) {
 }
 
 } // namespace
+
+const FastenerFeature* SoleFastenerOf(const Document* doc) {
+  if (doc == nullptr || doc->FeatureCount() != 1)
+    return nullptr;
+  return dynamic_cast<const FastenerFeature*>(doc->GetFeatures()[0].get());
+}
 
 FastenerFeature::FastenerFeature(const std::string& name, std::string standard,
                                  std::string size, double length)

@@ -103,12 +103,20 @@ def main():
         expect(out["rows"] == 2, f"export row count: {out}")
         lines = open(csv_path).read().strip().splitlines()
         expect(lines[0] ==
-               "part,quantity,material,unit_volume_mm3,unit_mass_g,total_mass_g",
+               "part,quantity,standard,designation,material,unit_volume_mm3,"
+               "unit_mass_g,total_mass_g",
                f"csv header: {lines[0]}")
         expect(len(lines) == 4, f"2 rows + header + total: {lines}")
         expect(lines[-1].startswith("total,"), f"total row: {lines[-1]}")
+        # Every field is present on the total row too, so a spreadsheet reads
+        # the last cell as the total rather than shifting it under a column
+        # that was added since.
+        expect(lines[-1].count(",") == lines[0].count(","),
+               f"total row field count: {lines[-1]}")
         pin_line = [l for l in lines if l.startswith("pin,")][0]
-        expect(",2,aluminum," in pin_line, f"pin CSV row: {pin_line}")
+        # A part somebody modelled leaves standard and designation EMPTY —
+        # which is what a purchaser filters on to split bought from made.
+        expect(",2,,,aluminum," in pin_line, f"pin CSV row: {pin_line}")
 
         print("bom_smoke: OK")
     finally:

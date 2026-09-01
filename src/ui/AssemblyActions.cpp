@@ -183,6 +183,34 @@ bool AssemblyPartsStale(AppState& state) {
   return false;
 }
 
+namespace {
+// How far along the axis the LAST material is — the maximum exit, not the
+// last segment's.
+//
+// `TraverseAxis` orders by where each solid is entered, which is not the same
+// order as where they are left once anything overlaps: a plate moved down past
+// a nut is entered after the washer and left after the nut. Reading the end of
+// the ordered list said a stale screw still reached, which is precisely the
+// case the check exists for.
+double LastExit(const std::vector<parts::StackSegment>& stack) {
+  double out = 0.0;
+  for (const parts::StackSegment& seg : stack)
+    out = std::max(out, seg.exit);
+  return out;
+}
+
+// Millimetres as a person writes them: "12 mm", "3.5 mm" — not the six
+// decimal places std::to_string gives, which makes a refusal read like a
+// stack trace.
+std::string Mm(double v) {
+  std::ostringstream out;
+  out.precision(4);
+  out << v << " mm";
+  return out.str();
+}
+
+} // namespace
+
 BomTable ComputeBom(AppState& state) {
   BomTable table;
   if (!state.assembly)
@@ -210,6 +238,10 @@ BomTable ComputeBom(AppState& state) {
       if (slot.kind == DocKind::Part && slot.id == inst.partId)
         fresh.partName = slot.name;
     const Document* part = PartDocById(state, inst.partId);
+    if (const FastenerFeature* screw = SoleFastenerOf(part)) {
+      fresh.standard = screw->standard;
+      fresh.designation = screw->Designation();
+    }
     if (!part) {
       fresh.partName = "(missing part)"; // dangling reference — mass unknown
       table.warnings.push_back("'" + inst.path +
@@ -246,6 +278,101 @@ BomTable ComputeBom(AppState& state) {
   return table;
 }
 
+std::vector<FastenerCheck> CheckFasteners(AppState& state) {
+  std::vector<FastenerCheck> out;
+  if (!state.assembly)
+    return out;
+  const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
+
+  // Every body once, tagged with the instance it came from, so a fastener can
+  // be left out of its OWN traversal without leaving out its twin.
+  std::vector<parts::PlacedBody> all;
+  std::vector<size_t> owner;
+  for (size_t i = 0; i < flat.size(); i++) {
+    if (flat[i].part == nullptr || !flat[i].visible)
+      continue;
+    for (const Body& body : flat[i].part->GetBodies()) {
+      parts::PlacedBody pb;
+      pb.body = &body;
+      pb.world = flat[i].world;
+      pb.part = flat[i].path.empty() ? body.name : flat[i].path;
+      pb.partId = flat[i].partId;
+      all.push_back(pb);
+      owner.push_back(i);
+    }
+  }
+
+  for (size_t i = 0; i < flat.size(); i++) {
+    const FastenerFeature* screw = SoleFastenerOf(flat[i].part);
+    if (screw == nullptr || !flat[i].visible)
+      continue;
+    const parts::Profile* profile = parts::ProfileFor(screw->standard);
+    if (profile == nullptr || profile->kind != parts::Kind::Screw)
+      continue; // a nut or a washer spans nothing; the screw is the claim
+    const std::optional<double> nominal = parts::NominalDiameter(screw->size);
+    if (!nominal)
+      continue;
+    // Probed past the LOOSEST hole this size is drilled to, not past the
+    // thread: a placed fastener knows its size and its axis but not the bore
+    // it went through, and a ray offset by the thread radius runs down the
+    // inside of the clearance and finds nothing. A hole wider than "Loose"
+    // would make this cry wolf, which is the right way round for a check.
+    const std::optional<double> bore =
+        parts::WidestClearance(screw->size, nullptr);
+    const double probe = bore ? *bore * 0.5 : *nominal * 0.5;
+
+    // Its own placement IS the derivation: the bearing face is the frame's
+    // z = 0 and the shank runs +Z, so the rim and the axis come back out of
+    // the matrix with nothing stored.
+    const glm::vec3 origin(flat[i].world * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    const glm::vec3 axis = glm::normalize(
+        glm::vec3(flat[i].world * glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)));
+
+    std::vector<parts::PlacedBody> others;
+    for (size_t b = 0; b < all.size(); b++)
+      if (owner[b] != i)
+        others.push_back(all[b]);
+
+    FastenerCheck finding;
+    finding.occurrence = flat[i].rootOccurrenceId;
+    finding.part = screw->Designation();
+
+    const double reach = 10000.0;
+    const std::vector<parts::StackSegment> stack = parts::TraverseAxis(
+        others, glm::dvec3(origin), glm::dvec3(axis), probe, reach);
+    if (stack.empty()) {
+      finding.why = "spans nothing — there is no material on its axis, so it "
+                    "is holding the two halves of the air together";
+      out.push_back(finding);
+      continue;
+    }
+    // Everything the shank has to reach through, WASHERS AND NUT INCLUDED:
+    // they are occurrences on the same axis, so re-traversing finds them the
+    // same way it found them when the length was derived.
+    const double grip = LastExit(stack);
+    if (screw->length < grip - 1e-3) {
+      finding.why = "is " + Mm(grip - screw->length) +
+                    " too short: its stack is now " + Mm(grip) + " and it is " +
+                    Mm(screw->length) +
+                    " under the head. Re-fit it, or re-derive from the rim.";
+      out.push_back(finding);
+      continue;
+    }
+    // And bottoming out, which the length alone cannot show: a blind hole is
+    // whatever stops the ON-axis ray, and a screw longer than that is jacking
+    // the joint apart rather than clamping it.
+    const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
+        others, glm::dvec3(origin), glm::dvec3(axis), 0.0, reach);
+    if (!onAxis.empty() && screw->length > onAxis.front().enter + 1e-3) {
+      finding.why = "bottoms out: the hole is " + Mm(onAxis.front().enter) +
+                    " deep and the screw is " + Mm(screw->length) +
+                    " long, so it lands on the floor and clamps nothing.";
+      out.push_back(finding);
+    }
+  }
+  return out;
+}
+
 std::string BomToCsv(const BomTable& bom) {
   auto field = [](const std::string& s) {
     if (s.find_first_of(",\"\n") == std::string::npos)
@@ -258,8 +385,11 @@ std::string BomToCsv(const BomTable& bom) {
     }
     return quoted + "\"";
   };
-  std::string csv =
-      "part,quantity,material,unit_volume_mm3,unit_mass_g,total_mass_g\n";
+  // `standard` and `designation` are the two columns a purchase order needs
+  // and the panel has no room for: blank on a part somebody made, filled on
+  // a bought one, so a filter on either splits the list in two.
+  std::string csv = "part,quantity,standard,designation,material,"
+                    "unit_volume_mm3,unit_mass_g,total_mass_g\n";
   char buf[64];
   auto num = [&buf](double v) {
     snprintf(buf, sizeof buf, "%.6g", v);
@@ -267,6 +397,7 @@ std::string BomToCsv(const BomTable& bom) {
   };
   for (const BomRow& r : bom.rows) {
     csv += field(r.partName) + "," + std::to_string(r.quantity) + "," +
+           field(r.standard) + "," + field(r.designation) + "," +
            field(r.material) + "," + num(r.unitVolume) + ",";
     if (r.massKnown)
       csv += num(r.unitMassG) + "," + num(r.unitMassG * r.quantity);
@@ -274,7 +405,7 @@ std::string BomToCsv(const BomTable& bom) {
       csv += ",";
     csv += "\n";
   }
-  csv += "total,,,,,";
+  csv += "total,,,,,,,";
   if (bom.massKnown)
     csv += num(bom.totalMassG);
   csv += "\n";
@@ -1814,18 +1945,6 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
 }
 
 namespace {
-// Millimetres as a person writes them: "12 mm", "3.5 mm" — not the six
-// decimal places std::to_string gives, which makes a refusal read like a
-// stack trace.
-std::string Mm(double v) {
-  std::ostringstream out;
-  out.precision(4);
-  out << v << " mm";
-  return out.str();
-}
-} // namespace
-
-namespace {
 // +Z (a fastener's own reach direction) rotated onto `to`.
 //
 // Written out rather than pulled from glm's experimental quaternion header,
@@ -2038,7 +2157,7 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
     // "Enough" is the nut's own height, which is the shortest length at which
     // every one of its threads is engaged; a nut hanging off the last two is
     // the failure this rule exists to prevent.
-    fit.grip = underHead + stack.back().exit + underNut + nutHeight;
+    fit.grip = underHead + LastExit(stack) + underNut + nutHeight;
     length = parts::SnapLength(request.standard, fit.size, fit.grip, &why);
   } else {
     const double blocked = onAxis.front().enter;
@@ -2110,7 +2229,7 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
   const glm::vec3 into = -axis;          // down the hole
   const glm::quat down = AlignZTo(into); // head end: body points back out
   const glm::quat up = AlignZTo(axis); // far end: body points out the far side
-  const glm::vec3 exit = centre + into * static_cast<float>(stack.back().exit);
+  const glm::vec3 exit = centre + into * static_cast<float>(LastExit(stack));
 
   const auto place = [&](const std::string& standard, double partLength,
                          const glm::vec3& at,

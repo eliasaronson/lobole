@@ -1,6 +1,7 @@
 #include "core/drawing/DrawingDimension.h"
 
 #include "core/drawing/DrawingCallout.h"
+#include "core/features/FastenerFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
 
@@ -287,6 +288,37 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
                                                    : glm::dvec2(0.7071, 0.7071);
     rd.rim = c + dir * rad;
     rd.labelPos = rd.rim + off;
+    rd.resolved = true;
+    break;
+  }
+  case DrawingDimKind::FastenerCallout: {
+    // The one ref names an occurrence, and the occurrence's own document says
+    // what it is: a part whose whole feature list is one Fastener carries its
+    // designation ("ISO 4762 M6x50"), which is exactly what belongs on the
+    // leader. No occurrence (a PART view), no resolver, or a part that is not
+    // a bought fastener -> dangling, never a guessed label. That is the same
+    // rule the hole callout follows: a drawing that quietly labels the wrong
+    // screw is worse than one with an obvious gap in it.
+    if (dim.refs.empty() || !ctx.occurrenceDoc)
+      return rd;
+    if (dim.refs[0].occurrenceId == 0)
+      return rd;
+    const FastenerFeature* screw =
+        SoleFastenerOf(ctx.occurrenceDoc(dim.refs[0].occurrenceId));
+    if (screw == nullptr)
+      return rd;
+    glm::dvec2 anchor;
+    if (!RefPoint(view, dim.refs[0], anchor))
+      return rd;
+    // Anchored on whatever edge was picked rather than on a circle: a screw
+    // is a circle from above and two lines from the side, and a callout that
+    // only worked in a top view would be a callout nobody could place on the
+    // section they actually drew.
+    rd.leader = true;
+    rd.center = anchor;
+    rd.rim = anchor;
+    rd.labelPos = anchor + off;
+    rd.text = screw->Designation();
     rd.resolved = true;
     break;
   }

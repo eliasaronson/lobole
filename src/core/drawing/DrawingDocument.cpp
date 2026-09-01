@@ -238,6 +238,8 @@ const char* DrawingDimKindToString(DrawingDimKind k) {
     return "hole_callout";
   case DrawingDimKind::PatternCallout:
     return "pattern_callout";
+  case DrawingDimKind::FastenerCallout:
+    return "fastener_callout";
   }
   return "distance";
 }
@@ -259,12 +261,15 @@ bool DrawingDimKindFromString(const std::string& s, DrawingDimKind& out) {
     out = DrawingDimKind::HoleCallout;
   else if (s == "pattern_callout") // v53
     out = DrawingDimKind::PatternCallout;
+  else if (s == "fastener_callout") // v70
+    out = DrawingDimKind::FastenerCallout;
   else
     return false;
   return true;
 }
 
 std::vector<const char*> DrawingDimKindNames() {
-  return {"distance", "distance_x", "distance_y",   "radius",
-          "diameter", "angle",      "hole_callout", "pattern_callout"};
+  return {"distance",     "distance_x",      "distance_y",
+          "radius",       "diameter",        "angle",
+          "hole_callout", "pattern_callout", "fastener_callout"};
 }

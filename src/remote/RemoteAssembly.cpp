@@ -103,7 +103,22 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "iso4017 (hex head); the drive follows the standard, so leave it empty.",
      "drive, dry_run, nut, rim, standard, washer, washer_under_head, "
      "washer_under_nut"},
-    {"bom", "Bill of materials (aggregated part counts, masses).", ""},
+    {"bom",
+     "Bill of materials (aggregated part counts, masses). A row generated "
+     "from a standard carries {standard, designation} — the two fields a "
+     "purchase order needs — and a modelled part leaves them empty, so a "
+     "filter on either splits bought from made.",
+     ""},
+    {"check_fasteners",
+     "Every placed fastener re-derived against the stack it is IN, and what "
+     "is wrong with it (docs/parts/plan.md). A length derived from other "
+     "documents' geometry cannot be a live binding (A2), so a stack that "
+     "changed under a screw has to be REPORTED — this is that report: too "
+     "short, bottoming out in a blind hole, or spanning nothing at all. "
+     "Nothing is stored to make it work: a placed fastener's position and "
+     "orientation are its rim and its axis, so it also checks one nobody "
+     "derived. Empty findings mean every fastener still fits.",
+     ""},
     {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",
      "Enter in-context editing of a part within the assembly.", "occurrence"},
@@ -741,6 +756,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     return json{{"active", state.activeExplodedView},
                 {"factor", state.explodeFactor}};
   }
+  if (m == "check_fasteners") {
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — a fastener is placed in "
+          "one, so switch tabs with set_active_part (see list_parts)");
+    json findings = json::array();
+    for (const ui::FastenerCheck& c : ui::CheckFasteners(state))
+      findings.push_back(
+          json{{"occurrence", c.occurrence}, {"part", c.part}, {"why", c.why}});
+    return json{{"ok", findings.empty()}, {"findings", findings}};
+  }
   if (m == "bom") {
     // Bill of materials (A4): derived, one row per referenced part.
     // Unknown masses (a body without a density) are null and taint the total.
@@ -751,10 +777,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     const ui::BomTable bom = ui::ComputeBom(state);
     json rows = json::array();
     for (const ui::BomRow& r : bom.rows) {
-      json row = {{"part_id", r.partId},
-                  {"part", r.partName},
-                  {"quantity", r.quantity},
-                  {"material", r.material},
+      json row = {{"part_id", r.partId},        {"part", r.partName},
+                  {"quantity", r.quantity},     {"material", r.material},
+                  {"standard", r.standard},     {"designation", r.designation},
                   {"unit_volume", r.unitVolume}};
       row["unit_mass_g"] = r.massKnown ? json(r.unitMassG) : json(nullptr);
       row["total_mass_g"] =

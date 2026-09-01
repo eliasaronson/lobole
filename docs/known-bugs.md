@@ -7,6 +7,24 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## `set_occurrence_transform` demands an orientation `add_occurrence` does not
+
+Found 2026-09-01 while driving the fastener check from a script. Both RPCs take
+a `transform`, and `add_occurrence` treats its `orientation` as optional
+(`{position: [...]}` alone places a part), but `set_occurrence_transform`
+throws the raw nlohmann error — `key 'orientation' not found` — which names
+neither the RPC nor the field that is optional three lines away in the same
+document.
+
+**Impact:** small, but it is the shape of error this project's conventions are
+about: a message with no correction in it, on a surface where the sibling call
+accepts the same object. Moving a part along one axis is the common case.
+
+**Fix:** default `orientation` to the occurrence's current one, as
+`add_occurrence` defaults it to identity. Same for `position`, so either half
+of a transform can be set alone.
+
+
 ## The viewport tears on the external monitor (environment, not the app)
 
 Reported 2026-08-31 while reviewing the 30-degree lens, and worth recording

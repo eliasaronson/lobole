@@ -1,0 +1,36 @@
+{
+  "features": [
+    {
+      "id": 1,
+      "name": "Bolt",
+      "size": "M6",
+      "length": 20.0,
+      "standard": "iso4017",
+      "type": "Fastener"
+    },
+    {
+      "id": 2,
+      "name": "Nut",
+      "size": "M6",
+      "standard": "iso4032",
+      "type": "Fastener"
+    },
+    {
+      "id": 3,
+      "name": "Washer",
+      "size": "M6",
+      "standard": "iso7089",
+      "type": "Fastener"
+    },
+    {
+      "id": 4,
+      "name": "Torx",
+      "size": "M6",
+      "length": 20.0,
+      "standard": "iso14579",
+      "type": "Fastener"
+    }
+  ],
+  "format": "designer-document",
+  "version": 70
+}

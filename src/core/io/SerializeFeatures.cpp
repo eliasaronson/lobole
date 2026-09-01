@@ -657,7 +657,8 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* fastener = dynamic_cast<const FastenerFeature*>(&feature)) {
     j["standard"] = fastener->standard;
     j["size"] = fastener->size;
-    j["length"] = fastener->length;
+    if (fastener->length > 0.0)
+      j["length"] = fastener->length; // a nut and a washer have none
     if (!fastener->lengthExpr.empty())
       j["length_expr"] = fastener->lengthExpr;
     // Omitted when empty, which means "the drive this standard is made with"
@@ -1281,9 +1282,14 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     cyl->heightExpr = j.value("height_expr", std::string{});
     out = std::move(cyl);
   } else if (type == "Fastener") {
+    // `length` is OPTIONAL, because whether it means anything is the
+    // standard's business and not the loader's: a nut and a washer have none,
+    // and requiring one here made them unreachable through add_feature while
+    // the feature itself was perfectly able to build them. A screw without one
+    // is still refused — by Execute, which knows which is which.
     auto fastener = std::make_unique<FastenerFeature>(
         name, j.at("standard").get<std::string>(),
-        j.at("size").get<std::string>(), j.at("length").get<double>());
+        j.at("size").get<std::string>(), j.value("length", 0.0));
     fastener->lengthExpr = j.value("length_expr", std::string{});
     fastener->drive = j.value("drive", std::string{});
     out = std::move(fastener);

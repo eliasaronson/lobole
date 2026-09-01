@@ -136,6 +136,18 @@ LengthRange(const std::string& stem, const std::string& size,
 [[nodiscard]] std::optional<std::pair<std::string, std::string>>
 ThreadForClearance(double diameter, std::string* error);
 
+// The widest hole this size is ever drilled to — the "Loose" column of the
+// clearance table — or nullopt when the size is not in it.
+//
+// For probing a stack whose hole nobody recorded. A fastener already placed
+// knows its own size and axis but not the bore it went through, and a ray
+// offset by the THREAD radius runs down the inside of the clearance and finds
+// no material at all. Offsetting past the loosest fit instead errs toward a
+// false alarm rather than a false pass, which is the right direction for a
+// check.
+[[nodiscard]] std::optional<double> WidestClearance(const std::string& size,
+                                                    std::string* error);
+
 // The LONGEST nominal length that is at most `available`, for a blind hole:
 // the screw must not bottom out, so it is bounded from above rather than
 // below. nullopt with a refusal when nothing short enough exists.

@@ -3501,6 +3501,20 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
     if (const DrawingView* view = state.drawing->FindView(dim.viewId)) {
       ctx.sourceDoc = DrawingSourceDocument(state, view->sourceDocId);
       ctx.viewScale = view->scale;
+      // A fastener callout names the part an OCCURRENCE places, which is a
+      // different document from the assembly the view is of. Resolved through
+      // the VIEW's source assembly rather than through state.assembly: a
+      // drawing is its own tab, so the assembly it draws is never the active
+      // one while the drawing is on screen.
+      const uint64_t sourceId = view->sourceDocId;
+      ctx.occurrenceDoc = [&state,
+                           sourceId](uint64_t occId) -> const Document* {
+        const AssemblyDocument* asmDoc = AssemblyDocById(state, sourceId);
+        if (asmDoc == nullptr)
+          return nullptr;
+        const Occurrence* occ = asmDoc->FindById(occId);
+        return occ ? PartDocById(state, occ->partId) : nullptr;
+      };
     }
   }
   return drawing::ResolveDim(dim, it->second, ctx);

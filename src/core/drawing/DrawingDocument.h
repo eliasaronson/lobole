@@ -41,7 +41,11 @@ enum class DrawingDimKind {
   Diameter,
   Angle,
   HoleCallout,
-  PatternCallout
+  PatternCallout,
+  // A leader naming the standard part it points at: "ISO 4762 M6x50", read
+  // out of the occurrence's own Fastener feature. Only on an ASSEMBLY view —
+  // a part view has no occurrence, so there is nothing to name.
+  FastenerCallout
 };
 
 // Title-block fields (a simple labelled table under the border). All cosmetic

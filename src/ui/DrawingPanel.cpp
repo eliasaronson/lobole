@@ -96,7 +96,7 @@ void StrokeDashed(ImDrawList* dl, AppState& state,
 // Enter finishes — the pattern callout's pick-a-row flow).
 int NeededRefs(DrawingDimKind k) {
   if (k == DrawingDimKind::Radius || k == DrawingDimKind::Diameter ||
-      k == DrawingDimKind::HoleCallout)
+      k == DrawingDimKind::HoleCallout || k == DrawingDimKind::FastenerCallout)
     return 1;
   if (k == DrawingDimKind::PatternCallout)
     return -1;
@@ -662,14 +662,16 @@ void DrawDimsSection(AppState& state) {
       const char* label;
       DrawingDimKind kind;
     };
-    static const Tool tools[] = {{"Distance", DrawingDimKind::Distance},
-                                 {"Dist X", DrawingDimKind::DistanceX},
-                                 {"Dist Y", DrawingDimKind::DistanceY},
-                                 {"Radius", DrawingDimKind::Radius},
-                                 {"Diameter", DrawingDimKind::Diameter},
-                                 {"Angle", DrawingDimKind::Angle},
-                                 {"Hole note", DrawingDimKind::HoleCallout},
-                                 {"Pattern", DrawingDimKind::PatternCallout}};
+    static const Tool tools[] = {
+        {"Distance", DrawingDimKind::Distance},
+        {"Dist X", DrawingDimKind::DistanceX},
+        {"Dist Y", DrawingDimKind::DistanceY},
+        {"Radius", DrawingDimKind::Radius},
+        {"Diameter", DrawingDimKind::Diameter},
+        {"Angle", DrawingDimKind::Angle},
+        {"Hole note", DrawingDimKind::HoleCallout},
+        {"Pattern", DrawingDimKind::PatternCallout},
+        {"Part note", DrawingDimKind::FastenerCallout}};
     for (size_t i = 0; i < std::size(tools); ++i) {
       if (i % 3 != 0)
         ImGui::SameLine();

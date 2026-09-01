@@ -66,6 +66,17 @@ public:
   std::string drive;
 };
 
+class Document;
+
+// The one Fastener feature a generated standard part is made of, or null.
+//
+// "The whole document" rather than "contains one": a part with a screw AND
+// modelled geometry is not a bought item, and calling it one would put it on a
+// purchase order and on a drawing callout. Shared by the BOM, the fastener
+// check and the drawing callout — three places that must agree on what counts
+// as a bought part.
+[[nodiscard]] const FastenerFeature* SoleFastenerOf(const Document* doc);
+
 // A note on WHAT EACH STANDARD IS, because "Fastener" covers three shapes:
 // `core/parts/FastenerProfile` maps the standard to its kind (screw, nut,
 // washer), its head, its recess and whether the nominal length is measured

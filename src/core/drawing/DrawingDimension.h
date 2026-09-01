@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include <functional>
 #include <string>
 
 // Resolving a driven drawing dimension (workstream 13, D3): match its ProjRefs
@@ -50,6 +51,11 @@ struct ResolvedDim {
 struct DimContext {
   const Document* sourceDoc = nullptr;
   double viewScale = 1.0;
+  // The part document an OCCURRENCE places, for an assembly view. A fastener
+  // callout names the standard part it points at, and that name lives in the
+  // occurrence's own document rather than in the assembly the view is of —
+  // which is why this is a resolver and not a second `sourceDoc`.
+  std::function<const Document*(uint64_t occurrenceId)> occurrenceDoc;
 };
 
 // Resolves `dim` against its view's projected geometry. `view` must be the

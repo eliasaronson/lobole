@@ -50,6 +50,22 @@ struct BomRow {
   double unitVolume = 0.0; // mm^3, all bodies of the part
   bool massKnown = false;
   double unitMassG = 0.0; // valid when massKnown
+  // A BOUGHT part, and what to order it as: the standard's name ("iso4762")
+  // and the designation ("ISO 4762 M6x50"). Both empty for a part somebody
+  // modelled (docs/parts/plan.md, phase 5).
+  //
+  // Derived, not stored: a part whose whole feature list is one Fastener is a
+  // bought item by construction. That keeps the distinction right when the
+  // part tab is renamed, which is the case a stored flag gets wrong.
+  //
+  // There is deliberately no sixth COLUMN in the panel for it. The table
+  // already clips at five in a 210 px dock — three parts all read "Gang" —
+  // and a fastener's part name IS its designation, so the column would repeat
+  // what column one says while making every other cell narrower. It goes in
+  // the CSV, where a purchaser reads it, and in the row's tooltip.
+  std::string standard;
+  std::string designation;
+  [[nodiscard]] bool bought() const { return !standard.empty(); }
 };
 
 struct BomTable {
@@ -149,6 +165,26 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
                       bool released);
 
 BomTable ComputeBom(AppState& state); // empty without an active assembly
+
+// What is wrong with a fastener already placed, or an empty list.
+//
+// The plan's staleness gate (docs/parts/plan.md): a fastener whose stack has
+// changed under it must REPORT that rather than silently keeping the length it
+// was fitted with. Deriving from the plates is a dependency on other
+// documents' geometry that regeneration cannot express (A2), so the value is
+// derived once at placement — and this is what makes a stale one visible.
+//
+// Nothing is stored to make it work. A placed fastener's position and
+// orientation ARE its rim and its axis, so the stack is re-traversed from
+// scratch, and the washers and nut on the same axis are part of what it has to
+// span — they are occurrences like any other. That means it also checks a
+// fastener nobody derived, which a stored-at-placement record could not.
+struct FastenerCheck {
+  uint64_t occurrence = 0;
+  std::string part; // the designation
+  std::string why;  // decision-complete
+};
+[[nodiscard]] std::vector<FastenerCheck> CheckFasteners(AppState& state);
 
 // The table as CSV (quoted where needed); unknown masses are empty cells.
 std::string BomToCsv(const BomTable& bom);

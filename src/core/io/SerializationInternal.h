@@ -17,7 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    69; // v69: the Fastener feature — a standard part built from a vendored
+    70; // v70: seven fastener standards instead of one (nuts, washers, hex
+        //      and countersunk and button heads, a hexalobular drive), the
+        //      drive DEFAULTED to the one its standard is made with rather
+        //      than to "hex", and the `fastener_callout` drawing dimension.
+        //      All three widen what a loader must ACCEPT — a v69 build reads
+        //      "iso4017" as an unknown standard — which is what the bump is
+        //      for (docs/parts/plan.md, phases 4-5).
+        // (v69: the Fastener feature — a standard part built from a vendored
         //      dimension table (docs/parts/plan.md), carrying only what the
         //      table cannot give it: which standard, which size, how long
         // (v68: cam operation `use_outline` (clear the face's outline,

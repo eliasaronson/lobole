@@ -225,9 +225,16 @@ document boundary**, which is the single missing edge behind three separately
 deferred items (cross-part linked sketches, cross-part refs in context,
 assembly-level features); and there is **no general "long operation off the
 frame" mechanism**, so four cases have three hand-rolled answers and two open
-bugs. Plus the absences worth knowing: no standard parts/fastener library, no
+bugs. Plus the absences worth knowing: no
 user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
-surfacing or sheet metal.
+surfacing or sheet metal. **The standard-parts absence closed 2026-09-01**
+([parts/plan.md](parts/plan.md), F1 phases 1-5): seven vendored ISO standards,
+a fastener derived from the hole you pick — size out of the clearance table
+read backwards, length out of the stack, washers and nut included — a BOM that
+tells bought from made, and `check_fasteners` for a stack that changed under a
+screw. The gap it closed was not tedium: every assembly this project had built
+was missing its fasteners, so its BOM, its mass and its contact checks were all
+reporting confidently about an incomplete model.
 
 **Designed but unbuilt**, in full — the list is now two items:
 

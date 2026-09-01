@@ -789,6 +789,27 @@ TEST_CASE(
   CHECK_THAT(at(fit.placed[2]).z, WithinAbs(-26.0, 1e-3));       // far washer
   CHECK_THAT(at(fit.placed[3]).z, WithinAbs(-26.0 - 1.6, 1e-3)); // the nut
 
+  // Nothing is wrong with the joint that was just derived, and the check
+  // proves it by RE-deriving rather than by trusting what placed it: the
+  // washers and the nut are occurrences on the same axis, so re-traversing
+  // finds exactly the 46.4 mm the length was snapped for.
+  CHECK(ui::CheckFasteners(state).empty());
+
+  // Then the stack changes under it: the bottom plate is moved 15 mm in a
+  // redesign and the joint is left behind. Deriving a length from other
+  // documents' geometry cannot be a live binding (A2), so what this has to do
+  // is SAY so rather than quietly keep the number it was fitted with.
+  for (Occurrence& o : state.assembly->GetOccurrences())
+    if (o.name == "Bottom")
+      o.position.z -= 15.0f;
+  state.assembly->BumpVersion(); // the solved poses are cached per version
+  const std::vector<ui::FastenerCheck> stale = ui::CheckFasteners(state);
+  REQUIRE(stale.size() == 1);
+  INFO(stale[0].why);
+  CHECK(stale[0].part == "ISO 4762 M6x50");
+  CHECK(stale[0].why.find("too short") != std::string::npos);
+  CHECK(stale[0].why.find("4.6 mm") != std::string::npos);
+
   // A nut on a blind hole has nothing to thread onto. Refused by name: the
   // alternative is a nut floating inside the plate, which is invisible from
   // outside and exactly the class of error this whole verb exists to stop.
@@ -801,6 +822,18 @@ TEST_CASE(
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("no far side") != std::string::npos);
+
+  // The other way a fastener goes wrong, which its length alone cannot show:
+  // a screw longer than the blind hole it sits in lands on the floor and
+  // clamps nothing, while looking identical from outside.
+  ui::AddFastener(state, "iso4762", "M6", 20.0, "",
+                  glm::vec3(0.0f, 0.0f, 20.0f),
+                  glm::quat(0.0f, 1.0f, 0.0f, 0.0f), nullptr);
+  const std::vector<ui::FastenerCheck> bottomed = ui::CheckFasteners(state);
+  REQUIRE(bottomed.size() == 1);
+  INFO(bottomed[0].why);
+  CHECK(bottomed[0].why.find("bottoms out") != std::string::npos);
+  CHECK(bottomed[0].why.find("8 mm") != std::string::npos);
 
   // And a washer standard that is not a washer, which is the same mistake one
   // level up: it would place a nut under the head and look almost right.
