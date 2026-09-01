@@ -340,7 +340,10 @@ malformed input, fuzzed over `tests/golden/` as a seed corpus — the "refuse,
 don't substitute" conviction has never been tested against inputs nobody
 wrote by hand.
 
-## T6 — Performance regressions have no gate
+## T6 — Performance regressions have no gate — WITHDRAWN, they do
+
+> **Corrected 2026-09-01.** Every claim below about what is ungated is wrong.
+> Read the retraction under it.
 
 Three performance rounds have shipped with their numbers recorded in docs
 (scale: open 259 s -> 0.04 s; GPU: Arc 40 -> 30 ms; import: resync 5.9 s ->
@@ -353,6 +356,34 @@ plate`, and the outline-edge build), and the first is the right pattern to
 copy: it asserts the *shape* of the cost rather than an absolute millisecond
 count, so it survives a slower machine. Not arguing for perf CI — arguing that
 the three biggest wins deserve the FaceSnapPoints treatment.
+
+### The retraction (2026-09-01)
+
+They already have it, and in a better form than "the FaceSnapPoints
+treatment". Checked one by one before writing any of the tests this entry
+asked for:
+
+| the win | what gates it |
+|---|---|
+| open 259 s -> 0.04 s (baked geometry) | `test_baked_geometry.cpp` — **nine** assertions on `Document::LastRegenStats().executed`, whose own comment reads "Observable, not vibes" |
+| STEP parsed twice (12 s of a 14 s import) | `test_serialization.cpp` seeded-import case — seeds the feature, **deletes the file**, and proves a re-execution then fails, so the first one demonstrably did not read it |
+| assembly resync 5.9 s -> 30 ms | `assembly/switching_back_to_an_assembly_reuses_its_meshes` — compares **asset ids** across a tab round trip |
+| idle throttle (Arc 40 -> 30 ms) | `tests/test_frame_pacer.cpp`, six headless cases on the decision, plus `shell/idle_throttle_rests_and_input_wakes` |
+
+The narrow claim — "no test asserts a millisecond figure" — is true and is
+fine. The claim that mattered, that these wins can regress silently, is false.
+
+The asset-id gate is worth reading, because it is better than the counting
+assertion this entry proposed and its comment says exactly why: asset ids are
+never reused, so a surviving id proves the upload was not redone, while
+**counting** assets would not — "a destroy-then-recreate lands back on the same
+count". That is the failure mode a naive count would have shipped with.
+
+What is genuinely not gated is the SSAO upsample's visual half, and that is
+T2's problem, not a perf gate's.
+
+**Nothing to build here.** Recorded rather than deleted because the useful
+output of this entry is that the codebase was ahead of the review.
 
 ## T7 — The order-dependent GUI failures are still undiagnosed — HABIT FIXED
 
@@ -643,7 +674,8 @@ tooling halves were mostly actionable without one, and this is what landed.
 | **T4** coverage leaves no trace | run recorded, and it needs a fix | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
 | **T2** pixel-regression gate | NOT done — needs a decision | — |
 | **P2** GPU memory visibility | done — and the finding was WRONG | (below) |
-| **T6** perf gates, **T7** shuffled runs | NOT done | — |
+| **T6** perf gates | WITHDRAWN — already gated, better than proposed | — |
+| **T7** shuffled runs | fixed | `24857e9` |
 
 ## What T5 found, and why it is the item worth reading
 
