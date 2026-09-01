@@ -54,6 +54,8 @@ std::filesystem::path EnvironmentHdri() {
   return DataDir() / "hdri" / kEnvironmentHdriFile;
 }
 
+std::filesystem::path PartsDir() { return DataDir() / "parts"; }
+
 std::filesystem::path ShaderDir() {
   const std::filesystem::path development =
       ExecutableDir() / "libraries" / "shaders";

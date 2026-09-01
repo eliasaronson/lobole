@@ -1,6 +1,7 @@
 # Standard parts — plan (F1)
 
-> Status: **planned, not built.** Written 2026-09-01 from a survey of the open
+> Status: **phase 1 SHIPPED 2026-09-01** (the tables, the lookups and the
+> refusals — no geometry); phases 2-5 planned. Written 2026-09-01 from a survey of the open
 > libraries, both of which were cloned to `~/Documents/CAD/parts/` and read
 > rather than judged from their websites. The survey, the source comparison and
 > the interface argument live in
@@ -264,10 +265,40 @@ regen's input surface for.
 
 ## Phases
 
-1. **The table layer, no geometry.** Vendored CSVs, a reader, and the
-   refusals: an unknown standard, size or drive is refused naming what is
-   stocked. Entirely headless-testable, and the phase that pins the data before
-   any geometry depends on it.
+1. **The table layer, no geometry.** — **SHIPPED.** `assets/parts/` (six
+   vendored files), `core/parts/FastenerTable`, `RuntimePaths::PartsDir()`,
+   `tests/test_parts.cpp`.
+
+   Three things the data turned out to be, none of which this plan predicted:
+
+   - **A file holds SEVERAL tables**, separated by blank lines.
+     `iso4762def.csv` is three — the dimensions, the nominal length series for
+     ISO 4762, and the length RANGE each size is made in. So "is an M6x200 a
+     thing" is answerable from the vendored data, and `SnapLength` consults
+     the per-size range rather than offering an M6 at a length only an M20 is
+     made in. The plan expected to need the generic ISO 888 series for this.
+   - **The format is not uniform.** Some files name each table on a line of
+     its own, some go straight to the header. Both are read rather than one
+     being normalised away, because the files are kept byte-identical to
+     upstream so a re-vendor can diff.
+   - **ISO 4762 stocks 20 sizes, not 84.** The larger number was the whole
+     file, three tables conflated.
+
+   And two bugs the tests caught, both worth recording because neither was
+   about the parser being wrong in the abstract:
+
+   - **A trailing empty field was dropped.** `"M6",6.0,` splits to two fields,
+     not three, because `getline` hits EOF rather than yielding a final empty
+     one — so a row whose last column is blank looked like a row with a column
+     missing and was refused. A blank last column is exactly the shape a
+     standard that does not define its final dimension at some size takes.
+   - **A refusal named the wrong sizes.** "M7 is not stocked" truncated an
+     84-entry list from both ends, dropping M6 and M8 — precisely the two
+     sizes that answer the question. It now leads with the neighbours: *"the
+     nearest stocked are M6 and M8; all sizes are …"*.
+
+   One expectation of mine was also wrong rather than the data: `s_mean` is
+   the MIDDLE of the socket's tolerance band, so an M6's 5 mm hex reads 5.06.
 2. **One fastener, end to end.** `Fastener` feature → a generated part
    document → an occurrence, for the socket head cap screw (ISO 4762, hex
    drive). RPC only, no GUI. This is where the architectural claims get tested:

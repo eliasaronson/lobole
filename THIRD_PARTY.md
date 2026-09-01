@@ -122,3 +122,14 @@ push so it cannot rot.
 Catch2, CMake, Ninja, shaderc/glslc, ccache, and static-analysis tools are not
 part of the installed runtime payload. Their licenses remain in their upstream
 packages and source distributions.
+
+## FreeCAD Fasteners Workbench — standard-parts dimension tables
+
+`assets/parts/iso4762def.csv`, `iso4032def.csv`, `iso7089def.csv`,
+`iso888length.csv`, `iso4757def.csv`, `iso10664def.csv`
+
+Vendored from https://github.com/shaise/FreeCAD_FastenersWB (`FsData/`),
+**GPL-2.0-or-later**, unmodified below a provenance header. Data only — no code
+is taken. These are the dimension tables a generated fastener is built from and
+checked against (docs/parts/plan.md).
+

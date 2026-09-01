@@ -277,6 +277,7 @@ set(core_sources
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/io/GeometryCache.cpp
+    src/core/parts/FastenerTable.cpp
     src/core/io/AtomicWrite.cpp
     src/core/io/Settings.cpp
     src/core/io/WindowGeometry.cpp
@@ -655,6 +656,10 @@ include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 set(DESIGNER_HDRI "brown_photostudio_02_2k.hdr")
 file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
+# The vendored standard-parts tables (docs/parts/plan.md). Staged beside the
+# executable for a development build; installed under share/designer below.
+file(COPY ${CMAKE_SOURCE_DIR}/assets/parts
+     DESTINATION ${CMAKE_BINARY_DIR}/assets)
 
 if(NOT ENABLE_TEST_ENGINE)
   # No engine: drop its sources and the suite written against it.
@@ -1046,6 +1051,8 @@ install(FILES
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
 install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/parts"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer")
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 # AppStream metainfo. Installing it triggers `appstreamcli compose` during a

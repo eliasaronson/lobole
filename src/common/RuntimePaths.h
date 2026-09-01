@@ -21,4 +21,10 @@ inline constexpr const char* kEnvironmentHdriFile =
     "brown_photostudio_02_2k.hdr";
 std::filesystem::path EnvironmentHdri();
 
+// The vendored standard-parts dimension tables (docs/parts/plan.md). Same
+// reason the HDRI filename lives here rather than at its uses: a directory
+// name spelled out at each site is a directory name with several places to be
+// wrong in.
+std::filesystem::path PartsDir();
+
 } // namespace RuntimePaths
