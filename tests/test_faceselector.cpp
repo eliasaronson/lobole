@@ -7,6 +7,7 @@
 #include "render/Camera.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 using Catch::Matchers::WithinAbs;
@@ -232,6 +233,65 @@ TEST_CASE("PickEdge finds the edge under the ray and honors occlusion",
     // If anything is picked it must be a near silhouette edge, not the far one.
     CHECK(glm::length(glm::vec2(far.point.x, far.point.y)) > 1.0f);
   }
+}
+
+TEST_CASE("PickEdge down a bore takes the NEAREST of the coaxial rims",
+          "[picking][edges]") {
+  // Found 2026-09-01 building the fastener verb, whose whole gesture is
+  // "click the rim the head sits against". Looking straight down a hole, the
+  // ray is COLLINEAR with every rim in the stack: `perp` is zero for all of
+  // them, so every angular error is zero, nothing occludes the far ones
+  // (you are looking through the hole), and a strictly-less comparison left
+  // the winner to mesh registration order. It returned the bottom rim of the
+  // lowest plate, 20 mm behind the cursor — from which a screw derives
+  // correctly for a joint entered from the other side.
+  //
+  // Two bare rings on one axis, registered FAR FIRST so the old code would
+  // have to pick the far one to pass by accident.
+  const auto ring = [](float z) {
+    std::vector<glm::vec3> poly;
+    for (int i = 0; i <= 64; i++) {
+      const float a = static_cast<float>(i) * 2.0f * 3.14159265f / 64.0f;
+      poly.push_back({3.3f * std::cos(a), 3.3f * std::sin(a), z});
+    }
+    return std::vector<std::vector<glm::vec3>>{poly};
+  };
+
+  FaceSelector selector;
+  selector.AddMesh(7, {}, {}, {}, glm::mat4(1.0f), ring(-10.0f)); // far
+  selector.AddMesh(8, {}, {}, {}, glm::mat4(1.0f), ring(10.0f));  // near
+
+  // Straight down, exactly through both rims at x = 3.3.
+  Ray ray;
+  ray.origin = glm::vec3(3.3f, 0.0f, 50.0f);
+  ray.direction = glm::vec3(0.0f, 0.0f, -1.0f);
+  const EdgeHit hit = selector.PickEdge(ray);
+  REQUIRE(hit.hit);
+  CHECK(hit.meshId == 8); // the near one, not the one registered first
+  CHECK_THAT(hit.point.z, WithinAbs(10.0f, 1e-3f));
+
+  // Registration order is not what decides it: the same question with the
+  // meshes added the other way round gives the same answer.
+  FaceSelector other;
+  other.AddMesh(8, {}, {}, {}, glm::mat4(1.0f), ring(10.0f));
+  other.AddMesh(7, {}, {}, {}, glm::mat4(1.0f), ring(-10.0f));
+  const EdgeHit again = other.PickEdge(ray);
+  REQUIRE(again.hit);
+  CHECK(again.meshId == 8);
+
+  // And a genuinely better-aimed FAR edge still wins over a badly-aimed near
+  // one: the tie-break is a tie-break, not "nearest always".
+  FaceSelector mixed;
+  mixed.AddMesh(8, {}, {}, {}, glm::mat4(1.0f), ring(10.0f)); // near, off-aim
+  std::vector<std::vector<glm::vec3>> onAxis = {
+      {{0.0f, 0.0f, -12.0f}, {0.0f, 0.0f, -8.0f}}};
+  mixed.AddMesh(9, {}, {}, {}, glm::mat4(1.0f), onAxis); // far, dead centre
+  Ray centre;
+  centre.origin = glm::vec3(0.0f, 0.0f, 50.0f);
+  centre.direction = glm::vec3(0.0f, 0.0f, -1.0f);
+  const EdgeHit aimed = mixed.PickEdge(centre);
+  REQUIRE(aimed.hit);
+  CHECK(aimed.meshId == 9);
 }
 
 TEST_CASE("PickEdge rejects a slightly hidden edge at normal camera distance",

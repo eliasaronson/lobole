@@ -280,8 +280,27 @@ EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
         if (occluder.hit && t > occluder.distance + kOcclusionDepthEpsilon)
           continue;
         const float angular = perp / t;
-        if (angular < bestAngular) {
-          bestAngular = angular;
+        // Ties go to the NEAREST, and the tie case is not exotic: looking
+        // straight down a bore, the ray is COLLINEAR with every rim in the
+        // stack, so `perp` is zero for all of them and every angular error is
+        // zero. A strictly-less comparison then leaves the winner to mesh
+        // registration order, and it handed back the bottom rim of the lowest
+        // plate — 20 mm behind the cursor, with nothing occluding it because
+        // you are looking through the hole. A fastener derived from that goes
+        // in from the wrong side and looks plausible.
+        //
+        // One hundredth of the pick radius: well under a pixel, so this only
+        // fires between edges nobody could aim between, and no pick that was
+        // already decided changes.
+        constexpr float kAngularTie = kTanPickAngle * 0.01f;
+        const bool first = !best.hit;
+        const bool better = angular < bestAngular - kAngularTie;
+        const bool nearerTie =
+            !first && angular < bestAngular + kAngularTie && t < best.distance;
+        if (first || better || nearerTie) {
+          // The bar stays the BEST angle seen, not the accepted one, so a run
+          // of nearer-but-slightly-worse candidates cannot walk it outward.
+          bestAngular = std::min(bestAngular, angular);
           best.hit = true;
           best.distance = t;
           best.point = onSeg;

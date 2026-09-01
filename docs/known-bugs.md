@@ -7,31 +7,6 @@ an entry when it lands a fix + regression test.
 ---
 
 
-## Picking a rim head-on down a bore can hand back the far end
-
-Found 2026-09-01 writing the fastener verb's GUI test. Looking straight down a
-hole, every rim in the stack — the top and bottom of every plate the bore
-passes through — projects onto the SAME circle in screen space. The edge
-picker returned the bottom rim of the LOWEST plate, 20 mm behind the one under
-the cursor.
-
-**Impact on fasteners specifically:** the rim pick exists to say which end the
-head goes on, and this is the one view where it cannot. The screw is then
-derived correctly for a joint entered from the other side — a fastener coming
-up through the assembly from underneath, which is plausible geometry and not
-what was asked for. Orbiting even slightly resolves it, so it is unlikely to
-survive contact with a person; it is written down because the failure looks
-like a placement bug rather than a picking one.
-
-**Impact generally:** any edge pick down a straight axis has this. Measure and
-fillet reach the same picker.
-
-**Likely fix:** rank edge candidates by distance ALONG the ray before
-screen-space proximity, so a tie in screen space is broken by depth. Wider
-blast radius than it sounds (every edge pick in the app goes through
-`PickEdge`), which is why it is here rather than fixed inline with the verb.
-
-
 ## A tool-session pick slot must be registered in two files, or it dies silently
 
 Found 2026-09-01 building the fastener verb, and it cost a debugging round

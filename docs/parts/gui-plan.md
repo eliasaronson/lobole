@@ -149,14 +149,24 @@ a confusing way.
   two that can never be submitted in the same frame (the no-assembly early
   return and the main body both had a Done button). Worth knowing before
   writing a tool window rather than after.
-- **Head-on, a rim pick is ambiguous.** Looking straight down a bore, every
-  rim in the stack projects onto the same circle, and the picker handed back
-  the bottom rim of the LOWEST plate — 20 mm behind the cursor. The rim pick
-  exists to say which end the head goes on, and that is the one view where it
-  cannot. Orbiting resolves it, so it is unlikely to survive contact with a
-  person; recorded in known-bugs.md because the failure reads as a placement
-  bug rather than a picking one, and the fix (rank edge candidates by
-  distance along the ray) touches every edge pick in the app.
+- **Head-on, a rim pick took the FAR rim** — and the first diagnosis of it
+  was wrong, which is the part worth keeping. Written up as "the picker
+  prefers screen proximity over depth; fixing it means re-ranking every edge
+  pick in the app", it read as a risky pass over a shared facility.
+
+  Reading `PickEdge` said otherwise. It ranks by ANGULAR error (`perp / t`)
+  and already rejects occluded edges. Looking down a bore the ray is
+  **collinear** with every rim in the stack, so `perp` is zero for all of
+  them and every angular error is zero; nothing occludes the far ones because
+  you are looking through the hole; and `angular < bestAngular` — strictly
+  less — never fires again after the first candidate. The winner was mesh
+  REGISTRATION ORDER. Not a depth-ranking problem at all: an exact tie with
+  no tie-break.
+
+  So the fix is a tie-break on distance, which by construction cannot change
+  any pick that was already decided. Twenty minutes against the half-day the
+  wrong diagnosis implied. Fixed and gated in `test_faceselector.cpp`, with
+  the far ring registered first so the old code cannot pass by accident.
 
 ## Phases
 
