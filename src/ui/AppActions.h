@@ -39,6 +39,11 @@ void OpenFeatureEditor(AppState& state, uint64_t featureId);
 // items coexist (the panel lists select independently, as the old separate
 // fields did): each setter replaces only its own kind; 0 removes it.
 uint64_t SelectedOccurrenceId(const AppState& state);
+// Every selected occurrence, in selection order. The single-id form above is
+// the head of this and stays the right question for the editor rows, which
+// show ONE occurrence's transform.
+[[nodiscard]] std::vector<uint64_t>
+SelectedOccurrenceIds(const AppState& state);
 uint64_t SelectedMateId(const AppState& state);
 void SelectMate(AppState& state, uint64_t mateId);
 // Drops items whose referent no longer exists (deleted feature, undone
@@ -74,6 +79,10 @@ void SetActivePart(AppState& state, size_t index);
 // while any assembly still places this part or assembly — a dangling
 // reference is not something to create on purpose.
 bool DeletePart(AppState& state, size_t index, std::string* why = nullptr);
+// Why that tab cannot be deleted, or empty when it can. The menu asks BEFORE
+// offering, so a refusal is a disabled item with a reason on it rather than a
+// live one that does nothing.
+[[nodiscard]] std::string WhyPartUndeletable(AppState& state, size_t index);
 
 // Tab-bar folders (display grouping only — storage stays flat, ids and
 // references are unaffected). Folders live in state.tabFolders and may be

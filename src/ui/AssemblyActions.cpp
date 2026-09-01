@@ -109,6 +109,35 @@ bool RedoAssembly(AppState& state) {
   return true;
 }
 
+bool IsOccurrenceSelected(const AppState& state, uint64_t occId) {
+  return state.selection.Has({SelectionItem::Kind::Occurrence, occId, {}});
+}
+
+void ToggleOccurrence(AppState& state, uint64_t occId) {
+  if (occId != 0)
+    state.selection.Toggle({SelectionItem::Kind::Occurrence, occId, {}});
+}
+
+int DeleteSelectedOccurrences(AppState& state) {
+  // One snapshot and one solve for the whole batch: undoing a five-part
+  // deletion should be one Ctrl+Z, not five, and re-solving between removals
+  // would run the mate solver against half-deleted state.
+  if (state.assembly == nullptr)
+    return 0;
+  const std::vector<uint64_t> doomed = SelectedOccurrenceIds(state);
+  if (doomed.empty())
+    return 0;
+  SnapshotAssembly(state);
+  int removed = 0;
+  for (const uint64_t id : doomed)
+    if (state.assembly->RemoveOccurrence(id))
+      removed++;
+  SelectOccurrence(state, 0);
+  if (removed > 0)
+    SolveActiveAssembly(state); // a mate referencing one now dangles/frees
+  return removed;
+}
+
 void SelectOccurrence(AppState& state, uint64_t occId) {
   // Occurrence items replace only their own kind (a selected mate stays, as
   // with the old separate fields). Highlights are applied by the per-frame

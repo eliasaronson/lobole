@@ -288,6 +288,19 @@ void HandleViewportInput(AppState& state) {
       escUsed = true;
     }
 
+    // Delete removes the selected occurrences. HERE rather than in the
+    // keymap, deliberately: Escape, Enter, Delete and the arrows resolve
+    // against armed tools, previews and text fields across ~15 call sites,
+    // so they are modal verbs rather than rebindable commands (Keymap.h says
+    // so). Which means this must yield to everything that could also want
+    // it — a mate session being picked into, an armed slot, a typing field —
+    // and it does, by asking last.
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput &&
+        !state.slotPick.Active() && !state.mateTool.active &&
+        !state.fastenerTool.open) {
+      DeleteSelectedOccurrences(state);
+    }
+
     UpdateHandleHover(state, overViewport);
 
     // The drag gizmo gets first shot: a live drag continues even off-viewport,

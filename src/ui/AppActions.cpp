@@ -124,6 +124,18 @@ uint64_t SelectedOccurrenceId(const AppState& state) {
   return it != nullptr ? it->id : 0;
 }
 
+std::vector<uint64_t> SelectedOccurrenceIds(const AppState& state) {
+  // The selection has always been a SET — the viewport has ctrl-clicked
+  // occurrences into it since U1d — and SelectedOccurrenceId returning only
+  // the FIRST is what made every consumer single-select. This is the same
+  // question asked without that narrowing.
+  std::vector<uint64_t> out;
+  for (const SelectionItem& it : state.selection.items)
+    if (it.kind == SelectionItem::Kind::Occurrence && it.id != 0)
+      out.push_back(it.id);
+  return out;
+}
+
 uint64_t SelectedMateId(const AppState& state) {
   const SelectionItem* it = state.selection.First(SelectionItem::Kind::Mate);
   return it != nullptr ? it->id : 0;
@@ -1354,17 +1366,21 @@ namespace {
 AssemblyDocument* SlotAssembly(AppState& state, size_t i);
 } // namespace
 
-bool DeletePart(AppState& state, size_t index, std::string* why) {
+std::string WhyPartUndeletable(AppState& state, size_t index) {
   EnsureParts(state);
-  if (state.parts.size() <= 1 || index >= state.parts.size()) {
-    if (why)
-      *why = "cannot delete the last (or a missing) tab";
-    return false; // never delete the last tab
-  }
+  if (state.parts.size() <= 1)
+    return "this is the last tab — a project always has one document";
+  if (index >= state.parts.size())
+    return "that tab is gone";
   // Refused while something references it — which `describe` has claimed
   // since A2 while nothing actually checked, so deleting a placed part left
   // every assembly holding a dangling reference. A5 widens the same question:
   // an assembly can now be referenced too.
+  //
+  // Split out of DeletePart so the MENU can ask before offering (F1 dogfood
+  // round): the item used to be enabled, call DeletePart, and drop both the
+  // false and the reason on the floor — an enabled control that silently does
+  // nothing, which is the same defect that made File > Save look broken.
   const uint64_t doomedId = state.parts[index].id;
   std::string referencedBy;
   for (size_t i = 0; i < state.parts.size(); i++) {
@@ -1380,12 +1396,21 @@ bool DeletePart(AppState& state, size_t index, std::string* why) {
       break;
     }
   }
-  if (!referencedBy.empty()) {
+  if (!referencedBy.empty())
+    return "'" + state.parts[index].name + "' is placed in " + referencedBy +
+           " — delete those occurrences first (right-click one in the "
+           "assembly's Model panel)";
+  return {};
+}
+
+bool DeletePart(AppState& state, size_t index, std::string* why) {
+  if (const std::string blocked = WhyPartUndeletable(state, index);
+      !blocked.empty()) {
     if (why)
-      *why = "'" + state.parts[index].name + "' is placed in " + referencedBy +
-             " — remove those occurrences first";
+      *why = blocked;
     return false;
   }
+  const uint64_t doomedId = state.parts[index].id;
   const bool deletingActive = index == static_cast<size_t>(state.activePart);
   if (deletingActive) {
     // Activate a neighbor first so AppState always holds a live document.

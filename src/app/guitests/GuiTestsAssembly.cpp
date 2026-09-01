@@ -793,6 +793,112 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).
+  // Removing an occurrence, by right-clicking the thing you want gone.
+  //
+  // Reported from use 2026-09-01: "there is no option to delete something in
+  // an assembly that I can see". There was one — a button in the "Selected
+  // occurrence" editor, below the list, reachable only after selecting a row
+  // and off the bottom of the panel on any real assembly. Clicked here on the
+  // ROW, which is where a person looks, and clicked rather than called
+  // because the complaint was that it could not be found.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "an_occurrence_is_deleted_from_its_"
+                       "own_row");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
+    for (int i = 0; i < 2; ++i) {
+      Occurrence o;
+      o.name = "Block " + std::to_string(i + 1);
+      o.partId = partId;
+      o.position = glm::vec3(static_cast<float>(i) * 40.0f, 0.0f, 0.0f);
+      s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(4);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)2);
+    const uint64_t doomed = s_App->assembly->GetOccurrences().front().id;
+
+    const std::string row = "//###Model/###occ_" + std::to_string(doomed);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    ctx->ItemClick("//$FOCUSED/Delete occurrence###occ_delete");
+    ctx->Yield(3);
+
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)1);
+    IM_CHECK(s_App->assembly->FindById(doomed) == nullptr);
+  };
+
+  // Ctrl-click several rows, press Delete, and they all go.
+  //
+  // The selection has been a SET since U1d and the viewport has ctrl-clicked
+  // into it all along; the LIST was the half that still forced one at a time,
+  // so removing four parts was four right-clicks. Delete is wired in the
+  // modal-key chain rather than the keymap on purpose (Keymap.h: Escape,
+  // Enter, Delete and the arrows resolve against armed tools and text fields
+  // across ~15 sites), which is why it is PRESSED here against a real
+  // assembly tab rather than dispatched as a command.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "ctrl_click_selects_several_and_"
+                       "delete_removes_them");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
+    std::vector<uint64_t> ids;
+    for (int i = 0; i < 4; ++i) {
+      Occurrence o;
+      o.name = "Block " + std::to_string(i + 1);
+      o.partId = partId;
+      o.position = glm::vec3(static_cast<float>(i) * 40.0f, 0.0f, 0.0f);
+      ids.push_back(s_App->assembly->AddOccurrence(o));
+    }
+    ctx->Yield(4);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)4);
+
+    const auto row = [&](size_t i) {
+      return "//###Model/###occ_" + std::to_string(ids[i]);
+    };
+    ctx->ItemClick(row(0).c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedOccurrenceIds(*s_App).size(), (size_t)1);
+
+    // Ctrl-click ADDS rather than replacing.
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->ItemClick(row(1).c_str());
+    ctx->Yield();
+    ctx->ItemClick(row(2).c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedOccurrenceIds(*s_App).size(), (size_t)3);
+    // And removes: ctrl-clicking a selected row takes it back out.
+    ctx->ItemClick(row(2).c_str());
+    ctx->Yield();
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    IM_CHECK_EQ(ui::SelectedOccurrenceIds(*s_App).size(), (size_t)2);
+
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)2);
+    IM_CHECK(s_App->assembly->FindById(ids[0]) == nullptr);
+    IM_CHECK(s_App->assembly->FindById(ids[1]) == nullptr);
+    IM_CHECK(s_App->assembly->FindById(ids[2]) != nullptr);
+
+    // One snapshot for the batch: undoing a two-part deletion is one Ctrl+Z.
+    IM_CHECK(ui::UndoAssembly(*s_App));
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)4);
+  };
+
   // A fastener is placed by clicking a hole's rim (docs/parts/gui-plan.md).
   //
   // The whole verb: arm from the toolbar, click the rim in the viewport, and

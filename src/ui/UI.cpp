@@ -566,8 +566,18 @@ void DrawPartTabs(AppState& state) {
           state.parts[i].kind == DocKind::Assembly  ? "Delete assembly"
           : state.parts[i].kind == DocKind::Drawing ? "Delete drawing"
                                                     : "Delete part";
-      if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
+      // ASK first. This item used to be enabled whenever more than one tab
+      // existed, call DeletePart, and drop both its `false` and its reason on
+      // the floor — so on any real project, where every part is placed in an
+      // assembly, clicking Delete did nothing at all and said nothing about
+      // why. Reported from use; the same defect as File > Save doing nothing
+      // on an assembly tab.
+      const std::string blocked = WhyPartUndeletable(state, i);
+      if (ImGui::MenuItem(label, nullptr, false, blocked.empty()))
         DeletePart(state, i);
+      if (!blocked.empty() &&
+          ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", blocked.c_str());
     };
 
     // The tabs live in their own scrolling child, and "+" sits OUTSIDE it,

@@ -711,6 +711,55 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
 
 } // namespace
 
+TEST_CASE("Deleting a placed part refuses with a reason, and says where",
+          "[actions]") {
+  // Reported from use 2026-09-01: right-clicking a tab and choosing Delete
+  // did nothing. DeletePart was already refusing correctly — a part placed in
+  // an assembly cannot go without leaving a dangling reference — but the menu
+  // item was enabled whenever more than one tab existed and threw both the
+  // `false` and the reason away. On any real project every part is placed in
+  // something, so Delete never worked and never said why.
+  //
+  // The reason is now computed BEFORE the item is offered, which is what lets
+  // the menu disable it and put the explanation on it.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const size_t plate = ui::AddPart(state, "Plate");
+  ui::SetActivePart(state, plate);
+  state.document->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0.0f), 10.0, 10.0, 10.0));
+  const size_t spare = ui::AddPart(state, "Spare");
+
+  // Unplaced: deletable, and the menu is told so with an empty reason.
+  CHECK(ui::WhyPartUndeletable(state, spare).empty());
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Rig"));
+  Occurrence occ;
+  occ.partId = state.parts[plate].id;
+  occ.name = "Plate";
+  state.assembly->AddOccurrence(occ);
+
+  const std::string why = ui::WhyPartUndeletable(state, plate);
+  INFO(why);
+  CHECK_FALSE(why.empty());
+  CHECK(why.find("Rig") != std::string::npos);         // WHERE it is placed
+  CHECK(why.find("right-click") != std::string::npos); // and what to do
+  // The refusal and the action agree — the menu cannot offer what the action
+  // would reject, which is the whole point of asking first.
+  std::string fromAction;
+  CHECK_FALSE(ui::DeletePart(state, plate, &fromAction));
+  CHECK(fromAction == why);
+
+  // Remove the occurrence and it becomes deletable, through the same call
+  // the row's context menu makes.
+  state.assembly->RemoveOccurrence(state.assembly->GetOccurrences().front().id);
+  CHECK(ui::WhyPartUndeletable(state, plate).empty());
+  CHECK(ui::DeletePart(state, plate, nullptr));
+}
+
 TEST_CASE("A circular edge that is the end of a solid is not a hole",
           "[actions][parts]") {
   // From the dock round (docs/dogfooding.md): a 49-part assembly whose every

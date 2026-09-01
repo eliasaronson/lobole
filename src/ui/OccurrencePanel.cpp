@@ -561,15 +561,25 @@ void DrawOccurrencePanel(AppState& state) {
         (o.name.empty() ? RefNameById(state, o) : o.name) +
         (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
         (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
-    if (SelectableEllipsis(label, SelectedOccurrenceId(state) == o.id))
-      SelectOccurrence(state, o.id);
+    // Ctrl-click adds and removes; a plain click replaces. The same gesture
+    // the VIEWPORT has accepted for occurrences since U1d — the list was the
+    // half that still forced one at a time.
+    if (SelectableEllipsis(label, IsOccurrenceSelected(state, o.id))) {
+      if (ImGui::GetIO().KeyCtrl)
+        ToggleOccurrence(state, o.id);
+      else
+        SelectOccurrence(state, o.id);
+    }
 
     // Right-click the row to go to what it references: the shortcut for the
     // "Open"/"Edit" button below, which needs the row selected first and only
     // shows for the selected one. Opening a row that is not the selected one
     // would be a silent selection change, so the menu selects it too.
     if (ImGui::BeginPopupContextItem(("###occ_ctx_" + suffix).c_str())) {
-      SelectOccurrence(state, o.id);
+      // Right-clicking INSIDE a multi-selection keeps it — collapsing to the
+      // clicked row is how you lose a five-part selection by aiming at it.
+      if (!IsOccurrenceSelected(state, o.id))
+        SelectOccurrence(state, o.id);
       const bool isSub = o.refKind == OccurrenceRef::Assembly;
       const std::string item =
           std::string("Open ") + (isSub ? "assembly" : "part") + "###occ_open";
@@ -585,6 +595,24 @@ void DrawOccurrencePanel(AppState& state) {
       if (!slot && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
                                       : "That part is not in this project");
+      }
+      // Delete belongs HERE, on the thing being deleted. It existed only as a
+      // button in the "Selected occurrence" editor below the list, which you
+      // reach by selecting a row first and which is off the bottom of a short
+      // panel on any real assembly — so the answer to "how do I remove this"
+      // was invisible, and the tab bar's Delete part refused because of the
+      // very occurrences nobody could find. Reported from use.
+      ImGui::Separator();
+      const size_t picked = SelectedOccurrenceIds(state).size();
+      const std::string del =
+          (picked > 1 ? "Delete " + std::to_string(picked) + " occurrences"
+                      : std::string("Delete occurrence")) +
+          "###occ_delete";
+      if (ImGui::MenuItem(del.c_str())) {
+        DeleteSelectedOccurrences(state);
+        ImGui::EndPopup();
+        ImGui::End();
+        return; // the list we are walking just changed under us
       }
       ImGui::EndPopup();
     }
@@ -647,12 +675,14 @@ void DrawOccurrencePanel(AppState& state) {
       return; // the panel just switched to a part tab
     }
     ImGui::SameLine();
-    if (ImGui::Button("Delete occurrence")) {
-      const uint64_t id = sel->id;
-      SnapshotAssembly(state);
-      asmDoc.RemoveOccurrence(id);
-      SelectOccurrence(state, 0);
-      SolveActiveAssembly(state); // a mate referencing it now dangles/frees
+    const size_t picked = SelectedOccurrenceIds(state).size();
+    const std::string del =
+        picked > 1 ? "Delete " + std::to_string(picked) + " occurrences"
+                   : std::string("Delete occurrence");
+    if (ImGui::Button(del.c_str())) {
+      DeleteSelectedOccurrences(state);
+      ImGui::End();
+      return; // `sel` pointed into the list that just shrank
     }
   }
 

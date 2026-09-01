@@ -130,6 +130,14 @@ void StartMateEdit(AppState& state, uint64_t mateId);
 
 // The armed connector slot consumed a pipeline pick (SlotPickClicked routes
 // kMateSessionSlot here).
+// Multi-select in the occurrence list, matching what the viewport has done
+// since U1d: ctrl-click adds and removes, a plain click replaces.
+[[nodiscard]] bool IsOccurrenceSelected(const AppState& state, uint64_t occId);
+void ToggleOccurrence(AppState& state, uint64_t occId);
+// Remove every selected occurrence. Returns how many went. One undo snapshot
+// and one solve for the batch.
+int DeleteSelectedOccurrences(AppState& state);
+
 void MateConnectorPicked(AppState& state, const SelectionItem& item);
 
 void AcceptMateTool(AppState& state);
