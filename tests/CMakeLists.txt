@@ -197,6 +197,19 @@ set_tests_properties(offscreen_smoke PROPERTIES LABELS slow TIMEOUT 300
 # --offscreen and the child dies with it. Skips (77) without the mcp SDK or
 # a Vulkan device. Finds the binary itself (build/designer beside tools/),
 # so no $<TARGET_FILE> — which is the point: it tests the server's own probe.
+# Pixel regression on the offscreen renderer. Its baseline is keyed to the
+# DEVICE that produced it (ping reports it), so this skips rather than fails
+# where no baseline matches — which is every developer machine until someone
+# records one, and is the only honest answer for a check whose subject is not
+# bit-reproducible across vendors. CI pins its driver in the container image
+# and runs the script directly with --require-baseline, so a Mesa bump there
+# is a red build rather than a gate that quietly stopped applying.
+add_test(NAME render_pixel_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_pixel_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_pixel_smoke PROPERTIES LABELS slow TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
 add_test(NAME mcp_autostart_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_autostart_smoke.py)
 set_tests_properties(mcp_autostart_smoke PROPERTIES TIMEOUT 120

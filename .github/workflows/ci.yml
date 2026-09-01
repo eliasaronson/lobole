@@ -132,6 +132,20 @@ jobs:
       - name: Offscreen smoke (software Vulkan, NO Xvfb)
         run: ctest --test-dir build -R offscreen_smoke --output-on-failure
 
+      # Pixel regression, and the one place it can be a real gate. lavapipe is
+      # bit-reproducible for a fixed scene and camera (measured: three separate
+      # processes, byte-identical PNGs), and the driver here is pinned by the
+      # container image — so the baseline keyed to it always matches and exact
+      # equality is usable instead of a tolerance nobody could justify.
+      #
+      # Run directly rather than through ctest, for --require-baseline: the
+      # ctest registration SKIPS where no baseline matches the device, which is
+      # right on a developer's GPU and wrong here. A Mesa bump changes the key
+      # on purpose; this turns that into a red build so someone re-records
+      # deliberately, instead of a gate that silently stopped applying.
+      - name: Pixel regression (software Vulkan, NO Xvfb)
+        run: python3 tests/render_pixel_smoke.py build/designer --require-baseline
+
   build-and-test:
     runs-on: ubuntu-24.04
     steps:

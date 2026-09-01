@@ -847,7 +847,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "feature/entity/constraint types, enums, and the document format "
      "version. {method} narrows to one.",
      "method"},
-    {"ping", "Liveness check; returns {ok, app}.", ""},
+    {"ping",
+     "Liveness check; returns {ok, app, port, mode, ui_actions, project, "
+     "dirty, gpu}. `gpu` is the device that answers renders — empty under "
+     "--headless, which has no renderer.",
+     ""},
     {"get_state",
      "Full snapshot: features (with errors), bodies (volume, bbox), "
      "selection, camera, undo/redo, rollback, regen summary.",
@@ -1143,7 +1147,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"mode", ModeName(m_mode)},
             {"ui_actions", UiActionsAvailable()},
             {"project", project},
-            {"dirty", ui::ProjectDirty(state)}};
+            {"dirty", ui::ProjectDirty(state)},
+            // Which GPU answers is the first thing worth knowing about a
+            // rendering bug, and until now it existed only in the log and in
+            // Help > About — both out of reach of the caller writing the
+            // report. It is also what lets a pixel baseline be keyed to the
+            // device that produced it (tests/render_pixel_smoke.py).
+            {"gpu", state.gpuName}};
   }
   if (m == "get_state") {
     json features = json::array();

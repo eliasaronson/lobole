@@ -280,7 +280,7 @@ two docs quoting the old figure in the same commit.
 
 Worth asking separately why four CAM tests cost 138 s of CPU between them.
 
-## T2 — The renderer has no pixel-regression gate
+## T2 — The renderer has no pixel-regression gate — BUILT
 
 The most effective renderer verification this project has ever run was manual:
 the 08-24 architecture review re-rendered a fixed three-body scene through the
@@ -302,6 +302,46 @@ git. A perceptual-hash or a bounded per-channel delta against a baseline
 recorded by `--record` is the shape.
 
 Best value-for-effort item in this section.
+
+### Built 2026-09-01, and the tolerance turned out to be unnecessary
+
+The paragraph above assumed a tolerance was forced. Measured first, which is
+what changed the design: under lavapipe the same scene rendered in **three
+separate processes** gave byte-identical PNGs — including the first-render
+transient, which differs from the steady state and differs the same way every
+time. Output is deterministic *per driver*; it is only *across* drivers that it
+is not.
+
+So the baseline is **keyed to the device that produced it**. `ping` now reports
+the GPU (it existed only in the log and in Help > About, out of reach of the
+caller writing a bug report), and the filename carries it down to the LLVM
+version. A driver the baseline does not cover is REFUSED as "no baseline for
+this device" rather than compared loosely — the same rule the document loader
+follows for an input it does not recognise. That makes **exact byte equality**
+usable, and a tolerance is a number nobody could justify that hides exactly the
+small regression this is for.
+
+`tests/render_pixel_smoke.py`, one scene chosen to put the passes at risk that
+a refactor touches — curvature for shading, silhouettes at several depths for
+the outline pass, one shape standing on another for shadows and AO — with an
+explicit camera, never `fit_view`, because fitting is derived from the
+framebuffer and the model bounds and would re-frame the shot when either moved.
+
+Verified in both directions, which is the part that matters:
+
+| | |
+|---|---|
+| unchanged, twice | **SAME** — 63296 bytes, byte-identical |
+| SSAO off | **DIFFERS** (44454 bytes) |
+| shadows off | **DIFFERS** (42449 bytes) |
+| on the NVIDIA GPU (unkeyed) | **skips**, naming the record command |
+
+The silent-gate risk is real and is handled explicitly: on a Mesa bump the key
+changes and the check stops applying. Locally that is a skip, which is honest —
+a developer's GPU has no baseline and should not fail. In CI the driver is
+pinned by the container image, so the workflow runs the script directly with
+`--require-baseline` and a bump becomes a red build, not a gate that quietly
+stopped.
 
 ## T3 — `gui_smoke` has to be excluded by hand, every time — FIXED
 
@@ -672,7 +712,7 @@ tooling halves were mostly actionable without one, and this is what landed.
 | **P5** worktree picks its own port | fixed | `073aa31` |
 | **P3** TSan build mode | added | (below) |
 | **T4** coverage leaves no trace | run recorded, and it needs a fix | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
-| **T2** pixel-regression gate | NOT done — needs a decision | — |
+| **T2** pixel-regression gate | built | (below) |
 | **P2** GPU memory visibility | done — and the finding was WRONG | (below) |
 | **T6** perf gates | WITHDRAWN — already gated, better than proposed | — |
 | **T7** shuffled runs | fixed | `24857e9` |
@@ -757,10 +797,9 @@ report its port under instrumentation — a TSan-speed artifact, not a race.
 **T2 (pixel-regression gate)** and **P2 (GPU memory)** both need a decision
 rather than more typing.
 
-T2's is where the baseline lives: exact byte equality is driver- and
-machine-specific, so a golden PNG in git would fail on anyone else's GPU. It
-needs a tolerance and a locally-recorded baseline, and choosing that shape is
-the work.
+T2's was where the baseline lives — resolved by measuring instead of
+reasoning: lavapipe is bit-reproducible, so the baseline is keyed to the
+device and exact equality works. See its section above.
 
 P2 was left for a seam decision and then **turned out not to need one** — see
 its correction above. Asking whether it beat an external monitor was the right
