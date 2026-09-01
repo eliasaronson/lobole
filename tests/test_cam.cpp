@@ -3944,4 +3944,61 @@ TEST_CASE("cam: a picked wall is re-resolved at every depth", "[cam]") {
   CHECK(MovesInTheNotch(paths[0]) == 0);
 }
 
+TEST_CASE("cam verify: a through cut is not a gouge", "[cam]") {
+  // A through cut ends BELOW the workpiece on purpose — into the spoilboard —
+  // so the cutter leaves no web holding the part in the sheet. The verifier
+  // compared cell to cell against a designed surface whose floor IS the
+  // stock's bottom, so every such job reported the overcut as material removed
+  // from the part and said "that is scrap" about correct G-code.
+  //
+  // Measured on the real smart_speaker front_wall: both setups reported
+  // 0.50 mm of gouge, which is exactly the -0.5 bottomZ its profile ops carry.
+  // A verdict that cries wolf on every through cut teaches an operator to skip
+  // the line that would have mattered, which is worse than not checking.
+  auto doc = BlockDoc(40, 30, 10);
+  cam::Setup setup = BasicSetup();
+  // No bottom margin: the stock floor is the part's own bottom face, which is
+  // the case that produces the false gouge (and is what a sheet clamped to a
+  // spoilboard actually is).
+  setup.stock.bottomMargin = 0.0;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.side = cam::Side::Outside;
+  op.topZ = 11.0;
+  op.bottomZ = -0.5; // through the part, 0.5 into the spoilboard
+  op.stepdown = 5.0;
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), /*res=*/0.4);
+  REQUIRE(v.cells > 0);
+  INFO("gouge " << v.maxGouge << " below stock " << v.belowStock);
+  // The part is untouched...
+  CHECK(v.maxGouge < 0.5); // one cell of quantisation at 0.4 mm
+  CHECK(v.Safe(0.1));
+  // ...and the overcut is REPORTED rather than dropped. Silently discarding it
+  // would be the substitution this codebase refuses; it is a real fact about
+  // the program, it is just not a fact about the part.
+  CHECK(v.belowStock > 0.4);
+  CHECK(v.belowStock < 0.7);
+
+  // The gouge check still bites where it should: the same job cut 3 mm deeper
+  // than the part is thick has nowhere to put that depth except the part.
+  cam::Setup deep = setup;
+  deep.operations[0].side = cam::Side::Inside;
+  deep.operations[0].targets.clear();
+  const cam::Verdict shallow =
+      cam::VerifyGcode("G90 G21\nG0 X20 Y15 Z20\nG1 Z-5 F100\nM30\n", setup,
+                       doc->GetBodies(), 0.4);
+  INFO("plunge gouge " << shallow.maxGouge);
+  CHECK(shallow.maxGouge > 5.0); // straight down through 10 mm of part
+  CHECK_FALSE(shallow.Safe(0.1));
+}
+
 #endif // HAVE_CAM

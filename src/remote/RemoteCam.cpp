@@ -115,8 +115,11 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_verify",
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
-     "leftover_area_mm2, leftover_regions, rapids_through_stock, ok, "
-     "complete, says}. `ok` = nothing scraps the part or breaks the tool (no "
+     "leftover_area_mm2, leftover_regions, rapids_through_stock, "
+     "below_stock_mm, ok, complete, says}. `below_stock_mm` is depth cut past "
+     "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
+     "is reported, never counted as gouge. "
+     "`ok` = nothing scraps the part or breaks the tool (no "
      "gouge, no rapid through material) and is the one to gate on; `complete` "
      "= nothing left standing, which a correct job with tabs or a dropping "
      "slug will NOT satisfy. "
@@ -683,6 +686,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                              {"depth_mm", r.depth}});
     return json{{"max_gouge_mm", v.maxGouge},
                 {"max_leftover_mm", v.maxLeftover},
+                // Past the bottom of the stock: the spoilboard, not the part.
+                // Separate from the gouge because every through cut does it
+                // on purpose, and conflating them called correct G-code scrap.
+                {"below_stock_mm", v.belowStock},
+                {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
                 {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
                 {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
                 // How MUCH is left over, and in how many places: corner radii

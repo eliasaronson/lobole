@@ -406,7 +406,8 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
 }
 
 Verdict Compare(const HeightMap& machined, const HeightMap& designed,
-                const std::vector<uint8_t>* touched, double leftoverTolerance) {
+                double floorZ, const std::vector<uint8_t>* touched,
+                double leftoverTolerance) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -426,8 +427,17 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         untouched++;
         continue; // nobody asked the program to cut here
       }
-      const double got = machined.At(i, j);
+      const double rawGot = machined.At(i, j);
       v.cells++;
+      // Below the stock there is no part to scrap: that is the spoilboard,
+      // and a through cut is SUPPOSED to reach it. Recorded separately and
+      // clamped out of the gouge test — see Verdict::belowStock for what
+      // conflating the two told the operator about correct G-code.
+      if (floorZ - rawGot > v.belowStock) {
+        v.belowStock = floorZ - rawGot;
+        v.belowStockAt = {machined.CellX(i), machined.CellY(j)};
+      }
+      const double got = std::max(rawGot, floorZ);
       // A cell that straddles a vertical WALL has no single designed height:
       // the tool runs tangent to the wall, and whether the cell counts as
       // inside or outside is decided by where its centre happens to fall.
@@ -612,7 +622,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   }
 
   out.designed = SampleModel(bodies, machined, lo.z);
-  out.verdict = Compare(machined, out.designed, &touched);
+  out.verdict = Compare(machined, out.designed, lo.z, &touched);
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
   out.machined = std::move(machined);

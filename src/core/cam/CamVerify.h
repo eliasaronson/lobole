@@ -116,7 +116,20 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock);
 // --- the verdict ----------------------------------------------------------
 
 struct Verdict {
-  double maxGouge = 0.0;    // mm cut BELOW the designed surface (scrap)
+  double maxGouge = 0.0; // mm cut BELOW the designed surface (scrap)
+  // How far the deepest cut went below the WORKPIECE — the spoilboard, which
+  // is what a through cut is for. Reported, never counted as gouge, and not
+  // part of Safe(): below the stock there is no part left to scrap.
+  //
+  // It has to be separate rather than absent. Every through cut sets bottomZ
+  // below the stock floor on purpose (the profile ops on a real job use
+  // -0.5), and where the stock's bottom margin is 0 that floor IS the part's
+  // bottom face — so comparing cell to cell reported 0.50 mm of "gouge" on
+  // correct G-code and told the operator "that is scrap". A verifier that
+  // cries wolf on every through cut teaches people to skip the one line that
+  // would have mattered.
+  double belowStock = 0.0;
+  glm::dvec2 belowStockAt{0.0};
   double maxLeftover = 0.0; // mm of stock still above it (unfinished)
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
@@ -174,8 +187,12 @@ struct Verdict {
 // every cell.
 // Leftover deeper than this counts toward `leftoverArea`/`leftoverRegions`.
 // Zero takes the grid's own quantisation (one and a half cells).
+// `floorZ` is the bottom of the STOCK. Material removed below it is the
+// spoilboard, not the part, so it lands in `belowStock` instead of `maxGouge`
+// (see that field). Callers that genuinely have no workpiece bottom can pass
+// -infinity, which restores a plain cell-to-cell comparison.
 [[nodiscard]] Verdict Compare(const HeightMap& machined,
-                              const HeightMap& designed,
+                              const HeightMap& designed, double floorZ,
                               const std::vector<uint8_t>* touched = nullptr,
                               double leftoverTolerance = 0.0);
 

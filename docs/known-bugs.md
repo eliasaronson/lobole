@@ -276,6 +276,51 @@ action to pair with `item_click`. Neither is needed by anything today, which is
 why this is filed rather than fixed.
 
 
+## The verifier called every through cut a gouge — FIXED 2026-09-01
+
+`cam_verify` reported **0.50 mm of gouge** on the smart_speaker front_wall, in
+both setups, and said of it:
+
+> "Cuts 0.50 mm INTO the part at X-106.4 Y-518.9 — **that is scrap.** Check the
+> depths and the tool diameter."
+
+The G-code was correct. 0.50 is the `bottom_z: -0.5` its profile ops carry —
+a through cut ends BELOW the workpiece on purpose, in the spoilboard, so no web
+holds the part in the sheet. The setup's stock has `bottom_margin: 0.0`, so the
+stock floor is the part's own bottom face, and `SampleModel` uses that floor as
+the designed height wherever the part has no material. Comparing cell to cell,
+0.5 mm past it is 0.5 mm of "gouge", necessarily, on **every through cut in
+every job**.
+
+Found while checking an unrelated number, which is how it had survived: the
+line is easy to read as "some quantisation, the mesh is coarse". It is not
+noise — it is exactly the sacrificial depth, and it scales with whatever the
+operator typed.
+
+**Impact is trust, not correctness.** Nothing was cut wrong. But `ok` was false
+on every through-cutting job, and the one line a verifier exists to make
+unmissable was firing on the jobs that were fine — which teaches an operator to
+skip it. `Verdict::Complete()` already documented this hazard for *leftover*
+("a correct job routinely reports material left over"); the gouge side never
+got the same treatment.
+
+**Fixed** by giving the spoilboard its own number rather than dropping it.
+`Compare` takes the stock floor; depth past it lands in `Verdict::belowStock`
+(and `below_stock_mm` over RPC) and is clamped out of the gouge test. Below the
+stock there is no part left to scrap. Discarding it silently would have been
+the substitution this codebase refuses — it is a real fact about the program,
+just not a fact about the part.
+
+On the real job: gouge **0.50 -> 0.0** (Front) and **0.50 -> 0.005** (Back,
+quantisation), and both verdicts now say only what is true — that the job
+leaves material in the corners a round cutter cannot reach.
+
+Gated by `cam verify: a through cut is not a gouge`, which checks both
+directions: the through cut is clean AND its overcut is still reported, and a
+plunge straight into the part still reports a gouge and fails `Safe()`.
+
+---
+
 ## CAM: two defects found machining the smart_speaker front_wall (2026-08-31)
 
 Both found by the verifier on a real 2-sided job, both reproducible, neither
