@@ -385,6 +385,17 @@ std::optional<std::pair<double, double>> LengthRange(const std::string& stem,
   return std::make_pair(lo, hi);
 }
 
+// How far past a nominal length a derived grip may sit and still snap to it.
+//
+// Not an engineering tolerance — a NUMERIC one. A grip is the sum of boolean
+// intersection distances, so two 10 mm plates measure 20.0000005 rather than
+// 20, and a bare `<` comparison then rejected the 20 mm screw and offered a
+// 25: five millimetres of error out of half a micron of noise, on the most
+// ordinary joint there is. A micron is far below anything anybody models
+// deliberately and far above float noise, and a real 20.5 mm grip still goes
+// to 25.
+constexpr double kSnapTol = 1.0e-3;
+
 std::optional<double> SnapLength(const std::string& stem,
                                  const std::string& size, double required,
                                  std::string* error) {
@@ -398,7 +409,7 @@ std::optional<double> SnapLength(const std::string& stem,
       LengthRange(stem, size, nullptr);
 
   for (const double length : lengths) {
-    if (length < required)
+    if (length < required - kSnapTol)
       continue;
     if (range && (length < range->first || length > range->second))
       continue;
@@ -429,7 +440,7 @@ std::optional<double> SnapLengthDown(const std::string& stem,
       LengthRange(stem, size, nullptr);
   std::optional<double> best;
   for (const double length : lengths) {
-    if (length > available)
+    if (length > available + kSnapTol)
       break;
     if (range && (length < range->first || length > range->second))
       continue;

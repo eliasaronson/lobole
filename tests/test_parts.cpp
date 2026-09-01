@@ -655,6 +655,26 @@ TEST_CASE("parts: the four head shapes each measure their standard",
   }
 }
 
+TEST_CASE("parts: a grip a hair over a nominal length snaps to it", "[parts]") {
+  // Found on a real model: two 10 mm bars, an M8 through both, and the answer
+  // was an M8x25. A grip is a sum of boolean intersection distances, so the
+  // stack measured 20.0000005 and a bare `<` rejected the 20 mm screw for
+  // half a micron — five millimetres of error out of numeric noise, on the
+  // most ordinary joint there is.
+  const SourceTables tables;
+  std::string error;
+  CHECK(parts::SnapLength("iso4762", "M8", 20.0000005, &error) == 20.0);
+  CHECK(parts::SnapLength("iso4762", "M8", 20.0, &error) == 20.0);
+  // And a grip that is genuinely longer still goes up: the tolerance absorbs
+  // noise, not a millimetre of real material.
+  CHECK(parts::SnapLength("iso4762", "M8", 20.5, &error) == 25.0);
+
+  // The blind-hole direction is bounded from ABOVE and gets the same
+  // treatment, for the same reason and with the same limit.
+  CHECK(parts::SnapLengthDown("iso4762", "M8", 19.9999995, &error) == 20.0);
+  CHECK(parts::SnapLengthDown("iso4762", "M8", 19.5, &error) == 16.0);
+}
+
 TEST_CASE("parts: a non-preferred size is a size, not a refusal", "[parts]") {
   // ISO marks the sizes it would rather you avoided with parentheses —
   // "(M3.5)" — and that is a recommendation about which sizes to design
