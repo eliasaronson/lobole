@@ -821,7 +821,7 @@ bool RecomputeOrigin(Setup& setup, const std::vector<Body>& bodies) {
   // The picked face wins on Z, because "Pick top face — that sets Z zero for
   // the job" is a promise the file now has to keep.
   if (setup.topFace.IsSet()) {
-    const FaceRegion region = PickedFaceRegion(framed, setup.topFace);
+    const FaceRegion region = PickedFaceRegion(framed, setup.topFace.ref);
     if (region.ok)
       o.z = region.z;
   }
@@ -1244,7 +1244,7 @@ EdgeBreak EdgeBreakFor(const Tool& tool, double asked, double window) {
 
 DerivedOp DeriveOperation(const Setup& setup,
                           const std::vector<Body>& rawBodies, OpType type,
-                          const ElementRef& target, int toolNumber) {
+                          const Target& target, int toolNumber) {
   // Depths are read in the frame the machine cuts in, or an indexed setup
   // derives them from the wrong axis (C9).
   const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
@@ -1305,12 +1305,12 @@ DerivedOp DeriveOperation(const Setup& setup,
   switch (type) {
   case OpType::Adaptive: // the strategy, derived exactly like the verb it is
   case OpType::Pocket: {
-    if (IsWallFace(bodies, target)) {
+    if (IsWallFace(bodies, target.ref)) {
       out.why = "click the pocket's FLOOR — a wall says where to go round, "
                 "not how deep to go. Cut it out follows a wall.";
       return out;
     }
-    const FaceRegion region = PickedFaceRegion(bodies, target);
+    const FaceRegion region = PickedFaceRegion(bodies, target.ref);
     if (!region.ok) {
       out.why = region.why;
       return out;
@@ -1343,9 +1343,9 @@ DerivedOp DeriveOperation(const Setup& setup,
     // "cut it out" means — a profile that stops on the last skin leaves the
     // part welded to the stock.
     op.bottomZ = lo.z;
-    if (IsWallFace(bodies, target)) {
+    if (IsWallFace(bodies, target.ref)) {
       // A wall names the contour to follow AND how far down to follow it.
-      const WallContour wall = PickedWallContour(bodies, target);
+      const WallContour wall = PickedWallContour(bodies, target.ref);
       if (!wall.ok) {
         out.why = wall.why;
         return out;
@@ -1359,7 +1359,7 @@ DerivedOp DeriveOperation(const Setup& setup,
       if (wall.bottomZ > modelBottom + 1e-6)
         op.bottomZ = wall.bottomZ;
     } else if (target.IsSet()) {
-      const FaceRegion region = PickedFaceRegion(bodies, target);
+      const FaceRegion region = PickedFaceRegion(bodies, target.ref);
       if (!region.ok) {
         out.why = region.why;
         return out;
@@ -1442,7 +1442,7 @@ DerivedOp DeriveOperation(const Setup& setup,
                 "top edge to round or chamfer";
       return out;
     }
-    const WallContour wall = PickedWallContour(bodies, target);
+    const WallContour wall = PickedWallContour(bodies, target.ref);
     if (!wall.ok) {
       out.why = wall.why;
       return out;
@@ -1476,9 +1476,9 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.topZ = hi.z;
     bool found = false;
     for (const Body& body : bodies) {
-      if (body.createdBy != target.featureId || !body.shape.IsValid())
+      if (body.createdBy != target.ref.featureId || !body.shape.IsValid())
         continue;
-      const std::optional<int> idx = body.elementMap.Resolve(target.name);
+      const std::optional<int> idx = body.elementMap.Resolve(target.ref.name);
       if (!idx)
         continue;
       glm::vec3 origin(0.0f), axis(0.0f), xAxis(0.0f);
@@ -1595,22 +1595,57 @@ bool MoveOperation(Setup& setup, uint64_t opId, size_t toIndex) {
   return true;
 }
 
+namespace {
+// Where this body's part sits in the stock, or null when nobody has said.
+const Placement* PlacementForBody(const Setup& setup, const Body& b) {
+  if (b.jobPartId == 0)
+    return nullptr;
+  for (const Placement& p : setup.placements)
+    if (p.jobPartId == b.jobPartId)
+      return &p;
+  return nullptr;
+}
+} // namespace
+
 std::vector<Body> BodiesInSetupFrame(const Setup& setup,
                                      const std::vector<Body>& in) {
-  if (SetupIsSquare(setup))
+  if (SetupIsSquare(setup) && setup.placements.empty())
     return in;
   // Undo the setup's frame: the part turns under a spindle that always points
   // down, which is what both a clamp and an indexed trunnion amount to. A
   // rotation's inverse is its transpose.
   const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup));
-  glm::mat4 m(1.0f);
+  glm::mat4 frame(1.0f);
   for (int col = 0; col < 3; col++)
     for (int row = 0; row < 3; row++)
-      m[col][row] = static_cast<float>(toSetup[col][row]);
+      frame[col][row] = static_cast<float>(toSetup[col][row]);
 
   std::vector<Body> out;
   out.reserve(in.size());
   for (const Body& b : in) {
+    // Where the part sits in the stock composes HERE and nowhere else, after
+    // the fixture frame and in setup space -- which is what makes "where on
+    // the sheet" an in-plane statement rather than a fourth way to tilt a
+    // part (docs/cam/job-document.md). setup-frame.md learned what a second
+    // copy of this transform costs.
+    const Placement* place = PlacementForBody(setup, b);
+    if (place != nullptr && !place->enabled)
+      continue; // on the sheet, not cut this run
+    glm::mat4 m = frame;
+    if (place != nullptr) {
+      const float c =
+          static_cast<float>(std::cos(glm::radians(place->rotZdeg)));
+      const float sn =
+          static_cast<float>(std::sin(glm::radians(place->rotZdeg)));
+      glm::mat4 t(1.0f);
+      t[0][0] = c;
+      t[0][1] = sn;
+      t[1][0] = -sn;
+      t[1][1] = c;
+      t[3][0] = static_cast<float>(place->pos.x);
+      t[3][1] = static_cast<float>(place->pos.y);
+      m = t * m;
+    }
     Body copy = b; // keeps createdBy and the element map: names must survive
     if (b.shape.IsValid())
       copy.shape = b.shape.Transformed(m);
@@ -1679,15 +1714,15 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
     return {};
   // A wall names one contour at every depth — the case an opening that goes
   // all the way through has, because it has no floor to name.
-  if (IsWallFace(bodies, op.targets.front())) {
-    const WallContour wall = PickedWallContour(bodies, op.targets.front());
+  if (IsWallFace(bodies, op.targets.front().ref)) {
+    const WallContour wall = PickedWallContour(bodies, op.targets.front().ref);
     if (!wall.ok) {
       error = wall.why;
       return {};
     }
     return Clipper2Lib::Paths64{ToClipper(wall.loop.pts)};
   }
-  const FaceRegion region = PickedFaceRegion(bodies, op.targets.front());
+  const FaceRegion region = PickedFaceRegion(bodies, op.targets.front().ref);
   if (!region.ok) {
     error = region.why;
     return {};
@@ -1768,10 +1803,10 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // wrong at the rest — the pick is re-resolved per pass below, against the
   // projection. A floor region and a targetless cut keep their own shapes.
   const bool wallPick =
-      !op.targets.empty() && IsWallFace(bodies, op.targets.front());
+      !op.targets.empty() && IsWallFace(bodies, op.targets.front().ref);
   WallContour wall;
   if (wallPick) {
-    wall = PickedWallContour(bodies, op.targets.front());
+    wall = PickedWallContour(bodies, op.targets.front().ref);
     if (!wall.ok) {
       tp.error = wall.why;
       return;
@@ -2186,7 +2221,8 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
     return;
   }
   int found = 0;
-  for (const ElementRef& ref : op.targets) {
+  for (const Target& t : op.targets) {
+    const ElementRef& ref = t.ref;
     for (const Body& body : bodies) {
       if (body.createdBy != ref.featureId)
         continue;
@@ -2259,7 +2295,7 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
                "top edge to round or chamfer";
     return;
   }
-  const WallContour wall = PickedWallContour(bodies, op.targets.front());
+  const WallContour wall = PickedWallContour(bodies, op.targets.front().ref);
   if (!wall.ok) {
     tp.error = wall.why;
     return;
@@ -2373,8 +2409,34 @@ Toolpath Generate(const Setup& setup, const Operation& op,
   return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies));
 }
 
+std::string PlacementRefusal(const Setup& setup) {
+  for (size_t i = 0; i < setup.placements.size(); i++)
+    for (size_t k = i + 1; k < setup.placements.size(); k++)
+      if (setup.placements[i].jobPartId == setup.placements[k].jobPartId &&
+          setup.placements[i].enabled && setup.placements[k].enabled)
+        return "this setup places one part twice, and repeats are not cut "
+               "yet -- the second copy would be skipped and the file would "
+               "look right. Disable one placement, or give the copies their "
+               "own job parts";
+  return "";
+}
+
 std::vector<Toolpath> GenerateAll(const Setup& setup,
                                   const std::vector<Body>& bodies) {
+  // An arrangement we cannot honestly cut stops here, in every operation's
+  // own error, rather than at the machine.
+  if (const std::string why = PlacementRefusal(setup); !why.empty()) {
+    std::vector<Toolpath> refused;
+    for (const Operation& op : setup.operations)
+      if (op.enabled) {
+        Toolpath t;
+        t.operationId = op.id;
+        t.toolNumber = op.toolNumber;
+        t.error = why;
+        refused.push_back(std::move(t));
+      }
+    return refused;
+  }
   // Framed ONCE for the whole setup: the transform is an OCC operation per
   // body, and doing it per operation was both slower and a place for two
   // operations to disagree.

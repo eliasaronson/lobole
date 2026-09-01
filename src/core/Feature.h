@@ -53,6 +53,13 @@ struct Body {
   bool hasDisplayColor = false;
   glm::vec3 displayColor{0.0f};
 
+  // Which part of a CAM JOB this body came from (v73), stamped when the job
+  // assembles its body list (ui::JobBodies). Transient like the shape, and 0
+  // everywhere else -- a job is the only thing that puts several parts'
+  // bodies in one vector, which is exactly when an ElementRef alone stops
+  // naming one face (docs/cam/job-document.md).
+  uint64_t jobPartId = 0;
+
   // User appearance override, stamped from the creating feature after each
   // regeneration (Document::Regenerate post-pass keyed on createdBy).
   // Renderers prefer: appearance > material > displayColor > palette.

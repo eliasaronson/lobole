@@ -885,7 +885,7 @@ void DrawCamPanel(AppState& state) {
       ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
                             "pass (profile only)");
       if (!op.targets.empty())
-        ImGui::TextDisabled("boundary: %s", op.targets[0].name.c_str());
+        ImGui::TextDisabled("boundary: %s", op.targets[0].ref.name.c_str());
       ImGui::TreePop();
     }
 

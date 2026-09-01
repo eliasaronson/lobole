@@ -1,0 +1,41 @@
+{
+  "job_parts": [
+    "Bracket",
+    "Spacer"
+  ],
+  "job_target_parts": [
+    1,
+    2
+  ],
+  "job_placements": [
+    {
+      "part": 1,
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "rot_z": 0.0,
+      "enabled": true
+    },
+    {
+      "part": 2,
+      "pos": [
+        200.0,
+        0.0
+      ],
+      "rot_z": 90.0,
+      "enabled": true
+    }
+  ],
+  "cam_op_sides": [
+    "outside",
+    "outside"
+  ],
+  "cam_op_types": [
+    "profile",
+    "profile"
+  ],
+  "cam_tool_types": [
+    "flat"
+  ]
+}

@@ -1,5 +1,7 @@
 #include "core/cam/JobDocument.h"
 
+#include <algorithm>
+
 namespace cam {
 
 uint64_t JobDocument::AddPart(uint64_t sourceDocId, const std::string& name) {
@@ -12,13 +14,31 @@ uint64_t JobDocument::AddPart(uint64_t sourceDocId, const std::string& name) {
 }
 
 bool JobDocument::RemovePart(uint64_t id) {
+  bool found = false;
   for (auto it = m_parts.begin(); it != m_parts.end(); ++it) {
     if (it->id == id) {
       m_parts.erase(it);
-      return true;
+      found = true;
+      break;
     }
   }
-  return false;
+  if (!found)
+    return false;
+  // Everything that named it goes too. A placement for a part the job no
+  // longer holds puts a ghost in the stock, and an operation target pointing
+  // at one is the dangling reference the id exists to prevent -- it would
+  // resolve against whatever body happened to answer to the same element
+  // name, which is the wrong bracket, cut for real.
+  for (Setup& setup : m_setups) {
+    std::erase_if(setup.placements,
+                  [id](const Placement& p) { return p.jobPartId == id; });
+    for (Operation& op : setup.operations)
+      std::erase_if(op.targets,
+                    [id](const Target& t) { return t.jobPartId == id; });
+    if (setup.topFace.jobPartId == id)
+      setup.topFace = Target{};
+  }
+  return true;
 }
 
 JobPart* JobDocument::FindPart(uint64_t id) {

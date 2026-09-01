@@ -127,7 +127,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // to set the job up (docs/cam/dogfood-round.md, round 2).
     IM_CHECK(std::abs(live->stock.margin.z - 1.0) < 1e-9);
     const cam::DerivedOp face = cam::DeriveOperation(
-        *live, CamPart()->GetBodies(), cam::OpType::Face, ElementRef{});
+        *live, CamPart()->GetBodies(), cam::OpType::Face, cam::Target{});
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 

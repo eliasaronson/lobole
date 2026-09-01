@@ -88,6 +88,24 @@ cam::Side SideFromName(const std::string& s) {
   return cam::Side::Outside;
 }
 
+// A machining selection: the element, and which part of the job it is on
+// (v73). `part` is omitted for a single-part job, where 0 is unambiguous --
+// the one part -- so those files keep the shape they had.
+json TargetJson(const cam::Target& t) {
+  json j = {{"feature_id", t.ref.featureId}, {"element", t.ref.name}};
+  if (t.jobPartId != 0)
+    j["part"] = t.jobPartId;
+  return j;
+}
+
+cam::Target TargetFromJson(const json& j) {
+  cam::Target t;
+  t.jobPartId = j.value("part", uint64_t{0});
+  t.ref.featureId = j.value("feature_id", uint64_t{0});
+  t.ref.name = j.value("element", std::string());
+  return t;
+}
+
 } // namespace
 
 json CamSetupToJson(const cam::Setup& setup) {
@@ -110,8 +128,7 @@ json CamSetupToJson(const cam::Setup& setup) {
   // "Z zero is not set yet" about a job that had one, every time it was
   // reopened, because the answer lived in the session rather than the job.
   if (setup.topFace.IsSet())
-    j["top_face"] = {{"feature_id", setup.topFace.featureId},
-                     {"element", setup.topFace.name}};
+    j["top_face"] = TargetJson(setup.topFace);
   // How the part is clamped (v67). Written only when it is not "as modelled",
   // so a job on a part that already lies flat re-saves byte-identically.
   // Doubles, not the float QuatToJson the assembly schema uses: this frame
@@ -160,6 +177,21 @@ json CamSetupToJson(const cam::Setup& setup) {
     j["tools"].push_back(std::move(tj));
   }
 
+  // Where each part sits in the stock (v73). Omitted when nothing has been
+  // laid out, so a one-part job re-saves exactly as it did.
+  if (!setup.placements.empty()) {
+    j["placements"] = json::array();
+    for (const cam::Placement& p : setup.placements) {
+      json pj = {{"id", p.id}, {"part", p.jobPartId}};
+      if (p.pos.x != 0.0 || p.pos.y != 0.0)
+        pj["pos"] = {p.pos.x, p.pos.y};
+      if (p.rotZdeg != 0.0)
+        pj["rot_z"] = p.rotZdeg;
+      if (!p.enabled)
+        pj["enabled"] = false;
+      j["placements"].push_back(std::move(pj));
+    }
+  }
   j["operations"] = json::array();
   for (const cam::Operation& op : setup.operations) {
     json oj = {{"id", op.id},
@@ -200,9 +232,8 @@ json CamSetupToJson(const cam::Setup& setup) {
       oj["enabled"] = false;
     if (!op.targets.empty()) {
       oj["targets"] = json::array();
-      for (const ElementRef& ref : op.targets)
-        oj["targets"].push_back(
-            json{{"feature_id", ref.featureId}, {"element", ref.name}});
+      for (const cam::Target& t : op.targets)
+        oj["targets"].push_back(TargetJson(t));
     }
     j["operations"].push_back(std::move(oj));
   }
@@ -215,10 +246,8 @@ cam::Setup CamSetupFromJson(const json& j) {
   setup.name = j.value("name", std::string("Setup"));
   setup.post = j.value("post", std::string("mach3"));
   setup.safeZ = j.value("safe_z", 5.0);
-  if (j.contains("top_face")) {
-    setup.topFace.featureId = j["top_face"].value("feature_id", uint64_t{0});
-    setup.topFace.name = j["top_face"].value("element", std::string());
-  }
+  if (j.contains("top_face"))
+    setup.topFace = TargetFromJson(j["top_face"]);
   if (j.contains("origin") && j["origin"].is_array() && j["origin"].size() == 3)
     setup.origin = {j["origin"][0].get<double>(), j["origin"][1].get<double>(),
                     j["origin"][2].get<double>()};
@@ -291,6 +320,16 @@ cam::Setup CamSetupFromJson(const json& j) {
     t.tipAngleDeg = tj.value("tip_angle", 90.0);
     setup.tools.push_back(std::move(t));
   }
+  for (const json& pj : j.value("placements", json::array())) {
+    cam::Placement p;
+    p.id = pj.value("id", uint64_t{0});
+    p.jobPartId = pj.value("part", uint64_t{0});
+    if (pj.contains("pos") && pj["pos"].is_array() && pj["pos"].size() == 2)
+      p.pos = {pj["pos"][0].get<double>(), pj["pos"][1].get<double>()};
+    p.rotZdeg = pj.value("rot_z", 0.0);
+    p.enabled = pj.value("enabled", true);
+    setup.placements.push_back(p);
+  }
   for (const json& oj : j.value("operations", json::array())) {
     cam::Operation op;
     op.id = oj.value("id", uint64_t{0});
@@ -319,12 +358,8 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.stepover = oj.value("stepover", 0.45);
     op.edgeSize = oj.value("edge_size", 0.0);
     op.enabled = oj.value("enabled", true);
-    for (const json& rj : oj.value("targets", json::array())) {
-      ElementRef ref;
-      ref.featureId = rj.value("feature_id", uint64_t{0});
-      ref.name = rj.value("element", std::string());
-      op.targets.push_back(std::move(ref));
-    }
+    for (const json& rj : oj.value("targets", json::array()))
+      op.targets.push_back(TargetFromJson(rj));
     setup.operations.push_back(std::move(op));
   }
   return setup;

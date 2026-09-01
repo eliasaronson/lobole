@@ -180,6 +180,50 @@ void AssertCamFrames(const std::vector<cam::Setup>& setups,
   }
 }
 
+// What a job HOLDS (v74): the parts it cuts, where each sits in the stock,
+// and which part each machining selection is on. The qualifier is the whole
+// point of the bump -- a target that reloads without it resolves against
+// whatever body answers to the same element name, which is the wrong part,
+// cut for real.
+void AssertJobParts(const cam::JobDocument& job, const nlohmann::json& expect) {
+  if (expect.contains("job_parts")) {
+    const auto want = expect.at("job_parts").get<std::vector<std::string>>();
+    std::vector<std::string> got;
+    for (const cam::JobPart& p : job.GetParts())
+      got.push_back(p.name);
+    CHECK(got == want);
+  }
+  if (expect.contains("job_target_parts")) {
+    const auto want =
+        expect.at("job_target_parts").get<std::vector<uint64_t>>();
+    std::vector<uint64_t> got;
+    for (const cam::Setup& s : job.GetSetups())
+      for (const cam::Operation& op : s.operations)
+        for (const cam::Target& t : op.targets)
+          got.push_back(t.jobPartId);
+    CHECK(got == want);
+  }
+  if (expect.contains("job_placements")) {
+    const auto& want = expect.at("job_placements");
+    std::vector<cam::Placement> got;
+    for (const cam::Setup& s : job.GetSetups())
+      for (const cam::Placement& p : s.placements)
+        got.push_back(p);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("placement " << i);
+      CHECK(got[i].jobPartId == want[i].at("part").get<uint64_t>());
+      CHECK_THAT(got[i].pos.x, Catch::Matchers::WithinAbs(
+                                   want[i].at("pos")[0].get<double>(), 1e-9));
+      CHECK_THAT(got[i].pos.y, Catch::Matchers::WithinAbs(
+                                   want[i].at("pos")[1].get<double>(), 1e-9));
+      CHECK_THAT(got[i].rotZdeg, Catch::Matchers::WithinAbs(
+                                     want[i].at("rot_z").get<double>(), 1e-9));
+      CHECK(got[i].enabled == want[i].at("enabled").get<bool>());
+    }
+  }
+}
+
 // Which face Z zero was picked from. On the SETUP, so a job reopened from its
 // own file still knows — the panel used to ask a session field and answered
 // "Z zero is not set yet" about an origin it had saved and was using.
@@ -188,7 +232,8 @@ void AssertCamTopFace(const std::vector<cam::Setup>& setups,
   if (!expect.contains("cam_top_face"))
     return;
   REQUIRE(!setups.empty());
-  CHECK(setups[0].topFace.name == expect.at("cam_top_face").get<std::string>());
+  CHECK(setups[0].topFace.ref.name ==
+        expect.at("cam_top_face").get<std::string>());
 }
 
 // The document's display units (v64). Optional, like the CAM assertions:
@@ -298,6 +343,7 @@ TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
         AssertCamShapes(j.GetSetups(), expect);
         AssertCamFrames(j.GetSetups(), expect);
         AssertCamStock(j.GetSetups(), bodies, expect);
+        AssertJobParts(j, expect);
       };
       check(**job);
 

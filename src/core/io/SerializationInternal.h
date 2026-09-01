@@ -17,7 +17,18 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    73; // v73: CAM setups are no longer part of the part. They live in a JOB
+    74; // v74: a job holds MORE THAN ONE part, which is what the job document
+        //      was for. A machining selection names the part it is on
+        //      (`part` beside `feature_id`/`element`), because two parts in
+        //      one job can own the same element name; and a setup carries
+        //      `placements`, where each part sits in the stock -- in-plane
+        //      only, since out-of-plane is what the fixturing frame says.
+        //      Both omitted at their defaults, so a one-part job written by
+        //      v73 re-saves byte-identically. The bump is for the other
+        //      direction: a v73 build reads a qualified target and drops the
+        //      qualifier, which silently machines the wrong part
+        //      (docs/cam/job-document.md).
+        // (v73: CAM setups are no longer part of the part. They live in a JOB
         //      document of their own (`kind: "job"` -- a parts list plus the
         //      setups that cut them), which is what makes a job about more
         //      than one part: four brackets out of one sheet used to be

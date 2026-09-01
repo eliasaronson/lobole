@@ -224,8 +224,19 @@ int RederiveDepths(Setup& setup, const std::vector<Body>& bodies);
 // carries the wrong stepdown.
 [[nodiscard]] DerivedOp DeriveOperation(const Setup& setup,
                                         const std::vector<Body>& bodies,
-                                        OpType type, const ElementRef& target,
+                                        OpType type, const Target& target,
                                         int toolNumber = 0);
+
+// Why this setup cannot be cut as laid out, or "" when it can. Separate from
+// StockRefusal, which is about the workpiece: this is about the ARRANGEMENT.
+//
+// Today it catches exactly one thing, and catching it is the point: a part
+// placed TWICE in one setup -- four of the same bracket nested in a sheet.
+// The data model holds it (a placement per copy, the way every slicer models
+// instances) and the generator does not cut it yet: a region resolves to the
+// first body that answers, so the second copy would be silently skipped and
+// the file would look right. Refuse instead.
+[[nodiscard]] std::string PlacementRefusal(const Setup& setup);
 
 // --- C9: the setup frame (indexed 4th axis) --------------------------------
 

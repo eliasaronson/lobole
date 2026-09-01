@@ -57,11 +57,27 @@ const std::vector<Body>& JobBodies(AppState& state) {
     const Document* doc = JobSourceDocument(state, part.sourceDocId);
     if (!doc)
       continue; // a source that is gone is reported, never substituted
-    for (const Body& b : doc->GetBodies())
+    for (const Body& b : doc->GetBodies()) {
       state.jobBodies.push_back(b);
+      state.jobBodies.back().jobPartId = part.id;
+    }
   }
   state.jobBodiesKey = key;
   return state.jobBodies;
+}
+
+cam::Target TargetFor(AppState& state, const ElementRef& ref) {
+  cam::Target t;
+  t.ref = ref;
+  for (const Body& b : JobBodies(state)) {
+    if (b.createdBy != ref.featureId)
+      continue;
+    if (!b.elementMap.Resolve(ref.name))
+      continue;
+    t.jobPartId = b.jobPartId;
+    break;
+  }
+  return t;
 }
 
 int FindJobForPart(AppState& state, uint64_t sourcePartId) {

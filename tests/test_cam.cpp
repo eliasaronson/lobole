@@ -315,7 +315,7 @@ TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
   op.bottomZ = 0.0;
   op.stepdown = 4.0;
   op.tabCount = 3;
-  op.targets.push_back(ElementRef{1, "F:box.side"});
+  op.targets.push_back(cam::Target{0, ElementRef{1, "F:box.side"}});
   setup.operations.push_back(op);
 
   CHECK(doc->TipChainHash() == hashBefore); // geometry untouched
@@ -338,7 +338,7 @@ TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
   CHECK(backOp.tabCount == 3);
   CHECK_THAT(backOp.stepdown, WithinAbs(4.0, 1e-9));
   REQUIRE(backOp.targets.size() == 1);
-  CHECK(backOp.targets[0].name == "F:box.side");
+  CHECK(backOp.targets[0].ref.name == "F:box.side");
   std::filesystem::remove(path);
 }
 
@@ -709,8 +709,8 @@ TEST_CASE("cam: a round opening is cut by picking its wall", "[cam]") {
   // most common opening there is unmachinable by wall pick — the W 170 S
   // baffle needed an onion-skin twin part just to give its Ø73/Ø148
   // openings floors to pocket.
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, wall);
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, wall});
   INFO(derived.why);
   REQUIRE(derived.ok);
   CHECK(derived.op.side == cam::Side::Inside); // an opening cuts inside it
@@ -744,8 +744,8 @@ TEST_CASE("cam: a drill derives its depths from the hole it makes", "[cam]") {
   const ElementRef wall = BoreWall(*doc);
   REQUIRE(wall.IsSet());
 
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Drill, wall);
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, wall});
   INFO(derived.why);
   REQUIRE(derived.ok);
   // Top from the STOCK (a typed part-top once sent entry rapids through the
@@ -753,18 +753,19 @@ TEST_CASE("cam: a drill derives its depths from the hole it makes", "[cam]") {
   CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-9));
   CHECK_THAT(derived.op.bottomZ, WithinAbs(0.0, 1e-4)); // OCC bbox gap
   REQUIRE(derived.op.targets.size() == 1);
-  CHECK(derived.op.targets[0].name == wall.name);
+  CHECK(derived.op.targets[0].ref.name == wall.name);
 
   // No target is a teaching refusal, not "not a verb" — that message fired
   // even when the caller HAD passed cylindrical targets.
   const cam::DerivedOp none = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::Drill, ElementRef{});
+      setup, doc->GetBodies(), cam::OpType::Drill, cam::Target{});
   REQUIRE_FALSE(none.ok);
   CHECK(none.why.find("pass targets") != std::string::npos);
 
   // A flat face is refused as the wrong KIND, naming where to look.
-  const cam::DerivedOp flat = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::Drill, UpFaceAt(*doc, 20.0));
+  const cam::DerivedOp flat =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, UpFaceAt(*doc, 20.0)});
   REQUIRE_FALSE(flat.ok);
   CHECK(flat.why.find("cylind") != std::string::npos);
 }
@@ -775,8 +776,8 @@ TEST_CASE("cam: clicking a pocket floor derives every depth", "[cam]") {
   const ElementRef floor = UpFaceAt(*doc, 12.0);
   REQUIRE(floor.IsSet());
 
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor);
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
   INFO(derived.why);
   REQUIRE(derived.ok);
   // Nothing here was typed: the floor is the face, the top is the stock, the
@@ -786,7 +787,7 @@ TEST_CASE("cam: clicking a pocket floor derives every depth", "[cam]") {
   CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-9)); // part top + 1 mm stock
   CHECK_THAT(derived.op.stepdown, WithinAbs(3.0, 1e-9)); // half of a 6 mm tool
   REQUIRE(derived.op.targets.size() == 1);
-  CHECK(derived.op.targets[0].name == floor.name);
+  CHECK(derived.op.targets[0].ref.name == floor.name);
 
   cam::Setup job = setup;
   cam::Operation op = derived.op;
@@ -812,7 +813,8 @@ TEST_CASE("cam: a derived pocket clears its own boundary, not the model's",
   const ElementRef floor = UpFaceAt(*doc, 12.0);
   cam::Setup job = setup;
   cam::Operation op =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, floor})
           .op;
   op.id = 1;
   job.operations.push_back(op);
@@ -858,7 +860,7 @@ TEST_CASE("cam: a cut too narrow for the cutter says SO, with the numbers",
   op.toolNumber = 1; // 6 mm
   op.topZ = 20.0;
   op.bottomZ = 12.0;
-  op.targets.push_back(floor);
+  op.targets.push_back(cam::Target{0, floor});
 
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
   REQUIRE(tp.Empty());
@@ -908,7 +910,7 @@ TEST_CASE("cam: stock to leave can be what does not fit, and says so",
   op.topZ = 20.0;
   op.bottomZ = 12.0;
   op.stockToLeave = 1.0; // 6 + 2 x 1 = 8 mm of room needed in a 6.5 mm slot
-  op.targets.push_back(floor);
+  op.targets.push_back(cam::Target{0, floor});
 
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
   REQUIRE(tp.Empty());
@@ -945,7 +947,7 @@ TEST_CASE("cam: adaptive is silent about a shape it cannot enter — we are not"
   op.toolNumber = 1;
   op.topZ = 20.0;
   op.bottomZ = 8.0;
-  op.targets.push_back(floor);
+  op.targets.push_back(cam::Target{0, floor});
 
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
   REQUIRE(tp.Empty());
@@ -997,8 +999,8 @@ TEST_CASE("cam: an elliptical opening can be cut out", "[cam]") {
   CHECK(cam::IsWallFace(doc.GetBodies(), wall));
   {
     cam::Setup probe = BasicSetup();
-    const cam::DerivedOp asPocket =
-        cam::DeriveOperation(probe, doc.GetBodies(), cam::OpType::Pocket, wall);
+    const cam::DerivedOp asPocket = cam::DeriveOperation(
+        probe, doc.GetBodies(), cam::OpType::Pocket, cam::Target{0, wall});
     INFO(asPocket.why);
     CHECK_FALSE(asPocket.ok);
     CHECK(asPocket.why.find("FLOOR") != std::string::npos);
@@ -1015,7 +1017,7 @@ TEST_CASE("cam: an elliptical opening can be cut out", "[cam]") {
   op.topZ = 21.0;
   op.bottomZ = -1.0;
   op.stepdown = 5.0;
-  op.targets.push_back(wall);
+  op.targets.push_back(cam::Target{0, wall});
   setup.operations.push_back(op);
 
   const cam::Toolpath tp =
@@ -1150,7 +1152,7 @@ TEST_CASE("cam: a depth pass carries on from where the last one stopped",
       glm::vec3 c(0.0f), n(0.0f), u(0.0f);
       if (b.shape.FacePlane(index, c, n, u))
         continue; // planar
-      op.targets.push_back(ElementRef{b.createdBy, name});
+      op.targets.push_back(cam::Target{0, ElementRef{b.createdBy, name}});
       break;
     }
   REQUIRE(op.targets.size() == 1);
@@ -1210,7 +1212,7 @@ TEST_CASE("cam: an opening too narrow to cut out says which, and how narrow",
   op.toolNumber = 1;
   op.topZ = 20.0;
   op.bottomZ = 0.0;
-  op.targets.push_back(wall);
+  op.targets.push_back(cam::Target{0, wall});
 
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
   REQUIRE(tp.Empty());
@@ -1234,7 +1236,8 @@ TEST_CASE("cam: an island in the picked floor is machined around",
   CHECK(region.loops[1].hole);
 
   cam::Operation op =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, floor})
           .op;
   op.id = 1;
   // 9 mm deep with a 6 mm cutter, so the verb picks adaptive clearing (C8).
@@ -1295,7 +1298,8 @@ TEST_CASE("cam: a pocket too small to ramp around descends on a helix",
   const ElementRef floor = UpFaceAt(*doc, 11.0);
   REQUIRE(floor.IsSet());
   cam::Operation op =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, floor})
           .op;
   op.id = 1;
   op.stepdown = 0.0; // one pass, so the whole descent is in one entry
@@ -1352,7 +1356,7 @@ TEST_CASE("cam: a pocket too small to ramp around descends on a helix",
   w.safeZ = cam::DeriveSafeZ(w, wide->GetBodies());
   cam::Operation wop =
       cam::DeriveOperation(w, wide->GetBodies(), cam::OpType::Pocket,
-                           UpFaceAt(*wide, 12.0))
+                           cam::Target{0, UpFaceAt(*wide, 12.0)})
           .op;
   wop.id = 1;
   w.operations.push_back(wop);
@@ -1396,8 +1400,9 @@ TEST_CASE("cam: a verb that cannot apply says why", "[cam]") {
   // And a setup with no tool cannot derive anything, because every depth
   // here is a function of the cutter.
   cam::Setup toolless;
-  const cam::DerivedOp none = cam::DeriveOperation(
-      toolless, doc->GetBodies(), cam::OpType::Pocket, UpFaceAt(*doc, 12.0));
+  const cam::DerivedOp none =
+      cam::DeriveOperation(toolless, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, UpFaceAt(*doc, 12.0)});
   CHECK_FALSE(none.ok);
   CHECK(none.why.find("tool") != std::string::npos);
 }
@@ -1498,7 +1503,7 @@ TEST_CASE("cam verify: leftover means unreachable, not unprogrammed", "[cam]") {
   setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
   cam::Operation op =
       cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
-                           UpFaceAt(*doc, 12.0))
+                           cam::Target{0, UpFaceAt(*doc, 12.0)})
           .op;
   op.id = 1;
   setup.operations.push_back(op);
@@ -2123,8 +2128,8 @@ ElementRef PocketFloorRef(const Document& doc) {
 cam::Setup PocketJob(const Document& doc, const ElementRef& floor,
                      bool useOutline) {
   cam::Setup s = BasicSetup();
-  const cam::DerivedOp d =
-      cam::DeriveOperation(s, doc.GetBodies(), cam::OpType::Pocket, floor);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc.GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
   REQUIRE(d.ok);
   cam::Operation op = d.op;
   op.id = 1;
@@ -2161,8 +2166,8 @@ TEST_CASE("cam: a pass never rapids to a depth nothing cleared", "[cam]") {
 
   const auto rapidsFor = [&](double topZ, double stepdown) {
     cam::Setup s = BasicSetup();
-    const cam::DerivedOp d =
-        cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket, floor);
+    const cam::DerivedOp d = cam::DeriveOperation(
+        s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
     REQUIRE(d.ok);
     cam::Operation op = d.op;
     op.id = 1;
@@ -2205,8 +2210,8 @@ TEST_CASE("cam: concentric rings link at depth instead of lifting", "[cam]") {
   const ElementRef floor = PocketFloorRef(*doc);
   REQUIRE(floor.IsSet());
   cam::Setup s = BasicSetup();
-  const cam::DerivedOp d =
-      cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket, floor);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
   REQUIRE(d.ok);
   cam::Operation op = d.op;
   op.id = 1;
@@ -2280,8 +2285,8 @@ TEST_CASE("cam: a ball nose steps over by the cusp it leaves", "[cam]") {
   REQUIRE(floor.IsSet());
   cam::Setup setup = BasicSetup();
   setup.tools[0].type = cam::ToolType::Ball;
-  const cam::DerivedOp d =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor);
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
   REQUIRE(d.ok);
   CHECK_THAT(d.op.stepover,
              WithinAbs(cam::DerivedStepover(setup.tools[0]), 1e-9));
@@ -2303,7 +2308,7 @@ TEST_CASE("cam: a cone is refused a floor to clear", "[cam]") {
     for (const cam::OpType op :
          {cam::OpType::Pocket, cam::OpType::Face, cam::OpType::Adaptive}) {
       const cam::DerivedOp d =
-          cam::DeriveOperation(s, doc->GetBodies(), op, floor);
+          cam::DeriveOperation(s, doc->GetBodies(), op, cam::Target{0, floor});
       INFO(word << " / op " << static_cast<int>(op) << ": " << d.why);
       CHECK_FALSE(d.ok);
       CHECK(d.why.find(word) != std::string::npos);
@@ -2313,8 +2318,8 @@ TEST_CASE("cam: a cone is refused a floor to clear", "[cam]") {
   for (const cam::ToolType type : {cam::ToolType::Flat, cam::ToolType::Ball}) {
     cam::Setup s = BasicSetup();
     s.tools[0].type = type;
-    const cam::DerivedOp d =
-        cam::DeriveOperation(s, doc->GetBodies(), cam::OpType::Pocket, floor);
+    const cam::DerivedOp d = cam::DeriveOperation(
+        s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
     INFO(d.why);
     CHECK(d.ok);
   }
@@ -2558,8 +2563,8 @@ TEST_CASE("cam: clicking the wall of a through opening cuts it out", "[cam]") {
   const ElementRef wall = WallNear(*doc, 14.0, 15.0); // the slot's -X wall
   REQUIRE(wall.IsSet());
 
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, wall);
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, wall});
   INFO(derived.why);
   REQUIRE(derived.ok);
   // An opening is cut from INSIDE, with no tabs — the slug is scrap, and
@@ -2621,8 +2626,8 @@ TEST_CASE("cam: clicking a wall for a pocket says what to click instead",
   auto doc = SlottedDoc();
   const cam::Setup setup = BasicSetup();
   const ElementRef wall = WallNear(*doc, 14.0, 15.0);
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, wall);
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, wall});
   CHECK_FALSE(derived.ok);
   INFO(derived.why);
   CHECK(derived.why.find("FLOOR") != std::string::npos);
@@ -2639,7 +2644,7 @@ TEST_CASE("cam verify: a job with tabs is SAFE without being COMPLETE",
   cam::Setup setup = BasicSetup();
   setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
   cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::Profile, ElementRef{});
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{});
   REQUIRE(derived.ok);
   REQUIRE(derived.op.tabCount > 0); // the point of the test
   derived.op.id = 1;
@@ -2686,8 +2691,8 @@ TEST_CASE("cam: a wall is not a gouge, whatever the grid", "[cam][slow]") {
   setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
   const ElementRef floor = UpFaceAt(*doc, 11.0);
   REQUIRE(floor.IsSet());
-  cam::DerivedOp derived =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor);
+  cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
   INFO(derived.why);
   REQUIRE(derived.ok);
   derived.op.id = 1;
@@ -2784,7 +2789,8 @@ TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
   REQUIRE(floor.IsSet());
 
   cam::Operation base =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, floor})
           .op;
   base.id = 1;
 
@@ -2932,7 +2938,7 @@ TEST_CASE("cam: cut it out refuses the floor of a pocket", "[cam]") {
   const ElementRef floor = UpFaceAt(*doc, 12.0);
   REQUIRE(floor.IsSet());
   const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::Profile, floor);
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, floor});
   CHECK_FALSE(derived.ok);
   INFO(derived.why);
   // It must lead with the verb that WORKS here. Saying what is wrong and
@@ -2944,8 +2950,8 @@ TEST_CASE("cam: cut it out refuses the floor of a pocket", "[cam]") {
   // The part's own top face still means what it always meant.
   const ElementRef top = UpFaceAt(*doc, 20.0);
   REQUIRE(top.IsSet());
-  const cam::DerivedOp out =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, top);
+  const cam::DerivedOp out = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, top});
   INFO(out.why);
   REQUIRE(out.ok);
   CHECK(out.op.side == cam::Side::Outside);
@@ -2963,7 +2969,7 @@ TEST_CASE("cam: asking for adaptive derives the pocket it is", "[cam]") {
   const ElementRef floor = UpFaceAt(*doc, 12.0);
   REQUIRE(floor.IsSet());
   const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::Adaptive, floor);
+      setup, doc->GetBodies(), cam::OpType::Adaptive, cam::Target{0, floor});
   INFO(derived.why);
   REQUIRE(derived.ok);
   CHECK(derived.op.side == cam::Side::Inside);
@@ -3213,7 +3219,7 @@ TEST_CASE("cam: a V-bit chamfers the edge it is pointed at", "[cam]") {
   REQUIRE(wall.IsSet());
 
   const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
   INFO(derived.why);
   REQUIRE(derived.ok);
   // Nothing typed: the edge is the wall's own top (z = 20), and the bevel is
@@ -3262,7 +3268,7 @@ TEST_CASE("cam: a ball nose rounds the edge over an arc", "[cam]") {
   REQUIRE(wall.IsSet());
 
   const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
   INFO(derived.why);
   REQUIRE(derived.ok);
   CHECK(derived.op.name == "Round the edge");
@@ -3311,7 +3317,7 @@ TEST_CASE("cam: a flat mill is refused an edge break", "[cam]") {
   REQUIRE(wall.IsSet());
 
   const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
   REQUIRE_FALSE(derived.ok);
   // Names the tool it has and the two that would work — substituting one
   // would cut a square step where a chamfer was asked for.
@@ -3330,7 +3336,7 @@ TEST_CASE("cam: a flat mill is refused an edge break", "[cam]") {
   op.topZ = 20.0;
   op.bottomZ = 10.0;
   op.edgeSize = 8.0; // the tool's radius is 3
-  op.targets = {wall};
+  op.targets = {{0, wall}};
   vee.operations.push_back(op);
   const std::vector<cam::Toolpath> paths =
       cam::GenerateAll(vee, doc->GetBodies());
@@ -3383,7 +3389,7 @@ TEST_CASE("cam verify: an unmodelled edge break says why it gouges", "[cam]") {
   const ElementRef wall = SideWall(*doc);
   REQUIRE(wall.IsSet());
   const cam::DerivedOp derived = cam::DeriveOperation(
-      setup, doc->GetBodies(), cam::OpType::EdgeRound, wall);
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
   REQUIRE(derived.ok);
   cam::Operation op = derived.op;
   op.id = 1;
@@ -3425,7 +3431,8 @@ TEST_CASE("cam: one operation at a time cuts what all of them cut",
   REQUIRE(floor.IsSet());
 
   cam::Operation pocket =
-      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, floor})
           .op;
   pocket.id = 1;
   cam::Operation profile =
@@ -3952,7 +3959,7 @@ TEST_CASE("cam: a picked wall is re-resolved at every depth", "[cam]") {
   REQUIRE(wall.IsSet());
 
   cam::Setup setup = PanelSetup();
-  setup.operations[0].targets.push_back(wall);
+  setup.operations[0].targets.push_back(cam::Target{0, wall});
   const std::vector<cam::Toolpath> paths =
       cam::GenerateAll(setup, doc->GetBodies());
   REQUIRE(paths.size() == 1);
@@ -4019,3 +4026,122 @@ TEST_CASE("cam verify: a through cut is not a gouge", "[cam]") {
 }
 
 #endif // HAVE_CAM
+
+TEST_CASE("cam job: two parts in one setup, placed apart", "[cam][job]") {
+  // The case the whole job document exists for: two brackets cut from one
+  // sheet. Before v73 a cam::Setup lived in Document::m_camSetups, so this
+  // could not be said at all (docs/cam/job-document.md).
+  //
+  // The bodies arrive already stamped with the job part they came from --
+  // that is what ui::JobBodies does -- so this exercises the core rule
+  // without a running app: a placement moves the part it names, in setup
+  // space, and nothing else.
+  Document a;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+  Document b;
+  b.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 40, 30, 10));
+
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+
+  std::vector<Body> bodies;
+  for (const Body& body : a.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pa;
+  }
+  for (const Body& body : b.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pb;
+  }
+  REQUIRE(bodies.size() == 2);
+
+  // Unplaced, the two sit on top of each other: "nobody has said where" is
+  // the origin, which is honest and is not a layout.
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  const double stacked = hi.x - lo.x;
+
+  // Place the second 200 mm along, and the stock has to cover both.
+  cam::Placement place;
+  place.id = job.AllocateId();
+  place.jobPartId = pb;
+  place.pos = {200.0, 0.0};
+  setup.placements.push_back(place);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK(hi.x - lo.x > stacked + 190.0);
+
+  // A part on the sheet but not cut this run leaves the stock to the other
+  // one (PrusaSlicer's ModelInstance::printable, the same idea).
+  setup.placements[0].enabled = false;
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK_THAT(hi.x - lo.x, WithinAbs(stacked, 1e-6));
+}
+
+TEST_CASE("cam job: a part placed twice is refused, not half cut",
+          "[cam][job]") {
+  // The data model holds instances -- a placement per copy, the way every
+  // slicer models them -- and the generator does not cut them yet: a region
+  // resolves to the first body that answers, so the second copy would be
+  // skipped and the posted file would look right. That is the failure mode
+  // this project refuses everywhere else.
+  cam::JobDocument job;
+  const uint64_t part = job.AddPart(1, "Bracket");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  for (int i = 0; i < 2; i++) {
+    cam::Placement p;
+    p.id = job.AllocateId();
+    p.jobPartId = part;
+    p.pos = {i * 100.0, 0.0};
+    setup.placements.push_back(p);
+  }
+  const std::string why = cam::PlacementRefusal(setup);
+  CHECK(why.find("twice") != std::string::npos);
+
+  // And it reaches the toolpaths, not just a checker nobody calls.
+  cam::Operation op;
+  op.id = job.AllocateId();
+  op.type = cam::OpType::Profile;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, {});
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].error == why);
+
+  // Disabling one is the way out, and it works.
+  setup.placements[1].enabled = false;
+  CHECK(cam::PlacementRefusal(setup).empty());
+}
+
+TEST_CASE("cam job: dropping a part takes its placements and targets",
+          "[cam][job]") {
+  // A target on a part the job no longer holds would resolve against
+  // whatever body answered to the same element name -- the wrong bracket,
+  // cut for real. Two parts in one job can easily share both.
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  for (uint64_t part : {pa, pb}) {
+    cam::Placement p;
+    p.id = job.AllocateId();
+    p.jobPartId = part;
+    setup.placements.push_back(p);
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.targets.push_back(cam::Target{part, ElementRef{7, "1/face0"}});
+    setup.operations.push_back(op);
+  }
+  setup.topFace = cam::Target{pb, ElementRef{7, "1/face5"}};
+
+  REQUIRE(job.RemovePart(pb));
+  const cam::Setup& after = *job.FindSetup(setup.id);
+  REQUIRE(after.placements.size() == 1);
+  CHECK(after.placements[0].jobPartId == pa);
+  REQUIRE(after.operations.size() == 2);
+  CHECK(after.operations[0].targets.size() == 1);
+  CHECK(after.operations[1].targets.empty()); // its only target went with B
+  CHECK(!after.topFace.IsSet());              // and so did Z zero
+}

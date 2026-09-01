@@ -46,6 +46,12 @@ uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId);
 // frame it happens.
 const std::vector<Body>& JobBodies(AppState& state);
 
+// The machining selection for a picked element: the ref, plus which job part
+// it landed on, read off the body it resolves to. Returns jobPartId 0 when
+// nothing in the job owns it -- a target the job cannot machine, which the
+// caller refuses rather than guessing a part for.
+cam::Target TargetFor(AppState& state, const ElementRef& ref);
+
 // Create a job tab for one part document and make it active. Returns the new
 // tab's index. `name` empty derives one from the part.
 size_t CreateJobForPart(AppState& state, uint64_t sourcePartId,

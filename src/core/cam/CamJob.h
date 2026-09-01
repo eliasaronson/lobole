@@ -77,6 +77,28 @@ struct Tool {
   }
 }
 
+// What an operation MACHINES: an element, and which part of the job it is on.
+//
+// The qualifier is not decoration. Two parts in one job can easily own the
+// same feature id and the same element name, so a bare ElementRef stops being
+// an answer the moment a job holds more than one part. It names the PART, not
+// a placement: "machine this pocket" is a statement about the bracket, and it
+// is cut wherever that bracket sits.
+//
+// FreeCAD reached the same shape from the other end -- its operation Base is
+// an (object, subelement) pair, and Path/Op/Base.py:520 MIGRATES from the
+// scope-limited link it shipped first (docs/cam/job-document.md).
+struct Target {
+  uint64_t jobPartId = 0;
+  ElementRef ref;
+
+  [[nodiscard]] bool IsSet() const { return ref.IsSet(); }
+  [[nodiscard]] bool operator==(const Target& o) const {
+    return jobPartId == o.jobPartId && ref.featureId == o.ref.featureId &&
+           ref.name == o.ref.name;
+  }
+};
+
 // --- operations -----------------------------------------------------------
 
 enum class OpType {
@@ -107,7 +129,7 @@ struct Operation {
   // What to machine. Stable element references (toponaming), so a model edit
   // that moves a face does not orphan the job — the reason to have CAM in
   // the CAD rather than downstream of a STEP export.
-  std::vector<ElementRef> targets;
+  std::vector<Target> targets;
 
   // Depth, in setup space. topZ is where the cut starts (usually the stock
   // top), bottomZ where it ends. stepdown 0 = one pass.
@@ -192,6 +214,26 @@ struct Stock {
 // has no vertex kind, so it needs plumbing this change does not.
 enum class OriginAt { StockMin, StockCentre, ModelMin };
 
+// WHERE a part sits in the stock, for this setup.
+//
+// In-plane only -- a position on the bed and a spin under the spindle --
+// because anything out of plane is what the fixturing frame already says, and
+// two ways to tilt a part is the mistake docs/cam/setup-frame.md just finished
+// paying for.
+//
+// SEVERAL placements may name one `jobPartId`: that is four of the same
+// bracket nested in one sheet, which is how every slicer models it
+// (PrusaSlicer's ModelObject + N ModelInstance). The generator does not cut
+// repeats yet and says so rather than quietly cutting one.
+struct Placement {
+  uint64_t id = 0;
+  uint64_t jobPartId = 0;
+  glm::dvec2 pos{0.0, 0.0}; // setup space, mm
+  double rotZdeg = 0.0;
+  // On the sheet, not cut this run (PrusaSlicer's ModelInstance::printable).
+  bool enabled = true;
+};
+
 struct Setup {
   uint64_t id = 0;
   std::string name;
@@ -221,7 +263,7 @@ struct Setup {
   // field was not — two setups in one document shared one answer between
   // them (docs/cam/dogfood-round.md). Empty = nobody has picked one; the
   // origin is then whatever it defaults to.
-  ElementRef topFace;
+  Target topFace;
   // The MACHINE's rotary index: rotation about X in degrees, emitted as an A
   // word. 0 for every 3-axis job — INCLUDING one whose frame is rotated.
   double rotationA = 0.0;
@@ -238,8 +280,20 @@ struct Setup {
   double safeZ = 5.0;         // rapid height above the stock top (mm)
   double rapidFeed = 0.0;     // 0 = G0; some machines want a capped G1
 
+  // Where each part sits in the stock. Empty is a job that has parts but has
+  // not been laid out -- everything at the origin, which is the honest
+  // reading of "nobody has said".
+  std::vector<Placement> placements;
+
   std::vector<Tool> tools;
   std::vector<Operation> operations;
+
+  [[nodiscard]] const Placement* FindPlacement(uint64_t id) const {
+    for (const Placement& p : placements)
+      if (p.id == id)
+        return &p;
+    return nullptr;
+  }
 
   [[nodiscard]] const Tool* FindTool(int number) const {
     for (const Tool& t : tools)

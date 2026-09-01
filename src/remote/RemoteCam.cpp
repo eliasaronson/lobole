@@ -30,6 +30,30 @@ constexpr MethodDoc kCamMethods[] = {
      "from a part you have open to a tab you can add setups on. Returns the "
      "job's tab id and the job part it holds.",
      "part, name"},
+    {"add_job_part",
+     "Add a part to the open job {part: id or name} -- another thing this job "
+     "cuts. Returns the job part's id, which is what an operation target and "
+     "a placement name. A job is what makes four brackets out of one sheet "
+     "expressible; before v73 a setup could only ever be about one part.",
+     "part"},
+    {"remove_job_part",
+     "Drop a part from the job {id}. Every placement and every operation "
+     "target that named it goes with it -- a target on a part the job no "
+     "longer holds would resolve against whatever body answered to the same "
+     "element name, which is the wrong part, cut for real.",
+     "id"},
+    {"list_job_parts",
+     "The parts this job cuts: id, source document, name, whether the source "
+     "has changed since the job last saw it (`stale`), and where each sits in "
+     "each setup.",
+     ""},
+    {"set_job_placement",
+     "Where a part sits in the stock {setup, part, pos?: [x,y], rot_z?, "
+     "enabled?}. In-plane only: anything out of plane is what the setup's "
+     "fixturing frame says, and two ways to tilt a part is a mistake this "
+     "project already paid for once (docs/cam/setup-frame.md). `enabled` "
+     "false leaves the part on the sheet and does not cut it.",
+     "setup, part, pos, rot_z, enabled"},
     {"add_cam_setup",
      "Add a milling setup {name?, post?: mach3|linuxcnc, safe_z?}; returns "
      "its id and the safe_z derived for it. A setup arrives with one 6 mm "
@@ -316,7 +340,10 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
         throw std::runtime_error(
             "each target needs {feature_id, element}; list_elements shows "
             "the stable names");
-      op.targets.push_back(std::move(ref));
+      // Which job part the element is on, resolved from the bodies the job
+      // actually holds. An element no part of this job owns is refused by
+      // the derivation below rather than pinned to a guess (v73).
+      op.targets.push_back(ui::TargetFor(state, ref));
     }
   }
   (void)state;
@@ -362,9 +389,12 @@ json OpJson(const cam::Operation& op) {
   }
   if (!op.targets.empty()) {
     j["targets"] = json::array();
-    for (const ElementRef& r : op.targets)
-      j["targets"].push_back(
-          json{{"feature_id", r.featureId}, {"element", r.name}});
+    for (const cam::Target& t : op.targets) {
+      json tj = {{"feature_id", t.ref.featureId}, {"element", t.ref.name}};
+      if (t.jobPartId != 0)
+        tj["part"] = t.jobPartId;
+      j["targets"].push_back(std::move(tj));
+    }
   }
   return j;
 }
@@ -431,6 +461,100 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         "part in v73. `machine_part` makes a job from the part you have open "
         "and switches to it");
 
+  if (m == "add_job_part") {
+    if (!p.contains("part"))
+      throw std::runtime_error("add_job_part needs {part: id or name}");
+    const nlohmann::json& pj = p.at("part");
+    uint64_t sourceId = 0;
+    std::string sourceName;
+    for (const ui::PartSlot& slot : state.parts) {
+      if (slot.kind != ui::DocKind::Part)
+        continue;
+      const bool match = pj.is_string() ? slot.name == pj.get<std::string>()
+                                        : slot.id == pj.get<uint64_t>();
+      if (match) {
+        sourceId = slot.id;
+        sourceName = slot.name;
+      }
+    }
+    if (sourceId == 0)
+      throw std::runtime_error("no part " + pj.dump() +
+                               " in this project; list_parts shows them");
+    const uint64_t id = job->AddPart(sourceId, sourceName);
+    job->BumpVersion();
+    return json{{"id", id}, {"source", sourceId}, {"name", sourceName}};
+  }
+
+  if (m == "remove_job_part") {
+    const uint64_t id = p.at("id").get<uint64_t>();
+    if (!job->RemovePart(id))
+      throw std::runtime_error("no job part with id " + std::to_string(id) +
+                               "; list_job_parts shows the ones that exist");
+    job->BumpVersion();
+    ui::RefreshCamToolpaths(state);
+    return json{{"removed", id}};
+  }
+
+  if (m == "list_job_parts") {
+    json out = json::array();
+    for (const cam::JobPart& part : job->GetParts()) {
+      json pj = {
+          {"id", part.id}, {"source", part.sourceDocId}, {"name", part.name}};
+      // A source that is gone is REPORTED, never substituted: the job cannot
+      // cut what it cannot find, and saying nothing here is how a job posts
+      // an empty file and looks fine doing it.
+      pj["missing"] = ui::JobSourceDocument(state, part.sourceDocId) == nullptr;
+      json places = json::array();
+      for (const cam::Setup& setup : job->GetSetups())
+        for (const cam::Placement& pl : setup.placements)
+          if (pl.jobPartId == part.id)
+            places.push_back(json{{"setup", setup.id},
+                                  {"id", pl.id},
+                                  {"pos", {pl.pos.x, pl.pos.y}},
+                                  {"rot_z", pl.rotZdeg},
+                                  {"enabled", pl.enabled}});
+      pj["placements"] = std::move(places);
+      out.push_back(std::move(pj));
+    }
+    return json{{"parts", std::move(out)}};
+  }
+
+  if (m == "set_job_placement") {
+    cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    const uint64_t partId = p.at("part").get<uint64_t>();
+    if (job->FindPart(partId) == nullptr)
+      throw std::runtime_error("no job part with id " + std::to_string(partId) +
+                               "; list_job_parts shows the ones that exist");
+    cam::Placement* place = nullptr;
+    for (cam::Placement& pl : setup.placements)
+      if (pl.jobPartId == partId)
+        place = &pl;
+    if (place == nullptr) {
+      cam::Placement fresh;
+      fresh.id = job->AllocateId();
+      fresh.jobPartId = partId;
+      setup.placements.push_back(fresh);
+      place = &setup.placements.back();
+    }
+    if (p.contains("pos")) {
+      const auto v = p.at("pos").get<std::vector<double>>();
+      if (v.size() != 2)
+        throw std::runtime_error("pos is [x, y] in setup space");
+      place->pos = {v[0], v[1]};
+    }
+    if (p.contains("rot_z"))
+      place->rotZdeg = p.at("rot_z").get<double>();
+    if (p.contains("enabled"))
+      place->enabled = p.at("enabled").get<bool>();
+    job->BumpVersion();
+    (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
+    ui::RefreshCamToolpaths(state);
+    return json{
+        {"setup", setup.id},       {"part", partId},
+        {"id", place->id},         {"pos", {place->pos.x, place->pos.y}},
+        {"rot_z", place->rotZdeg}, {"enabled", place->enabled}};
+  }
+
   if (m == "add_cam_setup") {
     cam::Setup& setup = job->AddSetup(p.value("name", std::string()));
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
@@ -477,8 +601,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                                                                : "stock_min"},
                  {"fit_arcs", setup.fitArcs}};
       if (setup.topFace.IsSet())
-        sj["top_face"] = {{"feature_id", setup.topFace.featureId},
-                          {"element", setup.topFace.name}};
+        sj["top_face"] = {{"feature_id", setup.topFace.ref.featureId},
+                          {"element", setup.topFace.ref.name},
+                          {"part", setup.topFace.jobPartId}};
       sj["tools"] = json::array();
       for (const cam::Tool& t : setup.tools)
         sj["tools"].push_back(ToolJson(t));
@@ -643,8 +768,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                            : json::object();
       target.featureId = tj.value("feature_id", uint64_t{0});
       target.name = tj.value("element", std::string());
-      const cam::DerivedOp derived = cam::DeriveOperation(
-          setup, ui::JobBodies(state), type, target, op.toolNumber);
+      const cam::DerivedOp derived =
+          cam::DeriveOperation(setup, ui::JobBodies(state), type,
+                               ui::TargetFor(state, target), op.toolNumber);
       if (!derived.ok)
         throw std::runtime_error(derived.why);
       const int tool = op.toolNumber;

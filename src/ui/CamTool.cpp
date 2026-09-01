@@ -108,7 +108,7 @@ void OperationGhost(AppState& state, const cam::Setup& setup,
   std::vector<cam::Loop> loops;
   if (!op.targets.empty()) {
     const cam::FaceRegion& region =
-        CachedRegion(state, state.camGhostRegion, setup, op.targets[0]);
+        CachedRegion(state, state.camGhostRegion, setup, op.targets[0].ref);
     if (!region.ok)
       return;
     loops = region.loops;
@@ -228,8 +228,11 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   cam::Setup* setup = EnsureCamSetup(state);
   if (setup == nullptr)
     return false;
-  const cam::DerivedOp derived = cam::DeriveOperation(
-      *setup, ui::JobBodies(state), type, target, state.camVerbTool);
+  // Which job part the picked face is on, read off the body it resolves to:
+  // two parts in one job can own the same element name (v73).
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(*setup, ui::JobBodies(state), type,
+                           ui::TargetFor(state, target), state.camVerbTool);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return false;
@@ -271,7 +274,8 @@ bool PickedFaceNormal(const std::vector<Body>& bodies, const ElementRef& ref,
 void ReZeroFromTopFace(AppState& state, cam::Setup& setup) {
   if (setup.topFace.IsSet()) {
     const cam::FaceRegion region = cam::PickedFaceRegion(
-        cam::BodiesInSetupFrame(setup, ui::JobBodies(state)), setup.topFace);
+        cam::BodiesInSetupFrame(setup, ui::JobBodies(state)),
+        setup.topFace.ref);
     // The face that was level is not level any more: this orientation cannot
     // keep that Z zero, and pretending otherwise is worse than asking again.
     if (!region.ok)
@@ -354,7 +358,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // needed a detour into Advanced to undo what this had just done
     // (docs/cam/dogfood-round.md, round 2). The default 1 mm is the rough
     // board every facing pass exists for; a board already flat is one number.
-    setup->topFace = item.element;
+    setup->topFace = ui::TargetFor(state, item.element);
     // Through the ONE derivation, so a Z zero picked here and a work origin
     // set from the panel cannot disagree about where the file's zero is.
     (void)cam::RecomputeOrigin(*setup, ui::JobBodies(state));
@@ -836,7 +840,8 @@ void DrawCamLabels(AppState& state) {
   if (op == nullptr || op->targets.empty())
     return;
   const cam::FaceRegion region = cam::PickedFaceRegion(
-      cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)), op->targets[0]);
+      cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)),
+      op->targets[0].ref);
   if (!region.ok || region.loops.empty() || region.loops[0].pts.empty())
     return;
 

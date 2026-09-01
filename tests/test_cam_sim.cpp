@@ -506,7 +506,7 @@ TEST_CASE("cam sim: an ARC-fitted, tabbed job plays where it cuts", "[cam]") {
       glm::vec3 c(0.0f), n(0.0f), u(0.0f);
       if (b.shape.FacePlane(index, c, n, u))
         continue; // planar: not the bore
-      op.targets.push_back(ElementRef{b.createdBy, name});
+      op.targets.push_back(cam::Target{0, ElementRef{b.createdBy, name}});
       break;
     }
   REQUIRE(op.targets.size() == 1);
