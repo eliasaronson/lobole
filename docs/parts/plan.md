@@ -114,8 +114,9 @@ wrong-length screw looks correct in the viewport**.
 | head type | chosen — no geometry implies it |
 | drive | chosen — likewise, though the standard usually fixes it |
 
-Primary entry point: **pick a cylindrical face in an assembly**, choose a head,
-done. CAM's verb model applied to fasteners. The toolbar path with no pick has
+Primary entry point: **pick the hole's rim in an assembly** (a circular edge —
+see below for why the rim rather than the bore), choose a head, done. CAM's
+verb model applied to fasteners. The toolbar path with no pick has
 nothing to derive from and therefore **refuses by name** — "pick the hole this
 fastener goes through" — which U10 requires and which is the honest answer for
 a screw with no hole.
@@ -127,8 +128,9 @@ clearance") or refused when it matches nothing.
 
 Scripted twin, deriving identically:
 
-    add_fastener {target: {feature_id, element}, standard: "iso4762",
-                  drive: "hex"}
+    add_fastener {target: {feature_id, element},   # the rim, a circular edge
+                  standard: "iso4762", drive: "hex",
+                  far_end?: {feature_id, element}}  # optional override
 
 ### The pick is an EDGE, not a face
 
