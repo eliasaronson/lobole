@@ -16,6 +16,13 @@
 >
 > It became the roadmap's **seventeenth workstream**, v1-complete;
 > roadmap.md is authoritative for status.
+>
+> **One thing it did not build: a way to place a fastener by CLICKING.**
+> `fit_fastener` is RPC-only, which inverts the U10 argument the derivation
+> was for. Planned in [gui-plan.md](gui-plan.md), about a day, and it opens
+> with a correctness fix that should ship on its own — the derivation
+> resolves a picked rim against the FIRST occurrence of the part, so on a
+> joint made of two occurrences of one plate it places at the wrong end.
 
 ## Why
 
