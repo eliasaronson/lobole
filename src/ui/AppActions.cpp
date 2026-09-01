@@ -1,6 +1,7 @@
 #include "ui/AppActions.h"
 #include "core/Units.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
+#include "ui/JobActions.h"         // JobBodies / JobRenderVersion (a job tab)
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -2928,6 +2929,17 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
       max = glm::max(max, bmax);
       any = true;
     }
+  } else if (state.job) {
+    // A job tab draws the parts LAID OUT, so the camera has to frame the
+    // layout rather than one part -- otherwise the first look at a sheet is
+    // from inside whichever part happens to sit at the origin.
+    for (const Body& body : JobPlacedBodies(state)) {
+      glm::vec3 bmin, bmax;
+      body.shape.GetBoundingBox(bmin, bmax);
+      min = glm::min(min, bmin);
+      max = glm::max(max, bmax);
+      any = true;
+    }
   }
   return any;
 }
@@ -3919,6 +3931,11 @@ void SyncDocumentRenderers(AppState& state) {
     activeVersion = state.drawing->Version();
   else if (state.document)
     activeVersion = state.document->Version();
+  else if (state.job)
+    // A job's own version, mixed with every source part's: the job draws
+    // OTHER documents' bodies, so a model edit in one of them has to reach
+    // the viewport (ui::JobBodies keeps the same key).
+    activeVersion = JobRenderVersion(state);
   else
     return;
   // Section caps (C4): a change to the clip plane forces a rebuild so the
@@ -3975,8 +3992,17 @@ void SyncDocumentRenderers(AppState& state) {
     return;
   }
 
+  // A JOB tab draws the parts LAID OUT: each one where its placement puts
+  // it, in the setup's own frame. That is the picture the whole document
+  // kind is for -- parts arranged on a piece of stock -- and it is the same
+  // list the toolpath is generated from, so what you see is what is cut.
+  std::vector<Body> jobBodies;
+  if (state.job)
+    jobBodies = JobPlacedBodies(state);
+
   size_t palette = 0;
-  const auto& bodies = state.document->GetBodies();
+  const std::vector<Body>& bodies =
+      state.job ? jobBodies : state.document->GetBodies();
   std::vector<glm::vec3> bodyColors(bodies.size(), glm::vec3(0.7f));
   for (size_t bi = 0; bi < bodies.size(); bi++) {
     const auto& body = bodies[bi];
@@ -4080,7 +4106,9 @@ void SyncDocumentRenderers(AppState& state) {
     state.meshRenderer->RemoveInstance(state.topoGhostInstance);
     state.topoGhostInstance = 0;
   }
-  if (state.topoGhostStudyId && !state.simulation.active) {
+  // A job tab has no document of its own, and a topology study belongs to a
+  // part -- nothing to ghost here.
+  if (state.topoGhostStudyId && !state.simulation.active && state.document) {
     const fem::StudyRuntime* rt =
         state.document->StudyResults(state.topoGhostStudyId);
     if (rt && rt->topology) {
@@ -4116,8 +4144,13 @@ void SyncDocumentRenderers(AppState& state) {
   // expanded primitives) is rebuilt per-frame in UI.cpp, since it must react to
   // edit-mode and selection/hover changes that don't bump the document version.
 
-  LOG_INFO("Document synced: {} features, {} bodies",
-           state.document->FeatureCount(), state.document->GetBodies().size());
+  if (state.job)
+    LOG_INFO("Job synced: {} parts, {} bodies", state.job->PartCount(),
+             bodies.size());
+  else
+    LOG_INFO("Document synced: {} features, {} bodies",
+             state.document->FeatureCount(),
+             state.document->GetBodies().size());
 }
 
 bool SyncRayTracingScene(AppState& state, bool groundPlane) {
@@ -4151,7 +4184,11 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
         rtItems.push_back(
             {&bodies[bi], inst.world, inst.partId, inst.part->Version(), bi});
     }
-  } else {
+  } else if (state.job) {
+    // A job tab ray-traces what it draws: the parts laid out.
+    for (const Body& body : JobBodies(state))
+      rtItems.push_back({&body, glm::mat4(1.0f)});
+  } else if (state.document) {
     for (const auto& body : state.document->GetBodies())
       rtItems.push_back({&body, glm::mat4(1.0f)});
   }

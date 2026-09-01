@@ -442,6 +442,8 @@ const char* TabGlyph(DocKind kind) {
     return ICON_FA_CUBES;
   case DocKind::Drawing:
     return ICON_FA_FILE_LINES;
+  case DocKind::Job:
+    return ICON_FA_SCREWDRIVER_WRENCH;
   }
   return ICON_FA_CUBE;
 }
@@ -454,6 +456,8 @@ const char* TabKindName(DocKind kind) {
     return "Assembly";
   case DocKind::Drawing:
     return "Drawing";
+  case DocKind::Job:
+    return "Job";
   }
   return "Part";
 }
@@ -555,6 +559,7 @@ void DrawPartTabs(AppState& state) {
     const auto duplicateMenuItem = [&](size_t i) {
       const char* label =
           state.parts[i].kind == DocKind::Assembly  ? "Duplicate assembly"
+          : state.parts[i].kind == DocKind::Job     ? "Duplicate job"
           : state.parts[i].kind == DocKind::Drawing ? "Duplicate drawing"
                                                     : "Duplicate part";
       if (ImGui::MenuItem(label))
@@ -564,6 +569,7 @@ void DrawPartTabs(AppState& state) {
     const auto deleteMenuItem = [&](size_t i) {
       const char* label =
           state.parts[i].kind == DocKind::Assembly  ? "Delete assembly"
+          : state.parts[i].kind == DocKind::Job     ? "Delete job"
           : state.parts[i].kind == DocKind::Drawing ? "Delete drawing"
                                                     : "Delete part";
       // ASK first. This item used to be enabled whenever more than one tab

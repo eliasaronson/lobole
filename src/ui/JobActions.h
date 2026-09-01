@@ -46,6 +46,21 @@ uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId);
 // frame it happens.
 const std::vector<Body>& JobBodies(AppState& state);
 
+// The bodies a job TAB draws: every part, in the ACTIVE setup's frame and
+// where its placement puts it. This is the "laid out on the stock" picture,
+// and it is the same list the toolpath is generated from -- what you see is
+// what is cut. Returns model-space bodies when no setup exists yet.
+std::vector<Body> JobPlacedBodies(AppState& state);
+
+// The active setup of the active job, or null. "Active" means the one the
+// panel is showing; with none chosen it is the first.
+const cam::Setup* ActiveJobSetup(AppState& state);
+
+// A change counter for everything a job TAB draws: the job itself plus every
+// source part it references. The renderer resyncs on it, so a model edit in
+// one of the parts reaches the viewport.
+uint64_t JobRenderVersion(AppState& state);
+
 // The machining selection for a picked element: the ref, plus which job part
 // it landed on, read off the body it resolves to. Returns jobPartId 0 when
 // nothing in the job owns it -- a target the job cannot machine, which the

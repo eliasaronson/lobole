@@ -222,8 +222,11 @@ void DrawCamPanel(AppState& state) {
   }
   PanelHeading(kPanelCam);
   if (!state.job) {
-    ImGui::TextWrapped("CAM works on a part — a setup cuts one model. Switch "
-                       "to a part tab.");
+    // Not "switch to a part tab": since v73 a setup belongs to a JOB, and the
+    // way to get one is to machine a part.
+    ImGui::TextWrapped("CAM works on a job — a job says how parts are cut out "
+                       "of a piece of stock. Open a part and press the CAM "
+                       "button to make one.");
     ImGui::End();
     return;
   }
@@ -381,6 +384,124 @@ void DrawCamPanel(AppState& state) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
     ImGui::TextWrapped("%s", state.slotPick.miss.c_str());
     ImGui::PopStyleColor();
+  }
+
+  // What this job cuts, and where each part sits in the stock. A job holds
+  // more than one part (v74) — four brackets out of one sheet — and until
+  // this section existed the only door was the RPC, which makes a feature
+  // half-built by this project's own rule.
+  if (ImGui::CollapsingHeader("Parts###cam_parts")) {
+    const std::vector<cam::PlacementFit> fits =
+        setup != nullptr ? cam::CheckPlacements(*setup, ui::JobBodies(state))
+                         : std::vector<cam::PlacementFit>{};
+    uint64_t removePart = 0;
+    for (const cam::JobPart& part : state.job->GetParts()) {
+      ImGui::PushID(static_cast<int>(part.id));
+      const bool missing =
+          ui::JobSourceDocument(state, part.sourceDocId) == nullptr;
+      if (missing) {
+        // Said here rather than left to a toolpath that comes back empty:
+        // a job cannot cut what it cannot find.
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+        ImGui::TextWrapped("%s — its part is gone", part.name.c_str());
+        ImGui::PopStyleColor();
+      } else {
+        ImGui::TextUnformatted(part.name.c_str());
+      }
+      if (setup != nullptr) {
+        cam::Placement* place = nullptr;
+        for (cam::Placement& pl : setup->placements)
+          if (pl.jobPartId == part.id)
+            place = &pl;
+        if (place == nullptr) {
+          ImGui::SameLine();
+          if (ImGui::SmallButton("Place###cam_place")) {
+            cam::Placement fresh;
+            fresh.id = state.job->AllocateId();
+            fresh.jobPartId = part.id;
+            setup->placements.push_back(fresh);
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Say where this part sits in the stock");
+        } else {
+          float xy[2] = {static_cast<float>(place->pos.x),
+                         static_cast<float>(place->pos.y)};
+          ImGui::SetNextItemWidth(140.0f);
+          // Through the expression wrapper, like every other numeric field
+          // here: a raw drag reads "10/2" as 10.
+          if (ui::ExprDragFloat2(state, "###cam_place_xy", xy, 0.5f)) {
+            place->pos = {xy[0], xy[1]};
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Where on the stock (X, Y in setup space)");
+          ImGui::SameLine();
+          float rot = static_cast<float>(place->rotZdeg);
+          ImGui::SetNextItemWidth(70.0f);
+          if (ui::ExprDragFloat(state, "###cam_place_rot", &rot, 1.0f, -360.0f,
+                                360.0f, "%.1f°")) {
+            place->rotZdeg = rot;
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Spin under the spindle");
+          ImGui::SameLine();
+          if (ImGui::Checkbox("Cut###cam_place_on", &place->enabled)) {
+            state.job->BumpVersion();
+            dirty = true;
+          }
+          ImGui::SetItemTooltip("Off leaves it on the sheet and does not cut "
+                                "it");
+          for (const cam::PlacementFit& f : fits) {
+            if (f.placementId != place->id)
+              continue;
+            const char* say =
+                f.fit == cam::Fit::FullyOutside    ? "not on the stock"
+                : f.fit == cam::Fit::PartlyOutside ? "hangs over the edge"
+                : !f.overlaps.empty()              ? "on top of another part"
+                                                   : nullptr;
+            if (say != nullptr) {
+              ImGui::PushStyleColor(ImGuiCol_Text,
+                                    ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+              ImGui::TextUnformatted(say);
+              ImGui::PopStyleColor();
+            }
+          }
+        }
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Remove###cam_part_remove"))
+        removePart = part.id;
+      ImGui::SetItemTooltip("Take this part out of the job (its operations go "
+                            "with it)");
+      ImGui::PopID();
+    }
+    if (removePart != 0) {
+      state.job->RemovePart(removePart);
+      state.job->BumpVersion();
+      dirty = true;
+    }
+    // Every part of the project this job does not already hold. Buttons, not
+    // a combo: an ImGui combo gathers with an empty label and cannot be
+    // gated by a GUI test (docs/cam/stock-and-origin.md W6).
+    for (const ui::PartSlot& slot : state.parts) {
+      if (slot.kind != ui::DocKind::Part)
+        continue;
+      bool held = false;
+      for (const cam::JobPart& part : state.job->GetParts())
+        held = held || part.sourceDocId == slot.id;
+      if (held)
+        continue;
+      ImGui::PushID(static_cast<int>(slot.id));
+      if (ImGui::SmallButton(
+              ("Add " + slot.name + "###cam_part_add").c_str())) {
+        state.job->AddPart(slot.id, slot.name);
+        state.job->BumpVersion();
+        dirty = true;
+      }
+      ImGui::PopID();
+    }
   }
 
   // The stock, and the rapid height above it. Both are properties of the JOB

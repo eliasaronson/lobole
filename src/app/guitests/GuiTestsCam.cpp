@@ -1313,6 +1313,70 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!after.empty());
   };
 
+  // A job holds more than one part, and you can say so by clicking. Until
+  // this section existed the only door was the RPC, which by this project's
+  // own rule makes a feature half-built.
+  t = IM_REGISTER_TEST(engine, "cam", "parts_and_placement_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    // A second part in the project, so the job has something to add.
+    const size_t second = ui::AddPart(*s_App, "Spacer");
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("Blk", glm::vec3(0, 0, 0), 20, 20, 12));
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    (void)second;
+
+    cam::Setup& setup = MakeJob()->AddSetup("Sheet");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)1); // the part it was made
+                                                      // for
+
+    // Reach the panel the way a user does: click its dock tab (a tab item's
+    // id IS the window's TabId).
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_parts");
+    ctx->Yield(2);
+
+    // Add the second part by clicking its button.
+    ctx->ItemClick("**/###cam_part_add");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)2);
+
+    // Place it: the button appears per unplaced part, so clicking the first
+    // one places the part that has none yet.
+    ctx->ItemClick("**/###cam_place");
+    ctx->Yield(2);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
+    IM_CHECK(live != nullptr);
+    IM_CHECK_EQ(live->placements.size(), (size_t)1);
+
+    // And it names a part the job actually holds — a placement for anything
+    // else would put a ghost in the stock.
+    IM_CHECK(Job()->FindPart(live->placements[0].jobPartId) != nullptr);
+
+    // Removing a part takes its placement with it.
+    ctx->ItemClick("**/###cam_part_remove");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)1);
+    IM_CHECK(Job()->FindSetup(setup.id)->placements.size() <= 1);
+
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel))
+      if (ctx->ItemInfo(modelWin->TabId, ImGuiTestOpFlags_NoError).ID != 0) {
+        ctx->ItemClick(modelWin->TabId);
+        ctx->Yield(2);
+      }
+  };
+
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
   // right when on, and — the part that decides whether it feels safe — the
   // keyboard goes to it ONLY while the pointer is over it.
