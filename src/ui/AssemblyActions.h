@@ -236,7 +236,31 @@ struct FastenerFit {
   double grip = 0.0;       // material + gaps the screw must span
   double length = 0.0;     // snapped to a stocked nominal
   bool blind = false;      // the last thing the axis met has no far side
-  uint64_t occurrence = 0; // 0 when nothing was placed
+  uint64_t occurrence = 0; // the screw; 0 when nothing was placed
+  // Every occurrence placed, screw first: the washers and the nut too, so a
+  // caller that has to undo the whole joint is not left hunting for the parts
+  // it did not hear about.
+  std::vector<uint64_t> placed;
+  std::vector<std::string> parts; // their designations, in the same order
+};
+
+// What to put on the axis (docs/parts/plan.md, phase 4).
+//
+// The screw's own dimensions are still derived — this is only the CHOICE of
+// what a joint is made of, which is the one thing the geometry cannot answer.
+// A washer is not implied by a hole and a nut is not implied by a through
+// hole: plenty of joints have neither, and adding them because they would fit
+// is exactly the "plausible and wrong" this codebase refuses.
+struct FastenerRequest {
+  std::string standard = "iso4762"; // the screw
+  std::string drive;                // empty: the one that standard is made with
+  bool washerUnderHead = false;
+  bool washerUnderNut = false;
+  // A nut on the far side, by standard ("iso4032"), or empty for none.
+  // Refused on a blind hole, where there is no far side to put one on.
+  std::string nut;
+  std::string washer = "iso7089";
+  bool dryRun = false; // derive and explain without placing
 };
 
 // Derive a fastener from a picked hole RIM and place it (phase 3).
@@ -250,11 +274,16 @@ struct FastenerFit {
 // diameter (the clearance table read backwards), the LENGTH from the stack the
 // axis passes through, snapped to a length that size is actually made in.
 //
-// `dryRun` derives and explains without placing, which is what a GUI preview
-// and a "what would this be" query both want.
+// `request.dryRun` derives and explains without placing, which is what a GUI
+// preview and a "what would this be" query both want.
+//
+// Phase 4 completes the JOINT rather than placing a lone screw: washers and a
+// far-side nut come off the same traversal, so the length accounts for them
+// instead of the person having to. That is the whole argument for deriving —
+// a screw sized for the plates and then fitted with two washers and a nut is
+// too short, and it looks exactly right in the viewport.
 FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
-                              const std::string& standard,
-                              const std::string& drive, bool dryRun);
+                              const FastenerRequest& request);
 
 uint64_t MaterializeImportedPart(AppState& state,
                                  const interchange::PlannedPart& part,

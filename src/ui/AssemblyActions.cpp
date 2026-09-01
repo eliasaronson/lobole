@@ -28,6 +28,7 @@
 #include "core/io/ImportAssembly.h"
 #include "core/io/Serialization.h"
 #include "core/parts/AxisStack.h"
+#include "core/parts/FastenerProfile.h"
 #include "core/parts/FastenerTable.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
@@ -1824,9 +1825,57 @@ std::string Mm(double v) {
 }
 } // namespace
 
+namespace {
+// +Z (a fastener's own reach direction) rotated onto `to`.
+//
+// Written out rather than pulled from glm's experimental quaternion header,
+// which this file does not otherwise need and which errors unless a global
+// GLM_ENABLE_EXPERIMENTAL is defined.
+glm::quat AlignZTo(const glm::vec3& to) {
+  const glm::vec3 from(0.0f, 0.0f, 1.0f);
+  const float dot = glm::dot(from, to);
+  if (dot < -0.999999f)
+    return glm::quat(0.0f, 1.0f, 0.0f, 0.0f); // 180 degrees about X
+  if (dot > 0.999999f)
+    return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+  const glm::vec3 c = glm::cross(from, to);
+  return glm::normalize(glm::quat(1.0f + dot, c.x, c.y, c.z));
+}
+
+// One dimension of a companion part (a washer's thickness), refusing by name
+// when the standard is not the kind the caller asked it to be. A "washer"
+// that turns out to be a nut would place silently and be found by eye.
+std::optional<double> CompanionDim(const std::string& standard,
+                                   parts::Kind wanted, const std::string& size,
+                                   std::initializer_list<const char*> columns,
+                                   std::string* why) {
+  const parts::Profile* profile = parts::ProfileFor(standard);
+  if (profile == nullptr) {
+    *why = "\"" + standard +
+           "\" is not a standard this build makes — it makes " +
+           parts::KnownStandards();
+    return std::nullopt;
+  }
+  if (profile->kind != wanted) {
+    *why = profile->designation + " is a " + profile->what + ", not a " +
+           (wanted == parts::Kind::Nut ? "nut" : "washer");
+    return std::nullopt;
+  }
+  const auto dims = parts::Dimensions(standard, size, why);
+  if (!dims)
+    return std::nullopt;
+  for (const char* column : columns) {
+    const auto it = dims->find(column);
+    if (it != dims->end())
+      return it->second;
+  }
+  *why = profile->designation + " " + size + " has no thickness to stack";
+  return std::nullopt;
+}
+} // namespace
+
 FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
-                              const std::string& standard,
-                              const std::string& drive, bool dryRun) {
+                              const FastenerRequest& request) {
   FastenerFit fit;
   const auto fail = [&](const std::string& why) -> FastenerFit {
     fit.ok = false;
@@ -1836,6 +1885,24 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
   if (state.assembly == nullptr)
     return fail("a fastener goes in an ASSEMBLY — switch to the assembly tab "
                 "and pick the rim of the hole it passes through");
+
+  const parts::Profile* screwProfile = parts::ProfileFor(request.standard);
+  if (screwProfile == nullptr)
+    return fail("\"" + request.standard +
+                "\" is not a standard this build makes — it makes " +
+                parts::KnownStandards());
+  if (screwProfile->kind != parts::Kind::Screw)
+    return fail(screwProfile->designation + " is a " + screwProfile->what +
+                ", which does not pass through a hole — ask for a screw and "
+                "put this on it with `nut` or `washer`");
+  if (screwProfile->lengthOverHead)
+    return fail(screwProfile->designation +
+                " sinks its head INTO the part, and the rim picked here is a "
+                "plain bore's — its countersink is not modelled, so the head "
+                "would end up inside solid material. Use a screw whose head "
+                "stands proud (iso4762, iso14579, iso7380, iso4017) until "
+                "holes carry their countersink (docs/modeling/"
+                "hole-standards.md).");
 
   // Every placed leaf, once: the rim is on one of them and the stack is made
   // of the rest.
@@ -1927,12 +1994,52 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
   // difference between an M6x8 and a bolt through solid metal.
   const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
       placed, glm::dvec3(centre), glm::dvec3(-axis), 0.0, reach);
+  fit.blind = !onAxis.empty();
+
+  // What else is on the axis, and how thick. A washer under the head pushes
+  // the head out by its own thickness, so it lengthens the screw — deriving
+  // the length and THEN adding hardware is how a joint ends up one washer
+  // short, which looks perfectly right in a viewport.
+  double underHead = 0.0, underNut = 0.0, nutHeight = 0.0;
+  if (request.washerUnderHead) {
+    const auto h = CompanionDim(request.washer, parts::Kind::Washer, fit.size,
+                                {"h", "h_max"}, &why);
+    if (!h)
+      return fail(why);
+    underHead = *h;
+  }
+  if (!request.nut.empty()) {
+    if (fit.blind)
+      return fail("there is no far side to put a nut on — the axis stops "
+                  "inside " +
+                  stack.back().part +
+                  ", which is a blind hole. Tap it and leave the nut off.");
+    const auto m =
+        CompanionDim(request.nut, parts::Kind::Nut, fit.size, {"m"}, &why);
+    if (!m)
+      return fail(why);
+    nutHeight = *m;
+    if (request.washerUnderNut) {
+      const auto h = CompanionDim(request.washer, parts::Kind::Washer, fit.size,
+                                  {"h", "h_max"}, &why);
+      if (!h)
+        return fail(why);
+      underNut = *h;
+    }
+  } else if (request.washerUnderNut) {
+    return fail("a washer under the nut needs a nut — ask for one (nut: "
+                "\"iso4032\"), or drop the washer.");
+  }
 
   std::optional<double> length;
-  if (onAxis.empty()) {
-    // Clear all the way: a through joint, and the screw spans the lot.
-    fit.grip = stack.back().exit;
-    length = parts::SnapLength(standard, fit.size, fit.grip, &why);
+  if (!fit.blind) {
+    // Clear all the way: a through joint, and the screw spans the lot — the
+    // plates, the washers at both ends, and enough thread to fill the nut.
+    // "Enough" is the nut's own height, which is the shortest length at which
+    // every one of its threads is engaged; a nut hanging off the last two is
+    // the failure this rule exists to prevent.
+    fit.grip = underHead + stack.back().exit + underNut + nutHeight;
+    length = parts::SnapLength(request.standard, fit.size, fit.grip, &why);
   } else {
     const double blocked = onAxis.front().enter;
     // Which plate the obstruction is in. The LAST one means a blind hole —
@@ -1964,20 +2071,17 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
                   " in — its hole does not go all the way through, so a "
                   "fastener cannot reach the parts beyond it.");
 
-    fit.blind = true;
     // A blind hole bounds the length from ABOVE: the screw must not bottom
     // out. Take the longest stocked length that fits, which is also the most
     // thread engaged.
-    const double above = blocking->enter; // everything before the tapped part
     const double engagement = *parts::NominalDiameter(fit.size); // ~1x d
-    fit.grip = blocked;
+    fit.grip = underHead + blocked;
     if (into < engagement)
       return fail("the hole is only " + Mm(into) + " deep in " +
                   blocking->part + ", which is less than the " +
                   Mm(engagement) + " of thread an " + fit.size +
                   " needs to hold. Drill deeper, or use a smaller size.");
-    (void)above;
-    length = parts::SnapLengthDown(standard, fit.size, blocked, &why);
+    length = parts::SnapLengthDown(request.standard, fit.size, fit.grip, &why);
   }
   if (!length)
     return fail(why + " (the stack is " + summary.str() + ")");
@@ -1985,32 +2089,60 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
 
   std::ostringstream head;
   head.precision(4);
-  head << fit.size << "x" << fit.length << " — grip " << fit.grip << ": "
-       << summary.str();
+  head << fit.size << "x" << fit.length << " — grip " << fit.grip << ": ";
+  if (underHead > 0.0)
+    head << "washer " << underHead << ", ";
+  head << summary.str();
+  if (underNut > 0.0)
+    head << ", washer " << underNut;
+  if (nutHeight > 0.0)
+    head << ", nut " << nutHeight;
   fit.summary = head.str();
 
-  if (dryRun) {
+  if (request.dryRun) {
     fit.ok = true;
     return fit;
   }
-  // Head-down at the rim, looking along the hole: the feature is built with
-  // the head's rim on z = 0, so placing it is a rotation from +Z to the axis.
-  // +Z (the feature's own shank direction) rotated onto the hole's axis.
-  // Written out rather than pulled from glm's experimental quaternion header,
-  // which this file does not otherwise need and which errors unless a global
-  // GLM_ENABLE_EXPERIMENTAL is defined.
-  const glm::vec3 from(0.0f, 0.0f, 1.0f), to = -axis;
-  const float dot = glm::dot(from, to);
-  glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
-  if (dot < -0.999999f) {
-    orientation = glm::quat(0.0f, 1.0f, 0.0f, 0.0f); // 180 degrees about X
-  } else if (dot < 0.999999f) {
-    const glm::vec3 c = glm::cross(from, to);
-    orientation = glm::normalize(glm::quat(1.0f + dot, c.x, c.y, c.z));
-  }
-  fit.occurrence = AddFastener(state, standard, fit.size, fit.length, drive,
-                               centre, orientation, &fit.why);
-  fit.ok = fit.occurrence != 0;
+
+  // Placement. Every fastener is built with its bearing face on z = 0 and its
+  // body below, so all four of these are the same two questions: where is the
+  // face, and which way is "away from the material".
+  const glm::vec3 into = -axis;          // down the hole
+  const glm::quat down = AlignZTo(into); // head end: body points back out
+  const glm::quat up = AlignZTo(axis); // far end: body points out the far side
+  const glm::vec3 exit = centre + into * static_cast<float>(stack.back().exit);
+
+  const auto place = [&](const std::string& standard, double partLength,
+                         const glm::vec3& at,
+                         const glm::quat& orientation) -> bool {
+    // The drive is the SCREW's: a washer has no recess, and handing it one
+    // would be refused by the standard that does not have it.
+    const bool isScrew = standard == request.standard;
+    const uint64_t id = AddFastener(state, standard, fit.size, partLength,
+                                    isScrew ? request.drive : std::string{}, at,
+                                    orientation, &fit.why);
+    if (id == 0)
+      return false;
+    fit.placed.push_back(id);
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      if (o.id == id)
+        fit.parts.push_back(o.name);
+    return true;
+  };
+
+  if (!place(request.standard, fit.length,
+             centre - into * static_cast<float>(underHead), down))
+    return fail(fit.why);
+  fit.occurrence = fit.placed.front();
+  if (underHead > 0.0 && !place(request.washer, 0.0, centre, down))
+    return fail(fit.why);
+  if (underNut > 0.0 && !place(request.washer, 0.0, exit, up))
+    return fail(fit.why);
+  if (!request.nut.empty() &&
+      !place(request.nut, 0.0, exit + axis * static_cast<float>(-underNut), up))
+    return fail(fit.why);
+
+  fit.ok = true;
   return fit;
 }
 

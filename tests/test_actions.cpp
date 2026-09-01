@@ -711,6 +711,110 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
 } // namespace
 
 TEST_CASE(
+    "A joint is derived whole: washers, nut and a length that covers them",
+    "[actions][parts]") {
+  // Phase 4 of docs/parts/plan.md. The argument for deriving at all is that a
+  // typed length is right for the stack somebody had in mind and wrong for
+  // every other — and a joint is where that bites hardest, because a screw
+  // sized for the plates and THEN fitted with two washers and a nut is too
+  // short by the 8.4 mm of hardware and looks perfectly correct in a viewport.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
+  MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
+  const DrilledPlate blind = MakePlate(state, "Blind", 20.0, 6.6, 8.0, 0.0);
+
+  const auto place = [&](const char* part, glm::vec3 at) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    state.assembly->AddOccurrence(occ);
+  };
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  place("Top", glm::vec3(0.0f, 0.0f, 0.0f));
+  place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+
+  ui::FastenerRequest request;
+  request.nut = "iso4032";
+  request.washerUnderHead = true;
+  request.washerUnderNut = true;
+  request.dryRun = true;
+  ui::FastenerFit fit = ui::FitFastenerToHole(state, top.topRim, request);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  // 38 mm of plate, two 1.6 mm washers, and the nut's own 5.2 mm — "enough
+  // thread to fill the nut" is its height, which is the shortest length at
+  // which every one of its threads is engaged.
+  CHECK_THAT(fit.grip, WithinAbs(1.6 + 38.0 + 1.6 + 5.2, 1e-3));
+  CHECK_THAT(fit.length, WithinAbs(50.0, 1e-9));
+  // Without them the same hole wants 40, so the hardware moves the answer two
+  // nominal lengths — not a rounding, and not something a person adds in their
+  // head reliably.
+  ui::FastenerRequest bare;
+  bare.dryRun = true;
+  CHECK_THAT(ui::FitFastenerToHole(state, top.topRim, bare).length,
+             WithinAbs(40.0, 1e-9));
+  CHECK(fit.summary.find("washer 1.6") != std::string::npos);
+  CHECK(fit.summary.find("nut 5.2") != std::string::npos);
+
+  // And placed: four occurrences off one pick, three part documents, because
+  // the two washers are the same spec and `bom` aggregates them.
+  request.dryRun = false;
+  fit = ui::FitFastenerToHole(state, top.topRim, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.placed.size() == 4);
+  CHECK(fit.parts[0] == "ISO 4762 M6x50");
+  CHECK(fit.parts[1] == "ISO 7089 M6");
+  CHECK(fit.parts[2] == "ISO 7089 M6");
+  CHECK(fit.parts[3] == "ISO 4032 M6");
+
+  // Each one bearing-face down on the surface it clamps. The screw's own
+  // origin is pushed OUT by the washer under its head — placing it at the rim
+  // would bury the head in the washer, which renders as a screw sitting a
+  // millimetre and a half too low and nothing else.
+  const auto at = [&](uint64_t id) {
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      if (o.id == id)
+        return o.position;
+    return glm::vec3(0.0f);
+  };
+  CHECK_THAT(at(fit.placed[0]).z, WithinAbs(12.0 + 1.6, 1e-3));  // screw
+  CHECK_THAT(at(fit.placed[1]).z, WithinAbs(12.0, 1e-3));        // its washer
+  CHECK_THAT(at(fit.placed[2]).z, WithinAbs(-26.0, 1e-3));       // far washer
+  CHECK_THAT(at(fit.placed[3]).z, WithinAbs(-26.0 - 1.6, 1e-3)); // the nut
+
+  // A nut on a blind hole has nothing to thread onto. Refused by name: the
+  // alternative is a nut floating inside the plate, which is invisible from
+  // outside and exactly the class of error this whole verb exists to stop.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Tapped"));
+  place("Blind", glm::vec3(0.0f));
+  ui::FastenerRequest tapped;
+  tapped.nut = "iso4032";
+  tapped.dryRun = true;
+  fit = ui::FitFastenerToHole(state, blind.topRim, tapped);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("no far side") != std::string::npos);
+
+  // And a washer standard that is not a washer, which is the same mistake one
+  // level up: it would place a nut under the head and look almost right.
+  ui::FastenerRequest wrong;
+  wrong.washerUnderHead = true;
+  wrong.washer = "iso4032";
+  wrong.dryRun = true;
+  fit = ui::FitFastenerToHole(state, blind.topRim, wrong);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("not a washer") != std::string::npos);
+}
+
+TEST_CASE(
     "A fastener derives its size and length from the hole it is picked in",
     "[actions][parts]") {
   // Phase 3 of docs/parts/plan.md, and the four cases that decide whether
@@ -721,6 +825,9 @@ TEST_CASE(
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
   ui::EnsureParts(state);
+
+  ui::FastenerRequest dry;
+  dry.dryRun = true;
 
   const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
   MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
@@ -743,8 +850,7 @@ TEST_CASE(
   ui::SetActivePart(state, ui::AddAssembly(state, "Gap"));
   place("Top", glm::vec3(0.0f, 0.0f, 3.0f));
   place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
-  ui::FastenerFit fit =
-      ui::FitFastenerToHole(state, top.topRim, "iso4762def", "hex", true);
+  ui::FastenerFit fit = ui::FitFastenerToHole(state, top.topRim, dry);
   INFO(fit.why << " / " << fit.summary);
   REQUIRE(fit.ok);
   CHECK(fit.size == "M6"); // read back out of the clearance table
@@ -760,7 +866,7 @@ TEST_CASE(
   //    off-axis probe's 20 mm of plate is not the answer.
   ui::SetActivePart(state, ui::AddAssembly(state, "Blind"));
   place("Blind", glm::vec3(0.0f));
-  fit = ui::FitFastenerToHole(state, blind.topRim, "iso4762def", "hex", true);
+  fit = ui::FitFastenerToHole(state, blind.topRim, dry);
   INFO(fit.why << " / " << fit.summary);
   REQUIRE(fit.ok);
   CHECK(fit.blind);
@@ -773,7 +879,7 @@ TEST_CASE(
   ui::SetActivePart(state, ui::AddAssembly(state, "Skewed"));
   place("Off", glm::vec3(0.0f));
   place("Skew", glm::vec3(0.0f, 0.0f, -10.0f));
-  fit = ui::FitFastenerToHole(state, off.topRim, "iso4762def", "hex", true);
+  fit = ui::FitFastenerToHole(state, off.topRim, dry);
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("not lined up") != std::string::npos);
@@ -785,7 +891,7 @@ TEST_CASE(
   ui::SetActivePart(state, ui::AddAssembly(state, "Bad"));
   place("Top", glm::vec3(0.0f));
   fit = ui::FitFastenerToHole(state, ElementRef{top.topRim.featureId, "nope"},
-                              "iso4762def", "hex", true);
+                              dry);
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("RIM") != std::string::npos);

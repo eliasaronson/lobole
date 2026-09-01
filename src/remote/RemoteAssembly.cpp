@@ -78,8 +78,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "(\"ISO 4762 M6x20\") and reused by every occurrence of it, so `bom` "
      "aggregates without knowing about fasteners. Refused on a part tab: a "
      "screw body there would be machined by CAM and counted as the part's own "
-     "mass. Optional {position, orientation} place it; deriving those from a "
-     "picked hole is not built yet.",
+     "mass. Optional {position, orientation} place it; `fit_fastener` derives "
+     "all of that from a picked hole and is what you usually want. Standards: "
+     "iso4762, iso14579, iso4017, iso7380 (screws — `length` required), "
+     "iso4032 (nut), iso7089 (washer — no `length`).",
      "drive, length, orientation, position, size, standard"},
     {"fit_fastener",
      "Derive a fastener from a picked hole RIM and place it "
@@ -92,8 +94,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "decomposes the stack (\"Plate 12.0, gap 3.0, Bracket 26.5\"), because a "
      "gap is either an unmodelled gasket or two parts that were meant to "
      "touch, and saying so is what makes the second visible. "
-     "{dry_run: true} derives without placing.",
-     "drive, dry_run, rim, standard"},
+     "{dry_run: true} derives without placing. The JOINT, not just the screw: "
+     "{nut: \"iso4032\", washer_under_head: true, washer_under_nut: true} "
+     "place those too and the LENGTH accounts for them — a screw sized for "
+     "the plates and then fitted with washers is too short and looks right. "
+     "A nut is refused on a blind hole. `standard` picks the screw: iso4762 "
+     "(hex socket cap), iso14579 (torx socket cap), iso7380 (button), "
+     "iso4017 (hex head); the drive follows the standard, so leave it empty.",
+     "drive, dry_run, nut, rim, standard, washer, washer_under_head, "
+     "washer_under_nut"},
     {"bom", "Bill of materials (aggregated part counts, masses).", ""},
     {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",
@@ -155,15 +164,26 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     const auto& r = p.at("rim");
     rim.featureId = r.at("feature_id").get<uint64_t>();
     rim.name = r.at("element").get<std::string>();
-    const ui::FastenerFit fit = ui::FitFastenerToHole(
-        state, rim, p.value("standard", std::string("iso4762def")),
-        p.value("drive", std::string("hex")), p.value("dry_run", false));
+    ui::FastenerRequest request;
+    request.standard = p.value("standard", std::string("iso4762"));
+    request.drive = p.value("drive", std::string{});
+    request.washer = p.value("washer", std::string("iso7089"));
+    request.nut = p.value("nut", std::string{});
+    request.washerUnderHead = p.value("washer_under_head", false);
+    request.washerUnderNut = p.value("washer_under_nut", false);
+    request.dryRun = p.value("dry_run", false);
+    const ui::FastenerFit fit = ui::FitFastenerToHole(state, rim, request);
     if (!fit.ok)
       throw std::runtime_error(fit.why);
-    return json{{"occurrence", fit.occurrence}, {"size", fit.size},
-                {"clearance", fit.clearance},   {"grip_mm", fit.grip},
-                {"length_mm", fit.length},      {"blind", fit.blind},
-                {"summary", fit.summary}};
+    return json{{"occurrence", fit.occurrence},
+                {"size", fit.size},
+                {"clearance", fit.clearance},
+                {"grip_mm", fit.grip},
+                {"length_mm", fit.length},
+                {"blind", fit.blind},
+                {"summary", fit.summary},
+                {"placed", fit.placed},
+                {"parts", fit.parts}};
   }
   if (m == "add_fastener") {
     glm::vec3 position(0.0f);
@@ -180,9 +200,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     }
     std::string error;
     const uint64_t id = ui::AddFastener(
-        state, p.value("standard", std::string("iso4762def")),
-        p.at("size").get<std::string>(), p.at("length").get<double>(),
-        p.value("drive", std::string("hex")), position, orientation, &error);
+        state, p.value("standard", std::string("iso4762")),
+        p.at("size").get<std::string>(), p.value("length", 0.0),
+        p.value("drive", std::string{}), position, orientation, &error);
     if (id == 0)
       throw std::runtime_error(error);
     std::string placed;

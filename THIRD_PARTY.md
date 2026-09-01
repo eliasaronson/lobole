@@ -126,7 +126,8 @@ packages and source distributions.
 ## FreeCAD Fasteners Workbench — standard-parts dimension tables
 
 `assets/parts/iso4762def.csv`, `iso4032def.csv`, `iso7089def.csv`,
-`iso888length.csv`, `iso4757def.csv`, `iso10664def.csv`
+`iso888length.csv`, `iso4757def.csv`, `iso10664def.csv`, `iso14579def.csv`,
+`iso4017head.csv`, `iso10642def.csv`, `iso7380def.csv`
 
 Vendored from https://github.com/shaise/FreeCAD_FastenersWB (`FsData/`),
 **GPL-2.0-or-later**, unmodified below a provenance header. Data only — no code

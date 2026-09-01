@@ -40,10 +40,29 @@ struct Table {
   std::vector<std::string> columns; // in file order, for error messages
   std::vector<std::string> order;   // sizes in FILE order (M2 before M10)
   std::map<std::string, std::map<std::string, double>> rows;
+  // The same fields as written, before they were read as numbers. A column
+  // that is NOT a number lives only here: `iso14579def.csv` names the driver
+  // that fits each size ("M6","T30",…) in the middle of a dimension table, and
+  // `iso7045def.csv` the Phillips size. Refusing those files as malformed —
+  // which is what this parser did — would have meant no torx at all.
+  //
+  // A non-numeric field is therefore ABSENT from `rows` rather than zero,
+  // exactly like a blank one, so nothing reads a driver name as a millimetre.
+  std::map<std::string, std::map<std::string, std::string>> text;
 
   [[nodiscard]] bool Has(const std::string& key) const {
-    return rows.find(key) != rows.end();
+    return Find(key) != nullptr;
   }
+
+  // The row for a size, tolerating the PARENTHESES the ISO tables mark a
+  // non-preferred size with: ISO 4032 stocks "(M3.5)", and someone asking for
+  // "M3.5" is asking for that size, not for one the standard omits. The
+  // parentheses are a recommendation about which sizes to design around, not
+  // part of the name — so they are matched through, and printed as-is in a
+  // refusal so the recommendation is still visible.
+  [[nodiscard]] const std::map<std::string, double>*
+  Find(const std::string& key) const;
+  [[nodiscard]] const std::string* Key(const std::string& key) const;
 };
 
 // Every table in one file, in file order. Table 0 is the dimensions.
@@ -123,6 +142,14 @@ ThreadForClearance(double diameter, std::string* error);
 [[nodiscard]] std::optional<double> SnapLengthDown(const std::string& stem,
                                                    const std::string& size,
                                                    double available,
+                                                   std::string* error);
+
+// One field as it was WRITTEN, for a column that is not a dimension: the
+// driver an ISO 14579 size takes ("T30"), the Phillips number an ISO 7045
+// takes ("2"). nullopt when the file, the size or the column is not there.
+[[nodiscard]] std::optional<std::string> TextField(const std::string& stem,
+                                                   const std::string& size,
+                                                   const std::string& column,
                                                    std::string* error);
 
 // Test seam: point the loader at a directory other than the installed one.

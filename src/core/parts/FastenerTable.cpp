@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "core/parts/FastenerProfile.h"
 
 #include <algorithm>
 #include <cctype>
@@ -64,7 +65,14 @@ std::string Lower(std::string s) {
 
 // The numeric part of a size key: 6 from "M6", 1.6 from "M1.6", 20 from "T20".
 // nullopt for anything that is not <letters><number>.
-std::optional<double> KeyNumber(const std::string& key) {
+std::optional<double> KeyNumber(const std::string& raw) {
+  // "(M3.5)" is M3.5, marked non-preferred. Stripping the marker here is what
+  // lets a refusal name it as a neighbour: without this, ISO 4032's
+  // parenthesised sizes were invisible to the nearest-stocked search, so
+  // "M3.6 is not stocked" could not offer the M3.5 sitting right beside it.
+  std::string key = raw;
+  if (key.size() >= 2 && key.front() == '(' && key.back() == ')')
+    key = key.substr(1, key.size() - 2);
   size_t i = 0;
   while (i < key.size() && (std::isalpha(static_cast<unsigned char>(key[i]))))
     i++;
@@ -127,6 +135,28 @@ std::string KeyList(const Table& table, const std::string& wanted) {
 }
 
 } // namespace
+
+const std::string* Table::Key(const std::string& key) const {
+  const auto exact = rows.find(key);
+  if (exact != rows.end())
+    return &exact->first;
+  const auto marked = rows.find("(" + key + ")");
+  if (marked != rows.end())
+    return &marked->first;
+  // And the other way, so a caller echoing a key back out of `order` is not
+  // refused for quoting the marker it was given.
+  if (key.size() >= 2 && key.front() == '(' && key.back() == ')') {
+    const auto bare = rows.find(key.substr(1, key.size() - 2));
+    if (bare != rows.end())
+      return &bare->first;
+  }
+  return nullptr;
+}
+
+const std::map<std::string, double>* Table::Find(const std::string& key) const {
+  const std::string* resolved = Key(key);
+  return resolved == nullptr ? nullptr : &rows.at(*resolved);
+}
 
 const Table* TableFile::ById(const std::string& idSuffix) const {
   const std::string want = Lower(idSuffix);
@@ -210,25 +240,31 @@ std::optional<TableFile> ParseFile(const std::string& text,
                   " twice — a lookup would be ambiguous");
 
     std::map<std::string, double> row;
+    std::map<std::string, std::string> text;
     for (size_t i = 1; i < fields.size(); i++) {
       // Absent, not zero: a blank means the standard does not define that
       // dimension at this size, and zero is a real dimension.
       if (fields[i].empty())
         continue;
+      text[current.columns[i]] = fields[i];
       try {
         size_t consumed = 0;
         const double value = std::stod(fields[i], &consumed);
         if (consumed != fields[i].size())
-          throw std::invalid_argument("trailing characters");
+          continue; // a name, not a dimension — see Table::text
         row[current.columns[i]] = value;
       } catch (const std::exception&) {
-        return fail("table \"" + current.id + "\" line " +
-                    std::to_string(lineNo) + ", column " + current.columns[i] +
-                    ": \"" + fields[i] + "\" is not a number");
+        // Likewise. A dimension column that turns out to hold a name is not a
+        // malformed file: `iso14579def.csv` puts the driver size ("T30")
+        // between two real dimensions, and refusing the file over it would
+        // mean no hexalobular drive at all. It is absent from `rows`, so a
+        // caller asking for it as a millimetre gets the same refusal a
+        // missing dimension gives, naming the column.
       }
     }
     current.order.push_back(key);
     current.rows[key] = std::move(row);
+    current.text[key] = std::move(text);
   }
   finish();
 
@@ -238,7 +274,15 @@ std::optional<TableFile> ParseFile(const std::string& text,
   return out;
 }
 
-const TableFile* Load(const std::string& stem, std::string* error) {
+const TableFile* Load(const std::string& named, std::string* error) {
+  // A standard can be named the way a person names it ("iso4762") or the way
+  // the vendored file is ("iso4762def"). The files keep UPSTREAM's names so a
+  // re-vendor can diff, and upstream calls ISO 4017's `iso4017head` — which
+  // is not a thing anybody would think to type. So the profile table resolves
+  // one to the other, here, once, rather than at every call site.
+  const Profile* profile = ProfileFor(named);
+  const std::string stem = profile ? profile->stem : named;
+
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto cached = g_cache.find(stem);
   if (cached != g_cache.end())
@@ -277,14 +321,14 @@ std::optional<std::map<std::string, double>> Dimensions(const std::string& stem,
     return std::nullopt;
   // Table 0 is the dimensions: the length series and the ranges follow it.
   const Table& table = file->tables.front();
-  const auto row = table.rows.find(size);
-  if (row == table.rows.end()) {
+  const std::map<std::string, double>* row = table.Find(size);
+  if (row == nullptr) {
     if (error)
       *error =
           table.id + " does not stock " + size + " — " + KeyList(table, size);
     return std::nullopt;
   }
-  return row->second;
+  return *row;
 }
 
 std::vector<double> NominalLengths(const std::string& stem,
@@ -323,15 +367,15 @@ std::optional<std::pair<double, double>> LengthRange(const std::string& stem,
   const Table* range = file->ById("range");
   if (range == nullptr)
     return std::nullopt; // no range table: not an error, just not a screw
-  const auto row = range->rows.find(size);
-  if (row == range->rows.end())
+  const std::map<std::string, double>* row = range->Find(size);
+  if (row == nullptr)
     return std::nullopt;
   // The columns are the range's own; take the two extremes rather than
   // assuming their names, since one file spells them Min/Max and the shape of
   // a future one is not ours to promise.
   double lo = 0.0, hi = 0.0;
   bool first = true;
-  for (const auto& [column, value] : row->second) {
+  for (const auto& [column, value] : *row) {
     lo = first ? value : std::min(lo, value);
     hi = first ? value : std::max(hi, value);
     first = false;
@@ -430,6 +474,33 @@ ThreadForClearance(double diameter, std::string* error) {
 
 std::optional<double> NominalDiameter(const std::string& size) {
   return KeyNumber(size);
+}
+
+std::optional<std::string> TextField(const std::string& stem,
+                                     const std::string& size,
+                                     const std::string& column,
+                                     std::string* error) {
+  const TableFile* file = Load(stem, error);
+  if (file == nullptr)
+    return std::nullopt;
+  const Table& table = file->tables.front();
+  const std::string* key = table.Key(size);
+  if (key == nullptr) {
+    if (error)
+      *error =
+          table.id + " does not stock " + size + " — " + KeyList(table, size);
+    return std::nullopt;
+  }
+  const auto row = table.text.find(*key);
+  if (row == table.text.end())
+    return std::nullopt;
+  const auto field = row->second.find(column);
+  if (field == row->second.end()) {
+    if (error)
+      *error = table.id + " " + size + " has no " + column + " column";
+    return std::nullopt;
+  }
+  return field->second;
 }
 
 void SetDataDirForTesting(const std::string& dir) {

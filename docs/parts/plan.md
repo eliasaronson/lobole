@@ -1,9 +1,10 @@
 # Standard parts — plan (F1)
 
-> Status: **phases 1-3 SHIPPED 2026-09-01** — the tables and their refusals,
-> the `Fastener` feature (format v69) placed as an occurrence, and now the
-> derivation: pick a hole's rim and the size and length follow. Phases 4-5
-> (breadth, polish) planned. Written 2026-09-01 from a survey of the open
+> Status: **phases 1-4 SHIPPED 2026-09-01** — the tables and their refusals,
+> the `Fastener` feature (format v69) placed as an occurrence, the derivation
+> (pick a hole's rim and the size and length follow), and seven standards
+> covering the whole joint. Phase 5 (polish) planned. Written 2026-09-01 from
+> a survey of the open
 > libraries, both of which were cloned to `~/Documents/CAD/parts/` and read
 > rather than judged from their websites. The survey, the source comparison and
 > the interface argument live in
@@ -249,11 +250,21 @@ plausible-and-wrong answer, and it looks perfect in the viewport.
 
 ### What v1 does not place
 
-The **nut and washers**. A through bolt needs them, and "complete the joint"
-(screw + washer + nut, all derived from the same ray) is the obvious follow-on
-— but it multiplies the placement rules before the single-fastener ones have
-been used in anger. v1 places one fastener per pick; the far-side nut is a
-second pick on the far rim.
+The **nut and washers** — *until phase 4, which does*. The plan expected the
+far-side nut to be a second pick on the far rim; it is not, and the reason is
+the one argument for deriving at all: **the hardware changes the length**. Two
+1.6 mm washers and a 5.2 mm nut on a 38 mm stack move an M6 from 40 to 50 — two
+nominal lengths, not a rounding, and not something anyone adds in their head
+reliably. A screw sized for the plates and *then* fitted with washers is too
+short and looks exactly right in the viewport.
+
+So one pick still derives, and `{nut, washer_under_head, washer_under_nut}`
+say what the joint is made of — the one thing the geometry genuinely cannot
+answer, since plenty of joints have neither and adding them because they would
+fit is the substitution this document is about. Every fastener is built with
+its bearing face on z = 0 and its body below, which is what lets all four be
+placed by the same two questions: where is the face, and which way is away
+from the material.
 
 ### The cross-document catch
 
@@ -360,9 +371,67 @@ regen's input surface for.
    size is read backwards out of the clearance table (Ø6.6 is an M6 normal),
    41 mm of grip snaps up to the 45 that ISO 4762 is made in, and the gap is
    named rather than silently absorbed.
-4. **Breadth.** Nuts and washers, then the remaining head types and drives, one
-   vendored file at a time. Each is a profile and a table row — the survey
-   measured a socket head cap screw's entire head at seven lines.
+4. **Breadth.** — **SHIPPED.** Seven standards (four screw heads, two drives,
+   a nut and a washer), `core/parts/FastenerProfile`, and the joint rather
+   than the screw: `fit_fastener` now takes `{nut, washer_under_head,
+   washer_under_nut}` and the LENGTH accounts for them.
+
+   **The plan's interface table was wrong about the drive, and this is the
+   correction.** It said the head and the drive are *chosen*. They are not:
+   you do not order an ISO 4762 with a torx drive, you order an ISO 14579.
+   The standard fixes the head, the recess, and whether the nominal length is
+   measured over the head or under it — a fastener is a catalogue item, not a
+   configuration of one. So the drive defaults to the standard's own and a
+   drive that disagrees is refused *naming the standard that has it*, which is
+   the correction the caller actually needs. That also collapsed the form: of
+   the four fields the plan expected, one (`standard`) is left.
+
+   | standard | | length is |
+   |---|---|---|
+   | iso4762 | socket head cap screw, hex | under the head |
+   | iso14579 | hexalobular (torx) socket head cap | under the head |
+   | iso4017 | hex head screw, no recess at all | under the head |
+   | iso7380 | button head, hex socket | under the head |
+   | iso10642 | countersunk socket head | **overall** |
+   | iso4032 | hex nut | — |
+   | iso7089 | plain washer | — |
+
+   Four things the data and the geometry corrected:
+
+   - **A dimension table can hold a NAME.** `iso14579def.csv` says which
+     driver each size takes ("M6","T30",2.3) between two real dimensions, and
+     the phase-1 parser refused the whole file over it — which would have
+     meant no torx at all. A non-numeric field is now text and is ABSENT from
+     the numbers, so nothing reads a driver size as a millimetre. That is a
+     deliberate loosening of "a file that half loads is worse than one that
+     refuses", and the guarantee it keeps is the one that mattered.
+   - **A parenthesised size is a size.** ISO 4032 stocks "(M3.5)"; the
+     parentheses mark a size to avoid designing around, not a different part.
+     Asking for M3.5 was refused with "the nearest stocked are M3 and M4",
+     which is a lie about a row in the table.
+   - **The button head's socket opens THROUGH the crown.** The recess is
+     wider than the dome near the top, so the apex is not there to measure and
+     the head is 0.36 mm shorter than the standard's `k`. That is what a
+     button head cap screw looks like from above; the test asserts the derived
+     crossing rather than `k`, and it is the one head whose volume is not
+     area x depth.
+   - **A tangent boolean came back 0.36 mm short.** Clipping the dome's sphere
+     with a box whose floor sat exactly on the apex produced a measurably
+     flatter dome and no error. Clipping below it costs nothing.
+
+   And one asymmetry worth stating before someone files it as a bug: a
+   cosmetic thread ADDS material to a screw (a full-diameter shank) and
+   REMOVES it from a nut (a full-diameter bore), so the generated screw is a
+   little heavy and the generated nut a little light. Same simplification,
+   opposite signs, seen from outside and inside the thread.
+
+   **What is refused rather than approximated:** a countersunk screw fitted to
+   a plain bore's rim (its countersink is not modelled, so the head would end
+   up inside solid material — it waits on
+   [../modeling/hole-standards.md](../modeling/hole-standards.md)), a nut on a
+   blind hole, a washer standard that is not a washer, and Phillips, whose
+   vendored table is still unused because a cruciform drawn as a hexagon is
+   the substitution this whole document is about.
 5. **Polish.** BOM designation column, the drawing callout, and whatever the
    first real assembly asks for.
 

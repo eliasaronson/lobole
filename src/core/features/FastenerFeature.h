@@ -56,13 +56,23 @@ public:
   std::string size;     // table key, e.g. "M6"
   double length = 0.0;  // mm, under the head
   std::string lengthExpr;
-  // Which recess is cut in the head. Only the drives the vendored standards
-  // define are accepted; an unknown one is refused by name rather than left
-  // plain, because a screw with no recess is a screw nobody can turn and it
-  // looks fine in the viewport.
-  std::string drive = "hex";
+  // Which recess is cut in the head, and EMPTY means "the one this standard
+  // is made with" — which is almost always what you want, because the
+  // standard fixes it. You do not order an ISO 4762 with a torx drive, you
+  // order an ISO 14579, so a drive that disagrees with the standard is
+  // refused naming the standard that has it. An unknown name is refused too,
+  // rather than left plain: a screw with no recess is a screw nobody can
+  // turn, and it looks perfectly fine in the viewport.
+  std::string drive;
 };
 
+// A note on WHAT EACH STANDARD IS, because "Fastener" covers three shapes:
+// `core/parts/FastenerProfile` maps the standard to its kind (screw, nut,
+// washer), its head, its recess and whether the nominal length is measured
+// over the head. A nut and a washer have no length, and asking for one is
+// refused rather than ignored — an "M6x20 washer" is a spec somebody typed
+// wrong, and silently building a plain washer for it hides that.
+//
 // A note on MASS, because a number that is 25% off looks like a bug rather
 // than a modelling choice. The shank is a plain cylinder at the nominal
 // diameter — a COSMETIC thread, which is what this codebase already does and
@@ -71,3 +81,12 @@ public:
 // steel M6x20 comes out at 7.6 g against a catalogue's ~6 g. That is the right
 // error to have (a joint is never lighter than the model says) and it is worth
 // knowing before comparing against a supplier's figure.
+//
+// A NUT's error has the opposite sign, and that is worth stating rather than
+// assuming the note above generalises. Its bore is cut at the nominal
+// diameter, where a real thread leaves material down to the minor diameter —
+// so the cosmetic simplification REMOVES material from a nut and ADDS it to a
+// screw. (Omitting the corner chamfers pushes back the other way, by less.) A
+// generated M6 nut therefore weighs 2.4 g and a real one a little more, while
+// the M6x20 screw above is a little heavy. Neither is a bug; they are the
+// same simplification seen from inside and outside the thread.

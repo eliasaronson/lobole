@@ -660,7 +660,10 @@ json FeatureToJson(const Feature& feature) {
     j["length"] = fastener->length;
     if (!fastener->lengthExpr.empty())
       j["length_expr"] = fastener->lengthExpr;
-    if (fastener->drive != "hex") // omit the default
+    // Omitted when empty, which means "the drive this standard is made with"
+    // — the default, and the only value that stays right if the standard's
+    // recess is ever corrected.
+    if (!fastener->drive.empty())
       j["drive"] = fastener->drive;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
@@ -922,10 +925,13 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "center [x,y,z] (base), direction [x,y,z], radius (+_expr), "
      "height (+_expr)"},
     {"Fastener", 69,
-     "standard (vendored table stem, e.g. iso4762def), size (a key in it, "
-     "e.g. M6), length (+_expr) mm under the head, drive?: hex. Every other "
-     "dimension is READ from the table — an unstocked size is refused naming "
-     "the nearest that are stocked (docs/parts/plan.md)"},
+     "standard: iso4762|iso14579|iso4017|iso10642|iso7380 (screws), iso4032 "
+     "(nut), iso7089 (washer); size (a key in that table, e.g. M6); length "
+     "(+_expr) mm — under the head, or OVERALL for a countersunk one, and "
+     "omitted for a nut or a washer; drive?: leave empty for the one the "
+     "standard is made with. Every other dimension is READ from the table — "
+     "an unstocked size is refused naming the nearest that are stocked "
+     "(docs/parts/plan.md)"},
     {"Import", 1, "path (STEP/STL/BREP file)"},
     {"DatumPlane", 1,
      "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
@@ -1279,7 +1285,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("standard").get<std::string>(),
         j.at("size").get<std::string>(), j.at("length").get<double>());
     fastener->lengthExpr = j.value("length_expr", std::string{});
-    fastener->drive = j.value("drive", std::string("hex"));
+    fastener->drive = j.value("drive", std::string{});
     out = std::move(fastener);
   } else if (type == "Import") {
     auto imp =

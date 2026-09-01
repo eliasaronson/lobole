@@ -183,11 +183,20 @@ TEST_CASE("parts: a malformed table refuses rather than half-loading",
   INFO(error);
   CHECK_THAT(error, ContainsSubstring("twice"));
 
+  // A field that is a NAME rather than a dimension is not malformed, and this
+  // is a deliberate loosening (phase 4): iso14579def.csv names the driver each
+  // size takes ("M6","T30",2.3) in the middle of a dimension table, and
+  // refusing that file would have meant no hexalobular drive at all. The
+  // guarantee that matters is kept — the field is ABSENT from the numbers, so
+  // nothing reads a driver name as a millimetre — and it is readable as text.
   error.clear();
-  tables.Write("nan", "\"Nan\"\n\"Dia\",\"k\"\n\"M6\",six\n");
-  CHECK(parts::Load("nan", &error) == nullptr);
-  INFO(error);
-  CHECK_THAT(error, ContainsSubstring("is not a number"));
+  tables.Write("named", "\"Named\"\n\"Dia\",\"k\",\"Drive\"\n\"M6\",6.0,T30\n");
+  REQUIRE(parts::Load("named", &error) != nullptr);
+  const auto named = parts::Dimensions("named", "M6", &error);
+  REQUIRE(named.has_value());
+  CHECK(named->at("k") == 6.0);
+  CHECK(named->count("Drive") == 0);
+  CHECK(parts::TextField("named", "M6", "Drive", &error) == "T30");
 
   error.clear();
   tables.Write("empty", "\"Empty\"\n\"Dia\",\"k\"\n");
@@ -230,8 +239,10 @@ TEST_CASE("parts: the shipped tables all load", "[parts]") {
   // Cheap, and it is the check that fails when a re-vendor drops a file or a
   // packaging change forgets to stage the directory.
   std::string error;
-  for (const char* standard : {"iso4762def", "iso4032def", "iso7089def",
-                               "iso888length", "iso4757def", "iso10664def"}) {
+  for (const char* standard :
+       {"iso4762def", "iso4032def", "iso7089def", "iso888length", "iso4757def",
+        "iso10664def", "iso14579def", "iso4017head", "iso10642def",
+        "iso7380def", "clearance_hole_sizes"}) {
     INFO(standard << ": " << error);
     CHECK(parts::Load(standard, &error) != nullptr);
   }
@@ -247,8 +258,10 @@ TEST_CASE("parts: the build stages the tables where the app looks", "[parts]") {
       RuntimePaths::ExecutableDir().parent_path() / "assets" / "parts";
   INFO("expected the build to stage " << staged);
   REQUIRE(fs::is_directory(staged));
-  for (const char* standard : {"iso4762def", "iso4032def", "iso7089def",
-                               "iso888length", "iso4757def", "iso10664def"}) {
+  for (const char* standard :
+       {"iso4762def", "iso4032def", "iso7089def", "iso888length", "iso4757def",
+        "iso10664def", "iso14579def", "iso4017head", "iso10642def",
+        "iso7380def", "clearance_hole_sizes"}) {
     INFO(standard);
     CHECK(fs::exists(staged / (std::string(standard) + ".csv")));
   }
@@ -338,17 +351,330 @@ TEST_CASE("parts: a screw the standard does not stock builds nothing, loudly",
   CHECK(drive.GetBodies().empty());
   INFO(drive.GetFeature(0)->GetError());
   CHECK_THAT(drive.GetFeature(0)->GetError(),
-             ContainsSubstring("is not generated yet"));
+             ContainsSubstring("is not one this build cuts"));
+
+  // A drive this build DOES cut, on a standard that is not made with it. The
+  // refusal names the standard that is, because a torx socket cap screw is an
+  // ISO 14579 — it is a different catalogue item, not a configuration of this
+  // one, and that is the correction the caller needs.
+  Document wrongDrive;
+  auto torx = std::make_unique<FastenerFeature>("Screw", "iso4762", "M6", 20.0);
+  torx->drive = "torx";
+  wrongDrive.AddFeature(std::move(torx));
+  CHECK(wrongDrive.GetBodies().empty());
+  INFO(wrongDrive.GetFeature(0)->GetError());
+  CHECK_THAT(wrongDrive.GetFeature(0)->GetError(),
+             ContainsSubstring("iso14579"));
+
+  // A standard nothing in this build makes.
+  Document unknown;
+  unknown.AddFeature(
+      std::make_unique<FastenerFeature>("Screw", "din912", "M6", 20.0));
+  CHECK(unknown.GetBodies().empty());
+  INFO(unknown.GetFeature(0)->GetError());
+  CHECK_THAT(unknown.GetFeature(0)->GetError(),
+             ContainsSubstring("socket head cap screw"));
 
   // A standard that describes something else entirely: ISO 7089 is a washer
-  // and has no head or socket to build a screw from.
+  // and has no length to be 20 mm of.
   Document washer;
   washer.AddFeature(
       std::make_unique<FastenerFeature>("Screw", "iso7089def", "M6", 20.0));
   CHECK(washer.GetBodies().empty());
   INFO(washer.GetFeature(0)->GetError());
   CHECK_THAT(washer.GetFeature(0)->GetError(),
-             ContainsSubstring("does not describe one"));
+             ContainsSubstring("has no length"));
+}
+
+namespace {
+
+// The volume of a solid built from one FastenerFeature, or 0 with the refusal
+// in `error`. Every case below measures the body rather than trusting that it
+// was built, because a feature that refuses returns no body at all.
+double BuildVolume(const char* standard, const char* size, double length,
+                   Document& doc) {
+  doc.AddFeature(
+      std::make_unique<FastenerFeature>("F", standard, size, length));
+  if (doc.GetBodies().empty())
+    return 0.0;
+  return doc.GetBodies()[0].shape.Volume();
+}
+
+constexpr double kPi = 3.14159265358979323846;
+
+double HexArea(double acrossFlats) {
+  return acrossFlats * acrossFlats * std::sqrt(3.0) / 2.0;
+}
+
+// How much of a disc of radius `rho` a regular hexagon of that width covers,
+// both centred on the axis. Whole disc while it fits inside the flats, whole
+// hexagon once the disc clears the corners, and in between the disc less the
+// six circular segments that stick out past the flats.
+double DiscInsideHex(double rho, double acrossFlats) {
+  const double flat = acrossFlats * 0.5;
+  const double corner = acrossFlats / std::sqrt(3.0);
+  if (rho <= flat)
+    return kPi * rho * rho;
+  if (rho >= corner)
+    return HexArea(acrossFlats);
+  return kPi * rho * rho - 6.0 * (rho * rho * std::acos(flat / rho) -
+                                  flat * std::sqrt(rho * rho - flat * flat));
+}
+
+// A button head with its socket, by integrating the dome's cross-section and
+// taking the hexagon out of the slices the socket reaches.
+//
+// Needed because the socket is WIDER than the dome near the crown, so it does
+// not remove a clean prism: it opens through the top of the dome, which is
+// what a real button head cap screw looks like from above and is why this
+// head is the one that cannot be checked with area x depth.
+double ButtonHeadVolume(double dk, double k, double s, double t) {
+  const double r = dk * 0.5;
+  const double sphere = (r * r + k * k) / (2.0 * k);
+  const double centre = -k + sphere;
+  constexpr int kSlices = 20000;
+  const double dz = k / kSlices;
+  double volume = 0.0;
+  for (int i = 0; i < kSlices; i++) {
+    const double z = -k + (i + 0.5) * dz;
+    const double rho =
+        std::sqrt(std::max(0.0, sphere * sphere - (z - centre) * (z - centre)));
+    double area = kPi * rho * rho;
+    if (z <= -k + t)
+      area -= DiscInsideHex(rho, s);
+    volume += area * dz;
+  }
+  return volume;
+}
+
+// The cross-sectional area of a hexalobular recess, by counting: a central
+// disc of diameter B unioned with six discs of radius Re on a circle of radius
+// A/2 - Re. Integrated numerically rather than derived, because the closed
+// form is six circle-circle lens areas and getting THAT wrong would make this
+// test agree with a bug in the generator for the same reason.
+double TorxArea(double A, double B, double Re) {
+  const double ring = A * 0.5 - Re;
+  const double half = A * 0.5 + 1e-9;
+  constexpr int kSteps = 1200;
+  const double step = 2.0 * half / kSteps;
+  double inside = 0.0;
+  for (int ix = 0; ix < kSteps; ix++) {
+    const double x = -half + (ix + 0.5) * step;
+    for (int iy = 0; iy < kSteps; iy++) {
+      const double y = -half + (iy + 0.5) * step;
+      bool in = x * x + y * y <= (B * 0.5) * (B * 0.5);
+      for (int i = 0; i < 6 && !in; i++) {
+        const double a = i * kPi / 3.0;
+        const double dx = x - ring * std::cos(a), dy = y - ring * std::sin(a);
+        in = dx * dx + dy * dy <= Re * Re;
+      }
+      if (in)
+        inside += step * step;
+    }
+  }
+  return inside;
+}
+
+} // namespace
+
+TEST_CASE("parts: a nut and a washer are their standards' own numbers",
+          "[parts]") {
+  // Phase 4's first claim: the joint can be completed. A nut and a washer are
+  // the two things every assembly we have built is missing on the far side of
+  // its holes, and both are checked against the row they were built from.
+  const SourceTables tables;
+  std::string error;
+
+  const auto nutDims = parts::Dimensions("iso4032", "M6", &error);
+  INFO(error);
+  REQUIRE(nutDims.has_value());
+  const double acrossFlats = nutDims->at("s_nom"), m = nutDims->at("m");
+
+  Document nutDoc;
+  const double nut = BuildVolume("iso4032", "M6", 0.0, nutDoc);
+  REQUIRE(nutDoc.GetBodies().size() == 1);
+  glm::vec3 lo(0.0f), hi(0.0f);
+  nutDoc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+  // A hexagon measures `s` across the flats and 2/sqrt(3) times that across
+  // the corners, so its bounding box has one of each — which of the two lands
+  // on X depends on the prism's phase and is not a promise worth making.
+  // Checking BOTH is the stronger statement anyway: a nut built to the wrong
+  // one of those two numbers does not fit the spanner it is named for, and it
+  // would pass a check against either alone.
+  CHECK_THAT(std::min(hi.x - lo.x, hi.y - lo.y), WithinAbs(acrossFlats, 1e-3));
+  CHECK_THAT(std::max(hi.x - lo.x, hi.y - lo.y),
+             WithinAbs(acrossFlats * 2.0 / std::sqrt(3.0), 1e-3));
+  CHECK_THAT(hi.z - lo.z, WithinAbs(m, 1e-3));
+  // Bearing face on z = 0, body below — the convention every fastener shares,
+  // so the placement layer can point one down an axis without knowing which
+  // of the three shapes it is holding.
+  CHECK_THAT(hi.z, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(nut, WithinAbs(HexArea(acrossFlats) * m - kPi * 9.0 * m, 0.5));
+
+  const auto washerDims = parts::Dimensions("iso7089", "M6", &error);
+  REQUIRE(washerDims.has_value());
+  const double outer = washerDims->at("d2_max");
+  const double bore = washerDims->at("d1_min"), h = washerDims->at("h");
+
+  Document washerDoc;
+  const double washer = BuildVolume("iso7089", "M6", 0.0, washerDoc);
+  REQUIRE(washerDoc.GetBodies().size() == 1);
+  washerDoc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+  CHECK_THAT(hi.x - lo.x, WithinAbs(outer, 1e-3));
+  CHECK_THAT(hi.z - lo.z, WithinAbs(h, 1e-3));
+  CHECK_THAT(hi.z, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(washer,
+             WithinAbs(kPi * (outer * outer - bore * bore) / 4.0 * h, 0.5));
+
+  // Neither carries a designation with a length in it: "ISO 4032 M6x0" is not
+  // a thing to order, and a BOM line reading it would be nonsense.
+  CHECK(dynamic_cast<const FastenerFeature*>(nutDoc.GetFeature(0))
+            ->Designation() == "ISO 4032 M6");
+  CHECK(dynamic_cast<const FastenerFeature*>(washerDoc.GetFeature(0))
+            ->Designation() == "ISO 7089 M6");
+}
+
+TEST_CASE("parts: the four head shapes each measure their standard",
+          "[parts]") {
+  // One case per head, each against its own table's spelling of the same
+  // dimension — `dk_max` in ISO 4762, `dk` in ISO 7380, `csh_diam` in
+  // ISO 10642, `s` in ISO 4017. Normalising those away would have ended the
+  // ability to diff the vendored files against upstream, so they are listed.
+  const SourceTables tables;
+  std::string error;
+  const double length = 20.0, shank = kPi * 9.0 * length;
+  glm::vec3 lo(0.0f), hi(0.0f);
+
+  SECTION("a hex head is turned from the outside and has no recess") {
+    const auto dims = parts::Dimensions("iso4017", "M6", &error);
+    INFO(error);
+    REQUIRE(dims.has_value());
+    const double acrossFlats = dims->at("s"), k = dims->at("k");
+    Document doc;
+    const double volume = BuildVolume("iso4017", "M6", length, doc);
+    REQUIRE(doc.GetBodies().size() == 1);
+    doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    CHECK_THAT(std::min(hi.x - lo.x, hi.y - lo.y),
+               WithinAbs(acrossFlats, 1e-3));
+    CHECK_THAT(std::max(hi.x - lo.x, hi.y - lo.y),
+               WithinAbs(acrossFlats * 2.0 / std::sqrt(3.0), 1e-3));
+    CHECK_THAT(lo.z, WithinAbs(-k, 1e-3));
+    CHECK_THAT(hi.z - lo.z, WithinAbs(length + k, 1e-3));
+    // No socket subtracted, because there is nothing to put a driver in: the
+    // whole point of a hex head is that it is turned by a spanner.
+    CHECK_THAT(volume, WithinAbs(HexArea(acrossFlats) * k + shank, 0.5));
+  }
+
+  SECTION("a button head is a spherical cap of the standard's height") {
+    const auto dims = parts::Dimensions("iso7380", "M6", &error);
+    INFO(error);
+    REQUIRE(dims.has_value());
+    const double dk = dims->at("dk"), k = dims->at("k");
+    const double s = dims->at("s_mean"), t = dims->at("t_min");
+    Document doc;
+    const double volume = BuildVolume("iso7380", "M6", length, doc);
+    REQUIRE(doc.GetBodies().size() == 1);
+    doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    CHECK_THAT(hi.x - lo.x, WithinAbs(dk, 1e-3));
+    CHECK_THAT(hi.z, WithinAbs(length, 1e-3));
+    // NOT -k, and this is the finding rather than a tolerance: the socket is
+    // wider than the dome near the crown, so it opens THROUGH the top and the
+    // apex is not there to measure. What is left is the dome down to where it
+    // is as wide as the socket is across its flats — which is what a button
+    // head cap screw looks like from above, and is 0.36 mm short of the
+    // standard's head height for reasons that are geometry, not error.
+    // A cap k tall on a base dk across is a sphere of (r^2 + k^2) / 2k; a
+    // hemisphere, which is what a domed head is easy to draw as, would be
+    // 5.25 mm tall here against the standard's 3.3.
+    const double r = dk * 0.5;
+    const double sphere = (r * r + k * k) / (2.0 * k);
+    const double crown =
+        (-k + sphere) - std::sqrt(sphere * sphere - s * s / 4.0);
+    CHECK(crown > -k);
+    CHECK_THAT(lo.z, WithinAbs(crown, 1e-3));
+    CHECK_THAT(volume, WithinAbs(ButtonHeadVolume(dk, k, s, t) + shank, 0.5));
+  }
+
+  SECTION("a countersunk head is a cone, and the length is OVER it") {
+    const auto dims = parts::Dimensions("iso10642", "M6", &error);
+    INFO(error);
+    REQUIRE(dims.has_value());
+    const double dk = dims->at("csh_diam"), k = dims->at("csh_height");
+    const double s = dims->at("s_mean"), t = dims->at("t");
+    Document doc;
+    const double volume = BuildVolume("iso10642", "M6", length, doc);
+    REQUIRE(doc.GetBodies().size() == 1);
+    doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    CHECK_THAT(hi.x - lo.x, WithinAbs(dk, 1e-3));
+    // The one head of the four that does NOT stand proud: it is sunk into the
+    // part, so the whole screw lies at +z and an M6x20 is 20 mm OVERALL. Read
+    // as 20 mm under the head it would be one head-height too long, which
+    // looks perfectly right in a viewport.
+    CHECK_THAT(lo.z, WithinAbs(0.0, 1e-6));
+    CHECK_THAT(hi.z - lo.z, WithinAbs(length, 1e-3));
+    const double cone = kPi * k / 3.0 * (dk * dk / 4.0 + dk * 3.0 / 2.0 + 9.0);
+    CHECK_THAT(
+        volume,
+        WithinAbs(cone + kPi * 9.0 * (length - k) - HexArea(s) * t, 0.5));
+  }
+
+  SECTION("a hexalobular screw borrows ISO 4762's head, by name") {
+    // ISO 14579 IS ISO 4762 with a different recess, and its vendored file
+    // says so by carrying only the recess — no dk, no k. The borrowing is
+    // declared in the profile table rather than inferred, and this is what
+    // checks the declaration against the two files.
+    const auto head = parts::Dimensions("iso4762", "M6", &error);
+    const auto socket = parts::Dimensions("iso14579", "M6", &error);
+    INFO(error);
+    REQUIRE(head.has_value());
+    REQUIRE(socket.has_value());
+    CHECK(socket->count("dk_max") == 0);
+    const double dk = head->at("dk_max"), k = head->at("k");
+    const double A = socket->at("A"), depth = socket->at("t_mean");
+
+    const auto driver =
+        parts::TextField("iso14579def", "M6", "DriveSize", &error);
+    REQUIRE(driver.has_value());
+    CHECK(*driver == "T30");
+    const auto lobe = parts::Dimensions("iso10664def", *driver, &error);
+    REQUIRE(lobe.has_value());
+
+    Document doc;
+    const double volume = BuildVolume("iso14579", "M6", length, doc);
+    REQUIRE(doc.GetBodies().size() == 1);
+    doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    CHECK_THAT(hi.x - lo.x, WithinAbs(dk, 1e-3));
+    CHECK_THAT(lo.z, WithinAbs(-k, 1e-3));
+    // And the recess is the lobed one, not a hexagon: an M6's torx socket is
+    // 5.6 across the lobes against a 5.06 hexagon, so a substituted hex would
+    // land within a few percent on volume and be the wrong shape entirely.
+    const double lobed = TorxArea(A, lobe->at("B"), lobe->at("Re")) * depth;
+    CHECK_THAT(volume, WithinAbs(kPi * dk * dk / 4.0 * k + shank - lobed, 0.6));
+    CHECK(dynamic_cast<const FastenerFeature*>(doc.GetFeature(0))
+              ->Designation() == "ISO 14579 M6x20");
+  }
+}
+
+TEST_CASE("parts: a non-preferred size is a size, not a refusal", "[parts]") {
+  // ISO marks the sizes it would rather you avoided with parentheses —
+  // "(M3.5)" — and that is a recommendation about which sizes to design
+  // around, not a different part number. Asking for M3.5 used to be refused
+  // with "the nearest stocked are M3 and M4", which is a lie about a size
+  // sitting in the table.
+  const SourceTables tables;
+  std::string error;
+  const auto dims = parts::Dimensions("iso4032", "M3.5", &error);
+  INFO(error);
+  REQUIRE(dims.has_value());
+  CHECK(dims->at("s_nom") == 6.0);
+  // Quoted the way the file quotes it, too, so echoing a key back out of a
+  // listing is not refused for carrying the marker it was given.
+  CHECK(parts::Dimensions("iso4032", "(M3.5)", &error).has_value());
+  // And it is offered as a neighbour, which is the reason this matters: the
+  // refusal for a size that really is absent has to name the one next to it.
+  CHECK_FALSE(parts::Dimensions("iso4032", "M3.6", &error).has_value());
+  INFO(error);
+  CHECK_THAT(error, ContainsSubstring("(M3.5)"));
 }
 
 TEST_CASE("parts: a fastener round-trips through the document format",
