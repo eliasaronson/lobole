@@ -226,9 +226,11 @@ this codebase has already paid for once each.
 
 ## Out of scope
 
-- **A ghost of the screw before Accept.** CAM's `camGhostOp` is the precedent
-  and it would be nice; the live summary already states the answer in numbers
-  before the commit, which is the part that matters.
+- **A ghost of the screw before Accept.** Deferred here and then asked for
+  from use — *"different ISO standards does not tell me much"* — so it has its
+  own plan: [preview-plan.md](preview-plan.md). The live summary states the
+  answer in numbers, which turned out not to be enough when the question is
+  which HEAD you are getting.
 - **The second pick that overrides the far end.** Designed in
   [plan.md](plan.md), unbuilt, and no real model has wanted it yet.
 - **Folding hardware in the Occurrences tree.** Two bolted joints put eight
