@@ -711,7 +711,7 @@ tooling halves were mostly actionable without one, and this is what landed.
 | **P4** GPU frame-capture recipe | written | `9784ff6` |
 | **P5** worktree picks its own port | fixed | `073aa31` |
 | **P3** TSan build mode | added | (below) |
-| **T4** coverage leaves no trace | run recorded, and it needs a fix | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
+| **T4** coverage leaves no trace | run recorded; its caveat later retracted | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
 | **T2** pixel-regression gate | built | (below) |
 | **P2** GPU memory visibility | done — and the finding was WRONG | (below) |
 | **T6** perf gates | WITHDRAWN — already gated, better than proposed | — |
@@ -748,18 +748,18 @@ design (they need a GPU and belong to the GUI suite). 133 `src/core` functions
 across 25 files were never executed. Recorded in
 [coverage-2026-08-31.md](coverage-2026-08-31.md).
 
-The number that matters is a correction to the tool, not a gap in the code.
-**gcov writes its counters when a process exits normally, every smoke test
-stops the app with SIGTERM, and nothing handles it — so the app's own runs
-contribute nothing.** The tell is `Checkpoints.cpp`, listed with all 8
-functions "never called", while `headless_smoke.py`'s Checkpoints phase
-creates, lists, restores and error-paths them and PASSED in that same run.
+**A caveat was attached here and has been retracted (2026-09-01).** It said
+gcov never flushed because the smoke tests SIGTERM the app, so app-only code
+read as untested. Wrong twice: `HeadlessMain.cpp:67` and `main.cpp:1471`
+already install clean-shutdown handlers, and `headless_smoke.py` has a phase
+named "Clean shutdown on SIGTERM" asserting exit 0 — so the counters flushed
+all along. And `Checkpoints.cpp`, the example the caveat rested on, is not a
+false positive: it is the **no-git fallback**, reached only when
+`ui::CanVersionProject` is false, which no test machine is. The tool reported
+what was true and the reader supplied a wrong reason.
 
-So the list is really "functions `designer_tests` never calls", and anything
-reachable only over the RPC surface is missing from it. Left as-is with the
-caveat stated rather than quietly trusted: the fix is a SIGTERM handler calling
-`__gcov_dump()` in coverage builds, and it wants to be a deliberate change
-rather than something bolted on at midnight.
+The numbers stand. The genuine finding underneath is that the no-git checkpoint
+path is unexercised, which is exactly what a coverage pass is for.
 
 Worth reading past the false positives: the uncovered set is dominated by
 **removal and teardown paths** — `RemoveConfigurationCommand`,
