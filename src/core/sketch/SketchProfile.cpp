@@ -11,6 +11,7 @@
 #include <BRepOffsetAPI_MakeOffset.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <GC_MakeSegment.hxx>
@@ -591,6 +592,46 @@ std::vector<ProfileGroup> ClassifyLoops(const std::vector<Loop>& loops) {
   return groups;
 }
 
+// Signed area of a closed wire projected into the plane's UV frame; positive
+// means counter-clockwise about the plane normal. The winding of a wire is
+// whatever the user's draw direction was (a rectangle dragged top-left to
+// bottom-right is clockwise) — a hole added with the SAME winding as its
+// outer boundary is unioned instead of subtracted, so every wire that goes
+// into a face has to be measured rather than assumed.
+double WireSignedAreaUV(const SketchPlane& plane, const TopoDS_Wire& wire) {
+  std::vector<glm::vec2> pts;
+  for (BRepTools_WireExplorer ex(wire); ex.More(); ex.Next()) {
+    const TopoDS_Edge& edge = ex.Current();
+    BRepAdaptor_Curve curve(edge);
+    const double f = curve.FirstParameter(), l = curve.LastParameter();
+    // WireExplorer hands edges back in connection order, but a REVERSED edge
+    // is traversed from its last parameter to its first.
+    const bool rev = edge.Orientation() == TopAbs_REVERSED;
+    const int n = curve.GetType() == GeomAbs_Line ? 1 : 24;
+    for (int i = 0; i < n; i++) {
+      const double u = static_cast<double>(i) / n;
+      const gp_Pnt p = curve.Value(f + (l - f) * (rev ? 1.0 - u : u));
+      pts.push_back(plane.WorldToPlane(glm::vec3(static_cast<float>(p.X()),
+                                                 static_cast<float>(p.Y()),
+                                                 static_cast<float>(p.Z()))));
+    }
+  }
+  double area = 0.0;
+  for (size_t i = 0, j = pts.size() - 1; i < pts.size(); j = i++)
+    area += static_cast<double>(pts[j].x) * pts[i].y -
+            static_cast<double>(pts[i].x) * pts[j].y;
+  return pts.size() < 3 ? 0.0 : area * 0.5;
+}
+
+// A wire oriented for its role in a face: the outer boundary CCW about the
+// plane normal, an inner boundary (hole) CW.
+TopoDS_Wire OrientWire(const SketchPlane& plane, const TopoDS_Wire& wire,
+                       bool outer) {
+  const double area = WireSignedAreaUV(plane, wire);
+  const bool ccw = area > 0.0;
+  return ccw == outer ? wire : TopoDS::Wire(wire.Reversed());
+}
+
 // Builds the planar face for one profile group (outer boundary + its holes).
 // Null face on failure. Shared by BuildPrism (extrude) and BuildRevolve.
 TopoDS_Face BuildGroupFace(const SketchPlane& plane,
@@ -606,12 +647,12 @@ TopoDS_Face BuildGroupFace(const SketchPlane& plane,
   TopoDS_Wire outerWire = MakeLoopWire(plane, loops[group.outer]);
   if (outerWire.IsNull())
     return TopoDS_Face();
-  BRepBuilderAPI_MakeFace faceMaker(pln, outerWire);
+  BRepBuilderAPI_MakeFace faceMaker(pln, OrientWire(plane, outerWire, true));
   for (size_t i : group.holes) {
     TopoDS_Wire hole = MakeLoopWire(plane, loops[i]);
     if (hole.IsNull())
       return TopoDS_Face();
-    faceMaker.Add(TopoDS::Wire(hole.Reversed()));
+    faceMaker.Add(OrientWire(plane, hole, false));
   }
   if (!faceMaker.IsDone()) {
     LOG_ERROR("Sketch profile: face construction failed");
@@ -1377,8 +1418,8 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
         return CADShape();
       }
 
-      BRepBuilderAPI_MakeFace ring(pln, outer);
-      ring.Add(TopoDS::Wire(inner.Reversed()));
+      BRepBuilderAPI_MakeFace ring(pln, OrientWire(plane, outer, true));
+      ring.Add(OrientWire(plane, inner, false));
       if (!ring.IsDone()) {
         ProfileFail(error, "thin ring face construction failed");
         return CADShape();

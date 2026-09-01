@@ -864,3 +864,38 @@ TEST_CASE("A cut into an empty document reports why", "[extrude][error]") {
   const std::string err = doc.GetFeature(1)->GetError();
   CHECK(err.find("no bodies") != std::string::npos);
 }
+
+// A rectangle whose corners are visited in the given direction: the sketch
+// rectangle tool follows the drag, so a hole is as likely to come out
+// clockwise as counter-clockwise.
+static std::vector<sketch::Entity> RectLinesDir(glm::vec2 c1, glm::vec2 c2,
+                                                bool ccw) {
+  glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
+  if (ccw)
+    return {sketch::Line{a, b}, sketch::Line{b, c}, sketch::Line{c, d},
+            sketch::Line{d, a}};
+  return {sketch::Line{a, d}, sketch::Line{d, c}, sketch::Line{c, b},
+          sketch::Line{b, a}};
+}
+
+// A hole used to be ADDED, not subtracted, whenever its loop wound the same
+// way as its outer boundary — the face builder reversed every inner wire on
+// the assumption that loops came out counter-clockwise. Circles are CCW by
+// construction, so only rectangles (and other chained loops) hit it, and the
+// result was a plate whose volume exceeded its own outline.
+TEST_CASE("Holes subtract at every winding of outer and hole", "[profile]") {
+  for (bool outerCcw : {false, true}) {
+    for (bool holeCcw : {false, true}) {
+      std::vector<sketch::Entity> e =
+          RectLinesDir({0, 0}, {100, 100}, outerCcw);
+      for (const auto& x : RectLinesDir({20, 20}, {40, 40}, holeCcw))
+        e.push_back(x);
+      const auto loops = sketch::BuildLoops(e);
+      REQUIRE(loops.size() == 2);
+      CADShape s = sketch::BuildPrism(kXY, loops, 1.0, false);
+      REQUIRE(s.IsValid());
+      INFO("outer ccw=" << outerCcw << " hole ccw=" << holeCcw);
+      CHECK_THAT(s.Volume(), WithinRel(100.0 * 100.0 - 20.0 * 20.0, 1e-9));
+    }
+  }
+}
