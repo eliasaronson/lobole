@@ -29,9 +29,21 @@ case "$out" in
   "" | *"no modified files to format"* | *"did not modify any files"*) exit 0 ;;
 esac
 
+# The suggested fix is scoped to the SAME files the check looked at, and
+# re-stages them by path. Both halves of that are scars:
+#
+#   * a bare `git clang-format --staged` formats every staged file of every
+#     extension it knows — and its defaults include JSON, so it silently
+#     reflows a frozen golden in tests/golden/ that the commit merely touched.
+#   * `git add -u` stages every modified tracked file in the repo, which once
+#     swept a developer's own unrelated work into somebody else's commit.
+#
+# A fix that is broader than the check is how a format pass becomes a diff
+# nobody asked for.
+printf -v filelist ' %q' "${files[@]}"
 echo "✗ pre-commit: staged C/C++ changes are not clang-formatted." >&2
-echo "  Fix (formats just your staged hunks, then re-stage):" >&2
-echo "      git clang-format --staged && git add -u" >&2
-echo "  In nix:  nix-shell -p clang-tools git --run 'git clang-format --staged' && git add -u" >&2
+echo "  Fix (formats just your staged hunks, then re-stages just those files):" >&2
+echo "      git clang-format --staged --$filelist && git add --$filelist" >&2
+echo "  In nix:  nix-shell -p clang-tools git --run 'git clang-format --staged --$filelist' && git add --$filelist" >&2
 echo "  Bypass once (not recommended):  git commit --no-verify" >&2
 exit 1

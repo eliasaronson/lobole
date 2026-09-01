@@ -7,43 +7,6 @@ an entry when it lands a fix + regression test.
 ---
 
 
-## A tool-session pick slot must be registered in two files, or it dies silently
-
-Found 2026-09-01 building the fastener verb, and it cost a debugging round
-because the symptom names nothing: the tool arms, and every click in the
-viewport does nothing at all.
-
-`SlotPickState::featureId` is overloaded. Normally it is a real feature id,
-and two different questions get asked about it in two different places:
-
-| question | where |
-|---|---|
-| when a pick lands, who consumes it? | `SlotPickClicked` (ui/FeatureEditor.cpp) |
-| is the session that armed this still alive? | the validity chain in ui/ViewportInput.cpp, **every frame** |
-
-For an ordinary feature slot the second question answers itself — *does this
-id still resolve to a feature in the active document?* A non-feature session
-(CAM, section, mate, fastener) has no document to ask, so each needs its own
-predicate, and both places are hand-maintained `if`-chains keyed on the same
-sentinel with nothing connecting them.
-
-**Miss the ViewportInput one and the slot is disarmed the same frame it is
-armed.** No error, no log, no failed assertion — the tool simply ignores every
-click, which reads as a broken picker rather than a missing row.
-
-**Impact:** latent. Four sentinels exist (`kMateSessionSlot`,
-`kSectionToolSlot`, `kCamToolSlot`, `kFastenerToolSlot`) and all four are
-registered correctly today. The cost is paid by the next one.
-
-**Fix:** one registry of `{sentinel, alive(state), consume(state, item)}`
-replacing both chains, with a `test_conventions.cpp` check that every `k*Slot`
-constant appears in it — the same move that collapsed seven hand-maintained
-renderer lists to two after three renderers in a row shipped with a wire
-missing (docs/rendering/renderer-wiring.md). About an hour, and it makes a
-half-registered session a compile-or-test failure instead of a debugging
-session.
-
-
 ## `set_occurrence_transform` demands an orientation `add_occurrence` does not
 
 Found 2026-09-01 while driving the fastener check from a script. Both RPCs take
