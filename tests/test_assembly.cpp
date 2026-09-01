@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "core/AssemblySolve.h"
 #include "core/Occurrence.h"
 #include "core/io/Serialization.h"
 
@@ -133,6 +134,36 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
 // A FROZEN golden (docs/versioning/format.md): hardcoded keys/values, never
 // regenerated. Loading it pins the exact v23 on-disk schema, so a silent key
 // rename (which a save→load round-trip would not catch) fails here.
+// A FROZEN golden for the attachment schema (v72): an occurrence that RIDES
+// on another, which is how a fastener travels with the part it is bolted to.
+TEST_CASE("Frozen v72 assembly golden carries an attachment",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v72-attachment.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc);
+  REQUIRE(asmDoc->GetOccurrences().size() == 2);
+
+  const Occurrence* plate = asmDoc->FindById(1);
+  const Occurrence* screw = asmDoc->FindById(2);
+  REQUIRE(plate != nullptr);
+  REQUIRE(screw != nullptr);
+  CHECK(plate->attachedTo == 0); // free, and omitted from the file
+  CHECK(screw->attachedTo == 1);
+  CHECK_THAT(screw->attachOffset.x, WithinAbs(4.0f, 1e-6f));
+  CHECK_THAT(screw->attachOffset.z, WithinAbs(10.0f, 1e-6f));
+
+  // Moving what it rides on carries it, which is the whole point: the
+  // placement is DERIVED while the attachment stands.
+  asmDoc->FindById(1)->position = glm::vec3(0.0f, 25.0f, 0.0f);
+  CHECK(assembly::ApplyAttachments(*asmDoc) == 1);
+  CHECK_THAT(asmDoc->FindById(2)->position.y, WithinAbs(25.0f, 1e-4f));
+  CHECK_THAT(asmDoc->FindById(2)->position.x, WithinAbs(4.0f, 1e-4f));
+  // Idempotent: re-running with nothing changed moves nothing.
+  CHECK(assembly::ApplyAttachments(*asmDoc) == 0);
+}
+
 TEST_CASE("Frozen v23 assembly golden loads at the exact schema",
           "[assembly][golden]") {
   // Assembly goldens live in a subdirectory so the part golden harness

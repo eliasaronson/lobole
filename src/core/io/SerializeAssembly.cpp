@@ -25,6 +25,14 @@ json OccurrenceToJson(const Occurrence& o) {
                     {"orientation", QuatToJson(o.orientation)}};
   j["visible"] = o.visible;
   j["fixed"] = o.fixed;
+  // What it rides on (v72). Omitted when free, so every existing assembly
+  // serializes byte-identically.
+  if (o.attachedTo != 0) {
+    j["attached_to"] = o.attachedTo;
+    j["attach_offset"] = {o.attachOffset.x, o.attachOffset.y, o.attachOffset.z};
+    j["attach_rotation"] = {o.attachRotation.x, o.attachRotation.y,
+                            o.attachRotation.z, o.attachRotation.w};
+  }
   // v56: which configuration of the reference this placement uses; 0 (and
   // absent, in every older file) = that document's active one.
   j["configuration_id"] = o.configurationId;
@@ -54,6 +62,17 @@ Occurrence OccurrenceFromJson(const json& j) {
     o.orientation = QuatFromJson(t.at("orientation"));
   o.visible = j.value("visible", true);
   o.fixed = j.value("fixed", false);
+  o.attachedTo = j.value("attached_to", uint64_t{0}); // v72
+  if (const auto it = j.find("attach_offset");
+      it != j.end() && it->is_array() && it->size() == 3) {
+    o.attachOffset = glm::vec3((*it)[0].get<float>(), (*it)[1].get<float>(),
+                               (*it)[2].get<float>());
+  }
+  if (const auto it = j.find("attach_rotation");
+      it != j.end() && it->is_array() && it->size() == 4) {
+    o.attachRotation = glm::quat((*it)[3].get<float>(), (*it)[0].get<float>(),
+                                 (*it)[1].get<float>(), (*it)[2].get<float>());
+  }
   return o;
 }
 

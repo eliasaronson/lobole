@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    71; // v71: a Hole records what it is FOR — `fit: {thread, kind, pitch?}`
+    72; // v72: an occurrence can RIDE ON another (`attached_to` +
+        //      `attach_offset`/`attach_rotation`), so a fastener travels with
+        //      the part it is bolted to and cannot be dragged out of its hole
+        //      on its own. Composition, not a mate: no solver sees it
+        //      (docs/parts/f1-loose-ends.md). Omitted when free, so every
+        //      existing assembly serializes byte-identically.
+        // (v71: a Hole records what it is FOR — `fit: {thread, kind, pitch?}`
         //      — and the diameter is DERIVED from it, so a clearance hole
         //      stops being a number somebody looked up once. Additive and
         //      optional: a hole without one serializes exactly as before

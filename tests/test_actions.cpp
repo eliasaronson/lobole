@@ -34,6 +34,7 @@
 
 #include <set>
 
+#include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
@@ -43,6 +44,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
+#include "core/parts/FastenerTable.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
@@ -820,6 +822,193 @@ TEST_CASE("A circular edge that is the end of a solid is not a hole",
   CHECK(fit.why.find("Axle") != std::string::npos);
   // And not "-0 mm out", which is what the old message measured it at.
   CHECK(fit.why.find("-0 mm") == std::string::npos);
+}
+
+TEST_CASE("A countersunk screw needs a countersunk hole", "[actions][parts]") {
+  // F1 refused iso10642 outright: the rim you pick on a plain bore is the
+  // bore's, so the head would end up inside solid material. Two things
+  // shipped since dissolve that — hole-standards gives a hole a recorded
+  // thread, and FindHoleForRef already matches a picked circle against the
+  // COUNTERSINK radius as well as the bore — so the blanket refusal becomes
+  // three real questions (docs/parts/f1-loose-ends.md).
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  // Read from the table rather than typed, so this tests against ISO 10642.
+  std::string why;
+  const auto dims = parts::Dimensions("iso10642", "M6", &why);
+  INFO(why);
+  REQUIRE(dims.has_value());
+  const double headHeight = dims->at("csh_height");
+  const double csDia = dims->at("csh_diam");
+
+  const auto plate = [&](const char* name, HoleKind kind, double csDepth) {
+    const size_t tab = ui::AddPart(state, name);
+    ui::SetActivePart(state, tab);
+    Document& doc = *state.document;
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        name, glm::vec3(-30.0f, -30.0f, 0.0f), 60.0, 60.0, 20.0));
+    doc.AddFeature(std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, 20.0f))));
+    const uint64_t sketchId = doc.GetFeatures().back()->GetId();
+    sketch::Point centre;
+    centre.p = glm::vec2(0.0f, 0.0f);
+    centre.id = 1;
+    dynamic_cast<SketchFeature*>(doc.GetFeatures().back().get())
+        ->entities.push_back(centre);
+    auto hole =
+        std::make_unique<HoleFeature>("Drill", sketchId, kind, 1.0, 25.0);
+    hole->through = true;
+    hole->fitThread = "M6";
+    hole->fitKind = "normal";
+    hole->csDiameter = csDia;
+    hole->csDepth = csDepth;
+    doc.AddFeature(std::move(hole));
+    doc.Regenerate();
+    return tab;
+  };
+
+  const auto rimOf = [&](size_t tab, double wantDia) {
+    ui::SetActivePart(state, tab);
+    const Body& body = state.document->GetBodies().front();
+    ElementRef rim;
+    for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+      const std::optional<Measure::EdgeInfo> edge =
+          Measure::DescribeEdgeAt(body, index);
+      if (!edge || edge->kind != "circle")
+        continue;
+      if (std::abs(edge->radius * 2.0 - wantDia) < 1e-3 &&
+          edge->midpoint.z > 19.0)
+        rim = ElementRef{body.createdBy, mapped};
+    }
+    return rim;
+  };
+
+  const auto rig = [&](const char* name, size_t tab) {
+    ui::SetActivePart(state, ui::AddAssembly(state, name));
+    Occurrence o;
+    o.partId = state.parts[tab].id;
+    o.name = name;
+    return state.assembly->AddOccurrence(o);
+  };
+
+  ui::FastenerRequest csk;
+  csk.standard = "iso10642";
+  csk.dryRun = true;
+
+  // 1. A plain bore: refused, naming what the hole has to be.
+  const size_t plainTab = plate("Plain", HoleKind::Simple, 0.0);
+  const ElementRef plainRim = rimOf(plainTab, 6.6);
+  REQUIRE(plainRim.IsSet());
+  const uint64_t plainOcc = rig("Plain rig", plainTab);
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{plainOcc, plainRim}, csk);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("COUNTERSUNK hole") != std::string::npos);
+
+  // 2. Countersunk but too SHALLOW: the head would stand proud of a surface
+  //    machined to swallow it, which is invisible at render distance.
+  const size_t shallowTab = plate("Shallow", HoleKind::Countersink, 2.0);
+  const ElementRef shallowRim = rimOf(shallowTab, csDia);
+  REQUIRE(shallowRim.IsSet());
+  const uint64_t shallowOcc = rig("Shallow rig", shallowTab);
+  fit = ui::FitFastenerToHole(state, ui::RimPick{shallowOcc, shallowRim}, csk);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("stand proud") != std::string::npos);
+
+  // 3. Deep enough: it fits.
+  const size_t deepTab = plate("Deep", HoleKind::Countersink, headHeight + 0.5);
+  const ElementRef deepRim = rimOf(deepTab, csDia);
+  REQUIRE(deepRim.IsSet());
+  const uint64_t deepOcc = rig("Deep rig", deepTab);
+  fit = ui::FitFastenerToHole(state, ui::RimPick{deepOcc, deepRim}, csk);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  CHECK(fit.size == "M6");
+  CHECK_THAT(fit.grip, WithinAbs(20.0, 1e-3)); // the plate, from its surface
+
+  // And a washer under a countersunk head is refused: the head bears on the
+  // cone, not on the surface.
+  ui::FastenerRequest washered = csk;
+  washered.washerUnderHead = true;
+  fit = ui::FitFastenerToHole(state, ui::RimPick{deepOcc, deepRim}, washered);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("bears on the cone") != std::string::npos);
+}
+
+TEST_CASE("A placed fastener rides on the part it bears on",
+          "[actions][parts]") {
+  // Reported from use: "I get surprised by the parts and fasteners being
+  // movable after having placed them". Two halves to that — a placed screw
+  // had a drag gizmo (GizmoOccurrence hands one to any selected non-fixed
+  // occurrence) AND did not follow its plate, because the solver leaves an
+  // unmated occurrence untouched. Neither held nor carried.
+  //
+  // Not a mate: a fastener is a zero-DOF leaf, so this is a composition
+  // (docs/parts/f1-loose-ends.md).
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
+  MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  const auto place = [&](const char* part, glm::vec3 at) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t topOcc = place("Top", glm::vec3(0.0f));
+  const uint64_t bottomOcc = place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+
+  ui::FastenerRequest request;
+  request.nut = "iso4032";
+  request.washerUnderHead = true;
+  request.washerUnderNut = true;
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.placed.size() == 4);
+
+  const auto occOf = [&](uint64_t id) { return state.assembly->FindById(id); };
+  // The head end rides the part the rim was picked in; the far end rides
+  // whatever the axis leaves LAST. Attaching the nut to the near plate would
+  // stretch a rigid group across a joint that is allowed to open.
+  CHECK(occOf(fit.placed[0])->attachedTo == topOcc);    // screw
+  CHECK(occOf(fit.placed[1])->attachedTo == topOcc);    // washer under head
+  CHECK(occOf(fit.placed[2])->attachedTo == bottomOcc); // washer under nut
+  CHECK(occOf(fit.placed[3])->attachedTo == bottomOcc); // nut
+
+  // Move the plate: the screw goes with it. This is the half check_fasteners
+  // could only report after the fact.
+  const glm::vec3 screwWas = occOf(fit.placed[0])->position;
+  const glm::vec3 nutWas = occOf(fit.placed[3])->position;
+  state.assembly->FindById(topOcc)->position += glm::vec3(0.0f, 5.0f, 0.0f);
+  state.assembly->FindById(bottomOcc)->position += glm::vec3(0.0f, 5.0f, 0.0f);
+  CHECK(assembly::ApplyAttachments(*state.assembly) == 4);
+  CHECK_THAT(occOf(fit.placed[0])->position.y,
+             WithinAbs(screwWas.y + 5.0, 1e-4));
+  CHECK_THAT(occOf(fit.placed[3])->position.y, WithinAbs(nutWas.y + 5.0, 1e-4));
+  // And nothing else moved: an attachment is a composition, so re-running it
+  // with nothing changed is a no-op rather than a slow drift.
+  CHECK(assembly::ApplyAttachments(*state.assembly) == 0);
+
+  // Deleting the plate takes what rides on it — a screw whose plate is gone
+  // is not a screw, and an orphan is the floating hardware this was for.
+  ui::SelectOccurrence(state, topOcc);
+  CHECK(ui::DeleteSelectedOccurrences(state) == 3); // the plate + 2 riders
+  CHECK(occOf(fit.placed[0]) == nullptr);
+  CHECK(occOf(fit.placed[1]) == nullptr);
+  CHECK(occOf(fit.placed[3]) != nullptr); // the nut rides the OTHER plate
 }
 
 TEST_CASE("A hole that says what it is for is believed over its diameter",

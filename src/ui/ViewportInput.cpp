@@ -233,26 +233,17 @@ void HandleViewportInput(AppState& state) {
     AbortPreviewHandleDrag(state);
     escUsed = true;
   } else if (state.slotPick.Active()) {
-    // Each non-feature tool session says here when its slot is still real.
-    // A sentinel that is NOT in this chain falls through to "is it a feature
-    // in the active document", which on an assembly tab is never true — so
-    // the slot is disarmed the same frame it is armed, and the tool looks
-    // like it ignores clicks. That is what the fastener session did until it
-    // was added here, and it is the third time this list has been the thing
-    // that was missed.
-    const bool mateSlot = state.slotPick.featureId == kMateSessionSlot;
-    const bool sectionSlot = state.slotPick.featureId == kSectionToolSlot;
-    const bool camSlot = state.slotPick.featureId == kCamToolSlot;
-    const bool fastenerSlot = state.slotPick.featureId == kFastenerToolSlot;
-    const bool valid =
-        mateSlot      ? (state.assembly != nullptr && state.mateTool.active)
-        : sectionSlot ? (state.document != nullptr && state.sectionToolOpen)
-        : camSlot     ? (state.document != nullptr)
-        : fastenerSlot
-            ? (state.assembly != nullptr && state.fastenerTool.open)
-            : (state.document != nullptr &&
-               state.document->FindFeatureById(state.slotPick.featureId) !=
-                   nullptr);
+    // The session's own answer, from the ONE table that also routes its picks
+    // (ToolSession in FeatureEditor.h). This used to be a second chain of
+    // sentinels here, and a session missing from it was disarmed the same
+    // frame it was armed — silently, so the tool merely appeared to ignore
+    // clicks.
+    const ToolSession* session = ToolSessionFor(state.slotPick.featureId);
+    const bool valid = session != nullptr
+                           ? session->alive(state)
+                           : (state.document != nullptr &&
+                              state.document->FindFeatureById(
+                                  state.slotPick.featureId) != nullptr);
     if (!valid) {
       state.slotPick = {}; // the slot ends with its feature/session
     } else if (esc) {

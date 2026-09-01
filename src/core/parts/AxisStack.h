@@ -28,6 +28,10 @@ namespace parts {
 struct StackSegment {
   std::string part; // display name, for the summary
   uint64_t partId = 0;
+  // Which PLACEMENT of that part, so a caller can attach something to the one
+  // it actually passed through. `partId` cannot answer that: a stack of two
+  // identical plates is one part twice.
+  uint64_t occurrence = 0;
   double enter = 0.0;
   double exit = 0.0;
   [[nodiscard]] double thickness() const { return exit - enter; }
@@ -39,6 +43,7 @@ struct PlacedBody {
   glm::mat4 world{1.0f};
   std::string part;
   uint64_t partId = 0;
+  uint64_t occurrence = 0;
 };
 
 // Every solid the fastener passes through, ordered by distance from `origin`

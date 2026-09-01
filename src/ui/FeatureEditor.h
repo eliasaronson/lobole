@@ -1,5 +1,7 @@
 #pragma once
 
+#include <span>
+
 #include "ui/AppState.h"
 
 class Feature;
@@ -64,6 +66,41 @@ inline constexpr uint64_t kCamToolSlot = ~2ull;
 // OCCURRENCE in the assembly, not a feature in any document, so it needs the
 // same treatment. SlotPickClicked routes these to FastenerRimPicked.
 inline constexpr uint64_t kFastenerToolSlot = ~3ull;
+
+// --- the tool-session registry ----------------------------------------------
+//
+// A sentinel is not a value, it is a SESSION, and every session has to answer
+// two questions in two different files:
+//
+//   * when a pick lands, who consumes it?   (SlotPickClicked, FeatureEditor)
+//   * is this armed slot still real?        (ViewportInput, EVERY FRAME)
+//
+// For an ordinary feature slot the second answers itself — does the id still
+// resolve to a feature in the active document? A non-feature session has no
+// document to ask, so each needed its own predicate, and both places were
+// hand-maintained `if` chains keyed on the same sentinel with nothing joining
+// them.
+//
+// Miss the ViewportInput one and the slot is disarmed the same frame it is
+// armed: no error, no log, no failed assertion — the tool simply ignores
+// every click, which reads as a broken picker rather than a missing row. That
+// cost a debugging round on the fastener session, and it is the third list in
+// this codebase to have been the thing that was forgotten (see
+// docs/rendering/renderer-wiring.md for the last one).
+//
+// One row here answers both, and test_conventions.cpp asserts every `k*Slot`
+// constant above appears in the table — so a half-registered session is a
+// test failure instead of a debugging session.
+struct ToolSession {
+  uint64_t sentinel;
+  // Still real? Called every frame while the slot is armed.
+  bool (*alive)(const AppState& state);
+  // A pick landed on it.
+  void (*consume)(AppState& state, const SelectionItem& item);
+};
+[[nodiscard]] std::span<const ToolSession> ToolSessions();
+// The session that owns an armed slot, or null for an ordinary feature slot.
+[[nodiscard]] const ToolSession* ToolSessionFor(uint64_t sentinel);
 
 // A tool's pick slots, declaratively (U7): the ordered list drives arming
 // (kinds/prompt come from here, not the draw site), viewport routing, and —

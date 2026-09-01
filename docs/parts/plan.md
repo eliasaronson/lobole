@@ -511,7 +511,7 @@ expensive to discover with twenty.
 
 ## Follow-ups
 
-> All three are planned together in [f1-loose-ends.md](f1-loose-ends.md),
+> All three SHIPPED 2026-09-01; see [f1-loose-ends.md](f1-loose-ends.md),
 > which also answers the sequencing question they raise: **the assembly
 > solver (A1) does not gate any of it.** A fastener is a zero-DOF leaf, the
 > current solver already places those correctly, and the design below bypasses

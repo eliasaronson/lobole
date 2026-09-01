@@ -1,6 +1,7 @@
 # Three things F1 left — plan
 
-> Status: **planned, not built.** Written 2026-09-01 after F1 phases 1-7 and
+> Status: **BUILT 2026-09-01**, all three (format v72). Written after F1
+> phases 1-7 and
 > hole-standards shipped, prompted by using it: *"I get surprised by the parts
 > and fasteners being movable after having placed them."* Every mechanism
 > named below was checked against the source.
@@ -125,6 +126,34 @@ One registry of `{sentinel, alive(state), consume(state, item)}` replacing both
 chains, plus a `test_conventions.cpp` scan asserting every `k*Slot` constant
 appears in it. The same move that collapsed seven renderer lists to two after
 three renderers shipped with a wire missing.
+
+## What building it corrected
+
+- **`position` was kept, not reinterpreted.** The tempting shape is to make
+  `position`/`orientation` mean *relative to the parent* when `attachedTo` is
+  set. That would need no derived state — and it would give one field two
+  meanings, which is exactly what made `slotPick.featureId` need registering
+  in two files. The relative placement is stored explicitly instead and the
+  world placement is RECOMPUTED, so every existing reader of `position` (the
+  drag gizmo, get_state, the RPC, exploded views, serialization) keeps working
+  unchanged.
+- **The relative transform is quaternion arithmetic, not a matrix round
+  trip.** `Decompose` is file-local to the solver, and for a rigid placement
+  `inv * (pos - parentPos)` and `inv * rot` are exact and need no
+  decomposition at all.
+- **`ApplyAttachments` had to be idempotent, and the golden asserts it.** A
+  composition that reports movement every time it runs is a slow drift rather
+  than a fix; the second call must move nothing.
+- **The registry needed TWO assertions, not one.** Checking that every
+  sentinel appears in the table catches a half-registered session. It does not
+  catch someone re-introducing the second chain, which is the actual defect —
+  so the gate also asserts `ViewportInput.cpp` compares no sentinel directly.
+- **The countersunk case really had dissolved.** All three checks it needed
+  were answerable from information already present: `FindHoleForRef` matching
+  the countersink radius says the picked rim IS the countersink, `HoleKind`
+  says the hole is one, and the standard's own `csh_height` against the hole's
+  `csDepth` says whether the head fits in it. What was a blanket refusal is
+  now three refusals that each name a fix.
 
 ## Order, and why
 

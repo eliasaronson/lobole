@@ -1113,28 +1113,48 @@ void SeedSlotsFromSelection(AppState& state, Feature& feature) {
     state.document->Regenerate();
 }
 
+namespace {
+// Each non-feature tool session, in one place. Adding one is a row here and
+// nothing else; test_conventions asserts every k*Slot sentinel appears.
+const ToolSession kToolSessions[] = {
+    {kMateSessionSlot,
+     [](const AppState& s) {
+       return s.assembly != nullptr && s.mateTool.active;
+     },
+     [](AppState& s, const SelectionItem& i) { MateConnectorPicked(s, i); }},
+    {kSectionToolSlot,
+     [](const AppState& s) {
+       return s.document != nullptr && s.sectionToolOpen;
+     },
+     [](AppState& s, const SelectionItem& i) { SectionFacePicked(s, i); }},
+    {kCamToolSlot, [](const AppState& s) { return s.document != nullptr; },
+     [](AppState& s, const SelectionItem& i) { CamFacePicked(s, i); }},
+    {kFastenerToolSlot,
+     [](const AppState& s) {
+       return s.assembly != nullptr && s.fastenerTool.open;
+     },
+     [](AppState& s, const SelectionItem& i) { FastenerRimPicked(s, i); }},
+};
+} // namespace
+
+std::span<const ToolSession> ToolSessions() { return kToolSessions; }
+
+const ToolSession* ToolSessionFor(uint64_t sentinel) {
+  for (const ToolSession& t : kToolSessions)
+    if (t.sentinel == sentinel)
+      return &t;
+  return nullptr;
+}
+
 void SlotPickClicked(AppState& state, const SelectionItem& item,
                      uint32_t meshId, uint32_t index) {
   if (!state.slotPick.Active())
     return;
-  if (state.slotPick.featureId == kCamToolSlot) {
-    CamFacePicked(state, item);
-    return;
-  }
-  if (state.slotPick.featureId == kSectionToolSlot) {
-    SectionFacePicked(state, item);
-    return;
-  }
-  if (state.slotPick.featureId == kFastenerToolSlot) {
-    // A fastener is an OCCURRENCE in the assembly, not a feature in any
-    // document, so it needs the sentinel like CAM and the mate session.
-    FastenerRimPicked(state, item);
-    return;
-  }
-  if (state.slotPick.featureId == kMateSessionSlot) {
-    // The mate session's connector slots live on the assembly, not the
-    // feature list; routing/advance/disarm happen in AssemblyActions.
-    MateConnectorPicked(state, item);
+  // One table, both questions (see ToolSession in the header). A session that
+  // is not in it falls through to "is this a feature in the active document",
+  // which on an assembly tab is never true.
+  if (const ToolSession* session = ToolSessionFor(state.slotPick.featureId)) {
+    session->consume(state, item);
     return;
   }
   if (!state.document)

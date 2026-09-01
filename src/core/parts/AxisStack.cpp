@@ -106,6 +106,7 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
     StackSegment seg;
     seg.part = p.part;
     seg.partId = p.partId;
+    seg.occurrence = p.occurrence;
     seg.enter = enter;
     seg.exit = exit;
     out.push_back(seg);

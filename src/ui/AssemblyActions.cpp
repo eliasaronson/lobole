@@ -131,9 +131,20 @@ int DeleteSelectedOccurrences(AppState& state) {
     return 0;
   SnapshotAssembly(state);
   int removed = 0;
-  for (const uint64_t id : doomed)
+  for (const uint64_t id : doomed) {
+    // Whatever rides on it goes with it. A screw whose plate is gone is not a
+    // screw, and leaving it behind reintroduces exactly the floating hardware
+    // attaching it was for (docs/parts/f1-loose-ends.md).
+    std::vector<uint64_t> riders;
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      if (o.attachedTo == id)
+        riders.push_back(o.id);
+    for (const uint64_t rider : riders)
+      if (state.assembly->RemoveOccurrence(rider))
+        removed++;
     if (state.assembly->RemoveOccurrence(id))
       removed++;
+  }
   SelectOccurrence(state, 0);
   if (removed > 0)
     SolveActiveAssembly(state); // a mate referencing one now dangles/frees
@@ -333,6 +344,7 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
       pb.world = flat[i].world;
       pb.part = flat[i].path.empty() ? body.name : flat[i].path;
       pb.partId = flat[i].partId;
+      pb.occurrence = flat[i].rootOccurrenceId;
       all.push_back(pb);
       owner.push_back(i);
     }
@@ -783,6 +795,12 @@ Occurrence* GizmoOccurrence(AppState& state) {
   // part explodes.
   if (state.activeExplodedView)
     return o;
+  // Something that RIDES on another part has a DERIVED pose: dragging it
+  // would be overwritten by the next ApplyAttachments, which is the shape of
+  // a control that appears to work and does not. This is why a placed
+  // fastener could be pulled out of its hole (docs/parts/f1-loose-ends.md).
+  if (o->attachedTo != 0)
+    return nullptr;
   return !o->fixed ? o : nullptr;
 }
 
@@ -1922,7 +1940,8 @@ bool ImportStepAsAssembly(AppState& state,
 uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& size, double length,
                      const std::string& drive, const glm::vec3& position,
-                     const glm::quat& orientation, std::string* error) {
+                     const glm::quat& orientation, std::string* error,
+                     uint64_t ridesOn) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
       *error = why;
@@ -1977,6 +1996,18 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
   occ.name = designation;
   occ.position = position;
   occ.orientation = orientation;
+  // Attached to the part it bears on, so it travels with that part and cannot
+  // be dragged out of its hole on its own (docs/parts/f1-loose-ends.md). The
+  // offset is whatever the two poses already imply, expressed in the parent's
+  // frame — quaternion arithmetic rather than a matrix round trip, which is
+  // exact for a rigid placement and needs no decomposition.
+  if (const Occurrence* parent =
+          ridesOn != 0 ? state.assembly->FindById(ridesOn) : nullptr) {
+    const glm::quat inv = glm::inverse(parent->orientation);
+    occ.attachedTo = ridesOn;
+    occ.attachOffset = inv * (position - parent->position);
+    occ.attachRotation = inv * orientation;
+  }
   return state.assembly->AddOccurrence(occ);
 }
 
@@ -2050,14 +2081,6 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     return fail(screwProfile->designation + " is a " + screwProfile->what +
                 ", which does not pass through a hole — ask for a screw and "
                 "put this on it with `nut` or `washer`");
-  if (screwProfile->lengthOverHead)
-    return fail(screwProfile->designation +
-                " sinks its head INTO the part, and the rim picked here is a "
-                "plain bore's — its countersink is not modelled, so the head "
-                "would end up inside solid material. Use a screw whose head "
-                "stands proud (iso4762, iso14579, iso7380, iso4017) until "
-                "holes carry their countersink (docs/modeling/"
-                "hole-standards.md).");
 
   // Every placed leaf, once: the rim is on one of them and the stack is made
   // of the rest.
@@ -2083,6 +2106,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
       pb.world = inst.world;
       pb.part = inst.path.empty() ? body.name : inst.path;
       pb.partId = inst.partId;
+      pb.occurrence = inst.rootOccurrenceId;
       placed.push_back(pb);
     }
     // The rim, in the frame the assembly puts it in. Described in the part's
@@ -2165,6 +2189,42 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
       return fail(why);
     fit.size = thread->first;
     fit.clearance = thread->second;
+  }
+
+  // A countersunk screw sinks its head INTO the part, so it needs a
+  // countersunk hole and the rim picked has to be the COUNTERSINK's, not the
+  // bore's. This was a blanket refusal until holes could describe themselves;
+  // the three questions below are the ones that refusal was standing in for
+  // (docs/parts/f1-loose-ends.md).
+  if (screwProfile->lengthOverHead) {
+    if (drilled == nullptr || drilled->kind != HoleKind::Countersink)
+      return fail(screwProfile->designation +
+                  " sinks its head into the part, so it needs a COUNTERSUNK "
+                  "hole — this one is not, and the head would end up inside "
+                  "solid material. Countersink the hole, or use a screw whose "
+                  "head stands proud (iso4762, iso14579, iso7380, iso4017).");
+    if (std::abs(radius * 2.0 - drilled->csDiameter) > 1e-3)
+      return fail("pick the rim of the COUNTERSINK, not the bore — the head "
+                  "sits in the cone, so " +
+                  Mm(drilled->csDiameter) +
+                  " across is the edge it bears on and " +
+                  Mm(drilled->diameter) + " is the hole under it.");
+    // Deep enough for the head? A countersink shallower than the head leaves
+    // it standing proud of a surface that was machined to swallow it, which
+    // is not something you can see at render distance.
+    const auto dims = parts::Dimensions(screwProfile->stem, fit.size, &why);
+    if (!dims)
+      return fail(why);
+    const auto csh = dims->find("csh_height");
+    if (csh != dims->end() && drilled->csDepth < csh->second - 1e-6)
+      return fail("the countersink is " + Mm(drilled->csDepth) +
+                  " deep and an " + fit.size + " " + screwProfile->designation +
+                  " head is " + Mm(csh->second) +
+                  " — the head would stand proud of a surface cut to take it. "
+                  "Deepen the countersink, or use a smaller screw.");
+    if (request.washerUnderHead)
+      return fail("a washer does not go under a countersunk head — the head "
+                  "bears on the cone, not on the surface.");
   }
 
   // Down the axis, from the rim. The direction is chosen by which way there is
@@ -2343,15 +2403,28 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const glm::quat up = AlignZTo(axis); // far end: body points out the far side
   const glm::vec3 exit = centre + into * static_cast<float>(LastExit(stack));
 
+  // Which occurrence each piece rides on. The head end bears on the part the
+  // rim was picked in; the far end on whatever the axis leaves last.
+  const uint64_t headOn = chosen->inst->rootOccurrenceId;
+  uint64_t farOn = headOn;
+  double farthest = 0.0;
+  for (const parts::StackSegment& seg : stack)
+    if (seg.exit > farthest) {
+      farthest = seg.exit;
+      farOn = seg.occurrence;
+    }
+
   fit.plan.push_back({request.standard, fit.size, fit.length,
-                      centre - into * static_cast<float>(underHead), down});
+                      centre - into * static_cast<float>(underHead), down,
+                      headOn});
   if (underHead > 0.0)
-    fit.plan.push_back({request.washer, fit.size, 0.0, centre, down});
+    fit.plan.push_back({request.washer, fit.size, 0.0, centre, down, headOn});
   if (underNut > 0.0)
-    fit.plan.push_back({request.washer, fit.size, 0.0, exit, up});
+    fit.plan.push_back({request.washer, fit.size, 0.0, exit, up, farOn});
   if (!request.nut.empty())
     fit.plan.push_back({request.nut, fit.size, 0.0,
-                        exit + axis * static_cast<float>(-underNut), up});
+                        exit + axis * static_cast<float>(-underNut), up,
+                        farOn});
 
   if (request.dryRun) {
     fit.ok = true;
@@ -2367,7 +2440,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     const uint64_t id =
         AddFastener(state, part.standard, part.size, part.length,
                     i == 0 ? request.drive : std::string{}, part.position,
-                    part.orientation, &fit.why);
+                    part.orientation, &fit.why, part.ridesOn);
     if (id == 0)
       return fail(fit.why);
     fit.placed.push_back(id);

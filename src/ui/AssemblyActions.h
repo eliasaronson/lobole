@@ -264,7 +264,8 @@ inline constexpr const char* kStandardPartsFolder = "Standard parts";
 uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& size, double length,
                      const std::string& drive, const glm::vec3& position,
-                     const glm::quat& orientation, std::string* error);
+                     const glm::quat& orientation, std::string* error,
+                     uint64_t ridesOn = 0);
 
 // What deriving a fastener from a picked hole worked out, whether or not it
 // could place one. Returned so the caller can SAY it: the decomposition is the

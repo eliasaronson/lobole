@@ -602,6 +602,17 @@ void DrawOccurrencePanel(AppState& state) {
       // panel on any real assembly — so the answer to "how do I remove this"
       // was invisible, and the tab bar's Delete part refused because of the
       // very occurrences nobody could find. Reported from use.
+      // Detach: a model is allowed to be wrong on purpose, and the pose is
+      // derived only while the attachment stands.
+      if (o.attachedTo != 0 &&
+          ImGui::MenuItem("Detach from its part###occ_detach")) {
+        SnapshotAssembly(state);
+        asmDoc.FindById(o.id)->attachedTo = 0;
+        asmDoc.BumpVersion();
+        ImGui::EndPopup();
+        ImGui::End();
+        return;
+      }
       ImGui::Separator();
       const size_t picked = SelectedOccurrenceIds(state).size();
       const std::string del =

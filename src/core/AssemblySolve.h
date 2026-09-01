@@ -63,6 +63,19 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
 // to trigger a renderer resync (so a no-op solve doesn't churn the renderer).
 // `asmById` (A5) is needed only for connectors whose anchor reaches into a
 // sub-assembly; omit it and those mates report that they cannot resolve.
+// Re-seat everything that RIDES on something else: an occurrence with
+// `attachedTo` gets its placement recomputed from its parent's, so a screw
+// follows the plate it is bolted to (docs/parts/f1-loose-ends.md).
+//
+// Composition, not constraint — it runs AFTER the solve rather than inside
+// it, because there is nothing to solve: a zero-DOF leaf's pose is a matrix
+// multiply. Returns how many moved.
+//
+// ONE LEVEL, on purpose. An attachment whose parent is itself attached is
+// left alone rather than chased: chains want a rigid-group feature with its
+// own UI, and inventing one here would be building for a case nobody has.
+int ApplyAttachments(AssemblyDocument& asmDoc);
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById = nullptr);
 

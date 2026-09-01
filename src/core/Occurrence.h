@@ -39,6 +39,26 @@ struct Occurrence {
   bool visible = true;
   bool fixed = false; // grounded flag; the anchor for the A3 solve
 
+  // What this occurrence RIDES ON (docs/parts/f1-loose-ends.md): the id of
+  // another occurrence in the same assembly, with `attachOffset` /
+  // `attachRotation` its placement in that occurrence's frame. 0 = free.
+  //
+  // Not a mate, deliberately. A mate is for kinematics and a fastener has
+  // none — it is a zero-DOF leaf — so putting one in the mate graph costs up
+  // to four rows per joint in the list you read the MECHANISM from, and mate
+  // placement is frame alignment, which could relocate the fastener away from
+  // where the fit computed it. An attachment is a composition, not a
+  // constraint: no solver sees it.
+  //
+  // `position`/`orientation` keep their one meaning — the placement in the
+  // ASSEMBLY — and are RECOMPUTED from the parent by ApplyAttachments. That
+  // is the trade: one derived field pair instead of overloading what
+  // `position` means for some occurrences, which is the kind of double duty
+  // that has bitten this codebase before.
+  uint64_t attachedTo = 0;
+  glm::vec3 attachOffset{0.0f};
+  glm::quat attachRotation{1.0f, 0.0f, 0.0f, 0.0f};
+
   // Which CONFIGURATION of the referenced document this placement uses
   // (A5, v56); 0 = whatever that document's active configuration is, which
   // is the behaviour every existing file means.

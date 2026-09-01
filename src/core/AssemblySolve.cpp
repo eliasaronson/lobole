@@ -475,6 +475,31 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
               " on its part (feature deleted or contributing nothing?)");
 }
 
+int ApplyAttachments(AssemblyDocument& asmDoc) {
+  int moved = 0;
+  for (Occurrence& o : asmDoc.GetOccurrences()) {
+    if (o.attachedTo == 0)
+      continue;
+    const Occurrence* parent = asmDoc.FindById(o.attachedTo);
+    if (parent == nullptr)
+      continue; // the parent went; the rider keeps its last pose
+    if (parent->attachedTo != 0)
+      continue; // one level (see the header)
+    const glm::mat4 world = PlacementOf(*parent) *
+                            glm::translate(glm::mat4(1.0f), o.attachOffset) *
+                            glm::mat4_cast(o.attachRotation);
+    glm::vec3 pos;
+    glm::quat rot;
+    Decompose(world, pos, rot);
+    if (pos != o.position || rot != o.orientation) {
+      o.position = pos;
+      o.orientation = rot;
+      moved++;
+    }
+  }
+  return moved;
+}
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById) {
   SolveReport report;
@@ -612,6 +637,9 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     o.orientation = rot;
   }
 
+  // Riders last: their parents have just been placed, and an attachment is a
+  // composition off the result rather than an input to it.
+  report.placed += ApplyAttachments(asmDoc);
   return report;
 }
 

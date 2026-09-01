@@ -714,6 +714,13 @@ struct PlannedPart {
   double length = 0.0;  // 0 for a nut or a washer
   glm::vec3 position{0.0f};
   glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+  // Which occurrence this piece RIDES ON, so it follows when that part moves
+  // (docs/parts/f1-loose-ends.md). The fit decides it rather than the
+  // placement guessing after the fact: the screw and the washer under its
+  // head bear on the part the head sits against, the nut and its washer on
+  // the LAST part in the stack. Attaching the far side to the near part would
+  // stretch a rigid group across a joint that is allowed to open.
+  uint64_t ridesOn = 0;
 };
 
 struct SelectionItem {

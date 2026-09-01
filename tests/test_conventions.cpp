@@ -23,6 +23,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <regex>
@@ -220,6 +221,68 @@ TEST_CASE("a background job is polled by the loop, never by a panel",
             return s;
           }());
   CHECK(offenders.empty());
+}
+
+TEST_CASE("every tool-session sentinel is in the registry", "[convention]") {
+  // A pick slot for a non-feature tool used to answer two questions in two
+  // files — routing in SlotPickClicked, liveness in ViewportInput's per-frame
+  // chain — with nothing joining them. Missing from the SECOND, a session is
+  // disarmed the same frame it is armed: no error, no log, no assertion, the
+  // tool just ignores every click. That is what the fastener session did, and
+  // diagnosing it cost a round because the symptom names nothing.
+  //
+  // One table answers both now. This gate is the thing that keeps a fifth
+  // session from being half-registered — the same move, and the same reason,
+  // as the scene-renderer registry below.
+  const auto read = [](const char* rel) {
+    std::ifstream f(fs::path(DESIGNER_SOURCE_DIR) / rel);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  const std::string header = read("src/ui/FeatureEditor.h");
+  const std::string impl = read("src/ui/FeatureEditor.cpp");
+  REQUIRE(!header.empty());
+  REQUIRE(!impl.empty());
+
+  // Every sentinel the header declares...
+  std::vector<std::string> sentinels;
+  for (size_t at = header.find("inline constexpr uint64_t k");
+       at != std::string::npos;
+       at = header.find("inline constexpr uint64_t k", at + 1)) {
+    const size_t nameAt = at + std::strlen("inline constexpr uint64_t ");
+    const size_t nameEnd = header.find(' ', nameAt);
+    if (nameEnd == std::string::npos)
+      continue;
+    const std::string name = header.substr(nameAt, nameEnd - nameAt);
+    if (name.size() > 4 && name.compare(name.size() - 4, 4, "Slot") == 0)
+      sentinels.push_back(name);
+  }
+  INFO("sentinels found: " << sentinels.size());
+  REQUIRE(sentinels.size() >= 4); // mate, section, cam, fastener
+
+  // ...appears in the one table that routes AND validates it.
+  const size_t at = impl.find("const ToolSession kToolSessions[]");
+  REQUIRE(at != std::string::npos);
+  const size_t end = impl.find("\n};", at);
+  REQUIRE(end != std::string::npos);
+  const std::string table = impl.substr(at, end - at);
+  for (const std::string& name : sentinels) {
+    INFO(name << " is declared in FeatureEditor.h but missing from "
+                 "kToolSessions — its tool will ignore every click, silently");
+    CHECK(table.find(name) != std::string::npos);
+  }
+
+  // And nothing hand-rolls the chain the table replaced.
+  const std::string viewport = read("src/ui/ViewportInput.cpp");
+  REQUIRE(!viewport.empty());
+  INFO("ViewportInput should ask ToolSessionFor, not compare sentinels itself");
+  CHECK(viewport.find("ToolSessionFor(") != std::string::npos);
+  for (const std::string& name : sentinels) {
+    INFO(name << " is compared directly in ViewportInput.cpp — that is the "
+                 "second chain this registry exists to remove");
+    CHECK(viewport.find("== " + name) == std::string::npos);
+  }
 }
 
 TEST_CASE("every scene renderer is in the draw-order registry",
