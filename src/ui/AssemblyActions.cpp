@@ -33,6 +33,7 @@
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/SketchRenderer.h"
+#include "render/VulkanCommon.h"
 #include "ui/DragMath.h"
 
 #include "core/features/PatternFeature.h"
@@ -1233,6 +1234,13 @@ void SyncAssemblyRenderers(AppState& state) {
   // regression is read rather than re-profiled.
   using SyncClock = std::chrono::steady_clock;
   const auto syncStart = SyncClock::now();
+  // Device ALLOCATIONS this sync makes, not bytes — a work-volume signal the
+  // phase timings above cannot give. Each buffer and image takes its own
+  // vkAllocateMemory (no sub-allocator), and a cold 299-part build makes 1196
+  // of them; a sync that suddenly makes ten times what it used to has stopped
+  // reusing something, which shows here before it shows in the clock.
+  // (No device we target imposes a limit — see VulkanCommon.h.)
+  const uint64_t allocsAtStart = vkutil::TotalDeviceAllocations();
   double buildMs = 0, instanceMs = 0, pickMs = 0, prewarmMs = 0;
   size_t builtParts = 0, instanceCount = 0;
   const auto elapsedMsSince = [](SyncClock::time_point t) {
@@ -1514,10 +1522,12 @@ void SyncAssemblyRenderers(AppState& state) {
   // Selection now — see SyncSelectionHighlights.)
   LOG_INFO("Assembly synced: {} occurrences, {} instances, {} parts cached "
            "({} tessellated) in {:.0f} ms [build {:.0f}, instances {:.0f}, "
-           "picking {:.0f}, of which parallel tessellation {:.0f}]",
+           "picking {:.0f}, of which parallel tessellation {:.0f}], "
+           "{} device allocations ({} total)",
            state.assembly->OccurrenceCount(), instanceCount, cache.parts.size(),
            builtParts, elapsedMsSince(syncStart), buildMs, instanceMs, pickMs,
-           prewarmMs);
+           prewarmMs, vkutil::TotalDeviceAllocations() - allocsAtStart,
+           vkutil::TotalDeviceAllocations());
 }
 
 // In-context editing (A4): appends the context assembly's other occurrences

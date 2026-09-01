@@ -406,8 +406,19 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
   {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
-    LOG_INFO("Selected GPU: {} (type {})", props.deviceName,
-             static_cast<int>(props.deviceType));
+    // maxMemoryAllocationCount beside the device name, because every buffer
+    // and image takes its own vkAllocateMemory (no sub-allocator) and a
+    // 299-part assembly makes 1196 of them. Every device this project targets
+    // reports 4294967295 — no ceiling (measured 2026-09-01: NVIDIA, Intel Arc,
+    // llvmpipe). The Vulkan FLOOR is 4096 though, so a driver that imposes a
+    // real limit is a port away, and running out of handles looks nothing like
+    // running out of memory: the 51 MB those 1196 hold is unremarkable, and an
+    // external GPU monitor would show nothing wrong. Logging it means such a
+    // machine says so on its first line rather than at the allocation that
+    // fails.
+    LOG_INFO("Selected GPU: {} (type {}), max device allocations {}",
+             props.deviceName, static_cast<int>(props.deviceType),
+             props.limits.maxMemoryAllocationCount);
     // Keep it for Help > About: which GPU answered is the first thing worth
     // knowing about a rendering bug, and the log is gone by the time someone
     // writes the report.

@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 
+#include <atomic>
 #include <fstream>
 
 namespace vkutil {
@@ -21,6 +22,10 @@ uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
             typeFilter, static_cast<uint32_t>(props));
   return kNoMemoryType;
 }
+
+// Every successful vkAllocateMemory below bumps this. See the header for why
+// it is monotonic rather than a live count.
+std::atomic<uint64_t> g_deviceAllocations{0};
 
 bool CreateBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
                   VkDeviceSize size, VkBufferUsageFlags usage,
@@ -65,12 +70,15 @@ bool CreateBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
     allocInfo.pNext = &flagsInfo;
 
   if (vkAllocateMemory(device, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
-    LOG_ERROR("Vulkan: vkAllocateMemory failed for {} bytes", req.size);
+    LOG_ERROR("Vulkan: vkAllocateMemory failed for {} bytes (this process has "
+              "made {} device allocations; the limit is a device property)",
+              req.size, g_deviceAllocations.load());
     vkDestroyBuffer(device, buffer, nullptr);
     buffer = VK_NULL_HANDLE;
     memory = VK_NULL_HANDLE;
     return false;
   }
+  g_deviceAllocations.fetch_add(1, std::memory_order_relaxed);
 
   vkBindBufferMemory(device, buffer, memory, 0);
   return true;
@@ -108,13 +116,22 @@ bool AllocateImageMemory(VkDevice device, VkPhysicalDevice physicalDevice,
   allocInfo.allocationSize = req.size;
   allocInfo.memoryTypeIndex = typeIndex;
   if (vkAllocateMemory(device, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
-    LOG_ERROR("Vulkan: image vkAllocateMemory failed for {} bytes", req.size);
+    LOG_ERROR("Vulkan: image vkAllocateMemory failed for {} bytes (this "
+              "process has made {} device allocations; the limit is a device "
+              "property)",
+              req.size, g_deviceAllocations.load());
     memory = VK_NULL_HANDLE;
     return false;
   }
 
+  g_deviceAllocations.fetch_add(1, std::memory_order_relaxed);
+
   vkBindImageMemory(device, image, memory, 0);
   return true;
+}
+
+uint64_t TotalDeviceAllocations() {
+  return g_deviceAllocations.load(std::memory_order_relaxed);
 }
 
 VkCommandBuffer BeginSingleTimeCommands(VkDevice device, VkCommandPool pool) {

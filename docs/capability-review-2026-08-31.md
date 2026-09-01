@@ -414,7 +414,10 @@ reproducible), and one reusable scoped timer that logs, so phase timing stops
 being retyped. The next perf round then starts from a profile instead of a
 hypothesis.
 
-## P2 — No GPU memory visibility, and a quantified ceiling underneath it
+## P2 — No GPU memory visibility — RESOLVED, and the ceiling was a phantom
+
+> **Corrected 2026-09-01.** The entry below inferred a limit from the Vulkan
+> spec floor and was wrong. Read the correction under it before the original.
 
 `vkutil::CreateBuffer` does **one `vkAllocateMemory` per buffer**
 (`VulkanCommon.cpp:67`) — no VMA, no sub-allocation. The header records the
@@ -435,6 +438,51 @@ device-memory leak is invisible until the driver refuses an allocation.
 Two separable fixes: **report VRAM in `frame_stats`** (cheap, immediately
 useful, and it makes the cache budget checkable), then **sub-allocate** (bigger,
 and the part that lifts the ceiling).
+
+### The correction (2026-09-01)
+
+Two things were wrong with the above, and the second one is the whole item.
+
+**The VRAM half was redundant.** `nvidia-smi` and `nvtop` are both installed
+and already report per-process device memory — `build/designer, 71 MiB` of
+8188 — live, for free. Putting heap usage into `frame_stats` would have
+duplicated an external tool while costing a seam decision, an extension
+enablement in `main.cpp`, an RPC and a describe entry. The argument for doing
+it anyway was the allocation COUNT, which no external tool reports.
+
+**And the ceiling does not exist.** "commonly 4096 on desktop drivers" was
+inferred from the Vulkan *floor* — `maxMemoryAllocationCount` must be at least
+4096 — and never checked. Measured on every device this project targets:
+
+| device | maxMemoryAllocationCount |
+|---|---|
+| NVIDIA RTX 4060 Laptop | 4294967295 |
+| Intel Arc (MTL) | 4294967295 |
+| llvmpipe (what CI runs) | 4294967295 |
+
+No handle ceiling anywhere. The "around 1000 parts" limit was arithmetic on a
+number nobody had read, and **the sub-allocator this entry called "the actual
+fix" is not needed.**
+
+**What shipped instead**, about fifteen lines and no seam at all: the limit is
+logged beside the device name, so a driver that *does* impose one says so on
+the first line of its log rather than at the allocation that fails; and the
+assembly sync's existing phase breakdown gained the allocations that sync made.
+
+    Selected GPU: NVIDIA GeForce RTX 4060 Laptop GPU (type 2),
+      max device allocations 4294967295
+    Assembly synced: 1 occurrences, 1 instances, 1 parts cached (1 tessellated)
+      in 9 ms [build 3, instances 0, picking 0, of which parallel
+      tessellation 4], 8 device allocations (79 total)
+
+That second number keeps its value with the ceiling gone: it is a work-volume
+signal the phase timings cannot give, and a sync that starts making ten times
+what it used to has stopped reusing something — visible here before it shows
+in the clock.
+
+This is the second finding this session that did not survive contact with a
+measurement, after the CAM round's "four fixtures failed to reproduce it". Both
+were plausible, both were argued from a number nobody had looked at.
 
 ## P3 — No ThreadSanitizer, in a tree that is now genuinely concurrent — BUILD MODE ADDED
 
@@ -582,7 +630,7 @@ tooling halves were mostly actionable without one, and this is what landed.
 | **P3** TSan build mode | added | (below) |
 | **T4** coverage leaves no trace | run recorded, and it needs a fix | [coverage-2026-08-31.md](coverage-2026-08-31.md) |
 | **T2** pixel-regression gate | NOT done — needs a decision | — |
-| **P2** GPU memory visibility | NOT done — needs a decision | — |
+| **P2** GPU memory visibility | done — and the finding was WRONG | (below) |
 | **T6** perf gates, **T7** shuffled runs | NOT done | — |
 
 ## What T5 found, and why it is the item worth reading
@@ -670,11 +718,10 @@ machine-specific, so a golden PNG in git would fail on anyone else's GPU. It
 needs a tolerance and a locally-recorded baseline, and choosing that shape is
 the work.
 
-P2's is a seam. `g_PhysicalDevice` is a static in `main.cpp`, unreachable from
-the RPC layer, so reporting heap budget and `maxMemoryAllocationCount` means
-deciding how the device gets exposed — a design choice in the one layer no test
-covers. The read-only query itself is trivial; the seam is not, and picking it
-at 23:30 unattended is how churn happens.
+P2 was left for a seam decision and then **turned out not to need one** — see
+its correction above. Asking whether it beat an external monitor was the right
+question: most of it did not, and the part that was unique to us was answering
+a ceiling that measurement showed does not exist.
 
 ## Notes for whoever picks these up
 

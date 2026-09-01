@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cstdint>
+
 #include <string>
 #include <vector>
 
@@ -69,6 +71,29 @@ void DestroyBuffer(VkDevice device, VkBuffer& buffer, VkDeviceMemory& memory,
 bool AllocateImageMemory(VkDevice device, VkPhysicalDevice physicalDevice,
                          VkImage image, VkMemoryPropertyFlags props,
                          VkDeviceMemory& memory);
+
+// How many device allocations this process has made, ever. Every buffer and
+// every image here takes its OWN `vkAllocateMemory` — there is no
+// sub-allocator — and a 299-part assembly builds 1196 of them for 51 MB.
+//
+// This exists because that sounded like a ceiling and turned out not to be
+// one, which is the reason to measure rather than reason. `maxMemoryAllocation
+// Count` has a Vulkan FLOOR of 4096, and a review inferred from that a limit
+// of "around 1000 parts". Measured 2026-09-01 on every device this project
+// targets — NVIDIA RTX 4060, Intel Arc (MTL), and llvmpipe, which is what CI
+// runs — all three report **4294967295**. There is no handle ceiling on any of
+// them, and the sub-allocator that finding implied is not needed.
+//
+// The counter stays because it is what settled that, and because a driver
+// reporting the spec floor is exactly what a port would meet: main.cpp logs
+// the limit beside the device name, so a machine that DOES impose one says so
+// on the first line of its log rather than at the allocation that fails.
+//
+// Monotonic on purpose. A live count would need every `vkFreeMemory` site to
+// route through one place, and a counter that drifts is worse than none. The
+// question it answers is "how many did that operation make" — a delta across
+// the operation, which is also a work-volume signal independent of any limit.
+[[nodiscard]] uint64_t TotalDeviceAllocations();
 
 // A primary command buffer already in the recording state, for a one-shot
 // upload or layout transition. VK_NULL_HANDLE if allocation failed.
