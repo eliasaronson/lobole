@@ -299,6 +299,24 @@ struct FastenerRequest {
   bool dryRun = false; // derive and explain without placing
 };
 
+// The rim, as a pick names it: WHICH occurrence, and which circular edge on
+// it (docs/parts/gui-plan.md, phase 1).
+//
+// The occurrence is not decoration. Every occurrence of one part shares every
+// element name, so an ElementRef alone does not name a rim in an assembly —
+// it names one rim per placement. Resolving it by taking the first match,
+// which is what this did until 2026-09-01, puts the fastener at the near end
+// of a joint made of two occurrences of the same plate. That is the ordinary
+// case, and the wrongness is silent.
+//
+// 0 means "infer", and infers only when there is nothing to infer between: a
+// rim that resolves on several occurrences with no occurrence given is
+// REFUSED naming them, not guessed at. A viewport pick always carries one.
+struct RimPick {
+  uint64_t occurrence = 0;
+  ElementRef element;
+};
+
 // Derive a fastener from a picked hole RIM and place it (phase 3).
 //
 // `rim` names a circular edge — the rim the head sits against. A cylindrical
@@ -318,7 +336,7 @@ struct FastenerRequest {
 // instead of the person having to. That is the whole argument for deriving —
 // a screw sized for the plates and then fitted with two washers and a nut is
 // too short, and it looks exactly right in the viewport.
-FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
+FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                               const FastenerRequest& request);
 
 uint64_t MaterializeImportedPart(AppState& state,

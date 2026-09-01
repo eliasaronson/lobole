@@ -711,6 +711,66 @@ DrilledPlate MakePlate(ui::AppState& state, const std::string& name,
 
 } // namespace
 
+TEST_CASE("A rim on two placements of one part names which",
+          "[actions][parts]") {
+  // The bug the click path would have hit on its first try, found while
+  // planning it (docs/parts/gui-plan.md, phase 1): every occurrence of a part
+  // carries every one of its element names, so an ElementRef alone does not
+  // name a rim in an assembly. Resolving it by first match put the fastener
+  // at the NEAR end of a joint made of two of the same plate — the ordinary
+  // case, and wrong in a way nothing shows.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate bar = MakePlate(state, "Bar", 10.0, 6.6, -1.0, 0.0);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Stack"));
+  const auto place = [&](float z) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, "Bar");
+    occ.name = "Bar";
+    occ.position = glm::vec3(0.0f, 0.0f, z);
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t near = place(0.0f);  // spans z 0..10
+  const uint64_t far = place(-10.0f); // spans z -10..0
+
+  ui::FastenerRequest dry;
+  dry.dryRun = true;
+
+  // With no occurrence named it REFUSES, naming both placements. Taking the
+  // first is exactly the substitution this codebase refuses everywhere else,
+  // and here the substitute looks perfect in the viewport.
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{0, bar.topRim}, dry);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("2 placements") != std::string::npos);
+  CHECK(fit.why.find("unique within a PART") != std::string::npos);
+  CHECK(fit.why.find("occurrence") != std::string::npos);
+
+  // Named, each resolves to ITS OWN rim. The near plate's rim is at the top
+  // of the stack and spans both; the far plate's is 10 mm lower and spans
+  // only itself, because the stack below it is empty.
+  fit = ui::FitFastenerToHole(state, ui::RimPick{near, bar.topRim}, dry);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  CHECK_THAT(fit.grip, WithinAbs(20.0, 1e-3));
+
+  fit = ui::FitFastenerToHole(state, ui::RimPick{far, bar.topRim}, dry);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  CHECK_THAT(fit.grip, WithinAbs(10.0, 1e-3));
+
+  // And an occurrence that does not carry it says so rather than falling
+  // back to one that does.
+  fit = ui::FitFastenerToHole(state, ui::RimPick{9999, bar.topRim}, dry);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  CHECK(fit.why.find("does not carry that rim") != std::string::npos);
+}
+
 TEST_CASE("Save works from every kind of tab, not just a part", "[actions]") {
   // Reported 2026-09-01 from a real session: File > Save and File > Save As
   // did nothing and opened no dialog, while File > Open opened one — which
@@ -778,16 +838,19 @@ TEST_CASE(
   MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
   const DrilledPlate blind = MakePlate(state, "Blind", 20.0, 6.6, 8.0, 0.0);
 
+  // Returns the occurrence id: an element name is unique within a PART, so
+  // two plates built the same way carry the same one and the id is what tells
+  // them apart (docs/parts/gui-plan.md, phase 1).
   const auto place = [&](const char* part, glm::vec3 at) {
     Occurrence occ;
     occ.partId = ui::PartIdByName(state, part);
     occ.name = part;
     occ.position = at;
-    state.assembly->AddOccurrence(occ);
+    return state.assembly->AddOccurrence(occ);
   };
 
   ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
-  place("Top", glm::vec3(0.0f, 0.0f, 0.0f));
+  const uint64_t topOcc = place("Top", glm::vec3(0.0f, 0.0f, 0.0f));
   place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
 
   ui::FastenerRequest request;
@@ -795,7 +858,8 @@ TEST_CASE(
   request.washerUnderHead = true;
   request.washerUnderNut = true;
   request.dryRun = true;
-  ui::FastenerFit fit = ui::FitFastenerToHole(state, top.topRim, request);
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, request);
   INFO(fit.why << " / " << fit.summary);
   REQUIRE(fit.ok);
   // 38 mm of plate, two 1.6 mm washers, and the nut's own 5.2 mm — "enough
@@ -808,7 +872,8 @@ TEST_CASE(
   // head reliably.
   ui::FastenerRequest bare;
   bare.dryRun = true;
-  CHECK_THAT(ui::FitFastenerToHole(state, top.topRim, bare).length,
+  CHECK_THAT(ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, bare)
+                 .length,
              WithinAbs(40.0, 1e-9));
   CHECK(fit.summary.find("washer 1.6") != std::string::npos);
   CHECK(fit.summary.find("nut 5.2") != std::string::npos);
@@ -816,7 +881,7 @@ TEST_CASE(
   // And placed: four occurrences off one pick, three part documents, because
   // the two washers are the same spec and `bom` aggregates them.
   request.dryRun = false;
-  fit = ui::FitFastenerToHole(state, top.topRim, request);
+  fit = ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, request);
   INFO(fit.why);
   REQUIRE(fit.ok);
   REQUIRE(fit.placed.size() == 4);
@@ -865,11 +930,12 @@ TEST_CASE(
   // alternative is a nut floating inside the plate, which is invisible from
   // outside and exactly the class of error this whole verb exists to stop.
   ui::SetActivePart(state, ui::AddAssembly(state, "Tapped"));
-  place("Blind", glm::vec3(0.0f));
+  const uint64_t blindOcc = place("Blind", glm::vec3(0.0f));
   ui::FastenerRequest tapped;
   tapped.nut = "iso4032";
   tapped.dryRun = true;
-  fit = ui::FitFastenerToHole(state, blind.topRim, tapped);
+  fit =
+      ui::FitFastenerToHole(state, ui::RimPick{blindOcc, blind.topRim}, tapped);
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("no far side") != std::string::npos);
@@ -892,7 +958,8 @@ TEST_CASE(
   wrong.washerUnderHead = true;
   wrong.washer = "iso4032";
   wrong.dryRun = true;
-  fit = ui::FitFastenerToHole(state, blind.topRim, wrong);
+  fit =
+      ui::FitFastenerToHole(state, ui::RimPick{blindOcc, blind.topRim}, wrong);
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("not a washer") != std::string::npos);
@@ -919,12 +986,15 @@ TEST_CASE(
   const DrilledPlate off = MakePlate(state, "Off", 10.0, 6.6, -1.0, 0.0);
   MakePlate(state, "Skew", 10.0, 6.6, -1.0, 20.0);
 
+  // Returns the occurrence id: an element name is unique within a PART, so
+  // two plates built the same way carry the same one and the id is what tells
+  // them apart (docs/parts/gui-plan.md, phase 1).
   const auto place = [&](const char* part, glm::vec3 at) {
     Occurrence occ;
     occ.partId = ui::PartIdByName(state, part);
     occ.name = part;
     occ.position = at;
-    state.assembly->AddOccurrence(occ);
+    return state.assembly->AddOccurrence(occ);
   };
 
   // 1. Two plates with a 3 mm gap. The gap is SPANNED and named: it is either
@@ -932,9 +1002,10 @@ TEST_CASE(
   //    geometry cannot tell those apart — so the summary says so and the
   //    length covers it.
   ui::SetActivePart(state, ui::AddAssembly(state, "Gap"));
-  place("Top", glm::vec3(0.0f, 0.0f, 3.0f));
+  uint64_t occ = place("Top", glm::vec3(0.0f, 0.0f, 3.0f));
   place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
-  ui::FastenerFit fit = ui::FitFastenerToHole(state, top.topRim, dry);
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{occ, top.topRim}, dry);
   INFO(fit.why << " / " << fit.summary);
   REQUIRE(fit.ok);
   CHECK(fit.size == "M6"); // read back out of the clearance table
@@ -949,8 +1020,8 @@ TEST_CASE(
   //    — a screw that bottoms out clamps nothing — so it snaps DOWN, and the
   //    off-axis probe's 20 mm of plate is not the answer.
   ui::SetActivePart(state, ui::AddAssembly(state, "Blind"));
-  place("Blind", glm::vec3(0.0f));
-  fit = ui::FitFastenerToHole(state, blind.topRim, dry);
+  occ = place("Blind", glm::vec3(0.0f));
+  fit = ui::FitFastenerToHole(state, ui::RimPick{occ, blind.topRim}, dry);
   INFO(fit.why << " / " << fit.summary);
   REQUIRE(fit.ok);
   CHECK(fit.blind);
@@ -961,9 +1032,9 @@ TEST_CASE(
   //    misalignment rather than as a shallow hole: told "the hole is 0 mm
   //    deep" a person goes looking for a drilling depth.
   ui::SetActivePart(state, ui::AddAssembly(state, "Skewed"));
-  place("Off", glm::vec3(0.0f));
+  occ = place("Off", glm::vec3(0.0f));
   place("Skew", glm::vec3(0.0f, 0.0f, -10.0f));
-  fit = ui::FitFastenerToHole(state, off.topRim, dry);
+  fit = ui::FitFastenerToHole(state, ui::RimPick{occ, off.topRim}, dry);
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("not lined up") != std::string::npos);
@@ -973,9 +1044,9 @@ TEST_CASE(
   //    direction, which is why the pick is an edge — and asking with one is
   //    refused rather than guessed at.
   ui::SetActivePart(state, ui::AddAssembly(state, "Bad"));
-  place("Top", glm::vec3(0.0f));
-  fit = ui::FitFastenerToHole(state, ElementRef{top.topRim.featureId, "nope"},
-                              dry);
+  occ = place("Top", glm::vec3(0.0f));
+  fit = ui::FitFastenerToHole(
+      state, ui::RimPick{occ, ElementRef{top.topRim.featureId, "nope"}}, dry);
   CHECK_FALSE(fit.ok);
   INFO(fit.why);
   CHECK(fit.why.find("RIM") != std::string::npos);

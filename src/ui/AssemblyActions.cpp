@@ -1993,7 +1993,7 @@ std::optional<double> CompanionDim(const std::string& standard,
 }
 } // namespace
 
-FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
+FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                               const FastenerRequest& request) {
   FastenerFit fit;
   const auto fail = [&](const std::string& why) -> FastenerFit {
@@ -2027,9 +2027,17 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
   // of the rest.
   const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
   std::vector<parts::PlacedBody> placed;
-  glm::vec3 centre(0.0f), axis(0.0f);
-  double radius = 0.0;
-  bool foundRim = false;
+  // EVERY instance the element resolves on, not the first. An ElementRef is
+  // unique within a PART; in an assembly it names one rim per placement of
+  // that part, so collecting the candidates is what makes the ambiguity
+  // visible instead of silently resolved.
+  struct RimOn {
+    const assembly::FlatInstance* inst;
+    glm::vec3 centre;
+    glm::vec3 axis;
+    double radius;
+  };
+  std::vector<RimOn> candidates;
   for (const assembly::FlatInstance& inst : flat) {
     if (inst.part == nullptr || !inst.visible)
       continue;
@@ -2041,31 +2049,65 @@ FastenerFit FitFastenerToHole(AppState& state, const ElementRef& rim,
       pb.partId = inst.partId;
       placed.push_back(pb);
     }
-    if (foundRim)
-      continue;
     // The rim, in the frame the assembly puts it in. Described in the part's
     // own space and then placed, because that is where the ElementRef means
     // something.
     const std::optional<Measure::Element> element =
-        Measure::Describe(inst.part->GetBodies(), rim);
+        Measure::Describe(inst.part->GetBodies(), rim.element);
     if (!element || element->kind != "edge" || element->shape != "circle" ||
         !element->hasRadius || !element->hasAxis)
       continue;
     const std::optional<glm::vec3> local =
-        Measure::CentreOf(inst.part->GetBodies(), rim);
+        Measure::CentreOf(inst.part->GetBodies(), rim.element);
     if (!local)
       continue;
-    centre = glm::vec3(inst.world * glm::vec4(*local, 1.0f));
-    axis =
-        glm::normalize(glm::vec3(inst.world * glm::vec4(element->axis, 0.0f)));
-    radius = element->radius;
-    foundRim = true;
+    candidates.push_back(
+        {&inst, glm::vec3(inst.world * glm::vec4(*local, 1.0f)),
+         glm::normalize(glm::vec3(inst.world * glm::vec4(element->axis, 0.0f))),
+         element->radius});
   }
-  if (!foundRim)
+  if (candidates.empty())
     return fail("pick the RIM of the hole — a circular edge, the one the head "
                 "sits against. A cylindrical face has an axis but no "
                 "direction, so it cannot say which end the fastener goes in "
                 "from; the rim says both.");
+
+  const RimOn* chosen = nullptr;
+  if (rim.occurrence != 0) {
+    for (const RimOn& c : candidates)
+      if (c.inst->rootOccurrenceId == rim.occurrence)
+        chosen = &c;
+    if (chosen == nullptr) {
+      std::string where;
+      for (const RimOn& c : candidates)
+        where += (where.empty() ? "" : ", ") + c.inst->path + " (" +
+                 std::to_string(c.inst->rootOccurrenceId) + ")";
+      return fail("occurrence " + std::to_string(rim.occurrence) +
+                  " does not carry that rim — it is on " + where);
+    }
+  } else if (candidates.size() == 1) {
+    chosen = &candidates.front();
+  } else {
+    // Refused, not guessed — and the ambiguity is wider than it first looks.
+    // An element name is unique within a DOCUMENT, so it is shared not only
+    // by every placement of one part but by every part built the same way:
+    // two plates drawn with the same three features carry the same feature
+    // ids and the same mapped names. Taking the first put the fastener at the
+    // near end of a two-plate joint, which reads as correct in the viewport.
+    std::string where;
+    for (const RimOn& c : candidates)
+      where += (where.empty() ? "" : ", ") + c.inst->path + " (occurrence " +
+               std::to_string(c.inst->rootOccurrenceId) + ")";
+    return fail("that element is on " + std::to_string(candidates.size()) +
+                " placements — " + where +
+                ". An element name is unique within a PART, so every "
+                "placement of it and every part built the same way carry the "
+                "same one; say which occurrence you mean. A pick in the "
+                "viewport carries it, a name on its own does not.");
+  }
+  glm::vec3 centre = chosen->centre;
+  glm::vec3 axis = chosen->axis;
+  const double radius = chosen->radius;
 
   // Which size the hole is for, read backwards out of the clearance table.
   std::string why;

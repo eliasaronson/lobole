@@ -87,7 +87,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Derive a fastener from a picked hole RIM and place it "
      "(docs/parts/plan.md). `rim` is a circular EDGE — the one the head sits "
      "against; a cylindrical face has an axis but no direction and cannot say "
-     "which end it goes in from. The SIZE comes from the hole's own diameter "
+     "which end it goes in from. `rim` is {feature_id, element, occurrence?} "
+     "— the occurrence is needed only when the part is placed more than once, "
+     "and leaving it out THERE is refused rather than resolved to the first. "
+     "The SIZE comes from the hole's own diameter "
      "(the clearance table read backwards) and the LENGTH from the stack the "
      "axis passes through, snapped to a length that size is made in. Returns "
      "{size, clearance, grip_mm, length_mm, blind, summary} — the summary "
@@ -175,10 +178,15 @@ std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
   if (m == "fit_fastener") {
-    ElementRef rim;
+    ui::RimPick rim;
     const auto& r = p.at("rim");
-    rim.featureId = r.at("feature_id").get<uint64_t>();
-    rim.name = r.at("element").get<std::string>();
+    rim.element.featureId = r.at("feature_id").get<uint64_t>();
+    rim.element.name = r.at("element").get<std::string>();
+    // Optional, and only optional because a part placed ONCE has nothing to
+    // disambiguate. Placed twice, the same element name is on both, and
+    // leaving it out is refused rather than resolved to whichever comes
+    // first (docs/parts/gui-plan.md).
+    rim.occurrence = r.value("occurrence", uint64_t{0});
     ui::FastenerRequest request;
     request.standard = p.value("standard", std::string("iso4762"));
     request.drive = p.value("drive", std::string{});
