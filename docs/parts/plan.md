@@ -511,6 +511,12 @@ expensive to discover with twenty.
 
 ## Follow-ups
 
+> All three are planned together in [f1-loose-ends.md](f1-loose-ends.md),
+> which also answers the sequencing question they raise: **the assembly
+> solver (A1) does not gate any of it.** A fastener is a zero-DOF leaf, the
+> current solver already places those correctly, and the design below bypasses
+> the solver entirely.
+
 ### A placed fastener is positioned, not mated
 
 Checked 2026-09-01, and true by construction: `AddFastener` builds an
@@ -544,10 +550,13 @@ Three things make it a design question rather than a missing line:
   parent concept on `Occurrence` to lean on (checked). Fifty bolts is two
   hundred rows in the Mates list.
 
-The cheap correct version is probably ONE fastened mate per fastener, to the
-part it bears against, made at placement and skippable. Held for a dogfood
-round first: how badly this bites depends entirely on whether people move
-parts after fastening them, which no round has told us yet.
+**The dogfood round answered it, and the answer was not "a mate".** Using it
+surfaced the sharper version: a placed fastener is not merely uncarried, it is
+freely DRAGGABLE — `GizmoOccurrence` hands a gizmo to any selected non-fixed
+occurrence — so you can pull a screw out of its hole and nothing objects. And
+a mate is the wrong instrument for a thing with zero degrees of freedom. See
+[f1-loose-ends.md](f1-loose-ends.md) for the attachment design that replaces
+this entry.
 
 ### A pick slot for a non-feature tool must be registered twice
 
