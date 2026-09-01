@@ -509,6 +509,52 @@ expensive to discover with twenty.
   instead of by a golden — said here rather than left as a gap someone has to
   rediscover.
 
+## Follow-ups
+
+### A placed fastener is positioned, not mated
+
+Checked 2026-09-01, and true by construction: `AddFastener` builds an
+`Occurrence` with a position and an orientation and nothing else, `fixed`
+defaults to false, and the solver says what that means outright — *"unmated
+occurrences have no world entry and are untouched"*.
+
+So a fastener will not drift; it also will not follow. Move a mated plate and
+the screw stays behind in space, and `check_fasteners` reports it only when
+somebody asks.
+
+**The A2 argument does not rescue this one, and that is the point.** Deriving
+a LENGTH across documents genuinely cannot be a live binding, so reporting
+staleness is the right answer there. POSITION within a single assembly is
+exactly what mates are for, so "we report it instead" is a weaker answer here
+than it was there.
+
+Three things make it a design question rather than a missing line:
+
+- **What does each piece mate to?** The screw is rigid relative to the part
+  its head bears on; the nut bears on the FAR part. Mate everything to the
+  entry part and the far side is wrong once the plates move relative to each
+  other; mate each to what it touches and a separating joint leaves the screw
+  and the nut drifting apart — honest, and it looks broken.
+- **Mates MOVE things.** The solver places by direct frame alignment, so a
+  fastened mate would relocate the fastener to align frames, possibly
+  fighting the transform the fit computed. The generated parts' faces do
+  carry element names, so connectors are possible; agreeing with the
+  derivation rather than overriding it is the work.
+- **Volume.** Up to four mates per joint, and there is no rigid-group or
+  parent concept on `Occurrence` to lean on (checked). Fifty bolts is two
+  hundred rows in the Mates list.
+
+The cheap correct version is probably ONE fastened mate per fastener, to the
+part it bears against, made at placement and skippable. Held for a dogfood
+round first: how badly this bites depends entirely on whether people move
+parts after fastening them, which no round has told us yet.
+
+### A pick slot for a non-feature tool must be registered twice
+
+See [../known-bugs.md](../known-bugs.md). Latent rather than broken — all four
+sentinels are correct today — and the fix is one registry gated by
+`test_conventions.cpp`.
+
 ## Out of scope
 
 - **Modelled helical threads.** Cosmetic by default — which is what Designer
