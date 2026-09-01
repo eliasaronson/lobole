@@ -163,7 +163,7 @@ Ordered by what I would actually care about, not by size.
 - **A standard parts / fastener library.** Absent entirely. See the section
   below — the justification originally written here ("every assembly dogfood
   round hand-modelled its screws") was wrong, and what is actually true is a
-  better argument.
+  better argument. **Planned 2026-09-01: [parts/plan.md](parts/plan.md).**
 - **User-definable feature types.** `kFeatureTypes` (SerializeFeatures.cpp) is
   a compile-time C++ table, so extending the modelling vocabulary means
   recompiling the application. FreeCAD has Python workbenches; Onshape has
