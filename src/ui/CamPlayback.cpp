@@ -51,19 +51,6 @@ constexpr glm::vec4 kDoneColor(0.20f, 0.22f, 0.30f, 0.85f);
 constexpr glm::vec4 kAheadCut(1.00f, 0.55f, 0.08f, 1.00f);
 constexpr glm::vec4 kAheadRapid(0.50f, 0.52f, 0.60f, 0.55f);
 
-// Setup space -> model space, as a matrix: the renderers want it per draw
-// rather than per point. The rotation itself is `cam::SetupToModel` — this
-// used to build its own from `rotationA`, which is one of the four places
-// that quietly assumed a setup could only be turned about X.
-glm::mat4 SetupModelMatrix(const cam::Setup& setup) {
-  const glm::dmat3 r = cam::SetupToModel(setup);
-  glm::mat4 m(1.0f);
-  for (int col = 0; col < 3; col++)
-    for (int row = 0; row < 3; row++)
-      m[col][row] = static_cast<float>(r[col][row]);
-  return m;
-}
-
 std::vector<Vertex3D> ToMeshVertices(const cam::StockMesh& m) {
   std::vector<Vertex3D> out;
   out.reserve(m.vertices.size());
@@ -219,7 +206,15 @@ void SyncCamPlayback(AppState& state) {
   if (setup == nullptr || !state.stockRenderer) {
     return;
   }
-  const glm::mat4 model = SetupModelMatrix(*setup);
+  // No transform anywhere in here, on purpose. A job tab DRAWS setup space
+  // (v73/J6): the parts are laid out in it, and so is everything drawn over
+  // them. This used to multiply the stock and the cutter by setup-to-model,
+  // which undid exactly the transform the viewport had just applied -- and
+  // was invisible while a setup had one frame (the two spaces coincide), then
+  // permanent once fixturing became per part (v76): the block stood upright
+  // through a part lying flat. The backplot had the same bug the same week.
+  // A function whose whole job is to undo what the viewport does is an
+  // invitation to put it back, so there is none to call.
 
   // The stock, re-meshed only when the simulation actually moved.
   if (state.camStockSim.Revision() != state.camStockDrawnRevision) {
@@ -235,7 +230,6 @@ void SyncCamPlayback(AppState& state) {
       verts.push_back({v.position, v.normal});
     state.stockRenderer->SetMesh(std::move(verts), mesh.indices);
   }
-  state.stockRenderer->SetTransform(model);
 
   // The bodies underneath, ghosted: the part is what the block is being taken
   // down to, and seeing it inside the stock is most of why this picture is
@@ -274,8 +268,7 @@ void SyncCamPlayback(AppState& state) {
   }
   const glm::dvec3 at = state.camTimeline.PositionAt(state.camCursor);
   state.meshRenderer->SetMeshTransform(
-      state.camToolInstance,
-      model * glm::translate(glm::mat4(1.0f), glm::vec3(at)));
+      state.camToolInstance, glm::translate(glm::mat4(1.0f), glm::vec3(at)));
 }
 
 bool CamPlaybackDrawsPath(const AppState& state) {
@@ -366,14 +359,19 @@ void DrawCamTransport(AppState& state) {
   // The scrub bar is DISTANCE along the path, not a clock: the file states
   // every cutting feed but no machine states its rapid rate, so a time axis
   // would be part measurement and part invention.
-  float progress = tl.totalDistance > 1e-9
-                       ? static_cast<float>(tl.DistanceAt(state.camCursor) /
-                                            tl.totalDistance)
-                       : 0.0f;
+  // In PERCENT, because the label is the value: a 0..1 slider printed with
+  // "%.0f%%" read "0%" at the halfway point and "1%" at the end, however far
+  // the cut had got.
+  float percent =
+      tl.totalDistance > 1e-9
+          ? static_cast<float>(100.0 * tl.DistanceAt(state.camCursor) /
+                               tl.totalDistance)
+          : 0.0f;
   ImGui::SetNextItemWidth(-FLT_MIN);
-  if (ImGui::SliderFloat("###cam_sim_scrub", &progress, 0.0f, 1.0f, "%.0f%%",
+  if (ImGui::SliderFloat("###cam_sim_scrub", &percent, 0.0f, 100.0f, "%.0f%%",
                          ImGuiSliderFlags_AlwaysClamp))
-    SeekCamPlayback(state, tl.CursorAtDistance(progress * tl.totalDistance));
+    SeekCamPlayback(state,
+                    tl.CursorAtDistance(percent / 100.0 * tl.totalDistance));
 
   ImGui::SetNextItemWidth(120.0f);
   ImGui::SliderFloat("Speed###cam_sim_speed", &state.camPlaybackSpeed, 0.5f,

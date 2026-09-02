@@ -272,7 +272,7 @@ void StockRenderer::Render(VkCommandBuffer commandBuffer,
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           m_pipelineLayout, 0, 1, &m_descriptorSets[frame], 0,
                           nullptr);
-  const Push push{m_model, m_color};
+  const Push push{glm::mat4(1.0f), m_color};
   vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                      0, sizeof(Push), &push);

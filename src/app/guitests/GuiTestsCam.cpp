@@ -476,12 +476,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(m.has_value());
     // The glyph is revolved about ITS OWN +Z (CamStockMesh::BuildToolMesh),
     // so column 2 of the model matrix is where the tool points in the world.
-    // It must be the spindle: the setup frame applied to +Z.
+    // It must be the spindle -- and a job tab DRAWS setup space (v73/J6), so
+    // the spindle is world +Z whatever the part is clamped like. This used
+    // to want the setup frame applied to +Z, which is where the spindle
+    // points in MODEL space: it passed only while the simulation was
+    // wrongly multiplying by setup-to-model, standing the stock upright
+    // through a part lying flat.
     const cam::Setup* live = Job()->FindSetup(setup.id);
-    const glm::dvec3 spindle =
-        cam::SetupToModel(*live) * glm::dvec3(0.0, 0.0, 1.0);
+    IM_CHECK(!cam::FrameIsSquare(*live)); // the frame is real, and unused
     const glm::vec3 drawn = glm::normalize(glm::vec3((*m)[2]));
-    const glm::vec3 want = glm::normalize(glm::vec3(spindle));
+    const glm::vec3 want(0.0f, 0.0f, 1.0f);
     ctx->LogInfo("drawn  %.4f %.4f %.4f", drawn.x, drawn.y, drawn.z);
     ctx->LogInfo("spindle %.4f %.4f %.4f", want.x, want.y, want.z);
     IM_CHECK(glm::length(drawn - want) < 1e-4f);
@@ -1518,6 +1522,28 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK(std::abs(plo[a] - lo[a]) < pad);
       IM_CHECK(std::abs(phi[a] - hi[a]) < pad);
     }
+
+    // And the SIMULATION is drawn in the same space. It had the same bug the
+    // same week: the stock and the cutter were multiplied by setup-to-model,
+    // which stood the block upright through a part lying flat. The world IS
+    // setup space on a job tab, so the cutter sits exactly where the timeline
+    // says, with nothing in between.
+    IM_CHECK(ui::BeginCamPlayback(*s_App));
+    ui::SeekCamPlayback(*s_App, s_App->camTimeline.CursorAtDistance(
+                                    s_App->camTimeline.totalDistance * 0.5));
+    ctx->Yield(2);
+    IM_CHECK(s_App->camToolInstance != 0);
+    const std::optional<glm::mat4> toolXf =
+        s_App->meshRenderer->GetInstanceTransform(s_App->camToolInstance);
+    IM_CHECK(toolXf.has_value());
+    const glm::vec3 drawnAt = glm::vec3((*toolXf)[3]);
+    const glm::vec3 cursorAt(s_App->camTimeline.PositionAt(s_App->camCursor));
+    IM_CHECK(glm::distance(drawnAt, cursorAt) < 1e-3f);
+    // ...and where the part is: a profile's cutter is never far off the box.
+    IM_CHECK(drawnAt.x > lo.x - pad && drawnAt.x < hi.x + pad);
+    IM_CHECK(drawnAt.y > lo.y - pad && drawnAt.y < hi.y + pad);
+    ui::EndCamPlayback(*s_App);
+    ctx->Yield(2);
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

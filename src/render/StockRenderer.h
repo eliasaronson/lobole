@@ -53,9 +53,10 @@ public:
   }
   [[nodiscard]] bool HasMesh() const { return !m_indices.empty(); }
 
-  // Setup space -> world. An indexed setup (C9) leans the block with the
-  // table, and the stock has to lean with it or it floats beside the part.
-  void SetTransform(const glm::mat4& m) { m_model = m; }
+  // The mesh is drawn where it is given: a job tab draws SETUP space, and
+  // the block is meshed in it. There used to be a model matrix here for an
+  // indexed setup to lean the block with the table -- which stood the stock
+  // upright through a part laid flat once the viewport drew setup space.
   void SetColor(const glm::vec4& c) { m_color = c; }
 
   void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
@@ -142,7 +143,6 @@ private:
   std::vector<StockVertex> m_vertices;
   std::vector<uint32_t> m_indices;
 
-  glm::mat4 m_model = glm::mat4(1.0f);
   glm::vec4 m_color = glm::vec4(0.62f, 0.64f, 0.68f, 1.0f);
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);
