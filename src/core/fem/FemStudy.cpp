@@ -1,5 +1,7 @@
 #include "core/fem/FemStudy.h"
 
+#include <BRepBuilderAPI_Copy.hxx>
+
 #include "cad/CADMaterials.h"
 #include "core/Document.h"
 #include "core/Measure.h"
@@ -134,9 +136,9 @@ std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
   return glm::dvec3(into.x, into.y, into.z);
 }
 
-bool MeshStudy(const Document& doc, Study& study,
-               std::vector<StudyBodyMesh>& out, std::string* error) {
-  out.clear();
+bool PlanStudyMesh(const Document& doc, Study& study, MeshPlan& out,
+                   std::string* error) {
+  out = MeshPlan{};
   study.error.clear();
   auto fail = [&](const std::string& m) {
     study.error = m;
@@ -179,21 +181,55 @@ bool MeshStudy(const Document& doc, Study& study,
 
   const auto& bodies = doc.GetBodies();
   for (const auto& [bodyIndex, settings] : perBody) {
-    auto mesh = Mesh(bodies[bodyIndex].shape.GetShape(), settings, &err);
-    if (!mesh)
-      return fail("body '" + bodies[bodyIndex].name + "': " + err);
+    MeshBodyPlan b;
+    b.bodyIndex = bodyIndex;
+    b.bodyName = bodies[bodyIndex].name;
+    b.shape = BRepBuilderAPI_Copy(bodies[bodyIndex].shape.GetShape()).Shape();
+    b.settings = settings;
+    out.bodies.push_back(std::move(b));
+  }
+  return true;
+}
+
+bool MeshPlanned(const MeshPlan& plan, std::vector<StudyBodyMesh>& out,
+                 std::string* error) {
+  out.clear();
+  std::string err;
+  for (const MeshBodyPlan& b : plan.bodies) {
+    auto mesh = Mesh(b.shape, b.settings, &err);
+    if (!mesh) {
+      if (error)
+        *error = "body '" + b.bodyName + "': " + err;
+      return false;
+    }
     StudyBodyMesh r;
-    r.bodyIndex = bodyIndex;
-    r.bodyName = bodies[bodyIndex].name;
+    r.bodyIndex = b.bodyIndex;
+    r.bodyName = b.bodyName;
     r.mesh = std::move(*mesh);
     out.push_back(std::move(r));
   }
   return true;
 }
 
-bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
-                  std::string* error) {
-  out = StudyJobInput{};
+bool MeshStudy(const Document& doc, Study& study,
+               std::vector<StudyBodyMesh>& out, std::string* error) {
+  out.clear();
+  MeshPlan plan;
+  if (!PlanStudyMesh(doc, study, plan, error))
+    return false;
+  std::string err;
+  if (!MeshPlanned(plan, out, &err)) {
+    study.error = err;
+    if (error)
+      *error = err;
+    return false;
+  }
+  return true;
+}
+
+bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
+               std::string* error) {
+  out = StudyPlan{};
   study.error.clear();
   auto fail = [&](const std::string& m) {
     study.error = m;
@@ -262,17 +298,61 @@ bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
     if (!hasFixed)
       return fail("body '" + body.name + "' has loads but no fixed support");
 
-    auto mesh = Mesh(body.shape.GetShape(), plan.settings, &err);
+    // Density-dependent analyses must fail HERE (prepare has the material
+    // library and study), not on the worker.
+    if (study.type == AnalysisType::Modal && mp.density <= 0.0f)
+      return fail("body '" + body.name +
+                  "': material has no density (needed "
+                  "for modal analysis)");
+    if (study.type != AnalysisType::Modal &&
+        (study.gravity.x != 0 || study.gravity.y != 0 ||
+         study.gravity.z != 0) &&
+        mp.density <= 0.0f)
+      return fail("body '" + body.name +
+                  "': material has no density (needed "
+                  "for gravity)");
+
+    // GPa -> MPa; density kg/m^3 -> tonne/mm^3 for the consistent mm-N-t-s
+    // system (so gravity loads and modal frequencies come out right).
+    StudyBodyPlan bp;
+    bp.bodyIndex = bodyIndex;
+    bp.bodyName = body.name;
+    bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    // A deep copy: the mesher writes triangulation into the faces it
+    // meshes, and this shape may be meshed on a worker while the document's
+    // own is being drawn.
+    bp.shape = BRepBuilderAPI_Copy(body.shape.GetShape()).Shape();
+    bp.settings = plan.settings;
+    for (const auto& [faceIndex, loadIdx] : plan.loads)
+      bp.loads.push_back({faceIndex, study.loads[loadIdx]});
+    out.bodies.push_back(std::move(bp));
+  }
+  return true;
+}
+
+bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
+                      std::string* error) {
+  out = StudyJobInput{};
+  out.type = plan.type;
+  out.numModes = plan.numModes;
+  out.gravity = plan.gravity;
+  std::string err;
+  auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  for (const StudyBodyPlan& bp : plan.bodies) {
+    auto mesh = Mesh(bp.shape, bp.settings, &err);
     if (!mesh)
-      return fail("body '" + body.name + "': " + err);
+      return fail("body '" + bp.bodyName + "': " + err);
 
     // Build fixed-node set and face tractions from the resolved faces. Fixed
     // faces contribute all their boundary-tri nodes; force/pressure faces
     // contribute their tri indices.
     std::set<int> fixedSet;
     std::vector<FaceLoad> faceLoads;
-    for (const auto& [faceIndex, loadIdx] : plan.loads) {
-      const Load& load = study.loads[loadIdx];
+    for (const auto& [faceIndex, load] : bp.loads) {
       if (load.type == LoadType::Fixed) {
         for (const auto& tri : mesh->boundary)
           if (tri.faceIndex == faceIndex)
@@ -290,32 +370,32 @@ bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
       }
     }
     if (fixedSet.empty())
-      return fail("body '" + body.name + "': fixed face meshed to no nodes");
+      return fail("body '" + bp.bodyName + "': fixed face meshed to no nodes");
 
-    // Density-dependent analyses must fail HERE (prepare has the material
-    // library and study), not on the worker.
-    if (study.type == AnalysisType::Modal && mp.density <= 0.0f)
-      return fail("body '" + body.name +
-                  "': material has no density (needed "
-                  "for modal analysis)");
-    if (study.type != AnalysisType::Modal &&
-        (study.gravity.x != 0 || study.gravity.y != 0 ||
-         study.gravity.z != 0) &&
-        mp.density <= 0.0f)
-      return fail("body '" + body.name +
-                  "': material has no density (needed "
-                  "for gravity)");
-
-    // GPa -> MPa; density kg/m^3 -> tonne/mm^3 for the consistent mm-N-t-s
-    // system (so gravity loads and modal frequencies come out right).
     StudyJobBody jb;
-    jb.bodyIndex = bodyIndex;
-    jb.bodyName = body.name;
-    jb.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    jb.bodyIndex = bp.bodyIndex;
+    jb.bodyName = bp.bodyName;
+    jb.mat = bp.mat;
     jb.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
     jb.faceLoads = std::move(faceLoads);
     jb.mesh = std::move(*mesh);
     out.bodies.push_back(std::move(jb));
+  }
+  return true;
+}
+
+bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
+                  std::string* error) {
+  out = StudyJobInput{};
+  StudyPlan plan;
+  if (!PlanStudy(doc, study, plan, error))
+    return false;
+  std::string err;
+  if (!MeshPlannedStudy(plan, out, &err)) {
+    study.error = err;
+    if (error)
+      *error = err;
+    return false;
   }
   return true;
 }

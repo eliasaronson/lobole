@@ -2439,8 +2439,7 @@ int main(int argc, char** argv) {
       pin.wantTextInput = io.WantTextInput;
       pin.cameraAnimating = g_Camera && g_Camera->IsAnimating();
       pin.simPlaying = g_App.camPlaying;
-      pin.jobRunning = g_App.topoJob != nullptr || g_App.studyJob != nullptr ||
-                       g_App.renderJob.active;
+      pin.jobRunning = !g_App.backgroundJobs.empty() || g_App.renderJob.active;
       pin.remoteRequests = static_cast<int>(remoteActivity);
       pin.documentVersion = g_App.assembly   ? g_App.assembly->Version()
                             : g_App.drawing  ? g_App.drawing->Version()

@@ -233,9 +233,11 @@ shipped step 0 the same day (one poll entry point for all three loops, fixing
 a push that never completed behind a collapsed section and a solve stranded by
 leaving Simulation mode) and **phase 1 on 2026-09-02**: the registry,
 `background_jobs`/`cancel_background_job`, and the adaptive pocket cut off
-the frame (the ~7 s freeze is closed — a pick returns in 0.5 ms). Phases 2-4
-migrate the four older jobs and give `mesh_study` its async path; that
-known-bugs entry stays open until then. Plus the absences worth knowing: no
+the frame (the ~7 s freeze is closed — a pick returns in 0.5 ms); **phases 2
+and 3 the same day**: the sync job and the FEM solves moved onto it, a solve
+lands in its own part whichever tab is active, and `mesh_study`/`run_study`
+mesh off the frame (`async: true`) — that known-bugs entry is closed. Phase 4
+(the STEP import) remains. Plus the absences worth knowing: no
 user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
 surfacing or sheet metal. **The standard-parts absence closed 2026-09-01**
 ([parts/plan.md](parts/plan.md), F1 phases 1-5): seven vendored ISO standards,

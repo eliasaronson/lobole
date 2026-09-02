@@ -10,8 +10,9 @@
 > `4cf286be`) — a mate loop closes instead of erroring. **A3's step 0
 > shipped the same day** ([ui/long-operations.md](ui/long-operations.md),
 > `65a4159c`): the two poll bugs and one poll entry point; **phase 1 on
-> 2026-09-02**: the registry and the adaptive pocket off the frame. Phases
-> 2-4 (the older jobs, async `mesh_study`) are planned, not built. A2 and
+> 2026-09-02**: the registry and the adaptive pocket off the frame; **phases
+> 2-3 the same day** (sync and FEM jobs on it, `mesh_study {async}`). Phase 4
+> (the STEP import) is planned, not built. A2 and
 > S1 are findings only and nothing there is scheduled. This is a read of the
 > tree against what the mainstream modellers do, taken after the CAM
 > projection fix (`286ef6b`) and prompted by "what are we missing, what is
@@ -143,8 +144,10 @@ and **step 0 shipped the same day** (`65a4159c`): `ui::PollBackgroundJobs`
 is the one poll entry point, called by all three loops, gated by
 `test_conventions`. **Phase 1 shipped 2026-09-02**: the registry,
 `background_jobs`/`cancel_background_job`, and the adaptive pocket cut off the
-frame through a content-keyed cache — the ~7 s freeze is closed. Async
-`mesh_study` waits for phase 3. Reading the implementations changed the entry. There are **five**, not four
+frame through a content-keyed cache — the ~7 s freeze is closed. **Phases 2-3
+followed the same day**: the sync and FEM jobs on the registry, results landing
+in their own part, and `mesh_study {async}` — the second known-bugs entry this
+section cites is closed too. Reading the implementations changed the entry. There are **five**, not four
 (`RenderJob` and `SyncJob` were missed), and two of them have live bugs that
 have nothing to do with duplication: `PollSync` sits inside a collapsed
 `TreeNode`, so a push never completes if the Sharing section is shut, and the

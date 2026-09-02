@@ -37,6 +37,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 class Camera;
@@ -1301,10 +1302,10 @@ struct AppState {
   char measureVarName[64] = "";
   SimulationState simulation;
   // The active topology-optimization run (TO2), or null when none is running.
-  // A minutes-long SIMP solve on a worker thread; the main thread polls it and
-  // stores the result at completion. One run at a time. See ui::TopoJob and the
-  // Start/Poll/Cancel TopologyRun helpers.
-  std::unique_ptr<TopoJob> topoJob;
+  // The payload of a running SIMP solve ("topo" in `backgroundJobs`), or
+  // null. One study run at a time. The registry owns the thread; this is
+  // what the panel's status reads while it runs (ui/TopoJob.h).
+  std::shared_ptr<TopoJob> topoJob;
 
   // A running fetch/push/clone (F9 C2) is a "sync" entry in
   // `backgroundJobs` (ui/SyncJob.h) since A3 phase 2.
@@ -1321,9 +1322,13 @@ struct AppState {
   GitVault::Divergence divergence;
   std::vector<GitVault::Remote> remotes;
   double remotesStamp = -1.0;
-  // The active async static/modal solve, or null. One study run at a time
-  // across both job slots (see Start{Topology,Study}Run's shared guard).
-  std::unique_ptr<StudyJob> studyJob;
+  // The payload of a running static/modal solve ("study"), or null. One
+  // study run at a time across topo and study (Start*Run's shared guard).
+  std::shared_ptr<StudyJob> studyJob;
+  // The payload of a running mesh_study ("mesh"), and what finished ones
+  // found, by (part slot id, study id) — study_status answers from here.
+  std::shared_ptr<MeshJob> meshJob;
+  std::map<std::pair<uint64_t, uint64_t>, MeshReport> meshReports;
   // Mass-properties center-of-gravity marker (C3): drawn as a small world-space
   // cross when the Properties panel's Mass properties section is open. The
   // panel computes the CoM and stamps it here; the overlay build reads it.

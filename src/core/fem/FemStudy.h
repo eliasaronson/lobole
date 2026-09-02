@@ -156,4 +156,24 @@ struct StudyBodyMesh {
 bool MeshStudy(const Document& doc, Study& study,
                std::vector<StudyBodyMesh>& out, std::string* error);
 
+// MeshStudy split at the thread boundary (docs/ui/long-operations.md, phase
+// 3): PlanStudyMesh does everything that needs the Document — expressions,
+// refs, per-body settings — and DEEP-COPIES each shape, so MeshPlanned can
+// run on a worker with nothing shared: Netgen attaches triangulation to the
+// faces it meshes, which on the document's own shape would be a write under
+// the renderer's reads. MeshStudy == PlanStudyMesh + MeshPlanned.
+struct MeshBodyPlan {
+  int bodyIndex = -1;
+  std::string bodyName;
+  TopoDS_Shape shape; // a copy, owned here
+  MeshSettings settings;
+};
+struct MeshPlan {
+  std::vector<MeshBodyPlan> bodies;
+};
+bool PlanStudyMesh(const Document& doc, Study& study, MeshPlan& out,
+                   std::string* error);
+bool MeshPlanned(const MeshPlan& plan, std::vector<StudyBodyMesh>& out,
+                 std::string* error);
+
 } // namespace fem

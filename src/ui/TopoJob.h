@@ -16,65 +16,67 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <thread>
+#include <vector>
 
 namespace ui {
 
+// The FEM jobs' payloads (docs/ui/long-operations.md, phase 3). The thread,
+// `done` and `cancel` live on the registry's BackgroundJob; these are what
+// the worker reads and writes and what the panel's status reads while it
+// runs. Each remembers the PART SLOT it was started from, so the result is
+// stored into that document even if another tab is active when it lands —
+// the case step 0 could not fix while the polls took "the active document".
 struct TopoJob {
   uint64_t studyId = 0;
+  uint64_t partSlotId = 0;
   int maxIterations = 0;
-
-  // Published by the worker each iteration, read by the main thread.
   std::atomic<int> iteration{0};
   std::atomic<double> compliance{0.0};
   std::atomic<double> maxChange{0.0};
   std::atomic<double> volumeFraction{0.0};
-  std::atomic<bool> cancel{false}; // main sets -> worker stops (keeps best)
-  std::atomic<bool> done{false};   // worker sets when finished/cancelled/failed
-
-  // The immutable input the worker optimizes over; the result/error it writes.
-  // Read by the main thread only after `done` (and the join).
   fem::TopoInput input;
   std::optional<fem::TopoResult> result;
   std::string error;
-
-  // The linear solver for the run (the GPU seam), created on the MAIN thread
-  // in StartTopologyRun (so solverName is set before the worker exists), then
-  // used only by the worker — Vulkan allows the handoff as long as a single
-  // thread uses the context at a time. Null = the built-in CPU path.
   std::unique_ptr<fem::TopoLinearSolver> solver;
   std::string solverName; // "gpu: <device>" or "cpu (<why>)" — set pre-launch
   std::chrono::steady_clock::time_point started;
-
-  std::thread thread;
-
-  // On teardown (or replacing the job), stop the worker and join — a joinable
-  // std::thread that is destroyed would std::terminate the process.
-  ~TopoJob() {
-    cancel.store(true);
-    if (thread.joinable())
-      thread.join();
-  }
 };
 
-// A running static/modal solve on a worker thread (the async path that keeps
-// a minutes-long CG solve from blocking the app and timing out remote
-// clients). Same immutable-snapshot rule as TopoJob: PrepareStudy runs on
-// the main thread, the worker touches only pure fem data. NOT cancellable —
-// the linear solver has no interruption points; teardown blocks on the join.
+// A static/modal solve. The plan is made on the main thread (PlanStudy);
+// the worker meshes it (MeshPlannedStudy) and solves — so a fine mesh no
+// longer holds a frame either.
 struct StudyJob {
   uint64_t studyId = 0;
+  uint64_t partSlotId = 0;
+  fem::StudyPlan plan;
   fem::StudyJobInput input;
-  fem::StudyRuntime runtime; // read by main only after `done` + join
+  fem::StudyRuntime runtime; // read by main only after the join
   std::string error;
-  std::atomic<bool> done{false};
   std::chrono::steady_clock::time_point started;
-  std::thread thread;
+};
 
-  ~StudyJob() {
-    if (thread.joinable())
-      thread.join();
-  }
+// mesh_study off the frame: the same plan/mesh split, no solve. What it
+// found is kept as a MeshReport keyed by (part slot, study) so study_status
+// can answer for it.
+struct MeshJob {
+  uint64_t studyId = 0;
+  uint64_t partSlotId = 0;
+  fem::MeshPlan plan;
+  std::vector<fem::StudyBodyMesh> meshes;
+  std::string error;
+  std::chrono::steady_clock::time_point started;
+};
+
+struct MeshReport {
+  struct Body {
+    std::string name;
+    size_t nodes = 0;
+    size_t elements = 0;
+    double worstQuality = 0.0;
+  };
+  std::vector<Body> bodies;
+  std::string error; // non-empty = the meshing failed, and why
+  double seconds = 0.0;
 };
 
 } // namespace ui

@@ -244,10 +244,10 @@ TEST_CASE("a background job is polled by the loop, never by a panel",
   //
   // The REMOTE layer is deliberately exempt: a handler must apply a finished
   // result before it answers a question about it, so it polls on the way in.
-  // (PollSync left the list 2026-09-02: the sync job moved onto the registry
-  // — A3 phase 2 — and has no join of its own to misplace.)
-  const std::vector<std::string> joins = {"PollImport", "PollTopologyRun",
-                                          "PollStudyRun", "PumpRenderJob"};
+  // (PollSync, PollTopologyRun and PollStudyRun left the list 2026-09-02:
+  // those jobs moved onto the registry — A3 phases 2 and 3 — and have no
+  // join of their own to misplace.)
+  const std::vector<std::string> joins = {"PollImport", "PumpRenderJob"};
   std::vector<std::string> offenders;
   for (const SourceFile& f : SourcesUnder("src/ui", ".cpp")) {
     if (f.path.filename() == "BackgroundJobs.cpp")

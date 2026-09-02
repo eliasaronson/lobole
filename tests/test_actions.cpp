@@ -44,6 +44,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
+#include "core/fem/FemStudy.h"
 #include "core/io/GitVault.h"
 #include "core/parts/FastenerTable.h"
 #include "ui/AppActions.h"
@@ -57,6 +58,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/JobActions.h"
 #include "ui/Overlays.h"
+#include "ui/SimulationActions.h"
 #include "ui/SyncJob.h"
 #include "ui/TerminalPanel.h"
 
@@ -1891,6 +1893,89 @@ TEST_CASE("a fetch runs on the registry and reports through the loop",
   CHECK(state.syncFailed); // there is no origin
   CHECK_FALSE(state.syncMessage.empty());
   std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("a study solved on the registry lands in its own part, not the "
+          "active tab",
+          "[actions][jobs][fem]") {
+  // A3 phase 3. The FEM polls used to take "the active document", so a solve
+  // started on a part tab and left for another tab was not reaped until you
+  // came back — and would have been stored into the WRONG document had the
+  // poll not been guarded. The job now remembers its part slot.
+  ui::AppState state = MakeHeadlessState();
+  Document& doc = *state.document;
+  auto bar =
+      std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100, 10, 10);
+  bar->SetMaterial("steel");
+  doc.AddFeature(std::move(bar));
+  doc.Regenerate();
+  REQUIRE(doc.GetBodies().size() == 1);
+  const uint64_t cb = doc.GetBodies()[0].createdBy;
+  auto face = [&](int i) {
+    return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
+  };
+  fem::Study& s = doc.AddStudy("Bar");
+  s.meshSize = 6.0;
+  fem::Load fx;
+  fx.id = doc.AllocateId();
+  fx.type = fem::LoadType::Fixed;
+  fx.face = face(0);
+  s.loads.push_back(fx);
+  fem::Load fo;
+  fo.id = doc.AllocateId();
+  fo.type = fem::LoadType::Force;
+  fo.face = face(1);
+  fo.magnitude = 2000.0;
+  fo.direction = glm::dvec3(1, 0, 0);
+  s.loads.push_back(fo);
+  const uint64_t studyId = s.id;
+  const uint64_t barSlot = state.parts[state.activePart].id;
+
+  std::string err;
+  REQUIRE(ui::StartStudyRun(state, doc, studyId, &err));
+  CHECK(ui::GetStudyRunStatus(state, studyId).running);
+  CHECK(ui::BackgroundJobRunning(state, "study"));
+  CHECK_FALSE(ui::StartStudyRun(state, doc, studyId, &err)); // one at a time
+  {
+    const std::vector<ui::BackgroundJobInfo> jobs =
+        ui::ListBackgroundJobs(state);
+    REQUIRE(jobs.size() == 1);
+    CHECK(jobs[0].kind == "study");
+    CHECK(jobs[0].label == "Solving 'Bar'");
+  }
+
+  // Leave for another part while it solves.
+  ui::AddPart(state, "Other");
+  REQUIRE(state.parts[state.activePart].id != barSlot);
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "study"); });
+  CHECK_FALSE(ui::GetStudyRunStatus(state, studyId).running);
+  CHECK(state.studyJob == nullptr);
+
+  // The bar has its results; the other part has nothing of the sort.
+  Document* barDoc = ui::PartDocById(state, barSlot);
+  REQUIRE(barDoc != nullptr);
+  REQUIRE(barDoc != state.document.get());
+  const fem::StudyRuntime* rt = barDoc->StudyResults(studyId);
+  REQUIRE(rt != nullptr);
+  CHECK(rt->bodies.size() == 1);
+  CHECK(rt->bodies[0].results.maxVonMises > 0.0);
+  CHECK(barDoc->FindStudy(studyId)->error.empty());
+  CHECK(state.document->StudyResults(studyId) == nullptr);
+
+  // mesh_study's async path: the plan on this thread, the mesh on a worker,
+  // the report where study_status reads it.
+  REQUIRE(ui::StartMeshRun(state, *barDoc, studyId, &err));
+  CHECK(ui::GetMeshRunStatus(state, studyId).running);
+  CHECK(ui::MeshReportFor(state, *barDoc, studyId) == nullptr);
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "mesh"); });
+  const ui::MeshReport* report = ui::MeshReportFor(state, *barDoc, studyId);
+  REQUIRE(report != nullptr);
+  CHECK(report->error.empty());
+  REQUIRE(report->bodies.size() == 1);
+  CHECK(report->bodies[0].name == "Bar");
+  CHECK(report->bodies[0].nodes > 0);
+  CHECK(report->bodies[0].elements > 0);
+  CHECK(ui::MeshReportFor(state, *state.document, studyId) == nullptr);
 }
 
 #ifdef HAVE_CAM

@@ -2086,12 +2086,10 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
   s_ViewportSize = ImVec2(state.viewportSize.x, state.viewportSize.y);
 #endif
 
-  // Store a finished async topology run (TO2) even if the client never polls
-  // study_status — this is the app's per-tick main-thread join point.
-  if (state.document) {
-    ui::PollTopologyRun(state, *state.document);
-    ui::PollStudyRun(state, *state.document);
-  }
+  // Store a finished background job (a solve, a mesh, an adaptive pass…)
+  // even if the client never polls for it — this is the RPC pump's own
+  // main-thread join point, and it applies before it answers.
+  ui::ReapBackgroundJobs(state);
 
   // Finish an in-flight UI action once the engine is done with it
 #ifdef HAVE_TEST_ENGINE

@@ -61,7 +61,9 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
 // and stores the result (or the study error). Cheap no-op otherwise — call it
 // each frame and before reporting study status. Defined in
 // SimulationActions.cpp.
-void PollTopologyRun(AppState& state, Document& doc);
+// (No PollTopologyRun since A3 phase 3: the registry joins the worker and
+// the job's own `finish` stores the result into the part it was started
+// from, whichever tab is active.)
 
 // Requests cancellation of the run for `studyId` (keeps best-so-far). Returns
 // false if no such run is active.
@@ -75,7 +77,19 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
                    std::string* error);
 
-void PollStudyRun(AppState& state, Document& doc);
+// mesh_study off the frame: plan on this thread, mesh on a worker, and keep
+// what it found as a MeshReport for study_status (`meshing: true` while it
+// runs, then `mesh: {...}`). One mesh run at a time, per study.
+bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
+                  std::string* error);
+struct MeshRunStatus {
+  bool running = false;
+  double elapsedSeconds = 0.0;
+};
+MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId);
+// The last finished mesh run's report for `studyId` of `doc`, or null.
+const MeshReport* MeshReportFor(const AppState& state, const Document& doc,
+                                uint64_t studyId);
 
 StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId);
 

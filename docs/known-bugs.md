@@ -96,7 +96,16 @@ re-runs libarea, and time the verification pass (207 ms at the panel's
 
 ---
 
-## mesh_study/run_study are synchronous past the client's default timeout
+## mesh_study/run_study are synchronous past the client's default timeout — FIXED 2026-09-02
+
+**Fixed** by [ui/long-operations.md](ui/long-operations.md) phase 3:
+`mesh_study {async: true}` runs the mesh on a "mesh" background job and
+`study_status` reports `meshing: true` until it lands, then `mesh: {bodies…}`.
+`run_study {async: true}` now meshes off the frame as well (it used to mesh on
+the main thread before handing the solve to its worker), and both land their
+results in the part they were started from whichever tab is active. The
+synchronous forms remain for callers who want them; the describe rows say
+which to use. Left as written below for the record.
 
 Found 2026-08-26: a modal study on a baffle with six Ø3 pilot holes meshed
 to 41k tets; the blocking `run_study` outlived designer_remote's 60 s
@@ -107,10 +116,7 @@ but nothing steers a caller there, and `mesh_study` has no async at all.
 **Partially fixed 2026-08-26** (friction round): `designer_remote.request`
 takes a per-call timeout and mesh_study's describe doc names the trap.
 Remaining: an async path for `mesh_study` itself, and/or a server-side
-hint when a synchronous solve exceeds ~10 s. **The mechanism now exists**
-([ui/long-operations.md](ui/long-operations.md), phase 1 shipped
-2026-09-02: a job registry with `background_jobs`/`cancel_background_job`);
-`mesh_study` is phase 3's adopter alongside the study runs.
+hint when a synchronous solve exceeds ~10 s.
 
 ---
 

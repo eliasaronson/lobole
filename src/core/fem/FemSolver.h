@@ -175,6 +175,31 @@ struct StudyJobInput {
 };
 bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
                   std::string* error);
+
+// PrepareStudy split one step further, at the meshing (docs/ui/
+// long-operations.md, phase 3): PlanStudy keeps everything that needs the
+// Document or the material library on the main thread and hands over deep
+// copies of the shapes plus plain loads; MeshPlannedStudy meshes them and
+// derives the fixed nodes and face tractions from the mesh it made, and is
+// safe on a worker. PrepareStudy == PlanStudy + MeshPlannedStudy.
+struct StudyBodyPlan {
+  int bodyIndex = 0;
+  std::string bodyName;
+  TopoDS_Shape shape; // a copy, owned here
+  MeshSettings settings;
+  Material mat;
+  std::vector<std::pair<int, Load>> loads; // (face index, the load)
+};
+struct StudyPlan {
+  AnalysisType type = AnalysisType::Static;
+  int numModes = 8;
+  glm::dvec3 gravity{0.0};
+  std::vector<StudyBodyPlan> bodies;
+};
+bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
+               std::string* error);
+bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
+                      std::string* error);
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
                         std::string* error);
 

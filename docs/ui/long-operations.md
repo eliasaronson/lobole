@@ -3,8 +3,10 @@
 > Status: **step 0 SHIPPED 2026-09-01** (the two bugs, and the single poll
 > entry point they needed); **phase 1 SHIPPED 2026-09-02** (the registry,
 > `background_jobs`/`cancel_background_job`, and the CAM adaptive pocket off
-> the frame — see [As built](#as-built-phase-1-2026-09-02)); phases 2-4
-> planned. [Read against the tree](#read-against-the-tree-2026-09-02) records
+> the frame — see [As built](#as-built-phase-1-2026-09-02)); **phases 2 and
+> 3 SHIPPED the same day** (the sync job, then the FEM solves and
+> `mesh_study` — see [As built, phases 2-3](#as-built-phases-2-3-2026-09-02));
+> phase 4 (ImportJob) planned. [Read against the tree](#read-against-the-tree-2026-09-02) records
 > what the code grew between the plan and the build. Written after reading all five
 > existing implementations, which is what changed the plan: the review
 > (capability-review-2026-08-31.md, A3) said there were four cases with three
@@ -384,6 +386,45 @@ Not done here, on purpose: phases 2-4 (SyncJob, TopoJob + StudyJob with
 `mesh_study` as the free adopter, ImportJob) — each a migration onto a shape
 now proven once. And the perf HUD does not yet show the registry; the panel
 row does.
+
+## As built, phases 2-3 (2026-09-02)
+
+- **Phase 2, SyncJob** (`1ef01cbf`): the struct is plain data — the
+  worker's whole world, copied in and read back after the join the registry
+  does. Its thread and completion are a "sync" entry whose `finish` applies
+  what `PollSync` used to (divergence, the merge half of a pull, opening a
+  clone). `SyncRunning` asks the registry; the `syncJob` slot is gone. The
+  shape carried it without change, which was the point of doing it second.
+- **Phase 3, TopoJob + StudyJob**, and the affinity fix step 0 could not
+  make: each payload records the **part slot id** it was started from and
+  its `finish` resolves that slot (`PartDocById`), so a solve started on a
+  part tab lands in that part whichever tab is active — or is dropped with a
+  warning if the tab was closed. `state.topoJob`/`studyJob` stay as
+  `shared_ptr` payloads the panel's status reads while the job runs; the
+  registry owns the thread. The RPC pump and the simulation handlers call
+  `ReapBackgroundJobs` where they used to poll two functions with "the
+  active document". `cancel_study` sets the "topo" job's cancel.
+- **Meshing left the frame too.** `PrepareStudy` was already split at the
+  solve, but it MESHED on the main thread, so an async `run_study` still
+  held a frame for the length of a Netgen mesh. It is now `PlanStudy`
+  (expressions, refs, materials, and a **deep copy** of each shape) plus
+  `MeshPlannedStudy` (mesh, fixed nodes, tractions — plain data, on the
+  worker). The copy is not optional: Netgen attaches triangulation to the
+  faces it meshes, which on the document's own shape is a write under the
+  renderer's reads. `MeshStudy` got the same split (`PlanStudyMesh` +
+  `MeshPlanned`), and `test_fem` holds both pairs to their inline originals
+  — same nodes, tets, supports and tractions, and `!IsSame` on the shape.
+- **`mesh_study {async: true}`** is a "mesh" job. `study_status` says
+  `{running, meshing: true}` until it lands and then carries `mesh: {bodies,
+  seconds, error?}` from a `MeshReport` keyed by (part slot, study). This
+  closes the known-bugs entry about `mesh_study` outliving the client's
+  socket timeout: the synchronous form still exists for a caller who wants
+  it, and the describe row now says which to use.
+- Not done: `PrepareTopology` still meshes on the main thread (the same
+  split would apply; no one has hit it). The `perf HUD` does not list the
+  registry. Phase 4 (ImportJob) is next: the modal keeps reading its own
+  payload, the sliced materialize becomes a `finish` that returns false
+  until the last part.
 
 ## Out of scope
 

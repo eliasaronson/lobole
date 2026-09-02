@@ -1,10 +1,8 @@
 #include "ui/BackgroundJobs.h"
 
-#include "core/Document.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/ImportJob.h"
-#include "ui/SimulationActions.h"
 
 #include <algorithm>
 #include <chrono>
@@ -28,22 +26,11 @@ void PollBackgroundJobs(AppState& state) {
   // (A git fetch/push/clone is a "sync" entry in the registry below — A3
   // phase 2 — and was the one polled from a collapsible TreeNode.)
 
-  // The FEM jobs need a document; an assembly tab has none. Guarding here
-  // rather than inside each is deliberate: `PollTopologyRun` takes a
-  // `Document&`, and inventing a null-document meaning for it would push the
-  // question into the domain that has no answer for it.
-  //
-  // A solve started on a part tab and then left for an assembly tab is
-  // therefore still not reaped until you return — which is the same shape as
-  // the bug above and is NOT fixed here. It needs the job to stop being
-  // addressed by "the active document", which is the registry's business
-  // (docs/ui/long-operations.md, phase 3). Named rather than left to be
-  // rediscovered.
-  if (Document* doc = state.document.get()) {
-    PollTopologyRun(state, *doc);
-    PollStudyRun(state, *doc);
-  }
-
+  // Everything else — the FEM solves and meshes, a git sync, an adaptive
+  // pass — is a registry entry whose `finish` knows which document it
+  // belongs to. (The FEM polls used to take "the active document", so a
+  // solve started on a part tab was not reaped while an assembly tab was
+  // active; phase 3 gave the job its part slot id instead.)
   ReapBackgroundJobs(state);
 }
 

@@ -12,10 +12,12 @@
 #include "render/MeshRenderer.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
+#include "ui/BackgroundJobs.h"
 #ifdef HAVE_FEM_GPU
 #include "femgpu/TopoGpuSolver.h"
 #endif
 
+#include <OSD.hxx>
 #include <glm/glm.hpp>
 
 #include <algorithm>
@@ -23,6 +25,7 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ui {
@@ -84,9 +87,57 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
   doc.StoreStudyResults(studyId, std::move(rt));
   return true;
 }
+namespace {
+
+// The part slot `doc` belongs to: the active one (its slot holds no
+// document while it is active) or a stashed one. 0 when `doc` is not a part
+// tab's document at all.
+uint64_t SlotIdOfDoc(const AppState& state, const Document& doc) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const PartSlot& slot = state.parts[i];
+    if (slot.kind != DocKind::Part)
+      continue;
+    const Document* d = slot.doc                ? slot.doc.get()
+                        : i == state.activePart ? state.document.get()
+                                                : nullptr;
+    if (d == &doc)
+      return slot.id;
+  }
+  return 0;
+}
+
+// Where a finished job stores its result: the document it was started
+// from, even when another tab is active now. Null when that tab is gone.
+Document* JobDocument(AppState& state, uint64_t partSlotId, const char* what) {
+  Document* doc = PartDocById(state, partSlotId);
+  if (doc == nullptr)
+    LOG_WARN("{}: the part it ran on was closed before it finished; the "
+             "result is dropped",
+             what);
+  return doc;
+}
+
+std::string StudyLabel(const Document& doc, uint64_t studyId,
+                       const char* verb) {
+  const fem::Study* s = doc.FindStudy(studyId);
+  return std::string(verb) + " '" +
+         (s != nullptr && !s->name.empty()
+              ? s->name
+              : "study " + std::to_string(studyId)) +
+         "'";
+}
+
+double Elapsed(std::chrono::steady_clock::time_point since) {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - since)
+      .count();
+}
+
+} // namespace
+
 bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
                       std::string* error) {
-  if (state.topoJob) {
+  if (BackgroundJobRunning(state, "topo") ||
+      BackgroundJobRunning(state, "study")) {
     if (error)
       *error = "a study run is already in progress";
     return false;
@@ -104,10 +155,11 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   }
   // Prepare the immutable snapshot on this (main) thread — meshing needs the
   // Document. Everything past this point is pure fem data.
-  auto job = std::make_unique<TopoJob>();
+  auto job = std::make_shared<TopoJob>();
   if (!fem::PrepareTopology(doc, *s, job->input, error))
     return false;
   job->studyId = studyId;
+  job->partSlotId = SlotIdOfDoc(state, doc);
   job->maxIterations = job->input.params.maxIterations;
 
   // Pick the linear solver here on the main thread, so study_status can
@@ -136,53 +188,61 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
 #endif
   job->started = std::chrono::steady_clock::now();
 
-  TopoJob* j = job.get(); // stable: the job outlives the thread (joined first)
-  job->thread = std::thread([j]() {
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "topo";
+  bg->label = StudyLabel(doc, studyId, "Optimizing");
+  bg->cancellable = true; // between iterations, keeping the best so far
+  BackgroundJob* raw = bg.get();
+  TopoJob* j = job.get(); // the shared_ptr below outlives the thread
+  bg->thread = std::thread([j, job, raw]() {
     std::string err;
     auto res = fem::TopologyOptimize(
         j->input.mesh, j->input.material, j->input.fixedNodes, j->input.loads,
         j->input.params, &err,
-        [j](const fem::TopoProgress& p) {
+        [j, raw](const fem::TopoProgress& p) {
           j->iteration.store(p.iteration, std::memory_order_relaxed);
           j->compliance.store(p.compliance, std::memory_order_relaxed);
           j->maxChange.store(p.maxChange, std::memory_order_relaxed);
           j->volumeFraction.store(p.volumeFraction, std::memory_order_relaxed);
-          return !j->cancel.load(std::memory_order_relaxed);
+          if (j->maxIterations > 0)
+            raw->fraction.store(static_cast<double>(p.iteration) /
+                                j->maxIterations);
+          return !raw->cancel.load(std::memory_order_relaxed);
         },
         j->input.keepNodes, j->solver.get());
     if (res)
       j->result = std::move(*res);
     else
       j->error = err;
-    j->done.store(true, std::memory_order_release);
+    raw->done.store(true); // last
   });
-  state.topoJob = std::move(job);
+  bg->finish = [job](AppState& s) {
+    TopoJob& j = *job;
+    if (Document* target =
+            JobDocument(s, j.partSlotId, "topology optimization")) {
+      if (j.result) {
+        fem::StudyRuntime rt = fem::MakeTopoRuntime(j.input, *j.result);
+        rt.solvedAtVersion = target->Version();
+        // Name the solver that actually did the work: TopologyOptimize drops
+        // an external solver that fails mid-run and finishes on the CPU, and
+        // a result labelled with the GPU it started on would be a lie.
+        rt.solver = j.result->solverFallback.empty()
+                        ? j.solverName
+                        : "cpu (" + j.solverName +
+                              " failed: " + j.result->solverFallback + ")";
+        rt.solveSeconds = Elapsed(j.started);
+        target->StoreStudyResults(j.studyId, std::move(rt));
+      } else if (fem::Study* st = target->FindStudy(j.studyId)) {
+        st->error = "body '" + j.input.bodyName + "': " + j.error;
+      }
+    }
+    if (s.topoJob == job)
+      s.topoJob.reset();
+    return true;
+  };
+  state.topoJob = job;
+  StartBackgroundJob(state, std::move(bg));
   return true;
-}
-
-void PollTopologyRun(AppState& state, Document& doc) {
-  if (!state.topoJob || !state.topoJob->done.load(std::memory_order_acquire))
-    return;
-  TopoJob& job = *state.topoJob;
-  job.thread.join(); // finished; consume the result (single join point)
-  if (job.result) {
-    fem::StudyRuntime rt = fem::MakeTopoRuntime(job.input, *job.result);
-    rt.solvedAtVersion = doc.Version();
-    // Name the solver that actually did the work: TopologyOptimize drops an
-    // external solver that fails mid-run and finishes on the CPU, and a
-    // result labelled with the GPU it started on would be a lie.
-    rt.solver = job.result->solverFallback.empty()
-                    ? job.solverName
-                    : "cpu (" + job.solverName +
-                          " failed: " + job.result->solverFallback + ")";
-    rt.solveSeconds = std::chrono::duration<double>(
-                          std::chrono::steady_clock::now() - job.started)
-                          .count();
-    doc.StoreStudyResults(job.studyId, std::move(rt));
-  } else if (fem::Study* s = doc.FindStudy(job.studyId)) {
-    s->error = "body '" + job.input.bodyName + "': " + job.error;
-  }
-  state.topoJob.reset();
 }
 
 bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
@@ -192,7 +252,8 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
       *error = m;
     return false;
   };
-  if (state.topoJob || state.studyJob)
+  if (BackgroundJobRunning(state, "topo") ||
+      BackgroundJobRunning(state, "study"))
     return fail("a study run is already in progress");
   fem::Study* s = doc.FindStudy(studyId);
   if (!s)
@@ -200,68 +261,142 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   if (s->type == fem::AnalysisType::Topology)
     return fail("topology studies run through the topology path");
 
-  // Prepare (expressions, face refs, meshing) on this thread — it needs the
-  // Document. The worker only ever sees the pure snapshot.
-  auto job = std::make_unique<StudyJob>();
-  if (!fem::PrepareStudy(doc, *s, job->input, error))
+  // Plan on this thread — expressions, face refs, materials need the
+  // Document. The worker meshes the plan's copied shapes and solves; it
+  // never sees the Document (docs/ui/long-operations.md, phase 3).
+  auto job = std::make_shared<StudyJob>();
+  if (!fem::PlanStudy(doc, *s, job->plan, error))
     return false;
   job->studyId = studyId;
+  job->partSlotId = SlotIdOfDoc(state, doc);
   job->started = std::chrono::steady_clock::now();
-  StudyJob* j = job.get(); // outlives the thread (joined in Poll/dtor)
-  job->thread = std::thread([j]() {
+
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "study";
+  bg->label = StudyLabel(doc, studyId, "Solving");
+  bg->cancellable = false; // the linear solver has no interruption points
+  BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([job, raw]() {
+    OSD::SetSignal(Standard_False); // OCC's handlers are per thread
     std::string err;
-    if (!fem::SolvePreparedStudy(j->input, j->runtime, &err))
-      j->error = err.empty() ? "solve failed" : err;
-    j->done.store(true, std::memory_order_release);
+    if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
+      job->error = err.empty() ? "meshing failed" : err;
+    else if (!fem::SolvePreparedStudy(job->input, job->runtime, &err))
+      job->error = err.empty() ? "solve failed" : err;
+    raw->done.store(true); // last
   });
-  state.studyJob = std::move(job);
+  bg->finish = [job](AppState& s) {
+    StudyJob& j = *job;
+    if (Document* target = JobDocument(s, j.partSlotId, "study solve")) {
+      if (j.error.empty()) {
+        j.runtime.solvedAtVersion = target->Version();
+        j.runtime.solver = "cpu (Eigen CG-IC)";
+        j.runtime.solveSeconds = Elapsed(j.started);
+        target->StoreStudyResults(j.studyId, std::move(j.runtime));
+      } else if (fem::Study* st = target->FindStudy(j.studyId)) {
+        st->error = j.error;
+      }
+    }
+    if (s.studyJob == job)
+      s.studyJob.reset();
+    return true;
+  };
+  state.studyJob = job;
+  StartBackgroundJob(state, std::move(bg));
   return true;
 }
 
-void PollStudyRun(AppState& state, Document& doc) {
-  if (!state.studyJob || !state.studyJob->done.load(std::memory_order_acquire))
-    return;
-  StudyJob& job = *state.studyJob;
-  job.thread.join(); // finished; consume the result (single join point)
-  if (job.error.empty()) {
-    job.runtime.solvedAtVersion = doc.Version();
-    job.runtime.solver = "cpu (Eigen CG-IC)";
-    job.runtime.solveSeconds =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                      job.started)
-            .count();
-    doc.StoreStudyResults(job.studyId, std::move(job.runtime));
-  } else if (fem::Study* s = doc.FindStudy(job.studyId)) {
-    s->error = job.error;
-  }
-  state.studyJob.reset();
+bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
+                  std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (BackgroundJobRunning(state, "mesh"))
+    return fail("a mesh run is already in progress");
+  fem::Study* s = doc.FindStudy(studyId);
+  if (!s)
+    return fail("no such study");
+  auto job = std::make_shared<MeshJob>();
+  if (!fem::PlanStudyMesh(doc, *s, job->plan, error))
+    return false;
+  job->studyId = studyId;
+  job->partSlotId = SlotIdOfDoc(state, doc);
+  job->started = std::chrono::steady_clock::now();
+  state.meshReports.erase({job->partSlotId, studyId});
+
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "mesh";
+  bg->label = StudyLabel(doc, studyId, "Meshing");
+  bg->cancellable = false;
+  BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([job, raw]() {
+    OSD::SetSignal(Standard_False);
+    std::string err;
+    if (!fem::MeshPlanned(job->plan, job->meshes, &err))
+      job->error = err.empty() ? "meshing failed" : err;
+    raw->done.store(true); // last
+  });
+  bg->finish = [job](AppState& s) {
+    MeshJob& j = *job;
+    MeshReport report;
+    report.error = j.error;
+    report.seconds = Elapsed(j.started);
+    for (const fem::StudyBodyMesh& bm : j.meshes)
+      report.bodies.push_back({bm.bodyName, bm.mesh.stats.nodeCount,
+                               bm.mesh.stats.tetCount,
+                               bm.mesh.stats.worstQuality});
+    s.meshReports[{j.partSlotId, j.studyId}] = std::move(report);
+    if (!j.error.empty())
+      if (Document* target = PartDocById(s, j.partSlotId))
+        if (fem::Study* st = target->FindStudy(j.studyId))
+          st->error = j.error;
+    if (s.meshJob == job)
+      s.meshJob.reset();
+    return true;
+  };
+  state.meshJob = job;
+  StartBackgroundJob(state, std::move(bg));
+  return true;
 }
 
 StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
   StudyRunStatus st;
   const StudyJob* job = state.studyJob.get();
-  if (!job || job->studyId != studyId ||
-      job->done.load(std::memory_order_acquire))
+  if (!job || job->studyId != studyId || !BackgroundJobRunning(state, "study"))
     return st;
   st.running = true;
-  st.elapsedSeconds = std::chrono::duration<double>(
-                          std::chrono::steady_clock::now() - job->started)
-                          .count();
+  st.elapsedSeconds = Elapsed(job->started);
   return st;
+}
+
+MeshRunStatus GetMeshRunStatus(const AppState& state, uint64_t studyId) {
+  MeshRunStatus st;
+  const MeshJob* job = state.meshJob.get();
+  if (!job || job->studyId != studyId || !BackgroundJobRunning(state, "mesh"))
+    return st;
+  st.running = true;
+  st.elapsedSeconds = Elapsed(job->started);
+  return st;
+}
+
+const MeshReport* MeshReportFor(const AppState& state, const Document& doc,
+                                uint64_t studyId) {
+  const auto it = state.meshReports.find({SlotIdOfDoc(state, doc), studyId});
+  return it == state.meshReports.end() ? nullptr : &it->second;
 }
 
 bool CancelTopologyRun(AppState& state, uint64_t studyId) {
   if (!state.topoJob || state.topoJob->studyId != studyId)
     return false;
-  state.topoJob->cancel.store(true, std::memory_order_relaxed);
-  return true;
+  return CancelBackgroundJobs(state, "topo") > 0;
 }
 
 TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
   TopoRunStatus st;
   const TopoJob* job = state.topoJob.get();
-  if (!job || job->studyId != studyId ||
-      job->done.load(std::memory_order_acquire))
+  if (!job || job->studyId != studyId || !BackgroundJobRunning(state, "topo"))
     return st; // running == false
   st.running = true;
   st.iteration = job->iteration.load(std::memory_order_relaxed);
@@ -270,9 +405,7 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
   st.maxChange = job->maxChange.load(std::memory_order_relaxed);
   st.volumeFraction = job->volumeFraction.load(std::memory_order_relaxed);
   st.solver = job->solverName; // written before the thread launched
-  st.elapsedSeconds = std::chrono::duration<double>(
-                          std::chrono::steady_clock::now() - job->started)
-                          .count();
+  st.elapsedSeconds = Elapsed(job->started);
   return st;
 }
 

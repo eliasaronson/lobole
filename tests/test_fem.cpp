@@ -1069,3 +1069,80 @@ TEST_CASE("a study refuses an unknown analysis or load type", "[fem][enums]") {
       DocumentIO::StudyFromJson(withLoad),
       Catch::Matchers::ContainsSubstring("unknown load type 'forse'"));
 }
+
+// ---------------------------------------------------------------------------
+// docs/ui/long-operations.md, phase 3: PrepareStudy and MeshStudy are split
+// at the meshing so a worker can do that half from copied shapes. The split
+// must be invisible — same nodes, same tets, same supports and tractions —
+// and the copy must be a copy, or the worker writes triangulation into the
+// document's own faces under the renderer.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
+          "[fem][mesh][jobs]") {
+  Document doc;
+  auto bar =
+      std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100, 10, 10);
+  bar->SetMaterial("steel");
+  doc.AddFeature(std::move(bar));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const uint64_t cb = doc.GetBodies()[0].createdBy;
+  auto face = [&](int i) {
+    return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
+  };
+  fem::Study& s = doc.AddStudy("Bar");
+  s.meshSize = 6.0;
+  fem::Load fx;
+  fx.id = doc.AllocateId();
+  fx.type = fem::LoadType::Fixed;
+  fx.face = face(0);
+  s.loads.push_back(fx);
+  fem::Load fo;
+  fo.id = doc.AllocateId();
+  fo.type = fem::LoadType::Force;
+  fo.face = face(1);
+  fo.magnitude = 2000.0;
+  fo.direction = glm::dvec3(1, 0, 0);
+  s.loads.push_back(fo);
+  fem::Refinement ref;
+  ref.face = face(2);
+  ref.size = 3.0;
+  s.refinements.push_back(ref);
+
+  std::string err;
+  fem::StudyJobInput whole;
+  REQUIRE(fem::PrepareStudy(doc, s, whole, &err));
+  REQUIRE(whole.bodies.size() == 1);
+
+  fem::StudyPlan plan;
+  REQUIRE(fem::PlanStudy(doc, s, plan, &err));
+  REQUIRE(plan.bodies.size() == 1);
+  // A copy: same geometry, not the same TShape.
+  CHECK_FALSE(plan.bodies[0].shape.IsSame(doc.GetBodies()[0].shape.GetShape()));
+  CHECK(plan.bodies[0].loads.size() == 2);
+  CHECK(plan.bodies[0].settings.faceSizes.size() == 1);
+  fem::StudyJobInput split;
+  REQUIRE(fem::MeshPlannedStudy(plan, split, &err));
+  REQUIRE(split.bodies.size() == 1);
+  CHECK(split.bodies[0].mesh.nodes.size() == whole.bodies[0].mesh.nodes.size());
+  CHECK(split.bodies[0].mesh.tets.size() == whole.bodies[0].mesh.tets.size());
+  CHECK(split.bodies[0].fixedNodes.size() == whole.bodies[0].fixedNodes.size());
+  REQUIRE(split.bodies[0].faceLoads.size() == whole.bodies[0].faceLoads.size());
+  CHECK(split.bodies[0].faceLoads[0].tris.size() ==
+        whole.bodies[0].faceLoads[0].tris.size());
+  CHECK(split.bodies[0].fixedNodes.size() > 0);
+  CHECK(split.bodies[0].faceLoads[0].tris.size() > 0);
+
+  // And the mesh-only pair.
+  std::vector<fem::StudyBodyMesh> meshed;
+  REQUIRE(fem::MeshStudy(doc, s, meshed, &err));
+  fem::MeshPlan mplan;
+  REQUIRE(fem::PlanStudyMesh(doc, s, mplan, &err));
+  CHECK_FALSE(
+      mplan.bodies[0].shape.IsSame(doc.GetBodies()[0].shape.GetShape()));
+  std::vector<fem::StudyBodyMesh> planned;
+  REQUIRE(fem::MeshPlanned(mplan, planned, &err));
+  REQUIRE(planned.size() == meshed.size());
+  CHECK(planned[0].mesh.stats.nodeCount == meshed[0].mesh.stats.nodeCount);
+  CHECK(planned[0].mesh.stats.tetCount == meshed[0].mesh.stats.tetCount);
+}

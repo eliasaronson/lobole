@@ -9,6 +9,7 @@
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/SimulationActions.h"
 
 #include <algorithm>
@@ -50,13 +51,23 @@ static constexpr MethodDoc SimulationMethods[] = {
     {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
      "Mesh the study (Netgen tets); returns element counts/quality. "
-     "Synchronous — a fine mesh takes minutes, so give the client a long "
-     "timeout (the server finishes even if the client gives up).",
-     "study"},
-    {"run_study", "Solve the study (blocking or async; poll study_status).",
+     "Synchronous by default — a fine mesh takes minutes, so either give the "
+     "client a long timeout (the server finishes even if the client gives "
+     "up) or pass `async: true`: the mesh then runs on a background job and "
+     "study_status answers {running, meshing: true} until it lands, after "
+     "which its `mesh` carries the same bodies/nodes/elements/worst_quality.",
+     "async, study"},
+    {"run_study",
+     "Solve the study (blocking, or `async` and poll study_status). Async "
+     "meshes AND solves off the frame; the result is stored into the part "
+     "the study belongs to even if another tab is active when it lands.",
      "async, study"},
     {"cancel_study", "Cancel a running study.", "study"},
-    {"study_status", "Status/progress of a study.", "study"},
+    {"study_status",
+     "Status/progress of a study: {running, meshing?, iteration…} while a "
+     "job runs, else the cached result's state plus `mesh` from the last "
+     "mesh_study {async}.",
+     "study"},
     {"study_results",
      "Result summary (max displacement, von Mises, frequencies, compliance).",
      "study"},
@@ -297,11 +308,20 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   }
   if (m == "mesh_study") {
     // Mesh (no solve) every body the study touches; a headless milestone
-    // before the solver exists. params: {study}
+    // before the solver exists. params: {study, async?}
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
     if (!s)
       throw std::runtime_error("no such study");
+    if (p.value("async", false)) {
+      // Off the frame (docs/ui/long-operations.md, phase 3): the plan is
+      // made here, the mesh on a worker; study_status says `meshing: true`
+      // until it lands and then carries the same `bodies` this returns.
+      std::string err;
+      if (!ui::StartMeshRun(state, *doc, id, &err))
+        throw std::runtime_error(err);
+      return json{{"started", true}, {"running", true}, {"job", "mesh"}};
+    }
     std::vector<fem::StudyBodyMesh> meshes;
     std::string err;
     if (!fem::MeshStudy(*doc, *s, meshes, &err))
@@ -322,9 +342,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // immediately, the others are synchronous. study_status/cancel_study drive
     // the async run. study_results: read the cached results (never solves).
     // params: {study}
-    // Catch a finished async run first, so its result is stored before we read.
-    ui::PollTopologyRun(state, *doc);
-    ui::PollStudyRun(state, *doc);
+    // Catch a finished async run first, so its result is stored before we
+    // read (the registry stores it into the part it ran on, whichever tab
+    // is active).
+    ui::ReapBackgroundJobs(state);
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
     if (!s)
@@ -339,6 +360,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       return json{{"cancelled", ui::CancelTopologyRun(state, id)}};
     }
     if (m == "study_status") {
+      const ui::MeshRunStatus mrs = ui::GetMeshRunStatus(state, id);
+      if (mrs.running)
+        return json{{"running", true},
+                    {"meshing", true},
+                    {"elapsed_seconds", mrs.elapsedSeconds}};
       const ui::StudyRunStatus srs = ui::GetStudyRunStatus(state, id);
       if (srs.running)
         return json{{"running", true},
@@ -354,16 +380,30 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                     {"volume_fraction", st.volumeFraction},
                     {"solver", st.solver},
                     {"elapsed_seconds", st.elapsedSeconds}};
-      // Not running — report the cached result's state (if any).
+      // Not running — report the cached result's state (if any), and what
+      // the last mesh_study {async} found.
       const fem::StudyRuntime* rt = doc->StudyResults(id);
-      return json{{"running", false},
-                  {"has_results", rt != nullptr},
-                  {"converged", rt && rt->converged},
-                  {"cancelled", rt && rt->cancelled},
-                  {"iterations", rt ? rt->iterations : 0},
-                  {"solver", rt ? rt->solver : ""},
-                  {"solve_seconds", rt ? rt->solveSeconds : 0.0},
-                  {"stale", doc->StudyResultsStale(id)}};
+      json out{{"running", false},
+               {"has_results", rt != nullptr},
+               {"converged", rt && rt->converged},
+               {"cancelled", rt && rt->cancelled},
+               {"iterations", rt ? rt->iterations : 0},
+               {"solver", rt ? rt->solver : ""},
+               {"solve_seconds", rt ? rt->solveSeconds : 0.0},
+               {"stale", doc->StudyResultsStale(id)}};
+      if (const ui::MeshReport* mr = ui::MeshReportFor(state, *doc, id)) {
+        json bodies = json::array();
+        for (const ui::MeshReport::Body& b : mr->bodies)
+          bodies.push_back({{"body", b.name},
+                            {"nodes", b.nodes},
+                            {"elements", b.elements},
+                            {"worst_quality", b.worstQuality}});
+        json mesh{{"bodies", bodies}, {"seconds", mr->seconds}};
+        if (!mr->error.empty())
+          mesh["error"] = mr->error;
+        out["mesh"] = mesh;
+      }
+      return out;
     }
 
     if (m == "run_study") {
@@ -495,7 +535,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // Export a topology result's optimized shape (iso-surface, Taubin-smoothed)
     // as a binary STL. params: {study, path, threshold?: 0..1 (0=auto),
     // smooth?: iterations (default 3)}
-    ui::PollTopologyRun(state, *doc);
+    ui::ReapBackgroundJobs(state);
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
     if (!s)
