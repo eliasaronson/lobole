@@ -7,7 +7,9 @@
 > a machine profile saved globally and embedded, the work area and the stock
 > always drawn, a job made the way an assembly is, tools from the machine,
 > placements dragged in the viewport, and the part bar's one-click door
-> dropped. Supersedes the implicit
+> dropped. **Next:** [router-round.md](router-round.md) — the small things a
+> router user hits first (GRBL, file per tool, bores and pecks, dogbones,
+> leads, rough-then-finish, undo). Supersedes the implicit
 > assumption in [plan.md](plan.md) that a `cam::Setup` belongs to the part it
 > cuts. Surveyed against FreeCAD CAM and the two slicers in
 > `~/Documents/CAD` on 2026-09-01 — see [What the survey
