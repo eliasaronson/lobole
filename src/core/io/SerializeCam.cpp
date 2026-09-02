@@ -438,6 +438,8 @@ json CamSetupToJson(const cam::Setup& setup) {
     // every one before this — re-saves byte-identically.
     if (op.useOutline)
       oj["use_outline"] = true;
+    if (op.leadArcs)
+      oj["lead_arcs"] = true;                       // v81; omitted when off
     if (op.cornerRelief != cam::CornerRelief::None) // v80; omitted when none
       oj["corner_relief"] =
           op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone" : "tbone";
@@ -581,6 +583,7 @@ cam::Setup CamSetupFromJson(const json& j) {
         oj.value("side", std::string(clears ? "inside" : "outside")));
     op.climb = oj.value("climb", true);
     op.useOutline = oj.value("use_outline", false);
+    op.leadArcs = oj.value("lead_arcs", false);
     if (oj.contains("corner_relief")) {
       const std::string r = oj.at("corner_relief").get<std::string>();
       if (r == "dogbone")

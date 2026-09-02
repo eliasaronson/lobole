@@ -5155,3 +5155,96 @@ TEST_CASE("cam relief: an outside profile relieves the part's inner corner "
              WithinAbs(3.0 * std::sqrt(2.0),
                        0.05)); // the path corner, r off each wall
 }
+
+// ---------------------------------------------------------------------------
+// R5: lead arcs.
+
+TEST_CASE("cam lead: a profile leaves the wall on a tangent arc",
+          "[cam][lead]") {
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0; // several passes: a lead on each, the last one checked
+  op.leadArcs = true;
+  setup.operations.push_back(op);
+  auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  // The last cutting moves before the final retract walk AWAY from the
+  // block: their distance from the part's outline grows from the tool's
+  // radius to twice it, and none of them comes closer than the radius.
+  const auto& moves = paths[0].moves;
+  REQUIRE(moves.size() > 12);
+  REQUIRE(moves.back().kind == cam::Move::Kind::Rapid);
+  const auto outlineDistance = [](const glm::dvec3& p) {
+    const double dx = std::max({0.0 - p.x, p.x - 40.0, 0.0});
+    const double dy = std::max({0.0 - p.y, p.y - 30.0, 0.0});
+    return std::hypot(dx, dy);
+  };
+  const size_t end = moves.size() - 1;
+  const double atWall = outlineDistance(moves[end - 9].to);
+  const double offWall = outlineDistance(moves[end - 1].to);
+  INFO("at wall " << atWall << ", off wall " << offWall);
+  CHECK_THAT(atWall, WithinAbs(3.0, 0.05));
+  CHECK_THAT(offWall, WithinAbs(6.0, 0.1));
+  for (size_t i = end - 9; i < end; i++)
+    CHECK(outlineDistance(moves[i].to) > 3.0 - 1e-6);
+  // ...and it is still a clean cut: nothing gouged by the arc.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  CHECK(v.maxGouge < 0.4);
+
+  // Inside an opening with no room for the arc, refused in words.
+  auto doc2 = std::make_unique<Document>();
+  doc2->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                                60.0, 40.0, 12.0));
+  const uint64_t block = doc2->GetFeature(0)->GetId();
+  // A 10 mm slot: room for a 6 mm tool (offset 3 each side leaves 4), not
+  // for the tool plus a 3 mm lead (the arc's end is 6 off the near wall and
+  // the cutter reaches 9; with 3 to spare from the far wall that needs 12).
+  doc2->AddFeature(std::make_unique<BoxFeature>("Slot", glm::vec3(10, 15, -1),
+                                                40.0, 10.0, 20.0));
+  const uint64_t slot = doc2->GetFeature(1)->GetId();
+  doc2->AddFeature(std::make_unique<BooleanFeature>("Slotted", block, slot,
+                                                    BooleanOp::Subtract));
+  ElementRef wall;
+  for (const Body& b : doc2->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f &&
+          o.x > 9.0f && o.x < 51.0f && o.y > 14.0f && o.y < 26.0f)
+        wall = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(wall.IsSet());
+  cam::Setup inside = BasicSetup();
+  cam::Operation in;
+  in.id = 2;
+  in.type = cam::OpType::Profile;
+  in.side = cam::Side::Inside;
+  in.topZ = 13.0;
+  in.bottomZ = -1.0;
+  in.stepdown = 5.0;
+  in.leadArcs = true;
+  in.targets = {cam::Target{0, wall}};
+  inside.operations.push_back(in);
+  auto inPaths = cam::GenerateAll(inside, doc2->GetBodies());
+  REQUIRE(inPaths.size() == 1);
+  INFO(inPaths[0].error);
+  CHECK(inPaths[0].error.find("lead arc") != std::string::npos);
+  CHECK(inPaths[0].error.find("room") != std::string::npos);
+  // Without the lead the same opening cuts.
+  inside.operations[0].leadArcs = false;
+  auto plainPaths = cam::GenerateAll(inside, doc2->GetBodies());
+  REQUIRE(plainPaths.size() == 1);
+  CHECK(plainPaths[0].error.empty());
+  // The flag survives a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  CHECK(DocumentIO::CamSetupFromJson(j).operations[0].leadArcs);
+}

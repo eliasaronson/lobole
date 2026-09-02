@@ -405,11 +405,16 @@ enum class Entry { Ramp, AtDepth };
 // at safe height, and drop again, once per pass. Starting where the last one
 // stopped puts the lift and the drop at the same point instead, which is no
 // travel at all.
+// `leadOut` > 0: leave the wall on a tangent arc of that radius (R5) before
+// retracting, curving AWAY from the material -- `materialInside` says which
+// side of the loop that is. A tool that stops against the wall and lifts
+// leaves a mark where it dwelt; one that arcs off does not.
 double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                 const std::vector<glm::dvec2>& pts, double z, double safeZ,
                 double stockTop, int tabCount, double tabWidth, double tabZ,
                 double entryZ, Entry entry = Entry::Ramp, double startS = 0.0,
-                bool retract = true) {
+                bool retract = true, double leadOut = 0.0,
+                bool materialInside = true) {
   if (pts.size() < 2)
     return startS;
   const double perimeter = Perimeter(pts);
@@ -571,7 +576,34 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     currentZ = zEnd;
     prev = s;
   }
-  const glm::dvec2 last = pointAt(total);
+  glm::dvec2 last = pointAt(total);
+  if (leadOut > 1e-9) {
+    // The direction the lap ends in, and the normal away from the material:
+    // the loop's outward normal when the part is inside it, inward when it
+    // is not. A quarter arc, tangent at the wall, ending a radius off it.
+    const glm::dvec2 before = pointAt(std::max(0.0, total - 1e-3));
+    const glm::dvec2 d = glm::length(last - before) > 1e-12
+                             ? glm::normalize(last - before)
+                             : glm::dvec2(1.0, 0.0);
+    double area2 = 0.0;
+    for (size_t i = 0; i < pts.size(); i++) {
+      const glm::dvec2& a = pts[i];
+      const glm::dvec2& b = pts[(i + 1) % pts.size()];
+      area2 += a.x * b.y - b.x * a.y;
+    }
+    const glm::dvec2 outward =
+        area2 > 0.0 ? glm::dvec2(d.y, -d.x) : glm::dvec2(-d.y, d.x);
+    const glm::dvec2 away = materialInside ? outward : -outward;
+    const glm::dvec2 centre = last + away * leadOut;
+    constexpr int kArcSegments = 8;
+    for (int i = 1; i <= kArcSegments; i++) {
+      const double t = glm::half_pi<double>() * i / kArcSegments;
+      const glm::dvec2 p =
+          centre - away * (leadOut * std::cos(t)) + d * (leadOut * std::sin(t));
+      Emit(tp, Move::Kind::Cut, {p.x, p.y, currentZ}, tool.feedCut);
+    }
+    last = glm::dvec2(tp.moves.back().to.x, tp.moves.back().to.y);
+  }
   // Left DOWN when the caller says another loop follows it: a concentric
   // clearing links ring to ring at depth, and it cannot if every lap ends by
   // retracting. The caller retracts once when the run is done.
@@ -1940,6 +1972,16 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     // cutter closes up and this pass emits nothing. Say which, and how narrow.
     if (paths.empty() && op.side == Side::Inside && tooTight.empty())
       tooTight = TooTightForTool(contour, tool, op.stockToLeave, "opening");
+    // A lead arc inside an opening needs a radius more of room than the
+    // cut itself: refused, saying so, rather than swept into the far wall.
+    const double lead = op.leadArcs && op.side != Side::On ? radius : 0.0;
+    if (lead > 0.0 && op.side == Side::Inside && !paths.empty() &&
+        Offset(contour, delta - radius).empty()) {
+      tp.error = "the lead arc needs " + Round2(radius) +
+                 " mm of room beyond the cut and this opening has none: turn "
+                 "off lead arcs for it, or use a smaller tool";
+      return;
+    }
     for (size_t loop = 0; loop < paths.size(); loop++) {
       Clipper2Lib::Path64& path = paths[loop];
       Orient(path, op.climb, op.side == Side::Inside);
@@ -1968,7 +2010,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       resume[loop] = EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop,
                               op.tabCount, op.tabWidth, bottom + op.tabHeight,
                               pass == 0 ? op.topZ : passes[pass - 1],
-                              Entry::Ramp, resume[loop]);
+                              Entry::Ramp, resume[loop], /*retract=*/true, lead,
+                              op.side == Side::Outside);
     }
   }
   if (tp.moves.empty() && tp.error.empty())

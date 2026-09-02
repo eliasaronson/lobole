@@ -183,6 +183,11 @@ struct Operation {
   double bottomZ = -1.0;
   double stepdown = 0.0;
   double stockToLeave = 0.0;
+  // Profile only (R5): leave the wall on a tangent arc of the tool's radius
+  // at the end of every pass instead of stopping against it and lifting --
+  // the stop is the dwell mark. The ramp is the entry, so there is no lead
+  // in: the tool arrives at the wall descending, already moving along it.
+  bool leadArcs = false;
   // Profile and pocket only (R4): what to do at the inside corners of the
   // material. Applied to the wall pass -- the loop one tool radius off the
   // wall -- at every sharp corner where the cutter cannot reach.

@@ -1238,6 +1238,14 @@ void DrawCamPanel(AppState& state) {
                               "tool's radius -- for a joint that takes a "
                               "square tenon.");
       }
+      if (op.type == cam::OpType::Profile) {
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Lead arcs###cam_leads", &op.leadArcs))
+          touched(op.id);
+        ImGui::SetItemTooltip("Leave the wall on a tangent arc of the tool's "
+                              "radius instead of stopping against it and "
+                              "lifting -- the stop is the dwell mark.");
+      }
       if (op.type == cam::OpType::Drill) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(55.0f);

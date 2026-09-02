@@ -145,7 +145,10 @@ constexpr MethodDoc kCamMethods[] = {
      "pecks of this depth; derived as the tool's diameter once a hole is "
      "deeper than three), corner_relief?: none|dogbone|tbone (profile and "
      "pocket: clear the inside corners a round cutter leaves, by the tool's "
-     "radius -- along the bisector, or along the longer wall), side?: "
+     "radius -- along the bisector, or along the longer wall), lead_arcs?: "
+     "bool (profile: leave the wall on a tangent arc of the tool's radius "
+     "instead of stopping against it -- no dwell mark; refused inside an "
+     "opening with no room for it), side?: "
      "outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element, part?}]}; `part` is the job part the element is "
@@ -358,6 +361,8 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.stepdown = p.at("stepdown").get<double>();
   if (p.contains("peck"))
     op.peck = p.at("peck").get<double>();
+  if (p.contains("lead_arcs"))
+    op.leadArcs = p.at("lead_arcs").get<bool>();
   if (p.contains("corner_relief")) {
     const std::string r = p.at("corner_relief").get<std::string>();
     if (r == "none")
@@ -434,6 +439,7 @@ json OpJson(const cam::Operation& op) {
             {"bottom_z", op.bottomZ},
             {"stepdown", op.stepdown},
             {"peck", op.peck},
+            {"lead_arcs", op.leadArcs},
             {"corner_relief",
              op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
              : op.cornerRelief == cam::CornerRelief::TBone ? "tbone"

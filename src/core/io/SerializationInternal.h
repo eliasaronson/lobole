@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    80; // v80: `corner_relief` on a profile or pocket (dogbone | tbone):
+    81; // v81: `lead_arcs` on a profile -- leave the wall on a tangent arc of
+        //      the tool's radius at the end of every pass. Omitted when off
+        //      (docs/cam/router-round.md, R5).
+        // (v80: `corner_relief` on a profile or pocket (dogbone | tbone):
         //      clear the inside corners a round cutter leaves, by the tool's
         //      radius. Omitted when none (docs/cam/router-round.md, R4).
         // (v79: `peck` on a drill operation -- retract fully between pecks of
