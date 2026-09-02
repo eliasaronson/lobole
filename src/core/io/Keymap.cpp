@@ -195,7 +195,6 @@ const Binding kDefaults[] = {
 
     {"part.simulation", Context::Part, "Simulation (FEM stress study)", "Tools",
      "Q"},
-    {"part.cam", Context::Part, "CAM (mill this part)", "Tools", "J"},
 
     // ---------------------------------------------------------------- Sketch
     {"sketch.line", Context::Sketch, "Line", "Draw", "L"},

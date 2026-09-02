@@ -427,3 +427,9 @@ fixturing became per part (v76): the block stood upright through a part
 lying flat. Same bug the backplot had the same week; the transform is
 deleted rather than corrected, and `backplot_lands_on_a_clamped_part` now
 asserts the cutter is drawn exactly at the timeline's cursor.
+
+**2026-09-02, later:** the part bar's CAM button is gone. A job is made from
+the tab bar's `+` and set up in the panel — machine, stock, parts — the way
+an assembly is made and then filled ([job-document.md](job-document.md),
+round two, M3).
+

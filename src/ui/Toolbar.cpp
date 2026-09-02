@@ -425,11 +425,11 @@ void DrawModelToolbar(AppState& state) {
       "Simulation (FEM stress study)");
 
 #ifdef HAVE_CAM
-  // CAM verbs (docs/cam/gui.md). A tool SESSION, not a mode: the backplot
-  // coexists with the model and a picked face still means "that face".
-  CommandButton(state, ICON_FA_SCREWDRIVER_WRENCH "###tb_cam", "part.cam",
-                "CAM (mill this part: pocket, cut out, face)",
-                state.camToolOpen);
+  // CAM left the part bar (docs/cam/job-document.md, round two, M3): a job
+  // is made from the tab bar's "+" the way an assembly is, then given a
+  // machine, a stock and parts. The one-click "machine this part" built a
+  // job around one part, which is the shape of "cut this" and not of "set
+  // up a job".
 #endif
 
   SectionToolButton(state);

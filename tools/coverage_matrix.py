@@ -81,7 +81,7 @@ TOOLS = [
      ["part"]),
     ("Sketch drawing",    ["EnterSketchOnPlane", "sketchEdit"],
      ["part"]),
-    ("CAM tool",          ["camToolOpen", "camDeriveOp", "###tb_cam"],
+    ("CAM tool",          ["camToolOpen", "camDeriveOp", "###tb_job_pocket"],
      ["part"]),
     ("Simulation loads",  ["simulation", "StudyPanel", "###tb_simulation"],
      ["part"]),

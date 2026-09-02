@@ -393,9 +393,6 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##DockHost");
     for (const char* id : kModelTools)
       IM_CHECK_SILENT(ctx->ItemExists((std::string("**/") + id).c_str()));
-#ifdef HAVE_CAM
-    IM_CHECK(ctx->ItemExists("**/###tb_cam"));
-#endif
   };
 
   // No two commands in ONE bar may wear the same glyph. Split and Section

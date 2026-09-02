@@ -814,10 +814,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         "Pocket", plate, voidId, BooleanOp::Subtract));
     ctx->Yield(2);
 
-    // Click 1: the verb, on the JOB bar. "Machine this part" on the part bar
-    // gets you to the job tab; no setup exists yet, and the verb makes one
-    // rather than sending the user to the panel.
-    ToolbarClick(ctx, "###tb_cam");
+    // Click 1: the verb, on the JOB bar. No setup exists yet, and the verb
+    // makes one rather than sending the user to the panel.
+    MakeJob();
     ctx->Yield(2);
     IM_CHECK(Job() != nullptr);
     IM_CHECK(Job()->GetSetups().empty());
@@ -956,7 +955,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
     ctx->Yield(2);
 
-    ToolbarClick(ctx, "###tb_cam");
+    MakeJob();
     ctx->Yield(2);
     ToolbarClick(ctx, "###tb_job_edge");
     ctx->Yield(2);
@@ -1036,7 +1035,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       }
     };
 
-    ToolbarClick(ctx, "###tb_cam");
+    MakeJob();
     ctx->Yield(2);
 
     // Two operations, through the verbs: a pocket on the floor, then the
@@ -1621,7 +1620,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // its own — it shares the left node, and the tab that was in front on
     // the part is not the one this tab is about.
     ctx->SetRef("//##MainMenuBar");
-    ToolbarClick(ctx, "###tb_cam");
+    MakeJob();
     ctx->Yield(8);
     IM_CHECK(Job() != nullptr);
     IM_CHECK_EQ(ui::ActiveContext(*s_App), keymap::Context::Job);
@@ -2082,6 +2081,86 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(live->machine.travelMax.x == 600.0); // not grown
     ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
+  };
+
+  // A job is made the way an assembly is (round two, M3): New Job on the
+  // tab bar, then the panel's setup step -- machine, stock, parts. With no
+  // machine defined the step REFUSES, visibly, and points at Preferences
+  // (u10); with one it is chosen for you. The part bar's CAM button is gone.
+  t = IM_REGISTER_TEST(engine, "cam", "a_job_is_made_from_the_tab_bar");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    (void)ui::DeleteMachine(*s_App, "Test tab router");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    ctx->SetRef("//##DockHost");
+    IM_CHECK(!ctx->ItemExists("**/###tb_cam")); // gone from the part bar
+
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Job##addjob");
+    ctx->Yield(4);
+    IM_CHECK(s_App->job != nullptr);
+    IM_CHECK(s_App->document == nullptr);
+    IM_CHECK(Job()->GetSetups().empty());
+    IM_CHECK(Job()->GetParts().empty());
+
+    // No machine: the step refuses. The button is there and disabled, the
+    // reason is said, and nothing was made.
+    const bool hadMachines = !s_App->machines.empty();
+    ctx->SetRef("//CAM###CamPanel");
+    if (!hadMachines) {
+      IM_CHECK(ctx->ItemExists("###cam_new_machine_prefs"));
+      IM_CHECK(!ctx->ItemExists("###cam_new_machine"));
+      ctx->ItemClick("###cam_add_setup", ImGuiMouseButton_Left,
+                     ImGuiTestOpFlags_NoError);
+      ctx->Yield(2);
+      IM_CHECK(Job()->GetSetups().empty());
+    }
+
+    // With a machine, it is chosen for you; a part comes in; the setup is
+    // made on that machine, with the sheet's thickness from the part.
+    cam::Machine mine;
+    mine.name = "Test tab router";
+    mine.travelMax = {600.0, 400.0, 80.0};
+    IM_CHECK(ui::SaveMachine(*s_App, mine));
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("###cam_new_machine"));
+    ctx->ItemClick("###cam_new_machine");
+    ctx->ItemClick("//$FOCUSED/Test tab router");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->camNewSetup.machine, std::string("Test tab router"));
+    // The plate is the only part: one Add button, PushID'd by its slot id.
+    uint64_t plateSlot = 0;
+    for (const ui::PartSlot& slot : s_App->parts)
+      if (slot.kind == ui::DocKind::Part)
+        plateSlot = slot.id;
+    IM_CHECK(plateSlot != 0);
+    ctx->ItemClick(("$$" + std::to_string(static_cast<int>(plateSlot)) +
+                    "/###cam_new_part_add")
+                       .c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->GetParts().size(), (size_t)1);
+    ctx->ItemClick("###cam_new_stock_fixed");
+    ctx->Yield(2);
+    IM_CHECK(std::abs(s_App->camNewSetup.sheet.x - 600.0f) < 1e-3f); // the bed
+    IM_CHECK(std::abs(s_App->camNewSetup.sheet.z - 12.0f) < 1e-3f);  // the part
+    ctx->ItemClick("###cam_add_setup");
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->GetSetups().size(), (size_t)1);
+    const cam::Setup& made = Job()->GetSetups()[0];
+    IM_CHECK(made.machine == mine);
+    IM_CHECK(made.stock.mode == cam::StockMode::Fixed);
+    IM_CHECK(std::abs(made.stock.size.x - 600.0) < 1e-6);
+    IM_CHECK(std::abs(made.stock.size.z - 12.0) < 1e-6);
+
+    // ...and the verbs work on it: the whole flow, no part-bar button.
+    ToolbarClick(ctx, "###tb_job_whole");
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->GetSetups()[0].operations.size(), (size_t)1);
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+    IM_CHECK(ui::DeleteMachine(*s_App, "Test tab router"));
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

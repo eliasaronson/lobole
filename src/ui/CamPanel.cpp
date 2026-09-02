@@ -24,6 +24,7 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <cfloat>
 #include <cstdio>
 
 namespace ui {
@@ -245,20 +246,128 @@ void DrawCamPanel(AppState& state) {
 
   std::vector<cam::Setup>& setups = state.job->GetSetups();
   if (setups.empty()) {
-    ImGui::TextWrapped("A setup describes how to cut this part: stock, tools "
-                       "and operations. It changes nothing about the model.");
+    // The setup STEP (round two, M3): a job is made the way an assembly is
+    // -- from the tab bar, empty -- and this is where it becomes a job: the
+    // machine, the stock, then parts. A slicer asks printer, plate, objects
+    // in that order; FreeCAD's job dialog asks template and models and puts
+    // the stock last. The machine goes first because everything after it
+    // is measured against it.
+    ImGui::TextWrapped("A job cuts parts out of a sheet on a machine.");
     ImGui::Spacing();
-    if (ImGui::Button("Add setup###cam_add_setup")) {
+    AppState::CamNewSetup& ns = state.camNewSetup;
+    // Default: the only machine, or the first -- a choice nobody has to
+    // make when the shop has one.
+    if (cam::FindMachine(state.machines, ns.machine) == nullptr)
+      ns.machine = state.machines.empty() ? "" : state.machines.front().name;
+    ImGui::TextDisabled("Machine");
+    if (state.machines.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
+      ImGui::TextWrapped("No machine yet. Define one first — post, work "
+                         "area, rotary — and every job you set up on it "
+                         "follows.");
+      ImGui::PopStyleColor();
+      if (ImGui::SmallButton("Preferences › Machines###cam_new_machine_prefs"))
+        state.settingsWindowOpen = true;
+    } else {
+      ImGui::SetNextItemWidth(160.0f);
+      if (ImGui::BeginCombo("###cam_new_machine", ns.machine.c_str())) {
+        for (const cam::Machine& mc : state.machines)
+          if (ImGui::Selectable(mc.name.c_str(), mc.name == ns.machine))
+            ns.machine = mc.name;
+        ImGui::EndCombo();
+      }
+    }
+    ImGui::Spacing();
+    ImGui::TextDisabled("Stock");
+    if (ImGui::RadioButton("Around the parts###cam_new_stock_relative",
+                           !ns.fixedSheet))
+      ns.fixedSheet = false;
+    ImGui::SetItemTooltip("A block wrapped around whatever the job holds, "
+                          "with a margin. The size follows the parts.");
+    if (ImGui::RadioButton("A sheet you own###cam_new_stock_fixed",
+                           ns.fixedSheet))
+      ns.fixedSheet = true;
+    ImGui::SetItemTooltip("The board on the bed. Its size is yours to type; "
+                          "the thickness comes from the parts.");
+    const std::vector<Body>& bodies = ui::JobBodies(state);
+    if (ns.fixedSheet) {
+      // Derived, not literal (docs/ui/u10-defaults-and-refusals.md): the
+      // sheet defaults to the machine's bed in X and Y, and to the parts'
+      // height in Z -- a sheet is as thick as what it is cut into. With no
+      // parts there is no thickness to derive, so the fields wait.
+      const cam::Machine* mc = cam::FindMachine(state.machines, ns.machine);
+      if (ns.sheet.x <= 0.0f && mc != nullptr && mc->HasWorkArea()) {
+        ns.sheet.x = static_cast<float>(mc->travelMax.x - mc->travelMin.x);
+        ns.sheet.y = static_cast<float>(mc->travelMax.y - mc->travelMin.y);
+      }
+      if (ns.sheet.z <= 0.0f && !bodies.empty()) {
+        glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+        for (const Body& body : bodies) {
+          glm::vec3 bmin, bmax;
+          body.shape.GetBoundingBox(bmin, bmax);
+          lo = glm::min(lo, bmin);
+          hi = glm::max(hi, bmax);
+        }
+        ns.sheet.z = hi.z - lo.z;
+      }
+      ImGui::SetNextItemWidth(200.0f);
+      float sheet[3] = {ns.sheet.x, ns.sheet.y, ns.sheet.z};
+      if (ExprDragFloat3(state, "mm###cam_new_sheet", sheet, 1.0f))
+        ns.sheet = {sheet[0], sheet[1], sheet[2]};
+      if (bodies.empty())
+        ImGui::TextDisabled("(thickness follows the parts — add one below)");
+    }
+    ImGui::Spacing();
+    // The step CHANGES the document or REFUSES visibly (u10): no machine is
+    // a refusal here, said above, and the button does nothing else.
+    const bool canCreate =
+        !state.machines.empty() && (!ns.fixedSheet || ns.sheet.x > 0.0f);
+    ImGui::BeginDisabled(!canCreate);
+    if (ImGui::Button("Create setup###cam_add_setup")) {
       cam::Setup& fresh = state.job->AddSetup();
+      if (const cam::Machine* mc = cam::FindMachine(state.machines, ns.machine))
+        ApplyMachine(fresh, *mc);
+      if (ns.fixedSheet) {
+        fresh.stock.mode = cam::StockMode::Fixed;
+        fresh.stock.size = {ns.sheet.x, ns.sheet.y, ns.sheet.z};
+      }
       state.camActiveSetup = fresh.id;
-      (void)cam::RecomputeOrigin(fresh, ui::JobBodies(state));
+      (void)cam::RecomputeOrigin(fresh, bodies);
       // Safe Z clear of the stock, not the struct's bare 5 mm — which sits
       // inside anything taller than that (docs/cam/gui.md).
-      fresh.safeZ = cam::DeriveSafeZ(fresh, ui::JobBodies(state));
+      fresh.safeZ = cam::DeriveSafeZ(fresh, bodies);
       state.camSafeZEdit = static_cast<float>(fresh.safeZ);
       // CAM edits live in the document but bump no document version (the
       // same as study edits), so this is what keeps the save prompt honest.
       state.projectMetaDirty = true;
+      state.camNewSetup = {};
+    }
+    ImGui::EndDisabled();
+    if (!canCreate && !state.machines.empty())
+      ImGui::TextDisabled("a sheet needs a size");
+    ImGui::Spacing();
+
+    // Parts can come in before the setup: the sheet's thickness is derived
+    // from them, and a job with nothing in it has nothing to cut.
+    ImGui::TextDisabled("Parts");
+    for (const cam::JobPart& part : state.job->GetParts())
+      ImGui::BulletText("%s", part.name.c_str());
+    for (const ui::PartSlot& slot : state.parts) {
+      if (slot.kind != ui::DocKind::Part)
+        continue;
+      bool held = false;
+      for (const cam::JobPart& part : state.job->GetParts())
+        held = held || part.sourceDocId == slot.id;
+      if (held)
+        continue;
+      ImGui::PushID(static_cast<int>(slot.id));
+      if (ImGui::SmallButton(
+              ("Add " + slot.name + "###cam_new_part_add").c_str())) {
+        state.job->AddPart(slot.id, slot.name);
+        state.job->BumpVersion();
+        state.projectMetaDirty = true;
+      }
+      ImGui::PopID();
     }
     ImGui::End();
     return;

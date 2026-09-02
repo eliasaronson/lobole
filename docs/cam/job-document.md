@@ -720,3 +720,15 @@ stamps on every operation — so a verb-made operation on a bad layout
 generated fine and only a Generate press refused. It checks first now, and
 the verb refuses the dead cut in its window.
 
+### As built — M3 (2026-09-02)
+
+New Job sits on the tab bar's `+` beside Part, Assembly and Drawing. The
+CAM panel on a job with no setup is the **setup step**: the machine (chosen
+for you when there is one; a refusal pointing at Preferences › Machines when
+there is none), the stock (around the parts, or a sheet whose size defaults
+to the machine's bed and whose thickness follows the parts — no literal
+anywhere), the parts (the same Add buttons the Parts section has), and
+Create setup. The part bar's CAM button, `part.cam` and its `J` key are gone;
+`machine_part` stays as the RPC composite. Four GUI tests that reached a job
+through the button use `MakeJob()`; one new one walks the whole door.
+

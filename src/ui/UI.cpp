@@ -756,6 +756,11 @@ void DrawPartTabs(AppState& state) {
                     "Assembly " + std::to_string(state.parts.size() + 1));
       if (ImGui::MenuItem("New Drawing##adddwg"))
         AddDrawing(state, "Drawing " + std::to_string(state.parts.size() + 1));
+      // A job is made the way an assembly is (docs/cam/job-document.md,
+      // round two): here, then a machine, a stock and parts -- not from a
+      // button on the part bar that built one around a single part.
+      if (ImGui::MenuItem("New Job##addjob"))
+        AddJob(state, "Job " + std::to_string(state.parts.size() + 1));
       ImGui::Separator();
       if (ImGui::MenuItem("New Folder##addfolder")) {
         newFolderDocId = 0; // no doc to file: create the folder empty

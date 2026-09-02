@@ -186,21 +186,6 @@ bool HasBody(AppState& s) {
   return s.document && !s.document->GetBodies().empty();
 }
 bool IdleBody(AppState& s) { return Idle(s) && HasBody(s); }
-// CAM works on a JOB tab since v73, where `document` is null by definition,
-// so the CAM verbs cannot ask HasBody any more -- they ask whether the job
-// has anything to cut. The command id stays `part.cam`: it is what a user's
-// keybinding names, and renaming it would silently drop theirs.
-bool HasJobBody(AppState& s) {
-#ifdef HAVE_CAM
-  // Either a job with something to cut, or a part that could BE one: pressing
-  // this on a part is how you get a job in the first place.
-  return (s.job != nullptr && !JobBodies(s).empty()) || HasBody(s);
-#else
-  (void)s;
-  return false;
-#endif
-}
-// A job tab with something to cut: the gate for every `job.*` verb.
 bool HasJob(AppState& s) {
 #ifdef HAVE_CAM
   return s.job != nullptr && !JobBodies(s).empty();
@@ -489,21 +474,6 @@ const std::vector<Command>& Table() {
     add("part.split", IdleBody, [](AppState& s) { CreateSplit(s); });
     add("part.refine", IdleBody, [](AppState& s) { CreateRefine(s); });
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
-    add("part.cam", HasJobBody, [](AppState& s) {
-#ifdef HAVE_CAM
-      // "Machine this part": get to the job that cuts it, making one if there
-      // is none. That one click is what keeps CAM's move onto its own
-      // document from turning the common case into a ritual
-      // (docs/cam/job-document.md). The verbs are the JOB tab's own toolbar
-      // (2026-09-02), so arriving there is the whole of this command -- it
-      // used to also toggle a window listing them, which a job tab no longer
-      // needs and a part tab cannot show.
-      if (s.job == nullptr && s.document != nullptr && !s.parts.empty())
-        OpenJobForPart(s, s.parts[static_cast<size_t>(s.activePart)].id);
-#else
-      (void)s;
-#endif
-    });
 
     // ------------------------------------------------------------- Job (CAM)
     // The verbs, one command each (docs/cam/gui.md). Each opens ITS window

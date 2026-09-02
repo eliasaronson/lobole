@@ -1335,6 +1335,14 @@ struct AppState {
   std::vector<cam::Machine> machines;
   // Preferences > Machines: which one is being edited (-1 = none).
   int machineEditIndex = -1;
+  // The CAM panel's setup step on a job with no setup yet (M3): which
+  // machine, and whether the stock is a sheet you own or a wrap of the parts.
+  struct CamNewSetup {
+    std::string machine; // "" = not chosen yet
+    bool fixedSheet = false;
+    glm::vec3 sheet{0.0f, 0.0f, 0.0f}; // derived when the step is drawn
+  };
+  CamNewSetup camNewSetup;
 
   // CAM (docs/cam/plan.md). Toolpaths are CACHED, not regenerated per frame:
   // the backplot overlay and the panel read the same vector the post
