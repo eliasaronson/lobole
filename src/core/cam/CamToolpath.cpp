@@ -1960,6 +1960,29 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
                          : op.side == Side::On   ? 0.0
                                                  : radius + op.stockToLeave;
     Clipper2Lib::Paths64 contour = picked.empty() ? ToClipper(solid) : picked;
+    if (contour.empty() && lastFound.empty() && picked.empty() && !wallPick) {
+      // A pass below the model with no pass above it to inherit from -- a
+      // ONE-pass through cut, which a finishing pass is (R6). The outline
+      // to carry down is the model's own at its bottom.
+      double modelBottom = std::numeric_limits<double>::max();
+      for (const Body& b : bodies) {
+        glm::vec3 bmin, bmax;
+        b.shape.GetBoundingBox(bmin, bmax);
+        modelBottom = std::min(modelBottom, static_cast<double>(bmin.z));
+      }
+      if (modelBottom < op.topZ) {
+        const std::vector<std::vector<Loop>> atBottom =
+            ProjectedOutlines(bodies, op.topZ, {modelBottom + 1e-3});
+        std::vector<Loop> low;
+        if (!atBottom.empty())
+          for (const Loop& l : atBottom[0])
+            if (!l.hole)
+              low.push_back(l);
+        for (Loop& l : low)
+          MakeCounterClockwise(l);
+        contour = ToClipper(low);
+      }
+    }
     if (contour.empty())
       contour = lastFound; // below the model: keep cutting what was there
     else
@@ -2886,10 +2909,62 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
   std::vector<Toolpath> out;
   for (size_t i : CuttingOrder(setup)) {
     const Operation& op = setup.operations[i];
-    if (op.enabled)
-      out.push_back(GenerateFramed(setup, op, framed));
+    if (!op.enabled)
+      continue;
+    for (Toolpath& tp : GenerateOpFramed(setup, op, framed))
+      out.push_back(std::move(tp));
   }
+  // Tool order is an order of TOOLPATHS (R6): an operation that roughs with
+  // T1 and finishes with T2 is two of them, and grouping by operation would
+  // put T2's finish between two T1 roughs -- which a file per tool refuses.
+  const OrderOutputBy order =
+      setup.splitOutput ? OrderOutputBy::Tool : setup.order;
+  if (order == OrderOutputBy::Tool)
+    std::stable_sort(out.begin(), out.end(),
+                     [](const Toolpath& a, const Toolpath& b) {
+                       return a.toolNumber < b.toolNumber;
+                     });
   return out;
+}
+
+std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
+                                       const std::vector<Body>& framed) {
+  std::vector<Toolpath> out;
+  if (op.finishTool == 0) {
+    out.push_back(GenerateFramed(setup, op, framed));
+    return out;
+  }
+  // Rough then finish (R6): the same operation twice. The rough leaves
+  // `finishStock` on the wall; the finish takes it with the finishing tool
+  // in one full-depth pass along the final boundary.
+  Operation rough = op;
+  rough.stockToLeave += op.finishStock;
+  // On the WALL only: the profile reads stock-to-leave in Z as well, and a
+  // rough that stopped short of the floor left a 0.6 mm step in the stock
+  // beyond the finishing tool's reach -- reported as leftover on a correct
+  // job. The finish takes the wall band at full depth; the floor is the
+  // rough's, cut to depth.
+  rough.bottomZ -= op.finishStock;
+  rough.cornerRelief = CornerRelief::None; // the finish clears the corners
+  rough.leadArcs = false;
+  out.push_back(GenerateFramed(setup, rough, framed));
+
+  Operation finish = op;
+  finish.toolNumber = op.finishTool;
+  finish.stepdown = 0.0; // one pass, the full depth
+  finish.peck = 0.0;
+  Toolpath tp = GenerateFramed(setup, finish, framed);
+  tp.finish = true;
+  if (setup.FindTool(op.finishTool) == nullptr)
+    tp.error = "finishing tool " + std::to_string(op.finishTool) +
+               " is not in this setup's tool table";
+  out.push_back(std::move(tp));
+  return out;
+}
+
+std::vector<Toolpath> GenerateOp(const Setup& setup, const Operation& op,
+                                 const std::vector<Body>& bodies) {
+  return GenerateOpFramed(setup, op, BodiesInSetupFrame(setup, bodies));
 }
 
 } // namespace cam

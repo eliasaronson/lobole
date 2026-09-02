@@ -92,6 +92,12 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
     DropCamToolpath(state, opId);
     return;
   }
+  if (op->finishTool != 0) {
+    // Two toolpaths for one operation, and tool order sorts across them: a
+    // full pass is the one place that gets both right.
+    RefreshCamToolpaths(state);
+    return;
+  }
   // An arrangement that cannot be cut -- a sheet longer than the machine, a
   // part off the stock -- is what a FULL pass stamps on every operation
   // (GenerateAll); this path has to say the same, or a verb-made operation
@@ -1237,6 +1243,53 @@ void DrawCamPanel(AppState& state) {
                               "T-bone along the longer wall, each by the "
                               "tool's radius -- for a joint that takes a "
                               "square tenon.");
+      }
+      if (op.type == cam::OpType::Profile || op.type == cam::OpType::Pocket) {
+        // Rough then finish (R6): a second tool takes the wall in one pass.
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90.0f);
+        const cam::Tool* finishTool = setup->FindTool(op.finishTool);
+        char finishLabel[32];
+        std::snprintf(
+            finishLabel, sizeof(finishLabel), "%s",
+            finishTool != nullptr
+                ? ("finish T" + std::to_string(finishTool->number)).c_str()
+                : "no finish");
+        if (ImGui::BeginCombo("###cam_finish", finishLabel)) {
+          if (ImGui::Selectable("no finishing pass", op.finishTool == 0)) {
+            op.finishTool = 0;
+            touched(op.id);
+          }
+          for (const cam::Tool& t : setup->tools) {
+            if (t.number == op.toolNumber)
+              continue;
+            char item[64];
+            std::snprintf(item, sizeof(item), "finish with T%d %.3g mm",
+                          t.number, t.diameter);
+            if (ImGui::Selectable(item, op.finishTool == t.number)) {
+              op.finishTool = t.number;
+              if (const cam::Tool* rough = setup->FindTool(op.toolNumber);
+                  rough != nullptr && op.finishStock <= 0.0)
+                op.finishStock = cam::DefaultFinishStock(*rough);
+              touched(op.id);
+            }
+          }
+          ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Rough with this tool leaving a little on the "
+                              "wall, then take it off in one full-depth pass "
+                              "with the finishing tool.");
+        if (op.finishTool != 0) {
+          ImGui::SameLine();
+          ImGui::SetNextItemWidth(55.0f);
+          float leave = static_cast<float>(op.finishStock);
+          if (ExprDragFloat(state, "left###cam_finish_stock", &leave, 0.05f,
+                            0.0f, 10.0f, "%.2f")) {
+            op.finishStock = leave;
+            touched(op.id);
+          }
+          ImGui::SetItemTooltip("What the rough leaves for the finish (mm)");
+        }
       }
       if (op.type == cam::OpType::Profile) {
         ImGui::SameLine();

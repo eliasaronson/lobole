@@ -1436,6 +1436,8 @@ struct AppState {
   // the LAST TOOL USED — the one the setup's newest operation cuts with —
   // and the first tool only when nothing has been cut yet (ui::VerbTool).
   int camVerbTool = 0;
+  // ...and which one finishes after it (R6). 0 = no finishing pass.
+  int camVerbFinishTool = 0;
   CamRegionCache camGhostRegion;
   CamRegionCache camHoverRegion;
   bool camShowStock = true;

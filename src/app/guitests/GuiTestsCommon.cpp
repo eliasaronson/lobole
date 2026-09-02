@@ -108,6 +108,7 @@ void ResetAppForTest() {
   s_App->camVerb = ui::AppState::CamVerb::None;
   s_App->camVerbOp = 0;
   s_App->camVerbTool = 0;
+  s_App->camVerbFinishTool = 0;
   s_App->camGhostOp = 0;
   s_App->camActiveSetup = 0;
   s_App->camRefusal.clear();

@@ -5248,3 +5248,119 @@ TEST_CASE("cam lead: a profile leaves the wall on a tangent arc",
   const auto j = DocumentIO::CamSetupToJson(setup);
   CHECK(DocumentIO::CamSetupFromJson(j).operations[0].leadArcs);
 }
+
+// ---------------------------------------------------------------------------
+// R6: rough then finish.
+
+TEST_CASE("cam finish: one operation roughs with one tool and finishes with "
+          "another",
+          "[cam][finish]") {
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Tool fine = setup.tools[0];
+  fine.number = 2;
+  fine.diameter = 3.0;
+  setup.tools.push_back(fine);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  op.finishTool = 2;
+  op.finishStock = cam::DefaultFinishStock(setup.tools[0]); // 0.6
+  setup.operations.push_back(op);
+
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 2); // two toolpaths from one operation
+  CHECK(paths[0].operationId == 1);
+  CHECK(paths[1].operationId == 1);
+  CHECK(paths[0].toolNumber == 1);
+  CHECK(!paths[0].finish);
+  CHECK(paths[1].toolNumber == 2);
+  CHECK(paths[1].finish);
+  INFO(paths[1].error);
+  CHECK(paths[1].error.empty());
+  const auto outlineDistance = [](const glm::dvec3& p) {
+    const double dx = std::max({0.0 - p.x, p.x - 40.0, 0.0});
+    const double dy = std::max({0.0 - p.y, p.y - 30.0, 0.0});
+    return std::hypot(dx, dy);
+  };
+  // The rough never comes nearer the final wall than its radius plus what
+  // it leaves; the finish runs at exactly its own radius from the wall,
+  // in ONE pass at the full depth.
+  double roughNearest = 1e9, finishNearest = 1e9, finishFarthest = 0.0;
+  double finishLowest = 1e9, finishHighest = -1e9;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut)
+      roughNearest = std::min(roughNearest, outlineDistance(m.to));
+  for (const cam::Move& m : paths[1].moves)
+    if (m.kind == cam::Move::Kind::Cut) {
+      finishNearest = std::min(finishNearest, outlineDistance(m.to));
+      finishFarthest = std::max(finishFarthest, outlineDistance(m.to));
+      finishLowest = std::min(finishLowest, m.to.z);
+      finishHighest = std::max(finishHighest, m.to.z);
+    }
+  INFO("rough nearest " << roughNearest << ", finish " << finishNearest << ".."
+                        << finishFarthest);
+  CHECK(roughNearest > 3.0 + 0.6 - 0.02); // within the offset's chord tolerance
+  CHECK_THAT(finishNearest, WithinAbs(1.5, 1e-3));
+  CHECK(finishFarthest < 1.5 + 0.01); // no corner rounding beyond the tool
+  CHECK_THAT(finishLowest, WithinAbs(-1.0, 1e-6));
+  CHECK(finishHighest <= 21.0 + 1e-6);
+  // Together: a clean part.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " at "
+                << v.leftoverAt.x << "," << v.leftoverAt.y << " regions "
+                << v.leftoverRegions << " area " << v.leftoverArea);
+  CHECK(v.maxGouge < 0.4);
+  CHECK(v.maxLeftover < 0.5); // the rough's 0.6 is gone
+
+  // A file per tool splits the two: tool order sorts TOOLPATHS.
+  setup.splitOutput = true;
+  const auto ordered = cam::GenerateAll(setup, doc->GetBodies());
+  std::vector<cam::PostFile> files;
+  REQUIRE(cam::PostProcessSplit("mach3", setup, ordered, {}, files, &error));
+  REQUIRE(files.size() == 2);
+  CHECK(files[0].tool == 1);
+  CHECK(files[1].tool == 2);
+
+  // A finishing tool the setup does not have is said, on the finish path.
+  cam::Setup missing = setup;
+  missing.operations[0].finishTool = 9;
+  const auto bad = cam::GenerateAll(missing, doc->GetBodies());
+  REQUIRE(bad.size() == 2);
+  CHECK(bad[1].error.find("finishing tool 9") != std::string::npos);
+
+  // The fields survive a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  const cam::Setup back = DocumentIO::CamSetupFromJson(j);
+  CHECK(back.operations[0].finishTool == 2);
+  CHECK_THAT(back.operations[0].finishStock, WithinAbs(0.6, 1e-9));
+}
+
+TEST_CASE("cam profile: a one-pass through cut follows the model's bottom "
+          "outline",
+          "[cam]") {
+  // Found by the finishing pass, which IS one pass at the full depth: a
+  // single pass below the model had no pass above it to inherit an outline
+  // from, and produced nothing.
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 0.0;
+  setup.operations.push_back(op);
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  CHECK(paths[0].CutLength() > 100.0);
+}

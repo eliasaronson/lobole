@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    81; // v81: `lead_arcs` on a profile -- leave the wall on a tangent arc of
+    82; // v82: `finish_tool` + `finish_stock` on a profile or pocket -- rough
+        //      with the operation's tool leaving the stock, then one
+        //      full-depth pass with the finishing tool. Omitted when none
+        //      (docs/cam/router-round.md, R6).
+        // (v81: `lead_arcs` on a profile -- leave the wall on a tangent arc of
         //      the tool's radius at the end of every pass. Omitted when off
         //      (docs/cam/router-round.md, R5).
         // (v80: `corner_relief` on a profile or pocket (dogbone | tbone):

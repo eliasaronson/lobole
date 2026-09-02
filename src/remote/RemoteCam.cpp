@@ -148,7 +148,10 @@ constexpr MethodDoc kCamMethods[] = {
      "radius -- along the bisector, or along the longer wall), lead_arcs?: "
      "bool (profile: leave the wall on a tangent arc of the tool's radius "
      "instead of stopping against it -- no dwell mark; refused inside an "
-     "opening with no room for it), side?: "
+     "opening with no room for it), finish_tool?: number (rough with `tool` "
+     "leaving finish_stock -- derived as a tenth of its diameter -- then "
+     "take the wall in one full-depth pass with this tool; two toolpaths "
+     "from one operation), finish_stock?, side?: "
      "outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element, part?}]}; `part` is the job part the element is "
@@ -363,6 +366,20 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.peck = p.at("peck").get<double>();
   if (p.contains("lead_arcs"))
     op.leadArcs = p.at("lead_arcs").get<bool>();
+  if (p.contains("finish_tool")) {
+    op.finishTool = p.at("finish_tool").get<int>();
+    if (op.finishTool != 0 && setup.FindTool(op.finishTool) == nullptr)
+      throw std::runtime_error("finish_tool " + std::to_string(op.finishTool) +
+                               " is not in this setup's tool table");
+    if (op.finishTool != 0 && op.finishTool == op.toolNumber)
+      throw std::runtime_error(
+          "finish_tool is the roughing tool; a finishing pass needs another");
+    if (op.finishTool != 0 && !p.contains("finish_stock"))
+      if (const cam::Tool* rough = setup.FindTool(op.toolNumber))
+        op.finishStock = cam::DefaultFinishStock(*rough);
+  }
+  if (p.contains("finish_stock"))
+    op.finishStock = p.at("finish_stock").get<double>();
   if (p.contains("corner_relief")) {
     const std::string r = p.at("corner_relief").get<std::string>();
     if (r == "none")
@@ -440,6 +457,8 @@ json OpJson(const cam::Operation& op) {
             {"stepdown", op.stepdown},
             {"peck", op.peck},
             {"lead_arcs", op.leadArcs},
+            {"finish_tool", op.finishTool},
+            {"finish_stock", op.finishStock},
             {"corner_relief",
              op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
              : op.cornerRelief == cam::CornerRelief::TBone ? "tbone"

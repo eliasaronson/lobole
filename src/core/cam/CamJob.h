@@ -183,6 +183,12 @@ struct Operation {
   double bottomZ = -1.0;
   double stepdown = 0.0;
   double stockToLeave = 0.0;
+  // Rough then finish (R6): a second tool that takes the wall in ONE
+  // full-depth pass after this operation has roughed it, leaving
+  // `finishStock` behind for it. One operation with two tools rather than
+  // two operations that must agree about a boundary. 0 = no finishing pass.
+  int finishTool = 0;
+  double finishStock = 0.0; // derived: the roughing tool's diameter / 10
   // Profile only (R5): leave the wall on a tangent arc of the tool's radius
   // at the end of every pass instead of stopping against it and lifting --
   // the stop is the dwell mark. The ramp is the entry, so there is no lead
@@ -420,6 +426,13 @@ struct Move {
   double feed = 0.0; // mm/min; 0 = rapid
 };
 
+// What a roughing pass leaves for the finishing tool (R6), derived from the
+// roughing cutter: a tenth of its diameter -- enough to take the roughing
+// marks off, little enough that the finishing tool takes it in one pass.
+[[nodiscard]] inline double DefaultFinishStock(const Tool& rough) {
+  return rough.diameter * 0.1;
+}
+
 struct Toolpath {
   uint64_t operationId = 0;
   int toolNumber = 1;
@@ -438,6 +451,9 @@ struct Toolpath {
     double radius = 0.0;
   };
   std::vector<Relief> reliefs;
+  // The finishing half of a rough-then-finish operation (R6): the same
+  // operationId as the roughing toolpath, the finishing tool's number.
+  bool finish = false;
 
   [[nodiscard]] bool Empty() const { return moves.empty(); }
   // Total distance travelled while cutting, in mm — the cheap sanity check a

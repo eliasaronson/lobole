@@ -439,7 +439,11 @@ json CamSetupToJson(const cam::Setup& setup) {
     if (op.useOutline)
       oj["use_outline"] = true;
     if (op.leadArcs)
-      oj["lead_arcs"] = true;                       // v81; omitted when off
+      oj["lead_arcs"] = true; // v81; omitted when off
+    if (op.finishTool != 0) { // v82; omitted when there is no finishing pass
+      oj["finish_tool"] = op.finishTool;
+      oj["finish_stock"] = op.finishStock;
+    }
     if (op.cornerRelief != cam::CornerRelief::None) // v80; omitted when none
       oj["corner_relief"] =
           op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone" : "tbone";
@@ -584,6 +588,8 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.climb = oj.value("climb", true);
     op.useOutline = oj.value("use_outline", false);
     op.leadArcs = oj.value("lead_arcs", false);
+    op.finishTool = oj.value("finish_tool", 0);
+    op.finishStock = oj.value("finish_stock", 0.0);
     if (oj.contains("corner_relief")) {
       const std::string r = oj.at("corner_relief").get<std::string>();
       if (r == "dogbone")

@@ -298,6 +298,15 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 [[nodiscard]] std::string MachineOverhang(const Setup& setup,
                                           const std::vector<Body>& bodies);
 
+// One operation's toolpaths: one, or two when it roughs with one tool and
+// finishes with another (R6, Operation::finishTool). GenerateAll walks this.
+[[nodiscard]] std::vector<Toolpath> GenerateOp(const Setup& setup,
+                                               const Operation& op,
+                                               const std::vector<Body>& bodies);
+[[nodiscard]] std::vector<Toolpath>
+GenerateOpFramed(const Setup& setup, const Operation& op,
+                 const std::vector<Body>& framed);
+
 [[nodiscard]] std::string PlacementRefusal(const Setup& setup,
                                            const std::vector<Body>& bodies);
 

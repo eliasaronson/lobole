@@ -263,8 +263,9 @@ cam::Setup* EnsureCamSetup(AppState& state) {
 
 // What the generator said about one operation's toolpath; empty when it cut.
 std::string ToolpathError(const AppState& state, uint64_t opId) {
+  // Any of the operation's toolpaths: a rough-then-finish has two (R6).
   for (const cam::Toolpath& tp : state.camToolpaths)
-    if (tp.operationId == opId)
+    if (tp.operationId == opId && !tp.error.empty())
       return tp.error;
   return {};
 }
@@ -300,6 +301,14 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
   }
   cam::Operation op = derived.op;
   op.id = state.job->AllocateId();
+  // "Then finish with" (R6): the window's second tool row.
+  if (state.camVerbFinishTool != 0 &&
+      state.camVerbFinishTool != op.toolNumber &&
+      setup->FindTool(state.camVerbFinishTool) != nullptr) {
+    op.finishTool = state.camVerbFinishTool;
+    if (const cam::Tool* rough = setup->FindTool(op.toolNumber))
+      op.finishStock = cam::DefaultFinishStock(*rough);
+  }
   setup->operations.push_back(op);
   state.camGhostOp = op.id;
   // The tool this cut with is the one in the spindle: the next verb derives
@@ -733,6 +742,39 @@ void VerbToolRow(AppState& state, cam::Setup& setup, const Verb& verb) {
   }
   ImGui::SameLine();
   ImGui::TextDisabled("(more: CAM panel › Tools)");
+  // Then finish with (R6): only offered when there is a second tool to
+  // finish with. "none" is a button too, so the choice can be undone.
+  if (setup.tools.size() < 2)
+    return;
+  ImGui::TextDisabled("Then finish with");
+  ImGui::SameLine();
+  const bool noneOn = state.camVerbFinishTool == 0;
+  if (noneOn)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  if (ImGui::SmallButton("none###cam_verb_finish_none"))
+    state.camVerbFinishTool = 0;
+  if (noneOn)
+    ImGui::PopStyleColor();
+  for (const cam::Tool& tool : setup.tools) {
+    if (tool.number == active)
+      continue;
+    ImGui::SameLine();
+    const bool on = tool.number == state.camVerbFinishTool;
+    if (on)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    char id[48];
+    std::snprintf(id, sizeof(id), "T%d###cam_verb_finish_t%d", tool.number,
+                  tool.number);
+    if (ImGui::SmallButton(id))
+      state.camVerbFinishTool = on ? 0 : tool.number;
+    if (on)
+      ImGui::PopStyleColor();
+    ImGui::SetItemTooltip("Rough with T%d leaving a little, then take the "
+                          "wall in one pass with this %.3g mm %s",
+                          active, tool.diameter, tool.name.c_str());
+  }
 }
 
 // Red, wrapped at the verdict's width. Unwrapped, one long refusal stretched
@@ -788,8 +830,8 @@ void OperationList(AppState& state, cam::Setup& setup) {
     // the floating window is where the work happens.
     const cam::Toolpath* path = nullptr;
     for (const cam::Toolpath& tp : state.camToolpaths)
-      if (tp.operationId == op.id)
-        path = &tp;
+      if (tp.operationId == op.id && (path == nullptr || !tp.error.empty()))
+        path = &tp; // the one with something to say, else the last
     char sentence[256];
     std::snprintf(sentence, sizeof(sentence),
                   "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
