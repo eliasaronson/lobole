@@ -14,6 +14,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
+#include "ui/CamJobs.h" // adaptive passes off the frame
 #include "ui/CamPlayback.h"
 #include "ui/CamTool.h"
 #include "ui/ExprInput.h"
@@ -66,12 +67,41 @@ cam::Setup* ActiveCamSetup(AppState& state) {
   return &setups.front();
 }
 
+namespace {
+// A toolpath that came back pending has no moves of its own yet. Blanking it
+// would read as "this operation produces nothing", which is a real state
+// the panel already has to express — so it keeps what the previous generate
+// drew, and `pending` is what tells post, verify and simulate not to use it
+// (docs/ui/long-operations.md, "R2 and R6").
+void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
+  if (!fresh.pending || !fresh.moves.empty())
+    return;
+  fresh.moves = previous.moves;
+  fresh.reliefs = previous.reliefs;
+  fresh.strategy = previous.strategy;
+}
+
+cam::GenerateContext ContextOf(AppState& state) {
+  cam::GenerateContext ctx;
+  ctx.cache = &state.camAdaptiveCache;
+  ctx.defer = state.camDeferAdaptive;
+  return ctx;
+}
+} // namespace
+
 void RefreshCamToolpaths(AppState& state) {
+  std::vector<cam::Toolpath> previous = std::move(state.camToolpaths);
   state.camToolpaths.clear();
   cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr || !state.job)
     return;
-  state.camToolpaths = cam::GenerateAll(*setup, ui::JobBodies(state));
+  cam::GenerateContext ctx = ContextOf(state);
+  state.camToolpaths = cam::GenerateAll(*setup, ui::JobBodies(state), &ctx);
+  for (cam::Toolpath& fresh : state.camToolpaths)
+    for (const cam::Toolpath& old : previous)
+      if (old.operationId == fresh.operationId && old.finish == fresh.finish)
+        KeepPreviousMoves(old, fresh);
+  QueueAdaptivePasses(state, std::move(ctx.pending));
 }
 
 void RefreshCamToolpath(AppState& state, uint64_t opId) {
@@ -103,6 +133,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
   // (GenerateAll); this path has to say the same, or a verb-made operation
   // on a bad layout generated fine here and only a Generate press refused.
   cam::Toolpath fresh;
+  cam::GenerateContext ctx = ContextOf(state);
   if (const std::string why =
           cam::PlacementRefusal(*setup, ui::JobBodies(state));
       !why.empty()) {
@@ -110,11 +141,13 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
     fresh.toolNumber = op->toolNumber;
     fresh.error = why;
   } else {
-    fresh = cam::Generate(*setup, *op, ui::JobBodies(state));
+    fresh = cam::Generate(*setup, *op, ui::JobBodies(state), &ctx);
   }
   for (cam::Toolpath& existing : state.camToolpaths)
     if (existing.operationId == opId) {
+      KeepPreviousMoves(existing, fresh);
       existing = std::move(fresh);
+      QueueAdaptivePasses(state, std::move(ctx.pending));
       return;
     }
   // New: insert where a full pass would have put it — operations order, so
@@ -136,6 +169,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
       state.camToolpaths.begin() +
           static_cast<ptrdiff_t>(std::min(at, state.camToolpaths.size())),
       std::move(fresh));
+  QueueAdaptivePasses(state, std::move(ctx.pending));
 }
 
 void DropCamToolpath(AppState& state, uint64_t opId) {
@@ -969,6 +1003,19 @@ void DrawCamPanel(AppState& state) {
   }
   ImGui::SameLine();
   ImGui::Checkbox("Show path###cam_show", &state.camShowToolpath);
+  // Adaptive passes in flight: the row owns the progress, not a modal — the
+  // rest of the job stays editable (docs/ui/long-operations.md, phase 1).
+  if (const AdaptiveProgress progress = AdaptiveProgressOf(state);
+      progress.running) {
+    ImGui::TextDisabled("%s", progress.label.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Cancel###cam_cancel_clearing"))
+      CancelAdaptivePasses(state);
+    ImGui::SetItemTooltip("Stops after the pass now cutting -- the clearing "
+                          "library cannot be interrupted mid-pass. What was "
+                          "waiting is queued again by the next edit or "
+                          "Generate.");
+  }
 
   // G4: what the verifier found, in words, without being asked. The numbers
   // behind these lines are in the same Verdict the RPC returns.
@@ -1024,7 +1071,12 @@ void DrawCamPanel(AppState& state) {
       // "job.nc" written into whatever directory the app was launched from.
       // Refuse and say where it would go instead of leaving G-code somewhere
       // nobody will look for it (docs/cam/dogfood-round.md).
-      if (state.projectPath.empty()) {
+      if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
+        // A file written now would carry the PREVIOUS toolpath where a pass
+        // is still cutting.
+        state.camLastPost = why;
+        LOG_INFO("CAM: refused to post while passes are pending");
+      } else if (state.projectPath.empty()) {
         state.camLastPost =
             "save the project first — the G-code goes beside it, named after "
             "the setup";
@@ -1391,7 +1443,12 @@ void DrawCamPanel(AppState& state) {
     for (const cam::Toolpath& tp : state.camToolpaths) {
       if (tp.operationId != op.id)
         continue;
-      if (!tp.error.empty()) {
+      if (tp.pending) {
+        ImGui::TextDisabled("  clearing%s", tp.moves.empty()
+                                                ? "..."
+                                                : "... (showing the "
+                                                  "previous toolpath)");
+      } else if (!tp.error.empty()) {
         ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "  %s",
                            tp.error.c_str());
       } else {

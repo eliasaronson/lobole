@@ -20,6 +20,7 @@
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
 #include "render/FrameTimer.h"
+#include "ui/BackgroundJob.h"
 #include "ui/ImportJob.h"
 #include "ui/SyncJob.h"
 #include "ui/TopoJob.h"
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -1369,6 +1371,25 @@ struct AppState {
   // consumes, so the picture cannot disagree with the file.
   std::vector<cam::Toolpath> camToolpaths;
   uint64_t camActiveSetup = 0;
+  // Adaptive clearing off the frame (docs/ui/long-operations.md, phase 1).
+  // Results by content key, so a re-open, an undo and a switch of tab all
+  // find what was already paid for; the queue is what a deferred generate
+  // still owes, one pass per entry, consumed one at a time by a "cam"
+  // BackgroundJob. `camDeferAdaptive` is the panel's default and what a
+  // synchronous RPC turns off for the length of its answer.
+  cam::AdaptiveCache camAdaptiveCache;
+  std::deque<cam::AdaptiveRequest> camAdaptiveQueue;
+  uint64_t camAdaptiveInFlight = 0; // key of the pass now cutting, or 0
+  bool camDeferAdaptive = true;
+  // Progress for the row and the label: passes done / passes in this batch.
+  // A batch is everything queued since the queue was last empty.
+  size_t camAdaptiveBatchDone = 0;
+  size_t camAdaptiveBatchTotal = 0;
+  // Generate was pressed while passes were pending: verify once they land.
+  bool camVerifyWhenSettled = false;
+  // Every long-running operation the registry knows about
+  // (ui/BackgroundJobs.h). Polled from PollBackgroundJobs and nowhere else.
+  std::vector<std::unique_ptr<BackgroundJob>> backgroundJobs;
   bool camShowToolpath = true;
   float camSafeZEdit = 5.0f;
   std::string camLastPost;

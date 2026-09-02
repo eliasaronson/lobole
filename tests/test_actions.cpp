@@ -48,14 +48,22 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
+#include "ui/CamJobs.h"
+#include "ui/CamPanel.h"
+#include "ui/CamTool.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
+#include "ui/JobActions.h"
 #include "ui/Overlays.h"
 #include "ui/TerminalPanel.h"
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 using Catch::Matchers::WithinAbs;
 
@@ -1747,3 +1755,259 @@ TEST_CASE(
   INFO(fit.why);
   CHECK(fit.why.find("RIM") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Long operations off the frame (docs/ui/long-operations.md, phase 1)
+//
+// The registry is polled by the loop and nowhere else; here the loop is the
+// test, calling PollBackgroundJobs the way HeadlessMain.cpp does. Headless,
+// because whether a job finishes has nothing to do with a widget.
+// ---------------------------------------------------------------------------
+
+namespace {
+void PumpUntil(ui::AppState& state, const std::function<bool()>& done,
+               int budgetMs = 20000) {
+  const auto t0 = std::chrono::steady_clock::now();
+  while (!done()) {
+    ui::PollBackgroundJobs(state);
+    if (std::chrono::steady_clock::now() - t0 >
+        std::chrono::milliseconds(budgetMs))
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+}
+} // namespace
+
+TEST_CASE("a background job is reaped by the loop, listed, and cancelled",
+          "[actions][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  REQUIRE(ui::ListBackgroundJobs(state).empty());
+
+  std::atomic<int> ticks{0};
+  int finished = 0;
+  auto job = std::make_unique<ui::BackgroundJob>();
+  job->kind = "test";
+  job->label = "Counting to fifty";
+  job->cancellable = true;
+  ui::BackgroundJob* raw = job.get();
+  job->thread = std::thread([raw, &ticks] {
+    while (!raw->cancel.load() && ticks.load() < 50) {
+      ticks++;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    raw->done.store(true);
+  });
+  job->finish = [&finished](ui::AppState&) {
+    finished++;
+    return true;
+  };
+  ui::StartBackgroundJob(state, std::move(job));
+
+  CHECK(ui::BackgroundJobRunning(state, "test"));
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "cam"));
+  const std::vector<ui::BackgroundJobInfo> listed =
+      ui::ListBackgroundJobs(state);
+  REQUIRE(listed.size() == 1);
+  CHECK(listed[0].kind == "test");
+  CHECK(listed[0].label == "Counting to fifty");
+  CHECK(listed[0].cancellable);
+  CHECK(listed[0].fraction < 0.0); // indeterminate, honestly
+
+  // Cancel is a request the worker honours between ticks.
+  CHECK(ui::CancelBackgroundJobs(state, "test") == 1);
+  CHECK(ui::CancelBackgroundJobs(state, "nothing") == 0);
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "test"); });
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "test"));
+  CHECK(finished == 1);
+  CHECK(ticks.load() < 50);
+  CHECK(state.backgroundJobs.empty());
+
+  // A finish that asks to be called again is, once per poll, until it says
+  // it is done — the sliced-tail shape.
+  int calls = 0;
+  auto sliced = std::make_unique<ui::BackgroundJob>();
+  sliced->kind = "sliced";
+  sliced->done.store(true); // no thread at all: finish is the whole job
+  sliced->finish = [&calls](ui::AppState&) { return ++calls >= 3; };
+  ui::StartBackgroundJob(state, std::move(sliced));
+  ui::PollBackgroundJobs(state);
+  CHECK(calls == 1);
+  CHECK(ui::BackgroundJobRunning(state, "sliced"));
+  ui::PollBackgroundJobs(state);
+  ui::PollBackgroundJobs(state);
+  CHECK(calls == 3);
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "sliced"));
+
+  // Join blocks for a running job and applies its finish.
+  int late = 0;
+  auto slow = std::make_unique<ui::BackgroundJob>();
+  slow->kind = "slow";
+  ui::BackgroundJob* slowRaw = slow.get();
+  slow->thread = std::thread([slowRaw] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    slowRaw->done.store(true);
+  });
+  slow->finish = [&late](ui::AppState&) {
+    late++;
+    return true;
+  };
+  ui::StartBackgroundJob(state, std::move(slow));
+  ui::JoinBackgroundJobs(state, "slow");
+  CHECK(late == 1);
+  CHECK(state.backgroundJobs.empty());
+}
+
+#ifdef HAVE_CAM
+namespace {
+ElementRef UpFaceAtZ(const std::vector<Body>& bodies, double z) {
+  for (const Body& b : bodies)
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+          std::abs(o.z - static_cast<float>(z)) < 1e-4f)
+        return ElementRef{b.createdBy, name};
+    }
+  return {};
+}
+
+bool SameMoves(const cam::Toolpath& a, const cam::Toolpath& b) {
+  if (a.moves.size() != b.moves.size())
+    return false;
+  for (size_t i = 0; i < a.moves.size(); i++)
+    if (a.moves[i].kind != b.moves[i].kind ||
+        glm::length(a.moves[i].to - b.moves[i].to) > 1e-9)
+      return false;
+  return true;
+}
+
+bool AnyPending(const ui::AppState& state) {
+  return ui::CamToolpathsPending(state);
+}
+} // namespace
+
+TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
+          "[actions][cam][jobs]") {
+  if (!cam::AdaptiveAvailable())
+    return;
+  ui::AppState state = MakeHeadlessState();
+  Document& doc = *state.document;
+  const uint64_t block = AddBox(doc, glm::vec3(0, 0, 0), 40, 30, 20);
+  const uint64_t voidId = AddBox(doc, glm::vec3(10, 8, 12), 20, 14, 20);
+  doc.AddFeature(std::make_unique<BooleanFeature>("Pocket", block, voidId,
+                                                  BooleanOp::Subtract));
+  doc.Regenerate();
+  const uint64_t partId = state.parts[state.activePart].id;
+  ui::CreateJobForPart(state, partId);
+  REQUIRE(state.job != nullptr);
+
+  cam::Setup& setup = state.job->AddSetup("Job");
+  cam::Tool tool;
+  tool.number = 1;
+  tool.diameter = 6.0;
+  tool.feedCut = 600.0;
+  tool.feedPlunge = 200.0;
+  setup.tools.push_back(tool);
+  setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+  const ElementRef floor = UpFaceAtZ(ui::JobBodies(state), 12.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op =
+      cam::DeriveOperation(setup, ui::JobBodies(state), cam::OpType::Pocket,
+                           ui::TargetFor(state, floor))
+          .op;
+  op.id = state.job->AllocateId();
+  op.name = "Pocket";
+  op.type = cam::OpType::Adaptive;
+  setup.operations.push_back(op);
+  state.camActiveSetup = setup.id;
+  const size_t passes = cam::DepthPasses(op).size();
+  REQUIRE(passes >= 2);
+
+  // The reference: synchronous, no cache.
+  const std::vector<cam::Toolpath> ref =
+      cam::GenerateAll(setup, ui::JobBodies(state));
+  REQUIRE(ref.size() == 1);
+  INFO(ref[0].error);
+  REQUIRE(ref[0].error.empty());
+
+  // The panel's path defers: pending at once, a "cam" job running.
+  REQUIRE(state.camDeferAdaptive);
+  ui::RefreshCamToolpaths(state);
+  REQUIRE(state.camToolpaths.size() == 1);
+  CHECK(state.camToolpaths[0].pending);
+  CHECK(state.camToolpaths[0].moves.empty()); // nothing previous to keep
+  CHECK(ui::BackgroundJobRunning(state, "cam"));
+  CHECK(state.camAdaptiveBatchTotal == passes);
+  CHECK_FALSE(ui::CamToolpathsPendingWhy(state).empty());
+  {
+    const std::vector<ui::BackgroundJobInfo> jobs =
+        ui::ListBackgroundJobs(state);
+    REQUIRE(jobs.size() == 1);
+    CHECK(jobs[0].kind == "cam");
+    CHECK(jobs[0].label.find("Pocket") != std::string::npos);
+    CHECK(jobs[0].label.find("1 of " + std::to_string(passes)) !=
+          std::string::npos);
+    CHECK_FALSE(jobs[0].cancellable);
+  }
+  // Verification waits for the passes instead of judging the previous file.
+  ui::RunCamVerification(state);
+  CHECK(state.camVerifyWhenSettled);
+  REQUIRE(state.camVerdict.size() == 1);
+  CHECK(state.camVerdict[0].text.find("Not verified yet") == 0);
+
+  // Refreshing again while it runs queues nothing twice.
+  ui::RefreshCamToolpaths(state);
+  CHECK(state.camAdaptiveBatchTotal == passes);
+
+  // The loop reaps each pass; the last one regenerates and verifies.
+  PumpUntil(state, [&] { return !AnyPending(state); });
+  CHECK_FALSE(AnyPending(state));
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "cam"));
+  REQUIRE(state.camToolpaths.size() == 1);
+  CHECK(state.camToolpaths[0].error.empty());
+  CHECK(SameMoves(state.camToolpaths[0], ref[0]));
+  CHECK(state.camAdaptiveCache.Size() == passes);
+  CHECK_FALSE(state.camVerifyWhenSettled);
+  CHECK_FALSE(state.camVerdict.empty());
+  CHECK(state.camVerdict[0].text.find("Not verified") == std::string::npos);
+  CHECK(state.camAdaptiveBatchTotal == 0); // the batch is over
+
+  // An unrelated regenerate (an undo would do this) is a cache hit: no job.
+  const size_t hits = state.camAdaptiveCache.hits;
+  ui::RefreshCamToolpaths(state);
+  CHECK_FALSE(AnyPending(state));
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "cam"));
+  CHECK(state.camAdaptiveCache.hits > hits);
+
+  // A pending toolpath keeps the previous moves for the backplot.
+  state.camAdaptiveCache.Clear();
+  ui::RefreshCamToolpaths(state);
+  REQUIRE(AnyPending(state));
+  CHECK(state.camToolpaths[0].pending);
+  CHECK(SameMoves(state.camToolpaths[0], ref[0])); // the previous, shown
+  // …and a synchronous caller settles: joins, computes, regenerates.
+  ui::SettleCamToolpaths(state);
+  CHECK_FALSE(AnyPending(state));
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "cam"));
+  CHECK(SameMoves(state.camToolpaths[0], ref[0]));
+
+  // Cancel: what was waiting says so; what was cutting lands and is cached,
+  // and lands WITHOUT queueing the rest again.
+  state.camAdaptiveCache.Clear();
+  ui::RefreshCamToolpaths(state);
+  REQUIRE(AnyPending(state));
+  REQUIRE(ui::BackgroundJobRunning(state, "cam"));
+  ui::CancelAdaptivePasses(state);
+  CHECK_FALSE(AnyPending(state));
+  CHECK(state.camToolpaths[0].error.find("cancelled") != std::string::npos);
+  CHECK(state.camAdaptiveQueue.empty());
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "cam"); });
+  CHECK_FALSE(AnyPending(state));
+  CHECK(state.camAdaptiveQueue.empty());
+  CHECK(state.camAdaptiveCache.Size() == 1); // the pass that was cutting
+  // The next Generate queues the rest again.
+  ui::RefreshCamToolpaths(state);
+  CHECK(AnyPending(state));
+  PumpUntil(state, [&] { return !AnyPending(state); });
+  CHECK(SameMoves(state.camToolpaths[0], ref[0]));
+}
+#endif // HAVE_CAM

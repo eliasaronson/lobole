@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <fstream>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -173,6 +174,53 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
             return s;
           }());
   CHECK(offenders.empty());
+}
+
+TEST_CASE("the adaptive key covers every field the pass reads",
+          "[convention]") {
+  // docs/ui/long-operations.md, phase 1: an adaptive pass runs on a worker
+  // from a COPY of its inputs and its result is cached by a hash of them.
+  // The one drift that design is exposed to is a new `setup.`/`op.`/`tool.`
+  // read inside CamAdaptive.cpp that the key does not know about — the
+  // cache would then answer a changed pass with the old moves, which is a
+  // wrong toolpath that looks right. Invisible in review, so checked here:
+  // every such field read anywhere in the file appears inside AdaptiveKey.
+  const fs::path path =
+      fs::path(DESIGNER_SOURCE_DIR) / "src/core/cam/CamAdaptive.cpp";
+  std::ifstream f(path);
+  REQUIRE(f.good());
+  std::stringstream ss;
+  ss << f.rdbuf();
+  const std::string text = ss.str();
+
+  const size_t keyAt = text.find("uint64_t AdaptiveKey(");
+  REQUIRE(keyAt != std::string::npos);
+  const size_t keyEnd = text.find("\n}\n", keyAt);
+  REQUIRE(keyEnd != std::string::npos);
+  const std::string key = text.substr(keyAt, keyEnd - keyAt);
+
+  const std::regex read(R"(\b(setup|op|tool)\.([A-Za-z_][A-Za-z0-9_]*)\b)");
+  std::set<std::string> everywhere, inKey;
+  for (auto it = std::sregex_iterator(text.begin(), text.end(), read);
+       it != std::sregex_iterator(); ++it)
+    everywhere.insert((*it)[1].str() + "." + (*it)[2].str());
+  for (auto it = std::sregex_iterator(key.begin(), key.end(), read);
+       it != std::sregex_iterator(); ++it)
+    inKey.insert((*it)[1].str() + "." + (*it)[2].str());
+  REQUIRE(inKey.size() >= 7); // the seven scalars the pass reads today
+
+  std::vector<std::string> missing;
+  for (const std::string& field : everywhere)
+    if (!inKey.count(field))
+      missing.push_back(field);
+  INFO("CamAdaptive.cpp reads these and AdaptiveKey does not hash them:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& m : missing)
+              s += "  " + m + "\n";
+            return s;
+          }());
+  CHECK(missing.empty());
 }
 
 TEST_CASE("a background job is polled by the loop, never by a panel",

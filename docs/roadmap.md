@@ -219,15 +219,23 @@ variables, drawings, BOM + exploded).
 [capability-review-2026-08-31.md](capability-review-2026-08-31.md). Its
 **testing and tooling halves are done** (all twelve items closed by
 2026-09-01, four of them by being retracted after measurement); the capability
-findings below remain findings, not schedule. Three are architecture rather than backlog: the assembly solve
+findings below remain findings, not schedule. Three were architecture rather than backlog. ~~The assembly solve
 places by direct frame alignment with **no numeric 3D solver**, so a mechanism
-with a closed kinematic loop cannot be assembled at all (the one place a
-mature open-source competitor is now ahead); **regeneration cannot cross a
-document boundary**, which is the single missing edge behind three separately
-deferred items (cross-part linked sketches, cross-part refs in context,
-assembly-level features); and there is **no general "long operation off the
-frame" mechanism**, so four cases have three hand-rolled answers and two open
-bugs. Plus the absences worth knowing: no
+with a closed kinematic loop cannot be assembled at all~~ — **closed
+2026-09-01 by A6** ([assemblies/a6-loop-solver-plan.md](assemblies/a6-loop-solver-plan.md)):
+loops close numerically in joint coordinates, wrapping the direct-frame pass.
+**Regeneration cannot cross a document boundary**, which is the single missing
+edge behind three separately deferred items (cross-part linked sketches,
+cross-part refs in context, assembly-level features). And there is **no
+general "long operation off the frame" mechanism**: five cases, five shapes.
+[ui/long-operations.md](ui/long-operations.md) planned it 2026-09-01 and
+shipped step 0 the same day (one poll entry point for all three loops, fixing
+a push that never completed behind a collapsed section and a solve stranded by
+leaving Simulation mode) and **phase 1 on 2026-09-02**: the registry,
+`background_jobs`/`cancel_background_job`, and the adaptive pocket cut off
+the frame (the ~7 s freeze is closed — a pick returns in 0.5 ms). Phases 2-4
+migrate the four older jobs and give `mesh_study` its async path; that
+known-bugs entry stays open until then. Plus the absences worth knowing: no
 user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
 surfacing or sheet metal. **The standard-parts absence closed 2026-09-01**
 ([parts/plan.md](parts/plan.md), F1 phases 1-5): seven vendored ISO standards,

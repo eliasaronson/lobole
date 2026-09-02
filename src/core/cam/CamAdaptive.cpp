@@ -61,9 +61,12 @@ std::string Trouble(const AdaptivePath::AdaptiveOutput& out) {
 
 bool AdaptiveAvailable() { return true; }
 
-AdaptiveResult AdaptiveClear(const Setup& setup, const Operation& op,
-                             const Tool& tool, const std::vector<Loop>& region,
-                             double z, double fromZ) {
+namespace {
+// The pass itself. `safeZ` rather than the Setup: it is the one field a pass
+// reads, and taking only it is what lets a request carry the whole input.
+AdaptiveResult ClearImpl(double safeZ, const Operation& op, const Tool& tool,
+                         const std::vector<Loop>& region, double z,
+                         double fromZ) {
   AdaptiveResult result;
   result.available = true;
 
@@ -127,7 +130,7 @@ AdaptiveResult AdaptiveClear(const Setup& setup, const Operation& op,
     const glm::dvec2 start(out.StartPoint.first, out.StartPoint.second);
     const double helixRadius = glm::length(start - helix);
     result.moves.push_back(
-        {Move::Kind::Rapid, {start.x, start.y, setup.safeZ}, false, 0.0, 0.0});
+        {Move::Kind::Rapid, {start.x, start.y, safeZ}, false, 0.0, 0.0});
     if (helixRadius > 1e-6 && fromZ > z + 1e-9) {
       const double perRev =
           2.0 * std::numbers::pi * helixRadius * std::tan(glm::radians(3.0));
@@ -166,16 +169,16 @@ AdaptiveResult AdaptiveClear(const Setup& setup, const Operation& op,
       for (const AdaptivePath::DPoint& pt : tpath.second) {
         if (motion == AdaptivePath::MotionType::mtLinkNotClear) {
           if (down) {
-            result.moves.push_back({Move::Kind::Rapid,
-                                    {result.moves.back().to.x,
-                                     result.moves.back().to.y, setup.safeZ},
-                                    false,
-                                    0.0,
-                                    0.0});
+            result.moves.push_back(
+                {Move::Kind::Rapid,
+                 {result.moves.back().to.x, result.moves.back().to.y, safeZ},
+                 false,
+                 0.0,
+                 0.0});
             down = false;
           }
           result.moves.push_back({Move::Kind::Rapid,
-                                  {pt.first, pt.second, setup.safeZ},
+                                  {pt.first, pt.second, safeZ},
                                   false,
                                   0.0,
                                   0.0});
@@ -202,12 +205,23 @@ AdaptiveResult AdaptiveClear(const Setup& setup, const Operation& op,
     if (!result.moves.empty())
       result.moves.push_back(
           {Move::Kind::Rapid,
-           {result.moves.back().to.x, result.moves.back().to.y, setup.safeZ},
+           {result.moves.back().to.x, result.moves.back().to.y, safeZ},
            false,
            0.0,
            0.0});
   }
   return result;
+}
+} // namespace
+
+AdaptiveResult AdaptiveClear(const Setup& setup, const Operation& op,
+                             const Tool& tool, const std::vector<Loop>& region,
+                             double z, double fromZ) {
+  return ClearImpl(setup.safeZ, op, tool, region, z, fromZ);
+}
+
+AdaptiveResult AdaptiveClear(const AdaptiveRequest& r) {
+  return ClearImpl(r.safeZ, r.op, r.tool, r.region, r.z, r.fromZ);
 }
 
 } // namespace cam
@@ -226,6 +240,120 @@ AdaptiveResult AdaptiveClear(const Setup&, const Operation&, const Tool&,
   return out;
 }
 
+AdaptiveResult AdaptiveClear(const AdaptiveRequest&) {
+  AdaptiveResult out;
+  out.error = "this build has no adaptive clearing "
+              "(-DENABLE_CAM_ADAPTIVE=OFF)";
+  return out;
+}
+
 } // namespace cam
 
 #endif
+
+// --- The key, the request and the cache: built with or without libarea ------
+
+namespace cam {
+
+namespace {
+// FNV-1a over the raw bytes of each input, in a fixed order. Doubles are
+// hashed by bit pattern, so -0.0 and 0.0 differ — harmless (one extra miss)
+// and simpler than canonicalising.
+struct Hasher {
+  uint64_t h = 1469598103934665603ULL;
+  void Bytes(const void* p, size_t n) {
+    const unsigned char* c = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; i++) {
+      h ^= c[i];
+      h *= 1099511628211ULL;
+    }
+  }
+  void D(double v) { Bytes(&v, sizeof v); }
+  void I(int64_t v) { Bytes(&v, sizeof v); }
+};
+} // namespace
+
+uint64_t AdaptiveKey(const Setup& setup, const Operation& op, const Tool& tool,
+                     const std::vector<Loop>& region, double z, double fromZ) {
+  // Every field a pass reads, and the loops. A read added to ClearImpl that
+  // is not added here fails `test_conventions`
+  // ("the adaptive key covers every field the pass reads").
+  Hasher hash;
+  hash.D(setup.safeZ);
+  hash.D(op.stepover);
+  hash.D(op.stockToLeave);
+  hash.I(static_cast<int64_t>(op.side));
+  hash.D(tool.diameter);
+  hash.D(tool.feedPlunge);
+  hash.D(tool.feedCut);
+  hash.D(z);
+  hash.D(fromZ);
+  hash.I(static_cast<int64_t>(region.size()));
+  for (const Loop& l : region) {
+    hash.I(l.hole ? 1 : 0);
+    hash.I(static_cast<int64_t>(l.pts.size()));
+    for (const glm::dvec2& p : l.pts) {
+      hash.D(p.x);
+      hash.D(p.y);
+    }
+  }
+  return hash.h;
+}
+
+AdaptiveRequest MakeAdaptiveRequest(const Setup& setup, const Operation& op,
+                                    const Tool& tool,
+                                    const std::vector<Loop>& region, double z,
+                                    double fromZ) {
+  AdaptiveRequest r;
+  r.key = AdaptiveKey(setup, op, tool, region, z, fromZ);
+  r.safeZ = setup.safeZ;
+  r.op = op;
+  r.tool = tool;
+  r.region = region;
+  r.z = z;
+  r.fromZ = fromZ;
+  return r;
+}
+
+const AdaptiveResult* AdaptiveCache::Find(uint64_t key) {
+  const auto it = m_entries.find(key);
+  if (it == m_entries.end()) {
+    misses++;
+    return nullptr;
+  }
+  hits++;
+  return &it->second;
+}
+
+bool AdaptiveCache::Contains(uint64_t key) const {
+  return m_entries.find(key) != m_entries.end();
+}
+
+void AdaptiveCache::Put(uint64_t key, AdaptiveResult result) {
+  if (const auto it = m_entries.find(key); it != m_entries.end()) {
+    m_moves -= it->second.moves.size();
+    it->second = std::move(result);
+    m_moves += it->second.moves.size();
+    return;
+  }
+  m_moves += result.moves.size();
+  m_entries.emplace(key, std::move(result));
+  m_order.push_back(key);
+  while (m_entries.size() > kMaxEntries ||
+         (m_moves > kMaxMoves && m_entries.size() > 1)) {
+    const uint64_t oldest = m_order.front();
+    m_order.pop_front();
+    if (const auto it = m_entries.find(oldest); it != m_entries.end()) {
+      m_moves -= it->second.moves.size();
+      m_entries.erase(it);
+    }
+  }
+}
+
+void AdaptiveCache::Clear() {
+  m_entries.clear();
+  m_order.clear();
+  m_moves = 0;
+}
+
+} // namespace cam

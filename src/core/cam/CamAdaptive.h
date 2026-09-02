@@ -1,9 +1,13 @@
 #pragma once
 
-#include "core/cam/CamJob.h"
-#include "core/cam/CamToolpath.h" // Loop
+#include "core/cam/CamJob.h" // Loop, Move, Operation, Tool, Setup
 
+#include <glm/glm.hpp>
+
+#include <cstdint>
+#include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Adaptive clearing (docs/cam/plan.md, C8).
@@ -38,13 +42,73 @@ struct AdaptiveResult {
 };
 
 // Clears `region` (outer loops plus island holes, in setup space) from
-// `fromZ` down to `z`, entering on the helix Adaptive2d plans for itself.
+// `fromZ` down to `z` — the helix entry is planned by the library, the
+// descent to it is ours. Reads exactly the inputs `AdaptiveKey` hashes and
+// nothing else; `test_conventions` holds the two to the same list.
 [[nodiscard]] AdaptiveResult
 AdaptiveClear(const Setup& setup, const Operation& op, const Tool& tool,
               const std::vector<Loop>& region, double z, double fromZ);
 
-// Whether this build has it at all (-DENABLE_CAM_ADAPTIVE=OFF removes the
-// dependency entirely). The UI asks so it can fall back rather than refuse.
 [[nodiscard]] bool AdaptiveAvailable();
+
+// --- Off the frame (docs/ui/long-operations.md, phase 1) --------------------
+//
+// One pass of adaptive clearing costs seconds and libarea's `Execute` has no
+// interruption points, so the pass is the unit of background work. What a
+// pass needs is COPIED into a request — plain structs, no OCC shape, nothing
+// that another thread could be mutating — and what it produced is keyed by a
+// hash of exactly those inputs. A content key rather than "operation 7 of
+// tab 4" is what makes the result safe to land on any tab, after any undo,
+// and after the parameters have moved on (then it is simply an entry nobody
+// reads).
+
+// Everything one pass reads, and nothing it does not.
+struct AdaptiveRequest {
+  uint64_t key = 0;
+  double safeZ = 0.0; // the one Setup field a pass reads
+  Operation op;
+  Tool tool;
+  std::vector<Loop> region;
+  double z = 0.0;
+  double fromZ = 0.0;
+};
+
+// The key for one pass: a hash over the seven scalars and the loops. Kept
+// beside the reads in CamAdaptive.cpp, and gated: every `setup.`/`op.`/
+// `tool.` field that file reads must appear in this function, or a new read
+// would silently miss the cache's invalidation — which is the one drift this
+// design is exposed to and which is invisible in review.
+[[nodiscard]] uint64_t AdaptiveKey(const Setup& setup, const Operation& op,
+                                   const Tool& tool,
+                                   const std::vector<Loop>& region, double z,
+                                   double fromZ);
+
+[[nodiscard]] AdaptiveRequest
+MakeAdaptiveRequest(const Setup& setup, const Operation& op, const Tool& tool,
+                    const std::vector<Loop>& region, double z, double fromZ);
+
+// The same clearing, from a request — the form a worker thread calls.
+[[nodiscard]] AdaptiveResult AdaptiveClear(const AdaptiveRequest& request);
+
+// Results by key. Bounded by entries AND by moves (a baffle pocket is 26k
+// moves; two hundred of those is memory a CAD app should not keep). Eviction
+// is oldest-in first; `hits`/`misses` are for tests and the perf HUD.
+class AdaptiveCache {
+public:
+  [[nodiscard]] const AdaptiveResult* Find(uint64_t key);
+  void Put(uint64_t key, AdaptiveResult result);
+  [[nodiscard]] bool Contains(uint64_t key) const;
+  [[nodiscard]] size_t Size() const { return m_entries.size(); }
+  void Clear();
+  size_t hits = 0;
+  size_t misses = 0;
+
+private:
+  static constexpr size_t kMaxEntries = 256;
+  static constexpr size_t kMaxMoves = 2'000'000;
+  std::unordered_map<uint64_t, AdaptiveResult> m_entries;
+  std::deque<uint64_t> m_order; // insertion order, for eviction
+  size_t m_moves = 0;
+};
 
 } // namespace cam

@@ -9,6 +9,7 @@
 #include "render/MeshRenderer.h"
 #include "render/StockRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // ActiveCamSetup, PostOpts
 #include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/JobActions.h"
@@ -105,6 +106,11 @@ bool BeginCamPlayback(AppState& state) {
   if (state.camToolpaths.empty()) {
     state.camPlaybackRefusal =
         "Nothing has been generated to simulate. Generate the job first.";
+    return false;
+  }
+  if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
+    // The picture would be of a file the job no longer posts.
+    state.camPlaybackRefusal = why;
     return false;
   }
 

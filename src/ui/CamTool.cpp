@@ -8,6 +8,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "ui/AppActions.h" // AppendPrimLine/Dot, WorldToScreen
+#include "ui/CamJobs.h"
 #include "ui/CamPanel.h"
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
@@ -1106,6 +1107,16 @@ void RunCamVerification(AppState& state) {
   state.camLeftover.clear();
   if (!state.job || state.camToolpaths.empty())
     return;
+  if (const std::string why = CamToolpathsPendingWhy(state); !why.empty()) {
+    // A verdict about the previous toolpath is worse than none. Say what is
+    // happening and verify when the last pass lands (CamJobs.cpp).
+    state.camVerifyWhenSettled = true;
+    state.camVerdict.push_back(
+        {cam::VerdictLine::Level::Warn, "Not verified yet: " + why +
+                                            ". The verdict "
+                                            "follows when the passes land."});
+    return;
+  }
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
     return;

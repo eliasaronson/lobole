@@ -5,9 +5,14 @@
 > bottom for the table and the corrections. **F1 then shipped complete the
 > same day** ([parts/plan.md](parts/plan.md), phases 1-5, formats v69+v70) —
 > and the "F1 in detail" section below has its own corrections block, because
-> three of the things it argued for turned out to be wrong once built. The
-> remaining capability findings (A1-A3, S1) are findings only and nothing
-> there is scheduled. This is a read of the
+> three of the things it argued for turned out to be wrong once built.
+> **A1 shipped 2026-09-01 as A6** ([assemblies/a6-loop-solver-plan.md](assemblies/a6-loop-solver-plan.md),
+> `4cf286be`) — a mate loop closes instead of erroring. **A3's step 0
+> shipped the same day** ([ui/long-operations.md](ui/long-operations.md),
+> `65a4159c`): the two poll bugs and one poll entry point; **phase 1 on
+> 2026-09-02**: the registry and the adaptive pocket off the frame. Phases
+> 2-4 (the older jobs, async `mesh_study`) are planned, not built. A2 and
+> S1 are findings only and nothing there is scheduled. This is a read of the
 > tree against what the mainstream modellers do, taken after the CAM
 > projection fix (`286ef6b`) and prompted by "what are we missing, what is
 > badly structured, what do we do worse than FreeCAD and Onshape".
@@ -27,6 +32,13 @@
 ---
 
 ## A1 — The assembly solve is not a solver, and closed loops are unassemblable
+
+> **SHIPPED 2026-09-01 as A6** (`4cf286be`, plan in
+> [assemblies/a6-loop-solver-plan.md](assemblies/a6-loop-solver-plan.md)).
+> The open question below was answered by the third option: a small numeric
+> core that wraps the direct-frame pass rather than replacing it, with the
+> mates' stored DOF fields as the state vector — so no format bump. The text
+> below is left as written, as the record of what the wall was.
 
 **The wall.** `core/AssemblySolve.h` states it without varnish:
 
@@ -126,8 +138,13 @@ bugs rather than missing features. The recommendation is small and concrete:
 fourth bespoke worker** — a job with a progress state, a cancel, and a row in
 the panel that owns it. `mesh_study` is then the first free adopter.
 
-**Planned 2026-09-01: [ui/long-operations.md](ui/long-operations.md)** — and
-reading the implementations changed the entry. There are **five**, not four
+**Planned 2026-09-01: [ui/long-operations.md](ui/long-operations.md)**,
+and **step 0 shipped the same day** (`65a4159c`): `ui::PollBackgroundJobs`
+is the one poll entry point, called by all three loops, gated by
+`test_conventions`. **Phase 1 shipped 2026-09-02**: the registry,
+`background_jobs`/`cancel_background_job`, and the adaptive pocket cut off the
+frame through a content-keyed cache — the ~7 s freeze is closed. Async
+`mesh_study` waits for phase 3. Reading the implementations changed the entry. There are **five**, not four
 (`RenderJob` and `SyncJob` were missed), and two of them have live bugs that
 have nothing to do with duplication: `PollSync` sits inside a collapsed
 `TreeNode`, so a push never completes if the Sharing section is shut, and the

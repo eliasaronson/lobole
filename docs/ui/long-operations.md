@@ -1,7 +1,11 @@
 # Long operations off the frame — plan (A3)
 
 > Status: **step 0 SHIPPED 2026-09-01** (the two bugs, and the single poll
-> entry point they needed); phases 1-4 planned. Written after reading all five
+> entry point they needed); **phase 1 SHIPPED 2026-09-02** (the registry,
+> `background_jobs`/`cancel_background_job`, and the CAM adaptive pocket off
+> the frame — see [As built](#as-built-phase-1-2026-09-02)); phases 2-4
+> planned. [Read against the tree](#read-against-the-tree-2026-09-02) records
+> what the code grew between the plan and the build. Written after reading all five
 > existing implementations, which is what changed the plan: the review
 > (capability-review-2026-08-31.md, A3) said there were four cases with three
 > hand-rolled answers. There are **five**, and reading them turned up two live
@@ -77,9 +81,11 @@ addressed by "the active document", which is phase 3's business.
 
 ## The mechanism
 
-One registry, owned by `AppState`, and **exactly two poll sites**: the frame
-loop and the RPC pump. Where a job is polled stops being a property of which
-panel is open.
+One registry, owned by `AppState`, polled from **`PollBackgroundJobs` and
+nowhere else** — which step 0 made the three loops (windowed, `--offscreen`,
+`--headless`) call once each, with the RPC handlers keeping their own polls
+for the reason given above. Where a job is polled stops being a property of
+which panel is open.
 
 ```cpp
 struct Job {
@@ -111,8 +117,11 @@ Three things this deliberately does **not** try to unify:
 
 ### What it buys immediately
 
-An RPC surface that works for every job rather than one: `jobs` (list what is
-running, with kind, label, fraction) and `cancel_job {kind}`. Today
+An RPC surface that works for every job rather than one: `background_jobs`
+(list what is running, with kind, label, fraction) and
+`cancel_background_job {kind}` — not `jobs`, because on this API a "job" is
+already the CAM job document (`add_job_part`, `list_job_parts`), and an agent
+reading `jobs` would expect those. Today
 `study_status` is bespoke, and `mesh_study` has no async path at all —
 [known-bugs.md](../known-bugs.md) records a modal study outliving the client's
 60 s socket timeout, which "LOOKS like a hang followed by a mystery". With the
@@ -231,6 +240,151 @@ genuine cancellation of third-party code that offers none, at the cost of
 serialising the input and output across a pipe. Written down now so it is a
 considered fallback rather than a rediscovery.
 
+## Read against the tree (2026-09-02)
+
+The plan was written 2026-09-01. The router round (R1–R7,
+[../cam/router-round.md](../cam/router-round.md)) shipped the next day, and
+three of its seven items touch phase 1. Read against the code before building,
+this is what the plan had not said — in order of how much it changes the work.
+
+### The seam is narrower than "the worker touches only pure data"
+
+`cam::AdaptiveClear(setup, op, tool, region, z, fromZ)` reads exactly seven
+scalars — `setup.safeZ`, `op.stepover`, `op.stockToLeave`, `op.side`,
+`tool.diameter`, `tool.feedPlunge`, `tool.feedCut` — plus the loops. The OCC
+sectioning that produces those loops runs on the line before the call, in
+`GenerateAdaptive`. So the worker runs **libarea and nothing else**, on copies
+of plain structs; no OCC shape crosses a thread, and the per-thread OCC signal
+handler that parallel tessellation had to install (`AssemblyActions.cpp`)
+does not apply. None of the 17 edit sites change: every one of them already
+goes through `RefreshCamToolpath(s)`, and that is where the split goes.
+
+### Content keys, not versions — and that answers three items at once
+
+Rather than a job that "belongs to operation 7 of setup 2 of tab 4", the
+result is keyed by a **hash of exactly those inputs**: a `cam::AdaptiveCache`
+on `AppState`, and `Generate` takes a `GenerateContext` that either fills the
+cache synchronously or, when `defer` is set, records the requests it skipped
+and marks the toolpath `pending`. The worker consumes that queue one pass at
+a time and its `finish` puts the result in the cache and re-runs the (now
+cheap) generate. Three of the findings below fall out of this:
+
+- **Document affinity (phase 1, not phase 3).** `state.camToolpaths` and
+  `ActiveCamSetup` are per ACTIVE tab, so a result addressed to "the active
+  job" lands in the wrong tab after a switch. A content-keyed cache has no
+  tab: whichever job tab is active when a pass lands regenerates from its
+  own document and picks up whatever is cached. The FEM caveat in step 0
+  stands for phase 3; it never applies here.
+- **The stale-result race.** The motivating case is "adds and then adjusts",
+  so the second edit arrives while the first pass runs. A result for the old
+  parameters is simply a cache entry nobody reads; the regenerate after it
+  lands sees the new parameters, misses, and queues them. One in-flight pass
+  at a time; a key already queued or in flight is not queued twice; a drag
+  therefore costs one pass per distinct value that survived to a frame, not
+  one per frame.
+- **Undo and re-open (R7).** `JobUndoGuard` restores the job document and
+  `RestoreJob` regenerates everything, so undoing an adaptive edit used to
+  cost the 7 s again. With the cache it is a hit. The undo guard's own
+  fingerprint is whole-job and stays that way — it answers "did anything
+  change", not "what is this pass worth".
+
+The key is computed in `CamAdaptive.cpp` next to the reads it covers, and
+`test_conventions` checks that every `op.`/`tool.`/`setup.` field that file
+reads appears in the key function — the drift this design is exposed to is a
+new read that the key does not know about, and that is invisible in review.
+
+### R2 and R6: a full pass is now the common case
+
+A finish-tool operation regenerates with a FULL pass (`RefreshCamToolpath`
+falls through to `RefreshCamToolpaths` because tool order sorts across the
+two toolpaths), and the posted file is only right once every toolpath has
+landed. So the unit of "pending" is the toolpath, the backplot keeps the
+previous moves of a pending toolpath rather than blanking them, and
+everything that consumes the list — post, verify, simulate, and the RPCs
+that wrap them — asks `CamToolpathsPendingWhy` first and refuses in words.
+
+### RPC semantics: synchronous by default, `async` opt-in
+
+`cam_toolpath`, `cam_post`, `cam_verify` and `cam_simulate` are synchronous
+today and `headless_smoke` plus every benchmark run depends on that. They
+stay so: a reader RPC **settles** first — joins the in-flight pass, computes
+the rest of the queue inline, regenerates — and answers with complete
+toolpaths. `cam_toolpath {async: true}` defers instead and answers with what
+is pending, for a client that would rather poll `background_jobs`. Mutating
+RPCs (`set_cam_op`, `set_job_placement`, …) defer like the panel does, so an
+agent editing a job on the human's windowed instance no longer freezes it.
+
+### Cancel, quit and close
+
+Cancel is coarse, as planned: it empties the queue and lets the pass now
+cutting finish (its result is cached; it was paid for). The toolpaths that
+were waiting stop being pending and say they were cancelled — the next edit
+or Generate queues them again. The registry entry joins its thread on
+destruction, so closing the app or the tab mid-pass blocks for the remainder
+of ONE pass, not the whole operation — accepted, and said here rather than
+discovered.
+
+### The gate needs a small adaptive operation
+
+"Generating an adaptive operation does not block a frame" is measured in the
+GUI suite on an operation sized for a test, not the 7 s baffle pocket: the
+assertion is about frame time while a pass is in flight, and the pass has to
+be long enough to span several frames and short enough to keep the suite's
+budget.
+
+## As built (phase 1, 2026-09-02)
+
+What is in the tree, and where the plan bent:
+
+- **`ui/BackgroundJob.h`** is the struct from "The mechanism" plus a
+  `cancellable` flag and a `reaped` marker; **`ui/BackgroundJobs.h`** grew
+  the registry verbs (`StartBackgroundJob`, `BackgroundJobRunning`,
+  `CancelBackgroundJobs`, `JoinBackgroundJobs`, `ListBackgroundJobs`) and
+  `PollBackgroundJobs` reaps the registry after the five legacy polls. A
+  `finish` may start a successor — that is how a queue of passes advances —
+  so the reap walks by index over the entries that existed when it began.
+- **`cam::GenerateContext`** (`CamToolpath.h`) is how a generate says what
+  it would have computed: with a cache, passes are looked up; with `defer`
+  as well, misses are appended to `pending` and the toolpath comes back
+  `Toolpath::pending`. Every depth pass of an operation is queued in one go,
+  top first, and nothing after the queueing runs on a partial result. No
+  signature outside the generate family changed.
+- **`cam::AdaptiveRequest` / `AdaptiveKey` / `AdaptiveCache`**
+  (`CamAdaptive.h`) live beside the seven reads they cover, and
+  `CamAdaptive.cpp` now compiles in every CAM build (it used to be dropped
+  without libarea, which would have left `AdaptiveAvailable` unresolved).
+  The cache is bounded at 256 entries and two million moves, oldest out.
+- **`ui/CamJobs.cpp`** is the worker glue: `QueueAdaptivePasses` (dedupe
+  against cache, queue and in-flight), one `cam` job per pass with the label
+  "Clearing 'Pocket', pass 2 of 4", a `finish` that caches the result and
+  regenerates whichever job tab is active, `SettleCamToolpaths` for the
+  synchronous RPC path, `CancelAdaptivePasses`, and `CamToolpathsPendingWhy`
+  which post, verify, simulate and Save G-code all ask first.
+- **Verification waits**: `RunCamVerification` on a pending list records
+  "Not verified yet: …" and sets `camVerifyWhenSettled`; the last pass's
+  `finish` runs it.
+- **The GUI suite generates inline** (`ResetAppForTest` sets
+  `camDeferAdaptive = false`): thirty tests read `camToolpaths` right after a
+  pick, and the deferred path is the subject of exactly one of them.
+  `cam/adaptive_clears_off_the_frame` turns it back on and measured, on a
+  60 x 40 plate with a 30 x 20 x 8 pocket: **the pick returns in 0.5 ms; 193
+  frames run while the passes cut; the worst frame is 31 ms.** The headless
+  twin (`test_actions`, "an adaptive pocket is cleared off the frame and
+  lands complete") pumps the registry the way `HeadlessMain` does and checks
+  landing, cache hits, keep-previous, settle and cancel against a
+  synchronous generate.
+- **RPC**: `cam_toolpath`, `cam_post` and `cam_verify` generate through
+  `GenerateCamToolpathsNow` (join the pass in flight, then the cache, then
+  inline); `cam_simulate` settles the active list first; `cam_toolpath
+  {async: true}` defers and answers `{pending, queued_passes, job}`.
+  `background_jobs` and `cancel_background_job` are server-level and in
+  `kNoPartDoc`.
+
+Not done here, on purpose: phases 2-4 (SyncJob, TopoJob + StudyJob with
+`mesh_study` as the free adopter, ImportJob) — each a migration onto a shape
+now proven once. And the perf HUD does not yet show the registry; the panel
+row does.
+
 ## Out of scope
 
 **Regeneration itself.** `Document::Regenerate` is synchronous on the calling
@@ -244,7 +398,8 @@ rest on. That is A2's neighbourhood, not this one.
 - The two bugs get a test each: a sync job completes with the History panel
   closed, and a study job is reaped after leaving Simulation mode. Both are
   headless-testable through the actions layer (`tests/test_actions.cpp`).
-- `jobs` and `cancel_job` join `rpc_params_gate` like every other RPC.
+- `background_jobs` and `cancel_background_job` join `rpc_params_gate` like
+  every other RPC.
 - The CAM adaptive job asserts what the freeze cost: generating an adaptive
   operation does not block a frame. The GUI suite can measure that directly —
   it already asserts frame behaviour in `shell/idle_throttle_rests_and_input_wakes`.

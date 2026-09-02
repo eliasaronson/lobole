@@ -7,6 +7,9 @@
 #include "ui/SimulationActions.h"
 #include "ui/SyncJob.h"
 
+#include <algorithm>
+#include <chrono>
+
 namespace ui {
 
 void PollBackgroundJobs(AppState& state) {
@@ -41,6 +44,97 @@ void PollBackgroundJobs(AppState& state) {
     PollTopologyRun(state, *doc);
     PollStudyRun(state, *doc);
   }
+
+  ReapBackgroundJobs(state);
+}
+
+// --- The registry ------------------------------------------------------------
+
+void ReapBackgroundJobs(AppState& state) {
+  // By index, and only over the entries that existed when this started: a
+  // `finish` is allowed to start the NEXT job (that is how a queue of
+  // adaptive passes advances), and that lands at the back of the vector.
+  const size_t had = state.backgroundJobs.size();
+  for (size_t i = 0; i < had && i < state.backgroundJobs.size(); i++) {
+    BackgroundJob& job = *state.backgroundJobs[i];
+    if (!job.done.load())
+      continue;
+    if (job.thread.joinable())
+      job.thread.join();
+    if (job.finish && !job.finish(state))
+      continue; // asked to be called again next frame
+    job.finish = nullptr;
+    job.reaped = true;
+  }
+  std::erase_if(
+      state.backgroundJobs,
+      [](const std::unique_ptr<BackgroundJob>& j) { return j->reaped; });
+}
+
+BackgroundJob& StartBackgroundJob(AppState& state,
+                                  std::unique_ptr<BackgroundJob> job) {
+  job->started = std::chrono::steady_clock::now();
+  state.backgroundJobs.push_back(std::move(job));
+  return *state.backgroundJobs.back();
+}
+
+bool BackgroundJobRunning(const AppState& state, const std::string& kind) {
+  for (const std::unique_ptr<BackgroundJob>& j : state.backgroundJobs)
+    if (j->kind == kind && !j->reaped)
+      return true;
+  return false;
+}
+
+BackgroundJob* FindBackgroundJob(AppState& state, const std::string& kind) {
+  for (std::unique_ptr<BackgroundJob>& j : state.backgroundJobs)
+    if (j->kind == kind && !j->reaped)
+      return j.get();
+  return nullptr;
+}
+
+size_t CancelBackgroundJobs(AppState& state, const std::string& kind) {
+  size_t asked = 0;
+  for (std::unique_ptr<BackgroundJob>& j : state.backgroundJobs)
+    if (j->kind == kind && !j->reaped) {
+      j->cancel.store(true);
+      asked++;
+    }
+  return asked;
+}
+
+void JoinBackgroundJobs(AppState& state, const std::string& kind) {
+  // A `finish` may start a successor of the same kind, so loop until none is
+  // left rather than joining the ones present now.
+  for (;;) {
+    BackgroundJob* job = FindBackgroundJob(state, kind);
+    if (job == nullptr)
+      return;
+    if (job->thread.joinable())
+      job->thread.join();
+    else if (!job->done.load())
+      return; // no thread and not done: a sliced job that only the loop
+              // advances, and waiting here would wait forever
+    job->done.store(true);
+    ReapBackgroundJobs(state);
+  }
+}
+
+std::vector<BackgroundJobInfo> ListBackgroundJobs(const AppState& state) {
+  std::vector<BackgroundJobInfo> out;
+  const auto now = std::chrono::steady_clock::now();
+  for (const std::unique_ptr<BackgroundJob>& j : state.backgroundJobs) {
+    if (j->reaped)
+      continue;
+    BackgroundJobInfo info;
+    info.kind = j->kind;
+    info.label = j->label;
+    info.cancellable = j->cancellable;
+    info.fraction = j->fraction.load();
+    info.elapsedSeconds =
+        std::chrono::duration<double>(now - j->started).count();
+    out.push_back(std::move(info));
+  }
+  return out;
 }
 
 } // namespace ui

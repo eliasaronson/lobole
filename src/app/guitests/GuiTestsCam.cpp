@@ -4,11 +4,14 @@
 #include "core/cam/CamMachine.h"
 #include "core/io/Serialization.h"
 #include "ui/AssemblyActions.h" // the placement gizmo
-#include "ui/DragMath.h"        // GizmoScale
+#include "ui/BackgroundJobs.h"
+#include "ui/CamJobs.h"
+#include "ui/DragMath.h" // GizmoScale
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
 #include "ui/MachineActions.h"
 
+#include <chrono>
 #include <filesystem>
 
 #ifdef HAVE_CAM
@@ -1020,6 +1023,89 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // R15: the same two clicks for the third verb, and the refusal that keeps
   // it honest — a flat end mill cannot break an edge, and saying so beats
   // ploughing a square step where a chamfer was asked for.
+  t = IM_REGISTER_TEST(engine, "cam", "adaptive_clears_off_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // docs/ui/long-operations.md, phase 1: generating an adaptive operation
+    // does not block a frame. The same pocket the two-clicks test derives,
+    // on the panel's REAL path (deferred, which the suite otherwise turns
+    // off), watched frame by frame while the passes cut.
+    if (!cam::AdaptiveAvailable())
+      return;
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
+    const uint64_t plate = CamPart()->GetFeature(0)->GetId();
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Void", glm::vec3(15, 10, 12), 30, 20, 20));
+    const uint64_t voidId = CamPart()->GetFeature(1)->GetId();
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Pocket", plate, voidId, BooleanOp::Subtract));
+    ctx->Yield(2);
+    MakeJob();
+    ctx->Yield(2);
+    s_App->camDeferAdaptive = true; // the real default, off for the suite
+    ToolbarClick(ctx, "###tb_job_pocket");
+    ctx->Yield(2);
+    ui::SelectionItem floor;
+    floor.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : CamPart()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+            std::abs(o.z - 12.0f) < 1e-4f)
+          floor.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(floor.element.IsSet());
+
+    // The pick returns at once: the toolpath is pending and a job is cutting.
+    const auto picked = std::chrono::steady_clock::now();
+    ui::CamFacePicked(*s_App, floor);
+    const double pickMs = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - picked)
+                              .count();
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].pending);
+    IM_CHECK(ui::BackgroundJobRunning(*s_App, "cam"));
+    ctx->LogInfo("pick returned in %.1f ms", pickMs);
+
+    // Frames keep coming while the passes cut, and none of them is held.
+    // The bound is generous against the idle pacer (a resting loop runs at
+    // ~10 Hz, so a frame CAN legitimately take ~100 ms); what it excludes is
+    // a frame that ran a pass, which on this pocket is several hundred ms.
+    int framesWhileRunning = 0;
+    double worstMs = 0.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (ui::BackgroundJobRunning(*s_App, "cam")) {
+      const auto f0 = std::chrono::steady_clock::now();
+      ctx->Yield();
+      const double ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - f0)
+                            .count();
+      worstMs = std::max(worstMs, ms);
+      framesWhileRunning++;
+      if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(60))
+        break;
+    }
+    ctx->LogInfo("%d frames while clearing, worst %.1f ms", framesWhileRunning,
+                 worstMs);
+    IM_CHECK(framesWhileRunning >= 2);
+    IM_CHECK(worstMs < 250.0);
+    IM_CHECK(!ui::BackgroundJobRunning(*s_App, "cam"));
+
+    // What landed is what a synchronous generate says.
+    ctx->Yield(2);
+    IM_CHECK(!ui::CamToolpathsPending(*s_App));
+    const cam::Setup* live = ui::ActiveCamSetup(*s_App);
+    IM_CHECK(live != nullptr);
+    const std::vector<cam::Toolpath> sync =
+        cam::GenerateAll(*live, ui::JobBodies(*s_App));
+    IM_CHECK_EQ(sync.size(), s_App->camToolpaths.size());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK_EQ(sync[0].moves.size(), s_App->camToolpaths[0].moves.size());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+    s_App->camToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_an_edge_break");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

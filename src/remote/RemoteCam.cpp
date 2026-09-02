@@ -11,6 +11,7 @@
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h" // JobUndoGuard
 #include "ui/AppState.h"
+#include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
 #include "ui/JobActions.h"
@@ -194,10 +195,15 @@ constexpr MethodDoc kCamMethods[] = {
      "one. The dry run behind add_cam_op's derivation.",
      "bottom_z, setup, side, target, targets, tool, top_z, type"},
     {"cam_toolpath",
-     "Generate toolpaths for a setup {setup} without writing a file: per "
-     "operation, the move count, cut length (mm), lowest Z, and the error "
-     "when it produced nothing. The cheap way to check a job.",
-     "path, post, setup"},
+     "Generate toolpaths for a setup {setup, async?} without writing a file: "
+     "per operation, the move count, cut length (mm), lowest Z, and the "
+     "error when it produced nothing. The cheap way to check a job. "
+     "Synchronous by default -- an adaptive pocket costs seconds and this "
+     "waits for it. `async: true` hands the adaptive passes to a background "
+     "job and answers {pending, queued_passes, job: \"cam\"} at once; "
+     "watch `background_jobs` until none of kind cam remains, then call "
+     "again without `async` for the list.",
+     "async, path, post, setup"},
     {"cam_verify",
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
@@ -1107,8 +1113,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "cam_verify") {
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    // Synchronous, like every reader here: the pass in flight is joined and
+    // the rest is computed now, through the same cache the panel fills
+    // (docs/ui/long-operations.md, "RPC semantics").
     const std::vector<cam::Toolpath> paths =
-        cam::GenerateAll(setup, ui::JobBodies(state));
+        ui::GenerateCamToolpathsNow(state, setup);
     std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
     for (const cam::Toolpath& tp : paths)
       reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
@@ -1186,8 +1195,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       state.camActiveSetup = setup.id;
     }
     if (!state.camPlaybackOpen) {
-      if (state.camToolpaths.empty())
-        ui::RefreshCamToolpaths(state);
+      // Complete toolpaths or none: a pass still cutting would make the
+      // playback a picture of the previous file.
+      ui::SettleCamToolpaths(state);
       if (!ui::BeginCamPlayback(state))
         throw std::runtime_error(state.camPlaybackRefusal);
     }
@@ -1241,10 +1251,36 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     return out;
   }
 
+  if (m == "cam_toolpath") {
+    // The asynchronous form, in its own branch so `async` is cam_toolpath's
+    // key and not cam_post's (rpc_params_gate). Without it, fall through to
+    // the shared synchronous handler below.
+    if (p.value("async", false)) {
+      // Defer the adaptive passes to the worker and answer with what is
+      // owed; `background_jobs` shows them landing. A script that reads
+      // `pending: 0` here has the same list a synchronous call returns.
+      const cam::Setup& setup =
+          RequireSetup(*job, p.at("setup").get<uint64_t>());
+      if (state.camActiveSetup != setup.id)
+        state.camActiveSetup = setup.id;
+      ui::RefreshCamToolpaths(state);
+      size_t pending = 0;
+      for (const cam::Toolpath& tp : state.camToolpaths)
+        pending += tp.pending ? 1 : 0;
+      return json{{"pending", pending},
+                  {"queued_passes", state.camAdaptiveQueue.size() +
+                                        (state.camAdaptiveInFlight ? 1 : 0)},
+                  {"job", "cam"}};
+    }
+  }
+
   if (m == "cam_toolpath" || m == "cam_post") {
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    // Synchronous, the default: a script that calls cam_toolpath then
+    // cam_post gets the same file it always did. The pass in flight (if the
+    // panel started one) is joined rather than recomputed.
     const std::vector<cam::Toolpath> paths =
-        cam::GenerateAll(setup, ui::JobBodies(state));
+        ui::GenerateCamToolpathsNow(state, setup);
 
     // An explicit top_z below the stock top means every entry RAPID passes
     // through material — the verifier catches it later as "rapid through

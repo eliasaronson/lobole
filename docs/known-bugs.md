@@ -57,7 +57,16 @@ the 4060's speed and ray tracing — a diagnostic, not a home). Nothing to
 change in the renderer; do not go looking at present modes again.
 
 
-## Generating an adaptive pocket takes ~7 s on the UI thread
+## Generating an adaptive pocket takes ~7 s on the UI thread — FIXED 2026-09-02
+
+**Fixed** by [ui/long-operations.md](ui/long-operations.md) phase 1: the
+adaptive passes run on a `cam` background job, one pass at a time, and land
+in a content-keyed cache; the row says "clearing…", the backplot keeps the
+previous toolpath, and post/verify/simulate refuse until the last pass is
+in. Measured in `cam/adaptive_clears_off_the_frame`: the pick returns in
+0.5 ms and 193 frames run while the passes cut, the worst 31 ms. The
+caching half also landed, so an undo or a re-open of the same operation is
+a hit rather than seven more seconds. Left as written below for the record.
 
 Measured 2026-08-26 on the saved baffle job (`scratch/w170s-alto`, a
 300 x 190 mm pocket, 6 mm cutter): the same pocket cut concentrically takes
@@ -98,7 +107,10 @@ but nothing steers a caller there, and `mesh_study` has no async at all.
 **Partially fixed 2026-08-26** (friction round): `designer_remote.request`
 takes a per-call timeout and mesh_study's describe doc names the trap.
 Remaining: an async path for `mesh_study` itself, and/or a server-side
-hint when a synchronous solve exceeds ~10 s.
+hint when a synchronous solve exceeds ~10 s. **The mechanism now exists**
+([ui/long-operations.md](ui/long-operations.md), phase 1 shipped
+2026-09-02: a job registry with `background_jobs`/`cancel_background_job`);
+`mesh_study` is phase 3's adopter alongside the study runs.
 
 ---
 

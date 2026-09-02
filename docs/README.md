@@ -29,7 +29,7 @@ thing behind it invisible to the next person who looks.
 | [variables/](variables/plan.md) | parameters + expressions | |
 | [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent) |
 | [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `f7-merge-and-conflicts.md`, `f8-external-changes.md`, `f9-collaboration.md`, `f10-autosave-the-project.md`, `f11-seeing-what-changed.md`, `f7-handoff.md`, `collab-dogfood.md`, `baked-geometry.md`, `format.md` |
-| [ui/](ui/plan.md) | selection, tools, layout | `u1`, `u7`–`u13` rounds (`u12` keybindings, `u13` chrome + units), `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `direct-manipulation.md` (preview drag handles), `terminal-panel.md` (an embedded terminal for Claude Code), `gui-coverage.md`, `coverage-matrix.md` (**generated** — interactive tools x tab kinds, the asymmetry that keeps costing bugs), `gui-test-isolation.md` (why any shard partition must be valid), `dims-and-assembly-measure.md`, `long-operations.md` (**planned** — one job registry for the five long operations, and the two poll bugs reading them found) |
+| [ui/](ui/plan.md) | selection, tools, layout | `u1`, `u7`–`u13` rounds (`u12` keybindings, `u13` chrome + units), `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `direct-manipulation.md` (preview drag handles), `terminal-panel.md` (an embedded terminal for Claude Code), `gui-coverage.md`, `coverage-matrix.md` (**generated** — interactive tools x tab kinds, the asymmetry that keeps costing bugs), `gui-test-isolation.md` (why any shard partition must be valid), `dims-and-assembly-measure.md`, `long-operations.md` (**step 0 + phase 1 shipped 2026-09-01/02** — one poll entry point for the five long operations, then a job registry with `background_jobs`/`cancel_background_job` and the adaptive pocket cleared off the frame through a content-keyed cache; phases 2-4 migrate the older jobs) |
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `measure-v2.md` (measure reopened, in flight), `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
 | [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
 | [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md`, `gpu-debugging.md` (validation layers vs. a frame capture — which question each answers), `renderer-wiring.md` |
@@ -84,11 +84,14 @@ thing behind it invisible to the next person who looks.
   which is the part worth reading.
 - **[capability-review-2026-08-31.md](capability-review-2026-08-31.md)** — the
   outward-facing counterpart: capability walls, absent feature families, and
-  what we do worse (and better) than FreeCAD and Onshape. **Findings only,
-  nothing scheduled.** The three that are architecture rather than backlog:
-  the assembly solve has no numeric 3D solver so closed loops are
-  unassemblable, regeneration cannot cross a document boundary, and there is
-  no general mechanism for running a long operation off the frame. Its second
+  what we do worse (and better) than FreeCAD and Onshape. The three that were
+  architecture rather than backlog: the assembly solve had no numeric 3D
+  solver so closed loops were unassemblable (**closed 2026-09-01 by A6**),
+  regeneration cannot cross a document boundary (a finding, unscheduled), and
+  there is no general mechanism for running a long operation off the frame
+  (**step 0 and phase 1 shipped 2026-09-01/02**, `ui/long-operations.md`:
+  the registry exists and the adaptive pocket clears off the frame; the
+  older jobs migrate in phases 2-4). Its second
   half is **a pass over the testing system** — what the harness does unusually
   well, and seven gaps, of which the loudest is that `tools/test-fast.sh` now
   takes 48.7 s against the ~8 s its own header claims (a by-name exclusion

@@ -2210,7 +2210,8 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
 // pocket; only the clearing strategy differs, which is the point of putting
 // the split here rather than in a second operation type's worth of geometry.
 void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
-                      const std::vector<Body>& bodies, Toolpath& tp) {
+                      const std::vector<Body>& bodies, Toolpath& tp,
+                      GenerateContext* ctx) {
   // Above this there can be no material, so it is the lowest height an entry
   // may RAPID to; below it the descent feeds (EmitDescent).
   glm::dvec3 stockLo(0.0), stockHi(0.0);
@@ -2234,6 +2235,11 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
   double entryZ = op.topZ;
   // Why nothing came out, if nothing does — see the same field in the pocket.
   std::string tooTight;
+  // One pass was handed to the caller's worker instead of run here. Every
+  // later pass that is not cached goes the same way — the whole operation is
+  // queued in one go, in depth order — and nothing below the queueing is
+  // allowed to run on a partial result.
+  bool deferred = false;
   for (const double z : DepthPasses(op)) {
     Clipper2Lib::Paths64 region = picked;
     if (region.empty()) {
@@ -2256,8 +2262,29 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       l.hole = false;
       asLoops.push_back(std::move(l));
     }
-    const AdaptiveResult cleared =
-        AdaptiveClear(setup, op, tool, asLoops, z, entryZ);
+    // The pass: from the cache, from a worker later, or right here.
+    const bool cached = ctx != nullptr && ctx->cache != nullptr;
+    const uint64_t key =
+        cached ? AdaptiveKey(setup, op, tool, asLoops, z, entryZ) : 0;
+    const AdaptiveResult* hit = cached ? ctx->cache->Find(key) : nullptr;
+    if (hit == nullptr && cached && ctx->defer) {
+      ctx->pending.push_back(
+          MakeAdaptiveRequest(setup, op, tool, asLoops, z, entryZ));
+      deferred = true;
+      entryZ = z;
+      continue;
+    }
+    if (deferred) {
+      entryZ = z;
+      continue;
+    }
+    AdaptiveResult computed;
+    if (hit == nullptr) {
+      computed = AdaptiveClear(setup, op, tool, asLoops, z, entryZ);
+      if (cached)
+        ctx->cache->Put(key, computed);
+    }
+    const AdaptiveResult& cleared = hit != nullptr ? *hit : computed;
     if (cleared.error.empty() && cleared.moves.empty() &&
         op.side == Side::Outside) {
       // Adaptive is the one clearing strategy that reads `side`, and outside
@@ -2298,6 +2325,16 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       tp.error = cleared.error; // partial: say so, keep what it did cut
     tp.moves.insert(tp.moves.end(), cleared.moves.begin(), cleared.moves.end());
     entryZ = z;
+  }
+  if (deferred) {
+    // Nothing this operation shows may be a partial cut: the caller decides
+    // what to draw in the meantime (the previous toolpath, by preference).
+    tp.moves.clear();
+    tp.error.clear();
+    tp.strategy.clear();
+    tp.reliefs.clear();
+    tp.pending = true;
+    return;
   }
   if (tp.moves.empty() && tp.error.empty())
     tp.error = tooTight;
@@ -2612,7 +2649,7 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
 } // namespace
 
 Toolpath GenerateFramed(const Setup& setup, const Operation& op,
-                        const std::vector<Body>& bodies) {
+                        const std::vector<Body>& bodies, GenerateContext* ctx) {
   Toolpath tp;
   tp.operationId = op.id;
   tp.toolNumber = op.toolNumber;
@@ -2645,13 +2682,13 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
     GenerateDrill(setup, op, *tool, bodies, tp);
     break;
   case OpType::Adaptive:
-    GenerateAdaptive(setup, op, *tool, bodies, tp);
+    GenerateAdaptive(setup, op, *tool, bodies, tp, ctx);
     break;
   case OpType::EdgeRound:
     GenerateEdgeRound(setup, op, *tool, bodies, tp);
     break;
   }
-  if (tp.moves.empty() && tp.error.empty())
+  if (tp.moves.empty() && tp.error.empty() && !tp.pending)
     tp.error = "this operation produced no toolpath — check its depths "
                "against the model";
   // The index this setup is cut at rides on every move, so the post emits it
@@ -2667,8 +2704,8 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
 }
 
 Toolpath Generate(const Setup& setup, const Operation& op,
-                  const std::vector<Body>& bodies) {
-  return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies));
+                  const std::vector<Body>& bodies, GenerateContext* ctx) {
+  return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }
 
 namespace {
@@ -2883,7 +2920,8 @@ std::string PlacementRefusal(const Setup& setup,
 }
 
 std::vector<Toolpath> GenerateAll(const Setup& setup,
-                                  const std::vector<Body>& bodies) {
+                                  const std::vector<Body>& bodies,
+                                  GenerateContext* ctx) {
   // An arrangement we cannot honestly cut stops here, in every operation's
   // own error, rather than at the machine.
   if (const std::string why = PlacementRefusal(setup, bodies); !why.empty()) {
@@ -2911,7 +2949,7 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
     const Operation& op = setup.operations[i];
     if (!op.enabled)
       continue;
-    for (Toolpath& tp : GenerateOpFramed(setup, op, framed))
+    for (Toolpath& tp : GenerateOpFramed(setup, op, framed, ctx))
       out.push_back(std::move(tp));
   }
   // Tool order is an order of TOOLPATHS (R6): an operation that roughs with
@@ -2928,10 +2966,11 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
 }
 
 std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
-                                       const std::vector<Body>& framed) {
+                                       const std::vector<Body>& framed,
+                                       GenerateContext* ctx) {
   std::vector<Toolpath> out;
   if (op.finishTool == 0) {
-    out.push_back(GenerateFramed(setup, op, framed));
+    out.push_back(GenerateFramed(setup, op, framed, ctx));
     return out;
   }
   // Rough then finish (R6): the same operation twice. The rough leaves
@@ -2947,13 +2986,13 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
   rough.bottomZ -= op.finishStock;
   rough.cornerRelief = CornerRelief::None; // the finish clears the corners
   rough.leadArcs = false;
-  out.push_back(GenerateFramed(setup, rough, framed));
+  out.push_back(GenerateFramed(setup, rough, framed, ctx));
 
   Operation finish = op;
   finish.toolNumber = op.finishTool;
   finish.stepdown = 0.0; // one pass, the full depth
   finish.peck = 0.0;
-  Toolpath tp = GenerateFramed(setup, finish, framed);
+  Toolpath tp = GenerateFramed(setup, finish, framed, ctx);
   tp.finish = true;
   if (setup.FindTool(op.finishTool) == nullptr)
     tp.error = "finishing tool " + std::to_string(op.finishTool) +
@@ -2963,8 +3002,9 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
 }
 
 std::vector<Toolpath> GenerateOp(const Setup& setup, const Operation& op,
-                                 const std::vector<Body>& bodies) {
-  return GenerateOpFramed(setup, op, BodiesInSetupFrame(setup, bodies));
+                                 const std::vector<Body>& bodies,
+                                 GenerateContext* ctx) {
+  return GenerateOpFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }
 
 } // namespace cam

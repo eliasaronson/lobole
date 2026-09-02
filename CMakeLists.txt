@@ -448,13 +448,16 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
             POSITION_INDEPENDENT_CODE ON
             SOVERSION 1
             VERSION 1.0.0)
-        list(APPEND core_sources src/core/cam/CamAdaptive.cpp)
         message(STATUS "libarea found - adaptive clearing enabled (LGPL, shared)")
     elseif(NOT ENABLE_CAM_ADAPTIVE)
         message(STATUS "Adaptive clearing disabled (-DENABLE_CAM_ADAPTIVE=OFF)")
     else()
         message(STATUS "deps/libarea missing - adaptive clearing disabled")
     endif()
+    # Compiled with OR without libarea: its #else half answers "not in this
+    # build" for the clearing, and the request/key/cache half
+    # (docs/ui/long-operations.md) is plain C++ that every CAM build needs.
+    list(APPEND core_sources src/core/cam/CamAdaptive.cpp)
 else()
     message(STATUS "deps/clipper2 missing (submodule not initialised) - CAM disabled")
 endif()
@@ -607,6 +610,7 @@ set(app_sources
     src/ui/ImportJob.cpp
     src/ui/SyncJob.cpp
     src/ui/SettingsWindow.cpp
+    src/ui/CamJobs.cpp
     src/ui/CamPanel.cpp
     src/ui/CamPlayback.cpp
     src/ui/CamTool.cpp

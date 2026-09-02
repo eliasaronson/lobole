@@ -2816,6 +2816,164 @@ TEST_CASE("cam: a drilled hole is drilled in the simulation too", "[cam]") {
 
 // --- C8: adaptive clearing ------------------------------------------------
 
+namespace {
+bool SameMoves(const cam::Toolpath& a, const cam::Toolpath& b) {
+  if (a.moves.size() != b.moves.size())
+    return false;
+  for (size_t i = 0; i < a.moves.size(); i++) {
+    const cam::Move& x = a.moves[i];
+    const cam::Move& y = b.moves[i];
+    if (x.kind != y.kind || glm::length(x.to - y.to) > 1e-9 ||
+        std::abs(x.feed - y.feed) > 1e-9)
+      return false;
+  }
+  return true;
+}
+} // namespace
+
+TEST_CASE("cam: an adaptive pass is cached, and can be deferred to a worker",
+          "[cam]") {
+  // docs/ui/long-operations.md, phase 1. The panel's generate must be able
+  // to hand the expensive passes to a worker and still come back, later,
+  // with EXACTLY what the synchronous generate produces — the cache is
+  // keyed by content, so the worker's answer and the inline answer are the
+  // same entry.
+  if (!cam::AdaptiveAvailable())
+    return;
+  auto doc = PocketDoc(); // 20 x 14 pocket, floor at z = 12
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           cam::Target{0, floor})
+          .op;
+  op.id = 1;
+  op.type = cam::OpType::Adaptive;
+  setup.operations.push_back(op);
+  const size_t passes = cam::DepthPasses(op).size();
+  REQUIRE(passes >= 2); // or "one pass per entry" is not exercised
+
+  // The reference: no context, every pass inline, as it always was.
+  const std::vector<cam::Toolpath> ref =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(ref.size() == 1);
+  INFO(ref[0].error);
+  REQUIRE(ref[0].error.empty());
+  REQUIRE_FALSE(ref[0].pending);
+  REQUIRE(ref[0].CutLength() > 0.0);
+
+  SECTION("a cache fills on the first generate and answers the second") {
+    cam::AdaptiveCache cache;
+    cam::GenerateContext ctx;
+    ctx.cache = &cache;
+    const std::vector<cam::Toolpath> first =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    CHECK(ctx.pending.empty());
+    CHECK(cache.misses == passes);
+    CHECK(cache.hits == 0);
+    CHECK(cache.Size() == passes);
+    CHECK(SameMoves(first[0], ref[0]));
+    const std::vector<cam::Toolpath> second =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    CHECK(cache.hits == passes);
+    CHECK(cache.misses == passes); // no new ones
+    CHECK(SameMoves(second[0], ref[0]));
+  }
+
+  SECTION("deferred: pending, nothing drawn, one request per pass") {
+    cam::AdaptiveCache cache;
+    cam::GenerateContext ctx;
+    ctx.cache = &cache;
+    ctx.defer = true;
+    const std::vector<cam::Toolpath> deferred =
+        cam::GenerateAll(setup, doc->GetBodies(), &ctx);
+    REQUIRE(deferred.size() == 1);
+    CHECK(deferred[0].pending);
+    CHECK(deferred[0].moves.empty());
+    CHECK(deferred[0].error.empty()); // not "produced no toolpath"
+    CHECK(ctx.pending.size() == passes);
+    // Depth order, top pass first: a worker cuts them in queue order and a
+    // person watching the backplot sees the pocket deepen.
+    for (size_t i = 1; i < ctx.pending.size(); i++)
+      CHECK(ctx.pending[i].z < ctx.pending[i - 1].z);
+    for (const cam::AdaptiveRequest& r : ctx.pending) {
+      CHECK(r.key != 0);
+      CHECK(r.safeZ == setup.safeZ);
+      CHECK(r.tool.diameter == 6.0);
+    }
+
+    // The worker: each request from its copy alone, no setup in sight.
+    for (const cam::AdaptiveRequest& r : ctx.pending)
+      cache.Put(r.key, cam::AdaptiveClear(r));
+
+    cam::GenerateContext again;
+    again.cache = &cache;
+    again.defer = true;
+    const std::vector<cam::Toolpath> landed =
+        cam::GenerateAll(setup, doc->GetBodies(), &again);
+    CHECK(again.pending.empty());
+    CHECK_FALSE(landed[0].pending);
+    CHECK(landed[0].error.empty());
+    CHECK(SameMoves(landed[0], ref[0]));
+  }
+
+  SECTION("the key moves with every input it hashes, and only those") {
+    const std::vector<cam::Loop> loops =
+        cam::SectionLoops(doc->GetBodies(), 12.0 + 1e-3);
+    const cam::Tool& tool = setup.tools[0];
+    const uint64_t base = cam::AdaptiveKey(setup, op, tool, loops, 15.0, 20.0);
+    CHECK(base == cam::AdaptiveKey(setup, op, tool, loops, 15.0, 20.0));
+    CHECK(base != cam::AdaptiveKey(setup, op, tool, loops, 14.0, 20.0));
+    CHECK(base != cam::AdaptiveKey(setup, op, tool, loops, 15.0, 21.0));
+    cam::Setup s2 = setup;
+    s2.safeZ += 1.0;
+    CHECK(base != cam::AdaptiveKey(s2, op, tool, loops, 15.0, 20.0));
+    cam::Operation o2 = op;
+    o2.stepover *= 0.5;
+    CHECK(base != cam::AdaptiveKey(setup, o2, tool, loops, 15.0, 20.0));
+    o2 = op;
+    o2.stockToLeave += 0.1;
+    CHECK(base != cam::AdaptiveKey(setup, o2, tool, loops, 15.0, 20.0));
+    o2 = op;
+    o2.side = cam::Side::Outside;
+    CHECK(base != cam::AdaptiveKey(setup, o2, tool, loops, 15.0, 20.0));
+    cam::Tool t2 = tool;
+    t2.diameter = 4.0;
+    CHECK(base != cam::AdaptiveKey(setup, op, t2, loops, 15.0, 20.0));
+    t2 = tool;
+    t2.feedCut += 1.0;
+    CHECK(base != cam::AdaptiveKey(setup, op, t2, loops, 15.0, 20.0));
+    t2 = tool;
+    t2.feedPlunge += 1.0;
+    CHECK(base != cam::AdaptiveKey(setup, op, t2, loops, 15.0, 20.0));
+    std::vector<cam::Loop> l2 = loops;
+    l2[0].pts[0].x += 0.001;
+    CHECK(base != cam::AdaptiveKey(setup, op, tool, l2, 15.0, 20.0));
+    // Fields a pass does NOT read do not move it: renaming the operation or
+    // changing its tool NUMBER (the same tool) is not a new pass.
+    o2 = op;
+    o2.name = "renamed";
+    CHECK(base == cam::AdaptiveKey(setup, o2, tool, loops, 15.0, 20.0));
+    t2 = tool;
+    t2.number = 7;
+    t2.name = "other";
+    CHECK(base == cam::AdaptiveKey(setup, op, t2, loops, 15.0, 20.0));
+  }
+
+  SECTION("the cache is bounded, oldest out first") {
+    cam::AdaptiveCache cache;
+    cam::AdaptiveResult r;
+    r.moves.resize(1);
+    for (uint64_t k = 1; k <= 300; k++)
+      cache.Put(k, r);
+    CHECK(cache.Size() == 256);
+    CHECK_FALSE(cache.Contains(1));
+    CHECK(cache.Contains(300));
+  }
+}
+
 TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
   auto doc = PocketDoc(); // 20 x 14 pocket, floor at z = 12
   cam::Setup setup = BasicSetup();

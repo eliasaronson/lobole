@@ -39,6 +39,8 @@
 #include "render/RayTracingRenderer.h"
 #include "render/RenderSheet.h"
 #include "ui/AppActions.h"
+#include "ui/BackgroundJobs.h"
+#include "ui/CamJobs.h"
 #include "ui/Commands.h" // ActiveContext (get_keymap)
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
@@ -741,8 +743,9 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
 // than dereferencing null. File scope so the describe endpoint can derive
 // each method's requires_part_doc from it.
 static const std::set<std::string> kNoPartDoc = {
-    "describe", "ping", "list_parts", "add_part", "add_assembly",
-    "set_active_part", "delete_part", "rename_part",
+    "describe", "ping", "background_jobs", "cancel_background_job",
+    "list_parts", "add_part", "add_assembly", "set_active_part", "delete_part",
+    "rename_part",
     // Tab-bar folders group tabs of every kind, so they must work from an
     // assembly or drawing tab as readily as from a part.
     "create_folder", "move_to_folder", "rename_folder", "dissolve_folder",
@@ -862,6 +865,19 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "dirty, gpu}. `gpu` is the device that answers renders — empty under "
      "--headless, which has no renderer.",
      ""},
+    {"background_jobs",
+     "Every long operation running off the frame, as {jobs: [{kind, label, "
+     "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
+     "job cannot say. Kinds today: `cam` (an adaptive clearing pass; see "
+     "cam_toolpath's `async`). Empty when nothing is running. Not the CAM "
+     "job document -- that is list_job_parts.",
+     ""},
+    {"cancel_background_job",
+     "Ask every job of {kind} to stop; returns {asked}. A job with no "
+     "interruption points (a `cam` pass) finishes the piece it is on and "
+     "starts nothing further; the answer says `cancellable: false` for it. "
+     "Refuses a kind that is not running, naming what is.",
+     "kind"},
     {"get_state",
      "Full snapshot: features (with errors), bodies (volume, bbox), "
      "selection, camera, undo/redo, rollback, regen summary.",
@@ -1164,6 +1180,38 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // report. It is also what lets a pixel baseline be keyed to the
             // device that produced it (tests/render_pixel_smoke.py).
             {"gpu", state.gpuName}};
+  }
+  if (m == "background_jobs") {
+    json jobs = json::array();
+    for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
+      jobs.push_back({{"kind", j.kind},
+                      {"label", j.label},
+                      {"fraction", j.fraction},
+                      {"cancellable", j.cancellable},
+                      {"elapsed_seconds", j.elapsedSeconds}});
+    return json{{"jobs", jobs}};
+  }
+  if (m == "cancel_background_job") {
+    const std::string kind = p.at("kind").get<std::string>();
+    if (!ui::BackgroundJobRunning(state, kind)) {
+      std::string running;
+      for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
+        running += (running.empty() ? "" : ", ") + j.kind;
+      throw std::runtime_error(
+          "no background job of kind '" + kind + "' is running" +
+          (running.empty() ? std::string(" (nothing is)")
+                           : " (running: " + running + ")"));
+    }
+    // The domain gets to say what cancelling means for what was queued
+    // behind the running piece.
+    if (kind == "cam")
+      ui::CancelAdaptivePasses(state);
+    const size_t asked = ui::CancelBackgroundJobs(state, kind);
+    bool cancellable = false;
+    for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
+      if (j.kind == kind)
+        cancellable |= j.cancellable;
+    return json{{"asked", asked}, {"cancellable", cancellable}};
   }
   if (m == "get_state") {
     json features = json::array();

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "core/Feature.h" // Body
-#include "core/cam/CamJob.h"
+#include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
+#include "core/cam/CamJob.h"      // Loop, Toolpath
 
 #include <glm/glm.hpp>
 
@@ -21,14 +22,6 @@
 // ImGui and no file writing. Posting those moves to a dialect is CamPost.
 namespace cam {
 
-// A closed contour on a Z plane, in setup space. `hole` marks a loop that
-// bounds a void rather than material — the distinction Clipper needs to
-// respect islands in a pocket.
-struct Loop {
-  std::vector<glm::dvec2> pts;
-  bool hole = false;
-};
-
 // The cross-section of `bodies` at height `z`, as ordered closed loops.
 // `deflection` is the chord tolerance for curved edges (mm) — the same knob
 // tessellation uses, and the reason a circular pocket comes out as a polygon
@@ -42,15 +35,31 @@ struct Loop {
 // pass 0.02 mm deeper than asked is a scrapped part).
 [[nodiscard]] std::vector<double> DepthPasses(const Operation& op);
 
+// How a generate treats the one expensive step, adaptive clearing
+// (docs/ui/long-operations.md, phase 1). With no context (the default) every
+// pass runs inline, as it always did. With a cache, a pass whose key is in
+// it is not run again — an undo, a re-open, an unrelated edit. With `defer`
+// as well, a pass that is NOT cached is not run either: it is appended to
+// `pending` for a worker, and the toolpath comes back `Toolpath::pending`.
+// The caller owns the cache and the worker; this file only says what it
+// would have computed.
+struct GenerateContext {
+  AdaptiveCache* cache = nullptr;
+  bool defer = false;
+  std::vector<AdaptiveRequest> pending; // out
+};
+
 // One operation's toolpath. Never throws: a failure comes back as
 // `Toolpath::error`, because a CAM job with one bad op should still show the
 // other five.
 [[nodiscard]] Toolpath Generate(const Setup& setup, const Operation& op,
-                                const std::vector<Body>& bodies);
+                                const std::vector<Body>& bodies,
+                                GenerateContext* ctx = nullptr);
 
 // Every enabled operation, in order.
-[[nodiscard]] std::vector<Toolpath>
-GenerateAll(const Setup& setup, const std::vector<Body>& bodies);
+[[nodiscard]] std::vector<Toolpath> GenerateAll(const Setup& setup,
+                                                const std::vector<Body>& bodies,
+                                                GenerateContext* ctx = nullptr);
 
 // The stock box for a setup, derived from the model bounds plus margins, IN
 // SETUP SPACE (C9) — so an indexed job gets the box the machine will see.
@@ -302,10 +311,12 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // finishes with another (R6, Operation::finishTool). GenerateAll walks this.
 [[nodiscard]] std::vector<Toolpath> GenerateOp(const Setup& setup,
                                                const Operation& op,
-                                               const std::vector<Body>& bodies);
+                                               const std::vector<Body>& bodies,
+                                               GenerateContext* ctx = nullptr);
 [[nodiscard]] std::vector<Toolpath>
 GenerateOpFramed(const Setup& setup, const Operation& op,
-                 const std::vector<Body>& framed);
+                 const std::vector<Body>& framed,
+                 GenerateContext* ctx = nullptr);
 
 [[nodiscard]] std::string PlacementRefusal(const Setup& setup,
                                            const std::vector<Body>& bodies);

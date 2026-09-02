@@ -433,11 +433,25 @@ struct Move {
   return rough.diameter * 0.1;
 }
 
+// A closed contour on a Z plane, in setup space. `hole` marks a loop that
+// bounds a void rather than material — the distinction Clipper needs to
+// respect islands in a pocket.
+struct Loop {
+  std::vector<glm::dvec2> pts;
+  bool hole = false;
+};
+
 struct Toolpath {
   uint64_t operationId = 0;
   int toolNumber = 1;
   std::vector<Move> moves;
   std::string error; // non-empty = this op produced nothing, and why
+  // Generated with `GenerateContext::defer` and at least one adaptive pass
+  // not yet in the cache: the moves are whatever the caller chose to keep
+  // (the previous toolpath, or nothing) and nothing downstream may treat
+  // them as the job — post, verify and simulate refuse while any is pending
+  // (docs/ui/long-operations.md, phase 1).
+  bool pending = false;
   // Non-empty when the operation was cut by a DIFFERENT strategy than its
   // type says — adaptive falling back to concentric clearing. Silence about
   // that is a job whose feeds were chosen for the strategy it did not use.
