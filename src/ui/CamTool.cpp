@@ -607,7 +607,10 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     state.slotPick.miss.clear();
     state.camNote = "added — keep clicking faces, or press Escape when done";
   } else {
+    // The pick's own line is where the refusal shows; the window used to
+    // print it a second time from camRefusal directly under it.
     state.slotPick.miss = state.camRefusal;
+    state.camRefusal.clear();
   }
   state.slotPick.prompt = prompt;
 }
@@ -1085,6 +1088,12 @@ void RunCamVerification(AppState& state) {
   state.camVerdict = cam::Explain(
       insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);
+  // A sheet hanging off the bed is a note, not a refusal: the cuts fit and
+  // the sheet is the operator's to slide through and hold down.
+  if (const std::string over =
+          cam::MachineOverhang(*setup, ui::JobBodies(state));
+      !over.empty())
+    state.camVerdict.push_back({cam::VerdictLine::Level::Warn, over});
   state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
 }
 

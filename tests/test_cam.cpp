@@ -4672,13 +4672,16 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   setup.machine.name = "Small router";
   setup.machine.travelMin = {0.0, 0.0, -90.0};
   setup.machine.travelMax = {600.0, 600.0, 0.0};
+  // The PARTS are what the spindle has to reach: 880 on a 600 machine.
   const std::string why = cam::MachineRefusal(setup, doc.GetBodies());
   INFO(why);
   CHECK(why.find("X") != std::string::npos);
-  CHECK(why.find("900") != std::string::npos);
+  CHECK(why.find("880") != std::string::npos);
   CHECK(why.find("600") != std::string::npos);
-  CHECK(why.find("300") != std::string::npos); // the shortfall
+  CHECK(why.find("280") != std::string::npos); // the shortfall
   CHECK(why.find("Small router") != std::string::npos);
+  CHECK(cam::MachineOverhang(setup, doc.GetBodies())
+            .empty()); // refused, not noted
   // ...and it is the placement refusal too, so generation and the post stop
   // on it rather than the machine.
   CHECK(cam::PlacementRefusal(setup, doc.GetBodies()) == why);
@@ -4692,6 +4695,25 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   CHECK(cam::MachineRefusal(unstated, doc.GetBodies()).empty());
   setup.machine.travelMax.x = 1200.0;
   CHECK(cam::MachineRefusal(setup, doc.GetBodies()).empty());
+
+  // A sheet LONGER than the bed with parts that fit is not a refusal: an
+  // open-ended router slides it through and cuts in tiles. It is a note.
+  Document small;
+  small.AddFeature(std::make_unique<BoxFeature>("Bracket", glm::vec3(0, 0, 0),
+                                                300.0, 200.0, 18.0));
+  cam::Setup tiled;
+  tiled.stock.mode = cam::StockMode::Fixed;
+  tiled.stock.size = {2440.0, 400.0, 18.0};
+  tiled.machine.name = "Small router";
+  tiled.machine.travelMin = {0.0, 0.0, -90.0};
+  tiled.machine.travelMax = {600.0, 600.0, 0.0};
+  CHECK(cam::MachineRefusal(tiled, small.GetBodies()).empty());
+  CHECK(cam::PlacementRefusal(tiled, small.GetBodies()).empty());
+  const std::string note = cam::MachineOverhang(tiled, small.GetBodies());
+  INFO(note);
+  CHECK(note.find("2440") != std::string::npos);
+  CHECK(note.find("hangs") != std::string::npos);
+  CHECK(note.find("1840") != std::string::npos); // how far
 }
 
 TEST_CASE("cam machine: a setup copies the machine's tool library, unless "

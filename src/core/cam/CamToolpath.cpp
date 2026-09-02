@@ -2556,24 +2556,69 @@ std::vector<size_t> CuttingOrder(const Setup& setup) {
   return out;
 }
 
+namespace {
+// The placed, enabled parts' box in setup space; false when there are none.
+bool PlacedPartsBounds(const Setup& setup, const std::vector<Body>& bodies,
+                       glm::dvec3& lo, glm::dvec3& hi) {
+  lo = glm::dvec3(std::numeric_limits<double>::max());
+  hi = glm::dvec3(std::numeric_limits<double>::lowest());
+  bool any = false;
+  for (const Body& b : BodiesInSetupFrame(setup, bodies)) {
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    lo = glm::min(lo, glm::dvec3(bmin));
+    hi = glm::max(hi, glm::dvec3(bmax));
+    any = true;
+  }
+  return any;
+}
+} // namespace
+
 std::string MachineRefusal(const Setup& setup,
                            const std::vector<Body>& bodies) {
   const Machine& m = setup.machine;
   if (!m.HasWorkArea())
     return "";
   glm::dvec3 lo(0.0), hi(0.0);
-  if (!StockBounds(setup, bodies, lo, hi))
+  if (!PlacedPartsBounds(setup, bodies, lo, hi))
     return "";
   const char* axes[3] = {"X", "Y", "Z"};
   for (int a = 0; a < 3; a++) {
     const double need = hi[a] - lo[a];
     const double have = m.travelMax[a] - m.travelMin[a];
     if (need > have + 1e-6) {
+      char buf[220];
+      std::snprintf(buf, sizeof(buf),
+                    "the parts need %.0f mm in %s and %s travels %.0f: %.0f mm "
+                    "too long. Lay them out differently, cut in more than one "
+                    "setup, or a bigger machine",
+                    need, axes[a],
+                    m.name.empty() ? "this machine" : m.name.c_str(), have,
+                    need - have);
+      return buf;
+    }
+  }
+  return "";
+}
+
+std::string MachineOverhang(const Setup& setup,
+                            const std::vector<Body>& bodies) {
+  const Machine& m = setup.machine;
+  if (!m.HasWorkArea() || !MachineRefusal(setup, bodies).empty())
+    return "";
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return "";
+  const char* axes[3] = {"X", "Y", "Z"};
+  for (int a = 0; a < 2; a++) { // a sheet hangs off in X or Y, not Z
+    const double need = hi[a] - lo[a];
+    const double have = m.travelMax[a] - m.travelMin[a];
+    if (need > have + 1e-6) {
       char buf[200];
       std::snprintf(buf, sizeof(buf),
-                    "the stock is %.0f mm in %s and %s travels %.0f: %.0f mm "
-                    "too long. A smaller sheet, a second setup, or a bigger "
-                    "machine",
+                    "the sheet is %.0f mm in %s and %s travels %.0f: it hangs "
+                    "%.0f mm off the bed. The cuts fit; slide the sheet "
+                    "through and hold it down where it overhangs",
                     need, axes[a],
                     m.name.empty() ? "this machine" : m.name.c_str(), have,
                     need - have);

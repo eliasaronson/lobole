@@ -279,14 +279,21 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 //     "hanging over the edge" and "not on it at all" are different mistakes;
 //   - two parts occupying the same rectangle, which a backplot drawing both
 //     cannot show you.
-// The job against the MACHINE's work area (round two, M2): the stock's
-// extent per axis against the travel's. Extents only -- where the operator
-// touches off inside the travel is not the job's to know -- and only when the
-// machine states a work area at all. Empty when it fits or nothing is stated;
-// otherwise the axis and the shortfall, in words. The bed is never grown to
-// fit (Kiri:Moto's answer): the machine is the shop's.
+// The job against the MACHINE's work area (round two, M2): what the spindle
+// has to REACH -- the placed parts' extent per axis -- against the travel's.
+// Not the stock's: a sheet longer than the bed is normal on an open-ended
+// router, slid through and cut in tiles, and the sheet hanging off the
+// machine is the operator's business (MachineOverhang says so, as a note).
+// Extents only -- where the operator touches off inside the travel is not
+// the job's to know -- and only when the machine states a work area at all.
+// Empty when it fits or nothing is stated; otherwise the axis and the
+// shortfall, in words. The bed is never grown to fit (Kiri:Moto's answer).
 [[nodiscard]] std::string MachineRefusal(const Setup& setup,
                                          const std::vector<Body>& bodies);
+// The stock against the travel, when the parts themselves fit: empty, or a
+// sentence saying which way the sheet hangs off the bed.
+[[nodiscard]] std::string MachineOverhang(const Setup& setup,
+                                          const std::vector<Body>& bodies);
 
 [[nodiscard]] std::string PlacementRefusal(const Setup& setup,
                                            const std::vector<Body>& bodies);

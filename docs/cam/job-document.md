@@ -759,3 +759,14 @@ rows of unlabelled travel min/max — and a partially typed one survives,
 because the file used to omit the area until all three axes were stated
 and the editor writes the file after every edit.
 
+**A part that does not fit the machine (asked the same evening).** The
+M2 check compared the *stock* to the travel, which refused the commonest
+big-sheet case: a 2440 board on a 1200 router, slid through and cut in
+tiles. What the machine limits is what the spindle has to reach, so
+`MachineRefusal` now checks the **placed parts'** extents; a sheet longer
+than the bed with parts that fit is `MachineOverhang`, a WARN line in the
+verdict — *"it hangs 1840 mm off the bed; the cuts fit; slide the sheet
+through and hold it down"*. A part itself longer than the travel is still
+refused, naming the parts' extent; tiling one part across two setups is a
+work-offset feature the first round's Not-this already names.
+
