@@ -176,6 +176,15 @@ void PruneSelection(AppState& state) {
             case SelectionItem::Kind::Mate:
               return !state.assembly ||
                      state.assembly->FindMateById(it.id) == nullptr;
+            case SelectionItem::Kind::Operation: {
+              if (!state.job)
+                return true;
+              for (const cam::Setup& s : state.job->GetSetups())
+                for (const cam::Operation& op : s.operations)
+                  if (op.id == it.id)
+                    return false;
+              return true;
+            }
             default:
               return false; // geometry refs resolve lazily; stale = no-op
             }

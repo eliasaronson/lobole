@@ -6,6 +6,7 @@
 #include "ui/AssemblyActions.h" // the placement gizmo
 #include "ui/DragMath.h"        // GizmoScale
 #include "ui/JobActions.h"
+#include "ui/ListSelection.h"
 #include "ui/MachineActions.h"
 
 #include <filesystem>
@@ -244,6 +245,74 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     const cam::Setup* live = Job()->FindSetup(setup.id);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
     IM_CHECK(live->operations[0].id != first);
+    s_App->camToolOpen = false;
+  };
+
+  // Operations are a LIST like the others (ListSelection.h): click selects,
+  // Shift ranges, right-click offers "Delete N operations", and the Delete
+  // key removes the selection. They had an x button per row and no selection
+  // at all.
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "operations_select_like_a_list_and_delete_together");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    std::vector<uint64_t> ids;
+    for (int i = 0; i < 4; i++) {
+      cam::Operation op;
+      op.id = Job()->AllocateId();
+      op.name = "Op " + std::to_string(i);
+      op.type = cam::OpType::Profile;
+      op.topZ = 13.0;
+      op.bottomZ = -1.0;
+      Job()->FindSetup(setup.id)->operations.push_back(op);
+      ids.push_back(op.id);
+    }
+    s_App->camToolOpen = true;
+    ctx->Yield(4);
+    const auto row = [&](size_t i) {
+      return "//CAM###ToolWindow/$$" +
+             std::to_string(static_cast<int>(ids[i])) + "/###op_row";
+    };
+    const auto picked = [&]() {
+      return ui::SelectedIds(*s_App, ui::SelectionItem::Kind::Operation);
+    };
+    const auto ops = [&]() { return Job()->FindSetup(setup.id)->operations; };
+
+    ctx->ItemClick(row(0).c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)1);
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->ItemClick(row(2).c_str());
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)3);
+
+    // Right-click inside the selection keeps it; the item counts it.
+    ctx->ItemClick(row(1).c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)3);
+    IM_CHECK_STR_EQ(ctx->ItemInfo("//$FOCUSED/###op_delete").DebugLabel,
+                    "Delete 3 operations###op_delete");
+    ctx->ItemClick("//$FOCUSED/###op_delete");
+    ctx->Yield(3);
+    IM_CHECK_EQ(ops().size(), (size_t)1);
+    IM_CHECK_EQ(ops()[0].id, ids[3]);
+    IM_CHECK_EQ(picked().size(), (size_t)0);
+
+    // The Delete key takes the last one.
+    ctx->ItemClick(row(3).c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)1);
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(3);
+    IM_CHECK_EQ(ops().size(), (size_t)0);
     s_App->camToolOpen = false;
   };
 

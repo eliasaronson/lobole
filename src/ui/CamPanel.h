@@ -4,6 +4,7 @@
 #include "render/SketchRenderer.h" // PrimVertex
 #include "ui/AppState.h"
 
+#include <string>
 #include <vector>
 
 namespace ui {
@@ -43,5 +44,22 @@ void DropCamToolpath(AppState& state, uint64_t opId);
 // The setup the panel, the tool session and the overlays all act on (the one
 // selected in the combo, else the first). Null when there is none.
 cam::Setup* ActiveCamSetup(AppState& state);
+
+// Removes operations by id from whichever setup holds them. The toolpath
+// cache, the ghost, the verb session and the selection let go of them, and
+// the verdict is re-run against what is left. ONE verb: the docked panel and
+// the tool window each had their own, with different side effects, and the
+// Delete key (ListSelection.h) needed a third. Returns how many went.
+int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids);
+
+// The row every operation list draws for one operation: `sentence` is what
+// it is, drawn as a Selectable so a click selects it, Ctrl/Shift extend
+// (`order` is the ids as listed, which a Shift range spans) and right-click
+// offers Delete for the selection. Inside the caller's PushID(op.id). Returns
+// true when the menu asked for Delete — the caller defers it, because it is
+// walking the list the delete would shrink.
+bool CamOperationRow(AppState& state, uint64_t opId,
+                     const std::string& sentence,
+                     const std::vector<uint64_t>& order);
 
 } // namespace ui

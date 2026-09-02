@@ -122,11 +122,6 @@ bool IsOccurrenceSelected(const AppState& state, uint64_t occId) {
   return state.selection.Has({SelectionItem::Kind::Occurrence, occId, {}});
 }
 
-void ToggleOccurrence(AppState& state, uint64_t occId) {
-  if (occId != 0)
-    state.selection.Toggle({SelectionItem::Kind::Occurrence, occId, {}});
-}
-
 int DeleteSelectedOccurrences(AppState& state) {
   // One snapshot and one solve for the whole batch: undoing a five-part
   // deletion should be one Ctrl+Z, not five, and re-solving between removals

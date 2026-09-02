@@ -10,6 +10,7 @@
 #include "ui/AppActions.h" // AppendPrimLine/Dot, WorldToScreen
 #include "ui/CamPanel.h"
 #include "ui/JobActions.h"
+#include "ui/ListSelection.h"
 
 #include "render/Camera.h"
 #include "ui/FeatureEditor.h"
@@ -754,7 +755,11 @@ void OperationList(AppState& state, cam::Setup& setup) {
   ImGui::Separator();
   // Deferred, so the list is not mutated while it is being walked — the
   // same shape the docked panel uses.
-  uint64_t removeOp = 0;
+  std::vector<uint64_t> removeOps; // the row's own x button
+  bool deleteSelected = false;     // the row menu's Delete (the selection)
+  std::vector<uint64_t> order;
+  for (const cam::Operation& op : setup.operations)
+    order.push_back(op.id);
   for (const cam::Operation& op : setup.operations) {
     const cam::Tool* tool = setup.FindTool(op.toolNumber);
     const double depth = op.topZ - op.bottomZ;
@@ -771,7 +776,7 @@ void OperationList(AppState& state, cam::Setup& setup) {
     // could not be taken back without going to find another window
     // (docs/cam/dogfood-round.md).
     if (ImGui::SmallButton("x###rmop"))
-      removeOp = op.id;
+      removeOps = {op.id};
     ImGui::SetItemTooltip("Remove this operation");
     ImGui::SameLine();
     // What the operation SAYS about itself, from its own fields — and then
@@ -785,11 +790,17 @@ void OperationList(AppState& state, cam::Setup& setup) {
     for (const cam::Toolpath& tp : state.camToolpaths)
       if (tp.operationId == op.id)
         path = &tp;
-    ImGui::Text("%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
-                op.name.c_str(), tool != nullptr ? tool->diameter : 0.0, depth,
-                passes, passes == 1 ? "" : "es",
-                op.climb ? "climb" : "conventional",
-                op.type == cam::OpType::Adaptive ? ", adaptive" : "");
+    char sentence[256];
+    std::snprintf(sentence, sizeof(sentence),
+                  "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
+                  op.name.c_str(), tool != nullptr ? tool->diameter : 0.0,
+                  depth, passes, passes == 1 ? "" : "es",
+                  op.climb ? "climb" : "conventional",
+                  op.type == cam::OpType::Adaptive ? ", adaptive" : "");
+    // The sentence is the ROW — select, Ctrl/Shift-extend, right-click
+    // Delete — the same row the docked panel draws (CamOperationRow).
+    if (CamOperationRow(state, op.id, sentence, order))
+      deleteSelected = true;
     if (path != nullptr && !path->error.empty()) {
       RefusalText(std::string(ICON_FA_TRIANGLE_EXCLAMATION) +
                   " cut nothing — " + path->error);
@@ -805,21 +816,10 @@ void OperationList(AppState& state, cam::Setup& setup) {
     }
     ImGui::PopID();
   }
-  if (removeOp != 0) {
-    auto& ops = setup.operations;
-    for (auto it = ops.begin(); it != ops.end(); ++it)
-      if (it->id == removeOp) {
-        ops.erase(it);
-        break;
-      }
-    if (state.camGhostOp == removeOp)
-      state.camGhostOp = 0;
-    if (state.camVerbOp == removeOp)
-      state.camVerbOp = 0;
-    state.projectMetaDirty = true;
-    DropCamToolpath(state, removeOp);
-    RunCamVerification(state);
-  }
+  if (deleteSelected)
+    DeleteSelection(state);
+  else if (!removeOps.empty())
+    RemoveCamOperations(state, removeOps);
 }
 
 } // namespace

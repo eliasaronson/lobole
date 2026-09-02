@@ -596,6 +596,7 @@ set(app_sources
     src/ui/MainMenuBar.cpp
     src/ui/FeatureTreePanel.cpp
     src/ui/OccurrencePanel.cpp
+    src/ui/ListSelection.cpp
     src/ui/StudyPanel.cpp
     src/ui/DrawingPanel.cpp
     src/ui/ConfigurationsPanel.cpp

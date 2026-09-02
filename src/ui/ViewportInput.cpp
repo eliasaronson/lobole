@@ -1,6 +1,7 @@
 #include "ui/ViewportInput.h"
 #include "ui/AssemblyActions.h"
 #include "ui/DrawingPanel.h"
+#include "ui/ListSelection.h"
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
 
@@ -268,6 +269,23 @@ void HandleViewportInput(AppState& state) {
   if (!state.faceSelector || !state.meshRenderer)
     return;
 
+  // Delete removes the selection — features on a part tab, occurrences on
+  // an assembly tab, operations on a job tab (ListSelection.h: one verb for
+  // every list). HERE rather than in the keymap, deliberately: Escape, Enter,
+  // Delete and the arrows resolve against armed tools, previews and text
+  // fields across ~15 call sites, so they are modal verbs rather than
+  // rebindable commands (Keymap.h says so). Which means this must yield to
+  // everything that could also want it — a mate session being picked into,
+  // an armed slot, a typing field, a sketch being edited (its entities own
+  // Delete, SketchInteraction), an open feature editor — and it does, by
+  // asking last.
+  if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput &&
+      !state.slotPick.Active() && !state.mateTool.active &&
+      !state.fastenerTool.open && !state.sketchEdit.IsEditing() &&
+      state.editFeatureId == 0) {
+    DeleteSelection(state);
+  }
+
   // Assembly tab: occurrences select through the pipeline; double-click
   // enters the referenced part in context (assembly ghosted, A4). Mate
   // connector picks flow through the pipeline too (U7c: Kind::Connector).
@@ -277,19 +295,6 @@ void HandleViewportInput(AppState& state) {
     if (state.mateTool.active && esc && !escUsed) {
       CancelMateTool(state);
       escUsed = true;
-    }
-
-    // Delete removes the selected occurrences. HERE rather than in the
-    // keymap, deliberately: Escape, Enter, Delete and the arrows resolve
-    // against armed tools, previews and text fields across ~15 call sites,
-    // so they are modal verbs rather than rebindable commands (Keymap.h says
-    // so). Which means this must yield to everything that could also want
-    // it — a mate session being picked into, an armed slot, a typing field —
-    // and it does, by asking last.
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput &&
-        !state.slotPick.Active() && !state.mateTool.active &&
-        !state.fastenerTool.open) {
-      DeleteSelectedOccurrences(state);
     }
 
     UpdateHandleHover(state, overViewport);

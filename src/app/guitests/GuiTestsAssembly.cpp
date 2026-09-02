@@ -902,6 +902,71 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)4);
   };
 
+  // Shift-click selects the rows between the last plain click and this one
+  // (ListSelection.h — the same gesture the feature tree and the job's
+  // operations take).
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "shift_click_selects_the_rows_between");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
+    std::vector<uint64_t> ids;
+    for (int i = 0; i < 5; ++i) {
+      Occurrence o;
+      o.name = "Block " + std::to_string(i + 1);
+      o.partId = partId;
+      o.position = glm::vec3(static_cast<float>(i) * 40.0f, 0.0f, 0.0f);
+      ids.push_back(s_App->assembly->AddOccurrence(o));
+    }
+    ctx->Yield(4);
+    const auto row = [&](size_t i) {
+      return "//###Model/###occ_" + std::to_string(ids[i]);
+    };
+    const auto picked = [&]() { return ui::SelectedOccurrenceIds(*s_App); };
+
+    ctx->ItemClick(row(1).c_str());
+    ctx->Yield();
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->ItemClick(row(3).c_str());
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)3);
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, ids[1]));
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, ids[2]));
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, ids[3]));
+    // The anchor stays on the plain click: a second Shift-click re-spans
+    // from there, upward this time, and replaces the first range.
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->ItemClick(row(0).c_str());
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)2);
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, ids[0]));
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, ids[1]));
+    IM_CHECK(!ui::IsOccurrenceSelected(*s_App, ids[3]));
+    // Ctrl+Shift ADDS a range to what is already picked.
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->ItemClick(row(4).c_str());
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->ItemClick(row(3).c_str());
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK_EQ(picked().size(), (size_t)4);
+    IM_CHECK(!ui::IsOccurrenceSelected(*s_App, ids[2]));
+
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)1);
+    IM_CHECK(s_App->assembly->FindById(ids[2]) != nullptr);
+  };
+
   // A fastener is placed by clicking a hole's rim (docs/parts/gui-plan.md).
   //
   // The whole verb: arm from the toolbar, click the rim in the viewport, and

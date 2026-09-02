@@ -5,6 +5,7 @@
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
+#include "ui/ListSelection.h"
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
@@ -544,6 +545,10 @@ void DrawOccurrencePanel(AppState& state) {
   if (asmDoc.OccurrenceCount() == 0)
     TextDisabledWrapped("Empty - use Insert part on the toolbar.");
 
+  // The rows as listed — what a Shift-click range spans (ListSelection.h).
+  std::vector<uint64_t> occOrder;
+  for (const Occurrence& o : asmDoc.GetOccurrences())
+    occOrder.push_back(o.id);
   for (const Occurrence& o : asmDoc.GetOccurrences()) {
     // Ids in the LABELS, not a PushID(int) scope: an integer scope is not
     // addressable as a path segment, so the assembly's primary list could
@@ -561,15 +566,12 @@ void DrawOccurrencePanel(AppState& state) {
         (o.name.empty() ? RefNameById(state, o) : o.name) +
         (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
         (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
-    // Ctrl-click adds and removes; a plain click replaces. The same gesture
-    // the VIEWPORT has accepted for occurrences since U1d — the list was the
-    // half that still forced one at a time.
-    if (SelectableEllipsis(label, IsOccurrenceSelected(state, o.id))) {
-      if (ImGui::GetIO().KeyCtrl)
-        ToggleOccurrence(state, o.id);
-      else
-        SelectOccurrence(state, o.id);
-    }
+    // Ctrl-click adds and removes, Shift-click ranges, a plain click
+    // replaces — the one list gesture (ListSelection.h). Own kind only: a
+    // selected mate stays, as the old separate fields let it.
+    if (SelectableEllipsis(label, IsOccurrenceSelected(state, o.id)))
+      ListRowClicked(state, SelectionItem::Kind::Occurrence, o.id, occOrder,
+                     /*ownKindOnly=*/true);
 
     // Right-click the row to go to what it references: the shortcut for the
     // "Open"/"Edit" button below, which needs the row selected first and only
@@ -578,8 +580,8 @@ void DrawOccurrencePanel(AppState& state) {
     if (ImGui::BeginPopupContextItem(("###occ_ctx_" + suffix).c_str())) {
       // Right-clicking INSIDE a multi-selection keeps it — collapsing to the
       // clicked row is how you lose a five-part selection by aiming at it.
-      if (!IsOccurrenceSelected(state, o.id))
-        SelectOccurrence(state, o.id);
+      ListRowContext(state, SelectionItem::Kind::Occurrence, o.id,
+                     /*ownKindOnly=*/true);
       const bool isSub = o.refKind == OccurrenceRef::Assembly;
       const std::string item =
           std::string("Open ") + (isSub ? "assembly" : "part") + "###occ_open";
@@ -616,11 +618,9 @@ void DrawOccurrencePanel(AppState& state) {
       ImGui::Separator();
       const size_t picked = SelectedOccurrenceIds(state).size();
       const std::string del =
-          (picked > 1 ? "Delete " + std::to_string(picked) + " occurrences"
-                      : std::string("Delete occurrence")) +
-          "###occ_delete";
+          DeleteLabel(picked, "occurrence") + "###occ_delete";
       if (ImGui::MenuItem(del.c_str())) {
-        DeleteSelectedOccurrences(state);
+        DeleteSelection(state);
         ImGui::EndPopup();
         ImGui::End();
         return; // the list we are walking just changed under us
@@ -687,11 +687,9 @@ void DrawOccurrencePanel(AppState& state) {
     }
     ImGui::SameLine();
     const size_t picked = SelectedOccurrenceIds(state).size();
-    const std::string del =
-        picked > 1 ? "Delete " + std::to_string(picked) + " occurrences"
-                   : std::string("Delete occurrence");
+    const std::string del = DeleteLabel(picked, "occurrence");
     if (ImGui::Button(del.c_str())) {
-      DeleteSelectedOccurrences(state);
+      DeleteSelection(state);
       ImGui::End();
       return; // `sel` pointed into the list that just shrank
     }

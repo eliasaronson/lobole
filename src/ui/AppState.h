@@ -747,8 +747,10 @@ struct SelectionItem {
     Occurrence,
     Mate,
     SketchRegion, // U2
-    Connector     // U7c: mate connector — id = occurrence, element = face
+    Connector,    // U7c: mate connector — id = occurrence, element = face
+    Operation     // a CAM operation row (job tabs); id = the operation's id
   };
+  static constexpr int kKindCount = static_cast<int>(Kind::Operation) + 1;
   Kind kind = Kind::Feature;
   uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
   ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}
@@ -790,6 +792,11 @@ constexpr uint32_t SelectionKindBit(SelectionItem::Kind k) {
 
 struct Selection {
   std::vector<SelectionItem> items; // ordered: pick order matters to tools
+  // Where a Shift+click range starts, per kind: the id last selected by a
+  // plain click in a LIST (ListRowClicked). 0 = no anchor. Kept apart from
+  // `items` because an anchor outlives the selection it started — Ctrl-click
+  // a row out and Shift-click still ranges from the same place.
+  uint64_t rangeAnchor[SelectionItem::kKindCount] = {};
 
   bool Empty() const { return items.empty(); }
   void Clear() { items.clear(); }

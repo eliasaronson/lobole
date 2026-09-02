@@ -2,6 +2,7 @@
 
 #include "core/io/Serialization.h"
 
+#include <algorithm>
 #include <set>
 
 uint64_t NextActionStamp() {
@@ -45,6 +46,47 @@ bool RemoveFeatureCommand::Execute(Document& doc) {
 
 void RemoveFeatureCommand::Undo(Document& doc) {
   doc.InsertFeature(std::move(m_removed), m_index);
+}
+
+RemoveFeaturesCommand::RemoveFeaturesCommand(std::vector<size_t> indices)
+    : m_indices(std::move(indices)) {}
+
+std::string RemoveFeaturesCommand::Description() const {
+  return m_description.empty() ? "Remove features" : m_description;
+}
+
+bool RemoveFeaturesCommand::Execute(Document& doc) {
+  std::sort(m_indices.begin(), m_indices.end());
+  m_indices.erase(std::unique(m_indices.begin(), m_indices.end()),
+                  m_indices.end());
+  if (m_indices.empty() || m_indices.back() >= doc.FeatureCount()) {
+    return false;
+  }
+  m_removed.clear();
+  m_removed.resize(m_indices.size());
+  {
+    Document::BulkEdit bulk(doc); // one Regenerate when the guard releases
+    // Highest first, so the lower indices are still the ones we were given.
+    for (size_t k = m_indices.size(); k-- > 0;) {
+      m_removed[k] = doc.RemoveFeature(m_indices[k]);
+    }
+  }
+  if (m_removed.size() == 1) {
+    m_description = "Remove " + m_removed[0]->TypeName() + " '" +
+                    m_removed[0]->GetName() + "'";
+  } else {
+    m_description = "Remove " + std::to_string(m_removed.size()) + " features";
+  }
+  return true;
+}
+
+void RemoveFeaturesCommand::Undo(Document& doc) {
+  Document::BulkEdit bulk(doc);
+  // Lowest first: each insert lands at its original index because everything
+  // below it is already back.
+  for (size_t k = 0; k < m_indices.size(); k++) {
+    doc.InsertFeature(std::move(m_removed[k]), m_indices[k]);
+  }
 }
 
 MoveFeatureCommand::MoveFeatureCommand(size_t from, size_t to)

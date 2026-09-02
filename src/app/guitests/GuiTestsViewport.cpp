@@ -1,8 +1,10 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "cad/CADKernel.h"
+#include "core/Command.h"
 #include "core/features/RevolveFeature.h"
 #include "ui/AssemblyActions.h"
 #include "ui/Commands.h"
+#include "ui/ListSelection.h"
 #include "ui/MeasureOverlay.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SimulationActions.h"
@@ -1617,18 +1619,111 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), sphereId);
 
-    // Delete the box above it: the selection stays on the sphere.
-    ctx->ItemClick("//###Model/Box 1##0", ImGuiMouseButton_Right);
-    ctx->ItemClick("//$FOCUSED/Delete");
-    ctx->Yield();
+    // Delete the box above it through the command stack (a script, an
+    // agent): the selection is by ID, so it stays on the sphere while the
+    // sphere's index shifts. Not through the row's menu: right-clicking a
+    // row OUTSIDE the selection selects it (the list rule, ListSelection.h),
+    // which would make this a test of that rule instead.
+    s_App->commands->Execute(std::make_unique<RemoveFeatureCommand>(0), *Doc());
+    ctx->Yield(2);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), sphereId);
 
     // Deleting the selected feature itself clears the selection (prune).
     ctx->ItemClick("//###Model/Sphere 2##0", ImGuiMouseButton_Right);
-    ctx->ItemClick("//$FOCUSED/Delete");
+    ctx->ItemClick("//$FOCUSED/###feat_delete");
     ctx->Yield();
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), (uint64_t)0);
+  };
+
+  // The feature tree takes the one list gesture (ListSelection.h): Shift
+  // ranges, Ctrl toggles, right-click Delete removes the whole selection as
+  // ONE undo step. Features were the list that could only ever hold one.
+  t = IM_REGISTER_TEST(engine, "selection",
+                       "tree_shift_range_and_delete_is_one_undo");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    for (int i = 0; i < 4; i++)
+      ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)4);
+    const auto row = [&](size_t i) {
+      return "//###Model/" + Doc()->GetFeature(i)->GetName() + "##" +
+             std::to_string(i);
+    };
+    const auto picked = [&]() {
+      return ui::SelectedIds(*s_App, ui::SelectionItem::Kind::Feature).size();
+    };
+    const uint64_t second = Doc()->GetFeature(1)->GetId();
+    const uint64_t fourth = Doc()->GetFeature(3)->GetId();
+
+    ctx->ItemClick(row(0).c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(picked(), (size_t)1);
+    // Shift-click: everything from the plain-clicked row to this one.
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->ItemClick(row(2).c_str());
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->Yield();
+    IM_CHECK_EQ(picked(), (size_t)3);
+    // Ctrl-click takes one back out of the range.
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->ItemClick(row(1).c_str());
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK_EQ(picked(), (size_t)2);
+    IM_CHECK(!ui::IsSelected(*s_App, ui::SelectionItem::Kind::Feature, second));
+
+    // Right-click INSIDE the selection keeps it, and the item says how many.
+    ctx->ItemClick(row(2).c_str(), ImGuiMouseButton_Right);
+    ctx->Yield();
+    IM_CHECK_EQ(picked(), (size_t)2);
+    IM_CHECK(ctx->ItemExists("//$FOCUSED/###feat_delete"));
+    IM_CHECK_STR_EQ(ctx->ItemInfo("//$FOCUSED/###feat_delete").DebugLabel,
+                    "Delete 2 features###feat_delete");
+    ctx->ItemClick("//$FOCUSED/###feat_delete");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(Doc()->FindFeatureById(second) != nullptr);
+    IM_CHECK(Doc()->FindFeatureById(fourth) != nullptr);
+    IM_CHECK_EQ(picked(), (size_t)0);
+
+    // One Ctrl+Z brings both back.
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)4);
+  };
+
+  // And the Delete KEY reaches features too — it used to remove occurrences
+  // only. Pressed against a part tab, through the same modal-key chain.
+  t = IM_REGISTER_TEST(engine, "selection", "delete_key_removes_features");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    for (int i = 0; i < 3; i++)
+      ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)3);
+    const uint64_t kept = Doc()->GetFeature(0)->GetId();
+    const auto row = [&](size_t i) {
+      return "//###Model/" + Doc()->GetFeature(i)->GetName() + "##" +
+             std::to_string(i);
+    };
+    ctx->ItemClick(row(1).c_str());
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->ItemClick(row(2).c_str());
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK_EQ(
+        ui::SelectedIds(*s_App, ui::SelectionItem::Kind::Feature).size(),
+        (size_t)2);
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(3);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(Doc()->GetFeature(0)->GetId(), kept);
+    // With nothing selected the key is a no-op, not a crash or a stray delete.
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
   };
 
   // U1b: the unified pick pipeline — face/body cycling on a repeated click,

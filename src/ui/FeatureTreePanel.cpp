@@ -17,6 +17,7 @@
 #include "render/Camera.h"
 #include "ui/AppActions.h"    // SelectFeature / SelectedFeatureId
 #include "ui/FeatureEditor.h" // ArmSlot (blend edge re-pick)
+#include "ui/ListSelection.h" // ListRowClicked / DeleteSelection
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // DrawSketchModelSections (U8a)
 
@@ -234,6 +235,11 @@ void DrawFeatureTreePanel(AppState& state) {
     // drop target after the list is drawn.
     static bool draggingBar = false;
     std::vector<float> gapY; // screen y of the gap above row i; [count] = end
+    // The rows as listed — what a Shift-click range spans (ListSelection.h).
+    std::vector<uint64_t> featureOrder;
+    featureOrder.reserve(count);
+    for (size_t i = 0; i < count; i++)
+      featureOrder.push_back(doc->GetFeature(i)->GetId());
 
     for (size_t i = 0; i < count; i++) {
       gapY.push_back(ImGui::GetCursorScreenPos().y);
@@ -307,10 +313,14 @@ void DrawFeatureTreePanel(AppState& state) {
           state.slotPick.Active() &&
           state.slotPick.slot == static_cast<int>(PickSlot::PatternSource) &&
           cutExt != nullptr && cutExt->mode == ExtrudeMode::Cut;
-      if (ImGui::Selectable(label.c_str(),
-                            SelectedFeatureId(state) == feature->GetId(),
-                            flags)) {
-        SelectFeature(state, feature->GetId());
+      // A plain click replaces the WHOLE selection (a feature row drops
+      // picked faces, as it always has); Ctrl toggles, Shift ranges.
+      if (ImGui::Selectable(
+              label.c_str(),
+              IsSelected(state, SelectionItem::Kind::Feature, feature->GetId()),
+              flags)) {
+        ListRowClicked(state, SelectionItem::Kind::Feature, feature->GetId(),
+                       featureOrder, /*ownKindOnly=*/false);
         if (armedForCutSource) {
           // A Body item IS {createdBy, ""} — a feature id — so the cut's id
           // travels the same slot path a body pick does.
@@ -386,6 +396,10 @@ void DrawFeatureTreePanel(AppState& state) {
                                        : "After the rollback bar");
       }
       if (ImGui::BeginPopupContextItem()) {
+        // Inside a multi-selection the right-click keeps it (Delete below
+        // acts on all of it); outside, the row becomes the selection.
+        ListRowContext(state, SelectionItem::Kind::Feature, feature->GetId(),
+                       /*ownKindOnly=*/false);
         // U7e: the explicit path to the committed-feature editor session
         // (double-click is the shortcut).
         if (ImGui::MenuItem("Edit…")) {
@@ -432,10 +446,13 @@ void DrawFeatureTreePanel(AppState& state) {
             ArmSlot(state, *fil, PickSlot::BlendEdges);
           }
         }
-        if (ImGui::MenuItem("Delete")) {
-          state.commands->Execute(std::make_unique<RemoveFeatureCommand>(i),
-                                  *doc);
-          // A dangling selected id is pruned next frame (PruneSelection).
+        // The selection, not just this row: "Delete 3 features" when three
+        // are picked, as one undo step (RemoveFeaturesCommand).
+        const size_t picked =
+            SelectedIds(state, SelectionItem::Kind::Feature).size();
+        if (ImGui::MenuItem(
+                (DeleteLabel(picked, "feature") + "###feat_delete").c_str())) {
+          DeleteSelection(state);
           ImGui::EndPopup();
           break; // feature list changed; redraw next frame
         }

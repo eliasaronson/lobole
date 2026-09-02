@@ -131,6 +131,40 @@ but stops owning selection state.
 - Escape clears armed filter first, then selection (matches today's
   tool-Escape cascade).
 
+### Lists — one gesture, one Delete (2026-09-02)
+
+Three panels list things with ids — features in a part, occurrences in an
+assembly, operations in a job — and they had drifted: features selected one
+at a time, occurrences Ctrl-clicked, operations had no selection at all and
+an `x` per row; two had a right-click Delete, one had the Delete key. What
+is shared now is the GESTURE and the VERB (`src/ui/ListSelection.h`), not
+the row: a feature row carries a rollback bar and Suppress, an occurrence
+row a visibility box, an operation row an enabled box and a ghost button,
+so a shared row widget would be a configuration blob that also renames the
+item ids the GUI tests address.
+
+- `ListRowClicked(kind, id, order)`: plain click selects the row alone and
+  becomes the range anchor (`Selection::rangeAnchor`, per kind); Ctrl
+  toggles it (and moves the anchor, as a file manager does); Shift selects
+  from the anchor to the row over `order` — the rows as the panel lists
+  them — replacing that kind; Ctrl+Shift adds the range.
+- `ListRowContext`: right-click inside the selection keeps it; outside, the
+  row becomes the selection. The menu's Delete says how many
+  (`DeleteLabel`: "Delete 3 features").
+- `DeleteSelection`: the one Delete — features through
+  `RemoveFeaturesCommand` (one undo step, one regenerate), occurrences
+  through `DeleteSelectedOccurrences` (one snapshot, one solve), operations
+  through `RemoveCamOperations` (both CAM windows had their own remove with
+  different side effects; now one). The Delete key calls it from the
+  modal-key chain in ViewportInput, yielding to armed slots, a mate or
+  fastener session, a text field, a sketch being edited and an open editor.
+- Selection got an `Operation` kind for the job's operation rows (id = the
+  operation's id), pruned like the others.
+
+A range delete of features can leave a dependent broken (an extrude whose
+sketch went); it does, and the row turns red with the reason — exactly as a
+single delete always has, so nothing is refused that used to be allowed.
+
 ## Out of scope
 
 Sketch-entity selection (mature); region picking (U2 adds

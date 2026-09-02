@@ -61,6 +61,7 @@ add_executable(designer_tests
     test_cam_sim.cpp
     test_command_modify.cpp
     test_reorder.cpp
+    test_remove_features.cpp
     test_expression.cpp
     test_variables.cpp
     test_datum.cpp

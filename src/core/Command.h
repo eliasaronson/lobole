@@ -65,6 +65,26 @@ private:
   std::string m_description;
 };
 
+// Removes SEVERAL features as one undo step (a multi-selection's Delete).
+// Indices are taken in any order and removed highest-first inside a BulkEdit,
+// so the document regenerates once for the batch rather than once per
+// feature. Refuses (removes nothing) if any index is out of range: a partial
+// delete that undoes as a whole would restore features that were never
+// removed. Undo reinserts each feature at its original index, lowest-first.
+class RemoveFeaturesCommand : public Command {
+public:
+  explicit RemoveFeaturesCommand(std::vector<size_t> indices);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  std::vector<size_t> m_indices; // sorted ascending after Execute
+  std::vector<std::unique_ptr<Feature>> m_removed; // parallel to m_indices
+  std::string m_description;
+};
+
 // Reorders one feature (drag in the feature tree). Execute performs the move
 // and regenerates; if the new order dangles a reference — some feature that was
 // error-free now fails to regenerate — it reverts and returns false, naming the

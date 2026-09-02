@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <filesystem>
 
 #include "ui/CamPanel.h"
@@ -18,6 +19,7 @@
 #include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h"
 #include "ui/JobActions.h"
+#include "ui/ListSelection.h"
 #include "ui/MachineActions.h"
 #include "ui/SelectionPipeline.h"
 
@@ -1015,9 +1017,14 @@ void DrawCamPanel(AppState& state) {
 
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");
-  uint64_t removeOp = 0;
+  // Both deferred past the loop, which walks the vector they would shrink.
+  std::vector<uint64_t> removeOps; // the row's own x button
+  bool deleteSelected = false;     // the row menu's Delete (the selection)
   uint64_t moveOp = 0; // dragged operation …
   size_t moveTo = 0;   // … and where it was dropped
+  std::vector<uint64_t> opOrder;
+  for (const cam::Operation& op : setup->operations)
+    opOrder.push_back(op.id);
   ImGui::PushID("ops");
   for (size_t opIndex = 0; opIndex < setup->operations.size(); opIndex++) {
     cam::Operation& op = setup->operations[opIndex];
@@ -1049,24 +1056,31 @@ void DrawCamPanel(AppState& state) {
     if (ImGui::Checkbox("###enabled", &op.enabled))
       touched(op.id);
     ImGui::SameLine();
-    // What this operation IS, in a sentence. The numbers behind it are
-    // derived from the model and the cutter (docs/cam/gui.md); the fields
-    // that set them are one disclosure away, not the way in.
-    const cam::Tool* opTool = setup->FindTool(op.toolNumber);
-    const int passes = static_cast<int>(cam::DepthPasses(op).size());
-    ImGui::Text(
-        "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s",
-        op.name.empty() ? kOpTypes[static_cast<int>(op.type)] : op.name.c_str(),
-        opTool != nullptr ? opTool->diameter : 0.0, op.topZ - op.bottomZ,
-        passes, passes == 1 ? "" : "es", op.climb ? "climb" : "conventional");
-    ImGui::SameLine();
     const bool ghosted = state.camGhostOp == op.id;
     if (ImGui::SmallButton(ghosted ? "hide###ghost" : "show###ghost"))
       state.camGhostOp = ghosted ? 0 : op.id;
     ImGui::SetItemTooltip("Ghost the material this one removes");
     ImGui::SameLine();
     if (ImGui::SmallButton("x###rmop"))
-      removeOp = op.id;
+      removeOps = {op.id};
+    ImGui::SetItemTooltip("Remove this operation");
+    ImGui::SameLine();
+    // What this operation IS, in a sentence. The numbers behind it are
+    // derived from the model and the cutter (docs/cam/gui.md); the fields
+    // that set them are one disclosure away, not the way in. The sentence is
+    // the ROW: click to select, Ctrl/Shift to extend, right-click to delete
+    // (CamOperationRow — the same row the tool window draws).
+    const cam::Tool* opTool = setup->FindTool(op.toolNumber);
+    const int passes = static_cast<int>(cam::DepthPasses(op).size());
+    char sentence[256];
+    std::snprintf(
+        sentence, sizeof(sentence),
+        "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s",
+        op.name.empty() ? kOpTypes[static_cast<int>(op.type)] : op.name.c_str(),
+        opTool != nullptr ? opTool->diameter : 0.0, op.topZ - op.bottomZ,
+        passes, passes == 1 ? "" : "es", op.climb ? "climb" : "conventional");
+    if (CamOperationRow(state, op.id, sentence, opOrder))
+      deleteSelected = true;
 
     if (ImGui::TreeNode("Advanced###adv")) {
       // WHICH CUTTER. There was no way to say it by clicking — `toolNumber`
@@ -1236,23 +1250,10 @@ void DrawCamPanel(AppState& state) {
     state.camVerdict.clear();
     state.camLeftover.clear();
   }
-  if (removeOp != 0) {
-    auto& ops = setup->operations;
-    for (auto it = ops.begin(); it != ops.end(); ++it)
-      if (it->id == removeOp) {
-        ops.erase(it);
-        break;
-      }
-    // Deleting one operation cannot change another's toolpath, so drop its
-    // entry and regenerate NOTHING. This used to re-cut the whole job.
-    DropCamToolpath(state, removeOp);
-    dirty = true;
-    state.projectMetaDirty = true;
-    state.camVerdict.clear();
-    state.camLeftover.clear();
-    if (state.camGhostOp == removeOp)
-      state.camGhostOp = 0;
-  }
+  if (deleteSelected)
+    DeleteSelection(state);
+  else if (!removeOps.empty())
+    RemoveCamOperations(state, removeOps);
 
   if (ImGui::SmallButton("Add operation###cam_add_op")) {
     // ONE derivation, two entry points: the same engine call the verbs use
@@ -1297,6 +1298,72 @@ void DrawCamPanel(AppState& state) {
   ImGui::End();
 }
 
+int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
+  if (!state.job || ids.empty())
+    return 0;
+  int removed = 0;
+  for (const uint64_t id : ids) {
+    bool found = false;
+    for (cam::Setup& setup : state.job->GetSetups()) {
+      auto& ops = setup.operations;
+      for (auto it = ops.begin(); it != ops.end(); ++it)
+        if (it->id == id) {
+          ops.erase(it);
+          found = true;
+          break;
+        }
+      if (found)
+        break;
+    }
+    if (!found)
+      continue;
+    removed++;
+    // Deleting one operation cannot change another's toolpath, so drop its
+    // entry and regenerate NOTHING. This used to re-cut the whole job.
+    DropCamToolpath(state, id);
+    if (state.camGhostOp == id)
+      state.camGhostOp = 0;
+    if (state.camVerbOp == id)
+      state.camVerbOp = 0;
+    auto& items = state.selection.items;
+    items.erase(std::remove_if(items.begin(), items.end(),
+                               [id](const SelectionItem& it) {
+                                 return it.kind ==
+                                            SelectionItem::Kind::Operation &&
+                                        it.id == id;
+                               }),
+                items.end());
+  }
+  if (removed == 0)
+    return 0;
+  state.projectMetaDirty = true;
+  // A verdict about the PREVIOUS job is worse than no verdict: re-run it
+  // against what is left, as the tool window always did.
+  RunCamVerification(state);
+  return removed;
+}
+
+bool CamOperationRow(AppState& state, uint64_t opId,
+                     const std::string& sentence,
+                     const std::vector<uint64_t>& order) {
+  constexpr SelectionItem::Kind kKind = SelectionItem::Kind::Operation;
+  // Own kind only: a plain click keeps the faces picked on the job — they
+  // are what the verb windows are aimed at.
+  if (ImGui::Selectable((sentence + "###op_row").c_str(),
+                        IsSelected(state, kKind, opId)))
+    ListRowClicked(state, kKind, opId, order, /*ownKindOnly=*/true);
+  bool wantDelete = false;
+  if (ImGui::BeginPopupContextItem("###op_ctx")) {
+    ListRowContext(state, kKind, opId, /*ownKindOnly=*/true);
+    const size_t picked = SelectedIds(state, kKind).size();
+    if (ImGui::MenuItem(
+            (DeleteLabel(picked, "operation") + "###op_delete").c_str()))
+      wantDelete = true;
+    ImGui::EndPopup();
+  }
+  return wantDelete;
+}
+
 } // namespace ui
 
 #else // !HAVE_CAM
@@ -1307,6 +1374,11 @@ void AppendCamToolpathOverlay(AppState&, std::vector<PrimVertex>&) {}
 void RefreshCamToolpaths(AppState&) {}
 void RefreshCamToolpath(AppState&, uint64_t) {}
 void DropCamToolpath(AppState&, uint64_t) {}
+int RemoveCamOperations(AppState&, const std::vector<uint64_t>&) { return 0; }
+bool CamOperationRow(AppState&, uint64_t, const std::string&,
+                     const std::vector<uint64_t>&) {
+  return false;
+}
 } // namespace ui
 
 #endif
