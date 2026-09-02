@@ -44,6 +44,13 @@ void ApplyMachine(cam::Setup& setup, const cam::Machine& machine) {
   // run. Zero it rather than carry it silently into the post.
   if (!machine.hasRotaryAxis)
     setup.rotationA = 0.0;
+  // The tool table, COPIED from the machine's library (M4) -- never linked,
+  // which is FreeCAD's answer and the one the per-setup table already
+  // gives. Only onto a setup with nothing cut yet: an operation names its
+  // tool by number, and replacing the table under it would re-point every
+  // cut at whatever now wears that number.
+  if (!machine.library.empty() && setup.operations.empty())
+    setup.tools = machine.library;
 }
 
 } // namespace ui

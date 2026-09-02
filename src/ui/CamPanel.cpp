@@ -861,9 +861,42 @@ void DrawCamPanel(AppState& state) {
       ImGui::PopID();
     }
     ImGui::PopID(); // "tools"
+    // The machine's library first (M4): the tools the shop owns, minus the
+    // ones this setup already has; then a blank one. Copied in, never
+    // linked, so a library edit later changes nothing already cut with.
+    const auto nextNumber = [&]() {
+      int n = 0;
+      for (const cam::Tool& t : setup->tools)
+        n = std::max(n, t.number);
+      return n + 1;
+    };
+    for (const cam::Tool& lib : setup->machine.library) {
+      bool held = false;
+      for (const cam::Tool& t : setup->tools)
+        held = held || (t.number == lib.number && t.diameter == lib.diameter &&
+                        t.type == lib.type);
+      if (held)
+        continue;
+      ImGui::PushID(lib.number);
+      char label[96];
+      std::snprintf(label, sizeof(label),
+                    "Add T%d %.3g mm %s###cam_add_lib_tool", lib.number,
+                    lib.diameter, lib.name.c_str());
+      if (ImGui::SmallButton(label)) {
+        cam::Tool t = lib;
+        // Its own number stays unless the setup already uses it.
+        for (const cam::Tool& have : setup->tools)
+          if (have.number == t.number)
+            t.number = nextNumber();
+        setup->tools.push_back(t);
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("From the machine's library");
+      ImGui::PopID();
+    }
     if (ImGui::SmallButton("Add tool###cam_add_tool")) {
       cam::Tool t;
-      t.number = static_cast<int>(setup->tools.size()) + 1;
+      t.number = nextNumber();
       t.name = "tool " + std::to_string(t.number);
       setup->tools.push_back(t);
       dirty = true;

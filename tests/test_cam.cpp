@@ -8,11 +8,13 @@
 #include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
+#include "core/cam/JobDocument.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "ui/MachineActions.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -4690,4 +4692,37 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   CHECK(cam::MachineRefusal(unstated, doc.GetBodies()).empty());
   setup.machine.travelMax.x = 1200.0;
   CHECK(cam::MachineRefusal(setup, doc.GetBodies()).empty());
+}
+
+TEST_CASE("cam machine: a setup copies the machine's tool library, unless "
+          "something is already cut with the old table",
+          "[cam][machine][job]") {
+  cam::JobDocument job;
+  cam::Machine m;
+  m.name = "Shop router";
+  cam::Tool small;
+  small.number = 1;
+  small.diameter = 3.0;
+  cam::Tool big;
+  big.number = 2;
+  big.diameter = 8.0;
+  m.library = {small, big};
+
+  cam::Setup& fresh = job.AddSetup("Fresh");
+  REQUIRE(fresh.tools.size() == 1); // the default 6 mm
+  ui::ApplyMachine(fresh, m);
+  REQUIRE(fresh.tools.size() == 2);
+  CHECK(fresh.tools[1].diameter == 8.0);
+  // COPIED: a library edit afterwards changes nothing the setup holds.
+  m.library[1].diameter = 10.0;
+  CHECK(fresh.tools[1].diameter == 8.0);
+
+  cam::Setup& busy = job.AddSetup("Busy");
+  cam::Operation op;
+  op.id = job.AllocateId();
+  op.toolNumber = 1;
+  busy.operations.push_back(op);
+  ui::ApplyMachine(busy, m);
+  CHECK(busy.tools.size() == 1); // the table an operation names stays
+  CHECK(busy.machine.name == "Shop router"); // the machine still applies
 }

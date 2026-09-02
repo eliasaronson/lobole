@@ -343,8 +343,53 @@ void DrawMachinesSection(AppState& state) {
     m.rapidFeed = rapid;
     edited = true;
   }
-  ImGui::TextDisabled("%zu tool%s in its library (a setup copies them)",
-                      m.library.size(), m.library.size() == 1 ? "" : "s");
+  // The tool library (M4): what the shop owns for this machine. A new setup
+  // on it copies the table; "Add tool" in the CAM panel offers these first.
+  ImGui::TextDisabled("Tools (a setup copies them)");
+  int removeTool = 0;
+  for (cam::Tool& t : m.library) {
+    ImGui::PushID(t.number);
+    ImGui::Text("T%d", t.number);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70.0f);
+    float dia = static_cast<float>(t.diameter);
+    if (ExprDragFloat(state, "mm###libdia", &dia, 0.1f, 0.1f, 50.0f, "%.3f")) {
+      t.diameter = dia;
+      edited = true;
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70.0f);
+    float feed = static_cast<float>(t.feedCut);
+    if (ExprDragFloat(state, "F###libfeed", &feed, 10.0f, 1.0f, 10000.0f,
+                      "%.0f")) {
+      t.feedCut = feed;
+      edited = true;
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70.0f);
+    int shape = static_cast<int>(t.type);
+    if (ImGui::Combo("###libtype", &shape, "flat\0ball\0V-bit\0drill\0")) {
+      t.type = static_cast<cam::ToolType>(shape);
+      edited = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("x###librm"))
+      removeTool = t.number;
+    ImGui::PopID();
+  }
+  if (removeTool != 0) {
+    std::erase_if(m.library,
+                  [&](const cam::Tool& t) { return t.number == removeTool; });
+    edited = true;
+  }
+  if (ImGui::SmallButton("Add tool###mach_add_tool")) {
+    cam::Tool t;
+    for (const cam::Tool& have : m.library)
+      t.number = std::max(t.number, have.number + 1);
+    t.name = "tool " + std::to_string(t.number);
+    m.library.push_back(t);
+    edited = true;
+  }
   if (edited)
     commit(m);
 }

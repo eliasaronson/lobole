@@ -25,7 +25,8 @@ bool DeleteMachine(AppState& state, const std::string& name,
                    std::string* error = nullptr);
 
 // Put `machine` on `setup`: the embedded copy, and the per-job values it
-// seeds (rapidFeed). The one place a setup's machine is assigned, so a
+// seeds (rapidFeed; the tool table, from the machine's library, when nothing
+// has been cut yet). The one place a setup's machine is assigned, so a
 // second seeded field cannot be forgotten at one of two doors.
 void ApplyMachine(cam::Setup& setup, const cam::Machine& machine);
 

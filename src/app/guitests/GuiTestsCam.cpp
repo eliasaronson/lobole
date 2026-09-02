@@ -2163,6 +2163,62 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::DeleteMachine(*s_App, "Test tab router"));
   };
 
+  // The machine's tool library (M4): edited in Preferences, COPIED onto a
+  // new setup on that machine, and offered first by the panel's Add tool.
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "a_setup_takes_its_tools_from_the_machine");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    (void)ui::DeleteMachine(*s_App, "Test tooled router");
+    cam::Machine mine;
+    mine.name = "Test tooled router";
+    IM_CHECK(ui::SaveMachine(*s_App, mine));
+
+    // Two tools into its library through Preferences; read back from disk.
+    ctx->MenuClick("Edit/###edit_preferences");
+    ctx->Yield();
+    ctx->SetRef("//###SettingsWindow");
+    ctx->ItemOpen("###sec_Machines");
+    ctx->Yield();
+    for (size_t i = 0; i < s_App->machines.size(); i++)
+      if (s_App->machines[i].name == "Test tooled router")
+        s_App->machineEditIndex = static_cast<int>(i);
+    ctx->Yield(2);
+    ctx->ItemClick("###mach_add_tool");
+    ctx->Yield(2);
+    ctx->ItemClick("###mach_add_tool");
+    ctx->Yield(2);
+    ctx->ItemInputValue("$$2/###libdia", "8");
+    ctx->Yield(3);
+    s_App->settingsWindowOpen = false;
+    ctx->Yield();
+    const auto fromDisk = DocumentIO::LoadMachines(ui::MachineDir());
+    const cam::Machine* saved =
+        cam::FindMachine(fromDisk, "Test tooled router");
+    IM_CHECK(saved != nullptr);
+    IM_CHECK_EQ(saved->library.size(), (size_t)2);
+    IM_CHECK(std::abs(saved->library[1].diameter - 8.0) < 1e-9);
+
+    // A setup made on it starts with that table, not the default 6 mm.
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    MakeJob();
+    ctx->Yield(3);
+    s_App->camNewSetup.machine = "Test tooled router";
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_add_setup");
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->GetSetups().size(), (size_t)1);
+    const cam::Setup& made = Job()->GetSetups()[0];
+    IM_CHECK_EQ(made.tools.size(), (size_t)2);
+    IM_CHECK(std::abs(made.tools[1].diameter - 8.0) < 1e-9);
+    // ...and the verb's tool row shows both, defaulting to the first.
+    IM_CHECK_EQ(ui::VerbTool(*s_App, made), 1);
+    IM_CHECK(ui::DeleteMachine(*s_App, "Test tooled router"));
+  };
+
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
   // right when on, and — the part that decides whether it feels safe — the
   // keyboard goes to it ONLY while the pointer is over it.
