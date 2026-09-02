@@ -17,7 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    75; // v75: a setup says in what ORDER it cuts (`order`:
+    76; // v76: fixturing is per PART. A placement can carry its own `frame`,
+        //      so one sheet can hold a baffle laid on its face beside a rail
+        //      laid on its edge -- each modelled in its assembly orientation,
+        //      all cut from one board. Unset means "as the setup says", which
+        //      keeps Setup::frame the single-part answer and re-saves an
+        //      existing job byte-identically. Optional rather than defaulted
+        //      to identity: a default would silently un-clamp a part the
+        //      moment you gave it a position (docs/cam/job-document.md).
+        // (v75: a setup says in what ORDER it cuts (`order`:
         //      authored|tool|part). With one part authoring order IS
         //      cutting order; with four, authoring per part means a tool
         //      change per part per tool. Omitted at `authored`, which is

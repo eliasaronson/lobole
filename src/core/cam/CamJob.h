@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -253,6 +254,20 @@ struct Placement {
   double rotZdeg = 0.0;
   // On the sheet, not cut this run (PrusaSlicer's ModelInstance::printable).
   bool enabled = true;
+
+  // How THIS part is clamped, when it is clamped differently from the rest of
+  // the setup. Unset means "as the setup says" -- which is the whole answer
+  // for a job whose parts all lie the same way, and keeps `Setup::frame` the
+  // single-part answer it has always been.
+  //
+  // It exists because fixturing is a claim about A PART IN A FIXTURE, and a
+  // sheet job is the case that proves it: a speaker cabinet's baffle, sides
+  // and back are each modelled in their assembly orientation and all cut from
+  // one board, so they need three different frames and one stock. Optional
+  // rather than defaulted, because a default of identity would silently
+  // un-clamp a part the moment you gave it a position
+  // (docs/cam/job-document.md; the split it refines is setup-frame.md's).
+  std::optional<glm::dquat> frame;
 };
 
 struct Setup {

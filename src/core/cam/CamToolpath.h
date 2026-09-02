@@ -298,11 +298,22 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // Whether the part is clamped as modelled — the fixture frame is identity.
 // Says nothing about `rotationA`: the two are separate claims.
 [[nodiscard]] bool FrameIsSquare(const Setup& setup);
+// ...for one job part, which may be clamped differently from the rest of the
+// setup (v76). `jobPartId` 0 asks about the setup's own frame.
+[[nodiscard]] bool FrameIsSquare(const Setup& setup, uint64_t jobPartId);
+
+// How a given part is clamped in this setup: its placement's frame if it has
+// one, the setup's otherwise. The ONE place that question is answered.
+[[nodiscard]] glm::dquat FixtureFrame(const Setup& setup, uint64_t jobPartId);
 
 // Setup space -> model space: how the part is fixtured, then how far the
 // table is indexed. The ONE place the two compose, so nothing downstream has
 // to know there are two.
 [[nodiscard]] glm::dmat3 SetupToModel(const Setup& setup);
+// ...for one part. Two parts in a sheet can be clamped differently, so this
+// is the composition that actually applies to a body; the argument-less form
+// is it with `jobPartId` 0.
+[[nodiscard]] glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId);
 
 // The bodies as this setup sees them: `SetupToModel` undone, so the setup's
 // "up" is +Z again and the whole 2.5D pipeline — sectioning, face regions,
@@ -314,6 +325,13 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // selection still resolves.
 [[nodiscard]] std::vector<Body> BodiesInSetupFrame(const Setup& setup,
                                                    const std::vector<Body>& in);
+
+// The outward normal of a planar face, or false when the ref names nothing
+// resolvable or something curved. Engine-side because both doors need it --
+// the pick in the panel and `lay_face_up` over the RPC -- and a geometry
+// question answered twice is a geometry question answered two ways.
+[[nodiscard]] bool FaceNormalOf(const std::vector<Body>& bodies,
+                                const ElementRef& ref, glm::vec3& normal);
 
 // The FIXTURING frame that lays `normal` under the spindle — the quaternion
 // taking +Z to it. Any planar face has one; there is nothing to refuse.

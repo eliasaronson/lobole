@@ -146,9 +146,11 @@ in both dialects.
 > is how a part is CLAMPED, `rotationA` is what the MACHINE does, and a
 > placement is where on the bed — and in-plane is deliberate: anything out of
 > plane is what `frame` already says, and two ways to tilt a part is this
-> document's own lesson. A job whose parts need DIFFERENT fixturing is not
-> yet expressible; that is the per-part frame in
-> [job-document.md](job-document.md), which is not built.
+> document's own lesson. A job whose parts need DIFFERENT fixturing IS
+> expressible since v76: a placement can carry its OWN `frame`, and a part
+> without one is clamped the way the setup says. `Setup::frame` is unchanged
+> and is still the whole answer for a one-part job — which is every job this
+> document was written about ([job-document.md](job-document.md)).
 
 ### S4 — many setups, one part (~1 session)
 

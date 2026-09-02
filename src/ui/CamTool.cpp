@@ -254,18 +254,6 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
 // The picked face's plane, in MODEL space. Both orientation picks need it,
 // and neither wants the setup frame applied — the whole point is to work out
 // what the frame should become.
-bool PickedFaceNormal(const std::vector<Body>& bodies, const ElementRef& ref,
-                      glm::vec3& normal) {
-  glm::vec3 centre(0.0f), uAxis(0.0f);
-  for (const Body& body : bodies) {
-    if (body.createdBy != ref.featureId)
-      continue;
-    const std::optional<int> idx = body.elementMap.Resolve(ref.name);
-    return idx && body.shape.FacePlane(*idx, centre, normal, uAxis);
-  }
-  return false;
-}
-
 // Turning the part re-answers where zero is: the origin is a point in SETUP
 // space and the setup just moved. Leaving it stale made the panel report a Z
 // zero from the previous orientation — the one number that breaks tools,
@@ -313,6 +301,50 @@ void CamOrientationChanged(AppState& state, cam::Setup& setup) {
 
 } // namespace
 
+// Clamp ONE part this way -- or the whole setup, when there is only one part
+// to clamp.
+//
+// Fixturing is a claim about a part in a fixture (v76), so with several parts
+// in one stock it belongs to each of them. With one part it belongs to the
+// setup, which is where it has always lived and where every single-part job
+// still finds it: writing a per-part frame there instead would be a change of
+// meaning nobody asked for.
+//
+// Returns true when something actually moved.
+bool SetFixtureFrame(AppState& state, cam::Setup& setup, uint64_t jobPartId,
+                     const glm::dquat& want) {
+  // A part that HAS a placement is clamped THERE. That is also what
+  // `set_job_placement lay_face_up` does over the RPC, and the two doors
+  // agreeing is the point (clicking_and_scripting_agree): keying on the
+  // part COUNT instead made an agent and a user produce different documents
+  // from the same intent.
+  if (jobPartId != 0)
+    for (cam::Placement& p : setup.placements)
+      if (p.jobPartId == jobPartId) {
+        const glm::dquat had = p.frame ? *p.frame : setup.frame;
+        if (std::abs(glm::dot(want, had)) >= 1.0 - 1e-9)
+          return false;
+        p.frame = want;
+        return true;
+      }
+  // No placement. With one part there is nothing to distinguish it from, so
+  // the setup's frame IS the answer and stays where it has always been. With
+  // several, laying a face up is a statement about THIS part, so it gets a
+  // placement rather than quietly reorienting every other one.
+  if (state.job == nullptr || state.job->PartCount() <= 1 || jobPartId == 0) {
+    if (std::abs(glm::dot(want, setup.frame)) >= 1.0 - 1e-9)
+      return false;
+    setup.frame = want;
+    return true;
+  }
+  cam::Placement fresh;
+  fresh.id = state.job->AllocateId();
+  fresh.jobPartId = jobPartId;
+  fresh.frame = want;
+  setup.placements.push_back(fresh);
+  return std::abs(glm::dot(want, setup.frame)) < 1.0 - 1e-9;
+}
+
 void CamFacePicked(AppState& state, const SelectionItem& item) {
   const PickSlot slot = static_cast<PickSlot>(state.slotPick.slot);
   if (!item.element.IsSet() || !state.job) {
@@ -335,13 +367,11 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // flip that machines the back off a reference you have already set.
     bool reclamped = false;
     glm::vec3 normal(0.0f);
-    if (PickedFaceNormal(ui::JobBodies(state), item.element, normal)) {
-      const glm::dquat want =
-          cam::SolveFaceUp(glm::dvec3(normal), setup->frame);
-      if (std::abs(glm::dot(want, setup->frame)) < 1.0 - 1e-9) {
-        setup->frame = want;
-        reclamped = true;
-      }
+    const cam::Target picked = ui::TargetFor(state, item.element);
+    if (cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
+      const glm::dquat had = cam::FixtureFrame(*setup, picked.jobPartId);
+      reclamped = SetFixtureFrame(state, *setup, picked.jobPartId,
+                                  cam::SolveFaceUp(glm::dvec3(normal), had));
     }
     const cam::FaceRegion region = cam::PickedFaceRegion(
         cam::BodiesInSetupFrame(*setup, ui::JobBodies(state)), item.element);
@@ -399,14 +429,18 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     if (setup == nullptr)
       return;
     glm::vec3 normal(0.0f);
-    if (!PickedFaceNormal(ui::JobBodies(state), item.element, normal)) {
+    if (!cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }
-    setup->frame = cam::SolveFaceUp(glm::dvec3(normal), setup->frame);
+    const uint64_t part = ui::TargetFor(state, item.element).jobPartId;
+    const glm::dquat had = cam::FixtureFrame(*setup, part);
+    (void)SetFixtureFrame(state, *setup, part,
+                          cam::SolveFaceUp(glm::dvec3(normal), had));
     CamOrientationChanged(state, *setup);
-    LOG_INFO("CAM: laid a face up, frame ({:.4f} {:.4f} {:.4f} {:.4f})",
-             setup->frame.w, setup->frame.x, setup->frame.y, setup->frame.z);
+    const glm::dquat now = cam::FixtureFrame(*setup, part);
+    LOG_INFO("CAM: laid a face up, frame ({:.4f} {:.4f} {:.4f} {:.4f})", now.w,
+             now.x, now.y, now.z);
     return;
   }
 
@@ -418,7 +452,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     if (setup == nullptr)
       return;
     glm::vec3 normal(0.0f);
-    if (!PickedFaceNormal(ui::JobBodies(state), item.element, normal)) {
+    if (!cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }

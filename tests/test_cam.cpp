@@ -4338,3 +4338,111 @@ TEST_CASE("cam job: an unknown cutting order is refused", "[cam][job]") {
   CHECK(loaded.error().find("authored, tool or part") != std::string::npos);
   std::filesystem::remove(path);
 }
+
+TEST_CASE("cam job: two parts, clamped differently, one sheet", "[cam][job]") {
+  // The case the whole per-part frame exists for, and the one this plan
+  // argued hardest for: a speaker cabinet's baffle and a rail, each modelled
+  // in the orientation it has in the assembly, both cut from one board. They
+  // need two fixture frames and one stock, which a per-SETUP frame cannot
+  // say (docs/cam/job-document.md, docs/cam/setup-frame.md).
+  Document baffle, rail;
+  // 210 wide, 16 thick, 400 tall: standing upright, like a real baffle.
+  baffle.AddFeature(
+      std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
+  // 300 long, 60 tall, 18 thick: on its edge.
+  rail.AddFeature(
+      std::make_unique<BoxFeature>("Rail", glm::vec3(0, 0, 0), 300, 60, 18));
+
+  cam::JobDocument job;
+  const uint64_t pb = job.AddPart(1, "Baffle");
+  const uint64_t pr = job.AddPart(2, "Rail");
+  cam::Setup& setup = job.AddSetup("Sheet");
+
+  std::vector<Body> bodies;
+  for (const Body& b : baffle.GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = pb;
+  }
+  for (const Body& b : rail.GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = pr;
+  }
+
+  // Lay the baffle on its big face (normal along Y) and leave the rail as
+  // modelled. Only the baffle turns.
+  cam::Placement pl;
+  pl.id = job.AllocateId();
+  pl.jobPartId = pb;
+  pl.frame = cam::SolveFaceUp(glm::dvec3(0, 1, 0), glm::dquat(1, 0, 0, 0));
+  setup.placements.push_back(pl);
+
+  CHECK(!cam::FrameIsSquare(setup, pb)); // the baffle is clamped
+  CHECK(cam::FrameIsSquare(setup, pr));  // the rail is as modelled
+  CHECK(cam::FrameIsSquare(setup));      // and so is the setup itself
+
+  const std::vector<Body> framed = cam::BodiesInSetupFrame(setup, bodies);
+  REQUIRE(framed.size() == 2);
+  const auto extent = [](const Body& b) {
+    glm::vec3 lo, hi;
+    b.shape.GetBoundingBox(lo, hi);
+    return hi - lo;
+  };
+  // Laid flat, the baffle is 210 x 400 on the bed and 16 thick -- it is the
+  // Z extent that says it worked, since upright it was 400 tall.
+  const glm::vec3 eb = extent(framed[0]);
+  CHECK_THAT(eb.z, WithinAbs(16.0, 1e-3));
+  CHECK_THAT(std::max(eb.x, eb.y), WithinAbs(400.0, 1e-3));
+  // The rail did not move: 18 thick, as modelled.
+  const glm::vec3 er = extent(framed[1]);
+  CHECK_THAT(er.z, WithinAbs(18.0, 1e-3));
+
+  // One sheet covers both, and it is 16-to-18 thick rather than 400.
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK(hi.z - lo.z < 40.0);
+}
+
+TEST_CASE("cam job: a per-part frame survives a save and reload",
+          "[cam][job]") {
+  // v76. A frame that reloads as "as modelled" is a part cut in an
+  // orientation it was not clamped in -- the failure setup-frame.md's own
+  // golden exists for, one level down.
+  cam::JobDocument job;
+  const uint64_t part = job.AddPart(1, "Baffle");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  cam::Placement pl;
+  pl.id = job.AllocateId();
+  pl.jobPartId = part;
+  pl.frame = cam::SolveFaceUp(glm::dvec3(0, 1, 0), glm::dquat(1, 0, 0, 0));
+  setup.placements.push_back(pl);
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_part_frame.json";
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
+  REQUIRE(back.has_value());
+  const cam::Setup& read = (*back)->GetSetups()[0];
+  REQUIRE(read.placements.size() == 1);
+  REQUIRE(read.placements[0].frame.has_value());
+  CHECK(!cam::FrameIsSquare(read, part));
+  CHECK_THAT(read.placements[0].frame->w, WithinAbs(pl.frame->w, 1e-12));
+  CHECK_THAT(read.placements[0].frame->x, WithinAbs(pl.frame->x, 1e-12));
+
+  // And a placement WITHOUT one still means "as the setup says", rather than
+  // reloading as an identity that quietly un-clamps the part.
+  cam::JobDocument plain;
+  const uint64_t p2 = plain.AddPart(1, "Panel");
+  cam::Setup& s2 = plain.AddSetup("Sheet");
+  s2.frame = cam::SolveFaceUp(glm::dvec3(0, 1, 0), glm::dquat(1, 0, 0, 0));
+  cam::Placement bare;
+  bare.id = plain.AllocateId();
+  bare.jobPartId = p2;
+  s2.placements.push_back(bare);
+  REQUIRE(DocumentIO::SaveJob(plain, path.string()).has_value());
+  auto back2 = DocumentIO::LoadJob(path.string());
+  REQUIRE(back2.has_value());
+  const cam::Setup& read2 = (*back2)->GetSetups()[0];
+  CHECK_FALSE(read2.placements[0].frame.has_value());
+  CHECK(!cam::FrameIsSquare(read2, p2)); // the setup's frame still applies
+  std::filesystem::remove(path);
+}

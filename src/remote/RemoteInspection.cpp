@@ -71,9 +71,12 @@ Document* ResolvePartParam(ui::AppState& state, const json& part) {
 // The active part document, required by the part-tab-only inspection RPCs.
 Document& RequirePartDoc(Document* doc, const char* what) {
   if (doc == nullptr)
-    throw std::runtime_error(std::string(what) +
-                             ": no active part document (on an assembly tab, "
-                             "pass `part` or occurrence refs)");
+    throw std::runtime_error(
+        std::string(what) +
+        ": no active part document. On an assembly tab pass `part` or "
+        "occurrence refs; on a JOB tab pass `part` — list_job_parts names "
+        "the parts that job cuts, and a machining target is picked on one "
+        "of them");
   return *doc;
 }
 

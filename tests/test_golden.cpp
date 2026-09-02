@@ -224,6 +224,31 @@ void AssertJobParts(const cam::JobDocument& job, const nlohmann::json& expect) {
       got.push_back(s.operations[i].id);
     CHECK(got == want);
   }
+  // Which parts are clamped differently from the setup, and how (v76). A
+  // null entry is a placement with no frame of its own -- which must reload
+  // as ABSENT, not as an identity that quietly un-clamps the part.
+  if (expect.contains("job_placement_frames")) {
+    const auto& want = expect.at("job_placement_frames");
+    std::vector<const cam::Placement*> got;
+    for (const cam::Setup& s : job.GetSetups())
+      for (const cam::Placement& p : s.placements)
+        got.push_back(&p);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("placement " << i);
+      if (want[i].is_null()) {
+        CHECK_FALSE(got[i]->frame.has_value());
+        continue;
+      }
+      REQUIRE(got[i]->frame.has_value());
+      const glm::dquat& q = *got[i]->frame;
+      const double c[4] = {q.x, q.y, q.z, q.w};
+      for (int k = 0; k < 4; k++)
+        CHECK_THAT(c[k],
+                   Catch::Matchers::WithinAbs(
+                       want[i][static_cast<size_t>(k)].get<double>(), 1e-12));
+    }
+  }
   if (expect.contains("job_placements")) {
     const auto& want = expect.at("job_placements");
     std::vector<cam::Placement> got;

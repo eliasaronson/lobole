@@ -1,8 +1,8 @@
 # The job is not part of the part (J1–J9)
 
-> Status: **J1–J6 SHIPPED 2026-09-01/02** (formats v73, v74, v75) — see
-> [As built](#as-built), which also lists what did NOT ship, including the
-> per-part fixturing frame this plan argued hardest for. Supersedes the implicit
+> Status: **J1–J6 SHIPPED 2026-09-01/02** (formats v73–v76), including the
+> per-part fixturing frame this plan argued hardest for — see
+> [As built](#as-built), which also lists what did not ship. Supersedes the implicit
 > assumption in [plan.md](plan.md) that a `cam::Setup` belongs to the part it
 > cuts. Surveyed against FreeCAD CAM and the two slicers in
 > `~/Documents/CAD` on 2026-09-01 — see [What the survey
@@ -388,6 +388,7 @@ section and the notes in plan.md, stock-and-origin.md and setup-frame.md.
 | J4 | a laid-out fixed sheet anchored at the setup origin; `cam::Fit` in three states + overlap, `check_layout`, refusal at the post | — |
 | J5 | `OrderOutputBy{Authored, Tool, Part}`, applied in `GenerateAll` | v75 |
 | J6 | `machine_part` and the CAM button; the Parts panel section; a job tab that draws its parts laid out | — |
+| — | fixturing per PART: `Placement::frame`, `cam::FixtureFrame`, `set_job_placement lay_face_up` | v76 |
 
 ### What the gates caught, and it was most of the interesting bugs
 
@@ -426,15 +427,35 @@ first body that answers, so the second copy would be silently skipped —
 `cam::PlacementRefusal` says so instead. Wiring the generator to cut repeats
 is the obvious next piece.
 
-### Not built
+### Per-part fixturing, and the bug that had to be fixed first
 
-- **Per-part fixturing.** The plan argued hardest for moving `frame` from the
-  Setup to the Placement, and it is the one decision that did not ship.
-  `frame` is still per-setup, so a job whose parts need to be clamped
-  DIFFERENTLY — a speaker cabinet's baffle, sides and back, each modelled in
-  its assembly orientation and all cut from one sheet — still needs a setup
-  each. The argument stands and the seam is ready (a placement already
-  carries the in-plane half); it is a day's work and a version bump.
+`Placement::frame` is a `std::optional<glm::dquat>`: set means "this part is
+clamped THIS way", unset means "as the setup says". `Setup::frame` stays, and
+stays the whole answer for a one-part job. Optional rather than defaulted to
+identity, because a default would silently un-clamp a part the moment you gave
+it a position — the substitution this project refuses everywhere else.
+`cam::FixtureFrame(setup, jobPartId)` is the one place the question is
+answered, and `BodiesInSetupFrame` composes it per body.
+
+One rule for both doors, because they have to agree: **a part that HAS a
+placement is clamped there**; a part without one, in a job with only one part,
+is clamped by the setup. Keying on the part COUNT instead — the first version
+of this — made an agent and a user produce different documents from the same
+intent.
+
+It could not have worked before a bug J6 introduced was fixed. A job tab draws
+its parts LAID OUT, in setup space, and everything drawn over them still
+mapped back to model space first — undoing exactly the transform the viewport
+had just applied. With one frame per setup the two spaces coincided often
+enough to hide it; with a frame per part it would have been permanent. So
+`cam::FromSetupSpace` is gone, and anything drawn over a job is drawn in setup
+space, full stop.
+
+Worth recording: the first assertion written for that bug **passed**. "The
+backplot is inside the part's box" holds when the backplot has collapsed onto
+one axis. It has to be the box MATCHING — a profile runs around the part.
+
+### Not built
 - **`split_output`**, one file per group. The ordering is what makes it
   meaningful and the ordering is in.
 - **Dragging a placement in the viewport.** Numbers in the panel today; the
@@ -442,4 +463,8 @@ is the obvious next piece.
 - **Staleness per part in the GUI.** `list_job_parts` reports a missing
   source and the panel says so; a source that has merely MOVED ON is not
   reported yet, which is the `DrawingSourceVersion` half of the contract.
+- **`list_elements` on a job tab needs an explicit `part`.** It refuses and
+  names the fix now, where it used to talk only about assembly tabs — but
+  listing the job's own parts' elements is the answer a CAM agent actually
+  wants.
 - **Auto-arrange**, and everything else in [Not this](#not-this).

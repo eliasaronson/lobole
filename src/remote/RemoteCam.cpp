@@ -57,11 +57,14 @@ constexpr MethodDoc kCamMethods[] = {
      "setup"},
     {"set_job_placement",
      "Where a part sits in the stock {setup, part, pos?: [x,y], rot_z?, "
-     "enabled?}. In-plane only: anything out of plane is what the setup's "
-     "fixturing frame says, and two ways to tilt a part is a mistake this "
-     "project already paid for once (docs/cam/setup-frame.md). `enabled` "
-     "false leaves the part on the sheet and does not cut it.",
-     "setup, part, pos, rot_z, enabled"},
+     "enabled?, lay_face_up?: {feature_id, element}}. Position and spin are "
+     "IN-PLANE: anything out of plane is fixturing, and two ways to tilt a "
+     "part is a mistake this project already paid for once "
+     "(docs/cam/setup-frame.md). `lay_face_up` is the out-of-plane half and "
+     "clamps THIS part with that face at the spindle -- so one sheet can hold "
+     "a baffle on its face beside a rail on its edge. It says nothing about "
+     "the machine: no A word is posted.",
+     "setup, part, pos, rot_z, enabled, lay_face_up"},
     {"add_cam_setup",
      "Add a milling setup {name?, post?: mach3|linuxcnc, safe_z?}; returns "
      "its id and the safe_z derived for it. A setup arrives with one 6 mm "
@@ -516,12 +519,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       json places = json::array();
       for (const cam::Setup& setup : job->GetSetups())
         for (const cam::Placement& pl : setup.placements)
-          if (pl.jobPartId == part.id)
+          if (pl.jobPartId == part.id) {
+            const glm::dquat f = cam::FixtureFrame(setup, part.id);
             places.push_back(json{{"setup", setup.id},
                                   {"id", pl.id},
                                   {"pos", {pl.pos.x, pl.pos.y}},
                                   {"rot_z", pl.rotZdeg},
-                                  {"enabled", pl.enabled}});
+                                  {"enabled", pl.enabled},
+                                  {"frame", {f.x, f.y, f.z, f.w}},
+                                  {"clamped_per_part", pl.frame.has_value()}});
+          }
       pj["placements"] = std::move(places);
       out.push_back(std::move(pj));
     }
@@ -584,13 +591,32 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       place->rotZdeg = p.at("rot_z").get<double>();
     if (p.contains("enabled"))
       place->enabled = p.at("enabled").get<bool>();
+    if (p.contains("lay_face_up")) {
+      ElementRef ref;
+      ref.featureId = p.at("lay_face_up").value("feature_id", uint64_t{0});
+      ref.name = p.at("lay_face_up").value("element", std::string());
+      glm::vec3 normal(0.0f);
+      if (!cam::FaceNormalOf(ui::JobBodies(state), ref, normal))
+        throw std::runtime_error(
+            "lay_face_up needs a FLAT face on this part; list_elements shows "
+            "the stable names");
+      place->frame = cam::SolveFaceUp(glm::dvec3(normal),
+                                      cam::FixtureFrame(setup, partId));
+    }
     job->BumpVersion();
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     ui::RefreshCamToolpaths(state);
-    return json{
+    json out = {
         {"setup", setup.id},       {"part", partId},
         {"id", place->id},         {"pos", {place->pos.x, place->pos.y}},
         {"rot_z", place->rotZdeg}, {"enabled", place->enabled}};
+    // How this part ends up clamped, and whether that is its OWN answer or
+    // the setup's. Reported because `lay_face_up` is the one field here whose
+    // effect cannot be read back off the numbers you sent.
+    const glm::dquat f = cam::FixtureFrame(setup, partId);
+    out["frame"] = {f.x, f.y, f.z, f.w};
+    out["clamped_per_part"] = place->frame.has_value();
+    return out;
   }
 
   if (m == "add_cam_setup") {

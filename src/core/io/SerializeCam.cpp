@@ -216,6 +216,11 @@ json CamSetupToJson(const cam::Setup& setup) {
         pj["rot_z"] = p.rotZdeg;
       if (!p.enabled)
         pj["enabled"] = false;
+      // How THIS part is clamped, when it is not clamped the way the setup
+      // says (v76). Doubles for the same reason the setup's frame is:
+      // 0.7071067811865476 round-trips where 0.70710678f does not.
+      if (p.frame)
+        pj["frame"] = {p.frame->x, p.frame->y, p.frame->z, p.frame->w};
       j["placements"].push_back(std::move(pj));
     }
   }
@@ -357,6 +362,11 @@ cam::Setup CamSetupFromJson(const json& j) {
       p.pos = {pj["pos"][0].get<double>(), pj["pos"][1].get<double>()};
     p.rotZdeg = pj.value("rot_z", 0.0);
     p.enabled = pj.value("enabled", true);
+    if (pj.contains("frame") && pj["frame"].is_array() &&
+        pj["frame"].size() == 4)
+      p.frame = glm::dquat(
+          pj["frame"][3].get<double>(), pj["frame"][0].get<double>(),
+          pj["frame"][1].get<double>(), pj["frame"][2].get<double>());
     setup.placements.push_back(p);
   }
   for (const json& oj : j.value("operations", json::array())) {

@@ -862,6 +862,18 @@ bool FrameIsSquare(const Setup& setup) {
   return std::abs(std::abs(setup.frame.w) - 1.0) < 1e-9;
 }
 
+glm::dquat FixtureFrame(const Setup& setup, uint64_t jobPartId) {
+  if (jobPartId != 0)
+    for (const Placement& p : setup.placements)
+      if (p.jobPartId == jobPartId && p.frame)
+        return *p.frame;
+  return setup.frame;
+}
+
+bool FrameIsSquare(const Setup& setup, uint64_t jobPartId) {
+  return std::abs(std::abs(FixtureFrame(setup, jobPartId).w) - 1.0) < 1e-9;
+}
+
 namespace {
 
 // Nothing to do: the part is clamped as modelled and the table is square. The
@@ -873,11 +885,13 @@ bool SetupIsSquare(const Setup& setup) {
 
 } // namespace
 
-glm::dmat3 SetupToModel(const Setup& setup) {
+glm::dmat3 SetupToModel(const Setup& setup) { return SetupToModel(setup, 0); }
+
+glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId) {
   // Fixture first, then the index: the part is clamped to the table, and the
   // table then turns the whole fixture with it. Composing them the other way
   // would index the part about an axis it is not sitting on.
-  glm::dmat3 m = glm::mat3_cast(setup.frame);
+  glm::dmat3 m = glm::mat3_cast(FixtureFrame(setup, jobPartId));
   if (std::abs(setup.rotationA) > 1e-9) {
     const double a = glm::radians(setup.rotationA);
     const double c = std::cos(a), s = std::sin(a);
@@ -886,6 +900,18 @@ glm::dmat3 SetupToModel(const Setup& setup) {
                     glm::dvec3(0.0, -s, c));
   }
   return m;
+}
+
+bool FaceNormalOf(const std::vector<Body>& bodies, const ElementRef& ref,
+                  glm::vec3& normal) {
+  glm::vec3 centre(0.0f), uAxis(0.0f);
+  for (const Body& body : bodies) {
+    if (body.createdBy != ref.featureId)
+      continue;
+    const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+    return idx && body.shape.FacePlane(*idx, centre, normal, uAxis);
+  }
+  return false;
 }
 
 glm::dquat SolveFaceUp(const glm::dvec3& normal, const glm::dquat& current) {
@@ -1621,14 +1647,6 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
                                      const std::vector<Body>& in) {
   if (SetupIsSquare(setup) && setup.placements.empty())
     return in;
-  // Undo the setup's frame: the part turns under a spindle that always points
-  // down, which is what both a clamp and an indexed trunnion amount to. A
-  // rotation's inverse is its transpose.
-  const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup));
-  glm::mat4 frame(1.0f);
-  for (int col = 0; col < 3; col++)
-    for (int row = 0; row < 3; row++)
-      frame[col][row] = static_cast<float>(toSetup[col][row]);
 
   std::vector<Body> out;
   out.reserve(in.size());
@@ -1641,7 +1659,16 @@ std::vector<Body> BodiesInSetupFrame(const Setup& setup,
     const Placement* place = PlacementForBody(setup, b);
     if (place != nullptr && !place->enabled)
       continue; // on the sheet, not cut this run
-    glm::mat4 m = frame;
+    // Undo the fixture frame THIS part is clamped in -- which may not be the
+    // setup's (v76): a sheet can hold a baffle laid on its face beside a rail
+    // laid on its edge. The part turns under a spindle that always points
+    // down, which is what both a clamp and an indexed trunnion amount to, and
+    // a rotation's inverse is its transpose.
+    const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup, b.jobPartId));
+    glm::mat4 m(1.0f);
+    for (int col = 0; col < 3; col++)
+      for (int row = 0; row < 3; row++)
+        m[col][row] = static_cast<float>(toSetup[col][row]);
     if (place != nullptr) {
       const float c =
           static_cast<float>(std::cos(glm::radians(place->rotZdeg)));
