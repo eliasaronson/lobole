@@ -134,6 +134,9 @@ struct Verdict {
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material
+  // Corners the program relieved on purpose (R4): cells inside a relief's
+  // bite are not gouge, and the verdict says how many there were.
+  int reliefs = 0;
   int firstBadLine = 0;       // the G-code line of the first such rapid
   size_t cells = 0;
   // How much of the stock the program never passed over. A pocket-only job
@@ -206,9 +209,12 @@ struct Inspection {
   bool ok = false; // false = there was nothing to check (no stock, no bodies)
 };
 
-[[nodiscard]] Inspection Inspect(const std::string& gcode, const Setup& setup,
-                                 const std::vector<Body>& bodies,
-                                 double res = 0.25);
+// `reliefs`: where the toolpaths deliberately cut into the model (corner
+// relief, R4) -- cells within a relief's radius are not counted as gouge.
+[[nodiscard]] Inspection
+Inspect(const std::string& gcode, const Setup& setup,
+        const std::vector<Body>& bodies, double res = 0.25,
+        const std::vector<Toolpath::Relief>& reliefs = {});
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -220,9 +226,10 @@ struct Inspection {
 
 // The whole loop, for callers that just want the answer: post text in,
 // verdict out.
-[[nodiscard]] Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
-                                  const std::vector<Body>& bodies,
-                                  double res = 0.25);
+[[nodiscard]] Verdict
+VerifyGcode(const std::string& gcode, const Setup& setup,
+            const std::vector<Body>& bodies, double res = 0.25,
+            const std::vector<Toolpath::Relief>& reliefs = {});
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/gui.md). Empty only when there is nothing to say.

@@ -407,7 +407,8 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
 
 Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 double floorZ, const std::vector<uint8_t>* touched,
-                double leftoverTolerance) {
+                double leftoverTolerance = 0.0,
+                const std::vector<Toolpath::Relief>& reliefs = {}) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -459,7 +460,17 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
           wantLo = std::min(wantLo, w);
           wantHi = std::max(wantHi, w);
         }
-      if (wantLo - got > v.maxGouge) {
+      // Inside a corner relief's bite the cut below the model is the point
+      // (R4): a dogbone that read as scrap would teach the user to ignore
+      // the one line that matters.
+      bool relieved = false;
+      for (const Toolpath::Relief& r : reliefs)
+        if (glm::distance(r.at, glm::dvec2(machined.CellX(i),
+                                           machined.CellY(j))) <= r.radius) {
+          relieved = true;
+          break;
+        }
+      if (!relieved && wantLo - got > v.maxGouge) {
         v.maxGouge = wantLo - got;
         v.gougeAt = {machined.CellX(i), machined.CellY(j)};
       }
@@ -539,7 +550,8 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
 constexpr double kGrazeTolerance = 1e-3;
 
 Inspection Inspect(const std::string& gcode, const Setup& setup,
-                   const std::vector<Body>& rawBodies, double res) {
+                   const std::vector<Body>& rawBodies, double res,
+                   const std::vector<Toolpath::Relief>& reliefs) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -622,7 +634,9 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   }
 
   out.designed = SampleModel(bodies, machined, lo.z);
-  out.verdict = Compare(machined, out.designed, lo.z, &touched);
+  out.verdict = Compare(machined, out.designed, lo.z, &touched,
+                        /*leftoverTolerance=*/0.0, reliefs);
+  out.verdict.reliefs = static_cast<int>(reliefs.size());
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
   out.machined = std::move(machined);
@@ -673,8 +687,9 @@ std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp, double tolerance,
 }
 
 Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
-                    const std::vector<Body>& bodies, double res) {
-  return Inspect(gcode, setup, bodies, res).verdict;
+                    const std::vector<Body>& bodies, double res,
+                    const std::vector<Toolpath::Relief>& reliefs) {
+  return Inspect(gcode, setup, bodies, res, reliefs).verdict;
 }
 
 std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
@@ -689,6 +704,12 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
              ? "This program never touches the stock — it cuts nothing."
              : "Nothing was checked — this job has no stock to cut."});
     return out;
+  }
+  if (v.reliefs > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d inside corner%s relieved for a square fit.", v.reliefs,
+                  v.reliefs == 1 ? "" : "s");
+    out.push_back({VerdictLine::Level::Good, buf});
   }
   // Gouging first: it is the one that scraps the part, and the only one a
   // backplot genuinely cannot show you.

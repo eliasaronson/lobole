@@ -1827,6 +1827,13 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
 
 // Profile: offset the section outward (or inward) by the tool radius and
 // follow it, once per depth pass.
+// Defined with the other loop surgery below (R4); the profile and the pocket
+// both call it.
+std::vector<glm::dvec2> AddCornerRelief(const std::vector<glm::dvec2>& pts,
+                                        bool materialInside, double length,
+                                        CornerRelief style,
+                                        std::vector<glm::dvec2>* corners);
+
 void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
                      const std::vector<Body>& bodies, Toolpath& tp) {
   // Above this there can be no material, so it is the lowest height an entry
@@ -1948,14 +1955,43 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       // loop A stopped would start it somewhere on B that means nothing.
       if (resume.size() <= loop)
         resume.resize(loop + 1, 0.0);
-      resume[loop] = EmitLoop(
-          tp, setup, tool, FromClipper(path), z, setup.safeZ, stockTop,
-          op.tabCount, op.tabWidth, bottom + op.tabHeight,
-          pass == 0 ? op.topZ : passes[pass - 1], Entry::Ramp, resume[loop]);
+      std::vector<glm::dvec2> pts = FromClipper(path);
+      if (op.cornerRelief != CornerRelief::None && op.side != Side::On) {
+        std::vector<glm::dvec2> corners;
+        pts = AddCornerRelief(pts, op.side == Side::Outside, radius,
+                              op.cornerRelief, &corners);
+        // Told to the verifier once per corner, not once per pass.
+        if (pass == 0)
+          for (const glm::dvec2& c : corners)
+            tp.reliefs.push_back({c, radius * 2.0});
+      }
+      resume[loop] = EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop,
+                              op.tabCount, op.tabWidth, bottom + op.tabHeight,
+                              pass == 0 ? op.topZ : passes[pass - 1],
+                              Entry::Ramp, resume[loop]);
     }
   }
   if (tp.moves.empty() && tp.error.empty())
     tp.error = tooTight;
+}
+
+// The pocket's wall ring with its corner relief (R4), the inner rings as
+// they are: a bone on an inner ring would reach past the wall ring into the
+// wall. The material is OUTSIDE a pocket's ring. Told to the verifier once,
+// on the first depth pass.
+std::vector<glm::dvec2> WallRelief(const Operation& op, const Tool& tool,
+                                   const std::vector<glm::dvec2>& ring,
+                                   bool wallRing, Toolpath& tp) {
+  if (!wallRing || op.cornerRelief == CornerRelief::None)
+    return ring;
+  const double radius = tool.diameter * 0.5;
+  std::vector<glm::dvec2> corners;
+  std::vector<glm::dvec2> out = AddCornerRelief(
+      ring, /*materialInside=*/false, radius, op.cornerRelief, &corners);
+  if (tp.reliefs.empty())
+    for (const glm::dvec2& c : corners)
+      tp.reliefs.push_back({c, radius * 2.0});
+  return out;
 }
 
 // Pocket: clear the voids inside the part's outline. Concentric offsets
@@ -2053,8 +2089,10 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       for (auto it = rings.rbegin(); it != rings.rend(); ++it)
         for (Clipper2Lib::Path64& path : *it) {
           Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitRing(tp, setup, tool, FromClipper(path), z, stockTop, step,
-                   /*entryZ=*/z);
+          EmitRing(tp, setup, tool,
+                   WallRelief(op, tool, FromClipper(path),
+                              &*it == &rings.front(), tp),
+                   z, stockTop, step, /*entryZ=*/z);
         }
       Emit(tp, Move::Kind::Rapid,
            {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
@@ -2062,8 +2100,10 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       for (Clipper2Lib::Paths64& paths : rings)
         for (Clipper2Lib::Path64& path : paths) {
           Orient(path, op.climb, /*insideMaterial=*/true);
-          EmitRing(tp, setup, tool, FromClipper(path), z, stockTop, step,
-                   entryZ);
+          EmitRing(tp, setup, tool,
+                   WallRelief(op, tool, FromClipper(path),
+                              &paths == &rings.front(), tp),
+                   z, stockTop, step, entryZ);
         }
       Emit(tp, Move::Kind::Rapid,
            {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
@@ -2253,6 +2293,72 @@ bool BoreRadius(const Body& body, int idx, double& radius) {
     return radius > 0.0;
   }
   return false;
+}
+
+// Corner relief (R4). `pts` is a TOOL-CENTRE loop -- the wall pass, one
+// radius off the material -- and `materialInside` says which side of it the
+// part is on (an outside profile: inside the loop; a pocket or an inside
+// profile: outside it). A sharp corner of that loop is a corner of the
+// material the round cutter cannot reach: on an outside profile it shows as
+// a REFLEX vertex (the part's inner corner), on a pocket as a CONVEX one
+// (the pocket's corner), and in both the material's corner lies away from the
+// corner's own small wedge -- along `u - v`, the incoming direction minus the
+// outgoing. Out that way by `length` and back is the dogbone; along the
+// longer of the two walls and back is the T-bone. Corners gentler than 30
+// degrees are left alone: the arcs an offset puts on convex corners are many
+// small kinks, and a relief on each would be a serrated wall.
+std::vector<glm::dvec2> AddCornerRelief(const std::vector<glm::dvec2>& pts,
+                                        bool materialInside, double length,
+                                        CornerRelief style,
+                                        std::vector<glm::dvec2>* corners) {
+  const size_t n = pts.size();
+  if (n < 3 || style == CornerRelief::None || length <= 1e-9)
+    return pts;
+  double area2 = 0.0;
+  for (size_t i = 0; i < n; i++) {
+    const glm::dvec2& a = pts[i];
+    const glm::dvec2& b = pts[(i + 1) % n];
+    area2 += a.x * b.y - b.x * a.y;
+  }
+  const bool ccw = area2 > 0.0;
+  std::vector<glm::dvec2> out;
+  out.reserve(n + 12);
+  constexpr double kMinTurnDeg = 30.0;
+  for (size_t i = 0; i < n; i++) {
+    const glm::dvec2& prev = pts[(i + n - 1) % n];
+    const glm::dvec2& p = pts[i];
+    const glm::dvec2& next = pts[(i + 1) % n];
+    out.push_back(p);
+    const glm::dvec2 din = p - prev, dout = next - p;
+    const double lin = glm::length(din), lout = glm::length(dout);
+    if (lin < 1e-9 || lout < 1e-9)
+      continue;
+    const glm::dvec2 u = din / lin, v = dout / lout;
+    const double cross = u.x * v.y - u.y * v.x;
+    const double turn =
+        glm::degrees(std::atan2(std::abs(cross), glm::dot(u, v)));
+    if (turn < kMinTurnDeg)
+      continue;
+    const bool leftTurn = cross > 0.0;
+    const bool convex = leftTurn == ccw; // w.r.t. the loop's interior
+    const bool reachable = materialInside ? convex : !convex;
+    if (reachable)
+      continue; // the cutter gets into this corner already
+    glm::dvec2 dir;
+    if (style == CornerRelief::Dogbone) {
+      dir = u - v;
+      if (glm::length(dir) < 1e-9)
+        continue; // a 180-degree turn has no bisector to speak of
+      dir = glm::normalize(dir);
+    } else {
+      dir = lin >= lout ? u : -v;
+    }
+    out.push_back(p + dir * length);
+    out.push_back(p);
+    if (corners != nullptr)
+      corners->push_back(p);
+  }
+  return out;
 }
 
 // Drill: one plunge per target hole, at the hole's axis.

@@ -1213,6 +1213,31 @@ void DrawCamPanel(AppState& state) {
         touched(op.id);
       }
       ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+      if (op.type == cam::OpType::Profile || op.type == cam::OpType::Pocket) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90.0f);
+        const char* reliefLabel =
+            op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
+            : op.cornerRelief == cam::CornerRelief::TBone ? "T-bone"
+                                                          : "corners";
+        if (ImGui::BeginCombo("###cam_relief", reliefLabel)) {
+          const std::pair<const char*, cam::CornerRelief> choices[] = {
+              {"leave the radius", cam::CornerRelief::None},
+              {"dogbone", cam::CornerRelief::Dogbone},
+              {"T-bone", cam::CornerRelief::TBone}};
+          for (const auto& [label, value] : choices)
+            if (ImGui::Selectable(label, op.cornerRelief == value)) {
+              op.cornerRelief = value;
+              touched(op.id);
+            }
+          ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Inside corners: a round cutter leaves a radius. "
+                              "A dogbone clears it along the bisector, a "
+                              "T-bone along the longer wall, each by the "
+                              "tool's radius -- for a joint that takes a "
+                              "square tenon.");
+      }
       if (op.type == cam::OpType::Drill) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(55.0f);

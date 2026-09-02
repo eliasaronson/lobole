@@ -438,6 +438,9 @@ json CamSetupToJson(const cam::Setup& setup) {
     // every one before this — re-saves byte-identically.
     if (op.useOutline)
       oj["use_outline"] = true;
+    if (op.cornerRelief != cam::CornerRelief::None) // v80; omitted when none
+      oj["corner_relief"] =
+          op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone" : "tbone";
     if (op.tabCount != 0) {
       oj["tabs"] = {{"count", op.tabCount},
                     {"width", op.tabWidth},
@@ -578,6 +581,18 @@ cam::Setup CamSetupFromJson(const json& j) {
         oj.value("side", std::string(clears ? "inside" : "outside")));
     op.climb = oj.value("climb", true);
     op.useOutline = oj.value("use_outline", false);
+    if (oj.contains("corner_relief")) {
+      const std::string r = oj.at("corner_relief").get<std::string>();
+      if (r == "dogbone")
+        op.cornerRelief = cam::CornerRelief::Dogbone;
+      else if (r == "tbone")
+        op.cornerRelief = cam::CornerRelief::TBone;
+      else if (r == "none")
+        op.cornerRelief = cam::CornerRelief::None;
+      else
+        throw std::runtime_error("unknown corner_relief '" + r +
+                                 "'; this build accepts none, dogbone, tbone");
+    }
     if (oj.contains("tabs")) {
       op.tabCount = oj["tabs"].value("count", 0);
       op.tabWidth = oj["tabs"].value("width", 6.0);

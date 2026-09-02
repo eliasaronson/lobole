@@ -20,6 +20,7 @@
 
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <set>
 #include <sstream>
 
 #include <algorithm>
@@ -4989,4 +4990,168 @@ TEST_CASE("cam drill: a deep hole pecks, retracting fully each time",
   const auto j = DocumentIO::CamSetupToJson(setup);
   CHECK_THAT(DocumentIO::CamSetupFromJson(j).operations[0].peck,
              WithinAbs(6.0, 1e-9));
+}
+
+// ---------------------------------------------------------------------------
+// R4: corner relief.
+
+TEST_CASE("cam relief: a dogbone clears a pocket's corners, and the verifier "
+          "knows it is not a gouge",
+          "[cam][relief]") {
+  // A 60 x 40 x 20 block with a 30 x 20 pocket 8 deep in its top.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               60.0, 40.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<BoxFeature>("Void", glm::vec3(15, 10, 12),
+                                               30.0, 20.0, 20.0));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocketed", block, voidId,
+                                                   BooleanOp::Subtract));
+  ElementRef floor;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+          std::abs(o.z - 12.0f) < 1e-4f)
+        floor = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(floor.IsSet());
+
+  const auto job = [&](cam::CornerRelief relief) {
+    cam::Setup setup = BasicSetup(); // one 6 mm flat
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::Pocket;
+    op.side = cam::Side::Inside;
+    op.topZ = 21.0;
+    op.bottomZ = 12.0;
+    op.stepdown = 4.0;
+    op.cornerRelief = relief;
+    op.targets = {cam::Target{0, floor}};
+    setup.operations.push_back(op);
+    return setup;
+  };
+
+  cam::Setup plain = job(cam::CornerRelief::None);
+  auto plainPaths = cam::GenerateAll(plain, doc->GetBodies());
+  REQUIRE(plainPaths.size() == 1);
+  REQUIRE(plainPaths[0].error.empty());
+  CHECK(plainPaths[0].reliefs.empty());
+  std::string plainG, error;
+  REQUIRE(cam::PostProcess("mach3", plain, plainPaths, {}, plainG, &error));
+  // The material standing at the pocket's corner: a round cutter following
+  // a square ring leaves it. Read off the machined height map at a cell
+  // just inside the corner -- the verifier's leftover count would not say,
+  // because leftover is measured only where the tool went, and a corner
+  // radius is exactly where it did not.
+  const auto heightAt = [](const cam::Inspection& insp, double x, double y) {
+    const int i = static_cast<int>((x - insp.machined.x0) / insp.machined.res);
+    const int j = static_cast<int>((y - insp.machined.y0) / insp.machined.res);
+    return static_cast<double>(insp.machined.At(i, j));
+  };
+  const cam::Inspection before =
+      cam::Inspect(plainG, plain, doc->GetBodies(), 0.25);
+  REQUIRE(before.ok);
+  INFO("before: corner at " << heightAt(before, 15.4, 10.4));
+  CHECK(heightAt(before, 15.4, 10.4) > 19.0); // uncut: the block's top
+
+  cam::Setup boned = job(cam::CornerRelief::Dogbone);
+  auto bonedPaths = cam::GenerateAll(boned, doc->GetBodies());
+  REQUIRE(bonedPaths.size() == 1);
+  REQUIRE(bonedPaths[0].error.empty());
+  CHECK(bonedPaths[0].reliefs.size() == 4); // one per corner, told once
+  // The bites go OUT of the pocket: some cut lies beyond the wall ring, past
+  // the pocket's corner by up to the tool's radius.
+  double farthest = 0.0;
+  for (const cam::Move& m : bonedPaths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut)
+      farthest = std::max(
+          farthest, std::max(std::abs(m.to.x - 30.0) - 12.0,
+                             std::abs(m.to.y - 20.0) - 7.0)); // ring half-sizes
+  CHECK(farthest > 1.0);
+  CHECK(farthest < 3.0 + 1e-6);
+  std::string bonedG;
+  REQUIRE(cam::PostProcess("mach3", boned, bonedPaths, {}, bonedG, &error));
+  // Without being told, the verifier calls the bites a gouge -- they ARE
+  // cuts into the model. Told, it does not, and it says how many corners.
+  const cam::Verdict naive =
+      cam::VerifyGcode(bonedG, boned, doc->GetBodies(), 0.25);
+  CHECK(naive.maxGouge > 1.0);
+  const cam::Inspection after = cam::Inspect(bonedG, boned, doc->GetBodies(),
+                                             0.25, bonedPaths[0].reliefs);
+  const cam::Verdict& told = after.verdict;
+  INFO("told: gouge " << told.maxGouge << ", corner at "
+                      << heightAt(after, 15.4, 10.4));
+  CHECK(told.maxGouge < 0.4);
+  CHECK(told.reliefs == 4);
+  CHECK(heightAt(after, 15.4, 10.4) < 12.5); // the corner is cleared
+  bool said = false;
+  for (const cam::VerdictLine& line : cam::Explain(told, 0.4, 0.0, false))
+    said = said ||
+           line.text.find("4 inside corners relieved") != std::string::npos;
+  CHECK(said);
+
+  // A T-bone runs along a wall instead of the bisector: its bites lie on the
+  // ring's edge lines, so they reach past the corner in ONE axis only.
+  cam::Setup tboned = job(cam::CornerRelief::TBone);
+  auto tPaths = cam::GenerateAll(tboned, doc->GetBodies());
+  REQUIRE(tPaths.size() == 1);
+  REQUIRE(tPaths[0].error.empty());
+  CHECK(tPaths[0].reliefs.size() == 4);
+  // Counted as distinct places, not per depth pass.
+  std::set<std::pair<long, long>> bites;
+  for (const cam::Move& m : tPaths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut &&
+        (std::abs(m.to.x - 30.0) > 12.0 + 1e-6 ||
+         std::abs(m.to.y - 20.0) > 7.0 + 1e-6)) {
+      const bool onX = std::abs(std::abs(m.to.y - 20.0) - 7.0) < 1e-6;
+      const bool onY = std::abs(std::abs(m.to.x - 30.0) - 12.0) < 1e-6;
+      CHECK((onX || onY)); // every bite lies on a wall line
+      bites.emplace(std::lround(m.to.x * 1000.0), std::lround(m.to.y * 1000.0));
+    }
+  CHECK(bites.size() == 4);
+
+  // The value survives a save, and an unknown one is refused.
+  const auto j = DocumentIO::CamSetupToJson(boned);
+  CHECK(DocumentIO::CamSetupFromJson(j).operations[0].cornerRelief ==
+        cam::CornerRelief::Dogbone);
+  nlohmann::json bad = j;
+  bad["operations"][0]["corner_relief"] = "vbone";
+  CHECK_THROWS_WITH(DocumentIO::CamSetupFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("tbone"));
+}
+
+TEST_CASE("cam relief: an outside profile relieves the part's inner corner "
+          "and nothing else",
+          "[cam][relief]") {
+  // An L: a 60 x 40 block with a 30 x 20 bite out of one corner.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               60.0, 40.0, 12.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<BoxFeature>("Bite", glm::vec3(30, 20, -1),
+                                               40.0, 30.0, 20.0));
+  const uint64_t bite = doc->GetFeature(1)->GetId();
+  doc->AddFeature(
+      std::make_unique<BooleanFeature>("L", block, bite, BooleanOp::Subtract));
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 13.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  op.cornerRelief = cam::CornerRelief::Dogbone;
+  setup.operations.push_back(op);
+  auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  // The L has one inner corner, at (30, 20); the outer corners are the
+  // cutter's to make sharp and get no bone.
+  REQUIRE(paths[0].reliefs.size() == 1);
+  CHECK_THAT(glm::distance(paths[0].reliefs[0].at, glm::dvec2(30.0, 20.0)),
+             WithinAbs(3.0 * std::sqrt(2.0),
+                       0.05)); // the path corner, r off each wall
 }

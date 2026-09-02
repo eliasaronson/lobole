@@ -156,6 +156,16 @@ enum class OpType {
 // (inside); for a profile it is the difference between a part and a hole.
 enum class Side { Outside, Inside, On };
 
+// Corner relief on profiles and pockets (docs/cam/router-round.md, R4). A
+// round cutter leaves a radius in every inside corner of the material; a
+// joint that has to take a square tenon needs the corner cleared. Dogbone:
+// out along the corner's bisector and back, the tool's RADIUS -- FreeCAD's
+// nominal, and the only length that clears the corner (Kiri:Moto's fifth of
+// a diameter does not). T-bone: the same length along the longer of the two
+// walls, where a joint hides it. Off by default: a relief is a decision about
+// the joint, not a fact about the part.
+enum class CornerRelief { None, Dogbone, TBone };
+
 struct Operation {
   uint64_t id = 0;
   std::string name;
@@ -173,6 +183,10 @@ struct Operation {
   double bottomZ = -1.0;
   double stepdown = 0.0;
   double stockToLeave = 0.0;
+  // Profile and pocket only (R4): what to do at the inside corners of the
+  // material. Applied to the wall pass -- the loop one tool radius off the
+  // wall -- at every sharp corner where the cutter cannot reach.
+  CornerRelief cornerRelief = CornerRelief::None;
   // Drill only (docs/cam/router-round.md, R3): retract fully between pecks
   // of this depth so the chips clear -- the G83 reading, as plain moves,
   // since neither GRBL nor our post speaks canned cycles. 0 = one plunge.
@@ -410,6 +424,15 @@ struct Toolpath {
   // type says — adaptive falling back to concentric clearing. Silence about
   // that is a job whose feeds were chosen for the strategy it did not use.
   std::string strategy;
+  // Where the path deliberately cut INTO the model: a corner relief's bite,
+  // as the path corner it was taken from and the radius the bite fills. The
+  // verifier is told, so a dogbone reads as "corner relieved" and not as the
+  // gouge it would otherwise be (R4).
+  struct Relief {
+    glm::dvec2 at{0.0};
+    double radius = 0.0;
+  };
+  std::vector<Relief> reliefs;
 
   [[nodiscard]] bool Empty() const { return moves.empty(); }
   // Total distance travelled while cutting, in mm — the cheap sanity check a

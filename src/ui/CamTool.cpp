@@ -1075,8 +1075,11 @@ void RunCamVerification(AppState& state) {
   // 0.4 mm cells: fine enough to catch a gouge that matters on a mill, coarse
   // enough that the check runs while the user is still looking at the button.
   constexpr double kRes = 0.4;
+  std::vector<cam::Toolpath::Relief> reliefs;
+  for (const cam::Toolpath& tp : state.camToolpaths)
+    reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
   const cam::Inspection insp =
-      cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes);
+      cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes, reliefs);
   if (!insp.ok)
     return;
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and

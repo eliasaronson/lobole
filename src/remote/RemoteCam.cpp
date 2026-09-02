@@ -143,7 +143,10 @@ constexpr MethodDoc kCamMethods[] = {
      "profile|pocket|face|drill|adaptive|edge_round, "
      "tool?, top_z?, bottom_z?, stepdown?, peck? (drill: retract between "
      "pecks of this depth; derived as the tool's diameter once a hole is "
-     "deeper than three), side?: outside|inside|on, climb?, "
+     "deeper than three), corner_relief?: none|dogbone|tbone (profile and "
+     "pocket: clear the inside corners a round cutter leaves, by the tool's "
+     "radius -- along the bisector, or along the longer wall), side?: "
+     "outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element, part?}]}; `part` is the job part the element is "
      "on (list_elements reports it as `job_part`), and is REQUIRED when the "
@@ -355,6 +358,18 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.stepdown = p.at("stepdown").get<double>();
   if (p.contains("peck"))
     op.peck = p.at("peck").get<double>();
+  if (p.contains("corner_relief")) {
+    const std::string r = p.at("corner_relief").get<std::string>();
+    if (r == "none")
+      op.cornerRelief = cam::CornerRelief::None;
+    else if (r == "dogbone")
+      op.cornerRelief = cam::CornerRelief::Dogbone;
+    else if (r == "tbone")
+      op.cornerRelief = cam::CornerRelief::TBone;
+    else
+      throw std::runtime_error("unknown corner_relief '" + r +
+                               "'; accepted: none, dogbone, tbone");
+  }
   if (p.contains("stock_to_leave"))
     op.stockToLeave = p.at("stock_to_leave").get<double>();
   if (p.contains("side"))
@@ -419,6 +434,10 @@ json OpJson(const cam::Operation& op) {
             {"bottom_z", op.bottomZ},
             {"stepdown", op.stepdown},
             {"peck", op.peck},
+            {"corner_relief",
+             op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
+             : op.cornerRelief == cam::CornerRelief::TBone ? "tbone"
+                                                           : "none"},
             // Both settable since they landed and neither reported, so a
             // script could state a boundary and an allowance it could not
             // then read back — and a job built over the RPC could not be
@@ -1058,13 +1077,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     const std::vector<cam::Toolpath> paths =
         cam::GenerateAll(setup, ui::JobBodies(state));
+    std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
+    for (const cam::Toolpath& tp : paths)
+      reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
     std::string gcode, error;
     if (!cam::PostProcess(setup.machine.post, setup, paths, PostOptsOf(setup),
                           gcode, &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
     const cam::Verdict v =
-        cam::VerifyGcode(gcode, setup, ui::JobBodies(state), res);
+        cam::VerifyGcode(gcode, setup, ui::JobBodies(state), res, reliefs);
     const double tol = res * 1.5; // one cell of quantisation, plus slack
     // The same sentences the panel shows. A verdict that reads as a row of
     // numbers over the RPC and as English in the GUI is two verdicts, and the
