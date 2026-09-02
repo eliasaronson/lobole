@@ -271,6 +271,7 @@ set(core_sources
     src/core/drawing/DrawingProjection.cpp
     src/core/drawing/DrawingDocument.cpp
     src/core/cam/JobDocument.cpp
+    src/core/cam/CamMachine.cpp
     src/core/drawing/DrawingExport.cpp
     src/core/drawing/DrawingDimension.cpp
     src/core/drawing/DrawingValidate.cpp
@@ -616,6 +617,7 @@ set(app_sources
     src/ui/AppActions.cpp
     src/ui/AssemblyActions.cpp
     src/ui/JobActions.cpp
+    src/ui/MachineActions.cpp
     src/ui/SimulationActions.cpp
     src/ui/FeatureEditor.cpp
     src/ui/ExprInput.cpp

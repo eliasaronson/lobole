@@ -3,6 +3,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/cam/CamAdaptive.h"
+#include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
@@ -16,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <sstream>
 
 #include <algorithm>
@@ -27,6 +29,7 @@
 #include <iterator>
 #include <map>
 #include <numbers>
+#include <unistd.h>
 
 // CAM's testable half (docs/cam/plan.md): bodies in, moves out, then G-code.
 // Every number here is one a machinist could check by hand, because the
@@ -303,7 +306,7 @@ TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
 
   cam::JobDocument job;
   cam::Setup& setup = job.AddSetup("Side A");
-  setup.post = "linuxcnc";
+  setup.machine.post = "linuxcnc";
   setup.safeZ = 12.5;
   setup.tools[0].diameter = 3.175;
   setup.tools[0].feedCut = 450.0;
@@ -328,7 +331,7 @@ TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
   const std::vector<cam::Setup>& setups = (*back)->GetSetups();
   REQUIRE(setups.size() == 1);
   CHECK(setups[0].name == "Side A");
-  CHECK(setups[0].post == "linuxcnc");
+  CHECK(setups[0].machine.post == "linuxcnc");
   CHECK_THAT(setups[0].safeZ, WithinAbs(12.5, 1e-9));
   REQUIRE(setups[0].tools.size() == 1);
   CHECK_THAT(setups[0].tools[0].diameter, WithinAbs(3.175, 1e-9));
@@ -1603,7 +1606,7 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   cam::Setup indexed = BasicSetup();
   // The machine has the axis, and is indexed on it. Both halves are needed:
   // a rotated FIXTURE never posts an A word (S3).
-  indexed.hasRotaryAxis = true;
+  indexed.machine.hasRotaryAxis = true;
   indexed.rotationA = 90.0;
   indexed.operations.push_back(op);
   const cam::Toolpath b = cam::GenerateAll(indexed, turned->GetBodies())[0];
@@ -1682,7 +1685,7 @@ TEST_CASE("cam: an indexed job is verified in its own frame", "[cam]") {
   cam::Setup indexed = BasicSetup();
   // The machine has the axis, and is indexed on it. Both halves are needed:
   // a rotated FIXTURE never posts an A word (S3).
-  indexed.hasRotaryAxis = true;
+  indexed.machine.hasRotaryAxis = true;
   indexed.rotationA = 90.0;
   // Derived, not typed: the depths must come from the frame the cut happens
   // in, which is the other half of the same bug.
@@ -1759,7 +1762,7 @@ TEST_CASE("cam: a fixture frame cuts what a rotary index would", "[cam]") {
   auto turned = TurnedBlockDoc();
 
   cam::Setup indexed = BasicSetup();
-  indexed.hasRotaryAxis = true;
+  indexed.machine.hasRotaryAxis = true;
   indexed.rotationA = 90.0;
   indexed.operations.push_back(ProfileOp());
   const cam::Toolpath a = cam::GenerateAll(indexed, turned->GetBodies())[0];
@@ -1814,7 +1817,7 @@ TEST_CASE("cam: clamping a part flat posts no rotary move", "[cam]") {
   // And a machine that HAS the axis but is not indexed on it says nothing
   // either: the flag alone is not a reason to move a table.
   cam::Setup rotary = clamped;
-  rotary.hasRotaryAxis = true;
+  rotary.machine.hasRotaryAxis = true;
   const std::vector<cam::Toolpath> rp =
       cam::GenerateAll(rotary, turned->GetBodies());
   for (const cam::Move& m : rp[0].moves)
@@ -3001,7 +3004,8 @@ TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
   REQUIRE(setups.size() == 1);
   REQUIRE(setups[0].operations.size() == 1);
   CHECK(setups[0].operations[0].type == cam::OpType::Adaptive);
-  CHECK(setups[0].fitArcs); // v60, defaulting on for a document without it
+  CHECK(setups[0]
+            .machine.fitArcs); // v60, defaulting on for a document without it
   std::filesystem::remove(path);
 }
 
@@ -3028,7 +3032,7 @@ TEST_CASE("cam: curves post as arcs, and the cut does not change", "[cam]") {
   lines.fitArcs = false;
   // The choice lives on the setup and survives a save, because a controller
   // that mishandles arcs mishandles them every session.
-  CHECK(setup.fitArcs);
+  CHECK(setup.machine.fitArcs);
   std::string withArcs, withLines, error;
   REQUIRE(cam::PostProcess("mach3", setup, paths, arcs, withArcs, &error));
   REQUIRE(cam::PostProcess("mach3", setup, paths, lines, withLines, &error));
@@ -3772,7 +3776,8 @@ TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
     const std::vector<cam::Toolpath> paths =
         cam::GenerateAll(setup, doc->GetBodies());
     std::string gcode, error;
-    if (!cam::PostProcess(setup.post, setup, paths, {}, gcode, &error)) {
+    if (!cam::PostProcess(setup.machine.post, setup, paths, {}, gcode,
+                          &error)) {
       std::printf("setup \"%s\": post failed: %s\n", setup.name.c_str(),
                   error.c_str());
       continue;
@@ -4500,4 +4505,155 @@ TEST_CASE("cam job: the same element name on two parts is refused, not guessed",
   const std::vector<uint64_t> one = owners(bodies, only);
   REQUIRE(one.size() == 1);
   CHECK(one[0] == 2);
+}
+
+// ---------------------------------------------------------------------------
+// The machine profile (docs/cam/job-document.md, round two; format v77).
+
+TEST_CASE("cam machine: JSON round-trips, and an unknown post is refused",
+          "[cam][machine]") {
+  cam::Machine m;
+  m.name = "Shop router";
+  m.travelMin = {0.0, 0.0, -100.0};
+  m.travelMax = {1200.0, 800.0, 0.0};
+  m.post = "mach3";
+  m.fitArcs = false;
+  m.hasRotaryAxis = true;
+  m.rapidFeed = 3000.0;
+  cam::Tool t;
+  t.number = 2;
+  t.diameter = 3.0;
+  m.library.push_back(t);
+  const auto j = DocumentIO::MachineToJson(m);
+  const cam::Machine back = DocumentIO::MachineFromJson(j);
+  CHECK(back == m);
+  // Defaults are omitted, so the job's own default machine is a small block.
+  const auto small = DocumentIO::MachineToJson(cam::Machine{});
+  CHECK(!small.contains("travel"));
+  CHECK(!small.contains("fit_arcs"));
+  CHECK(!small.contains("tools"));
+  CHECK(DocumentIO::MachineFromJson(small) == cam::Machine{});
+  // Refused, naming what is accepted: a silent mach3 posts for the wrong
+  // controller with nothing to say so.
+  nlohmann::json bad = j;
+  bad["post"] = "haas";
+  CHECK_THROWS_WITH(DocumentIO::MachineFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("haas") &&
+                        Catch::Matchers::ContainsSubstring("mach3"));
+}
+
+TEST_CASE("cam machine: a setup embeds it, and a v76 file still reads",
+          "[cam][machine][job]") {
+  cam::Setup setup;
+  setup.name = "Sheet";
+  setup.machine.name = "Shop router";
+  setup.machine.post = "mach3";
+  setup.machine.hasRotaryAxis = true;
+  setup.machine.travelMax = {600.0, 400.0, 80.0};
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  REQUIRE(j.contains("machine"));
+  CHECK(!j.contains("post"));            // the three old keys are gone
+  CHECK(!j.contains("has_rotary_axis")); // from the setup itself
+  const cam::Setup back = DocumentIO::CamSetupFromJson(j);
+  CHECK(back.machine == setup.machine);
+
+  // The legacy shape: post/has_rotary_axis/fit_arcs as the setup's own keys,
+  // read into an UNNAMED machine so the job cuts exactly as it did.
+  const nlohmann::json legacy = {{"id", 3},
+                                 {"name", "Old"},
+                                 {"post", "mach3"},
+                                 {"rotation_a", 90.0},
+                                 {"fit_arcs", false}};
+  const cam::Setup old = DocumentIO::CamSetupFromJson(legacy);
+  CHECK(old.machine.name.empty());
+  CHECK(old.machine.post == "mach3");
+  CHECK(!old.machine.fitArcs);
+  CHECK(old.machine.hasRotaryAxis); // implied by a rotary index, as before
+  nlohmann::json badLegacy = legacy;
+  badLegacy["post"] = "haas";
+  CHECK_THROWS_WITH(DocumentIO::CamSetupFromJson(badLegacy),
+                    Catch::Matchers::ContainsSubstring("haas"));
+}
+
+TEST_CASE("cam machine: the store saves, lists, refuses and deletes",
+          "[cam][machine]") {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() /
+                       ("designer-machines-" + std::to_string(::getpid()));
+  fs::remove_all(dir);
+  // No store yet is not an error: nothing has been saved.
+  std::string problems = "x";
+  CHECK(DocumentIO::LoadMachines(dir.string(), &problems).empty());
+  CHECK(problems.empty());
+
+  cam::Machine a;
+  a.name = "Shapeoko 4";
+  a.travelMax = {800.0, 800.0, 100.0};
+  cam::Machine b;
+  b.name = "Big router";
+  b.post = "linuxcnc";
+  std::string error;
+  REQUIRE(DocumentIO::SaveMachine(dir.string(), a, &error));
+  REQUIRE(DocumentIO::SaveMachine(dir.string(), b, &error));
+  CHECK(fs::exists(dir / "shapeoko-4.json"));
+  CHECK(fs::exists(dir / "big-router.json"));
+  const auto loaded = DocumentIO::LoadMachines(dir.string(), &problems);
+  REQUIRE(loaded.size() == 2);
+  CHECK(loaded[0].name == "Big router"); // sorted by name
+  CHECK(loaded[1] == a);
+
+  // Refusals, each in words.
+  cam::Machine unnamed;
+  CHECK(!DocumentIO::SaveMachine(dir.string(), unnamed, &error));
+  CHECK(error.find("name") != std::string::npos);
+  cam::Machine collides;
+  collides.name = "shapeoko_4"; // folds to the same file as "Shapeoko 4"
+  CHECK(!DocumentIO::SaveMachine(dir.string(), collides, &error));
+  CHECK(error.find("Shapeoko 4") != std::string::npos);
+  cam::Machine badPost = a;
+  badPost.post = "haas";
+  CHECK(!DocumentIO::SaveMachine(dir.string(), badPost, &error));
+  CHECK(error.find("haas") != std::string::npos);
+  CHECK(!DocumentIO::DeleteMachine(dir.string(), "nobody", &error));
+  CHECK(error.find("nobody") != std::string::npos);
+
+  // One broken file does not hide the others: it is named, and the rest load.
+  {
+    std::ofstream out(dir / "broken.json");
+    out << "{ \"name\": \"Broken\", \"post\": \"haas\" }";
+  }
+  const auto withBroken = DocumentIO::LoadMachines(dir.string(), &problems);
+  CHECK(withBroken.size() == 2);
+  CHECK(problems.find("broken.json") != std::string::npos);
+  CHECK(problems.find("haas") != std::string::npos);
+
+  REQUIRE(DocumentIO::DeleteMachine(dir.string(), "Shapeoko 4", &error));
+  CHECK(!fs::exists(dir / "shapeoko-4.json"));
+  fs::remove_all(dir);
+}
+
+TEST_CASE("cam machine: a setup's copy is matched against the store by name",
+          "[cam][machine]") {
+  cam::Machine global;
+  global.name = "Shapeoko 4";
+  global.travelMax = {800.0, 800.0, 100.0};
+  const std::vector<cam::Machine> store = {global};
+
+  cam::Machine own; // the job's own: nothing to compare against
+  CHECK(cam::MatchMachine(store, own) == cam::MachineMatch::Unnamed);
+  CHECK(cam::MatchMachine(store, global) == cam::MachineMatch::Global);
+  cam::Machine edited = global;
+  edited.travelMax.x = 600.0; // the bed got shorter on one side
+  CHECK(cam::MatchMachine(store, edited) == cam::MachineMatch::Differs);
+  cam::Machine elsewhere = global;
+  elsewhere.name = "Someone else's";
+  CHECK(cam::MatchMachine(store, elsewhere) == cam::MachineMatch::Missing);
+  CHECK(cam::FindMachine(store, "") == nullptr);
+  CHECK(cam::FindMachine(store, "Shapeoko 4") == &store[0]);
+
+  // The slug: case and punctuation fold, so two spellings share a file --
+  // which is what SaveMachine refuses on.
+  CHECK(cam::MachineFileName("Shapeoko 4") == "shapeoko-4.json");
+  CHECK(cam::MachineFileName("  Big -- Router! ") == "big-router.json");
+  CHECK(cam::MachineFileName("") == "machine.json");
 }

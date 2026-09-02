@@ -8,6 +8,7 @@
 
 #include "common/Logger.h"
 #include "core/Document.h"
+#include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
@@ -17,6 +18,7 @@
 #include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h"
 #include "ui/JobActions.h"
+#include "ui/MachineActions.h"
 #include "ui/SelectionPipeline.h"
 
 #include "IconsFontAwesome6.h"
@@ -301,10 +303,10 @@ void DrawCamPanel(AppState& state) {
     other.frame = cam::FlipFrame(setup->frame);
     other.stock = setup->stock;
     other.tools = setup->tools;
-    other.post = setup->post;
-    other.fitArcs = setup->fitArcs;
+    other.machine.post = setup->machine.post;
+    other.machine.fitArcs = setup->machine.fitArcs;
     other.rapidFeed = setup->rapidFeed;
-    other.hasRotaryAxis = setup->hasRotaryAxis;
+    other.machine.hasRotaryAxis = setup->machine.hasRotaryAxis;
     other.originAt = setup->originAt;
     other.safeZ = cam::DeriveSafeZ(other, ui::JobBodies(state));
     (void)cam::RecomputeOrigin(other, ui::JobBodies(state));
@@ -328,16 +330,85 @@ void DrawCamPanel(AppState& state) {
   }
 
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  if (ImGui::BeginCombo("###cam_post", setup->post.c_str())) {
-    for (const std::string& id : cam::PostIds())
-      if (ImGui::Selectable(id.c_str(), id == setup->post)) {
-        setup->post = id;
+  // WHICH MACHINE (round two). The combo lists the store; picking one copies
+  // it onto the setup (post, arcs, rotary, work area, and the rapid it
+  // seeds). It used to be a post combo defaulting to mach3, which is how
+  // every new job re-answered a question the shop answers once.
+  ImGui::SetNextItemWidth(120.0f);
+  const char* machineLabel =
+      setup->machine.name.empty() ? "(job's own)" : setup->machine.name.c_str();
+  if (ImGui::BeginCombo("###cam_machine", machineLabel)) {
+    for (const cam::Machine& mc : state.machines)
+      if (ImGui::Selectable(mc.name.c_str(), mc.name == setup->machine.name)) {
+        ApplyMachine(*setup, mc);
         dirty = true;
+        changed = kAllOps;
       }
+    if (state.machines.empty())
+      ImGui::TextDisabled("no machines yet — Preferences › Machines");
     ImGui::EndCombo();
   }
-  ImGui::SetItemTooltip("Which machine this job is posted for");
+  ImGui::SetItemTooltip("The machine this setup is for. Picking one copies "
+                        "its post, arc fitting, rotary axis and work area "
+                        "onto the setup; the job keeps that copy, so it "
+                        "opens anywhere.");
+
+  // How the setup's copy stands against the store, SAID. Every reference
+  // that embeds a machine profile reconciles it quietly on load; here the
+  // differing field is the one that matters -- a bed 100 mm shorter, a post
+  // that writes a different arc word.
+  switch (cam::MatchMachine(state.machines, setup->machine)) {
+  case cam::MachineMatch::Global:
+    break;
+  case cam::MachineMatch::Unnamed:
+    if (state.machines.empty()) {
+      ImGui::TextDisabled("No machine: define one in");
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Preferences › Machines###cam_machine_prefs"))
+        state.settingsWindowOpen = true;
+    } else {
+      ImGui::TextDisabled("No machine chosen — the job's own settings");
+    }
+    break;
+  case cam::MachineMatch::Differs:
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
+    ImGui::TextWrapped("Set up on a different '%s' than yours.",
+                       setup->machine.name.c_str());
+    ImGui::PopStyleColor();
+    if (ImGui::SmallButton("Use mine###cam_machine_use_mine")) {
+      ApplyMachine(*setup,
+                   *cam::FindMachine(state.machines, setup->machine.name));
+      dirty = true;
+      changed = kAllOps;
+    }
+    ImGui::SetItemTooltip("Replace the job's copy with your '%s'",
+                          setup->machine.name.c_str());
+    ImGui::SameLine();
+    break;
+  case cam::MachineMatch::Missing:
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
+    ImGui::TextWrapped("'%s' is not one of your machines.",
+                       setup->machine.name.c_str());
+    ImGui::PopStyleColor();
+    break;
+  }
+  {
+    const cam::MachineMatch match =
+        cam::MatchMachine(state.machines, setup->machine);
+    if (match == cam::MachineMatch::Differs ||
+        match == cam::MachineMatch::Missing) {
+      // ONE call site for both cases (widget_ids_lint): the label says which.
+      if (ImGui::SmallButton(match == cam::MachineMatch::Differs
+                                 ? "Save as mine###cam_machine_save"
+                                 : "Save it###cam_machine_save")) {
+        std::string error;
+        if (!SaveMachine(state, setup->machine, &error))
+          state.camNote = error;
+      }
+      ImGui::SetItemTooltip("Write the job's copy to your machines as '%s'",
+                            setup->machine.name.c_str());
+    }
+  }
 
   // Z zero and the verbs were here too, once: a "Pick top face" row and a
   // button opening a window that listed the verbs. Both are the job TOOLBAR
@@ -564,7 +635,20 @@ void DrawCamPanel(AppState& state) {
       dirty = true;
     }
     ImGui::SetItemTooltip("How far a through-cut goes into the spoilboard");
-    if (ImGui::Checkbox("Arcs (G2/G3)###cam_arcs", &setup->fitArcs))
+    // The machine's own fields, edited on the JOB'S COPY: changing one here
+    // is what makes the setup differ from the named machine, and the row
+    // under the setup combo says so.
+    ImGui::SetNextItemWidth(110.0f);
+    if (ImGui::BeginCombo("Post###cam_post", setup->machine.post.c_str())) {
+      for (const std::string& id : cam::PostIds())
+        if (ImGui::Selectable(id.c_str(), id == setup->machine.post)) {
+          setup->machine.post = id;
+          dirty = true;
+        }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Which controller dialect this job is posted for");
+    if (ImGui::Checkbox("Arcs (G2/G3)###cam_arcs", &setup->machine.fitArcs))
       dirty = true;
     ImGui::SetItemTooltip("Post curves as arcs instead of many short lines. "
                           "Turn off for a controller that mishandles them.");
@@ -573,14 +657,14 @@ void DrawCamPanel(AppState& state) {
     // A word — which is the whole point: laying a part flat on the bed used
     // to post `G0 A90` at routers that have no A (docs/cam/setup-frame.md).
     if (ImGui::Checkbox("Has a 4th axis (A)###cam_has_rotary",
-                        &setup->hasRotaryAxis)) {
+                        &setup->machine.hasRotaryAxis)) {
       dirty = true;
       changed = kAllOps;
     }
     ImGui::SetItemTooltip("Tick only for a machine with a rotary table. How "
                           "the part is CLAMPED is \"Lay a face up\" and needs "
                           "no rotary axis.");
-    if (setup->hasRotaryAxis) {
+    if (setup->machine.hasRotaryAxis) {
       float indexA = static_cast<float>(setup->rotationA);
       ImGui::SetNextItemWidth(90.0f);
       if (ExprDragFloat(state, "A index###cam_index_a", &indexA, 0.5f, -360.0f,
@@ -752,7 +836,7 @@ void DrawCamPanel(AppState& state) {
             (dir / (project.stem().string() + " - " + setup->name + ".nc"))
                 .string();
         std::string gcode, error;
-        if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
+        if (cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
                              PostOpts(*setup), gcode, &error) &&
             DocumentIO::WriteTextAtomic(path, gcode, &error)) {
           state.camLastPost = path;

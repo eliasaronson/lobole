@@ -214,7 +214,7 @@ bool HasRotaryAxis(AppState& s) {
   if (!HasJob(s))
     return false;
   const cam::Setup* setup = ActiveCamSetup(s);
-  return setup != nullptr && setup->hasRotaryAxis;
+  return setup != nullptr && setup->machine.hasRotaryAxis;
 #else
   (void)s;
   return false;

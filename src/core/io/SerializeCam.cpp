@@ -1,6 +1,15 @@
 #include "core/cam/CamJob.h"
+#include "core/cam/CamMachine.h"  // MachineFileName
+#include "core/cam/CamPost.h"     // PostExists, PostIds
 #include "core/cam/CamToolpath.h" // FrameIsSquare
+#include "core/io/Serialization.h" // WriteTextAtomic
 #include "core/io/SerializationInternal.h"
+
+#include <fstream>
+
+#include <filesystem>
+
+#include <algorithm>
 
 // CAM setups (v58, docs/cam/plan.md). Small enough to live inline in the
 // document rather than file-per-setup as studies do — a setup is a few
@@ -133,11 +142,202 @@ cam::Target TargetFromJson(const json& j) {
 
 } // namespace
 
+namespace {
+
+std::string PostIdList() {
+  std::string out;
+  for (const std::string& id : cam::PostIds())
+    out += (out.empty() ? "" : ", ") + id;
+  return out;
+}
+
+json ToolToJson(const cam::Tool& t) {
+  json tj = {{"number", t.number},
+             {"name", t.name},
+             {"diameter", t.diameter},
+             {"flutes", t.flutes},
+             {"flute_length", t.fluteLength},
+             {"feed_cut", t.feedCut},
+             {"feed_plunge", t.feedPlunge},
+             {"spindle_rpm", t.spindleRpm}};
+  // Written only when it is not the flat mill everything assumed before
+  // v66, so a job of plain end mills re-saves byte-identically.
+  if (t.type != cam::ToolType::Flat) {
+    tj["tool_type"] = ToolTypeName(t.type);
+    tj["tip_angle"] = t.tipAngleDeg;
+  }
+  return tj;
+}
+
+cam::Tool ToolFromJson(const json& tj) {
+  cam::Tool t;
+  t.number = tj.value("number", 1);
+  t.name = tj.value("name", std::string());
+  t.diameter = tj.value("diameter", 6.0);
+  t.flutes = tj.value("flutes", 2);
+  t.fluteLength = tj.value("flute_length", 20.0);
+  t.feedCut = tj.value("feed_cut", 300.0);
+  t.feedPlunge = tj.value("feed_plunge", 100.0);
+  t.spindleRpm = tj.value("spindle_rpm", 10000.0);
+  t.type = ToolTypeFromName(tj.value("tool_type", std::string("flat")));
+  t.tipAngleDeg = tj.value("tip_angle", 90.0);
+  return t;
+}
+
+} // namespace
+
+json MachineToJson(const cam::Machine& m) {
+  json j;
+  j["name"] = m.name;
+  j["post"] = m.post;
+  // Written only when stated / not the default, so a job on the job's own
+  // default machine carries a small block.
+  if (m.HasWorkArea())
+    j["travel"] = {{"min", {m.travelMin.x, m.travelMin.y, m.travelMin.z}},
+                   {"max", {m.travelMax.x, m.travelMax.y, m.travelMax.z}}};
+  if (!m.fitArcs)
+    j["fit_arcs"] = false;
+  if (m.hasRotaryAxis)
+    j["has_rotary_axis"] = true;
+  if (m.rapidFeed != 0.0)
+    j["rapid_feed"] = m.rapidFeed;
+  if (!m.library.empty()) {
+    j["tools"] = json::array();
+    for (const cam::Tool& t : m.library)
+      j["tools"].push_back(ToolToJson(t));
+  }
+  return j;
+}
+
+cam::Machine MachineFromJson(const json& j) {
+  cam::Machine m;
+  m.name = j.value("name", std::string());
+  m.post = j.value("post", std::string("mach3"));
+  // An unknown post is REFUSED, naming what is accepted: every line of the
+  // file is written in its dialect, and a silent mach3 posts for the wrong
+  // controller with nothing to say so.
+  if (!cam::PostExists(m.post))
+    throw std::runtime_error("unknown cam post '" + m.post +
+                             "'; this build accepts " + PostIdList());
+  if (j.contains("travel")) {
+    const json& t = j.at("travel");
+    const auto vec = [&](const char* key) {
+      const json& a = t.at(key);
+      if (!a.is_array() || a.size() != 3)
+        throw std::runtime_error(std::string("machine travel.") + key +
+                                 " must be [x, y, z]");
+      return glm::dvec3(a[0].get<double>(), a[1].get<double>(),
+                        a[2].get<double>());
+    };
+    m.travelMin = vec("min");
+    m.travelMax = vec("max");
+  }
+  m.fitArcs = j.value("fit_arcs", true);
+  m.hasRotaryAxis = j.value("has_rotary_axis", false);
+  m.rapidFeed = j.value("rapid_feed", 0.0);
+  for (const json& tj : j.value("tools", json::array()))
+    m.library.push_back(ToolFromJson(tj));
+  return m;
+}
+
+std::vector<cam::Machine> LoadMachines(const std::string& dir,
+                                       std::string* error) {
+  std::vector<cam::Machine> out;
+  if (error != nullptr)
+    error->clear();
+  std::error_code ec;
+  if (!std::filesystem::is_directory(dir, ec))
+    return out; // no store yet is not an error: nothing has been saved
+  std::string problems;
+  for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".json")
+      continue;
+    try {
+      std::ifstream in(entry.path());
+      const json j = json::parse(in);
+      out.push_back(MachineFromJson(j));
+      if (out.back().name.empty())
+        throw std::runtime_error("a machine needs a name");
+    } catch (const std::exception& e) {
+      // One broken file must not hide the others: say which, keep going.
+      problems += (problems.empty() ? "" : "; ") +
+                  entry.path().filename().string() + ": " + e.what();
+    }
+  }
+  std::sort(out.begin(), out.end(),
+            [](const cam::Machine& a, const cam::Machine& b) {
+              return a.name < b.name;
+            });
+  if (error != nullptr)
+    *error = problems;
+  return out;
+}
+
+bool SaveMachine(const std::string& dir, const cam::Machine& m,
+                 std::string* error) {
+  if (m.name.empty()) {
+    if (error != nullptr)
+      *error = "a machine needs a name";
+    return false;
+  }
+  if (!cam::PostExists(m.post)) {
+    if (error != nullptr)
+      *error = "unknown cam post '" + m.post + "'; this build accepts " +
+               PostIdList();
+    return false;
+  }
+  const std::filesystem::path file =
+      std::filesystem::path(dir) / cam::MachineFileName(m.name);
+  // Two names that fold to one file name ("Shapeoko 4" and "shapeoko-4")
+  // would silently overwrite each other; refuse the second.
+  std::error_code ec;
+  if (std::filesystem::exists(file, ec)) {
+    try {
+      std::ifstream in(file);
+      const json j = json::parse(in);
+      const std::string held = j.value("name", std::string());
+      if (!held.empty() && held != m.name) {
+        if (error != nullptr)
+          *error = "'" + m.name + "' would share a file with '" + held +
+                   "' — pick a name that differs in more than case or "
+                   "punctuation";
+        return false;
+      }
+    } catch (const std::exception&) {
+      // Unreadable: it is about to be replaced by something readable.
+    }
+  }
+  std::filesystem::create_directories(dir, ec);
+  return WriteTextAtomic(file, MachineToJson(m).dump(2) + "\n", error);
+}
+
+bool DeleteMachine(const std::string& dir, const std::string& name,
+                   std::string* error) {
+  const std::filesystem::path file =
+      std::filesystem::path(dir) / cam::MachineFileName(name);
+  std::error_code ec;
+  if (!std::filesystem::exists(file, ec)) {
+    if (error != nullptr)
+      *error = "no machine called '" + name + "'";
+    return false;
+  }
+  if (!std::filesystem::remove(file, ec)) {
+    if (error != nullptr)
+      *error = "could not delete " + file.string() + ": " + ec.message();
+    return false;
+  }
+  return true;
+}
+
 json CamSetupToJson(const cam::Setup& setup) {
   json j;
   j["id"] = setup.id;
   j["name"] = setup.name;
-  j["post"] = setup.post;
+  // The machine, EMBEDDED (v77): the copy the setup was set up on, named by
+  // its `name`. `post`, `has_rotary_axis` and `fit_arcs` used to be keys of
+  // the setup; a reader still accepts them from a file that predates the
+  // block (the v73-v76 goldens carry them).
+  j["machine"] = MachineToJson(setup.machine);
   j["safe_z"] = setup.safeZ;
   // DERIVED (v68): recomputed from the stock, the fixture and the picked face
   // on load, so it is written for a reader rather than read back. The RULE is
@@ -161,14 +361,8 @@ json CamSetupToJson(const cam::Setup& setup) {
   // where 0.70710678f does not.
   if (!cam::FrameIsSquare(setup))
     j["frame"] = {setup.frame.x, setup.frame.y, setup.frame.z, setup.frame.w};
-  // Written only when set: every 3-axis job would otherwise carry a rotary
-  // key that means nothing.
-  if (setup.hasRotaryAxis)
-    j["has_rotary_axis"] = true;
   if (setup.rotationA != 0.0)
     j["rotation_a"] = setup.rotationA;
-  if (!setup.fitArcs)
-    j["fit_arcs"] = false;
   j["stock"] = {
       {"margin",
        {setup.stock.margin.x, setup.stock.margin.y, setup.stock.margin.z}},
@@ -184,23 +378,8 @@ json CamSetupToJson(const cam::Setup& setup) {
   }
 
   j["tools"] = json::array();
-  for (const cam::Tool& t : setup.tools) {
-    json tj = {{"number", t.number},
-               {"name", t.name},
-               {"diameter", t.diameter},
-               {"flutes", t.flutes},
-               {"flute_length", t.fluteLength},
-               {"feed_cut", t.feedCut},
-               {"feed_plunge", t.feedPlunge},
-               {"spindle_rpm", t.spindleRpm}};
-    // Written only when it is not the flat mill everything assumed before
-    // v66, so a job of plain end mills re-saves byte-identically.
-    if (t.type != cam::ToolType::Flat) {
-      tj["tool_type"] = ToolTypeName(t.type);
-      tj["tip_angle"] = t.tipAngleDeg;
-    }
-    j["tools"].push_back(std::move(tj));
-  }
+  for (const cam::Tool& t : setup.tools)
+    j["tools"].push_back(ToolToJson(t));
 
   if (setup.order != cam::OrderOutputBy::Authored)
     j["order"] = OrderName(setup.order);
@@ -276,7 +455,6 @@ cam::Setup CamSetupFromJson(const json& j) {
   cam::Setup setup;
   setup.id = j.value("id", uint64_t{0});
   setup.name = j.value("name", std::string("Setup"));
-  setup.post = j.value("post", std::string("mach3"));
   setup.safeZ = j.value("safe_z", 5.0);
   if (j.contains("top_face"))
     setup.topFace = TargetFromJson(j["top_face"]);
@@ -304,12 +482,24 @@ cam::Setup CamSetupFromJson(const json& j) {
         glm::dquat(j["frame"][3].get<double>(), j["frame"][0].get<double>(),
                    j["frame"][1].get<double>(), j["frame"][2].get<double>());
   setup.rotationA = j.value("rotation_a", 0.0);
-  // Before v67 there was no such flag and `rotation_a` was the only way to
-  // turn a part, so a file that carries one was written by a machine that
-  // has the axis. Defaulting it to false instead would silently drop the A
-  // word from a rotary job that used to post one.
-  setup.hasRotaryAxis = j.value("has_rotary_axis", setup.rotationA != 0.0);
-  setup.fitArcs = j.value("fit_arcs", true);
+  if (j.contains("machine")) {
+    setup.machine = MachineFromJson(j.at("machine"));
+  } else {
+    // Before v77 the machine's three fields were the setup's own. Read them
+    // into the job's own (unnamed) machine, so a v73-v76 file cuts exactly
+    // as it did.
+    setup.machine.post = j.value("post", std::string("mach3"));
+    if (!cam::PostExists(setup.machine.post))
+      throw std::runtime_error("unknown cam post '" + setup.machine.post +
+                               "'; this build accepts " + PostIdList());
+    // Before v67 there was no such flag and `rotation_a` was the only way to
+    // turn a part, so a file that carries one was written by a machine that
+    // has the axis. Defaulting it to false instead would silently drop the A
+    // word from a rotary job that used to post one.
+    setup.machine.hasRotaryAxis =
+        j.value("has_rotary_axis", setup.rotationA != 0.0);
+    setup.machine.fitArcs = j.value("fit_arcs", true);
+  }
   if (j.contains("stock")) {
     const json& sj = j["stock"];
     if (sj.contains("margin") && sj["margin"].is_array() &&
@@ -338,20 +528,8 @@ cam::Setup CamSetupFromJson(const json& j) {
                            sj["place"][1].get<double>(),
                            sj["place"][2].get<double>()};
   }
-  for (const json& tj : j.value("tools", json::array())) {
-    cam::Tool t;
-    t.number = tj.value("number", 1);
-    t.name = tj.value("name", std::string());
-    t.diameter = tj.value("diameter", 6.0);
-    t.flutes = tj.value("flutes", 2);
-    t.fluteLength = tj.value("flute_length", 20.0);
-    t.feedCut = tj.value("feed_cut", 300.0);
-    t.feedPlunge = tj.value("feed_plunge", 100.0);
-    t.spindleRpm = tj.value("spindle_rpm", 10000.0);
-    t.type = ToolTypeFromName(tj.value("tool_type", std::string("flat")));
-    t.tipAngleDeg = tj.value("tip_angle", 90.0);
-    setup.tools.push_back(std::move(t));
-  }
+  for (const json& tj : j.value("tools", json::array()))
+    setup.tools.push_back(ToolFromJson(tj));
   if (j.contains("order"))
     setup.order = OrderFromName(j.at("order").get<std::string>());
   for (const json& pj : j.value("placements", json::array())) {

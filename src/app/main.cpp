@@ -43,6 +43,7 @@
 #include "ui/CamPlayback.h"
 #include "ui/FastenerTool.h"
 #include "ui/ImportJob.h"
+#include "ui/MachineActions.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SimulationActions.h"
@@ -1633,6 +1634,10 @@ int main(int argc, char** argv) {
     g_App.settings = settings::Load();
     g_App.settingsSaved = g_App.settings;
   }
+  // The machine store lives beside the settings and loads with them. Under
+  // the GUI tests too: the runner points XDG_CONFIG_HOME at a scratch
+  // directory, so the tests see an empty store rather than the desk's.
+  ui::ReloadMachines(g_App);
   // A preference must not silently override an explicit flag, so the command
   // line wins where the two overlap.
   bool autosaveFromFlag = false;

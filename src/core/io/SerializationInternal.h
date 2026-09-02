@@ -17,7 +17,17 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    76; // v76: fixturing is per PART. A placement can carry its own `frame`,
+    77; // v77: a setup EMBEDS its machine. `post`, `fit_arcs` and
+        //      `has_rotary_axis` were keys of the setup and every new job
+        //      re-answered "which machine" with a combo; they are now a
+        //      `machine` block -- name, travel, post, arcs, rotary, rapid,
+        //      tool library -- that is a copy of a globally stored profile
+        //      named by `name` (~/.config/designer/machines/<slug>.json), so
+        //      the file opens on a machine that has never seen the profile
+        //      and the panel says which copy it is using when the two differ
+        //      (docs/cam/job-document.md, round two). The three old keys are
+        //      still read from a file without the block.
+        // (v76: fixturing is per PART. A placement can carry its own `frame`,
         //      so one sheet can hold a baffle laid on its face beside a rail
         //      laid on its edge -- each modelled in its assembly orientation,
         //      all cut from one board. Unset means "as the setup says", which

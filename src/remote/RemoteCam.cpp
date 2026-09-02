@@ -3,6 +3,7 @@
 #ifdef HAVE_CAM
 
 #include "core/Document.h"
+#include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamSim.h"
 #include "core/cam/CamToolpath.h"
@@ -12,6 +13,7 @@
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
 #include "ui/JobActions.h"
+#include "ui/MachineActions.h"
 
 #include <algorithm>
 #include <fstream>
@@ -23,6 +25,22 @@ using nlohmann::json;
 namespace {
 
 constexpr MethodDoc kCamMethods[] = {
+    {"list_machines",
+     "Your machines, from ~/.config/designer/machines/*.json: each {name, "
+     "post, travel?: {min, max}, fit_arcs, has_rotary_axis, rapid_feed, "
+     "tools}. A setup names one and EMBEDS a copy of it; set_cam_setup "
+     "{machine} puts one on a setup.",
+     ""},
+    {"save_machine",
+     "Write a machine to the store {machine: {name, post?, travel?: {min: "
+     "[x,y,z], max: [x,y,z]}, fit_arcs?, has_rotary_axis?, rapid_feed?, "
+     "tools?: [...]}}, replacing one of that name. Refused without a name, "
+     "with an unknown post (naming the accepted ones), or with a name that "
+     "would share a file with a different name. Open jobs are not changed: a "
+     "setup keeps the copy it was set up on, and list_cam_setups reports "
+     "`machine_match` so a script can see that it now differs.",
+     "machine"},
+    {"delete_machine", "Remove a machine from the store {name}.", "name"},
     {"machine_part",
      "Make a JOB for a part and switch to it {part?: id or name (default: the "
      "open part), name?}. A job is a document of its own since v73 -- it "
@@ -70,19 +88,24 @@ constexpr MethodDoc kCamMethods[] = {
      "its id and the safe_z derived for it. A setup arrives with one 6 mm "
      "tool, because a setup with no tools can produce nothing, and with a "
      "rapid height clear of the stock, because the default 5 mm is inside "
-     "most of them.",
-     "name, post, safe_z"},
+     "most of them. `machine` puts one of your machines (list_machines) on "
+     "it -- post, arcs, rotary axis, work area, rapid -- and the setup "
+     "EMBEDS a copy, so the job file opens anywhere.",
+     "machine, name, post, safe_z"},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
      "face it was picked from), origin_at (the corner it is measured FROM), "
      "frame (how the part is CLAMPED, as "
      "[x,y,z,w]; identity = as modelled), has_rotary_axis, rotation_a, "
-     "fit_arcs, tools, "
+     "fit_arcs, machine (the embedded copy) and machine_match "
+     "(unnamed|global|differs|missing -- how that copy stands against your "
+     "store, by name), tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
      "so a setup that lays the part flat reports the box the machine sees.",
      ""},
     {"set_cam_setup",
-     "Change a setup {id, name?, post?, safe_z?, lay_face_up?: {feature_id, "
+     "Change a setup {id, name?, machine?: name, post?, safe_z?, "
+     "lay_face_up?: {feature_id, "
      "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?, "
      "origin_at?: stock_min|stock_centre|model_min, "
      "order?: authored|tool|part, "
@@ -109,8 +132,8 @@ constexpr MethodDoc kCamMethods[] = {
      "workpiece the sheet you own (size + place, where the part sits in it) "
      "rather than a shrink-wrap of the part; a sheet smaller than the part is "
      "refused, naming the axis and the shortfall.",
-     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, name, order, "
-     "origin_at, post, rotation_a, safe_z, stock, tool"},
+     "fit_arcs, flip, has_rotary_axis, id, lay_face_up, machine, name, "
+     "order, origin_at, post, rotation_a, safe_z, stock, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: "
@@ -284,7 +307,7 @@ cam::Setup& RequireSetup(cam::JobDocument& job, uint64_t id) {
 // (C7), not of who asked for the G-code.
 cam::PostOptions PostOptsOf(const cam::Setup& setup) {
   cam::PostOptions opts;
-  opts.fitArcs = setup.fitArcs;
+  opts.fitArcs = setup.machine.fitArcs;
   return opts;
 }
 
@@ -422,6 +445,38 @@ json OpJson(const cam::Operation& op) {
 
 } // namespace
 
+namespace {
+// `machine: name` on add_cam_setup / set_cam_setup: the global of that name,
+// copied onto the setup. Unknown is refused naming the ones that exist.
+void ApplyNamedMachine(ui::AppState& state, cam::Setup& setup,
+                       const std::string& name) {
+  const cam::Machine* mc = cam::FindMachine(state.machines, name);
+  if (mc == nullptr) {
+    std::string known;
+    for (const cam::Machine& m : state.machines)
+      known += (known.empty() ? "" : ", ") + m.name;
+    throw std::runtime_error("no machine called '" + name + "'; " +
+                             (known.empty()
+                                  ? std::string("save_machine defines one")
+                                  : "list_machines shows " + known));
+  }
+  ui::ApplyMachine(setup, *mc);
+}
+const char* MatchName(cam::MachineMatch match) {
+  switch (match) {
+  case cam::MachineMatch::Unnamed:
+    return "unnamed";
+  case cam::MachineMatch::Global:
+    return "global";
+  case cam::MachineMatch::Differs:
+    return "differs";
+  case cam::MachineMatch::Missing:
+    return "missing";
+  }
+  return "unnamed";
+}
+} // namespace
+
 std::span<const MethodDoc> CamMethodDocs() { return kCamMethods; }
 
 std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
@@ -473,6 +528,26 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"part", json{{"id", made->GetParts()[0].id},
                               {"source", sourceId},
                               {"name", sourceName}}}};
+  }
+
+  if (m == "list_machines") {
+    json out = json::array();
+    for (const cam::Machine& mc : state.machines)
+      out.push_back(DocumentIO::MachineToJson(mc));
+    return json{{"machines", out}, {"dir", ui::MachineDir()}};
+  }
+  if (m == "save_machine") {
+    const cam::Machine mc = DocumentIO::MachineFromJson(p.at("machine"));
+    std::string error;
+    if (!ui::SaveMachine(state, mc, &error))
+      throw std::runtime_error(error);
+    return DocumentIO::MachineToJson(mc);
+  }
+  if (m == "delete_machine") {
+    std::string error;
+    if (!ui::DeleteMachine(state, p.at("name").get<std::string>(), &error))
+      throw std::runtime_error(error);
+    return json{{"deleted", p.at("name").get<std::string>()}};
   }
 
   cam::JobDocument* job = ui::ActiveJob(state);
@@ -637,17 +712,22 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // produced 68 rapids through material on an 18 mm plate. The GUI got
     // this fix in the G-round; this door did not.
     setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
+    if (p.contains("machine"))
+      ApplyNamedMachine(state, setup, p.at("machine").get<std::string>());
     if (p.contains("post")) {
       const std::string post = p.at("post").get<std::string>();
       if (!cam::PostExists(post))
         throw std::runtime_error("unknown post '" + post + "'");
-      setup.post = post;
+      setup.machine.post = post;
     }
     if (p.contains("safe_z"))
       setup.safeZ = p.at("safe_z").get<double>();
     return json{{"id", setup.id},
                 {"name", setup.name},
-                {"post", setup.post},
+                {"post", setup.machine.post},
+                {"machine", DocumentIO::MachineToJson(setup.machine)},
+                {"machine_match",
+                 MatchName(cam::MatchMachine(state.machines, setup.machine))},
                 {"safe_z", setup.safeZ}};
   }
 
@@ -656,10 +736,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     for (const cam::Setup& setup : job->GetSetups()) {
       json sj = {{"id", setup.id},
                  {"name", setup.name},
-                 {"post", setup.post},
+                 {"post", setup.machine.post},
                  {"safe_z", setup.safeZ},
                  {"rotation_a", setup.rotationA},
-                 {"has_rotary_axis", setup.hasRotaryAxis},
+                 {"has_rotary_axis", setup.machine.hasRotaryAxis},
                  // How the part is CLAMPED, as [x, y, z, w]. Identity = as
                  // modelled. A script that reads a toolpath without this
                  // cannot tell which way up the part was cut.
@@ -672,7 +752,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                   setup.originAt == cam::OriginAt::StockCentre ? "stock_centre"
                   : setup.originAt == cam::OriginAt::ModelMin  ? "model_min"
                                                                : "stock_min"},
-                 {"fit_arcs", setup.fitArcs},
+                 {"fit_arcs", setup.machine.fitArcs},
+                 {"machine", DocumentIO::MachineToJson(setup.machine)},
+                 // How the embedded copy stands against the store, by name:
+                 // unnamed | global | differs | missing.
+                 {"machine_match",
+                  MatchName(cam::MatchMachine(state.machines, setup.machine))},
                  {"order", setup.order == cam::OrderOutputBy::Tool ? "tool"
                            : setup.order == cam::OrderOutputBy::Part
                                ? "part"
@@ -700,18 +785,23 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     cam::Setup& setup = RequireSetup(*job, p.at("id").get<uint64_t>());
     if (p.contains("name"))
       setup.name = p.at("name").get<std::string>();
+    // The machine first, so post/fit_arcs/has_rotary_axis in the same call
+    // are edits ON TOP of it -- the job's copy then differs from the named
+    // one, and list_cam_setups says so.
+    if (p.contains("machine"))
+      ApplyNamedMachine(state, setup, p.at("machine").get<std::string>());
     if (p.contains("post")) {
       const std::string post = p.at("post").get<std::string>();
       if (!cam::PostExists(post))
         throw std::runtime_error("unknown post '" + post + "'");
-      setup.post = post;
+      setup.machine.post = post;
     }
     if (p.contains("safe_z"))
       setup.safeZ = p.at("safe_z").get<double>();
     if (p.contains("rotation_a"))
       setup.rotationA = p.at("rotation_a").get<double>();
     if (p.contains("has_rotary_axis"))
-      setup.hasRotaryAxis = p.at("has_rotary_axis").get<bool>();
+      setup.machine.hasRotaryAxis = p.at("has_rotary_axis").get<bool>();
     if (p.contains("origin_at")) {
       const std::string at = p.at("origin_at").get<std::string>();
       if (at == "stock_min")
@@ -786,7 +876,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // derived from it — as is every coordinate the post writes.
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     if (p.contains("fit_arcs"))
-      setup.fitArcs = p.at("fit_arcs").get<bool>();
+      setup.machine.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("order")) {
       // Refused, never substituted: a job that posts in a different order
       // than it says is a broken cutter, and every plausible substitute here
@@ -943,8 +1033,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const std::vector<cam::Toolpath> paths =
         cam::GenerateAll(setup, ui::JobBodies(state));
     std::string gcode, error;
-    if (!cam::PostProcess(setup.post, setup, paths, PostOptsOf(setup), gcode,
-                          &error))
+    if (!cam::PostProcess(setup.machine.post, setup, paths, PostOptsOf(setup),
+                          gcode, &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
     const cam::Verdict v =
@@ -1130,7 +1220,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     if (m == "cam_toolpath")
       return toolpathOut;
 
-    const std::string post = p.value("post", setup.post);
+    const std::string post = p.value("post", setup.machine.post);
     std::string gcode, error;
     if (!cam::PostProcess(post, setup, paths, PostOptsOf(setup), gcode, &error))
       throw std::runtime_error(error);

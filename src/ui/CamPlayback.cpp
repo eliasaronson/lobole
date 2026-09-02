@@ -112,7 +112,7 @@ bool BeginCamPlayback(AppState& state) {
   // state or in linking is invisible to anything that plays a
   // std::vector<Move>, and one of those had already shipped (a NaN retract).
   std::string gcode, error;
-  if (!cam::PostProcess(setup->post, *setup, state.camToolpaths,
+  if (!cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
                         PostOpts(*setup), gcode, &error)) {
     state.camPlaybackRefusal = "Could not post this job: " + error;
     return false;

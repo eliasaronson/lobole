@@ -1328,6 +1328,14 @@ struct AppState {
   bool sidePanelWidthChecked = false;
   bool runGuiTests = false;
 
+  // The machine store (docs/cam/job-document.md, round two):
+  // ~/.config/designer/machines/*.json, mirrored here by
+  // ui::ReloadMachines. A setup embeds a COPY of one of these, named; the
+  // panel compares the two by name every frame and says when they differ.
+  std::vector<cam::Machine> machines;
+  // Preferences > Machines: which one is being edited (-1 = none).
+  int machineEditIndex = -1;
+
   // CAM (docs/cam/plan.md). Toolpaths are CACHED, not regenerated per frame:
   // the backplot overlay and the panel read the same vector the post
   // consumes, so the picture cannot disagree with the file.

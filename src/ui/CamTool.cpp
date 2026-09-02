@@ -1034,7 +1034,7 @@ void RunCamVerification(AppState& state) {
     return;
 
   std::string gcode, error;
-  if (!cam::PostProcess(setup->post, *setup, state.camToolpaths,
+  if (!cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
                         PostOpts(*setup), gcode, &error)) {
     state.camVerdict.push_back(
         {cam::VerdictLine::Level::Bad, "Could not post this job: " + error});

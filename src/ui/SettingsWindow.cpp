@@ -5,9 +5,13 @@
 #include "core/io/GitVault.h"
 
 #include "common/Logger.h"
+#include "core/cam/CamMachine.h"
+#include "core/cam/CamPost.h"
 #include "core/io/Keymap.h"
+#include "core/io/Serialization.h" // the machine store
 #include "core/io/Settings.h"
 #include "ui/Commands.h"
+#include "ui/MachineActions.h"
 
 #include "imgui.h"
 
@@ -169,6 +173,180 @@ bool DrawField(AppState& state, const settings::Field& f) {
     }
   }
   return changed;
+}
+
+// Preferences > Machines (docs/cam/job-document.md, round two). Not a
+// `Field` either: a LIST of structs, each its own file in
+// ~/.config/designer/machines, written on every edit the way settings.json
+// is -- there is no Save button to forget. A job names one of these and
+// embeds a copy; the CAM panel says when the two differ.
+std::string g_machineError; // the last refusal from the store, in words
+
+void DrawMachinesSection(AppState& state) {
+  ImGui::PushStyleColor(ImGuiCol_Text,
+                        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextUnformatted(
+      "The machines in your shop: post dialect, arc fitting, rotary axis, "
+      "work area and rapid. A CAM setup picks one and keeps a copy, so a job "
+      "file opens on a machine that has never seen the profile.");
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+
+  const auto commit = [&](const cam::Machine& m) {
+    std::string error;
+    if (!SaveMachine(state, m, &error))
+      g_machineError = error;
+    else
+      g_machineError.clear();
+  };
+
+  if (ImGui::Button("New###mach_new")) {
+    // A name nobody has, so the file can be written at once: the editor
+    // below renames it, and a rename is delete-then-save.
+    cam::Machine fresh;
+    for (int n = 1;; n++) {
+      fresh.name = "Machine " + std::to_string(n);
+      if (cam::FindMachine(state.machines, fresh.name) == nullptr)
+        break;
+    }
+    commit(fresh);
+    for (size_t i = 0; i < state.machines.size(); i++)
+      if (state.machines[i].name == fresh.name)
+        state.machineEditIndex = static_cast<int>(i);
+  }
+  ImGui::SameLine();
+  const bool have =
+      state.machineEditIndex >= 0 &&
+      state.machineEditIndex < static_cast<int>(state.machines.size());
+  ImGui::BeginDisabled(!have);
+  if (ImGui::Button("Duplicate###mach_dup") && have) {
+    cam::Machine copy =
+        state.machines[static_cast<size_t>(state.machineEditIndex)];
+    const std::string base = copy.name;
+    for (int n = 2;; n++) {
+      copy.name = base + " " + std::to_string(n);
+      if (cam::FindMachine(state.machines, copy.name) == nullptr)
+        break;
+    }
+    commit(copy);
+    for (size_t i = 0; i < state.machines.size(); i++)
+      if (state.machines[i].name == copy.name)
+        state.machineEditIndex = static_cast<int>(i);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Delete###mach_delete") && have) {
+    std::string error;
+    if (!DeleteMachine(
+            state,
+            state.machines[static_cast<size_t>(state.machineEditIndex)].name,
+            &error))
+      g_machineError = error;
+    else
+      g_machineError.clear();
+    state.machineEditIndex = -1;
+  }
+  ImGui::EndDisabled();
+  // Re-asked AFTER the buttons: Delete has just emptied the selection, and
+  // the stale answer indexed a list that no longer held it.
+  const bool selected =
+      state.machineEditIndex >= 0 &&
+      state.machineEditIndex < static_cast<int>(state.machines.size());
+
+  if (state.machines.empty())
+    ImGui::TextDisabled("No machines yet.");
+  for (size_t i = 0; i < state.machines.size(); i++) {
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::Selectable(state.machines[i].name.c_str(),
+                          static_cast<int>(i) == state.machineEditIndex))
+      state.machineEditIndex = static_cast<int>(i);
+    ImGui::PopID();
+  }
+  if (!g_machineError.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", g_machineError.c_str());
+    ImGui::PopStyleColor();
+  }
+  if (!selected)
+    return;
+
+  // The editor. Every edit is written to the file at once; a rename is a
+  // delete of the old file and a save of the new, refused (and reverted)
+  // when the new name would share a file with another machine.
+  cam::Machine& m = state.machines[static_cast<size_t>(state.machineEditIndex)];
+  ImGui::Separator();
+  static char nameBuf[96];
+  static int nameFor = -1;
+  if (nameFor != state.machineEditIndex || !ImGui::IsAnyItemActive()) {
+    std::snprintf(nameBuf, sizeof(nameBuf), "%s", m.name.c_str());
+    nameFor = state.machineEditIndex;
+  }
+  ImGui::SetNextItemWidth(ControlWidth());
+  ImGui::InputText("Name###mach_name", nameBuf, sizeof(nameBuf));
+  if (ImGui::IsItemDeactivatedAfterEdit() && m.name != nameBuf &&
+      nameBuf[0] != '\0') {
+    cam::Machine renamed = m;
+    renamed.name = nameBuf;
+    std::string error;
+    if (cam::FindMachine(state.machines, renamed.name) != nullptr) {
+      g_machineError =
+          "there is already a machine called '" + renamed.name + "'";
+    } else if (!DocumentIO::SaveMachine(MachineDir(), renamed, &error)) {
+      g_machineError = error;
+    } else {
+      (void)DocumentIO::DeleteMachine(MachineDir(), m.name, nullptr);
+      ReloadMachines(state);
+      g_machineError.clear();
+      for (size_t i = 0; i < state.machines.size(); i++)
+        if (state.machines[i].name == renamed.name)
+          state.machineEditIndex = static_cast<int>(i);
+      return; // `m` is gone
+    }
+  }
+
+  bool edited = false;
+  float lo[3] = {static_cast<float>(m.travelMin.x),
+                 static_cast<float>(m.travelMin.y),
+                 static_cast<float>(m.travelMin.z)};
+  float hi[3] = {static_cast<float>(m.travelMax.x),
+                 static_cast<float>(m.travelMax.y),
+                 static_cast<float>(m.travelMax.z)};
+  ImGui::SetNextItemWidth(ControlWidth());
+  if (ExprDragFloat3(state, "Travel min (mm)###mach_travel_min", lo, 1.0f)) {
+    m.travelMin = {lo[0], lo[1], lo[2]};
+    edited = true;
+  }
+  ImGui::SetNextItemWidth(ControlWidth());
+  if (ExprDragFloat3(state, "Travel max (mm)###mach_travel_max", hi, 1.0f)) {
+    m.travelMax = {hi[0], hi[1], hi[2]};
+    edited = true;
+  }
+  ImGui::SetItemTooltip("The work area, in machine coordinates. Leave it at "
+                        "zero and nothing is checked against it.");
+  ImGui::SetNextItemWidth(ControlWidth());
+  if (ImGui::BeginCombo("Post###mach_post", m.post.c_str())) {
+    for (const std::string& id : cam::PostIds())
+      if (ImGui::Selectable(id.c_str(), id == m.post)) {
+        m.post = id;
+        edited = true;
+      }
+    ImGui::EndCombo();
+  }
+  if (ImGui::Checkbox("Arcs (G2/G3)###mach_arcs", &m.fitArcs))
+    edited = true;
+  if (ImGui::Checkbox("Has a 4th axis (A)###mach_rotary", &m.hasRotaryAxis))
+    edited = true;
+  float rapid = static_cast<float>(m.rapidFeed);
+  ImGui::SetNextItemWidth(ControlWidth());
+  if (ExprDragFloat(state, "Rapid feed (mm/min, 0 = G0)###mach_rapid", &rapid,
+                    10.0f, 0.0f, 100000.0f, "%.0f")) {
+    m.rapidFeed = rapid;
+    edited = true;
+  }
+  ImGui::TextDisabled("%zu tool%s in its library (a setup copies them)",
+                      m.library.size(), m.library.size() == 1 ? "" : "s");
+  if (edited)
+    commit(m);
 }
 
 // Preferences > Keyboard. Not a `Field`: the table above is one scalar per
@@ -453,6 +631,8 @@ void DrawSettingsWindow(AppState& state) {
 
   if (ImGui::CollapsingHeader("Keyboard###sec_Keyboard"))
     changed |= DrawKeyboardSection(state);
+  if (ImGui::CollapsingHeader("Machines###sec_Machines"))
+    DrawMachinesSection(state);
 
   ImGui::Separator();
   // A user who has broken their config should not have to find the JSON.

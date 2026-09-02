@@ -846,7 +846,7 @@ bool RecomputeOrigin(Setup& setup, const std::vector<Body>& bodies) {
 }
 
 bool EmitsRotary(const Setup& setup) {
-  return setup.hasRotaryAxis && std::abs(setup.rotationA) > 1e-9;
+  return setup.machine.hasRotaryAxis && std::abs(setup.rotationA) > 1e-9;
 }
 
 glm::dquat FlipFrame(const glm::dquat& frame) {

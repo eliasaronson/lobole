@@ -1319,6 +1319,57 @@ def main():
         expect(len(d.call("history_log")["log"]) >= 4,
                "the restore is itself a version")
 
+        phase("Machines over the RPC")
+        # The store is global (a scratch XDG_CONFIG_HOME here) and a setup
+        # EMBEDS a copy of the machine it names; the RPC says how the two
+        # stand (docs/cam/job-document.md, round two).
+        for stale in ("Smoke router",):
+            try:
+                d.call("delete_machine", name=stale)
+            except RuntimeError:
+                pass
+        before = len(d.call("list_machines")["machines"])
+        saved = d.call("save_machine", machine={
+            "name": "Smoke router", "post": "mach3",
+            "travel": {"min": [0, 0, -90], "max": [600, 400, 0]},
+            "rapid_feed": 2500})
+        expect(saved["name"] == "Smoke router", f"save_machine echoes: {saved}")
+        machines = d.call("list_machines")["machines"]
+        expect(len(machines) == before + 1, "the store grew by one")
+        expect_error(d, "save_machine", "name",
+                     machine={"name": "", "post": "mach3"})
+        expect_error(d, "save_machine", "haas",
+                     machine={"name": "Haas", "post": "haas"})
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [0, 0, 0],
+            "width": 40, "height": 30, "depth": 20})
+        d.call("machine_part")
+        on = d.call("add_cam_setup", name="On the router", machine="Smoke router")
+        expect(on["machine"]["name"] == "Smoke router" and
+               on["machine_match"] == "global",
+               f"a setup on a named machine is `global`: {on}")
+        expect_error(d, "add_cam_setup", "Nobody's", name="x",
+                     machine="Nobody's")
+        # Editing the copy makes it differ; the store did not change.
+        d.call("set_cam_setup", id=on["id"], fit_arcs=False)
+        st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+              if s_["id"] == on["id"]][0]
+        expect(st["machine_match"] == "differs" and not st["fit_arcs"],
+               f"an edited copy reports `differs`: {st['machine_match']}")
+        d.call("set_cam_setup", id=on["id"], machine="Smoke router")
+        st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+              if s_["id"] == on["id"]][0]
+        expect(st["machine_match"] == "global" and st["fit_arcs"],
+               "re-picking the machine restores the copy")
+        d.call("delete_machine", name="Smoke router")
+        st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+              if s_["id"] == on["id"]][0]
+        expect(st["machine_match"] == "missing" and
+               st["machine"]["name"] == "Smoke router",
+               f"a deleted machine leaves the job its copy: {st['machine_match']}")
+        d.call("new_project")
+
         phase("CAM over the RPC")
         # Every operation type must survive the round trip through the RPC.
         # OpType::Adaptive was REPORTED as "profile" for a while — the way in

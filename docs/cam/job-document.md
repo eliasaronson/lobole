@@ -668,3 +668,36 @@ surveyed that embeds a copy also reconciles quietly (PrusaSlicer by value,
 Bambu by leaving it dirty), and the repo's rule is the opposite. Build the
 "differs from yours" line first and the merge second.
 
+### As built — M1 (2026-09-02, format v77)
+
+`cam::Machine` (CamJob.h, beside Tool, embedded by Setup) and
+core/cam/CamMachine.h for what is asked about one: `MatchMachine` gives
+`Unnamed | Global | Differs | Missing`. The store is `DocumentIO::
+LoadMachines/SaveMachine/DeleteMachine` over `~/.config/designer/machines/
+<slug>.json`; `ui::ReloadMachines` mirrors it into `state.machines` at startup
+and after every write. `post`, `fitArcs` and `hasRotaryAxis` left the setup
+(43 read sites moved mechanically); a v73–v76 file's three keys are read into
+an unnamed machine, and the goldens hold one job on a named machine beside
+one on its own.
+
+What the panel does with it: the setup row's combo is the machine (it was
+the post); the post moved under Stock and safety as one of the machine's own
+fields, edited on the job's copy; a line under the combo says *"Set up on a
+different 'X' than yours — Use mine · Save as mine"*, or *"'X' is not one of
+your machines — Save it"*, or *"No machine: define one in Preferences ›
+Machines"*. Preferences › Machines is New / Duplicate / Delete, a list, and
+an editor whose every edit writes the file (a rename moves it). RPC:
+`list_machines`, `save_machine`, `delete_machine`, `machine` on
+`add_cam_setup`/`set_cam_setup`, and `machine` + `machine_match` on every
+setup listed.
+
+**The plan's fourth row did not arise.** "Named but no embedded copy →
+refuse" assumed a file could carry a name alone; the writer always embeds
+the whole profile, so a reader never sees that shape. Three states, not four.
+
+**Two things the round found, neither about machines.** A Delete button that
+emptied the selection and then indexed it (a stale "have a selection" flag
+read before the buttons), and two more `ItemClick`s on collapsing headers —
+the BOM lesson again, this time surfaced by two new tests leaving Stock and
+Tools open. `ItemOpen`, always.
+

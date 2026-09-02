@@ -36,7 +36,7 @@ void DropCamToolpath(AppState& state, uint64_t opId);
 // session cannot disagree about whether this machine gets arcs (C7).
 [[nodiscard]] inline cam::PostOptions PostOpts(const cam::Setup& setup) {
   cam::PostOptions opts;
-  opts.fitArcs = setup.fitArcs;
+  opts.fitArcs = setup.machine.fitArcs;
   return opts;
 }
 

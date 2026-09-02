@@ -93,6 +93,22 @@ nlohmann::json StudyToJson(const fem::Study& study);
 // CAM setups (v58) — SerializeCam.cpp. Inline in both save formats.
 nlohmann::json CamSetupToJson(const cam::Setup& setup);
 cam::Setup CamSetupFromJson(const nlohmann::json& j);
+// The machine (docs/cam/job-document.md, round two): its JSON, embedded in a
+// setup and written as one file per machine in the global store.
+nlohmann::json MachineToJson(const cam::Machine& m);
+cam::Machine
+MachineFromJson(const nlohmann::json& j); // throws on an unknown post
+// The global store: `dir` holds one `<slug>.json` per machine (the app uses
+// settings::ConfigDir()/machines). Load returns every readable file sorted by
+// name and reports the unreadable ones in `error` without failing the rest;
+// Save refuses an unnamed machine, an unknown post, or a name that would
+// share a file with a different name; Delete refuses a name it cannot find.
+std::vector<cam::Machine> LoadMachines(const std::string& dir,
+                                       std::string* error = nullptr);
+bool SaveMachine(const std::string& dir, const cam::Machine& m,
+                 std::string* error = nullptr);
+bool DeleteMachine(const std::string& dir, const std::string& name,
+                   std::string* error = nullptr);
 fem::Study StudyFromJson(const nlohmann::json& j);
 
 // Topology-study RESULT (de)serialization (v33). Unlike FEM results (derived,

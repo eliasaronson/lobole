@@ -53,6 +53,41 @@ struct Tool {
   double feedCut = 300.0;    // mm/min in XY
   double feedPlunge = 100.0; // mm/min in Z
   double spindleRpm = 10000.0;
+  bool operator==(const Tool&) const = default;
+};
+
+// The MACHINE, as one physical thing (docs/cam/job-document.md, round two;
+// core/cam/CamMachine.h for what is asked about it). Post dialect, arc
+// fitting and the rotary axis lived on `Setup` because there was nowhere
+// else; they are claims about the machine in the shop, and a setup EMBEDS a
+// copy of the machine it was set up on, named by `name`. Saved globally, one
+// file per machine beside settings.json (Serialization.h).
+struct Machine {
+  std::string name; // the key a job names it by; "" = the job's own, unnamed
+  // The work area, in machine coordinates. Zero-size means "not stated", and
+  // nothing is checked against it -- a box nobody typed is not a limit.
+  glm::dvec3 travelMin{0.0, 0.0, 0.0};
+  glm::dvec3 travelMax{0.0, 0.0, 0.0};
+  std::string post = "mach3"; // post id; "linuxcnc" planned
+  // Whether the post fits G2/G3 arcs (C7). A controller that mishandles arcs
+  // mishandles them every session.
+  bool fitArcs = true;
+  // Whether the machine has an A axis at all. False means the rotary controls
+  // are not offered and no file can command an axis the shop does not own.
+  bool hasRotaryAxis = false;
+  // Seeds Setup::rapidFeed; 0 = G0. Kept per job as well, because a capped
+  // rapid is a per-job choice on the controllers that need one (Kiri:Moto
+  // keeps it on the process, not the device).
+  double rapidFeed = 0.0;
+  // The tool library a new setup's table is copied from (M4). Copied, never
+  // linked: FreeCAD's answer, and the one the per-setup table already gives.
+  std::vector<Tool> library;
+
+  [[nodiscard]] bool HasWorkArea() const {
+    return travelMax.x > travelMin.x && travelMax.y > travelMin.y &&
+           travelMax.z > travelMin.z;
+  }
+  bool operator==(const Machine&) const = default;
 };
 
 // How far ABOVE the tool's lowest point its cutting surface sits, `d` mm out
@@ -302,19 +337,18 @@ struct Setup {
   Target topFace;
   // The MACHINE's rotary index: rotation about X in degrees, emitted as an A
   // word. 0 for every 3-axis job — INCLUDING one whose frame is rotated.
+  // Needs `machine.hasRotaryAxis`: no file can carry an A word for an axis
+  // the shop does not own.
   double rotationA = 0.0;
-  // Whether the machine has an A axis at all. A property of the MACHINE, like
-  // `post` and `fitArcs`, so it persists. False means the rotary controls are
-  // not offered and no file can command an axis the shop does not own.
-  bool hasRotaryAxis = false;
 
-  // Whether the post fits G2/G3 arcs (C7). A property of the MACHINE, so it
-  // lives on the setup and persists — a controller that mishandles arcs
-  // mishandles them every session.
-  bool fitArcs = true;
-  std::string post = "mach3"; // post id; "linuxcnc" planned
-  double safeZ = 5.0;         // rapid height above the stock top (mm)
-  double rapidFeed = 0.0;     // 0 = G0; some machines want a capped G1
+  // The machine this setup was set up on: the post, arc fitting, the rotary
+  // axis, the work area. An EMBEDDED COPY of a globally stored profile, named
+  // by `machine.name` (docs/cam/job-document.md, round two); `post`,
+  // `fitArcs` and `hasRotaryAxis` used to be fields here, which is how every
+  // new job re-answered "which machine". Unnamed = the job's own.
+  Machine machine;
+  double safeZ = 5.0;     // rapid height above the stock top (mm)
+  double rapidFeed = 0.0; // 0 = G0; some machines want a capped G1
 
   // Where each part sits in the stock. Empty is a job that has parts but has
   // not been laid out -- everything at the origin, which is the honest
@@ -322,7 +356,7 @@ struct Setup {
   std::vector<Placement> placements;
 
   // In what order the operations cut, and whether the post writes one file
-  // per group. Properties of the JOB, like `post` and `fitArcs`.
+  // per group. Properties of the JOB, unlike the machine above.
   OrderOutputBy order = OrderOutputBy::Authored;
 
   std::vector<Tool> tools;

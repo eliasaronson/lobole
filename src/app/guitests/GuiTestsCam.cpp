@@ -1,6 +1,11 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "core/cam/CamMachine.h"
+#include "core/io/Serialization.h"
 #include "ui/JobActions.h"
+#include "ui/MachineActions.h"
+
+#include <filesystem>
 
 #ifdef HAVE_CAM
 #include "render/StockRenderer.h"
@@ -176,18 +181,25 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // the pair.
     ImGuiWindow* panel = ImGui::FindWindowByName("CAM###CamPanel");
     IM_CHECK(panel != nullptr);
-    const ImGuiID postCombo = panel->GetID("###cam_post");
+    // The setup row's combo is the MACHINE since round two; the post dialect
+    // moved under "Stock and safety" as one of the machine's own fields.
+    const ImGuiID machineCombo = panel->GetID("###cam_machine");
     const ImGuiID saveButton = panel->GetID("###cam_save_gcode");
-    IM_CHECK(postCombo != saveButton);
+    IM_CHECK(machineCombo != saveButton);
     ImGuiTestItemList items;
     ctx->GatherItems(&items, "//CAM###CamPanel");
     bool sawCombo = false, sawSave = false;
     for (const ImGuiTestItemInfo& item : items) {
-      sawCombo |= item.ID == postCombo;
+      sawCombo |= item.ID == machineCombo;
       sawSave |= item.ID == saveButton;
     }
-    IM_CHECK(sawCombo); // the post dialect…
+    IM_CHECK(sawCombo); // the machine…
     IM_CHECK(sawSave);  // …and Save G-code, as two separate widgets
+    // ...and the post combo is still reachable, under its header.
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_stock");
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("###cam_post"));
   };
 
   // An operation can be removed from the window that makes them. Removing was
@@ -539,7 +551,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
-    ctx->ItemClick("###cam_stock"); // open Stock and safety
+    ctx->ItemOpen(
+        "###cam_stock"); // OPEN, not toggle (a header keeps its state)
     ctx->Yield(2);
 
     // Move zero to the stock's centre by clicking, and the origin follows.
@@ -561,7 +574,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!live->operations.empty());
     if (!s_App->camToolpaths.empty()) {
       std::string gcode, error;
-      IM_CHECK(cam::PostProcess(live->post, *live, s_App->camToolpaths,
+      IM_CHECK(cam::PostProcess(live->machine.post, *live, s_App->camToolpaths,
                                 ui::PostOpts(*live), gcode, &error));
       const cam::GProgram file = cam::ParseGcode(gcode);
       const cam::GProgram back = cam::ProgramInSetupSpace(gcode, *live);
@@ -712,7 +725,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
     const cam::Setup* laid = Job()->FindSetup(setup.id);
     IM_CHECK(!cam::FrameIsSquare(*laid));
-    IM_CHECK(!laid->hasRotaryAxis);
+    IM_CHECK(!laid->machine.hasRotaryAxis);
     IM_CHECK(s_App->slotPick.miss.empty());
 
     // And now the SAME face is the top face, with a Z zero on it.
@@ -1121,7 +1134,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // raised "2 visible items with conflicting ID" in a modal. One of each
     // never collides — which is why the first version of this test passed
     // while the panel was broken in front of the user.
-    ctx->ItemClick("###cam_tools"); // expand the Tools header
+    ctx->ItemOpen(
+        "###cam_tools"); // OPEN, not toggle (a header keeps its state)
     ctx->Yield();
     ctx->ItemClick("###cam_add_tool");
     ctx->ItemClick("###cam_add_op");
@@ -1187,8 +1201,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // The toolpath the overlay drew is the one the post would consume: same
     // vector, so the picture cannot disagree with the file.
     std::string gcode, error;
-    IM_CHECK(cam::PostProcess(live->post, *live, s_App->camToolpaths, {}, gcode,
-                              &error));
+    IM_CHECK(cam::PostProcess(live->machine.post, *live, s_App->camToolpaths,
+                              {}, gcode, &error));
     IM_CHECK(gcode.find("G90 G91.1 G21") != std::string::npos);
     IM_CHECK(gcode.find("nan") == std::string::npos);
   };
@@ -1900,6 +1914,124 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->measure.readout.rfind("Distance:", 0) == 0);
     IM_CHECK(s_App->measure.readout.find("60") != std::string::npos);
     s_App->measure = ui::MeasureState{};
+  };
+
+  // Preferences > Machines is the store (docs/cam/job-document.md, round
+  // two): New writes a file, a rename moves it, an edit rewrites it, Delete
+  // removes it. The GUI runner points XDG_CONFIG_HOME at a scratch dir, so
+  // this is a scratch store; the test still cleans up by name.
+  t = IM_REGISTER_TEST(engine, "cam", "machines_are_kept_in_preferences");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    for (const char* stale : {"Machine 1", "Test router"})
+      (void)ui::DeleteMachine(*s_App, stale);
+    const size_t before = s_App->machines.size();
+    ctx->MenuClick("Edit/###edit_preferences");
+    ctx->Yield();
+    ctx->SetRef("//###SettingsWindow");
+    ctx->ItemOpen("###sec_Machines");
+    ctx->Yield();
+    ctx->ItemClick("###mach_new");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->machines.size(), before + 1);
+    IM_CHECK(cam::FindMachine(s_App->machines, "Machine 1") != nullptr);
+    const std::filesystem::path dir(ui::MachineDir());
+    IM_CHECK(std::filesystem::exists(dir / "machine-1.json"));
+
+    // Rename moves the file.
+    ctx->ItemInputValue("###mach_name", "Test router");
+    ctx->Yield(3);
+    IM_CHECK(cam::FindMachine(s_App->machines, "Test router") != nullptr);
+    IM_CHECK(cam::FindMachine(s_App->machines, "Machine 1") == nullptr);
+    IM_CHECK(std::filesystem::exists(dir / "test-router.json"));
+    IM_CHECK(!std::filesystem::exists(dir / "machine-1.json"));
+
+    // An edit rewrites it: typed, so the field's expression path is what is
+    // tested, and read back from DISK rather than from the struct.
+    ctx->ItemInputValue("###mach_rapid", "3000");
+    ctx->Yield(3);
+    ctx->ItemClick("###mach_rotary");
+    ctx->Yield(3);
+    const auto fromDisk = DocumentIO::LoadMachines(ui::MachineDir());
+    const cam::Machine* saved = cam::FindMachine(fromDisk, "Test router");
+    IM_CHECK(saved != nullptr);
+    IM_CHECK(std::abs(saved->rapidFeed - 3000.0) < 1e-9);
+    IM_CHECK(saved->hasRotaryAxis);
+
+    ctx->ItemClick("###mach_delete");
+    ctx->Yield(2);
+    IM_CHECK(cam::FindMachine(s_App->machines, "Test router") == nullptr);
+    IM_CHECK(!std::filesystem::exists(dir / "test-router.json"));
+    IM_CHECK_EQ(s_App->machines.size(), before);
+    s_App->settingsWindowOpen = false;
+  };
+
+  // A setup names a machine and EMBEDS a copy; the panel says when the copy
+  // and the store disagree, and offers both directions. Every reference
+  // surveyed reconciles this quietly (docs/cam/job-document.md, round two).
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "a_setup_names_a_machine_and_says_when_it_differs");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    (void)ui::DeleteMachine(*s_App, "Test shop router");
+    cam::Machine mine;
+    mine.name = "Test shop router";
+    mine.travelMax = {600.0, 400.0, 80.0};
+    mine.rapidFeed = 2500.0;
+    IM_CHECK(ui::SaveMachine(*s_App, mine));
+
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(3);
+    IM_CHECK(cam::MatchMachine(s_App->machines, setup.machine) ==
+             cam::MachineMatch::Unnamed);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_machine");
+    ctx->ItemClick("//$FOCUSED/Test shop router");
+    ctx->Yield(2);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
+    IM_CHECK(live->machine == mine);
+    IM_CHECK(std::abs(live->rapidFeed - 2500.0) < 1e-9); // seeded
+    IM_CHECK(cam::MatchMachine(s_App->machines, live->machine) ==
+             cam::MachineMatch::Global);
+    IM_CHECK(!ctx->ItemExists("###cam_machine_use_mine"));
+
+    // Edit the JOB'S copy: it now differs, and the panel offers mine back.
+    ctx->ItemOpen("###cam_stock");
+    ctx->Yield();
+    ctx->ItemClick("###cam_arcs");
+    ctx->Yield(2);
+    live = Job()->FindSetup(setup.id);
+    IM_CHECK(!live->machine.fitArcs);
+    IM_CHECK(cam::MatchMachine(s_App->machines, live->machine) ==
+             cam::MachineMatch::Differs);
+    IM_CHECK(ctx->ItemExists("###cam_machine_use_mine"));
+    ctx->ItemClick("###cam_machine_use_mine");
+    ctx->Yield(2);
+    live = Job()->FindSetup(setup.id);
+    IM_CHECK(live->machine == mine);
+
+    // The store loses it: the job keeps its copy and says so; Save it puts
+    // it back.
+    IM_CHECK(ui::DeleteMachine(*s_App, "Test shop router"));
+    ctx->Yield(2);
+    live = Job()->FindSetup(setup.id);
+    IM_CHECK(cam::MatchMachine(s_App->machines, live->machine) ==
+             cam::MachineMatch::Missing);
+    IM_CHECK(live->machine.name == "Test shop router"); // the copy survives
+    ctx->ItemClick("###cam_machine_save");
+    ctx->Yield(2);
+    IM_CHECK(cam::MatchMachine(s_App->machines, live->machine) ==
+             cam::MachineMatch::Global);
+    IM_CHECK(ui::DeleteMachine(*s_App, "Test shop router"));
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

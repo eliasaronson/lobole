@@ -1092,7 +1092,7 @@ void DrawJobToolbar(AppState& state) {
   // disabled button for an axis you do not own is a question with no answer.
 #ifdef HAVE_CAM
   if (const cam::Setup* setup = ActiveCamSetup(state);
-      setup != nullptr && setup->hasRotaryAxis)
+      setup != nullptr && setup->machine.hasRotaryAxis)
     btn(ICON_FA_ROTATE "###tb_job_index_face", "job.index_face",
         "Turn a face up: index the rotary table so this face points at the "
         "spindle",

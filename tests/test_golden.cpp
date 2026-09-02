@@ -171,11 +171,64 @@ void AssertCamFrames(const std::vector<cam::Setup>& setups,
     const auto want = expect.at("cam_setup_rotary").get<std::vector<bool>>();
     std::vector<bool> got;
     for (const cam::Setup& setup : setups)
-      got.push_back(setup.hasRotaryAxis);
+      got.push_back(setup.machine.hasRotaryAxis);
     REQUIRE(got.size() == want.size());
     for (size_t i = 0; i < got.size(); i++) {
       INFO("setup " << i);
       CHECK(got[i] == want[i]);
+    }
+  }
+  // v77: the machine a setup embeds — its name (empty = the job's own), its
+  // post, arc fitting, work area and tool library — and, for a file that
+  // predates the block, the three keys that used to be the setup's own,
+  // read into an unnamed machine.
+  if (expect.contains("cam_machine_names")) {
+    const auto want =
+        expect.at("cam_machine_names").get<std::vector<std::string>>();
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      CHECK(setups[i].machine.name == want[i]);
+    }
+  }
+  if (expect.contains("cam_posts")) {
+    const auto want = expect.at("cam_posts").get<std::vector<std::string>>();
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      CHECK(setups[i].machine.post == want[i]);
+    }
+  }
+  if (expect.contains("cam_fit_arcs")) {
+    const auto want = expect.at("cam_fit_arcs").get<std::vector<bool>>();
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      CHECK(setups[i].machine.fitArcs == want[i]);
+    }
+  }
+  if (expect.contains("cam_machine_travel_max")) {
+    const auto& want = expect.at("cam_machine_travel_max");
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      if (want[i].is_null()) {
+        CHECK(!setups[i].machine.HasWorkArea());
+        continue;
+      }
+      REQUIRE(setups[i].machine.HasWorkArea());
+      for (int c = 0; c < 3; c++)
+        CHECK_THAT(setups[i].machine.travelMax[c],
+                   Catch::Matchers::WithinAbs(want[i][c].get<double>(), 1e-9));
+    }
+  }
+  if (expect.contains("cam_machine_library_sizes")) {
+    const auto want =
+        expect.at("cam_machine_library_sizes").get<std::vector<size_t>>();
+    REQUIRE(setups.size() == want.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i);
+      CHECK(setups[i].machine.library.size() == want[i]);
     }
   }
 }
