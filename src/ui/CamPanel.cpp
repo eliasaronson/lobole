@@ -89,7 +89,20 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
     DropCamToolpath(state, opId);
     return;
   }
-  cam::Toolpath fresh = cam::Generate(*setup, *op, ui::JobBodies(state));
+  // An arrangement that cannot be cut -- a sheet longer than the machine, a
+  // part off the stock -- is what a FULL pass stamps on every operation
+  // (GenerateAll); this path has to say the same, or a verb-made operation
+  // on a bad layout generated fine here and only a Generate press refused.
+  cam::Toolpath fresh;
+  if (const std::string why =
+          cam::PlacementRefusal(*setup, ui::JobBodies(state));
+      !why.empty()) {
+    fresh.operationId = opId;
+    fresh.toolNumber = op->toolNumber;
+    fresh.error = why;
+  } else {
+    fresh = cam::Generate(*setup, *op, ui::JobBodies(state));
+  }
   for (cam::Toolpath& existing : state.camToolpaths)
     if (existing.operationId == opId) {
       existing = std::move(fresh);

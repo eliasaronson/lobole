@@ -279,6 +279,15 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 //     "hanging over the edge" and "not on it at all" are different mistakes;
 //   - two parts occupying the same rectangle, which a backplot drawing both
 //     cannot show you.
+// The job against the MACHINE's work area (round two, M2): the stock's
+// extent per axis against the travel's. Extents only -- where the operator
+// touches off inside the travel is not the job's to know -- and only when the
+// machine states a work area at all. Empty when it fits or nothing is stated;
+// otherwise the axis and the shortfall, in words. The bed is never grown to
+// fit (Kiri:Moto's answer): the machine is the shop's.
+[[nodiscard]] std::string MachineRefusal(const Setup& setup,
+                                         const std::vector<Body>& bodies);
+
 [[nodiscard]] std::string PlacementRefusal(const Setup& setup,
                                            const std::vector<Body>& bodies);
 

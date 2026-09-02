@@ -2556,8 +2556,39 @@ std::vector<size_t> CuttingOrder(const Setup& setup) {
   return out;
 }
 
+std::string MachineRefusal(const Setup& setup,
+                           const std::vector<Body>& bodies) {
+  const Machine& m = setup.machine;
+  if (!m.HasWorkArea())
+    return "";
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return "";
+  const char* axes[3] = {"X", "Y", "Z"};
+  for (int a = 0; a < 3; a++) {
+    const double need = hi[a] - lo[a];
+    const double have = m.travelMax[a] - m.travelMin[a];
+    if (need > have + 1e-6) {
+      char buf[200];
+      std::snprintf(buf, sizeof(buf),
+                    "the stock is %.0f mm in %s and %s travels %.0f: %.0f mm "
+                    "too long. A smaller sheet, a second setup, or a bigger "
+                    "machine",
+                    need, axes[a],
+                    m.name.empty() ? "this machine" : m.name.c_str(), have,
+                    need - have);
+      return buf;
+    }
+  }
+  return "";
+}
+
 std::string PlacementRefusal(const Setup& setup,
                              const std::vector<Body>& bodies) {
+  // The machine first: a sheet that does not fit the bed is refused before
+  // anything on the sheet is looked at.
+  if (const std::string why = MachineRefusal(setup, bodies); !why.empty())
+    return why;
   for (size_t i = 0; i < setup.placements.size(); i++)
     for (size_t k = i + 1; k < setup.placements.size(); k++)
       if (setup.placements[i].jobPartId == setup.placements[k].jobPartId &&

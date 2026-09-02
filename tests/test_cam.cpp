@@ -4657,3 +4657,37 @@ TEST_CASE("cam machine: a setup's copy is matched against the store by name",
   CHECK(cam::MachineFileName("  Big -- Router! ") == "big-router.json");
   CHECK(cam::MachineFileName("") == "machine.json");
 }
+
+TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
+          "[cam][machine][job]") {
+  // A 900 x 400 sheet on a machine that travels 600 in X.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Panel", glm::vec3(0, 0, 0),
+                                              880.0, 380.0, 18.0));
+  cam::Setup setup;
+  setup.stock.mode = cam::StockMode::Fixed;
+  setup.stock.size = {900.0, 400.0, 18.0};
+  setup.machine.name = "Small router";
+  setup.machine.travelMin = {0.0, 0.0, -90.0};
+  setup.machine.travelMax = {600.0, 600.0, 0.0};
+  const std::string why = cam::MachineRefusal(setup, doc.GetBodies());
+  INFO(why);
+  CHECK(why.find("X") != std::string::npos);
+  CHECK(why.find("900") != std::string::npos);
+  CHECK(why.find("600") != std::string::npos);
+  CHECK(why.find("300") != std::string::npos); // the shortfall
+  CHECK(why.find("Small router") != std::string::npos);
+  // ...and it is the placement refusal too, so generation and the post stop
+  // on it rather than the machine.
+  CHECK(cam::PlacementRefusal(setup, doc.GetBodies()) == why);
+  // The machine is NOT grown to fit: what Kiri:Moto does, and the wrong
+  // answer -- the picture stays right and the machine is wrong.
+  CHECK(setup.machine.travelMax.x == 600.0);
+
+  // A machine that states no work area checks nothing; one big enough fits.
+  cam::Setup unstated = setup;
+  unstated.machine.travelMax = unstated.machine.travelMin;
+  CHECK(cam::MachineRefusal(unstated, doc.GetBodies()).empty());
+  setup.machine.travelMax.x = 1200.0;
+  CHECK(cam::MachineRefusal(setup, doc.GetBodies()).empty());
+}

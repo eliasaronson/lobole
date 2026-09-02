@@ -36,6 +36,10 @@ constexpr glm::vec4 kHoverLine(0.45f, 0.85f, 1.00f, 0.95f);
 constexpr glm::vec3 kStockFill(0.32f, 0.36f, 0.44f);
 constexpr glm::vec4 kStockLine(0.60f, 0.66f, 0.78f, 0.55f);
 constexpr glm::vec4 kLeftoverDot(1.00f, 0.35f, 0.35f, 0.95f);
+// The machine's work area: dimmer than the stock, so the stock reads as the
+// thing in front; red when the job does not fit it.
+constexpr glm::vec4 kBedLine(0.45f, 0.55f, 0.70f, 0.35f);
+constexpr glm::vec4 kBedRefusedLine(1.00f, 0.35f, 0.35f, 0.80f);
 
 // A closed loop drawn at one height.
 void LoopLines(const std::vector<glm::dvec2>& pts, double z, float halfPx,
@@ -953,11 +957,13 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
     return;
   const bool session = state.camToolOpen;
 
-  // The stock, so "where is Z zero and how much material is above the part"
-  // stops being invisible. Only while the session is open: outside it, the
-  // box is clutter over the model you are drawing.
+  // The stock, ALWAYS on a job tab (round two, M2): it is the thing the
+  // parts are placed in, and drawing it only while a verb window was open
+  // left it invisible most of the time. "Only in the session" was written
+  // when CAM lived on the part tab, where the box was clutter over the model
+  // being drawn; a job tab draws nothing else.
   glm::dvec3 lo(0.0), hi(0.0);
-  if (session && state.camShowStock &&
+  if (state.camShowStock &&
       cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
     const std::vector<glm::dvec2> rect = {
         {lo.x, lo.y}, {hi.x, lo.y}, {hi.x, hi.y}, {lo.x, hi.y}};
@@ -967,6 +973,29 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
       AppendPrimLine(glm::vec3(c.x, c.y, lo.z), glm::vec3(c.x, c.y, hi.z), 1.0f,
                      kStockLine, prims);
     LoopWalls(rect, lo.z, hi.z, kStockFill, quads);
+
+    // ...and the MACHINE's work area around it, when the machine states one:
+    // a box the size of the travel, its near-left corner at the stock's and
+    // its floor at the stock's bottom, which is how a sheet is loaded. Where
+    // the operator touches off inside the travel is not the job's to know,
+    // so this is the machine's SIZE against the job's -- the check
+    // cam::MachineRefusal makes in words. Never resized to fit.
+    const cam::Machine& m = setup->machine;
+    if (m.HasWorkArea()) {
+      const glm::dvec3 size = m.travelMax - m.travelMin;
+      const std::vector<glm::dvec2> bed = {{lo.x, lo.y},
+                                           {lo.x + size.x, lo.y},
+                                           {lo.x + size.x, lo.y + size.y},
+                                           {lo.x, lo.y + size.y}};
+      const bool fits =
+          cam::MachineRefusal(*setup, ui::JobBodies(state)).empty();
+      const glm::vec4 line = fits ? kBedLine : kBedRefusedLine;
+      LoopLines(bed, lo.z, 1.0f, line, prims);
+      LoopLines(bed, lo.z + size.z, 0.8f, line, prims);
+      for (const glm::dvec2& c : bed)
+        AppendPrimLine(glm::vec3(c.x, c.y, lo.z),
+                       glm::vec3(c.x, c.y, lo.z + size.z), 0.8f, line, prims);
+    }
   }
 
   // What the selected operation removes.

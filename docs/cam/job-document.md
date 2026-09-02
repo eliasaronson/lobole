@@ -701,3 +701,22 @@ read before the buttons), and two more `ItemClick`s on collapsing headers —
 the BOM lesson again, this time surfaced by two new tests leaving Stock and
 Tools open. `ItemOpen`, always.
 
+### As built — M2 (2026-09-02)
+
+The stock is drawn on every job tab, session or not; "only in the session"
+was written for the part tab, where the box was clutter over the model. The
+machine's work area is a dimmer box the size of the travel, its near-left
+corner at the stock's and its floor at the stock's bottom — how a sheet is
+loaded — red when the job does not fit. `cam::MachineRefusal` checks
+**extents per axis**, not position: where the operator touches off inside
+the travel is not the job's to know. It is the first line of
+`PlacementRefusal`, so generation, the post and `check_layout` all stop on
+*"the stock is 900 mm in X and Small router travels 600: 300 mm too long"*.
+The machine is never resized to fit.
+
+**Found on the way:** the incremental single-operation refresh
+(`RefreshCamToolpath`) never applied the layout refusal that a full pass
+stamps on every operation — so a verb-made operation on a bad layout
+generated fine and only a Generate press refused. It checks first now, and
+the verb refuses the dead cut in its window.
+

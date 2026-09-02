@@ -928,15 +928,19 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(lowest <= (float)op.bottomZ + 1e-3f);
     IM_CHECK(highest >= (float)op.topZ - 1e-3f);
 
-    // Closing the session drops the decision-time drawings and keeps the
-    // backplot: the job survives the window that made it.
+    // Closing the session drops the decision-time drawings (the ghost) and
+    // keeps the backplot: the job survives the window that made it. The
+    // STOCK stays too, since round two -- it is the thing the parts are
+    // placed in, drawn on every job tab.
     ctx->ItemClick("//Clear a pocket###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
     IM_CHECK(!s_App->camToolOpen);
+    IM_CHECK_EQ(s_App->camGhostOp, (uint64_t)0);
     std::vector<PrimVertex> afterPrims;
     std::vector<LineVertex3D> afterQuads;
     ui::AppendCamVisualisation(*s_App, afterPrims, afterQuads);
-    IM_CHECK(afterQuads.empty()); // no stock box, no ghost
+    IM_CHECK(afterQuads.size() < quads.size()); // the ghost's walls are gone
+    IM_CHECK(!afterQuads.empty());              // the stock's are not
     std::vector<PrimVertex> backplot;
     ui::AppendCamToolpathOverlay(*s_App, backplot);
     IM_CHECK(!backplot.empty());
@@ -2032,6 +2036,52 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(cam::MatchMachine(s_App->machines, live->machine) ==
              cam::MachineMatch::Global);
     IM_CHECK(ui::DeleteMachine(*s_App, "Test shop router"));
+  };
+
+  // The stock and the machine's work area are drawn on a job tab whether or
+  // not a verb window is open (round two, M2); the work area turns red and
+  // the post refuses when the job does not fit it. The machine is never
+  // grown to fit.
+  t = IM_REGISTER_TEST(engine, "cam", "stock_and_work_area_are_always_drawn");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Panel", glm::vec3(0, 0, 0), 880, 380, 18));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolOpen); // no session
+
+    std::vector<PrimVertex> prims;
+    std::vector<LineVertex3D> quads;
+    ui::AppendCamVisualisation(*s_App, prims, quads);
+    IM_CHECK(!quads.empty()); // the stock's walls, with no session open
+    const size_t stockOnly = prims.size();
+
+    // A machine with a work area adds its box...
+    cam::Setup* live = Job()->FindSetup(setup.id);
+    live->machine.name = "Test big router";
+    live->machine.travelMin = {0.0, 0.0, -100.0};
+    live->machine.travelMax = {1200.0, 800.0, 0.0};
+    ctx->Yield(2);
+    prims.clear();
+    quads.clear();
+    ui::AppendCamVisualisation(*s_App, prims, quads);
+    IM_CHECK(prims.size() > stockOnly);
+    IM_CHECK(cam::MachineRefusal(*live, ui::JobBodies(*s_App)).empty());
+
+    // ...and a machine too small refuses, at the post and in the verdict.
+    live->machine.travelMax = {600.0, 800.0, 0.0};
+    ToolbarClick(ctx, "###tb_job_whole");
+    ctx->Yield(3);
+    live = Job()->FindSetup(setup.id);
+    IM_CHECK(!s_App->camRefusal.empty()); // the verb refused the dead cut
+    IM_CHECK(s_App->camRefusal.find("600") != std::string::npos);
+    IM_CHECK(live->operations.empty());
+    IM_CHECK(live->machine.travelMax.x == 600.0); // not grown
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
