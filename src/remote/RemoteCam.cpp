@@ -84,7 +84,8 @@ constexpr MethodDoc kCamMethods[] = {
      "the machine: no A word is posted.",
      "setup, part, pos, rot_z, enabled, lay_face_up"},
     {"add_cam_setup",
-     "Add a milling setup {name?, post?: mach3|linuxcnc, safe_z?}; returns "
+     "Add a milling setup {name?, post?: mach3|linuxcnc|grbl, safe_z?}; "
+     "returns "
      "its id and the safe_z derived for it. A setup arrives with one 6 mm "
      "tool, because a setup with no tools can produce nothing, and with a "
      "rapid height clear of the stock, because the default 5 mm is inside "

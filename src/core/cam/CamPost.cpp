@@ -137,15 +137,31 @@ struct Emitter {
 // Mach3 and LinuxCNC agree on the motion words this generator emits; they
 // differ in the preamble, the tool change, and how a program ends. Keeping
 // the difference to those three places is why the interface is this small.
+// How a controller takes a tool change (docs/cam/router-round.md, R1):
+//   Table  -- T then M6, and the controller's tool table does the rest
+//             (LinuxCNC).
+//   Manual -- T M6, then M0 with a message: the operator changes the tool,
+//             sets Z zero, presses cycle start (Mach3).
+//   Pause  -- NO M6 at all: GRBL ignores it unless built for it, and the
+//             one CAM surveyed that emits an inline "M6 T2" for GRBL runs
+//             straight on into the next cut with the wrong tool. M5, the
+//             message, M0 -- a feed hold every GRBL honours -- then the
+//             spindle again.
+enum class ToolChange { Table, Manual, Pause };
+
 struct Dialect {
   const char* id;
-  bool toolTable;  // LinuxCNC: T then M6 uses the table; Mach3: manual
+  ToolChange change;
   const char* end; // program end word
 };
 
 constexpr Dialect kDialects[] = {
-    {"mach3", false, "M30"},
-    {"linuxcnc", true, "M2"},
+    {"mach3", ToolChange::Manual, "M30"},
+    {"linuxcnc", ToolChange::Table, "M2"},
+    // Every G word in the preamble is GRBL-legal (G91.1 included, since 1.1),
+    // and the drill posts plain moves, so nothing needs translating -- the
+    // difference is only the tool change and the end word.
+    {"grbl", ToolChange::Pause, "M2"},
 };
 
 // --- C7: fitting arcs back onto the polyline -------------------------------
@@ -430,9 +446,22 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       // Retract before any tool change, always: the one move that is never
       // wrong and whose absence breaks things.
       e.Retract(setup.safeZ);
-      std::ostringstream t;
-      t << "T" << tp.toolNumber << " M6";
-      e.Raw(t.str());
+      if (dialect->change != ToolChange::Pause) {
+        std::ostringstream t;
+        t << "T" << tp.toolNumber << " M6";
+        e.Raw(t.str());
+      } else {
+        // The spindle off before the hold, and the change spelled out where
+        // the operator will read it: GRBL never sees the T word, so the
+        // message is the only thing that says which tool.
+        e.Raw("M5");
+        std::ostringstream t;
+        t << "(change to T" << tp.toolNumber;
+        if (tool != nullptr)
+          t << ": " << tool->name << " D" << Num(tool->diameter, 3);
+        t << " - set Z zero, then cycle start)";
+        e.Raw(t.str());
+      }
       if (opts.comments && tool != nullptr) {
         // The SHAPE goes in the comment too. "T2 D6" is the same line for a
         // 6 mm end mill and a 6 mm ball nose, and the operator at the machine
@@ -454,9 +483,13 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         e.Comment("tool " + std::to_string(tool->number) + ": " + tool->name +
                   " D" + Num(tool->diameter, 3) + shape);
       }
-      const bool paused = !dialect->toolTable && opts.pauseOnToolChange;
+      const bool paused =
+          dialect->change == ToolChange::Pause ||
+          (dialect->change == ToolChange::Manual && opts.pauseOnToolChange);
       if (paused)
-        e.Raw("M0 (change tool, set Z zero, then cycle start)");
+        e.Raw(dialect->change == ToolChange::Pause
+                  ? "M0"
+                  : "M0 (change tool, set Z zero, then cycle start)");
       currentTool = tp.toolNumber;
       const double rpm = tool != nullptr ? tool->spindleRpm : 0.0;
       // Restate the spindle after a PAUSE even when the speed has not

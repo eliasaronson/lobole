@@ -394,10 +394,39 @@ TEST_CASE("cam: the post emits a program that starts and ends safely",
   CHECK(lcnc.find("M2") != std::string::npos);
   CHECK(lcnc.find("M0 (change tool") == std::string::npos);
 
+  // GRBL (docs/cam/router-round.md, R1): no M6 -- GRBL ignores it unless
+  // built for it, and an inline "M6 T2" runs on into the next cut with the
+  // wrong tool -- so the change is M5, a message naming the tool, M0 (a feed
+  // hold every GRBL honours), then the spindle again. No G43 either. The
+  // cut itself is the same file.
+  std::string grbl;
+  REQUIRE(cam::PostProcess("grbl", setup, paths, {}, grbl, &error));
+  CHECK(grbl.find("M6") == std::string::npos);
+  CHECK(grbl.find("G43") == std::string::npos);
+  const size_t stop = grbl.find("M5");
+  const size_t msg = grbl.find("(change to T1");
+  const size_t hold = grbl.find("\nM0\n");
+  const size_t spindle = grbl.find("S12000 M3");
+  REQUIRE(stop != std::string::npos);
+  REQUIRE(msg != std::string::npos);
+  REQUIRE(hold != std::string::npos);
+  REQUIRE(spindle != std::string::npos);
+  CHECK(stop < msg);
+  CHECK(msg < hold);
+  CHECK(hold < spindle);
+  CHECK(grbl.find("M2\n") != std::string::npos);
+  CHECK(grbl.find("G90 G91.1 G21 G17 G40 G49 G80") != std::string::npos);
+  // The same cut: the verifier reads both files to the same result.
+  const cam::Verdict a = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.5);
+  const cam::Verdict b = cam::VerifyGcode(grbl, setup, doc->GetBodies(), 0.5);
+  CHECK_THAT(a.maxGouge, WithinAbs(b.maxGouge, 1e-9));
+  CHECK_THAT(a.maxLeftover, WithinAbs(b.maxLeftover, 1e-9));
+
   // An unknown post names the ones that exist rather than failing blankly.
   std::string none;
   CHECK_FALSE(cam::PostProcess("haas", setup, paths, {}, none, &error));
   CHECK(error.find("mach3") != std::string::npos);
+  CHECK(error.find("grbl") != std::string::npos);
 }
 
 TEST_CASE("cam: a failed operation is skipped LOUDLY in the file", "[cam]") {

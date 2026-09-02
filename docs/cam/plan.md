@@ -146,7 +146,7 @@ cam::Setup                     // a document object, like fem::Study
                  // docs/cam/setup-frame.md, which split the orientation into
                  // a FIXTURE frame and the machine's rotationA after C9
                  // shipped the two as one number
-  machine        // post id: "mach3" | "linuxcnc"
+  machine        // post id: "mach3" | "linuxcnc" | "grbl" (router-round.md R1)
   fitArcs        // post curves as G2/G3 (C7). A machine property, so it
                  // lives here and persists
   tools[]        // number, diameter, TYPE (flat|ball|vbit|drill) + tip angle,
