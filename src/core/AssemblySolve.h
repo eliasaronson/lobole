@@ -89,18 +89,6 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
 // own UI, and inventing one here would be building for a case nobody has.
 int ApplyAttachments(AssemblyDocument& asmDoc);
 
-// Is `b` reachable from `a` through the mate graph — are these two
-// occurrences already held to each other, however many parts apart?
-//
-// The question a second bolt through the same pair of flanges has to ask.
-// Every mate between an already-connected pair closes a LOOP, and this
-// solver reports a loop rather than solving it (over-constrained): three
-// bolts joining one bracket to one frame must add one mate, not three.
-// Mates whose connectors fail to resolve still count as edges — an unusable
-// mate is a broken joint to fix, not a licence to add another.
-[[nodiscard]] bool MatesConnect(const AssemblyDocument& asmDoc, uint64_t a,
-                                uint64_t b);
-
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById = nullptr);
 

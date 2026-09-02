@@ -2756,10 +2756,17 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // housings and joined to neither, which is the reported bug one layer in.
   // Consecutive pairs are a chain, so this stays a tree the solver can place.
   //
-  // Once per PAIR, never once per bolt. A second bolt across an interface a
-  // first already joined would close a loop, and this solver reports a loop
-  // as over-constrained rather than solving it. So three bolts through one
-  // flange add nothing after the first, and say so by adding nothing.
+  // Once per bolt AND per interface. Every bolt across an interface gets its
+  // own mate, anchored at ITS hole — so deleting one bolt leaves the parts
+  // held by the others, which is what a bolt pattern means.
+  //
+  // This used to stop at the first bolt, because a mate between an
+  // already-connected pair closes a loop and A3 reported a loop as
+  // over-constrained rather than solving it. A6 closes loops, and a bolt
+  // pattern is the redundant-BUT-CONSISTENT case it exists to handle: the
+  // extra mates are satisfied, add no constraint, and `solve_assembly` names
+  // them in `redundant_mates` instead of erroring
+  // (docs/assemblies/a6-loop-solver-plan.md).
   {
     const auto instFor = [&](uint64_t occ) -> const assembly::FlatInstance* {
       for (const assembly::FlatInstance& inst : flat)
@@ -2784,10 +2791,8 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     for (size_t i = 0; i + 1 < spanned.size(); i++) {
       const parts::StackSegment& near = *spanned[i];
       const parts::StackSegment& next = *spanned[i + 1];
-      if (near.occurrence == next.occurrence ||
-          assembly::MatesConnect(*state.assembly, near.occurrence,
-                                 next.occurrence))
-        continue;
+      if (near.occurrence == next.occurrence)
+        continue; // the same part twice down the axis is not an interface
       const assembly::FlatInstance* a = instFor(near.occurrence);
       const assembly::FlatInstance* b = instFor(next.occurrence);
       if (a == nullptr || b == nullptr)

@@ -279,3 +279,54 @@ the components it solved, `assembly::Solve` MERGES them into the walk's result
 instead of replacing it. Replacing would strand every occurrence in every other
 component at its stored transform — a silent wrong answer, guarded by "A loop
 leaves a mate tree elsewhere in the document alone".
+
+## Stage 5 done: the fastener mates are no longer suppressed (2026-09-02)
+
+`JoinAcrossInterface` consulted `assembly::MatesConnect` and skipped any
+interface an earlier bolt had already joined, because that mate would have
+closed a loop A3 refused. That guard is gone: every bolt now mates every
+interface it spans, anchored at ITS hole, so deleting one bolt leaves the joint
+held by the others — which is what a bolt pattern means.
+
+`MatesConnect` itself is deleted. It existed only for that guard, and with the
+guard gone it had no caller and no test.
+
+On `scratch/build_alternator.py` (three M8 through-bolts, SRE housing + stator
++ DE housing):
+
+| | before | after |
+|---|---|---|
+| mates | 2 | **6** (3 bolts x 2 interfaces) |
+| errored | 0 | 0 |
+| loop mates | — | 4, all `redundant_mates` |
+| residual | — | 0.0 mm |
+| solve | — | 3.5 ms |
+
+## Performance (measured 2026-09-02)
+
+The shape that matters: **a bolt pattern has zero unknowns.** Every mate in it
+is Fastened, so `PackDofs` yields no columns, and `SolveComponent` skips LM and
+the QR entirely — it walks the tree once, evaluates one residual per cut mate,
+and takes the `cols == 0` branch straight to "every row is dependent". Linear,
+and barely distinguishable from a loop-free solve.
+
+| assembly | solve |
+|---|---|
+| 3 bolts (2 loops) | 2.13 ms |
+| 12 bolts (11 loops) | 2.23 ms |
+| 48 bolts (47 loops) | 2.32 ms |
+| **192 bolts (191 loops)** | **2.88 ms** |
+| 4-link closed chain (4 unknowns) | 2.10 ms, residual 7e-9 |
+| 16-link closed chain (16 unknowns) | 2.24 ms, residual 1e-7 |
+| 64-link closed chain (64 unknowns) | 3.66 ms, residual 5e-6 |
+| 200-slider chain, loop in it (199 unknowns) | 8.2 ms |
+| 200-mate tree + a disjoint 2-mate loop | 2.6 ms |
+| 200 occurrences, no loop at all | 2.5 ms |
+
+~2.1 ms is the floor — the RPC round trip plus the placement walk, not the
+solver. So un-suppressing the fastener mates costs nothing measurable, and the
+only case that climbs is a genuinely large mechanism, where the cost is the
+numeric Jacobian: one tree walk per unknown per LM iteration.
+
+If that ever matters, the fix is analytic Jacobians (a revolute's column is a
+cross product, not a re-walk), not a cheaper solver. Nothing yet asks for it.

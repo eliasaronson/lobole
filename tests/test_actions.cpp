@@ -1167,22 +1167,38 @@ TEST_CASE("A bolt through two parts mates them", "[actions][parts][assembly]") {
   CHECK_THAT(glm::length(glm::cross(glm::normalize(screwToNut), axisAfter)),
              WithinAbs(0.0, 1e-3));
 
-  // A SECOND bolt between the same two parts adds no second mate. Every mate
-  // between an already-connected pair closes a loop, and this solver reports
-  // a loop as over-constrained rather than solving it: three bolts through
-  // one bracket are one joint, not three conflicting ones.
+  // A SECOND bolt between the same two parts gets its OWN mate, anchored at
+  // its own hole — delete either bolt and the other still holds the joint,
+  // which is what a bolt pattern means. It closes a loop, and A6 solves that
+  // loop as redundant-but-consistent rather than erroring on it (which is
+  // exactly why this used to add nothing).
   const ui::FastenerFit second =
       ui::FitFastenerToHole(state, ui::RimPick{topOcc, topRims[1]}, request);
   INFO(second.why);
   REQUIRE(second.ok);
-  CHECK(second.mates.empty());
-  CHECK(state.assembly->GetMates().size() == 1);
-  CHECK(ui::SolveActiveAssembly(state) == 0);
+  CHECK(second.mates.size() == 1);
+  CHECK(state.assembly->GetMates().size() == 2);
+
+  // The loop is REDUNDANT, not errored, and the second mate is the one that
+  // says nothing new. Nothing moves: both mates record a pose the parts are
+  // already in.
+  const assembly::SolveReport bolted = ui::SolveActiveAssemblyReport(state);
+  CHECK(bolted.erroredMates == 0);
+  CHECK(bolted.loopMates == 1);
+  CHECK(bolted.loopsClosed);
+  CHECK(bolted.dof == 0);
+  CHECK(bolted.redundantMates.size() == 1);
+  CHECK(bolted.redundantMates.front() == second.mates.front());
+  for (const Mate& m : state.assembly->GetMates())
+    CHECK(m.error.empty());
+  const glm::mat4 twoBolts = glm::inverse(worldOf(topOcc)) * worldOf(bottomOcc);
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++)
+      CHECK_THAT(twoBolts[c][r], WithinAbs(before[c][r], 1e-3));
   // A part clamped in the MIDDLE of the stack is joined too. The alternator's
   // stator sits between two housings and is bolted to neither, which is the
   // same report one layer in: mating only the two ENDS of a joint leaves
-  // whatever it clamps between them floating. Consecutive pairs are a chain,
-  // so this is still a tree the solver places rather than a loop it refuses.
+  // whatever it clamps between them floating.
   MakeMultiBorePlate(state, "Middle", 8.0, 6.6, bores);
   ui::SetActivePart(state, ui::AddAssembly(state, "Sandwich"));
   const uint64_t s1 = place("Top", glm::vec3(0.0f));
