@@ -389,6 +389,7 @@ section and the notes in plan.md, stock-and-origin.md and setup-frame.md.
 | J5 | `OrderOutputBy{Authored, Tool, Part}`, applied in `GenerateAll` | v75 |
 | J6 | `machine_part` and the CAM button; the Parts panel section; a job tab that draws its parts laid out | — |
 | — | fixturing per PART: `Placement::frame`, `cam::FixtureFrame`, `set_job_placement lay_face_up` | v76 |
+| — | a job tab's OWN toolbar: the verbs as `job.*` commands (keymap context `job`), one window per verb carrying the tool, the CAM panel only on job tabs — [gui.md](gui.md#the-verbs-became-the-toolbar-2026-09-02) | — |
 
 ### What the gates caught, and it was most of the interesting bugs
 

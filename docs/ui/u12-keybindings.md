@@ -51,7 +51,9 @@ chord inline (`"New Sketch (S)"`, `"Fit view (F)"`, `"Toggle planes
 (Shift+P)"`, …), and this doc set.
 
 **Coverage — 73 toolbar buttons, 18 with a chord:** Model 31/4, Sketch 28/12,
-Assembly 6/1, Simulation 3/1, Drawing 5/1. All 73 funnel through one helper,
+Assembly 6/1, Simulation 3/1, Drawing 5/1 (the counts as written; a `Job`
+context with 12 commands — the CAM verbs — joined on 2026-09-02, see
+docs/cam/gui.md). All 73 funnel through one helper,
 `ToolButton(icon, tooltip, enabled)` (`Toolbar.cpp:139`), plus the sketch
 toolbar's `toolBtn` / `toggleBtn` / `toolGroup` lambdas.
 
@@ -69,7 +71,7 @@ stable command id and held together by `keys/registry_is_one_to_one`.
 ```cpp
 // core/io/Keymap.h — no ImGui here: core does not link it, and nothing in the
 // binding vocabulary should change if a vendored ImGui renumbers its enum.
-enum class Context { Global, Part, Sketch, Assembly, Drawing, Simulation };
+enum class Context { Global, Part, Sketch, Assembly, Drawing, Job, Simulation };
 enum class Key : uint16_t { None, A, /* … */ Comma, Period, Slash, /* … */ };
 struct Chord { Key key; uint8_t mods; };          // Ctrl | Shift | Alt
 

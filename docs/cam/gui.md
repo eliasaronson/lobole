@@ -382,3 +382,48 @@ Deliberately still open at v1, and **two of the three have since shipped**
 **C6** (`b00cbf9`), and arcs in the posted file instead of polygonised curves
 are **C7** (`6c73990`, flat arcs; helical deferred). Still open: the ~0.4 %
 cut-length overcount at the ramp seam.
+
+### The verbs became the toolbar (2026-09-02)
+
+The design above put the verbs in **one floating window** opened by a
+toolbar button, because CAM lived on the part and a part's toolbar was full.
+Since the job became its own document kind ([job-document.md](job-document.md))
+that reads wrong on both sides: a job tab was drawing the *part* bar — thirty
+modelling tools, every one disabled — and the way into CAM was a button that
+opened a list of buttons.
+
+Now a job tab has **its own toolbar**, and the verbs are its tools, one
+button each, the way the part bar has one per feature:
+
+```
+[Z zero] [Lay face up] [Turn face up*] [Look down spindle] |
+[Clear a pocket] [Cut it out] [Drill a hole] [Break an edge] [Whole part] [Face top] |
+[Generate] [Simulate] | [Fit] [Measure]        * only on a setup with a rotary axis
+```
+
+Every button is a command (`job.*`, keymap context **`job`**), so the keys,
+the palette and the tooltips agree with the bar. Pressing a verb opens **that
+verb's window** — its sentence, its prompt, and **the tool it derives for**,
+with the operation it made under it — and lights the button while the pick
+is armed; pressing it again puts it away. The two no-pick verbs make the cut
+at once and open their window so the tool can still be changed: choosing
+another tool **re-derives the cut just made** rather than asking for a
+remove-and-redo.
+
+**The tool defaults to the last one used** (`ui::VerbTool`): the one chosen
+this session, else the setup's newest operation's, else the first. It is
+read from the job's operations, so it holds across sessions.
+
+The CAM panel keeps the **list** — setups, parts, stock, tools, operations,
+the transport — and now exists **only on a job tab**; the "Pick top face"
+row and the "Verbs" button left it for the bar. On a part the way in is
+still the part bar's own CAM button ("machine this part"), which opens the
+job tab.
+
+**One the change found:** the cutting simulation was drawn in *model* space
+— the stock and the cutter multiplied by setup-to-model — in a viewport that
+draws *setup* space. Invisible while a setup had one frame, permanent once
+fixturing became per part (v76): the block stood upright through a part
+lying flat. Same bug the backplot had the same week; the transform is
+deleted rather than corrected, and `backplot_lands_on_a_clamped_part` now
+asserts the cutter is drawn exactly at the timeline's cursor.
