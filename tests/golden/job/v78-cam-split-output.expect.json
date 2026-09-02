@@ -1,0 +1,79 @@
+{
+  "job_parts": [
+    "Baffle",
+    "Rail"
+  ],
+  "job_target_parts": [
+    1,
+    2
+  ],
+  "job_placement_frames": [
+    [
+      -0.7071067811865475,
+      0.0,
+      0.0,
+      0.7071067811865476
+    ],
+    null
+  ],
+  "job_placements": [
+    {
+      "part": 1,
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "rot_z": 0.0,
+      "enabled": true
+    },
+    {
+      "part": 2,
+      "pos": [
+        300.0,
+        0.0
+      ],
+      "rot_z": 0.0,
+      "enabled": true
+    }
+  ],
+  "cam_op_sides": [
+    "outside",
+    "outside"
+  ],
+  "cam_op_types": [
+    "profile",
+    "profile"
+  ],
+  "cam_tool_types": [
+    "flat",
+    "flat"
+  ],
+  "cam_machine_names": [
+    "Shop router",
+    ""
+  ],
+  "cam_posts": [
+    "mach3",
+    "mach3"
+  ],
+  "cam_fit_arcs": [
+    true,
+    false
+  ],
+  "cam_machine_travel_max": [
+    [
+      1200.0,
+      800.0,
+      0.0
+    ],
+    null
+  ],
+  "cam_machine_library_sizes": [
+    2,
+    0
+  ],
+  "cam_split_output": [
+    true,
+    false
+  ]
+}

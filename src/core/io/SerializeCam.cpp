@@ -387,6 +387,9 @@ json CamSetupToJson(const cam::Setup& setup) {
 
   if (setup.order != cam::OrderOutputBy::Authored)
     j["order"] = OrderName(setup.order);
+  if (setup.splitOutput)
+    j["split_output"] =
+        true; // v78; omitted when off, so old jobs re-save byte-identically
   // Where each part sits in the stock (v73). Omitted when nothing has been
   // laid out, so a one-part job re-saves exactly as it did.
   if (!setup.placements.empty()) {
@@ -534,6 +537,7 @@ cam::Setup CamSetupFromJson(const json& j) {
   }
   for (const json& tj : j.value("tools", json::array()))
     setup.tools.push_back(ToolFromJson(tj));
+  setup.splitOutput = j.value("split_output", false);
   if (j.contains("order"))
     setup.order = OrderFromName(j.at("order").get<std::string>());
   for (const json& pj : j.value("placements", json::array())) {

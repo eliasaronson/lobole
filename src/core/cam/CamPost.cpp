@@ -569,4 +569,38 @@ bool PostProcess(const std::string& postId, const Setup& setup,
   return true;
 }
 
+bool PostProcessSplit(const std::string& postId, const Setup& setup,
+                      const std::vector<Toolpath>& paths,
+                      const PostOptions& opts, std::vector<PostFile>& out,
+                      std::string* error) {
+  out.clear();
+  std::vector<std::vector<Toolpath>> groups;
+  std::vector<int> tools;
+  for (const Toolpath& tp : paths) {
+    if (!tp.error.empty() || tp.Empty())
+      continue; // the single-file post skips these too, with a comment
+    if (tools.empty() || tools.back() != tp.toolNumber) {
+      for (const int seen : tools)
+        if (seen == tp.toolNumber) {
+          if (error != nullptr)
+            *error = "tool " + std::to_string(tp.toolNumber) +
+                     " is used twice with another tool between: a file per "
+                     "tool needs the operations in tool order";
+          return false;
+        }
+      tools.push_back(tp.toolNumber);
+      groups.emplace_back();
+    }
+    groups.back().push_back(tp);
+  }
+  for (size_t g = 0; g < groups.size(); g++) {
+    PostFile file;
+    file.tool = tools[g];
+    if (!PostProcess(postId, setup, groups[g], opts, file.gcode, error))
+      return false;
+    out.push_back(std::move(file));
+  }
+  return true;
+}
+
 } // namespace cam

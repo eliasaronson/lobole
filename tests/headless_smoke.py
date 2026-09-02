@@ -1466,6 +1466,18 @@ def main():
         curved = open(nc).read()
         expect("G2 " in curved, "arcs on means arcs in the file")
         expect(len(curved) < len(plain), "and a smaller file")
+        # One file per tool (router-round.md R2): `path` is the base and the
+        # answer names every file written, each a complete program.
+        d.call("set_cam_setup", id=cam_setup, split_output=True)
+        expect(d.call("list_cam_setups")["setups"][0]["split_output"] is True,
+               "split_output round-trips")
+        split = d.call("cam_post", setup=cam_setup, path=nc)
+        expect(len(split["files"]) == 1 and
+               split["files"][0]["path"].endswith("arcs - T1.nc"),
+               f"a one-tool job splits into one named file: {split['files']}")
+        part = open(split["files"][0]["path"]).read()
+        expect("G2 " in part and "M30" in part, "the tool's file is complete")
+        d.call("set_cam_setup", id=cam_setup, split_output=False)
 
         # R9 (2026-08-26): a typed top_z below the stock top warns at
         # toolpath time, naming the op and both heights — the verifier's

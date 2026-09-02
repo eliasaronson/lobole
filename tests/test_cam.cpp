@@ -4782,3 +4782,75 @@ TEST_CASE("cam machine: a setup copies the machine's tool library, unless "
   CHECK(busy.tools.size() == 1); // the table an operation names stays
   CHECK(busy.machine.name == "Shop router"); // the machine still applies
 }
+
+TEST_CASE("cam post: one file per tool, each complete, together the job",
+          "[cam][post]") {
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Tool small = setup.tools[0];
+  small.number = 2;
+  small.diameter = 3.0;
+  setup.tools.push_back(small);
+  // Authored T1, T2, T1: a file per tool needs tool order, and the flag
+  // FORCES it rather than refusing the setting it contradicts.
+  for (int k = 0; k < 3; k++) {
+    cam::Operation op;
+    op.id = 10 + k;
+    op.type = cam::OpType::Profile;
+    op.toolNumber = k == 1 ? 2 : 1;
+    op.topZ = 20.0;
+    op.bottomZ = 20.0 - 2.0 * (k + 1);
+    setup.operations.push_back(op);
+  }
+  setup.splitOutput = true;
+  const std::vector<size_t> order = cam::CuttingOrder(setup);
+  REQUIRE(order.size() == 3);
+  CHECK(setup.operations[order[2]].toolNumber == 2); // T2 last, T1s together
+
+  std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 3);
+  std::vector<cam::PostFile> files;
+  std::string error;
+  REQUIRE(cam::PostProcessSplit("mach3", setup, paths, {}, files, &error));
+  REQUIRE(files.size() == 2);
+  CHECK(files[0].tool == 1);
+  CHECK(files[1].tool == 2);
+  // Each is a complete program that loads ITS tool, and only it.
+  for (const cam::PostFile& f : files) {
+    INFO("file for T" << f.tool);
+    CHECK(f.gcode.find("G90 G91.1 G21") != std::string::npos);
+    CHECK(f.gcode.find("M30") != std::string::npos);
+    const std::string load = "T" + std::to_string(f.tool) + " M6";
+    CHECK(f.gcode.find(load) != std::string::npos);
+    CHECK(f.gcode.find(load) == f.gcode.rfind(load)); // once
+    CHECK(f.gcode.find(f.tool == 1 ? "T2 M6" : "T1 M6") == std::string::npos);
+  }
+  // Together they hold every operation the one file holds.
+  std::string one;
+  std::vector<cam::Toolpath> ordered;
+  for (const size_t i : order)
+    for (const cam::Toolpath& tp : paths)
+      if (tp.operationId == setup.operations[i].id)
+        ordered.push_back(tp);
+  REQUIRE(cam::PostProcess("mach3", setup, ordered, {}, one, &error));
+  for (const cam::Operation& op : setup.operations) {
+    const std::string tag = "(op " + std::to_string(op.id) + ")";
+    REQUIRE(one.find(tag) != std::string::npos);
+    bool inSome = false;
+    for (const cam::PostFile& f : files)
+      inSome = inSome || f.gcode.find(tag) != std::string::npos;
+    CHECK(inSome);
+  }
+  // Paths NOT in tool order are refused, in words. GenerateAll already
+  // walks CuttingOrder, so this has to be mis-ordered by hand: T1, T2, T1.
+  REQUIRE(ordered.size() == 3);
+  const std::vector<cam::Toolpath> shuffled = {ordered[0], ordered[2],
+                                               ordered[1]};
+  std::vector<cam::PostFile> bad;
+  CHECK_FALSE(cam::PostProcessSplit("mach3", setup, shuffled, {}, bad, &error));
+  CHECK(error.find("tool order") != std::string::npos);
+  // The flag survives a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  CHECK(j.value("split_output", false));
+  CHECK(DocumentIO::CamSetupFromJson(j).splitOutput);
+}

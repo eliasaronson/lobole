@@ -41,4 +41,19 @@ bool PostProcess(const std::string& postId, const Setup& setup,
                  const std::vector<Toolpath>& paths, const PostOptions& opts,
                  std::string& out, std::string* error = nullptr);
 
+// One program per tool (docs/cam/router-round.md, R2): `paths` in the order
+// given, grouped by consecutive tool, each group posted as a complete program
+// that starts by loading its tool. A group for a tool that appears twice in
+// the order would be two files with one name, so the caller passes paths in
+// tool order (CuttingOrder does when Setup::splitOutput is set) and this
+// refuses otherwise.
+struct PostFile {
+  int tool = 0;
+  std::string gcode;
+};
+bool PostProcessSplit(const std::string& postId, const Setup& setup,
+                      const std::vector<Toolpath>& paths,
+                      const PostOptions& opts, std::vector<PostFile>& out,
+                      std::string* error = nullptr);
+
 } // namespace cam

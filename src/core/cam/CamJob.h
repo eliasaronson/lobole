@@ -358,6 +358,11 @@ struct Setup {
   // In what order the operations cut, and whether the post writes one file
   // per group. Properties of the JOB, unlike the machine above.
   OrderOutputBy order = OrderOutputBy::Authored;
+  // One program per tool (docs/cam/router-round.md, R2): most hobby
+  // controllers cannot take a tool change mid-file, so the operator runs
+  // T1's file, changes the tool, runs T2's. Forces tool order, since a file
+  // per tool that is not in tool order is a contradiction.
+  bool splitOutput = false;
 
   std::vector<Tool> tools;
   std::vector<Operation> operations;

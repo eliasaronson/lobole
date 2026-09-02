@@ -913,6 +913,44 @@ void DrawCamPanel(AppState& state) {
   // checking (docs/cam/dogfood-round.md, round 2). The list is the part that
   // may scroll; what the job SAYS is not.
   ImGui::Separator();
+  // In what order the job cuts, and whether it is one file or one per tool
+  // (J5, R2). The order was RPC-only until R2 -- half-built by this
+  // project's own rule -- and a file per tool is what most hobby
+  // controllers need, since they cannot take a tool change mid-file.
+  {
+    const char* orderLabel =
+        setup->splitOutput                         ? "by tool (file per tool)"
+        : setup->order == cam::OrderOutputBy::Tool ? "by tool"
+        : setup->order == cam::OrderOutputBy::Part ? "by part"
+                                                   : "as listed";
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::BeginDisabled(setup->splitOutput);
+    if (ImGui::BeginCombo("Cut###cam_order", orderLabel)) {
+      const std::pair<const char*, cam::OrderOutputBy> choices[] = {
+          {"as listed", cam::OrderOutputBy::Authored},
+          {"by tool", cam::OrderOutputBy::Tool},
+          {"by part", cam::OrderOutputBy::Part}};
+      for (const auto& [label, value] : choices)
+        if (ImGui::Selectable(label, setup->order == value)) {
+          setup->order = value;
+          dirty = true;
+          changed = kAllOps;
+        }
+      ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("The order the operations are cut in. By tool "
+                          "groups the tool changes; by part finishes each "
+                          "part before the next.");
+    if (ImGui::Checkbox("One file per tool###cam_split", &setup->splitOutput)) {
+      dirty = true;
+      changed = kAllOps;
+    }
+    ImGui::SetItemTooltip("Write T1's program, T2's program... each complete "
+                          "and starting by loading its tool. Forces tool "
+                          "order. For a controller that cannot take a tool "
+                          "change mid-file.");
+  }
   if (ImGui::Button("Generate###cam_generate")) {
     // A playback is a picture of a FILE, and this button replaces the file.
     // Leaving it running would scrub through G-code the job no longer posts.
@@ -989,17 +1027,39 @@ void DrawCamPanel(AppState& state) {
           dir = ".";
         // Named for the project AND the setup: several parts' jobs land in
         // one directory, and "Setup 1.nc" from two of them is one file.
-        const std::string path =
-            (dir / (project.stem().string() + " - " + setup->name + ".nc"))
-                .string();
-        std::string gcode, error;
-        if (cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
-                             PostOpts(*setup), gcode, &error) &&
-            DocumentIO::WriteTextAtomic(path, gcode, &error)) {
-          state.camLastPost = path;
-          LOG_INFO("CAM: wrote {}", path);
+        const std::string stem = project.stem().string() + " - " + setup->name;
+        std::string error;
+        if (setup->splitOutput) {
+          // One file per tool, each named for it, all said.
+          std::vector<cam::PostFile> files;
+          bool ok = cam::PostProcessSplit(setup->machine.post, *setup,
+                                          state.camToolpaths, PostOpts(*setup),
+                                          files, &error);
+          std::string wrote;
+          for (const cam::PostFile& f : files) {
+            if (!ok)
+              break;
+            const std::string path =
+                (dir / (stem + " - T" + std::to_string(f.tool) + ".nc"))
+                    .string();
+            ok = DocumentIO::WriteTextAtomic(path, f.gcode, &error);
+            if (ok) {
+              wrote += (wrote.empty() ? "" : "\n") + path;
+              LOG_INFO("CAM: wrote {}", path);
+            }
+          }
+          state.camLastPost = ok ? wrote : "could not write: " + error;
         } else {
-          state.camLastPost = "could not write: " + error;
+          const std::string path = (dir / (stem + ".nc")).string();
+          std::string gcode;
+          if (cam::PostProcess(setup->machine.post, *setup, state.camToolpaths,
+                               PostOpts(*setup), gcode, &error) &&
+              DocumentIO::WriteTextAtomic(path, gcode, &error)) {
+            state.camLastPost = path;
+            LOG_INFO("CAM: wrote {}", path);
+          } else {
+            state.camLastPost = "could not write: " + error;
+          }
         }
       }
     }

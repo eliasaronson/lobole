@@ -2524,7 +2524,11 @@ std::vector<size_t> CuttingOrder(const Setup& setup) {
   idx.reserve(setup.operations.size());
   for (size_t i = 0; i < setup.operations.size(); i++)
     idx.push_back(i);
-  if (setup.order == OrderOutputBy::Authored)
+  // A file per tool IS tool order: the flag overrides the setting rather
+  // than contradicting it (R2).
+  const OrderOutputBy order =
+      setup.splitOutput ? OrderOutputBy::Tool : setup.order;
+  if (order == OrderOutputBy::Authored)
     return idx;
 
   // The key each operation groups by. An operation with no target belongs to
@@ -2533,7 +2537,7 @@ std::vector<size_t> CuttingOrder(const Setup& setup) {
   // anyway.
   const auto key = [&](size_t i) -> uint64_t {
     const Operation& op = setup.operations[i];
-    if (setup.order == OrderOutputBy::Tool)
+    if (order == OrderOutputBy::Tool)
       return static_cast<uint64_t>(op.toolNumber);
     return op.targets.empty() ? 0 : op.targets.front().jobPartId;
   };

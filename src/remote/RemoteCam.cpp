@@ -16,6 +16,7 @@
 #include "ui/MachineActions.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 
 namespace remote {
@@ -109,7 +110,8 @@ constexpr MethodDoc kCamMethods[] = {
      "lay_face_up?: {feature_id, "
      "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?, "
      "origin_at?: stock_min|stock_centre|model_min, "
-     "order?: authored|tool|part, "
+     "order?: authored|tool|part, split_output?: bool (one program per "
+     "tool, which forces tool order), "
      "stock?: {mode?: relative|fixed, size?: [x,y,z], place?: [x,y,z], "
      "margin?: [x,y,z], bottom_margin?}} or "
      "one of its "
@@ -134,7 +136,7 @@ constexpr MethodDoc kCamMethods[] = {
      "rather than a shrink-wrap of the part; a sheet smaller than the part is "
      "refused, naming the axis and the shortfall.",
      "fit_arcs, flip, has_rotary_axis, id, lay_face_up, machine, name, "
-     "order, origin_at, post, rotation_a, safe_z, stock, tool"},
+     "order, origin_at, post, rotation_a, safe_z, split_output, stock, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: "
@@ -217,7 +219,9 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_post",
      "Write the G-code for a setup {setup, path, post?}. Reports the line "
      "count, the ops it skipped and why. Writes a file; it does not send it "
-     "to a machine.",
+     "to a machine. With split_output on the setup, `path` is the base and "
+     "one file per tool is written beside it as `<base> - T<n>.<ext>`, each "
+     "complete and starting by loading its tool; `files` names every one.",
      "path, post, setup"},
 };
 
@@ -772,6 +776,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  // unnamed | global | differs | missing.
                  {"machine_match",
                   MatchName(cam::MatchMachine(state.machines, setup.machine))},
+                 {"split_output", setup.splitOutput},
                  {"order", setup.order == cam::OrderOutputBy::Tool ? "tool"
                            : setup.order == cam::OrderOutputBy::Part
                                ? "part"
@@ -891,6 +896,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     if (p.contains("fit_arcs"))
       setup.machine.fitArcs = p.at("fit_arcs").get<bool>();
+    if (p.contains("split_output"))
+      setup.splitOutput = p.at("split_output").get<bool>();
     if (p.contains("order")) {
       // Refused, never substituted: a job that posts in a different order
       // than it says is a broken cutter, and every plausible substitute here
@@ -1241,16 +1248,41 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
     const std::string post = p.value("post", setup.machine.post);
     std::string gcode, error;
-    if (!cam::PostProcess(post, setup, paths, PostOptsOf(setup), gcode, &error))
-      throw std::runtime_error(error);
     const std::string path = p.at("path").get<std::string>();
-    if (!DocumentIO::WriteTextAtomic(path, gcode, &error))
-      throw std::runtime_error("could not write " + path + ": " + error);
+    json files = json::array();
+    if (setup.splitOutput) {
+      // One file per tool (R2): `path` is the base, and every file written
+      // is named in the answer -- a script that reads only `path` would
+      // otherwise send the machine one tool's worth of the job.
+      std::vector<cam::PostFile> split;
+      if (!cam::PostProcessSplit(post, setup, paths, PostOptsOf(setup), split,
+                                 &error))
+        throw std::runtime_error(error);
+      const std::filesystem::path base(path);
+      for (const cam::PostFile& f : split) {
+        const std::string one =
+            (base.parent_path() /
+             (base.stem().string() + " - T" + std::to_string(f.tool) +
+              base.extension().string()))
+                .string();
+        if (!DocumentIO::WriteTextAtomic(one, f.gcode, &error))
+          throw std::runtime_error("could not write " + one + ": " + error);
+        files.push_back({{"tool", f.tool}, {"path", one}});
+        gcode += f.gcode;
+      }
+    } else {
+      if (!cam::PostProcess(post, setup, paths, PostOptsOf(setup), gcode,
+                            &error))
+        throw std::runtime_error(error);
+      if (!DocumentIO::WriteTextAtomic(path, gcode, &error))
+        throw std::runtime_error("could not write " + path + ": " + error);
+    }
     size_t lines = 0;
     for (const char c : gcode)
       if (c == '\n')
         lines++;
     return json{{"path", path},
+                {"files", files},
                 {"post", post},
                 {"lines", lines},
                 {"operations", ops},

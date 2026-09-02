@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    77; // v77: a setup EMBEDS its machine. `post`, `fit_arcs` and
+    78; // v78: `split_output` on a setup -- one program per tool, which most
+        //      hobby controllers need because they cannot take a tool change
+        //      mid-file. Forces tool order. Omitted when off
+        //      (docs/cam/router-round.md, R2).
+        // (v77: a setup EMBEDS its machine. `post`, `fit_arcs` and
         //      `has_rotary_axis` were keys of the setup and every new job
         //      re-answered "which machine" with a combo; they are now a
         //      `machine` block -- name, travel, post, arcs, rotary, rapid,
