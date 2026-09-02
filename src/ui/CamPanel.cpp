@@ -1213,6 +1213,18 @@ void DrawCamPanel(AppState& state) {
         touched(op.id);
       }
       ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+      if (op.type == cam::OpType::Drill) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(55.0f);
+        float peck = static_cast<float>(op.peck);
+        if (ExprDragFloat(state, "Peck###peck", &peck, 0.25f, 0.0f, 100.0f,
+                          "%.2f")) {
+          op.peck = peck;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip("Retract fully between pecks of this depth so "
+                              "the chips clear (0 = one plunge)");
+      }
       if (op.type == cam::OpType::EdgeRound) {
         ImGui::SetNextItemWidth(70.0f);
         float size = static_cast<float>(op.edgeSize);

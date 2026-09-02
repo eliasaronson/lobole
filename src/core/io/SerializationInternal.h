@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    78; // v78: `split_output` on a setup -- one program per tool, which most
+    79; // v79: `peck` on a drill operation -- retract fully between pecks of
+        //      this depth, as plain moves. Omitted when 0. A hole wider than
+        //      the tool is bored, which needs no key: the tool decides
+        //      (docs/cam/router-round.md, R3).
+        // (v78: `split_output` on a setup -- one program per tool, which most
         //      hobby controllers need because they cannot take a tool change
         //      mid-file. Forces tool order. Omitted when off
         //      (docs/cam/router-round.md, R2).

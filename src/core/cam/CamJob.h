@@ -173,6 +173,11 @@ struct Operation {
   double bottomZ = -1.0;
   double stepdown = 0.0;
   double stockToLeave = 0.0;
+  // Drill only (docs/cam/router-round.md, R3): retract fully between pecks
+  // of this depth so the chips clear -- the G83 reading, as plain moves,
+  // since neither GRBL nor our post speaks canned cycles. 0 = one plunge.
+  // Derived: the tool's diameter once the hole is deeper than three of them.
+  double peck = 0.0;
 
   Side side = Side::Outside;
   bool climb = true;

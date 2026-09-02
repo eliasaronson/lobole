@@ -420,6 +420,8 @@ json CamSetupToJson(const cam::Setup& setup) {
                {"bottom_z", op.bottomZ}};
     if (op.stepdown != 0.0)
       oj["stepdown"] = op.stepdown;
+    if (op.peck != 0.0)
+      oj["peck"] = op.peck; // v79; omitted when off
     if (op.stockToLeave != 0.0)
       oj["stock_to_leave"] = op.stockToLeave;
     // EVERY type that reads it, not just profiles. Adaptive clearing is the
@@ -564,6 +566,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.topZ = oj.value("top_z", 0.0);
     op.bottomZ = oj.value("bottom_z", -1.0);
     op.stepdown = oj.value("stepdown", 0.0);
+    op.peck = oj.value("peck", 0.0);
     op.stockToLeave = oj.value("stock_to_leave", 0.0);
     // A clearing operation clears INSIDE its boundary; "outside" is a
     // profile's notion. So the default when the key is missing depends on the

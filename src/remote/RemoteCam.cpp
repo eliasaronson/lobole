@@ -141,7 +141,9 @@ constexpr MethodDoc kCamMethods[] = {
     {"add_cam_op",
      "Add an operation {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round, "
-     "tool?, top_z?, bottom_z?, stepdown?, side?: outside|inside|on, climb?, "
+     "tool?, top_z?, bottom_z?, stepdown?, peck? (drill: retract between "
+     "pecks of this depth; derived as the tool's diameter once a hole is "
+     "deeper than three), side?: outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element, part?}]}; `part` is the job part the element is "
      "on (list_elements reports it as `job_part`), and is REQUIRED when the "
@@ -351,6 +353,8 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.bottomZ = p.at("bottom_z").get<double>();
   if (p.contains("stepdown"))
     op.stepdown = p.at("stepdown").get<double>();
+  if (p.contains("peck"))
+    op.peck = p.at("peck").get<double>();
   if (p.contains("stock_to_leave"))
     op.stockToLeave = p.at("stock_to_leave").get<double>();
   if (p.contains("side"))
@@ -414,6 +418,7 @@ json OpJson(const cam::Operation& op) {
             {"top_z", op.topZ},
             {"bottom_z", op.bottomZ},
             {"stepdown", op.stepdown},
+            {"peck", op.peck},
             // Both settable since they landed and neither reported, so a
             // script could state a boundary and an allowance it could not
             // then read back — and a job built over the RPC could not be

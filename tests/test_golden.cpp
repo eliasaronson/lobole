@@ -222,6 +222,18 @@ void AssertCamFrames(const std::vector<cam::Setup>& setups,
                    Catch::Matchers::WithinAbs(want[i][c].get<double>(), 1e-9));
     }
   }
+  if (expect.contains("cam_op_pecks")) {
+    const auto want = expect.at("cam_op_pecks").get<std::vector<double>>();
+    std::vector<double> got;
+    for (const cam::Setup& setup : setups)
+      for (const cam::Operation& op : setup.operations)
+        got.push_back(op.peck);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("op " << i);
+      CHECK_THAT(got[i], Catch::Matchers::WithinAbs(want[i], 1e-9));
+    }
+  }
   if (expect.contains("cam_split_output")) {
     const auto want = expect.at("cam_split_output").get<std::vector<bool>>();
     REQUIRE(setups.size() == want.size());

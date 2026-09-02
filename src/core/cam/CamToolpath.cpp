@@ -1553,6 +1553,11 @@ DerivedOp DeriveOperation(const Setup& setup,
       return out;
     }
     op.targets = {target};
+    // Pecking, derived from the cutter: a hole deeper than three diameters
+    // packs its flutes, so retract every diameter and let the chips out.
+    if (const Tool* drill = setup.FindTool(op.toolNumber);
+        drill != nullptr && op.topZ - op.bottomZ > 3.0 * drill->diameter)
+      op.peck = drill->diameter;
     break;
   }
   }
@@ -2291,13 +2296,43 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
           return;
         }
         if (tool.diameter < dia - 1e-3) {
-          tp.error = "tool " + std::to_string(op.toolNumber) + " is " +
-                     Round2(tool.diameter) + " mm and that hole is " +
-                     Round2(dia) +
-                     " mm — a plunge makes a hole the size of the cutter. Use "
-                     "a " +
-                     Round2(dia) + " mm tool, or clear the hole as a pocket.";
-          return;
+          // A hole WIDER than the tool is bored (R3): a helix down at the
+          // ramp angle on the circle the tool centre has to walk, then a
+          // flat turn at the bottom -- and for a hole wider than two tools,
+          // rings from the centre outwards by the stepover, the wall last.
+          // The user pointed at a hole; the tool decides how it is made, the
+          // same rule Break an edge follows. This used to be a refusal
+          // ("a plunge makes a hole the size of the cutter"), which is true
+          // and was the wrong answer.
+          found++;
+          const glm::dvec2 centre(origin.x, origin.y);
+          const double wall = radius - tool.diameter * 0.5 - op.stockToLeave;
+          if (wall < 1e-6) {
+            tp.error = "tool " + std::to_string(op.toolNumber) + " is " +
+                       Round2(tool.diameter) + " mm and that hole is " +
+                       Round2(dia) + " mm: nothing is left to bore once " +
+                       Round2(op.stockToLeave) + " mm is left on the wall";
+            return;
+          }
+          glm::dvec3 stockLo(0.0), stockHi(0.0);
+          const double stockTop =
+              StockBoundsFramed(setup, bodies, stockLo, stockHi) ? stockHi.z
+                                                                 : setup.safeZ;
+          const double step = std::max(
+              tool.diameter * std::clamp(op.stepover, 0.05, 0.95), 0.1);
+          std::vector<double> rings;
+          // A centre pass only when the cutter cannot reach the middle from
+          // the wall ring: a 7 mm hole with a 6 mm tool is one ring.
+          for (double r = wall; r > 1e-9; r -= step)
+            rings.push_back(r);
+          if (rings.back() > step * 0.5 && wall > tool.diameter * 0.5)
+            rings.push_back(std::min(rings.back(), step * 0.5));
+          std::sort(rings.begin(), rings.end()); // inner first, the wall last
+          for (const double r : rings)
+            EmitHelix(tp, tool, centre, r, op.topZ, op.bottomZ, setup.safeZ,
+                      stockTop, kDeflection);
+          Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, setup.safeZ}, 0.0);
+          break;
         }
       }
       found++;
@@ -2308,8 +2343,26 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
       // same reason a profile rapids to the stock top before it ramps.
       if (op.topZ < setup.safeZ - 1e-9)
         Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, op.topZ}, 0.0);
-      Emit(tp, Move::Kind::Plunge, {centre.x, centre.y, op.bottomZ},
-           tool.feedPlunge);
+      if (op.peck > 1e-9 && op.topZ - op.bottomZ > op.peck + 1e-9) {
+        // Pecks (R3): down one peck, all the way back out to the hole's top
+        // so the chips clear (the G83 reading, not G73's short lift), rapid
+        // back to just above the floor of the last peck, and on.
+        double z = op.topZ;
+        while (z > op.bottomZ + 1e-9) {
+          const double next = std::max(op.bottomZ, z - op.peck);
+          Emit(tp, Move::Kind::Plunge, {centre.x, centre.y, next},
+               tool.feedPlunge);
+          z = next;
+          if (z > op.bottomZ + 1e-9) {
+            Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, op.topZ}, 0.0);
+            Emit(tp, Move::Kind::Rapid,
+                 {centre.x, centre.y, z + std::min(op.peck * 0.1, 0.5)}, 0.0);
+          }
+        }
+      } else {
+        Emit(tp, Move::Kind::Plunge, {centre.x, centre.y, op.bottomZ},
+             tool.feedPlunge);
+      }
       Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, setup.safeZ}, 0.0);
       break;
     }

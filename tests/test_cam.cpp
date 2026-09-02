@@ -4854,3 +4854,139 @@ TEST_CASE("cam post: one file per tool, each complete, together the job",
   CHECK(j.value("split_output", false));
   CHECK(DocumentIO::CamSetupFromJson(j).splitOutput);
 }
+
+// ---------------------------------------------------------------------------
+// R3: a hole wider than the tool is bored; a deep hole pecks.
+
+namespace {
+// A 40 x 30 block with one through hole of `dia` at its centre.
+std::unique_ptr<Document> HoleDoc(double dia, double height = 20.0) {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               40.0, 30.0, height));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::vec3(20, 15, -1), glm::vec3(0, 0, 1), dia * 0.5,
+      height + 2.0));
+  const uint64_t hole = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Drilled", block, hole,
+                                                   BooleanOp::Subtract));
+  return doc;
+}
+ElementRef HoleWall(const Document& doc) {
+  for (const Body& b : doc.GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!b.shape.FacePlane(index, o, n, u))
+        return ElementRef{b.createdBy, name};
+    }
+  return {};
+}
+} // namespace
+
+TEST_CASE("cam drill: a hole wider than the tool is bored, not refused",
+          "[cam][drill]") {
+  auto doc = HoleDoc(8.0, 12.0);   // 12 thick: under three diameters deep
+  cam::Setup setup = BasicSetup(); // one 6 mm flat
+  const ElementRef wall = HoleWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, wall});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 7;
+  CHECK(op.peck == 0.0); // ~14 mm deep with a 6 mm tool: under three diameters
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  // A bore walks a circle the tool's radius inside the wall: the cut moves
+  // vary in X and Y, and the lowest of them reaches the bottom.
+  double lo = 1e9, minX = 1e9, maxX = -1e9;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut) {
+      lo = std::min(lo, m.to.z);
+      minX = std::min(minX, m.to.x);
+      maxX = std::max(maxX, m.to.x);
+    }
+  CHECK_THAT(lo, WithinAbs(op.bottomZ, 1e-6));
+  CHECK_THAT(maxX - minX, WithinAbs(2.0, 1e-3)); // (8 - 6) mm of centre travel
+  // ...and it makes the hole without cutting the block: no gouge.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover);
+  CHECK(v.maxGouge < 0.4);
+
+  // A hole wider than two tools is rings, the wall last.
+  auto wide = HoleDoc(20.0);
+  cam::Setup rings = BasicSetup();
+  const cam::DerivedOp dw =
+      cam::DeriveOperation(rings, wide->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*wide)});
+  REQUIRE(dw.ok);
+  cam::Operation ringOp = dw.op;
+  ringOp.id = 8;
+  rings.operations.push_back(ringOp);
+  const auto ringPaths = cam::GenerateAll(rings, wide->GetBodies());
+  REQUIRE(ringPaths.size() == 1);
+  CHECK(ringPaths[0].error.empty());
+  // The LAST cut is on the wall's circle: radius 10 - 3 = 7 from the centre.
+  const cam::Move& last = ringPaths[0].moves[ringPaths[0].moves.size() - 2];
+  CHECK_THAT(glm::length(glm::dvec2(last.to.x - 20.0, last.to.y - 15.0)),
+             WithinAbs(7.0, 1e-3));
+
+  // A hole SMALLER than the tool is still a refusal: it would not fit in.
+  auto small = HoleDoc(4.0);
+  cam::Setup tight = BasicSetup();
+  const cam::DerivedOp ds =
+      cam::DeriveOperation(tight, small->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*small)});
+  REQUIRE(ds.ok);
+  cam::Operation smallOp = ds.op;
+  smallOp.id = 9;
+  tight.operations.push_back(smallOp);
+  const auto smallPaths = cam::GenerateAll(tight, small->GetBodies());
+  REQUIRE(smallPaths.size() == 1);
+  CHECK(smallPaths[0].error.find("would not fit") != std::string::npos);
+}
+
+TEST_CASE("cam drill: a deep hole pecks, retracting fully each time",
+          "[cam][drill]") {
+  auto doc = HoleDoc(6.0, 30.0); // 30 deep with a 6 mm tool: five diameters
+  cam::Setup setup = BasicSetup();
+  const cam::DerivedOp d =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*doc)});
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.peck, WithinAbs(6.0, 1e-9)); // derived: the tool's diameter
+  cam::Operation op = d.op;
+  op.id = 3;
+  setup.operations.push_back(op);
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].error.empty());
+  // Plunges step down a peck at a time, and every retract goes back to the
+  // hole's top -- the chips have to come out.
+  int plunges = 0, retractsToTop = 0;
+  for (size_t i = 1; i < paths[0].moves.size(); i++) {
+    const cam::Move& m = paths[0].moves[i];
+    if (m.kind == cam::Move::Kind::Plunge) {
+      plunges++;
+      // One peck, plus the half-millimetre of re-entry above the last floor.
+      CHECK(paths[0].moves[i - 1].to.z - m.to.z <= 6.5 + 1e-6);
+    }
+    if (m.kind == cam::Move::Kind::Rapid &&
+        m.to.z > paths[0].moves[i - 1].to.z &&
+        std::abs(m.to.z - op.topZ) < 1e-6)
+      retractsToTop++;
+  }
+  CHECK(plunges >= 5);
+  CHECK(retractsToTop >= 4);
+  // The value survives a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  CHECK_THAT(DocumentIO::CamSetupFromJson(j).operations[0].peck,
+             WithinAbs(6.0, 1e-9));
+}

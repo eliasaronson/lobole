@@ -1857,18 +1857,20 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
   // A verb whose operation would cut NOTHING is refused, not added. The
   // derivation only sees what it can see (a wall, a depth); the generator
-  // finds the rest — a 6 mm drill asked for an 8 mm hole — and its answer
+  // finds the rest — a 6 mm drill asked for a 4 mm hole — and its answer
   // used to arrive as a red line under a dead row the user then had to
-  // notice and remove. Twice, in the screenshot that prompted this.
+  // notice and remove. Twice, in the screenshot that prompted this. (The
+  // 8 mm hole that screenshot showed is BORED since R3; a hole the tool
+  // cannot fit in is the refusal that remains.)
   t = IM_REGISTER_TEST(engine, "cam", "a_dead_operation_is_refused_not_added");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     const uint64_t plate = CamPart()->GetFeature(0)->GetId();
-    // An 8 mm hole through it.
+    // A 4 mm hole through it: narrower than the 6 mm tool.
     CamPart()->AddFeature(std::make_unique<CylinderFeature>(
-        "Hole", glm::vec3(30, 20, -1), glm::vec3(0, 0, 1), 4.0, 14.0));
+        "Hole", glm::vec3(30, 20, -1), glm::vec3(0, 0, 1), 2.0, 14.0));
     const uint64_t hole = CamPart()->GetFeature(1)->GetId();
     CamPart()->AddFeature(std::make_unique<BooleanFeature>(
         "Drilled", plate, hole, BooleanOp::Subtract));
@@ -1897,7 +1899,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->camToolpaths.empty());
     IM_CHECK(!s_App->slotPick.miss.empty());
     ctx->LogInfo("refused: %s", s_App->slotPick.miss.c_str());
-    IM_CHECK(s_App->slotPick.miss.find("8 mm") != std::string::npos);
+    IM_CHECK(s_App->slotPick.miss.find("4 mm") != std::string::npos);
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot); // still armed
     ToolbarClick(ctx, "###tb_job_drill");                     // put it away
     ctx->Yield(2);
