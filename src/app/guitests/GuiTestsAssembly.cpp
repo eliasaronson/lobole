@@ -49,7 +49,10 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(3);
 
     // The section is collapsed by default and had no id until this round.
-    ctx->ItemClick("//###Model/###bom_header");
+    // ItemOpen rather than ItemClick for the same reason as the fastener
+    // test below: a click toggles, an ImGui collapsing header remembers, and
+    // whichever of the two runs second used to close what the first opened.
+    ctx->ItemOpen("//###Model/###bom_header");
     ctx->Yield(2);
     // The export button only draws inside the open section, so its presence
     // is the proof the header actually expanded. (The table itself is an ID
@@ -1067,7 +1070,13 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       ctx->Yield(2);
     };
     showPanel(ui::kPanelModel);
-    ctx->ItemClick("//###Model/Bill of materials###bom_header");
+    // ItemOpen, not ItemClick: a click TOGGLES, and an ImGui collapsing
+    // header keeps its state for the life of the process. Whenever a
+    // predecessor left the BOM section open — bom_counts_through_a_sub_
+    // assembly does, and a shuffled run puts it immediately before this one
+    // often enough — the click closed it instead, and everything inside went
+    // out of reach ("Unable to locate item ###bom_check_fasteners").
+    ctx->ItemOpen("//###Model/Bill of materials###bom_header");
     ctx->Yield(2);
     ctx->ItemClick("//###Model/Check fasteners###bom_check_fasteners");
     ctx->Yield(2);
