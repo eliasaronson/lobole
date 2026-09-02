@@ -58,53 +58,23 @@ struct ImportJob {
   std::atomic<double> fraction{-1.0};
   std::atomic<int> partsDone{0};
   std::atomic<int> partsTotal{0};
-  std::atomic<bool> cancel{false}; // main sets -> worker stops
-  std::atomic<bool> done{false};   // worker sets last
-
-  // Written by the worker, read by the main thread only after `done` (and the
-  // join). The plan is what materialization consumes.
   interchange::AssemblyImportPlan plan;
   Kind kind = Kind::Assembly;
-  // Kind::Feature only: the geometry the worker already parsed, handed to the
-  // ImportFeature so its first regen does not read the file a second time.
   CADKernel::ImportedModel model;
   std::string error;
-
-  // Main-thread materialization cursor: how many of plan.parts have become
-  // tabs. Not atomic — only the main thread touches it, after the join.
-  bool joined = false;
+  // The main-thread half: set once the worker's result has been read and the
+  // sliced materialize has begun (from then on cancel is refused).
+  bool materializing = false;
   size_t materializedParts = 0;
   std::vector<uint64_t> partIds;
-
-  std::thread worker;
-
-  // A joinable thread that destructs calls std::terminate, so quitting
-  // mid-import would take the app down rather than close it. Cancel and wait:
-  // the worker checks `cancel` between products and inside the XCAF transfer,
-  // so this is bounded by one product's extraction.
-  ~ImportJob() {
-    cancel.store(true, std::memory_order_relaxed);
-    if (worker.joinable())
-      worker.join();
-  }
-  ImportJob() = default;
-  ImportJob(const ImportJob&) = delete;
-  ImportJob& operator=(const ImportJob&) = delete;
 };
 
-// The background form of ui::ImportCADFile — THE import entry point for the
-// GUI. Starts a worker for .step/.stp (the only format whose read is slow) and
-// returns immediately; PollImport applies the result. Anything else (.brep,
-// .stl) is fast and imports synchronously here, exactly as before.
-//
-// False with `error` set if an import is already running or the file could not
-// be started. A true return does NOT mean the import succeeded — only that it
-// is under way; failures surface through AppState::importError.
-bool StartImport(AppState& state, const std::string& path, std::string* error);
+// The thread, `cancel` and `done` live on the registry's "import"
+// BackgroundJob since A3 phase 4 (ui/BackgroundJobs.h); this struct is the
+// worker's whole world plus what the modal reads while it runs. The sliced
+// materialize is the job's `finish`, returning false until the last part.
 
-// Called once a frame from the main loop. Joins a finished worker and
-// advances the materialization by one slice. No-op when nothing is running.
-void PollImport(AppState& state);
+bool StartImport(AppState& state, const std::string& path, std::string* error);
 
 // Is an import in flight (so the modal should be up and the file dialog should
 // refuse a second one)?

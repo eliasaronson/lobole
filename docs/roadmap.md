@@ -236,8 +236,8 @@ leaving Simulation mode) and **phase 1 on 2026-09-02**: the registry,
 the frame (the ~7 s freeze is closed — a pick returns in 0.5 ms); **phases 2
 and 3 the same day**: the sync job and the FEM solves moved onto it, a solve
 lands in its own part whichever tab is active, and `mesh_study`/`run_study`
-mesh off the frame (`async: true`) — that known-bugs entry is closed. Phase 4
-(the STEP import) remains. Plus the absences worth knowing: no
+mesh off the frame (`async: true`) — that known-bugs entry is closed — and
+**phase 4** put the STEP import on it. **A3 is complete.** Plus the absences worth knowing: no
 user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
 surfacing or sheet metal. **The standard-parts absence closed 2026-09-01**
 ([parts/plan.md](parts/plan.md), F1 phases 1-5): seven vendored ISO standards,

@@ -2,7 +2,6 @@
 
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
-#include "ui/ImportJob.h"
 
 #include <algorithm>
 #include <chrono>
@@ -18,10 +17,6 @@ void PollBackgroundJobs(AppState& state) {
   // (docs/ui/long-operations.md says why that is the one candidate for a real
   // background render thread later).
   PumpRenderJob(state);
-
-  // Join a finished STEP import worker, then create part tabs a slice per
-  // frame so the progress modal keeps painting.
-  PollImport(state);
 
   // (A git fetch/push/clone is a "sync" entry in the registry below — A3
   // phase 2 — and was the one polled from a collapsible TreeNode.)

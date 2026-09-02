@@ -34,6 +34,7 @@
 
 #include <set>
 
+#include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/Feature.h"
@@ -56,12 +57,14 @@
 #include "ui/CamTool.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
+#include "ui/ImportJob.h"
 #include "ui/JobActions.h"
 #include "ui/Overlays.h"
 #include "ui/SimulationActions.h"
 #include "ui/SyncJob.h"
 #include "ui/TerminalPanel.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <atomic>
@@ -1976,6 +1979,58 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   CHECK(report->bodies[0].nodes > 0);
   CHECK(report->bodies[0].elements > 0);
   CHECK(ui::MeshReportFor(state, *state.document, studyId) == nullptr);
+}
+
+TEST_CASE("a STEP import runs on the registry and materializes a slice a "
+          "poll",
+          "[actions][jobs][import]") {
+  // A3 phase 4: the worker reads the file, and the main-thread half — one
+  // part tab per product, then the assembly — is the job's own `finish`,
+  // returning false until the last part so a modal can keep painting.
+  ui::AppState state = MakeHeadlessState();
+  CADKernel& k = CADKernel::Instance();
+  CADKernel::ImportedModel model;
+  for (int i = 0; i < 3; i++) {
+    model.products.push_back({k.CreateBox(2.0, 2.0, 2.0),
+                              "Widget " + std::to_string(i), false,
+                              glm::vec3(0.0f)});
+    model.instances.push_back(
+        {static_cast<size_t>(i),
+         glm::translate(glm::mat4(1.0f),
+                        glm::vec3(10.0f * static_cast<float>(i), 0, 0)),
+         "I" + std::to_string(i)});
+  }
+  model.instances.push_back(
+      {0, glm::translate(glm::mat4(1.0f), glm::vec3(0, 10, 0)), "W0 again"});
+  const std::filesystem::path stepPath =
+      std::filesystem::temp_directory_path() /
+      ("designer-import-" + std::to_string(::getpid()) + ".step");
+  REQUIRE(k.SaveSTEPStructured(stepPath.string(), model, "Rig"));
+
+  const size_t tabsBefore = state.parts.size();
+  std::string error;
+  REQUIRE(ui::StartImport(state, stepPath.string(), &error));
+  CHECK(ui::ImportRunning(state));
+  CHECK(ui::BackgroundJobRunning(state, "import"));
+  CHECK_FALSE(ui::StartImport(state, stepPath.string(), &error));
+  {
+    const std::vector<ui::BackgroundJobInfo> jobs =
+        ui::ListBackgroundJobs(state);
+    REQUIRE(jobs.size() == 1);
+    CHECK(jobs[0].kind == "import");
+    CHECK(jobs[0].cancellable);
+  }
+  CHECK_FALSE(ui::ImportStatusLine(state).empty());
+  PumpUntil(state, [&] { return !ui::ImportRunning(state); });
+  CHECK_FALSE(ui::ImportRunning(state));
+  CHECK(state.importJob == nullptr);
+  INFO(state.importError);
+  CHECK(state.importError.empty());
+  // Three part tabs and the assembly.
+  CHECK(state.parts.size() == tabsBefore + 4);
+  REQUIRE(state.assembly != nullptr);
+  CHECK(state.assembly->GetOccurrences().size() == 4);
+  std::filesystem::remove(stepPath);
 }
 
 #ifdef HAVE_CAM

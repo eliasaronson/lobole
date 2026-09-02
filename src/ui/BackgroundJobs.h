@@ -46,7 +46,7 @@ struct AppState;
 // document.
 void PollBackgroundJobs(AppState& state);
 
-// --- The registry (docs/ui/long-operations.md, phase 1) --------------------
+// --- The registry (docs/ui/long-operations.md, phases 1-4) -----------------
 //
 // `state.backgroundJobs`, polled ONLY from PollBackgroundJobs. A job is
 // started with its `thread` already running (or about to be: `Start` does

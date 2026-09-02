@@ -3,10 +3,11 @@
 > Status: **step 0 SHIPPED 2026-09-01** (the two bugs, and the single poll
 > entry point they needed); **phase 1 SHIPPED 2026-09-02** (the registry,
 > `background_jobs`/`cancel_background_job`, and the CAM adaptive pocket off
-> the frame — see [As built](#as-built-phase-1-2026-09-02)); **phases 2 and
-> 3 SHIPPED the same day** (the sync job, then the FEM solves and
-> `mesh_study` — see [As built, phases 2-3](#as-built-phases-2-3-2026-09-02));
-> phase 4 (ImportJob) planned. [Read against the tree](#read-against-the-tree-2026-09-02) records
+> the frame — see [As built](#as-built-phase-1-2026-09-02)); **phases 2-4
+> SHIPPED the same day** (the sync job, the FEM solves and `mesh_study`, the
+> STEP import — see [As built, phases 2-4](#as-built-phases-2-4-2026-09-02)).
+> **COMPLETE**: every long operation but the offline path tracer (not a
+> thread; see below) is a registry entry. [Read against the tree](#read-against-the-tree-2026-09-02) records
 > what the code grew between the plan and the build. Written after reading all five
 > existing implementations, which is what changed the plan: the review
 > (capability-review-2026-08-31.md, A3) said there were four cases with three
@@ -387,7 +388,7 @@ Not done here, on purpose: phases 2-4 (SyncJob, TopoJob + StudyJob with
 now proven once. And the perf HUD does not yet show the registry; the panel
 row does.
 
-## As built, phases 2-3 (2026-09-02)
+## As built, phases 2-4 (2026-09-02)
 
 - **Phase 2, SyncJob** (`1ef01cbf`): the struct is plain data — the
   worker's whole world, copied in and read back after the join the registry
@@ -420,11 +421,23 @@ row does.
   closes the known-bugs entry about `mesh_study` outliving the client's
   socket timeout: the synchronous form still exists for a caller who wants
   it, and the describe row now says which to use.
-- Not done: `PrepareTopology` still meshes on the main thread (the same
-  split would apply; no one has hit it). The `perf HUD` does not list the
-  registry. Phase 4 (ImportJob) is next: the modal keeps reading its own
-  payload, the sliced materialize becomes a `finish` that returns false
-  until the last part.
+- **Phase 4, ImportJob**: the payload keeps its phase/fraction/parts atomics
+  for the modal; the worker's `cancel` is the registry's, and the sliced
+  materialize is the job's `finish` — called once after the join to read the
+  worker's verdict (a feature import, a failure, a cancel, or "materialize"),
+  then once per poll, returning false until the last part. The moment the
+  materialize starts it flips the entry's `cancellable` off, which is what
+  the modal and `background_jobs` both read. `PollImport` is gone; the
+  convention gate's join list is now `PumpRenderJob` and `ReapBackgroundJobs`
+  (the latter is the registry's own reap, which the remote layer may call).
+  Gated headless in `test_actions` (a 3-product STEP lands as three part
+  tabs and an assembly, a slice a poll) and by the existing GUI case
+  `assembly/a_step_import_runs_in_background` (the modal stays up across the
+  part→assembly tab switch).
+- Not done, and not owed by this plan: `PrepareTopology` still meshes on
+  the main thread (the same split would apply; no one has hit it); the perf
+  HUD does not list the registry; `RenderJob` stays a main-thread slicer
+  (see "Two things this is NOT").
 
 ## Out of scope
 

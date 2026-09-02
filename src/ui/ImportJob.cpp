@@ -5,12 +5,14 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
 
 #include <OSD.hxx>
 #include <Standard_Failure.hxx>
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <utility>
 
 namespace ui {
@@ -28,7 +30,7 @@ constexpr size_t kPartsPerFrame = 8;
 // only ever reads the atomics.
 class JobProgress : public CADKernel::ImportProgress {
 public:
-  explicit JobProgress(ImportJob* job) : m_job(job) {}
+  JobProgress(ImportJob* job, BackgroundJob* bg) : m_job(job), m_bg(bg) {}
 
   void OnPhase(Phase phase, double fraction) override {
     const ImportJob::Phase mapped = phase == Phase::ReadingFile
@@ -36,33 +38,32 @@ public:
                                         : ImportJob::Phase::Transferring;
     m_job->phase.store(static_cast<int>(mapped), std::memory_order_relaxed);
     m_job->fraction.store(fraction, std::memory_order_relaxed);
+    m_bg->fraction.store(fraction);
   }
 
-  bool Cancelled() override {
-    return m_job->cancel.load(std::memory_order_relaxed);
-  }
+  bool Cancelled() override { return m_bg->cancel.load(); }
 
 private:
   ImportJob* m_job;
+  BackgroundJob* m_bg;
 };
 
 // The worker. Touches its own job and the filesystem, nothing else — no
 // AppState, no Document. Same rule as TopoJob's immutable snapshot.
-void Run(ImportJob* job) {
+void Run(ImportJob* job, BackgroundJob* bg) {
   // OCC_CONVERT_SIGNALS turns hardware signals into Standard_Failure, and the
   // handler is installed PER THREAD. Without this a fault inside the reader on
   // this thread is a raw SIGSEGV rather than a catchable failure.
   OSD::SetSignal(Standard_False);
 
   try {
-    JobProgress progress(job);
+    JobProgress progress(job, bg);
     CADKernel::ImportedModel model;
     if (!CADKernel::Instance().LoadSTEPStructured(job->stepPath, model,
                                                   &progress)) {
-      job->error = job->cancel.load(std::memory_order_relaxed)
+      job->error = bg->cancel.load()
                        ? "" // cancelled: not an error, and reported as none
                        : "could not read '" + job->stepPath + "' as STEP";
-      job->done.store(true, std::memory_order_release);
       return;
     }
 
@@ -74,7 +75,6 @@ void Run(ImportJob* job) {
       // Carried over rather than dropped: the feature would otherwise parse
       // the same file again on its first regen.
       job->model = std::move(model);
-      job->done.store(true, std::memory_order_release);
       return;
     }
 
@@ -86,14 +86,15 @@ void Run(ImportJob* job) {
 
     job->plan = interchange::BuildAssemblyImportPlan(
         model, job->stepPath, job->destDir,
-        [job](size_t doneCount, size_t total) {
+        [job, bg](size_t doneCount, size_t total) {
           job->partsDone.store(static_cast<int>(doneCount),
                                std::memory_order_relaxed);
-          job->fraction.store(total > 0 ? static_cast<double>(doneCount) /
-                                              static_cast<double>(total)
-                                        : -1.0,
-                              std::memory_order_relaxed);
-          return !job->cancel.load(std::memory_order_relaxed);
+          const double f = total > 0 ? static_cast<double>(doneCount) /
+                                           static_cast<double>(total)
+                                     : -1.0;
+          job->fraction.store(f, std::memory_order_relaxed);
+          bg->fraction.store(f);
+          return !bg->cancel.load();
         });
     if (job->error.empty())
       job->error = job->plan.error;
@@ -102,15 +103,91 @@ void Run(ImportJob* job) {
   } catch (const std::exception& e) {
     job->error = std::string("STEP import failed: ") + e.what();
   }
+}
 
-  // Last, with release ordering: everything above must be visible to the main
-  // thread before it sees this.
-  job->done.store(true, std::memory_order_release);
+// The main-thread half, as the job's `finish`: called once after the join,
+// then once per frame while the materialize slices. Returns true when the
+// import is over, whichever way.
+bool Finish(AppState& state, const std::shared_ptr<ImportJob>& jobPtr) {
+  ImportJob* job = jobPtr.get();
+  BackgroundJob* bg = FindBackgroundJob(state, "import");
+  const bool cancelled = bg != nullptr && bg->cancel.load();
+
+  if (!job->materializing) {
+    // One product: a feature in the active part. The worker's parsed model
+    // goes with it (ImportFeature::SeedGeometry), so the first regen does not
+    // re-read the file — a LATER regen still does, which is what keeps
+    // editing the source file meaningful.
+    if (!cancelled && job->error.empty() &&
+        job->kind == ImportJob::Kind::Feature) {
+      const std::string path = job->stepPath;
+      CADKernel::ImportedModel parsed = std::move(job->model);
+      std::string featureError;
+      state.importJob.reset(); // nothing below touches the payload
+      if (!ImportAsFeature(state, path, &parsed, &featureError)) {
+        state.importError = featureError;
+        LOG_WARN("Import failed: {}", featureError);
+      } else {
+        state.importError.clear();
+      }
+      return true;
+    }
+    if (cancelled || !job->error.empty() || job->plan.parts.empty()) {
+      if (!cancelled && !job->error.empty())
+        LOG_WARN("Assembly import failed: {}", job->error);
+      state.importError = cancelled ? std::string() : job->error;
+      // Nothing was materialized yet, so there is nothing to unwind — the
+      // only side effect is the .brep sidecars, and they live in a directory
+      // named for this import that nothing else references.
+      state.importJob.reset();
+      return true;
+    }
+    job->materializing = true;
+    // Cancelling once tabs exist would leave a half-built assembly, so from
+    // here the request is refused (the modal drops its button, and
+    // `background_jobs` says cancellable: false).
+    if (bg != nullptr)
+      bg->cancellable = false;
+    job->phase.store(static_cast<int>(ImportJob::Phase::Materializing),
+                     std::memory_order_relaxed);
+    job->partsTotal.store(static_cast<int>(job->plan.parts.size()),
+                          std::memory_order_relaxed);
+    job->partsDone.store(0, std::memory_order_relaxed);
+    return false; // let the modal paint the phase change before the first slice
+  }
+
+  // Materialize on the MAIN thread, a slice per frame.
+  const size_t total = job->plan.parts.size();
+  const size_t end = std::min(job->materializedParts + kPartsPerFrame, total);
+  for (; job->materializedParts < end; job->materializedParts++) {
+    job->partIds.push_back(MaterializeImportedPart(
+        state, job->plan.parts[job->materializedParts], job->assemblyName));
+  }
+  job->partsDone.store(static_cast<int>(job->materializedParts),
+                       std::memory_order_relaxed);
+  const double f = total > 0 ? static_cast<double>(job->materializedParts) /
+                                   static_cast<double>(total)
+                             : -1.0;
+  job->fraction.store(f, std::memory_order_relaxed);
+  if (bg != nullptr)
+    bg->fraction.store(f);
+  if (job->materializedParts < total)
+    return false;
+
+  MaterializeImportedAssembly(state, job->plan, job->assemblyName,
+                              job->partIds);
+  LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", job->stepPath,
+           job->plan.parts.size(), job->plan.occurrences.size());
+  state.importError.clear();
+  state.importJob.reset();
+  return true;
 }
 
 } // namespace
 
-bool ImportRunning(const AppState& state) { return state.importJob != nullptr; }
+bool ImportRunning(const AppState& state) {
+  return BackgroundJobRunning(state, "import");
+}
 
 bool StartImport(AppState& state, const std::string& path, std::string* error) {
   const auto fail = [&](const std::string& msg) {
@@ -119,7 +196,7 @@ bool StartImport(AppState& state, const std::string& path, std::string* error) {
     LOG_WARN("Import: {}", msg);
     return false;
   };
-  if (state.importJob)
+  if (ImportRunning(state))
     return fail("an import is already running");
 
   // Only STEP is slow enough to be worth a thread: a .brep or .stl of any
@@ -145,92 +222,25 @@ bool StartImport(AppState& state, const std::string& path, std::string* error) {
   for (int n = 2; std::filesystem::exists(destDir); n++)
     destDir = importRoot / (asmName + "-" + std::to_string(n));
 
-  auto job = std::make_unique<ImportJob>();
+  auto job = std::make_shared<ImportJob>();
   job->stepPath = stepPath;
   job->destDir = destDir.string();
   job->assemblyName = asmName;
-  ImportJob* raw = job.get();
-  state.importJob = std::move(job);
-  raw->worker = std::thread(Run, raw);
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "import";
+  bg->label = "Importing " + asmName;
+  bg->cancellable = true; // until the materialize starts
+  BackgroundJob* raw = bg.get();
+  ImportJob* payload = job.get();
+  bg->thread = std::thread([payload, job, raw] {
+    Run(payload, raw);
+    raw->done.store(true); // last: everything Run wrote is visible first
+  });
+  bg->finish = [job](AppState& s) { return Finish(s, job); };
+  state.importJob = job;
+  StartBackgroundJob(state, std::move(bg));
   LOG_INFO("Assembly import started in the background: '{}'", stepPath);
   return true;
-}
-
-void PollImport(AppState& state) {
-  ImportJob* job = state.importJob.get();
-  if (job == nullptr)
-    return;
-
-  // Phase 1: waiting on the worker.
-  if (!job->joined) {
-    if (!job->done.load(std::memory_order_acquire))
-      return;
-    // Join before reading anything the worker wrote: the release/acquire pair
-    // orders the fields and the join orders the thread's exit.
-    job->worker.join();
-    job->joined = true;
-
-    const bool cancelled = job->cancel.load(std::memory_order_relaxed);
-    // One product: a feature in the active part. The worker's parsed model
-    // goes with it (ImportFeature::SeedGeometry), so the first regen does not
-    // re-read the file — a LATER regen still does, which is what keeps
-    // editing the source file meaningful.
-    if (!cancelled && job->error.empty() &&
-        job->kind == ImportJob::Kind::Feature) {
-      const std::string path = job->stepPath;
-      CADKernel::ImportedModel parsed = std::move(job->model);
-      std::string featureError;
-      state.importJob.reset(); // joins; nothing below touches the job
-      if (!ImportAsFeature(state, path, &parsed, &featureError)) {
-        state.importError = featureError;
-        LOG_WARN("Import failed: {}", featureError);
-      } else {
-        state.importError.clear();
-      }
-      return;
-    }
-    if (cancelled || !job->error.empty() || job->plan.parts.empty()) {
-      if (!cancelled && !job->error.empty())
-        LOG_WARN("Assembly import failed: {}", job->error);
-      state.importError = cancelled ? std::string() : job->error;
-      // Nothing was materialized yet, so there is nothing to unwind — the
-      // only side effect is the .brep sidecars, and they live in a directory
-      // named for this import that nothing else references.
-      state.importJob.reset();
-      return;
-    }
-    job->phase.store(static_cast<int>(ImportJob::Phase::Materializing),
-                     std::memory_order_relaxed);
-    job->partsTotal.store(static_cast<int>(job->plan.parts.size()),
-                          std::memory_order_relaxed);
-    job->partsDone.store(0, std::memory_order_relaxed);
-    return; // let the modal paint the phase change before the first slice
-  }
-
-  // Phase 2: materialize on the MAIN thread, a slice per frame. Cancelling
-  // here would leave a half-built assembly, so it is refused once this starts
-  // (the modal drops its Cancel button at the same moment).
-  const size_t total = job->plan.parts.size();
-  const size_t end = std::min(job->materializedParts + kPartsPerFrame, total);
-  for (; job->materializedParts < end; job->materializedParts++) {
-    job->partIds.push_back(MaterializeImportedPart(
-        state, job->plan.parts[job->materializedParts], job->assemblyName));
-  }
-  job->partsDone.store(static_cast<int>(job->materializedParts),
-                       std::memory_order_relaxed);
-  job->fraction.store(total > 0 ? static_cast<double>(job->materializedParts) /
-                                      static_cast<double>(total)
-                                : -1.0,
-                      std::memory_order_relaxed);
-  if (job->materializedParts < total)
-    return;
-
-  MaterializeImportedAssembly(state, job->plan, job->assemblyName,
-                              job->partIds);
-  LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", job->stepPath,
-           job->plan.parts.size(), job->plan.occurrences.size());
-  state.importError.clear();
-  state.importJob.reset();
 }
 
 std::string ImportStatusLine(const AppState& state) {

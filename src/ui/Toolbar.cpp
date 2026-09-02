@@ -7,6 +7,7 @@
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h" // ActiveCamSetup (the job bar's rotary button)
 #include "ui/Commands.h"
 #include "ui/FastenerTool.h"
@@ -179,6 +180,11 @@ void DrawImportModal(AppState& state) {
                               ImGuiWindowFlags_AlwaysAutoResize))
     return;
 
+  BackgroundJob* bg = FindBackgroundJob(state, "import");
+  if (state.importJob == nullptr || bg == nullptr) {
+    ImGui::EndPopup();
+    return;
+  }
   const ImportJob& job = *state.importJob;
   const double fraction = job.fraction.load(std::memory_order_relaxed);
   const auto phase =
@@ -198,10 +204,9 @@ void DrawImportModal(AppState& state) {
   // Cancelling once tabs exist would leave a half-built assembly behind, so
   // the button goes away exactly when unwinding stops being free.
   const bool cancellable = phase != ImportJob::Phase::Materializing;
-  ImGui::BeginDisabled(!cancellable ||
-                       job.cancel.load(std::memory_order_relaxed));
+  ImGui::BeginDisabled(!cancellable || bg->cancel.load());
   if (ImGui::Button("Cancel###import_cancel", ImVec2(120, 0)))
-    state.importJob->cancel.store(true, std::memory_order_relaxed);
+    bg->cancel.store(true);
   ImGui::EndDisabled();
   if (!cancellable) {
     ImGui::SameLine();

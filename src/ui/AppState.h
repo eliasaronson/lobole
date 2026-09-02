@@ -1309,10 +1309,10 @@ struct AppState {
 
   // A running fetch/push/clone (F9 C2) is a "sync" entry in
   // `backgroundJobs` (ui/SyncJob.h) since A3 phase 2.
-  // A background STEP import (ui/ImportJob.h) and the message left by the
-  // last failed one. Non-null = the progress modal is up and File > Import
-  // refuses a second one.
-  std::unique_ptr<ImportJob> importJob;
+  // The payload of a background STEP import ("import" in `backgroundJobs`,
+  // ui/ImportJob.h) and the message left by the last failed one. The modal
+  // reads the payload; ImportRunning asks the registry.
+  std::shared_ptr<ImportJob> importJob;
   std::string importError;
   // What the last one said, kept until the next one starts, so the panel has
   // something to show instead of the message flashing past.
