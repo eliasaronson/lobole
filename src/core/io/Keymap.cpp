@@ -310,6 +310,29 @@ const Binding kDefaults[] = {
     {"drawing.dim_pattern_callout", Context::Drawing, "Pattern callout",
      "Dimensions", "P"},
 
+    // ------------------------------------------------------------------- Job
+    // A CAM job tab. The verbs are the toolbar (docs/cam/gui.md): each is one
+    // sentence a person would say, and each is one click on a part. Letters
+    // follow the verb -- Pocket, Cut, Drill, Break -- and Shift for the two
+    // that need no pick. Z is zero; T is the view down the spindle (the plan
+    // view, "Top" in CAM's frame).
+    {"job.top_face", Context::Job, "Pick the top face (Z zero)", "Set up", "Z"},
+    {"job.lay_face_up", Context::Job, "Lay a face up (how the part is clamped)",
+     "Set up", "L"},
+    {"job.index_face", Context::Job, "Turn a face up (rotary table)", "Set up",
+     "A"},
+    {"job.look_down_spindle", Context::Job, "Look down the spindle", "Set up",
+     "T"},
+    {"job.pocket", Context::Job, "Clear a pocket", "Machine", "P"},
+    {"job.profile", Context::Job, "Cut it out", "Machine", "C"},
+    {"job.drill", Context::Job, "Drill a hole", "Machine", "D"},
+    {"job.edge", Context::Job, "Break an edge", "Machine", "B"},
+    {"job.whole", Context::Job, "Cut out the whole part", "Machine", "Shift+C"},
+    {"job.face", Context::Job, "Face the top", "Machine", "Shift+T"},
+    {"job.generate", Context::Job, "Generate toolpaths and verify", "Output",
+     "G"},
+    {"job.simulate", Context::Job, "Simulate the cut", "Output", "S"},
+
     // ------------------------------------------------------------ Simulation
     {"sim.fixed", Context::Simulation, "Fixed support", "Loads", "1"},
     {"sim.force", Context::Simulation, "Force load", "Loads", "2"},
@@ -331,6 +354,8 @@ const char* ContextName(Context c) {
     return "assembly";
   case Context::Drawing:
     return "drawing";
+  case Context::Job:
+    return "job";
   case Context::Simulation:
     return "simulation";
   }
@@ -349,6 +374,8 @@ const char* ContextLabel(Context c) {
     return "Assembly";
   case Context::Drawing:
     return "Drawing";
+  case Context::Job:
+    return "CAM job";
   case Context::Simulation:
     return "Simulation";
   }
@@ -356,9 +383,9 @@ const char* ContextLabel(Context c) {
 }
 
 std::span<const Context> AllContexts() {
-  static constexpr Context kAll[] = {Context::Global,  Context::Part,
-                                     Context::Sketch,  Context::Assembly,
-                                     Context::Drawing, Context::Simulation};
+  static constexpr Context kAll[] = {
+      Context::Global,  Context::Part, Context::Sketch,    Context::Assembly,
+      Context::Drawing, Context::Job,  Context::Simulation};
   return kAll;
 }
 

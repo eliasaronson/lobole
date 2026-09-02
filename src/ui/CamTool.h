@@ -21,8 +21,25 @@
 // round on simulation mode not exiting when it should.
 namespace ui {
 
-// The floating verb window. Drawn by DrawToolWindow when camToolOpen.
+// The floating verb window. Drawn by DrawToolWindow when camToolOpen; what
+// it shows is state.camVerb's.
 void DrawCamToolWindow(AppState& state);
+
+// A toolbar verb (Commands.cpp `job.*`): opens the window for `verb` and arms
+// its pick, or -- for the two verbs that need no pick -- makes the operation
+// right away. Pressing the verb that is already armed puts it away, which is
+// the way out that is not the Escape key.
+void StartCamVerb(AppState& state, AppState::CamVerb verb);
+
+// The tool the next verb derives for: the one chosen this session, else the
+// LAST TOOL USED (the setup's newest operation's), else the setup's first.
+// A job is cut with one tool far more often than not, and the tool you just
+// used is the one you have in the spindle.
+[[nodiscard]] int VerbTool(const AppState& state, const cam::Setup& setup);
+
+// The plan view of the active setup, framed on its stock
+// (`job.look_down_spindle`).
+void LookDownTheSpindle(AppState& state);
 
 // Arms one of the CAM pick slots (kCamToolSlot + the slot id).
 void ArmCamPick(AppState& state, PickSlot slot, const char* prompt);

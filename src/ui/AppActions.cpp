@@ -1024,6 +1024,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.dimTool = AppState::DimTool{};
   state.mateTool = AppState::MateToolState{};
   state.camToolOpen = false;
+  state.camVerb = AppState::CamVerb::None;
+  state.camVerbOp = 0;
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
 }
@@ -1100,6 +1102,14 @@ void ResetActiveTabUiState(AppState& state) {
   // geometry that was never measured. Simulation was reset here from the
   // start and measure was simply missed.
   state.measure = MeasureState{};
+  // A job tab's panel is the CAM panel, and it shares the left node with
+  // Variables, History and the rest: without this the tab that was in front
+  // on the part stays in front here, and the job's list is behind it.
+  // Repeated frames, as simulation mode does (DockLayout.cpp).
+  if (state.job) {
+    state.focusPanel = "CAM";
+    state.focusPanelFrames = 60;
+  }
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 

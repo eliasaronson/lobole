@@ -215,20 +215,18 @@ void DrawCamPanel(AppState& state) {
   // this one shipped without the flag — so the first launch after CAM landed
   // put the job list in front of the model tree. Three GUI tests caught it as
   // "unable to hover Model"; a user would have called it "my tree is gone".
+  // A JOB tab's panel, and no other's. It used to exist on every kind of
+  // tab, saying "open a part and press the CAM button" on the ones it could
+  // do nothing for -- a tab in the left node of every part, assembly and
+  // drawing, for a document kind that has its own tab (v73). The way into
+  // CAM from a part is the part bar's own button.
+  if (!state.job)
+    return;
   if (!ImGui::Begin(kPanelCam, nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
     ImGui::End();
     return;
   }
   PanelHeading(kPanelCam);
-  if (!state.job) {
-    // Not "switch to a part tab": since v73 a setup belongs to a JOB, and the
-    // way to get one is to machine a part.
-    ImGui::TextWrapped("CAM works on a job — a job says how parts are cut out "
-                       "of a piece of stock. Open a part and press the CAM "
-                       "button to make one.");
-    ImGui::End();
-    return;
-  }
 
   std::vector<cam::Setup>& setups = state.job->GetSetups();
   if (setups.empty()) {
@@ -341,49 +339,11 @@ void DrawCamPanel(AppState& state) {
   }
   ImGui::SetItemTooltip("Which machine this job is posted for");
 
-  // The way in, on its own line. It used to sit third on the "Pick top face"
-  // row, after a status message long enough ("Z zero is not set yet") that
-  // the whole row overflowed the panel — and the default dock layout makes
-  // this panel 217 px wide, so the one-click way into CAM was clipped off
-  // the edge where nobody could click it (dogfooding round 2).
-  if (ImGui::Button("Verbs — the one-click way in###cam_open_tool"))
-    state.camToolOpen = true;
-  ImGui::SetItemTooltip("Point at the part; every depth is derived from what "
-                        "you point at");
-
-  // G1: the highest-value single click in CAM. Z zero on the table instead of
-  // the stock top is the mistake that breaks tools, so it is the first
-  // control and it is a pick, not a number.
-  const bool arming = state.slotPick.featureId == kCamToolSlot;
-  if (arming)
-    ImGui::BeginDisabled();
-  if (ImGui::Button(setup->topFace.IsSet() ? "Re-pick top face###cam_topface"
-                                           : "Pick top face###cam_topface"))
-    ArmCamPick(state, PickSlot::CamTopFace,
-               "Click the top face — that sets Z zero for the job");
-  if (arming)
-    ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (arming)
-    // The prompt that is actually armed. This said "click the top face…"
-    // whatever the pick was for, so arming "clear a pocket" from the verbs
-    // window told you to click the wrong thing.
-    ImGui::TextDisabled("%s…", state.slotPick.prompt.empty()
-                                   ? "click a face"
-                                   : state.slotPick.prompt.c_str());
-  else if (setup->topFace.IsSet())
-    ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
-  else
-    ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
-                       "Z zero is not set yet");
-  if (!state.slotPick.miss.empty() && arming) {
-    // WRAPPED. A refusal is a sentence whose second half says what to do
-    // instead, and this panel is narrow: unwrapped, the useful half was
-    // clipped off the right edge where nobody could read it.
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
-    ImGui::TextWrapped("%s", state.slotPick.miss.c_str());
-    ImGui::PopStyleColor();
-  }
+  // Z zero and the verbs were here too, once: a "Pick top face" row and a
+  // button opening a window that listed the verbs. Both are the job TOOLBAR
+  // now (2026-09-02) -- the way in belongs where the part bar's tools are,
+  // not third on a row that overflowed a 217 px panel. What stays here is
+  // the LIST: setups, parts, stock, tools, operations, the numbers.
 
   // What this job cuts, and where each part sits in the stock. A job holds
   // more than one part (v74) — four brackets out of one sheet — and until

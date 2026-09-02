@@ -32,9 +32,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # and, ideally, an eventual fix — an entry here is a promise that the two can
 # never be submitted in the same frame.
 ALLOWED = {
-    # Drawn in the "no document" early-return path and in the normal path;
-    # the function returns between them, so only ever one per frame.
-    ("src/ui/CamTool.cpp", "cam_tool_done"),
+    # (empty — the one entry, CamTool.cpp's cam_tool_done, went back to a
+    # single site when the window became per-verb on 2026-09-02)
 }
 
 # Strings, comments and the call structure are all we need.

@@ -244,6 +244,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     CamPart()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
+    MakeJob(); // the window is a job-tab session; without one it closes itself
+    ctx->Yield(2);
     s_App->camToolOpen = true;
     ctx->Yield(4);
     ImGuiWindow* win = ImGui::FindWindowByName("CAM###ToolWindow");
@@ -318,7 +320,6 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     cam::Setup& setup = MakeJob()->AddSetup("Job");
     s_App->camActiveSetup = setup.id;
-    s_App->camToolOpen = true;
     ctx->Yield(3);
 
     // 3-axis: the spindle points down the world's -Z, so the camera looks
@@ -326,7 +327,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camera->SnapToView(glm::normalize(glm::vec3(1, 1, 0.2f)),
                               glm::vec3(0, 1, 0));
     ctx->Yield(2);
-    ctx->ItemClick("//CAM###ToolWindow/###cam_view_spindle");
+    ToolbarClick(ctx, "###tb_job_spindle"); // the job bar's own button
     ctx->Yield(150); // AlignToFace animates; wait for it to land
     glm::vec3 fwd = glm::normalize(s_App->camera->GetForward());
     IM_CHECK(std::abs(fwd.z + 1.0f) < 0.02f); // looking along -Z
@@ -341,14 +342,13 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camera->SnapToView(glm::normalize(glm::vec3(1, 1, 0.2f)),
                               glm::vec3(0, 1, 0));
     ctx->Yield(2);
-    ctx->ItemClick("//CAM###ToolWindow/###cam_view_spindle");
+    ToolbarClick(ctx, "###tb_job_spindle");
     ctx->Yield(150);
     fwd = glm::normalize(s_App->camera->GetForward());
     // A job tab draws SETUP space, so the spindle is world +Z whatever the
     // part is clamped like — there is no frame left to come back through.
     const glm::vec3 want(0.0f, 0.0f, -1.0f);
     IM_CHECK(glm::length(fwd - want) < 0.03f);
-    s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
   // Picking a face as "the top" IS the statement that the part is clamped
@@ -756,17 +756,17 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(MakeJob()->GetSetups().empty());
     ctx->Yield(2);
 
-    // Opening the window is not an edit: look and close, and the document is
-    // as it was.
-    ToolbarClick(ctx, "###tb_cam");
+    // Pressing the verb is not an edit: the window opens, the pick arms, and
+    // the document is as it was.
+    ToolbarClick(ctx, "###tb_job_top_face");
     ctx->Yield(3);
     IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(s_App->camVerb == ui::AppState::CamVerb::TopFace);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
     IM_CHECK(Job()->GetSetups().empty());
 
     // The first pick is. (The viewport click routes here through
     // SlotPickClicked; calling it directly keeps the test off the camera.)
-    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
-    ctx->Yield();
     ui::SelectionItem top;
     top.kind = ui::SelectionItem::Kind::Face;
     for (const Body& b : CamPart()->GetBodies())
@@ -801,14 +801,17 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         "Pocket", plate, voidId, BooleanOp::Subtract));
     ctx->Yield(2);
 
-    // Click 1: the verb. The toolbar opens the session; no setup exists yet,
-    // and the verb makes one rather than sending the user to the panel.
+    // Click 1: the verb, on the JOB bar. "Machine this part" on the part bar
+    // gets you to the job tab; no setup exists yet, and the verb makes one
+    // rather than sending the user to the panel.
     ToolbarClick(ctx, "###tb_cam");
     ctx->Yield(2);
-    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(Job() != nullptr);
     IM_CHECK(Job()->GetSetups().empty());
-    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_pocket");
+    ToolbarClick(ctx, "###tb_job_pocket");
     ctx->Yield(2);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(s_App->camVerb == ui::AppState::CamVerb::Pocket);
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
     IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamPocketFloor);
 
@@ -914,7 +917,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // Closing the session drops the decision-time drawings and keeps the
     // backplot: the job survives the window that made it.
-    ctx->ItemClick("//CAM###ToolWindow/###cam_tool_done");
+    ctx->ItemClick("//Clear a pocket###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
     IM_CHECK(!s_App->camToolOpen);
     std::vector<PrimVertex> afterPrims;
@@ -938,7 +941,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     ToolbarClick(ctx, "###tb_cam");
     ctx->Yield(2);
-    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_edge");
+    ToolbarClick(ctx, "###tb_job_edge");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamEdgeWall);
 
@@ -1031,7 +1034,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
           floor.element = ElementRef{b.createdBy, name};
       }
     IM_CHECK(floor.element.IsSet());
-    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_pocket");
+    ToolbarClick(ctx, "###tb_job_pocket");
     ctx->Yield();
     ui::CamFacePicked(*s_App, floor);
     ctx->Yield(2);
@@ -1047,7 +1050,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
           wall.element = ElementRef{b.createdBy, name};
       }
     IM_CHECK(wall.element.IsSet());
-    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_profile");
+    ToolbarClick(ctx, "###tb_job_profile");
     ctx->Yield();
     ui::CamFacePicked(*s_App, wall); // the part's own side: cut it out
     ctx->Yield(2);
@@ -1543,6 +1546,152 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(drawnAt.x > lo.x - pad && drawnAt.x < hi.x + pad);
     IM_CHECK(drawnAt.y > lo.y - pad && drawnAt.y < hi.y + pad);
     ui::EndCamPlayback(*s_App);
+    ctx->Yield(2);
+  };
+
+  // A job tab has its own toolbar (2026-09-02): the verbs, one button each,
+  // where the part bar has its features. It used to draw the PART bar —
+  // thirty disabled modelling tools — and the CAM panel used to exist on
+  // every kind of tab. Same three properties the part bar's tests hold it
+  // to: the row fits, every id is present, no two buttons wear one glyph.
+  t = IM_REGISTER_TEST(engine, "cam", "job_tab_has_its_own_toolbar");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    // On the PART: the part bar, the part context, and no CAM panel at all.
+    IM_CHECK_EQ(ui::ActiveContext(*s_App), keymap::Context::Part);
+    ctx->SetRef("//##DockHost");
+    IM_CHECK(ctx->ItemExists("**/###tb_box"));
+    IM_CHECK(!ctx->ItemExists("**/###tb_job_pocket"));
+    {
+      ImGuiWindow* cam = ImGui::FindWindowByName(ui::kPanelCam);
+      IM_CHECK(cam == nullptr || !cam->WasActive);
+    }
+
+    // On the JOB: the other way round, and the CAM panel comes forward on
+    // its own — it shares the left node, and the tab that was in front on
+    // the part is not the one this tab is about.
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_cam");
+    ctx->Yield(8);
+    IM_CHECK(Job() != nullptr);
+    IM_CHECK_EQ(ui::ActiveContext(*s_App), keymap::Context::Job);
+    ctx->SetRef("//##DockHost");
+    IM_CHECK(!ctx->ItemExists("**/###tb_box"));
+    static const char* const kJobTools[] = {
+        "###tb_job_top_face", "###tb_job_lay_face_up", "###tb_job_spindle",
+        "###tb_job_pocket",   "###tb_job_profile",     "###tb_job_drill",
+        "###tb_job_edge",     "###tb_job_whole",       "###tb_job_face",
+        "###tb_job_generate", "###tb_job_simulate",    "###tb_job_fit",
+        "###tb_job_measure",
+    };
+    std::unordered_map<std::string, std::string> byGlyph;
+    for (const char* id : kJobTools) {
+      const ImGuiTestItemInfo info =
+          ctx->ItemInfo((std::string("**/") + id).c_str());
+      IM_CHECK_SILENT(info.ID != 0);
+      const std::string label = info.DebugLabel;
+      const size_t hash = label.find("###");
+      IM_CHECK_NO_RET(hash != std::string::npos && hash > 0);
+      if (hash == std::string::npos || hash == 0)
+        continue;
+      const auto [it, fresh] = byGlyph.emplace(label.substr(0, hash), id);
+      if (!fresh)
+        ctx->LogError("%s and %s share one glyph", it->second.c_str(), id);
+      IM_CHECK_NO_RET(fresh);
+    }
+    // The rotary index only on a machine that has the axis.
+    IM_CHECK(!ctx->ItemExists("**/###tb_job_index_face"));
+    ImGuiWindow* bar = nullptr;
+    for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows)
+      if (std::string(w->Name).find("##ToolbarRow") != std::string::npos) {
+        bar = w;
+        break;
+      }
+    IM_CHECK(bar != nullptr);
+    IM_CHECK(bar->ContentSize.x <= bar->InnerRect.GetWidth() + 1.0f);
+    {
+      ImGuiWindow* cam = ImGui::FindWindowByName(ui::kPanelCam);
+      IM_CHECK(cam != nullptr && cam->WasActive);
+      IM_CHECK(cam->DockNode != nullptr &&
+               cam->DockNode->SelectedTabId == cam->TabId);
+    }
+
+    // A verb button is the verb: it opens THAT verb's window and arms its
+    // pick, lit while armed; pressing it again puts it away.
+    ToolbarClick(ctx, "###tb_job_profile");
+    ctx->Yield(3);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(s_App->camVerb == ui::AppState::CamVerb::Profile);
+    IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamProfileOutline);
+    IM_CHECK(ImGui::FindWindowByName("Cut it out###ToolWindow") != nullptr);
+    ToolbarClick(ctx, "###tb_job_profile");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camToolOpen);
+    IM_CHECK(s_App->slotPick.featureId != ui::kCamToolSlot);
+  };
+
+  // A verb derives for the LAST TOOL USED, and says which. Every number a
+  // verb makes is a fraction of the cutter, so the tool has to be visible
+  // where the verb is pressed — and the tool you just cut with is the one in
+  // the spindle, so it is the default, across sessions, because the answer
+  // is read from the job's operations and not from the session.
+  t = IM_REGISTER_TEST(engine, "cam", "verb_defaults_to_the_last_tool");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    {
+      cam::Setup* live = Job()->FindSetup(setup.id);
+      cam::Tool small = live->tools[0];
+      small.number = 2;
+      small.name = "small";
+      small.diameter = 3.0;
+      live->tools.push_back(small);
+    }
+    ctx->Yield(2);
+    // Nothing cut yet: the first tool.
+    IM_CHECK_EQ(ui::VerbTool(*s_App, *Job()->FindSetup(setup.id)), 1);
+
+    // The whole part, cut with the tool in the window: T2. The verb needs no
+    // pick, so the cut is made at once with the default, and choosing the
+    // other tool in ITS window re-derives that cut rather than asking for a
+    // remove-and-redo.
+    ToolbarClick(ctx, "###tb_job_whole");
+    ctx->Yield(3);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(s_App->camVerb == ui::AppState::CamVerb::Whole);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    IM_CHECK_EQ(live->operations[0].toolNumber, 1);
+    const uint64_t made = live->operations[0].id;
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_verb_t2");
+    ctx->Yield(3);
+    live = Job()->FindSetup(setup.id);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1); // re-derived, not added
+    IM_CHECK_EQ(live->operations[0].id, made);
+    IM_CHECK_EQ(live->operations[0].toolNumber, 2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].operationId == made);
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+
+    // A NEW session — the choice forgotten — still answers T2: it is what
+    // the newest operation cuts with.
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+    s_App->camVerbTool = 0;
+    IM_CHECK_EQ(ui::VerbTool(*s_App, *live), 2);
+    ToolbarClick(ctx, "###tb_job_face");
+    ctx->Yield(3);
+    live = Job()->FindSetup(setup.id);
+    IM_CHECK_EQ(live->operations.size(), (size_t)2);
+    IM_CHECK_EQ(live->operations[1].toolNumber, 2);
+    ctx->ItemClick("//Face the top###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
   };
 

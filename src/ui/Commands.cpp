@@ -1,5 +1,8 @@
 #include "ui/Commands.h"
 #include "ui/AssemblyActions.h"
+#include "ui/CamPanel.h"    // RefreshCamToolpaths
+#include "ui/CamPlayback.h" // BeginCamPlayback
+#include "ui/CamTool.h"     // StartCamVerb, the job verbs
 
 #include "common/Logger.h"
 #include "core/Conventions.h"
@@ -192,6 +195,26 @@ bool HasJobBody(AppState& s) {
   // Either a job with something to cut, or a part that could BE one: pressing
   // this on a part is how you get a job in the first place.
   return (s.job != nullptr && !JobBodies(s).empty()) || HasBody(s);
+#else
+  (void)s;
+  return false;
+#endif
+}
+// A job tab with something to cut: the gate for every `job.*` verb.
+bool HasJob(AppState& s) {
+#ifdef HAVE_CAM
+  return s.job != nullptr && !JobBodies(s).empty();
+#else
+  (void)s;
+  return false;
+#endif
+}
+bool HasRotaryAxis(AppState& s) {
+#ifdef HAVE_CAM
+  if (!HasJob(s))
+    return false;
+  const cam::Setup* setup = ActiveCamSetup(s);
+  return setup != nullptr && setup->hasRotaryAxis;
 #else
   (void)s;
   return false;
@@ -467,20 +490,50 @@ const std::vector<Command>& Table() {
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
     add("part.cam", HasJobBody, [](AppState& s) {
 #ifdef HAVE_CAM
-      // On a PART tab this is "machine this part": get to the job that cuts
-      // it -- making one if there is none -- and then open the session. That
-      // one click is what keeps CAM's move onto its own document from turning
-      // the common case into a ritual (docs/cam/job-document.md).
-      if (s.job == nullptr && s.document != nullptr && !s.parts.empty()) {
+      // "Machine this part": get to the job that cuts it, making one if there
+      // is none. That one click is what keeps CAM's move onto its own
+      // document from turning the common case into a ritual
+      // (docs/cam/job-document.md). The verbs are the JOB tab's own toolbar
+      // (2026-09-02), so arriving there is the whole of this command -- it
+      // used to also toggle a window listing them, which a job tab no longer
+      // needs and a part tab cannot show.
+      if (s.job == nullptr && s.document != nullptr && !s.parts.empty())
         OpenJobForPart(s, s.parts[static_cast<size_t>(s.activePart)].id);
-        s.camToolOpen = false; // a fresh tab opens the session below
-      }
-      s.camToolOpen = !s.camToolOpen;
-      if (!s.camToolOpen) {
-        s.camGhostOp = 0;
-        if (s.slotPick.featureId == kCamToolSlot)
-          s.slotPick = {};
-      }
+#else
+      (void)s;
+#endif
+    });
+
+    // ------------------------------------------------------------- Job (CAM)
+    // The verbs, one command each (docs/cam/gui.md). Each opens ITS window
+    // and arms its pick; the two that need no pick make the cut at once.
+    const auto verb = [&add](const char* id, AppState::CamVerb v,
+                             std::function<bool(AppState&)> gate = HasJob) {
+      add(id, std::move(gate), [v](AppState& s) { StartCamVerb(s, v); });
+    };
+    verb("job.top_face", AppState::CamVerb::TopFace);
+    verb("job.lay_face_up", AppState::CamVerb::LayFaceUp);
+    // The ROTARY index is a different claim and only true of a machine that
+    // has the axis. Offering it unconditionally is what let a 3-axis job be
+    // handed `G0 A90` for wanting a panel flat (docs/cam/setup-frame.md).
+    verb("job.index_face", AppState::CamVerb::IndexFace, HasRotaryAxis);
+    add("job.look_down_spindle", HasJob,
+        [](AppState& s) { LookDownTheSpindle(s); });
+    verb("job.pocket", AppState::CamVerb::Pocket);
+    verb("job.profile", AppState::CamVerb::Profile);
+    verb("job.drill", AppState::CamVerb::Drill);
+    verb("job.edge", AppState::CamVerb::Edge);
+    verb("job.whole", AppState::CamVerb::Whole);
+    verb("job.face", AppState::CamVerb::Face);
+    add("job.generate", HasJob, [](AppState& s) {
+      RefreshCamToolpaths(s);
+      RunCamVerification(s);
+    });
+    // Refuses in words (camPlaybackRefusal, printed by the CAM panel) when
+    // there is nothing generated to play -- the u10 rule.
+    add("job.simulate", HasJob, [](AppState& s) {
+#ifdef HAVE_CAM
+      (void)BeginCamPlayback(s);
 #else
       (void)s;
 #endif
@@ -679,6 +732,8 @@ keymap::Context ActiveContext(const AppState& state) {
     return keymap::Context::Assembly;
   if (state.drawing)
     return keymap::Context::Drawing;
+  if (state.job)
+    return keymap::Context::Job;
   return keymap::Context::Part;
 }
 

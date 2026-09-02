@@ -39,6 +39,7 @@ enum class Context : uint8_t {
   Sketch,
   Assembly,
   Drawing,
+  Job, // a CAM job tab (docs/cam/job-document.md)
   Simulation,
 };
 

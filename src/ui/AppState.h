@@ -1334,6 +1334,27 @@ struct AppState {
   // The verb session (G2): a Tool window, NOT a mode — CAM does not take the
   // viewport over, and modes have a known exit-bug class here (U11).
   bool camToolOpen = false;
+  // WHICH verb the window is for. The verbs are the job toolbar since
+  // 2026-09-02 (one button each, like the part tools), and the window that
+  // opens is that verb's: its prompt, its tool, what it made. None = the
+  // plain session window (the job's operations and verdict, no verb armed).
+  enum class CamVerb {
+    None,
+    TopFace,
+    LayFaceUp,
+    IndexFace,
+    Pocket,
+    Profile,
+    Drill,
+    Edge,
+    Whole,
+    Face,
+  };
+  CamVerb camVerb = CamVerb::None;
+  // The operation the no-pick verbs (Whole, Face) just made, so the window
+  // can re-derive it for a different tool without the user removing it and
+  // pressing the verb again. 0 = none this session.
+  uint64_t camVerbOp = 0;
 
   // Where the floating tool window was last anchored: the top-right corner of
   // the 3D viewport at the time. Kept so the window can FOLLOW the viewport —
@@ -1376,7 +1397,9 @@ struct AppState {
   // refusal (those are camRefusal, in red): a consequence, stated, because the
   // alternative is a job that quietly changed under the user.
   std::string camNote;
-  // Which cutter the next verb derives for. 0 = the setup's first tool.
+  // Which cutter the next verb derives for. 0 = not chosen this session, so
+  // the LAST TOOL USED — the one the setup's newest operation cuts with —
+  // and the first tool only when nothing has been cut yet (ui::VerbTool).
   int camVerbTool = 0;
   CamRegionCache camGhostRegion;
   CamRegionCache camHoverRegion;

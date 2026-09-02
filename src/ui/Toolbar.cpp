@@ -7,6 +7,7 @@
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/CamPanel.h" // ActiveCamSetup (the job bar's rotary button)
 #include "ui/Commands.h"
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
@@ -1058,6 +1059,84 @@ void DrawDrawingToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
+// The JOB toolbar: the CAM verbs, one button each, the way the part bar has
+// one button per feature (docs/cam/gui.md, docs/cam/job-document.md). A job
+// tab used to draw the PART bar -- thirty modelling tools, every one of them
+// disabled, and the way into CAM a floating window listing the verbs. The
+// verbs ARE the tools of this document kind; this is where a person looks
+// for them. Each one is a command, so the keys, the palette and the tooltips
+// agree with the bar (keys/registry_is_one_to_one).
+//
+// Ids are "###tb_job_*" so a test or an agent addresses the verb, not the
+// glyph. `job_tab_has_its_own_toolbar` asserts the row FITS and that no two
+// wear one glyph, the way the part bar's tests do.
+void DrawJobToolbar(AppState& state) {
+  const auto btn = [&state](const char* icon, const char* id, const char* tip,
+                            bool active = false) {
+    CommandButton(state, icon, id, tip, active);
+  };
+  const bool armed = state.slotPick.featureId == kCamToolSlot;
+  const auto armedFor = [&](PickSlot slot) {
+    return armed && state.slotPick.slot == static_cast<int>(slot);
+  };
+
+  // Set up: Z zero first, and loudly, because it is the number that breaks
+  // tools; then how the part is clamped.
+  btn(ICON_FA_CROSSHAIRS "###tb_job_top_face", "job.top_face",
+      "Pick the top face: Z zero for the job (also lays the part flat on it)",
+      armedFor(PickSlot::CamTopFace));
+  btn(ICON_FA_HAND "###tb_job_lay_face_up", "job.lay_face_up",
+      "Lay a face up: clamp the part with this face towards the spindle",
+      armedFor(PickSlot::CamLayFaceUp));
+  // Only on a machine that has the axis -- the command's gate says so, and a
+  // disabled button for an axis you do not own is a question with no answer.
+#ifdef HAVE_CAM
+  if (const cam::Setup* setup = ActiveCamSetup(state);
+      setup != nullptr && setup->hasRotaryAxis)
+    btn(ICON_FA_ROTATE "###tb_job_index_face", "job.index_face",
+        "Turn a face up: index the rotary table so this face points at the "
+        "spindle",
+        armedFor(PickSlot::CamIndexFace));
+#endif
+  btn(ICON_FA_VIDEO "###tb_job_spindle", "job.look_down_spindle",
+      "Look down the spindle: the plan view of this setup, framed on the "
+      "stock");
+
+  Divider();
+
+  // Machine it: each verb is one click on the model. The lit one is armed.
+  btn(ICON_FA_SQUARE_MINUS "###tb_job_pocket", "job.pocket",
+      "Clear a pocket: click its floor", armedFor(PickSlot::CamPocketFloor));
+  btn(ICON_FA_VECTOR_SQUARE "###tb_job_profile", "job.profile",
+      "Cut it out: click the wall to follow",
+      armedFor(PickSlot::CamProfileOutline));
+  btn(ICON_FA_CIRCLE_DOT "###tb_job_drill", "job.drill",
+      "Drill a hole: click inside it", armedFor(PickSlot::CamDrillHole));
+  btn(ICON_FA_BORDER_TOP_LEFT "###tb_job_edge", "job.edge",
+      "Break an edge: click the wall whose top edge to round or chamfer",
+      armedFor(PickSlot::CamEdgeWall));
+  btn(ICON_FA_SCISSORS "###tb_job_whole", "job.whole",
+      "Cut out the whole part (no pick)");
+  btn(ICON_FA_GRIP_LINES "###tb_job_face", "job.face",
+      "Face the top: skim the material above the part (no pick)");
+
+  Divider();
+
+  btn(ICON_FA_GEARS "###tb_job_generate", "job.generate",
+      "Generate every toolpath and verify the job");
+  btn(ICON_FA_PLAY "###tb_job_simulate", "job.simulate",
+      "Simulate the cut: play the posted file against the stock",
+      state.camPlaybackOpen);
+
+  Divider();
+
+  btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_job_fit", "view.fit",
+      "Fit view");
+  CommandButton(state, ICON_FA_RULER "###tb_job_measure", "view.measure",
+                "Measure", state.measure.active);
+  ImGui::NewLine();
+}
+
 void DrawToolbar(AppState& state) {
   if (state.sketchEdit.IsEditing())
     DrawSketchModeToolbar(state);
@@ -1067,6 +1146,8 @@ void DrawToolbar(AppState& state) {
     DrawAssemblyToolbar(state);
   else if (state.drawing)
     DrawDrawingToolbar(state);
+  else if (state.job)
+    DrawJobToolbar(state);
   else
     DrawModelToolbar(state);
 }

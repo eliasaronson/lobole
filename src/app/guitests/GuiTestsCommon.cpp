@@ -105,6 +105,9 @@ void ResetAppForTest() {
   // app clears on its own (a job outlives the window that made it, by
   // design). Its overlays draw over the viewport the next test clicks in.
   s_App->camToolOpen = false;
+  s_App->camVerb = ui::AppState::CamVerb::None;
+  s_App->camVerbOp = 0;
+  s_App->camVerbTool = 0;
   s_App->camGhostOp = 0;
   s_App->camActiveSetup = 0;
   s_App->camRefusal.clear();

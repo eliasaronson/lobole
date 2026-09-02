@@ -140,44 +140,83 @@ const cam::Operation* FindOp(const cam::Setup& setup, uint64_t id) {
   return nullptr;
 }
 
-// The verb buttons: each is one sentence a person would say out loud, and
-// each resolves to one click on the model.
+// The verbs: each is one sentence a person would say out loud, and each
+// resolves to one click on the model. Since 2026-09-02 they are the JOB
+// TOOLBAR (one button each, like the part tools), and the window that opens
+// is the verb's own -- its prompt, its tool, what it made. The three
+// orientation picks are verbs too: same button, same window, no cutter.
 struct Verb {
+  AppState::CamVerb verb;
   const char* label;
-  const char* id;
-  cam::OpType type;
+  cam::OpType type; // what the verb makes; unused for the orientation picks
   PickSlot slot;
+  bool picks;  // false: the verb needs no click on the model
+  bool cutter; // true: the window offers the tool the verb derives for
   const char* prompt;
   const char* tip;
 };
 
+using CamVerb = AppState::CamVerb;
+
 constexpr Verb kVerbs[] = {
-    {"Clear a pocket", "###cam_verb_pocket", cam::OpType::Pocket,
-     PickSlot::CamPocketFloor, "Click the floor of the pocket to clear",
+    {CamVerb::TopFace, "Pick the top face", cam::OpType::Face,
+     PickSlot::CamTopFace, true, false,
+     "Click the top face — that sets Z zero for the job",
+     "Z zero is this face: where the operator touches off. Calling a face "
+     "the top also clamps the part with it up, so an upright part lies down "
+     "with the same click."},
+    {CamVerb::LayFaceUp, "Lay a face up", cam::OpType::Face,
+     PickSlot::CamLayFaceUp, true, false,
+     "Click the face to clamp facing up — that is how the part sits on the "
+     "bed",
+     "Clamp the part with this face up. Changes nothing in the model and "
+     "posts no rotary move — it is how the part sits on the bed for this "
+     "setup."},
+    {CamVerb::IndexFace, "Turn a face up", cam::OpType::Face,
+     PickSlot::CamIndexFace, true, false,
+     "Click the face to turn up under the spindle",
+     "Rotary (4th axis) jobs: index the table so this face points at the "
+     "spindle, then use the verbs as usual."},
+    {CamVerb::Pocket, "Clear a pocket", cam::OpType::Pocket,
+     PickSlot::CamPocketFloor, true, true,
+     "Click the floor of the pocket to clear",
      "Click the flat bottom of the pocket. Its walls become the boundary and "
      "its height becomes the depth."},
-    {"Cut it out", "###cam_verb_profile", cam::OpType::Profile,
-     PickSlot::CamProfileOutline,
+    {CamVerb::Profile, "Cut it out", cam::OpType::Profile,
+     PickSlot::CamProfileOutline, true, true,
      "Click the wall to follow — the part's own side, or the inside of an "
      "opening",
      "Follow a wall. The part's own side cuts it free of the stock, with tabs "
      "so it does not break loose under the cutter; the wall of an opening "
      "cuts that opening out. An opening that goes all the way through has no "
      "floor to click, so its wall is the only thing to point at."},
-    {"Drill a hole", "###cam_verb_drill", cam::OpType::Drill,
-     PickSlot::CamDrillHole, "Click the inside of the hole to drill",
+    {CamVerb::Drill, "Drill a hole", cam::OpType::Drill, PickSlot::CamDrillHole,
+     true, true, "Click the inside of the hole to drill",
      "Drill a hole that is already in the model: click its cylindrical wall "
      "and the depth comes from the hole's own extent. ONE plunge on the "
      "hole's own axis at the tool's plunge feed — no pecking and no helix, so "
      "the tool has to be able to plunge the full depth and clear its own "
      "chips. The verb stays armed, so a bolt circle is one click per hole."},
-    {"Break an edge", "###cam_verb_edge", cam::OpType::EdgeRound,
-     PickSlot::CamEdgeWall, "Click the wall whose top edge to round or chamfer",
+    {CamVerb::Edge, "Break an edge", cam::OpType::EdgeRound,
+     PickSlot::CamEdgeWall, true, true,
+     "Click the wall whose top edge to round or chamfer",
      "Follow a wall's top edge with a shaped cutter: a ball nose rounds it "
      "over, a V-bit chamfers it. The TOOL decides which, so a flat end mill "
      "is refused rather than ploughing a square step. The size of the break "
      "comes from the tool and the wall unless the operation says otherwise."},
+    {CamVerb::Whole, "Cut out the whole part", cam::OpType::Profile,
+     PickSlot::CamProfileOutline, false, true, "",
+     "Follow the part's own outline — no pick needed."},
+    {CamVerb::Face, "Face the top", cam::OpType::Face, PickSlot::CamTopFace,
+     false, true, "", "Skim the material sitting above the part."},
 };
+
+const Verb* FindVerb(CamVerb verb) {
+  for (const Verb& v : kVerbs)
+    if (v.verb == verb)
+      return &v;
+  return nullptr;
+}
 
 } // namespace
 
@@ -222,14 +261,15 @@ cam::Setup* EnsureCamSetup(AppState& state) {
 // it — the panel must not be where a depth comes from.
 // `hint` is the job part the click landed on; 0 means "work it out", which is
 // only an answer while the element name is unique across the job.
-bool CreateVerbOperation(AppState& state, cam::OpType type,
-                         const ElementRef& target, uint64_t hint = 0) {
+// Returns the new operation's id, 0 when refused.
+uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
+                             const ElementRef& target, uint64_t hint = 0) {
   state.camRefusal.clear();
   if (!state.job)
-    return false;
+    return 0;
   cam::Setup* setup = EnsureCamSetup(state);
   if (setup == nullptr)
-    return false;
+    return 0;
   // Which job part the picked face is on. A target that cannot be pinned to
   // one is refused in words rather than machined on whichever part answered
   // to the name first (v76).
@@ -237,18 +277,21 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   const cam::Target picked = ui::TargetFor(state, target, hint, &why);
   if (target.IsSet() && picked.jobPartId == 0) {
     state.camRefusal = why;
-    return false;
+    return 0;
   }
   const cam::DerivedOp derived = cam::DeriveOperation(
-      *setup, ui::JobBodies(state), type, picked, state.camVerbTool);
+      *setup, ui::JobBodies(state), type, picked, VerbTool(state, *setup));
   if (!derived.ok) {
     state.camRefusal = derived.why;
-    return false;
+    return 0;
   }
   cam::Operation op = derived.op;
   op.id = state.job->AllocateId();
   setup->operations.push_back(op);
   state.camGhostOp = op.id;
+  // The tool this cut with is the one in the spindle: the next verb derives
+  // for it unless told otherwise.
+  state.camVerbTool = op.toolNumber;
   state.projectMetaDirty = true;
   // Just the new one: the operations already in the job did not change, and
   // one of them may be an adaptive pocket that takes seconds to re-cut.
@@ -256,7 +299,38 @@ bool CreateVerbOperation(AppState& state, cam::OpType type,
   RunCamVerification(state);
   LOG_INFO("CAM: {} from a picked face, Z {:.3f} to {:.3f}", op.name, op.topZ,
            op.bottomZ);
-  return true;
+  return op.id;
+}
+
+// The verb's newest operation, derived again for a different cutter. Every
+// number in it is a fraction of the tool, so a tool change after the fact is
+// a re-derivation and not a field edit -- and doing it here is what lets the
+// no-pick verbs stay ONE click: the cut is made with the tool in the spindle,
+// and the window offers the others without a remove-and-redo.
+void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
+                    int tool) {
+  cam::Operation* op = nullptr;
+  for (cam::Operation& o : setup.operations)
+    if (o.id == state.camVerbOp)
+      op = &o;
+  if (op == nullptr)
+    return;
+  const cam::Target target =
+      op->targets.empty() ? cam::Target{} : op->targets.front();
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, ui::JobBodies(state), verb.type, target, tool);
+  if (!derived.ok) {
+    state.camRefusal = derived.why;
+    return;
+  }
+  const uint64_t id = op->id;
+  *op = derived.op;
+  op->id = id;
+  state.camRefusal.clear();
+  state.camGhostOp = id;
+  state.projectMetaDirty = true;
+  RefreshCamToolpath(state, id);
+  RunCamVerification(state);
 }
 
 // The picked face's plane, in MODEL space. Both orientation picks need it,
@@ -491,7 +565,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
   // per hole spent saying something already said. Escape disarms, and so does
   // pressing the verb again.
   const std::string prompt = state.slotPick.prompt;
-  if (CreateVerbOperation(state, type, item.element, item.jobPartId)) {
+  if (const uint64_t made =
+          CreateVerbOperation(state, type, item.element, item.jobPartId)) {
+    state.camVerbOp = made; // the one a tool change in the window re-derives
     state.slotPick.miss.clear();
     state.camNote = "added — keep clicking faces, or press Escape when done";
   } else {
@@ -499,6 +575,215 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
   }
   state.slotPick.prompt = prompt;
 }
+
+int VerbTool(const AppState& state, const cam::Setup& setup) {
+  if (setup.tools.empty())
+    return 0;
+  if (state.camVerbTool != 0 && setup.FindTool(state.camVerbTool) != nullptr)
+    return state.camVerbTool;
+  // The last tool USED: the newest operation's. Operations are kept in the
+  // order they were made, so the back is the most recent -- and this holds
+  // across sessions, because the operations are in the document and the
+  // session's choice is not.
+  for (auto it = setup.operations.rbegin(); it != setup.operations.rend(); ++it)
+    if (setup.FindTool(it->toolNumber) != nullptr)
+      return it->toolNumber;
+  return setup.tools.front().number;
+}
+
+void LookDownTheSpindle(AppState& state) {
+  const cam::Setup* setup = ActiveCamSetup(state);
+  if (state.camera == nullptr || setup == nullptr)
+    return;
+  // The camera goes where the spindle is and looks the way it looks, with
+  // the setup's own +Y up the screen. Snap rather than animate: this is a
+  // "show me the job" button, not a flourish.
+  // The spindle points down setup +Z, and a job tab DRAWS setup space, so
+  // that is the world direction too — no frame to come back through.
+  const glm::vec3 dir(0.0f, 0.0f, 1.0f);
+  const glm::vec3 up(0.0f, 1.0f, 0.0f);
+  state.camera->SnapToView(dir, up);
+  // …and framed on the STOCK, which is the thing being cut. Keeping the
+  // previous zoom gave a plan view of four square millimetres if that is
+  // where you happened to be.
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
+    // StockBounds reports the box in SETUP space, which is what the job tab
+    // draws — the box IS the world box.
+    FitCameraToWorldBox(state, glm::vec3(lo), glm::vec3(hi));
+    // Fitting moves the TARGET, and Camera::SetTarget keeps the camera
+    // where it is and re-aims — so it swings the view off the axis that
+    // was just set. Aim first (so the fit's pan away from this window is
+    // computed in the right frame), fit, then aim again.
+    state.camera->SnapToView(dir, up);
+  }
+}
+
+void StartCamVerb(AppState& state, AppState::CamVerb verb) {
+  if (!state.job)
+    return;
+  const Verb* v = FindVerb(verb);
+  if (v == nullptr) { // None: the plain session window
+    state.camToolOpen = true;
+    state.camVerb = verb;
+    return;
+  }
+  // Pressing the armed verb again puts it away. A verb that STAYS armed
+  // after a pick needs a way out that is not only the Escape key.
+  const bool armedHere = v->picks && state.camVerb == verb &&
+                         state.slotPick.featureId == kCamToolSlot &&
+                         state.slotPick.slot == static_cast<int>(v->slot);
+  if (armedHere) {
+    state.slotPick = {};
+    state.camNote.clear();
+    state.camToolOpen = false;
+    state.camVerb = CamVerb::None;
+    state.camGhostOp = 0;
+    return;
+  }
+  state.camToolOpen = true;
+  state.camVerb = verb;
+  state.camVerbOp = 0;
+  state.camRefusal.clear();
+  state.camNote.clear();
+  if (v->picks) {
+    // Any pick button switches to itself: greying the others out while one
+    // was armed meant Escape between every change of verb.
+    ArmCamPick(state, v->slot, v->prompt);
+    return;
+  }
+  // No pick: the cut is made NOW, with the tool in the spindle. The window
+  // that opens shows it, and offers the other tools (RederiveVerbOp).
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.camVerbOp = CreateVerbOperation(state, v->type, {});
+}
+
+namespace {
+
+// The cutter row: which tool the verb derives for, the one in use marked.
+// Shown for every job with a setup, one tool or six -- a verb that derives
+// every number from the cutter should say which cutter, and "the last one
+// used" is a default worth being able to see.
+void VerbToolRow(AppState& state, cam::Setup& setup, const Verb& verb) {
+  if (setup.tools.empty())
+    return;
+  const int active = VerbTool(state, setup);
+  ImGui::TextDisabled("Tool");
+  for (const cam::Tool& tool : setup.tools) {
+    ImGui::SameLine();
+    const bool on = tool.number == active;
+    if (on)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    char id[40];
+    std::snprintf(id, sizeof(id), "T%d###cam_verb_t%d", tool.number,
+                  tool.number);
+    if (ImGui::SmallButton(id) && !on) {
+      state.camVerbTool = tool.number;
+      if (state.camVerbOp != 0)
+        RederiveVerbOp(state, setup, verb, tool.number);
+    }
+    if (on)
+      ImGui::PopStyleColor();
+    ImGui::SetItemTooltip("%.3g mm %s — what the verb derives for%s",
+                          tool.diameter, tool.name.c_str(),
+                          state.camVerbOp != 0 ? "; changes the cut just made"
+                                               : "");
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("(more: CAM panel › Tools)");
+}
+
+// Red, wrapped at the verdict's width. Unwrapped, one long refusal stretched
+// the floating window to the width of the sentence — across the whole app,
+// over the panel and the model both.
+void RefusalText(const std::string& text) {
+  ImGui::PushTextWrapPos(320.0f);
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+  ImGui::TextWrapped("%s", text.c_str());
+  ImGui::PopStyleColor();
+  ImGui::PopTextWrapPos();
+}
+
+// What the job is, in one sentence per operation — the numbers are derived,
+// so they are shown rather than asked for. The drag fields still exist, in
+// the CAM panel, for anyone who wants them.
+void OperationList(AppState& state, cam::Setup& setup) {
+  if (setup.operations.empty())
+    return;
+  ImGui::Separator();
+  // Deferred, so the list is not mutated while it is being walked — the
+  // same shape the docked panel uses.
+  uint64_t removeOp = 0;
+  for (const cam::Operation& op : setup.operations) {
+    const cam::Tool* tool = setup.FindTool(op.toolNumber);
+    const double depth = op.topZ - op.bottomZ;
+    const int passes = static_cast<int>(cam::DepthPasses(op).size());
+    ImGui::PushID(static_cast<int>(op.id));
+    const bool ghosted = state.camGhostOp == op.id;
+    if (ImGui::RadioButton("###ghost", ghosted))
+      state.camGhostOp = ghosted ? 0 : op.id;
+    ImGui::SetItemTooltip("Show what this one removes");
+    ImGui::SameLine();
+    // Removing an operation was only possible in the DOCKED panel, which is
+    // a tab behind Model — while every operation is made here. An operation
+    // added by mistake (or three, when the first two silently cut nothing)
+    // could not be taken back without going to find another window
+    // (docs/cam/dogfood-round.md).
+    if (ImGui::SmallButton("x###rmop"))
+      removeOp = op.id;
+    ImGui::SetItemTooltip("Remove this operation");
+    ImGui::SameLine();
+    // What the operation SAYS about itself, from its own fields — and then
+    // what actually came of it. This line used to be the description alone,
+    // so an operation that generated nothing rendered identically to one
+    // that cut the part: the user clicked "Clear a pocket" three times at a
+    // face that never changed, because nothing in this window ever said the
+    // op was dead (docs/cam/dogfood-round.md). The docked panel printed it;
+    // the floating window is where the work happens.
+    const cam::Toolpath* path = nullptr;
+    for (const cam::Toolpath& tp : state.camToolpaths)
+      if (tp.operationId == op.id)
+        path = &tp;
+    ImGui::Text("%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
+                op.name.c_str(), tool != nullptr ? tool->diameter : 0.0, depth,
+                passes, passes == 1 ? "" : "es",
+                op.climb ? "climb" : "conventional",
+                op.type == cam::OpType::Adaptive ? ", adaptive" : "");
+    if (path != nullptr && !path->error.empty()) {
+      RefusalText(std::string(ICON_FA_TRIANGLE_EXCLAMATION) +
+                  " cut nothing — " + path->error);
+    } else if (path != nullptr && !path->strategy.empty()) {
+      // It cut, but not by the strategy its type names. Feeds were chosen
+      // for one of them.
+      ImGui::PushTextWrapPos(320.0f);
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
+      ImGui::TextWrapped("%s cut %s", ICON_FA_TRIANGLE_EXCLAMATION,
+                         path->strategy.c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopTextWrapPos();
+    }
+    ImGui::PopID();
+  }
+  if (removeOp != 0) {
+    auto& ops = setup.operations;
+    for (auto it = ops.begin(); it != ops.end(); ++it)
+      if (it->id == removeOp) {
+        ops.erase(it);
+        break;
+      }
+    if (state.camGhostOp == removeOp)
+      state.camGhostOp = 0;
+    if (state.camVerbOp == removeOp)
+      state.camVerbOp = 0;
+    state.projectMetaDirty = true;
+    DropCamToolpath(state, removeOp);
+    RunCamVerification(state);
+  }
+}
+
+} // namespace
 
 void DrawCamToolWindow(AppState& state) {
   // The session belongs to the JOB (v73), so without one there is nothing to
@@ -508,88 +793,70 @@ void DrawCamToolWindow(AppState& state) {
   // was a sketch trim, two tests later in a shuffled GUI run.
   if (!state.job) {
     state.camToolOpen = false;
+    state.camVerb = CamVerb::None;
+    state.camVerbOp = 0;
     state.camGhostOp = 0;
     if (state.slotPick.featureId == kCamToolSlot)
       state.slotPick = {};
     return;
   }
-  BeginToolWindowFrame(state, "CAM");
+  const Verb* verb = FindVerb(state.camVerb);
+  BeginToolWindowFrame(state, verb != nullptr ? verb->label : "CAM");
 
   cam::Setup* setup = ActiveCamSetup(state);
   const bool armed = state.slotPick.featureId == kCamToolSlot;
+  const bool armedHere = verb != nullptr && armed && verb->picks &&
+                         state.slotPick.slot == static_cast<int>(verb->slot);
 
-  // Z zero first, and loudly, because it is the number that breaks tools.
-  ImGui::TextDisabled("Zero");
-  const bool armedTop =
-      armed && state.slotPick.slot == static_cast<int>(PickSlot::CamTopFace);
-  if (ImGui::Button(setup != nullptr && setup->topFace.IsSet()
-                        ? "Re-pick top face###cam_tool_topface"
-                        : "Pick top face###cam_tool_topface"))
-    ArmCamPick(state, PickSlot::CamTopFace,
-               "Click the top face — that sets Z zero for the job");
-  ImGui::SameLine();
-  if (armedTop)
-    ImGui::TextDisabled("click the top face…");
-  else if (setup != nullptr && setup->topFace.IsSet())
-    ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
-  else
-    ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
-                       "Z zero is not set yet");
-
-  // How the part is clamped. Offered to every job, because it is a statement
-  // about the fixture and not about the machine — the reason it exists is
-  // that a part modelled upright (a speaker baffle, an imported panel) has no
-  // level face worth zeroing on until it is laid down.
-  const bool armedLay =
-      armed && state.slotPick.slot == static_cast<int>(PickSlot::CamLayFaceUp);
-  if (ImGui::Button("Lay a face up###cam_lay_face"))
-    ArmCamPick(state, PickSlot::CamLayFaceUp,
-               "Click the face to clamp facing up — that is how the part sits "
-               "on the bed");
-  ImGui::SetItemTooltip("Clamp the part with this face up. Changes nothing in "
-                        "the model and posts no rotary move — it is how the "
-                        "part sits on the bed for this setup.");
-  ImGui::SameLine();
-  if (armedLay)
-    ImGui::TextDisabled("pick a face…");
-  else if (setup != nullptr && !cam::FrameIsSquare(*setup))
-    ImGui::TextDisabled("laid flat");
-  else
-    ImGui::TextDisabled("as modelled");
-
-  // The ROTARY index, which is a different claim and only true of a machine
-  // that has the axis. Offering it unconditionally is what let a 3-axis job
-  // be handed `G0 A90` for wanting a panel flat (docs/cam/setup-frame.md).
-  if (setup != nullptr && setup->hasRotaryAxis) {
-    const bool armedIndex =
-        armed &&
-        state.slotPick.slot == static_cast<int>(PickSlot::CamIndexFace);
-    if (ImGui::Button("Turn a face up###cam_index_face"))
-      ArmCamPick(state, PickSlot::CamIndexFace,
-                 "Click the face to turn up under the spindle");
-    ImGui::SetItemTooltip("Rotary (4th axis) jobs: index the table so this "
-                          "face points at the spindle, then use the verbs as "
-                          "usual");
-    ImGui::SameLine();
-    if (armedIndex)
-      ImGui::TextDisabled("pick a face…");
-    else if (std::abs(setup->rotationA) > 1e-9)
-      ImGui::TextDisabled("A %.2f°", setup->rotationA);
-    else
-      ImGui::TextDisabled("A 0° (3-axis)");
+  // What the verb is for, in a sentence, and where its pick stands.
+  if (verb != nullptr) {
+    ImGui::PushTextWrapPos(320.0f);
+    ImGui::TextDisabled("%s", verb->tip);
+    ImGui::PopTextWrapPos();
+    switch (state.camVerb) {
+    case CamVerb::TopFace:
+      if (armedHere)
+        ImGui::TextDisabled("click the top face…");
+      else if (setup != nullptr && setup->topFace.IsSet())
+        ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
+      else
+        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
+                           "Z zero is not set yet");
+      break;
+    case CamVerb::LayFaceUp:
+      if (armedHere)
+        ImGui::TextDisabled("pick a face…");
+      else if (setup != nullptr && !cam::FrameIsSquare(*setup))
+        ImGui::TextDisabled("laid flat");
+      else
+        ImGui::TextDisabled("as modelled");
+      break;
+    case CamVerb::IndexFace:
+      if (armedHere)
+        ImGui::TextDisabled("pick a face…");
+      else if (setup != nullptr && std::abs(setup->rotationA) > 1e-9)
+        ImGui::TextDisabled("A %.2f°", setup->rotationA);
+      else
+        ImGui::TextDisabled("A 0° (3-axis)");
+      break;
+    default:
+      if (armedHere)
+        // The slot stays armed after a pick: one verb is almost never one
+        // face. Say how it ends, since the pill only says how it starts.
+        ImGui::TextDisabled("click faces… Escape, or the button again, when "
+                            "done");
+      break;
+    }
+    if (verb->cutter && setup != nullptr)
+      VerbToolRow(state, *setup, *verb);
   }
 
   // Why the last pick did not take. This window never drew it, so a refused
   // click looked exactly like a click that did nothing — and one of them
   // ("add a setup first") was reachable on any fresh part
   // (docs/cam/dogfood-round.md). The docked panel printed it all along.
-  if (armed && !state.slotPick.miss.empty()) {
-    ImGui::PushTextWrapPos(320.0f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
-    ImGui::TextWrapped("%s", state.slotPick.miss.c_str());
-    ImGui::PopStyleColor();
-    ImGui::PopTextWrapPos();
-  }
+  if (armed && !state.slotPick.miss.empty())
+    RefusalText(state.slotPick.miss);
   // …and what the last action DID, when it did more than was asked. Laying
   // the part flat to take a Z zero, or re-deriving depths after a re-clamp,
   // are consequences the user has to be told about — the alternative is a job
@@ -599,196 +866,16 @@ void DrawCamToolWindow(AppState& state) {
     ImGui::TextDisabled("%s", state.camNote.c_str());
     ImGui::PopTextWrapPos();
   }
+  if (!state.camRefusal.empty())
+    RefusalText(state.camRefusal);
 
-  // The plan view of THIS setup. For a plain 3-axis job (rotationA = 0) the
-  // spindle is world up and this equals the Top view — the world is Z-up
-  // since docs/up-axis.md — but an indexed setup looks down ITS spindle,
-  // not the world's, and the stock-framed zoom is useful either way.
-  if (ImGui::Button("Look down the spindle###cam_view_spindle") &&
-      state.camera != nullptr && setup != nullptr) {
-    // The camera goes where the spindle is and looks the way it looks, with
-    // the setup's own +Y up the screen. Snap rather than animate: this is a
-    // "show me the job" button, not a flourish.
-    // The spindle points down setup +Z, and a job tab DRAWS setup space, so
-    // that is the world direction too — no frame to come back through.
-    const glm::vec3 dir(0.0f, 0.0f, 1.0f);
-    const glm::vec3 up(0.0f, 1.0f, 0.0f);
-    state.camera->SnapToView(dir, up);
-    // …and framed on the STOCK, which is the thing being cut. Keeping the
-    // previous zoom gave a plan view of four square millimetres if that is
-    // where you happened to be.
-    glm::dvec3 lo(0.0), hi(0.0);
-    if (cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
-      // StockBounds reports the box in SETUP space, which is what the job tab
-      // draws — the box IS the world box.
-      FitCameraToWorldBox(state, glm::vec3(lo), glm::vec3(hi));
-      // Fitting moves the TARGET, and Camera::SetTarget keeps the camera
-      // where it is and re-aims — so it swings the view off the axis that
-      // was just set. Aim first (so the fit's pan away from this window is
-      // computed in the right frame), fit, then aim again.
-      state.camera->SnapToView(dir, up);
-    }
-  }
-  ImGui::SetItemTooltip("Plan view in the frame this setup cuts in, framed "
-                        "on the stock — for an indexed setup this is the "
-                        "rotated spindle, not the world's Top");
+  // The job so far: for the machining verbs and the plain window. The
+  // orientation picks are one question each, and the list under them was
+  // noise.
+  if (setup != nullptr && (verb == nullptr || verb->cutter))
+    OperationList(state, *setup);
 
   ImGui::Separator();
-  ImGui::TextDisabled("Machine it");
-  // WHICH CUTTER the next verb derives for. Every number a verb produces is a
-  // fraction of the cutter, so choosing the tool after the fact means
-  // re-deriving; and the verbs are the one-click way in, which is worth
-  // nothing if the one click has to be undone to change tools.
-  if (setup != nullptr && setup->tools.size() > 1) {
-    ImGui::TextDisabled("Tool");
-    for (const cam::Tool& tool : setup->tools) {
-      ImGui::SameLine();
-      const bool active = state.camVerbTool == 0
-                              ? tool.number == setup->tools.front().number
-                              : tool.number == state.camVerbTool;
-      if (active)
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                              ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-      char id[40];
-      std::snprintf(id, sizeof(id), "T%d###cam_verb_t%d", tool.number,
-                    tool.number);
-      if (ImGui::SmallButton(id))
-        state.camVerbTool = tool.number;
-      if (active)
-        ImGui::PopStyleColor();
-      ImGui::SetItemTooltip("%.3g mm %s — what the next verb derives for",
-                            tool.diameter, tool.name.c_str());
-    }
-  }
-  for (const Verb& verb : kVerbs) {
-    const bool armedHere =
-        armed && state.slotPick.slot == static_cast<int>(verb.slot);
-    // NOT disabled while another pick is armed. They were, back when a verb
-    // disarmed itself on success; now that one stays armed, greying its
-    // neighbours out means Escape between every change of verb. Any pick
-    // button switches to itself.
-    if (ImGui::Button((std::string(verb.label) + verb.id).c_str(),
-                      ImVec2(190.0f, 0.0f))) {
-      // Pressing the armed verb again puts it away. A verb that STAYS armed
-      // after a pick needs a way out that is not only the Escape key.
-      if (armedHere) {
-        state.slotPick = {};
-        state.camNote.clear();
-      } else {
-        ArmCamPick(state, verb.slot, verb.prompt);
-      }
-    }
-    ImGui::SetItemTooltip("%s", verb.tip);
-    if (armedHere) {
-      ImGui::SameLine();
-      ImGui::TextDisabled("click faces…");
-    }
-  }
-  // The two verbs that need no pick at all.
-  ImGui::BeginDisabled(armed);
-  if (ImGui::Button("Cut out the whole part###cam_verb_whole",
-                    ImVec2(190.0f, 0.0f)))
-    CreateVerbOperation(state, cam::OpType::Profile, {});
-  ImGui::SetItemTooltip("Follow the part's own outline — no pick needed");
-  if (ImGui::Button("Face the top###cam_verb_face", ImVec2(190.0f, 0.0f)))
-    CreateVerbOperation(state, cam::OpType::Face, {});
-  ImGui::SetItemTooltip("Skim the material sitting above the part");
-  ImGui::EndDisabled();
-
-  if (!state.camRefusal.empty()) {
-    // Wrapped at the same width the verdict uses. Unwrapped, one long refusal
-    // stretched this floating window to the width of the sentence — across
-    // the whole app, over the panel and the model both.
-    ImGui::PushTextWrapPos(320.0f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
-    ImGui::TextWrapped("%s", state.camRefusal.c_str());
-    ImGui::PopStyleColor();
-    ImGui::PopTextWrapPos();
-  }
-
-  // What the job is, in one sentence per operation — the numbers are derived,
-  // so they are shown rather than asked for. The drag fields still exist, in
-  // the CAM panel, for anyone who wants them.
-  if (setup != nullptr && !setup->operations.empty()) {
-    ImGui::Separator();
-    // Deferred, so the list is not mutated while it is being walked — the
-    // same shape the docked panel uses.
-    uint64_t removeOp = 0;
-    for (const cam::Operation& op : setup->operations) {
-      const cam::Tool* tool = setup->FindTool(op.toolNumber);
-      const double depth = op.topZ - op.bottomZ;
-      const int passes = static_cast<int>(cam::DepthPasses(op).size());
-      ImGui::PushID(static_cast<int>(op.id));
-      const bool ghosted = state.camGhostOp == op.id;
-      if (ImGui::RadioButton("###ghost", ghosted))
-        state.camGhostOp = ghosted ? 0 : op.id;
-      ImGui::SetItemTooltip("Show what this one removes");
-      ImGui::SameLine();
-      // Removing an operation was only possible in the DOCKED panel, which is
-      // a tab behind Model — while every operation is made here. An operation
-      // added by mistake (or three, when the first two silently cut nothing)
-      // could not be taken back without going to find another window
-      // (docs/cam/dogfood-round.md).
-      if (ImGui::SmallButton("x###rmop"))
-        removeOp = op.id;
-      ImGui::SetItemTooltip("Remove this operation");
-      ImGui::SameLine();
-      // What the operation SAYS about itself, from its own fields — and then
-      // what actually came of it. This line used to be the description alone,
-      // so an operation that generated nothing rendered identically to one
-      // that cut the part: the user clicked "Clear a pocket" three times at a
-      // face that never changed, because nothing in this window ever said the
-      // op was dead (docs/cam/dogfood-round.md). The docked panel printed it;
-      // the floating window is where the work happens.
-      const cam::Toolpath* path = nullptr;
-      for (const cam::Toolpath& tp : state.camToolpaths)
-        if (tp.operationId == op.id)
-          path = &tp;
-      ImGui::Text("%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
-                  op.name.c_str(), tool != nullptr ? tool->diameter : 0.0,
-                  depth, passes, passes == 1 ? "" : "es",
-                  op.climb ? "climb" : "conventional",
-                  op.type == cam::OpType::Adaptive ? ", adaptive" : "");
-      if (path != nullptr && !path->error.empty()) {
-        ImGui::PushTextWrapPos(320.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
-        ImGui::TextWrapped("%s cut nothing — %s", ICON_FA_TRIANGLE_EXCLAMATION,
-                           path->error.c_str());
-        ImGui::PopStyleColor();
-        ImGui::PopTextWrapPos();
-      } else if (path != nullptr && !path->strategy.empty()) {
-        // It cut, but not by the strategy its type names. Feeds were chosen
-        // for one of them.
-        ImGui::PushTextWrapPos(320.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
-        ImGui::TextWrapped("%s cut %s", ICON_FA_TRIANGLE_EXCLAMATION,
-                           path->strategy.c_str());
-        ImGui::PopStyleColor();
-        ImGui::PopTextWrapPos();
-      }
-      ImGui::PopID();
-    }
-    if (removeOp != 0) {
-      auto& ops = setup->operations;
-      for (auto it = ops.begin(); it != ops.end(); ++it)
-        if (it->id == removeOp) {
-          ops.erase(it);
-          break;
-        }
-      if (state.camGhostOp == removeOp)
-        state.camGhostOp = 0;
-      state.projectMetaDirty = true;
-      DropCamToolpath(state, removeOp);
-      RunCamVerification(state);
-    }
-  }
-
-  ImGui::Separator();
-  if (ImGui::Button("Generate###cam_tool_generate")) {
-    RefreshCamToolpaths(state);
-    RunCamVerification(state);
-  }
-  ImGui::SameLine();
   ImGui::Checkbox("Show path###cam_tool_show", &state.camShowToolpath);
   ImGui::SameLine();
   ImGui::Checkbox("Stock###cam_tool_stock", &state.camShowStock);
@@ -815,6 +902,8 @@ void DrawCamToolWindow(AppState& state) {
     // The session closes; the job stays, and so does the backplot. Only the
     // decision-time drawings go away.
     state.camToolOpen = false;
+    state.camVerb = CamVerb::None;
+    state.camVerbOp = 0;
     state.camGhostOp = 0;
     state.camRefusal.clear();
     if (state.slotPick.featureId == kCamToolSlot)
@@ -944,6 +1033,9 @@ void RunCamVerification(AppState& state) {
 
 namespace ui {
 void DrawCamToolWindow(AppState&) {}
+void StartCamVerb(AppState&, AppState::CamVerb) {}
+int VerbTool(const AppState&, const cam::Setup&) { return 0; }
+void LookDownTheSpindle(AppState&) {}
 void ArmCamPick(AppState&, PickSlot, const char*) {}
 void CamFacePicked(AppState&, const SelectionItem&) {}
 void AppendCamVisualisation(AppState&, std::vector<PrimVertex>&,
