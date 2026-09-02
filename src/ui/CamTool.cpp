@@ -281,6 +281,7 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
   state.camRefusal.clear();
   if (!state.job)
     return 0;
+  JobUndoGuard undoGuard(state); // one step per verb (R7)
   cam::Setup* setup = EnsureCamSetup(state);
   if (setup == nullptr)
     return 0;
@@ -352,6 +353,7 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
       op = &o;
   if (op == nullptr)
     return;
+  JobUndoGuard undoGuard(state);
   const cam::Target target =
       op->targets.empty() ? cam::Target{} : op->targets.front();
   const cam::DerivedOp derived = cam::DeriveOperation(
@@ -479,6 +481,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     state.slotPick.miss = "that is not a face this job can use";
     return;
   }
+  JobUndoGuard undoGuard(state); // one step per pick (R7)
 
   if (slot == PickSlot::CamTopFace) {
     cam::Setup* setup = EnsureCamSetup(state);

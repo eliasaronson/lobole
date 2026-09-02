@@ -644,6 +644,12 @@ struct AssemblyHistory {
 struct JobHistory {
   std::vector<cam::JobDocument> undo;
   std::vector<cam::JobDocument> redo;
+  std::vector<uint64_t> undoStamps; // action-clock stamps, like the drawing's
+  std::vector<uint64_t> redoStamps;
+  // A pre-edit copy held back while a drag is still in progress (R7): one
+  // undo step per drag, not one per frame of it.
+  std::optional<cam::JobDocument> pending;
+  std::string pendingFingerprint;
 };
 
 struct DrawingHistory {

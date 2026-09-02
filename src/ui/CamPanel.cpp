@@ -246,6 +246,9 @@ void DrawCamPanel(AppState& state) {
   // CAM from a part is the part bar's own button.
   if (!state.job)
     return;
+  // Every edit this panel makes lands on the undo stack through this one
+  // guard (R7): a drag is one step, a click is one step.
+  JobUndoGuard undoGuard(state, /*coalesce=*/true);
   if (!ImGui::Begin(kPanelCam, nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
     ImGui::End();
     return;
@@ -1457,6 +1460,8 @@ void DrawCamPanel(AppState& state) {
 }
 
 int RemoveCamOperations(AppState& state, const std::vector<uint64_t>& ids) {
+  if (!ids.empty())
+    SnapshotJob(state); // one undo step per removal, however many rows (R7)
   if (!state.job || ids.empty())
     return 0;
   int removed = 0;

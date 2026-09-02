@@ -9,6 +9,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
+#include "ui/AppActions.h" // JobUndoGuard
 #include "ui/AppState.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 namespace remote {
 
@@ -608,6 +610,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   cam::JobDocument* job = ui::ActiveJob(state);
+  // One undo step per RPC that changes the job (R7); a refused call moves
+  // nothing and records nothing.
+  std::optional<ui::JobUndoGuard> undoGuard;
+  if (job != nullptr)
+    undoGuard.emplace(state);
   if (job == nullptr)
     throw std::runtime_error(
         "CAM works on a job, not a part: a setup stopped being part of the "

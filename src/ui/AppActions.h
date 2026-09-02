@@ -138,6 +138,36 @@ void SnapshotDrawing(AppState& state);
 bool UndoDrawing(AppState& state);
 bool RedoDrawing(AppState& state);
 
+// Job undo (docs/cam/router-round.md, R7): a full snapshot, the drawing's
+// pattern. SnapshotJob BEFORE a mutation; PushJobUndo when the pre-edit copy
+// is already in hand (the guard below). Undo restores the copy, re-generates
+// the toolpaths and re-verifies, and bumps the version past the current one
+// so every cache keyed on it drops.
+void SnapshotJob(AppState& state);
+void PushJobUndo(AppState& state, const cam::JobDocument& before);
+bool UndoJob(AppState& state);
+bool RedoJob(AppState& state);
+
+// The one way the CAM panel's forty-nine edit sites and every mutating RPC
+// get onto the undo stack without each saying so: hold a copy and the job's
+// fingerprint at construction; at destruction -- every return path -- push
+// the copy if the fingerprint moved. `coalesce`: while an ImGui item is
+// still active (a drag), hold the copy back and push it once when the item
+// lets go, so a drag is one undo step and not sixty.
+class JobUndoGuard {
+public:
+  explicit JobUndoGuard(AppState& state, bool coalesce = false);
+  ~JobUndoGuard();
+  JobUndoGuard(const JobUndoGuard&) = delete;
+  JobUndoGuard& operator=(const JobUndoGuard&) = delete;
+
+private:
+  AppState& m_state;
+  bool m_coalesce;
+  std::optional<cam::JobDocument> m_before;
+  std::string m_fingerprint;
+};
+
 // The tab index of the slot with a stable id (nullopt when gone) — the
 // in-context banner's Return button and RPCs resolve slots through this.
 std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId);

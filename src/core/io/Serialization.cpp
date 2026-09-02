@@ -1825,6 +1825,10 @@ std::unique_ptr<cam::JobDocument> LoadJobImpl(const std::string& path,
 
 } // namespace
 
+std::string JobFingerprint(const cam::JobDocument& job) {
+  return JobBodyJson(job).dump();
+}
+
 std::expected<void, std::string> SaveJob(const cam::JobDocument& job,
                                          const std::string& path) {
   std::string error;

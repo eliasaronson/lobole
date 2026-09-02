@@ -2426,6 +2426,85 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->selection.Clear();
   };
 
+  // A job edit undoes (router-round.md R7): a verb, a placement drag and a
+  // panel field each become one step, and redo brings each back. Nothing on
+  // a job tab could be undone before this.
+  t = IM_REGISTER_TEST(engine, "cam", "a_job_edit_undoes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    // The id, not a reference: undo REPLACES the job, and a reference into
+    // the old one is exactly the dangling read that crashed this test first.
+    const uint64_t setupId = MakeJob()->AddSetup("Job").id;
+    s_App->camActiveSetup = setupId;
+    ctx->Yield(3);
+    IM_CHECK(!ui::CanGlobalUndo(*s_App));
+
+    // A verb: one step.
+    ToolbarClick(ctx, "###tb_job_whole");
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->FindSetup(setupId)->operations.size(), (size_t)1);
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+    IM_CHECK(ui::CanGlobalUndo(*s_App));
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(setupId)->operations.empty());
+    IM_CHECK(s_App->camToolpaths.empty()); // the picture followed
+    ui::GlobalRedo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK_EQ(Job()->FindSetup(setupId)->operations.size(), (size_t)1);
+    IM_CHECK(!s_App->camToolpaths.empty());
+
+    // A placement drag: one step for the whole drag.
+    const Body& body = ui::JobBodies(*s_App)[0];
+    ui::SelectionItem item;
+    item.kind = ui::SelectionItem::Kind::Body;
+    item.id = body.createdBy;
+    item.jobPartId = body.jobPartId;
+    s_App->selection.items = {item};
+    ctx->Yield(2);
+    s_App->viewportHandles.clear();
+    ui::PublishGizmoHandles(*s_App);
+    IM_CHECK(!s_App->viewportHandles.empty());
+    const glm::vec3 origin = s_App->viewportHandles[0].origin;
+    const float L = ui::GizmoScale(*s_App);
+    Ray grab;
+    grab.origin = origin + glm::vec3(0.5f * L, 0.0f, 100.0f);
+    grab.direction = {0.0f, 0.0f, -1.0f};
+    IM_CHECK(ui::HandleGizmoInput(*s_App, grab, true, true, false));
+    Ray moved = grab;
+    moved.origin.x += 20.0f;
+    IM_CHECK(ui::HandleGizmoInput(*s_App, moved, false, true, false));
+    IM_CHECK(ui::HandleGizmoInput(*s_App, moved, false, false, true));
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindSetup(setupId)->placements.size(), (size_t)1);
+    s_App->selection.Clear();
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(Job()->FindSetup(setupId)->placements.empty());
+    IM_CHECK_EQ(Job()->FindSetup(setupId)->operations.size(), (size_t)1);
+
+    // A panel field: typed, one step, through the guard the panel's every
+    // edit passes through.
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_stock");
+    ctx->Yield(2);
+    const double safeBefore = Job()->FindSetup(setupId)->safeZ;
+    ctx->ItemInputValue("###cam_safez", "77");
+    ctx->Yield(4);
+    IM_CHECK(std::abs(Job()->FindSetup(setupId)->safeZ - 77.0) < 1e-6);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(std::abs(Job()->FindSetup(setupId)->safeZ - safeBefore) < 1e-6);
+  };
+
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
   // right when on, and — the part that decides whether it feels safe — the
   // keyboard goes to it ONLY while the pointer is over it.

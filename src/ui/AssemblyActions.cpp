@@ -1189,6 +1189,7 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
   if (!GizmoHitTest(state, spec, ray, axis, rotate))
     return false;
   cam::Setup* setup = ActiveCamSetup(state);
+  SnapshotJob(state); // one undo step per drag (R7)
   cam::Placement* place = PlacementFor(state, part);
   if (place == nullptr) {
     cam::Placement fresh;

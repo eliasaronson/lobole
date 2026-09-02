@@ -1373,6 +1373,30 @@ def main():
                f"a deleted machine leaves the job its copy: {st['machine_match']}")
         d.call("new_project")
 
+        phase("Job undo over the RPC")
+        # One undo step per RPC that changes the job (router-round.md R7).
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [0, 0, 0],
+            "width": 40, "height": 30, "depth": 20})
+        d.call("machine_part")
+        undo_setup = d.call("add_cam_setup", name="Undo")["id"]
+        d.call("add_cam_op", setup=undo_setup, type="profile",
+               top_z=21.0, bottom_z=0.0, stepdown=8.0)
+        expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 1,
+               "the op is there")
+        d.call("undo")
+        expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 0,
+               "undo took the op back out")
+        d.call("redo")
+        expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 1,
+               "redo put it back")
+        d.call("undo")
+        d.call("undo")
+        expect(len(d.call("list_cam_setups")["setups"]) == 0,
+               "and the setup before it")
+        d.call("new_project")
+
         phase("CAM over the RPC")
         # Every operation type must survive the round trip through the RPC.
         # OpType::Adaptive was REPORTED as "profile" for a while — the way in

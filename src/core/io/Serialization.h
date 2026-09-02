@@ -144,6 +144,10 @@ LoadDrawing(const std::string& path);
 // inside a directory, or the named file).
 [[nodiscard]] std::expected<void, std::string>
 SaveJob(const cam::JobDocument& job, const std::string& path);
+// The job's body JSON as text: what a save would write, minus the envelope.
+// Two jobs with the same fingerprint are the same job -- which is how the
+// undo stack knows an edit happened without every edit site saying so (R7).
+[[nodiscard]] std::string JobFingerprint(const cam::JobDocument& job);
 [[nodiscard]] std::expected<std::unique_ptr<cam::JobDocument>, std::string>
 LoadJob(const std::string& path);
 

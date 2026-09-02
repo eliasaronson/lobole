@@ -1,6 +1,7 @@
 # The router shop's list (R1–R7)
 
-> Status: **PLANNED 2026-09-02.** From: *"what are we missing that other
+> Status: **R1–R7 SHIPPED 2026-09-02** (formats v78–v82) — see
+> [As built](#as-built). Planned the same day. From: *"what are we missing that other
 > CAM software has or what can we make better"* → *"Lets do that."* The
 > small things a router user hits on their first real part, each a day or
 > less, ranked by how often they bite. Surveyed the same day against FreeCAD
@@ -181,3 +182,37 @@ and the verifier's 0.4 mm grid, and dogbones on an offset path are the kind
 of polygon surgery that produces a self-intersection on the one part that
 was not tested. Both are gated by the verifier, which is the point of
 having one.
+
+## As built
+
+All seven, the same day, in order. What the plan did not anticipate:
+
+- **R1.** The Dialect table says *how* a controller takes a tool change
+  (Table / Manual / Pause) rather than whether it has a tool table; the
+  frozen mach3 and linuxcnc programs did not move by a byte.
+- **R2.** Tool order had to become an order of *toolpaths*, not operations,
+  once R6 made one operation two of them. The cutting-order combo, RPC-only
+  since J5, joined the panel beside the new checkbox.
+- **R3.** The bore is inner ring first, the wall last, so a through hole's
+  slug goes progressively rather than dropping. The peck retracts to the
+  hole's top (G83's reading), then rapids back to half a millimetre above
+  the last floor.
+- **R4.** The verifier has to be *told* about reliefs: each toolpath carries
+  its bites and `Inspect` skips gouge inside them, or every dogbone reads as
+  scrap. The test reads the machined height map at the pocket's corner,
+  because the verifier's leftover is measured only where the tool went and
+  a corner radius is exactly where it did not.
+- **R5.** Lead-*out* only. The ramp is the entry: the tool arrives at the
+  wall descending and already moving along it, so there is no dwell to
+  lead into. A 14 mm slot has room for a 6 mm tool's lead; a 10 mm one does
+  not, and the test had that backwards the first time.
+- **R6.** Stock-to-leave is read in Z as well as on the wall, so the rough
+  copy keeps the full depth or it leaves a step in the stock beyond the
+  finishing tool's reach. And a one-pass through cut produced nothing —
+  found because a finishing pass *is* one — fixed for every stepdown-0 cut.
+- **R7.** One `JobUndoGuard`, holding a copy and the job's fingerprint at
+  construction and pushing the copy at destruction if the fingerprint
+  moved, covers the panel's forty-nine edit sites and every mutating RPC
+  without touching them; it coalesces a drag while an ImGui item is active.
+  The verbs, the picks and the gizmo snapshot explicitly.
+

@@ -1,7 +1,11 @@
 #include "ui/AppActions.h"
 #include "core/Units.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
-#include "ui/JobActions.h"         // JobBodies / JobRenderVersion (a job tab)
+#include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
+#include "ui/CamTool.h"            // RunCamVerification (job undo)
+#include "ui/JobActions.h"
+
+#include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -1379,6 +1383,102 @@ bool RedoDrawing(AppState& state) {
   return true;
 }
 
+void PushJobUndo(AppState& state, const cam::JobDocument& before) {
+  if (!state.job)
+    return;
+  state.jobHistory.undo.push_back(before);
+  state.jobHistory.undoStamps.push_back(NextActionStamp());
+  state.jobHistory.redo.clear();
+  state.jobHistory.redoStamps.clear();
+}
+
+void SnapshotJob(AppState& state) {
+  if (state.job)
+    PushJobUndo(state, *state.job);
+}
+
+namespace {
+// Put a restored copy in place: its version has to move PAST the current
+// one, or a cache keyed on the version (the placed bodies, the render) can
+// serve the state the copy was taken from. Then the toolpaths, which are a
+// picture of the job that just changed.
+void RestoreJob(AppState& state, cam::JobDocument restored) {
+  const uint64_t current = state.job->Version();
+  while (restored.Version() <= current)
+    restored.BumpVersion();
+  *state.job = std::move(restored);
+  state.camActiveSetup = 0; // re-resolved: the setup may be gone
+  state.camGhostOp = 0;
+  state.camVerbOp = 0;
+  state.syncedDocumentVersion = UINT64_MAX;
+  state.projectMetaDirty = true;
+  RefreshCamToolpaths(state);
+  RunCamVerification(state);
+}
+} // namespace
+
+bool UndoJob(AppState& state) {
+  if (!state.job || state.jobHistory.undo.empty())
+    return false;
+  state.jobHistory.redo.push_back(*state.job);
+  state.jobHistory.redoStamps.push_back(state.jobHistory.undoStamps.back());
+  state.jobHistory.undoStamps.pop_back();
+  cam::JobDocument restored = std::move(state.jobHistory.undo.back());
+  state.jobHistory.undo.pop_back();
+  RestoreJob(state, std::move(restored));
+  return true;
+}
+
+bool RedoJob(AppState& state) {
+  if (!state.job || state.jobHistory.redo.empty())
+    return false;
+  state.jobHistory.undo.push_back(*state.job);
+  state.jobHistory.undoStamps.push_back(state.jobHistory.redoStamps.back());
+  state.jobHistory.redoStamps.pop_back();
+  cam::JobDocument restored = std::move(state.jobHistory.redo.back());
+  state.jobHistory.redo.pop_back();
+  RestoreJob(state, std::move(restored));
+  return true;
+}
+
+JobUndoGuard::JobUndoGuard(AppState& state, bool coalesce)
+    : m_state(state), m_coalesce(coalesce) {
+  if (state.job) {
+    m_before = *state.job;
+    m_fingerprint = DocumentIO::JobFingerprint(*state.job);
+  }
+}
+
+JobUndoGuard::~JobUndoGuard() {
+  AppState& state = m_state;
+  if (!state.job || !m_before)
+    return;
+  // Undo itself replaces the job under a guard (the panel is drawing while
+  // Ctrl+Z lands): a history that just changed is not an edit to record.
+  const std::string now = DocumentIO::JobFingerprint(*state.job);
+  const bool moved = now != m_fingerprint;
+  JobHistory& h = state.jobHistory;
+  if (m_coalesce && ImGui::IsAnyItemActive()) {
+    // Mid-drag: hold the FIRST pre-edit copy, whatever this frame did.
+    if (moved && !h.pending) {
+      h.pending = std::move(*m_before);
+      h.pendingFingerprint = m_fingerprint;
+    }
+    return;
+  }
+  if (h.pending) {
+    // The drag let go. One step, from before it started -- unless it came
+    // back to exactly where it began.
+    if (now != h.pendingFingerprint)
+      PushJobUndo(state, *h.pending);
+    h.pending.reset();
+    h.pendingFingerprint.clear();
+    return;
+  }
+  if (moved)
+    PushJobUndo(state, *m_before);
+}
+
 uint64_t PartIdByName(const AppState& state, const std::string& name) {
   for (const PartSlot& slot : state.parts)
     if (slot.kind == DocKind::Part && slot.name == name)
@@ -1766,6 +1866,10 @@ uint64_t ActiveTabTopUndoStamp(const AppState& state) {
     return state.drawingHistory.undoStamps.empty()
                ? 0
                : state.drawingHistory.undoStamps.back();
+  if (state.job)
+    return state.jobHistory.undoStamps.empty()
+               ? 0
+               : state.jobHistory.undoStamps.back();
   return state.commands ? state.commands->TopUndoStamp() : 0;
 }
 uint64_t ActiveTabTopRedoStamp(const AppState& state) {
@@ -1777,6 +1881,10 @@ uint64_t ActiveTabTopRedoStamp(const AppState& state) {
     return state.drawingHistory.redoStamps.empty()
                ? 0
                : state.drawingHistory.redoStamps.back();
+  if (state.job)
+    return state.jobHistory.redoStamps.empty()
+               ? 0
+               : state.jobHistory.redoStamps.back();
   return state.commands ? state.commands->TopRedoStamp() : 0;
 }
 void ActiveTabUndo(AppState& state) {
@@ -1784,6 +1892,8 @@ void ActiveTabUndo(AppState& state) {
     UndoAssembly(state);
   else if (state.drawing)
     UndoDrawing(state);
+  else if (state.job)
+    UndoJob(state);
   else if (state.commands && state.commands->CanUndo())
     state.commands->Undo(*state.document);
 }
@@ -1792,6 +1902,8 @@ void ActiveTabRedo(AppState& state) {
     RedoAssembly(state);
   else if (state.drawing)
     RedoDrawing(state);
+  else if (state.job)
+    RedoJob(state);
   else if (state.commands && state.commands->CanRedo())
     state.commands->Redo(*state.document);
 }
