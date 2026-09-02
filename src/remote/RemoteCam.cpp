@@ -448,18 +448,21 @@ json OpJson(const cam::Operation& op) {
 namespace {
 // `machine: name` on add_cam_setup / set_cam_setup: the global of that name,
 // copied onto the setup. Unknown is refused naming the ones that exist.
+[[noreturn]] void RefuseUnknownMachine(const ui::AppState& state,
+                                       const std::string& name) {
+  std::string known;
+  for (const cam::Machine& m : state.machines)
+    known += (known.empty() ? "" : ", ") + m.name;
+  throw std::runtime_error("no machine called '" + name + "'; " +
+                           (known.empty()
+                                ? std::string("save_machine defines one")
+                                : "list_machines shows " + known));
+}
 void ApplyNamedMachine(ui::AppState& state, cam::Setup& setup,
                        const std::string& name) {
   const cam::Machine* mc = cam::FindMachine(state.machines, name);
-  if (mc == nullptr) {
-    std::string known;
-    for (const cam::Machine& m : state.machines)
-      known += (known.empty() ? "" : ", ") + m.name;
-    throw std::runtime_error("no machine called '" + name + "'; " +
-                             (known.empty()
-                                  ? std::string("save_machine defines one")
-                                  : "list_machines shows " + known));
-  }
+  if (mc == nullptr)
+    RefuseUnknownMachine(state, name);
   ui::ApplyMachine(setup, *mc);
 }
 const char* MatchName(cam::MachineMatch match) {
@@ -704,6 +707,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "add_cam_setup") {
+    // The machine is resolved BEFORE the setup exists: a refused name used to
+    // leave a half-made setup behind the error, which the panel then showed
+    // as "no machine chosen" while the caller believed nothing had happened.
+    const cam::Machine* named = nullptr;
+    if (p.contains("machine")) {
+      const std::string want = p.at("machine").get<std::string>();
+      named = cam::FindMachine(state.machines, want);
+      if (named == nullptr)
+        RefuseUnknownMachine(state, want);
+    }
     cam::Setup& setup = job->AddSetup(p.value("name", std::string()));
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     // Safe Z clear of the stock, exactly as the panel does it. Without this
@@ -712,8 +725,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // produced 68 rapids through material on an 18 mm plate. The GUI got
     // this fix in the G-round; this door did not.
     setup.safeZ = cam::DeriveSafeZ(setup, ui::JobBodies(state));
-    if (p.contains("machine"))
-      ApplyNamedMachine(state, setup, p.at("machine").get<std::string>());
+    if (named != nullptr)
+      ui::ApplyMachine(setup, *named);
     if (p.contains("post")) {
       const std::string post = p.at("post").get<std::string>();
       if (!cam::PostExists(post))

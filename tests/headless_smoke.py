@@ -1349,8 +1349,11 @@ def main():
         expect(on["machine"]["name"] == "Smoke router" and
                on["machine_match"] == "global",
                f"a setup on a named machine is `global`: {on}")
+        n_before = len(d.call("list_cam_setups")["setups"])
         expect_error(d, "add_cam_setup", "Nobody's", name="x",
                      machine="Nobody's")
+        expect(len(d.call("list_cam_setups")["setups"]) == n_before,
+               "a refused add_cam_setup adds nothing")
         # Editing the copy makes it differ; the store did not change.
         d.call("set_cam_setup", id=on["id"], fit_arcs=False)
         st = [s_ for s_ in d.call("list_cam_setups")["setups"]
