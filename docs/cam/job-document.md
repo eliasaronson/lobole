@@ -2,7 +2,11 @@
 
 > Status: **J1–J6 SHIPPED 2026-09-01/02** (formats v73–v76), including the
 > per-part fixturing frame this plan argued hardest for — see
-> [As built](#as-built), which also lists what did not ship. Supersedes the implicit
+> [As built](#as-built), which also lists what did not ship. **Round two
+> planned 2026-09-02** — [set up like a slicer (M1–M5)](#round-two-set-up-like-a-slicer-m1m5):
+> a machine profile saved globally, the work area and the stock always
+> drawn, a job made the way an assembly is, and the part bar's one-click
+> door dropped. Supersedes the implicit
 > assumption in [plan.md](plan.md) that a `cam::Setup` belongs to the part it
 > cuts. Surveyed against FreeCAD CAM and the two slicers in
 > `~/Documents/CAD` on 2026-09-01 — see [What the survey
@@ -293,6 +297,10 @@ technique C1–C5 already uses, and the only honest way to assert an ordering.
 
 ### J6 — "Machine this part" (~½ session)
 
+> Superseded by [M3](#m3--a-job-is-made-the-way-an-assembly-is-1-session):
+> the button goes, the flow becomes *new job → machine → stock → add parts*.
+> The reasoning below is kept as written.
+
 The one-click path from a part tab: create the job, add this part, derive the
 stock, open the tab. Without it J1 is a regression for the common case —
 today's flow is *open part → add setup → cut*, and it must not become *new job
@@ -460,7 +468,8 @@ one axis. It has to be the box MATCHING — a profile runs around the part.
 - **`split_output`**, one file per group. The ordering is what makes it
   meaningful and the ordering is in.
 - **Dragging a placement in the viewport.** Numbers in the panel today; the
-  assembly occurrence gizmo (A2.5) is the thing to reuse.
+  assembly occurrence gizmo (A2.5) is the thing to reuse — now
+  [M5](#m5--dragging-a-placement-in-the-viewport-1-session).
 - **Staleness per part in the GUI.** `list_job_parts` reports a missing
   source and the panel says so; a source that has merely MOVED ON is not
   reported yet, which is the `DrawingSourceVersion` half of the contract.
@@ -469,3 +478,193 @@ one axis. It has to be the box MATCHING — a profile runs around the part.
   listing the job's own parts' elements is the answer a CAM agent actually
   wants.
 - **Auto-arrange**, and everything else in [Not this](#not-this).
+
+## Round two: set up like a slicer (M1–M5)
+
+> Planned 2026-09-02, after the job document had been used for a day. From:
+> *"Setup the machine settings/work area and have them saved globally, then
+> add/setup the material/stock and then add parts in that … have all of that
+> visualized. I also don't think it necessary to have the single click from
+> part setup, even if it's a bit convenient. I'm fine with it being more
+> similar to a slicer or assembly setup."* Surveyed the same day against
+> FreeCAD CAM, PrusaSlicer 3.0, BambuStudio, Kiri:Moto and KiCad's library
+> tables in `~/Documents/CAD`.
+
+### What is wrong now
+
+A `cam::Setup` still carries the **machine** — `post`, `fitArcs`,
+`rapidFeed`, `hasRotaryAxis` — mixed in with the **job**: stock, tools,
+operations, placements. Every new job re-answers "which machine" with a combo
+defaulting to `mach3`, and there is no work area at all: nothing says a
+900 mm sheet does not fit a 600 mm router until the file is on the machine.
+The stock box is drawn only while a verb window is open, so the thing the
+parts are placed *in* is invisible most of the time. And the way in is a
+button on the part bar that makes a job around one part, which is the shape
+of "cut this part" and not of "set up a job" — fine for one bracket, wrong
+for a sheet of eight.
+
+A slicer separates these into three things a person sets up in order:
+**printer** (saved once, chosen by name), **material/plate**, **objects placed
+on it**. That is the order to adopt.
+
+### What the survey said
+
+| | who | what it does | what it decides here |
+|---|---|---|---|
+| Machine is a global file, referenced by name | FreeCAD (`Job.Machine` is a *string*; `.fcm` JSON under `CamAssets/Machines`, `Job.py:777-796` resolves it), Kiri:Moto (`settings.device`, local clone shadows the stock list, `devices.js:66-93`), KiCad (nickname → global-then-project table, `library_manager.cpp:758-834`) | the machine is not a job property; the job **names** one | **M1**: `machines/<name>.json` beside `settings.json`; a setup carries the name |
+| …and the file embeds a copy anyway | PrusaSlicer 3.0 writes the full printer preset into the 3mf and reconciles by **value** on load (`PresetInteractor.cpp:3314`, `find_with_same_values`); Bambu embeds too, falls back to `inherits`, and leaves a differing preset **dirty** (`Preset.cpp:2295-2369`) | a job file must open on a machine that has never seen that profile | **M1**: the job embeds the profile it was set up on; on load: global match → use it; global differs → use the job's, **say so**; global missing → use the job's, say so |
+| Missing name is a loud, per-name error | KiCad `LOAD_ERROR "Library not found in library table"` (`library_manager.cpp:1500-1509`); ERC reports it | a job naming a machine nobody has, with no embedded copy, is refused by name | **M1**: refuse, naming the machines that exist — the repo's rule |
+| Work area defined but never checked | FreeCAD's `Machine/models/machine.py` has `min_limit`/`max_limit` and `is_valid_position` — **no caller anywhere**, including the simulator; `Job.py:783` still says `TODO: Once Machine property is added to Job` | a work area that is only data is decoration | **M2**: draw it, and `cam::Fit` grows an *off-the-machine* state that the post refuses on |
+| Bed drawn, then silently GROWN to fit | Kiri:Moto `platform.js:1206-1224` — `fit()` sets `device.bedDepth = maxy + 10`; no "out of bounds" string exists in `src/kiri` | the worst answer: the picture stays right and the machine is wrong | **never**: the bed is the machine's; a job that does not fit is told so |
+| Four containment states, two of them non-errors | PrusaSlicer `BedContainmentState`: *"Colliding with the build volume boundary, thus not printable and error is shown"* / *"Outside … is ignored: not printed and no error is shown"* (`Bed.hpp:13`) | J4's `Fit{On, Off, Partly}` was the sheet's; the machine adds the same shape one level out | **M2**: `Fit` gains `OffMachine`; a placement fully off the bed is *held*, one straddling it is *refused* — the same words J4 chose |
+| Tools are copied into the job, never linked | FreeCAD `ToolBit … attach_to_doc(doc)` (`Controller.py:451-475`); templates re-materialise from a dict, never a path | a job's tool table is its own — a library only **seeds** it | **M4**: the machine carries a tool library; a setup's tools stay a copy, taken from it |
+| Job creation is a dialog asking three things | FreeCAD `DlgJobCreate`: template, models, units — then stock **last**, so the template's stock wins (`Job.py:256-261`) | the order is machine → parts → stock, and the machine's defaults win | **M3**: new job asks *machine*, then *stock*; parts come in the way occurrences do |
+| Rapid rate is not on the machine | Kiri:Moto keeps `camFastFeed` on the process, not the device | a capped rapid is a per-job choice for some controllers | **M1** keeps `rapidFeed` on the setup, seeded by the machine |
+
+### The fix
+
+```
+// core/cam/CamMachine.h — ONE physical thing: the machine.
+cam::Machine {
+  std::string name;              // the key a job names it by
+  glm::dvec3 travelMin, travelMax; // the work area, in machine coordinates
+  std::string post;              // "mach3" | "linuxcnc" | …  (from Setup)
+  bool fitArcs;                  //                            (from Setup)
+  bool hasRotaryAxis;            //                            (from Setup)
+  double rapidFeedDefault;       // seeds Setup::rapidFeed; 0 = G0
+  std::vector<Tool> library;     // seeds Setup::tools (M4)
+};
+
+cam::Setup {
+  std::string machine;           // NEW — the profile's name
+  cam::Machine machineCopy;      // NEW — what the job was set up on (embedded)
+  // GONE: post, fitArcs, hasRotaryAxis — read through the machine
+  double rapidFeed;              // stays: per-job, seeded
+  Stock stock; …                 // unchanged
+};
+
+cam::Fit { On, Off, Partly, OffMachine, PartlyOffMachine }   // M2
+```
+
+**Stored globally, beside the keymap.** `~/.config/designer/machines/<name>.json`,
+one file per machine, listed by name in Preferences › Machines with an
+editor for every field. Not a row in `settings.json`: the settings table is
+scalar fields and one keymap, and a list of structs does not belong in it —
+the same reason KiCad's tables are files of their own.
+
+**Referenced by name AND embedded.** The name is the working reference —
+edit the machine in Preferences and every job on it follows. The embedded
+copy is what opens the file somewhere else. Reconciliation on load is
+PrusaSlicer's, stated in KiCad's voice:
+
+| global `<name>` | vs embedded | result | said where |
+|---|---|---|---|
+| present, equal | — | use global | nothing |
+| present, differs | — | use the **job's** copy | panel: *"set up on a different 'Shapeoko' than yours — Use mine / Keep the job's"* |
+| missing | present | use the job's copy | panel: *"'Shapeoko' is not one of your machines — Save it"* |
+| missing | missing | **refuse** | load error naming the machines that exist |
+
+The choice is never silent, because the differing field is the one that
+matters: a bed 100 mm shorter, a post that writes a different arc word.
+
+**The work area is drawn always on a job tab, and so is the stock.** A
+translucent box for the travel, the sheet inside it, the parts inside that —
+Bambu's plate. Not only while a verb window is open, which is what made the
+stock invisible most of the time. `cam::Fit` gains the machine level, with
+J4's own rule: fully off is *held* and not cut, straddling is *refused* at
+the post. The bed is never resized to fit.
+
+**A job is made the way an assembly is.** The `+` on the tab bar offers Job
+beside Part, Assembly and Drawing. It asks for the machine (refusing, and
+opening Preferences › Machines, when there is none — the u10 rule), then the
+stock, then parts arrive through the Parts section the way occurrences
+arrive through Insert. The part bar's CAM button **goes**. `machine_part`
+stays as the RPC composite of `new_job` + `add_job_part` it always was — it
+costs nothing and a script may want it — but the GUI no longer has a
+one-click door, by request.
+
+### Decisions
+
+**The machine leaves the setup.** `post`, `fitArcs`, `hasRotaryAxis` were
+always claims about the machine (setup-frame.md said so when it split
+`frame` from `rotationA`); they lived on the setup because there was nowhere
+else. One physical thing per struct, which is the rule that has paid for
+itself twice now.
+
+**`rapidFeed` stays on the setup.** Kiri:Moto is right that a capped rapid
+is a per-job choice on the controllers that need one. The machine seeds it.
+
+**Tools are copied, not linked.** FreeCAD's answer, and the one the existing
+per-setup tool table already gives. The machine's library is where a new
+setup's table comes from, and `Add tool` in a setup can take one from it.
+
+**No auto-grow, no auto-arrange.** Kiri:Moto grows the bed; slicers arrange.
+The first is a wrong answer and the second is [Not this](#not-this).
+
+### Phases
+
+#### M1 — the machine profile (~1½ sessions)
+
+`cam::Machine`, the global store and its loader, Preferences › Machines
+(list, editor, new/duplicate/delete — every numeric field through
+`ui::ExprInput`), `Setup::machine` + the embedded copy, the load
+reconciliation table above, `post`/`fitArcs`/`hasRotaryAxis` read through the
+machine everywhere they are read today. RPCs: `list_machines`, `set_machine`
+(a setup's), `save_machine` / `delete_machine` (the store), `describe` rows,
+`rpc_params_gate`. **Format bump** + golden with an embedded machine, and one
+golden whose named machine does not exist locally (the file still opens).
+`headless_smoke` gets the reconciliation cases. The job bar's rotary button
+reads the machine.
+
+#### M2 — the work area and the stock, always drawn (~1 session)
+
+The travel box and the stock box on every job tab, from `AppendCamVisualisation`
+without the session gate (`quads` channel, dimmer than the stock).
+`cam::Fit::OffMachine` / `PartlyOffMachine` from `CheckPlacements`, reported
+in the Parts section in words, refused by `PlacementRefusal` at the post.
+A stock larger than the travel is its own refusal. GUI test: a sheet wider
+than the bed says so and does not post; Kiri:Moto's grow-to-fit has a test
+asserting it does NOT happen.
+
+#### M3 — a job is made the way an assembly is (~1 session)
+
+Job on the `+` tab menu; a creation step that asks machine then stock (one
+window, u10-gated); the Parts section's `Add` becomes the Insert-style popup
+listing the project's parts; the part bar's `###tb_cam` and `part.cam` go
+(keymap row too — `keys/registry_is_one_to_one`). `machine_part` RPC kept as
+the composite. Every GUI test that reached a job through `###tb_cam` uses
+`MakeJob()` or the new door. `docs/cam/gui.md` updated.
+
+#### M4 — tools with the machine (~½ session)
+
+`Machine::library`; a new setup's `tools` copied from it; `Add tool` in the
+panel offers the library first. The verb window's tool row unchanged.
+
+#### M5 — dragging a placement in the viewport (~1 session)
+
+From [Not built](#not-built): the A2.5 occurrence gizmo reused for a
+placement, constrained to the setup plane (in-plane position and spin only —
+fixturing stays a face pick). Fit states recomputed on drop, drawn while
+dragging.
+
+### Not this (round two)
+
+- **Machine kinematics, collision with the frame, spindle envelope.** The
+  travel box is a box. FreeCAD's `is_valid_position` is the whole of what a
+  box can say, and it is enough to catch the sheet that does not fit.
+- **Vendor bundles.** No downloadable machine list; a machine is typed in
+  once. Kiri:Moto's stock device JSON is the shape to allow for later, not to
+  build.
+- **Per-machine post *dialect editing*.** Kiri:Moto's token-template posts
+  are a different design from `cam::PostProcess`; the post stays an id.
+- Everything in the first round's [Not this](#not-this).
+
+### Cost, honestly
+
+~5 sessions. M1 is the one with a format bump and a loader that has to say
+four different things; the rest is UI over data that mostly exists. The risk
+is M1's reconciliation being built as a silent merge — every reference
+surveyed that embeds a copy also reconciles quietly (PrusaSlicer by value,
+Bambu by leaving it dirty), and the repo's rule is the opposite. Build the
+"differs from yours" line first and the merge second.
+
