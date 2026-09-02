@@ -4606,15 +4606,18 @@ std::vector<LineVertex3D> BuildActiveSketchOverlay(AppState& state,
   return {};
 }
 
-// A thick screen-space line segment (two triangles). The B-end negates
-// corner.x so both ends offset to the same world side (no bowtie). Public:
+// A thick screen-space line segment (two triangles). corner.x is the SIDE of
+// the line, the same side at both ends: the vertex shader's normal is
+// canonical for the segment whichever end a vertex sits at (sketch_prim.vert).
+// It used to negate corner.x at the B end to undo a per-end normal, which
+// kept the geometry right but twisted the anti-aliasing coordinate. Public:
 // the selection pipeline draws its edge overlays with it too.
 void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
                     const glm::vec4& color, std::vector<PrimVertex>& out) {
   PrimVertex am{a, b, {-1, 0}, {halfPx, 0}, color};
   PrimVertex ap{a, b, {1, 0}, {halfPx, 0}, color};
-  PrimVertex bp{b, a, {-1, 0}, {halfPx, 0}, color}; // logical +side at B
-  PrimVertex bm{b, a, {1, 0}, {halfPx, 0}, color};  // logical -side at B
+  PrimVertex bp{b, a, {1, 0}, {halfPx, 0}, color};
+  PrimVertex bm{b, a, {-1, 0}, {halfPx, 0}, color};
   for (const PrimVertex& v : {am, ap, bp, am, bp, bm})
     out.push_back(v);
 }

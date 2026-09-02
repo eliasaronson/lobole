@@ -30,10 +30,20 @@ void main() {
     float halfPx = inParams.x;
     vec2 offsetPx;
     if (inParams.y < 0.5) {
-        // Line: offset along the screen-space normal of the segment.
+        // Line: offset along the screen-space normal of the segment. The
+        // normal is CANONICAL — the same for a vertex at either end — so
+        // corner.x = +1 is the same side of the line at A and at B, and the
+        // fragment's cross-section coordinate is consistent across the quad.
+        // Before this, the far end's normal was the near end's negated
+        // (its posThis→posOther runs the other way); the vertex data undid
+        // that for the position but vLocal kept the raw sign, so the
+        // anti-aliased core of every stroke was a twisted hourglass — a
+        // pinched rope at 4 px, invisible at the 3 px sketch lines wear.
         vec2 dir = screenB - screenA;
         float len = length(dir);
         dir = len > 1e-4 ? dir / len : vec2(1.0, 0.0);
+        if (dir.x < 0.0 || (dir.x == 0.0 && dir.y < 0.0))
+            dir = -dir;
         vec2 nrm = vec2(-dir.y, dir.x);
         offsetPx = nrm * (inCorner.x * halfPx);
         vLocal = vec2(inCorner.x, 0.0);
