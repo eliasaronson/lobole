@@ -770,3 +770,12 @@ through and hold it down"*. A part itself longer than the travel is still
 refused, naming the parts' extent; tiling one part across two setups is a
 work-offset feature the first round's Not-this already names.
 
+**...and then a warning, not a refusal (same evening).** *"Say I want to cut
+as far as I can for the side here."* A part longer than the bed is cut as
+far as the machine reaches; the rest is a second setup with the sheet moved
+along. Refusing the whole job refused the part the user wanted the first
+metre of. `MachineWarning` (was `MachineRefusal`) left `PlacementRefusal`;
+`cam::MachineLines` gives the panel and `cam_verify` the same WARN lines —
+the parts' reach beyond the travel, else the sheet's overhang. The bed still
+turns red.
+

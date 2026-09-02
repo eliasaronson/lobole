@@ -2077,16 +2077,22 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     quads.clear();
     ui::AppendCamVisualisation(*s_App, prims, quads);
     IM_CHECK(prims.size() > stockOnly);
-    IM_CHECK(cam::MachineRefusal(*live, ui::JobBodies(*s_App)).empty());
+    IM_CHECK(cam::MachineWarning(*live, ui::JobBodies(*s_App)).empty());
 
-    // ...and a machine too small refuses, at the post and in the verdict.
+    // ...and a machine too small WARNS: the cut is made, as far as the
+    // machine reaches, and the verdict says how far that is.
     live->machine.travelMax = {600.0, 800.0, 0.0};
     ToolbarClick(ctx, "###tb_job_whole");
     ctx->Yield(3);
     live = Job()->FindSetup(setup.id);
-    IM_CHECK(!s_App->camRefusal.empty()); // the verb refused the dead cut
-    IM_CHECK(s_App->camRefusal.find("600") != std::string::npos);
-    IM_CHECK(live->operations.empty());
+    IM_CHECK(s_App->camRefusal.empty());
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    bool warned = false;
+    for (const cam::VerdictLine& line : s_App->camVerdict)
+      warned |= line.level == cam::VerdictLine::Level::Warn &&
+                line.text.find("600") != std::string::npos &&
+                line.text.find("beyond") != std::string::npos;
+    IM_CHECK(warned);
     IM_CHECK(live->machine.travelMax.x == 600.0); // not grown
     ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
     ctx->Yield(2);

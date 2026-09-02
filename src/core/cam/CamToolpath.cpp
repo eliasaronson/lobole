@@ -2574,7 +2574,7 @@ bool PlacedPartsBounds(const Setup& setup, const std::vector<Body>& bodies,
 }
 } // namespace
 
-std::string MachineRefusal(const Setup& setup,
+std::string MachineWarning(const Setup& setup,
                            const std::vector<Body>& bodies) {
   const Machine& m = setup.machine;
   if (!m.HasWorkArea())
@@ -2587,11 +2587,12 @@ std::string MachineRefusal(const Setup& setup,
     const double need = hi[a] - lo[a];
     const double have = m.travelMax[a] - m.travelMin[a];
     if (need > have + 1e-6) {
-      char buf[220];
+      char buf[260];
       std::snprintf(buf, sizeof(buf),
-                    "the parts need %.0f mm in %s and %s travels %.0f: %.0f mm "
-                    "too long. Lay them out differently, cut in more than one "
-                    "setup, or a bigger machine",
+                    "the parts need %.0f mm in %s and %s travels %.0f: the "
+                    "last %.0f mm are beyond the machine. It cuts as far as "
+                    "it reaches and stops; the rest is a second setup with "
+                    "the sheet moved along",
                     need, axes[a],
                     m.name.empty() ? "this machine" : m.name.c_str(), have,
                     need - have);
@@ -2604,7 +2605,7 @@ std::string MachineRefusal(const Setup& setup,
 std::string MachineOverhang(const Setup& setup,
                             const std::vector<Body>& bodies) {
   const Machine& m = setup.machine;
-  if (!m.HasWorkArea() || !MachineRefusal(setup, bodies).empty())
+  if (!m.HasWorkArea() || !MachineWarning(setup, bodies).empty())
     return "";
   glm::dvec3 lo(0.0), hi(0.0);
   if (!StockBounds(setup, bodies, lo, hi))
@@ -2630,10 +2631,6 @@ std::string MachineOverhang(const Setup& setup,
 
 std::string PlacementRefusal(const Setup& setup,
                              const std::vector<Body>& bodies) {
-  // The machine first: a sheet that does not fit the bed is refused before
-  // anything on the sheet is looked at.
-  if (const std::string why = MachineRefusal(setup, bodies); !why.empty())
-    return why;
   for (size_t i = 0; i < setup.placements.size(); i++)
     for (size_t k = i + 1; k < setup.placements.size(); k++)
       if (setup.placements[i].jobPartId == setup.placements[k].jobPartId &&

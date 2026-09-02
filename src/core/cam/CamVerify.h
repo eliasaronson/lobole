@@ -232,6 +232,13 @@ struct VerdictLine {
   std::string text;
 };
 
+// The MACHINE's lines of the verdict (docs/cam/job-document.md, M2): the
+// parts' reach beyond the travel, or the sheet's overhang when the parts
+// fit -- as WARN lines, never refusals. One helper for the panel and the
+// RPC, so the two verdicts cannot disagree about the machine.
+[[nodiscard]] std::vector<VerdictLine>
+MachineLines(const Setup& setup, const std::vector<Body>& bodies);
+
 // `breaksAnEdge` says the job contains an edge-break operation. It changes
 // nothing that is measured — it names the most likely cause of the gouge such
 // a job reports, which is that the round or chamfer exists in the TOOLPATH and

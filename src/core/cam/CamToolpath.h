@@ -284,11 +284,14 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // Not the stock's: a sheet longer than the bed is normal on an open-ended
 // router, slid through and cut in tiles, and the sheet hanging off the
 // machine is the operator's business (MachineOverhang says so, as a note).
-// Extents only -- where the operator touches off inside the travel is not
-// the job's to know -- and only when the machine states a work area at all.
-// Empty when it fits or nothing is stated; otherwise the axis and the
-// shortfall, in words. The bed is never grown to fit (Kiri:Moto's answer).
-[[nodiscard]] std::string MachineRefusal(const Setup& setup,
+// A WARNING, not a refusal: a part longer than the bed is cut as far as the
+// machine reaches, and the rest is a second setup with the sheet moved
+// along -- refusing the whole job refused the part the user wanted the
+// first metre of. Extents only -- where the operator touches off inside the
+// travel is not the job's to know -- and only when the machine states a work
+// area at all. Empty when it fits or nothing is stated; otherwise the axis
+// and the shortfall, in words. The bed is never grown to fit.
+[[nodiscard]] std::string MachineWarning(const Setup& setup,
                                          const std::vector<Body>& bodies);
 // The stock against the travel, when the parts themselves fit: empty, or a
 // sentence saying which way the sheet hangs off the bed.

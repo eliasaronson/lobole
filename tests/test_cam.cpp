@@ -4673,7 +4673,7 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   setup.machine.travelMin = {0.0, 0.0, -90.0};
   setup.machine.travelMax = {600.0, 600.0, 0.0};
   // The PARTS are what the spindle has to reach: 880 on a 600 machine.
-  const std::string why = cam::MachineRefusal(setup, doc.GetBodies());
+  const std::string why = cam::MachineWarning(setup, doc.GetBodies());
   INFO(why);
   CHECK(why.find("X") != std::string::npos);
   CHECK(why.find("880") != std::string::npos);
@@ -4681,10 +4681,15 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   CHECK(why.find("280") != std::string::npos); // the shortfall
   CHECK(why.find("Small router") != std::string::npos);
   CHECK(cam::MachineOverhang(setup, doc.GetBodies())
-            .empty()); // refused, not noted
-  // ...and it is the placement refusal too, so generation and the post stop
-  // on it rather than the machine.
-  CHECK(cam::PlacementRefusal(setup, doc.GetBodies()) == why);
+            .empty()); // warned, not noted
+  // A WARNING, not a refusal: the job still generates, and the verdict
+  // carries the sentence. The machine cuts as far as it reaches; refusing
+  // the whole job refused the part the user wanted the first metre of.
+  CHECK(cam::PlacementRefusal(setup, doc.GetBodies()).empty());
+  const auto lines = cam::MachineLines(setup, doc.GetBodies());
+  REQUIRE(lines.size() == 1);
+  CHECK(lines[0].level == cam::VerdictLine::Level::Warn);
+  CHECK(lines[0].text == why);
   // The machine is NOT grown to fit: what Kiri:Moto does, and the wrong
   // answer -- the picture stays right and the machine is wrong.
   CHECK(setup.machine.travelMax.x == 600.0);
@@ -4692,9 +4697,9 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   // A machine that states no work area checks nothing; one big enough fits.
   cam::Setup unstated = setup;
   unstated.machine.travelMax = unstated.machine.travelMin;
-  CHECK(cam::MachineRefusal(unstated, doc.GetBodies()).empty());
+  CHECK(cam::MachineWarning(unstated, doc.GetBodies()).empty());
   setup.machine.travelMax.x = 1200.0;
-  CHECK(cam::MachineRefusal(setup, doc.GetBodies()).empty());
+  CHECK(cam::MachineWarning(setup, doc.GetBodies()).empty());
 
   // A sheet LONGER than the bed with parts that fit is not a refusal: an
   // open-ended router slides it through and cuts in tiles. It is a note.
@@ -4707,7 +4712,7 @@ TEST_CASE("cam machine: a sheet longer than the travel is refused, in words",
   tiled.machine.name = "Small router";
   tiled.machine.travelMin = {0.0, 0.0, -90.0};
   tiled.machine.travelMax = {600.0, 600.0, 0.0};
-  CHECK(cam::MachineRefusal(tiled, small.GetBodies()).empty());
+  CHECK(cam::MachineWarning(tiled, small.GetBodies()).empty());
   CHECK(cam::PlacementRefusal(tiled, small.GetBodies()).empty());
   const std::string note = cam::MachineOverhang(tiled, small.GetBodies());
   INFO(note);

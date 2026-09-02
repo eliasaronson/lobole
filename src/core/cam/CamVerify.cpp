@@ -747,3 +747,18 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
 }
 
 } // namespace cam
+
+namespace cam {
+
+std::vector<VerdictLine> MachineLines(const Setup& setup,
+                                      const std::vector<Body>& bodies) {
+  std::vector<VerdictLine> out;
+  if (const std::string reach = MachineWarning(setup, bodies); !reach.empty())
+    out.push_back({VerdictLine::Level::Warn, reach});
+  else if (const std::string over = MachineOverhang(setup, bodies);
+           !over.empty())
+    out.push_back({VerdictLine::Level::Warn, over});
+  return out;
+}
+
+} // namespace cam

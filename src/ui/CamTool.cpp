@@ -982,7 +982,7 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
     // its floor at the stock's bottom, which is how a sheet is loaded. Where
     // the operator touches off inside the travel is not the job's to know,
     // so this is the machine's SIZE against the job's -- the check
-    // cam::MachineRefusal makes in words. Never resized to fit.
+    // cam::MachineWarning makes in words. Never resized to fit.
     const cam::Machine& m = setup->machine;
     if (m.HasWorkArea()) {
       const glm::dvec3 size = m.travelMax - m.travelMin;
@@ -991,7 +991,7 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
                                            {lo.x + size.x, lo.y + size.y},
                                            {lo.x, lo.y + size.y}};
       const bool fits =
-          cam::MachineRefusal(*setup, ui::JobBodies(state)).empty();
+          cam::MachineWarning(*setup, ui::JobBodies(state)).empty();
       const glm::vec4 line = fits ? kBedLine : kBedRefusedLine;
       LoopLines(bed, lo.z, 1.0f, line, prims);
       LoopLines(bed, lo.z + size.z, 0.8f, line, prims);
@@ -1088,12 +1088,11 @@ void RunCamVerification(AppState& state) {
   state.camVerdict = cam::Explain(
       insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);
-  // A sheet hanging off the bed is a note, not a refusal: the cuts fit and
-  // the sheet is the operator's to slide through and hold down.
-  if (const std::string over =
-          cam::MachineOverhang(*setup, ui::JobBodies(state));
-      !over.empty())
-    state.camVerdict.push_back({cam::VerdictLine::Level::Warn, over});
+  // The machine's lines: the parts' reach beyond the travel, or the sheet's
+  // overhang -- warnings, never refusals. Cut as far as it reaches.
+  for (const cam::VerdictLine& line :
+       cam::MachineLines(*setup, ui::JobBodies(state)))
+    state.camVerdict.push_back(line);
   state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
 }
 
