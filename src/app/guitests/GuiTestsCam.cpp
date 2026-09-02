@@ -1,7 +1,10 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "cad/FaceSelector.h" // Ray
 #include "core/cam/CamMachine.h"
 #include "core/io/Serialization.h"
+#include "ui/AssemblyActions.h" // the placement gizmo
+#include "ui/DragMath.h"        // GizmoScale
 #include "ui/JobActions.h"
 #include "ui/MachineActions.h"
 
@@ -2217,6 +2220,82 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // ...and the verb's tool row shows both, defaulting to the first.
     IM_CHECK_EQ(ui::VerbTool(*s_App, made), 1);
     IM_CHECK(ui::DeleteMachine(*s_App, "Test tooled router"));
+  };
+
+  // A placement is dragged in the viewport (round two, M5): the occurrence
+  // gizmo's X/Y arrows on the selected job part move it in the stock, the Z
+  // arc spins it. Driven through the same state machine the mouse drives,
+  // with rays aimed at the handle, so the camera stays out of it.
+  t = IM_REGISTER_TEST(engine, "cam", "a_placement_is_dragged_in_the_viewport");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    const Body& body = ui::JobBodies(*s_App)[0];
+    IM_CHECK(body.jobPartId != 0);
+
+    // Nothing selected: no handles.
+    std::vector<LineVertex3D> lines;
+    s_App->viewportHandles.clear();
+    ui::BuildGizmoOverlay(*s_App, lines);
+    IM_CHECK(lines.empty());
+
+    // Select the part (a Body item, as a click on it would leave).
+    ui::SelectionItem item;
+    item.kind = ui::SelectionItem::Kind::Body;
+    item.id = body.createdBy;
+    item.jobPartId = body.jobPartId;
+    s_App->selection.items = {item};
+    ctx->Yield(2);
+    lines.clear();
+    s_App->viewportHandles.clear();
+    ui::BuildGizmoOverlay(*s_App, lines);
+    IM_CHECK(!lines.empty());
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)3); // X, Y, spin
+    // The handles sit on the part: at its top centre.
+    const glm::vec3 origin = s_App->viewportHandles[0].origin;
+    IM_CHECK(std::abs(origin.x - 30.0f) < 1e-3f);
+    IM_CHECK(std::abs(origin.y - 20.0f) < 1e-3f);
+    IM_CHECK(std::abs(origin.z - 12.0f) < 1e-3f);
+
+    // Grab the X arrow with a ray straight down onto its middle, drag it
+    // 25 mm along X, release.
+    const float L = ui::GizmoScale(*s_App);
+    Ray grab;
+    grab.origin = origin + glm::vec3(0.5f * L, 0.0f, 100.0f);
+    grab.direction = {0.0f, 0.0f, -1.0f};
+    IM_CHECK(ui::HandleGizmoInput(*s_App, grab, true, true, false));
+    IM_CHECK(s_App->gizmoDrag.active);
+    IM_CHECK_EQ(s_App->gizmoDrag.jobPartId, body.jobPartId);
+    IM_CHECK_EQ(s_App->gizmoDrag.axis, 0);
+    IM_CHECK(!s_App->gizmoDrag.rotate);
+    Ray moved = grab;
+    moved.origin.x += 25.0f;
+    IM_CHECK(ui::HandleGizmoInput(*s_App, moved, false, true, false));
+    // No Yield between move and release: a frame in between runs the
+    // viewport's own gizmo pass, which reads the REAL mouse (up) and ends
+    // the drag itself -- correct for a user, wrong for a scripted one.
+    const cam::Setup* live = Job()->FindSetup(setup.id);
+    IM_CHECK_EQ(live->placements.size(), (size_t)1); // made on grab
+    IM_CHECK(std::abs(live->placements[0].pos.x - 25.0) < 0.5);
+    IM_CHECK(std::abs(live->placements[0].pos.y) < 1e-6);
+    IM_CHECK(ui::HandleGizmoInput(*s_App, moved, false, false, true));
+    IM_CHECK(!s_App->gizmoDrag.active);
+    ctx->Yield(2);
+    // The drawn part followed the drag.
+    glm::vec3 bmin, bmax;
+    ui::JobPlacedBodies(*s_App)[0].shape.GetBoundingBox(bmin, bmax);
+    IM_CHECK(std::abs(bmin.x - 25.0f) < 0.5f);
+    // ...and the handles moved with it.
+    lines.clear();
+    s_App->viewportHandles.clear();
+    ui::BuildGizmoOverlay(*s_App, lines);
+    IM_CHECK(std::abs(s_App->viewportHandles[0].origin.x - 55.0f) < 0.5f);
+    s_App->selection.Clear();
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

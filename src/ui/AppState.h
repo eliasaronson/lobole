@@ -950,6 +950,12 @@ struct AppState {
     // transform is untouched).
     uint64_t explodeView = 0;
     glm::vec3 startOffset{0};
+    // A JOB tab (round two, M5): non-zero -> the drag writes this job part's
+    // placement in the active setup -- in-plane position along X/Y, spin
+    // about Z. Fixturing (which face is up) stays a face pick.
+    uint64_t jobPartId = 0;
+    glm::dvec2 startPlace{0.0, 0.0};
+    double startRotZ = 0.0;
   };
 
   // Direct-manipulation handle on the pending preview feature (docs/ui/

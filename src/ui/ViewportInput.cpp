@@ -334,6 +334,26 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
+  // A JOB tab's one handle is the placement gizmo on the selected part
+  // (docs/cam/job-document.md, M5): first shot at clicks, like the assembly's
+  // above, and a miss falls through to picking.
+  if (state.job) {
+    UpdateHandleHover(state, overViewport);
+    const bool clicked =
+        overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    const bool released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    if (state.gizmoDrag.active || clicked) {
+      Ray ray = state.faceSelector->ScreenToWorldRay(
+          io.MousePos.x - state.viewportPos.x,
+          io.MousePos.y - state.viewportPos.y,
+          static_cast<int>(state.viewportSize.x),
+          static_cast<int>(state.viewportSize.y), *state.camera);
+      if (HandleGizmoInput(state, ray, clicked, down, released))
+        return;
+    }
+  }
+
   UpdateHandleHover(state, overViewport);
 
   // Direct-manipulation handles: first shot at clicks, exactly like the

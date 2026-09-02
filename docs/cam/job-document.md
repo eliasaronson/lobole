@@ -3,10 +3,11 @@
 > Status: **J1–J6 SHIPPED 2026-09-01/02** (formats v73–v76), including the
 > per-part fixturing frame this plan argued hardest for — see
 > [As built](#as-built), which also lists what did not ship. **Round two
-> planned 2026-09-02** — [set up like a slicer (M1–M5)](#round-two-set-up-like-a-slicer-m1m5):
-> a machine profile saved globally, the work area and the stock always
-> drawn, a job made the way an assembly is, and the part bar's one-click
-> door dropped. Supersedes the implicit
+> SHIPPED 2026-09-02** (format v77) — [set up like a slicer (M1–M5)](#round-two-set-up-like-a-slicer-m1m5):
+> a machine profile saved globally and embedded, the work area and the stock
+> always drawn, a job made the way an assembly is, tools from the machine,
+> placements dragged in the viewport, and the part bar's one-click door
+> dropped. Supersedes the implicit
 > assumption in [plan.md](plan.md) that a `cam::Setup` belongs to the part it
 > cuts. Surveyed against FreeCAD CAM and the two slicers in
 > `~/Documents/CAD` on 2026-09-01 — see [What the survey
@@ -731,4 +732,22 @@ anywhere), the parts (the same Add buttons the Parts section has), and
 Create setup. The part bar's CAM button, `part.cam` and its `J` key are gone;
 `machine_part` stays as the RPC composite. Four GUI tests that reached a job
 through the button use `MakeJob()`; one new one walks the whole door.
+
+### As built — M4 and M5 (2026-09-02)
+
+**M4.** The machine's library is edited in Preferences › Machines and copied
+onto a setup by `ApplyMachine` — only onto a setup with nothing cut yet,
+because an operation names its tool by number and replacing the table under
+it would re-point every cut. The panel's Add tool offers the library first.
+
+**M5.** The occurrence gizmo grew a job-tab branch inside `AssemblyActions`
+rather than a copy of its helpers: the selected job part gets X and Y
+arrows and a Z arc at its top centre; a part without a placement gets one
+on grab. The drag bumps the job version each frame so the drawn parts
+follow, and the drop regenerates and re-verifies. Two things it does not do:
+**undo** — a job has no snapshot stack yet (`JobHistory` exists and nothing
+pushes to it), so neither does anything else on a job tab; and out-of-plane
+motion, on purpose.
+
+**Round two is complete.** ~5 sessions estimated, one day spent.
 

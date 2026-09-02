@@ -1,5 +1,8 @@
 #include "ui/AssemblyActions.h"
 #include "ui/AppActions.h"
+#include "ui/CamPanel.h" // ActiveCamSetup, RefreshCamToolpaths (the placement gizmo)
+#include "ui/CamTool.h"    // RunCamVerification
+#include "ui/JobActions.h" // JobPlacedBodies
 
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
 
@@ -1063,7 +1066,151 @@ void AppendGizmoHandles(AppState& state, const GizmoSpec& spec, float L,
 }
 } // namespace
 
+// ---- The placement gizmo on a JOB tab (docs/cam/job-document.md, M5) ----
+//
+// The same handles, on the selected job part: X and Y arrows move its
+// placement in the stock, the Z arc spins it. Nothing out of plane -- which
+// face is up is a fixturing statement and stays a face pick (setup-frame.md).
+// A part without a placement gets one on grab, at the origin, which is where
+// it was being drawn anyway.
+namespace {
+
+uint64_t PlacementGizmoPart(AppState& state) {
+  if (!state.job || state.slotPick.Active() || state.measure.active)
+    return 0;
+  if (ActiveCamSetup(state) == nullptr)
+    return 0;
+  for (const SelectionItem& item : state.selection.items)
+    if (item.jobPartId != 0 && (item.kind == SelectionItem::Kind::Body ||
+                                item.kind == SelectionItem::Kind::Face ||
+                                item.kind == SelectionItem::Kind::Edge))
+      return item.jobPartId;
+  return 0;
+}
+
+bool BuildPlacementGizmoSpec(AppState& state, uint64_t jobPartId,
+                             GizmoSpec& spec) {
+  // At the top centre of the part as DRAWN, so the handles sit on the
+  // material they move.
+  glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+  bool any = false;
+  for (const Body& b : JobPlacedBodies(state)) {
+    if (b.jobPartId != jobPartId)
+      continue;
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    lo = glm::min(lo, bmin);
+    hi = glm::max(hi, bmax);
+    any = true;
+  }
+  if (!any)
+    return false;
+  spec.origin = glm::vec3((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, hi.z);
+  spec.axis[0] = {1, 0, 0};
+  spec.axis[1] = {0, 1, 0};
+  spec.axis[2] = {0, 0, 1};
+  spec.trans[0] = spec.trans[1] = true;
+  spec.trans[2] = false;
+  spec.rot[0] = spec.rot[1] = false;
+  spec.rot[2] = true;
+  return true;
+}
+
+cam::Placement* PlacementFor(AppState& state, uint64_t jobPartId) {
+  cam::Setup* setup = ActiveCamSetup(state);
+  if (setup == nullptr)
+    return nullptr;
+  for (cam::Placement& p : setup->placements)
+    if (p.jobPartId == jobPartId)
+      return &p;
+  return nullptr;
+}
+
+bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
+                          bool down, bool released) {
+  auto& g = state.gizmoDrag;
+  if (g.active) {
+    cam::Placement* place = PlacementFor(state, g.jobPartId);
+    if (released || !down || place == nullptr || !state.job) {
+      g.active = false;
+      g.jobPartId = 0;
+      if (state.job) {
+        // Where it landed is what the job cuts: the fit states, the
+        // toolpaths and the verdict all follow the drop.
+        state.projectMetaDirty = true;
+        RefreshCamToolpaths(state);
+        RunCamVerification(state);
+      }
+      return true;
+    }
+    const glm::vec3 A = g.frameAxis[g.axis];
+    if (!g.rotate) {
+      const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+      const double d = static_cast<double>(t - g.startParam);
+      place->pos = g.startPlace + glm::dvec2(A.x * d, A.y * d);
+    } else {
+      float ang;
+      if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
+        place->rotZdeg =
+            g.startRotZ + glm::degrees(static_cast<double>(ang - g.startParam));
+    }
+    // The placed bodies are rebuilt from the placement on the next frame:
+    // JobRenderVersion keys on it.
+    state.job->BumpVersion();
+    return true;
+  }
+
+  const uint64_t part = PlacementGizmoPart(state);
+  if (part == 0 || !clicked)
+    return false;
+  GizmoSpec spec;
+  if (!BuildPlacementGizmoSpec(state, part, spec))
+    return false;
+  int axis = 0;
+  bool rotate = false;
+  if (!GizmoHitTest(state, spec, ray, axis, rotate))
+    return false;
+  cam::Setup* setup = ActiveCamSetup(state);
+  cam::Placement* place = PlacementFor(state, part);
+  if (place == nullptr) {
+    cam::Placement fresh;
+    fresh.id = state.job->AllocateId();
+    fresh.jobPartId = part;
+    setup->placements.push_back(fresh);
+    place = &setup->placements.back();
+  }
+  g.active = true;
+  g.axis = axis;
+  g.rotate = rotate;
+  g.frameOrigin = spec.origin;
+  for (int i = 0; i < 3; i++)
+    g.frameAxis[i] = spec.axis[i];
+  g.mateId = 0;
+  g.explodeView = 0;
+  g.jobPartId = part;
+  g.startPlace = place->pos;
+  g.startRotZ = place->rotZdeg;
+  const glm::vec3 A = spec.axis[axis];
+  if (!rotate) {
+    g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);
+  } else {
+    float ang = 0.0f;
+    (void)RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
+    g.startParam = ang;
+  }
+  return true;
+}
+
+} // namespace
+
 void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
+  if (state.job) {
+    const uint64_t part = PlacementGizmoPart(state);
+    GizmoSpec spec;
+    if (part != 0 && BuildPlacementGizmoSpec(state, part, spec))
+      AppendGizmoHandles(state, spec, GizmoScale(state), lines);
+    return;
+  }
   Occurrence* occ = GizmoOccurrence(state);
   if (!occ)
     return;
@@ -1076,6 +1223,8 @@ void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
 
 bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
                       bool released) {
+  if (state.job)
+    return HandlePlacementGizmo(state, ray, clicked, down, released);
   auto& g = state.gizmoDrag;
 
   if (g.active) {
