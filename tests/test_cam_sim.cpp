@@ -185,15 +185,24 @@ TEST_CASE("cam sim: a laid-flat job plays where its toolpath cuts", "[cam]") {
   CHECK(glm::length(playLo - genLo) < 0.02);
   CHECK(glm::length(playHi - genHi) < 0.02);
 
-  // And drawn back on the model, the path is on the PART — the property the
-  // backplot and the stock mesh both rely on, since each is rendered through
-  // the setup frame rather than re-derived in model space.
-  const glm::dvec3 corner =
-      cam::FromSetupSpace(job.setup, glm::dvec3(genLo.x, genLo.y, genHi.z));
+  // And the path is ON the part. Both are in SETUP space and are drawn there
+  // — a job tab shows its parts laid out (v73/J6), so the backplot, the stock
+  // mesh and the bodies share one space and nothing is mapped back. The
+  // property this asserts is unchanged; where it is asserted is not.
+  const std::vector<Body> framed =
+      cam::BodiesInSetupFrame(job.setup, job.doc->GetBodies());
+  glm::vec3 partLo(FLT_MAX), partHi(-FLT_MAX);
+  for (const Body& b : framed) {
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    partLo = glm::min(partLo, bmin);
+    partHi = glm::max(partHi, bmax);
+  }
   // The panel is 40 x 10 x 30 about the origin, plus the stock margin.
-  CHECK(std::abs(corner.x) < 40.0);
-  CHECK(std::abs(corner.y) < 40.0);
-  CHECK(std::abs(corner.z) < 40.0);
+  CHECK(genLo.x > partLo.x - 40.0);
+  CHECK(genHi.x < partHi.x + 40.0);
+  CHECK(genLo.y > partLo.y - 40.0);
+  CHECK(genHi.y < partHi.y + 40.0);
 }
 
 TEST_CASE("cam sim: a job zeroed on its corner still plays its own verdict",

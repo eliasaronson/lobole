@@ -341,9 +341,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//CAM###ToolWindow/###cam_view_spindle");
     ctx->Yield(150);
     fwd = glm::normalize(s_App->camera->GetForward());
-    const glm::dvec3 spindle =
-        cam::FromSetupSpace(*Job()->FindSetup(setup.id), glm::dvec3(0, 0, 1));
-    const glm::vec3 want = -glm::normalize(glm::vec3(spindle));
+    // A job tab draws SETUP space, so the spindle is world +Z whatever the
+    // part is clamped like — there is no frame left to come back through.
+    const glm::vec3 want(0.0f, 0.0f, -1.0f);
     IM_CHECK(glm::length(fwd - want) < 0.03f);
     s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
@@ -1375,6 +1375,80 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         ctx->ItemClick(modelWin->TabId);
         ctx->Yield(2);
       }
+  };
+
+  // The backplot is drawn ON the part, whatever the part is clamped like.
+  //
+  // It used to be built in setup space and shown in MODEL space, because the
+  // viewport drew the model. Since the job tab draws its parts LAID OUT
+  // (v73/J6) that undoes exactly the transform the viewport just applied, so
+  // a laid-flat job drew its toolpath floating beside the part it belongs to.
+  t = IM_REGISTER_TEST(engine, "cam", "backplot_lands_on_a_clamped_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // An upright panel: nothing is machinable until it is laid down, which is
+    // what makes the frame non-identity.
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    // Lay the big face up, the way picking it as the top face does.
+    const Body& body = ui::JobBodies(*s_App)[0];
+    glm::vec3 up(0.0f);
+    double best = 0.0;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (body.shape.FacePlane(index, o, n, u) && std::abs(n.y) > best) {
+        best = std::abs(n.y);
+        up = n;
+      }
+    }
+    IM_CHECK(best > 0.9);
+    cam::Setup* live = Job()->FindSetup(setup.id);
+    live->frame = cam::SolveFaceUp(glm::dvec3(up), live->frame);
+    IM_CHECK(!cam::FrameIsSquare(*live));
+    live->safeZ = cam::DeriveSafeZ(*live, ui::JobBodies(*s_App));
+    (void)cam::RecomputeOrigin(*live, ui::JobBodies(*s_App));
+    const cam::DerivedOp derived = cam::DeriveOperation(
+        *live, ui::JobBodies(*s_App), cam::OpType::Profile, cam::Target{});
+    IM_CHECK(derived.ok);
+    cam::Operation op = derived.op;
+    op.id = Job()->AllocateId();
+    live->operations.push_back(op);
+    ui::RefreshCamToolpaths(*s_App);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+
+    std::vector<PrimVertex> prims;
+    ui::AppendCamToolpathOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+
+    // Where the part is DRAWN, and where the backplot is drawn. A profile
+    // runs around the part, so the two must share a neighbourhood.
+    glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+    for (const Body& b : ui::JobPlacedBodies(*s_App)) {
+      glm::vec3 bmin, bmax;
+      b.shape.GetBoundingBox(bmin, bmax);
+      lo = glm::min(lo, bmin);
+      hi = glm::max(hi, bmax);
+    }
+    glm::vec3 plo(FLT_MAX), phi(-FLT_MAX);
+    for (const PrimVertex& v : prims) {
+      plo = glm::min(plo, v.posThis);
+      phi = glm::max(phi, v.posThis);
+    }
+    // MATCHING extents, not merely overlapping ones: a profile runs around
+    // the part, so its box is the part's box plus a tool radius. "Inside the
+    // part's box" passes with the backplot collapsed onto one axis, which is
+    // exactly what the wrong transform produces.
+    const float pad = 30.0f; // tool radius + stock margin
+    for (int a = 0; a < 2; a++) {
+      IM_CHECK(std::abs(plo[a] - lo[a]) < pad);
+      IM_CHECK(std::abs(phi[a] - hi[a]) < pad);
+    }
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

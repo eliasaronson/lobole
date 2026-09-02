@@ -888,12 +888,6 @@ glm::dmat3 SetupToModel(const Setup& setup) {
   return m;
 }
 
-glm::dvec3 FromSetupSpace(const Setup& setup, const glm::dvec3& p) {
-  if (SetupIsSquare(setup))
-    return p;
-  return SetupToModel(setup) * p;
-}
-
 glm::dquat SolveFaceUp(const glm::dvec3& normal, const glm::dquat& current) {
   const double len = glm::length(normal);
   if (len < 1e-9)

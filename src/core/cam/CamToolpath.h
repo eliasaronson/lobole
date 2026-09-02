@@ -336,12 +336,12 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // clamp can hold a part any way up.
 [[nodiscard]] bool SolveIndexA(const glm::dvec3& normal, double& degrees);
 
-// A point in setup space, back in model space — for DRAWING. Toolpaths,
-// stock and ghosts are all computed where the machine works; the viewport
-// shows the part where the user put it. Without this the backplot of an
-// indexed job floats beside the model it belongs to.
-[[nodiscard]] glm::dvec3 FromSetupSpace(const Setup& setup,
-                                        const glm::dvec3& p);
+// `FromSetupSpace` USED to live here: a point in setup space mapped back to
+// model space, for drawing. It is gone. A job tab draws its parts LAID OUT
+// (v73/J6) -- the viewport IS setup space -- so mapping back undid exactly
+// the transform the viewport had just applied and floated the backplot, the
+// tool glyph and the depth label beside the part they belong to. Anything
+// drawn over a job is drawn in setup space, full stop.
 
 // The rapid height for this job: clear of the stock, in absolute Z (which is
 // what the toolpath emits). The default in the struct is a bare 5 mm, which

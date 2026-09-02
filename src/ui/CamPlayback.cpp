@@ -285,10 +285,8 @@ bool CamPlaybackDrawsPath(const AppState& state) {
 void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
   if (!CamPlaybackDrawsPath(state) || !state.camShowToolpath)
     return;
-  const cam::Setup* setup = ActiveCamSetup(state);
-  const auto shown = [&](const glm::dvec3& p) {
-    return glm::vec3(setup != nullptr ? cam::FromSetupSpace(*setup, p) : p);
-  };
+  // Setup space is what the viewport draws on a job tab (v73/J6).
+  const auto shown = [&](const glm::dvec3& p) { return glm::vec3(p); };
   const cam::Timeline& tl = state.camTimeline;
   const size_t at = state.camCursor.seg;
   for (size_t k = 0; k < tl.Segments(); k++) {

@@ -150,8 +150,9 @@ TEST_CASE("CAM's setup frame agrees with the world frame", "[world_up]") {
   // either the world flipped without CAM's knowledge or someone added a
   // compensating rotation that must not exist.
   cam::Setup setup;
-  CHECK(Eq(cam::FromSetupSpace(setup, glm::dvec3(0, 0, 1)), conv::kWorldUp));
-  CHECK(Eq(cam::FromSetupSpace(setup, glm::dvec3(1, 0, 0)), conv::kWorldRight));
+  const glm::dmat3 m = cam::SetupToModel(setup);
+  CHECK(Eq(m * glm::dvec3(0, 0, 1), conv::kWorldUp));
+  CHECK(Eq(m * glm::dvec3(1, 0, 0), conv::kWorldRight));
 }
 
 TEST_CASE("the default camera stands upright above the floor", "[world_up]") {

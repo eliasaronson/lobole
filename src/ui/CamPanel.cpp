@@ -148,11 +148,13 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
   const double r = tool->diameter * 0.5;
   constexpr int kSegments = 32;
   const glm::vec4 color(1.0f, 0.85f, 0.35f, 0.85f);
-  // Built in setup space (where the tool is) and shown in model space (where
-  // the part is): for an indexed setup the cutter leans with the table.
-  const auto shown = [&](const glm::dvec3& p) {
-    return glm::vec3(cam::FromSetupSpace(setup, p));
-  };
+  // Built in setup space and DRAWN there: a job tab shows its parts laid out
+  // (v73/J6), so the viewport is already the space the tool works in. It used
+  // to map back to model space, because the viewport used to draw the model
+  // — which since J6 undoes exactly the transform the viewport just applied,
+  // and floats the picture beside the part it belongs to.
+  const auto shown = [&](const glm::dvec3& p) { return glm::vec3(p); };
+  (void)setup;
   glm::vec3 prev(0.0f);
   for (int i = 0; i <= kSegments; i++) {
     const double a = 2.0 * 3.14159265358979 * i / kSegments;
@@ -183,12 +185,9 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
   }
   if (!state.camShowToolpath || state.camToolpaths.empty())
     return;
-  const cam::Setup* active = ActiveCamSetup(state);
-  // Moves are in SETUP space (C9). Drawn straight, an indexed job's backplot
-  // floats beside the part instead of on it.
-  const auto shown = [&](const glm::dvec3& p) {
-    return active != nullptr ? cam::FromSetupSpace(*active, p) : p;
-  };
+  // Moves are in SETUP space (C9), and so is the viewport on a job tab
+  // (v73/J6) — the parts are drawn laid out. Nothing to convert.
+  const auto shown = [&](const glm::dvec3& p) { return p; };
   for (const cam::Toolpath& tp : state.camToolpaths) {
     glm::dvec3 from(0.0);
     bool have = false;

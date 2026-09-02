@@ -565,28 +565,19 @@ void DrawCamToolWindow(AppState& state) {
     // The camera goes where the spindle is and looks the way it looks, with
     // the setup's own +Y up the screen. Snap rather than animate: this is a
     // "show me the job" button, not a flourish.
-    const glm::vec3 dir = glm::normalize(
-        glm::vec3(cam::FromSetupSpace(*setup, glm::dvec3(0, 0, 1))));
-    const glm::vec3 up = glm::normalize(
-        glm::vec3(cam::FromSetupSpace(*setup, glm::dvec3(0, 1, 0))));
+    // The spindle points down setup +Z, and a job tab DRAWS setup space, so
+    // that is the world direction too — no frame to come back through.
+    const glm::vec3 dir(0.0f, 0.0f, 1.0f);
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
     state.camera->SnapToView(dir, up);
     // …and framed on the STOCK, which is the thing being cut. Keeping the
     // previous zoom gave a plan view of four square millimetres if that is
     // where you happened to be.
     glm::dvec3 lo(0.0), hi(0.0);
     if (cam::StockBounds(*setup, ui::JobBodies(state), lo, hi)) {
-      // StockBounds reports the box in SETUP space; the camera lives in model
-      // space, so every corner comes back through the frame.
-      glm::vec3 mn(std::numeric_limits<float>::max());
-      glm::vec3 mx(std::numeric_limits<float>::lowest());
-      for (int c = 0; c < 8; c++) {
-        const glm::dvec3 corner((c & 1) ? hi.x : lo.x, (c & 2) ? hi.y : lo.y,
-                                (c & 4) ? hi.z : lo.z);
-        const glm::vec3 w(cam::FromSetupSpace(*setup, corner));
-        mn = glm::min(mn, w);
-        mx = glm::max(mx, w);
-      }
-      FitCameraToWorldBox(state, mn, mx);
+      // StockBounds reports the box in SETUP space, which is what the job tab
+      // draws — the box IS the world box.
+      FitCameraToWorldBox(state, glm::vec3(lo), glm::vec3(hi));
       // Fitting moves the TARGET, and Camera::SetTarget keeps the camera
       // where it is and re-aims — so it swings the view off the axis that
       // was just set. Aim first (so the fit's pan away from this window is
@@ -857,9 +848,7 @@ void DrawCamLabels(AppState& state) {
     centre += p;
   centre /= static_cast<double>(region.loops[0].pts.size());
   const glm::vec2 at = WorldToScreen(
-      state,
-      glm::vec3(cam::FromSetupSpace(
-          *setup, {centre.x, centre.y, (op->topZ + op->bottomZ) * 0.5})));
+      state, glm::vec3(centre.x, centre.y, (op->topZ + op->bottomZ) * 0.5));
   char text[64];
   std::snprintf(text, sizeof(text), "%.3g mm deep", op->topZ - op->bottomZ);
   ImDrawList* dl = ImGui::GetForegroundDrawList();
