@@ -765,11 +765,14 @@ void DrawCamPanel(AppState& state) {
   }
   if (!state.camLastPost.empty())
     ImGui::TextDisabled("%s", state.camLastPost.c_str());
-
-  // The transport sits with Generate and the verdict, because it answers the
-  // same question they do — is this job right — and it is the one that shows
-  // rather than tells.
-  DrawCamTransport(state);
+  // Why Simulate (on the job toolbar) would not start. The transport itself
+  // is a floating window over the viewport now (CamPlayback.cpp); it used to
+  // be a section here, and this panel was the busiest thing on screen.
+  if (!state.camPlaybackOpen && !state.camPlaybackRefusal.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", state.camPlaybackRefusal.c_str());
+    ImGui::PopStyleColor();
+  }
 
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");

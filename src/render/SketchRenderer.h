@@ -61,6 +61,12 @@ public:
   void SetPrimitives(std::vector<PrimVertex> prims) {
     m_primitives = std::move(prims);
   }
+  // What the last SetPrimitives handed over, for a test to read: whether a
+  // contributor's lines actually REACHED the renderer is a different question
+  // from whether the contributor produces any, and the CAM backplot answered
+  // the second while failing the first (a `state.document` gate on a tab
+  // that has none).
+  [[nodiscard]] size_t PrimitiveCount() const { return m_primitives.size(); }
   // The same thick primitives with DEPTH TEST OFF, for annotations that
   // describe the solid rather than living on it. A measurement is the case
   // this exists for: a plate's thickness or a bore-to-wall distance runs

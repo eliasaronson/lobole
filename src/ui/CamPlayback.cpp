@@ -11,6 +11,7 @@
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h" // ActiveCamSetup, PostOpts
 #include "ui/JobActions.h"
+#include "ui/Theme.h" // ElevatedWindowBorder
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -295,25 +296,33 @@ void AppendCamPlaybackPath(AppState& state, std::vector<PrimVertex>& out) {
   }
 }
 
-void DrawCamTransport(AppState& state) {
-  ImGui::SeparatorText("Simulate the cut");
-  if (!state.camPlaybackOpen) {
-    if (ImGui::Button(ICON_FA_PLAY " Simulate###cam_sim_start"))
-      BeginCamPlayback(state);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Cuts the posted file into a block of stock and shows "
-                        "what comes off.");
-    if (!state.camPlaybackRefusal.empty())
-      ImGui::TextWrapped("%s", state.camPlaybackRefusal.c_str());
+void DrawCamTransportWindow(AppState& state) {
+  if (!state.camPlaybackOpen || !state.job)
+    return;
+  // A media transport, where a media transport goes: along the BOTTOM of the
+  // viewport, centred, and only while something is playing. Not the tool
+  // window slot (BeginToolWindowFrame): that is one-at-a-time by design and
+  // a verb window may be open beside this. Anchored when it appears and
+  // draggable after; NoSavedSettings so a stale imgui.ini cannot park it.
+  const ImVec2 anchor(state.viewportPos.x + state.viewportSize.x * 0.5f,
+                      state.viewportPos.y + state.viewportSize.y - 12.0f);
+  ImGui::SetNextWindowPos(anchor, ImGuiCond_Appearing, ImVec2(0.5f, 1.0f));
+  ImGui::SetNextWindowBgAlpha(0.96f);
+  const ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
+      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings;
+  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
+  if (!ImGui::Begin("Simulate the cut###CamTransport", nullptr, flags)) {
+    ImGui::End();
+    ImGui::PopStyleColor();
     return;
   }
+  ImGui::PopStyleColor();
 
   const cam::Timeline& tl = state.camTimeline;
-  // TWO rows. The CAM panel is 217 px wide in the default layout, and seven
-  // buttons on one line would run off the end of it — the same width that
-  // decided where Generate and the verdict go (docs/cam/dogfood-round.md).
+  // ONE row now. This was two, sized to a 217 px panel; a floating window is
+  // as wide as its scrub bar.
   if (ImGui::Button(ICON_FA_BACKWARD_FAST "###cam_sim_rewind"))
     SeekCamPlayback(state, {0, 0.0});
   Tip("Back to the start");
@@ -338,7 +347,7 @@ void DrawCamTransport(AppState& state) {
   if (ImGui::Button(ICON_FA_FORWARD_FAST "###cam_sim_end"))
     SeekCamPlayback(state, tl.End());
   Tip("To the end");
-
+  ImGui::SameLine();
   if (ImGui::Button(ICON_FA_ANGLES_RIGHT " Op###cam_sim_nextop"))
     SeekCamPlayback(state, tl.NextOp(state.camCursor));
   Tip("Skip to the next operation");
@@ -351,8 +360,12 @@ void DrawCamTransport(AppState& state) {
     Tip("Skip to the next tool change");
     ImGui::SameLine();
   }
+  ImGui::Checkbox("Path###cam_sim_show_path", &state.camShowToolpath);
+  Tip("Draw the file being played, dimmed behind the cursor");
+  ImGui::SameLine();
   if (ImGui::Button("Close###cam_sim_close")) {
     EndCamPlayback(state);
+    ImGui::End();
     return;
   }
 
@@ -367,15 +380,17 @@ void DrawCamTransport(AppState& state) {
           ? static_cast<float>(100.0 * tl.DistanceAt(state.camCursor) /
                                tl.totalDistance)
           : 0.0f;
-  ImGui::SetNextItemWidth(-FLT_MIN);
+  ImGui::SetNextItemWidth(420.0f);
   if (ImGui::SliderFloat("###cam_sim_scrub", &percent, 0.0f, 100.0f, "%.0f%%",
                          ImGuiSliderFlags_AlwaysClamp))
     SeekCamPlayback(state,
                     tl.CursorAtDistance(percent / 100.0 * tl.totalDistance));
 
-  ImGui::SetNextItemWidth(120.0f);
-  ImGui::SliderFloat("Speed###cam_sim_speed", &state.camPlaybackSpeed, 0.5f,
-                     100.0f, "x%.0f", ImGuiSliderFlags_Logarithmic);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(90.0f);
+  ImGui::SliderFloat("###cam_sim_speed", &state.camPlaybackSpeed, 0.5f, 100.0f,
+                     "x%.0f", ImGuiSliderFlags_Logarithmic);
+  Tip("Playback speed");
 
   // The readout: everything the cursor is standing on, in the file's own
   // terms, so a suspicious moment can be looked up in the G-code.
@@ -411,6 +426,7 @@ void DrawCamTransport(AppState& state) {
                         tl.DistanceAt(state.camCursor), tl.totalDistance,
                         tl.MinutesAt(state.camCursor));
   }
+  ImGui::End();
 }
 
 } // namespace ui
@@ -423,7 +439,7 @@ void EndCamPlayback(AppState&) {}
 void TickCamPlayback(AppState&, double) {}
 void SeekCamPlayback(AppState&, cam::SimCursor) {}
 void SyncCamPlayback(AppState&) {}
-void DrawCamTransport(AppState&) {}
+void DrawCamTransportWindow(AppState&) {}
 bool CamPlaybackDrawsPath(const AppState&) { return false; }
 void AppendCamPlaybackPath(AppState&, std::vector<PrimVertex>&) {}
 } // namespace ui

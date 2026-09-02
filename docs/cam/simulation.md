@@ -486,3 +486,24 @@ gone. This is correct, and it is why a screenshot taken down the tool axis at
 - S6 is untouched: colour by operation, holder collision, deviation map. All
   three are now cheap — the height map, the op id per move and the tool
   profile are all in place.
+
+### The transport is a floating window (2026-09-02)
+
+The transport left the CAM panel for **its own floating window along the
+bottom of the viewport** (`DrawCamTransportWindow`), open only while a
+playback is: one row of buttons, the scrub bar, speed, the readout, a Path
+toggle and Close. The panel had become the busiest thing on screen once the
+job document put setups, parts, stock, tools *and* the transport in one
+217 px column. The way in is the job toolbar's Simulate (`job.simulate`);
+its refusal — nothing generated yet — is printed by the panel under Generate,
+where Generate is.
+
+Two things found in the same round. The stock and the cutter were still
+multiplied by setup-to-model in a viewport that draws setup space (see
+gui.md, "The verbs became the toolbar"). And **no CAM drawing reached the
+renderer on a job tab at all**: every contributor in `UI.cpp` was gated on
+`state.document`, which a job tab does not have — so since v73 the backplot,
+the stock box and the ghost were built and thrown away. The GUI tests call
+the contributors directly and never asked the renderer;
+`backplot_reaches_the_renderer_on_a_job_tab` does now.
+

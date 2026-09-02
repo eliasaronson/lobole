@@ -18,6 +18,7 @@
 #include "render/UnderlayRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h"
+#include "ui/CamPlayback.h" // DrawCamTransportWindow
 #include "ui/CamTool.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
@@ -847,6 +848,7 @@ void DrawUI(AppState& state) {
   DrawSettingsWindow(state);
   DrawPerfHud(state);
   DrawToolWindow(state);
+  DrawCamTransportWindow(state); // the cutting simulation's transport
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);
@@ -938,8 +940,14 @@ void DrawUI(AppState& state) {
     // into `quads` before it is handed over — but their outlines are
     // primitives, which are built further down. Collect them here and splice
     // them in below.
+    // On a JOB tab too: a job has no `document`, and this gate was
+    // `state.document` alone, so a job tab -- the one kind of tab CAM is
+    // drawn on since v73 -- drew no backplot, no stock box and no ghost.
+    // The GUI tests kept passing because they call the contributors
+    // directly; `backplot_reaches_the_renderer_on_a_job_tab` reads the
+    // renderer instead.
     std::vector<PrimVertex> camPrims;
-    if (state.document)
+    if (state.document || state.job)
       AppendCamVisualisation(state, camPrims, quads);
 
     state.sketchRenderer->SetQuads(std::move(quads));
@@ -972,7 +980,9 @@ void DrawUI(AppState& state) {
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendCalibrationMarkers(state, prims);   // calibrate-image picks
       AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
-      AppendCamToolpathOverlay(state, prims);   // CAM backplot
+    }
+    if (state.document || state.job) {
+      AppendCamToolpathOverlay(state, prims); // CAM backplot
       prims.insert(prims.end(), camPrims.begin(), camPrims.end());
     }
     state.sketchRenderer->SetPrimitives(std::move(prims));
@@ -996,11 +1006,11 @@ void DrawUI(AppState& state) {
       DrawElementNameOverlay(state); // toponaming debug: hovered face's name
       DrawDimensions(state);
       DrawDimensionOnCreate(state); // typed-number field for the last entity
-      DrawCamLabels(state);         // CAM: the derived depth, on the part
       DrawConstraintGlyphs(state);
       DrawToolPrompt(state);
       DrawInContextBanner(state);
     }
+    DrawCamLabels(state); // CAM: the derived depth, on the part (job tab)
   }
 
   // Sketch reference images (v49): textured underlays on the active sketch

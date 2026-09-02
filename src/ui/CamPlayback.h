@@ -8,8 +8,10 @@
 // The cutting simulation's session: arm it, run it, draw it, end it
 // (docs/cam/simulation.md, S4–S5).
 //
-// The panel (CamPanel.cpp) owns the transport widgets; this owns the state
-// machine behind them. It is deliberately ONE begin and ONE end, because
+// The transport is a FLOATING window over the viewport (DrawCamTransportWindow,
+// since 2026-09-02 -- it used to be a section of the CAM panel, which made
+// that panel the busiest thing on screen); this owns the state machine behind
+// it. It is deliberately ONE begin and ONE end, because
 // playback hides things — the bodies go translucent and a stock block stands
 // in front of them — and a mode with several exits is the U11 bug class this
 // codebase has already paid for once (docs/cam/gui.md).
@@ -37,9 +39,13 @@ void SeekCamPlayback(AppState& state, cam::SimCursor to);
 // bodies ghosted underneath. Cheap and idempotent — call it every frame.
 void SyncCamPlayback(AppState& state);
 
-// The transport: play/pause, step, the scrub bar, speed, and the readout
-// naming the operation, tool, feed and G-code line under the cursor.
-void DrawCamTransport(AppState& state);
+// The transport, as its own floating window along the bottom of the viewport
+// while a playback is open: play/pause, step, the scrub bar, speed, the
+// readout naming the operation, tool, feed and G-code line under the cursor,
+// and Close. Draws nothing when nothing is playing -- the way IN is the job
+// toolbar's Simulate (`job.simulate`), and its refusal is printed by the CAM
+// panel under Generate.
+void DrawCamTransportWindow(AppState& state);
 
 // The path, coloured by what has already been cut. Replaces the plain
 // backplot while a playback is open — during playback the line drawn IS the

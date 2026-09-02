@@ -1212,24 +1212,46 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     ctx->SetRef("//CAM###CamPanel");
 
-    // Before anything is generated the button REFUSES, in words, where it
-    // is — the defaults/refusals rule (docs/ui/u10-*). A transport that
-    // opens onto an empty program would be worse than no button.
-    ctx->ItemClick("###cam_sim_start");
+    // Before anything is generated the button REFUSES, in words — the
+    // defaults/refusals rule (docs/ui/u10-*). A transport that opens onto an
+    // empty program would be worse than no button. Simulate is the job
+    // toolbar's; the refusal is printed by the panel, and no transport
+    // window appears.
+    ToolbarClick(ctx, "###tb_job_simulate");
     ctx->Yield(2);
     IM_CHECK(!s_App->camPlaybackOpen);
     IM_CHECK(!s_App->camPlaybackRefusal.empty());
+    {
+      ImGuiWindow* t =
+          ImGui::FindWindowByName("Simulate the cut###CamTransport");
+      IM_CHECK(t == nullptr || !t->WasActive);
+    }
 
+    ctx->SetRef("//CAM###CamPanel");
     ctx->ItemClick("###cam_add_op");
     ctx->Yield(2);
     ctx->ItemClick("###cam_generate");
     ctx->Yield(2);
     IM_CHECK(!s_App->camToolpaths.empty());
 
-    ctx->ItemClick("###cam_sim_start");
-    ctx->Yield(2);
+    ToolbarClick(ctx, "###tb_job_simulate");
+    ctx->Yield(3);
     IM_CHECK(s_App->camPlaybackOpen);
     IM_CHECK(!s_App->camTimeline.Empty());
+    // The transport is a FLOATING window over the viewport, inside it, along
+    // the bottom — not a section of the panel (2026-09-02).
+    {
+      ImGuiWindow* t =
+          ImGui::FindWindowByName("Simulate the cut###CamTransport");
+      IM_CHECK(t != nullptr && t->WasActive);
+      IM_CHECK(t->Pos.x >= s_App->viewportPos.x);
+      IM_CHECK(t->Pos.x + t->Size.x <=
+               s_App->viewportPos.x + s_App->viewportSize.x + 1.0f);
+      IM_CHECK(t->Pos.y + t->Size.y <=
+               s_App->viewportPos.y + s_App->viewportSize.y + 1.0f);
+      IM_CHECK(t->Pos.y > s_App->viewportPos.y + s_App->viewportSize.y * 0.5f);
+    }
+    ctx->SetRef("//Simulate the cut###CamTransport");
     // Nothing is cut at the start, and the whole program cuts something.
     IM_CHECK(s_App->camStockSim.RemovedVolume() < 1e-9);
     ui::SeekCamPlayback(*s_App, s_App->camTimeline.End());
@@ -1692,6 +1714,48 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(live->operations.size(), (size_t)2);
     IM_CHECK_EQ(live->operations[1].toolNumber, 2);
     ctx->ItemClick("//Face the top###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+  };
+
+  // The backplot is DRAWN on a job tab. Every CAM contributor in UI.cpp was
+  // gated on `state.document`, which a job tab does not have, so the one
+  // kind of tab CAM is drawn on since v73 drew no backplot, no stock box and
+  // no ghost — and every test kept passing, because they call the
+  // contributors directly and never asked the renderer what it was handed.
+  t = IM_REGISTER_TEST(engine, "cam",
+                       "backplot_reaches_the_renderer_on_a_job_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    IM_CHECK(s_App->document == nullptr); // a job tab: no part document
+    IM_CHECK(s_App->sketchRenderer != nullptr);
+    ctx->Yield(2);
+    const size_t before = s_App->sketchRenderer->PrimitiveCount();
+
+    ToolbarClick(ctx, "###tb_job_whole");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camShowToolpath);
+    // What the renderer HOLDS grew by the backplot, not just what the
+    // contributor would produce if asked.
+    std::vector<PrimVertex> backplot;
+    ui::AppendCamToolpathOverlay(*s_App, backplot);
+    IM_CHECK(!backplot.empty());
+    IM_CHECK(s_App->sketchRenderer->PrimitiveCount() >=
+             before + backplot.size());
+
+    // ...and hiding the path takes it back out.
+    s_App->camShowToolpath = false;
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchRenderer->PrimitiveCount() <
+             before + backplot.size());
+    s_App->camShowToolpath = true;
+    ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
   };
 
