@@ -44,6 +44,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
+#include "core/io/GitVault.h"
 #include "core/parts/FastenerTable.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -56,14 +57,17 @@
 #include "ui/FileDialogs.h"
 #include "ui/JobActions.h"
 #include "ui/Overlays.h"
+#include "ui/SyncJob.h"
 #include "ui/TerminalPanel.h"
 
 #include <glm/gtc/quaternion.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <thread>
+#include <unistd.h>
 
 using Catch::Matchers::WithinAbs;
 
@@ -1855,6 +1859,38 @@ TEST_CASE("a background job is reaped by the loop, listed, and cancelled",
   ui::JoinBackgroundJobs(state, "slow");
   CHECK(late == 1);
   CHECK(state.backgroundJobs.empty());
+}
+
+TEST_CASE("a fetch runs on the registry and reports through the loop",
+          "[actions][jobs]") {
+  // A3 phase 2: the sync job (fetch/push/clone) has no poll of its own any
+  // more — it is a "sync" entry the loop reaps like any other. A repository
+  // with no remote makes the fetch fail fast, which is enough to see the
+  // whole path: started, listed, reaped, and its verdict applied.
+  ui::AppState state = MakeHeadlessState();
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      ("designer-sync-" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  REQUIRE(GitVault::Init(dir.string()));
+  state.projectPath = dir.string();
+
+  REQUIRE(ui::StartFetch(state, "origin", false));
+  CHECK(ui::SyncRunning(state));
+  CHECK(ui::BackgroundJobRunning(state, "sync"));
+  CHECK_FALSE(ui::StartFetch(state, "origin", false)); // one at a time
+  {
+    const std::vector<ui::BackgroundJobInfo> jobs =
+        ui::ListBackgroundJobs(state);
+    REQUIRE(jobs.size() == 1);
+    CHECK(jobs[0].kind == "sync");
+    CHECK(jobs[0].label == "Fetching origin");
+  }
+  PumpUntil(state, [&] { return !ui::SyncRunning(state); });
+  CHECK_FALSE(ui::SyncRunning(state));
+  CHECK(state.syncFailed); // there is no origin
+  CHECK_FALSE(state.syncMessage.empty());
+  std::filesystem::remove_all(dir);
 }
 
 #ifdef HAVE_CAM

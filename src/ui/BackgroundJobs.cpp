@@ -5,7 +5,6 @@
 #include "ui/AppState.h"
 #include "ui/ImportJob.h"
 #include "ui/SimulationActions.h"
-#include "ui/SyncJob.h"
 
 #include <algorithm>
 #include <chrono>
@@ -26,8 +25,8 @@ void PollBackgroundJobs(AppState& state) {
   // frame so the progress modal keeps painting.
   PollImport(state);
 
-  // A git fetch/push/clone. Was polled from a collapsed-able TreeNode.
-  PollSync(state);
+  // (A git fetch/push/clone is a "sync" entry in the registry below — A3
+  // phase 2 — and was the one polled from a collapsible TreeNode.)
 
   // The FEM jobs need a document; an assembly tab has none. Guarding here
   // rather than inside each is deliberate: `PollTopologyRun` takes a

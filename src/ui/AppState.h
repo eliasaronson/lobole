@@ -22,7 +22,6 @@
 #include "render/FrameTimer.h"
 #include "ui/BackgroundJob.h"
 #include "ui/ImportJob.h"
-#include "ui/SyncJob.h"
 #include "ui/TopoJob.h"
 #include "ui/ViewportHandle.h"
 
@@ -1307,9 +1306,8 @@ struct AppState {
   // Start/Poll/Cancel TopologyRun helpers.
   std::unique_ptr<TopoJob> topoJob;
 
-  // A running fetch/push/clone (F9 C2). One at a time; PollSync joins it and
-  // applies the result on the main thread.
-  std::unique_ptr<SyncJob> syncJob;
+  // A running fetch/push/clone (F9 C2) is a "sync" entry in
+  // `backgroundJobs` (ui/SyncJob.h) since A3 phase 2.
   // A background STEP import (ui/ImportJob.h) and the message left by the
   // last failed one. Non-null = the progress modal is up and File > Import
   // refuses a second one.

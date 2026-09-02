@@ -3,99 +3,117 @@
 #include "common/Logger.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/HistoryPanel.h"
 
+#include <memory>
+#include <thread>
 #include <utility>
 
 namespace ui {
 
 namespace {
 
+constexpr const char* kKind = "sync";
+
 // The worker. Touches nothing but its own job and `.git/`.
-void Run(SyncJob* job) {
-  switch (job->kind) {
+void Run(SyncJob& job) {
+  switch (job.kind) {
   case SyncJob::Kind::Fetch:
-    job->ok = GitVault::Fetch(job->dir, job->remote, &job->error);
+    job.ok = GitVault::Fetch(job.dir, job.remote, &job.error);
     break;
   case SyncJob::Kind::Push:
-    job->push = GitVault::Push(job->dir, job->remote, job->branch,
-                               job->setUpstream, &job->error);
-    job->ok = job->push == GitVault::PushResult::Pushed ||
-              job->push == GitVault::PushResult::UpToDate;
+    job.push = GitVault::Push(job.dir, job.remote, job.branch, job.setUpstream,
+                              &job.error);
+    job.ok = job.push == GitVault::PushResult::Pushed ||
+             job.push == GitVault::PushResult::UpToDate;
     break;
   case SyncJob::Kind::Clone:
-    job->ok = GitVault::Clone(job->url, job->dir, &job->error);
+    job.ok = GitVault::Clone(job.url, job.dir, &job.error);
     break;
   }
-  // Last, and with release ordering: everything above must be visible to the
-  // main thread before it sees this.
-  job->done.store(true, std::memory_order_release);
 }
 
-bool Start(AppState& state, std::unique_ptr<SyncJob> job) {
-  if (state.syncJob)
+// What the join used to do: the result, applied on the main thread.
+void Apply(AppState& state, const SyncJob& job);
+
+bool Start(AppState& state, SyncJob sync, const std::string& label) {
+  if (BackgroundJobRunning(state, kKind))
     return false; // one at a time
   state.syncMessage.clear();
   state.syncFailed = false;
-  SyncJob* raw = job.get();
-  state.syncJob = std::move(job);
-  raw->worker = std::thread(Run, raw);
+  auto shared = std::make_shared<SyncJob>(std::move(sync));
+  auto job = std::make_unique<BackgroundJob>();
+  job->kind = kKind;
+  job->label = label;
+  job->cancellable = false; // git has no interruption points from here
+  BackgroundJob* raw = job.get();
+  job->thread = std::thread([shared, raw] {
+    Run(*shared);
+    // Last: everything Run wrote must be visible to the main thread before
+    // it sees this (BackgroundJob::done is seq_cst).
+    raw->done.store(true);
+  });
+  job->finish = [shared](AppState& s) {
+    Apply(s, *shared);
+    return true;
+  };
+  StartBackgroundJob(state, std::move(job));
   return true;
 }
 
 } // namespace
 
-bool SyncRunning(const AppState& state) { return state.syncJob != nullptr; }
+bool SyncRunning(const AppState& state) {
+  return BackgroundJobRunning(state, kKind);
+}
 
 bool StartFetch(AppState& state, const std::string& remote, bool mergeAfter) {
   if (state.projectPath.empty())
     return false;
-  auto job = std::make_unique<SyncJob>();
-  job->kind = SyncJob::Kind::Fetch;
-  job->dir = state.projectPath;
-  job->remote = remote;
-  job->mergeAfter = mergeAfter;
-  return Start(state, std::move(job));
+  SyncJob job;
+  job.kind = SyncJob::Kind::Fetch;
+  job.dir = state.projectPath;
+  job.remote = remote;
+  job.mergeAfter = mergeAfter;
+  return Start(state, std::move(job),
+               (mergeAfter ? "Pulling from " : "Fetching ") + remote);
 }
 
 bool StartPush(AppState& state, const std::string& remote) {
   if (state.projectPath.empty())
     return false;
-  auto job = std::make_unique<SyncJob>();
-  job->kind = SyncJob::Kind::Push;
-  job->dir = state.projectPath;
-  job->remote = remote;
-  job->branch = GitVault::CurrentBranch(state.projectPath);
+  SyncJob job;
+  job.kind = SyncJob::Kind::Push;
+  job.dir = state.projectPath;
+  job.remote = remote;
+  job.branch = GitVault::CurrentBranch(state.projectPath);
   // Only the first push of a branch needs to say where it belongs.
-  job->setUpstream = GitVault::Upstream(state.projectPath).empty();
-  return Start(state, std::move(job));
+  job.setUpstream = GitVault::Upstream(state.projectPath).empty();
+  return Start(state, std::move(job), "Sending to " + remote);
 }
 
 bool StartClone(AppState& state, const std::string& url,
                 const std::string& dir) {
-  auto job = std::make_unique<SyncJob>();
-  job->kind = SyncJob::Kind::Clone;
-  job->url = url;
-  job->dir = dir;
-  return Start(state, std::move(job));
+  SyncJob job;
+  job.kind = SyncJob::Kind::Clone;
+  job.url = url;
+  job.dir = dir;
+  return Start(state, std::move(job), "Cloning " + url);
 }
 
-void PollSync(AppState& state) {
-  if (!state.syncJob || !state.syncJob->done.load(std::memory_order_acquire))
-    return;
-  // Join before reading anything the worker wrote — the atomic's release/
-  // acquire pair orders the fields, and the join makes the thread's exit
-  // ordered too. SyncJob itself cannot be copied out (an atomic and a thread
-  // are neither copyable nor movable), so take what is needed and drop it.
-  state.syncJob->worker.join();
-  const SyncJob::Kind kind = state.syncJob->kind;
-  const std::string dir = state.syncJob->dir;
-  const bool mergeAfter = state.syncJob->mergeAfter;
-  const bool ok = state.syncJob->ok;
-  const std::string jobError = state.syncJob->error;
-  const GitVault::PushResult pushResult = state.syncJob->push;
-  state.syncJob.reset();
+namespace {
+void Apply(AppState& state, const SyncJob& job) {
+  // On the main thread, after the registry joined the worker: every field
+  // the worker wrote is ordered before `done`, and the join orders the
+  // thread's exit too.
+  const SyncJob::Kind kind = job.kind;
+  const std::string dir = job.dir;
+  const bool mergeAfter = job.mergeAfter;
+  const bool ok = job.ok;
+  const std::string jobError = job.error;
+  const GitVault::PushResult pushResult = job.push;
 
   state.syncFailed = !ok;
   if (!ok) {
@@ -157,5 +175,6 @@ void PollSync(AppState& state) {
   }
   state.remotesStamp = -1.0;
 }
+} // namespace
 
 } // namespace ui
