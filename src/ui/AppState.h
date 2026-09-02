@@ -956,6 +956,7 @@ struct AppState {
     uint64_t jobPartId = 0;
     glm::dvec2 startPlace{0.0, 0.0};
     double startRotZ = 0.0;
+    glm::vec3 startBoxMin{0}, startBoxMax{0}; // the part as drawn at grab
   };
 
   // Direct-manipulation handle on the pending preview feature (docs/ui/

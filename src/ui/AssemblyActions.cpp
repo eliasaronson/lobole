@@ -1,4 +1,7 @@
 #include "ui/AssemblyActions.h"
+
+#include "core/cam/CamToolpath.h" // StockBounds (the placement snap)
+#include "imgui.h" // KeyCtrl: the placement drag snaps unless Ctrl says free
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h" // ActiveCamSetup, RefreshCamToolpaths (the placement gizmo)
 #include "ui/CamTool.h"    // RunCamVerification
@@ -1144,15 +1147,62 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
       return true;
     }
     const glm::vec3 A = g.frameAxis[g.axis];
+    // Snapping, unless Ctrl says free: a part's edge to the sheet's edges
+    // and to the other parts' -- which is how parts are butted together on
+    // a board -- and a spin to the multiples of 45 degrees. The threshold
+    // scales with the gizmo, so it is the same on screen at any zoom.
+    const bool snap = !ImGui::GetIO().KeyCtrl;
     if (!g.rotate) {
       const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
-      const double d = static_cast<double>(t - g.startParam);
+      double d = static_cast<double>(t - g.startParam);
+      if (snap) {
+        // On screen, a fraction of the gizmo; on the board, never less than
+        // one percent of the sheet's longer side -- zoomed right in, a
+        // gizmo-only window shrinks to nothing and the edge is missed.
+        double threshold = 0.15 * GizmoScale(state);
+        const int ax = g.axis; // 0 = X, 1 = Y
+        const double lo = g.startBoxMin[ax] + d, hi = g.startBoxMax[ax] + d;
+        std::vector<double> lines;
+        const cam::Setup* setup = ActiveCamSetup(state);
+        glm::dvec3 slo(0.0), shi(0.0);
+        if (setup != nullptr && setup->stock.mode == cam::StockMode::Fixed &&
+            cam::StockBounds(*setup, JobBodies(state), slo, shi)) {
+          lines.push_back(slo[ax]);
+          lines.push_back(shi[ax]);
+          lines.push_back((slo[ax] + shi[ax]) * 0.5); // the sheet's centre
+          threshold = std::max(threshold,
+                               0.01 * std::max(shi.x - slo.x, shi.y - slo.y));
+        }
+        for (const Body& b : JobPlacedBodies(state)) {
+          if (b.jobPartId == g.jobPartId)
+            continue;
+          glm::vec3 bmin, bmax;
+          b.shape.GetBoundingBox(bmin, bmax);
+          lines.push_back(bmin[ax]);
+          lines.push_back(bmax[ax]);
+        }
+        double best = threshold, shift = 0.0;
+        for (const double line : lines)
+          for (const double edge : {lo, hi})
+            if (std::abs(line - edge) < best) {
+              best = std::abs(line - edge);
+              shift = line - edge;
+            }
+        d += shift;
+      }
       place->pos = g.startPlace + glm::dvec2(A.x * d, A.y * d);
     } else {
       float ang;
-      if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
-        place->rotZdeg =
+      if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
+        double deg =
             g.startRotZ + glm::degrees(static_cast<double>(ang - g.startParam));
+        if (snap) {
+          const double nearest = std::round(deg / 45.0) * 45.0;
+          if (std::abs(deg - nearest) < 5.0)
+            deg = nearest;
+        }
+        place->rotZdeg = deg;
+      }
     }
     // The placed bodies are rebuilt from the placement on the next frame:
     // JobRenderVersion keys on it.
@@ -1190,6 +1240,16 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
   g.jobPartId = part;
   g.startPlace = place->pos;
   g.startRotZ = place->rotZdeg;
+  g.startBoxMin = glm::vec3(FLT_MAX);
+  g.startBoxMax = glm::vec3(-FLT_MAX);
+  for (const Body& b : JobPlacedBodies(state)) {
+    if (b.jobPartId != part)
+      continue;
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    g.startBoxMin = glm::min(g.startBoxMin, bmin);
+    g.startBoxMax = glm::max(g.startBoxMax, bmax);
+  }
   const glm::vec3 A = spec.axis[axis];
   if (!rotate) {
     g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);

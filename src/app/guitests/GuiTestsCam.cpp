@@ -1953,7 +1953,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!std::filesystem::exists(dir / "machine-1.json"));
 
     // An edit rewrites it: typed, so the field's expression path is what is
-    // tested, and read back from DISK rather than from the struct.
+    // tested, and read back from DISK rather than from the struct. ONE axis
+    // of the work area first: the file used to drop the whole area until
+    // all three were stated, so the X just typed snapped back to zero.
+    ctx->ItemInputValue("###mach_wa_x", "600");
+    ctx->Yield(3);
     ctx->ItemInputValue("###mach_rapid", "3000");
     ctx->Yield(3);
     ctx->ItemClick("###mach_rotary");
@@ -1963,6 +1967,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(saved != nullptr);
     IM_CHECK(std::abs(saved->rapidFeed - 3000.0) < 1e-9);
     IM_CHECK(saved->hasRotaryAxis);
+    IM_CHECK(std::abs(saved->travelMax.x - 600.0) < 1e-9);
+    IM_CHECK(!saved->HasWorkArea()); // Y and Z still unstated, and kept so
 
     ctx->ItemClick("###mach_delete");
     ctx->Yield(2);
@@ -2101,7 +2107,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ctx->ItemExists("**/###tb_cam")); // gone from the part bar
 
     ctx->ItemClick("//##PartTabs/+##addmenu");
-    ctx->ItemClick("//$FOCUSED/New Job##addjob");
+    ctx->ItemClick("//$FOCUSED/New CAM Job##addjob");
     ctx->Yield(4);
     IM_CHECK(s_App->job != nullptr);
     IM_CHECK(s_App->document == nullptr);
@@ -2295,6 +2301,57 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->viewportHandles.clear();
     ui::BuildGizmoOverlay(*s_App, lines);
     IM_CHECK(std::abs(s_App->viewportHandles[0].origin.x - 55.0f) < 0.5f);
+
+    // SNAPPING: on a fixed 200 x 100 sheet, a drag that leaves the part's
+    // far edge a hair short of the sheet's edge lands it exactly there.
+    {
+      cam::Setup* s = Job()->FindSetup(setup.id);
+      s->stock.mode = cam::StockMode::Fixed;
+      s->stock.size = {200.0, 100.0, 12.0};
+      s->placements[0].pos = {0.0, 0.0};
+      s_App->job->BumpVersion();
+    }
+    ctx->Yield(2);
+    lines.clear();
+    s_App->viewportHandles.clear();
+    ui::BuildGizmoOverlay(*s_App, lines);
+    const glm::vec3 o2 = s_App->viewportHandles[0].origin;
+    Ray grab2;
+    grab2.origin = o2 + glm::vec3(0.5f * L, 0.0f, 100.0f);
+    grab2.direction = {0.0f, 0.0f, -1.0f};
+    IM_CHECK(ui::HandleGizmoInput(*s_App, grab2, true, true, false));
+    Ray near = grab2;
+    near.origin.x += 139.0f; // the part's far edge would sit at 199, 1 short
+    IM_CHECK(ui::HandleGizmoInput(*s_App, near, false, true, false));
+    ctx->LogInfo("gizmo scale %.2f, snapped x %.3f", L,
+                 Job()->FindSetup(setup.id)->placements[0].pos.x);
+    IM_CHECK(std::abs(Job()->FindSetup(setup.id)->placements[0].pos.x - 140.0) <
+             1e-3); // snapped: far edge ON the sheet's edge at 200
+    IM_CHECK(ui::HandleGizmoInput(*s_App, near, false, false, true));
+    ctx->Yield(2);
+
+    // ...and a spin to the common angles: 88 degrees becomes 90.
+    lines.clear();
+    s_App->viewportHandles.clear();
+    ui::BuildGizmoOverlay(*s_App, lines);
+    const glm::vec3 o3 = s_App->viewportHandles[0].origin;
+    // Grabbed BETWEEN the arrows (135 degrees): on the +X axis the arc and
+    // the X arrow coincide, and the arrow wins the tie.
+    const float R = 0.78f * L;
+    const float a0 = glm::radians(135.0f), a1 = glm::radians(135.0f + 88.0f);
+    Ray arc;
+    arc.origin = o3 + glm::vec3(R * std::cos(a0), R * std::sin(a0), 100.0f);
+    arc.direction = {0.0f, 0.0f, -1.0f};
+    IM_CHECK(ui::HandleGizmoInput(*s_App, arc, true, true, false));
+    IM_CHECK(s_App->gizmoDrag.rotate);
+    Ray turned = arc;
+    turned.origin = o3 + glm::vec3(R * std::cos(a1), R * std::sin(a1), 100.0f);
+    IM_CHECK(ui::HandleGizmoInput(*s_App, turned, false, true, false));
+    IM_CHECK(
+        std::abs(std::abs(Job()->FindSetup(setup.id)->placements[0].rotZdeg) -
+                 90.0) < 1e-6);
+    IM_CHECK(ui::HandleGizmoInput(*s_App, turned, false, false, true));
+    ctx->Yield(2);
     s_App->selection.Clear();
   };
 

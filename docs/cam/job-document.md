@@ -751,3 +751,11 @@ motion, on purpose.
 
 **Round two is complete.** ~5 sessions estimated, one day spent.
 
+**Later the same day.** The placement drag SNAPS: the part's edge to the
+sheet's edges and centre and to the other parts' edges (how parts are
+butted together on a board), the spin to multiples of 45°; Ctrl drags free.
+And the Preferences work area is three fields named X, Y, Z instead of two
+rows of unlabelled travel min/max — and a partially typed one survives,
+because the file used to omit the area until all three axes were stated
+and the editor writes the file after every edit.
+

@@ -305,24 +305,22 @@ void DrawMachinesSection(AppState& state) {
   }
 
   bool edited = false;
-  float lo[3] = {static_cast<float>(m.travelMin.x),
-                 static_cast<float>(m.travelMin.y),
-                 static_cast<float>(m.travelMin.z)};
-  float hi[3] = {static_cast<float>(m.travelMax.x),
-                 static_cast<float>(m.travelMax.y),
-                 static_cast<float>(m.travelMax.z)};
-  ImGui::SetNextItemWidth(ControlWidth());
-  if (ExprDragFloat3(state, "Travel min (mm)###mach_travel_min", lo, 1.0f)) {
-    m.travelMin = {lo[0], lo[1], lo[2]};
-    edited = true;
+  // The work area as a SIZE per axis, each field named. It was two rows of
+  // three unlabelled boxes (travel min / travel max), which read as six
+  // numbers with no axis on them; a hobby machine is known by its bed --
+  // "600 by 400, 80 of Z" -- and that is what is asked. Min stays where the
+  // file put it (zero unless a file said otherwise), max = min + size.
+  ImGui::TextDisabled("Work area (mm) — leave at zero to check nothing");
+  static const char* const kAxis[3] = {"X###mach_wa_x", "Y###mach_wa_y",
+                                       "Z###mach_wa_z"};
+  for (int a = 0; a < 3; a++) {
+    float size = static_cast<float>(m.travelMax[a] - m.travelMin[a]);
+    ImGui::SetNextItemWidth(ControlWidth() * 0.5f);
+    if (ExprDragFloat(state, kAxis[a], &size, 1.0f, 0.0f, 100000.0f, "%.0f")) {
+      m.travelMax[a] = m.travelMin[a] + size;
+      edited = true;
+    }
   }
-  ImGui::SetNextItemWidth(ControlWidth());
-  if (ExprDragFloat3(state, "Travel max (mm)###mach_travel_max", hi, 1.0f)) {
-    m.travelMax = {hi[0], hi[1], hi[2]};
-    edited = true;
-  }
-  ImGui::SetItemTooltip("The work area, in machine coordinates. Leave it at "
-                        "zero and nothing is checked against it.");
   ImGui::SetNextItemWidth(ControlWidth());
   if (ImGui::BeginCombo("Post###mach_post", m.post.c_str())) {
     for (const std::string& id : cam::PostIds())

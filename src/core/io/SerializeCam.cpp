@@ -192,7 +192,11 @@ json MachineToJson(const cam::Machine& m) {
   j["post"] = m.post;
   // Written only when stated / not the default, so a job on the job's own
   // default machine carries a small block.
-  if (m.HasWorkArea())
+  // Written whenever ANY axis is stated, not only once all three are: the
+  // Preferences editor writes the file after every edit, so gating on a
+  // complete work area threw away the X a user had just typed while Y and Z
+  // were still zero -- the field snapped back to 0.000 on Enter.
+  if (m.travelMax != m.travelMin)
     j["travel"] = {{"min", {m.travelMin.x, m.travelMin.y, m.travelMin.z}},
                    {"max", {m.travelMax.x, m.travelMax.y, m.travelMax.z}}};
   if (!m.fitArcs)
