@@ -285,10 +285,12 @@ void ConsumeMeasure(AppState& state, const Candidate& c) {
     e.kind = MeasureState::Element::Kind::Edge;
     e.ref = c.item.element;
     e.occurrenceId = c.item.id;
+    e.jobPartId = c.item.jobPartId;
     break;
   case SelectionItem::Kind::Body:
     e.kind = MeasureState::Element::Kind::Body;
     e.ref = ElementRef{c.item.id, ""};
+    e.jobPartId = c.item.jobPartId;
     break;
   case SelectionItem::Kind::Occurrence:
     e.kind = MeasureState::Element::Kind::Occurrence;
@@ -306,6 +308,7 @@ void ConsumeMeasure(AppState& state, const Candidate& c) {
     e.kind = MeasureState::Element::Kind::Face;
     e.ref = c.item.element;
     e.occurrenceId = c.item.id;
+    e.jobPartId = c.item.jobPartId;
     break;
   }
   MeasureElementClicked(state, e);

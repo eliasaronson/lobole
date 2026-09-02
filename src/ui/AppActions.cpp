@@ -5011,9 +5011,14 @@ std::optional<MeasureSource> ResolveOccurrenceBodies(AppState& state,
 std::optional<MeasureSource>
 ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
   if (e.occurrenceId == 0) {
-    if (!state.document)
-      return std::nullopt;
-    return MeasureSource{&state.document->GetBodies(), glm::mat4(1.0f), ""};
+    if (state.document)
+      return MeasureSource{&state.document->GetBodies(), glm::mat4(1.0f), ""};
+    // A JOB tab: its parts, laid out -- which is what the viewport draws, so
+    // no transform. The tool was greyed out here for want of this branch,
+    // while the pick pipeline underneath it already knew the job's bodies.
+    if (state.job)
+      return MeasureSource{&JobPlacedBodies(state), glm::mat4(1.0f), ""};
+    return std::nullopt;
   }
   if (!state.assembly)
     return std::nullopt;
@@ -5073,6 +5078,22 @@ Resolved ResolveTargetFor(AppState& state, const MeasureState::Element& e) {
     return r;
   r.target.bodies = src->bodies;
   r.target.xf = src->xf;
+  r.prefix = src->prefix;
+  // A job pick is measured against ITS part's bodies only, the way an
+  // occurrence pick is: the ref names a face on every part that happens to
+  // share the feature id and the name (v76), and the first to answer is
+  // not necessarily the one that was clicked.
+  if (state.job && e.occurrenceId == 0 && e.jobPartId != 0) {
+    for (const Body& b : *src->bodies)
+      if (b.jobPartId == e.jobPartId)
+        r.owned.push_back(b);
+    if (r.owned.empty())
+      return r;
+    r.target.bodies = &r.owned;
+    if (state.job->PartCount() > 1)
+      if (const cam::JobPart* part = state.job->FindPart(e.jobPartId))
+        r.prefix = part->name + ": ";
+  }
   // A BODY pick filters the set to the one body that feature created; a
   // face/edge names the element.
   r.target.ref = e.kind == MeasureState::Element::Kind::Body
@@ -5094,6 +5115,11 @@ std::string WholeName(AppState& state, const MeasureState::Element& e) {
   if (state.document)
     for (const Body& b : state.document->GetBodies())
       if (b.createdBy == e.ref.featureId && !b.name.empty())
+        return b.name;
+  if (state.job)
+    for (const Body& b : JobPlacedBodies(state))
+      if (b.createdBy == e.ref.featureId && !b.name.empty() &&
+          (e.jobPartId == 0 || b.jobPartId == e.jobPartId))
         return b.name;
   return "body";
 }
@@ -5395,19 +5421,24 @@ MeasureOut MeasurePair(AppState& state, const MeasureState::Element& ea,
 // extrema call sixty times a second for a cursor that has not moved is pure
 // waste; recomputing it when the model changes under a still cursor is
 // required.
-std::string HoverCacheKey(const AppState& state) {
+std::string HoverCacheKey(AppState& state) {
   const MeasureState& m = state.measure;
   std::string key = std::to_string(m.hover.element.ref.featureId) + "/" +
                     m.hover.element.ref.name + "#" +
-                    std::to_string(m.hover.element.occurrenceId);
+                    std::to_string(m.hover.element.occurrenceId) + "/" +
+                    std::to_string(m.hover.element.jobPartId);
   if (!m.picked.empty()) {
     key += "|" + std::to_string(m.picked[0].ref.featureId) + "/" +
            m.picked[0].ref.name + "#" +
-           std::to_string(m.picked[0].occurrenceId);
+           std::to_string(m.picked[0].occurrenceId) + "/" +
+           std::to_string(m.picked[0].jobPartId);
   }
   key += "@" + std::to_string(m.picked.size()) + "@" +
          std::to_string(state.document ? state.document->Version() : 0) + "@" +
-         std::to_string(state.assembly ? state.assembly->Version() : 0);
+         std::to_string(state.assembly ? state.assembly->Version() : 0) + "@" +
+         // A job's geometry moves when any part does AND when a part is
+         // re-clamped or re-placed; JobRenderVersion keys on all of it.
+         std::to_string(state.job ? JobRenderVersion(state) : 0);
   return key;
 }
 } // namespace
@@ -5416,7 +5447,7 @@ void UpdateMeasureReadout(AppState& state) {
   auto& m = state.measure;
   m.hasDistanceLine = false;
   m.dimension = MeasureState::Dimension{};
-  if ((!state.document && !state.assembly) || m.picked.empty()) {
+  if ((!state.document && !state.assembly && !state.job) || m.picked.empty()) {
     m.readout.clear();
     return;
   }
@@ -5478,7 +5509,7 @@ void UpdateMeasureReadout(AppState& state) {
 void UpdateMeasureHover(AppState& state) {
   auto& h = state.measure.hover;
   if (!state.measure.active || !h.has || state.measure.picked.size() >= 2 ||
-      (!state.document && !state.assembly)) {
+      (!state.document && !state.assembly && !state.job)) {
     h.readout.clear();
     h.dimension = MeasureState::Dimension{};
     h.cacheKey.clear();
@@ -5489,7 +5520,8 @@ void UpdateMeasureHover(AppState& state) {
   for (const MeasureState::Element& p : state.measure.picked) {
     if (p.ref.featureId == h.element.ref.featureId &&
         p.ref.name == h.element.ref.name &&
-        p.occurrenceId == h.element.occurrenceId) {
+        p.occurrenceId == h.element.occurrenceId &&
+        p.jobPartId == h.element.jobPartId) {
       h.readout.clear();
       h.dimension = MeasureState::Dimension{};
       h.cacheKey.clear();
@@ -5756,7 +5788,8 @@ void RefreshPinnedMeasurements(AppState& state) {
 }
 
 void MeasureElementClicked(AppState& state, const MeasureState::Element& e) {
-  if (!state.measure.active || (!state.document && !state.assembly))
+  if (!state.measure.active ||
+      (!state.document && !state.assembly && !state.job))
     return;
   auto& picked = state.measure.picked;
   const auto it = std::find(picked.begin(), picked.end(), e);

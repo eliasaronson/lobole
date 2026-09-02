@@ -419,7 +419,8 @@ const std::vector<Command>& Table() {
     add(
         "view.measure",
         [](AppState& s) {
-          return HasBody(s) || (s.assembly && s.assembly->OccurrenceCount());
+          return HasBody(s) || HasJob(s) ||
+                 (s.assembly && s.assembly->OccurrenceCount());
         },
         ToggleMeasure);
     add("view.section", nullptr, ToggleSection);

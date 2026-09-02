@@ -1851,6 +1851,57 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
              1e-6);
   };
 
+  // Measure works on a job tab. The button was greyed out there: the gate
+  // asked for a part or an assembly, and the element resolution knew only
+  // those two sources — while the pick pipeline under it already knew the
+  // job's bodies. A job pick is measured against ITS part's bodies, the way
+  // an occurrence pick is, because two parts in one job share element names.
+  t = IM_REGISTER_TEST(engine, "cam", "measure_works_on_a_job_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    MakeJob();
+    ctx->Yield(2);
+    IM_CHECK(s_App->document == nullptr);
+    IM_CHECK(ui::CommandEnabled(*s_App, "view.measure"));
+    ToolbarClick(ctx, "###tb_job_measure");
+    ctx->Yield(2);
+    IM_CHECK(s_App->measure.active);
+
+    // The two X faces, 60 mm apart.
+    const Body& body = ui::JobBodies(*s_App)[0];
+    std::string px, nx;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (!body.shape.FacePlane(index, o, n, u))
+        continue;
+      if (n.x > 0.99f)
+        px = name;
+      else if (n.x < -0.99f)
+        nx = name;
+    }
+    IM_CHECK(!px.empty() && !nx.empty());
+    ui::MeasureState::Element a =
+        ui::MeasureState::Element::OfFace(ElementRef{body.createdBy, px});
+    ui::MeasureState::Element b =
+        ui::MeasureState::Element::OfFace(ElementRef{body.createdBy, nx});
+    a.jobPartId = b.jobPartId = body.jobPartId;
+    IM_CHECK(a.jobPartId != 0);
+    ui::MeasureElementClicked(*s_App, a);
+    ctx->Yield();
+    ctx->LogInfo("one face: %s", s_App->measure.readout.c_str());
+    IM_CHECK(!s_App->measure.readout.empty());
+    IM_CHECK(s_App->measure.readout.find("Could not") == std::string::npos);
+    ui::MeasureElementClicked(*s_App, b);
+    ctx->Yield();
+    ctx->LogInfo("two faces: %s", s_App->measure.readout.c_str());
+    IM_CHECK(s_App->measure.readout.rfind("Distance:", 0) == 0);
+    IM_CHECK(s_App->measure.readout.find("60") != std::string::npos);
+    s_App->measure = ui::MeasureState{};
+  };
+
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
   // right when on, and — the part that decides whether it feels safe — the
   // keyboard goes to it ONLY while the pointer is over it.

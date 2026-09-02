@@ -391,6 +391,11 @@ struct MeasureState {
     // context). Part of the element's identity — the same face on two
     // occurrences of one part is two distinct measurables.
     uint64_t occurrenceId = 0;
+    // Job tabs: the job part the element was picked on (0 = not a job pick).
+    // Two parts in one job routinely share BOTH halves of an ElementRef --
+    // two boxes both have feature 1 and a "1/face5" -- so the ref alone
+    // names two faces there, exactly as it does on two occurrences.
+    uint64_t jobPartId = 0;
 
     bool IsEdge() const { return kind == Kind::Edge; }
     bool IsCorner() const { return kind == Kind::Corner; }
@@ -401,7 +406,7 @@ struct MeasureState {
     bool operator==(const Element& o) const {
       return kind == o.kind && ref.featureId == o.ref.featureId &&
              ref.name == o.ref.name && ref2.name == o.ref2.name &&
-             occurrenceId == o.occurrenceId;
+             occurrenceId == o.occurrenceId && jobPartId == o.jobPartId;
     }
 
     // Named constructors, because the four kinds fill different fields and a
