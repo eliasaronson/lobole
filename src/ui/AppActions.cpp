@@ -976,6 +976,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // unrelated part -- the same trap ReleasePartRenderCache exists for.
   state.jobBodies.clear();
   state.jobBodiesKey = 0;
+  state.jobPlacedBodies.clear();
+  state.jobPlacedKey = 0;
   state.solvedPartVersions.clear();
   // Phase V: a wholesale replacement (File > New, Open flat, checkpoint/history
   // restore) collapses the project to this single part, so ITS parameters
@@ -1221,6 +1223,13 @@ size_t AddDrawing(AppState& state, const std::string& name) {
   state.projectMetaDirty = true;
   ResetActiveTabUiState(state);
   return state.parts.size() - 1;
+}
+
+const std::vector<Body>& ViewportBodies(AppState& state) {
+  static const std::vector<Body> kNone;
+  if (state.job)
+    return JobPlacedBodies(state);
+  return state.document ? state.document->GetBodies() : kNone;
 }
 
 size_t AddJob(AppState& state, const std::string& name) {
@@ -3996,13 +4005,8 @@ void SyncDocumentRenderers(AppState& state) {
   // it, in the setup's own frame. That is the picture the whole document
   // kind is for -- parts arranged on a piece of stock -- and it is the same
   // list the toolpath is generated from, so what you see is what is cut.
-  std::vector<Body> jobBodies;
-  if (state.job)
-    jobBodies = JobPlacedBodies(state);
-
   size_t palette = 0;
-  const std::vector<Body>& bodies =
-      state.job ? jobBodies : state.document->GetBodies();
+  const std::vector<Body>& bodies = ViewportBodies(state);
   std::vector<glm::vec3> bodyColors(bodies.size(), glm::vec3(0.7f));
   for (size_t bi = 0; bi < bodies.size(); bi++) {
     const auto& body = bodies[bi];

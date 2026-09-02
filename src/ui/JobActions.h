@@ -50,7 +50,10 @@ const std::vector<Body>& JobBodies(AppState& state);
 // where its placement puts it. This is the "laid out on the stock" picture,
 // and it is the same list the toolpath is generated from -- what you see is
 // what is cut. Returns model-space bodies when no setup exists yet.
-std::vector<Body> JobPlacedBodies(AppState& state);
+// Cached, like JobBodies and for the same reason: the OCC transform per body
+// is not free, and this is read by the render sync, the camera fit and every
+// viewport pick.
+const std::vector<Body>& JobPlacedBodies(AppState& state);
 
 // The active setup of the active job, or null. "Active" means the one the
 // panel is showing; with none chosen it is the first.
@@ -62,10 +65,20 @@ const cam::Setup* ActiveJobSetup(AppState& state);
 uint64_t JobRenderVersion(AppState& state);
 
 // The machining selection for a picked element: the ref, plus which job part
-// it landed on, read off the body it resolves to. Returns jobPartId 0 when
-// nothing in the job owns it -- a target the job cannot machine, which the
-// caller refuses rather than guessing a part for.
-cam::Target TargetFor(AppState& state, const ElementRef& ref);
+// it is on.
+//
+// `partHint` is where the pick actually LANDED — a viewport click knows the
+// body it hit, and an RPC caller can pass the `job_part` list_elements gave
+// it. Without one this searches, and a search is only an answer while the
+// name is unique: two parts in a job can own the same feature id and the same
+// element name (a part machined twice is the easy case), and picking the
+// first match is the wrong bracket, cut for real.
+//
+// Returns jobPartId 0 when nothing in the job owns the ref, or when more than
+// one part does and no hint said which. `why`, when given, receives the
+// reason — callers REFUSE on it rather than machining a guess.
+cam::Target TargetFor(AppState& state, const ElementRef& ref,
+                      uint64_t partHint = 0, std::string* why = nullptr);
 
 // Create a job tab for one part document and make it active. Returns the new
 // tab's index. `name` empty derives one from the part.

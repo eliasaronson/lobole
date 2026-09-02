@@ -4446,3 +4446,58 @@ TEST_CASE("cam job: a per-part frame survives a save and reload",
   CHECK(!cam::FrameIsSquare(read2, p2)); // the setup's frame still applies
   std::filesystem::remove(path);
 }
+
+TEST_CASE("cam job: the same element name on two parts is refused, not guessed",
+          "[cam][job]") {
+  // Found by driving the RPC, not by reading the code: two boxes in two
+  // documents both have feature id 1 and both have a face called "1/face5",
+  // so a target of {feature_id: 1, element: "1/face5"} names TWO faces. The
+  // qualifier exists for this, and resolving it by searching for the first
+  // body that answers threw the qualifier away again — it cut the first
+  // part, silently, whichever one you meant.
+  //
+  // This exercises the resolver's rule directly; ui::TargetFor is where the
+  // app applies it, over both doors.
+  const auto owners = [](const std::vector<Body>& bodies,
+                         const ElementRef& ref) {
+    std::vector<uint64_t> out;
+    for (const Body& b : bodies) {
+      if (b.createdBy != ref.featureId || !b.elementMap.Resolve(ref.name))
+        continue;
+      if (std::find(out.begin(), out.end(), b.jobPartId) == out.end())
+        out.push_back(b.jobPartId);
+    }
+    return out;
+  };
+
+  Document a, b;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+  b.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 60, 50, 10));
+  std::vector<Body> bodies;
+  for (const Body& body : a.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = 1;
+  }
+  for (const Body& body : b.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = 2;
+  }
+  REQUIRE(bodies.size() == 2);
+  // Two independently modelled boxes really do collide on both halves of an
+  // ElementRef. That is the premise, so assert it rather than assume it.
+  CHECK(bodies[0].createdBy == bodies[1].createdBy);
+
+  const std::string name = bodies[0].elementMap.names.begin()->second;
+  const ElementRef shared{bodies[0].createdBy, name};
+  CHECK(owners(bodies, shared).size() == 2); // ambiguous: must be refused
+
+  // A name only one part owns still resolves without help. (Boxes of
+  // different sizes still share face names, so make one unique by hand.)
+  bodies[1].elementMap.names.begin()->second = "unique/face";
+  const ElementRef only{bodies[1].createdBy, "unique/face"};
+  const std::vector<uint64_t> one = owners(bodies, only);
+  REQUIRE(one.size() == 1);
+  CHECK(one[0] == 2);
+}

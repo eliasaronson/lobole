@@ -474,9 +474,12 @@ std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
   const auto it = std::find_if(
       meshes.begin(), meshes.end(),
       [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
-  if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
+  // Whatever the viewport is showing — a job tab has no document, and asking
+  // one there dereferenced null and picked nothing.
+  const std::vector<Body>& bodies = ViewportBodies(state);
+  if (it == meshes.end() || it->bodyIndex >= bodies.size())
     return std::nullopt;
-  const Body& body = state.document->GetBodies()[it->bodyIndex];
+  const Body& body = bodies[it->bodyIndex];
   const std::string* name = body.elementMap.NameOf(static_cast<int>(faceIndex));
   if (name == nullptr)
     return std::nullopt; // face isn't named (only extrude NewBody faces are)

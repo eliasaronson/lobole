@@ -65,6 +65,13 @@ size_t AddPart(AppState& state, const std::string& name);
 size_t AddAssembly(AppState& state, const std::string& name);
 size_t AddDrawing(AppState& state, const std::string& name);
 size_t AddJob(AppState& state, const std::string& name);
+
+// The bodies the VIEWPORT is showing: a part tab's document bodies, or a job
+// tab's parts laid out. Anything that turns a picked mesh back into geometry
+// has to ask this rather than `state.document`, which is null on a job tab —
+// asking the document there returned nothing, so a click on a job selected
+// nothing at all and said nothing about it.
+const std::vector<Body>& ViewportBodies(AppState& state);
 // Appends a copy of the tab at `index` — same kind, same contents, a new
 // stable id and a name nothing else has taken ("Part 1 copy") — and switches
 // to it. Returns the new tab's index, or SIZE_MAX if `index` names no tab.

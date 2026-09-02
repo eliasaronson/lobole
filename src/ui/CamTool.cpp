@@ -220,19 +220,27 @@ cam::Setup* EnsureCamSetup(AppState& state) {
 // Creates the operation a verb implies, or refuses in words. The derivation
 // itself is engine-side (cam::DeriveOperation) so a headless test can reach
 // it — the panel must not be where a depth comes from.
+// `hint` is the job part the click landed on; 0 means "work it out", which is
+// only an answer while the element name is unique across the job.
 bool CreateVerbOperation(AppState& state, cam::OpType type,
-                         const ElementRef& target) {
+                         const ElementRef& target, uint64_t hint = 0) {
   state.camRefusal.clear();
   if (!state.job)
     return false;
   cam::Setup* setup = EnsureCamSetup(state);
   if (setup == nullptr)
     return false;
-  // Which job part the picked face is on, read off the body it resolves to:
-  // two parts in one job can own the same element name (v73).
-  const cam::DerivedOp derived =
-      cam::DeriveOperation(*setup, ui::JobBodies(state), type,
-                           ui::TargetFor(state, target), state.camVerbTool);
+  // Which job part the picked face is on. A target that cannot be pinned to
+  // one is refused in words rather than machined on whichever part answered
+  // to the name first (v76).
+  std::string why;
+  const cam::Target picked = ui::TargetFor(state, target, hint, &why);
+  if (target.IsSet() && picked.jobPartId == 0) {
+    state.camRefusal = why;
+    return false;
+  }
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      *setup, ui::JobBodies(state), type, picked, state.camVerbTool);
   if (!derived.ok) {
     state.camRefusal = derived.why;
     return false;
@@ -367,7 +375,8 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // flip that machines the back off a reference you have already set.
     bool reclamped = false;
     glm::vec3 normal(0.0f);
-    const cam::Target picked = ui::TargetFor(state, item.element);
+    const cam::Target picked =
+        ui::TargetFor(state, item.element, item.jobPartId);
     if (cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
       const glm::dquat had = cam::FixtureFrame(*setup, picked.jobPartId);
       reclamped = SetFixtureFrame(state, *setup, picked.jobPartId,
@@ -388,7 +397,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // needed a detour into Advanced to undo what this had just done
     // (docs/cam/dogfood-round.md, round 2). The default 1 mm is the rough
     // board every facing pass exists for; a board already flat is one number.
-    setup->topFace = ui::TargetFor(state, item.element);
+    setup->topFace = ui::TargetFor(state, item.element, item.jobPartId);
     // Through the ONE derivation, so a Z zero picked here and a work origin
     // set from the panel cannot disagree about where the file's zero is.
     (void)cam::RecomputeOrigin(*setup, ui::JobBodies(state));
@@ -433,7 +442,8 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }
-    const uint64_t part = ui::TargetFor(state, item.element).jobPartId;
+    const uint64_t part =
+        ui::TargetFor(state, item.element, item.jobPartId).jobPartId;
     const glm::dquat had = cam::FixtureFrame(*setup, part);
     (void)SetFixtureFrame(state, *setup, part,
                           cam::SolveFaceUp(glm::dvec3(normal), had));
@@ -481,7 +491,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
   // per hole spent saying something already said. Escape disarms, and so does
   // pressing the verb again.
   const std::string prompt = state.slotPick.prompt;
-  if (CreateVerbOperation(state, type, item.element)) {
+  if (CreateVerbOperation(state, type, item.element, item.jobPartId)) {
     state.slotPick.miss.clear();
     state.camNote = "added — keep clicking faces, or press Escape when done";
   } else {

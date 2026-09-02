@@ -117,7 +117,10 @@ constexpr MethodDoc kCamMethods[] = {
      "profile|pocket|face|drill|adaptive|edge_round, "
      "tool?, top_z?, bottom_z?, stepdown?, side?: outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
-     "[{feature_id, element}]}; returns its id and every field derived for "
+     "[{feature_id, element, part?}]}; `part` is the job part the element is "
+     "on (list_elements reports it as `job_part`), and is REQUIRED when the "
+     "same element name appears on more than one part of the job -- guessing "
+     "there machines the wrong one. Returns its id and every field derived for "
      "it. LEAVE OUT top_z/bottom_z and they are derived from what the "
      "operation acts on — the same derivation the GUI's verbs use, so a "
      "script does not type a depth the panel would not let a person type. "
@@ -350,12 +353,18 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
       // later, with the failure surfacing at the machine. Refuse now.
       if (ref.featureId == 0 || ref.name.empty())
         throw std::runtime_error(
-            "each target needs {feature_id, element}; list_elements shows "
-            "the stable names");
-      // Which job part the element is on, resolved from the bodies the job
-      // actually holds. An element no part of this job owns is refused by
-      // the derivation below rather than pinned to a guess (v73).
-      op.targets.push_back(ui::TargetFor(state, ref));
+            "each target needs {feature_id, element}, and `part` when the job "
+            "holds more than one; list_elements reports both");
+      // Which job part the element is on. `part` says it outright --
+      // list_elements reports `job_part` beside every body for exactly this
+      // -- and without one it is worked out, which is only an answer while
+      // the name is unique across the job (v76).
+      std::string why;
+      const cam::Target t =
+          ui::TargetFor(state, ref, tj.value("part", uint64_t{0}), &why);
+      if (t.jobPartId == 0)
+        throw std::runtime_error(why);
+      op.targets.push_back(t);
     }
   }
   (void)state;
@@ -851,9 +860,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                            : json::object();
       target.featureId = tj.value("feature_id", uint64_t{0});
       target.name = tj.value("element", std::string());
-      const cam::DerivedOp derived =
-          cam::DeriveOperation(setup, ui::JobBodies(state), type,
-                               ui::TargetFor(state, target), op.toolNumber);
+      // A targetless derive is a real request -- "face the stock", "cut the
+      // outline" -- and it is refused further down, in its own words. Only a
+      // target that names something has to name a part.
+      std::string why;
+      const cam::Target picked =
+          ui::TargetFor(state, target, tj.value("part", uint64_t{0}), &why);
+      if (target.IsSet() && picked.jobPartId == 0)
+        throw std::runtime_error(why);
+      const cam::DerivedOp derived = cam::DeriveOperation(
+          setup, ui::JobBodies(state), type, picked, op.toolNumber);
       if (!derived.ok)
         throw std::runtime_error(derived.why);
       const int tool = op.toolNumber;

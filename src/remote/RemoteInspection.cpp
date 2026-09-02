@@ -11,6 +11,7 @@
 #include "render/ClipPlanes.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/JobActions.h"
 
 #include <glm/glm.hpp>
 
@@ -1607,9 +1608,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // measure-probing every name. Document-only: works headless.
     // params: {body?: index, part?: name|stable-id (cross-part, no tab
     // switch)}
+    // On a JOB tab there is no active part document and yet there is plenty
+    // to list: every part the job cuts. Each body carries the `job_part` it
+    // came from, which is the other half of a machining target -- so an agent
+    // can go straight from here to add_cam_op without knowing to switch tabs
+    // and without a second call to work out which part it is looking at.
     const auto& bodies =
         p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
-                           : RequirePartDoc(doc, "list_elements").GetBodies();
+        : state.job != nullptr
+            ? ui::JobBodies(state)
+            : RequirePartDoc(doc, "list_elements").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error(IndexError("body", p.value("body", -1),
@@ -1658,6 +1666,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       out.push_back({{"body", i},
                      {"name", bodies[i].name},
                      {"created_by", bodies[i].createdBy},
+                     {"job_part", bodies[i].jobPartId},
                      {"faces", faces},
                      {"edges", edges}});
     }

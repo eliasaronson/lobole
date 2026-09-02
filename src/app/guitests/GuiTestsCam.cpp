@@ -249,7 +249,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ImGuiWindow* win = ImGui::FindWindowByName("CAM###ToolWindow");
     IM_CHECK(win != nullptr);
     ui::FitCameraToDocument(*s_App);
-    ctx->Yield(4);
+    if (s_App->camera)
+      s_App->camera
+          ->StopAnimation(); // a fit ANIMATES; the click needs it landed
+    ctx->Yield(20);
 
     // Where the part's centre lands on screen. It must sit left of the
     // window's left edge, not under it.
@@ -1375,6 +1378,72 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
         ctx->ItemClick(modelWin->TabId);
         ctx->Yield(2);
       }
+  };
+
+  // A click on a job tab knows WHICH placed part it landed on. Two parts in
+  // one job routinely share a feature id and an element name -- two boxes
+  // modelled independently both have feature 1 and a face "1/face5" -- so
+  // without this the target resolves to whichever body answers first, which
+  // is the wrong part, cut for real.
+  t = IM_REGISTER_TEST(engine, "cam", "a_click_knows_which_part_it_hit");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    ui::AddPart(*s_App, "B");
+    s_App->document->AddFeature(
+        std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+
+    cam::Setup& setup = MakeJob()->AddSetup("Sheet");
+    s_App->camActiveSetup = setup.id;
+    const uint64_t second = Job()->AddPart(s_App->parts[1].id, "B");
+    // 400 mm apart, so a click can tell them apart on screen.
+    cam::Placement pl;
+    pl.id = Job()->AllocateId();
+    pl.jobPartId = second;
+    pl.pos = {400.0, 0.0};
+    Job()->FindSetup(setup.id)->placements.push_back(pl);
+    Job()->BumpVersion();
+    ctx->Yield(4);
+
+    // Both parts really do collide on both halves of an ElementRef.
+    const std::vector<Body>& placed = ui::JobPlacedBodies(*s_App);
+    IM_CHECK_EQ(placed.size(), (size_t)2);
+    IM_CHECK_EQ(placed[0].createdBy, placed[1].createdBy);
+    IM_CHECK(placed[0].jobPartId != placed[1].jobPartId);
+
+    // Frame it deterministically rather than through a fit, the way every
+    // other viewport-click test does: a fit animates, and an earlier test's
+    // orbit leaks in through the shared camera.
+    glm::vec3 lo, hi;
+    placed[1].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 centre = (lo + hi) * 0.5f;
+    const float radius = glm::length(hi - lo) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(glm::vec3(0.0f, 0.0f, 1.0f));
+    s_App->camera->SetPosition(
+        centre + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 5.0f);
+    ctx->Yield(4);
+
+    // Click the SECOND part, the one 400 mm along.
+    const ImVec2 at = WorldToWindow(centre);
+    ctx->MouseMoveToPos(at);
+    ctx->MouseClick(0);
+    ctx->Yield(3);
+
+    bool sawFace = false;
+    for (const ui::SelectionItem& item : s_App->selection.items) {
+      if (item.kind != ui::SelectionItem::Kind::Face)
+        continue;
+      sawFace = true;
+      IM_CHECK_EQ(item.jobPartId, placed[1].jobPartId);
+    }
+    IM_CHECK(sawFace);
   };
 
   // The backplot is drawn ON the part, whatever the part is clamped like.

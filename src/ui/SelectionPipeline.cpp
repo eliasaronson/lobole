@@ -8,6 +8,7 @@
 #include "ui/AppActions.h"         // EdgeElementRef, AppendPrimLine
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
 #include "ui/FeatureEditor.h"      // SlotPickClicked (U3)
+#include "ui/JobActions.h"         // JobPlacedBodies (a job tab's bodies)
 #include "ui/SketchInteraction.h"  // FaceElementRef
 
 #include "core/Occurrence.h" // AssemblyDocument, Occurrence
@@ -74,12 +75,14 @@ AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
 
 // The body a render mesh mirrors, or null (assembly meshes, stale index).
 const Body* BodyOfMesh(const AppState& state, uint32_t meshId) {
-  for (const DocumentRenderMesh& m : state.documentMeshes) {
-    if (m.meshId == meshId && state.document &&
-        m.bodyIndex < state.document->GetBodies().size()) {
-      return &state.document->GetBodies()[m.bodyIndex];
-    }
-  }
+  // Whatever the viewport is showing: a job tab draws the job's parts, not a
+  // document's bodies (v73/J6), and it is the only place a body carries a
+  // jobPartId -- which is what tells two parts sharing a feature id apart.
+  const std::vector<Body>& bodies =
+      ui::ViewportBodies(const_cast<AppState&>(state));
+  for (const DocumentRenderMesh& m : state.documentMeshes)
+    if (m.meshId == meshId && m.bodyIndex < bodies.size())
+      return &bodies[m.bodyIndex];
   return nullptr;
 }
 
@@ -179,9 +182,13 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
                  face.faceIndex});
         } else if (auto ref =
                        FaceElementRef(state, face.meshId, face.faceIndex)) {
-          out.push_back({{SelectionItem::Kind::Face, 0, *ref},
-                         face.meshId,
-                         face.faceIndex});
+          SelectionItem item{SelectionItem::Kind::Face, 0, *ref};
+          // Which placed part was actually under the cursor. Without it a CAM
+          // target resolves by searching for the first body that answers to
+          // the same element name (v76).
+          if (const Body* body = BodyOfMesh(state, face.meshId))
+            item.jobPartId = body->jobPartId;
+          out.push_back({std::move(item), face.meshId, face.faceIndex});
         }
       }
       if (kinds & KindBit(SelectionItem::Kind::Body)) {
@@ -423,8 +430,12 @@ const char* ArmedPrompt(AppState& state) {
 
 void HandleSelectionInput(AppState& state, bool overViewport,
                           bool allowEscapeClear) {
+  // A JOB tab has neither a document nor an assembly and is full of pickable
+  // geometry — its parts, laid out (v73/J6). Leaving it out here meant a
+  // click on a job selected nothing and said nothing about it, which is how
+  // a CAM pick could only ever be made through the panel.
   if (!state.faceSelector || !state.meshRenderer || !state.camera ||
-      (!state.document && !state.assembly)) {
+      (!state.document && !state.assembly && !state.job)) {
     return;
   }
   ImGuiIO& io = ImGui::GetIO();

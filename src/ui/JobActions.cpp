@@ -5,6 +5,8 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 
+#include <algorithm>
+
 namespace ui {
 
 cam::JobDocument* ActiveJob(AppState& state) { return state.job.get(); }
@@ -51,29 +53,58 @@ const cam::Setup* ActiveJobSetup(AppState& state) {
   return &job->GetSetups().front();
 }
 
-std::vector<Body> JobPlacedBodies(AppState& state) {
+const std::vector<Body>& JobPlacedBodies(AppState& state) {
+  static const std::vector<Body> kNone;
+  if (ActiveJob(state) == nullptr) {
+    state.jobPlacedBodies.clear();
+    state.jobPlacedKey = 0;
+    return kNone;
+  }
+  const uint64_t key = JobRenderVersion(state);
+  if (key == state.jobPlacedKey && !state.jobPlacedBodies.empty())
+    return state.jobPlacedBodies;
   const cam::Setup* setup = ActiveJobSetup(state);
   const std::vector<Body>& bodies = JobBodies(state);
-  return setup != nullptr ? cam::BodiesInSetupFrame(*setup, bodies) : bodies;
+  state.jobPlacedBodies =
+      setup != nullptr ? cam::BodiesInSetupFrame(*setup, bodies) : bodies;
+  state.jobPlacedKey = key;
+  return state.jobPlacedBodies;
 }
 
 uint64_t JobRenderVersion(AppState& state) {
   const cam::JobDocument* job = ActiveJob(state);
   if (job == nullptr)
     return 0;
-  // The same mix JobBodies keys its cache on, plus the ACTIVE setup and its
-  // placements: moving a part must redraw it, and a placement is not part of
-  // the job's version.
+  // The same mix JobBodies keys its cache on, plus everything that decides
+  // where a body LANDS: the active setup, how it is fixtured, and every
+  // placement. None of those bump the job's version -- the panel and the
+  // picks write them in place -- so leaving them out meant laying a face up
+  // redrew nothing at all, and the backplot was the only thing that moved.
   uint64_t key = JobBodiesKey(state, *job);
-  for (const cam::Setup& setup : job->GetSetups())
+  const auto mix = [&key](double v) {
+    key = (key ^ static_cast<uint64_t>(v * 4096.0)) * 1099511628211ull;
+  };
+  key = (key ^ state.camActiveSetup) * 1099511628211ull;
+  for (const cam::Setup& setup : job->GetSetups()) {
+    mix(setup.frame.x);
+    mix(setup.frame.y);
+    mix(setup.frame.z);
+    mix(setup.frame.w);
+    mix(setup.rotationA);
     for (const cam::Placement& p : setup.placements) {
+      if (p.frame) {
+        mix(p.frame->x);
+        mix(p.frame->y);
+        mix(p.frame->z);
+        mix(p.frame->w);
+      }
       key = (key ^ p.id) * 1099511628211ull;
-      key = (key ^ static_cast<uint64_t>(p.pos.x * 1024.0)) * 1099511628211ull;
-      key = (key ^ static_cast<uint64_t>(p.pos.y * 1024.0)) * 1099511628211ull;
-      key =
-          (key ^ static_cast<uint64_t>(p.rotZdeg * 1024.0)) * 1099511628211ull;
+      mix(p.pos.x);
+      mix(p.pos.y);
+      mix(p.rotZdeg);
       key = (key ^ (p.enabled ? 1u : 2u)) * 1099511628211ull;
     }
+  }
   return key;
 }
 
@@ -102,16 +133,49 @@ const std::vector<Body>& JobBodies(AppState& state) {
   return state.jobBodies;
 }
 
-cam::Target TargetFor(AppState& state, const ElementRef& ref) {
+cam::Target TargetFor(AppState& state, const ElementRef& ref, uint64_t partHint,
+                      std::string* why) {
   cam::Target t;
   t.ref = ref;
+  std::vector<uint64_t> owners;
   for (const Body& b : JobBodies(state)) {
-    if (b.createdBy != ref.featureId)
+    if (b.createdBy != ref.featureId || !b.elementMap.Resolve(ref.name))
       continue;
-    if (!b.elementMap.Resolve(ref.name))
-      continue;
-    t.jobPartId = b.jobPartId;
-    break;
+    if (std::find(owners.begin(), owners.end(), b.jobPartId) == owners.end())
+      owners.push_back(b.jobPartId);
+  }
+  if (partHint != 0) {
+    if (std::find(owners.begin(), owners.end(), partHint) != owners.end()) {
+      t.jobPartId = partHint;
+      return t;
+    }
+    if (why)
+      *why = "that element is not on job part " + std::to_string(partHint);
+    return t;
+  }
+  if (owners.size() == 1) {
+    t.jobPartId = owners.front();
+    return t;
+  }
+  if (why) {
+    if (owners.empty()) {
+      *why = "no part of this job owns '" + ref.name + "'";
+    } else {
+      // Named, not picked between: every candidate is plausible and cutting
+      // the wrong one is scrap.
+      std::string names;
+      const cam::JobDocument* job = ActiveJob(state);
+      for (uint64_t id : owners) {
+        const cam::JobPart* p = job ? job->FindPart(id) : nullptr;
+        names += (names.empty() ? "" : ", ") + std::to_string(id);
+        if (p && !p->name.empty())
+          names += " (" + p->name + ")";
+      }
+      *why = "'" + ref.name +
+             "' is on more than one part of this job — say "
+             "which with `part`: " +
+             names;
+    }
   }
   return t;
 }

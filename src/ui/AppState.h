@@ -759,6 +759,15 @@ struct SelectionItem {
   // — which is every pick that is not inside a sub-assembly.
   std::vector<uint64_t> innerPath;
 
+  // Which JOB PART this pick landed on, when the tab is a job (v76). 0
+  // everywhere else. Two parts in one job can own the same feature id AND
+  // the same element name -- a job made of one part machined twice is the
+  // easy case -- so the ElementRef alone names two faces, and resolving it by
+  // search picks whichever comes first. That is the wrong bracket, cut for
+  // real. Not part of operator==: it is where the pick HAPPENED, and the
+  // same face picked twice is the same selection.
+  uint64_t jobPartId = 0;
+
   bool operator==(const SelectionItem& o) const {
     return kind == o.kind && id == o.id &&
            element.featureId == o.element.featureId &&
@@ -827,6 +836,11 @@ struct AppState {
   // per-frame.
   std::vector<Body> jobBodies;
   uint64_t jobBodiesKey = 0;
+  // …and the same list laid out in the active setup's frame
+  // (ui::JobPlacedBodies): what the viewport draws and what a pick resolves
+  // against.
+  std::vector<Body> jobPlacedBodies;
+  uint64_t jobPlacedKey = 0;
   // Part→assembly change propagation (A4): {partId → Document::Version()}
   // stamped at the active assembly's last solve. AssemblyPartsStale compares
   // against these on tab activation, so a part edit re-solves mates
