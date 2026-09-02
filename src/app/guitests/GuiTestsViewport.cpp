@@ -6,6 +6,7 @@
 #include "ui/MeasureOverlay.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SimulationActions.h"
+#include "ui/ViewportHandleDraw.h"
 
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -1219,28 +1220,28 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     const double a0 = rev->angleDeg;
     IM_CHECK(std::abs(a0 - 360.0) < 1e-9); // the default, and the clamp ceiling
 
-    // Take the grab point off the DRAWN handle rather than recomputing the
-    // arc: PerpTo and the axis resolution live in an anonymous namespace, and
-    // a test that re-derives them can drift from what is on screen — which
-    // is the one thing a handle test must not do.
-    std::vector<LineVertex3D> lines;
-    ui::BuildPreviewHandleOverlay(*s_App, lines);
-    IM_CHECK(lines.size() > 8); // the 48-segment circle really is there
+    // Take the grab point off the PUBLISHED handle rather than recomputing
+    // the arc: the axis resolution lives in an anonymous namespace, and a
+    // test that re-derives it can drift from what is on screen — which is
+    // the one thing a handle test must not do. Since the shared drawer draws
+    // the ring FROM this record, the record is the drawn geometry.
+    std::vector<PrimVertex> decor;
+    s_App->viewportHandles.clear();
+    ui::BuildPreviewHandleOverlay(*s_App, decor);
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)1);
+    const ui::ViewportHandle arc = s_App->viewportHandles[0];
+    IM_CHECK(arc.kind == ui::HandleKind::Rotate);
+    std::vector<PrimVertex> drawn;
+    ui::DrawViewportHandles(*s_App, drawn);
+    IM_CHECK(drawn.size() >= 48 * 6); // the 48-chord ring really is drawn
 
-    glm::vec3 centre(0.0f);
-    for (const LineVertex3D& v : lines)
-      centre += v.position;
-    centre /= static_cast<float>(lines.size());
-    const glm::vec3 v0 = lines[0].position;
-    const glm::vec3 r0 = v0 - centre;
-    const float radius = glm::length(r0);
+    const glm::vec3 centre = arc.origin;
+    const float radius = arc.length;
     IM_CHECK(radius > 0.1f);
-    // The plane the circle lies in, from the geometry itself. lines[2] is the
-    // next segment's start, so the cross product points along the axis in the
-    // direction of increasing angle.
-    const glm::vec3 axis =
-        glm::normalize(glm::cross(r0, lines[2].position - centre));
-    const glm::vec3 b1 = glm::normalize(r0);
+    // The ring's own parametrisation (AppendHandleRing): b1 = PerpTo(axis),
+    // b2 = axis x b1, so `at(deg)` lands ON the drawn chord ends.
+    const glm::vec3 axis = arc.dir;
+    const glm::vec3 b1 = ui::PerpTo(axis);
     const glm::vec3 b2 = glm::cross(axis, b1);
 
     // Frame it face-on to the arc, so the circle projects as a circle rather
@@ -2043,22 +2044,27 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     }
 
     // And the highlight reaches the DRAWN output, not just the state: the
-    // same overlay, built with and without a hover, must differ — and only
-    // in the hovered axis's own lines.
+    // same handles, drawn with and without a hover, must differ — and only
+    // in the hovered axis's own strokes.
     const uint64_t xId =
         ui::HandleId(ui::HandleOwner::Gizmo, ui::GizmoSub(0, /*rotate=*/false));
-    const auto overlayWith = [&](uint64_t hovered) {
+    const auto drawnWith = [&](uint64_t hovered) {
       s_App->hoveredHandle = hovered;
-      std::vector<LineVertex3D> lines;
       s_App->viewportHandles.clear(); // rebuilt by the call below
-      ui::BuildGizmoOverlay(*s_App, lines);
-      return lines;
+      ui::PublishGizmoHandles(*s_App);
+      std::vector<PrimVertex> prims;
+      ui::DrawViewportHandles(*s_App, prims);
+      return prims;
     };
-    const std::vector<LineVertex3D> plain = overlayWith(0);
-    const std::vector<LineVertex3D> hoveredX = overlayWith(xId);
+    const std::vector<PrimVertex> plain = drawnWith(0);
+    const std::vector<PrimVertex> hoveredX = drawnWith(xId);
     IM_CHECK_EQ(plain.size(), hoveredX.size()); // geometry is untouched
+    IM_CHECK(!plain.empty());
     int brighter = 0;
-    for (size_t i = 0; i < plain.size(); i++)
+    for (size_t i = 0; i < plain.size(); i++) {
+      IM_CHECK(plain[i].posThis == hoveredX[i].posThis);
+      // The stroke is thick: the whole point of the shared drawer.
+      IM_CHECK(plain[i].params.x >= 1.5f);
       if (plain[i].color != hoveredX[i].color) {
         brighter++;
         // Brighter, and still recognisably the axis's own colour: X stays
@@ -2066,6 +2072,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
         IM_CHECK(hoveredX[i].color.r > plain[i].color.r);
         IM_CHECK(hoveredX[i].color.r > hoveredX[i].color.g);
       }
+    }
     IM_CHECK(brighter > 0);
   };
 

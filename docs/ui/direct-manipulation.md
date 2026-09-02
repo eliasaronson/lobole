@@ -51,7 +51,7 @@ together:
 - **Rendering**: `UI.cpp` (~384) builds a dedicated `gizmo` line channel →
   `SketchRenderer::SetGizmoLines`, drawn depth-test-off on top
   (`m_gizmoPipeline`). On part tabs it's currently always empty
-  (`BuildGizmoOverlay` early-outs without `state.assembly`) — free to use.
+  (`PublishGizmoHandles` early-outs without `state.assembly`) — free to use.
 - **Anchor data**: `SketchFeature::plane` (`SketchPlane::GetNormal/
   PlaneToWorld`), `ExtrudeFeature::regions` (U2 outer-loop entity ids),
   `FilletFeature::edges` + `DocumentRenderMesh::edgePolylines` (edgeIndex
@@ -75,7 +75,7 @@ together:
    change to A2.5.
 4. **New module `src/ui/PreviewHandles.cpp/.h`** (mirrors the gizmo pair):
    - `BuildPreviewHandleOverlay(state, lines)` — appends the handle geometry
-     for the pending feature; called in `UI.cpp` next to `BuildGizmoOverlay`,
+     for the pending feature; called in `UI.cpp` next to `PublishGizmoHandles`,
      same channel.
    - `HandlePreviewHandleInput(state, ray, clicked, down, released)` — the
      gizmo's grab/drag/release contract; called from `ViewportInput.cpp` on

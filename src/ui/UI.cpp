@@ -39,6 +39,7 @@
 #include "ui/SketchToolbar.h"
 #include "ui/TerminalPanel.h"
 #include "ui/VariablesPanel.h"
+#include "ui/ViewportHandleDraw.h"
 #include "ui/ViewportInput.h"
 
 #include "IconsFontAwesome6.h"
@@ -927,16 +928,17 @@ void DrawUI(AppState& state) {
     AppendThreadOverlays(state, overlay); // cosmetic threads (part tabs)
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
 
-    // The occurrence drag gizmo goes to its own no-depth channel so its handles
-    // stay visible/grabbable through geometry (A2.5). The preview-feature
-    // handles share the channel (part tabs, where the gizmo is empty).
-    std::vector<LineVertex3D> gizmo;
-    // Rebuilt every frame by the two owners as they draw: the shared list is
-    // what hover and clicks hit-test against, so it must describe THIS
-    // frame's handles (docs/ui/viewport-handles.md).
+    // Viewport handles (docs/ui/viewport-handles.md): every owner PUBLISHES
+    // its arrows and arcs into one list, rebuilt every frame, which is what
+    // hover and clicks hit-test against and what DrawViewportHandles draws
+    // (below, once the FEM loads have published too). The preview handle's
+    // decorations go to the same on-top channel the handles land in.
     state.viewportHandles.clear();
-    BuildGizmoOverlay(state, gizmo);
-    BuildPreviewHandleOverlay(state, gizmo);
+    PublishGizmoHandles(state);
+    std::vector<PrimVertex> handleDecor;
+    BuildPreviewHandleOverlay(state, handleDecor);
+    // Markers that are not handles keep the no-depth 1 px line channel.
+    std::vector<LineVertex3D> gizmo;
     AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)
     AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
@@ -997,6 +999,12 @@ void DrawUI(AppState& state) {
     // depth-tested one is drawn inside the solid where nothing can see it.
     std::vector<PrimVertex> measurePrims;
     AppendMeasureOverlay(state, measurePrims);
+    // The handles: thick, on top, and drawn from the same records the hit
+    // test uses. After AppendSimulationBCGlyphs above, which publishes the
+    // force arrows.
+    DrawViewportHandles(state, measurePrims);
+    measurePrims.insert(measurePrims.end(), handleDecor.begin(),
+                        handleDecor.end());
     state.sketchRenderer->SetOverlayPrimitives(std::move(measurePrims));
 
     // 2D annotations. DrawMeasureLabels is outside the part-tab gate for the

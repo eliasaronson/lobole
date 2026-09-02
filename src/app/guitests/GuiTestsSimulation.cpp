@@ -2,6 +2,7 @@
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
+#include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
 // Simulation GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -119,13 +120,17 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // The glyph: the arrow's HEAD is the end the force points toward, so
-    // head-minus-tail must run along the force direction. (The head is drawn
-    // as two barbs at the far end; the shaft is the first primitive pair.)
+    // head-minus-tail must run along the force direction. The glyph pass
+    // PUBLISHES the arrow and the shared drawer draws it (the head is two
+    // barbs at the far end; the shaft is the first primitive it emits).
     std::vector<PrimVertex> prims;
     s_App->viewportHandles.clear();
     ui::AppendSimulationBCGlyphs(*s_App, prims);
-    IM_CHECK(!prims.empty());
-    const glm::vec3 shaftA = prims[0].posThis, shaftB = prims[0].posOther;
+    const size_t first = prims.size();
+    ui::DrawViewportHandles(*s_App, prims);
+    IM_CHECK(prims.size() > first);
+    const glm::vec3 shaftA = prims[first].posThis,
+                    shaftB = prims[first].posOther;
     const glm::vec3 along = glm::normalize(shaftB - shaftA);
     IM_CHECK(std::abs(along.y + 1.0f) < 1e-3f); // points -Y, like the force
     IM_CHECK(std::abs(along.x) < 1e-3f);
@@ -219,12 +224,16 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // Signed height of the glyph's lowest vertex over the face plane, and
-    // the direction the shaft (the first primitive) points.
+    // the direction the shaft (the first primitive the shared drawer emits
+    // for the published arrow) points.
     std::vector<PrimVertex> prims;
+    size_t first = 0;
     const auto rebuild = [&]() {
       prims.clear();
       s_App->viewportHandles.clear();
       ui::AppendSimulationBCGlyphs(*s_App, prims);
+      first = prims.size();
+      ui::DrawViewportHandles(*s_App, prims);
     };
     const auto lowest = [&]() {
       float worst = FLT_MAX;
@@ -235,18 +244,19 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       return worst;
     };
     rebuild();
-    IM_CHECK(!prims.empty());
+    IM_CHECK(prims.size() > first);
     IM_CHECK(lowest() > -1e-3f);
     // Still pointing WITH the force: outside placement must not flip it.
-    glm::vec3 along = glm::normalize(prims[0].posOther - prims[0].posThis);
+    glm::vec3 along =
+        glm::normalize(prims[first].posOther - prims[first].posThis);
     IM_CHECK(glm::dot(along, n) > 0.99f);
 
     // And a push keeps the old approach-from-outside placement.
     study->loads[0].direction = -load.direction;
     rebuild();
-    IM_CHECK(!prims.empty());
+    IM_CHECK(prims.size() > first);
     IM_CHECK(lowest() > -1e-3f);
-    along = glm::normalize(prims[0].posOther - prims[0].posThis);
+    along = glm::normalize(prims[first].posOther - prims[first].posThis);
     IM_CHECK(glm::dot(along, n) < -0.99f);
 
     ui::ExitSimulation(*s_App);

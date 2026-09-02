@@ -2251,10 +2251,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(body.jobPartId != 0);
 
     // Nothing selected: no handles.
-    std::vector<LineVertex3D> lines;
     s_App->viewportHandles.clear();
-    ui::BuildGizmoOverlay(*s_App, lines);
-    IM_CHECK(lines.empty());
+    ui::PublishGizmoHandles(*s_App);
+    IM_CHECK(s_App->viewportHandles.empty());
 
     // Select the part (a Body item, as a click on it would leave).
     ui::SelectionItem item;
@@ -2263,10 +2262,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     item.jobPartId = body.jobPartId;
     s_App->selection.items = {item};
     ctx->Yield(2);
-    lines.clear();
     s_App->viewportHandles.clear();
-    ui::BuildGizmoOverlay(*s_App, lines);
-    IM_CHECK(!lines.empty());
+    ui::PublishGizmoHandles(*s_App);
     IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)3); // X, Y, spin
     // The handles sit on the part: at its top centre.
     const glm::vec3 origin = s_App->viewportHandles[0].origin;
@@ -2303,9 +2300,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::JobPlacedBodies(*s_App)[0].shape.GetBoundingBox(bmin, bmax);
     IM_CHECK(std::abs(bmin.x - 25.0f) < 0.5f);
     // ...and the handles moved with it.
-    lines.clear();
     s_App->viewportHandles.clear();
-    ui::BuildGizmoOverlay(*s_App, lines);
+    ui::PublishGizmoHandles(*s_App);
     IM_CHECK(std::abs(s_App->viewportHandles[0].origin.x - 55.0f) < 0.5f);
 
     // SNAPPING: on a fixed 200 x 100 sheet, a drag that leaves the part's
@@ -2318,9 +2314,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       s_App->job->BumpVersion();
     }
     ctx->Yield(2);
-    lines.clear();
     s_App->viewportHandles.clear();
-    ui::BuildGizmoOverlay(*s_App, lines);
+    ui::PublishGizmoHandles(*s_App);
     const glm::vec3 o2 = s_App->viewportHandles[0].origin;
     Ray grab2;
     grab2.origin = o2 + glm::vec3(0.5f * L, 0.0f, 100.0f);
@@ -2337,9 +2332,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
 
     // ...and a spin to the common angles: 88 degrees becomes 90.
-    lines.clear();
     s_App->viewportHandles.clear();
-    ui::BuildGizmoOverlay(*s_App, lines);
+    ui::PublishGizmoHandles(*s_App);
     const glm::vec3 o3 = s_App->viewportHandles[0].origin;
     // Grabbed BETWEEN the arrows (135 degrees): on the +X axis the arc and
     // the X arrow coincide, and the arrow wins the tie.

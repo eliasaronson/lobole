@@ -10,10 +10,10 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
-#include "ui/AppActionsInternal.h" // LineVertex
 #include "ui/DragMath.h"
 #include "ui/PreviewFeature.h"
-#include "ui/SketchInteraction.h" // WorldToScreen
+#include "ui/SketchInteraction.h"  // WorldToScreen
+#include "ui/ViewportHandleDraw.h" // kHandleHalfPx
 
 #include "imgui.h"
 
@@ -265,22 +265,9 @@ double CurrentHandleValue(const Feature& f) {
   return 0.0;
 }
 
-void AppendArrow(std::vector<LineVertex3D>& lines, const glm::vec3& base,
-                 const glm::vec3& A, float L, const glm::vec3& kHandleColor) {
-  const float head = 0.18f * L;
-  const glm::vec3 tip = base + A * L, side = PerpTo(A);
-  lines.push_back(LineVertex(base, kHandleColor));
-  lines.push_back(LineVertex(tip, kHandleColor));
-  lines.push_back(LineVertex(tip, kHandleColor));
-  lines.push_back(LineVertex(tip - A * head + side * head, kHandleColor));
-  lines.push_back(LineVertex(tip, kHandleColor));
-  lines.push_back(LineVertex(tip - A * head - side * head, kHandleColor));
-}
-
 } // namespace
 
-void BuildPreviewHandleOverlay(AppState& state,
-                               std::vector<LineVertex3D>& lines) {
+void BuildPreviewHandleOverlay(AppState& state, std::vector<PrimVertex>& out) {
   HandleSpec spec;
   bool isSection = false;
   uint64_t sectionId = 0;
@@ -303,10 +290,11 @@ void BuildPreviewHandleOverlay(AppState& state,
   vh.length = spec.rotate ? spec.arcRadius : L;
   vh.color = kHandleColor;
   state.viewportHandles.push_back(vh);
-  // Shadow the file-scope colour so every line below draws in the hover /
-  // drag tint without threading a parameter through each push_back.
-  const glm::vec3 kHandleColor =
-      HandleTint(vh, state.hoveredHandle, state.handleDrag.active ? vh.id : 0);
+  // The handle itself is drawn by DrawViewportHandles from the record above.
+  // The decorations below are drawn here, in the same tint, so they follow
+  // the hover / drag highlight with the arrow they belong to.
+  const glm::vec4 tint(
+      HandleTint(vh, state.hoveredHandle, ActiveHandleId(state)), 1.0f);
 
   // Where the cut plane is, as a square outline around the arrow's base —
   // an offset typed into the tool window is otherwise invisible until it
@@ -320,33 +308,19 @@ void BuildPreviewHandleOverlay(AppState& state,
     const glm::vec3 corners[4] = {
         spec.anchor + (u + v) * r, spec.anchor + (u - v) * r,
         spec.anchor - (u + v) * r, spec.anchor - (u - v) * r};
-    for (int i = 0; i < 4; i++) {
-      lines.push_back(LineVertex(corners[i], kHandleColor));
-      lines.push_back(LineVertex(corners[(i + 1) % 4], kHandleColor));
-    }
+    for (int i = 0; i < 4; i++)
+      AppendPrimLine(corners[i], corners[(i + 1) % 4], kHandleHalfPx, tint,
+                     out);
   }
 
   if (!spec.rotate) {
-    AppendArrow(lines, spec.anchor, spec.dir, L, kHandleColor);
     // A blend/short-arrow base tick so the grab point reads on the geometry.
     const glm::vec3 s1 = PerpTo(spec.dir) * (0.09f * L);
     const glm::vec3 s2 = glm::cross(spec.dir, PerpTo(spec.dir)) * (0.09f * L);
-    lines.push_back(LineVertex(spec.anchor - s1, kHandleColor));
-    lines.push_back(LineVertex(spec.anchor + s1, kHandleColor));
-    lines.push_back(LineVertex(spec.anchor - s2, kHandleColor));
-    lines.push_back(LineVertex(spec.anchor + s2, kHandleColor));
-  } else {
-    const glm::vec3 b1 = PerpTo(spec.dir), b2 = glm::cross(spec.dir, b1);
-    const int seg = 48;
-    glm::vec3 prev = spec.anchor + b1 * spec.arcRadius;
-    for (int s = 1; s <= seg; s++) {
-      const float a = (float)s / seg * glm::two_pi<float>();
-      const glm::vec3 p =
-          spec.anchor + (std::cos(a) * b1 + std::sin(a) * b2) * spec.arcRadius;
-      lines.push_back(LineVertex(prev, kHandleColor));
-      lines.push_back(LineVertex(p, kHandleColor));
-      prev = p;
-    }
+    AppendPrimLine(spec.anchor - s1, spec.anchor + s1, kHandleHalfPx, tint,
+                   out);
+    AppendPrimLine(spec.anchor - s2, spec.anchor + s2, kHandleHalfPx, tint,
+                   out);
   }
 
   // Floating readout at the handle while dragging (foreground list: on top of

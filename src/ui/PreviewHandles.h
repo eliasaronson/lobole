@@ -1,6 +1,6 @@
 #pragma once
 
-#include "render/SketchRenderer.h" // LineVertex3D
+#include "render/SketchRenderer.h" // PrimVertex
 #include "ui/AppState.h"
 
 #include <vector>
@@ -17,10 +17,12 @@ namespace ui {
 // dialog stays live and accept still commits one AddFeatureCommand. No handle
 // when the parameter is expression-driven.
 
-// Appends the handle geometry (and, mid-drag, the floating value readout) for
-// the pending feature. Same overlay channel as the assembly gizmo.
-void BuildPreviewHandleOverlay(AppState& state,
-                               std::vector<LineVertex3D>& lines);
+// Publishes the pending feature's (or the active section's) handle for the
+// shared hit test and drawer (ui/ViewportHandleDraw.h), and appends its
+// decorations — the section's plane outline, the arrow's base tick, and
+// mid-drag the floating value readout — to `out`, the same on-top channel
+// the handles themselves are drawn into.
+void BuildPreviewHandleOverlay(AppState& state, std::vector<PrimVertex>& out);
 
 // Is there a viewport handle to hit at all — a pending feature's, or the
 // active section's? ViewportInput asks before routing a click here, and the

@@ -624,6 +624,7 @@ set(app_sources
     src/ui/ExprComplete.cpp
     src/ui/PreviewFeature.cpp
     src/ui/PreviewHandles.cpp
+    src/ui/ViewportHandleDraw.cpp
     src/ui/Overlays.cpp
     src/ui/TextFit.cpp
     src/ui/Theme.cpp

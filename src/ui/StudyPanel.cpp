@@ -851,7 +851,9 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       // pull takes off from the face instead: tail on the face, head out.
       const glm::vec3 tail = glm::dot(dir, n) > 0.0f ? c : c - dir * len;
       // Draggable (docs/ui/viewport-handles.md): the shaft is the handle, so
-      // what highlights is exactly what a click grabs.
+      // what highlights is exactly what a click grabs. Published, not drawn:
+      // DrawViewportHandles draws it with every other handle, on top — so
+      // the pull case above is now belt and braces rather than load-bearing.
       ViewportHandle vh;
       vh.id = HandleId(HandleOwner::Load, load.id);
       vh.kind = HandleKind::Linear;
@@ -860,10 +862,6 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       vh.length = len;
       vh.color = glm::vec3(kForce);
       state.viewportHandles.push_back(vh);
-      const glm::vec3 tint = HandleTint(
-          vh, state.hoveredHandle,
-          sim.loadDrag.active && sim.loadDrag.loadId == load.id ? vh.id : 0);
-      ArrowGlyph(tail, tail + dir * len, glm::vec4(tint, kForce.a), out);
       break;
     }
     case fem::LoadType::Pressure: {

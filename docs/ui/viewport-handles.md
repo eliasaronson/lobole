@@ -110,6 +110,57 @@ Pressure loads deliberately stay undraggable: their glyph is a *field* of
 short arrows over the face rather than one arrow with a tip, so there is no
 shaft to grab. They would need a different affordance, not this one.
 
+## Drawing shared too (2026-09-02)
+
+The plan above says "shared: which handle is under the cursor, and how it is
+drawn", and only the first half was built. Each owner kept drawing its own
+arrow: the gizmo and the preview handle as 1 px `LINE_LIST` segments in the
+no-depth "gizmo" channel (two copies of the same arrow code, rings of 40 and
+48 chords), the FEM force arrow at 2.2 px through the thick primitive
+pipeline with a 27° head. Three drawers, three looks, and the single-pixel
+ones read as cheap next to everything else the viewport draws thick.
+
+Now `ui/ViewportHandleDraw.h` is the ONE drawer. An owner publishes its
+`ViewportHandle` and draws nothing; `DrawViewportHandles` walks
+`state.viewportHandles` once per frame — after the last owner has published —
+applies `HandleTint` against `hoveredHandle` and `ActiveHandleId(state)`, and
+emits every arrow and ring as thick anti-aliased primitives (`kHandleHalfPx`,
+4 px) into the on-top primitive channel, so a handle stays visible and
+grabbable through the geometry it moves. The consequence worth having: what
+highlights is what is drawn *by construction* — both read the same record —
+instead of by three drawers agreeing with a hit test.
+
+What stays with the owners are decorations, not handles: the section's plane
+outline and the preview arrow's base tick (drawn in the handle's tint through
+the same thick helper, into the same channel), and the floating value readout.
+The mass-properties CoG cross and the FEM peak marker are not handles and keep
+the 1 px no-depth line channel. `BuildGizmoOverlay(state, lines)` became
+`PublishGizmoHandles(state)`; `BuildPreviewHandleOverlay` takes the prim
+vector its decorations go into. The tests that used to read grab points off
+the emitted line segments read the published handle instead, which is now the
+same thing, and `gizmo_hover_names_the_axis` compares the drawer's output.
+
+Not `VkPipelineRasterizationStateCreateInfo::lineWidth`: widths above 1 need
+the optional `wideLines` feature (lavapipe and several drivers lack it) and
+are not anti-aliased. The primitive pipeline already existed for exactly this.
+
+**Found by the first 4 px stroke: every thick line in the app was a twisted
+rope.** `sketch_prim.vert` took the normal from posThis→posOther, which runs
+the other way for a segment's far-end vertices, and `AppendPrimLine` undid
+that by negating `corner.x` at that end — correct for the POSITION, but the
+fragment shader's cross-section coordinate (`vLocal.x`, the anti-aliasing
+distance) kept the raw sign, so `+1` at one end met `-1` at the other on the
+same edge and the opaque core of the quad was an hourglass. At the 3 px the
+sketch lines wear the pinch is a pixel and reads as slight unevenness; at 4 px
+a ring of 48 chords reads as rope, and at 12 px (the diagnostic width) each
+chord is a plain X. The shader's normal is now canonical per segment (flipped
+when the screen direction points -x), the helper passes the true side at both
+ends, and every consumer — sketch entities, selection, measure, CAM backplot,
+FEM glyphs, handles — gets full-width strokes from the same fix. The
+`--offscreen` harness could not have shown this: it draws no `SketchRenderer`
+output at all (not even the origin triad), so the screenshots came from
+`headless-preview.sh --gui` under Xvfb.
+
 ## Found immediately after, by the hover it added
 
 The section arrow **highlighted on an assembly tab and then did nothing when

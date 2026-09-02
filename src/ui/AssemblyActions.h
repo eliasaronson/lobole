@@ -164,12 +164,14 @@ std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
 // Appends the mate tool's connector triads (picked connectors) to `lines`.
 void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
 
-// The 3D drag gizmo (A2.5). BuildGizmoOverlay appends the translate/rotate
-// handles for the selected non-fixed occurrence; HandleGizmoInput runs the drag
-// state machine (grab → live per-frame transform → release snapshots+solves)
-// and returns true when it consumed the viewport (so the caller skips
-// pick/orbit).
-void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+// The 3D drag gizmo (A2.5). PublishGizmoHandles publishes the translate/rotate
+// handles for the selected non-fixed occurrence (or the selected job part's
+// placement) into state.viewportHandles, where the shared hit test AND the
+// shared drawer read them (ui/ViewportHandleDraw.h); HandleGizmoInput runs the
+// drag state machine (grab → live per-frame transform → release
+// snapshots+solves) and returns true when it consumed the viewport (so the
+// caller skips pick/orbit).
+void PublishGizmoHandles(AppState& state);
 
 // Pushes an occurrence's current placement to the renderers WITHOUT a resync
 // — the live-drag path. Composes each mesh's place inside the occurrence, so
