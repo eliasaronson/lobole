@@ -1234,9 +1234,16 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(!s_App->camToolpaths.empty());
 
+    // A verb window open, asking for a face: Simulate closes it. Two
+    // sessions over one block would be two claims on the same clicks.
+    ToolbarClick(ctx, "###tb_job_pocket");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camToolOpen);
     ToolbarClick(ctx, "###tb_job_simulate");
     ctx->Yield(3);
     IM_CHECK(s_App->camPlaybackOpen);
+    IM_CHECK(!s_App->camToolOpen);
+    IM_CHECK(s_App->slotPick.featureId != ui::kCamToolSlot);
     IM_CHECK(!s_App->camTimeline.Empty());
     // The transport is a FLOATING window over the viewport, inside it, along
     // the bottom — not a section of the panel (2026-09-02).
@@ -1757,6 +1764,91 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camShowToolpath = true;
     ctx->ItemClick("//Cut out the whole part###ToolWindow/###cam_tool_done");
     ctx->Yield(2);
+  };
+
+  // A verb whose operation would cut NOTHING is refused, not added. The
+  // derivation only sees what it can see (a wall, a depth); the generator
+  // finds the rest — a 6 mm drill asked for an 8 mm hole — and its answer
+  // used to arrive as a red line under a dead row the user then had to
+  // notice and remove. Twice, in the screenshot that prompted this.
+  t = IM_REGISTER_TEST(engine, "cam", "a_dead_operation_is_refused_not_added");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    const uint64_t plate = CamPart()->GetFeature(0)->GetId();
+    // An 8 mm hole through it.
+    CamPart()->AddFeature(std::make_unique<CylinderFeature>(
+        "Hole", glm::vec3(30, 20, -1), glm::vec3(0, 0, 1), 4.0, 14.0));
+    const uint64_t hole = CamPart()->GetFeature(1)->GetId();
+    CamPart()->AddFeature(std::make_unique<BooleanFeature>(
+        "Drilled", plate, hole, BooleanOp::Subtract));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job"); // arrives with a 6 mm flat
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    ui::SelectionItem wall;
+    wall.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : CamPart()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (!b.shape.FacePlane(index, o, n, u)) // curved: the hole's wall
+          wall.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(wall.element.IsSet());
+
+    ToolbarClick(ctx, "###tb_job_drill");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamDrillHole);
+    ui::CamFacePicked(*s_App, wall);
+    ctx->Yield(2);
+    const cam::Setup* live = Job()->FindSetup(setup.id);
+    IM_CHECK(live->operations.empty()); // refused, not a dead row
+    IM_CHECK(s_App->camToolpaths.empty());
+    IM_CHECK(!s_App->slotPick.miss.empty());
+    ctx->LogInfo("refused: %s", s_App->slotPick.miss.c_str());
+    IM_CHECK(s_App->slotPick.miss.find("8 mm") != std::string::npos);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot); // still armed
+    ToolbarClick(ctx, "###tb_job_drill");                     // put it away
+    ctx->Yield(2);
+  };
+
+  // A number typed into a CAM field TAKES on a job tab. Every ExprDrag field
+  // evaluated against `state.document->Symbols()` behind a null check that
+  // refused to commit, and a job tab has no document: the tool diameter
+  // accepted "8", then snapped back to 6.000 on Enter, with the error sent to
+  // a prompt bar the tab does not draw.
+  t = IM_REGISTER_TEST(engine, "cam", "tool_size_can_be_typed_on_a_job_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(4);
+    IM_CHECK(s_App->document == nullptr);
+    IM_CHECK(std::abs(Job()->FindSetup(setup.id)->tools[0].diameter - 6.0) <
+             1e-9);
+
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemOpen("###cam_tools");
+    ctx->Yield(2);
+    // ItemInputValue IS the gesture: Ctrl+click the drag, type, Enter.
+    ctx->ItemInputValue("tools/$$1/###dia", "8");
+    ctx->Yield(3);
+    IM_CHECK(std::abs(Job()->FindSetup(setup.id)->tools[0].diameter - 8.0) <
+             1e-6);
+    // ...and an expression, which is what the field is for.
+    ctx->ItemInputValue("tools/$$1/###dia", "5*2");
+    ctx->Yield(3);
+    IM_CHECK(std::abs(Job()->FindSetup(setup.id)->tools[0].diameter - 10.0) <
+             1e-6);
   };
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

@@ -256,6 +256,14 @@ cam::Setup* EnsureCamSetup(AppState& state) {
   return &fresh;
 }
 
+// What the generator said about one operation's toolpath; empty when it cut.
+std::string ToolpathError(const AppState& state, uint64_t opId) {
+  for (const cam::Toolpath& tp : state.camToolpaths)
+    if (tp.operationId == opId)
+      return tp.error;
+  return {};
+}
+
 // Creates the operation a verb implies, or refuses in words. The derivation
 // itself is engine-side (cam::DeriveOperation) so a headless test can reach
 // it — the panel must not be where a depth comes from.
@@ -296,6 +304,21 @@ uint64_t CreateVerbOperation(AppState& state, cam::OpType type,
   // Just the new one: the operations already in the job did not change, and
   // one of them may be an adaptive pocket that takes seconds to re-cut.
   RefreshCamToolpath(state, op.id);
+  // An operation that cut NOTHING is a refusal, not an operation. The
+  // derivation can only check what it can see (a floor, a wall, a depth);
+  // the generator finds the rest -- a 6 mm drill asked for an 8 mm hole --
+  // and until now its answer arrived as a red line under a dead row in the
+  // list, which the user then had to notice and remove. Twice, in the
+  // screenshot that prompted this. The verb says why and adds nothing; the
+  // fix (another tool) is one click away in the same window.
+  if (const std::string why = ToolpathError(state, op.id); !why.empty()) {
+    setup->operations.pop_back();
+    DropCamToolpath(state, op.id);
+    state.camGhostOp = 0;
+    state.camRefusal = why;
+    RunCamVerification(state);
+    return 0;
+  }
   RunCamVerification(state);
   LOG_INFO("CAM: {} from a picked face, Z {:.3f} to {:.3f}", op.name, op.topZ,
            op.bottomZ);
@@ -324,12 +347,21 @@ void RederiveVerbOp(AppState& state, cam::Setup& setup, const Verb& verb,
     return;
   }
   const uint64_t id = op->id;
+  const cam::Operation before = *op;
   *op = derived.op;
   op->id = id;
   state.camRefusal.clear();
   state.camGhostOp = id;
   state.projectMetaDirty = true;
   RefreshCamToolpath(state, id);
+  // Same rule as making one: a tool the cut cannot be made with is refused,
+  // and the cut stays as it was rather than becoming a dead row.
+  if (const std::string why = ToolpathError(state, id); !why.empty()) {
+    *op = before;
+    state.camVerbTool = before.toolNumber;
+    RefreshCamToolpath(state, id);
+    state.camRefusal = why;
+  }
   RunCamVerification(state);
 }
 

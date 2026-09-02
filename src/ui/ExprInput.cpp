@@ -61,6 +61,17 @@ void LeaveExprMode() {
 // a field abandoned mid-edit is cleaned up: if the stand-in stopped being
 // drawn (its panel closed, its feature was deleted), the next expression
 // field to come along releases the slot rather than inheriting it.
+// What a typed value resolves against. The part's table on a part tab (it
+// chains to the project's); the PROJECT's on any other kind of tab. This used
+// to be `state.document->Symbols()` behind a null check that simply refused
+// to commit -- so on a job tab every numeric field took the typed text and
+// then snapped back to the old value on Enter, with the error going to a
+// prompt bar that tab does not draw. A tool diameter that cannot be changed.
+const SymbolTable& SymbolsFor(const AppState& state) {
+  return state.document != nullptr ? state.document->Symbols()
+                                   : state.projectSymbols;
+}
+
 bool InExprMode(const char* label) {
   if (g_exprId == 0)
     return false;
@@ -179,12 +190,12 @@ bool DrawExprField(AppState& state, const char* label, double* out,
   const bool commit =
       g_exprLive && !ImGui::IsKeyPressed(ImGuiKey_Escape, false);
   LeaveExprMode();
-  if (!commit || g_exprText[0] == '\0' || state.document == nullptr)
+  if (!commit || g_exprText[0] == '\0')
     return false;
   // No plain-number shortcut: the drag did NOT apply this one, we did.
   // EvaluateText handles a bare number (and a unit-suffixed one) anyway.
-  const auto r = ExpressionEngine::Default().EvaluateText(
-      g_exprText, state.document->Symbols());
+  const auto r =
+      ExpressionEngine::Default().EvaluateText(g_exprText, SymbolsFor(state));
   if (!r.has_value()) {
     state.sketchEdit.actionMsg = r.error().message; // prompt-bar feedback
     return false;
@@ -229,10 +240,8 @@ bool ExprCommitOnItem(AppState& state, ImGuiID id, double* out,
   std::strtod(g_buf, &end);
   if (end != nullptr && *end == '\0')
     return false; // a plain number: the widget already applied it
-  if (state.document == nullptr)
-    return false;
-  const auto r = ExpressionEngine::Default().EvaluateText(
-      g_buf, state.document->Symbols());
+  const auto r =
+      ExpressionEngine::Default().EvaluateText(g_buf, SymbolsFor(state));
   if (!r.has_value()) {
     state.sketchEdit.actionMsg = r.error().message; // prompt-bar feedback
     return false;

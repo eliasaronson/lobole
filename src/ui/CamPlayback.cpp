@@ -10,6 +10,7 @@
 #include "render/StockRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h" // ActiveCamSetup, PostOpts
+#include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/JobActions.h"
 #include "ui/Theme.h" // ElevatedWindowBorder
 
@@ -136,6 +137,18 @@ bool BeginCamPlayback(AppState& state) {
                           cam::MakeStock(lo, hi, state.camSimRes));
   state.camCursor = {0, 0.0};
   state.camPlaybackOpen = true;
+  // The simulation is the one thing on screen now: a verb window still
+  // asking for a face, or a measurement, over a block being cut is two
+  // sessions claiming the same clicks. Close them -- the job stays.
+  state.camToolOpen = false;
+  state.camVerb = AppState::CamVerb::None;
+  state.camVerbOp = 0;
+  state.camGhostOp = 0;
+  state.camRefusal.clear();
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
+  state.measure = MeasureState{};
+  state.sectionToolOpen = false;
   state.camPlaying = false;
   state.camStockDrawnRevision = 0;
   return true;
