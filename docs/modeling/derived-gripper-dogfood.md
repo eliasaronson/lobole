@@ -21,6 +21,17 @@ bodies**: every pad, silkscreen sheet and SMD part is a body).
 | Gripper body | the gripper servo's case (`ZK_122`) | servo case, its two covers, the wrist-roll horn (four `derive_occurrence` from the in-context edit), the camera (`add_feature Derived` with a placement) | an L-shaped end plate on the servo's bottom face; two cheeks on the covers' outer faces with four M2 clearance holes **on the covers' tapped holes**; the fixed finger; a flange disc and web on the wrist-roll horn's flat face with four M2.5 holes **on its bolt circle**; four standoffs with M2 tapped holes **on the camera's 12.5 × 21 mm hole pattern** |
 | Moving jaw | the drive horn | drive horn, passive horn, servo case | hub disc on the horn's face with four M2.5 holes **on its bolt circle**; the arm on the hub, outboard of the body's cheek; the fingertip bent over to the fixed finger's plane |
 
+Second pass (the same day, after "this looks very messy"): the cheeks run
+most of the servo's length with chamfered corners and stop 1.6 mm short of
+the jaw hub; the fixed finger tapers from the plate to a flat gripping face
+at z = −6; the flange disc is sized to the horn; the hub is 24 mm on the
+19 mm horn; the arm is a tapered lever on top of the hub with a fingertip
+pad whose face opposes the fixed finger's, 13 mm apart at rest. The first
+pass of that redesign ran the cheeks to x = −10 and the pairwise check
+reported them against the drive horn (174 mm³) and the hub (161 mm³) —
+shortened, jaw–body clear by 1.5 mm. Renders `scratch/so101/50-53*.png`,
+the drawing `54-drawing.png`.
+
 Every bold hole pattern is external geometry: `project_geometry` of the
 ghost's hole edges into an empty sketch, and a Hole at the projected
 circles' centres. No hole coordinate was typed. The only numbers carried
@@ -90,9 +101,10 @@ after reopening every Derived is `stale: false`, no feature errors, the
 body and jaw volumes unchanged, `check_geometry` has no `stale_derived`.
 
 Drawing: `create_drawing` + four auto-placed views of the body + a note,
-exported to `scratch/so101/gripper-body-drawing.svg`. The export's own
-issue list says the four auto-placed views overlap on the A3 sheet — the
-placement "clear of the views already there" is not, for this part.
+exported to `scratch/so101/gripper-body-drawing.svg`. On the first pass the
+export's own issue list said the four views overlapped on the A3 sheet;
+after the placement fix (finding 18) they export as one row at 1:1 with an
+empty issue list.
 
 ## What broke, in order
 
@@ -161,8 +173,25 @@ placement "clear of the views already there" is not, for this part.
 17. `add_drawing_view`'s doc says `{drawing, source, ...}`; its handler
     refuses `drawing` (it works on the active drawing tab). `create_drawing`
     `sheet` is an object, and says so — a good refusal.
-18. Four auto-placed views overlap on the sheet (see the checks above).
-19. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
+18. **Four auto-placed views overlap on the sheet.** The row-and-wrap rule
+    clamps a wrapped row back up to the border, and when the views already
+    there reach that low the new one lands on them; a taller iso view
+    centred on the first row's midline went over the border the same way.
+    Fixed: a placement that overlaps a view, the title block or the border
+    re-lays the whole sheet out from the top-left, at the current scale and
+    then each standard scale down until it fits (one scale per sheet). The
+    body's four views now export with an empty issue list;
+    `drawing_smoke` asserts it on an 87 × 43 × 60 mm part on A3.
+19. **Every copy of an imported part read stale after the first save.**
+    Saving adopts the staged import files into the project directory and
+    rewrites each Import's `path`; the path was in the source's chain hash,
+    so the hash moved and every Derived from an imported part reported
+    `stale: true` — `update_derived` then changed nothing (volume delta 0).
+    The camera, imported straight from its STEP, did not. Fixed: an Import
+    hashes the file's bytes (cached by path, size and mtime), not its path;
+    a moved file is the same part, a different file at the path is not.
+    Test: `a moved import file is not a changed source; a changed file is`.
+20. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
     Raspberry Pi STEP (the crypto chip's footprint name). Not ours.
 
 ## Fixed the same day (`edb28a92` and the follow-up)
@@ -173,6 +202,8 @@ placement "clear of the views already there" is not, for this part.
 - `add_mate` face-connector refusal; `get_state` `reference: true`.
 - `contact_report` skips reference bodies on both the part and the assembly tab.
 - Drawing views skip reference bodies.
+- Auto-placed views re-lay the sheet out instead of piling up.
+- Import features hash their file's content, not its path.
 - Tests: `a hole placed on a derived hole edge, no coordinates copied`;
   `derived_smoke` contact_report assertion.
 

@@ -326,6 +326,13 @@ public:
   // .step/.stp (structured), .brep (exact sidecar), or .stl (triangle mesh,
   // sewn to a shell/solid).
   std::string path;
+  // A hash of the file's BYTES, cached by path + size + mtime, so the chain
+  // hash can key an import on what it imports rather than where the file
+  // sits: saving a project adopts staged imports into the project directory
+  // and rewrites `path`, and with the path in the hash every Derived copy of
+  // an imported part read stale after the first save (the SO-101 gripper
+  // dogfood). 0 when the file cannot be read.
+  size_t ContentHash() const;
   // Display color for the imported bodies. Assembly import (I2) extracts
   // per-part .brep sidecars, which carry no color — the import plan passes
   // the product's STEP color through here instead. Per-product colors in a
@@ -351,4 +358,9 @@ public:
 
 private:
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
+
+  mutable std::string m_hashPath;
+  mutable uintmax_t m_hashSize = 0;
+  mutable long long m_hashMtime = 0;
+  mutable size_t m_hashValue = 0;
 };

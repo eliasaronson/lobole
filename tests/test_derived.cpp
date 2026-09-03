@@ -12,6 +12,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
+#include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
@@ -599,6 +600,55 @@ TEST_CASE("a hole placed on a derived hole edge, no coordinates copied",
              WithinRel(800.0 - 3.14159265 * 1.0 * 4.0, 1e-4));
   CHECK_THAT(VolumeOf(host, did), // the ghost is not drilled
              WithinRel(1000.0 + 3.14159265 * 4.0 * 3.0, 1e-6));
+}
+
+TEST_CASE("a moved import file is not a changed source; a changed file is",
+          "[derived][import]") {
+  // Saving a project adopts staged import files into the project directory
+  // and rewrites each Import's path. That is not a change to the part, so
+  // it must not read as one (every copy of an imported part went stale
+  // after the first save). A different file at the path is.
+  const fs::path dir = TempPath("derived-import-hash");
+  fs::create_directories(dir);
+  Document box;
+  box.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0.0f), 10.0, 10.0, 10.0));
+  REQUIRE(box.Regenerate());
+  const fs::path a = dir / "a.brep", b = dir / "b.brep", c = dir / "c.brep";
+  REQUIRE(CADKernel::Instance().SaveBREP(a.string(), box.GetBodies()[0].shape));
+  fs::copy_file(a, b);
+
+  Document source;
+  source.AddFeature(std::make_unique<ImportFeature>("servo", a.string()));
+  REQUIRE(source.Regenerate());
+  REQUIRE(source.GetBodies().size() == 1);
+  Document host;
+  const uint64_t did = Derive(host, source);
+  REQUIRE(host.Regenerate());
+  const auto resolver = [&](uint64_t) -> const Document* { return &source; };
+  const auto* d = dynamic_cast<const DerivedFeature*>(host.GetFeature(0));
+  REQUIRE(d != nullptr);
+  CHECK(derived::IsStale(*d, resolver) == std::optional<bool>{false});
+
+  // The same bytes at another path: the adoption case.
+  auto* imp = dynamic_cast<ImportFeature*>(source.GetFeature(0));
+  REQUIRE(imp != nullptr);
+  imp->path = b.string();
+  REQUIRE(source.Regenerate());
+  CHECK(derived::IsStale(*d, resolver) == std::optional<bool>{false});
+
+  // Different bytes: a bigger box at the path is a changed source.
+  Document big;
+  big.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0.0f), 20.0, 10.0, 10.0));
+  REQUIRE(big.Regenerate());
+  REQUIRE(CADKernel::Instance().SaveBREP(c.string(), big.GetBodies()[0].shape));
+  imp->path = c.string();
+  REQUIRE(source.Regenerate());
+  CHECK(derived::IsStale(*d, resolver) == std::optional<bool>{true});
+  (void)did;
+  std::error_code ec;
+  fs::remove_all(dir, ec);
 }
 
 TEST_CASE("a mate connector on a derived face resolves in the assembly",

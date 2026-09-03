@@ -3855,6 +3855,62 @@ Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
   return nullptr;
 }
 
+namespace {
+
+// One view's footprint at 1:1, anchored at the origin (the sheet anchor maps
+// model -> position + scale * model).
+struct ViewFootprint {
+  glm::dvec2 modelMin, modelMax;
+};
+
+// Lays every view out from the sheet's top-left at one scale: a row to the
+// right, wrapping below when the row is full. Returns false when a wrapped
+// row would land on the title block or under the border — the sheet is full
+// at this scale. `positions` receives one anchor per footprint.
+bool FlowLayout(const SheetChrome& chrome, double scale,
+                const std::vector<ViewFootprint>& items,
+                std::vector<glm::dvec2>& positions) {
+  positions.clear();
+  double gapMax = 8.0;
+  for (const ViewFootprint& f : items) {
+    const glm::dvec2 size = (f.modelMax - f.modelMin) * scale;
+    gapMax = std::max(gapMax, std::max(size.x, size.y) * 0.15);
+  }
+  const double gap = gapMax;
+  double cursorX = chrome.borderMin.x + gap; // next left edge
+  double rowTop = chrome.borderMax.y - gap;  // this row's top edge
+  double rowBottom = rowTop;                 // lowest edge in this row
+  for (const ViewFootprint& f : items) {
+    const glm::dvec2 size = (f.modelMax - f.modelMin) * scale;
+    if (cursorX + size.x > chrome.borderMax.x &&
+        cursorX > chrome.borderMin.x + gap + 1e-9) {
+      cursorX = chrome.borderMin.x + gap; // wrap
+      rowTop = rowBottom - gap;
+    }
+    const double left = cursorX, top = rowTop;
+    const double bottom = top - size.y;
+    const Span rowX{left, left + size.x};
+    const Span blockX{chrome.titleBlockMin.x, chrome.titleBlockMax.x};
+    const double floorY =
+        Overlaps(rowX, blockX) ? chrome.titleBlockMax.y : chrome.borderMin.y;
+    if (bottom < floorY + gap || left + size.x > chrome.borderMax.x)
+      return false; // does not fit at this scale
+    positions.push_back(
+        glm::dvec2(left - scale * f.modelMin.x, top - scale * f.modelMax.y));
+    cursorX = left + size.x + gap;
+    rowBottom = std::min(rowBottom, bottom);
+  }
+  return true;
+}
+
+bool BoxesOverlap(glm::dvec2 aMin, glm::dvec2 aMax, glm::dvec2 bMin,
+                  glm::dvec2 bMax) {
+  return Overlaps({aMin.x, aMax.x}, {bMin.x, bMax.x}) &&
+         Overlaps({aMin.y, aMax.y}, {bMin.y, bMax.y});
+}
+
+} // namespace
+
 uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   if (!state.drawing)
     return 0;
@@ -3948,6 +4004,61 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
     }
   }
   v.position = pos;
+
+  // The row-and-wrap rule above clamps a wrapped row up to the border, and
+  // when the views already there reach that low the new one lands ON them —
+  // four auto-placed views of a 90 mm gripper body at 2:1 came out as one
+  // pile (the D4 dogfood). A placement that overlaps a view or the title
+  // block is not a placement: re-lay the whole sheet out from the top-left,
+  // at this scale first and then each standard scale down, until it fits.
+  // Every view of the sheet is moved (and, if needed, rescaled together —
+  // one scale per sheet is the drafting rule the block above already keeps).
+  if (measured) {
+    const SheetChrome chrome = ChromeOf(dwg.GetSheet());
+    const glm::dvec2 newMin = pos + v.scale * sv.bboxMin;
+    const glm::dvec2 newMax = pos + v.scale * sv.bboxMax;
+    bool collides =
+        BoxesOverlap(newMin, newMax, chrome.titleBlockMin,
+                     chrome.titleBlockMax) ||
+        newMin.x < chrome.borderMin.x || newMin.y < chrome.borderMin.y ||
+        newMax.x > chrome.borderMax.x || newMax.y > chrome.borderMax.y;
+    for (const DrawingView& other : dwg.GetViews()) {
+      const auto it = state.drawingRenders.find(other.id);
+      if (it != state.drawingRenders.end() && it->second.hasGeometry &&
+          BoxesOverlap(newMin, newMax, it->second.bboxMin, it->second.bboxMax))
+        collides = true;
+    }
+    if (collides) {
+      std::vector<DrawingView*> laid;
+      std::vector<ViewFootprint> items;
+      for (DrawingView& other : dwg.GetViews()) {
+        const auto it = state.drawingRenders.find(other.id);
+        if (it == state.drawingRenders.end() || !it->second.hasGeometry ||
+            other.scale <= 0.0)
+          continue;
+        laid.push_back(&other);
+        items.push_back({(it->second.bboxMin - other.position) / other.scale,
+                         (it->second.bboxMax - other.position) / other.scale});
+      }
+      items.push_back({sv.bboxMin, sv.bboxMax});
+      static const double kScales[] = {100.0, 50.0, 20.0, 10.0, 5.0,  2.0, 1.0,
+                                       0.5,   0.2,  0.1,  0.05, 0.02, 0.01};
+      std::vector<glm::dvec2> positions;
+      for (double scale : kScales) {
+        if (scale > v.scale + 1e-12)
+          continue;
+        if (!FlowLayout(chrome, scale, items, positions))
+          continue;
+        for (size_t i = 0; i < laid.size(); i++) {
+          laid[i]->scale = scale;
+          laid[i]->position = positions[i];
+        }
+        v.scale = scale;
+        v.position = positions.back();
+        break;
+      }
+    }
+  }
 
   SnapshotDrawing(state);
   const uint64_t id = dwg.AddView(v);

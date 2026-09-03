@@ -231,6 +231,29 @@ def main():
                f"mid-view label flagged: {chk['issues']}")
         d.call("remove_drawing_dim", id=r["id"])
 
+        # --- D4 (2026-09-03): four auto-placed views of a part the size of
+        # the SO-101 gripper body (87 x 43 x 60 mm) on A3 came out as one
+        # pile: the wrapped row was clamped back up onto the views already
+        # there. Auto-placement must lay the sheet out (one scale, no view on
+        # another, none on the title block) or say so.
+        d.call("add_part", name="tallbody")
+        d.call("add_feature", feature={"type": "Box", "name": "body",
+               "position": [-5, -22, -28], "width": 87, "height": 43,
+               "depth": 60})
+        d.call("create_drawing", name="tallbody-dwg", sheet={"size": "a3"})
+        ids = [d.call("add_drawing_view", source="tallbody", orientation=o)["id"]
+               for o in ("front", "top", "right", "iso")]
+        views = d.call("list_drawing_views")["views"]
+        scales = {round(v["scale"], 6) for v in views}
+        expect(len(scales) == 1, f"one scale per sheet: {scales}")
+        chk = d.call("check_drawing")
+        piles = [i for i in chk["issues"]
+                 if i["kind"] in ("view_overlap", "view_overlaps_title_block",
+                                  "view_outside_border")]
+        expect(not piles, f"four auto-placed views, no pile: {piles}")
+        d.call("delete_part", part="tallbody-dwg")
+        d.call("delete_part", part="tallbody")
+
         # Leave the project as the later save/reopen assertions expect it.
         tabs = d.call("list_parts")["parts"]
         for t in sorted(tabs, key=lambda t: -t["index"]):

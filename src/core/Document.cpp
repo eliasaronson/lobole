@@ -222,6 +222,17 @@ bool Document::Regenerate() {
     // Appearance is cosmetic (the stamp pass reapplies it after any cache
     // hit): keep it out of the hash so a recolor never rebuilds geometry.
     fj.erase("appearance");
+    // An import is WHAT it imports, not where the file sits: a save adopts
+    // staged files into the project directory and rewrites the path, which
+    // must not read as a changed part (every Derived copy of an imported
+    // part went stale after the first save). A file that cannot be read
+    // keeps its path in the hash, so it still differs from one that can.
+    if (const auto* imp =
+            dynamic_cast<const ImportFeature*>(m_features[i].get()))
+      if (const size_t content = imp->ContentHash(); content != 0) {
+        fj.erase("path");
+        fj["content_hash"] = content;
+      }
     chain = std::hash<std::string>{}(
         std::to_string(chain) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));

@@ -1,5 +1,9 @@
 #include "core/Feature.h"
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
@@ -84,6 +88,34 @@ bool CylinderFeature::Execute(RegenContext& ctx) {
 ImportFeature::ImportFeature(const std::string& name, const std::string& path)
     : path(path) {
   m_name = name;
+}
+
+size_t ImportFeature::ContentHash() const {
+  std::error_code ec;
+  const std::filesystem::path fp(path);
+  const uintmax_t size = std::filesystem::file_size(fp, ec);
+  if (ec)
+    return 0;
+  const auto mtime = std::filesystem::last_write_time(fp, ec);
+  if (ec)
+    return 0;
+  const long long stamp = mtime.time_since_epoch().count();
+  if (m_hashValue != 0 && m_hashPath == path && m_hashSize == size &&
+      m_hashMtime == stamp)
+    return m_hashValue;
+  std::ifstream in(fp, std::ios::binary);
+  if (!in)
+    return 0;
+  std::string bytes((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+  size_t h = std::hash<std::string>{}(bytes);
+  if (h == 0)
+    h = 1; // 0 means "unreadable"
+  m_hashPath = path;
+  m_hashSize = size;
+  m_hashMtime = stamp;
+  m_hashValue = h;
+  return h;
 }
 
 bool ImportFeature::Execute(RegenContext& ctx) {
