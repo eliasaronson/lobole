@@ -121,6 +121,12 @@ is ever done it wants its own design doc and its own gate before any code.
 
 ## A3 — There is no general "long operation off the frame" mechanism
 
+> **CLOSED 2026-09-02** ([ui/long-operations.md](ui/long-operations.md),
+> four commits `a2587a27`..`1a65d0a9`): a job registry, and every row in the
+> table below on it — the two "synchronous" entries are the two known-bugs
+> entries now marked fixed. The text below is left as written, as the record
+> of what the gap was.
+
 Four instances, three hand-rolled answers, one still unfixed:
 
 | operation | today |

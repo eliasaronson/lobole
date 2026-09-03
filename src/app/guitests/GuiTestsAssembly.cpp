@@ -242,7 +242,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::ImportRunning(*s_App));
     IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
 
-    // PollImport runs from the frame loop; yield until it lands. Bounded so a
+    // The registry reaps it from the frame loop; yield until it lands.
+    // Bounded so a
     // hang fails the test rather than wedging the suite. The modal must be up
     // for the duration — it is drawn by DockLayout rather than a toolbar
     // precisely so it survives the part->assembly tab switch that

@@ -14,7 +14,11 @@
 > hand-rolled answers. There are **five**, and reading them turned up two live
 > bugs that have nothing to do with tidiness.
 
-## What exists
+## What existed (2026-09-01, before the migration)
+
+Kept as the record of why. Today every row below is a registry entry
+(see [As built](#as-built-phase-1-2026-09-02)); only `RenderJob` keeps its
+shape, by design.
 
 Five long operations, five shapes. The rule they all follow is already
 articulated, in `ImportJob.h`:
@@ -136,16 +140,22 @@ bespoke status verb.
 Deliberately not a big-bang rewrite of five working things — the refactoring
 policy is "split what the next feature extends", and four of these five work.
 
-0. **The two bugs above**, now, independently of everything else.
-1. **The registry, the two poll sites, and `jobs`/`cancel_job`** — with the
-   CAM adaptive pocket as the only adopter. Nothing existing changes, and the
-   new job proves the shape before anything is migrated onto it.
+All done, in this order, 2026-09-01/02:
+
+0. **The two bugs above**, now, independently of everything else —
+   `65a4159c`.
+1. **The registry, one poll site, and `background_jobs`/
+   `cancel_background_job`** — with the CAM adaptive pocket as the only
+   adopter. Nothing existing changes, and the new job proves the shape
+   before anything is migrated onto it — `a2587a27`.
 2. **`SyncJob`** — the worst-affected and the simplest (no progress, no
-   cancel). If the shape cannot carry it, that is cheap to discover here.
+   cancel). If the shape cannot carry it, that is cheap to discover here —
+   `1ef01cbf`.
 3. **`TopoJob` + `StudyJob`** together: they share a panel and a poll site, and
-   splitting them would leave the panel polling two ways.
+   splitting them would leave the panel polling two ways — `777f1e0d`.
 4. **`ImportJob`** last — the sliced materialize and the modal make it the
-   hardest, and by then the registry has been proven three times.
+   hardest, and by then the registry has been proven three times —
+   `1a65d0a9`.
 
 `RenderJob` is not a thread; whether it belongs here at all is a question for
 when the rest is done, not now.
@@ -343,7 +353,8 @@ What is in the tree, and where the plan bent:
   `cancellable` flag and a `reaped` marker; **`ui/BackgroundJobs.h`** grew
   the registry verbs (`StartBackgroundJob`, `BackgroundJobRunning`,
   `CancelBackgroundJobs`, `JoinBackgroundJobs`, `ListBackgroundJobs`) and
-  `PollBackgroundJobs` reaps the registry after the five legacy polls. A
+  `PollBackgroundJobs` reaps the registry (after `PumpRenderJob`, the one
+  legacy poll left once phases 2-4 landed). A
   `finish` may start a successor — that is how a queue of passes advances —
   so the reap walks by index over the entries that existed when it began.
 - **`cam::GenerateContext`** (`CamToolpath.h`) is how a generate says what
@@ -452,8 +463,14 @@ rest on. That is A2's neighbourhood, not this one.
 - The two bugs get a test each: a sync job completes with the History panel
   closed, and a study job is reaped after leaving Simulation mode. Both are
   headless-testable through the actions layer (`tests/test_actions.cpp`).
+  **Done, one step further**: "a fetch runs on the registry and reports
+  through the loop" (no panel at all) and "a study solved on the registry
+  lands in its own part, not the active tab" (not merely a mode left — a
+  different tab active when it lands).
 - `background_jobs` and `cancel_background_job` join `rpc_params_gate` like
-  every other RPC.
+  every other RPC. **Done.**
 - The CAM adaptive job asserts what the freeze cost: generating an adaptive
   operation does not block a frame. The GUI suite can measure that directly —
   it already asserts frame behaviour in `shell/idle_throttle_rests_and_input_wakes`.
+  **Done**: `cam/adaptive_clears_off_the_frame` (pick 0.5 ms, worst frame
+  31 ms while the passes cut).
