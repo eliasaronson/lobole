@@ -5522,3 +5522,66 @@ TEST_CASE("cam profile: a one-pass through cut follows the model's bottom "
   CHECK(paths[0].error.empty());
   CHECK(paths[0].CutLength() > 100.0);
 }
+
+// ---------------------------------------------------------------------------
+// Cut what fits: a path never leaves the machine's travel.
+
+TEST_CASE("cam machine: a path is clipped to the travel, and says how much",
+          "[cam][machine]") {
+  auto doc = BlockDoc(); // 40 x 30 x 20; the stock is 2 mm bigger each way
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 8.0;
+  setup.operations.push_back(op);
+  // Untouched without a work area.
+  const auto whole = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(whole.size() == 1);
+  CHECK(whole[0].clippedMm == 0.0);
+  const double wholeCut = whole[0].CutLength();
+
+  // A machine 30 mm wide in X: the bed sits at the stock's corner, so the
+  // far 10-odd millimetres of the block are beyond it.
+  setup.machine.name = "Narrow";
+  setup.machine.travelMin = {0.0, 0.0, -100.0};
+  setup.machine.travelMax = {30.0, 600.0, 0.0};
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::MachineBounds(setup, doc->GetBodies(), lo, hi));
+  CHECK_THAT(hi.x - lo.x, WithinAbs(30.0, 1e-9));
+  const auto clipped = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(clipped.size() == 1);
+  REQUIRE(clipped[0].error.empty());
+  CHECK(clipped[0].clippedMm > 20.0);
+  CHECK(clipped[0].CutLength() < wholeCut - 20.0);
+  // EVERY move stays inside the bed in X and Y -- rapids too: a rapid off
+  // the bed is the same alarm.
+  for (const cam::Move& m : clipped[0].moves) {
+    CHECK(m.to.x >= lo.x - 1e-6);
+    CHECK(m.to.x <= hi.x + 1e-6);
+    CHECK(m.to.y >= lo.y - 1e-6);
+    CHECK(m.to.y <= hi.y + 1e-6);
+  }
+  // Where the cut runs out of the bed it retracts at the boundary.
+  int retracts = 0;
+  for (size_t i = 1; i < clipped[0].moves.size(); i++) {
+    const cam::Move& a = clipped[0].moves[i - 1];
+    const cam::Move& b = clipped[0].moves[i];
+    if (b.kind == cam::Move::Kind::Rapid && b.to.z > a.to.z + 1.0 &&
+        std::abs(b.to.x - hi.x) < 1e-3)
+      retracts++;
+  }
+  CHECK(retracts >= 1);
+  // The file it makes is clean, and the verdict says what was left out.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, clipped, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  CHECK(v.maxGouge < 0.4);
+  const auto lines = cam::MachineLines(setup, doc->GetBodies(), &clipped);
+  REQUIRE(lines.size() == 1);
+  INFO(lines[0].text);
+  CHECK(lines[0].text.find("left out of the file") != std::string::npos);
+}

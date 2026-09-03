@@ -772,12 +772,24 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
 namespace cam {
 
 std::vector<VerdictLine> MachineLines(const Setup& setup,
-                                      const std::vector<Body>& bodies) {
+                                      const std::vector<Body>& bodies,
+                                      const std::vector<Toolpath>* paths) {
   std::vector<VerdictLine> out;
-  if (const std::string reach = MachineWarning(setup, bodies); !reach.empty())
+  if (std::string reach = MachineWarning(setup, bodies); !reach.empty()) {
+    double clipped = 0.0;
+    if (paths != nullptr)
+      for (const Toolpath& tp : *paths)
+        clipped += tp.clippedMm;
+    if (clipped > 0.0) {
+      char buf[96];
+      std::snprintf(buf, sizeof(buf),
+                    ". %.0f mm of cutting beyond it is left out of the file",
+                    clipped);
+      reach += buf;
+    }
     out.push_back({VerdictLine::Level::Warn, reach});
-  else if (const std::string over = MachineOverhang(setup, bodies);
-           !over.empty())
+  } else if (const std::string over = MachineOverhang(setup, bodies);
+             !over.empty())
     out.push_back({VerdictLine::Level::Warn, over});
   return out;
 }

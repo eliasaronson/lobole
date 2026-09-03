@@ -2868,6 +2868,139 @@ std::string MachineWarning(const Setup& setup,
   return "";
 }
 
+bool MachineBoundsFramed(const Setup& setup, const std::vector<Body>& framed,
+                         glm::dvec3& lo, glm::dvec3& hi) {
+  const Machine& m = setup.machine;
+  if (!m.HasWorkArea())
+    return false;
+  glm::dvec3 slo(0.0), shi(0.0);
+  if (!StockBoundsFramed(setup, framed, slo, shi))
+    return false;
+  lo = slo;
+  hi = slo + (m.travelMax - m.travelMin);
+  return true;
+}
+
+bool MachineBounds(const Setup& setup, const std::vector<Body>& bodies,
+                   glm::dvec3& lo, glm::dvec3& hi) {
+  return MachineBoundsFramed(setup, BodiesInSetupFrame(setup, bodies), lo, hi);
+}
+
+void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
+                   double safeZ, double plungeFeed) {
+  if (tp.moves.empty())
+    return;
+  constexpr double kEps = 1e-6;
+  // Liang-Barsky in XY: the parameter range of a->b that lies in the box.
+  const auto clip = [&](const glm::dvec3& a, const glm::dvec3& b, double& t0,
+                        double& t1) {
+    t0 = 0.0;
+    t1 = 1.0;
+    const double d[2] = {b.x - a.x, b.y - a.y};
+    const double p0[2] = {a.x, a.y};
+    const double bl[2] = {lo.x - kEps, lo.y - kEps};
+    const double bh[2] = {hi.x + kEps, hi.y + kEps};
+    for (int ax = 0; ax < 2; ax++) {
+      if (std::abs(d[ax]) < 1e-12) {
+        if (p0[ax] < bl[ax] || p0[ax] > bh[ax])
+          return false;
+        continue;
+      }
+      double tl = (bl[ax] - p0[ax]) / d[ax], th = (bh[ax] - p0[ax]) / d[ax];
+      if (tl > th)
+        std::swap(tl, th);
+      t0 = std::max(t0, tl);
+      t1 = std::min(t1, th);
+      if (t0 > t1)
+        return false;
+    }
+    return true;
+  };
+  const auto lerp = [](const glm::dvec3& a, const glm::dvec3& b, double t) {
+    return a + (b - a) * t;
+  };
+  const auto cutting = [](const Move& m) {
+    return m.kind == Move::Kind::Cut || m.kind == Move::Kind::Plunge;
+  };
+
+  std::vector<Move> out;
+  out.reserve(tp.moves.size() + 16);
+  double clipped = 0.0;
+  bool outside = false; // the tool is off the bed, parked at safeZ
+  const auto retract = [&](const glm::dvec3& at) {
+    if (at.z < safeZ - kEps) {
+      Move up;
+      up.kind = Move::Kind::Rapid;
+      up.to = {at.x, at.y, safeZ};
+      out.push_back(up);
+    }
+    outside = true;
+  };
+  const auto reenter = [&](const glm::dvec3& at, const Move& like) {
+    Move over;
+    over.kind = Move::Kind::Rapid;
+    over.to = {at.x, at.y, safeZ};
+    out.push_back(over);
+    if (at.z < safeZ - kEps) {
+      Move down;
+      down.kind = like.kind == Move::Kind::Rapid ? Move::Kind::Rapid
+                                                 : Move::Kind::Plunge;
+      down.to = at;
+      down.feed = like.kind == Move::Kind::Rapid ? 0.0 : plungeFeed;
+      out.push_back(down);
+    }
+    outside = false;
+  };
+
+  // The first move has no "from": it is where the tool goes first.
+  {
+    const Move& first = tp.moves[0];
+    double t0, t1;
+    if (clip(first.to, first.to, t0, t1))
+      out.push_back(first);
+    else
+      outside = true; // parked off the bed until something comes back in
+  }
+  glm::dvec3 prev = tp.moves[0].to;
+  for (size_t i = 1; i < tp.moves.size(); i++) {
+    const Move& m = tp.moves[i];
+    const double length = glm::length(m.to - prev);
+    double t0, t1;
+    if (!clip(prev, m.to, t0, t1)) {
+      if (!outside)
+        retract(prev);
+      if (cutting(m))
+        clipped += length;
+      prev = m.to;
+      continue;
+    }
+    if (t0 > kEps) {
+      // Comes in part-way: what came before it is off the bed.
+      if (cutting(m))
+        clipped += length * t0;
+      if (!outside)
+        retract(prev);
+      reenter(lerp(prev, m.to, t0), m);
+    } else if (outside) {
+      // Starts on the boundary or inside while parked: come back in here.
+      reenter(prev, m);
+    }
+    if (t1 < 1.0 - kEps) {
+      Move part = m;
+      part.to = lerp(prev, m.to, t1);
+      out.push_back(part);
+      if (cutting(m))
+        clipped += length * (1.0 - t1);
+      retract(part.to);
+    } else {
+      out.push_back(m);
+    }
+    prev = m.to;
+  }
+  tp.moves = std::move(out);
+  tp.clippedMm += clipped;
+}
+
 std::string MachineOverhang(const Setup& setup,
                             const std::vector<Body>& bodies) {
   const Machine& m = setup.machine;
@@ -2945,12 +3078,24 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
   // Two orders would be a picture that can disagree with the file, which the
   // CAM plan refuses on principle.
   std::vector<Toolpath> out;
+  glm::dvec3 bedLo(0.0), bedHi(0.0);
+  const bool bed = MachineBoundsFramed(setup, framed, bedLo, bedHi);
   for (size_t i : CuttingOrder(setup)) {
     const Operation& op = setup.operations[i];
     if (!op.enabled)
       continue;
-    for (Toolpath& tp : GenerateOpFramed(setup, op, framed, ctx))
+    for (Toolpath& tp : GenerateOpFramed(setup, op, framed, ctx)) {
+      // Cut what fits (the router round's last finding): a controller never
+      // truncates a program for you -- it alarms on the line, or hits the
+      // stop -- so a move beyond the travel is clipped HERE, once, where
+      // every picture and the file read from.
+      if (bed && tp.error.empty()) {
+        const Tool* tool = setup.FindTool(tp.toolNumber);
+        ClipToMachine(tp, bedLo, bedHi, setup.safeZ,
+                      tool != nullptr ? tool->feedPlunge : 100.0);
+      }
       out.push_back(std::move(tp));
+    }
   }
   // Tool order is an order of TOOLPATHS (R6): an operation that roughs with
   // T1 and finishes with T2 is two of them, and grouping by operation would

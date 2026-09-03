@@ -243,8 +243,10 @@ struct VerdictLine {
 // parts' reach beyond the travel, or the sheet's overhang when the parts
 // fit -- as WARN lines, never refusals. One helper for the panel and the
 // RPC, so the two verdicts cannot disagree about the machine.
+// `paths`, when given, adds how much cutting was clipped off at the travel.
 [[nodiscard]] std::vector<VerdictLine>
-MachineLines(const Setup& setup, const std::vector<Body>& bodies);
+MachineLines(const Setup& setup, const std::vector<Body>& bodies,
+             const std::vector<Toolpath>* paths = nullptr);
 
 // `breaksAnEdge` says the job contains an edge-break operation. It changes
 // nothing that is measured — it names the most likely cause of the gouge such

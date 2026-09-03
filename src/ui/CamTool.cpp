@@ -1029,21 +1029,22 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
     // the operator touches off inside the travel is not the job's to know,
     // so this is the machine's SIZE against the job's -- the check
     // cam::MachineWarning makes in words. Never resized to fit.
-    const cam::Machine& m = setup->machine;
-    if (m.HasWorkArea()) {
-      const glm::dvec3 size = m.travelMax - m.travelMin;
-      const std::vector<glm::dvec2> bed = {{lo.x, lo.y},
-                                           {lo.x + size.x, lo.y},
-                                           {lo.x + size.x, lo.y + size.y},
-                                           {lo.x, lo.y + size.y}};
+    glm::dvec3 bedLo(0.0), bedHi(0.0);
+    if (cam::MachineBounds(*setup, ui::JobBodies(state), bedLo, bedHi)) {
+      // The SAME box the generator clips to (cam::MachineBounds): what is
+      // drawn as the machine is what the file stays inside.
+      const std::vector<glm::dvec2> bed = {{bedLo.x, bedLo.y},
+                                           {bedHi.x, bedLo.y},
+                                           {bedHi.x, bedHi.y},
+                                           {bedLo.x, bedHi.y}};
       const bool fits =
           cam::MachineWarning(*setup, ui::JobBodies(state)).empty();
       const glm::vec4 line = fits ? kBedLine : kBedRefusedLine;
-      LoopLines(bed, lo.z, 1.0f, line, prims);
-      LoopLines(bed, lo.z + size.z, 0.8f, line, prims);
+      LoopLines(bed, bedLo.z, 1.0f, line, prims);
+      LoopLines(bed, bedHi.z, 0.8f, line, prims);
       for (const glm::dvec2& c : bed)
-        AppendPrimLine(glm::vec3(c.x, c.y, lo.z),
-                       glm::vec3(c.x, c.y, lo.z + size.z), 0.8f, line, prims);
+        AppendPrimLine(glm::vec3(c.x, c.y, bedLo.z),
+                       glm::vec3(c.x, c.y, bedHi.z), 0.8f, line, prims);
     }
   }
 
@@ -1150,7 +1151,7 @@ void RunCamVerification(AppState& state) {
   // The machine's lines: the parts' reach beyond the travel, or the sheet's
   // overhang -- warnings, never refusals. Cut as far as it reaches.
   for (const cam::VerdictLine& line :
-       cam::MachineLines(*setup, ui::JobBodies(state)))
+       cam::MachineLines(*setup, ui::JobBodies(state), &state.camToolpaths))
     state.camVerdict.push_back(line);
   state.camLeftover = cam::LeftoverPoints(insp, tolerance, 3000);
 }

@@ -1141,7 +1141,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // The machine's lines too -- the parts' reach beyond the travel, the
     // sheet's overhang -- the same helper the panel uses.
     for (const cam::VerdictLine& line :
-         cam::MachineLines(setup, ui::JobBodies(state)))
+         cam::MachineLines(setup, ui::JobBodies(state), &paths))
       says.push_back(line.text);
     json biggest = json::array();
     for (const cam::Verdict::Region& r : v.biggest)

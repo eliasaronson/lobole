@@ -468,6 +468,10 @@ struct Toolpath {
   // The finishing half of a rough-then-finish operation (R6): the same
   // operationId as the roughing toolpath, the finishing tool's number.
   bool finish = false;
+  // Millimetres of cutting that lay beyond the machine's travel and were
+  // left out of this path (ClipToMachine). The verdict says so; a controller
+  // never truncates for you -- it alarms on the line, or hits the stop.
+  double clippedMm = 0.0;
 
   [[nodiscard]] bool Empty() const { return moves.empty(); }
   // Total distance travelled while cutting, in mm — the cheap sanity check a

@@ -307,6 +307,28 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 [[nodiscard]] std::string MachineOverhang(const Setup& setup,
                                           const std::vector<Body>& bodies);
 
+// Where the machine's travel sits in SETUP space: a box the size of the
+// travel, its near-left corner at the stock's and its floor at the stock's
+// bottom -- how a sheet is loaded, and the one anchoring the viewport draws
+// and the clip below cuts to. False when the machine states no work area or
+// there is no stock. `bodies` unframed; the Framed form takes them framed.
+[[nodiscard]] bool MachineBounds(const Setup& setup,
+                                 const std::vector<Body>& bodies,
+                                 glm::dvec3& lo, glm::dvec3& hi);
+[[nodiscard]] bool MachineBoundsFramed(const Setup& setup,
+                                       const std::vector<Body>& framed,
+                                       glm::dvec3& lo, glm::dvec3& hi);
+
+// Cut what fits: every move clipped to the box in X and Y. A cut that runs
+// out of the box is cut to the boundary and the tool retracts to `safeZ`; one
+// that comes back in re-enters at the boundary at safe height and plunges
+// (at `plungeFeed`) back to the depth it was at. What was left out is
+// counted in Toolpath::clippedMm. GenerateAll applies this when the machine
+// states a work area, so the backplot, the simulation, the verifier and the
+// file all show the same shortened cut.
+void ClipToMachine(Toolpath& tp, const glm::dvec3& lo, const glm::dvec3& hi,
+                   double safeZ, double plungeFeed);
+
 // One operation's toolpaths: one, or two when it roughs with one tool and
 // finishes with another (R6, Operation::finishTool). GenerateAll walks this.
 [[nodiscard]] std::vector<Toolpath> GenerateOp(const Setup& setup,

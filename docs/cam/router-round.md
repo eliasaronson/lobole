@@ -216,3 +216,15 @@ All seven, the same day, in order. What the plan did not anticipate:
   without touching them; it coalesces a drag while an ImGui item is active.
   The verbs, the picks and the gizmo snapshot explicitly.
 
+**The next morning: cut what fits.** The machine warning said the machine
+"cuts as far as it reaches and stops", and that was wrong about every
+controller surveyed: GRBL with soft limits on refuses the line and alarms,
+without them it drives into the stop. So the file has to stop for it.
+`cam::ClipToMachine` clips every move to the travel box in X and Y — a cut
+that runs out is cut to the boundary and retracts, one that comes back
+re-enters at safe height and plunges to where it was — applied once in
+`GenerateAll` so the backplot, the simulation, the verifier and the file
+show the same shortened cut, and the verdict says how many millimetres
+were left out. `cam::MachineBounds` is the one anchoring the viewport draws
+and the clip cuts to.
+
