@@ -33,7 +33,7 @@ thing behind it invisible to the next person who looks.
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `measure-v2.md` (measure reopened, in flight), `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
 | [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
 | [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md`, `gpu-debugging.md` (validation layers vs. a frame capture — which question each answers), `renderer-wiring.md` |
-| [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs |
+| [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs, `a6` loop solver, `relations-plan.md` (gear/rack/screw couplings between mates, v83) |
 | [simulation/](simulation/plan.md) | FEM | see also `ui/u11-simulation-setup.md` |
 | [drawings/](drawings/plan.md) | 2D drafting | `guide.md` (the workflow) |
 | [configurations/](configurations/plan.md) | part + assembly families | |

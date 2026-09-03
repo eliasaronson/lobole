@@ -89,6 +89,22 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
 // own UI, and inventing one here would be building for a case nobody has.
 int ApplyAttachments(AssemblyDocument& asmDoc);
 
+// Relations (docs/assemblies/relations-plan.md): make every relation hold
+// by setting the dependent mate's DOF from the driving one. `drivenMateId`
+// names the mate that was just changed (a drag, set_mate) and the walk goes
+// outward from it, so dragging either gear turns the other; 0 means an
+// unprompted solve, where A drives B — deterministic, and a no-op after a
+// driven pass because propagation is idempotent. Sets `Relation::error`
+// for a mate that is gone or lacks the DOF, and returns how many DOFs it
+// wrote. Solve() calls it with 0; callers that changed a mate call it with
+// that mate before Solve().
+int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId = 0);
+
+// Read/write one DOF of a mate by name; false when the mate type lacks it.
+bool MateHasDof(MateType type, MateDof dof);
+[[nodiscard]] double MateDofValue(const Mate& m, MateDof dof);
+void SetMateDof(Mate& m, MateDof dof, double value);
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById = nullptr);
 

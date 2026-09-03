@@ -85,6 +85,16 @@ Mate MateFromJson(const nlohmann::json& j);
 nlohmann::json ExplodedViewToJson(const ExplodedView& view);
 ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 
+// Single-relation (de)serialization (v83, docs/assemblies/relations-plan.md);
+// same convention. An unknown kind or DOF name is refused naming the
+// accepted ones — never demoted to a default.
+nlohmann::json RelationToJson(const Relation& relation);
+Relation RelationFromJson(const nlohmann::json& j);
+const char* RelationKindToString(RelationKind kind);
+RelationKind RelationKindFromString(const std::string& s);
+const char* MateDofToString(MateDof dof);
+MateDof MateDofFromString(const std::string& s);
+
 // Single-study (de)serialization (v29, FEM); used both for the studies/ dir
 // files and to echo/snapshot studies from the RPCs and Commands. Throws on
 // malformed input.

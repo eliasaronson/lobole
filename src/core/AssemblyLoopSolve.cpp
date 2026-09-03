@@ -97,6 +97,30 @@ struct Packing {
   int cols = 0;
 };
 
+} // namespace
+
+int DofColumn(MateType type, MateDof dof, int firstColumn) {
+  if (firstColumn < 0)
+    return -1;
+  // Mirrors SeedQ/AdjustAt's packing order per type.
+  switch (type) {
+  case MateType::Revolute:
+    return dof == MateDof::Rotation ? firstColumn : -1;
+  case MateType::Slider:
+    return dof == MateDof::Offset ? firstColumn : -1;
+  case MateType::Cylindrical:
+    return dof == MateDof::Rotation ? firstColumn : firstColumn + 1;
+  case MateType::Planar:
+    return dof == MateDof::Rotation ? firstColumn + 2 : -1;
+  case MateType::Ball:
+  case MateType::Fastened:
+    break;
+  }
+  return -1;
+}
+
+namespace {
+
 Packing PackDofs(const std::vector<LoopMate>& mates) {
   Packing p;
   p.columnOf.assign(mates.size(), -1);
@@ -330,7 +354,25 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
 
   const Packing pack = PackDofs(problem.mates);
   const int cols = pack.cols;
-  const int rows = static_cast<int>(problem.cut.size()) * 6;
+  // Relations whose DOFs are both unknowns here are rows; one that names a
+  // DOF the mate lacks was refused at creation and is skipped, not guessed.
+  struct RelationRow {
+    int colA, colB;
+    double ratio, phase;
+    bool rotationB;
+  };
+  std::vector<RelationRow> relRows;
+  for (const LoopRelation& r : problem.relations) {
+    const int ca =
+        DofColumn(problem.mates[r.mateA].type, r.dofA, pack.columnOf[r.mateA]);
+    const int cb =
+        DofColumn(problem.mates[r.mateB].type, r.dofB, pack.columnOf[r.mateB]);
+    if (ca < 0 || cb < 0)
+      continue;
+    relRows.push_back({ca, cb, r.ratio, r.phase, r.dofB == MateDof::Rotation});
+  }
+  const int cutRows = static_cast<int>(problem.cut.size()) * 6;
+  const int rows = cutRows + static_cast<int>(relRows.size());
   std::vector<double> q = SeedQ(problem.mates, pack);
 
   const double charLen =
@@ -350,6 +392,14 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
       CutResidual(problem.mates[mi], adjust[mi], w, charLen, v);
       for (int i = 0; i < 6; i++)
         r[static_cast<int>(k) * 6 + i] = v[i];
+    }
+    // A relation row in the same units as the cut rows: a rotation residual
+    // is scaled by the characteristic length, as the cut rows' rotational
+    // part is, so radians and millimetres weigh alike in the least squares.
+    for (size_t k = 0; k < relRows.size(); k++) {
+      const RelationRow& rr = relRows[k];
+      const double v = qq[rr.colB] - rr.ratio * qq[rr.colA] - rr.phase;
+      r[cutRows + static_cast<int>(k)] = rr.rotationB ? v * charLen : v;
     }
     if (keepWorld)
       world = std::move(w);
@@ -532,6 +582,18 @@ std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
     out[slotFor(p.mates[i].aOcc)].sub.cut.push_back(subIndexOf[i]);
   for (const auto& [occ, at] : p.anchor)
     out[slotFor(occ)].sub.anchor.emplace_back(occ, at);
+  // A relation is a row only where both its mates live in ONE component;
+  // across components it is propagation's business (AssemblySolve.cpp).
+  for (const LoopRelation& r : p.relations) {
+    const size_t sa = slotFor(p.mates[r.mateA].aOcc);
+    const size_t sb = slotFor(p.mates[r.mateB].aOcc);
+    if (sa != sb)
+      continue;
+    LoopRelation sub = r;
+    sub.mateA = subIndexOf[r.mateA];
+    sub.mateB = subIndexOf[r.mateB];
+    out[sa].sub.relations.push_back(sub);
+  }
   return out;
 }
 

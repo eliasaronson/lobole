@@ -66,12 +66,29 @@ struct LoopTreeEdge {
 
 // The problem the caller hands over: the spanning forest it already walked,
 // the edges that closed loops, and where each component is pinned.
+// A relation between two mates' DOFs (docs/assemblies/relations-plan.md):
+// one residual row, dofB - ratio * dofA - phase, beside the six per cut mate.
+struct LoopRelation {
+  size_t mateA = 0; // indices into LoopProblem::mates
+  size_t mateB = 0;
+  MateDof dofA = MateDof::Rotation;
+  MateDof dofB = MateDof::Rotation;
+  double ratio = -1.0;
+  double phase = 0.0;
+};
+
 struct LoopProblem {
   std::vector<LoopMate> mates;
   std::vector<LoopTreeEdge> tree;                     // in placement order
   std::vector<size_t> cut;                            // indices into `mates`
   std::vector<std::pair<uint64_t, glm::mat4>> anchor; // pinned occ -> world
+  std::vector<LoopRelation> relations;
 };
+
+// The column of one DOF of a mate in the solver's state vector, or -1 when
+// that mate type has no such DOF. `firstColumn` is the mate's first column
+// (PackDofs); shared with the residual code so the two cannot disagree.
+int DofColumn(MateType type, MateDof dof, int firstColumn);
 
 struct LoopSolution {
   bool ran = false;       // false when there was nothing to close

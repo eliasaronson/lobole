@@ -11,6 +11,8 @@
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 #include "ui/TextFit.h"
 
+#include "core/io/Serialization.h" // RelationKindToString
+
 #include "imgui.h"
 
 #include <glm/gtc/quaternion.hpp> // eulerAngles, quat(vec3)
@@ -86,6 +88,67 @@ std::string OccLabel(const AppState& state, const AssemblyDocument& asmDoc,
 // The mate list and its selected-mate editor. The create/edit session's
 // controls (connector slot rows, flip, accept/cancel) live in the floating
 // Tool window (DrawMateToolWindow below, U7c).
+// Relations (docs/assemblies/relations-plan.md): listed with their ratio
+// and phase editable and a remove button. Made by RPC in this round — a
+// relation names two mates and the panel selects one — so there is no
+// creation tool here for the defaults gate to hold.
+void DrawRelationsSection(AppState& state) {
+  AssemblyDocument& asmDoc = *state.assembly;
+  if (asmDoc.RelationCount() == 0)
+    return;
+  ImGui::SeparatorText("Relations");
+  uint64_t remove = 0;
+  for (Relation& r : asmDoc.GetRelations()) {
+    ImGui::PushID(static_cast<int>(r.id));
+    const Mate* a = asmDoc.FindMateById(r.mateA);
+    const Mate* b = asmDoc.FindMateById(r.mateB);
+    const std::string label =
+        (r.name.empty() ? std::string(DocumentIO::RelationKindToString(r.kind))
+                        : r.name) +
+        "  [" + DocumentIO::RelationKindToString(r.kind) + "]";
+    if (!r.error.empty()) {
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s", "(!)");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", r.error.c_str());
+      ImGui::SameLine();
+    }
+    ImGui::TextUnformatted(label.c_str());
+    if (a != nullptr && b != nullptr)
+      ImGui::TextDisabled(
+          "  %s -> %s",
+          (a->name.empty() ? "mate " + std::to_string(a->id) : a->name).c_str(),
+          (b->name.empty() ? "mate " + std::to_string(b->id) : b->name)
+              .c_str());
+    double ratio = r.ratio, phase = r.phase;
+    ImGui::SetNextItemWidth(110.0f);
+    if (ExprInputDouble(state, "ratio###rel_ratio", &ratio, "%.5g") &&
+        ratio != 0.0 && ratio != r.ratio) {
+      SnapshotAssembly(state);
+      r.ratio = ratio;
+      asmDoc.BumpVersion();
+      SolveActiveAssembly(state);
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110.0f);
+    if (ExprInputDouble(state, "phase###rel_phase", &phase, "%.5g") &&
+        phase != r.phase) {
+      SnapshotAssembly(state);
+      r.phase = phase;
+      asmDoc.BumpVersion();
+      SolveActiveAssembly(state);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("x###rel_remove"))
+      remove = r.id;
+    ImGui::PopID();
+  }
+  if (remove != 0) {
+    SnapshotAssembly(state);
+    asmDoc.RemoveRelation(remove);
+    SolveActiveAssembly(state);
+  }
+}
+
 void DrawMatesSection(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
 
@@ -696,6 +759,7 @@ void DrawOccurrencePanel(AppState& state) {
   }
 
   DrawMatesSection(state);
+  DrawRelationsSection(state);
   DrawConfigsSection(state);
   DrawExplodedSection(state);
   DrawBomSection(state);

@@ -1,5 +1,6 @@
 #include "remote/RemoteAssembly.h"
 
+#include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/io/Serialization.h"
@@ -15,6 +16,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -67,6 +69,24 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "ball_rotation, dx, dy, flipped, id, name, offset, rotation"},
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates", "List mates with status/errors.", ""},
+    {"add_relation",
+     "Couple two mates' degrees of freedom {type: gear|rack|screw|linear, a: "
+     "mate id, b: mate id}: dof_b = ratio * dof_a + phase. The ratio is "
+     "DERIVED from the kind's own numbers when given — gear: {teeth_a, "
+     "teeth_b} (ratio = -teeth_a/teeth_b, so meshing gears counter-rotate); "
+     "rack: {pitch_radius} mm (a's rotation drives b's slide); screw: "
+     "{pitch} mm per turn on ONE cylindrical mate (pass the same id as a and "
+     "b); linear: a bare {ratio}. `ratio` may be given directly for any kind; "
+     "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
+     "teeth mesh. Dragging or set_mate on EITHER mate turns the other; inside "
+     "a mate loop the relation is a solver row and lowers the DOF count. "
+     "Refused for a mate that lacks the degree of freedom (a fastened mate "
+     "has no rotation) (docs/assemblies/relations-plan.md).",
+     "a, b, name, phase, pitch, pitch_radius, ratio, teeth_a, teeth_b, type"},
+    {"set_relation", "Edit a relation's {ratio?, phase?, name?} by {id}.",
+     "id, name, phase, ratio"},
+    {"remove_relation", "Remove a relation by id.", "id"},
+    {"list_relations", "List relations with status/errors.", ""},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns the per-mate status plus, for an assembly "
@@ -579,6 +599,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
                     q.at(1).get<float>(), q.at(2).get<float>());
     }
+    // The mate just edited drives whatever it is related to: turning the
+    // wheel turns the pinion as readily as the other way round.
+    (void)assembly::PropagateRelations(*state.assembly, mate->id);
     ui::SolveActiveAssembly(state);
     json out = DocumentIO::MateToJson(*mate);
     if (!mate->error.empty())
@@ -611,6 +634,150 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       arr.push_back(mj);
     }
     return json{{"mates", arr}};
+  }
+  if (m == "add_relation") {
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    Relation r;
+    r.kind =
+        DocumentIO::RelationKindFromString(p.at("type").get<std::string>());
+    r.mateA = p.at("a").get<uint64_t>();
+    r.mateB = p.at("b").get<uint64_t>();
+    r.name = p.value("name", std::string{});
+    r.phase = p.value("phase", 0.0);
+    const Mate* a = state.assembly->FindMateById(r.mateA);
+    const Mate* b = state.assembly->FindMateById(r.mateB);
+    if (a == nullptr || b == nullptr)
+      throw std::runtime_error(
+          "no mate with id " +
+          std::to_string(a == nullptr ? r.mateA : r.mateB) +
+          "; list_mates shows the ones that exist");
+    // The kind fixes which DOF of each mate is coupled, and how the ratio is
+    // derived from the kind's own numbers.
+    switch (r.kind) {
+    case RelationKind::Gear:
+      r.dofA = r.dofB = MateDof::Rotation;
+      if (p.contains("teeth_a") || p.contains("teeth_b")) {
+        const double za = p.value("teeth_a", 0.0), zb = p.value("teeth_b", 0.0);
+        if (za <= 0.0 || zb <= 0.0)
+          throw std::runtime_error(
+              "a gear ratio needs both teeth_a and teeth_b (positive)");
+        r.ratio = -za / zb;
+      }
+      break;
+    case RelationKind::Rack:
+      r.dofA = MateDof::Rotation;
+      r.dofB = MateDof::Offset;
+      if (p.contains("pitch_radius")) {
+        r.ratio = p.at("pitch_radius").get<double>();
+        if (r.ratio <= 0.0)
+          throw std::runtime_error("pitch_radius must be positive (mm)");
+      }
+      break;
+    case RelationKind::Screw:
+      r.dofA = MateDof::Rotation;
+      r.dofB = MateDof::Offset;
+      if (r.mateA != r.mateB)
+        throw std::runtime_error(
+            "a screw relation is one CYLINDRICAL mate's rotation driving its "
+            "own offset: pass the same mate id as a and b");
+      if (p.contains("pitch")) {
+        const double pitch = p.at("pitch").get<double>();
+        if (pitch <= 0.0)
+          throw std::runtime_error("pitch must be positive (mm per turn)");
+        r.ratio = pitch / (2.0 * M_PI);
+      }
+      break;
+    case RelationKind::Linear:
+      r.dofA = r.dofB = MateDof::Offset;
+      break;
+    }
+    if (p.contains("ratio"))
+      r.ratio = p.at("ratio").get<double>();
+    else if (!(p.contains("teeth_a") || p.contains("pitch_radius") ||
+               p.contains("pitch")))
+      throw std::runtime_error(
+          "give the ratio, or what it is derived from: teeth_a + teeth_b for "
+          "a gear, pitch_radius for a rack, pitch for a screw");
+    if (r.ratio == 0.0)
+      throw std::runtime_error("a relation's ratio cannot be zero");
+    const auto lacks = [](const Mate& mm, MateDof dof) {
+      return !assembly::MateHasDof(mm.type, dof);
+    };
+    if (lacks(*a, r.dofA) || lacks(*b, r.dofB)) {
+      const Mate& bad = lacks(*a, r.dofA) ? *a : *b;
+      const MateDof dof = lacks(*a, r.dofA) ? r.dofA : r.dofB;
+      throw std::runtime_error(
+          "mate " + std::to_string(bad.id) + " (" +
+          DocumentIO::MateToJson(bad).at("mate_type").get<std::string>() +
+          ") has no " + DocumentIO::MateDofToString(dof) + " to couple — a " +
+          DocumentIO::RelationKindToString(r.kind) + " needs " +
+          (r.dofA == MateDof::Rotation ? "revolute" : "slider") +
+          " or cylindrical mates");
+    }
+    ui::SnapshotAssembly(state);
+    const uint64_t id = state.assembly->AddRelation(std::move(r));
+    ui::SolveActiveAssembly(state);
+    json out =
+        DocumentIO::RelationToJson(*state.assembly->FindRelationById(id));
+    if (const Relation* made = state.assembly->FindRelationById(id);
+        made != nullptr && !made->error.empty())
+      out["error"] = made->error;
+    return out;
+  }
+  if (m == "set_relation") {
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    Relation* r = state.assembly->FindRelationById(p.at("id").get<uint64_t>());
+    if (!r)
+      throw std::runtime_error("no such relation; list_relations shows them");
+    ui::SnapshotAssembly(state);
+    if (p.contains("ratio")) {
+      r->ratio = p.at("ratio").get<double>();
+      if (r->ratio == 0.0)
+        throw std::runtime_error("a relation's ratio cannot be zero");
+    }
+    if (p.contains("phase"))
+      r->phase = p.at("phase").get<double>();
+    if (p.contains("name"))
+      r->name = p.at("name").get<std::string>();
+    state.assembly->BumpVersion();
+    ui::SolveActiveAssembly(state);
+    json out = DocumentIO::RelationToJson(*r);
+    if (!r->error.empty())
+      out["error"] = r->error;
+    return out;
+  }
+  if (m == "remove_relation") {
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    ui::SnapshotAssembly(state);
+    if (!state.assembly->RemoveRelation(p.at("id").get<uint64_t>())) {
+      state.assemblyHistory.undo.pop_back(); // nothing changed; drop snapshot
+      throw std::runtime_error("no such relation");
+    }
+    ui::SolveActiveAssembly(state);
+    return json::object();
+  }
+  if (m == "list_relations") {
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    json arr = json::array();
+    for (const Relation& r : state.assembly->GetRelations()) {
+      json rj = DocumentIO::RelationToJson(r);
+      if (!r.error.empty())
+        rj["error"] = r.error;
+      arr.push_back(rj);
+    }
+    return json{{"relations", arr}};
   }
   if (m == "select_mate") {
     if (!state.assembly)

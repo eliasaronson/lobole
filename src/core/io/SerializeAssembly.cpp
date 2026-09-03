@@ -246,4 +246,75 @@ ExplodedView ExplodedViewFromJson(const json& j) {
   return v;
 }
 
+// ---- Relations (v83) ------------------------------------------------------
+
+const char* RelationKindToString(RelationKind kind) {
+  switch (kind) {
+  case RelationKind::Gear:
+    return "gear";
+  case RelationKind::Rack:
+    return "rack";
+  case RelationKind::Screw:
+    return "screw";
+  case RelationKind::Linear:
+    return "linear";
+  }
+  return "gear";
+}
+
+RelationKind RelationKindFromString(const std::string& s) {
+  if (s == "gear")
+    return RelationKind::Gear;
+  if (s == "rack")
+    return RelationKind::Rack;
+  if (s == "screw")
+    return RelationKind::Screw;
+  if (s == "linear")
+    return RelationKind::Linear;
+  throw std::runtime_error("unknown relation type '" + s +
+                           "' (expected one of: gear, rack, screw, linear)");
+}
+
+const char* MateDofToString(MateDof dof) {
+  return dof == MateDof::Rotation ? "rotation" : "offset";
+}
+
+MateDof MateDofFromString(const std::string& s) {
+  if (s == "rotation")
+    return MateDof::Rotation;
+  if (s == "offset")
+    return MateDof::Offset;
+  throw std::runtime_error("unknown mate degree of freedom '" + s +
+                           "' (expected rotation or offset)");
+}
+
+json RelationToJson(const Relation& r) {
+  json j;
+  j["type"] = "Relation";
+  j["id"] = r.id;
+  j["name"] = r.name;
+  j["kind"] = RelationKindToString(r.kind);
+  j["mate_a"] = r.mateA;
+  j["mate_b"] = r.mateB;
+  j["dof_a"] = MateDofToString(r.dofA);
+  j["dof_b"] = MateDofToString(r.dofB);
+  j["ratio"] = r.ratio;
+  j["phase"] = r.phase;
+  return j;
+}
+
+Relation RelationFromJson(const json& j) {
+  Relation r;
+  r.id = j.at("id").get<uint64_t>();
+  r.name = j.value("name", std::string{});
+  r.kind = RelationKindFromString(j.at("kind").get<std::string>());
+  r.mateA = j.at("mate_a").get<uint64_t>();
+  r.mateB = j.at("mate_b").get<uint64_t>();
+  r.dofA = MateDofFromString(j.at("dof_a").get<std::string>());
+  r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
+  r.ratio = j.at("ratio").get<double>();
+  r.phase = j.value("phase", 0.0);
+  return r;
+}
+
 } // namespace DocumentIO

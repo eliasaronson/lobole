@@ -218,6 +218,18 @@ void LoadExplodedViews(AssemblyDocument& asmDoc,
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
 
+// Relations (v83) follow the same restore-and-pin discipline.
+void LoadRelations(AssemblyDocument& asmDoc,
+                   const std::vector<json>& relJsons) {
+  uint64_t maxId = 0;
+  for (const json& rj : relJsons) {
+    Relation r = RelationFromJson(rj);
+    maxId = std::max(maxId, r.id);
+    asmDoc.GetRelations().push_back(std::move(r));
+  }
+  asmDoc.EnsureNextIdAtLeast(maxId + 1);
+}
+
 // Binary sibling of WriteTextAtomic for reference-image pixel files (v49):
 // same temp+rename + identical-content skip, but byte-exact (no text-mode
 // translation).
@@ -816,6 +828,30 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    // Relations (v83) mirror exploded views: file-per-relation under
+    // relations/, the id list in the index; both absent when there are none.
+    const fs::path relDir = dir / "relations";
+    if (!asmDoc.GetRelations().empty()) {
+      index["relations"] = json::array();
+      fs::create_directories(relDir);
+    }
+    std::set<std::string> wantedRel;
+    for (const Relation& r : asmDoc.GetRelations()) {
+      const std::string file =
+          std::to_string(IdForFile(r.id, "relation", r.name)) + "-" +
+          LabelSlug(r.name) + ".json";
+      if (!WriteTextAtomic(relDir / file, RelationToJson(r).dump(2) + "\n",
+                           error))
+        return false;
+      index["relations"].push_back(r.id);
+      wantedRel.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(relDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedRel.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     // Configurations (v31): file-per-config + active id in the index; absent
     // when none so older assemblies stay byte-identical.
     if (asmDoc.ActiveConfiguration() != 0)
@@ -954,6 +990,29 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       viewJsons.push_back(ParseProjectFile(it->second));
     }
     LoadExplodedViews(*asmDoc, viewJsons);
+
+    // Relations (v83): id-prefix files under relations/, index order.
+    {
+      std::map<uint64_t, fs::path> relById;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "relations", ec)) {
+        if (entry.path().extension() != ".json")
+          continue;
+        InsertIdFile(relById, entry.path(), "relation");
+      }
+      std::vector<json> relJsons;
+      for (const auto& idJson : index.value("relations", json::array())) {
+        const uint64_t id = idJson.get<uint64_t>();
+        const auto it = relById.find(id);
+        if (it == relById.end()) {
+          if (error)
+            *error = "missing relation file for id " + std::to_string(id);
+          return nullptr;
+        }
+        relJsons.push_back(ParseProjectFile(it->second));
+      }
+      LoadRelations(*asmDoc, relJsons);
+    }
 
     // Configurations (v31): id-prefix files under configurations/, index order.
     {
@@ -1144,6 +1203,11 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       for (const ExplodedView& v : asmDoc.GetExplodedViews())
         j["exploded"].push_back(ExplodedViewToJson(v));
     }
+    if (!asmDoc.GetRelations().empty()) { // absent when none (v83)
+      j["relations"] = json::array();
+      for (const Relation& r : asmDoc.GetRelations())
+        j["relations"].push_back(RelationToJson(r));
+    }
     if (asmDoc.ActiveConfiguration() != 0) // v31
       j["active_configuration"] = asmDoc.ActiveConfiguration();
     if (!asmDoc.GetConfigurations().empty()) {
@@ -1206,6 +1270,8 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
               j.value("mates", json::array()).get<std::vector<json>>());
     LoadExplodedViews(
         *asmDoc, j.value("exploded", json::array()).get<std::vector<json>>());
+    LoadRelations(*asmDoc,
+                  j.value("relations", json::array()).get<std::vector<json>>());
     for (const auto& cj : j.value("configurations", json::array())) // v31
       asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
     asmDoc->SetActiveConfiguration(

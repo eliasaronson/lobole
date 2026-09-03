@@ -97,6 +97,37 @@ const ExplodedView* AssemblyDocument::FindExplodedViewById(uint64_t id) const {
   return nullptr;
 }
 
+uint64_t AssemblyDocument::AddRelation(Relation relation) {
+  relation.id = m_nextId++;
+  m_relations.push_back(std::move(relation));
+  m_version++;
+  return m_relations.back().id;
+}
+
+bool AssemblyDocument::RemoveRelation(uint64_t id) {
+  const auto it = std::find_if(m_relations.begin(), m_relations.end(),
+                               [id](const Relation& r) { return r.id == id; });
+  if (it == m_relations.end())
+    return false;
+  m_relations.erase(it);
+  m_version++;
+  return true;
+}
+
+Relation* AssemblyDocument::FindRelationById(uint64_t id) {
+  for (Relation& r : m_relations)
+    if (r.id == id)
+      return &r;
+  return nullptr;
+}
+
+const Relation* AssemblyDocument::FindRelationById(uint64_t id) const {
+  for (const Relation& r : m_relations)
+    if (r.id == id)
+      return &r;
+  return nullptr;
+}
+
 // ---- Configurations (C4) --------------------------------------------------
 
 const Configuration* AssemblyDocument::FindConfiguration(uint64_t id) const {

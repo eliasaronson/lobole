@@ -15,6 +15,7 @@ branch in a real language with no sandbox.
 | generator | what | live afterwards | frozen |
 |---|---|---|---|
 | `gear.py` | spur gear: involute flanks as arcs, tip and root arcs, bore | thickness, bore | module, teeth, pressure angle |
+| `gear_train.py` | two of them on a carrier, mated by their bores, coupled by a gear relation (docs/assemblies/relations-plan.md), checked for tooth clash over a pitch | the relation's ratio and phase | the gears |
 
 Run one against the running app (it finds the one announced instance, or
 takes `--port`; it never guesses):

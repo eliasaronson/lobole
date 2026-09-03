@@ -43,6 +43,7 @@ add_executable(designer_tests
     test_assembly.cpp
     test_assembly_solve.cpp
     test_assembly_loops.cpp
+    test_assembly_relations.cpp
     test_measure.cpp
     test_materials.cpp
     test_shell.cpp
@@ -303,6 +304,13 @@ add_test(NAME assembly_loops_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_loops_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_loops_smoke PROPERTIES TIMEOUT 120)
+
+# Relations (v83): a gear pair's ratio derived from tooth counts and driven
+# from either side, a rack, the refusals — over the RPC, headless.
+add_test(NAME assembly_relations_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_relations_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A4 propagation: editing a part re-solves the assembly on tab
 # activation, without an explicit solve_assembly. Headless (no display).

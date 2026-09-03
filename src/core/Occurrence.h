@@ -177,6 +177,30 @@ struct ExplodedView {
   std::vector<ExplodeStep> steps; // at most one per occurrence
 };
 
+// A relation couples two mates' degrees of freedom
+// (docs/assemblies/relations-plan.md): dofB = ratio * dofA + phase. The kind
+// is a label and a unit convention on that one equation — a gear is
+// rotation-to-rotation with ratio -zA/zB, a rack is the pinion's rotation to
+// the rack's slide with the pitch radius as ratio (mm per radian), a screw
+// is one cylindrical mate's own rotation to its own offset (pitch / 2pi),
+// and linear is slide-to-slide. Enforced by propagation in a mate tree and
+// as a residual row inside a loop.
+enum class RelationKind { Gear, Rack, Screw, Linear };
+enum class MateDof { Rotation, Offset };
+
+struct Relation {
+  uint64_t id = 0;  // stable, shares the assembly's id counter
+  std::string name; // display label (cosmetic)
+  RelationKind kind = RelationKind::Gear;
+  uint64_t mateA = 0;
+  uint64_t mateB = 0; // may equal mateA (a screw)
+  MateDof dofA = MateDof::Rotation;
+  MateDof dofB = MateDof::Rotation;
+  double ratio = -1.0;
+  double phase = 0.0; // in dofB's unit (radians or mm)
+  std::string error;  // set by the solve: a mate gone, a DOF missing
+};
+
 // An assembly document: an ordered list of occurrences that *place* the bodies
 // of other parts by explicit transform, plus the mates that constrain them
 // (A3 — re-solved over non-`fixed` occurrences by a placement pass). A
@@ -241,6 +265,16 @@ public:
   ExplodedView* FindExplodedViewById(uint64_t id);
   const ExplodedView* FindExplodedViewById(uint64_t id) const;
 
+  // Relations (v83, docs/assemblies/relations-plan.md): same id space and
+  // the same add/remove/find discipline as mates and exploded views.
+  const std::vector<Relation>& GetRelations() const { return m_relations; }
+  std::vector<Relation>& GetRelations() { return m_relations; }
+  size_t RelationCount() const { return m_relations.size(); }
+  uint64_t AddRelation(Relation relation);
+  bool RemoveRelation(uint64_t id);
+  Relation* FindRelationById(uint64_t id);
+  const Relation* FindRelationById(uint64_t id) const;
+
   // Directly set the next-id counter (used by the loader so restored ids are
   // never reissued). No-op if `next` is not greater than the current counter.
   void EnsureNextIdAtLeast(uint64_t next) {
@@ -293,6 +327,7 @@ private:
   units::System m_units;
   std::vector<Mate> m_mates;
   std::vector<ExplodedView> m_explodedViews;
+  std::vector<Relation> m_relations;
   std::vector<Configuration> m_configurations;
   uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id

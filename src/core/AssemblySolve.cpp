@@ -495,9 +495,115 @@ int ApplyAttachments(AssemblyDocument& asmDoc) {
   return moved;
 }
 
+bool MateHasDof(MateType type, MateDof dof) {
+  switch (type) {
+  case MateType::Revolute:
+    return dof == MateDof::Rotation;
+  case MateType::Slider:
+    return dof == MateDof::Offset;
+  case MateType::Cylindrical:
+    return true;
+  case MateType::Planar:
+    return dof == MateDof::Rotation;
+  case MateType::Ball:
+  case MateType::Fastened:
+    break;
+  }
+  return false;
+}
+
+double MateDofValue(const Mate& m, MateDof dof) {
+  return dof == MateDof::Rotation ? m.rotation : m.offset;
+}
+
+void SetMateDof(Mate& m, MateDof dof, double value) {
+  if (dof == MateDof::Rotation)
+    m.rotation = static_cast<float>(value);
+  else
+    m.offset = static_cast<float>(value);
+}
+
+int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
+  int wrote = 0;
+  std::vector<Relation>& rels = asmDoc.GetRelations();
+  // Validate first: a relation with a problem is reported and skipped, and
+  // never half-applied.
+  std::vector<bool> usable(rels.size(), false);
+  for (size_t i = 0; i < rels.size(); i++) {
+    Relation& r = rels[i];
+    r.error.clear();
+    const Mate* a = asmDoc.FindMateById(r.mateA);
+    const Mate* b = asmDoc.FindMateById(r.mateB);
+    if (a == nullptr || b == nullptr) {
+      r.error = "a mate this relation couples is gone";
+      continue;
+    }
+    if (!MateHasDof(a->type, r.dofA) || !MateHasDof(b->type, r.dofB)) {
+      r.error = "a mate this relation couples no longer has that degree of "
+                "freedom";
+      continue;
+    }
+    if (r.mateA == r.mateB && r.dofA == r.dofB) {
+      r.error = "a relation cannot couple a degree of freedom to itself";
+      continue;
+    }
+    usable[i] = true;
+  }
+  // Walk the relation graph from the driven mate (or from every A when
+  // unprompted). A mate reached once is settled; a later relation that
+  // would move it again is left to the loop solver's rows, which is where
+  // an inconsistent set belongs.
+  std::vector<uint64_t> frontier;
+  std::vector<uint64_t> settled;
+  const auto isSettled = [&](uint64_t id) {
+    return std::find(settled.begin(), settled.end(), id) != settled.end();
+  };
+  if (drivenMateId != 0) {
+    frontier.push_back(drivenMateId);
+    settled.push_back(drivenMateId);
+  } else {
+    for (size_t i = 0; i < rels.size(); i++)
+      if (usable[i] && !isSettled(rels[i].mateA)) {
+        frontier.push_back(rels[i].mateA);
+        settled.push_back(rels[i].mateA);
+      }
+  }
+  while (!frontier.empty()) {
+    const uint64_t from = frontier.back();
+    frontier.pop_back();
+    for (size_t i = 0; i < rels.size(); i++) {
+      if (!usable[i])
+        continue;
+      Relation& r = rels[i];
+      Mate* a = asmDoc.FindMateById(r.mateA);
+      Mate* b = asmDoc.FindMateById(r.mateB);
+      if (r.mateA == from && !isSettled(r.mateB)) {
+        SetMateDof(*b, r.dofB, r.ratio * MateDofValue(*a, r.dofA) + r.phase);
+        settled.push_back(r.mateB);
+        frontier.push_back(r.mateB);
+        wrote++;
+      } else if (r.mateB == from && !isSettled(r.mateA) && r.ratio != 0.0) {
+        SetMateDof(*a, r.dofA, (MateDofValue(*b, r.dofB) - r.phase) / r.ratio);
+        settled.push_back(r.mateA);
+        frontier.push_back(r.mateA);
+        wrote++;
+      } else if (r.mateA == from && r.mateB == from) {
+        // A screw: one mate, two DOFs — the driven DOF is whichever the
+        // caller changed, which this cannot know; A's DOF drives.
+        SetMateDof(*b, r.dofB, r.ratio * MateDofValue(*a, r.dofA) + r.phase);
+        wrote++;
+      }
+    }
+  }
+  return wrote;
+}
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById) {
   SolveReport report;
+  // Relations hold before anything is placed: in a mate tree this IS their
+  // enforcement; in a loop they are rows below as well.
+  (void)PropagateRelations(asmDoc, 0);
 
   // Pre-derive both connector frames for every mate; a mate whose connectors
   // don't resolve (dangling ref / missing part) is stamped errored and sits
@@ -570,6 +676,21 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     lm.dx = m.dx;
     lm.dy = m.dy;
     lm.ballRotation = m.ballRotation;
+  }
+  {
+    std::unordered_map<uint64_t, size_t> indexOfMate;
+    for (size_t i = 0; i < asmDoc.GetMates().size(); i++)
+      indexOfMate[asmDoc.GetMates()[i].id] = i;
+    for (const Relation& r : asmDoc.GetRelations()) {
+      if (!r.error.empty())
+        continue;
+      const auto ia = indexOfMate.find(r.mateA);
+      const auto ib = indexOfMate.find(r.mateB);
+      if (ia == indexOfMate.end() || ib == indexOfMate.end())
+        continue;
+      loop.relations.push_back(
+          {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase});
+    }
   }
   std::vector<bool> classified(asmDoc.GetMates().size(), false);
   const auto pin = [&](uint64_t occId, const glm::mat4& at) {

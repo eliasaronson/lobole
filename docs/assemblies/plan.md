@@ -164,6 +164,12 @@ numeric pass wraps the A3 walk rather than replacing it — a loop-free assembly
 still never touches a solver. docs/assemblies/a6-loop-solver-plan.md. Degrees-of-freedom display + drag-within-mate
 (spin a revolute) is the payoff feature.
 
+**Relations (2026-09-03, v83)** — gear, rack, screw and linear couplings
+between two mates' DOFs, `dofB = ratio * dofA + phase`: propagated in a mate
+tree, a residual row inside a loop. What every mainstream assembly does for
+gears, and what none of them does with contact dynamics.
+[relations-plan.md](relations-plan.md).
+
 ### A4 — Assembly features & beyond — **v1 SHIPPED (July 2026)** — [design: a4-design.md](a4-design.md)
 > **2026-07-13:** design signed off and **all four phases shipped**:
 > (1) part→assembly change propagation — per-part version stamps at solve,
