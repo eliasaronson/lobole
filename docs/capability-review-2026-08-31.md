@@ -182,6 +182,10 @@ cycles back, but with tools already in the tree — SubtreeVersions and
 WouldCycle from A4/A5 — and its one genuinely new gate is a golden whose
 unit is a project bundle rather than a document.
 
+**Planned 2026-09-03**, as the binder: [modeling/derived-plan.md](modeling/derived-plan.md)
+— four phases, the SO-101 gripper as the acceptance test, live update
+explicitly left out.
+
 **Verdict, 2026-09-03: not now.** Every part this project has built was
 fine with project variables for the shared numbers, and copy-links records
 no demand for the cross-part case. The binder is cheap and safe enough to

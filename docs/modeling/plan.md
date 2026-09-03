@@ -183,6 +183,10 @@ this plan says "shipped": check that a human can reach it.
 
 ## Cross-cutting
 
+**Derived geometry (A2)** — another part's bodies copied into this one as a
+snapshot, drawn on like any body, updated on request:
+[derived-plan.md](derived-plan.md) (planned 2026-09-03).
+
 - **Regeneration-failure UX** (land before the first failure-prone feature —
   fillets, up-to-face): today a feature that fails to regenerate has no story.
   With M7-era features, upstream edits *will* make downstream features fail
