@@ -7,6 +7,29 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## `interference` reports a phantom whole-tooth clash at one exactly symmetric pose
+
+Found 2026-09-03 driving the three-gear train (`scratch/gear_train3.py`, m2
+gears 12:24:36 on relations). Sweeping the pinion through a tooth pitch, the
+idler–wheel pair reads *touching* (volume 0) at every pose except pinion =
+π/12 exactly, where it reads *clash, 162 mm³* — about one whole tooth — and
+reads touching again 0.005 rad either side. A real overlap is continuous in
+the pose; a spike at the one pose where a tooth sits exactly centred in a
+gap, flanks tangent and symmetric, is the boolean producing a solid out of
+coincident faces.
+
+**Impact:** a false positive at a measure-zero pose. The pinion–idler pair
+never shows it, and the same wheel pair at zero backlash reads 0.02 mm³ over
+the whole pitch in `generators/gear_train.py`. Nobody would act on it, but a
+script sweeping poses and taking the max would.
+
+**Likely fix:** the checker's *touching* tolerance should apply to the common
+volume too — a common solid whose every face lies within `touch_tol` of a
+face of both inputs is a touch, not a clash — or run the boolean with the
+fuzzy value the contact report already uses for its touching band.
+
+---
+
 ## `set_occurrence_transform` demands an orientation `add_occurrence` does not
 
 Found 2026-09-01 while driving the fastener check from a script. Both RPCs take
