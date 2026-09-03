@@ -252,6 +252,21 @@ Ordered by what I would actually care about, not by size.
   recompiling the application. FreeCAD has Python workbenches; Onshape has
   FeatureScript. This one is pointed given goal 5 of the roadmap: an agent can
   *drive* every feature this app has and cannot *define* one.
+  **Answered 2026-09-03, "scripted features"**: sorted by what the community
+  libraries elsewhere actually contain — standard parts, plywood joinery,
+  features the kernel lacks, utilities, and a company's own composite — four
+  of the five exist because those users cannot change the core, and here
+  the core is the cheap place (fasteners were done as data). The scripting
+  layer OUTSIDE the app already carries loops and logic with no
+  determinism cost, and `generators/` now proves it on the hard case: a
+  spur gear (`generators/gear.py`, involute flanks within 8 µm, 209 ms for
+  24 teeth, gated headless). What it cannot do — regenerate a computed
+  profile when its inputs change — is the demand signal for a **feature
+  template** (a saved feature list with parameters, instantiated as one
+  composite feature, no language), which is the version worth building if
+  a composite ever recurs across projects. An interpreter inside the
+  regeneration loop is not: sandbox, pinned version, packaging, and a new
+  determinism gate, for the one thing templates cannot express.
 - **Surfacing / NURBS surface modelling**, and **sheet metal**. Both standard
   elsewhere, both absent. My recommendation is to keep skipping them — each is
   a deep workstream serving users this project does not have, and the breadth

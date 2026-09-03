@@ -97,6 +97,9 @@ thing behind it invisible to the next person who looks.
   well, and seven gaps, of which the loudest is that `tools/test-fast.sh` now
   takes 48.7 s against the ~8 s its own header claims (a by-name exclusion
   list that never learned about the CAM gates).
+- **`generators/`** (top level, not under docs) — parts written as programs
+  against the API, a spur gear first; the standing answer to "do we need a
+  scripted-feature language for X" (capability review, "scripted features").
 - **[coverage-2026-08-31.md](coverage-2026-08-31.md)** — the first recorded
   `tools/coverage.sh` run: 75% of `src/core`, and the 133 functions nothing
   executed — including the no-git checkpoint fallback, which no test machine

@@ -504,6 +504,15 @@ add_test(NAME mcp_formats_gate
                  $<TARGET_FILE:designer>)
 set_tests_properties(mcp_formats_gate PROPERTIES TIMEOUT 120)
 
+# generators/*.py are parts written as programs (a spur gear first); this
+# runs one against a headless app and checks the part by numbers. It is the
+# standing answer to "do we need scripted features for X" — so it stays on
+# the default path.
+add_test(NAME generators_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generators_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(generators_smoke PROPERTIES TIMEOUT 300)
+
 # Same for the python client every script and smoke test imports.
 add_test(NAME py_client_compiles
          COMMAND python3 -c
