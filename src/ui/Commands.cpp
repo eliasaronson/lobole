@@ -11,6 +11,7 @@
 #include "render/Camera.h"
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/DerivedActions.h"
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
@@ -452,6 +453,10 @@ const std::vector<Command>& Table() {
     add("part.cylinder", Idle, [](AppState& s) { CreateCylinder(s); });
     add("part.datum_plane", Idle, [](AppState& s) { CreateDatumPlane(s); });
     add("part.datum_axis", Idle, [](AppState& s) { CreateDatumAxis(s); });
+    // A copy of another part to draw on (docs/modeling/derived-plan.md).
+    // Enabled on any part tab: with nothing to derive from the window says
+    // so and Accept stays disabled (U10), the same rule as the fastener.
+    add("part.derive", Idle, [](AppState& s) { CreateDerived(s); });
 
     add("part.fillet", IdleBody, [](AppState& s) { CreateFillet(s); });
     add("part.chamfer", IdleBody, [](AppState& s) { CreateChamfer(s); });

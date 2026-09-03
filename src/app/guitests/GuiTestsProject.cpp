@@ -1,4 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/MassProps.h"
+#include "core/features/DerivedFeature.h"
+#include "ui/DerivedActions.h"
 
 // Project GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -1484,4 +1487,121 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
   // every control addressable, and a change reaching the renderer's own
   // fields — the "it reverted when I opened a second project" class of bug
   // starts with two copies of a preference.
+  // Derived (docs/modeling/derived-plan.md, D2): the tool copies the one
+  // other part as a ghost — translucent, tinted, weightless, still there to
+  // be drawn on — and the tree verb retakes the copy once the source moves.
+  t = IM_REGISTER_TEST(engine, "derived",
+                       "tool_copies_the_other_part_as_a_ghost");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Servo");
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_box");
+    const double servoVolume = Doc()->GetBodies()[0].shape.Volume();
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
+
+    // One candidate: the preview already carries its snapshot, so Accept
+    // is live and the copy is on screen before anything is committed.
+    ToolbarClick(ctx, "###tb_derive");
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK(Doc()->GetFeature(0)->TypeName() == "Derived");
+    IM_CHECK_EQ(Doc()->GetFeature(0)->GetName(),
+                std::string("Servo (derived)"));
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(Doc()->GetBodies()[0].reference);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - servoVolume) <
+             1e-6);
+    // Drawn as a ghost (the in-context neighbour's look), no outline.
+    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)1);
+    IM_CHECK(
+        s_App->meshRenderer->IsInstanceGhost(s_App->documentMeshes[0].meshId));
+    IM_CHECK_EQ(s_App->documentMeshes[0].outlineId, 0u);
+    // Weightless: the mass report has no body in it.
+    const auto mass = Measure::MassOfBodies(Doc()->GetBodies());
+    IM_CHECK(mass.has_value());
+    IM_CHECK(mass->bodies.empty());
+    IM_CHECK(!ui::DerivedStale(*s_App, *dynamic_cast<const DerivedFeature*>(
+                                           Doc()->GetFeature(0)))
+                  .value_or(true));
+
+    // The source grows a second body. Nothing happens to the copy until
+    // asked; the row says it is behind, and the verb retakes it.
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_sphere");
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(ui::DerivedStale(*s_App, *dynamic_cast<const DerivedFeature*>(
+                                          Doc()->GetFeature(0)))
+                 .value_or(false));
+    ctx->ItemClick("//###Model/Servo (derived)##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_derived_update");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    IM_CHECK(!ui::DerivedStale(*s_App, *dynamic_cast<const DerivedFeature*>(
+                                           Doc()->GetFeature(0)))
+                  .value_or(true));
+    // One undo step gives the previous snapshot back.
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+  };
+
+  // With nothing to derive from, the window says so and Accept is disabled
+  // (the defaults gate pins the same case); once a second part exists the
+  // source list lists it, and choosing it takes the snapshot.
+  t = IM_REGISTER_TEST(engine, "derived", "source_list_takes_the_snapshot");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Camera");
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    ui::AddPart(*s_App, "Servo");
+    ui::SetActivePart(*s_App, 2);
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+
+    // Two candidates: the tool asks. Accept is disabled until one is picked.
+    ToolbarClick(ctx, "###tb_derive");
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ImGuiTestItemInfo accept = ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+    const uint64_t servoId = s_App->parts[2].id;
+    ctx->ItemClick(
+        ("//###ToolWindow/###derive_src_" + std::to_string(servoId) + "_0")
+            .c_str());
+    ctx->Yield(2);
+    accept = ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    const auto* d = dynamic_cast<const DerivedFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(d != nullptr);
+    IM_CHECK_EQ(d->sourcePart, servoId);
+    IM_CHECK_EQ(d->sourceName, std::string("Servo"));
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+  };
 }

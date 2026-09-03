@@ -11,6 +11,7 @@
 #include "render/ClipPlanes.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DerivedActions.h"
 #include "ui/JobActions.h"
 
 #include <glm/glm.hpp>
@@ -429,6 +430,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           continue;
         const glm::mat4 xf = inst.world;
         for (const Body& b : inst.part->GetBodies()) {
+          if (b.reference)
+            continue; // a derived ghost is not the occurrence's matter
           Body nb = b;
           nb.shape = b.shape.Transformed(xf);
           placed.push_back(std::move(nb));
@@ -469,6 +472,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (!inst.visible || inst.rootOccurrenceId != rootId)
             continue;
           for (const Body& b : inst.part->GetBodies()) {
+            if (b.reference)
+              continue; // a derived ghost is not the occurrence's matter
             Body nb = b;
             nb.shape = b.shape.Transformed(inst.world);
             out.push_back(std::move(nb));
@@ -518,6 +523,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               if (flat)
                 for (const assembly::FlatInstance& inst : *flat)
                   for (const Body& b : inst.part->GetBodies()) {
+                    if (b.reference)
+                      continue;
                     Body nb = b;
                     nb.shape = b.shape.Transformed(hit->world * inst.world);
                     t.bodies.push_back(std::move(nb));
@@ -526,6 +533,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           } else if (const Document* pd =
                          ui::PartDocById(state, hit->occ->partId)) {
             for (const Body& b : pd->GetBodies()) {
+              if (b.reference)
+                continue;
               Body nb = b;
               nb.shape = b.shape.Transformed(hit->world);
               t.bodies.push_back(std::move(nb));
@@ -1279,7 +1288,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (!mass)
       throw std::runtime_error(err);
     if (mass->bodies.empty())
-      throw std::runtime_error("no bodies");
+      throw std::runtime_error(
+          bodies.empty() ? "no bodies"
+                         : "only reference bodies (derived ghosts), which "
+                           "weigh nothing here; set reference: false on the "
+                           "Derived feature to count one");
     json out = json::array();
     for (size_t i = 0; i < mass->bodies.size(); i++) {
       const Measure::BodyMass& bm = mass->bodies[i];
@@ -1349,6 +1362,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"body_count", bodies.size()},
                 {"feature_errors", std::move(featureErrors)},
                 {"ok", ok}};
+    // Derived copies behind their source (v84): built fine, so `ok` stands,
+    // but the geometry is yesterday's — the caller decides whether to
+    // update_derived. Present only when there is something to say.
+    {
+      json stale = json::array();
+      for (const DerivedFeature* d : ui::StaleDerived(state, part))
+        stale.push_back({{"id", d->GetId()},
+                         {"name", d->GetName()},
+                         {"source", d->sourceName}});
+      if (!stale.empty())
+        out["stale_derived"] = std::move(stale);
+    }
     // Round-8 retro: floating geometry INSIDE a part warns by default —
     // the ladder's mount plate passed every opt-in gate because nobody
     // thought to ask. `ok` is untouched (disjoint multi-body parts can be

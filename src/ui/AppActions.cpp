@@ -4192,8 +4192,16 @@ void SyncDocumentRenderers(AppState& state) {
       albedo = mat.baseColor;
     }
     bodyColors[bi] = albedo; // section caps reuse the body's color
+    // A Derived reference body is drawn the way an in-context neighbour is:
+    // the ghost tint, translucent, no outline — so what is another part's
+    // geometry never reads as this part's. It stays pickable (that is what
+    // it is for), through the face selector below.
+    if (body.reference) {
+      state.meshRenderer->SetMeshColor(meshId, glm::vec3(0.55f, 0.60f, 0.68f));
+      state.meshRenderer->SetInstanceGhost(meshId, 0.35f);
+    }
     uint32_t outlineId = 0;
-    if (state.outlineRenderer)
+    if (state.outlineRenderer && !body.reference)
       outlineId = state.outlineRenderer->AddMesh(vertices, cadMesh.indices);
     std::vector<std::vector<glm::vec3>> edges =
         body.shape.GenerateEdgePolylines(0.1);

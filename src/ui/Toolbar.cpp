@@ -344,6 +344,8 @@ void DrawModelToolbar(AppState& state) {
   btn(ICON_FA_CUBE "###tb_box", "part.box", "Box");
   btn(ICON_FA_CIRCLE "###tb_sphere", "part.sphere", "Sphere");
   btn(ICON_FA_DATABASE "###tb_cylinder", "part.cylinder", "Cylinder");
+  btn(ICON_FA_CLONE "###tb_derive", "part.derive",
+      "Derive (a copy of another part, to draw on)");
 
   Divider();
 

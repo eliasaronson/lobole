@@ -5,12 +5,14 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Expression.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DerivedActions.h"
 #include "ui/PreviewFeature.h"
 
 #include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
@@ -128,6 +130,21 @@ static constexpr MethodDoc ModelingMethods[] = {
      "Append a feature (see feature_types for the JSON dialect) "
      "and regenerate; returns {index, id, entity_ids?, regen}.",
      "feature"},
+    {"update_derived",
+     "Retake a Derived feature's snapshot from its source part (one undo "
+     "step): {feature_id} or {index}, or {all: true} for every Derived of "
+     "the active part whose source is loaded. Refuses a source that is not "
+     "in the project or a broken link. Returns {updated: [ids], regen, "
+     "digest}. Never automatic: get_state's `stale` says when to call it "
+     "(docs/modeling/derived-plan.md).",
+     "all, feature_id, index"},
+    {"derive_occurrence",
+     "In an in-context edit (edit_in_context): add a Derived copy of a "
+     "neighbour occurrence's part, placed where the ghost is "
+     "(OccMatrix(edited)^-1 * OccMatrix(neighbour)); {occurrence, name?, "
+     "reference?: true, bodies?: [created_by ids]}. Returns {index, id, "
+     "regen, digest}.",
+     "bodies, name, occurrence, reference"},
     {"modify_feature",
      "Change the feature at `index` to `feature` JSON; one undo step; returns "
      "{regen}. It keeps its IDENTITY: omit \"id\" and the feature keeps the "
@@ -279,6 +296,17 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // The GUI refuses a tool with missing inputs; the script API used to
     // accept one and commit a feature that does nothing (a fillet with no
     // edges regenerates happily). Same rule, both surfaces.
+    // A Derived arrives without its snapshot (the request names a source;
+    // the copy is taken here, through the project): refuses a part that is
+    // not loaded, the part itself, and a cycle — in words naming the parts
+    // that ARE there (docs/modeling/derived-plan.md).
+    if (auto* d = dynamic_cast<DerivedFeature*>(feature.get())) {
+      ui::DerivedSource src;
+      src.slotId = d->sourcePart;
+      if (const std::string why = ui::PointDerivedAt(state, *d, src);
+          !why.empty())
+        throw std::runtime_error("Derived: " + why);
+    }
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
@@ -300,6 +328,91 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     resp["regen"] = RegenSummaryJson(*doc);
     resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
+  }
+  if (m == "update_derived") {
+    const json preDigest = BodyDigestJson(*doc);
+    json updated = json::array();
+    if (p.value("all", false)) {
+      std::vector<uint64_t> before;
+      for (const auto& f : doc->GetFeatures())
+        if (auto* d = dynamic_cast<const DerivedFeature*>(f.get());
+            d && d->sourcePart != 0)
+          before.push_back(d->GetId());
+      std::string why;
+      const size_t n = ui::UpdateAllDerived(state, &why);
+      if (n == 0 && !why.empty())
+        throw std::runtime_error(why);
+      for (uint64_t id : before)
+        updated.push_back(id);
+      json resp = {{"updated", std::move(updated)},
+                   {"regen", RegenSummaryJson(*doc)},
+                   {"digest", DigestJson(preDigest, *doc)}};
+      if (!why.empty())
+        resp["skipped"] = why;
+      return resp;
+    }
+    uint64_t id = 0;
+    if (p.contains("feature_id")) {
+      id = p.at("feature_id").get<uint64_t>();
+    } else if (p.contains("index")) {
+      const size_t index = p.at("index").get<size_t>();
+      Feature* f = doc->GetFeature(index);
+      if (!f)
+        throw std::runtime_error(IndexError(
+            "feature", index, doc->FeatureCount(), "get_state lists features"));
+      id = f->GetId();
+    } else {
+      throw std::runtime_error(
+          "pass {feature_id} or {index} of a Derived feature, or {all: true}");
+    }
+    if (const std::string why = ui::UpdateDerived(state, id); !why.empty())
+      throw std::runtime_error(why);
+    updated.push_back(id);
+    return json{{"updated", std::move(updated)},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
+  }
+  if (m == "derive_occurrence") {
+    if (!state.inContext.assemblySlotId)
+      throw std::runtime_error(
+          "derive_occurrence works during an in-context edit — open the "
+          "assembly and call edit_in_context {occurrence} first; from a plain "
+          "part tab use add_feature {type: Derived, source_part}");
+    const uint64_t occ = p.at("occurrence").get<uint64_t>();
+    const ui::DerivedSource* pick = nullptr;
+    std::string neighbours;
+    const std::vector<ui::DerivedSource> candidates =
+        ui::DerivedSourceCandidates(state);
+    for (const ui::DerivedSource& c : candidates) {
+      if (c.occurrenceId == 0)
+        continue;
+      neighbours += (neighbours.empty() ? "" : ", ") + c.name + " (" +
+                    std::to_string(c.occurrenceId) + ")";
+      if (c.occurrenceId == occ && pick == nullptr)
+        pick = &c;
+    }
+    if (pick == nullptr)
+      throw std::runtime_error("occurrence " + std::to_string(occ) +
+                               " is not a neighbour of the part being edited" +
+                               (neighbours.empty()
+                                    ? " (there are none)"
+                                    : "; the neighbours are: " + neighbours));
+    auto d = std::make_unique<DerivedFeature>(
+        p.value("name", pick->name + " (derived)"), 0);
+    d->reference = p.value("reference", true);
+    if (p.contains("bodies"))
+      d->bodies = p.at("bodies").get<std::vector<uint64_t>>();
+    if (const std::string why = ui::PointDerivedAt(state, *d, *pick);
+        !why.empty())
+      throw std::runtime_error("Derived: " + why);
+    const json preDigest = BodyDigestJson(*doc);
+    state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(d)),
+                            *doc);
+    const size_t index = doc->FeatureCount() - 1;
+    return json{{"index", index},
+                {"id", doc->GetFeature(index)->GetId()},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "modify_feature") {
     const size_t index = p.at("index").get<size_t>();

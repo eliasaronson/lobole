@@ -143,6 +143,9 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "sketch.constraint_midpoint",
       "sketch.constraint_fixed",
       "sketch.constraint_collinear",
+      // Derive: a copy of another part is placed once per part from the
+      // toolbar or the RPC, like an import — not something typed mid-flow.
+      "part.derive",
   };
   for (const keymap::Binding& b : keymap::Defaults()) {
     INFO(b.id);

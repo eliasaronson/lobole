@@ -184,7 +184,9 @@ unit is a project bundle rather than a document.
 
 **Planned 2026-09-03**, as the binder: [modeling/derived-plan.md](modeling/derived-plan.md)
 — four phases, the SO-101 gripper as the acceptance test, live update
-explicitly left out.
+explicitly left out. **Built the same day** (D1 `0beba3a8` + D2): the
+verdict below was overtaken within hours — the plan was asked for and then
+asked to be built — and stands as the record of the reasoning.
 
 **Verdict, 2026-09-03: not now.** Every part this project has built was
 fine with project variables for the shared numbers, and copy-links records

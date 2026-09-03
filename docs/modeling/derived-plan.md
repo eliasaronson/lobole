@@ -1,6 +1,8 @@
 # Derived — geometry from another part (A2)
 
-> Status: **PLANNED 2026-09-03**, unbuilt. The capability review's A2
+> Status: **D1 + D2 SHIPPED 2026-09-03** (`0beba3a8` core, the commit after it
+> the surface); D3 partly pinned by D1's tests, D4 (the gripper) open. See
+> "As built" at the end. The capability review's A2
 > ([../capability-review-2026-08-31.md](../capability-review-2026-08-31.md))
 > as a design: a **binder feature with a snapshot**, not a shared regeneration
 > graph. From: *"we already have variable changes as cross-cutting
@@ -118,8 +120,8 @@ assembly's current solve when that document is loaded.
 
 | phase | what | cost |
 |---|---|---|
-| **D1** core | `DerivedFeature`: snapshot load in `Execute`, `Update` against `PartDocById`, staleness by version + chain hash, names, `reference` flag honoured by mass/BOM/export/CAM/booleans; serialization v84 with the snapshot in `geometry/`; refusals | 1 session |
-| **D2** surface | `add_feature {type: Derived}` / `update_derived` / `get_state.stale`; the tree row (tint, badge, Update, Break link → an Import-like frozen body); "derive this neighbour" from an in-context edit; the `defaults/*` gate for the tool | 1 session |
+| **D1** core — **shipped** | `DerivedFeature`: snapshot load in `Execute`, `Update` against `PartDocById`, staleness by version + chain hash, names, `reference` flag honoured by mass/BOM/export/CAM/booleans; serialization v84 with the snapshot in `geometry/`; refusals | 1 session |
+| **D2** surface — **shipped** | `add_feature {type: Derived}` / `update_derived` / `get_state.stale`; the tree row (tint, badge, Update, Break link → an Import-like frozen body); "derive this neighbour" from an in-context edit; the `defaults/*` gate for the tool | 1 session |
 | **D3** proof | sketch-on-derived-face, external geometry from a derived edge, a hole pattern from derived circles, a mate connector on a derived face — each a test, none new code if D1's names are right | ½ session |
 | **D4** acceptance | **the SO-101 gripper**: import the arm's STEP, derive the wrist servo into a new part, design the gripper body and moving jaw on its faces, derive the Pi Camera 3 STEP into the jaw and mount it, mates, interference and contact reports, a drawing. The dogfood round the roadmap keeps asking for, on the part this feature exists for | 1 session |
 
@@ -139,3 +141,69 @@ assembly's current solve when that document is loaded.
   that leaves a downstream feature broken.
 - The gripper: a screenshot per part in the dogfood record, the contact
   report clash-free at the end, and the list of what broke on the way.
+
+## As built (2026-09-03)
+
+What shipped is the design above with these differences, each for a reason
+found in the tree:
+
+- **The snapshot is a document asset, not a `geometry/` file.** `geometry/`
+  is the baked-geometry accelerator: keyed by the chain hash, ignored when
+  stale, and deleted outright when the per-project bake setting is turned
+  off. A snapshot is truth, not an accelerator, so it lives where the v49
+  reference-image bytes do — `Document`'s asset store, `assets/derived-
+  <content hash>.brep` in the directory form, base64 under `assets` in the
+  single file. Content-addressed, so two features deriving the same servo
+  share one blob, and an update leaves the previous blob in the store for
+  undo. The single-file loader had to decode assets BEFORE its one
+  regeneration; it decoded them after.
+- **The stale stamp is the source's `TipChainHash`, not `Version()`.**
+  `Version()` restarts at 0 on every load, so it cannot survive a session.
+  The chain hash is what the prefix cache and the bake already key on, and
+  it strips appearance, so recolouring the source is not "moved".
+- **Names are `<derived id>/<source created_by>/<source name>`** exactly
+  as planned; `test_derived` pins a sketch on a placed derived face following
+  the face through an update that changes the source's height.
+- **`Body::reference`** is the one flag every consumer reads. Skipped by:
+  `MassOfBodies` (mass, BOM), STEP/STL/BREP export (refused in words when
+  only ghosts remain), CAM job stock, the FEM mesh plan, `ApplyBodyMode`
+  (Add never fuses into a ghost — with only ghosts the first solid becomes
+  the part's own body; Cut passes through), Boolean operands (refused
+  naming `reference: false`), the assembly's placed bodies (fastener check,
+  interference, contact, section caps, fit, visual export) and the assembly
+  render cache (in the assembly the real part is at its own occurrence),
+  and baked geometry carries it so a reloaded jaw does not weigh its servo.
+  A source's own ghosts are never derived further ("a ghost of a ghost").
+- **Drawn as an in-context neighbour is**: ghost tint, alpha 0.35, no
+  outline, still pickable. In the part tab only.
+- **Verbs.** RPC: `add_feature {type: Derived, source_part, bodies?,
+  placement?, reference?}` (the snapshot is taken in the handler, through
+  the project), `update_derived {feature_id | index | all: true}`,
+  `derive_occurrence {occurrence, name?, reference?, bodies?}` (in an
+  in-context edit only; placement = `OccMatrix(edited)⁻¹ · OccMatrix
+  (neighbour)`), `get_state` rows carry `stale: true | false | null` (null =
+  source not loaded: unknown, never reported as fresh), `check_geometry`
+  adds `stale_derived` when there is something to say. GUI: `###tb_derive`
+  opens a preview whose window lists the candidates as buttons (a combo
+  cannot be gated) — one candidate is taken at once, several ask; the tree
+  row is tinted blue, amber when stale, with **Update from source** and
+  **Break link** (the source is forgotten: a frozen copy, never stale) in
+  its context menu; the editor has the same list, a Reference checkbox and
+  an Update button. No placement editor in the GUI: placement comes from the
+  neighbour or the RPC, which is where a real placement comes from.
+- **A general fix found on the way**: the tool window's Accept button only
+  disabled on unfilled pick SLOTS; a feature whose `WhyIncomplete` said no
+  was refused by `AcceptPendingFeature` in silence. Accept now disables and
+  says why, for every tool.
+- **Gates**: `test_derived.cpp` (9 cases), golden `v84-derived-servo`
+  (loads with no source part), `derived_smoke.py` (the RPC surface end to
+  end, headless: refusals, stale, update + undo, the in-context placement,
+  save/open), GUI `defaults/derive` (refuses until a source exists),
+  `derived/tool_copies_the_other_part_as_a_ghost` (ghost instance, weightless,
+  stale badge, Update verb, one undo step), `derived/source_list_takes_the_
+  snapshot`.
+
+**Still open**: D3's remaining proofs (external geometry from a derived
+edge, a hole pattern from derived circles, a mate connector on a derived
+face — each expected to need no new code) and D4, the gripper.
+

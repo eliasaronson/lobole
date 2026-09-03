@@ -2,6 +2,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
+#include "ui/DerivedActions.h"
 #include "ui/FastenerTool.h"
 #include <functional>
 #include <utility>
@@ -15,6 +16,7 @@
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
@@ -35,6 +37,7 @@
 #include "render/Camera.h"
 #include "ui/AppActions.h" // BodyProducers
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 #include "imgui_internal.h" // GetCurrentWindowRead (LeftLabel auto-resize case)
 
@@ -1184,6 +1187,69 @@ void SlotPickClicked(AppState& state, const SelectionItem& item,
     ArmNextUnfilledSlot(state, *f);
 }
 
+// The Derived editor (docs/modeling/derived-plan.md): which part (or, in an
+// in-context edit, which neighbour) the copy is taken from, as one button
+// per candidate — a combo gathers with an empty label and cannot be gated —
+// plus the reference flag. Choosing a source TAKES the snapshot, so the
+// preview shows the copy at once and Accept has something to commit.
+void DrawDerivedParams(AppState& state, DerivedFeature& d, size_t index,
+                       bool commit) {
+  if (d.sourcePart == 0) {
+    ImGui::TextDisabled("Source: none yet");
+  } else {
+    ImGui::Text("Source: %s (id %llu)", d.sourceName.c_str(),
+                static_cast<unsigned long long>(d.sourcePart));
+    const std::optional<bool> stale = DerivedStale(state, d);
+    if (!stale.has_value())
+      ImGui::TextDisabled("(source not loaded; freshness unknown)");
+    else if (*stale)
+      ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f),
+                         ICON_FA_TRIANGLE_EXCLAMATION
+                         " Stale: the source has changed since this copy");
+  }
+  const std::vector<DerivedSource> candidates = DerivedSourceCandidates(state);
+  if (candidates.empty()) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f),
+                       ICON_FA_TRIANGLE_EXCLAMATION
+                       " No other part to derive from — add one (File > New "
+                       "Part) or open the assembly and edit this part in "
+                       "context");
+    ImGui::PopTextWrapPos();
+  } else {
+    ImGui::TextDisabled("Derive from:");
+    for (const DerivedSource& c : candidates) {
+      const std::string label =
+          (c.occurrenceId ? ICON_FA_OBJECT_GROUP " " : ICON_FA_CUBE " ") +
+          c.name + "###derive_src_" + std::to_string(c.slotId) + "_" +
+          std::to_string(c.occurrenceId);
+      const bool current =
+          c.slotId == d.sourcePart &&
+          (c.occurrenceId == 0 || d.position != glm::vec3(0.0f));
+      if (ImGui::Selectable(label.c_str(), current)) {
+        nlohmann::json before = DocumentIO::FeatureToJson(d);
+        const std::string why = PointDerivedAt(state, d, c);
+        if (why.empty()) {
+          if (d.GetName() == "Derived")
+            d.SetName(c.name + " (derived)");
+          CommitDiscrete(state, d, before, index, commit);
+        } else {
+          state.sketchEdit.actionMsg = why;
+        }
+      }
+    }
+  }
+  HandleEdit(state, d,
+             ImGui::Checkbox("Reference (a ghost to draw on, not this "
+                             "part's matter)",
+                             &d.reference),
+             index, commit);
+  if (d.sourcePart != 0 && ImGui::Button("Update from source")) {
+    if (const std::string why = UpdateDerived(state, d.GetId()); !why.empty())
+      state.sketchEdit.actionMsg = why;
+  }
+}
+
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                              bool commit) {
   // Name
@@ -1261,6 +1327,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
             cyl->height);
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
     ImGui::TextDisabled("File: %s", import->path.c_str());
+  } else if (auto* d = dynamic_cast<DerivedFeature*>(&feature)) {
+    DrawDerivedParams(state, *d, index, commit);
   } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {
     if (sk->planeRef != 0) {
       if (Feature* datum = state.document->FindFeatureById(sk->planeRef)) {

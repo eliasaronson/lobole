@@ -14,6 +14,7 @@
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
@@ -42,6 +43,7 @@
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/Commands.h" // ActiveContext (get_keymap)
+#include "ui/DerivedActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
 #include "ui/SettingsWindow.h"    // ApplySettings / the save debounce
@@ -1233,6 +1235,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // built a valid result, but likely not the intended one.
       if (!doc->GetFeature(i)->GetWarning().empty()) {
         f["warning"] = doc->GetFeature(i)->GetWarning();
+      }
+      // A Derived copy says whether its source has moved (v84): true/false,
+      // or null when the source is not loaded — unknown is not fresh.
+      if (auto* d = dynamic_cast<const DerivedFeature*>(doc->GetFeature(i))) {
+        const std::optional<bool> stale = ui::DerivedStale(state, *d);
+        f["stale"] = stale.has_value() ? json(*stale) : json(nullptr);
       }
       features.push_back(f);
     }

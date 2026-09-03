@@ -617,6 +617,19 @@ void DrawToolWindow(AppState& state) {
       break;
     }
   }
+  // A feature that says it cannot be committed (WhyIncomplete) is refused by
+  // AcceptPendingFeature already; the button has to say so too, or a click
+  // does nothing in silence. Slot-less inputs (a Derived's source) only
+  // have this channel.
+  if (missing == nullptr) {
+    if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
+      blocking = true;
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f),
+                         ICON_FA_TRIANGLE_EXCLAMATION " %s", why.c_str());
+      ImGui::PopTextWrapPos();
+    }
+  }
   if (!state.slotPick.miss.empty() &&
       state.slotPick.featureId == feature->GetId()) {
     ImGui::PushTextWrapPos(0.0f);

@@ -151,7 +151,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[24];
+extern const ToolCase kToolCases[25];
 const ToolCase* FindToolCase(const char* testName);
 
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);

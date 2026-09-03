@@ -1,5 +1,6 @@
 #include "ui/FeatureTreePanel.h"
 #include "core/Units.h"
+#include "ui/DerivedActions.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 #include "ui/TextFit.h"
@@ -10,6 +11,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h" // Measure::MassOfBodies (mass-props section)
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/SketchFeature.h"
@@ -134,6 +136,8 @@ const char* FeatureIcon(const std::string& type) {
     return ICON_FA_ROUTE;
   if (type == "Import")
     return ICON_FA_FILE_IMPORT;
+  if (type == "Derived")
+    return ICON_FA_CLONE;
   return ICON_FA_SHAPES;
 }
 
@@ -294,10 +298,19 @@ void DrawFeatureTreePanel(AppState& state) {
       // A warning (built, but a likely-unintended no-op) tints amber — only
       // when the feature is neither broken nor dimmed, so error/dim win.
       const bool warned = !dimmed && !errored && !feature->GetWarning().empty();
+      // A Derived copy whose source has moved wears the warning tint (it
+      // built fine, but it is behind); a fresh one the linked-copy blue, so
+      // "this is another part's geometry" reads at a glance.
+      auto* derivedFeat = dynamic_cast<DerivedFeature*>(feature);
+      const bool derivedStale =
+          derivedFeat != nullptr && !dimmed && !errored &&
+          DerivedStale(state, *derivedFeat) == std::optional<bool>{true};
       if (errored)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
-      else if (warned)
+      else if (warned || derivedStale)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.25f, 1.0f));
+      else if (derivedFeat != nullptr && !dimmed)
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.60f, 0.75f, 0.95f, 1.0f));
       else if (dimmed)
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -389,6 +402,19 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
           ImGui::SetTooltip("%s", feature->GetWarning().c_str());
+      } else if (derivedStale) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Stale: '%s' has changed since this copy was "
+                            "taken. Right-click > Update from source.",
+                            derivedFeat->sourceName.c_str());
+      } else if (derivedFeat != nullptr && !dimmed) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("%s copy of '%s'",
+                            derivedFeat->reference ? "Reference (ghost)"
+                                                   : "Solid",
+                            derivedFeat->sourceName.c_str());
       } else if (dimmed) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
@@ -420,6 +446,30 @@ void DrawFeatureTreePanel(AppState& state) {
           nlohmann::json after = DocumentIO::FeatureToJson(*feature);
           state.commands->PushApplied(
               std::make_unique<ModifyFeatureCommand>(i, before, after));
+        }
+        // A Derived copy's verbs (docs/modeling/derived-plan.md): retake the
+        // snapshot (one undo step), or freeze it as an unlinked body.
+        // Both replace the feature object (a ModifyFeatureCommand), so
+        // `feature` is dangling afterwards: leave the row like Delete does.
+        if (derivedFeat != nullptr && derivedFeat->sourcePart != 0) {
+          bool replaced = false;
+          if (ImGui::MenuItem("Update from source###feat_derived_update")) {
+            if (const std::string why = UpdateDerived(state, feature->GetId());
+                !why.empty())
+              state.sketchEdit.actionMsg = why;
+            replaced = true;
+          }
+          if (ImGui::MenuItem("Break link###feat_derived_break")) {
+            if (const std::string why =
+                    BreakDerivedLink(state, feature->GetId());
+                !why.empty())
+              state.sketchEdit.actionMsg = why;
+            replaced = true;
+          }
+          if (replaced) {
+            ImGui::EndPopup();
+            break; // feature list changed; redraw next frame
+          }
         }
         // Rollback bar (not undoable — a view of the history, not an edit).
         if (ImGui::MenuItem("Rollback to here")) {
