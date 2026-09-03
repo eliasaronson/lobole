@@ -603,6 +603,89 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // Deliberately no cleanup.
   };
 
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "a_ring_drag_unwraps_past_half_a_turn");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // A drag-within-mate on a revolute ring measured its angle from the grab
+    // with atan2, which wraps at +-pi: the DOF jumped a full turn when the
+    // cursor crossed that line. Invisible on a gear (every tooth is
+    // periodic), a 226 mm leap on the rack it drives — reported from the
+    // gear train as "if I keep turning it jumps back". One drag through 300
+    // degrees must land at 300 degrees, not -60.
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t partSlotId = s_App->parts[0].id;
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence base;
+    base.partId = partSlotId;
+    base.fixed = true;
+    const uint64_t baseId = s_App->assembly->AddOccurrence(base);
+    Occurrence spinner;
+    spinner.partId = partSlotId;
+    const uint64_t spinId = s_App->assembly->AddOccurrence(spinner);
+    Mate axle;
+    axle.type = MateType::Revolute;
+    axle.a.occurrenceId = baseId;
+    axle.a.anchor.origin = true;
+    axle.b.occurrenceId = spinId;
+    axle.b.anchor.origin = true;
+    axle.flipped = false;
+    axle.offset = 6.0f; // seated up the axis: the ring must follow the part
+    const uint64_t axleId = s_App->assembly->AddMate(axle);
+    ui::SolveActiveAssembly(*s_App);
+    ui::SelectOccurrence(*s_App, spinId);
+    ctx->Yield(3);
+
+    // The grab point comes off the PUBLISHED ring, which is what is drawn.
+    // Its radius follows the camera distance (GizmoScale), so the camera is
+    // framed FIRST and the ring read after — read before, the radius is the
+    // old view's and the click lands beside the ring.
+    const auto ring = [&]() -> ui::ViewportHandle {
+      for (const ui::ViewportHandle& h : s_App->viewportHandles)
+        if (h.kind == ui::HandleKind::Rotate)
+          return h;
+      return {};
+    };
+    IM_CHECK(ring().length > 0.0f);
+    const glm::vec3 centre = ring().origin;
+    const glm::vec3 axis = ring().dir;
+    // Drawn where the DRIVEN part sits (the mate's axial offset), not at the
+    // A frame: a gear seated on a plate had its ring 6.5 mm below it.
+    IM_CHECK(std::abs(centre.z - 6.0f) < 1e-3f);
+    const glm::vec3 b1 = ui::PerpTo(axis);
+    const glm::vec3 b2 = glm::cross(axis, b1);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(b2);
+    s_App->camera->SetPosition(centre + axis * 40.0f + b1 * 3.0f);
+    ctx->Yield(3);
+    const float radius = ring().length;
+    IM_CHECK(radius > 0.1f);
+    const auto at = [&](float deg) {
+      const float a = glm::radians(deg);
+      return centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius;
+    };
+    const float rot0 = s_App->assembly->FindMateById(axleId)->rotation;
+    const ImVec2 grab = WorldToWindow(at(0.0f));
+    ctx->MouseMoveToPos(grab);
+    ctx->Yield();
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->Yield();
+    for (int step = 1; step <= 10; step++) {
+      ctx->MouseMoveToPos(WorldToWindow(at(30.0f * step)));
+      ctx->Yield();
+    }
+    IM_CHECK(s_App->gizmoDrag.active && s_App->gizmoDrag.rotate);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    const float turned = s_App->assembly->FindMateById(axleId)->rotation - rot0;
+    ctx->LogInfo("ring drag through 300 degrees turned the mate %.1f degrees",
+                 glm::degrees(turned));
+    IM_CHECK(std::abs(std::abs(turned) - glm::radians(300.0f)) <
+             glm::radians(12.0f));
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "mate_hover_marker");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

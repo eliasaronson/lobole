@@ -950,6 +950,14 @@ struct AppState {
                        0}; // occurrence orientation at grab (free drag)
     float startParam =
         0.0f; // axis coordinate (translate) / angle (rotate) at grab
+    // A rotate drag is UNWRAPPED: the mouse's angle about the axis comes
+    // from atan2 and wraps at +-pi, and measuring from the grab angle made
+    // the DOF jump a full turn when the cursor crossed that line — invisible
+    // on a gear (every tooth is periodic), a 226 mm leap on the rack it
+    // drives. `turned` accumulates the per-frame delta, each wrapped into
+    // (-pi, pi], from the angle seen last frame.
+    float lastAngle = 0.0f;
+    float turned = 0.0f;
     // The gizmo's frame: world axes at the occurrence origin for a free drag,
     // or the mate's connector-A world frame for a drag-within-mate (phase 3).
     glm::vec3 frameOrigin{0};

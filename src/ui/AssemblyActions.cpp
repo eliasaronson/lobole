@@ -922,9 +922,13 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
   const auto Wa = ConnectorWorldFrame(state, mate->a);
   if (!Wa)
     return false; // dangling connector → no meaningful DOF gizmo
-  spec.origin = glm::vec3((*Wa)[3]);
   for (int i = 0; i < 3; i++)
     spec.axis[i] = glm::normalize(glm::vec3((*Wa)[i]));
+  // Where the DRIVEN part is, not where the mate's A frame is: the axial
+  // offset seats B up or down the axis (a gear on a plate sits 6.5 mm above
+  // the hole's mid-depth), and a ring drawn at the hole read as the gear
+  // floating above it — reported as "the pinion moves away from the gears".
+  spec.origin = glm::vec3((*Wa)[3]) + spec.axis[2] * mate->offset;
   switch (mate->type) {
   case MateType::Revolute:
     spec.rot[2] = true;
@@ -945,6 +949,20 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
     return false; // no DOF
   }
   return true;
+}
+
+// The angle turned since the grab, unwrapped: the per-frame delta is
+// wrapped into (-pi, pi] and accumulated, so crossing atan2's seam is a small
+// step like any other rather than a full turn (see AppState::GizmoDrag).
+float UnwrappedTurn(AppState::GizmoDrag& g, float angleNow) {
+  float d = angleNow - g.lastAngle;
+  while (d > glm::pi<float>())
+    d -= 2.0f * glm::pi<float>();
+  while (d <= -glm::pi<float>())
+    d += 2.0f * glm::pi<float>();
+  g.turned += d;
+  g.lastAngle = angleNow;
+  return g.turned;
 }
 
 // Ray vs the spec's enabled handles → (axis, rotate). Arrows win ties.
@@ -1162,8 +1180,8 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
     } else {
       float ang;
       if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
-        double deg =
-            g.startRotZ + glm::degrees(static_cast<double>(ang - g.startParam));
+        double deg = g.startRotZ +
+                     glm::degrees(static_cast<double>(UnwrappedTurn(g, ang)));
         if (snap) {
           const double nearest = std::round(deg / 45.0) * 45.0;
           if (std::abs(deg - nearest) < 5.0)
@@ -1226,6 +1244,8 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
     float ang = 0.0f;
     (void)RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
     g.startParam = ang;
+    g.lastAngle = ang;
+    g.turned = 0.0f;
   }
   return true;
 }
@@ -1303,7 +1323,8 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       } else {
         float ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
-          occ->orientation = glm::angleAxis(ang - g.startParam, A) * g.startRot;
+          occ->orientation =
+              glm::angleAxis(UnwrappedTurn(g, ang), A) * g.startRot;
       }
     } else {
       // Drag-within-mate: write the mate's DOF, then re-solve so the
@@ -1321,7 +1342,7 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       } else {
         float ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
-          const float d = ang - g.startParam;
+          const float d = UnwrappedTurn(g, ang);
           if (mate->type == MateType::Ball)
             mate->ballRotation = glm::angleAxis(d, A) * g.startBall;
           else
@@ -1398,6 +1419,8 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     float ang = 0.0f;
     RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
     g.startParam = ang;
+    g.lastAngle = ang;
+    g.turned = 0.0f;
   }
   if (mate) { // capture the DOF value at grab
     g.startDof = rotate ? mate->rotation
