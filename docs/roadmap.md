@@ -226,7 +226,10 @@ with a closed kinematic loop cannot be assembled at all~~ — **closed
 loops close numerically in joint coordinates, wrapping the direct-frame pass.
 **Regeneration cannot cross a document boundary**, which is the single missing
 edge behind three separately deferred items (cross-part linked sketches,
-cross-part refs in context, assembly-level features). And there is **no
+cross-part refs in context, assembly-level features) — the review now records
+the one safe shape for it, a **binder feature** with a baked snapshot and an
+explicit update (not a shared regeneration graph), and the verdict that it
+waits for the first real part that needs it. And there is **no
 general "long operation off the frame" mechanism**: five cases, five shapes.
 [ui/long-operations.md](ui/long-operations.md) planned it 2026-09-01 and
 shipped step 0 the same day (one poll entry point for all three loops, fixing

@@ -117,6 +117,58 @@ failure mode is not a crash but a document that regenerates differently on
 someone else's machine. **Highest value and highest risk on this list.** If it
 is ever done it wants its own design doc and its own gate before any code.
 
+### An option that keeps every guarantee: a binder, not a graph (2026-09-03)
+
+Asked "is there a good way to do this, and what would we gain". Read against
+the tree, regeneration already crosses a document boundary in three places,
+and each is a precedent for HOW rather than a violation:
+
+- **Project variables.** A part's `RegenContext` carries the project symbol
+  table, so two parts share a number today. This is what every assembly
+  built here has used to keep a hole in one part over a hole in another.
+- **The Import feature.** A feature that depends on something outside the
+  document (a STEP file), re-read on regen, with the parsed geometry BAKED
+  into the file so the first regen is a load, not a parse.
+- **A4 propagation.** An assembly records each referenced part's
+  `Document::Version()` and reports staleness; it never resolves live.
+
+The Part Studio shape above — one regeneration graph across parts — is the
+one to avoid, for the reason given. The shape that fits the three precedents
+is a **binder feature** (FreeCAD's ShapeBinder, Onshape's derived part):
+
+- A part gets a `Derived` feature naming another part by its stable slot id,
+  optionally one body or face of it, and carrying a **baked copy** of that
+  geometry plus the source version it was taken at — the Import feature's
+  seeded-geometry pattern, with a part in place of a file.
+- Regen of the part resolves only its own feature list, because the copy is
+  IN the file. Determinism, checkpoints, rollback, the golden corpus and the
+  merge machinery see one more feature with data in it, which the format
+  already handles for baked geometry.
+- Staleness is the source's version moving, reported the way drawings and
+  FEM results already report it, and cleared by an explicit **update** (the
+  FEM rule: stale, never auto-solved). A cycle is two stale snapshots, never
+  a hang. Two machines regenerate the same file identically because the file
+  carries the snapshot.
+- From the copy, sketch-on-face and external geometry work as on any body,
+  so the cross-part linked sketch copies (copy-links phase 2) and cross-part
+  references in context fall out — two of the three items above.
+
+What it would NOT buy is the third item, assembly-level features (one hole
+through three parts): a binder pulls geometry in, that case pushes a cut out
+to several parts, and is its own smaller design if a real assembly ever
+needs it. The fastener work already answers the common instance, since a
+bolt is placed from the hole it fits.
+
+Cost, honestly: one to two sessions, following the Import feature's shape;
+a format bump for the new feature; a golden; the `defaults/*` gate for its
+creation tool. Risk: low — nothing in the regeneration contract changes.
+
+**Verdict, 2026-09-03: not now.** Every part this project has built was
+fine with project variables for the shared numbers, and copy-links records
+no demand for the cross-part case. The binder is cheap and safe enough to
+wait for the first real part that wants to draw on another part's face.
+When that day comes, build the binder, not the graph.
+
 ---
 
 ## A3 — There is no general "long operation off the frame" mechanism

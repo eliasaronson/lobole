@@ -114,3 +114,10 @@ Built as designed, with the phase boundary held:
 **Still phase 2:** cross-part links, for the reason stated above — regen
 would have to resolve another part's document and dirty dependents, widening
 its input surface. Unlinked cross-part paste remains the behaviour until then.
+
+
+**2026-09-03:** the shape phase 2 would take is now written down in
+[../capability-review-2026-08-31.md](../capability-review-2026-08-31.md) (A2,
+"a binder, not a graph"): a feature carrying a baked copy of another part's
+geometry plus the source version, updated explicitly — from which a linked
+copy across parts is the within-part case on the copy. Still no demand.
