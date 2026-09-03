@@ -102,3 +102,38 @@ checkpoints (a checkpoint is a point in exactly this stream).
 S1 (cheap, immediately useful for AI-assisted development of Designer itself)
 → S2 (unlocks CI) → S3 → S4. Do after variables V1 so the API speaks
 expressions from the start.
+
+## Agent-facing follow-ons (surveyed 2026-09-03)
+
+A read of the hosted "CAD copilot" products — agents that drive Onshape,
+Fusion or SolidWorks through connectors, with a task platform around them —
+against this repo. Their MCP surfaces are for the platform (create a task,
+send a message, list files), not for CAD; the model sits on their side and
+the CAD on someone else's, which is the opposite of goal 5 here (one command
+layer shared by the human and the agent, inside the app) and not something
+to copy. Their open-source text-to-CAD piece has an LLM write OpenSCAD and
+pulls the numbers into sliders — the code-as-model approach the scripted-
+features question already settled (generators outside the app; see
+[../capability-review-2026-08-31.md](../capability-review-2026-08-31.md),
+"scripted features"). Three things survive the comparison, in value order:
+
+1. **`extract_variables` — feature-tree cleanup as one verb.** The workflow
+   those copilots are best known for: pull hard-coded dimensions out of the
+   selected features into named project variables with expressions, and
+   rename features by what they cut. It is exactly the parameters-first
+   workflow the benchmark teaches, and it has no single verb here — an agent
+   handed a messy imported part does it one `modify_feature` at a time.
+   Half a session. It lands on the surface the benchmark measures, so it
+   needs a benchmark run before any claim (CLAUDE.md).
+2. **Selection as the agent's context, as a stated habit.** "Add a fillet
+   here" works in those products because the copilot reads what the user
+   selected. `get_state` already exposes the selection with element names;
+   what is missing is the sentence in the modeling-workflow prompt that
+   says to read it before acting on a request that says "this" or "here".
+   A prompt change is a benchmark change too.
+3. **An interaction channel for unattended runs.** Their task API has a
+   verb for the agent to ask the human a question or an approval mid-task,
+   idempotency keys on every mutation, and `confirm: true` on deletes.
+   `background_jobs` (A3) covers the asynchronous half; the question/approval
+   half has no home here and needs none until an agent runs unattended
+   against a Designer instance. Named so it is not rediscovered.

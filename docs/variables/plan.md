@@ -106,6 +106,12 @@ the RPC surface, `remote_smoke.py` coverage.
   [inspect/plan.md](../inspect/plan.md)).
 - **Per-sketch local variables**; global-only first.
 - **Conditionals / string params** (Onshape FeatureScript territory — no).
+- **`extract_variables`** — the selected features' literal dimensions into
+  named variables driving expressions, in one verb (2026-09-03, from the
+  agent-facing follow-ons in [../scripting/plan.md](../scripting/plan.md)).
+  The evaluator, the `_expr` fields and the panel are all in place; this is
+  the verb over them. Wants a benchmark run, since it changes what the
+  benchmark measures.
 
 ## Risks
 

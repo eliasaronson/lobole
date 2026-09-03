@@ -214,7 +214,10 @@ variables, drawings, BOM + exploded).
    list implied.
 5. **Then the deferred follow-ons**, in demand order: per-occurrence
    part-config selection, assembly-level features, drawing section/detail
-   views, FEM assembly contact, deb/rpm packaging.
+   views, FEM assembly contact, deb/rpm packaging — and, from the 2026-09-03
+   look at the hosted CAD copilots, `extract_variables` (feature-tree cleanup
+   as one verb) and selection-as-context in the agent prompt
+   ([scripting/plan.md](scripting/plan.md), "Agent-facing follow-ons").
 
 **Capability walls, found 2026-08-31** and recorded in
 [capability-review-2026-08-31.md](capability-review-2026-08-31.md). Its
