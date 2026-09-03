@@ -1254,6 +1254,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                     {"material", body.material},
                     {"bbox_min", Vec3ToJson(min)},
                     {"bbox_max", Vec3ToJson(max)}};
+      if (body.reference) // a Derived ghost: drawn on, weighed as nothing
+        entry["reference"] = true;
       if (body.appearance.Any()) { // v54 visual override, set_appearance
         json a = json::object();
         if (body.appearance.color)

@@ -21,7 +21,8 @@ HoleFeature::HoleFeature(const std::string& name, uint64_t sketchId,
 bool HoleFeature::Execute(RegenContext& ctx) {
   const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sk) {
-    SetError("hole needs a sketch of points (missing or suppressed)");
+    SetError(
+        "hole needs a sketch of points or circles (missing or suppressed)");
     return false;
   }
   // A recorded fit DERIVES the diameter (docs/modeling/hole-standards.md).
@@ -51,14 +52,21 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  // Hole centers = the sketch's Point entities (in plane UV -> world).
+  // Hole centers = the sketch's Point entities and its Circles' centres (in
+  // plane UV -> world). Circles count so that a hole can be placed on
+  // another body's hole WITHOUT copying its coordinates: external geometry
+  // of a Derived ghost's hole edge projects to a (construction) circle, and
+  // that circle is the centre. The SO-101 gripper dogfood carried every
+  // servo and camera hole centre by hand before this.
   std::vector<glm::vec3> centers;
   for (const auto& e : sk->entities) {
     if (const auto* p = std::get_if<sketch::Point>(&e))
       centers.push_back(sk->plane.PlaneToWorld(p->p));
+    else if (const auto* c = std::get_if<sketch::Circle>(&e))
+      centers.push_back(sk->plane.PlaneToWorld(c->center));
   }
   if (centers.empty()) {
-    SetError("hole sketch has no points to place holes at");
+    SetError("hole sketch has no points or circles to place holes at");
     return false;
   }
 

@@ -1,10 +1,14 @@
 #include "cad/CADKernel.h"
 
 #include <cmath>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <glm/gtc/quaternion.hpp>
 #include <map>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
 
 #ifdef HAVE_OPENCASCADE
 #pragma message("Compiling with OpenCASCADE support")
@@ -70,6 +74,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Solid.hxx>
+#include <TopoDS_TShape.hxx>
 #include <algorithm>
 
 #include <XCAFApp_Application.hxx>
@@ -93,12 +98,67 @@ CADShape::~CADShape() {}
 
 bool CADShape::IsValid() const { return !m_shape.IsNull(); }
 
+namespace {
+
+// Volume by shape IDENTITY. Every mutating RPC digests every body of the
+// part twice (before and after), and the digest is the volume; a part that
+// holds a Derived snapshot of a 197-body PCB spent 14 s per sketch add in
+// BRepGProp::VolumeProperties on bodies that had not changed (the SO-101
+// gripper dogfood, docs/modeling/derived-plan.md). A shape moved by a rigid
+// placement shares its TShape, so keying on the TShape (plus the location's
+// scale, the one part of a location that changes a volume) makes the second
+// and every later pass a lookup. The handle in the entry keeps the TShape
+// alive, so its address cannot be recycled for a different shape while the
+// entry lives; the ring bounds the memory.
+struct VolumeCache {
+  struct Entry {
+    Handle(TopoDS_TShape) keepAlive;
+    double scale = 1.0;
+    double volume = 0.0;
+  };
+  static constexpr size_t kCapacity = 4096;
+  std::mutex mutex;
+  std::unordered_map<const TopoDS_TShape*, Entry> entries;
+  std::deque<const TopoDS_TShape*> order; // insertion order, for eviction
+
+  std::optional<double> Find(const TopoDS_Shape& shape) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = entries.find(shape.TShape().get());
+    if (it == entries.end() ||
+        it->second.scale != shape.Location().Transformation().ScaleFactor())
+      return std::nullopt;
+    return it->second.volume;
+  }
+  void Store(const TopoDS_Shape& shape, double volume) {
+    std::lock_guard<std::mutex> lock(mutex);
+    const TopoDS_TShape* key = shape.TShape().get();
+    if (entries.find(key) == entries.end()) {
+      order.push_back(key);
+      while (order.size() > kCapacity) {
+        entries.erase(order.front());
+        order.pop_front();
+      }
+    }
+    entries[key] = {shape.TShape(),
+                    shape.Location().Transformation().ScaleFactor(), volume};
+  }
+};
+
+VolumeCache& TheVolumeCache() {
+  static VolumeCache cache;
+  return cache;
+}
+
+} // namespace
+
 double CADShape::Volume() const {
   if (!IsValid())
     return 0.0;
-
+  if (const std::optional<double> hit = TheVolumeCache().Find(m_shape))
+    return *hit;
   GProp_GProps props;
   BRepGProp::VolumeProperties(m_shape, props);
+  TheVolumeCache().Store(m_shape, props.Mass());
   return props.Mass();
 }
 

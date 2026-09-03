@@ -519,6 +519,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       if (c.value("origin", false))
         anchor = {{"origin", true}};
       else if (c.contains("face")) {
+        // A bare element name here used to leak a json type error
+        // ("cannot use at() with string") instead of the contract.
+        if (!c.at("face").is_object() || !c.at("face").contains("feature_id") ||
+            !c.at("face").contains("element"))
+          throw std::runtime_error(
+              "connector 'face' is an object {feature_id, element}: the id of "
+              "the feature that CREATED the body (created_by in get_state) "
+              "and the element name (list_elements)");
         anchor = {{"face",
                    {{"feature_id", c.at("face").at("feature_id")},
                     {"element", c.at("face").at("element")}}}};

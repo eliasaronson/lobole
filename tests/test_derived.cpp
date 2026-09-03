@@ -557,6 +557,50 @@ TEST_CASE("hole centres read off a derived boss drill the part's own body",
              WithinRel(1000.0 + 3.14159265 * 4.0 * 3.0, 1e-6));
 }
 
+TEST_CASE("a hole placed on a derived hole edge, no coordinates copied",
+          "[derived][hole][external]") {
+  // The boss's top cap, projected into the hole sketch as external geometry,
+  // is a construction circle; the Hole takes its centre. No number from the
+  // ghost crosses into this part by hand.
+  auto source = MakeSource();
+  Document host;
+  const uint64_t did = Derive(host, *source);
+  host.AddFeature(std::make_unique<BoxFeature>("Jaw", glm::vec3(0, 0, -4.0f),
+                                               20.0, 10.0, 4.0));
+  const uint64_t jawId = host.GetFeature(1)->GetId();
+  REQUIRE(host.Regenerate());
+  std::string cap;
+  for (const Body& b : host.GetBodies()) {
+    if (b.name != "Boss")
+      continue;
+    for (const auto& [index, name] : b.elementMap.names)
+      if (const auto info = Measure::DescribeFaceAt(b, index);
+          info && info->normal.z > 0.99f)
+        cap = name;
+  }
+  REQUIRE(!cap.empty());
+  SketchPlane plane(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centres", plane);
+  sk->AddExternalGeometry(ElementRef{did, cap}, sketch::ExternalKind::Face);
+  host.AddFeature(std::move(sk));
+  const uint64_t skId = host.GetFeature(2)->GetId();
+  host.AddFeature(
+      std::make_unique<HoleFeature>("Drill", skId, HoleKind::Simple, 2.0, 4.0));
+  const bool ok = host.Regenerate();
+  INFO("sketch: " << host.GetFeature(2)->GetError()
+                  << " hole: " << host.GetFeature(3)->GetError());
+  REQUIRE(ok);
+  const auto* s2 = dynamic_cast<const SketchFeature*>(host.GetFeature(2));
+  REQUIRE(s2 != nullptr);
+  REQUIRE(s2->external.size() == 1);
+  REQUIRE(s2->external[0].genIds.size() == 1); // the cap's one circle
+  CHECK(host.GetFeature(3)->GetError().empty());
+  CHECK_THAT(VolumeOf(host, jawId),
+             WithinRel(800.0 - 3.14159265 * 1.0 * 4.0, 1e-4));
+  CHECK_THAT(VolumeOf(host, did), // the ghost is not drilled
+             WithinRel(1000.0 + 3.14159265 * 4.0 * 3.0, 1e-6));
+}
+
 TEST_CASE("a mate connector on a derived face resolves in the assembly",
           "[derived][assembly]") {
   auto source = MakeSource();

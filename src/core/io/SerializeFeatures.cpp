@@ -1038,7 +1038,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "face {feature_id, element} (cylindrical), designation (e.g. \"M8\"), "
      "pitch?, thread_class?, length (+_expr), modeled?"},
     {"Hole", 21,
-     "hole_kind: simple|counterbore|countersink, sketch_id (point centres; "
+     "hole_kind: simple|counterbore|countersink, sketch_id (centres: its "
+     "points and its circles' centres, so a projected hole edge places a hole; "
      "drills along -plane normal), diameter (+_expr), depth (+_expr), "
      "through?, cb_diameter?, cb_depth?, cs_diameter?, cs_depth?; "
      "fit?: {thread: \"M6\", kind: close|normal|loose|tapped, pitch?} — what "

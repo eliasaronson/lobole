@@ -129,9 +129,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   (the pull direction is this plane's normal), "faces": [{{"feature_id":
   <same body>, "element": <side-face name from list_elements>}}, ...]}} —
   faces perpendicular to the pull can't be tapered (pick side faces).
-- Hole (drill holes at a sketch's Point entities, cut into the bodies below
-  along the sketch plane's -normal): {{"type": "Hole", "name": str,
-  "sketch_id": <a sketch whose points are the hole centers>,
+- Hole (drill holes at a sketch's Point entities and at its circles' centres
+  — so external geometry of another body's hole edge places a hole with no
+  coordinate copied — cut into the bodies below along the sketch plane's
+  -normal): {{"type": "Hole", "name": str,
+  "sketch_id": <a sketch whose points/circles are the hole centers>,
   "hole_kind": "simple"|"counterbore"|"countersink", "diameter": num,
   "diameter_expr"?: str, "depth": num, "depth_expr"?: str, "through"?: bool,
   counterbore: "cb_diameter"/"cb_depth", countersink: "cs_diameter"/

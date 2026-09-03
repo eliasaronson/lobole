@@ -995,21 +995,30 @@ void SketchFeature::RemoveExternalGeometry(size_t extIndex) {
 
 bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
   for (auto& ext : external) {
+    // A feature can create SEVERAL bodies (an Import, a Derived copy of a
+    // multi-body part): the element lives on whichever of them resolves the
+    // name, not on the first one. Taking the first left every element of a
+    // derived servo's second body "no longer exists".
     const Body* body = nullptr;
-    for (const Body& b : ctx.bodies)
-      if (b.createdBy == ext.ref.featureId) {
+    std::optional<int> idx;
+    bool anyBody = false;
+    for (const Body& b : ctx.bodies) {
+      if (b.createdBy != ext.ref.featureId)
+        continue;
+      anyBody = true;
+      idx = ext.kind == sketch::ExternalKind::Face
+                ? b.elementMap.Resolve(ext.ref.name)
+                : b.elementMap.ResolveEdge(ext.ref.name);
+      if (idx) {
         body = &b;
         break;
       }
-    if (body == nullptr) {
+    }
+    if (!anyBody) {
       SetError("external geometry's body no longer exists");
       return false;
     }
-    const std::optional<int> idx =
-        ext.kind == sketch::ExternalKind::Face
-            ? body->elementMap.Resolve(ext.ref.name)
-            : body->elementMap.ResolveEdge(ext.ref.name);
-    if (!idx) {
+    if (body == nullptr) {
       SetError("external geometry '" + ext.ref.name + "' no longer exists");
       return false;
     }
