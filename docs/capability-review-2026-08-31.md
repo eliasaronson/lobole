@@ -163,6 +163,25 @@ Cost, honestly: one to two sessions, following the Import feature's shape;
 a format bump for the new feature; a golden; the `defaults/*` gate for its
 creation tool. Risk: low — nothing in the regeneration contract changes.
 
+**How much of the risk the variables precedent already retires (asked
+2026-09-03: "we already have variable changes as cross-cutting dependencies —
+is A2 the same risk?").** Closer than this section first said, but not the
+same. Project variables prove that a part's regeneration can take an input
+from outside its document, that an edit there invalidates every reader, and
+that two machines regenerate identically from a shared text input; A4 proves
+staleness by version stamp. What they do not prove is the part that the
+Part Studio fear is actually about: the parameter table is evaluated first,
+once, and no part feeds it, so dependencies run table → parts and never part
+→ part — no order to get right, no cycle possible (which is exactly why
+measured variables stay deferred in variables/plan.md). Geometry references
+are part → part, carry a face through another part's toponaming rather than
+a number, and need a regeneration order across tabs. The snapshot binder
+above avoids all three, so it is variable-class risk. A LIVE binder (re-read
+on the source's version moving, in dependency order) adds ordering and
+cycles back, but with tools already in the tree — SubtreeVersions and
+WouldCycle from A4/A5 — and its one genuinely new gate is a golden whose
+unit is a project bundle rather than a document.
+
 **Verdict, 2026-09-03: not now.** Every part this project has built was
 fine with project variables for the shared numbers, and copy-links records
 no demand for the cross-part case. The binder is cheap and safe enough to
