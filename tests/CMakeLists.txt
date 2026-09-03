@@ -494,6 +494,16 @@ add_test(NAME mcp_server_compiles
                  ${CMAKE_CURRENT_BINARY_DIR}/designer_mcp.pyc)
 set_tests_properties(mcp_server_compiles PROPERTIES TIMEOUT 60)
 
+# The server's hand-written format prose (FEATURE_FORMATS, MATERIAL_SLUGS)
+# against the app's `describe`, HEADLESS. mcp_smoke has the same check, but
+# it is gui-labelled (a hidden window), and a feature type added without a
+# row stayed red there for two days in September 2026 with nothing on the
+# default path to say so. This needs no display, no GPU and no mcp SDK.
+add_test(NAME mcp_formats_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_formats_gate.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(mcp_formats_gate PROPERTIES TIMEOUT 120)
+
 # Same for the python client every script and smoke test imports.
 add_test(NAME py_client_compiles
          COMMAND python3 -c

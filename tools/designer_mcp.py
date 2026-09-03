@@ -181,6 +181,16 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "element": <stable face name from list_elements>}}, ...]}} — at least one
   open face is required (the faces removed to hollow through).
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
+- Fastener (a standard screw, nut or washer read from its ISO table — every
+  dimension but these comes from the standard): {{"type": "Fastener",
+  "name": str, "standard": "iso4762"|"iso14579"|"iso4017"|"iso10642"|
+  "iso7380" (screws) | "iso4032" (nut) | "iso7089" (washer), "size": str
+  (a stocked key, e.g. "M6" — an unstocked one is refused naming the
+  nearest stocked), "length"?: num (mm under the head, OVERALL for a
+  countersunk screw; omit for a nut or a washer), "length_expr"?: str,
+  "drive"?: str (omit for the drive the standard is made with)}} — in an
+  ASSEMBLY, prefer the `add_fastener`/`fit_fastener` RPCs, which derive all
+  of this from the hole you pick (docs/parts/plan.md).
 
 Call the `describe` tool for the authoritative method/type/enum lists.
 

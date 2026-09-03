@@ -175,7 +175,11 @@ descriptions; the source of truth is `SerializeFeatures.cpp`
 (a feature an LLM can't drive is half-shipped), now test-enforced: a new
 feature type must be added to the describe table beside the dispatch chain
 (remote_smoke fails otherwise) and to `FEATURE_FORMATS` in
-`designer_mcp.py` (mcp_smoke cross-checks it against describe).
+`designer_mcp.py` — cross-checked against describe by `mcp_formats_gate`,
+which is HEADLESS and on the default `ctest -LE gui` path (mcp_smoke checks
+it too, but opens a window and so sits behind the `gui` label: the Fastener
+feature shipped without a row on 2026-09-01 and was red there for two days
+with nothing on the default path to say so).
 
 ## Testing
 
