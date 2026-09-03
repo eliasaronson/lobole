@@ -142,7 +142,8 @@ The exposed set is what a person asks an assistant for:
 | Project | `new_project`, `open_project`, `save_project`, `export_stl`, `export_step` |
 | Author | `add_feature`, `modify_feature`, `delete_feature`, `undo` |
 
-Everything else — assemblies, drawings, studies, configurations, sketch
+Everything else — assemblies (mates, and since v83 the gear/rack/screw
+relations between them), drawings, studies, configurations, sketch
 constraints and ops, checkpoints, topology, reference images, the raw GUI
 actions — is reached through **`rpc(method, params)`**, and documented through
 **`help(method)`**, which returns the same prose that used to sit in that

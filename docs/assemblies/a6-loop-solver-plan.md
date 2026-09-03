@@ -188,9 +188,11 @@ today's read-only semantics exactly.
 5. **Un-suppress the fastener mates** that `MatesConnect` currently drops.
 
 Out of scope for A6, in rough order of what should come next: joint limits
-(a box bound on a scalar of q), gear/screw/rack relations (a linear equality
-between two entries of q, i.e. variable elimination), drag-solve (an IK
-residual on the existing A2.5 gizmo), motion study.
+(a box bound on a scalar of q), ~~gear/screw/rack relations (a linear equality
+between two entries of q, i.e. variable elimination)~~ — **built 2026-09-03**
+as one residual row per relation rather than elimination, plus propagation
+in a mate tree ([relations-plan.md](relations-plan.md), v83); drag-solve (an
+IK residual on the existing A2.5 gizmo), motion study.
 
 Explicitly not planned: primitive constraint stacking, dynamics, contact-driven
 motion.

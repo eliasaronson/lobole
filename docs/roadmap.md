@@ -59,9 +59,10 @@ and the **History panel** that makes both usable without a terminal (F6);
 the **scripting stack** — JSON-RPC remote, an **MCP server**, **headless mode**, a Python
 client, and record/replay session tests; **CI** runs `ctest -LE gui` on every push.
 
-**Beyond the core:** **assemblies** A1–A5 (occurrences + instancing, all six mate types,
+**Beyond the core:** **assemblies** A1–A6 (occurrences + instancing, all six mate types,
 drag gizmo + drag-within-mate, part→assembly propagation, BOM, in-context edit, exploded
-views, sub-assemblies); **inspection** (measure, mass properties, section views,
+views, sub-assemblies, closed mate loops solved numerically) plus **relations** — gear,
+rack, screw and linear couplings between mates (v83, 2026-09-03); **inspection** (measure, mass properties, section views,
 interference, contact reports);
 **interchange** (STEP/STL/BREP + glTF/OBJ/PLY export, STEP import) via menu/RPC/MCP;
 **FEM** single-part linear static plus modal and self-weight (Netgen meshing,
