@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <glm/glm.hpp>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -64,6 +65,14 @@ struct Body {
   // regeneration (Document::Regenerate post-pass keyed on createdBy).
   // Renderers prefer: appearance > material > displayColor > palette.
   Appearance appearance;
+
+  // A ghost, not this part (a Derived feature with `reference: true`,
+  // docs/modeling/derived-plan.md): here to be drawn on — sketch-on-face,
+  // external geometry, hole centres, a mate connector — and absent from
+  // everything that treats a body as matter: mass and BOM, export, CAM,
+  // the FEM mesh, Add/Cut and Boolean operands, the assembly's placed
+  // bodies. Transient like the shape, stamped by the creating feature.
+  bool reference = false;
 };
 
 class Feature;
@@ -79,6 +88,11 @@ struct RegenContext {
   // The document's evaluated parameter values (never null during a normal
   // regeneration); what expression-driven fields were evaluated against.
   const SymbolTable* symbols = nullptr;
+  // The document's asset store (v49 image pixels, a Derived feature's
+  // snapshot B-Reps), read-only: what a feature whose geometry comes from
+  // bytes rather than parameters loads from. Null only in a hand-built
+  // context.
+  const std::map<std::string, std::vector<unsigned char>>* assets = nullptr;
 
   // Searches features[0, currentIndex) by stable id; nullptr if absent.
   const Feature* FindById(uint64_t id) const;

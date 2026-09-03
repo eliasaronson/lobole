@@ -299,6 +299,7 @@ set(core_sources
     src/core/sketch/SketchSelection.cpp
     src/core/features/ExtrudeFeature.cpp
     src/core/features/FastenerFeature.cpp
+    src/core/features/DerivedFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
     src/core/BodyMode.cpp
     src/core/features/RevolveFeature.cpp
@@ -618,6 +619,7 @@ set(app_sources
     src/ui/TerminalPanel.cpp
     src/ui/SketchToolbar.cpp
     src/ui/FastenerTool.cpp
+    src/ui/DerivedActions.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
     src/ui/AssemblyActions.cpp

@@ -521,7 +521,15 @@ void ExportDialog(AppState& state) {
     return;
   }
   auto& kernel = CADKernel::Instance();
-  const auto& bodies = state.document->GetBodies();
+  // Derived reference bodies are other parts' geometry: never exported.
+  std::vector<Body> bodies;
+  for (const Body& b : state.document->GetBodies())
+    if (!b.reference)
+      bodies.push_back(b);
+  if (bodies.empty()) {
+    LOG_WARN("Export: the part has only reference bodies, nothing to export");
+    return;
+  }
   bool ok = false;
   if (ext == ".stl" || ext == ".brep") {
     // Single-shape formats: fuse the document into one solid.

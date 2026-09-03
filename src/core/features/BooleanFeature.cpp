@@ -30,6 +30,12 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
              "feature made none)");
     return false;
   }
+  if (target->reference || tool->reference) {
+    SetError("'" + (target->reference ? target->name : tool->name) +
+             "' is a derived reference body, not this part's matter — set "
+             "reference: false on its Derived feature to use it in a boolean");
+    return false;
+  }
 
   // Run the boolean with history kept alive so the operands' element names
   // propagate onto the result (toponaming T5).

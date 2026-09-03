@@ -125,6 +125,8 @@ const std::vector<Body>& JobBodies(AppState& state) {
     if (!doc)
       continue; // a source that is gone is reported, never substituted
     for (const Body& b : doc->GetBodies()) {
+      if (b.reference)
+        continue; // a derived ghost is not stock to cut
       state.jobBodies.push_back(b);
       state.jobBodies.back().jobPartId = part.id;
     }

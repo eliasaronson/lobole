@@ -181,6 +181,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "element": <stable face name from list_elements>}}, ...]}} — at least one
   open face is required (the faces removed to hollow through).
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
+- Derived (a copy of another part's bodies, to draw on): {{"type":
+  "Derived", "name": str, "source_part": <part slot id from
+  list_parts>, "bodies"?: [<created_by ids>] (absent = all),
+  "placement"?: {{"position": [x,y,z], "orientation": [x,y,z,w]}},
+  "reference"?: true (a ghost: absent from mass, BOM, export, CAM and
+  booleans) | false (an ordinary body of this part)}} — the snapshot is
+  taken when added; `update_derived` retakes it, `get_state` says when
+  it is stale.
 - Fastener (a standard screw, nut or washer read from its ISO table — every
   dimension but these comes from the standard): {{"type": "Fastener",
   "name": str, "standard": "iso4762"|"iso14579"|"iso4017"|"iso10642"|

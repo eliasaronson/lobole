@@ -181,6 +181,10 @@ bool PlanStudyMesh(const Document& doc, Study& study, MeshPlan& out,
 
   const auto& bodies = doc.GetBodies();
   for (const auto& [bodyIndex, settings] : perBody) {
+    if (bodies[bodyIndex].reference)
+      return fail("body '" + bodies[bodyIndex].name +
+                  "' is a derived reference (another part's geometry); set "
+                  "reference: false on its Derived feature to analyse it");
     MeshBodyPlan b;
     b.bodyIndex = bodyIndex;
     b.bodyName = bodies[bodyIndex].name;

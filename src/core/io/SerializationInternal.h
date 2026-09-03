@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    83; // v83: assembly `relations` -- a gear, rack, screw or linear coupling
+    84; // v84: the `Derived` feature -- a snapshot of another part's bodies
+        //      (B-Reps as content-addressed document assets, names + element
+        //      maps in the feature), placement, `reference` flag, and the
+        //      source's chain hash for the stale check
+        //      (docs/modeling/derived-plan.md).
+        // (v83: assembly `relations` -- a gear, rack, screw or linear coupling
         //      between two mates' degrees of freedom, dofB = ratio * dofA +
         //      phase. Omitted when none (docs/assemblies/relations-plan.md).
         // (v82: `finish_tool` + `finish_stock` on a profile or pocket -- rough

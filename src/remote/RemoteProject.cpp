@@ -861,9 +861,17 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // STEP / binary STL / native BREP. params:
     // {path, body?: index, deflection?: 0.1 (STL only)}
     const std::string path = p.at("path").get<std::string>();
-    const auto& bodies = doc->GetBodies();
+    // Derived reference bodies are other parts' geometry: never exported.
+    // `body` indexes the document's body list as get_state reports it.
+    std::vector<Body> bodies;
+    for (const Body& b : doc->GetBodies())
+      if (!b.reference)
+        bodies.push_back(b);
     if (bodies.empty())
-      throw std::runtime_error("no bodies to export");
+      throw std::runtime_error(
+          doc->GetBodies().empty()
+              ? "no bodies to export"
+              : "only reference bodies (derived ghosts); nothing to export");
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");

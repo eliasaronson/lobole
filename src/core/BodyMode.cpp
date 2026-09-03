@@ -43,23 +43,35 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     return true;
 
   case ExtrudeMode::Add: {
-    if (bodies.empty()) {
-      LOG_WARN("ApplyBodyMode '{}': Add with no bodies, creating one", name);
-      bodies.push_back({name, std::move(shape), material, ownerId});
-      bodies.back().elementMap = std::move(shapeMap);
-      return true;
-    }
     // Fuse into the last body whose bbox overlaps the shape, else the last.
+    // A reference body (a Derived ghost) is never a target: the first solid
+    // drawn on a derived face becomes this part's own body, which is the
+    // whole point of drawing there.
     glm::vec3 pmin, pmax;
     shape.GetBoundingBox(pmin, pmax);
-    int target = static_cast<int>(bodies.size()) - 1;
+    int target = -1;
     for (int i = static_cast<int>(bodies.size()) - 1; i >= 0; i--) {
+      if (bodies[i].reference)
+        continue;
+      if (target < 0)
+        target = i; // the last non-reference body, unless one overlaps
       glm::vec3 bmin, bmax;
       bodies[i].shape.GetBoundingBox(bmin, bmax);
       if (BoxesOverlap(pmin, pmax, bmin, bmax)) {
         target = i;
         break;
       }
+    }
+    if (target < 0) {
+      if (!bodies.empty())
+        LOG_INFO("ApplyBodyMode '{}': Add with only reference bodies, "
+                 "creating one",
+                 name);
+      else
+        LOG_WARN("ApplyBodyMode '{}': Add with no bodies, creating one", name);
+      bodies.push_back({name, std::move(shape), material, ownerId});
+      bodies.back().elementMap = std::move(shapeMap);
+      return true;
     }
     ElementMap fusedMap;
     std::string boolErr;
@@ -82,16 +94,29 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
   }
 
   case ExtrudeMode::Cut: {
-    if (bodies.empty()) {
-      Fail(error, "cut with no bodies — nothing exists yet to cut into "
-                  "(did an earlier feature fail?)");
+    // Reference bodies are not matter: a cut passes through a Derived ghost
+    // as if it were not there, and a part that has only ghosts has nothing
+    // to cut into.
+    const bool anySolid =
+        std::any_of(bodies.begin(), bodies.end(),
+                    [](const Body& b) { return !b.reference; });
+    if (!anySolid) {
+      Fail(error, bodies.empty()
+                      ? "cut with no bodies — nothing exists yet to cut into "
+                        "(did an earlier feature fail?)"
+                      : "cut with only reference bodies — a derived ghost is "
+                        "not cut into (set reference: false to make it this "
+                        "part's body)");
       return false;
     }
     double volBefore = 0.0;
     for (const auto& body : bodies) {
-      volBefore += body.shape.Volume();
+      if (!body.reference)
+        volBefore += body.shape.Volume();
     }
     for (auto& body : bodies) {
+      if (body.reference)
+        continue;
       ElementMap cutMap;
       CADShape cut =
           topo::BooleanNamed(BooleanOp::Subtract, body.shape, body.elementMap,
@@ -110,7 +135,8 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                  bodies.end());
     double volAfter = 0.0;
     for (const auto& body : bodies) {
-      volAfter += body.shape.Volume();
+      if (!body.reference)
+        volAfter += body.shape.Volume();
     }
     if (warning && VolumeUnchanged(volBefore, volAfter)) {
       *warning = "cut removed no material — the tool profile does not "

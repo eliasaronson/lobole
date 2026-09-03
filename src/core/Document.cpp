@@ -301,7 +301,7 @@ bool Document::Regenerate() {
       m_features[i]->ClearError();
       m_features[i]->ClearWarning();
       if (!EffectiveSuppressed(i)) {
-        RegenContext ctx{m_bodies, m_features, i, &m_symbols};
+        RegenContext ctx{m_bodies, m_features, i, &m_symbols, &m_assets};
         m_lastStats.executed++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty()) {

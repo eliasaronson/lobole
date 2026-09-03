@@ -9,6 +9,8 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
   DocumentMass out;
   glm::dvec3 weightedCom(0.0);
   for (const Body& body : bodies) {
+    if (body.reference)
+      continue; // a Derived ghost weighs nothing here (it is another part)
     CADShape::MassProps mp;
     if (!body.shape.ComputeMassProps(mp)) {
       if (error)

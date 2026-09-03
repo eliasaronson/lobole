@@ -47,6 +47,10 @@ std::string ProjectSaveTarget(const std::string& picked);
 // (ModifyFeatureCommand). FeatureToJson throws on unserializable types;
 // FeatureFromJson throws on malformed/unknown input.
 nlohmann::json FeatureToJson(const Feature& feature);
+// A body's face/edge names as {faces: {index: name}, edges: {...}} — the
+// shape baked geometry (geometry/index.json) and a Derived snapshot share.
+nlohmann::json ElementMapToJson(const ElementMap& map);
+ElementMap ElementMapFromJson(const nlohmann::json& j);
 std::unique_ptr<Feature> FeatureFromJson(const nlohmann::json& j);
 
 // Introspection for the describe RPC (read-only metadata; the tables live

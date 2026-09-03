@@ -1,4 +1,5 @@
 #include "core/io/GeometryCache.h"
+#include "core/io/Serialization.h" // ElementMapToJson
 
 #include "common/Logger.h"
 #include "core/Document.h"
@@ -32,32 +33,6 @@ constexpr int kGeometryFormat = 1;
 
 fs::path GeometryDir(const std::string& dir) {
   return fs::path(dir) / "geometry";
-}
-
-json ElementMapToJson(const ElementMap& map) {
-  json faces = json::object();
-  for (const auto& [index, name] : map.names)
-    faces[std::to_string(index)] = name;
-  json edges = json::object();
-  for (const auto& [index, name] : map.edgeNames)
-    edges[std::to_string(index)] = name;
-  return json{{"faces", std::move(faces)}, {"edges", std::move(edges)}};
-}
-
-ElementMap ElementMapFromJson(const json& j) {
-  ElementMap map;
-  // Bind the sub-objects to NAMED values first. `value()` returns a copy, and
-  // iterating `.items()` directly on that temporary reads freed memory once
-  // the full expression ends — undefined behaviour that happened to work with
-  // one nlohmann version and yielded nulls ("type must be string, but is
-  // null") with Ubuntu's 3.11.3, silently disabling baked geometry there.
-  const json faces = j.value("faces", json::object());
-  const json edges = j.value("edges", json::object());
-  for (const auto& [key, value] : faces.items())
-    map.names[std::stoi(key)] = value.get<std::string>();
-  for (const auto& [key, value] : edges.items())
-    map.edgeNames[std::stoi(key)] = value.get<std::string>();
-  return map;
 }
 
 // Do these two files hold the same bytes? Cheap next to writing a B-Rep, and
@@ -168,6 +143,10 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
         entry["display_color"] = {body.displayColor.x, body.displayColor.y,
                                   body.displayColor.z};
       }
+      // A derived ghost stays a ghost across a baked open: without this a
+      // reloaded jaw would weigh its servo (v84).
+      if (body.reference)
+        entry["reference"] = true;
       index["bodies"].push_back(std::move(entry));
       wanted.push_back(file);
     }
@@ -246,6 +225,7 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
         body.displayColor = {c[0].get<float>(), c[1].get<float>(),
                              c[2].get<float>()};
       }
+      body.reference = bj.value("reference", false);
       bodies.push_back(std::move(body));
     }
     if (bodies.empty())

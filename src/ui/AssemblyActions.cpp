@@ -345,6 +345,8 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
     if (flat[i].part == nullptr || !flat[i].visible)
       continue;
     for (const Body& body : flat[i].part->GetBodies()) {
+      if (body.reference)
+        continue; // a derived ghost is not the occurrence's matter
       parts::PlacedBody pb;
       pb.body = &body;
       pb.world = flat[i].world;
@@ -1454,6 +1456,8 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
     if (!inst.visible)
       continue;
     for (const auto& body : inst.part->GetBodies()) {
+      if (body.reference)
+        continue; // a ghost does not set the assembly's extent
       glm::vec3 mn, mx;
       body.shape.GetBoundingBox(mn, mx);
       for (int c = 0; c < 8; c++) {
@@ -1560,7 +1564,9 @@ void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
     const auto& partBodies = part->GetBodies();
     out[partId].resize(partBodies.size());
     for (size_t bi = 0; bi < partBodies.size(); bi++) {
-      if (!partBodies[bi].shape.IsValid())
+      // A derived ghost is drawn in its own part's tab only: in the
+      // assembly the real part is there, at its own occurrence.
+      if (!partBodies[bi].shape.IsValid() || partBodies[bi].reference)
         continue;
       byTShape[partBodies[bi].shape.GetShape().TShape().get()].push_back(
           {partId, bi, &partBodies[bi].shape});
@@ -2137,8 +2143,8 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
         continue;
       const auto& bodies = inst.part->GetBodies();
       for (size_t bi = 0; bi < bodies.size(); bi++) {
-        if (!bodies[bi].shape.IsValid())
-          continue;
+        if (!bodies[bi].shape.IsValid() || bodies[bi].reference)
+          continue; // a derived ghost is another part's geometry
         MeshExport::Item item;
         item.shape = bodies[bi].shape;
         // The tree path names the item ("Gangway/Board 03"), which is what a
@@ -2526,6 +2532,8 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     if (inst.part == nullptr || !inst.visible)
       continue;
     for (const Body& body : inst.part->GetBodies()) {
+      if (body.reference)
+        continue; // a derived ghost is not the occurrence's matter
       parts::PlacedBody pb;
       pb.body = &body;
       pb.world = inst.world;

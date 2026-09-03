@@ -8,6 +8,7 @@
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
@@ -338,11 +339,16 @@ std::vector<unsigned char> Base64Decode(const std::string& in) {
 // so serialization persists only live assets and prunes orphans.
 std::set<std::string> ReferencedAssets(const Document& doc) {
   std::set<std::string> names;
-  for (const auto& f : doc.GetFeatures())
+  for (const auto& f : doc.GetFeatures()) {
     if (auto* sk = dynamic_cast<const SketchFeature*>(f.get()))
       for (const auto& img : sk->images)
         if (!img.asset.empty())
           names.insert(img.asset);
+    // A Derived feature's snapshot B-Reps (v84) live in the same store.
+    if (auto* d = dynamic_cast<const DerivedFeature*>(f.get()))
+      for (const DerivedBody& b : d->snapshot)
+        names.insert(b.asset);
+  }
   return names;
 }
 
@@ -1151,17 +1157,18 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
                         pj.at("expression").get<std::string>(),
                         pj.value("comment", std::string{}));
     }
+    // Assets (v49 image bytes, v84 derived snapshots): decode the base64
+    // "assets" map into the doc store BEFORE the features regenerate — a
+    // Derived feature reads its B-Reps from it during Execute.
+    if (j.contains("assets"))
+      for (const auto& [name, b64] : j.at("assets").items())
+        doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
     {
       Document::BulkEdit bulk(*doc); // one regeneration, not one per feature
       for (const auto& fj : j.at("features")) {
         doc->AddFeature(FeatureFromJson(fj));
       }
     }
-    // Reference-image bytes (v49): decode the base64 "assets" map into the doc
-    // asset store.
-    if (j.contains("assets"))
-      for (const auto& [name, b64] : j.at("assets").items())
-        doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
     for (const auto& sj : j.value("studies", json::array())) { // v29
       doc->RestoreStudy(StudyFromJson(sj));
     }

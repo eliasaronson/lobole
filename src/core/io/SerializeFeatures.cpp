@@ -6,6 +6,7 @@
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
@@ -504,6 +505,27 @@ AxisRef AxisRefFromJson(const json& j) {
 
 namespace DocumentIO {
 
+json ElementMapToJson(const ElementMap& map) {
+  json faces = json::object();
+  for (const auto& [index, name] : map.names)
+    faces[std::to_string(index)] = name;
+  json edges = json::object();
+  for (const auto& [index, name] : map.edgeNames)
+    edges[std::to_string(index)] = name;
+  return json{{"faces", std::move(faces)}, {"edges", std::move(edges)}};
+}
+
+ElementMap ElementMapFromJson(const json& j) {
+  ElementMap map;
+  const json faces = j.value("faces", json::object());
+  const json edges = j.value("edges", json::object());
+  for (const auto& [key, value] : faces.items())
+    map.names[std::stoi(key)] = value.get<std::string>();
+  for (const auto& [key, value] : edges.items())
+    map.edgeNames[std::stoi(key)] = value.get<std::string>();
+  return map;
+}
+
 json FeatureToJson(const Feature& feature) {
   json j;
   j["type"] = feature.TypeName();
@@ -670,6 +692,31 @@ json FeatureToJson(const Feature& feature) {
     j["path"] = import->path;
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
+  } else if (auto* d = dynamic_cast<const DerivedFeature*>(&feature)) {
+    // v84 (docs/modeling/derived-plan.md). The snapshot rides here in full
+    // but for the B-Reps, which are document assets: the chain hash is a
+    // hash of this JSON, so an update (new asset names, new element maps,
+    // new source hash) invalidates everything after the feature.
+    j["source_part"] = d->sourcePart;
+    j["source_name"] = d->sourceName;
+    if (!d->bodies.empty())
+      j["bodies"] = d->bodies;
+    j["placement"] = {{"position", Vec3ToJson(d->position)},
+                      {"orientation", QuatToJson(d->orientation)}};
+    j["reference"] = d->reference;
+    json bodies = json::array();
+    for (const DerivedBody& b : d->snapshot) {
+      json bj{{"asset", b.asset},
+              {"name", b.name},
+              {"material", b.material},
+              {"source_created_by", b.sourceCreatedBy},
+              {"element_map", ElementMapToJson(b.elementMap)}};
+      if (b.hasDisplayColor)
+        bj["display_color"] = Vec3ToJson(b.displayColor);
+      bodies.push_back(std::move(bj));
+    }
+    j["snapshot"] = {{"source_chain_hash", d->sourceChainHash},
+                     {"bodies", std::move(bodies)}};
   } else if (auto* dp = dynamic_cast<const DatumPlaneFeature*>(&feature)) {
     j["kind"] = DatumPlaneKindToString(dp->kind);
     // Parent (Offset/Angled): earlier datum by id, or a base plane.
@@ -944,6 +991,15 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/plan.md)"},
     {"Import", 1, "path (STEP/STL/BREP file)"},
+    {"Derived", 84,
+     "source_part (a part slot id), bodies?: [created_by ids] (absent = all "
+     "of the source's bodies), placement?: {position [x,y,z], orientation "
+     "[x,y,z,w]}, reference?: true (a ghost to draw on — absent from mass, "
+     "BOM, export, CAM and booleans) | false (an ordinary body of this "
+     "part). A COPY of another part's bodies, taken when the feature is "
+     "added and on update_derived; regeneration reads the snapshot, never "
+     "the source, and get_state reports `stale` when the source has moved "
+     "(docs/modeling/derived-plan.md)"},
     {"DatumPlane", 1,
      "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
      "flip?, axis?, angle_deg? (+_expr)"},
@@ -1315,6 +1371,39 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       imp->color = Vec3FromJson(j.at("color"));
     }
     out = std::move(imp);
+  } else if (type == "Derived") {
+    auto d = std::make_unique<DerivedFeature>(
+        name, j.at("source_part").get<uint64_t>());
+    d->sourceName = j.value("source_name", std::string{});
+    if (j.contains("bodies"))
+      d->bodies = j.at("bodies").get<std::vector<uint64_t>>();
+    if (j.contains("placement")) {
+      const json& pl = j.at("placement");
+      if (pl.contains("position"))
+        d->position = Vec3FromJson(pl.at("position"));
+      if (pl.contains("orientation"))
+        d->orientation = QuatFromJson(pl.at("orientation"));
+    }
+    d->reference = j.value("reference", true);
+    if (j.contains("snapshot")) {
+      const json& snap = j.at("snapshot");
+      d->sourceChainHash = snap.value("source_chain_hash", size_t{0});
+      for (const json& bj : snap.value("bodies", json::array())) {
+        DerivedBody b;
+        b.asset = bj.at("asset").get<std::string>();
+        b.name = bj.value("name", std::string{});
+        b.material = bj.value("material", std::string{});
+        b.sourceCreatedBy = bj.value("source_created_by", uint64_t{0});
+        b.elementMap =
+            ElementMapFromJson(bj.value("element_map", json::object()));
+        if (bj.contains("display_color")) {
+          b.hasDisplayColor = true;
+          b.displayColor = Vec3FromJson(bj.at("display_color"));
+        }
+        d->snapshot.push_back(std::move(b));
+      }
+    }
+    out = std::move(d);
   } else if (type == "DatumPlane") {
     auto dp = std::make_unique<DatumPlaneFeature>(
         name, DatumPlaneKindFromString(j.at("kind").get<std::string>()));
