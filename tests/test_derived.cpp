@@ -12,14 +12,17 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
+#include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/Occurrence.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
@@ -447,4 +450,144 @@ TEST_CASE("the v84 derived golden builds from this recipe", "[derived]") {
     std::error_code ec;
     fs::remove(path, ec);
   }
+}
+
+// ---- D3: the proofs that a derived body is geometry like any other, with
+// no code of its own: external geometry, hole centres, a mate connector.
+
+namespace {
+// The name of the source box's +Z face on the copy, and the copy's index.
+std::string DerivedTopName(const Document& source, uint64_t boxId,
+                           uint64_t did) {
+  for (const Body& sb : source.GetBodies())
+    if (sb.createdBy == boxId)
+      for (const auto& [index, name] : sb.elementMap.names)
+        if (const auto info = Measure::DescribeFaceAt(sb, index);
+            info && info->normal.z > 0.99f)
+          return std::to_string(did) + "/" + std::to_string(boxId) + "/" + name;
+  return {};
+}
+} // namespace
+
+TEST_CASE("external geometry projects a derived face and a derived edge",
+          "[derived][external]") {
+  auto source = MakeSource();
+  const uint64_t boxId = BoxId(*source);
+  Document host;
+  const uint64_t did = Derive(host, *source, /*reference=*/true, {boxId});
+  auto* feature = dynamic_cast<DerivedFeature*>(host.FindFeatureById(did));
+  REQUIRE(feature);
+  feature->position = glm::vec3(10.0f, 0.0f, 0.0f);
+  REQUIRE(host.Regenerate());
+  const std::string top = DerivedTopName(*source, boxId, did);
+  REQUIRE(!top.empty());
+  // An edge of the top face (midpoint at z = 5), so its projection is a
+  // line and not the point a vertical edge collapses to.
+  const Body& copy = host.GetBodies()[0];
+  std::string anEdge;
+  for (const auto& [index, name] : copy.elementMap.edgeNames)
+    if (const auto info = Measure::DescribeEdgeAt(copy, index);
+        info && std::abs(info->midpoint.z - 5.0f) < 1e-3f)
+      anEdge = name;
+  REQUIRE(!anEdge.empty());
+
+  auto sk = std::make_unique<SketchFeature>("Ref", kXY);
+  sk->AddExternalGeometry(ElementRef{did, top}, sketch::ExternalKind::Face);
+  sk->AddExternalGeometry(ElementRef{did, anEdge}, sketch::ExternalKind::Edge);
+  host.AddFeature(std::move(sk));
+  auto* s2 = dynamic_cast<SketchFeature*>(host.GetFeature(1));
+  REQUIRE(s2 != nullptr);
+  CHECK(s2->GetError().empty());
+  REQUIRE(s2->external.size() == 2);
+  REQUIRE(s2->external[0].genIds.size() == 4); // the top face's 4 edges
+  float minX = 1e9f, maxX = -1e9f;
+  for (uint32_t id : s2->external[0].genIds) {
+    const size_t idx = s2->IndexOfEntity(id);
+    REQUIRE(idx != SIZE_MAX);
+    auto* l = std::get_if<sketch::Line>(&s2->entities[idx]);
+    REQUIRE(l != nullptr);
+    for (glm::vec2 p : {l->a, l->b}) {
+      minX = std::min(minX, p.x);
+      maxX = std::max(maxX, p.x);
+    }
+  }
+  CHECK_THAT(minX, WithinAbs(10.0f, 1e-3f)); // placed 10 along +X
+  CHECK_THAT(maxX, WithinAbs(30.0f, 1e-3f));
+  CHECK(s2->external[1].genIds.size() == 1);
+}
+
+TEST_CASE("hole centres read off a derived boss drill the part's own body",
+          "[derived][hole]") {
+  auto source = MakeSource();
+  Document host;
+  const uint64_t did = Derive(host, *source);
+  host.AddFeature(std::make_unique<BoxFeature>("Jaw", glm::vec3(0, 0, -4.0f),
+                                               20.0, 10.0, 4.0));
+  const uint64_t jawId = host.GetFeature(1)->GetId();
+  REQUIRE(host.Regenerate());
+  // Where the boss is: its +Z cap on the derived copy.
+  glm::vec2 centre(0.0f);
+  bool found = false;
+  for (const Body& b : host.GetBodies()) {
+    if (b.name != "Boss")
+      continue;
+    for (const auto& [index, name] : b.elementMap.names)
+      if (const auto info = Measure::DescribeFaceAt(b, index);
+          info && info->normal.z > 0.99f) {
+        centre = glm::vec2(info->centroid);
+        found = true;
+      }
+  }
+  REQUIRE(found);
+  CHECK_THAT(centre.x, WithinAbs(5.0f, 1e-4f));
+  CHECK_THAT(centre.y, WithinAbs(5.0f, 1e-4f));
+  // A hole from the jaw's top (z = 0) down, at that centre.
+  SketchPlane plane(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centres", plane);
+  sk->AddEntity(sketch::Point{centre});
+  host.AddFeature(std::move(sk));
+  const uint64_t skId = host.GetFeature(2)->GetId();
+  host.AddFeature(
+      std::make_unique<HoleFeature>("Drill", skId, HoleKind::Simple, 2.0, 4.0));
+  REQUIRE(host.Regenerate());
+  CHECK(host.GetFeature(3)->GetError().empty());
+  CHECK_THAT(VolumeOf(host, jawId),
+             WithinRel(800.0 - 3.14159265 * 1.0 * 4.0, 1e-4));
+  CHECK_THAT(VolumeOf(host, did), // the ghost is not drilled
+             WithinRel(1000.0 + 3.14159265 * 4.0 * 3.0, 1e-6));
+}
+
+TEST_CASE("a mate connector on a derived face resolves in the assembly",
+          "[derived][assembly]") {
+  auto source = MakeSource();
+  const uint64_t boxId = BoxId(*source);
+  auto host = std::make_unique<Document>();
+  const uint64_t did = Derive(*host, *source, /*reference=*/true, {boxId});
+  REQUIRE(host->Regenerate());
+  const std::string top = DerivedTopName(*source, boxId, did);
+  REQUIRE(!top.empty());
+
+  AssemblyDocument asmDoc;
+  Occurrence jaw;
+  jaw.name = "jaw";
+  jaw.partId = 2;
+  jaw.position = glm::vec3(0.0f, 0.0f, 100.0f);
+  const uint64_t jawOcc = asmDoc.AddOccurrence(jaw);
+  const assembly::PartResolver partById = [&](uint64_t id) -> const Document* {
+    return id == 2 ? host.get() : nullptr;
+  };
+  const assembly::AssemblyResolver asmById =
+      [](uint64_t) -> const AssemblyDocument* { return nullptr; };
+  Connector c;
+  c.occurrenceId = jawOcc;
+  c.anchor.face = ElementRef{did, top};
+  std::string why;
+  const auto frame =
+      assembly::ConnectorLocalFrame(c, asmDoc, partById, &why, asmById);
+  INFO(why);
+  REQUIRE(frame.has_value());
+  // Local to the occurrence: the servo copy's top, at z = 5, facing +Z.
+  CHECK_THAT((*frame)[3].z, WithinAbs(5.0f, 1e-3f));
+  CHECK_THAT((*frame)[3].x, WithinAbs(10.0f, 1e-3f));
+  CHECK_THAT(std::abs((*frame)[2].z), WithinAbs(1.0f, 1e-4f));
 }

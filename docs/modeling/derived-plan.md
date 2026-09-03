@@ -1,8 +1,8 @@
 # Derived — geometry from another part (A2)
 
-> Status: **D1 + D2 SHIPPED 2026-09-03** (`0beba3a8` core, the commit after it
-> the surface); D3 partly pinned by D1's tests, D4 (the gripper) open. See
-> "As built" at the end. The capability review's A2
+> Status: **D1-D3 SHIPPED 2026-09-03** (`0beba3a8` core, `e82961eb`
+> surface, then the D3 proofs); D4 (the gripper) open. See "As built" at
+> the end. The capability review's A2
 > ([../capability-review-2026-08-31.md](../capability-review-2026-08-31.md))
 > as a design: a **binder feature with a snapshot**, not a shared regeneration
 > graph. From: *"we already have variable changes as cross-cutting
@@ -122,7 +122,7 @@ assembly's current solve when that document is loaded.
 |---|---|---|
 | **D1** core — **shipped** | `DerivedFeature`: snapshot load in `Execute`, `Update` against `PartDocById`, staleness by version + chain hash, names, `reference` flag honoured by mass/BOM/export/CAM/booleans; serialization v84 with the snapshot in `geometry/`; refusals | 1 session |
 | **D2** surface — **shipped** | `add_feature {type: Derived}` / `update_derived` / `get_state.stale`; the tree row (tint, badge, Update, Break link → an Import-like frozen body); "derive this neighbour" from an in-context edit; the `defaults/*` gate for the tool | 1 session |
-| **D3** proof | sketch-on-derived-face, external geometry from a derived edge, a hole pattern from derived circles, a mate connector on a derived face — each a test, none new code if D1's names are right | ½ session |
+| **D3** proof — **shipped** | sketch-on-derived-face, external geometry from a derived edge, a hole pattern from derived circles, a mate connector on a derived face — each a test, none new code if D1's names are right | ½ session |
 | **D4** acceptance | **the SO-101 gripper**: import the arm's STEP, derive the wrist servo into a new part, design the gripper body and moving jaw on its faces, derive the Pi Camera 3 STEP into the jaw and mount it, mates, interference and contact reports, a drawing. The dogfood round the roadmap keeps asking for, on the part this feature exists for | 1 session |
 
 ## Gates
@@ -203,7 +203,13 @@ found in the tree:
   stale badge, Update verb, one undo step), `derived/source_list_takes_the_
   snapshot`.
 
-**Still open**: D3's remaining proofs (external geometry from a derived
-edge, a hole pattern from derived circles, a mate connector on a derived
-face — each expected to need no new code) and D4, the gripper.
+- **D3 held**: external geometry projects a derived face (its four edges,
+  where the placement put them) and a derived edge; a hole at a centre read
+  off the derived boss drills the part's own body and not the ghost; a mate
+  connector on a derived face resolves in the assembly at the copy's face.
+  Three tests, zero new code — D1's names were right. The one thing learned:
+  a vertical edge projects to a point, so a test has to pick a top edge by
+  its midpoint, not the first name in the map.
+
+**Still open**: D4, the gripper.
 
