@@ -28,6 +28,7 @@ sys.path.insert(0, HERE)
 from _lib import connect  # noqa: E402
 
 M, ZA, ZB, THICK, BORE, PLATE = 2.0, 12, 36, 8.0, 6.0, 5.0
+BACKLASH = 0.15  # mm of extra centre distance per mesh
 
 
 def cylinder_face(d, part, radius, near=None):
@@ -78,7 +79,12 @@ def main():
     # The carrier: a plate with three axle holes, and a rail block whose +X
     # face carries the rack (a slider mated face-to-face slides along the
     # faces' normal, which is what makes the rack go sideways and not up).
-    gears = (("pinion", ZA, 0.0), ("idler", 24, 36.0), ("wheel", ZB, 96.0))
+    # Centre distances m(z1+z2)/2 plus a backlash allowance: drawn with zero
+    # backlash the flanks coincide and every checker is left deciding
+    # whether a coincident face is a touch or a clash. 0.15 mm per mesh is
+    # in the range a hobbed m2 pair is cut with.
+    gears = (("pinion", ZA, 0.0), ("idler", 24, 36.0 + BACKLASH),
+             ("wheel", ZB, 96.0 + 2 * BACKLASH))
     d.call("add_part", name="carrier")
     d.call("add_feature", feature={
         "type": "Box", "name": "Plate", "position": [-20, -50, -PLATE],
