@@ -1034,6 +1034,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       std::vector<BEnt> ents;
       json skipped = json::array();
       for (const Body& b : doc->GetBodies()) {
+        if (b.reference)
+          continue; // a derived ghost is not this part's matter
         BEnt e{&b, {}, {}, {}};
         e.single.push_back(b);
         if (!Measure::WorldBounds(e.single, glm::mat4(1.0f), e.min, e.max)) {
@@ -1128,6 +1130,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (!inst.visible)
         continue;
       for (const Body& b : inst.part->GetBodies()) {
+        // A derived ghost is not the occurrence's matter: the gripper body
+        // carrying a copy of the servo it was drawn on reported a 15 cm3
+        // clash with that servo — its own ghost.
+        if (b.reference)
+          continue;
         Body nb = b;
         nb.shape = b.shape.Transformed(inst.world);
         byRoot[inst.rootOccurrenceId].push_back(std::move(nb));

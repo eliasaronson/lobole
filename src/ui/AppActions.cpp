@@ -3532,6 +3532,11 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
   for (const Body& body : doc.GetBodies()) {
     if (body.shape.GetShape().IsNull())
       continue;
+    // A Derived ghost is not the part: a drawing of the gripper body is a
+    // drawing of the body, not of the servo it was drawn on (and the HLR of
+    // a 197-body camera ghost took the view past a minute).
+    if (body.reference)
+      continue;
     SourceBody sb;
     sb.input.shape = body.shape.GetShape();
     sb.input.transform = xf;

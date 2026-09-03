@@ -235,8 +235,8 @@ the one safe shape for it, a **binder feature** with a baked snapshot and an
 explicit update (not a shared regeneration graph) — planned in full as
 [modeling/derived-plan.md](modeling/derived-plan.md) and **D1 + D2 built
 2026-09-03** (the `Derived` feature, v84: a ghost to draw on, updated on
-request, stale reported and never auto-resolved); D3's remaining proofs and
-D4 (the SO-101 gripper as the acceptance test) open. And there is **no
+request, stale reported and never auto-resolved); D3 proved and D4, the
+SO-101 gripper, built on it the same day ([modeling/derived-gripper-dogfood.md](modeling/derived-gripper-dogfood.md)). And there is **no
 general "long operation off the frame" mechanism**: five cases, five shapes.
 [ui/long-operations.md](ui/long-operations.md) planned it 2026-09-01 and
 shipped step 0 the same day (one poll entry point for all three loops, fixing

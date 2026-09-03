@@ -1,0 +1,187 @@
+# D4 — the SO-101 gripper on Derived ghosts (dogfood record, 2026-09-03)
+
+The acceptance test of [derived-plan.md](derived-plan.md): import the arm's
+STEP, derive the wrist servo into a new part, design the gripper body and
+the moving jaw on its faces, derive the Pi Camera 3 STEP into the jaw and
+mount it, mates, interference and contact reports, a drawing. Driven over
+the RPC from `scratch/so101/gripper.py` (every step is a function; the
+whole thing rebuilds from `setup`) against an `--offscreen` instance on a
+scratch port. Every number below is from that run.
+
+Sources: TheRobotStudio/SO-ARM100 `STEP/SO101/SO101 Assembly.step` (20 MB,
+336 k entities; the product structure is flat — one PRODUCT is an assembly,
+the six servos are loose parts) and the Raspberry Pi
+`Camera_module_3_std_model_simple.stp` (30 MB, 584 k entities, **197
+bodies**: every pad, silkscreen sheet and SMD part is a body).
+
+## What was built
+
+| part | its frame | on the ghosts of | its own geometry |
+|---|---|---|---|
+| Gripper body | the gripper servo's case (`ZK_122`) | servo case, its two covers, the wrist-roll horn (four `derive_occurrence` from the in-context edit), the camera (`add_feature Derived` with a placement) | an L-shaped end plate on the servo's bottom face; two cheeks on the covers' outer faces with four M2 clearance holes **on the covers' tapped holes**; the fixed finger; a flange disc and web on the wrist-roll horn's flat face with four M2.5 holes **on its bolt circle**; four standoffs with M2 tapped holes **on the camera's 12.5 × 21 mm hole pattern** |
+| Moving jaw | the drive horn | drive horn, passive horn, servo case | hub disc on the horn's face with four M2.5 holes **on its bolt circle**; the arm on the hub, outboard of the body's cheek; the fingertip bent over to the fixed finger's plane |
+
+Every bold hole pattern is external geometry: `project_geometry` of the
+ghost's hole edges into an empty sketch, and a Hole at the projected
+circles' centres. No hole coordinate was typed. The only numbers carried
+by hand are the servo's bounding box (plate and cheek extents) and the
+camera's board-back plane.
+
+Assembly: the old `Wrist_Roll_Follower` (which arrived named "SOLID 6"),
+the old moving jaw, its nuts and 15 screws removed; the body fastened
+origin-to-origin to the servo case (its frame IS the servo's, `add_occurrence`
+placed it there); the jaw revolute on its hub's underside snapped to the
+hub's rim edge, against the horn's flat face. Both land exactly on their
+sources' transforms.
+
+Screenshots: `scratch/so101/10-12*.png` (body), `20-21*.png` (jaw),
+`30-31*.png` (the gripper assembly).
+
+## Timings (second pass, after the fixes below)
+
+| step | time |
+|---|---|
+| import the arm as an assembly (97 parts, 270 occurrences) | 8.2 s |
+| import the camera as a part (197 bodies) | 12.7 s |
+| `derive_occurrence`, a small ghost, in context | 1.9–2.9 s |
+| a feature add in the body with 4 small ghosts | 1.8–2.8 s (a sketch 0.01 s) |
+| `add_feature Derived` of the 197-body camera | 6.3 s |
+| a feature add in the body after the camera | 4.5 s (**was 12–17 s**) |
+| a feature add in the jaw with the 202-body body as a visible neighbour | 3.9–4.5 s |
+| pairwise `interference {a, b}` | 0.1–0.5 s |
+| `interference {}` (no pair) over 253 occurrences | never returned in 48 min, killed |
+| `contact_report` over 253 occurrences | never returned in 23 min, killed |
+| `contact_report` over the gripper's 9 occurrences | 9.0 s |
+| `save_project` (187 MB) / first `open_project` / second | 1.5 s / 64 s / 1.3 s |
+| `list_elements` on the camera part WITHOUT `body` | 172.6 s; with `body: i` instant |
+
+Where the 12–17 s went (`tools/profile.sh --app`, headless: 3.1–3.9 s of
+it): `BodyDigestJson` 46.6 % — every mutating RPC digests every body twice,
+and the digest is `BRepGProp::VolumeProperties` on 197 unchanged B-spline
+bodies. `Document::Regenerate` was the STEP import; `DerivedFeature::Execute`
+0.48 % (its decode cache works). The rest, offscreen only, is
+`SyncDocumentRenderers` removing and re-adding every mesh, and — for the
+jaw — `SyncInContextGhosts` re-tessellating and re-uploading every neighbour
+body on every regeneration (it builds its assets fresh instead of reading
+`partRenderCache`). That one is still open.
+
+## The checks, at the end
+
+Pairwise `interference` in the gripper's own assembly (body, jaw, servo
+case and covers, the three horns), each in 0.1–0.5 s:
+
+| pair | result |
+|---|---|
+| body – servo case, top cover, wrist-roll horn | touching |
+| body – bottom cover | clear by 0.003 mm (the cover's face is 3 µm inside its bbox) |
+| jaw – drive horn | touching |
+| jaw – body | clear by 3.87 mm (the first arm went through the cheek: 306 mm³) |
+| jaw – servo case / top cover / passive horn | clear by 10.8 / 2.1 / 33.9 mm |
+
+`contact_report` on that assembly: 9.0 s, two clashes, both inside the
+vendor's servo model (its case interpenetrates its own top cover by
+1007 mm³ and bottom cover by 142 mm³) — none involving the parts designed
+here. Before the fix below the same report listed nine, seven of them a
+part's ghost against the real thing.
+
+Project: `save_project` 1.5 s, 187 MB on disk (the camera snapshot and 97
+parts' baked geometry); the first `open_project` 64 s, the second 1.3 s;
+after reopening every Derived is `stale: false`, no feature errors, the
+body and jaw volumes unchanged, `check_geometry` has no `stale_derived`.
+
+Drawing: `create_drawing` + four auto-placed views of the body + a note,
+exported to `scratch/so101/gripper-body-drawing.svg`. The export's own
+issue list says the four auto-placed views overlap on the A3 sheet — the
+placement "clear of the views already there" is not, for this part.
+
+## What broke, in order
+
+1. **`import_step as_assembly` left 12 of 97 parts broken and said nothing.**
+   Eleven `Wiring_holder` products and one LED footprint came out of XCAF as
+   "no valid shapes" in their staged brep; the RPC response has no
+   `regen`/failed list (the regen-honesty rule for a mutating RPC). Product
+   names were lost for some nodes — `Wrist_Roll_Follower_SO101` arrived as
+   "SOLID 6", `Wrist_Roll_SO101` as "SOLID 5", unnamed nodes as `=>[0:1:1:28]`.
+2. **A part holding a 197-body ghost cost 14 s per sketch add** — fixed
+   (volume cache), see above.
+3. **Sketch external geometry only looked at the FIRST body a feature
+   created** and stopped, so every element of a multi-body Derived copy's
+   (or an Import's) second body read "no longer exists". Fixed; found by the
+   new hole-from-circle test, not by eye.
+4. **Hole took only Point entities.** A projected hole edge is a circle (or
+   two half-arcs when the source split the wall, as the camera PCB's are),
+   so the plan's "hole centres" proof needed every centre copied from
+   `list_elements`. Fixed: circles' and arcs' centres count, coincident ones
+   merge.
+5. **`add_feature Sketch` refuses an `external` key** (accepted: constraints,
+   entities, name, plane). Over the RPC external geometry is
+   `project_geometry {sketch_id, feature_id, element, kind}` per element,
+   which the Sketch row of `describe` does not say.
+6. **A mate face connector sits at the face centroid.** A plate wider than
+   the servo's end face, fastened face-to-face, shifted the body 7 mm.
+   Origin-to-origin is the honest mate when a part was placed at its
+   source's frame; `snap_edge` on the hub's rim is what a merged underside
+   needs.
+7. **`add_mate` with `face: "<name>"`** (a string) leaked
+   `cannot use at() with string`. Fixed: the refusal names the
+   `{feature_id, element}` contract.
+8. **`get_state` bodies did not say `reference`.** Fixed.
+9. **A cylinder face's `normal` in `list_elements` is the normal at the
+   centroid, not the axis.** I read it as the axis and drilled the servo's
+   end face; the projection of the real hole edges (a degenerate spline,
+   all poles on one line) is what showed the tapped holes run along the
+   servo's thickness — through the side covers, which is how the SO-101
+   holds it. The design changed to two cheeks. The ghost caught the error
+   before any part was printed, which is the feature's whole point.
+10. **A circle and a rectangle crossing in one sketch** are refused
+    ("profile loops overlap"): the flange disc and its web are two sketches.
+11. **`interference {}` and `contact_report` over 253 occurrences do not
+    return in bounded time and block every RPC, including `ping`.** Pairwise
+    interference is instant. The gripper's own 9-occurrence assembly is
+    what the acceptance check runs on.
+12. **`contact_report` on an assembly counted a part's derived ghosts as its
+    matter.** The gripper body, carrying a copy of the servo it was drawn
+    on, reported a 15.4 cm³ clash with that servo — its own ghost — and the
+    jaw the same with the body's. The pairwise `interference` already
+    skipped ghosts; the report did not. Fixed, and `derived_smoke` now
+    asserts a copy placed on its source reports no clash.
+13. `add_occurrence {part: <id>}` leaks `type must be string` — `part` is a
+    name (the doc says so; the refusal should).
+14. `create_drawing {name: "Gripper body"}` is refused because a part tab
+    has that name — a good refusal, quoted here because it is the kind the
+    others should be.
+15. Derived's `bodies` filter is by `created_by`, and an Import's 197 bodies
+    are ONE `created_by`: the PCB and lens alone (3 bodies) cannot be
+    derived without the 194 pads. A name filter would also have made every
+    timing above smaller. Open.
+16. **A drawing view projected the ghosts.** The top view of the body ran
+    the HLR over the 197-body camera copy and took the RPC past its 60 s
+    client timeout. A ghost is not the part; fixed (drawing views skip
+    reference bodies; `derived_smoke` asserts no ghost curve).
+17. `add_drawing_view`'s doc says `{drawing, source, ...}`; its handler
+    refuses `drawing` (it works on the active drawing tab). `create_drawing`
+    `sheet` is an object, and says so — a good refusal.
+18. Four auto-placed views overlap on the sheet (see the checks above).
+19. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
+    Raspberry Pi STEP (the crypto chip's footprint name). Not ours.
+
+## Fixed the same day (`edb28a92` and the follow-up)
+
+- `CADShape::Volume` cache keyed by TShape identity (+ location scale).
+- `SketchFeature::RegenerateExternal` looks through every body of the feature.
+- Hole takes circle and arc centres, merges coincident ones.
+- `add_mate` face-connector refusal; `get_state` `reference: true`.
+- `contact_report` skips reference bodies on both the part and the assembly tab.
+- Drawing views skip reference bodies.
+- Tests: `a hole placed on a derived hole edge, no coordinates copied`;
+  `derived_smoke` contact_report assertion.
+
+## Still open after D4
+
+- `SyncInContextGhosts` should read `partRenderCache` (the assembly tab's
+  per-part asset cache) instead of tessellating every neighbour per regen.
+- A Derived `bodies` filter by body NAME (format bump).
+- `import_step as_assembly`: report the parts that failed to regenerate in
+  its own response; keep the PRODUCT name when the shape label is "SOLID".
+- `interference {}` / `contact_report` on hundreds of occurrences: a bbox
+  prefilter and the A3 job registry (off the RPC thread, `ping` answers).

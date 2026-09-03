@@ -1,8 +1,9 @@
 # Derived — geometry from another part (A2)
 
-> Status: **D1-D3 SHIPPED 2026-09-03** (`0beba3a8` core, `e82961eb`
-> surface, then the D3 proofs); D4 (the gripper) open. See "As built" at
-> the end. The capability review's A2
+> Status: **D1-D4 DONE 2026-09-03** (`0beba3a8` core, `e82961eb`
+> surface, `b3933741` the D3 proofs, then the gripper:
+> [derived-gripper-dogfood.md](derived-gripper-dogfood.md)). See "As built"
+> at the end. The capability review's A2
 > ([../capability-review-2026-08-31.md](../capability-review-2026-08-31.md))
 > as a design: a **binder feature with a snapshot**, not a shared regeneration
 > graph. From: *"we already have variable changes as cross-cutting
@@ -211,5 +212,5 @@ found in the tree:
   a vertical edge projects to a point, so a test has to pick a top edge by
   its midpoint, not the first name in the map.
 
-**Still open**: D4, the gripper.
+**D4 done** (2026-09-03): [derived-gripper-dogfood.md](derived-gripper-dogfood.md) — the gripper built on ghosts of the real servo and camera STEP, every hole from a projected ghost edge, 19 findings, 8 fixed the same day.
 

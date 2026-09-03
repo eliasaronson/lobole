@@ -145,6 +145,22 @@ def main():
         here = next(f for f in feats if f["name"] == "servo here")
         expect(abs(here["placement"]["position"][0] + 50.0) < 1e-6, here)
         expect(here["stale"] is False, here)
+        # The copy sits exactly on the real servo; the assembly's contact
+        # report must not read the ghost as the jaw's matter.
+        d.call("set_active_part", part="grip")
+        rep = d.call("contact_report")
+        expect(rep.get("clashes", []) == [], rep.get("clashes"))
+        d.call("set_active_part", part="jaw")
+
+        # A drawing of the jaw is a drawing of the jaw: the ghost projects no
+        # curve (the HLR of a 197-body ghost took a view past a minute).
+        d.call("create_drawing", name="jaw sheet", sheet={"size": "a4"})
+        view = d.call("add_drawing_view", source="jaw", orientation="top")["id"]
+        geom = d.call("list_drawing_geometry", view=view)
+        owners = {e["ref"]["feature_id"] for e in geom.get("geometry", [])}
+        expect(owners and did not in owners and here["id"] not in owners,
+               f"ghost curves in the drawing: {owners}")
+        d.call("delete_part", part="jaw sheet")
 
         # Through disk: the copies come back without touching the source.
         path = os.path.join(tmp, "grip.dsgn")

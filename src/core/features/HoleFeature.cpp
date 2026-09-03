@@ -58,12 +58,24 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // of a Derived ghost's hole edge projects to a (construction) circle, and
   // that circle is the centre. The SO-101 gripper dogfood carried every
   // servo and camera hole centre by hand before this.
+  // Arcs count too, and coincident centres merge: a hole whose wall the
+  // source split in two (the camera PCB's) projects as two half-arcs, and a
+  // cylinder projected along its axis as two circles.
   std::vector<glm::vec3> centers;
+  const auto add = [&](const glm::vec2& uv) {
+    const glm::vec3 w = sk->plane.PlaneToWorld(uv);
+    for (const glm::vec3& c : centers)
+      if (glm::length(c - w) < 1e-4f)
+        return;
+    centers.push_back(w);
+  };
   for (const auto& e : sk->entities) {
     if (const auto* p = std::get_if<sketch::Point>(&e))
-      centers.push_back(sk->plane.PlaneToWorld(p->p));
+      add(p->p);
     else if (const auto* c = std::get_if<sketch::Circle>(&e))
-      centers.push_back(sk->plane.PlaneToWorld(c->center));
+      add(c->center);
+    else if (const auto* a = std::get_if<sketch::Arc>(&e))
+      add(a->center);
   }
   if (centers.empty()) {
     SetError("hole sketch has no points or circles to place holes at");
