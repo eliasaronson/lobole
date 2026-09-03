@@ -116,15 +116,25 @@ allow (both angles at zero). The RPC smoke derives −1/3 from `teeth_a: 12,
 teeth_b: 36`, turns the wheel and finds the pinion three times as far
 round the other way, and reloads a rack relation from the saved project.
 
-**The demo, `generators/gear_train.py`**: two generator gears (m2, 12 and 36
-teeth) each mated by its bore to a hole in a carrier 48 mm apart, a gear
-relation derived from the tooth counts and phased by half a pitch on the
-wheel (π/36). Turning the pinion through one pitch in eight steps, the
-interference check reports *touching* or *clear* at every step with a worst
-clash volume of 0.023 mm³ — the 8 µm arc approximation on a pair drawn
-with zero backlash. A wrong ratio or phase shows up here as whole teeth
-overlapping, so this is the static tooth check that stands in for
-"contact", and it passes.
+**The demo, `generators/gear_train.py`**: three generator gears (m2: 12,
+24 and 36 teeth) each mated by its bore to a hole in a carrier and seated
+ON the plate by the mate's axial offset — derived from the two thicknesses,
+its sign measured from the hole frame rather than assumed — two gear
+relations chained from the tooth counts with the idler phased by half a
+pitch, and a toothless bar on a slider whose faces make it slide along X,
+coupled to the wheel by a rack relation. Turning the pinion through one
+pitch, both pairs report *touching* or *clear* at every step but one (the
+phantom in known-bugs), and the rack moves the wheel's pitch radius per
+radian. Driving the WHEEL turns the pinion through the idler, which is the
+graph walk. A wrong ratio or phase shows up as whole teeth overlapping, so
+this is the static tooth check that stands in for "contact".
+
+Two lessons from the first version of it, both mine: a slider mated by
+ORIGIN frames slides along world Z (the frames are Z-up), which read as
+"the pinion moves up"; and a face-to-face revolute seats a bore's centre on
+the hole's centre, half a plate down, so the plate's top face cut through
+the teeth and read as overlap. Both are correct mates doing what they say;
+the demo now says what it means.
 
 What is still missing, named: a creation tool in the panel (needs a
 two-mate pick), a drive (a DOF along time, the CAM transport's shape), and

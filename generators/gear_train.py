@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""A gear train: two generator gears on a carrier, coupled by a relation.
+"""A gear train: three generator gears on a carrier, coupled by relations,
+and a rack on a rail.
 
     python3 generators/gear_train.py [--port N] [--save PATH]
 
-The pinion (12 teeth) and wheel (36 teeth), module 2, so the centre distance
-is m (z1 + z2) / 2 = 48. Each gear's bore is mated (revolute) to a hole in
-the carrier; a gear relation derived from the tooth counts couples the two
-axles, phased by half a pitch on the wheel so the teeth interleave. Then
-the pinion is turned through a tooth pitch and the interference check says
-whether the teeth ever clash — the static tooth check that stands in for
-"contact".
+pinion z12 -> idler z24 -> wheel z36, module 2, so the centre distances are
+36 and 60 mm. Each gear's bore is mated (revolute) to a hole in the carrier
+and seated ON the plate by the mate's axial offset (derived from the two
+thicknesses). Two gear relations chain the axles, the ratios derived from
+the tooth counts and the idler phased by half a pitch so the teeth
+interleave; a rack relation slides a bar along a rail block by the wheel's
+pitch radius per radian. Then the pinion is turned through a tooth pitch
+and the interference check says whether the teeth ever clash — the static
+tooth check that stands in for "contact".
+
+What this is: docs/assemblies/relations-plan.md, the demo.
 """
 import argparse
 import math
@@ -22,8 +27,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from _lib import connect  # noqa: E402
 
-M, ZA, ZB, THICK, BORE = 2.0, 12, 36, 8.0, 6.0
-CENTRE = M * (ZA + ZB) / 2.0  # 48
+M, ZA, ZB, THICK, BORE, PLATE = 2.0, 12, 36, 8.0, 6.0, 5.0
 
 
 def cylinder_face(d, part, radius, near=None):
@@ -43,6 +47,22 @@ def cylinder_face(d, part, radius, near=None):
             "element": f["element"]}
 
 
+def planar_face(d, part, normal, near=None):
+    """A planar face of `part` facing `normal`, nearest `near` (x, y, z)."""
+    q = d.call("query_geometry", part=part, element_type="face",
+               geometry_type="plane", normal=list(normal), angle_tol_deg=1.0)
+    best = None
+    for f in q["matches"]:
+        c = f["centroid"]
+        dist = 0.0 if near is None else math.dist(c, near)
+        if best is None or dist < best[0]:
+            best = (dist, f)
+    if best is None:
+        raise SystemExit(f"no planar face facing {normal} in {part}: {q}")
+    f = best[1]
+    return {"feature_id": f["created_by"], "element": f["element"]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
@@ -55,70 +75,113 @@ def main():
         port = Designer.instances()[0]["port"]
     d.call("new_project")
 
-    # The carrier: a plate with two Ø6 holes 48 apart.
+    # The carrier: a plate with three axle holes, and a rail block whose +X
+    # face carries the rack (a slider mated face-to-face slides along the
+    # faces' normal, which is what makes the rack go sideways and not up).
+    gears = (("pinion", ZA, 0.0), ("idler", 24, 36.0), ("wheel", ZB, 96.0))
     d.call("add_part", name="carrier")
     d.call("add_feature", feature={
-        "type": "Box", "name": "Plate", "position": [-20, -20, -5],
-        "width": CENTRE + 40, "height": 40, "depth": 5})
+        "type": "Box", "name": "Plate", "position": [-20, -50, -PLATE],
+        "width": 136, "height": 100, "depth": PLATE})
     d.call("add_feature", feature={
-        "type": "Sketch", "name": "Holes",
+        "type": "Sketch", "name": "Axle holes",
         "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
                   "uAxis": [1, 0, 0]},
-        "entities": [{"type": "point", "p": [0, 0]},
-                     {"type": "point", "p": [CENTRE, 0]}]})
+        "entities": [{"type": "point", "p": [x, 0]} for _, _, x in gears]})
     holes_sk = d.call("get_state")["features"][-1]["id"]
     d.call("add_feature", feature={
-        "type": "Hole", "name": "Axle holes", "sketch_id": holes_sk,
-        "hole_kind": "simple", "diameter": BORE, "depth": 5.0,
+        "type": "Hole", "name": "Axles", "sketch_id": holes_sk,
+        "hole_kind": "simple", "diameter": BORE, "depth": PLATE,
         "through": True})
+    d.call("add_feature", feature={
+        "type": "Box", "name": "Rail block", "position": [112, -47, 0],
+        "width": 4, "height": 8, "depth": 8})
+    d.call("set_material", feature_id=d.call("get_state")["features"][0]["id"],
+           material="aluminum")
 
-    # The gears, each in its own part, from the generator.
     gear = os.path.join(ROOT, "generators", "gear.py")
-    for name, z in (("pinion", ZA), ("wheel", ZB)):
+    for name, z, _ in gears:
         d.call("add_part", name=name)
         d.call("set_active_part", name=name)
         subprocess.run([sys.executable, gear, "--port", str(port),
                         "--module", str(M), "--teeth", str(z),
                         "--thickness", str(THICK), "--bore", str(BORE),
                         "--name", name], check=True)
+        d.call("set_material",
+               feature_id=d.call("get_state")["features"][1]["id"],
+               material="steel")
 
-    # The assembly: carrier fixed, each gear's bore on its hole.
-    hole_a = cylinder_face(d, "carrier", BORE / 2, (0, 0))
-    hole_b = cylinder_face(d, "carrier", BORE / 2, (CENTRE, 0))
-    bore_a = cylinder_face(d, "pinion", BORE / 2)
-    bore_b = cylinder_face(d, "wheel", BORE / 2)
+    # The rack: a bar with no teeth (the relation is the test), whose -X end
+    # face mates to the rail block.
+    d.call("add_part", name="rack")
+    d.call("add_feature", feature={
+        "type": "Box", "name": "Bar", "position": [0, -4, -3],
+        "width": 120, "height": 8, "depth": 6})
+
     d.call("add_assembly", name="train")
     carrier = d.call("add_occurrence", part="carrier", fixed=True)["id"]
-    pinion = d.call("add_occurrence", part="pinion")["id"]
-    wheel = d.call("add_occurrence", part="wheel")["id"]
-    ma = d.call("add_mate", type="revolute", name="pinion axle",
-                a={"occurrence": carrier, "face": hole_a},
-                b={"occurrence": pinion, "face": bore_a})["id"]
-    mb = d.call("add_mate", type="revolute", name="wheel axle",
-                a={"occurrence": carrier, "face": hole_b},
-                b={"occurrence": wheel, "face": bore_b})["id"]
-    rel = d.call("add_relation", type="gear", a=ma, b=mb, teeth_a=ZA,
-                 teeth_b=ZB, phase=math.pi / ZB, name=f"{ZA}:{ZB}")
-    print("relation:", rel["kind"], "ratio %.4f" % rel["ratio"],
-          "phase %.4f" % rel["phase"], rel.get("error", ""))
-    for m in d.call("list_mates")["mates"]:
-        print("mate", m["name"], "error:", m.get("error", "-"))
+    occ, mates = {}, {}
+    for name, z, x in gears:
+        occ[name] = d.call("add_occurrence", part=name)["id"]
+        mates[name] = d.call("add_mate", type="revolute", name=f"{name} axle",
+                             a={"occurrence": carrier,
+                                "face": cylinder_face(d, "carrier", BORE / 2,
+                                                      (x, 0))},
+                             b={"occurrence": occ[name],
+                                "face": cylinder_face(d, name, BORE / 2)})["id"]
+    # Seat each gear ON the plate: a face mate puts the bore's centre on the
+    # hole's centre, half a plate down. The axial offset is derived from the
+    # two thicknesses; its sign follows the hole frame's Z, which is measured
+    # rather than assumed.
+    seat = PLATE / 2 + THICK / 2
+    for name in occ:
+        d.call("set_mate", id=mates[name], offset=seat)
+    z_now = next(o for o in d.call("list_occurrences")["occurrences"]
+                 if o["name"] == "pinion")["transform"]["position"][2]
+    if z_now < -1e-6:
+        for name in occ:
+            d.call("set_mate", id=mates[name], offset=-seat)
+    rack = d.call("add_occurrence", part="rack")["id"]
+    slider = d.call("add_mate", type="slider", name="rack slide",
+                    a={"occurrence": carrier,
+                       "face": planar_face(d, "carrier", (1, 0, 0),
+                                           (116, -43, 4))},
+                    b={"occurrence": rack,
+                       "face": planar_face(d, "rack", (-1, 0, 0))})["id"]
 
-    # Turn the pinion through one tooth pitch and watch the teeth.
+    # Phases: tooth 0 of every gear points +x. A pair meshes when one has a
+    # tooth and the other a gap on the line between them.
+    rels = [
+        d.call("add_relation", type="gear", a=mates["pinion"], b=mates["idler"],
+               teeth_a=ZA, teeth_b=24, phase=math.pi / 24, name="12:24"),
+        d.call("add_relation", type="gear", a=mates["idler"], b=mates["wheel"],
+               teeth_a=24, teeth_b=ZB, phase=0.0, name="24:36"),
+        d.call("add_relation", type="rack", a=mates["wheel"], b=slider,
+               pitch_radius=M * ZB / 2, name="wheel rack"),
+    ]
+    for r in rels:
+        print("relation", r["name"], "ratio %.4f phase %.4f" % (r["ratio"],
+                                                                r["phase"]),
+              r.get("error", ""))
+
+    # Turn the pinion through one tooth pitch and watch every pair.
     worst = 0.0
     pitch = 2 * math.pi / ZA
     for i in range(9):
         theta = pitch * i / 8
-        d.call("set_mate", id=ma, rotation=theta)
-        wheel_rot = next(m for m in d.call("list_mates")["mates"]
-                         if m["id"] == mb)["rotation"]
-        r = d.call("interference", a=pinion, b=wheel)
-        print("pinion %.3f rad -> wheel %.4f rad: %s, clearance %.3f mm, "
-              "clash volume %.3f" % (theta, wheel_rot, r["state"],
-                                     r.get("distance", 0.0),
-                                     r.get("volume", 0.0)))
-        worst = max(worst, r.get("volume", 0.0))
+        d.call("set_mate", id=mates["pinion"], rotation=theta)
+        pairs = []
+        for x, y in (("pinion", "idler"), ("idler", "wheel")):
+            r = d.call("interference", a=occ[x], b=occ[y])
+            worst = max(worst, r.get("volume", 0.0))
+            pairs.append("%s-%s %s %.3f" % (x, y, r["state"],
+                                             r.get("volume", 0.0)))
+        rack_x = next(o for o in d.call("list_occurrences")["occurrences"]
+                      if o["name"] == "rack")["transform"]["position"][0]
+        print("pinion %.3f rad: %s; rack x %.2f" % (theta, ", ".join(pairs),
+                                                     rack_x))
     print("worst clash volume over a pitch: %.4f mm3" % worst)
+    d.call("set_mate", id=mates["pinion"], rotation=pitch / 4)
     if a.save:
         d.call("save_project", path=a.save)
         print("saved", a.save)
