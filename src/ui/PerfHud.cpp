@@ -129,6 +129,24 @@ void DrawPerfHud(AppState& state) {
                       "ready.\nWith vsync on, a large display share is "
                       "NORMAL — it only means GPU-bound\nwhen the total "
                       "frame time is above the refresh period too.");
+  // WHICH GPU, right here: a 7 fps plate with the passes at 50 ms each was
+  // the Intel iGPU answering after an NVIDIA driver update without a reboot
+  // left the NVIDIA ICD unable to enumerate — the app had fallen back, said
+  // so in the log and in Preferences, and this panel, the one a person
+  // opens for exactly that question, did not.
+  if (!state.gpuName.empty()) {
+    if (!state.gpuPreferenceNote.empty()) {
+      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f),
+                         "on %s  (not the preferred GPU)",
+                         state.gpuName.c_str());
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s\nAfter a driver update the preferred GPU can "
+                          "be missing until a reboot.",
+                          state.gpuPreferenceNote.c_str());
+    } else {
+      ImGui::TextDisabled("on %s", state.gpuName.c_str());
+    }
+  }
   // What the GPU itself spends per pass — the half `display` cannot split.
   // On an unsupported queue say so; silence would read as "no GPU cost".
   if (!state.gpuStats.supported) {
