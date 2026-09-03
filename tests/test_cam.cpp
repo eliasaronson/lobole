@@ -5575,6 +5575,17 @@ TEST_CASE("cam machine: a path is clipped to the travel, and says how much",
       retracts++;
   }
   CHECK(retracts >= 1);
+  // The SINGLE-operation path -- the one the panel regenerates a verb's
+  // operation through -- clips the same. It did not, the morning after this
+  // shipped: the clip lived in the full pass only, and the verb's path ran
+  // off the bed while the RPC's file stopped at it.
+  const cam::Toolpath single =
+      cam::Generate(setup, setup.operations[0], doc->GetBodies());
+  CHECK(single.clippedMm > 20.0);
+  for (const cam::Move& m : single.moves) {
+    CHECK(m.to.x <= hi.x + 1e-6);
+    CHECK(m.to.y <= hi.y + 1e-6);
+  }
   // The file it makes is clean, and the verdict says what was left out.
   std::string gcode, error;
   REQUIRE(cam::PostProcess("mach3", setup, clipped, {}, gcode, &error));

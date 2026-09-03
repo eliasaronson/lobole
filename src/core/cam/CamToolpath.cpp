@@ -2691,6 +2691,15 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   if (tp.moves.empty() && tp.error.empty() && !tp.pending)
     tp.error = "this operation produced no toolpath — check its depths "
                "against the model";
+  // Cut what fits: clipped HERE, at the one place every toolpath is made,
+  // and not in GenerateAll -- the panel regenerates a verb's operation on
+  // its own through this function, and a clip that lived only in the full
+  // pass left the verb's path running off the bed while the RPC's file
+  // stopped at it (found live, the morning after it shipped).
+  glm::dvec3 bedLo(0.0), bedHi(0.0);
+  if (tp.error.empty() && MachineBoundsFramed(setup, bodies, bedLo, bedHi))
+    ClipToMachine(tp, bedLo, bedHi, setup.safeZ,
+                  tool != nullptr ? tool->feedPlunge : 100.0);
   // The index this setup is cut at rides on every move, so the post emits it
   // and the machine is never asked to guess which way the part is facing.
   // How the part is CLAMPED never gets here: it is already baked into the
@@ -3078,24 +3087,14 @@ std::vector<Toolpath> GenerateAll(const Setup& setup,
   // Two orders would be a picture that can disagree with the file, which the
   // CAM plan refuses on principle.
   std::vector<Toolpath> out;
-  glm::dvec3 bedLo(0.0), bedHi(0.0);
-  const bool bed = MachineBoundsFramed(setup, framed, bedLo, bedHi);
   for (size_t i : CuttingOrder(setup)) {
     const Operation& op = setup.operations[i];
     if (!op.enabled)
       continue;
-    for (Toolpath& tp : GenerateOpFramed(setup, op, framed, ctx)) {
-      // Cut what fits (the router round's last finding): a controller never
-      // truncates a program for you -- it alarms on the line, or hits the
-      // stop -- so a move beyond the travel is clipped HERE, once, where
-      // every picture and the file read from.
-      if (bed && tp.error.empty()) {
-        const Tool* tool = setup.FindTool(tp.toolNumber);
-        ClipToMachine(tp, bedLo, bedHi, setup.safeZ,
-                      tool != nullptr ? tool->feedPlunge : 100.0);
-      }
+    // Each path arrives clipped to the machine (GenerateFramed), the full
+    // pass and the panel's single-operation refresh alike.
+    for (Toolpath& tp : GenerateOpFramed(setup, op, framed, ctx))
       out.push_back(std::move(tp));
-    }
   }
   // Tool order is an order of TOOLPATHS (R6): an operation that roughs with
   // T1 and finishes with T2 is two of them, and grouping by operation would
