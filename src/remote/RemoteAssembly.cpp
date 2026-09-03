@@ -81,7 +81,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "teeth mesh. Dragging or set_mate on EITHER mate turns the other; inside "
      "a mate loop the relation is a solver row and lowers the DOF count. "
      "Refused for a mate that lacks the degree of freedom (a fastened mate "
-     "has no rotation) (docs/assemblies/relations-plan.md).",
+     "has no rotation), and for a rack whose slider runs ALONG the pinion's "
+     "axis instead of across it; `warnings` names gear axles more than 5 "
+     "degrees off parallel (docs/assemblies/relations-plan.md).",
      "a, b, name, phase, pitch, pitch_radius, ratio, teeth_a, teeth_b, type"},
     {"set_relation", "Edit a relation's {ratio?, phase?, name?} by {id}.",
      "id, name, phase, ratio"},
@@ -717,6 +719,35 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           (r.dofA == MateDof::Rotation ? "revolute" : "slider") +
           " or cylindrical mates");
     }
+    // The geometry a kind implies, checked against the mates' own frames —
+    // a mate's DOF axis is its A connector's Z. A rack that slides ALONG the
+    // pinion's axis is never a rack (the first demo did exactly that, and
+    // read as "the pinion moves up"), so it is refused; gears on skew axes
+    // are unusual but real (bevel, crossed helical), so those get a warning.
+    json warnings = json::array();
+    {
+      const auto fa = ui::ConnectorWorldFrame(state, a->a);
+      const auto fb = ui::ConnectorWorldFrame(state, b->a);
+      if (fa && fb) {
+        const glm::vec3 za = glm::normalize(glm::vec3((*fa)[2]));
+        const glm::vec3 zb = glm::normalize(glm::vec3((*fb)[2]));
+        const float along = std::abs(glm::dot(za, zb)); // 1 parallel, 0 across
+        if (r.kind == RelationKind::Rack && along > 0.7071f)
+          throw std::runtime_error(
+              "mate " + std::to_string(b->id) + " slides along mate " +
+              std::to_string(a->id) +
+              "'s axis; a rack slides ACROSS the pinion's axis. Mate the "
+              "rack by faces whose normal is the direction it travels "
+              "(a slider slides along its connector frames' Z), not by "
+              "origin frames, which are Z-up");
+        if (r.kind == RelationKind::Gear && along < 0.9962f) // > 5 degrees
+          warnings.push_back(
+              "the two axles are not parallel (" +
+              std::to_string(glm::degrees(std::acos(along))) +
+              " degrees apart): fine for a bevel or crossed pair, wrong "
+              "for spur gears");
+      }
+    }
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddRelation(std::move(r));
     ui::SolveActiveAssembly(state);
@@ -725,6 +756,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (const Relation* made = state.assembly->FindRelationById(id);
         made != nullptr && !made->error.empty())
       out["error"] = made->error;
+    if (!warnings.empty())
+      out["warnings"] = warnings;
     return out;
   }
   if (m == "set_relation") {

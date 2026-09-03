@@ -181,6 +181,14 @@ def main():
         print("pinion %.3f rad: %s; rack x %.2f" % (theta, ", ".join(pairs),
                                                      rack_x))
     print("worst clash volume over a pitch: %.4f mm3" % worst)
+    # The whole assembly, not just the pairs this script thought to ask
+    # about: the first version of it seated every gear INSIDE the plate and
+    # only measured gear against gear. A clash here is a mate saying
+    # something other than what was meant.
+    rep = d.call("contact_report")
+    clashes = [(c["a"], c["b"]) for c in rep.get("clashes", [])]
+    print("contact report: %d component(s), clashes: %s" % (
+        len(rep.get("components", [])), clashes or "none"))
     d.call("set_mate", id=mates["pinion"], rotation=pitch / 4)
     if a.save:
         d.call("save_project", path=a.save)

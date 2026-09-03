@@ -112,15 +112,32 @@ def main():
         expect(d.call("list_relations")["relations"] == [], "removed")
 
         # A rack: the pinion's turn slides it by the pitch radius per radian.
+        # Mated by ORIGIN frames a slider runs along Z — the pinion's own
+        # axis — which is never a rack, and is refused in words. Faces whose
+        # normal is the travel direction make it one.
         d.call("add_part", name="rack")
         d.call("add_feature", feature={
             "type": "Box", "name": "Bar", "position": [0, 0, 0],
             "width": 100, "height": 8, "depth": 6})
         d.call("set_active_part", name="train")
         rack = d.call("add_occurrence", part="rack")["id"]
-        s = origin_mate(d, "slider", carrier, rack)
+        up = origin_mate(d, "slider", carrier, rack)
+        refused(d, "add_relation", "ACROSS", type="rack", a=a, b=up,
+                pitch_radius=12)
+        d.call("remove_mate", id=up)
+
+        def face(part, normal):
+            q = d.call("query_geometry", part=part, element_type="face",
+                       geometry_type="plane", normal=list(normal),
+                       angle_tol_deg=1.0)
+            f = q["matches"][0]
+            return {"feature_id": f["created_by"], "element": f["element"]}
+        s = d.call("add_mate", type="slider",
+                   a={"occurrence": carrier, "face": face("carrier", (1, 0, 0))},
+                   b={"occurrence": rack, "face": face("rack", (-1, 0, 0))})["id"]
         rr = d.call("add_relation", type="rack", a=a, b=s, pitch_radius=12)
         expect(abs(rr["ratio"] - 12.0) < 1e-12, "rack ratio is the radius")
+        expect("warnings" not in rr, f"an across slider draws no warning: {rr}")
         d.call("set_mate", id=a, rotation=0.5)
         expect(abs(mate(d, s)["offset"] - 6.0) < 1e-4,
                f"rack slid 6 mm: {mate(d, s)['offset']}")
