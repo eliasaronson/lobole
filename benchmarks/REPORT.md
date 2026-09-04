@@ -152,3 +152,22 @@ screw and jaw, a dock bracket, the enclosure's port and bracing.
 
 **Then re-run before and after any change to the surface.** That is the whole
 point of the directory, and it costs about $17 and 40 minutes at this size.
+
+## 2026-09-04: T4/T5 added, and this round left UNMEASURED
+
+The agent-scale round (docs/agent-scale-plan.md) added two mechanism tasks —
+`t4-slider-crank` and `t5-crank-motion` — which are the first here that grade
+anything but a single static part: a closed loop, a driven DOF, and a swept
+pose. `benchmarks/runners/reference.py` builds all ten by hand and scores
+48/48, so the tasks and the oracle are sound.
+
+**No sweep has been run against them.** The suite is now 10 tasks x 3 arms x 3
+reps = 90 runs with a $180 ceiling, and the decision was to hold rather than
+spend it. So nothing in this round — the batch RPC, the SDK, datum frames, the
+motion study, mesh collision — has a benchmark number behind it, and none is
+claimed. What it does have is the acceptance test
+(docs/modeling/single-cylinder-dogfood.md), which is a different kind of
+evidence: one engine, built by a script, with six defects the gates caught.
+
+The sweep is still the thing to run before and after the next change to the
+surface, and it is a bigger bill than the "about $17" the section above quotes.
