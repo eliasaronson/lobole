@@ -67,6 +67,7 @@ add_executable(designer_tests
     test_expression.cpp
     test_variables.cpp
     test_datum.cpp
+    test_frame.cpp
     test_revolve.cpp
     test_boolean.cpp
     test_split.cpp
@@ -312,6 +313,14 @@ add_test(NAME assembly_relations_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_relations_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
+
+# Named datum frames (v86, agent-scale plan G0): a frame built FROM a bolt
+# pattern, a mate anchored to it BY NAME, and the mate following when a
+# variable moves the geometry — the position an agent never transcribed.
+add_test(NAME frame_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/frame_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(frame_smoke PROPERTIES TIMEOUT 120)
 
 # Derived (v84): a jaw derives a servo as a ghost over the RPC — refusals,
 # stale reported and never auto-resolved, update as one undo step, the

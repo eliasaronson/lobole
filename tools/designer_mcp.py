@@ -114,6 +114,23 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   offset: "offset": num, "offset_expr"?: str, "flip"?: bool
   angled: "axis": <axis ref>, "angle_deg": num, "angle_expr"?: str
   through_points: "points": [[x,y,z],[x,y,z],[x,y,z]]
+- Frame (a NAMED datum frame — origin + axes — that a mate anchors to by
+  name and the `frame` query reports; the way to position without
+  transcribing a coordinate): {{"type": "Frame", "name": str, "kind":
+  "explicit"|"from_element"|"offset", ...}}
+  explicit: "origin": [x,y,z], "origin_expr"?: [sx,sy,sz],
+            "z_axis"?: [x,y,z], "x_axis"?: [x,y,z]
+  from_element: "elements": [{{"feature_id": <body's created_by>,
+            "element": <name from list_elements>}}, ...] — ONE planar face
+            gives its centroid + outward normal, one cylindrical face or
+            circular edge its centre + axis, and SEVERAL circular ones a
+            BOLT CIRCLE (centred on the pattern, X toward the first named);
+            "flip"?: true negates Z (a face's normal points out of the part)
+  offset: "parent_id": <a Frame; 0 = the part origin>, "offset": [x,y,z]
+            (+"offset_expr"), "rotation_deg": [rx,ry,rz] (+"rotation_expr")
+  Mate to one with add_mate a/b = {{"occurrence": <id|name>,
+  "frame": <Frame id or name>}}; then moving the geometry the frame was
+  built from moves the mate with it.
 - DatumAxis: {{"type": "DatumAxis", "name": str, "kind":
   "two_points"|"sketch_line"|"global_x"|"global_y"|"global_z", ...}}
   two_points: "points": [[x,y,z],[x,y,z]]

@@ -31,6 +31,7 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
@@ -487,6 +488,15 @@ void CreateDatumAxis(AppState& state) {
   BeginPreviewFeature(state, std::move(ax));
 }
 
+void CreateFrame(AppState& state) {
+  // The part origin, Z up: the one frame every part has, and the identity
+  // no unit has to be guessed for. The editor turns it into an element or
+  // offset frame; a script passes the definition outright.
+  auto fr = std::make_unique<FrameFeature>(NextName(state, "Frame"),
+                                           FrameKind::Explicit);
+  BeginPreviewFeature(state, std::move(fr));
+}
+
 namespace {
 // Ids of earlier features usable as a sweep/loft profile or section (closed
 // sketches) resp. as a path/guide (a sketch chain or a Curve3D). Used to seed
@@ -932,6 +942,36 @@ void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines) {
     const glm::vec3 d = da->Direction();
     lines.push_back(LineVertex(o - d * half, c));
     lines.push_back(LineVertex(o + d * half, c));
+  }
+}
+
+float FrameTriadLength(AppState& state) {
+  // Half a datum quad's half-extent: a triad is a point of reference, not a
+  // surface, so it reads smaller — and it scales with the scene the way the
+  // datum quads do (3 against a base plane's 8, then the document's reach).
+  return 0.5f * (3.0f / kDefaultPlaneHalfExtent) * ScenePlaneHalfExtent(state);
+}
+
+void AppendFrameLines(AppState& state, std::vector<LineVertex3D>& lines) {
+  if (!state.document || !DatumPlanesVisible(state))
+    return;
+  const float len = FrameTriadLength(state);
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    auto* fr = dynamic_cast<FrameFeature*>(state.document->GetFeature(i));
+    if (!fr || !fr->GetError().empty())
+      continue;
+    const bool emphasized = fr->GetId() == state.pendingFeatureId ||
+                            fr->GetId() == SelectedFeatureId(state);
+    const float k = emphasized ? 1.4f : 1.0f;
+    const glm::vec3 o = fr->Origin();
+    const glm::vec3 axes[3] = {fr->XAxis(), fr->YAxis(), fr->ZAxis()};
+    const glm::vec3 tints[3] = {glm::vec3(0.90f, 0.30f, 0.30f),
+                                glm::vec3(0.35f, 0.85f, 0.35f),
+                                glm::vec3(0.35f, 0.55f, 1.00f)};
+    for (int a = 0; a < 3; a++) {
+      lines.push_back(LineVertex(o, tints[a] * k));
+      lines.push_back(LineVertex(o + axes[a] * len, tints[a] * k));
+    }
   }
 }
 

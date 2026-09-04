@@ -3,6 +3,7 @@
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h"
@@ -63,7 +64,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"select_occurrence", "Select an occurrence in the UI.", "id"},
     {"add_mate",
      "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
-     "connectors...}.",
+     "a, b: connectors}. A connector is {occurrence: id|name, frame: <Frame "
+     "id|name of that part>} (v86 — the mate as DESIGNED: a bolt-circle "
+     "centre, a shaft axis), {occurrence, face: {feature_id, element}, "
+     "snap_edge?} (a face's centroid + normal, or a snapped hole centre), or "
+     "{occurrence, origin: true}; inner_path? reaches into a sub-assembly.",
      "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, type"},
     {"set_mate", "Edit a mate's parameters.",
      "ball_rotation, dx, dy, flipped, id, name, offset, rotation"},
@@ -511,26 +516,26 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "set_active_part (see list_parts)");
     auto connToJson = [&state](const json& c) -> json {
       json anchor;
-      // A5: a face anchor names a face of a PART. A placed sub-assembly has
-      // none of its own, so refuse it HERE rather than storing a mate that
-      // can only ever fail to solve (which is what it used to do, reporting
-      // "the part document is not loaded" — a missing-file message for a
-      // file that is not missing).
-      if (!c.value("origin", false) && c.contains("face") &&
-          state.assembly != nullptr && c.contains("occurrence")) {
-        const Occurrence* o = nullptr;
+      const Occurrence* o = nullptr;
+      if (state.assembly != nullptr && c.contains("occurrence")) {
         if (c.at("occurrence").is_number())
           o = state.assembly->FindById(c.at("occurrence").get<uint64_t>());
         else
           for (const Occurrence& cand : state.assembly->GetOccurrences())
             if (cand.name == c.at("occurrence").get<std::string>())
               o = &cand;
+      }
+      // A5: a face anchor names a face of a PART. A placed sub-assembly has
+      // none of its own, so refuse it HERE rather than storing a mate that
+      // can only ever fail to solve (which is what it used to do, reporting
+      // "the part document is not loaded" — a missing-file message for a
+      // file that is not missing).
+      if (!c.value("origin", false) && c.contains("face") && o != nullptr) {
         // v57: a face anchor on a sub-assembly is fine WITH a path naming the
         // part inside it whose face is meant — "bolt this bracket to the
         // flange of the pump inside the pump unit". Without one there is
         // still nothing to anchor to: a placed assembly has no faces.
-        if (o != nullptr && o->refKind == OccurrenceRef::Assembly &&
-            !c.contains("inner_path"))
+        if (o->refKind == OccurrenceRef::Assembly && !c.contains("inner_path"))
           throw std::runtime_error(
               "'" + o->name +
               "' is a sub-assembly, which has no faces of its own: add "
@@ -538,7 +543,70 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               "whose face you mean — list_occurrences on that tab), mate it "
               "by origin, or open that assembly and mate the part there");
       }
-      if (c.value("origin", false))
+      if (c.contains("frame")) {
+        // v86: a named Frame of the occurrence's part — the mate as
+        // designed. A name is resolved HERE against that part's history so
+        // the stored anchor is an id (names are cosmetic and renamable); a
+        // name that is not a Frame there is refused naming the frames that
+        // are.
+        if (o == nullptr)
+          throw std::runtime_error(
+              "connector 'frame' needs 'occurrence' (id or name — see "
+              "list_occurrences)");
+        if (o->refKind == OccurrenceRef::Assembly && !c.contains("inner_path"))
+          throw std::runtime_error(
+              "'" + o->name +
+              "' is a sub-assembly, which has no frames of its own: add "
+              "inner_path down to the part whose frame you mean, or mate it "
+              "by origin");
+        uint64_t partId = o->partId;
+        if (c.contains("inner_path")) {
+          // Walk the path to the part the frame belongs to.
+          const AssemblyDocument* sub = ui::AssemblyDocById(state, o->partId);
+          const Occurrence* inner = nullptr;
+          for (const json& idj : c.at("inner_path")) {
+            if (sub == nullptr)
+              throw std::runtime_error(
+                  "inner_path goes deeper than the sub-assembly does");
+            inner = sub->FindById(idj.get<uint64_t>());
+            if (inner == nullptr)
+              throw std::runtime_error("inner_path names occurrence " +
+                                       idj.dump() + ", which is not inside '" +
+                                       o->name + "'");
+            sub = inner->refKind == OccurrenceRef::Assembly
+                      ? ui::AssemblyDocById(state, inner->partId)
+                      : nullptr;
+          }
+          if (inner != nullptr)
+            partId = inner->partId;
+        }
+        const Document* part = ui::PartDocById(state, partId);
+        if (part == nullptr)
+          throw std::runtime_error("the part of '" + o->name +
+                                   "' is not loaded");
+        const json& fv = c.at("frame");
+        const FrameFeature* hit = nullptr;
+        std::string frames;
+        for (const auto& f : part->GetFeatures()) {
+          const auto* fr = dynamic_cast<const FrameFeature*>(f.get());
+          if (fr == nullptr)
+            continue;
+          if ((fv.is_number() && fr->GetId() == fv.get<uint64_t>()) ||
+              (fv.is_string() && fr->GetName() == fv.get<std::string>()))
+            hit = fr;
+          if (!frames.empty())
+            frames += ", ";
+          frames += std::to_string(fr->GetId()) + " (" + fr->GetName() + ")";
+        }
+        if (hit == nullptr)
+          throw std::runtime_error(
+              "no Frame " + fv.dump() + " on the part of '" + o->name +
+              "'; frames there: " +
+              (frames.empty()
+                   ? std::string("none (add_feature type Frame on that part)")
+                   : frames));
+        anchor = {{"frame", hit->GetId()}};
+      } else if (c.value("origin", false))
         anchor = {{"origin", true}};
       else if (c.contains("face")) {
         // A bare element name here used to leak a json type error
@@ -558,7 +626,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               {"element", c.at("snap_edge").at("element")}};
       } else
         throw std::runtime_error(
-            "connector needs 'origin:true' or 'face:{feature_id,element}'");
+            "connector needs 'frame: <Frame id|name>', 'origin:true' or "
+            "'face:{feature_id,element}'");
       json out{{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
       if (c.contains("inner_path"))
         out["inner_path"] = c.at("inner_path");

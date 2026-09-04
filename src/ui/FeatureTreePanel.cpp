@@ -108,6 +108,8 @@ const char* FeatureIcon(const std::string& type) {
     return ICON_FA_TABLE_CELLS_LARGE;
   if (type == "DatumAxis")
     return ICON_FA_ARROWS_UP_DOWN;
+  if (type == "Frame")
+    return ICON_FA_LOCATION_CROSSHAIRS;
   if (type == "Curve3D")
     return ICON_FA_WAVE_SQUARE;
   if (type == "Pipe")

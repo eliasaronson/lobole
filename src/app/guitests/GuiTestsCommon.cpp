@@ -316,7 +316,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[25] = {
+const ToolCase kToolCases[26] = {
     {"box", "###tb_box", Needs::Nothing, Expect::Changes},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
@@ -326,6 +326,7 @@ const ToolCase kToolCases[25] = {
     {"curve3d", "###tb_curve3d", Needs::Nothing, Expect::Changes},
     {"datum_plane", "###tb_datum_plane", Needs::Nothing, Expect::Changes},
     {"datum_axis", "###tb_datum_axis", Needs::Nothing, Expect::Changes},
+    {"frame", "###tb_frame", Needs::Nothing, Expect::Changes},
     {"extrude", "###tb_extrude", Needs::ClosedSketch, Expect::Changes},
     {"revolve", "###tb_revolve", Needs::ClosedSketch, Expect::Changes},
     {"sweep", "###tb_sweep", Needs::ProfileAndPath, Expect::Changes},

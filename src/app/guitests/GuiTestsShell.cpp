@@ -16,12 +16,13 @@ static const char* const kModelTools[] = {
     "###tb_cylinder",   "###tb_extrude",     "###tb_revolve",
     "###tb_curve3d",    "###tb_sweep",       "###tb_loft",
     "###tb_pipe",       "###tb_datum_plane", "###tb_datum_axis",
-    "###tb_boolean",    "###tb_mirror",      "###tb_pattern",
-    "###tb_fillet",     "###tb_chamfer",     "###tb_rib",
-    "###tb_hole",       "###tb_thread",      "###tb_shell",
-    "###tb_draft",      "###tb_split",       "###tb_refine",
-    "###tb_fit",        "###tb_planes",      "###tb_simulation",
-    "###tb_section",    "###tb_measure",     "###tb_render",
+    "###tb_frame",      "###tb_boolean",     "###tb_mirror",
+    "###tb_pattern",    "###tb_fillet",      "###tb_chamfer",
+    "###tb_rib",        "###tb_hole",        "###tb_thread",
+    "###tb_shell",      "###tb_draft",       "###tb_split",
+    "###tb_refine",     "###tb_fit",         "###tb_planes",
+    "###tb_simulation", "###tb_section",     "###tb_measure",
+    "###tb_render",
 };
 
 void RegisterShellGuiTests(ImGuiTestEngine* engine) {

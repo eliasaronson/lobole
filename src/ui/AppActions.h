@@ -533,6 +533,9 @@ void CreateCylinder(AppState& state);
 void CreateDatumPlane(AppState& state);
 // Starts a preview of a two-point datum axis (along X by default).
 void CreateDatumAxis(AppState& state);
+// A named datum frame (v86, agent-scale plan G0), explicit at the part origin
+// until edited; a mate anchors to it by name.
+void CreateFrame(AppState& state);
 
 void CreateCurve3D(AppState& state); // 3D curve (helix / fit-spline / poly)
 void CreatePipe(AppState& state);    // pipe/tube along a path
@@ -699,6 +702,12 @@ void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines);
 // Appends a line segment for every DatumAxisFeature (same visibility rule as
 // the datum planes), tinted distinctly; selected/pending is brightened.
 void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines);
+// Appends an RGB triad (X red, Y green, Z blue) for every resolved
+// FrameFeature, `FrameTriadLength` long — derived from the scene's extent
+// like the datum planes, so a frame on a 2 mm part and one on a 2 m dock
+// both read.
+void AppendFrameLines(AppState& state, std::vector<LineVertex3D>& lines);
+float FrameTriadLength(AppState& state);
 // Draws every Curve3D feature's tessellated polyline (curves-3d Phase 0).
 void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines);
 

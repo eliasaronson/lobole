@@ -811,7 +811,7 @@ static const std::set<std::string> kNoPartDoc = {
     // list_elements/measure work there when given an explicit `part`;
     // mass_properties aggregates occurrence masses in world space.
     "interference", "contact_report", "compare_geometry", "query_geometry",
-    "list_elements", "measure", "mass_properties", "render_sheet",
+    "list_elements", "measure", "frame", "mass_properties", "render_sheet",
     // set_section writes the global viewport clip plane (per-frame UBO,
     // world space); `section` sums the cut area over a part's bodies or,
     // on an assembly tab, over every visible occurrence in place.

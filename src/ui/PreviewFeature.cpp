@@ -11,6 +11,7 @@
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h" // occurrence names (measure rows)
 #include "ui/AppActions.h"               // SelectFeature
 #include "ui/CamTool.h"                  // DrawCamToolWindow (CAM verbs)
@@ -592,6 +593,7 @@ void DrawToolWindow(AppState& state) {
       dynamic_cast<SketchFeature*>(feature) == nullptr &&
       dynamic_cast<DatumPlaneFeature*>(feature) == nullptr &&
       dynamic_cast<DatumAxisFeature*>(feature) == nullptr &&
+      dynamic_cast<FrameFeature*>(feature) == nullptr &&
       dynamic_cast<CurveFeature*>(feature) == nullptr;
   bool noChange = false;
   if (!blocking && touchesBodies && state.document) {

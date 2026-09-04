@@ -791,7 +791,15 @@ void DrawMateToolWindow(AppState& state) {
     if (!have || c.occurrenceId == 0)
       return "";
     std::string s = OccLabel(state, asmDoc, c.occurrenceId);
-    if (c.anchor.snapEdge.IsSet())
+    if (c.anchor.frameId != 0) { // v86: the mate as designed, by name
+      std::string fname = "frame " + std::to_string(c.anchor.frameId);
+      if (const Occurrence* o = asmDoc.FindById(c.occurrenceId))
+        if (const Document* part = PartDocById(state, o->partId))
+          for (const auto& f : part->GetFeatures())
+            if (f->GetId() == c.anchor.frameId)
+              fname = f->GetName();
+      s += " @ " + fname;
+    } else if (c.anchor.snapEdge.IsSet())
       s += " (snapped)";
     return s;
   };

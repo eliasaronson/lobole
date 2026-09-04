@@ -4,7 +4,11 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GeometryCache.h"
@@ -121,6 +125,77 @@ TEST_CASE("Advice survives a baked open", "[baked]") {
   REQUIRE(loaded != nullptr);
   CHECK(loaded->LastRegenStats().executed == 0); // it really was baked
   CHECK(loaded->GetFeature(2)->GetWarning() == warning);
+  fs::remove_all(proj);
+}
+
+// A DATUM's output is not a body, so the blob does not carry it. Executing
+// nothing therefore left every datum at its DEFAULT — a plane at the origin,
+// a frame at the identity — on a document that had just been saved correct.
+// Nothing downstream could tell: a mate anchored to that frame solved
+// cleanly and put the part at the origin. The bake installs bodies and then
+// runs the datums (Feature::IsDatum), which is what this pins.
+TEST_CASE("Datums are resolved on a baked open", "[baked][frame][datum]") {
+  const fs::path proj = TempProject("baked-datums.dsgn");
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0), 40, 10, 30));
+  const uint64_t plate = doc.GetFeature(0)->GetId();
+
+  auto dp = std::make_unique<DatumPlaneFeature>("Deck", DatumPlaneKind::Offset);
+  dp->offset = 50.0;
+  doc.AddFeature(std::move(dp));
+
+  auto da =
+      std::make_unique<DatumAxisFeature>("Spine", DatumAxisKind::TwoPoints);
+  da->p0 = glm::vec3(1.0f, 2.0f, 3.0f);
+  da->p1 = glm::vec3(1.0f, 2.0f, 9.0f);
+  doc.AddFeature(std::move(da));
+
+  auto seat = std::make_unique<FrameFeature>("seat", FrameKind::Explicit);
+  seat->origin[0] = 7.0;
+  seat->origin[2] = 11.0;
+  doc.AddFeature(std::move(seat));
+  const uint64_t seatId = doc.GetFeature(3)->GetId();
+
+  // The one that needs the BODIES the bake installs, not just arithmetic.
+  std::string top;
+  for (const auto& [index, name] : doc.GetBodies()[0].elementMap.names)
+    if (const auto info = Measure::DescribeFaceAt(doc.GetBodies()[0], index);
+        info && info->kind == "plane" && info->normal.y > 0.99f)
+      top = name;
+  REQUIRE(!top.empty());
+  auto face = std::make_unique<FrameFeature>("lid", FrameKind::FromElement);
+  face->elements = {ElementRef{plate, top}};
+  doc.AddFeature(std::move(face));
+  const uint64_t lidId = doc.GetFeature(4)->GetId();
+  REQUIRE(doc.Regenerate());
+  REQUIRE(testio::Save(doc, proj.string()));
+
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  // The BODY still came from the blob: one box, no B-Rep rebuilt.
+  REQUIRE(loaded->GetBodies().size() == 1);
+  CHECK(loaded->LastRegenStats().cached == 1);   // the Box was not re-executed
+  CHECK(loaded->LastRegenStats().executed == 4); // the four datums were
+
+  CHECK_THAT(dynamic_cast<DatumPlaneFeature*>(loaded->GetFeature(1))
+                 ->OutputPlane()
+                 .GetOrigin()
+                 .z,
+             WithinRel(50.0f, 1e-5f));
+  CHECK_THAT(dynamic_cast<DatumAxisFeature*>(loaded->GetFeature(2))->Origin().x,
+             WithinRel(1.0f, 1e-5f));
+  auto* fr = dynamic_cast<FrameFeature*>(loaded->FindFeatureById(seatId));
+  REQUIRE(fr != nullptr);
+  CHECK(fr->GetError().empty());
+  CHECK_THAT(fr->Origin().x, WithinRel(7.0f, 1e-5f));
+  CHECK_THAT(fr->Origin().z, WithinRel(11.0f, 1e-5f));
+  auto* lid = dynamic_cast<FrameFeature*>(loaded->FindFeatureById(lidId));
+  REQUIRE(lid != nullptr);
+  INFO(lid->GetError());
+  CHECK(lid->GetError().empty());
+  CHECK_THAT(lid->Origin().y, WithinRel(10.0f, 1e-4f)); // the box's top
+  CHECK_THAT(lid->ZAxis().y, WithinRel(1.0f, 1e-5f));
   fs::remove_all(proj);
 }
 

@@ -3,9 +3,11 @@
 #include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
+#include "core/FrameMath.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "render/ClipPlanes.h"
@@ -298,6 +300,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "opposite ones 180) and unsigned in 0-90 when either direction's sign is "
      "arbitrary, as a line edge's is; `basis` says which.",
      "a, b, distance_kind, kind, part"},
+    {"frame",
+     "The frame of a thing — origin, unit x/y/z, and a column-major 4x4 "
+     "`matrix` — in PART space on a part tab, or in WORLD space with "
+     "{occurrence}. {frame: <Frame id|name>} = a named datum frame (v86); "
+     "{feature_id, element} = a planar face (centroid + outward normal + "
+     "in-plane x), a cylindrical/conical/spherical face or a circular edge "
+     "(centre + axis); {occurrence: id|name|path} alone = that occurrence's "
+     "placement, and with frame / feature_id+element = that anchor placed "
+     "in the world. Nothing = the part origin. This is exactly the frame a "
+     "mate connector with the same spec uses, so a script positions "
+     "against it and never transcribes a coordinate.",
+     "element, feature_id, frame, occurrence, part"},
     {"list_elements",
      "Stable face/edge names per body (the toponaming handles "
      "measure/fillet/mates use). Bounded by max_faces (default 4000, the "
@@ -1795,6 +1809,154 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // say "the top face" instead of "1/face3".
     out["name"] = Measure::HumanName(*ta.bodies, ta.ref, state.ActiveUnits());
     return out;
+  }
+  if (m == "frame") {
+    const auto v3 = [](const glm::vec3& v) { return json{v.x, v.y, v.z}; };
+    const auto frameJson = [&](const glm::mat4& mtx, const char* space,
+                               const std::string& source) {
+      json out{{"origin", v3(frame::Origin(mtx))},
+               {"x", v3(frame::XAxis(mtx))},
+               {"y", v3(frame::YAxis(mtx))},
+               {"z", v3(frame::ZAxis(mtx))},
+               {"space", space},
+               {"source", source}};
+      json m = json::array();
+      for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++)
+          m.push_back(mtx[c][r]);
+      out["matrix"] = std::move(m);
+      return out;
+    };
+    // The frame in a PART's own space: a named Frame, an element, or the
+    // origin. The same resolution a mate connector performs.
+    const auto localFrame = [&](const Document& part,
+                                std::string& source) -> glm::mat4 {
+      if (p.contains("frame")) {
+        const json& fv = p.at("frame");
+        const FrameFeature* hit = nullptr;
+        std::string frames;
+        for (const auto& f : part.GetFeatures()) {
+          const auto* fr = dynamic_cast<const FrameFeature*>(f.get());
+          if (fr == nullptr)
+            continue;
+          if ((fv.is_number() && fr->GetId() == fv.get<uint64_t>()) ||
+              (fv.is_string() && fr->GetName() == fv.get<std::string>()))
+            hit = fr;
+          if (!frames.empty())
+            frames += ", ";
+          frames += std::to_string(fr->GetId()) + " (" + fr->GetName() + ")";
+        }
+        if (hit == nullptr)
+          throw std::runtime_error(
+              "no Frame " + fv.dump() + " here; frames: " +
+              (frames.empty() ? std::string("none (add_feature type Frame)")
+                              : frames));
+        if (!hit->GetError().empty())
+          throw std::runtime_error("frame '" + hit->GetName() +
+                                   "' did not resolve: " + hit->GetError());
+        source = "frame " + std::to_string(hit->GetId()) + " (" +
+                 hit->GetName() + ")";
+        return hit->Matrix();
+      }
+      if (p.contains("feature_id") || p.contains("element")) {
+        if (!p.contains("feature_id") || !p.contains("element"))
+          throw std::runtime_error(
+              "an element frame needs BOTH feature_id (the body's created_by, "
+              "get_state) and element (its name, list_elements)");
+        const ElementRef ref{p.at("feature_id").get<uint64_t>(),
+                             p.at("element").get<std::string>()};
+        glm::vec3 o, z, x;
+        bool circular = false;
+        std::string why;
+        if (!frame::ElementFrame(part.GetBodies(), ref, o, z, x, circular, why))
+          throw std::runtime_error(why);
+        source = std::string(circular ? "axis of " : "plane of ") + ref.name;
+        return frame::Build(o, x, z);
+      }
+      source = "origin";
+      return glm::mat4(1.0f);
+    };
+    if (p.contains("occurrence")) {
+      if (!state.assembly)
+        throw std::runtime_error(
+            "frame: `occurrence` needs an assembly tab (switch with "
+            "set_active_part, see list_parts); on a part tab pass `frame` or "
+            "feature_id + element");
+      const json& v = p.at("occurrence");
+      const Occurrence* occ = nullptr;
+      glm::mat4 world(1.0f);
+      std::string label;
+      bool placed = false;
+      if (v.is_number_unsigned() || v.is_number_integer()) {
+        occ = state.assembly->FindById(v.get<uint64_t>());
+        if (!occ)
+          throw std::runtime_error("frame: occurrence id " + v.dump() +
+                                   " not found (see list_occurrences)");
+        label = occ->name;
+      } else {
+        const std::string name = v.get<std::string>();
+        for (const Occurrence& o : state.assembly->GetOccurrences())
+          if (o.name == name) {
+            occ = &o;
+            label = o.name;
+            break;
+          }
+        if (!occ && name.find('/') != std::string::npos) {
+          auto hit = assembly::ResolvePath(*state.assembly, name,
+                                           ui::PartResolverFor(state),
+                                           ui::AssemblyResolverFor(state));
+          if (!hit)
+            throw std::runtime_error(hit.error());
+          occ = hit->occ;
+          world = hit->world;
+          label = name;
+          placed = true;
+        }
+        if (!occ)
+          throw std::runtime_error(
+              "frame: occurrence '" + name +
+              "' not found (see list_occurrences; a part inside a "
+              "sub-assembly is addressed by path, e.g. \"Unit/Part\")");
+      }
+      if (!placed) {
+        // The SOLVED placement, from the flattened tree — never the raw
+        // transform, which lags the solve.
+        for (const assembly::FlatInstance& inst :
+             ui::FlattenActiveAssembly(state))
+          if (inst.rootOccurrenceId == occ->id && inst.innerIds.empty()) {
+            world = inst.world;
+            placed = true;
+            break;
+          }
+        if (!placed)
+          world = ui::OccurrenceMatrix(*occ);
+      }
+      std::string source = "placement of " + label;
+      glm::mat4 local(1.0f);
+      if (p.contains("frame") || p.contains("feature_id") ||
+          p.contains("element")) {
+        if (occ->refKind == OccurrenceRef::Assembly)
+          throw std::runtime_error(
+              "'" + label +
+              "' is a sub-assembly, which has no frames or faces of its own: "
+              "address the part inside it by path (\"Unit/Part\")");
+        const Document* part = ui::PartDocById(state, occ->partId);
+        if (part == nullptr)
+          throw std::runtime_error("the part of '" + label + "' is not loaded");
+        std::string inner;
+        local = localFrame(*part, inner);
+        source = inner + " on " + label;
+      }
+      json out = frameJson(world * local, "world", source);
+      out["occurrence"] = label;
+      return out;
+    }
+    const Document& part = p.contains("part")
+                               ? *ResolvePartParam(state, p.at("part"))
+                               : RequirePartDoc(doc, "frame");
+    std::string source;
+    const glm::mat4 local = localFrame(part, source);
+    return frameJson(local, "part", source);
   }
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and

@@ -17,10 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    85; // v85: `Derived.body_names` -- pick a source's bodies by NAME as well
+    86; // v86: the `Frame` feature (a named datum frame: explicit, from one
+        //      or several elements, or offset from another) and the mate
+        //      connector anchor `{frame: <id>}` that mates to it by name
+        //      (docs/agent-scale-plan.md, G0).
+        // (v85: `Derived.body_names` -- pick a source's bodies by NAME as well
         //      as by their created_by id, because one Import feature creates
         //      every body of a STEP (a camera module arrives as 197)
-        //      (docs/modeling/derived-followup-plan.md, I3).
+        //      (docs/modeling/derived-followup-plan.md, I3).)
         // (v84: the `Derived` feature -- a snapshot of another part's bodies
         //      (B-Reps as content-addressed document assets, names + element
         //      maps in the feature), placement, `reference` flag, and the

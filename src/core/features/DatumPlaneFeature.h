@@ -32,6 +32,8 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] bool IsDatum() const override { return true; }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(offsetExpr, offset);
     visit(angleExpr, angleDeg);

@@ -911,6 +911,7 @@ void DrawUI(AppState& state) {
           BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
       BuildSketchOverlay(state, overlay);
       AppendDatumAxisLines(state, overlay); // user datum axes as line segments
+      AppendFrameLines(state, overlay);     // named datum frames as triads
       AppendCurve3DLines(state, overlay);   // 3D curves (fit-spline/helix/...)
 
       // While editing, draw a grid + subtle fill on the work plane so it's

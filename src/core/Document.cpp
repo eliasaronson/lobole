@@ -273,11 +273,33 @@ bool Document::Regenerate() {
         if (Feature* f = FindFeatureById(id))
           f->SetWarning(text);
       }
-      LOG_INFO("Loaded baked geometry ({} bodies): {} features executed 0, "
-               "{} advisories restored",
-               m_bodies.size(), upTo, bakedWarnings.size());
+      // ...but a DATUM's output is not a body, so the bake does not carry it
+      // (Feature::IsDatum). Execute those against the bodies just installed —
+      // in list order, so a frame offset from another frame reads a resolved
+      // parent. Skipping this left every datum at its default: a mate
+      // anchored to a Frame resolved to the identity and placed the part at
+      // the origin, on a document that had just been saved correct.
+      size_t datums = 0;
+      bool datumsOk = true;
+      for (size_t i = 0; i < upTo; i++) {
+        if (!m_features[i]->IsDatum() || EffectiveSuppressed(i))
+          continue;
+        m_features[i]->ClearError();
+        RegenContext ctx{m_bodies, m_features, i, &m_symbols, &m_assets};
+        datums++;
+        if (!m_features[i]->Execute(ctx)) {
+          if (m_features[i]->GetError().empty())
+            m_features[i]->SetError("regeneration failed");
+          datumsOk = false;
+        }
+      }
+      m_lastStats.executed = datums;
+      m_lastStats.cached = upTo - datums;
+      LOG_INFO("Loaded baked geometry ({} bodies): {} features, {} datums "
+               "executed, {} advisories restored",
+               m_bodies.size(), upTo, datums, bakedWarnings.size());
       stampAppearance();
-      return true;
+      return datumsOk;
     }
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");
   }

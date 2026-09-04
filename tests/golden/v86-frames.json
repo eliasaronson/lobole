@@ -1,0 +1,328 @@
+{
+  "features": [
+    {
+      "constraints": [
+        {
+          "a": [
+            4288600670,
+            1
+          ],
+          "b": [
+            4283024346,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4283024346,
+            1
+          ],
+          "b": [
+            4146773382,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4146773382,
+            1
+          ],
+          "b": [
+            3391162336,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3391162336,
+            1
+          ],
+          "b": [
+            4288600670,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4288600670,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4146773382,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4283024346,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3391162336,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        }
+      ],
+      "entities": [
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            40.0,
+            0.0
+          ],
+          "id": 4288600670,
+          "type": "line"
+        },
+        {
+          "a": [
+            40.0,
+            0.0
+          ],
+          "b": [
+            40.0,
+            40.0
+          ],
+          "id": 4283024346,
+          "type": "line"
+        },
+        {
+          "a": [
+            40.0,
+            40.0
+          ],
+          "b": [
+            0.0,
+            40.0
+          ],
+          "id": 4146773382,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            40.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "id": 3391162336,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Outline",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 4.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Plate",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Extrude"
+    },
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "center": [
+            30.0,
+            20.0
+          ],
+          "id": 837006246,
+          "radius": 1.5,
+          "type": "circle"
+        },
+        {
+          "center": [
+            20.0,
+            30.0
+          ],
+          "id": 624969948,
+          "radius": 1.5,
+          "type": "circle"
+        },
+        {
+          "center": [
+            10.0,
+            20.0
+          ],
+          "id": 2458606889,
+          "radius": 1.5,
+          "type": "circle"
+        },
+        {
+          "center": [
+            20.0,
+            10.0
+          ],
+          "id": 1257928751,
+          "radius": 1.5,
+          "type": "circle"
+        }
+      ],
+      "id": 3,
+      "name": "Holes",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 5.0,
+      "id": 4,
+      "mode": "cut",
+      "name": "Bores",
+      "reversed": false,
+      "sketch_id": 3,
+      "type": "Extrude"
+    },
+    {
+      "elements": [
+        {
+          "element": "4/g1257928751;M4",
+          "feature_id": 2
+        },
+        {
+          "element": "4/g2458606889;M4",
+          "feature_id": 2
+        },
+        {
+          "element": "4/g837006246;M4",
+          "feature_id": 2
+        },
+        {
+          "element": "4/g624969948;M4",
+          "feature_id": 2
+        }
+      ],
+      "id": 5,
+      "kind": "from_element",
+      "name": "bolt_circle",
+      "type": "Frame"
+    },
+    {
+      "id": 6,
+      "kind": "explicit",
+      "name": "seat",
+      "origin": [
+        0.0,
+        0.0,
+        6.0
+      ],
+      "origin_expr": [
+        "",
+        "",
+        "seat_z"
+      ],
+      "type": "Frame",
+      "x_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "z_axis": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": 7,
+      "kind": "offset",
+      "name": "lifted",
+      "offset": [
+        0.0,
+        0.0,
+        10.0
+      ],
+      "parent_id": 5,
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "Frame"
+    }
+  ],
+  "format": "designer-document",
+  "parameters": [
+    {
+      "expression": "6",
+      "name": "seat_z"
+    }
+  ],
+  "version": 86
+}

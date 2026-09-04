@@ -27,6 +27,8 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] bool IsDatum() const override { return true; }
+
   [[nodiscard]] const glm::vec3& Origin() const { return m_origin; }
   [[nodiscard]] const glm::vec3& Direction() const { return m_dir; } // unit
 

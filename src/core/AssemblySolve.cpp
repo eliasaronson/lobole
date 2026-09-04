@@ -1,5 +1,8 @@
 #include "core/AssemblySolve.h"
 
+#include "core/FrameMath.h"
+#include "core/features/FrameFeature.h"
+
 #include "cad/CADKernel.h"
 #include "core/Document.h"
 #include "core/MassProps.h"
@@ -292,27 +295,11 @@ glm::mat4 OccMatrix(const Occurrence& o) {
          glm::mat4_cast(o.orientation);
 }
 
-// Build a right-handed orthonormal frame matrix from an origin, an in-plane X
-// hint, and the primary Z axis (columns X, Y, Z, origin). X is
-// re-orthogonalized against Z so the frame is exactly orthonormal even if the
-// hint drifted.
+// The one frame builder (core/FrameMath.h): origin, in-plane X hint, primary
+// Z, columns X Y Z origin, exactly orthonormal.
 glm::mat4 FrameMatrix(const glm::vec3& origin, const glm::vec3& xHint,
                       const glm::vec3& zAxis) {
-  const glm::vec3 z = glm::normalize(zAxis);
-  glm::vec3 x = xHint - glm::dot(xHint, z) * z;
-  if (glm::dot(x, x) < 1e-12f) {
-    // Degenerate hint: pick any perpendicular deterministically.
-    x = std::abs(z.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-    x = x - glm::dot(x, z) * z;
-  }
-  x = glm::normalize(x);
-  const glm::vec3 y = glm::cross(z, x);
-  glm::mat4 m(1.0f);
-  m[0] = glm::vec4(x, 0.0f);
-  m[1] = glm::vec4(y, 0.0f);
-  m[2] = glm::vec4(z, 0.0f);
-  m[3] = glm::vec4(origin, 1.0f);
-  return m;
+  return frame::Build(origin, xHint, zAxis);
 }
 
 // Adjustment from a's connector frame to b's connector frame, composed as
@@ -402,6 +389,33 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
                   "own — mate to its origin instead, or open that assembly "
                   "and mate the part inside it");
     return fail("the part document is not loaded");
+  }
+
+  // v86: a named Frame of the part — the mate as designed. Resolved by id
+  // against the part's history; an errored frame refuses the mate rather
+  // than handing it a stale matrix.
+  if (c.anchor.frameId != 0) {
+    const FrameFeature* fr = nullptr;
+    std::string frames;
+    for (const auto& f : part->GetFeatures()) {
+      const auto* cand = dynamic_cast<const FrameFeature*>(f.get());
+      if (cand == nullptr)
+        continue;
+      if (cand->GetId() == c.anchor.frameId)
+        fr = cand;
+      if (!frames.empty())
+        frames += ", ";
+      frames += std::to_string(cand->GetId()) + " (" + cand->GetName() + ")";
+    }
+    if (fr == nullptr) {
+      return fail("frame " + std::to_string(c.anchor.frameId) +
+                  " is not a Frame feature of its part; frames there: " +
+                  (frames.empty() ? std::string("none") : frames));
+    }
+    if (!fr->GetError().empty())
+      return fail("frame '" + fr->GetName() +
+                  "' did not resolve: " + fr->GetError());
+    return innerXf * fr->Matrix();
   }
 
   const ElementRef& ref = c.anchor.face;

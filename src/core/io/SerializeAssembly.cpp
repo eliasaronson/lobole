@@ -130,7 +130,9 @@ json ConnectorToJson(const Connector& c) {
   // every existing mate serializes byte-identically.
   if (!c.innerPath.empty())
     j["inner_path"] = c.innerPath;
-  if (c.anchor.origin) {
+  if (c.anchor.frameId != 0) { // v86: a named Frame of the part
+    j["anchor"] = {{"frame", c.anchor.frameId}};
+  } else if (c.anchor.origin) {
     j["anchor"] = {{"origin", true}};
   } else {
     json anchor = {{"face",
@@ -155,7 +157,9 @@ Connector ConnectorFromJson(const json& j) {
   if (j.contains("inner_path"))
     c.innerPath = j.at("inner_path").get<std::vector<uint64_t>>();
   const json& a = j.at("anchor");
-  if (a.value("origin", false)) {
+  if (a.contains("frame")) { // v86
+    c.anchor.frameId = a.at("frame").get<uint64_t>();
+  } else if (a.value("origin", false)) {
     c.anchor.origin = true;
   } else if (a.contains("face")) {
     const json& f = a.at("face");

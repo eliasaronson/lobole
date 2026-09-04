@@ -163,6 +163,20 @@ public:
   // during regeneration, because an empty tool must still be able to open.
   [[nodiscard]] virtual std::string WhyIncomplete() const { return {}; }
 
+  // A DATUM: a feature whose output is not geometry — a plane, an axis, a
+  // frame, a curve — but state computed in Execute and read afterwards (by
+  // the overlays, by a mate connector, by the `frame` query).
+  //
+  // Baked geometry (docs/versioning/baked-geometry.md) replaces the BODY
+  // list and executes nothing, which leaves that state at its default: a
+  // datum plane draws at the origin, and a mate anchored to a Frame silently
+  // resolves to the identity — the model loads, looks plausible and is
+  // wrong. So Regenerate executes these on a baked open too. They are pure
+  // arithmetic plus at most a face lookup, which is why this costs nothing
+  // against the rebuild the bake avoids. A feature that CONTRIBUTES A BODY
+  // must never return true: its geometry is what the bake carries.
+  [[nodiscard]] virtual bool IsDatum() const { return false; }
+
   // The tool solid a CUT feature swept on its last Execute, for a Pattern
   // referencing it: a cut leaves no body behind to replicate, so the pattern
   // replicates the CUTTER instead (R14). Null for everything else. Valid

@@ -4,6 +4,7 @@
 #include "core/Feature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/FrameFeature.h"
 #include "ui/AppActions.h"         // EdgeElementRef
 #include "ui/AppActionsInternal.h" // DatumPlanesVisible
 #include "ui/SketchInteraction.h"  // WorldToScreen / SketchUVToScreen
@@ -30,6 +31,13 @@ void DrawDatumLabels(AppState& state) {
       const glm::vec3 end = da->Origin() + da->Direction() * 3.0f;
       glm::vec2 s = WorldToScreen(state, end);
       dl->AddText(ImVec2(s.x, s.y), col, da->GetName().c_str());
+    } else if (auto* fr = dynamic_cast<FrameFeature*>(f)) {
+      if (!fr->GetError().empty())
+        continue;
+      const glm::vec3 end =
+          fr->Origin() + fr->ZAxis() * FrameTriadLength(state);
+      glm::vec2 s = WorldToScreen(state, end);
+      dl->AddText(ImVec2(s.x, s.y), col, fr->GetName().c_str());
     }
   }
 }

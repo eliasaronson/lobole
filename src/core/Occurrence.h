@@ -92,6 +92,11 @@ struct ConnectorAnchor {
   // does the point they share. When they share no vertex or more than one,
   // the anchor falls back to `snapEdge`'s own point rather than guessing.
   ElementRef snapEdge2;
+  // A named Frame feature of the part (v86, agent-scale plan G0): the frame
+  // AS DESIGNED — a bolt-circle centre, a shaft axis, an offset seat —
+  // instead of the centroid of whatever face is nearest. When set, `origin`
+  // and `face` are ignored.
+  uint64_t frameId = 0;
 };
 
 // One side of a mate: a frame on some occurrence of this assembly.

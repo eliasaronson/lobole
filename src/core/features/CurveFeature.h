@@ -37,6 +37,8 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+
+  [[nodiscard]] bool IsDatum() const override { return true; }
   void VisitExprs(const ExprVisitor& visit) override;
 
   // Result of the last Execute (transient, rebuilt each regeneration, never

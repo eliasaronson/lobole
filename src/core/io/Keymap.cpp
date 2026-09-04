@@ -172,6 +172,9 @@ const Binding kDefaults[] = {
     {"part.cylinder", Context::Part, "Cylinder", "Create", "Shift+C"},
     {"part.datum_plane", Context::Part, "Datum Plane", "Create", "Shift+D"},
     {"part.datum_axis", Context::Part, "Datum Axis", "Create", "Shift+A"},
+    // Shift+E for framE: F is Standard parts and Shift+F is zoom-to-selection,
+    // both older and both global.
+    {"part.frame", Context::Part, "Datum Frame", "Create", "Shift+E"},
     // Unbound: a copy of another part is placed once per part, not typed.
     {"part.derive", Context::Part, "Derive (copy of another part)", "Create",
      ""},

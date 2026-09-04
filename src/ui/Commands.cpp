@@ -453,6 +453,7 @@ const std::vector<Command>& Table() {
     add("part.cylinder", Idle, [](AppState& s) { CreateCylinder(s); });
     add("part.datum_plane", Idle, [](AppState& s) { CreateDatumPlane(s); });
     add("part.datum_axis", Idle, [](AppState& s) { CreateDatumAxis(s); });
+    add("part.frame", Idle, [](AppState& s) { CreateFrame(s); });
     // A copy of another part to draw on (docs/modeling/derived-plan.md).
     // Enabled on any part tab: with nothing to derive from the window says
     // so and Accept stays disabled (U10), the same rule as the fastener.

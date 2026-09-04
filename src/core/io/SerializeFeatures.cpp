@@ -11,6 +11,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
@@ -385,6 +386,30 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
   if (s == "through_points")
     return DatumPlaneKind::ThroughPoints;
   throw std::runtime_error("Unknown datum plane kind: " + s);
+}
+
+const char* FrameKindToString(FrameKind kind) {
+  switch (kind) {
+  case FrameKind::Explicit:
+    return "explicit";
+  case FrameKind::FromElement:
+    return "from_element";
+  case FrameKind::Offset:
+    return "offset";
+  }
+  return "explicit";
+}
+
+FrameKind FrameKindFromString(const std::string& s) {
+  if (s == "explicit")
+    return FrameKind::Explicit;
+  if (s == "from_element")
+    return FrameKind::FromElement;
+  if (s == "offset")
+    return FrameKind::Offset;
+  throw std::runtime_error("unknown Frame kind '" + s +
+                           "' (expected one of: explicit, from_element, "
+                           "offset)");
 }
 
 const char* DatumAxisKindToString(DatumAxisKind kind) {
@@ -775,6 +800,44 @@ json FeatureToJson(const Feature& feature) {
     case DatumAxisKind::GlobalZ:
       break; // kind string is sufficient
     }
+  } else if (auto* fr = dynamic_cast<const FrameFeature*>(&feature)) { // v86
+    j["kind"] = FrameKindToString(fr->kind);
+    switch (fr->kind) {
+    case FrameKind::Explicit: {
+      j["origin"] = {fr->origin[0], fr->origin[1], fr->origin[2]};
+      if (!fr->originExpr[0].empty() || !fr->originExpr[1].empty() ||
+          !fr->originExpr[2].empty())
+        j["origin_expr"] = {fr->originExpr[0], fr->originExpr[1],
+                            fr->originExpr[2]};
+      j["z_axis"] = Vec3ToJson(fr->zAxis);
+      j["x_axis"] = Vec3ToJson(fr->xAxis);
+      break;
+    }
+    case FrameKind::FromElement: {
+      json els = json::array();
+      for (const ElementRef& e : fr->elements)
+        els.push_back(ElementRefJson(e));
+      j["elements"] = std::move(els);
+      if (fr->flip)
+        j["flip"] = true;
+      break;
+    }
+    case FrameKind::Offset: {
+      j["parent_id"] = fr->parentId;
+      j["offset"] = {fr->offset[0], fr->offset[1], fr->offset[2]};
+      if (!fr->offsetExpr[0].empty() || !fr->offsetExpr[1].empty() ||
+          !fr->offsetExpr[2].empty())
+        j["offset_expr"] = {fr->offsetExpr[0], fr->offsetExpr[1],
+                            fr->offsetExpr[2]};
+      j["rotation_deg"] = {fr->rotationDeg[0], fr->rotationDeg[1],
+                           fr->rotationDeg[2]};
+      if (!fr->rotationExpr[0].empty() || !fr->rotationExpr[1].empty() ||
+          !fr->rotationExpr[2].empty())
+        j["rotation_expr"] = {fr->rotationExpr[0], fr->rotationExpr[1],
+                              fr->rotationExpr[2]};
+      break;
+    }
+    }
   } else if (auto* cv = dynamic_cast<const CurveFeature*>(&feature)) { // v42
     j["kind"] = Curve3DKindToString(cv->kind);
     switch (cv->kind) {
@@ -1019,6 +1082,17 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "sketch position (about +x, a point at +z rotates toward -y) — confirm "
      "partial-sweep orientation from the digest bbox, not a render tile"},
     {"DatumAxis", 1, "kind, points?/sketch_id?/entity_id?"},
+    {"Frame", 86,
+     "kind: explicit|from_element|offset — a NAMED datum frame (origin + "
+     "axes) that mates anchor to by name ({occurrence, frame: <id|name>}) "
+     "and `frame` reports. explicit: origin [x,y,z] (+origin_expr "
+     "[sx,sy,sz]), z_axis, x_axis. from_element: elements [{feature_id, "
+     "element}] — ONE planar face (centroid + normal), cylindrical face or "
+     "circular edge (centre + axis), or SEVERAL circular ones = a bolt "
+     "circle (centre of the pattern, X toward the first hole); flip? "
+     "negates Z. offset: parent_id (a Frame; 0 = the part origin), offset "
+     "[x,y,z] (+offset_expr), rotation_deg [rx,ry,rz] (+rotation_expr), "
+     "applied as parent · T · Rx · Ry · Rz"},
     {"Curve3D", 42,
      "kind: fit_spline|control_poly|helix; points [[x,y,z]...], degree?, "
      "closed?; helix: origin, axis, radius (+_expr), pitch (+_expr), turns "
@@ -1474,6 +1548,61 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       break;
     }
     out = std::move(da);
+  } else if (type == "Frame") { // v86
+    auto fr = std::make_unique<FrameFeature>(
+        name, FrameKindFromString(j.at("kind").get<std::string>()));
+    const auto triple = [&](const char* key, double* out, bool required) {
+      if (!j.contains(key)) {
+        if (required)
+          throw std::runtime_error(std::string("Frame '") + name + "' needs " +
+                                   key + " [x, y, z]");
+        return;
+      }
+      const json& a = j.at(key);
+      if (!a.is_array() || a.size() != 3)
+        throw std::runtime_error(std::string("Frame '") + name + "': " + key +
+                                 " is [x, y, z]");
+      for (size_t i = 0; i < 3; i++)
+        out[i] = a.at(i).get<double>();
+    };
+    const auto exprTriple = [&](const char* key, std::string* out) {
+      if (!j.contains(key))
+        return;
+      const json& a = j.at(key);
+      if (!a.is_array() || a.size() != 3)
+        throw std::runtime_error(std::string("Frame '") + name + "': " + key +
+                                 " is [expr_x, expr_y, expr_z] (\"\" = "
+                                 "literal)");
+      for (size_t i = 0; i < 3; i++)
+        out[i] = a.at(i).get<std::string>();
+    };
+    switch (fr->kind) {
+    case FrameKind::Explicit:
+      triple("origin", fr->origin, /*required=*/false);
+      exprTriple("origin_expr", fr->originExpr);
+      if (j.contains("z_axis"))
+        fr->zAxis = Vec3FromJson(j.at("z_axis"));
+      if (j.contains("x_axis"))
+        fr->xAxis = Vec3FromJson(j.at("x_axis"));
+      break;
+    case FrameKind::FromElement:
+      if (!j.contains("elements") || !j.at("elements").is_array())
+        throw std::runtime_error(
+            std::string("Frame '") + name +
+            "' from_element needs elements: [{feature_id, element}, ...]");
+      for (const json& e : j.at("elements"))
+        fr->elements.push_back(ElementRefFromJson(e));
+      fr->flip = j.value("flip", false);
+      break;
+    case FrameKind::Offset:
+      fr->parentId = j.value("parent_id", uint64_t{0});
+      triple("offset", fr->offset, /*required=*/false);
+      exprTriple("offset_expr", fr->offsetExpr);
+      triple("rotation_deg", fr->rotationDeg, /*required=*/false);
+      exprTriple("rotation_expr", fr->rotationExpr);
+      break;
+    }
+    out = std::move(fr);
   } else if (type == "Curve3D") { // v42
     auto cv = std::make_unique<CurveFeature>(
         name, Curve3DKindFromString(j.at("kind").get<std::string>()));

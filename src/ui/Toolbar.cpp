@@ -375,6 +375,8 @@ void DrawModelToolbar(AppState& state) {
       "Datum Plane");
   btn(ICON_FA_ARROWS_UP_DOWN "###tb_datum_axis", "part.datum_axis",
       "Datum Axis");
+  btn(ICON_FA_LOCATION_CROSSHAIRS "###tb_frame", "part.frame",
+      "Datum Frame (a named origin + axes a mate anchors to)");
 
   Divider();
 

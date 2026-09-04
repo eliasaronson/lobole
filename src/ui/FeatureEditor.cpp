@@ -20,6 +20,7 @@
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
@@ -587,6 +588,83 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
   case DatumAxisKind::GlobalY:
   case DatumAxisKind::GlobalZ:
     break; // fully defined by the kind
+  }
+}
+
+// Properties widgets for a datum frame: kind, then the active variant's
+// fields. Elements are shown, not picked, here: a frame from elements is
+// authored by name (scripts) or from a selection when created — this editor
+// flips its Z and edits the numeric variants.
+void DrawFrameParams(AppState& state, FrameFeature& fr, size_t index,
+                     bool commit) {
+  const char* kinds[] = {"Explicit", "From Element(s)", "Offset"};
+  int kind = std::to_underlying(fr.kind);
+  if (LabeledCombo("Type", &kind, kinds, 3)) {
+    nlohmann::json before = DocumentIO::FeatureToJson(fr);
+    fr.kind = static_cast<FrameKind>(kind);
+    CommitDiscrete(state, fr, before, index, commit);
+  }
+  switch (fr.kind) {
+  case FrameKind::Explicit:
+    ExprDim(state, fr, index, commit, "Origin X", fr.originExpr[0],
+            fr.origin[0]);
+    ExprDim(state, fr, index, commit, "Origin Y", fr.originExpr[1],
+            fr.origin[1]);
+    ExprDim(state, fr, index, commit, "Origin Z", fr.originExpr[2],
+            fr.origin[2]);
+    HandleEdit(state, fr, DragFloat3Row(state, "Z axis", &fr.zAxis.x), index,
+               commit);
+    HandleEdit(state, fr, DragFloat3Row(state, "X axis", &fr.xAxis.x), index,
+               commit);
+    break;
+  case FrameKind::FromElement:
+    if (fr.elements.empty()) {
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
+                         "No element named yet");
+    } else {
+      for (const ElementRef& e : fr.elements)
+        ImGui::Text("%llu / %s", static_cast<unsigned long long>(e.featureId),
+                    e.name.c_str());
+    }
+    HandleEdit(state, fr, ImGui::Checkbox("Flip Z", &fr.flip), index, commit);
+    break;
+  case FrameKind::Offset: {
+    // Parent: the part origin or any earlier Frame.
+    std::vector<std::string> names{"Part origin"};
+    std::vector<uint64_t> ids{0};
+    for (size_t i = 0; i < index; i++)
+      if (auto* other =
+              dynamic_cast<FrameFeature*>(state.document->GetFeature(i))) {
+        names.push_back(other->GetName());
+        ids.push_back(other->GetId());
+      }
+    std::vector<const char*> items;
+    for (const std::string& n : names)
+      items.push_back(n.c_str());
+    int sel = 0;
+    for (size_t i = 0; i < ids.size(); i++)
+      if (ids[i] == fr.parentId)
+        sel = static_cast<int>(i);
+    if (LabeledCombo("Parent", &sel, items.data(),
+                     static_cast<int>(items.size()))) {
+      nlohmann::json before = DocumentIO::FeatureToJson(fr);
+      fr.parentId = ids[static_cast<size_t>(sel)];
+      CommitDiscrete(state, fr, before, index, commit);
+    }
+    ExprDim(state, fr, index, commit, "Offset X", fr.offsetExpr[0],
+            fr.offset[0]);
+    ExprDim(state, fr, index, commit, "Offset Y", fr.offsetExpr[1],
+            fr.offset[1]);
+    ExprDim(state, fr, index, commit, "Offset Z", fr.offsetExpr[2],
+            fr.offset[2]);
+    ExprDim(state, fr, index, commit, "Rotate X (deg)", fr.rotationExpr[0],
+            fr.rotationDeg[0]);
+    ExprDim(state, fr, index, commit, "Rotate Y (deg)", fr.rotationExpr[1],
+            fr.rotationDeg[1]);
+    ExprDim(state, fr, index, commit, "Rotate Z (deg)", fr.rotationExpr[2],
+            fr.rotationDeg[2]);
+    break;
+  }
   }
 }
 
@@ -1351,6 +1429,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawDatumPlaneParams(state, *dp, index, commit);
   } else if (auto* da = dynamic_cast<DatumAxisFeature*>(&feature)) {
     DrawDatumAxisParams(state, *da, index, commit);
+  } else if (auto* fr = dynamic_cast<FrameFeature*>(&feature)) {
+    DrawFrameParams(state, *fr, index, commit);
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
     const char* ends[] = {"Blind", "Symmetric", "Two-sided", "Up to face",
                           "Through all"};
