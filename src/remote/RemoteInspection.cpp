@@ -300,8 +300,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "a, b, distance_kind, kind, part"},
     {"list_elements",
      "Stable face/edge names per body (the toponaming handles "
-     "measure/fillet/mates use).",
-     "body, part"},
+     "measure/fillet/mates use). Bounded by max_faces (default 4000, the "
+     "faces it would DESCRIBE — each is an OCC surface analysis): pass "
+     "body: <index> for one body of a many-bodied part.",
+     "body, max_faces, part"},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
@@ -1818,6 +1820,30 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error(IndexError("body", p.value("body", -1),
                                           bodies.size(),
                                           "get_state lists bodies"));
+    // Describing a face is an OpenCASCADE surface analysis (~10 ms), so
+    // this is bounded by how many it would describe, not by how many
+    // bodies. A part holding a derived 197-body camera has 17,186 faces:
+    // the call took 172 s, when `body` would have made it instant.
+    const size_t maxFaces = p.value("max_faces", size_t{4000});
+    size_t faceCount = 0, describedBodies = 0;
+    for (size_t i = 0; i < bodies.size(); i++) {
+      if (only >= 0 && i != static_cast<size_t>(only))
+        continue;
+      faceCount += bodies[i].elementMap.names.size();
+      describedBodies++;
+    }
+    if (faceCount > maxFaces)
+      throw std::runtime_error(
+          "that is " + std::to_string(faceCount) + " faces across " +
+          std::to_string(describedBodies) +
+          (describedBodies == 1 ? " body" : " bodies") +
+          ", and describing one is an OCC surface analysis" +
+          (only >= 0 ? std::string(" — raise max_faces (now ") +
+                           std::to_string(maxFaces) + ") to list it anyway"
+                     : std::string(" — pass body: <index> to list ONE body "
+                                   "(get_state lists them, in this order), "
+                                   "or raise max_faces (now ") +
+                           std::to_string(maxFaces) + ")"));
     json out = json::array();
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && i != static_cast<size_t>(only))

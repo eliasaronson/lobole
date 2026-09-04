@@ -54,8 +54,37 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   // a get_state feature entry — a legitimate agent pattern — stays valid.
   static const std::set<std::string> kAllow = {
       "type", "index", "error", "warning", "after_earlier_failure"};
+  // The round trip alone is not enough: a key whose value is EMPTY
+  // serializes back to nothing, so `"external": []` on a sketch (a filter
+  // that found no edges — the SO-101 gripper's) was refused as an unknown
+  // field naming a vocabulary that did not include it. The type's own
+  // documented dialect settles those.
+  std::set<std::string> dialect;
+  for (const DocumentIO::FeatureTypeInfo& info : DocumentIO::FeatureTypes()) {
+    if (built.TypeName() != info.type)
+      continue;
+    std::string word;
+    for (const char* c = info.params; *c != '\0'; ++c) {
+      if ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+          (*c >= '0' && *c <= '9') || *c == '_') {
+        word += *c;
+        continue;
+      }
+      if (!word.empty())
+        dialect.insert(word);
+      word.clear();
+    }
+    if (!word.empty())
+      dialect.insert(word);
+    break;
+  }
   for (auto it = request.begin(); it != request.end(); ++it) {
     if (out.contains(it.key()) || kAllow.count(it.key()) != 0)
+      continue;
+    // Documented for this type, just empty here.
+    if (dialect.count(it.key()) != 0 &&
+        ((it.value().is_array() || it.value().is_object()) &&
+         it.value().empty()))
       continue;
     std::string accepted;
     for (auto o = out.begin(); o != out.end(); ++o)
@@ -172,7 +201,8 @@ static constexpr MethodDoc ModelingMethods[] = {
      "features are skipped but keep parameters.",
      "feature_id, suppressed"},
     {"delete_feature",
-     "Delete the feature at `index`; one undo step; returns {regen}.", "index"},
+     "Delete a feature by `id` or `index`; one undo step; returns {regen}.",
+     "id, index"},
     {"project_geometry",
      "Project a body face/edge (feature_id + element) into "
      "a sketch as live locked construction geometry.",
@@ -596,13 +626,26 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "delete_feature") {
     const json preDigest = BodyDigestJson(*doc);
-    if (!state.commands->Execute(
-            std::make_unique<RemoveFeatureCommand>(p.at("index").get<size_t>()),
-            *doc)) {
-      throw std::runtime_error(IndexError(
-          "feature", p.at("index").get<size_t>(), doc->FeatureCount(),
-          "get_state lists features with "
-          "their indices"));
+    // `id` as well as `index`: every other verb that names a feature takes
+    // an id, and get_state reports both, so requiring the index here was a
+    // detour every caller made once.
+    size_t index = 0;
+    if (p.contains("id")) {
+      const uint64_t id = p.at("id").get<uint64_t>();
+      if (doc->FindFeatureById(id, &index) == nullptr)
+        throw std::runtime_error("no feature with id " + std::to_string(id) +
+                                 " (get_state lists features with their ids)");
+    } else if (p.contains("index")) {
+      index = p.at("index").get<size_t>();
+    } else {
+      throw std::runtime_error("delete_feature needs `id` or `index` "
+                               "(get_state lists features with both)");
+    }
+    if (!state.commands->Execute(std::make_unique<RemoveFeatureCommand>(index),
+                                 *doc)) {
+      throw std::runtime_error(IndexError("feature", index, doc->FeatureCount(),
+                                          "get_state lists features with "
+                                          "their indices"));
     }
     return json{{"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};

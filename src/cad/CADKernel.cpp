@@ -1026,7 +1026,15 @@ std::string XcafLabelName(const TDF_Label& label) {
   if (!label.IsNull() && label.FindAttribute(TDataStd_Name::GetID(), name)) {
     const TCollection_ExtendedString& ext = name->Get();
     TCollection_AsciiString ascii(ext);
-    return std::string(ascii.ToCString());
+    std::string out(ascii.ToCString());
+    // XCAF writes "=>[0:1:1:5]" on an assembly component whose instance the
+    // file did not name: it is a POINTER to the definition label, not a
+    // name, and importing the SO-101 arm put a dozen of them in the
+    // occurrence list. Empty means "ask the definition", which is what the
+    // callers already do.
+    if (out.rfind("=>[", 0) == 0)
+      return {};
+    return out;
   }
   return {};
 }

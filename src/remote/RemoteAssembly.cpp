@@ -38,9 +38,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "index); refused while any assembly places it.",
      "index, part"},
     {"add_occurrence",
-     "Place a part OR another assembly in the active assembly {part: name of "
-     "either, transform?}. Returns {id, part_id, ref_kind}; a reference that "
-     "would close a cycle is refused.",
+     "Place a part OR another assembly in the active assembly {part: name or "
+     "slot id of either, transform?}. Returns {id, part_id, ref_kind}; a "
+     "reference that would close a cycle is refused.",
      "fixed, name, part, transform, visible"},
     {"remove_occurrence", "Remove an occurrence by id.", "id"},
     {"list_occurrences",
@@ -298,15 +298,37 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // overwhelmingly common case and the pre-A5 meaning); an assembly of the
     // same name would need renaming, which is a better problem than silently
     // resolving to the wrong kind.
-    const std::string refName = p.at("part").get<std::string>();
-    uint64_t refId = ui::PartIdByName(state, refName);
+    // A NAME or a stable slot id: list_parts and list_occurrences both hand
+    // out ids (`part_id`), and passing one back used to leak a json type
+    // error instead of working.
+    uint64_t refId = 0;
     OccurrenceRef refKind = OccurrenceRef::Part;
-    if (refId == 0) {
+    std::string refName;
+    if (p.at("part").is_number()) {
+      const uint64_t asId = p.at("part").get<uint64_t>();
+      refName = std::to_string(asId);
       for (const ui::PartSlot& slot : state.parts) {
-        if (slot.kind == ui::DocKind::Assembly && slot.name == refName) {
-          refId = slot.id;
-          refKind = OccurrenceRef::Assembly;
+        if (slot.id != asId)
+          continue;
+        if (slot.kind != ui::DocKind::Part &&
+            slot.kind != ui::DocKind::Assembly)
           break;
+        refId = slot.id;
+        refKind = slot.kind == ui::DocKind::Assembly ? OccurrenceRef::Assembly
+                                                     : OccurrenceRef::Part;
+        refName = slot.name;
+        break;
+      }
+    } else {
+      refName = p.at("part").get<std::string>();
+      refId = ui::PartIdByName(state, refName);
+      if (refId == 0) {
+        for (const ui::PartSlot& slot : state.parts) {
+          if (slot.kind == ui::DocKind::Assembly && slot.name == refName) {
+            refId = slot.id;
+            refKind = OccurrenceRef::Assembly;
+            break;
+          }
         }
       }
     }

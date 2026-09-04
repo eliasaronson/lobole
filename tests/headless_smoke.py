@@ -1184,6 +1184,15 @@ def main():
         rep = d.call("import_step", path=step, as_assembly=True)
         expect(len(rep["occurrences"]) == 1,
                "assembly import works without a saved project")
+        # The response says whether the parts it created actually built.
+        # Importing the SO-101 arm left 12 of 97 tabs broken and reported
+        # success, and the only way to find out was to open each tab.
+        expect(rep["ok"] and "failed" not in rep,
+               f"a clean import says so: {rep}")
+        expect(rep["parts"] == 1, f"parts it created: {rep}")
+        expect(not any(o["name"].startswith("=>")
+                       for o in rep["occurrences"]),
+               f"XCAF pointer markers are not names: {rep['occurrences']}")
         parts = d.call("list_parts")["parts"]
         expect(len(parts) == 3 and
                [p["type"] for p in parts].count("assembly") == 1,

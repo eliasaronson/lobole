@@ -48,7 +48,7 @@ static constexpr MethodDoc DrawingMethods[] = {
      "scale, position}. Omit BOTH scale and position and it is placed the "
      "way the Add view button places it: fitted to the sheet, clear of the "
      "views already there, and projected (needs_update false).",
-     "base_view, name, orientation, position, scale, source"},
+     "base_view, drawing, name, orientation, position, scale, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views", "List views with placement and scale.", ""},
     {"update_drawing", "Re-project all views from current geometry.", ""},
@@ -221,6 +221,32 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"drawings", arr}};
   }
   if (m == "add_drawing_view") {
+    // `drawing` (name or id) switches to that drawing tab first — the doc
+    // has always described it, and the handler used to refuse the key.
+    if (p.contains("drawing")) {
+      const json& which = p.at("drawing");
+      bool found = false;
+      for (size_t i = 0; i < state.parts.size(); i++) {
+        const auto& slot = state.parts[i];
+        if (slot.kind != ui::DocKind::Drawing)
+          continue;
+        if (which.is_number() ? slot.id == which.get<uint64_t>()
+                              : slot.name == which.get<std::string>()) {
+          ui::SetActivePart(state, i);
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        std::string have;
+        for (const auto& slot : state.parts)
+          if (slot.kind == ui::DocKind::Drawing)
+            have += (have.empty() ? "" : ", ") + slot.name;
+        throw std::runtime_error(
+            "no drawing named " + which.dump() +
+            "; drawings: " + (have.empty() ? "(none)" : have));
+      }
+    }
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     // `source` = the source document's NAME (a part or an assembly), resolved

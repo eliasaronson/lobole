@@ -970,7 +970,12 @@ int DocumentFormatVersion() { return kVersion; }
 static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Sketch", 1,
      "plane {origin, normal, uAxis} (in-plane V = normal x uAxis!), entities "
-     "[{type: line|circle|arc|ellipse|spline|point|rect, ...}], name?"},
+     "[{type: line|circle|arc|ellipse|spline|point|rect, ...}], name?, "
+     "face_ref? {feature_id, element} (sketch ON a body face), external? "
+     "[{feature_id, element, kind: face|edge}] — live projected construction "
+     "geometry of another body, the same thing project_geometry adds to an "
+     "existing sketch (a projected hole edge is a circle, and Hole takes "
+     "circle centres, so a hole pattern needs no coordinates)"},
     {"Extrude", 1,
      "sketch_id, distance (+_expr), mode: new_body|add|cut, end_mode?: "
      "blind|symmetric|two_sided|up_to_face|through_all, distance2? (+_expr), "

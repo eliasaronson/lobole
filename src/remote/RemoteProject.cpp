@@ -1004,6 +1004,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   if (m == "import_step") {
     if (p.value("as_assembly", false)) {
       // Product structure → part tabs + an assembly (interchange I2).
+      const size_t tabsBefore = state.parts.size();
       std::string error;
       if (!ui::ImportStepAsAssembly(state, p.at("path").get<std::string>(),
                                     &error)) {
@@ -1012,7 +1013,32 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       json occs = json::array();
       for (const Occurrence& o : state.assembly->GetOccurrences())
         occs.push_back({{"id", o.id}, {"name", o.name}});
-      return json{{"assembly_index", state.activePart}, {"occurrences", occs}};
+      // What did NOT come through. A STEP whose products include shapes
+      // OpenCASCADE will not rebuild leaves those part tabs empty and their
+      // occurrences drawing nothing, and this was visible only by opening
+      // each of 97 tabs: 12 were broken on the SO-101 arm and the response
+      // said the import had succeeded (the regen-honesty rule, for the one
+      // mutating RPC that was not keeping it).
+      json failed = json::array();
+      size_t partTabs = 0;
+      for (size_t i = tabsBefore; i < state.parts.size(); i++) {
+        const Document* part = ui::PartDocById(state, state.parts[i].id);
+        if (part == nullptr)
+          continue; // the assembly tab the import also creates
+        partTabs++;
+        for (const auto& f : part->GetFeatures())
+          if (!f->GetError().empty())
+            failed.push_back({{"part", state.parts[i].name},
+                              {"feature", f->GetName()},
+                              {"error", f->GetError()}});
+      }
+      json out{{"assembly_index", state.activePart},
+               {"occurrences", occs},
+               {"parts", partTabs},
+               {"ok", failed.empty()}};
+      if (!failed.empty())
+        out["failed"] = failed;
+      return out;
     }
     const size_t before = doc->GetBodies().size();
     const json preDigest = BodyDigestJson(*doc);
