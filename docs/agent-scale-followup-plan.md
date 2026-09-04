@@ -164,6 +164,48 @@ That reframes the guidance: **fast mode is for models carrying swept
 surfaces, not for assemblies**, and the other way out of a slow sheet is to
 leave the sweeps off it.
 
+### Can the spring itself be made cheaper?
+
+Partly, and the part that worked was OUR mistake rather than OCC's limit.
+Measured on a bare 4-turn helical sweep (probe built against OCC 7.9 directly,
+so nothing of ours is in the numbers):
+
+| | HLR |
+|---|---|
+| what we shipped (`MakePipeShell`, corrected Frenet) | 1461 ms |
+| `SetTolerance` 1e-3 / 1e-2 | 1432 / 1347 ms |
+| `BRepOffsetAPI_MakePipe` instead | 1537 ms |
+| spine approximation capped to degree 5 | 1749 ms |
+| ...capped to degree 3 | 2888 ms |
+
+So the sweep knobs are worth nothing. Capping the spine's degree makes it
+WORSE, which is counter-intuitive and worth writing down: `BuildCurve3d`
+approximates the helix at degree 12 with 46 poles, and forcing degree 3 buys
+62 poles on the curve and 1872 on the swept surface — HLR would rather
+intersect a few high-degree spans than many low-degree ones.
+
+**What did work: the spring was a TUBE.** `Pipe` takes a `wall_thickness`,
+and the generator passed one, so every spring carried a second swept B-spline
+surface down its bore — invisible, and classified against on every view. A
+spring is round bar coiled up. Dropping it:
+
+| | HLR |
+|---|---|
+| one spring, hollow | 7290 ms |
+| one spring, solid | 2456 ms |
+| the engine, hollow springs | 85.1 s |
+| the engine, solid springs | **47.4 s** |
+
+and the engine's animated GLB fell from 10.8 MB to 1.6 MB, because the bore
+was being tessellated too.
+
+The remaining 47 s is OCC's: two 4-turn B-spline sweeps against 17 other
+bodies, with no tuning surface exposed. HLR cost is superlinear in turns (182
+ms / 1.7 s / 6.4 s for 1, 2 and 4 turns), so fewer coils is the only other
+model-side lever. A view that could EXCLUDE named occurrences would let a
+real drawing of this engine be exact everywhere except the springs; it does
+not exist and is not in this plan.
+
 What shipped:
 
 * **`quality: "fast"`** — polygonal HLR over the triangulations. Three views of

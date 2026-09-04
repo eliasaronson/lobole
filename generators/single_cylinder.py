@@ -253,7 +253,12 @@ def valve(app):
     coil = p.state()["features"][-1]["id"]
     p.app.add_feature(feature={
         "type": "Pipe", "name": "Spring", "path_id": coil,
-        "outer_diameter": 3.2, "wall_thickness": 1.5, "mode": "add"})
+        # SOLID wire (no wall_thickness): a spring is round bar coiled up, not
+        # tubing. It was a tube, which is both wrong and expensive — the bore
+        # is a second swept B-spline surface for the drawing's hidden-line
+        # pass to classify against, and dropping it took one spring's HLR from
+        # 7.3 s to 2.5 s.
+        "outer_diameter": 3.2, "mode": "add"})
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, -1), x=(1, 0, 0))
     p.check()
     return p

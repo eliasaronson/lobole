@@ -123,6 +123,12 @@ instantly. Sixteen bored boxes project in 3.1 ms. `Hide()` intersects every
 projected edge against every face, and a swept B-spline surface is orders of
 magnitude dearer to intersect than a plane.
 
+One of those springs was also modelled wrong: `Pipe` takes a `wall_thickness`
+and the generator passed one, so each spring was TUBING rather than round bar.
+The bore is a second swept B-spline surface, invisible and paid for on every
+view. Making them solid took the engine's exact sheet from 85.1 s to 47.4 s
+and its animated GLB from 10.8 MB to 1.6 MB.
+
 So the sheet is projected with `quality="fast"` (polygonal HLR — a look, not
 a dimensionable deliverable), and `--exact-drawing` takes the time. The other
 way out, for a real drawing of this engine, is to leave the springs off the
