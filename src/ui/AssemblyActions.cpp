@@ -1928,6 +1928,18 @@ void SyncAssemblyRenderers(AppState& state) {
       for (size_t bodyIdx = 0; bodyIdx < bodies.size(); bodyIdx++) {
         const auto& body = bodies[bodyIdx];
         SharedBody sb;
+        // A Derived ghost is drawn on its OWN part's tab and nowhere else:
+        // in the assembly the thing it copies is already here, at its own
+        // occurrence. Drawing both put a second servo and a second horn
+        // inside the real ones — visibly a different colour, offset by the
+        // copy's placement, and impossible to select apart. PrewarmTessella-
+        // tions already skipped them; this loop did not, so they were meshed
+        // on the fallback path and instanced anyway. The empty slot keeps
+        // bodyIdx aligned with the part's GetBodies() (picking reads it).
+        if (body.reference) {
+          shared.push_back(std::move(sb));
+          continue;
+        }
         // The geometry comes from the app-wide shape cache, so a body drawn
         // on its own part tab, here, and as a Derived copy is tessellated
         // and uploaded ONCE. Normally the mesh is already computed

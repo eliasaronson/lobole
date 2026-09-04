@@ -1563,6 +1563,54 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
   };
 
+  // A ghost belongs to the part that drew on it, and to NOTHING else: in an
+  // assembly the thing it copies is already there, at its own occurrence.
+  // Both were drawn, so the SO-101 gripper showed a second servo and a
+  // second horn inside the real ones — a different colour, offset by the
+  // copy's placement, and impossible to select apart.
+  t = IM_REGISTER_TEST(engine, "derived", "a_ghost_is_not_drawn_in_assemblies");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Servo");
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_box");
+    const uint64_t servoId = s_App->parts[1].id;
+    // Part 0 draws on a ghost of the servo AND has a body of its own.
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_derive");
+    ctx->Yield(2);
+    ToolbarCreateAccept(ctx, "###tb_sphere");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    IM_CHECK(Doc()->GetBodies()[0].reference);
+    IM_CHECK(!Doc()->GetBodies()[1].reference);
+    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2); // its own tab: both
+
+    // Placed in an assembly, only its own body is drawn — the servo is one
+    // occurrence, not two.
+    const uint64_t bracketId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    ctx->Yield(2);
+    for (uint64_t partId : {bracketId, servoId}) {
+      Occurrence o;
+      o.name = "occ" + std::to_string(partId);
+      o.partId = partId;
+      o.fixed = true;
+      s_App->assembly->AddOccurrence(o);
+    }
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+    // Two occurrences, one body each: the ghost adds nothing.
+    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2);
+    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes)
+      IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(m.meshId));
+  };
+
   // With nothing to derive from, the window says so and Accept is disabled
   // (the defaults gate pins the same case); once a second part exists the
   // source list lists it, and choosing it takes the snapshot.

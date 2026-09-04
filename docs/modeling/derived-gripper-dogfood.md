@@ -198,7 +198,18 @@ empty issue list.
     hashes the file's bytes (cached by path, size and mtime), not its path;
     a moved file is the same part, a different file at the path is not.
     Test: `a moved import file is not a changed source; a changed file is`.
-20. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
+20. **An assembly drew every part's derived ghosts.** The build loop that
+    tessellates a part's bodies for the assembly had no `reference` check
+    (the parallel prewarm beside it did), so a part that was drawn on a
+    ghost put a second copy of that ghost into the assembly, at the copy's
+    placement, in the part's palette colour rather than the vendor's. The
+    gripper therefore showed two servos and two horns inside each other —
+    which is what "why are these two circles offset and of different
+    materials" turned out to be. The hub and the horn under it are
+    concentric (both at x=0, z=0 in the jaw's frame); what looked like an
+    offset was the 3.7 mm the hub sits proud of the horn's face, seen
+    down the axis. Fixed; `derived/a_ghost_is_not_drawn_in_assemblies`.
+21. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
     Raspberry Pi STEP (the crypto chip's footprint name). Not ours.
 
 ## Fixed the same day (`edb28a92` and the follow-up)
@@ -208,7 +219,7 @@ empty issue list.
 - Hole takes circle and arc centres, merges coincident ones.
 - `add_mate` face-connector refusal; `get_state` `reference: true`.
 - `contact_report` skips reference bodies on both the part and the assembly tab.
-- Drawing views skip reference bodies.
+- Drawing views skip reference bodies, and so does the assembly renderer.
 - Auto-placed views re-lay the sheet out instead of piling up.
 - Import features hash their file's content, not its path.
 - Tests: `a hole placed on a derived hole edge, no coordinates copied`;
