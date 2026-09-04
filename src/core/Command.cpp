@@ -393,3 +393,55 @@ std::string CommandStack::UndoDescription() const {
 std::string CommandStack::RedoDescription() const {
   return m_redo.empty() ? std::string() : m_redo.back()->Description();
 }
+
+// --- CompositeCommand --------------------------------------------------------
+
+CompositeCommand::CompositeCommand(std::vector<std::unique_ptr<Command>> parts,
+                                   std::string description)
+    : m_parts(std::move(parts)), m_description(std::move(description)) {}
+
+bool CompositeCommand::Execute(Document& doc) {
+  // Redo: forward order, inside ONE bulk edit so the document regenerates
+  // once — the same shape the batch had when it ran.
+  Document::BulkEdit bulk(doc);
+  bool ok = true;
+  for (auto& part : m_parts)
+    ok = part->Execute(doc) && ok;
+  return ok;
+}
+
+void CompositeCommand::Undo(Document& doc) {
+  Document::BulkEdit bulk(doc);
+  for (auto it = m_parts.rbegin(); it != m_parts.rend(); ++it)
+    (*it)->Undo(doc);
+}
+
+void CommandStack::CoalesceSince(size_t depth, const std::string& description) {
+  if (depth >= m_undo.size() || m_undo.size() - depth < 2)
+    return;
+  std::vector<std::unique_ptr<Command>> parts;
+  parts.reserve(m_undo.size() - depth);
+  for (size_t i = depth; i < m_undo.size(); i++)
+    parts.push_back(std::move(m_undo[i]));
+  m_undo.resize(depth);
+  auto composite =
+      std::make_unique<CompositeCommand>(std::move(parts), description);
+  composite->SetStamp(NextActionStamp());
+  m_undo.push_back(std::move(composite));
+}
+
+size_t CommandStack::RollbackSince(size_t depth, Document& doc) {
+  size_t undone = 0;
+  if (depth >= m_undo.size())
+    return undone;
+  {
+    // One regeneration for the whole unwind, not one per command.
+    Document::BulkEdit bulk(doc);
+    while (m_undo.size() > depth) {
+      m_undo.back()->Undo(doc);
+      m_undo.pop_back();
+      undone++;
+    }
+  }
+  return undone;
+}

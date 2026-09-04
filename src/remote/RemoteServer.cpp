@@ -40,6 +40,7 @@
 #include "render/RayTracingRenderer.h"
 #include "render/RenderSheet.h"
 #include "ui/AppActions.h"
+#include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/Commands.h" // ActiveContext (get_keymap)
@@ -745,7 +746,10 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
 // than dereferencing null. File scope so the describe endpoint can derive
 // each method's requires_part_doc from it.
 static const std::set<std::string> kNoPartDoc = {
-    "describe", "ping", "background_jobs", "cancel_background_job",
+    // A batch is whatever its calls are: each one meets the part gate on its
+    // own, so gating the wrapper would refuse an assembly batch for a part
+    // that is not open and has nothing to do with it.
+    "batch", "describe", "ping", "background_jobs", "cancel_background_job",
     "list_parts", "add_part", "add_assembly", "set_active_part", "delete_part",
     "rename_part",
     // Tab-bar folders group tabs of every kind, so they must work from an
@@ -858,6 +862,24 @@ static const std::set<std::string> kNoPartDoc = {
 // together. `screenshot` and the UI actions are dispatched outside
 // HandleSemantic but are part of the same surface.
 static constexpr remote::MethodDoc kServerMethods[] = {
+    {"batch",
+     "Run {calls: [{method, params}]} as ONE transaction: one regeneration "
+     "at the end instead of one per call, and ONE undo step. A param value "
+     "{\"$ref\": n} anywhere is the result of the n-th call in this batch "
+     "(1-based, BACKWARD only) — its `id` by default, or another field with "
+     "{\"$ref\": n, \"key\": \"...\"} — so a sketch and the extrude "
+     "that names it are one batch. A call that "
+     "throws rolls the WHOLE batch back and names which call failed and why "
+     "(stop_on_error, default true; false runs on and reports each error in "
+     "place). Returns {results: [...], regen, calls, failed?, "
+     "regenerations}: the per-call `regen`/`digest` are STRIPPED — geometry "
+     "is answered once, at the end, by the batch's own `regen` — so a "
+     "result carries the identities a call created. Refuses to nest, and "
+     "refuses anything whose effect a rollback could not take back "
+     "(screenshots, exports, project and git verbs, UI actions), naming it. "
+     "A feature that fails to BUILD is not a failed call: it is reported in "
+     "the final regen, exactly as it would be on its own.",
+     "calls, stop_on_error"},
     {"describe",
      "This endpoint: methods (each with the parameter keys it accepts), "
      "feature/entity/constraint types, enums, and the document format "
@@ -1065,6 +1087,275 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                        : "not a part";
     throw std::runtime_error("the active document is " + std::string(kind) +
                              ", not a part; switch to a part tab");
+  }
+
+  if (m == "batch") {
+    // One transaction, one regeneration, one undo step
+    // (docs/agent-scale-plan.md, G1a). The gripper dogfood spent 86 calls on
+    // two parts and an assembly, each paying a full regeneration of a
+    // 200-body part; adding the features and regenerating once is the same
+    // document for a fraction of the work (Document::BulkEdit's own
+    // rationale, which had no way in from here).
+    if (m_inBatch)
+      throw std::runtime_error(
+          "batch does not nest — put the inner calls in the outer list");
+    const json& calls = p.at("calls");
+    const bool stopOnError = p.value("stop_on_error", true);
+    if (!calls.is_array())
+      throw std::runtime_error(
+          "batch 'calls' is an array of {method, params} objects");
+    if (calls.empty())
+      throw std::runtime_error("batch 'calls' is empty — nothing to run");
+
+    // What a rollback could not take back. Each of these reaches outside the
+    // document (a file, a git tree, the window, the tab), so undoing the
+    // document would leave the world half-changed and the response would be
+    // a lie about it.
+    static const std::set<std::string> kNotInBatch = {"screenshot",
+                                                      "render_sheet",
+                                                      "render_still",
+                                                      "export_step",
+                                                      "export_stl",
+                                                      "export_mesh",
+                                                      "export_visual",
+                                                      "export_drawing",
+                                                      "save_project",
+                                                      "open_project",
+                                                      "new_project",
+                                                      "clone_project",
+                                                      "import_step",
+                                                      "autosave_now",
+                                                      "checkpoint_create",
+                                                      "checkpoint_restore",
+                                                      "history_restore",
+                                                      "branch_create",
+                                                      "branch_switch",
+                                                      "branch_merge",
+                                                      "merge_finish",
+                                                      "merge_abort",
+                                                      "conflict_resolve",
+                                                      "fetch",
+                                                      "pull",
+                                                      "push",
+                                                      "undo",
+                                                      "redo",
+                                                      "set_settings",
+                                                      "reset_layout",
+                                                      "set_active_part"};
+    // Methods whose RESULT does not depend on freshly built geometry, so the
+    // regeneration can be deferred past them. Everything else flushes first,
+    // which is what keeps a measure or a list_elements inside a batch honest
+    // instead of answering from the geometry as it was before the batch.
+    static const std::set<std::string> kDeferrable = {
+        "add_feature",     "modify_feature", "delete_feature",   "move_feature",
+        "rename_feature",  "set_material",   "suppress_feature", "set_variable",
+        "rename_variable", "delete_variable"};
+
+    for (size_t i = 0; i < calls.size(); i++) {
+      if (!calls[i].is_object() || !calls[i].contains("method"))
+        throw std::runtime_error("batch call " + std::to_string(i + 1) +
+                                 " is not {method, params}");
+      const std::string sub = calls[i].at("method").get<std::string>();
+      if (sub == "batch")
+        throw std::runtime_error(
+            "batch does not nest — put the inner calls in the outer list. "
+            "The document is unchanged.");
+      if (kNotInBatch.count(sub))
+        throw std::runtime_error(
+            "'" + sub +
+            "' cannot run inside a batch: a batch rolls the DOCUMENT back on "
+            "failure and this reaches outside it (a file, the git tree, the "
+            "window, or the active tab). Call it before or after the batch. "
+            "The document is unchanged.");
+      if (IsUiAction(sub))
+        throw std::runtime_error(
+            "'" + sub +
+            "' is a UI action, which drives the real window through the test "
+            "engine and cannot be rolled back: call it outside the batch. The "
+            "document is unchanged.");
+      if (!IsKnownMethod(sub))
+        throw std::runtime_error("batch call " + std::to_string(i + 1) +
+                                 ": no method '" + sub +
+                                 "' (see describe). The document is "
+                                 "unchanged.");
+    }
+
+    // The marks a rollback rewinds to. Both are taken before anything runs:
+    // a part batch unwinds its commands, an assembly batch restores the
+    // snapshot its first mutation pushed.
+    const size_t undoMark =
+        state.commands ? state.commands->UndoDepth() : size_t{0};
+    const size_t asmMark = state.assemblyHistory.undo.size();
+
+    json results = json::array();
+    json failures = json::array();
+    // Each call's result by index, for {"$ref": n}. Null where a call failed
+    // or has not run; a reference into either is refused rather than
+    // resolving to nothing.
+    std::vector<json> byIndex(calls.size(), json());
+    size_t regenerations = 0;
+    std::optional<Document::BulkEdit> bulk;
+    Document* bulkDoc = nullptr;
+    const auto flush = [&] {
+      if (bulk) {
+        bulk.reset(); // the guard's release IS the regeneration
+        bulkDoc = nullptr;
+        regenerations++;
+      }
+    };
+
+    m_inBatch = true;
+    struct Guard {
+      bool& flag;
+      ~Guard() { flag = false; }
+    } guard{m_inBatch};
+
+    std::string fatal;
+    for (size_t i = 0; i < calls.size(); i++) {
+      const std::string sub = calls[i].at("method").get<std::string>();
+      json subParams =
+          calls[i].contains("params") ? calls[i].at("params") : json::object();
+      // {"$ref": n} anywhere in the params is the result of call n — by
+      // default its `id`, or {"$ref": n, "key": "..."} for another field.
+      // Without this a batch could not express the API's commonest pair, a
+      // sketch and the extrude that names it, and the whole verb would be
+      // limited to calls that happen not to depend on each other.
+      std::function<json(const json&)> resolveRefs =
+          [&](const json& v) -> json {
+        if (v.is_array()) {
+          json out = json::array();
+          for (const json& e : v)
+            out.push_back(resolveRefs(e));
+          return out;
+        }
+        if (!v.is_object())
+          return v;
+        if (v.contains("$ref")) {
+          const json& which = v.at("$ref");
+          if (!which.is_number_unsigned() || which.get<size_t>() == 0)
+            throw std::runtime_error(
+                "$ref takes the 1-based number of an EARLIER call in this "
+                "batch, e.g. {\"$ref\": 1}");
+          const size_t n = which.get<size_t>();
+          if (n > i)
+            throw std::runtime_error(
+                "$ref names call " + std::to_string(n) +
+                ", which has not run yet — a $ref points BACKWARD (this is "
+                "call " +
+                std::to_string(i + 1) + ")");
+          if (byIndex[n - 1].is_null())
+            throw std::runtime_error("$ref names call " + std::to_string(n) +
+                                     ", which failed, so it returned nothing");
+          const std::string key = v.value("key", std::string("id"));
+          if (!byIndex[n - 1].is_object() || !byIndex[n - 1].contains(key)) {
+            std::vector<std::string> had;
+            if (byIndex[n - 1].is_object())
+              for (auto it = byIndex[n - 1].begin(); it != byIndex[n - 1].end();
+                   ++it)
+                had.push_back(it.key());
+            throw std::runtime_error(
+                "call " + std::to_string(n) + " returned no '" + key +
+                "'; it returned: " + remote::KnownList(had));
+          }
+          return byIndex[n - 1].at(key);
+        }
+        json out = json::object();
+        for (auto it = v.begin(); it != v.end(); ++it)
+          out[it.key()] = resolveRefs(it.value());
+        return out;
+      };
+      if (kDeferrable.count(sub) && state.document) {
+        if (bulkDoc != state.document.get()) {
+          flush();
+          bulk.emplace(*state.document);
+          bulkDoc = state.document.get();
+        }
+      } else {
+        flush();
+      }
+      try {
+        subParams = resolveRefs(subParams);
+        bool subHandled = false;
+        remote::RpcParams subP{subParams};
+        Request subRequest;
+        subRequest.method = sub;
+        subRequest.params = subParams;
+        json r = HandleSemantic(subRequest, state, subHandled, subP);
+        if (!subHandled)
+          throw std::runtime_error(
+              "'" + sub +
+              "' is not a semantic method (it needs the GUI or a renderer) — "
+              "call it outside the batch");
+        // The same strict check the single-call path runs. Inside a
+        // transaction it is not "applied, then rejected": the batch rolls
+        // back, so a typo'd key leaves nothing behind.
+        if (auto unknown = subP.UnknownKeys(); !unknown.empty())
+          throw std::runtime_error(
+              UnknownParamError(sub, unknown, subP.SeenKeys()));
+        // Geometry is answered ONCE, by the batch's own regen. A per-call
+        // summary here would be read from a document that has not
+        // regenerated yet — the honest thing is not to send one.
+        if (r.is_object()) {
+          r.erase("regen");
+          r.erase("digest");
+        }
+        byIndex[i] = r;
+        results.push_back({{"call", i + 1}, {"method", sub}, {"result", r}});
+      } catch (const std::exception& e) {
+        failures.push_back(
+            {{"call", i + 1}, {"method", sub}, {"error", e.what()}});
+        if (stopOnError) {
+          fatal = "batch call " + std::to_string(i + 1) + " (" + sub +
+                  ") failed: " + e.what();
+          break;
+        }
+        results.push_back(
+            {{"call", i + 1}, {"method", sub}, {"error", e.what()}});
+      }
+    }
+    flush();
+
+    if (!fatal.empty()) {
+      // Roll the whole thing back: the commands this batch pushed, and the
+      // assembly state its first mutation snapshotted.
+      size_t undone = 0;
+      if (state.commands && state.document)
+        undone = state.commands->RollbackSince(undoMark, *state.document);
+      bool asmRestored = false;
+      if (state.assembly && state.assemblyHistory.undo.size() > asmMark) {
+        *state.assembly = state.assemblyHistory.undo[asmMark];
+        state.assemblyHistory.undo.resize(asmMark);
+        state.assemblyHistory.undoStamps.resize(asmMark);
+        state.syncedDocumentVersion = UINT64_MAX;
+        asmRestored = true;
+        ui::SolveActiveAssembly(state);
+      }
+      throw std::runtime_error(
+          fatal + ". The batch was rolled back: " + std::to_string(undone) +
+          " edit(s) undone" +
+          (asmRestored ? " and the assembly restored" : "") +
+          ", so the document is as it was before the batch. " +
+          std::to_string(calls.size() - results.size() - 1) +
+          " later call(s) did not run.");
+    }
+
+    // One undo step for the whole batch, and one assembly snapshot.
+    if (state.commands)
+      state.commands->CoalesceSince(
+          undoMark, "Batch of " + std::to_string(calls.size()) + " calls");
+    if (state.assemblyHistory.undo.size() > asmMark + 1) {
+      state.assemblyHistory.undo.resize(asmMark + 1);
+      state.assemblyHistory.undoStamps.resize(asmMark + 1);
+    }
+
+    json out{{"calls", calls.size()},
+             {"results", std::move(results)},
+             {"regenerations", regenerations}};
+    if (!failures.empty())
+      out["failed"] = std::move(failures);
+    if (state.document)
+      out["regen"] = remote::RegenSummaryJson(*state.document);
+    return out;
   }
 
   if (m == "describe") {

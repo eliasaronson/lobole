@@ -314,6 +314,13 @@ add_test(NAME assembly_relations_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
 
+# batch (agent-scale plan G1a): N calls, ONE regeneration, ONE undo step,
+# and a failed call rolls the whole thing back.
+add_test(NAME batch_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/batch_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(batch_smoke PROPERTIES TIMEOUT 120)
+
 # Named datum frames (v86, agent-scale plan G0): a frame built FROM a bolt
 # pattern, a mate anchored to it BY NAME, and the mate following when a
 # variable moves the geometry — the position an agent never transcribed.

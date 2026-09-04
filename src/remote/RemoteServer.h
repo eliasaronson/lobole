@@ -172,6 +172,9 @@ private:
   // One in-flight UI action at a time (runs across frames in the engine)
   nlohmann::json m_uiActionId;
   int m_uiActionClient = -1;
+  // True while a `batch` is running its calls, so a nested one is refused
+  // rather than opening a second transaction inside the first.
+  bool m_inBatch = false;
   bool m_uiActionInFlight = false;
   std::function<void(ImGuiTestContext*)> m_uiAction;
   // The live AppState, refreshed every ProcessPending tick: UI actions run

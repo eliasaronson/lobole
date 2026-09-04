@@ -134,7 +134,7 @@ script would be rewritten against.
 
 ## G1 — Scripting: one batch, one regen, and an SDK that speaks geometry
 
-### G1a `batch` RPC (half a day)
+### G1a `batch` RPC — SHIPPED 2026-09-04
 
 `batch {calls: [{method, params}], stop_on_error: true}`:
 
@@ -154,12 +154,46 @@ script would be rewritten against.
 - refuses `batch` inside `batch`, `ui_action`, screenshots, and the git verbs
   (each is its own transaction already).
 
-Gate: `batch_smoke.py` — 40 features in one batch regenerate once (count
-`RegenSummary` calls through a counter on the document), a mid-batch refusal
-leaves the document unchanged, and the MethodDoc row passes
-`rpc_params_gate.py`. **Measure:** `generators/gear.py` m1 z60 before/after
-(449 ms today, of which the sketch is one call — the win shows on
-`gear_train.py`, which is many).
+#### As built
+
+All of the above, plus one thing the plan had missed and the measurement
+found: **a batch could not use an id an earlier call returned**, which is the
+API's commonest pair (a sketch, then the extrude that names it) and would
+have limited the whole verb to calls that happen not to depend on each
+other. So a param value `{"$ref": n}` anywhere is the n-th call's result —
+its `id` by default, or `{"$ref": n, "key": "..."}` for another field.
+Backward only, and a reference to a call that failed or to a field it did
+not return is refused naming what it did return.
+
+Two more decisions worth recording. The regeneration is deferred only past
+calls whose ANSWER does not depend on rebuilt geometry (the feature and
+variable verbs); anything else — a `measure`, a `mass_properties` — flushes
+first, so a query inside a batch can never answer from the geometry as it
+was before the batch. And the per-call `regen`/`digest` are stripped from
+the results, because under a deferred regeneration they would describe a
+document that has not been rebuilt yet; geometry is answered once, by the
+batch's own `regen`.
+
+**Measured**, headless, same machine:
+
+| what | one call each | one batch |
+|---|---|---|
+| 40 sketches appended | 0.11 s, 40 regenerations | 0.00 s, 1 |
+| 40 holes drilled (80 calls, sketch + cut) | 0.86 s | 0.49 s |
+| 12 edits EARLY in a 49-feature part | 1.89 s | **0.20 s** |
+
+The third row is where the verb earns its keep and the second says why the
+first two are modest: incremental regeneration already makes an APPEND cheap
+(only the new feature runs), so batching appends saves the per-call overhead
+and little else. An edit early in the history re-runs everything after it,
+so twelve of them cost twelve full rebuilds — and one batch costs one.
+
+Gates: `tests/batch_smoke.py` (the regeneration count, one undo step for 40
+features, rollback on a failed call and on a rejected key, `stop_on_error:
+false`, a feature that fails to BUILD not counting as a failed call, `$ref`
+including its three refusals, a mid-batch query seeing current geometry, and
+an assembly batch as one snapshot), plus `rpc_params_gate`,
+`regen_honesty_smoke` and `rpc_gate_smoke`. 1062 headless, 278 GUI.
 
 ### G1b the SDK (two days)
 

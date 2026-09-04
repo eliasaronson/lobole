@@ -358,7 +358,11 @@ mcp = FastMCP(
     "configurations, sketch constraints, exports, raw GUI actions) is reached "
     "with rpc('method', {...}) and documented by help('method'). For building "
     "a part with loops or computed arguments, execute_script (a python "
-    "snippet with the client pre-bound as `d`) beats a tool call per step.",
+    "snippet with the client pre-bound as `d`) beats a tool call per step. "
+    "For many edits at once, rpc('batch', {'calls': [...]}) runs them as ONE "
+    "transaction — one regeneration, one undo step, and a rollback if any "
+    "call fails; {'$ref': n} inside a call's params is the n-th call's id, "
+    "so a sketch and the extrude that names it go in one batch.",
 )
 
 _client = None

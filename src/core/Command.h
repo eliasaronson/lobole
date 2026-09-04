@@ -289,6 +289,25 @@ private:
   uint64_t m_before = 0;
 };
 
+// N commands applied as ONE undo step (the `batch` RPC). Built from commands
+// already on the stack — they ran individually and are collapsed afterwards —
+// so it is only ever pushed with PushApplied. Undo runs them in reverse.
+class CompositeCommand : public Command {
+public:
+  CompositeCommand(std::vector<std::unique_ptr<Command>> parts,
+                   std::string description);
+
+  std::string Description() const override { return m_description; }
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+  size_t Size() const { return m_parts.size(); }
+
+private:
+  std::vector<std::unique_ptr<Command>> m_parts;
+  std::string m_description;
+};
+
 class CommandStack {
 public:
   // Executes the command and pushes it onto the undo stack (clearing any
@@ -301,6 +320,19 @@ public:
   // Execute here would ReplaceFeature with an identical copy, dangling every
   // pointer the caller still holds (the material-change segfault).
   void PushApplied(std::unique_ptr<Command> command);
+
+  // How many undoable commands are on the stack — the mark a `batch` takes
+  // before running so it can collapse or discard exactly what it pushed.
+  size_t UndoDepth() const { return m_undo.size(); }
+
+  // Collapses everything pushed since `depth` into ONE undo step. Fewer than
+  // two commands is a no-op (one command is already one step). The document
+  // is untouched: the commands are applied and stay applied.
+  void CoalesceSince(size_t depth, const std::string& description);
+
+  // Undoes and DISCARDS everything pushed since `depth`, newest first — a
+  // failed batch leaving nothing half-applied. Returns how many it undid.
+  size_t RollbackSince(size_t depth, Document& doc);
 
   bool CanUndo() const { return !m_undo.empty(); }
   bool CanRedo() const { return !m_redo.empty(); }
