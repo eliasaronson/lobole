@@ -625,7 +625,28 @@ this round, which was the entire point of adding it.
 says why it could not measure this round; the next one is the first that
 can.
 
-## Acceptance: the single-cylinder engine
+## Acceptance: the single-cylinder engine — PASSED 2026-09-04
+
+`generators/single_cylinder.py` builds it and the app checks it: 224 RPC calls
+and 2.0 s to build, 49 samples over 720 degrees, 735 pair checks in 3.9 s, a
+piston stroke of 86.000 against 2R = 86.000, clean in mesh and again under
+exact booleans, and 12 nodes x 49 keyframes of animated GLB. Four ISO 4762
+M10x80 cap screws, each derived from the hole it goes in.
+
+Six defects came out of it, four of them in this round's own new code, and all
+six were found by a gate rather than by looking: the loop solver not holding
+the driven DOF, a scrub landing on the mirrored branch at a singularity, every
+bolted joint reading as a clash, a cam lobe overshooting its own rise and
+another not closing at its own closing angle, and `fit_fastener` unable to
+derive anything from an ordinary M10 clearance hole. Written up in
+docs/modeling/single-cylinder-dogfood.md.
+
+The one thing not delivered is the drawing: a single view of this assembly is
+66-86 s and a three-view sheet had not finished after 21 minutes, which is a
+defect in the projection with its own measurements in docs/known-bugs.md, not
+a property of the model. It is behind `--drawing`.
+
+The original statement of the test:
 
 `generators/single_cylinder.py`, on the SDK: a block with one bore, a
 piston with rings and pin, a rod with bolts, a crank throw with
