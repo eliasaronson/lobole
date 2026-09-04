@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
 #include "core/Document.h"
@@ -102,6 +103,40 @@ TEST_CASE("Hole errors and round-trips (v21)", "[hole]") {
 // to the literal twin and quietly drill the 1 mm default. Phase V's expression
 // refresh surfaces the unresolved reference; this pins that the hole path is
 // covered so a bad bore can never pass unnoticed again.
+TEST_CASE("a hole centre over nothing is reported", "[hole]") {
+  // The cut still removes material, so the body-mode "removed nothing"
+  // warning stays quiet and the feature reads as clean — which is how a
+  // pattern whose centres all landed 7.6 mm off the part survived two
+  // rounds of "it built fine" (the SO-101 gripper's flange).
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0.0f), 20.0, 20.0, 5.0));
+  SketchPlane plane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centres", plane);
+  sk->AddEntity(sketch::Point{{5.0f, 5.0f}});  // in the plate
+  sk->AddEntity(sketch::Point{{60.0f, 5.0f}}); // in thin air
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  doc.AddFeature(
+      std::make_unique<HoleFeature>("Drill", skId, HoleKind::Simple, 3.0, 6.0));
+  REQUIRE(doc.Regenerate());
+  const Feature* hole = doc.GetFeature(2);
+  CHECK(hole->GetError().empty()); // it did cut something
+  CHECK_THAT(hole->GetWarning(),
+             Catch::Matchers::ContainsSubstring("1 of 2 hole centres"));
+  CHECK_THAT(hole->GetWarning(), Catch::Matchers::ContainsSubstring("60.00"));
+
+  // Both over material: silent.
+  auto* centres = dynamic_cast<SketchFeature*>(doc.GetFeature(1));
+  REQUIRE(centres != nullptr);
+  centres->entities.clear();
+  centres->AddEntity(sketch::Point{{5.0f, 5.0f}});
+  centres->AddEntity(sketch::Point{{12.0f, 12.0f}});
+  doc.ClearRegenCache(); // the sketch was edited in place
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.GetFeature(2)->GetWarning().empty());
+}
+
 TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));

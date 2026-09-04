@@ -1,5 +1,9 @@
 #include "core/features/HoleFeature.h"
 
+#include "core/parts/AxisStack.h"
+
+#include <cstdio>
+
 #include "core/parts/FastenerTable.h"
 
 #include "cad/CADKernel.h"
@@ -17,6 +21,18 @@ HoleFeature::HoleFeature(const std::string& name, uint64_t sketchId,
     : sketchId(sketchId), kind(kind), diameter(diameter), depth(depth) {
   m_name = name;
 }
+
+namespace {
+// "a, b, c and 2 more" — the error-style rule for a list that could be long.
+std::string Join(const std::vector<std::string>& items, size_t show) {
+  std::string out;
+  for (size_t i = 0; i < items.size() && i < show; i++)
+    out += (out.empty() ? "" : ", ") + items[i];
+  if (items.size() > show)
+    out += " and " + std::to_string(items.size() - show) + " more";
+  return out;
+}
+} // namespace
 
 bool HoleFeature::Execute(RegenContext& ctx) {
   const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
@@ -157,6 +173,41 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   if (!tool.IsValid()) {
     SetError("hole tool is empty");
     return false;
+  }
+
+  // A hole that meets no material removes nothing and used to say nothing:
+  // regen.ok, no warning, and a body that looks drilled from the outside.
+  // That silence is how a sketch whose plane origin already carried the
+  // pattern's offset — so every centre landed 7.6 mm off the part — passed
+  // two rounds of "it built fine" (docs/modeling/derived-gripper-dogfood.md).
+  // The probe is the fastener stack's: a bundle of rays just outside the
+  // bore wall, so a centre beside a part still counts as meeting it.
+  {
+    std::vector<parts::PlacedBody> placed;
+    for (const Body& b : ctx.bodies)
+      if (!b.reference && b.shape.IsValid())
+        placed.push_back({&b, glm::mat4(1.0f), "", 0, 0});
+    std::vector<std::string> empty;
+    for (const glm::vec3& c : centers) {
+      if (!parts::TraverseAxis(placed, glm::dvec3(c), glm::dvec3(axis), r,
+                               boreDepth)
+               .empty())
+        continue;
+      char buf[64];
+      std::snprintf(buf, sizeof(buf), "(%.2f, %.2f, %.2f)", c.x, c.y, c.z);
+      empty.push_back(buf);
+    }
+    // SOME of them missing is the case nothing else reports: the cut still
+    // removes material, so the body-mode "removed nothing" warning stays
+    // quiet and the feature looks clean. (All of them missing is that
+    // warning's job, and it says it better; it is set after this one.)
+    if (!empty.empty())
+      SetWarning(std::to_string(empty.size()) + " of " +
+                 std::to_string(centers.size()) +
+                 " hole centres drill empty space and remove nothing: " +
+                 Join(empty, 4) +
+                 ". A sketch's coordinates are measured FROM its plane "
+                 "origin (world = origin + u*U + v*V).");
   }
 
   ElementMap toolMap;

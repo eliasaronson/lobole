@@ -209,7 +209,23 @@ empty issue list.
     concentric (both at x=0, z=0 in the jaw's frame); what looked like an
     offset was the 3.7 mm the hub sits proud of the horn's face, seen
     down the axis. Fixed; `derived/a_ghost_is_not_drawn_in_assemblies`.
-21. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
+21. **A hole centre that drills empty space removed nothing and said
+    nothing.** `regen.ok` was true and the feature carried no warning, so a
+    flange whose sketch put every bolt hole 7.6 mm off the part read as
+    clean through two rounds. (My bug: a sketch's coordinates are measured
+    FROM its plane origin, `world = origin + u*U + v*V`, and I passed the
+    horn's world position as both the origin AND the UV centre, doubling
+    it. The bolt pattern came from the ghost's own edges and was right;
+    the material was in the wrong place.) A Hole now warns, naming the
+    centres that meet no material — the case where SOME miss, which is the
+    one nothing else reports, because the cut still removes material and
+    the body-mode "removed nothing" warning stays quiet.
+22. **Four of the arm's own screws were orphans.** Removing the old wrist
+    follower and jaw left the four M3 that held them floating inside the
+    wrist-roll horn, 45° off its own bolt circle, and the new flange sat
+    on their heads (4 × 19.6 mm³). They are removed with the parts they
+    held; the interference sweep is what named them.
+23. The camera's lens/sensor body is named `ATMEL_ATSHA204A_8UDFN` in the
     Raspberry Pi STEP (the crypto chip's footprint name). Not ours.
 
 ## Fixed the same day (`edb28a92` and the follow-up)
@@ -220,6 +236,7 @@ empty issue list.
 - `add_mate` face-connector refusal; `get_state` `reference: true`.
 - `contact_report` skips reference bodies on both the part and the assembly tab.
 - Drawing views skip reference bodies, and so does the assembly renderer.
+- A Hole warns when some of its centres drill empty space.
 - Auto-placed views re-lay the sheet out instead of piling up.
 - Import features hash their file's content, not its path.
 - Tests: `a hole placed on a derived hole edge, no coordinates copied`;
