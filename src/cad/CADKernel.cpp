@@ -23,6 +23,7 @@
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Shell.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -675,6 +676,15 @@ bool CADShape::CornerPoint(int edgeA, int edgeB, glm::vec3& point) const {
   const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(*shared));
   point = glm::vec3(p.X(), p.Y(), p.Z());
   return true;
+}
+
+bool CADShape::ContainsPoint(const glm::vec3& p, double tol) const {
+  if (m_shape.IsNull())
+    return false;
+  BRepClass3d_SolidClassifier classifier(m_shape);
+  classifier.Perform(gp_Pnt(p.x, p.y, p.z), tol);
+  const TopAbs_State state = classifier.State();
+  return state == TopAbs_IN || state == TopAbs_ON;
 }
 
 bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {

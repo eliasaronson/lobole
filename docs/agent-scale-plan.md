@@ -272,11 +272,60 @@ named frame follows the face it was built from, and an edit that destroys
 that face makes the mate REFUSE rather than reuse its last good pose.
 1063 headless, 278 GUI.
 
+#### The gripper, rebuilt on the SDK — the measurement
+
+`scratch/so101/gripper_sdk.py` builds the same two parts and the same
+assembly from the same STEP files.
+
+| | original | on the SDK |
+|---|---|---|
+| lines of code | 652 | **228** |
+| RPC calls | 86 | **138** |
+| transcribed coordinates | 12 | **0** |
+| wall clock, end to end | (a day of iteration) | 24 s |
+
+**The call count going UP is the result, not a regression.** The original
+knew where things were because a human had read twelve numbers off
+`list_elements` and typed them in. This asks the app instead — one query per
+face, per edge set, per plane — and those queries are what make the script
+survive the file changing. It does not survive otherwise: the original's
+occurrence ids (255/256/257/254) no longer resolve at all, because twelve of
+the arm's parts fail to import and every id after them shifts. The rewrite
+finds the wrist servo by name.
+
+Every derived value matches what the original had transcribed: the servo end
+face at x=22.56 (`END_X = 22.56`), the covers' outer faces at y=-18.78 and
+16.92 (`-18.8` / `17.1`), the wrist-roll horn's face at (7.573, -0.208,
+-23.4) (`HORN_C = (7.57, -0.21)`, `HORN_Z = -23.4`).
+
+**Four SDK defects the rewrite found**, none of which the piston gate could
+have:
+
+1. `Part.bodies()` described every face of every body in one call, which a
+   part carrying a derived 197-body camera answers with a refusal (17,842
+   faces). Bodies are now listed from `get_state` and each body's geometry
+   is read only when asked for, per body.
+2. `edges(kind="circle")` silently misses a hole whose rim the kernel split
+   into arcs — the camera's four mounting holes are 24 arcs, and the filter
+   found none of them and drilled nothing. `circular=True` covers both.
+3. The radius filter's default tolerance was a float epsilon (1e-4), not a
+   manufacturing one. Now 0.05 mm.
+4. No way to pass a timeout, so a 20 MB STEP import could not be made at
+   all. `_timeout=` on any generated call.
+
+**And one shipped bug, which is the important one.** The "this hole drills
+empty space" warning added earlier this week fired on four holes that had
+visibly drilled four standoffs. It reused `fit_fastener`'s ray bundle, which
+documents its own assumption — that a ray starts OUTSIDE the material — and
+a hole drilled into a boss breaks it: every offset ray begins inside the
+boss, all four are discarded as "started inside", and the hole is reported
+as meeting nothing. A false warning is worse than no warning, so the test is
+now a direct classification of points down the bore
+(`CADShape::ContainsPoint`), which depends on no ray origin at all.
+
 **Not done, deliberately:** `generators/gear_train.py` was left alone — it
 has uncommitted local changes, and rewriting a file someone is working in is
-not the port's job. The `gripper.py` rewrite and its line/call count against
-652 lines and 86 calls is the remaining measurement, and belongs with the
-benchmark sweep that is already owed for G0 and G1a.
+not the port's job.
 
 ## G2 — Motion study: a driver, samples, a scrub, an export (three days)
 

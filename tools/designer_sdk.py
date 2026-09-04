@@ -128,7 +128,10 @@ class _Rpc:
         self.__doc__ = doc
         self.__name__ = name
 
-    def __call__(self, **kw):
+    def __call__(self, _timeout=None, **kw):
+        """`_timeout` (seconds) for the calls that need one — a big STEP
+        import runs for minutes. Underscored so it can never collide with a
+        documented parameter."""
         if not self.free_form:
             unknown = sorted(k for k in kw if k not in self.params)
             if unknown:
@@ -136,7 +139,7 @@ class _Rpc:
                 raise SdkError(
                     f"{self.name}() got {', '.join(unknown)}; it takes "
                     f"{takes}")
-        return self._app.call(self.name, **kw)
+        return self._app.call(self.name, _timeout=_timeout, **kw)
 
 
 class App:
@@ -172,8 +175,10 @@ class App:
             f"{len(self.__dict__.get('_methods', ()))} methods; "
             f"app.methods() lists them")
 
-    def call(self, method, **params):
-        return self._remote.call(method, **params)
+    def call(self, method, _timeout=None, **params):
+        if _timeout is None:
+            return self._remote.call(method, **params)
+        return self._remote.request(method, params, timeout=_timeout)
 
     def methods(self, contains=""):
         """The documented method names, optionally filtered."""
@@ -395,29 +400,73 @@ class Frame:
 
 
 class Body:
-    def __init__(self, part, raw):
-        self._part, self._raw = part, raw
-        self.index = raw["body"]
-        self.name = raw["name"]
-        self.created_by = raw["created_by"]
-        self._faces = [Face(part, self, f) for f in raw["faces"]]
-        self._edges = [Edge(part, self, e) for e in raw["edges"]]
+    """One body of a part. Its faces and edges are fetched the first time
+    they are asked for, and only for THIS body.
 
-    def faces(self, kind=None, where=None, normal=None, tol=0.01):
+    Deliberately lazy and per-body: describing a face is an OpenCASCADE
+    surface analysis, so a part carrying a derived 197-body import has ~18k
+    of them and asking for all of them at once is refused by the app (and
+    took 172 s before it was bounded). The body LIST is cheap; the geometry
+    is not.
+    """
+
+    def __init__(self, part, index, raw):
+        self._part, self._raw, self.index = part, raw, index
+        self.name = raw.get("name", "")
+        self.volume = raw.get("volume", 0.0)
+        self.reference = raw.get("reference", False)
+        self.bbox = (V(raw["bbox_min"]), V(raw["bbox_max"])) \
+            if "bbox_min" in raw else None
+        self._els = None
+
+    def _load(self):
+        if self._els is None:
+            r = self._part.app.list_elements(body=self.index)["bodies"][0]
+            self._els = r
+            self._faces = [Face(self._part, self, f) for f in r["faces"]]
+            self._edges = [Edge(self._part, self, e) for e in r["edges"]]
+        return self._els
+
+    @property
+    def created_by(self):
+        return self._load()["created_by"]
+
+    def faces(self, kind=None, where=None, normal=None, radius=None,
+              tol=0.01, radius_tol=0.05):
         """Faces, filtered. `normal=(0,0,1)` keeps the ones pointing that
         way; `where` is any predicate over a Face."""
+        self._load()
         out = self._faces
         if kind:
             out = [f for f in out if f.kind == kind]
         if normal is not None:
             n = V(normal).unit()
             out = [f for f in out if f.normal and f.normal.dot(n) > 1 - tol]
+        if radius is not None:
+            out = [f for f in out if f.radius is not None
+                   and abs(f.radius - radius) < radius_tol]
         if where:
             out = [f for f in out if where(f)]
         return out
 
-    def edges(self, kind=None, where=None, radius=None, tol=1e-4):
+    def edges(self, kind=None, where=None, radius=None, circular=None,
+              tol=0.05):
+        """Edges, filtered.
+
+        `circular=True` means "a round rim" — circle OR arc. Whether the
+        kernel represents a hole's rim as one circle or as two half arcs is
+        an implementation detail of the file it came from, and asking for
+        `kind="circle"` silently misses the arc form: the Pi camera's four
+        mounting holes are 24 arcs, and a filter written for circles found
+        none of them and drilled nothing.
+
+        `tol` is a real tolerance in millimetres (0.05 by default), not a
+        float-comparison epsilon: an imported radius is rarely exact.
+        """
+        self._load()
         out = self._edges
+        if circular:
+            out = [e for e in out if e.kind in ("circle", "arc")]
         if kind:
             out = [e for e in out if e.kind == kind]
         if radius is not None:
@@ -436,8 +485,8 @@ class Body:
         return _only(self.edges(**kw), "edge", kw)
 
     def __repr__(self):
-        return (f"Body({self.name!r}, {len(self._faces)} faces, "
-                f"{len(self._edges)} edges)")
+        n = "unread" if self._els is None else f"{len(self._faces)} faces"
+        return f"Body({self.name!r}, {n})"
 
 
 def _only(items, what, kw):
@@ -967,8 +1016,15 @@ class Part(_Tab):
     def state(self):
         return self.app.get_state()
 
-    def bodies(self):
-        return [Body(self, b) for b in self.app.list_elements()["bodies"]]
+    def bodies(self, reference=None):
+        """This part's bodies. Cheap: the LIST comes from get_state, and each
+        body's faces and edges are read only when asked for. `reference=`
+        filters ghosts in or out."""
+        out = [Body(self, i, b)
+               for i, b in enumerate(self.app.get_state()["bodies"])]
+        if reference is not None:
+            out = [b for b in out if b.reference == reference]
+        return out
 
     def body(self, name=None, index=None):
         bs = self.bodies()
@@ -993,8 +1049,11 @@ class Part(_Tab):
         return self.app.mass_properties()["total"]["volume"]
 
     def bbox(self):
-        b = self.app.get_state()["bodies"][0]
-        return V(b["bbox_min"]), V(b["bbox_max"])
+        bs = [b for b in self.app.get_state()["bodies"]
+              if not b.get("reference")]
+        lo = V([min(b["bbox_min"][i] for b in bs) for i in range(3)])
+        hi = V([max(b["bbox_max"][i] for b in bs) for i in range(3)])
+        return lo, hi
 
     # --- the standing check ------------------------------------------------
     def check(self, warn=True):
@@ -1023,7 +1082,7 @@ class Part(_Tab):
         """A feature response, as the Body it created (looked up after the
         regeneration, so its faces and edges are the real ones)."""
         fid = r["id"]
-        for b in self.bodies():
+        for b in self.bodies(reference=False):
             if b.created_by == fid:
                 return b
         return None
@@ -1136,8 +1195,10 @@ def _conn(spec):
             return {"occurrence": occ.id, "face": what.ref}
         if isinstance(what, Face):
             return {"occurrence": occ.id, "face": what.ref}
-        raise SdkError(f"a connector is (occurrence, frame name | Frame | "
-                       f"Face | Edge), not {what!r}")
+        raise SdkError(
+            f"a connector is (occurrence, frame name | Frame | Face | Edge), "
+            f"not {what!r} — for an occurrence's ORIGIN pass the occurrence "
+            f"on its own")
     if isinstance(spec, Occurrence):
         return {"occurrence": spec.id, "origin": True}
     if isinstance(spec, dict):

@@ -180,18 +180,34 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // That silence is how a sketch whose plane origin already carried the
   // pattern's offset — so every centre landed 7.6 mm off the part — passed
   // two rounds of "it built fine" (docs/modeling/derived-gripper-dogfood.md).
-  // The probe is the fastener stack's: a bundle of rays just outside the
-  // bore wall, so a centre beside a part still counts as meeting it.
+  //
+  // The test is a CLASSIFICATION of points down the bore, not a ray cast.
+  // The first version reused the fastener stack's ray bundle, whose rays are
+  // offset just outside the bore wall — and that bundle documents its own
+  // assumption, that a ray starts OUTSIDE the material. A hole drilled into
+  // a boss breaks it: the offset rays begin inside the boss, every one is
+  // discarded as "started inside", and four holes that had visibly drilled
+  // four standoffs were reported as drilling air (the SO-101 gripper rebuilt
+  // on the SDK, docs/agent-scale-plan.md G1b). A false warning is worse than
+  // none, so this asks the question directly instead.
   {
-    std::vector<parts::PlacedBody> placed;
-    for (const Body& b : ctx.bodies)
-      if (!b.reference && b.shape.IsValid())
-        placed.push_back({&b, glm::mat4(1.0f), "", 0, 0});
     std::vector<std::string> empty;
     for (const glm::vec3& c : centers) {
-      if (!parts::TraverseAxis(placed, glm::dvec3(c), glm::dvec3(axis), r,
-                               boreDepth)
-               .empty())
+      bool meets = false;
+      // Sampled over the bore's own length, so the spacing scales with the
+      // hole rather than being a fixed number of millimetres.
+      for (int i = 1; i <= 9 && !meets; i++) {
+        const glm::vec3 p = c + axis * float(boreDepth * (0.1 * i));
+        for (const Body& b : ctx.bodies) {
+          if (b.reference || !b.shape.IsValid())
+            continue;
+          if (b.shape.ContainsPoint(p)) {
+            meets = true;
+            break;
+          }
+        }
+      }
+      if (meets)
         continue;
       char buf[64];
       std::snprintf(buf, sizeof(buf), "(%.2f, %.2f, %.2f)", c.x, c.y, c.z);

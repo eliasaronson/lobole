@@ -101,6 +101,14 @@ public:
   bool FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
                 glm::vec3& xAxis) const;
 
+  // Is this point inside the solid (on the boundary counts)? A direct
+  // classification, not a ray cast: nothing about it depends on where the
+  // query starts or which way it points, which is what makes it the right
+  // test for "does this hole meet any material" — a ray bundle offset
+  // around the bore can begin INSIDE a boss and report the boss absent.
+  [[nodiscard]] bool ContainsPoint(const glm::vec3& p,
+                                   double tol = 1.0e-6) const;
+
   // Connector inference (A2.5): every snap candidate a face offers, in ONE
   // pass — each non-degenerate bounding edge's index in the deduplicated
   // TopExp::MapShapes(EDGE) order (the ElementMap::edgeNames convention), its
@@ -326,6 +334,7 @@ public:
   void FaceCorners(int, std::vector<FaceCorner>&) const {}
   bool CornerPoint(int, int, glm::vec3&) const { return false; }
   bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
+  bool ContainsPoint(const glm::vec3&, double = 1.0e-6) const { return false; }
 };
 
 class CADKernel {
