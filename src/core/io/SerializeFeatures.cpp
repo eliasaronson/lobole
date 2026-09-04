@@ -1207,10 +1207,35 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       } else {
         sketch::Entity ent = EntityFromJson(ej);
         std::map<std::string, std::string> exprs;
-        for (const std::string& field : sketch::EntityExprFields(ent)) {
+        const std::vector<std::string> fields = sketch::EntityExprFields(ent);
+        for (const std::string& field : fields) {
           const std::string expr = ej.value(field + "_expr", std::string{});
           if (!expr.empty())
             exprs[field] = expr;
+        }
+        // An `_expr` key this entity kind does not have was DROPPED, so a
+        // dimension written as a live variable silently became the literal
+        // it happened to evaluate to: `generators/gear.py` sent
+        // `radius_expr` (the field is `r_expr`) and advertised an adjustable
+        // bore that was frozen. Refuse the key instead, naming the ones this
+        // entity takes (docs/agent-scale-plan.md, G1b).
+        for (auto it = ej.begin(); it != ej.end(); ++it) {
+          const std::string& key = it.key();
+          if (key.size() <= 5 || key.compare(key.size() - 5, 5, "_expr") != 0)
+            continue;
+          const std::string field = key.substr(0, key.size() - 5);
+          if (std::find(fields.begin(), fields.end(), field) != fields.end())
+            continue;
+          std::string takes;
+          for (const std::string& f : fields)
+            takes += (takes.empty() ? "" : ", ") + f + "_expr";
+          throw std::runtime_error(
+              "sketch entity of type '" + ej.value("type", std::string{}) +
+              "': no expression field '" + key + "'. It takes " +
+              (takes.empty() ? std::string("none — its geometry is not "
+                                           "expression-driven; use a "
+                                           "dimensional constraint")
+                             : takes));
         }
         if (!exprs.empty())
           pendingEntityExprs.emplace_back(sk->entities.size(),

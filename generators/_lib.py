@@ -53,11 +53,18 @@ def rect(c1, c2):
             "c2": [float(c2[0]), float(c2[1])]}
 
 
-def circle(center, radius, radius_expr=None):
+def circle(center, radius, r_expr=None):
+    """A circle entity, optionally with its RADIUS driven by an expression.
+
+    The field is `r_expr` — the app's own name for it (v38). It used to be
+    spelled `radius_expr` here, which is not a field of any entity, so it was
+    silently dropped and this generator's "live" bore was a literal. The app
+    now refuses an expression field an entity does not have.
+    """
     e = {"type": "circle", "center": [float(center[0]), float(center[1])],
          "radius": float(radius)}
-    if radius_expr:
-        e["radius_expr"] = radius_expr
+    if r_expr:
+        e["r_expr"] = r_expr
     return e
 
 

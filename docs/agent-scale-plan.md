@@ -195,7 +195,7 @@ including its three refusals, a mid-batch query seeing current geometry, and
 an assembly batch as one snapshot), plus `rpc_params_gate`,
 `regen_honesty_smoke` and `rpc_gate_smoke`. 1062 headless, 278 GUI.
 
-### G1b the SDK (two days)
+### G1b the SDK — SHIPPED 2026-09-04
 
 `tools/designer.py` (198 lines: `Sketch`, `extrude`, `box`) becomes the
 package S3 promised, absorbing `generators/_lib.py` (planes that spell out
@@ -220,12 +220,63 @@ not); every method returns the ids it made; nothing is a default with a
 unit unless derived from what it acts on (CLAUDE.md). `execute_script`'s
 prelude imports it so an MCP agent gets it for free.
 
-Gate: `sdk_smoke.py` builds a piston (crown, ring grooves, pin bore, skirt
-relief) in ≤ 15 lines and checks volume/extents; `generators/gear.py` and
-`gear_train.py` are ported to it and `generators_smoke.py` still passes.
-**Measure:** `gripper.py` re-written on the SDK: lines and wall time against
-652 / 86 calls. **No benchmark, no claim:** the MCP surface changes
-(`execute_script` prelude, `help`), so a sweep runs before the claim.
+#### As built — and the design changed on one question
+
+Asked mid-build: *can this be generated so nothing is duplicated?* It can,
+and it should be, so the module is two layers:
+
+- **The RPC surface is GENERATED at connect time from `describe`.** No
+  wrapper is written per method. `app.add_feature(...)`, `app.frame(...)`,
+  `app.contact_report(...)` — all 222 of them — resolve through the
+  description the app publishes, with keyword arguments checked against the
+  documented parameter list BEFORE the round trip. The enums come the same
+  way. A new RPC is callable the day it lands and nothing here can drift
+  from the server, which is the thing a hand-written client always
+  eventually does.
+- **Hand-written: only what `describe` cannot express.** The reference
+  objects (`Face`, `Edge`, `Frame`, `Plane`, `Body`), the plane arithmetic
+  (`plane.uv(world)` / `plane.world(u, v)`), the compositions
+  (`revolve_profile`, `bolt_circle`, `polyline`, `slot`, `polygon`,
+  `project`), the assembly verbs that mate BY FRAME NAME, `check()`, and a
+  `batch()` context manager whose handles are `$ref`s.
+
+`tests/sdk_smoke.py` gates the split itself: every documented method is
+reachable, nothing hand-written on `App` shadows one, the enums are read
+rather than copied, and no constraint-kind string is hard-coded in the
+module.
+
+#### The bug this found: a "live" variable that was frozen
+
+`generators/gear.py` advertises a bore that stays adjustable. It was not.
+A circle's expression field is `r_expr` (v38); the helper sent
+`radius_expr`, which is not a field of any entity, so the app **dropped it
+silently** and the bore was the literal it happened to start at. Measured
+before the fix: setting `gear_bore` from 6 to 12 changed the gear's volume
+by zero. `EntityFromJson` now refuses an expression field the entity does
+not have, naming the ones it takes; `_lib.circle` takes `r_expr`; the gear's
+bore is live (3234 mm³ → 2555 mm³ on the same edit). The SDK uses the app's
+own fields for the same reason — a coordinate or radius given as a string
+rides on the entity and the DOCUMENT evaluates it, so there is no second
+expression language in the client. Same shape as G0's baked-datum bug: a
+plausible substitute that loaded fine, looked right and was wrong.
+
+Gate: `tests/sdk_smoke.py` — the generated-surface rules above, the plane
+arithmetic that put the gripper's flange 7.57 mm off its axis (round-tripped
+both ways), a **piston in 20 lines** (revolved body, three revolved ring
+grooves, wrist-pin bore, every dimension a variable) checked by volume and
+extents, a parametric edit moving it, `bolt_circle` with the frame that
+names it, a hole pattern taken from another part's ghost by PROJECTION with
+no coordinate transcribed, a batch of sixteen features in one regeneration,
+and an assembly where the check catches a floating part, a mate onto a
+named frame follows the face it was built from, and an edit that destroys
+that face makes the mate REFUSE rather than reuse its last good pose.
+1063 headless, 278 GUI.
+
+**Not done, deliberately:** `generators/gear_train.py` was left alone — it
+has uncommitted local changes, and rewriting a file someone is working in is
+not the port's job. The `gripper.py` rewrite and its line/call count against
+652 lines and 86 calls is the remaining measurement, and belongs with the
+benchmark sweep that is already owed for G0 and G1a.
 
 ## G2 — Motion study: a driver, samples, a scrub, an export (three days)
 

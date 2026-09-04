@@ -103,6 +103,12 @@ def build(d, module, teeth, pressure_deg, thickness, bore, name):
         skb = check(d.call("add_feature", feature={
             "type": "Sketch", "name": f"{name} bore",
             "plane": plane_at_z(thickness, flip=True),
+            # The app's expression field for a circle's radius is `r_expr`
+            # (v38). This said `radius_expr`, which is not a field of any
+            # entity, so it was DROPPED — and the bore this file advertises
+            # as a live variable was the literal it happened to start at
+            # (docs/agent-scale-plan.md, G1b; the app now refuses an
+            # expression field the entity does not have).
             "entities": [circle((0, 0), bore / 2.0, "gear_bore / 2")]}),
             "bore sketch")
         check(d.call("add_feature", feature={

@@ -314,6 +314,15 @@ add_test(NAME assembly_relations_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
 
+# The SDK (agent-scale plan G1b): the RPC surface is GENERATED from
+# `describe` (so nothing is duplicated and nothing can drift), and only the
+# semantics describe cannot express are hand-written — reference objects,
+# plane arithmetic, compositions. Builds a piston and checks it by number.
+add_test(NAME sdk_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sdk_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sdk_smoke PROPERTIES TIMEOUT 180)
+
 # batch (agent-scale plan G1a): N calls, ONE regeneration, ONE undo step,
 # and a failed call rolls the whole thing back.
 add_test(NAME batch_smoke

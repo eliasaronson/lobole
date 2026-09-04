@@ -82,7 +82,7 @@ thing behind it invisible to the next person who looks.
   dead code), measured rather than estimated. All five stages shipped; the
   follow-ups at the bottom include one struck because its premise was wrong,
   which is the part worth reading.
-- **[agent-scale-plan.md](agent-scale-plan.md)** — **G0 + G1a shipped
+- **[agent-scale-plan.md](agent-scale-plan.md)** — **G0, G1a + G1b shipped
   2026-09-04**, the rest planned:
   what a text-to-cad W16 exposed. Seven workstreams — datum frames a mate can name, a `batch` RPC and an SDK
   that speaks geometry, a motion study (driver, samples, scrub, animated GLB),
