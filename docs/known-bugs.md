@@ -7,43 +7,6 @@ an entry when it lands a fix + regression test.
 ---
 
 
-## `check_fasteners` calls every BLIND-hole screw too short
-
-Found 2026-09-04 on the single-cylinder engine's head bolts, and reproduced on
-a minimal rig: an 80 mm base with a 25 mm blind hole, a 20 mm plate on top,
-one screw.
-
-    fit_fastener    -> M10x45, blind=True, "grip 45: plate 20, base 60"
-    check_fasteners -> "is 35 mm too short: its stack is now 80 mm"
-
-Nothing happened between the two calls. `fit_fastener` stops the stack at the
-bottom of the blind hole, which is what a grip is; `check_fasteners`
-re-derives it by probing the axis and counts the solid material *below* the
-hole as more stack, so it measures plate + the base's whole thickness. Every
-blind-hole joint therefore reads as too short by exactly the material under
-the hole, and the report is unusable on any model that has one — which is
-most of them, since a blind tapped or clearance hole is the normal way to
-bolt into a block.
-
-The two answers come from different code: `FitFastenerToHole` traverses the
-stack and knows it bottomed out (it sets `blind`), while the check walks the
-axis with a ray offset past the loosest clearance and takes every solid span
-it crosses. Note `fit`'s own summary string has the same blind spot — it says
-"base 60" while correctly reporting a grip of 45 — so the decomposition is
-the raw traversal and only the grip is trimmed.
-
-Impact: `check_fasteners` is the standing report that a stack changed under a
-screw (A2: a derived length cannot be a live binding), and it currently cries
-wolf on every blind hole, which is the failure mode that makes people stop
-reading a report. The fix is to stop the check's traversal where the fit's
-does — at the first end of a hole the axis does not come out of — and to trim
-the summary the same way, so the two agree by construction rather than by
-both being written carefully.
-
-
----
-
-
 ## A drawing view of an ASSEMBLY costs ~80 s, and a sheet of three costs more
 
 Found 2026-09-04 building the single-cylinder engine

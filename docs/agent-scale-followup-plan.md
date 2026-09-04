@@ -10,7 +10,18 @@ Ordered by what it costs to leave alone.
 
 ---
 
-## W1 — `check_fasteners` must agree with `fit_fastener`
+## W1 — `check_fasteners` must agree with `fit_fastener` — DONE 2026-09-04
+
+Shipped in da043eae. It was two defects, not one: the grip ignored the on-axis
+ray, AND the check applied the through rule ("it must span the stack") to blind
+joints, which are snapped DOWN to a stocked length and so are shorter than
+their hole is deep by construction. Fixing only the first would still have
+called the engine's M10x80 in an 85 mm joint 5 mm short. Both callers now take
+the answer from `parts::JointEnd`; a blind screw is judged on bottoming out and
+thread engagement instead. `tests/fastener_stack_smoke.py`.
+
+The original statement:
+
 
 **The defect.** Minimal rig: an 80 mm base with a 25 mm blind hole, a 20 mm
 plate on top, one screw.
