@@ -130,6 +130,39 @@ def main():
         expect(["P1", "P2", "P3", "P4"] in comps,
                f"touch_tol widens contact: {comps}")
 
+        # --- The sweeps are BOUNDED and say what they covered --------------
+        # Both used to be O(occurrences^2) exact OpenCASCADE checks with no
+        # bound: on a 253-occurrence imported arm neither returned, and the
+        # server could not answer `ping` while one ran.
+        # Six copies overlapping each other (the part spans x 0..35), six
+        # far away: the far ones must cost a box test, not a boolean.
+        d.call("add_assembly", name="grid")
+        d.call("set_active_part", part="grid")
+        for i in range(6):
+            d.call("add_occurrence", part="Part 1", fixed=True,
+                   transform={"position": [i * 5.0, 0, 0]})
+        for i in range(6):
+            d.call("add_occurrence", part="Part 1", fixed=True,
+                   transform={"position": [1000.0 + i * 500.0, 0, 0]})
+        rep = d.call("interference")
+        pairs = 12 * 11 // 2
+        expect(rep["pairs_box_cleared"] + rep["pairs_checked"] +
+               rep.get("pairs_unchecked", 0) == pairs,
+               f"every pair accounted for: {rep}")
+        expect(rep["pairs_box_cleared"] >= 51,
+               f"parts far apart are box-cleared, not booleaned: {rep}")
+        expect(rep["clash"], f"the overlapping six clash: {rep}")
+        expect(not rep.get("truncated"), f"a 12-part grid completes: {rep}")
+        # A budget of one: the answer says so instead of pretending.
+        rep = d.call("interference", max_pairs=1)
+        expect(rep["pairs_checked"] == 1 and rep.get("truncated"),
+               f"max_pairs bounds the sweep: {rep}")
+        expect("mm apart" in rep["truncation"],
+               f"truncation names what was left: {rep['truncation']}")
+        rep = d.call("contact_report", max_pairs=1)
+        expect(rep["pairs_checked"] == 1 and rep.get("truncated"),
+               f"contact_report honours max_pairs: {rep}")
+
         print("contact_smoke: all checks passed")
         return 0
     finally:

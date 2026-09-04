@@ -17,6 +17,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -84,6 +85,132 @@ Document& RequirePartDoc(Document* doc, const char* what) {
 
 // V1 contact classification: a pair either overlaps (clash), sits within the
 // touch tolerance (touching — a boltable joint), or is clear by `distance`.
+// An assembly-wide pairwise sweep, bounded.
+//
+// Both sweeps below are O(occurrences^2) in EXACT geometry checks, and an
+// exact check is an OpenCASCADE boolean or extrema. On the SO-101 arm (253
+// occurrences, 31,878 pairs — a hundred of them PCB parts sharing one 25 mm
+// board) `interference` with no pair named ran for 48 minutes without
+// answering and blocked every other RPC, `ping` included, because it did a
+// boolean for every pair and reported all of them.
+//
+// Two rules make it bounded. A pair whose world boxes are further apart
+// than the tolerance cannot touch, so one box test settles it. What is left
+// is checked CLOSEST FIRST — the pairs most likely to clash — until the
+// budget is spent, and whatever is left over is REPORTED rather than
+// quietly dropped.
+//
+// A pair cap alone is NOT a time bound: an exact check between two large
+// solids is an OpenCASCADE boolean, and 4000 of them on this arm still ran
+// past ten minutes. The sweep therefore also stops at a deadline, and says
+// how far it got. An answer that arrives with its coverage stated is worth
+// more than one that never arrives.
+struct SweepPlan {
+  std::vector<std::pair<size_t, size_t>> exact; // closest box gap first
+  std::vector<double> gap;                      // box gap, same order
+  size_t boxCleared = 0;                        // settled by the box test alone
+  size_t overBudget = 0;      // needed an exact check, did not get one
+  double overBudgetGap = 0.0; // the smallest box gap left unchecked
+  double elapsed = 0.0;       // seconds spent on the exact checks
+};
+
+// Walks a plan's exact pairs until the deadline, calling `check(i, j)`.
+// Returns how many were checked; the rest are folded into the plan's
+// over-budget count so the coverage report covers both reasons.
+template <typename F>
+size_t RunSweep(SweepPlan& plan, double deadlineSeconds, F&& check) {
+  const auto start = std::chrono::steady_clock::now();
+  const bool timed = deadlineSeconds > 0.0;
+  plan.elapsed = 0.0;
+  // The deadline is checked BETWEEN pairs: one contact check between two
+  // imported servos has been measured at 100 s on its own, and no bound
+  // here can preempt an OpenCASCADE boolean already running. `elapsed_s`
+  // in the response is the honest number.
+  for (size_t k = 0; k < plan.exact.size(); ++k) {
+    // Every pair, not every eighth: one contact check between two imported
+    // servos is seconds, so sampling the clock in batches overran a 20 s
+    // deadline by 100 s. Reading a steady_clock is nanoseconds.
+    if (timed) {
+      const double elapsed = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - start)
+                                 .count();
+      if (elapsed > deadlineSeconds) {
+        if (plan.overBudget == 0 || plan.gap[k] < plan.overBudgetGap)
+          plan.overBudgetGap = plan.gap[k];
+        plan.overBudget += plan.exact.size() - k;
+        plan.exact.resize(k);
+        plan.gap.resize(k);
+        plan.elapsed = elapsed;
+        return k;
+      }
+    }
+    check(plan.exact[k].first, plan.exact[k].second);
+  }
+  plan.elapsed =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+          .count();
+  return plan.exact.size();
+}
+
+SweepPlan PlanSweep(const std::vector<glm::vec3>& mins,
+                    const std::vector<glm::vec3>& maxs, double gapTol,
+                    size_t maxPairs) {
+  struct Cand {
+    double gap;
+    size_t i, j;
+  };
+  std::vector<Cand> cands;
+  SweepPlan plan;
+  for (size_t i = 0; i < mins.size(); ++i)
+    for (size_t j = i + 1; j < mins.size(); ++j) {
+      const glm::vec3 d = glm::max(
+          glm::max(mins[i] - maxs[j], mins[j] - maxs[i]), glm::vec3(0.0f));
+      const double gap = static_cast<double>(glm::length(d));
+      if (gap > gapTol) {
+        plan.boxCleared++;
+        continue;
+      }
+      cands.push_back({gap, i, j});
+    }
+  std::stable_sort(cands.begin(), cands.end(),
+                   [](const Cand& a, const Cand& b) { return a.gap < b.gap; });
+  for (size_t k = 0; k < cands.size(); ++k) {
+    if (plan.exact.size() >= maxPairs) {
+      plan.overBudget = cands.size() - k;
+      plan.overBudgetGap = cands[k].gap;
+      break;
+    }
+    plan.exact.push_back({cands[k].i, cands[k].j});
+    plan.gap.push_back(cands[k].gap);
+  }
+  return plan;
+}
+
+// What the sweep did, always in the response: a bounded answer that does
+// not say it was bounded is the "correct-looking wrong answer" again.
+void AttachSweepCoverage(nlohmann::json& out, const SweepPlan& plan,
+                         size_t entities, size_t maxPairs,
+                         double deadlineSeconds) {
+  out["occurrences"] = entities;
+  out["pairs_checked"] = plan.exact.size();
+  out["pairs_box_cleared"] = plan.boxCleared;
+  out["elapsed_s"] = plan.elapsed;
+  if (plan.overBudget == 0)
+    return;
+  out["truncated"] = true;
+  out["pairs_unchecked"] = plan.overBudget;
+  out["truncation"] =
+      "checked the " + std::to_string(plan.exact.size()) +
+      " closest pairs, then stopped (max_pairs " + std::to_string(maxPairs) +
+      ", deadline_s " + std::to_string(deadlineSeconds) + "); " +
+      std::to_string(plan.overBudget) +
+      " more have overlapping or near boxes and were NOT checked exactly, "
+      "the closest of them " +
+      std::to_string(plan.overBudgetGap) +
+      " mm apart. Raise the limits, name a pair {a, b}, or sweep a smaller "
+      "assembly.";
+}
+
 const char* ContactState(const Measure::SetContact& c, double touchTol) {
   if (c.volume > 1e-9)
     return "clash";
@@ -179,19 +306,28 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
      "touching from clear; the no-pair assembly sweep stays clash-only — use "
-     "contact_report for the full picture. A part INSIDE a sub-assembly is "
+     "contact_report for the full picture. That sweep is BOUNDED: pairs whose "
+     "boxes do not overlap cannot clash and cost one box test, the rest are "
+     "checked closest-first up to max_pairs (4000) or deadline_s (20 s, "
+     "checked between pairs — a single boolean can overrun it) and the "
+     "response "
+     "says what it checked, box-cleared and left unchecked. A part INSIDE a "
+     "sub-assembly is "
      "addressed by path — \"Gangway/Board 19\", or the id chain \"2/17\" "
      "when a name repeats — which is the only way to ask a question that "
      "spans the boundary (read-only; a sub-assembly is edited on its tab).",
-     "a, b, touch_tol"},
+     "a, b, deadline_s, max_pairs, touch_tol"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
-     "default 1.0 mm), clashes. Assembly tab: over occurrences, plus "
+     "default 1.0 mm), clashes; bounded like the interference sweep "
+     "(closest-first up to max_pairs 4000 / deadline_s 20 s, with the coverage "
+     "in the "
+     "response). Assembly tab: over occurrences, plus "
      "intended-vs-realized mate diffs when mates exist. Part tab: over the "
      "part's BODIES — catches a bracket floating inside one part, which "
      "the occurrence-level sweep cannot see.",
-     "near_tol, touch_tol"},
+     "deadline_s, max_pairs, near_tol, touch_tol"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
@@ -563,8 +699,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         return *v;
       };
       if (!p.contains("a") && !p.contains("b")) {
-        // No pair named: sweep EVERY visible, unsuppressed pair — the
-        // whole-assembly clash check a design review actually wants.
+        // No pair named: sweep every visible, unsuppressed pair — the
+        // whole-assembly clash check a design review actually wants. Only
+        // pairs whose boxes OVERLAP can clash, and only clashing pairs are
+        // reported: this used to run a boolean for all 31,878 pairs of a
+        // 253-occurrence arm and return every one of them.
         std::vector<Target> occs;
         for (const Occurrence& o : state.assembly->GetOccurrences()) {
           if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
@@ -576,19 +715,37 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (!t.bodies.empty())
             occs.push_back(std::move(t));
         }
+        std::vector<glm::vec3> mins(occs.size()), maxs(occs.size());
+        std::vector<size_t> keep;
+        for (size_t i = 0; i < occs.size(); ++i)
+          if (Measure::WorldBounds(occs[i].bodies, glm::mat4(1.0f), mins[i],
+                                   maxs[i]))
+            keep.push_back(i);
+        std::vector<glm::vec3> km, kx;
+        for (size_t i : keep) {
+          km.push_back(mins[i]);
+          kx.push_back(maxs[i]);
+        }
+        const size_t maxPairs = p.value("max_pairs", size_t{4000});
+        const double deadline = p.value("deadline_s", 20.0);
+        SweepPlan plan = PlanSweep(km, kx, 0.0, maxPairs);
         json pairs = json::array();
         bool any = false;
-        for (size_t i = 0; i < occs.size(); ++i)
-          for (size_t j = i + 1; j < occs.size(); ++j) {
-            const double v = pairVolume(occs[i], occs[j]);
-            if (v > 1e-9)
-              any = true;
-            pairs.push_back({{"a", occs[i].label},
-                             {"b", occs[j].label},
-                             {"clash", v > 1e-9},
-                             {"volume", v}});
-          }
-        return json{{"clash", any}, {"pairs", pairs}};
+        RunSweep(plan, deadline, [&](size_t ki, size_t kj) {
+          const Target& ta = occs[keep[ki]];
+          const Target& tb = occs[keep[kj]];
+          const double v = pairVolume(ta, tb);
+          if (v <= 1e-9)
+            return;
+          any = true;
+          pairs.push_back({{"a", ta.label},
+                           {"b", tb.label},
+                           {"clash", true},
+                           {"volume", v}});
+        });
+        json out{{"clash", any}, {"pairs", pairs}};
+        AttachSweepCoverage(out, plan, keep.size(), maxPairs, deadline);
+        return out;
       }
       const Target ta = targetOf(p.at("a"));
       const Target tb = targetOf(p.at("b"));
@@ -1155,12 +1312,6 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       }
       ents.push_back(std::move(e));
     }
-    // AABB gap: 0 when the boxes overlap; a lower bound on exact distance.
-    const auto boxGap = [](const Ent& a, const Ent& b) {
-      const glm::vec3 gap =
-          glm::max(glm::max(a.min - b.max, b.min - a.max), glm::vec3(0.0f));
-      return static_cast<double>(glm::length(gap));
-    };
     std::vector<size_t> parent(ents.size());
     for (size_t i = 0; i < parent.size(); ++i)
       parent[i] = i;
@@ -1170,14 +1321,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     json pairs = json::array(), nearMisses = json::array(),
          clashes = json::array();
     std::set<std::pair<uint64_t, uint64_t>> touchingIds;
-    for (size_t i = 0; i < ents.size(); ++i)
-      for (size_t j = i + 1; j < ents.size(); ++j) {
-        if (boxGap(ents[i], ents[j]) > nearTol)
-          continue; // provably clear by more than the near window
+    // Closest first, and bounded: on a 253-occurrence arm this loop is
+    // 31,878 pairs, and the ones sharing a PCB all pass the box test.
+    std::vector<glm::vec3> mins, maxs;
+    for (const Ent& e : ents) {
+      mins.push_back(e.min);
+      maxs.push_back(e.max);
+    }
+    const size_t maxPairs = p.value("max_pairs", size_t{4000});
+    const double deadline = p.value("deadline_s", 20.0);
+    SweepPlan plan = PlanSweep(mins, maxs, nearTol, maxPairs);
+    RunSweep(plan, deadline, [&](size_t i, size_t j) {
+      {
         const auto c = Measure::ContactBetween(ents[i].bodies, ents[i].xf,
                                                ents[j].bodies, ents[j].xf);
         if (!c)
-          continue;
+          return;
         const char* st = ContactState(*c, touchTol);
         pairs.push_back({{"a", ents[i].occ->name},
                          {"b", ents[j].occ->name},
@@ -1198,6 +1357,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                 {"b", ents[j].occ->name},
                                 {"distance", c->distance}});
       }
+    });
     std::map<size_t, std::vector<std::string>> comps;
     for (size_t i = 0; i < ents.size(); ++i)
       comps[find(i)].push_back(ents[i].occ->name);
@@ -1206,11 +1366,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       componentList.push_back(std::move(names));
     std::sort(componentList.begin(), componentList.end(),
               [](const auto& a, const auto& b) { return a.size() > b.size(); });
-    json out = {
-        {"occurrences", ents.size()},  {"connected", componentList.size() <= 1},
-        {"components", componentList}, {"pairs", pairs},
-        {"near_misses", nearMisses},   {"clashes", clashes},
-        {"touch_tol", touchTol},       {"near_tol", nearTol}};
+    json out = {{"connected", componentList.size() <= 1},
+                {"components", componentList},
+                {"pairs", pairs},
+                {"near_misses", nearMisses},
+                {"clashes", clashes},
+                {"touch_tol", touchTol},
+                {"near_tol", nearTol}};
+    AttachSweepCoverage(out, plan, ents.size(), maxPairs, deadline);
     if (!skipped.empty())
       out["skipped"] = skipped;
     // Intended vs realized: only meaningful when the assembly HAS mates —
