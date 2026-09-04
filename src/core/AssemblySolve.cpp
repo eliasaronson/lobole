@@ -537,6 +537,12 @@ void SetMateDof(Mate& m, MateDof dof, double value) {
     m.offset = static_cast<float>(value);
 }
 
+double RelationValue(const Relation& r, double a) {
+  if (r.kind == RelationKind::Cam)
+    return CamLift(r.lift, a) + r.phase;
+  return r.ratio * a + r.phase;
+}
+
 int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
   int wrote = 0;
   std::vector<Relation>& rels = asmDoc.GetRelations();
@@ -559,6 +565,11 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
     }
     if (r.mateA == r.mateB && r.dofA == r.dofB) {
       r.error = "a relation cannot couple a degree of freedom to itself";
+      continue;
+    }
+    if (r.kind == RelationKind::Cam && r.lift.size() < 2) {
+      r.error = "a cam relation needs a lift table of at least two "
+                "(angle, lift) points";
       continue;
     }
     usable[i] = true;
@@ -592,11 +603,15 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
       Mate* a = asmDoc.FindMateById(r.mateA);
       Mate* b = asmDoc.FindMateById(r.mateB);
       if (r.mateA == from && !isSettled(r.mateB)) {
-        SetMateDof(*b, r.dofB, r.ratio * MateDofValue(*a, r.dofA) + r.phase);
+        SetMateDof(*b, r.dofB, RelationValue(r, MateDofValue(*a, r.dofA)));
         settled.push_back(r.mateB);
         frontier.push_back(r.mateB);
         wrote++;
-      } else if (r.mateB == from && !isSettled(r.mateA) && r.ratio != 0.0) {
+      } else if (r.mateB == from && !isSettled(r.mateA) &&
+                 r.kind != RelationKind::Cam && r.ratio != 0.0) {
+        // A cam is deliberately absent here: many angles give one lift, so
+        // driving it backwards would have to pick a branch, and a plausible
+        // branch is the substitution this project refuses.
         SetMateDof(*a, r.dofA, (MateDofValue(*b, r.dofB) - r.phase) / r.ratio);
         settled.push_back(r.mateA);
         frontier.push_back(r.mateA);
@@ -604,7 +619,7 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
       } else if (r.mateA == from && r.mateB == from) {
         // A screw: one mate, two DOFs — the driven DOF is whichever the
         // caller changed, which this cannot know; A's DOF drives.
-        SetMateDof(*b, r.dofB, r.ratio * MateDofValue(*a, r.dofA) + r.phase);
+        SetMateDof(*b, r.dofB, RelationValue(r, MateDofValue(*a, r.dofA)));
         wrote++;
       }
     }
@@ -703,7 +718,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       if (ia == indexOfMate.end() || ib == indexOfMate.end())
         continue;
       loop.relations.push_back(
-          {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase});
+          {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase, r.lift});
     }
   }
   std::vector<bool> classified(asmDoc.GetMates().size(), false);

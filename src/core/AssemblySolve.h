@@ -102,6 +102,10 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId = 0);
 
 // Read/write one DOF of a mate by name; false when the mate type lacks it.
 bool MateHasDof(MateType type, MateDof dof);
+
+// What a relation makes of its driving value: `ratio * a + phase` for every
+// kind but a cam, which reads its lift table instead.
+double RelationValue(const Relation& r, double drivingValue);
 [[nodiscard]] double MateDofValue(const Mate& m, MateDof dof);
 void SetMateDof(Mate& m, MateDof dof, double value);
 

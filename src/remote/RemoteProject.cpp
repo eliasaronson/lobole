@@ -47,7 +47,9 @@ static constexpr MethodDoc ProjectMethods[] = {
      "Import a STEP file into the current project (XCAF: names, "
      "colors, real assemblies).",
      "as_assembly, path"},
-    {"export_step", "Export the active part (or {part}) to STEP {path}.",
+    {"export_step",
+     "Export to STEP {path}: the active part (or {part}), or — on an "
+     "assembly tab — every occurrence at its SOLVED placement.",
      "body, deflection, path"},
     {"export_stl", "Export to STL {path, deflection?}.",
      "body, deflection, path"},
@@ -861,6 +863,22 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // STEP / binary STL / native BREP. params:
     // {path, body?: index, deflection?: 0.1 (STL only)}
     const std::string path = p.at("path").get<std::string>();
+    // An ASSEMBLY exports every occurrence at its solved placement — the
+    // same walk export_visual uses. STEP is the interchange format, and
+    // "export the assembly" refusing with "switch to a part tab" made the
+    // one document kind a customer actually asks for unexportable except as
+    // a mesh (found by the T4 benchmark task, agent-scale plan G6).
+    if (state.assembly && m == "export_step") {
+      std::vector<CADShape> shapes;
+      for (const MeshExport::Item& item : ui::BuildVisualExportItems(state))
+        shapes.push_back(item.shape.Transformed(item.transform));
+      if (shapes.empty())
+        throw std::runtime_error(
+            "nothing to export: the assembly places no visible geometry");
+      if (!CADKernel::Instance().SaveSTEP(path, shapes))
+        throw std::runtime_error("STEP export failed writing " + path);
+      return json{{"path", path}, {"shapes", shapes.size()}};
+    }
     // Derived reference bodies are other parts' geometry: never exported.
     // `body` indexes the document's body list as get_state reports it.
     std::vector<Body> bodies;

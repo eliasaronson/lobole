@@ -75,13 +75,20 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates", "List mates with status/errors.", ""},
     {"add_relation",
-     "Couple two mates' degrees of freedom {type: gear|rack|screw|linear, a: "
-     "mate id, b: mate id}: dof_b = ratio * dof_a + phase. The ratio is "
-     "DERIVED from the kind's own numbers when given — gear: {teeth_a, "
-     "teeth_b} (ratio = -teeth_a/teeth_b, so meshing gears counter-rotate); "
-     "rack: {pitch_radius} mm (a's rotation drives b's slide); screw: "
-     "{pitch} mm per turn on ONE cylindrical mate (pass the same id as a and "
-     "b); linear: a bare {ratio}. `ratio` may be given directly for any kind; "
+     "Couple two mates' degrees of freedom {type: "
+     "gear|chain|rack|screw|linear|cam, a: mate id, b: mate id}: "
+     "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
+     "own numbers when given — gear: {teeth_a, teeth_b} (ratio = "
+     "-teeth_a/teeth_b, so meshing gears counter-rotate); CHAIN: the same "
+     "but the ratio KEEPS its sign, because a chain or belt turns both "
+     "sprockets the same way; rack: {pitch_radius} mm (a's rotation drives "
+     "b's slide); screw: {pitch} mm per turn on ONE cylindrical mate (pass "
+     "the same id as a and b); linear: a bare {ratio}. CAM is the exception "
+     "— a's rotation drives b's offset through a LIFT TABLE, not a ratio: "
+     "{lift: [[angle_deg, lift_mm], ...]} spanning one turn, or {rise, "
+     "duration_deg?, start_deg?} for a cosine lobe built for you. It is the "
+     "one relation that is not invertible (many angles give one lift), so it "
+     "drives forward only. `ratio` may be given directly for any other kind; "
      "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
      "teeth mesh. Dragging or set_mate on EITHER mate turns the other; inside "
      "a mate loop the relation is a solver row and lowers the DOF count. "
@@ -89,7 +96,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotation), and for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
      "degrees off parallel (docs/assemblies/relations-plan.md).",
-     "a, b, name, phase, pitch, pitch_radius, ratio, teeth_a, teeth_b, type"},
+     "a, b, duration_deg, lift, name, phase, pitch, pitch_radius, ratio, "
+     "rise, start_deg, teeth_a, teeth_b, type"},
     {"set_relation", "Edit a relation's {ratio?, phase?, name?} by {id}.",
      "id, name, phase, ratio"},
     {"remove_relation", "Remove a relation by id.", "id"},
@@ -794,14 +802,86 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     case RelationKind::Linear:
       r.dofA = r.dofB = MateDof::Offset;
       break;
+    case RelationKind::Chain:
+      // A gear whose ratio KEEPS its sign: a chain or a belt turns both
+      // sprockets the same way. Expressing one as a gear with a negated
+      // tooth count works and makes the sign a thing to remember instead of
+      // a thing to say, which is how a reversed conveyor gets modelled.
+      r.dofA = r.dofB = MateDof::Rotation;
+      if (p.contains("teeth_a") || p.contains("teeth_b")) {
+        const double za = p.value("teeth_a", 0.0), zb = p.value("teeth_b", 0.0);
+        if (za <= 0.0 || zb <= 0.0)
+          throw std::runtime_error(
+              "a chain ratio needs both teeth_a and teeth_b (positive)");
+        r.ratio = za / zb;
+      }
+      break;
+    case RelationKind::Cam: {
+      // A lift table, not a ratio: the follower's offset is a function of
+      // the cam's angle. Either the table itself, or the three numbers a
+      // cosine lobe is described by.
+      r.dofA = MateDof::Rotation;
+      r.dofB = MateDof::Offset;
+      if (p.contains("lift")) {
+        for (const json& pt : p.at("lift")) {
+          if (!pt.is_array() || pt.size() != 2)
+            throw std::runtime_error(
+                "lift is [[angle_deg, lift_mm], ...] — a point is a pair");
+          r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
+        }
+      } else if (p.contains("rise") || p.contains("duration_deg")) {
+        const double rise = p.value("rise", 0.0);
+        const double duration = p.value("duration_deg", 180.0);
+        const double start = p.value("start_deg", 0.0);
+        if (rise <= 0.0)
+          throw std::runtime_error("a cosine lobe needs rise > 0 (mm)");
+        if (duration <= 0.0 || duration >= 360.0)
+          throw std::runtime_error(
+              "duration_deg is the lobe's width, 0 < duration < 360");
+        // A full-rise cosine over `duration`, flat elsewhere: the standard
+        // harmonic lobe, sampled every 10 degrees of the lobe so the spline
+        // through it is the lobe and not a corner-cutting of it.
+        const int steps = 18;
+        for (int i = 0; i <= steps; i++) {
+          const double f = static_cast<double>(i) / steps;
+          const double angle = start + f * duration;
+          r.lift.emplace_back(angle,
+                              rise * 0.5 * (1.0 - std::cos(2.0 * M_PI * f)));
+        }
+        // The dwell: one point past the lobe, so the table spans the turn.
+        if (start + duration < 360.0)
+          r.lift.emplace_back(start + duration + (360.0 - duration) * 0.5, 0.0);
+      } else {
+        throw std::runtime_error(
+            "a cam needs its profile: lift [[angle_deg, lift_mm], ...], or "
+            "rise + duration_deg (+ start_deg) for a cosine lobe");
+      }
+      if (r.lift.size() < 2)
+        throw std::runtime_error("a cam's lift table needs at least 2 points");
+      std::sort(r.lift.begin(), r.lift.end());
+      for (size_t i = 0; i + 1 < r.lift.size(); i++)
+        if (r.lift[i + 1].first - r.lift[i].first < 1e-9)
+          throw std::runtime_error(
+              "two lift points share the angle " +
+              std::to_string(r.lift[i].first) +
+              " degrees — a profile is a function of the angle");
+      if (r.lift.front().first < 0.0 || r.lift.back().first >= 360.0)
+        throw std::runtime_error(
+            "lift angles are 0 <= angle < 360; the table wraps, so the last "
+            "point joins the first");
+      r.ratio = 1.0; // unused by a cam, but never zero (the zero check below)
+      break;
     }
-    if (p.contains("ratio"))
+    }
+    if (p.contains("ratio") && r.kind != RelationKind::Cam)
       r.ratio = p.at("ratio").get<double>();
-    else if (!(p.contains("teeth_a") || p.contains("pitch_radius") ||
+    else if (r.kind != RelationKind::Cam &&
+             !(p.contains("teeth_a") || p.contains("pitch_radius") ||
                p.contains("pitch")))
       throw std::runtime_error(
           "give the ratio, or what it is derived from: teeth_a + teeth_b for "
-          "a gear, pitch_radius for a rack, pitch for a screw");
+          "a gear or a chain, pitch_radius for a rack, pitch for a screw, a "
+          "lift table for a cam");
     if (r.ratio == 0.0)
       throw std::runtime_error("a relation's ratio cannot be zero");
     const auto lacks = [](const Mate& mm, MateDof dof) {

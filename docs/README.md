@@ -27,7 +27,7 @@ thing behind it invisible to the next person who looks.
 | [sketching/](sketching/plan.md) | the 2D constraint sketcher | `phase-*.md` per phase; `copy-links.md`, `reference-image-plan.md` |
 | [modeling/](modeling/plan.md) | 3D features | `toponaming.md` + `toponaming-design.md` (persistent face/edge refs), `m3-extrude.md`, `curves-3d-plan.md`, `thread-rib.md`, `regeneration.md`, `hole-standards.md` (**planned** — a hole that knows it is an M6 clearance, from 298 rows of vendored table), `derived-plan.md` (**D1–D4 done 2026-09-03**, v84 — A2 as a binder feature: another part's geometry copied into this one as a snapshot, a ghost to draw on, updated on request), `derived-gripper-dogfood.md` (the SO-101 gripper built on ghosts of the real servo and camera STEP: 19 findings, 8 fixed) |
 | [variables/](variables/plan.md) | parameters + expressions | |
-| [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent) |
+| [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent), `fanout.md` (several agents, several parts, one project — and why each needs its own worktree) |
 | [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `f7-merge-and-conflicts.md`, `f8-external-changes.md`, `f9-collaboration.md`, `f10-autosave-the-project.md`, `f11-seeing-what-changed.md`, `f7-handoff.md`, `collab-dogfood.md`, `baked-geometry.md`, `format.md` |
 | [ui/](ui/plan.md) | selection, tools, layout | `u1`, `u7`–`u13` rounds (`u12` keybindings, `u13` chrome + units), `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `direct-manipulation.md` (preview drag handles), `terminal-panel.md` (an embedded terminal for Claude Code), `gui-coverage.md`, `coverage-matrix.md` (**generated** — interactive tools x tab kinds, the asymmetry that keeps costing bugs), `gui-test-isolation.md` (why any shard partition must be valid), `dims-and-assembly-measure.md`, `long-operations.md` (**step 0 + phase 1 shipped 2026-09-01/02** — one poll entry point for the five long operations, then a job registry with `background_jobs`/`cancel_background_job` and the adaptive pocket cleared off the frame through a content-keyed cache; phases 2-4 moved the sync job, the FEM solves (with `mesh_study {async}`) and the STEP import onto it — **complete**) |
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `measure-v2.md` (measure reopened, in flight), `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
@@ -82,8 +82,8 @@ thing behind it invisible to the next person who looks.
   dead code), measured rather than estimated. All five stages shipped; the
   follow-ups at the bottom include one struck because its premise was wrong,
   which is the part worth reading.
-- **[agent-scale-plan.md](agent-scale-plan.md)** — **G0, G1a, G1b, G2 + G3
-  shipped 2026-09-04**, G4-G6 planned:
+- **[agent-scale-plan.md](agent-scale-plan.md)** — **all seven shipped
+  2026-09-04**:
   what a text-to-cad W16 exposed. Seven workstreams — datum frames a mate can name, a `batch` RPC and an SDK
   that speaks geometry, a motion study (driver, samples, scrub, animated GLB),
   mesh-BVH interference for sweeps, cam and chain relations, a fan-out test,

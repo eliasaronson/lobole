@@ -262,6 +262,10 @@ const char* RelationKindToString(RelationKind kind) {
     return "screw";
   case RelationKind::Linear:
     return "linear";
+  case RelationKind::Chain:
+    return "chain";
+  case RelationKind::Cam:
+    return "cam";
   }
   return "gear";
 }
@@ -275,8 +279,13 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Screw;
   if (s == "linear")
     return RelationKind::Linear;
-  throw std::runtime_error("unknown relation type '" + s +
-                           "' (expected one of: gear, rack, screw, linear)");
+  if (s == "chain")
+    return RelationKind::Chain;
+  if (s == "cam")
+    return RelationKind::Cam;
+  throw std::runtime_error(
+      "unknown relation type '" + s +
+      "' (expected one of: gear, rack, screw, linear, chain, cam)");
 }
 
 const char* MateDofToString(MateDof dof) {
@@ -304,6 +313,12 @@ json RelationToJson(const Relation& r) {
   j["dof_b"] = MateDofToString(r.dofB);
   j["ratio"] = r.ratio;
   j["phase"] = r.phase;
+  if (!r.lift.empty()) { // v88, cam only; absent for every other kind
+    json lift = json::array();
+    for (const auto& [angle, mm] : r.lift)
+      lift.push_back({angle, mm});
+    j["lift"] = std::move(lift);
+  }
   return j;
 }
 
@@ -352,6 +367,12 @@ Relation RelationFromJson(const json& j) {
   r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
   r.ratio = j.at("ratio").get<double>();
   r.phase = j.value("phase", 0.0);
+  for (const json& pt : j.value("lift", json::array())) { // v88
+    if (!pt.is_array() || pt.size() != 2)
+      throw std::runtime_error(
+          "a cam's lift table is [[angle_deg, lift_mm], ...]");
+    r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
+  }
   return r;
 }
 

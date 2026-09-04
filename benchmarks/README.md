@@ -117,13 +117,31 @@ failed dimension check is a failure to model, not a failure to guess.
 | `t2-stepped-shaft` | 2 | coaxial steps, and the centre of mass proves their order |
 | `t3-gusset-bracket` | 3 | a genuinely inclined face (the sketch-plane V-axis trap) |
 | `t3-parametric-bushing` | 3 | variables that drive geometry through a later edit |
+| `t4-slider-crank` | 4 | three PARTS and an ASSEMBLY: mates that have to place things where the geometry says, not where a number was typed |
+| `t5-crank-motion` | 5 | the same, plus **saying what it does** — the stroke over a full turn, and whether anything collides |
 
-`runners/reference.py` builds all eight by hand and must score 39/39. It costs
+`runners/reference.py` builds all ten by hand and must score 48/48. It costs
 nothing, it runs in about a minute, and it is the first thing to run when a
 sweep looks wrong: **if the reference arm fails, the harness or the app is
 broken, not the agent.** It is also where a task's expected numbers get checked
-— two of the eight were wrong when first written, and this caught both before a
-paid run ever started.
+— two of the first eight were wrong when written, and T4's were wrong twice
+(the largest solid is the piston, not the crank; and origin-to-origin mates
+stack all three parts on the crank axis, which the bbox check caught).
+
+### Why T4 and T5 exist
+
+The first two sweeps put every arm at 1.000, and the second one showed the
+other half of that ceiling: after three workstreams of new surface — named
+frames, a batch RPC, an SDK — the benchmark could not detect an improvement
+either, because **not one of the eight tasks used any of it.** T0–T3 are
+single parts. Nothing there has a mate, so nothing there can be made better
+or worse by anything to do with assemblies.
+
+T4 is the smallest task that cannot be done without placing one part against
+another, and T5 is the smallest that cannot be answered without moving it.
+Writing them found a capability gap on the first run: `export_step` refused
+on an assembly tab ("switch to a part tab"), so the one document kind a
+customer asks for could not be exported to the interchange format at all.
 
 ## Arms
 

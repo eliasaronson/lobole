@@ -7,6 +7,32 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## `thread/face_pick_fills_the_slot` fails in one shuffled order
+
+Found 2026-09-04 by the standing GUI suite, seed 36636 on shard 2. The Thread
+tool's viewport click resolves no face: `th->face.name` is empty at
+GuiTestsModeling.cpp:1287, so the tool reports no cylindrical face where the
+click landed on one. It passes alone, and it passes in most orders — the same
+binary, the same test, a different neighbour.
+
+**Order-dependent, and reproducible.** Replaying the archived order and seed
+fails every time, and it fails identically with the tree at that commit and
+with three workstreams' worth of uncommitted changes stashed away, so it is
+not new and is nothing to do with relations, motion studies or the benchmark.
+The archive is written for exactly this:
+
+    ~/.local/state/designer/gui-failures/20260904-183459-shard2/reproduce.sh
+
+Impact: one test, intermittently red in CI depending on the shuffle. The
+mechanism is unknown; the shape of it — a viewport pick that resolves nothing
+after some other test has run — points at leftover camera or selection state
+rather than at threads, which is what the shuffle was introduced to surface
+(docs/ui/gui-test-isolation.md). The fix starts by bisecting the recorded
+order: the neighbour that precedes it is the suspect, not the test itself.
+
+---
+
+
 ## `interference` reports a phantom whole-tooth clash at one exactly symmetric pose
 
 Found 2026-09-03 driving the three-gear train (`scratch/gear_train3.py`, m2

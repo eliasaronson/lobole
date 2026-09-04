@@ -108,12 +108,84 @@ def t3_parametric_bushing(d):
     d.call("set_variable", name="bore", expression="20")
 
 
+def _frame(d, name, origin, z=(0, 0, 1), x=(1, 0, 0)):
+    return d.call("add_feature", feature={
+        "type": "Frame", "name": name, "kind": "explicit",
+        "origin": list(origin), "z_axis": list(z), "x_axis": list(x)})["id"]
+
+
+def _mechanism(d):
+    """T4/T5's by-hand build: three parts, one assembly, three mates, left at
+    full reach.
+
+    Mated between NAMED FRAMES (v86), which is the only way to say "the rod's
+    first hole pivots on the crank's pin" without transcribing where either
+    of them is. Origin-to-origin mates stack all three parts on the crank
+    axis, which is what the first version of this did.
+    """
+    # --- the parts
+    d.call("add_part", name="crank")
+    d.call("add_feature", feature={
+        "type": "Cylinder", "name": "Disc", "center": [0, 0, 0],
+        "direction": [0, 0, 1], "radius": 28.0, "height": 8.0})
+    d.call("add_feature", feature={
+        "type": "Cylinder", "name": "Pin", "center": [20, 0, 8],
+        "direction": [0, 0, 1], "radius": 4.0, "height": 12.0})
+    _frame(d, "pin", (20, 0, 8))
+    # The crank is the fixed part, so it also carries the ground frame the
+    # piston slides along: Z of the frame is the slide direction.
+    _frame(d, "ground_x", (0, 0, 8), z=(1, 0, 0), x=(0, 0, 1))
+
+    d.call("add_part", name="rod")
+    d.call("add_feature", feature={
+        "type": "Box", "name": "Bar", "position": [-7, -6, 0],
+        "width": 84.0, "height": 12.0, "depth": 6.0})
+    holes = sketch(d, [circle(0, 0, 4.5), circle(70, 0, 4.5)])
+    extrude(d, holes, 8.0, mode="cut", name="Holes")
+    _frame(d, "big_end", (0, 0, 0))
+    _frame(d, "small_end", (70, 0, 0))
+
+    d.call("add_part", name="piston")
+    d.call("add_feature", feature={
+        "type": "Cylinder", "name": "Piston", "center": [-15, 0, 0],
+        "direction": [1, 0, 0], "radius": 15.0, "height": 30.0})
+    _frame(d, "wrist", (0, 0, 0))
+    _frame(d, "slide", (0, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
+
+    # --- the assembly: crank fixed; the rod pivots on the pin at one end and
+    # on the piston at the other; the piston is held to the X axis.
+    d.call("add_assembly", name="mechanism")
+    crank = d.call("add_occurrence", part="crank", fixed=True)["id"]
+    rod = d.call("add_occurrence", part="rod")["id"]
+    piston = d.call("add_occurrence", part="piston")["id"]
+    d.call("add_mate", type="revolute", name="big end",
+           a={"occurrence": crank, "frame": "pin"},
+           b={"occurrence": rod, "frame": "big_end"}, flipped=False)
+    d.call("add_mate", type="revolute", name="small end",
+           a={"occurrence": rod, "frame": "small_end"},
+           b={"occurrence": piston, "frame": "wrist"}, flipped=False)
+    d.call("add_mate", type="slider", name="bore",
+           a={"occurrence": crank, "frame": "ground_x"},
+           b={"occurrence": piston, "frame": "slide"}, flipped=False)
+    d.call("solve_assembly")
+
+
+def t4_slider_crank(d):
+    _mechanism(d)
+
+
+def t5_crank_motion(d):
+    _mechanism(d)
+
+
 BUILDERS = {
     "t0-plate": t0_plate, "t0-spacer": t0_spacer,
     "t1-mount-plate": t1_mount_plate, "t1-l-bracket": t1_l_bracket,
     "t2-flange": t2_flange, "t2-stepped-shaft": t2_stepped_shaft,
     "t3-gusset-bracket": t3_gusset_bracket,
     "t3-parametric-bushing": t3_parametric_bushing,
+    "t4-slider-crank": t4_slider_crank,
+    "t5-crank-motion": t5_crank_motion,
 }
 
 

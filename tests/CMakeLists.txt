@@ -316,6 +316,13 @@ add_test(NAME assembly_relations_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
 
+# Fan-out (agent-scale plan G5): three instances, three parts, one project —
+# and the refusal that makes two instances on ONE directory loud.
+add_test(NAME fanout_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fanout_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fanout_smoke PROPERTIES TIMEOUT 300)
+
 # Motion studies (agent-scale plan G2): a study over the RPC, run sync and
 # as a job, the collision table, a scrub, the animated GLB, the refusals.
 add_test(NAME motion_smoke

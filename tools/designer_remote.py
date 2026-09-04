@@ -65,8 +65,14 @@ class Designer:
 
     def close(self):
         # makefile() dups the socket fd — close BOTH, or the server never
-        # sees EOF and keeps serving a ghost client (the remote handles one
-        # client at a time, so the next connection would hang).
+        # sees EOF and keeps serving a ghost client.
+        #
+        # The server accepts up to EIGHT clients (RemoteServer.cpp's
+        # runaway-connection backstop) and drains them through ONE main-thread
+        # queue, so it is execution that is serialized, not connection. An
+        # earlier note here said it handled one client at a time; it does not,
+        # and several agents driving several instances is the point of
+        # docs/scripting/fanout.md.
         self.file.close()
         self.sock.close()
 

@@ -192,6 +192,37 @@ int main(int argc, char** argv) {
   out["area"] = Snap(surf.Mass());
   out["com"] = Vec(vol.CentreOfMass());
 
+  // Per-solid facts, ranked by volume descending (T4/T5): an assembly
+  // exported as several solids is graded by WHERE each one is, and the rank
+  // is a stable name for "the big one" / "the small one" that no feature
+  // name can fake. The aggregate com above cannot see a part that moved
+  // while another moved the opposite way.
+  {
+    std::vector<std::pair<double, json>> each;
+    for (TopExp_Explorer e(shape, TopAbs_SOLID); e.More(); e.Next()) {
+      GProp_GProps sv;
+      BRepGProp::VolumeProperties(e.Current(), sv);
+      Bnd_Box sb;
+      BRepBndLib::AddOptimal(e.Current(), sb);
+      json one;
+      one["volume"] = Snap(sv.Mass());
+      one["com"] = Vec(sv.CentreOfMass());
+      if (!sb.IsVoid()) {
+        Standard_Real xa, ya, za, xb, yb, zb;
+        sb.Get(xa, ya, za, xb, yb, zb);
+        one["bbox_size"] =
+            json::array({Snap(xb - xa), Snap(yb - ya), Snap(zb - za)});
+      }
+      each.emplace_back(sv.Mass(), one);
+    }
+    std::sort(each.begin(), each.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    json arr = json::array();
+    for (const auto& [v, one] : each)
+      arr.push_back(one);
+    out["solid_details"] = arr;
+  }
+
   std::map<std::string, int> by_kind;
   std::map<std::string, CylGroup> cyls;
   std::map<std::string, PlaneGroup> planes;

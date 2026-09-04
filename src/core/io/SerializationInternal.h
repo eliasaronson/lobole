@@ -17,10 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    87; // v87: assembly `motion` -- a MotionStudy: one mate DOF driven over a
+    88; // v88: relation kinds `chain` (a gear whose ratio keeps its sign — a
+        //      chain or belt does not reverse) and `cam` (rotation to offset
+        //      through a periodic LIFT TABLE, not a ratio), with the table
+        //      in `lift` (docs/agent-scale-plan.md, G4).
+        // (v87: assembly `motion` -- a MotionStudy: one mate DOF driven over a
         //      range in N samples, solved at each and clash-checked, so a
         //      mechanism's motion is a thing the document holds
-        //      (docs/agent-scale-plan.md, G2).
+        //      (docs/agent-scale-plan.md, G2).)
         // (v86: the `Frame` feature (a named datum frame: explicit, from one
         //      or several elements, or offset from another) and the mate
         //      connector anchor `{frame: <id>}` that mates to it by name

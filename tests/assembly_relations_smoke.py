@@ -149,6 +149,59 @@ def main():
         d.call("set_active_part", name="train")
         rels = d.call("list_relations")["relations"]
         expect(len(rels) == 1 and rels[0]["kind"] == "rack", f"reloaded: {rels}")
+
+        # ---- chain and cam (v88, agent-scale plan G4) -------------------
+        for r in d.call("list_relations")["relations"]:
+            d.call("remove_relation", id=r["id"])
+        # A chain keeps the sign a gear reverses: both sprockets turn the
+        # same way, which is the whole reason it is its own kind.
+        ch = d.call("add_relation", type="chain", a=a, b=b, teeth_a=12,
+                    teeth_b=36, name="chain")
+        expect(abs(ch["ratio"] - 1.0 / 3.0) < 1e-9,
+               f"a chain's ratio keeps its sign: {ch}")
+        d.call("set_mate", id=a, rotation=0.6)
+        expect(abs(mate(d, b)["rotation"] - 0.2) < 1e-5,
+               f"the driven sprocket turns the SAME way: "
+               f"{mate(d, b)['rotation']}")
+        d.call("remove_relation", id=ch["id"])
+        refused(d, "add_relation", "teeth_a", type="chain", a=a, b=b)
+
+        # A cam drives an offset through a lift table. The wheel's mate
+        # becomes cylindrical so it has one.
+        d.call("remove_mate", id=b)
+        cyl = origin_mate(d, "cylindrical", carrier, wheel,
+                          name="follower", offset=48.0)
+        refused(d, "add_relation", "lift", type="cam", a=a, b=cyl)
+        cam = d.call("add_relation", type="cam", a=a, b=cyl, rise=8.0,
+                     duration_deg=180, name="lobe")
+        expect(len(cam["lift"]) >= 19, f"a cosine lobe was built: {cam}")
+        expect("error" not in cam, f"the cam solved clean: {cam}")
+        # 90 degrees is the lobe's peak; 180 closes it; 270 dwells.
+        for deg, want in ((90.0, 8.0), (180.0, 0.0), (270.0, 0.0)):
+            d.call("set_mate", id=a, rotation=deg * math.pi / 180.0)
+            got = mate(d, cyl)["offset"]
+            expect(abs(got - want) < 1e-2,
+                   f"at {deg} deg the follower is at {got:.3f}, not {want}")
+        # Pushing the FOLLOWER does not turn the cam: many angles give one
+        # lift, so there is no answer and a plausible one would be a guess.
+        angle_before = mate(d, a)["rotation"]
+        d.call("set_mate", id=cyl, offset=4.0)
+        expect(abs(mate(d, a)["rotation"] - angle_before) < 1e-6,
+               "a cam drives forward only")
+        # An explicit table is taken as given, and a bad one is refused.
+        d.call("remove_relation", id=cam["id"])
+        tab = d.call("add_relation", type="cam", a=a, b=cyl, name="table",
+                     lift=[[0, 0], [90, 5], [180, 0], [270, 0]])
+        expect(len(tab["lift"]) == 4, f"the table is stored as given: {tab}")
+        d.call("set_mate", id=a, rotation=math.pi / 2)
+        expect(abs(mate(d, cyl)["offset"] - 5.0) < 1e-2,
+               f"and drives it: {mate(d, cyl)['offset']}")
+        d.call("remove_relation", id=tab["id"])
+        refused(d, "add_relation", "share the angle", type="cam", a=a, b=cyl,
+                lift=[[0, 0], [0, 5], [180, 0]])
+        refused(d, "add_relation", "0 <= angle < 360", type="cam", a=a, b=cyl,
+                lift=[[0, 0], [400, 5]])
+        refused(d, "add_relation", "rise > 0", type="cam", a=a, b=cyl, rise=0)
         d.close()
     finally:
         app.terminate()

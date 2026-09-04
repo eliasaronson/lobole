@@ -91,6 +91,38 @@ def _c_inclined(f, c):
     return c.get("min", 0) <= got <= c.get("max", 1 << 30), got
 
 
+def _c_solid_com(f, c):
+    """Where the i-th solid is, ranked by volume descending.
+
+    The aggregate `com` cannot see an assembly whose parts moved in opposite
+    directions, which is exactly what a mechanism does — so a task with more
+    than one body grades each one's own position.
+    """
+    solids = f.get("solid_details") or []
+    i = c.get("solid", 0)
+    if i >= len(solids):
+        return False, {"solids": len(solids)}
+    got = solids[i].get("com")
+    if not got:
+        return False, None
+    tol = c.get("tol", 0.5)
+    return all(_within(x, y, tol) for x, y in zip(got, c["value"])), got
+
+
+def _c_solid_volume(f, c):
+    """The i-th solid's own volume, ranked by volume descending."""
+    solids = f.get("solid_details") or []
+    i = c.get("solid", 0)
+    if i >= len(solids):
+        return False, {"solids": len(solids)}
+    got = solids[i].get("volume")
+    if "value" in c:
+        pct = c.get("tol_pct", 1.0)
+        return abs(got - c["value"]) <= abs(c["value"]) * pct / 100.0, got
+    lo, hi = c.get("min", 0.0), c.get("max", float("inf"))
+    return lo <= got <= hi, got
+
+
 def _c_com(f, c):
     got = f.get("com")
     if not got:
@@ -106,6 +138,8 @@ CHECKS = {
     "cyl_group": _c_cyl_group,
     "inclined_planes": _c_inclined,
     "com": _c_com,
+    "solid_com": _c_solid_com,
+    "solid_volume": _c_solid_volume,
 }
 
 

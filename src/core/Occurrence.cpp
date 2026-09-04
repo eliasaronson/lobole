@@ -1,6 +1,7 @@
 #include "core/Occurrence.h"
 
 #include <algorithm>
+#include <cmath>
 
 uint64_t AssemblyDocument::AddOccurrence(Occurrence occ) {
   occ.id = m_nextId++;
@@ -126,6 +127,69 @@ const Relation* AssemblyDocument::FindRelationById(uint64_t id) const {
     if (r.id == id)
       return &r;
   return nullptr;
+}
+
+namespace {
+// Catmull-Rom through the table's points, wrapped: a periodic profile with a
+// continuous slope. Linear interpolation would be simpler and would give the
+// loop solver a Jacobian that jumps at every table point.
+double CamAt(const std::vector<std::pair<double, double>>& t, double deg,
+             double* slope) {
+  const size_t n = t.size();
+  const auto wrapDeg = [](double d) {
+    d = std::fmod(d, 360.0);
+    return d < 0.0 ? d + 360.0 : d;
+  };
+  deg = wrapDeg(deg);
+  // The span this angle falls in, with the table treated as a ring.
+  size_t i = 0;
+  while (i + 1 < n && t[i + 1].first <= deg)
+    i++;
+  const auto at = [&](long k) {
+    const long m = static_cast<long>(n);
+    const long j = ((k % m) + m) % m;
+    return t[static_cast<size_t>(j)];
+  };
+  const double a0 = t[i].first;
+  const double a1 = (i + 1 < n) ? t[i + 1].first : t[0].first + 360.0;
+  const double span = a1 - a0;
+  if (span <= 1e-12) {
+    if (slope)
+      *slope = 0.0;
+    return t[i].second;
+  }
+  const double u = (deg - a0) / span;
+  const double p0 = at(static_cast<long>(i) - 1).second, p1 = t[i].second;
+  const double p2 = at(static_cast<long>(i) + 1).second;
+  const double p3 = at(static_cast<long>(i) + 2).second;
+  const double u2 = u * u, u3 = u2 * u;
+  const double value = 0.5 * ((2.0 * p1) + (-p0 + p2) * u +
+                              (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 +
+                              (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u3);
+  if (slope) {
+    const double dvdu =
+        0.5 * ((-p0 + p2) + 2.0 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u +
+               3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u2);
+    // mm per radian: du/ddeg * ddeg/drad.
+    *slope = dvdu / span * (180.0 / 3.14159265358979323846);
+  }
+  return value;
+}
+} // namespace
+
+double CamLift(const std::vector<std::pair<double, double>>& table,
+               double angleRad, double* slopeOut) {
+  if (table.empty()) {
+    if (slopeOut)
+      *slopeOut = 0.0;
+    return 0.0;
+  }
+  if (table.size() == 1) {
+    if (slopeOut)
+      *slopeOut = 0.0;
+    return table[0].second;
+  }
+  return CamAt(table, angleRad * 180.0 / 3.14159265358979323846, slopeOut);
 }
 
 uint64_t AssemblyDocument::AddMotionStudy(MotionStudy study) {

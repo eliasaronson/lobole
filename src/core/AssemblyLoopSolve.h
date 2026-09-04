@@ -75,6 +75,10 @@ struct LoopRelation {
   MateDof dofB = MateDof::Rotation;
   double ratio = -1.0;
   double phase = 0.0;
+  // A cam's lift table (v88), empty for every other kind. When set, the row
+  // is dofB - lift(dofA) - phase rather than dofB - ratio*dofA - phase, and
+  // the solver differentiates the spline rather than a constant.
+  std::vector<std::pair<double, double>> lift;
 };
 
 struct LoopProblem {

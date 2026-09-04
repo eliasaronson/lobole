@@ -1,0 +1,45 @@
+{
+  "id": "t4-slider-crank",
+  "tier": 4,
+  "title": "Slider-crank assembly",
+  "prompt": "All dimensions are millimetres. Build exactly what is described — no fillets, chamfers, draft or extra features unless the description asks for them. Export nothing; leave the work in the document.\n\nThree separate PARTS, then one ASSEMBLY that places all three and mates them so the mechanism actually articulates.\n\nThe parts:\n- \"crank\": a disc 56 diameter and 8 thick, its axis along Z, its flat back face on Z=0; plus a pin 8 diameter standing 12 proud of the disc's front face (so from Z=8 to Z=20), its axis 20 from the disc's axis.\n- \"rod\": a bar 84 long, 12 wide and 6 thick, lying along X from X=-7 to X=77, centred on Y=0, from Z=0 to Z=6. It has two holes through the thickness: 9 diameter at (0, 0) and 9 diameter at (70, 0).\n- \"piston\": a cylinder 30 diameter and 30 long, its axis along X, spanning X=-15 to X=15, centred on the origin.\n\nThe assembly, named \"mechanism\":\n- place the crank with its axis on the Z axis and its back face on Z=0;\n- place the rod so its first hole is on the crank pin's axis;\n- place the piston so its axis passes through the rod's second hole;\n- mate them so the crank turns about its own axis, the rod's first hole pivots on the crank's pin, the rod's second hole pivots on the piston, and the piston is held to slide along the X axis.\n\nSet the crank so the pin is on the +X side of the crank axis (the mechanism at its longest reach), and leave the assembly there.",
+  "checks": [
+    {
+      "kind": "solids",
+      "min": 3,
+      "max": 4,
+      "why": "three parts placed (the crank may export as one solid or two)"
+    },
+    {
+      "kind": "solid_volume",
+      "solid": 0,
+      "value": 21205.75,
+      "tol_pct": 3.0,
+      "why": "the largest solid is the piston, 30 dia x 30"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 9,
+      "internal": true,
+      "count": 2,
+      "why": "both rod holes, drilled and not faked"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 30,
+      "internal": false,
+      "count": 1,
+      "why": "the piston's outside"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        133,
+        56,
+        30
+      ],
+      "tol": 3.0,
+      "why": "mated and left at full reach: the crank's -X edge to the piston's +X end"
+    }
+  ]
+}

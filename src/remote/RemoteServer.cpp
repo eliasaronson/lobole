@@ -789,8 +789,9 @@ static const std::set<std::string> kNoPartDoc = {
     "add_motion_study", "set_motion_study", "remove_motion_study",
     "list_motion_studies", "run_motion_study", "motion_status",
     "set_motion_pose", "export_motion",
-    // export_visual works on a part OR an assembly (occurrence walk).
-    "export_visual",
+    // export_visual and export_step both work on a part OR an assembly
+    // (the same occurrence walk, at solved placements).
+    "export_visual", "export_step",
     // Clearing the compare_geometry overlay must work from any tab — the
     // overlay is part-scoped, but switching tabs is how you leave it behind.
     "clear_geometry_delta",

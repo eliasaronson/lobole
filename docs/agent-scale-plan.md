@@ -508,7 +508,7 @@ overlapping / clear / wholly-enclosed pairs, the deflection scaling with the
 body, the placement-keyed cache, and the speed ratio) plus the `mode: mesh`
 case in `contact_smoke.py`. 1067 headless, 278 GUI.
 
-## G4 — Cam and chain relations (one day)
+## G4 — Cam and chain relations — SHIPPED 2026-09-04
 
 - `RelationKind::Chain`: gear with the sign kept (a chain does not reverse):
   `ratio = +teeth_a / teeth_b`. One row in `add_relation`; the chain itself
@@ -526,13 +526,37 @@ case in `contact_smoke.py`. 1067 headless, 278 GUI.
 - Serialization: `RelationToJson` gains `table` (SerializeAssembly.cpp:291);
   the same v86 bump as G2.
 
-Gate: relation unit cases (a full turn returns the valve to seat; the table
-is periodic or refused); `slider_crank.py` gains a camshaft on a 2:1 gear
-relation and two valves; `motion_smoke.py` checks lift at the lobe's peak.
+### As built
 
-## G5 — Fan-out: N builders on N parts (half a day)
+Both kinds, v88 (golden `assembly/v88-chain-and-cam`, history row).
 
-Nothing to build, one thing to prove and one to fix:
+`chain` is a gear whose ratio KEEPS its sign, because a chain or a belt turns
+both sprockets the same way. It is worth its own kind rather than a gear with
+a negated tooth count: the negation makes the sign a thing to remember
+instead of a thing to say, and that is how a conveyor gets modelled running
+backwards.
+
+`cam` is the one relation that is not a ratio. The follower's offset comes
+from a periodic LIFT TABLE (`[[angle_deg, lift_mm], ...]`), interpolated by a
+Catmull-Rom spline — not a polyline, because the loop solver differentiates
+this numerically and a polyline hands it a Jacobian that jumps at every
+table point. `add_relation` takes the table, or `{rise, duration_deg,
+start_deg}` and builds a cosine lobe.
+
+It is also the one relation that **only drives forwards**. Many angles give
+one lift, so propagating backwards would have to pick a branch, and a
+plausible branch is the substitution this project refuses: pushing the
+follower leaves the camshaft where it was, and the test says so.
+
+Gate: three cases in `test_assembly_relations.cpp` (the chain's sign against
+the gear's, the profile read back at its peak and its dwell, the slope
+continuous across a table point — which is what the solver differentiates —
+forward drive and the refusal to be driven back, and the v88 round trip), plus
+the chain and cam half of `assembly_relations_smoke.py`.
+
+## G5 — Fan-out — SHIPPED 2026-09-04
+
+Nothing to build, one thing to prove and one to fix — both done:
 
 - `docs/scripting/fanout.md`: the recipe — N headless instances on scratch
   ports (`tools/scratch_port.py`), one worktree each (F9), one part each,
@@ -544,9 +568,21 @@ Nothing to build, one thing to prove and one to fix:
   refusal: two instances on ONE project directory, the second save is
   refused by the F8 stamp, not corrupted.
 - Fix the client's comment that the server "handles one client at a time":
-  it accepts up to 8 and executes serially (`RemoteServer.cpp:277`).
+  it accepts up to 8 and executes serially (`RemoteServer.cpp:277`). Done —
+  connections are not serialized, execution is.
 
-## G6 — Benchmark above T3 (one day + a sweep)
+### As built
+
+`docs/scripting/fanout.md` is the recipe, and `tests/fanout_smoke.py` is the
+proof: three instances serve at once, three parts built in three of them
+merge into one project (the directory format is one file per part, so the
+merge is disjoint by construction), and — the half that matters — two
+instances on ONE directory is LOUD. The second save is refused by the F8 disk
+stamp, naming what happened, and the first agent's edit survives. That
+refusal is the reason a fan-out uses a worktree per agent rather than a
+shared directory, and it had never been run.
+
+## G6 — Benchmark above T3 — SHIPPED 2026-09-04
 
 The report says the harness cannot detect a regression; the fix is tasks
 that can fail.
@@ -559,8 +595,35 @@ that can fail.
   report whether anything collides". Scored: `export_step` at t = 0 and
   t = 0.5 → two oracle reads → the piston's `solid_com` moved by the stroke.
   Labelled, not scored: the app's `clean: true` (`"source": "app"`).
-- `reference.py` builds both by hand (39 → 47 checks); a sweep before G1b
-  and after; results committed, never overwritten.
+- `reference.py` builds both by hand (39 → 48 checks); results committed,
+  never overwritten.
+
+### As built
+
+`t4-slider-crank` (three parts, one assembly, three mates, left at full
+reach) and `t5-crank-motion` (the same, and SAY what it does: the stroke over
+a full turn and whether anything collides). The oracle gained per-solid facts
+— volume, centre of mass and bbox per solid, ranked by volume — because an
+aggregate centre of mass cannot see a mechanism whose parts moved in opposite
+directions, which is what a mechanism does. Two new check kinds read them:
+`solid_com` and `solid_volume`.
+
+`reference.py` builds both by hand and the suite scores **48/48**.
+
+**Writing them found a capability gap on the first run**, which is what a
+task above T3 is for: `export_step` REFUSED on an assembly tab ("switch to a
+part tab"), so the one document kind a customer asks for could not be
+exported to the interchange format at all — only as a mesh. It now walks the
+occurrences at their solved placements, the same walk `export_visual` uses.
+
+The reference build also had to be rewritten onto NAMED FRAMES (G0): mated
+origin-to-origin, all three parts stack on the crank axis, and the bbox check
+caught it. That is the first time the benchmark has exercised anything from
+this round, which was the entire point of adding it.
+
+**Owed:** a sweep with the new tasks in. The previous one is committed and
+says why it could not measure this round; the next one is the first that
+can.
 
 ## Acceptance: the single-cylinder engine
 

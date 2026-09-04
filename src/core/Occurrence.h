@@ -190,7 +190,13 @@ struct ExplodedView {
 // is one cylindrical mate's own rotation to its own offset (pitch / 2pi),
 // and linear is slide-to-slide. Enforced by propagation in a mate tree and
 // as a residual row inside a loop.
-enum class RelationKind { Gear, Rack, Screw, Linear };
+// gear:  rotation -> rotation, ratio -zA/zB (meshing teeth reverse)
+// chain: rotation -> rotation, ratio +zA/zB (a chain or a belt does NOT)
+// rack:  rotation -> offset, ratio = pitch radius (mm per radian)
+// screw: one cylindrical mate's rotation -> its own offset, pitch/2pi
+// linear: offset -> offset
+// cam:   rotation -> offset through a LIFT TABLE, not a ratio
+enum class RelationKind { Gear, Rack, Screw, Linear, Chain, Cam };
 enum class MateDof { Rotation, Offset };
 
 struct Relation {
@@ -203,8 +209,24 @@ struct Relation {
   MateDof dofB = MateDof::Rotation;
   double ratio = -1.0;
   double phase = 0.0; // in dofB's unit (radians or mm)
-  std::string error;  // set by the solve: a mate gone, a DOF missing
+  // Cam only (v88): the lift profile, as (angle in DEGREES, lift in mm)
+  // rising by angle and spanning one full turn. Interpolated by a periodic
+  // Catmull-Rom spline, so the follower's motion has a continuous slope —
+  // the loop solver differentiates this numerically, and a table read as a
+  // polyline would hand it a Jacobian that jumps at every sample.
+  //
+  // A cam is the one relation that is NOT invertible: many angles give the
+  // same lift, so propagation runs forward only and the reverse direction is
+  // refused rather than picking a branch.
+  std::vector<std::pair<double, double>> lift;
+  std::string error; // set by the solve: a mate gone, a DOF missing
 };
+
+// The lift a cam profile gives at `angleRad`, and its slope (mm per radian).
+// Periodic over one turn: the table wraps, so a crank turning past 360 sees
+// the same profile again. An empty table is a zero lift.
+double CamLift(const std::vector<std::pair<double, double>>& table,
+               double angleRad, double* slopeOut = nullptr);
 
 // A motion study (v87, docs/agent-scale-plan.md G2): ONE mate's degree of
 // freedom driven from `from` to `to` in `samples` steps, the assembly solved

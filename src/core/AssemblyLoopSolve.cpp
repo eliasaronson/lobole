@@ -360,6 +360,7 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     int colA, colB;
     double ratio, phase;
     bool rotationB;
+    std::vector<std::pair<double, double>> lift; // cam only (v88)
   };
   std::vector<RelationRow> relRows;
   for (const LoopRelation& r : problem.relations) {
@@ -369,7 +370,8 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
         DofColumn(problem.mates[r.mateB].type, r.dofB, pack.columnOf[r.mateB]);
     if (ca < 0 || cb < 0)
       continue;
-    relRows.push_back({ca, cb, r.ratio, r.phase, r.dofB == MateDof::Rotation});
+    relRows.push_back(
+        {ca, cb, r.ratio, r.phase, r.dofB == MateDof::Rotation, r.lift});
   }
   const int cutRows = static_cast<int>(problem.cut.size()) * 6;
   const int rows = cutRows + static_cast<int>(relRows.size());
@@ -398,7 +400,14 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     // part is, so radians and millimetres weigh alike in the least squares.
     for (size_t k = 0; k < relRows.size(); k++) {
       const RelationRow& rr = relRows[k];
-      const double v = qq[rr.colB] - rr.ratio * qq[rr.colA] - rr.phase;
+      // A cam reads its lift table where the others multiply by a ratio.
+      // The residual is still "what B is, less what A says it should be",
+      // and the numeric Jacobian differentiates the spline — which is why
+      // the profile is interpolated smoothly rather than as a polyline.
+      const double want = rr.lift.empty()
+                              ? rr.ratio * qq[rr.colA] + rr.phase
+                              : CamLift(rr.lift, qq[rr.colA]) + rr.phase;
+      const double v = qq[rr.colB] - want;
       r[cutRows + static_cast<int>(k)] = rr.rotationB ? v * charLen : v;
     }
     if (keepWorld)

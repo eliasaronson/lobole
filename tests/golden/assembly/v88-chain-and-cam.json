@@ -1,0 +1,175 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 4,
+      "mate_type": "revolute",
+      "name": "",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 3
+      },
+      "flipped": false,
+      "id": 5,
+      "mate_type": "cylindrical",
+      "name": "",
+      "offset": 48.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Carrier",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Pinion",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 3,
+      "name": "Wheel",
+      "part_id": 3,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "relations": [
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "id": 6,
+      "kind": "chain",
+      "mate_a": 4,
+      "mate_b": 5,
+      "name": "timing chain",
+      "phase": 0.0,
+      "ratio": 0.5,
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "offset",
+      "id": 7,
+      "kind": "cam",
+      "lift": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          45.0,
+          4.0
+        ],
+        [
+          90.0,
+          8.0
+        ],
+        [
+          135.0,
+          4.0
+        ],
+        [
+          180.0,
+          0.0
+        ],
+        [
+          270.0,
+          0.0
+        ]
+      ],
+      "mate_a": 5,
+      "mate_b": 5,
+      "name": "inlet lobe",
+      "phase": 0.0,
+      "ratio": 1.0,
+      "type": "Relation"
+    }
+  ],
+  "version": 88
+}

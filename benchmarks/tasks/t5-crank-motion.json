@@ -1,0 +1,42 @@
+{
+  "id": "t5-crank-motion",
+  "tier": 5,
+  "title": "Slider-crank, and what it does",
+  "prompt": "All dimensions are millimetres. Build exactly what is described — no fillets, chamfers, draft or extra features unless the description asks for them.\n\nFirst build the mechanism.\n\nThree separate PARTS, then one ASSEMBLY that places all three and mates them so it articulates:\n- \"crank\": a disc 56 diameter and 8 thick, its axis along Z, its flat back face on Z=0; plus a pin 8 diameter standing 12 proud of the disc's front face (so from Z=8 to Z=20), its axis 20 from the disc's axis.\n- \"rod\": a bar 84 long, 12 wide and 6 thick, lying along X from X=-7 to X=77, centred on Y=0, from Z=0 to Z=6, with 9 diameter holes through the thickness at (0, 0) and (70, 0).\n- \"piston\": a cylinder 30 diameter and 30 long, its axis along X, spanning X=-15 to X=15, centred on the origin.\n\nThe assembly, named \"mechanism\", mates them so the crank turns about its own axis, the rod's first hole pivots on the crank's pin, the rod's second hole pivots on the piston, and the piston is held to slide along the X axis.\n\nThen SAY WHAT IT DOES. Turn the crank through a full revolution and report the piston's stroke — how far it travels between its extremes — and whether anything collides at any point in that revolution. Report both in your final answer.\n\nFinally, leave the crank set so the pin is on the +X side of the crank axis (the mechanism at full reach).",
+  "checks": [
+    {
+      "kind": "solids",
+      "min": 3,
+      "max": 4,
+      "why": "three parts placed"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 9,
+      "internal": true,
+      "count": 2,
+      "why": "both rod holes"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        133,
+        56,
+        30
+      ],
+      "tol": 3.0,
+      "why": "left at full reach, as asked"
+    },
+    {
+      "kind": "solid_com",
+      "solid": 0,
+      "value": [
+        90,
+        0,
+        8
+      ],
+      "tol": 4.0,
+      "why": "the piston is at its far extreme, not somewhere mid-stroke"
+    }
+  ]
+}
