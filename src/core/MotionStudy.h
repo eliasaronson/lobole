@@ -49,6 +49,10 @@ struct Sample {
 
 struct Result {
   std::vector<Sample> samples;
+  // Pairs skipped because they are rigid to each other over the whole study
+  // — bolted joints, a part and the frame it is fastened to. The motion
+  // cannot make them collide; `contact_report` says whether they already do.
+  size_t pairsRigid = 0;
   bool clean = true;         // no clash at any sample, and every one solved
   size_t worstSample = 0;    // the sample with the most clashes (or the
                              // first unsolved one)

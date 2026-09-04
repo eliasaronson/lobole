@@ -373,8 +373,27 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     relRows.push_back(
         {ca, cb, r.ratio, r.phase, r.dofB == MateDof::Rotation, r.lift});
   }
+  // A pinned DOF is one more row: q[col] - value = 0. It is a row rather
+  // than a removed column so an over-driven mechanism reports a residual
+  // instead of silently refusing to move — the same treatment relations get.
+  struct PinRow {
+    int col;
+    double value;
+    bool rotation;
+  };
+  std::vector<PinRow> pinRows;
+  for (const LoopPin& pin : problem.pinned) {
+    if (pin.mate >= problem.mates.size())
+      continue;
+    const int col = DofColumn(problem.mates[pin.mate].type, pin.dof,
+                              pack.columnOf[pin.mate]);
+    if (col < 0)
+      continue;
+    pinRows.push_back({col, pin.value, pin.dof == MateDof::Rotation});
+  }
   const int cutRows = static_cast<int>(problem.cut.size()) * 6;
-  const int rows = cutRows + static_cast<int>(relRows.size());
+  const int rows = cutRows + static_cast<int>(relRows.size()) +
+                   static_cast<int>(pinRows.size());
   std::vector<double> q = SeedQ(problem.mates, pack);
 
   const double charLen =
@@ -409,6 +428,13 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
                               : CamLift(rr.lift, qq[rr.colA]) + rr.phase;
       const double v = qq[rr.colB] - want;
       r[cutRows + static_cast<int>(k)] = rr.rotationB ? v * charLen : v;
+    }
+    // The pinned rows, in the same units as the rest.
+    const int pinBase = cutRows + static_cast<int>(relRows.size());
+    for (size_t k = 0; k < pinRows.size(); k++) {
+      const PinRow& pr = pinRows[k];
+      const double v = qq[pr.col] - pr.value;
+      r[pinBase + static_cast<int>(k)] = pr.rotation ? v * charLen : v;
     }
     if (keepWorld)
       world = std::move(w);
@@ -593,6 +619,12 @@ std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
     out[slotFor(occ)].sub.anchor.emplace_back(occ, at);
   // A relation is a row only where both its mates live in ONE component;
   // across components it is propagation's business (AssemblySolve.cpp).
+  for (const LoopPin& pin : p.pinned) {
+    if (pin.mate >= p.mates.size())
+      continue;
+    Component& c = out[slotFor(p.mates[pin.mate].aOcc)];
+    c.sub.pinned.push_back({subIndexOf[pin.mate], pin.dof, pin.value});
+  }
   for (const LoopRelation& r : p.relations) {
     const size_t sa = slotFor(p.mates[r.mateA].aOcc);
     const size_t sb = slotFor(p.mates[r.mateB].aOcc);

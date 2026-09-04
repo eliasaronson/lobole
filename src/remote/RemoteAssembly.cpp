@@ -132,7 +132,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "and leaving it out THERE is refused rather than resolved to the first. "
      "The SIZE comes from the hole's own diameter "
      "(the clearance table read backwards) and the LENGTH from the stack the "
-     "axis passes through, snapped to a length that size is made in. Returns "
+     "axis passes through, snapped to a length that size is made in. Reading "
+     "a diameter backwards is AMBIGUOUS for 46 of the table's 111 sizes — 11 "
+     "mm is both an M9 Loose and an M10 Normal clearance — and those are "
+     "refused naming every candidate rather than answered with whichever the "
+     "table lists first; pass `size` (\"M10\") to say which, or drill the "
+     "hole with a Hole feature, which records the fit it was made for. A "
+     "`size` given is CHECKED against the hole, not believed. Returns "
      "{size, clearance, grip_mm, length_mm, blind, summary} — the summary "
      "decomposes the stack (\"Plate 12.0, gap 3.0, Bracket 26.5\"), because a "
      "gap is either an unmodelled gasket or two parts that were meant to "
@@ -157,8 +163,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "second bolt across one already joined would close a loop the solver "
      "reports as over-constrained. `mates` is empty when there was nothing "
      "new to join.",
-     "drive, dry_run, far_end, nut, rim, standard, washer, washer_under_head, "
-     "washer_under_nut"},
+     "drive, dry_run, far_end, nut, rim, size, standard, washer, "
+     "washer_under_head, washer_under_nut"},
     {"bom",
      "Bill of materials (aggregated part counts, masses). A row generated "
      "from a standard carries {standard, designation} — the two fields a "
@@ -244,6 +250,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     request.standard = p.value("standard", std::string("iso4762"));
     request.drive = p.value("drive", std::string{});
     request.washer = p.value("washer", std::string("iso7089"));
+    request.size = p.value("size", std::string{});
     request.nut = p.value("nut", std::string{});
     request.washerUnderHead = p.value("washer_under_head", false);
     request.washerUnderNut = p.value("washer_under_nut", false);
@@ -711,7 +718,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
     (void)assembly::PropagateRelations(*state.assembly, mate->id);
-    ui::SolveActiveAssembly(state);
+    // Hold what was just set: in a closed loop the solver would otherwise
+    // treat this DOF as one more unknown and move it.
+    ui::SolveActiveAssemblyDriven(state, mate->id,
+                                  p.contains("offset") ? MateDof::Offset
+                                                       : MateDof::Rotation);
     json out = DocumentIO::MateToJson(*mate);
     if (!mate->error.empty())
       out["error"] = mate->error;
@@ -841,16 +852,31 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         // A full-rise cosine over `duration`, flat elsewhere: the standard
         // harmonic lobe, sampled every 10 degrees of the lobe so the spline
         // through it is the lobe and not a corner-cutting of it.
+        // The profile is PERIODIC, so every angle is wrapped into [0, 360):
+        // a lobe that opens at 200 degrees and lasts 150 runs past the end
+        // of the turn, and generating 455 made the table refuse itself.
+        const auto wrap = [](double d) {
+          d = std::fmod(d, 360.0);
+          return d < 0.0 ? d + 360.0 : d;
+        };
+        // Both ENDS of the lobe, not just the opening one. `duration` is
+        // less than a full turn, so the point at f = 1 is where the lobe
+        // CLOSES and is a different angle from where it opens — dropping it
+        // (on the reasoning that a periodic table's last point is its first)
+        // left a 180-degree lobe with no point at 180. Its closing flank
+        // then ran from the 170-degree sample all the way to the dwell in
+        // the middle of the base circle, and the follower stood 0.18 mm off
+        // its seat at the angle the lobe was specified to close at.
         const int steps = 18;
         for (int i = 0; i <= steps; i++) {
           const double f = static_cast<double>(i) / steps;
-          const double angle = start + f * duration;
-          r.lift.emplace_back(angle,
+          r.lift.emplace_back(wrap(start + f * duration),
                               rise * 0.5 * (1.0 - std::cos(2.0 * M_PI * f)));
         }
-        // The dwell: one point past the lobe, so the table spans the turn.
-        if (start + duration < 360.0)
-          r.lift.emplace_back(start + duration + (360.0 - duration) * 0.5, 0.0);
+        // The dwell: one point in the middle of the closed span, so the
+        // spline has something to hold flat between lobes.
+        r.lift.emplace_back(wrap(start + duration + (360.0 - duration) * 0.5),
+                            0.0);
       } else {
         throw std::runtime_error(
             "a cam needs its profile: lift [[angle_deg, lift_mm], ...], or "

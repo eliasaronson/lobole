@@ -10,6 +10,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <vector>
 
 namespace parts {
 
@@ -469,10 +470,40 @@ ThreadForClearance(double diameter, std::string* error) {
   // tolerance is there to absorb a float round trip, not to let a 6.5 mm hole
   // pass as an M6 clearance.
   constexpr double kTol = 0.005;
+  // EVERY match, not the first. 46 of the 111 diameters in this table are a
+  // clearance for two different threads — 11.0 mm is an M9 Loose and an M10
+  // Normal — and returning whichever came first in table order silently
+  // answered every one of them with the SMALLER thread on the LOOSER fit.
+  // For 11 mm that was M9, which no standard stocks, so a perfectly ordinary
+  // M10 clearance hole came back as a baffling refusal about M9.
+  std::vector<std::pair<std::string, std::string>> matches;
   for (const std::string& size : table.order)
     for (const auto& [fit, value] : table.rows.at(size))
       if (std::abs(value - diameter) < kTol)
-        return std::make_pair(size, fit);
+        matches.emplace_back(size, fit);
+  if (matches.size() == 1)
+    return matches.front();
+  if (matches.size() > 1) {
+    if (error) {
+      std::ostringstream why;
+      why.precision(4);
+      why << diameter
+          << " mm is a clearance hole for more than one "
+             "thread — ";
+      for (size_t i = 0; i < matches.size(); ++i)
+        why << (i == 0                    ? ""
+                : i + 1 == matches.size() ? " and "
+                                          : ", ")
+            << matches[i].first << " " << matches[i].second;
+      why << ". Which one it is cannot be read off the hole, so say it: pass "
+             "`size` (\""
+          << matches.back().first
+          << "\", say), or drill it with a Hole feature, which records the "
+             "fit it was made for and is never ambiguous.";
+      *error = why.str();
+    }
+    return std::nullopt;
+  }
   if (error) {
     std::ostringstream why;
     why.precision(4);

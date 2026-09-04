@@ -187,15 +187,16 @@ bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
   return true;
 }
 
-assembly::SolveReport SolveActiveAssemblyReport(AppState& state) {
+assembly::SolveReport
+SolveActiveAssemblyReport(AppState& state, const assembly::Driven& driven) {
   if (!state.assembly)
     return {};
   const assembly::PartResolver resolve =
       [&state](uint64_t partId) -> const Document* {
     return PartDocById(state, partId);
   };
-  const assembly::SolveReport rep =
-      assembly::Solve(*state.assembly, resolve, AssemblyResolverFor(state));
+  const assembly::SolveReport rep = assembly::Solve(
+      *state.assembly, resolve, AssemblyResolverFor(state), driven);
   state.assembly->BumpVersion(); // solved transforms changed → renderer resync
   // Stamp the referenced parts' versions (A4): AssemblyPartsStale compares
   // against these, so a later part edit re-solves on tab activation. Stamped
@@ -216,6 +217,10 @@ assembly::SolveReport SolveActiveAssemblyReport(AppState& state) {
 
 int SolveActiveAssembly(AppState& state) {
   return SolveActiveAssemblyReport(state).erroredMates;
+}
+
+int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof) {
+  return SolveActiveAssemblyReport(state, {mateId, dof}).erroredMates;
 }
 
 bool AssemblyPartsStale(AppState& state) {
@@ -2733,6 +2738,31 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     fit.size = drilled->fitThread;
     fit.clearance = drilled->fitKind;
     tapped = drilled->fitKind == "tapped";
+  } else if (!request.size.empty()) {
+    // The caller broke the tie. Believe the SIZE, but not that this hole is
+    // one: a size whose clearances do not include this diameter would put an
+    // M12 in an M6 hole and report it as derived.
+    const auto fits =
+        parts::Dimensions("clearance_hole_sizes", request.size, &why);
+    if (!fits)
+      return fail(why);
+    std::string matched;
+    for (const auto& [column, value] : *fits)
+      if (std::abs(value - radius * 2.0) < 0.005)
+        matched = column;
+    if (matched.empty()) {
+      std::ostringstream no;
+      no.precision(4);
+      no << "this hole is " << radius * 2.0 << " mm across, which is not a "
+         << request.size << " clearance —";
+      for (const auto& [column, value] : *fits)
+        no << " " << column << " " << value << ",";
+      no.seekp(-1, std::ios_base::end);
+      no << " are. Pass the size the hole IS for, or pick another rim.";
+      return fail(no.str());
+    }
+    fit.size = request.size;
+    fit.clearance = matched;
   } else {
     const auto thread = parts::ThreadForClearance(radius * 2.0, &why);
     if (!thread)

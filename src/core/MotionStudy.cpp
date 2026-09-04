@@ -98,6 +98,51 @@ Result Run(const AssemblyDocument& asmDocIn,
   size_t worstCount = 0;
   bool worstSet = false;
 
+  // Pass A: solve every sample and record the placements, so the clash pass
+  // can skip the pairs that DO NOT MOVE relative to each other.
+  //
+  // Two parts bolted together touch — that is what a bolted joint is — and a
+  // mesh check reports touching as a clash, so a real engine's every fixed
+  // joint made `clean` impossible. It is also the wrong question: a pair
+  // whose relative pose never changes cannot be made to collide BY THE
+  // MOTION. Whether it interferes at rest is `contact_report`'s job, and it
+  // answers exactly, which this does not.
+  std::map<uint64_t, std::vector<glm::mat4>> track;
+  {
+    AssemblyDocument probe = asmDoc;
+    Mate* probeDriver = probe.FindMateById(study.driverMate);
+    for (int i = 0; i < study.samples; i++) {
+      const double t =
+          static_cast<double>(i) / static_cast<double>(study.samples - 1);
+      assembly::SetMateDof(*probeDriver, study.driverDof, ValueAt(study, t));
+      assembly::PropagateRelations(probe, probeDriver->id);
+      assembly::Solve(probe, parts, assemblies,
+                      {probeDriver->id, study.driverDof});
+      for (const Occurrence& o : probe.GetOccurrences())
+        track[o.id].push_back(glm::translate(glm::mat4(1.0f), o.position) *
+                              glm::mat4_cast(o.orientation));
+    }
+  }
+  // A pair moves when the transform taking one into the other is not the
+  // same at every sample.
+  const auto movesRelative = [&](uint64_t a, uint64_t b) {
+    const auto ia = track.find(a), ib = track.find(b);
+    if (ia == track.end() || ib == track.end())
+      return true; // unknown: check it
+    const size_t n = std::min(ia->second.size(), ib->second.size());
+    if (n < 2)
+      return true;
+    const glm::mat4 first = glm::inverse(ia->second[0]) * ib->second[0];
+    for (size_t k = 1; k < n; k++) {
+      const glm::mat4 rel = glm::inverse(ia->second[k]) * ib->second[k];
+      for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++)
+          if (std::abs(rel[c][r] - first[c][r]) > 1e-6)
+            return true;
+    }
+    return false;
+  };
+
   for (int i = 0; i < study.samples; i++) {
     if (cancelled && cancelled()) {
       out.cancelled = true;
@@ -109,8 +154,8 @@ Result Run(const AssemblyDocument& asmDocIn,
 
     assembly::SetMateDof(*driver, study.driverDof, s.value);
     assembly::PropagateRelations(asmDoc, driver->id);
-    const assembly::SolveReport rep =
-        assembly::Solve(asmDoc, parts, assemblies);
+    const assembly::SolveReport rep = assembly::Solve(
+        asmDoc, parts, assemblies, {driver->id, study.driverDof});
     s.erroredMates = rep.erroredMates;
     s.residualMm = rep.residualMm;
     s.solved = rep.erroredMates == 0 && rep.loopsClosed;
@@ -155,6 +200,10 @@ Result Run(const AssemblyDocument& asmDocIn,
         for (size_t b = a + 1; b < placed.size(); b++) {
           if (!ok[b] || placed[a].root == placed[b].root)
             continue; // a part does not clash with itself
+          if (!movesRelative(placed[a].root, placed[b].root)) {
+            out.pairsRigid++;
+            continue; // rigid to each other: the motion cannot make them
+          }
           if (lo[a].x > hi[b].x || lo[b].x > hi[a].x || lo[a].y > hi[b].y ||
               lo[b].y > hi[a].y || lo[a].z > hi[b].z || lo[b].z > hi[a].z)
             continue;

@@ -477,3 +477,40 @@ TEST_CASE("Chain and cam round-trip, and the v88 golden loads",
              WithinAbs(float(M_PI / 2), 1e-5f));
   CHECK_THAT((*g)->FindMateById(5)->offset, WithinAbs(8.0f, 1e-3f));
 }
+
+TEST_CASE("A cam profile never overshoots its own table",
+          "[assembly][relations][cam]") {
+  // The single-cylinder engine's finding: a Catmull-Rom through a 9 mm lobe
+  // with a long dwell dipped 1.86 mm BELOW zero between the lobe closing and
+  // reopening, so a closed valve travelled backwards into the head and the
+  // motion study reported 10.86 mm of lift on a 9 mm cam. A lift table is
+  // data; an interpolant that leaves the interval its endpoints define is
+  // inventing motion the cam does not have.
+  std::vector<std::pair<double, double>> lobe;
+  const double rise = 9.0, duration = 150.0, start = 20.0;
+  for (int i = 0; i < 18; i++) {
+    const double f = i / 18.0;
+    lobe.emplace_back(start + f * duration,
+                      rise * 0.5 * (1.0 - std::cos(2.0 * M_PI * f)));
+  }
+  lobe.emplace_back(start + duration + (360.0 - duration) * 0.5, 0.0);
+
+  double lo = 1e9, hi = -1e9;
+  for (int deg = 0; deg < 3600; deg++) {
+    const double v = CamLift(lobe, deg * 0.1 * M_PI / 180.0);
+    lo = std::min(lo, v);
+    hi = std::max(hi, v);
+  }
+  INFO("profile ranges " << lo << " .. " << hi << " on a " << rise
+                         << " mm lobe");
+  CHECK(lo >= -1e-6);       // a closed valve does not lift backwards
+  CHECK(hi <= rise + 1e-6); // and an open one does not exceed its lobe
+
+  // Still smooth: the slope is continuous across a table point, which is
+  // what the loop solver differentiates.
+  const double a = lobe[3].first * M_PI / 180.0;
+  double before = 0.0, after = 0.0;
+  CamLift(lobe, a - 1e-4, &before);
+  CamLift(lobe, a + 1e-4, &after);
+  CHECK_THAT(after, WithinAbs(before, 0.05));
+}

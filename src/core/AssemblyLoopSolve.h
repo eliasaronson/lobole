@@ -81,12 +81,27 @@ struct LoopRelation {
   std::vector<std::pair<double, double>> lift;
 };
 
+// A DOF held at a value while the loop closes around it (v88 fix): the mate
+// the caller just DROVE.
+//
+// Without this the driven DOF is one more unknown in an underdetermined
+// least-squares, and the solver moves it: setting a crank to 90 degrees and
+// reading back 67 is what the single-cylinder engine found
+// (docs/modeling/single-cylinder-dogfood.md). A closed loop's whole point is
+// that turning the crank moves the piston, and it did not.
+struct LoopPin {
+  size_t mate = 0; // index into LoopProblem::mates
+  MateDof dof = MateDof::Rotation;
+  double value = 0.0;
+};
+
 struct LoopProblem {
   std::vector<LoopMate> mates;
   std::vector<LoopTreeEdge> tree;                     // in placement order
   std::vector<size_t> cut;                            // indices into `mates`
   std::vector<std::pair<uint64_t, glm::mat4>> anchor; // pinned occ -> world
   std::vector<LoopRelation> relations;
+  std::vector<LoopPin> pinned;
 };
 
 // The column of one DOF of a mate in the solver's state vector, or -1 when

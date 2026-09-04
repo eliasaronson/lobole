@@ -133,6 +133,11 @@ LengthRange(const std::string& stem, const std::string& size,
 // the hole was for. A diameter matching nothing is refused rather than snapped
 // to the nearest, because "6.5 is nearly M6" is exactly the substitution that
 // puts an M6 screw in a hole somebody drilled for something else.
+//
+// A diameter matching SEVERAL is refused the same way, and for the same
+// reason: 46 of the table's 111 diameters are a clearance for two threads at
+// different fits, so answering with the first in table order is a coin toss
+// dressed as a measurement. The refusal names every candidate.
 [[nodiscard]] std::optional<std::pair<std::string, std::string>>
 ThreadForClearance(double diameter, std::string* error);
 

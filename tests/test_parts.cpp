@@ -675,6 +675,45 @@ TEST_CASE("parts: a grip a hair over a nominal length snaps to it", "[parts]") {
   CHECK(parts::SnapLengthDown("iso4762", "M8", 19.5, &error) == 16.0);
 }
 
+TEST_CASE("parts: an ambiguous clearance diameter is refused, not guessed",
+          "[parts]") {
+  // Found building the single-cylinder engine
+  // (docs/modeling/single-cylinder-dogfood.md). 46 of the clearance table's
+  // 111 diameters are a clearance for two different threads, and the
+  // backward lookup returned whichever came first in table order — always
+  // the SMALLER thread on the LOOSER fit.
+  const SourceTables tables;
+  std::string error;
+
+  // Unambiguous: 6.6 is an M6 Normal and nothing else.
+  const auto six = parts::ThreadForClearance(6.6, &error);
+  REQUIRE(six);
+  CHECK(six->first == "M6");
+  CHECK(six->second == "Normal");
+
+  // 11.0 is an M9 Loose AND an M10 Normal. It used to answer M9 — a size
+  // ISO 4762 does not stock — so an ordinary M10 clearance hole came back as
+  // a refusal about M9.
+  error.clear();
+  CHECK_FALSE(parts::ThreadForClearance(11.0, &error).has_value());
+  INFO(error);
+  CHECK(error.find("M9") != std::string::npos);
+  CHECK(error.find("M10") != std::string::npos);
+  // And it says the way through rather than just saying no.
+  CHECK(error.find("size") != std::string::npos);
+
+  // 10.0 is the same shape: M8 Loose and M9 Normal.
+  error.clear();
+  CHECK_FALSE(parts::ThreadForClearance(10.0, &error).has_value());
+
+  // A diameter that is nobody's clearance is still refused, with the older
+  // message — the two refusals are for different reasons and say so.
+  error.clear();
+  CHECK_FALSE(parts::ThreadForClearance(6.5, &error).has_value());
+  INFO(error);
+  CHECK(error.find("more than one") == std::string::npos);
+}
+
 TEST_CASE("parts: a hole knows what it is for", "[parts]") {
   // docs/modeling/hole-standards.md. The other direction from
   // ThreadForClearance: given the intent, the number — so "a clearance hole

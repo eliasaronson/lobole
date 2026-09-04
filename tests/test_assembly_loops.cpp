@@ -472,3 +472,56 @@ TEST_CASE("A loop leaves a mate tree elsewhere in the document alone",
   CHECK(glm::length(ob->position) < 1e-3f);
   CHECK(glm::length(od->position) < 1e-3f);
 }
+
+TEST_CASE("A driven DOF is HELD while the loop closes around it",
+          "[assembly][solve][loops]") {
+  // The defect the single-cylinder engine found
+  // (docs/modeling/single-cylinder-dogfood.md): a closed loop has one more
+  // unknown than it has equations, so the least-squares step is free to move
+  // ANY of them — including the one the caller just drove. Setting a crank to
+  // 90 degrees and reading back 67 is not a tolerance; it is the solver
+  // answering a different question.
+  //
+  // The same four-bar, with J1 driven to a quarter turn.
+  const auto build = [](double drive, bool pin) {
+    assembly::LoopProblem p;
+    p.mates.push_back(Revolute(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f),
+                               static_cast<float>(drive)));
+    p.mates.push_back(Revolute(2, 20, AtX(40.0f), 30, glm::mat4(1.0f), 0.0f));
+    p.mates.push_back(Revolute(3, 30, AtX(100.0f), 40, AtX(40.0f), 0.0f));
+    p.mates.push_back(Revolute(4, 10, AtX(100.0f), 40, glm::mat4(1.0f), 0.0f));
+    p.tree.push_back({0, 10, 20, false});
+    p.tree.push_back({1, 20, 30, false});
+    p.tree.push_back({2, 30, 40, false});
+    p.cut.push_back(3);
+    p.anchor.emplace_back(10, glm::mat4(1.0f));
+    if (pin)
+      p.pinned.push_back({0, MateDof::Rotation, drive});
+    return p;
+  };
+
+  const double drive = 3.14159265358979 / 2.0; // 90 degrees
+  SECTION("pinned, it stays where it was driven") {
+    const assembly::LoopSolution s = assembly::SolveLoops(build(drive, true));
+    REQUIRE(s.ran);
+    CHECK(s.converged);
+    CHECK(s.residualMm < 1e-3);
+    CHECK_THAT(static_cast<double>(s.solved[0].rotation),
+               WithinAbs(drive, 1e-4));
+    // And the linkage really closed AROUND it. Checked branch-independently:
+    // a four-bar with equal opposite links has two assembly modes and both
+    // are correct, so what is pinned is the closure — the rocker's ground
+    // pivot back on the ground pivot — not which mode it landed in.
+    REQUIRE(s.world.count(40) == 1);
+    const glm::vec3 pivot = glm::vec3(s.world.at(40)[3]);
+    CHECK_THAT(pivot.x, WithinAbs(100.0, 1e-3));
+    CHECK_THAT(pivot.y, WithinAbs(0.0, 1e-3));
+  }
+  SECTION("a pin does not break a loop that has nothing to pin") {
+    assembly::LoopProblem p = build(drive, true);
+    p.pinned[0].dof = MateDof::Offset; // a revolute does not slide
+    const assembly::LoopSolution s = assembly::SolveLoops(p);
+    CHECK(s.ran);
+    CHECK(s.converged); // the row is skipped, not a bad column
+  }
+}

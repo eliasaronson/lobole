@@ -175,6 +175,15 @@ def main():
         cam = d.call("add_relation", type="cam", a=a, b=cyl, rise=8.0,
                      duration_deg=180, name="lobe")
         expect(len(cam["lift"]) >= 19, f"a cosine lobe was built: {cam}")
+        # BOTH ends of the lobe are in the table. Without the closing one a
+        # 180-degree lobe ran its last flank from 170 straight to the dwell,
+        # and the follower stood 0.18 mm proud at the angle the lobe was
+        # specified to shut at — a lobe that does not close when it says so.
+        angles = [round(a, 6) for a, _ in cam["lift"]]
+        expect(0.0 in angles and 180.0 in angles,
+               f"the lobe opens and CLOSES on the table: {angles}")
+        expect(abs(dict(cam["lift"])[180.0]) < 1e-9,
+               f"the lobe is shut at 180: {cam['lift']}")
         expect("error" not in cam, f"the cam solved clean: {cam}")
         # 90 degrees is the lobe's peak; 180 closes it; 270 dwells.
         for deg, want in ((90.0, 8.0), (180.0, 0.0), (270.0, 0.0)):

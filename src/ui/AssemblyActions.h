@@ -99,11 +99,17 @@ void SelectOccurrence(AppState& state, uint64_t occId);
 // edit and after loading. Returns the number of mates left in an error state.
 int SolveActiveAssembly(AppState& state);
 
+// The same, holding the DOF the caller just drove while a loop closes around
+// it (a drag, a set_mate, a motion sample). Without it the loop solver treats
+// that DOF as one more unknown and moves it.
+int SolveActiveAssemblyDriven(AppState& state, uint64_t mateId, MateDof dof);
+
 // The SAME pass, reporting everything it learned rather than just the error
 // count: A6's loop closure, remaining degrees of freedom, and which mates were
 // redundant-but-consistent. Additive — SolveActiveAssembly is this narrowed to
 // `erroredMates`, which is all its existing callers ever wanted.
-assembly::SolveReport SolveActiveAssemblyReport(AppState& state);
+assembly::SolveReport
+SolveActiveAssemblyReport(AppState& state, const assembly::Driven& driven = {});
 
 // Part→assembly change propagation (A4): true when any part referenced by the
 // active assembly has regenerated since the assembly's last solve (compared
@@ -344,6 +350,16 @@ struct FastenerRequest {
   // Refused on a blind hole, where there is no far side to put one on.
   std::string nut;
   std::string washer = "iso7089";
+  // The thread, when the hole cannot say it: "M10".
+  //
+  // Normally empty and normally derived — that is the whole point of picking
+  // a rim. But 46 of the clearance table's 111 diameters are a clearance for
+  // two different threads, and for those the hole genuinely does not know
+  // which fastener it was drilled for. The derivation refuses there, naming
+  // the candidates, and this is the way through. Given, it is CHECKED against
+  // the hole rather than believed: a size whose clearances do not include
+  // this diameter is refused.
+  std::string size;
   // WHERE THE JOINT ENDS, when the axis carries on past it.
   //
   // One pick derives; this is the second, and it is optional because most

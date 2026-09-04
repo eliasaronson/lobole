@@ -330,6 +330,12 @@ add_test(NAME motion_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(motion_smoke PROPERTIES TIMEOUT 300)
 
+# A scrub lands on the branch the run walked, not the mirror image of it.
+add_test(NAME scrub_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scrub_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(scrub_smoke PROPERTIES TIMEOUT 300)
+
 # The SDK (agent-scale plan G1b): the RPC surface is GENERATED from
 # `describe` (so nothing is duplicated and nothing can drift), and only the
 # semantics describe cannot express are hand-written — reference objects,

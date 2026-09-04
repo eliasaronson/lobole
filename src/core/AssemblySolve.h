@@ -109,8 +109,17 @@ double RelationValue(const Relation& r, double drivingValue);
 [[nodiscard]] double MateDofValue(const Mate& m, MateDof dof);
 void SetMateDof(Mate& m, MateDof dof, double value);
 
+// What the caller just drove, held while a loop closes around it. Zero =
+// nothing driven, which is every call that is not a drag, a set_mate or a
+// motion sample.
+struct Driven {
+  uint64_t mate = 0;
+  MateDof dof = MateDof::Rotation;
+};
+
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
-                  const AssemblyResolver& asmById = nullptr);
+                  const AssemblyResolver& asmById = nullptr,
+                  const Driven& driven = {});
 
 // ---- Flatten: the one tree walk (A5) --------------------------------------
 //

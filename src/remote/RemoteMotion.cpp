@@ -119,6 +119,7 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
            {"samples", samples},
            {"worst_sample", r.worstSample},
            {"pairs_checked", r.pairsChecked},
+           {"pairs_rigid", r.pairsRigid},
            {"seconds", r.seconds},
            {"unit", rot ? "deg" : "mm"},
            {"table", motion::Table(r, s)}};

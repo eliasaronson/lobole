@@ -628,7 +628,7 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
 }
 
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
-                  const AssemblyResolver& asmById) {
+                  const AssemblyResolver& asmById, const Driven& driven) {
   SolveReport report;
   // Relations hold before anything is placed: in a mate tree this IS their
   // enforcement; in a loop they are rows below as well.
@@ -721,6 +721,21 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
           {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase, r.lift});
     }
   }
+  // The driven DOF is PINNED while the loop closes: without it the solver
+  // treats it as one more unknown and moves it, so a crank set to 90 degrees
+  // solved to 67 (docs/modeling/single-cylinder-dogfood.md).
+  if (driven.mate != 0) {
+    std::unordered_map<uint64_t, size_t> indexOfMate;
+    for (size_t i = 0; i < asmDoc.GetMates().size(); i++)
+      indexOfMate[asmDoc.GetMates()[i].id] = i;
+    const auto it = indexOfMate.find(driven.mate);
+    if (it != indexOfMate.end() &&
+        MateHasDof(asmDoc.GetMates()[it->second].type, driven.dof))
+      loop.pinned.push_back(
+          {it->second, driven.dof,
+           MateDofValue(asmDoc.GetMates()[it->second], driven.dof)});
+  }
+
   std::vector<bool> classified(asmDoc.GetMates().size(), false);
   const auto pin = [&](uint64_t occId, const glm::mat4& at) {
     world[occId] = at;

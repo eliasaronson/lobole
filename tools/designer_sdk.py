@@ -160,6 +160,12 @@ class App:
                 m.get("params_free_form", False))
         self.enums = {k: v for k, v in d.items() if k != "methods"}
         self.format_version = d.get("document_format_version")
+        # Which tab the app is on, as far as this client knows. Tracked so a
+        # handle can make itself active without a round trip when it already
+        # is — a script that builds a part, then places it, then builds
+        # another part otherwise has to remember to switch back, and gets
+        # "the active document is not an assembly" when it does not.
+        self._active = None
 
     # The generated surface. Deliberately __getattr__ rather than setattr in
     # a loop: an SDK method defined on the class always wins, and shadowing
@@ -222,6 +228,7 @@ def _open_tab(app, name, kind, create):
             raise SdkError(f"no {kind} named {name!r}; the project has: "
                            f"{have or 'nothing'}")
     app.call("set_active_part", part=hit["id"])
+    app._active = hit["id"]
     return (Part if kind == "part" else Asm)(app, hit)
 
 
@@ -797,7 +804,11 @@ class _Tab:
         self.name, self.id = slot["name"], slot["id"]
 
     def activate(self):
-        self.app.set_active_part(part=self.id)
+        """Make this tab the active one. Free when it already is: the client
+        knows which tab it last switched to."""
+        if self.app._active != self.id:
+            self.app.set_active_part(part=self.id)
+            self.app._active = self.id
         return self
 
     def __repr__(self):
@@ -806,6 +817,7 @@ class _Tab:
 
 class Part(_Tab):
     def _add(self, feature):
+        self.activate()
         return self.app.add_feature(feature=feature)
 
     # --- parameters --------------------------------------------------------
@@ -1014,9 +1026,11 @@ class Part(_Tab):
 
     # --- reading the model -------------------------------------------------
     def state(self):
+        self.activate()
         return self.app.get_state()
 
     def bodies(self, reference=None):
+        self.activate()
         """This part's bodies. Cheap: the LIST comes from get_state, and each
         body's faces and edges are read only when asked for. `reference=`
         filters ghosts in or out."""
@@ -1046,6 +1060,7 @@ class Part(_Tab):
         return [e for b in self.bodies() for e in b.edges(**kw)]
 
     def volume(self):
+        self.activate()
         return self.app.mass_properties()["total"]["volume"]
 
     def bbox(self):
@@ -1057,6 +1072,7 @@ class Part(_Tab):
 
     # --- the standing check ------------------------------------------------
     def check(self, warn=True):
+        self.activate()
         """Raise if any feature is broken; print advisories. The scripted
         equivalent of looking at the tree — every generator used to hand-roll
         this and most scratch scripts forgot to."""
@@ -1111,6 +1127,7 @@ class Asm(_Tab):
     def place(self, part, at=None, fixed=False, name=None):
         """Place a part. `at` is a world position; leave it out and mate it
         instead — which is the point."""
+        self.activate()
         kw = {"part": part.name if isinstance(part, Part) else part,
               "fixed": fixed}
         if name:
@@ -1122,6 +1139,7 @@ class Asm(_Tab):
         return Occurrence(self, dict(r, name=r.get("name", name or "")))
 
     def occurrences(self):
+        self.activate()
         return [Occurrence(self, o)
                 for o in self.app.list_occurrences()["occurrences"]]
 
@@ -1131,6 +1149,7 @@ class Asm(_Tab):
 
     # --- mates: a connector is a FRAME NAME, not a coordinate -------------
     def _mate(self, type_, a, b, **kw):
+        self.activate()
         return self.app.add_mate(type=type_, a=_conn(a), b=_conn(b), **kw)
 
     def fasten(self, a, b, **kw):
@@ -1152,14 +1171,50 @@ class Asm(_Tab):
         return self._mate("ball", a, b, **kw)
 
     def gear(self, mate_a, mate_b, teeth_a, teeth_b, **kw):
+        self.activate()
         return self.app.add_relation(type="gear", a=_id(mate_a),
                                      b=_id(mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
 
+    def chain(self, mate_a, mate_b, teeth_a, teeth_b, **kw):
+        """A chain or belt: like a gear, but both sprockets turn the SAME
+        way (v88)."""
+        self.activate()
+        return self.app.add_relation(type="chain", a=_id(mate_a),
+                                     b=_id(mate_b), teeth_a=teeth_a,
+                                     teeth_b=teeth_b, **kw)
+
+    def cam(self, mate_a, mate_b, **kw):
+        """A cam: rotation to offset through a lift table, or {rise,
+        duration_deg, start_deg} for a cosine lobe (v88)."""
+        self.activate()
+        return self.app.add_relation(type="cam", a=_id(mate_a),
+                                     b=_id(mate_b), **kw)
+
+    def bolt(self, rim, occurrence, standard="iso4762", **kw):
+        """Fit a fastener to a hole rim, deriving its size and length.
+
+        Self-activating like every other Asm verb, and that is the point:
+        finding the rim means querying a PART, which switches the tab, so a
+        bare `app.fit_fastener` right after one is refused with "a fastener
+        goes in an ASSEMBLY" even though the caller never left it.
+        """
+        self.activate()
+        ref = rim.ref if hasattr(rim, "ref") else dict(rim)
+        ref["occurrence"] = _id(occurrence)
+        return self.app.fit_fastener(rim=ref, standard=standard, **kw)
+
+    def motion(self, driver, **kw):
+        """A motion study on this assembly (v87)."""
+        self.activate()
+        return self.app.add_motion_study(driver=_id(driver), **kw)
+
     def solve(self):
+        self.activate()
         return self.app.solve_assembly()
 
     def check(self, connected=True, clearances=True):
+        self.activate()
         """The assembly's standing check: nothing clashing, nothing floating,
         and no near miss under a millimetre — which is almost always an
         arithmetic slip, and is exactly what a transcribed coordinate
@@ -1272,7 +1327,7 @@ def _id(x):
         return 0
     if isinstance(x, Ref):
         return x
-    if isinstance(x, (Sketch, Frame)):
+    if isinstance(x, (Sketch, Frame, Occurrence)):
         return x.id
     if isinstance(x, Body):
         return x.created_by
