@@ -422,7 +422,12 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
     // Derived rather than recorded: the nut's own placement says where the
     // joint ends, so a far-end override needs to store nothing to be
     // respected here.
-    double grip = LastExit(stack);
+    // What actually STOPS this screw, on the axis rather than beside it.
+    // Cast here rather than at the end: it is half the answer to where the
+    // joint ends, and reading it only afterwards is how the grip came to
+    // ignore blind holes entirely.
+    const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
+        others, glm::dvec3(origin), glm::dvec3(axis), 0.0, reach);
     double nutEnds = 0.0;
     const auto riderOn = [&](uint64_t occurrence) -> const parts::Profile* {
       for (size_t b = 0; b < all.size(); b++)
@@ -433,11 +438,12 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
     };
     for (const parts::StackSegment& seg : stack) {
       const parts::Profile* rider = riderOn(seg.occurrence);
-      if (rider != nullptr && rider->kind == parts::Kind::Nut) {
-        grip = seg.exit;
+      if (rider != nullptr && rider->kind == parts::Kind::Nut)
         nutEnds = seg.exit;
-      }
     }
+    // The SAME answer fit_fastener derived from, from the same helper.
+    const parts::JointExtent extent = parts::JointEnd(stack, onAxis, nutEnds);
+    const double grip = extent.end;
 
     // A nut BURIED IN A PART, which is the other way a joint comes apart and
     // which the rule above would otherwise hide. Bounding the grip at the nut
@@ -473,24 +479,45 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
         continue;
       }
     }
-    if (screw->length < grip - 1e-3) {
-      finding.why = "is " + Mm(grip - screw->length) +
-                    " too short: its stack is now " + Mm(grip) + " and it is " +
-                    Mm(screw->length) +
-                    " under the head. Re-fit it, or re-derive from the rim.";
-      out.push_back(finding);
+    // TWO DIFFERENT RULES, and applying the through one to a blind joint is
+    // what made every blind-hole screw in a model read as too short.
+    //
+    // A through screw must SPAN its stack: anything less and the nut is not
+    // reached. A blind screw must not BOTTOM OUT, and is derived by snapping
+    // DOWN to a stocked length, so it is shorter than its hole is deep by
+    // construction — "it does not reach the far side" is not a defect there,
+    // it is the definition. What can be wrong with a blind screw is that too
+    // little thread is engaged in the part it threads into.
+    if (!extent.blind) {
+      if (screw->length < grip - 1e-3) {
+        finding.why = "is " + Mm(grip - screw->length) +
+                      " too short: its stack is now " + Mm(grip) +
+                      " and it is " + Mm(screw->length) +
+                      " under the head. Re-fit it, or re-derive from the rim.";
+        out.push_back(finding);
+      }
       continue;
     }
-    // And bottoming out, which the length alone cannot show: a blind hole is
-    // whatever stops the ON-axis ray, and a screw longer than that is jacking
-    // the joint apart rather than clamping it.
-    const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
-        others, glm::dvec3(origin), glm::dvec3(axis), 0.0, reach);
-    if (!onAxis.empty() && screw->length > onAxis.front().enter + 1e-3) {
-      finding.why = "bottoms out: the hole is " + Mm(onAxis.front().enter) +
+    if (screw->length > grip + 1e-3) {
+      finding.why = "bottoms out: the hole is " + Mm(grip) +
                     " deep and the screw is " + Mm(screw->length) +
                     " long, so it lands on the floor and clamps nothing.";
       out.push_back(finding);
+      continue;
+    }
+    // Enough thread in the part it threads into — the same bar fit_fastener
+    // holds a derivation to (~1x the nominal diameter), asked of the screw
+    // that is actually there.
+    if (const parts::StackSegment* threads = parts::SegmentAt(stack, grip)) {
+      const double engaged = screw->length - threads->enter;
+      if (engaged < *nominal - 1e-3) {
+        finding.why = "has only " + Mm(std::max(engaged, 0.0)) +
+                      " of thread in " + threads->part + ": an " + screw->size +
+                      " needs " + Mm(*nominal) + " to hold, and the hole is " +
+                      Mm(grip - threads->enter) +
+                      " deep. Use a longer screw, or drill and tap deeper.";
+        out.push_back(finding);
+      }
     }
   }
   return out;
@@ -2867,6 +2894,23 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                   "starts.");
   }
 
+  // The bundle above measured PLATE THICKNESS. What stops the screw is a
+  // different question, and needs the on-axis ray the bundle deliberately does
+  // not cast: anything solid ON the axis is either a blind hole's floor or a
+  // plate whose hole does not line up, and telling those apart is the
+  // difference between an M6x8 and a bolt through solid metal.
+  const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
+      placed, glm::dvec3(centre), glm::dvec3(-axis), 0.0, reach);
+  // Where the joint ends, from the same helper `check_fasteners` uses, so the
+  // two cannot drift apart (docs/agent-scale-followup-plan.md, W1).
+  const parts::JointExtent extent = parts::JointEnd(stack, onAxis, truncate);
+  fit.blind = extent.blind;
+  // The summary is bounded by the JOINT, not by the far-end pick alone: in a
+  // blind hole the screw reaches the floor, so listing the block's full
+  // thickness beside a grip that stops at the floor made the decomposition
+  // disagree with the number next to it ("grip 45: plate 20, base 60").
+  const double counted = extent.end;
+
   std::ostringstream summary;
   summary.precision(4);
   double previousExit = 0.0;
@@ -2877,29 +2921,19 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // joint made the summary's own numbers add up to something other than the
     // grip beside them — found the first time a real casing was bolted, where
     // "grip 65: ... DE rib 30 ..." totalled 95.
-    if (truncate > 0.0 && seg.enter >= truncate - 1e-6) {
+    if (seg.enter >= counted - 1e-6) {
       beyond += (beyond.empty() ? "" : ", ") + seg.part;
       continue;
     }
     if (!first && seg.enter - previousExit > 1e-3)
       summary << ", gap " << (seg.enter - previousExit);
-    const double within =
-        (truncate > 0.0 ? std::min(seg.exit, truncate) : seg.exit) - seg.enter;
+    const double within = std::min(seg.exit, counted) - seg.enter;
     summary << (first ? "" : ", ") << seg.part << " " << within;
-    if (truncate > 0.0 && seg.exit > truncate + 1e-6)
+    if (seg.exit > counted + 1e-6)
       summary << " (of " << seg.thickness() << ")";
-    previousExit = std::min(seg.exit, truncate > 0.0 ? truncate : seg.exit);
+    previousExit = std::min(seg.exit, counted);
     first = false;
   }
-  // The bundle above measured PLATE THICKNESS. What stops the screw is a
-  // different question, and needs the on-axis ray the bundle deliberately does
-  // not cast: anything solid ON the axis is either a blind hole's floor or a
-  // plate whose hole does not line up, and telling those apart is the
-  // difference between an M6x8 and a bolt through solid metal.
-  const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
-      placed, glm::dvec3(centre), glm::dvec3(-axis), 0.0, reach);
-  fit.blind = !onAxis.empty();
-
   // What else is on the axis, and how thick. A washer under the head pushes
   // the head out by its own thickness, so it lengthens the screw — deriving
   // the length and THEN adding hardware is how a joint ends up one washer
@@ -2945,11 +2979,10 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // Truncated at the second pick when there is one: everything between the
     // two is still in the stack, so the washers and the nut are still found —
     // only the far END moves in.
-    const double spans = truncate > 0.0 ? truncate : LastExit(stack);
-    fit.grip = underHead + spans + underNut + nutHeight;
+    fit.grip = underHead + extent.end + underNut + nutHeight;
     length = parts::SnapLength(request.standard, fit.size, fit.grip, &why);
   } else {
-    const double blocked = onAxis.front().enter;
+    const double blocked = extent.end;
     // Material ON the axis, right at the rim: this is not a hole at all. It
     // is the end of a SOLID — a boss, a pin, a shaft — whose end cap has a
     // circular edge like any bore does.
@@ -2970,10 +3003,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // the screw threads into it. An EARLIER one means the axis runs into
     // material it should have passed through, which is a misalignment and a
     // refusal, because the alternative is a bolt drawn through solid metal.
-    const parts::StackSegment* blocking = nullptr;
-    for (const parts::StackSegment& seg : stack)
-      if (blocked >= seg.enter - 1e-6 && blocked <= seg.exit + 1e-6)
-        blocking = &seg;
+    const parts::StackSegment* blocking = parts::SegmentAt(stack, blocked);
     if (blocking == nullptr)
       return fail("something solid sits on this hole's axis " + Mm(blocked) +
                   " out, clear of every plate the hole passes through — a "
@@ -3042,9 +3072,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const glm::vec3 into = -axis;          // down the hole
   const glm::quat down = AlignZTo(into); // head end: body points back out
   const glm::quat up = AlignZTo(axis); // far end: body points out the far side
-  const glm::vec3 exit =
-      centre +
-      into * static_cast<float>(truncate > 0.0 ? truncate : LastExit(stack));
+  const glm::vec3 exit = centre + into * static_cast<float>(extent.end);
 
   // Which occurrence each piece rides on. The head end bears on the part the
   // rim was picked in; the far end on the last part the JOINT reaches.

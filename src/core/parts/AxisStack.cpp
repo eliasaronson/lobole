@@ -118,4 +118,39 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
   return out;
 }
 
+JointExtent JointEnd(const std::vector<StackSegment>& stack,
+                     const std::vector<StackSegment>& onAxis, double truncate) {
+  JointExtent e;
+  // Anything on the axis stops the screw there, whatever the plates beside it
+  // do. `onAxis` is already in ray order, so its first hit is the near one.
+  e.blind = !onAxis.empty();
+  if (e.blind) {
+    e.end = onAxis.front().enter;
+  } else {
+    for (const StackSegment& seg : stack)
+      e.end = std::max(e.end, seg.exit);
+  }
+  // A caller's own bound never reaches PAST where the axis stops: a far-end
+  // pick or a nut says where the joint ends, and if the axis ended sooner
+  // then the axis wins.
+  if (truncate > 0.0 && truncate < e.end)
+    e.end = truncate;
+  return e;
+}
+
+const StackSegment* SegmentAt(const std::vector<StackSegment>& stack,
+                              double distance) {
+  // The LAST match, not the first, and the difference is not academic: where
+  // two parts abut, the boundary distance is inside both of them to within
+  // tolerance, and the one that matters is the DEEPER one — the part the axis
+  // is entering, not the one it is leaving. Taking the first turned "the hole
+  // in Skew is not lined up with this one" into "the axis runs into Off",
+  // which sends a person to the wrong part (test_actions.cpp:1753).
+  const StackSegment* found = nullptr;
+  for (const StackSegment& seg : stack)
+    if (distance >= seg.enter - 1e-6 && distance <= seg.exit + 1e-6)
+      found = &seg;
+  return found;
+}
+
 } // namespace parts

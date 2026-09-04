@@ -336,6 +336,12 @@ add_test(NAME scrub_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(scrub_smoke PROPERTIES TIMEOUT 300)
 
+# fit_fastener and check_fasteners agree about where a joint ENDS (W1).
+add_test(NAME fastener_stack_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fastener_stack_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fastener_stack_smoke PROPERTIES TIMEOUT 300)
+
 # The SDK (agent-scale plan G1b): the RPC surface is GENERATED from
 # `describe` (so nothing is duplicated and nothing can drift), and only the
 # semantics describe cannot express are hand-written — reference objects,

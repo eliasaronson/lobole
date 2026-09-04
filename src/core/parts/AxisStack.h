@@ -73,4 +73,38 @@ struct PlacedBody {
 TraverseAxis(const std::vector<PlacedBody>& placed, const glm::dvec3& origin,
              const glm::dvec3& direction, double holeRadius, double maxDist);
 
+// WHERE THE JOINT ENDS — the one answer both deriving a fastener and checking
+// one have to agree on.
+//
+// They did not. `fit_fastener` stopped at the floor of a blind hole, which is
+// what a grip is; `check_fasteners` re-derived from the probed stack alone and
+// counted the material BELOW the hole as more joint. An 80 mm block with a 25
+// mm blind hole under a 20 mm plate came back as a 45 mm grip from one and an
+// 80 mm stack from the other, with nothing happening in between, so every
+// blind-hole joint in a model read as too short by exactly the material under
+// its hole (docs/agent-scale-followup-plan.md, W1).
+//
+// Both callers already hold both traversals; only one of them was using the
+// second. Taking the answer from here means they agree by construction rather
+// than by two pieces of code being written carefully.
+//
+// `stack` is the PROBED traversal (the bundle offset outside the bore: plate
+// thicknesses). `onAxis` is the traversal straight down the axis, which finds
+// only what actually STOPS a screw — a blind hole's floor, or a plate whose
+// hole does not line up. `truncate` is a caller's own bound (a far-end pick,
+// or the far face of the joint's own nut), or 0 for none.
+struct JointExtent {
+  double end = 0.0;   // how far down the axis the joint reaches, in mm
+  bool blind = false; // it stopped ON material, not in daylight
+};
+[[nodiscard]] JointExtent JointEnd(const std::vector<StackSegment>& stack,
+                                   const std::vector<StackSegment>& onAxis,
+                                   double truncate);
+
+// The segment a distance down the axis lands in, or null when it falls in a
+// gap between two of them (which is a real answer: something solid sits on
+// the axis clear of every plate the hole passes through).
+[[nodiscard]] const StackSegment*
+SegmentAt(const std::vector<StackSegment>& stack, double distance);
+
 } // namespace parts
