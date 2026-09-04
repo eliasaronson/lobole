@@ -111,6 +111,11 @@ only the head is actually bolted. The point of the exercise was whether the app 
 hold a running mechanism together and say honestly when it cannot, and the
 massing is what the motion study needs to be true about.
 
-The drawing is behind `--drawing` and off by default: a three-view sheet of
-this assembly had not finished after 21 minutes. That is a real defect with
-its own measurements in docs/known-bugs.md, not a property of the model.
+The drawing was the one deliverable this test could not produce: a three-view
+sheet had not finished after 21 minutes. It does now, in about three seconds,
+because that turned out to be a defect rather than a property of the model —
+exact HLR spends all of its time in visibility classification and does not
+scale to an assembly. The sheet is projected with `quality="fast"`
+(polygonal HLR), which is a look rather than a dimensionable deliverable;
+`--exact-drawing` asks for the real thing and takes ~84 s a view. See
+docs/agent-scale-followup-plan.md, W3.

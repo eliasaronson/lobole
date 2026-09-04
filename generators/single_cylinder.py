@@ -318,8 +318,9 @@ def top_end(app, rig, occ, main_mate):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
-    ap.add_argument("--drawing", action="store_true",
-                    help="also export a 3-view drawing (slow, see the note)")
+    ap.add_argument("--exact-drawing", action="store_true",
+                    help="project the sheet with exact HLR (~84 s a view) "
+                         "instead of the fast polygonal one")
     ap.add_argument("--out", default="/tmp/single_cylinder")
     a = ap.parse_args()
     app = connect(a.port)
@@ -379,30 +380,24 @@ def main():
     print(f"  animation: {ex['nodes']} nodes x {ex['frames']} keyframes -> "
           f"{glb} ({os.path.getsize(glb) // 1024} kB)")
 
-    # ---- and a drawing of it, on request --------------------------------
-    # OFF by default, and that is a finding rather than a preference: a
-    # drawing view holds no geometry (add_drawing_view returns in 0.00 s) and
-    # the whole projection happens at export. On single parts that is cheap —
-    # a plain block exports in 0.00 s, a block with a four-turn helical spring
-    # in 5.5 s — but three views of this eight-part assembly had not finished
-    # after 21 minutes of one core. See docs/known-bugs.md.
-    if not a.drawing:
-        print("  drawing: skipped (--drawing to try it; see docs/known-bugs.md)")
-        project = os.path.join(a.out, "single_cylinder.dsgn")
-        app.save_project(path=project)
-        print(f"  project: {project}")
-        return 0
+    # ---- and a drawing of it ---------------------------------------------
+    # `quality="fast"` by default, and that is a real choice rather than a
+    # default nobody thought about: exact HLR of this assembly is ~84 s A VIEW
+    # (all of it visibility classification), so a three-view sheet is four
+    # minutes. Fast is polygonal HLR — the same sheet in about 3 s, and a LOOK:
+    # polylines with no source refs, so nothing on it can be dimensioned.
+    # --exact-drawing asks for the deliverable and takes the time.
     rig.activate()
     app.create_drawing(name="engine drawing")
     for i, view in enumerate(("front", "right", "iso")):
-        # Generous timeouts: a hidden-line projection of this assembly has to
-        # go through the valve springs, and a helical sweep is the most
-        # expensive shape in the model by a wide margin.
         app.add_drawing_view(source="engine", orientation=view,
-                             position=[70 + 130 * i, 150], _timeout=900)
+                             position=[70 + 130 * i, 150],
+                             quality="exact" if a.exact_drawing else "fast",
+                             _timeout=900)
     app.export_drawing(path=os.path.join(a.out, "single_cylinder.pdf"),
                        _timeout=900)
-    print(f"  drawing: 3 views -> {a.out}/single_cylinder.pdf")
+    print(f"  drawing: 3 views ({'exact' if a.exact_drawing else 'fast'}) "
+          f"-> {a.out}/single_cylinder.pdf")
 
     project = os.path.join(a.out, "single_cylinder.dsgn")
     app.save_project(path=project)

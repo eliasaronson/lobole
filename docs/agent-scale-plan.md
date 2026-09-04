@@ -641,10 +641,10 @@ another not closing at its own closing angle, and `fit_fastener` unable to
 derive anything from an ordinary M10 clearance hole. Written up in
 docs/modeling/single-cylinder-dogfood.md.
 
-The one thing not delivered is the drawing: a single view of this assembly is
-66-86 s and a three-view sheet had not finished after 21 minutes, which is a
-defect in the projection with its own measurements in docs/known-bugs.md, not
-a property of the model. It is behind `--drawing`.
+The drawing was the one thing not delivered — a three-view sheet had not
+finished after 21 minutes. It does now, in about three seconds: that was a
+defect in the projection, not a property of the model, and it is fixed in
+docs/agent-scale-followup-plan.md, W3.
 
 The original statement of the test:
 
