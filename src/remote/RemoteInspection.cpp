@@ -819,6 +819,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error(
             "'" + (ta.bodies.empty() ? ta.label : tb.label) +
             "' resolves to no geometry (missing, hidden or empty)");
+      if (mode == "mesh") {
+        // The same yes/no the sweep gives, for ONE named pair: no volume,
+        // no distance, and the deflection it was decided to.
+        const bool hit = pairMesh(ta, tb);
+        return json{{"clash", hit},  {"state", hit ? "clash" : "clear"},
+                    {"mode", mode},  {"deflection_mm", meshDeflection},
+                    {"a", ta.label}, {"b", tb.label}};
+      }
       const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),
                                              tb.bodies, glm::mat4(1.0f));
       if (!c)
@@ -830,6 +838,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                   {"volume", c->volume},
                   {"distance", c->distance},
                   {"state", ContactState(*c, touchTol)},
+                  {"mode", mode},
                   {"a", ta.label},
                   {"b", tb.label}};
     }

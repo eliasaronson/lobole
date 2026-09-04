@@ -128,6 +128,38 @@ const Relation* AssemblyDocument::FindRelationById(uint64_t id) const {
   return nullptr;
 }
 
+uint64_t AssemblyDocument::AddMotionStudy(MotionStudy study) {
+  study.id = m_nextId++;
+  m_motionStudies.push_back(std::move(study));
+  m_version++;
+  return m_motionStudies.back().id;
+}
+
+bool AssemblyDocument::RemoveMotionStudy(uint64_t id) {
+  const auto it =
+      std::find_if(m_motionStudies.begin(), m_motionStudies.end(),
+                   [id](const MotionStudy& s) { return s.id == id; });
+  if (it == m_motionStudies.end())
+    return false;
+  m_motionStudies.erase(it);
+  m_version++;
+  return true;
+}
+
+MotionStudy* AssemblyDocument::FindMotionStudyById(uint64_t id) {
+  for (MotionStudy& s : m_motionStudies)
+    if (s.id == id)
+      return &s;
+  return nullptr;
+}
+
+const MotionStudy* AssemblyDocument::FindMotionStudyById(uint64_t id) const {
+  for (const MotionStudy& s : m_motionStudies)
+    if (s.id == id)
+      return &s;
+  return nullptr;
+}
+
 // ---- Configurations (C4) --------------------------------------------------
 
 const Configuration* AssemblyDocument::FindConfiguration(uint64_t id) const {

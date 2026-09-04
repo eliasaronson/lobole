@@ -30,6 +30,7 @@
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h"
 #include "remote/RemoteModeling.h"
+#include "remote/RemoteMotion.h"
 #include "remote/RemoteProject.h"
 #include "remote/RemoteSimulation.h"
 #include "remote/RpcParams.h"
@@ -784,6 +785,10 @@ static const std::set<std::string> kNoPartDoc = {
     "set_occurrence_configuration", "solve_assembly", "bom", "export_bom",
     "edit_in_context", "add_exploded_view", "remove_exploded_view",
     "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
+    // Motion studies (G2) live on the assembly.
+    "add_motion_study", "set_motion_study", "remove_motion_study",
+    "list_motion_studies", "run_motion_study", "motion_status",
+    "set_motion_pose", "export_motion",
     // export_visual works on a part OR an assembly (occurrence walk).
     "export_visual",
     // Clearing the compare_geometry overlay must work from any tab — the
@@ -1058,6 +1063,7 @@ static bool IsKnownMethod(const std::string& m) {
     add(remote::ModelingMethodDocs());
     add(remote::ProjectMethodDocs());
     add(remote::AssemblyMethodDocs());
+    add(remote::MotionMethodDocs());
     add(remote::InspectionMethodDocs());
     add(remote::CamMethodDocs());
     add(remote::DrawingMethodDocs());
@@ -1403,6 +1409,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::ModelingMethodDocs());
     addDocs(remote::ProjectMethodDocs());
     addDocs(remote::AssemblyMethodDocs());
+    addDocs(remote::MotionMethodDocs());
     addDocs(remote::InspectionMethodDocs());
     addDocs(remote::CamMethodDocs());
     addDocs(remote::DrawingMethodDocs());
@@ -1763,6 +1770,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"index", slot}, {"name", newName}, {"id", state.parts[slot].id}};
   }
   if (auto r = remote::HandleDrawingRpc(state, m, p))
+    return *r;
+  if (auto r = remote::HandleMotionRpc(state, m, p))
     return *r;
   if (auto r = remote::HandleAssemblyRpc(state, m, p))
     return *r;

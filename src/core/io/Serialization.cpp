@@ -231,6 +231,18 @@ void LoadRelations(AssemblyDocument& asmDoc,
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
 
+// Motion studies (v87): the same again.
+void LoadMotionStudies(AssemblyDocument& asmDoc,
+                       const std::vector<json>& jsons) {
+  uint64_t maxId = 0;
+  for (const json& sj : jsons) {
+    MotionStudy s = MotionStudyFromJson(sj);
+    maxId = std::max(maxId, s.id);
+    asmDoc.GetMotionStudies().push_back(std::move(s));
+  }
+  asmDoc.EnsureNextIdAtLeast(maxId + 1);
+}
+
 // Binary sibling of WriteTextAtomic for reference-image pixel files (v49):
 // same temp+rename + identical-content skip, but byte-exact (no text-mode
 // translation).
@@ -858,6 +870,29 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    // Motion studies (v87) mirror relations: file-per-study under motion/.
+    const fs::path motionDir = dir / "motion";
+    if (!asmDoc.GetMotionStudies().empty()) {
+      index["motion"] = json::array();
+      fs::create_directories(motionDir);
+    }
+    std::set<std::string> wantedMotion;
+    for (const MotionStudy& s : asmDoc.GetMotionStudies()) {
+      const std::string file =
+          std::to_string(IdForFile(s.id, "motion", s.name)) + "-" +
+          LabelSlug(s.name) + ".json";
+      if (!WriteTextAtomic(motionDir / file,
+                           MotionStudyToJson(s).dump(2) + "\n", error))
+        return false;
+      index["motion"].push_back(s.id);
+      wantedMotion.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(motionDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedMotion.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     // Configurations (v31): file-per-config + active id in the index; absent
     // when none so older assemblies stay byte-identical.
     if (asmDoc.ActiveConfiguration() != 0)
@@ -1018,6 +1053,29 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         relJsons.push_back(ParseProjectFile(it->second));
       }
       LoadRelations(*asmDoc, relJsons);
+    }
+
+    // Motion studies (v87): id-prefix files under motion/, index order.
+    {
+      std::map<uint64_t, fs::path> byId;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "motion", ec)) {
+        if (entry.path().extension() != ".json")
+          continue;
+        InsertIdFile(byId, entry.path(), "motion");
+      }
+      std::vector<json> jsons;
+      for (const auto& idJson : index.value("motion", json::array())) {
+        const uint64_t id = idJson.get<uint64_t>();
+        const auto it = byId.find(id);
+        if (it == byId.end()) {
+          if (error)
+            *error = "missing motion study file for id " + std::to_string(id);
+          return nullptr;
+        }
+        jsons.push_back(ParseProjectFile(it->second));
+      }
+      LoadMotionStudies(*asmDoc, jsons);
     }
 
     // Configurations (v31): id-prefix files under configurations/, index order.
@@ -1215,6 +1273,11 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       for (const Relation& r : asmDoc.GetRelations())
         j["relations"].push_back(RelationToJson(r));
     }
+    if (!asmDoc.GetMotionStudies().empty()) { // absent when none (v87)
+      j["motion"] = json::array();
+      for (const MotionStudy& s : asmDoc.GetMotionStudies())
+        j["motion"].push_back(MotionStudyToJson(s));
+    }
     if (asmDoc.ActiveConfiguration() != 0) // v31
       j["active_configuration"] = asmDoc.ActiveConfiguration();
     if (!asmDoc.GetConfigurations().empty()) {
@@ -1279,6 +1342,8 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
         *asmDoc, j.value("exploded", json::array()).get<std::vector<json>>());
     LoadRelations(*asmDoc,
                   j.value("relations", json::array()).get<std::vector<json>>());
+    LoadMotionStudies(
+        *asmDoc, j.value("motion", json::array()).get<std::vector<json>>());
     for (const auto& cj : j.value("configurations", json::array())) // v31
       asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
     asmDoc->SetActiveConfiguration(

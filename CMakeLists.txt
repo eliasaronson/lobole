@@ -303,6 +303,8 @@ set(core_sources
     src/core/features/DatumPlaneFeature.cpp
     src/core/features/FrameFeature.cpp
     src/core/MeshCollide.cpp
+    src/core/MotionStudy.cpp
+    src/core/io/GlbAnimation.cpp
     src/core/BodyMode.cpp
     src/core/features/RevolveFeature.cpp
     src/core/features/ShellFeature.cpp
@@ -625,6 +627,7 @@ set(app_sources
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
     src/ui/AssemblyActions.cpp
+    src/ui/MotionActions.cpp
     src/ui/JobActions.cpp
     src/ui/MachineActions.cpp
     src/ui/SimulationActions.cpp
@@ -654,6 +657,7 @@ set(app_sources
     src/remote/RemoteModeling.cpp
     src/remote/RemoteDrawings.cpp
     src/remote/RemoteAssembly.cpp
+    src/remote/RemoteMotion.cpp
     src/remote/RemoteProject.cpp
 )
 

@@ -307,6 +307,40 @@ json RelationToJson(const Relation& r) {
   return j;
 }
 
+json MotionStudyToJson(const MotionStudy& s) {
+  json j;
+  j["type"] = "MotionStudy";
+  j["id"] = s.id;
+  j["name"] = s.name;
+  j["driver_mate"] = s.driverMate;
+  j["driver_dof"] = MateDofToString(s.driverDof);
+  j["from"] = s.from;
+  j["to"] = s.to;
+  j["samples"] = s.samples;
+  j["check_clash"] = s.checkClash;
+  j["clash_mode"] = s.clashMode;
+  return j;
+}
+
+MotionStudy MotionStudyFromJson(const json& j) {
+  MotionStudy s;
+  s.id = j.at("id").get<uint64_t>();
+  s.name = j.value("name", std::string{});
+  s.driverMate = j.at("driver_mate").get<uint64_t>();
+  s.driverDof = MateDofFromString(j.at("driver_dof").get<std::string>());
+  s.from = j.at("from").get<double>();
+  s.to = j.at("to").get<double>();
+  s.samples = j.value("samples", 48);
+  if (s.samples < 2)
+    throw std::runtime_error("a motion study needs at least 2 samples");
+  s.checkClash = j.value("check_clash", true);
+  s.clashMode = j.value("clash_mode", std::string("mesh"));
+  if (s.clashMode != "mesh" && s.clashMode != "exact")
+    throw std::runtime_error("unknown motion study clash_mode '" + s.clashMode +
+                             "' (expected mesh or exact)");
+  return s;
+}
+
 Relation RelationFromJson(const json& j) {
   Relation r;
   r.id = j.at("id").get<uint64_t>();

@@ -1,11 +1,14 @@
 #include "ui/OccurrencePanel.h"
+#include "core/Measure.h"
 #include "ui/AppActions.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/DockLayout.h"    // PanelHeading
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
 #include "ui/ListSelection.h"
+#include "ui/MotionActions.h"
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
@@ -281,6 +284,143 @@ void DrawMatesSection(AppState& state) {
   }
 }
 } // namespace
+
+// Motion studies (G2): the list, an Add that picks the first mate with a
+// degree of freedom, and for the active study a driver combo, a scrub
+// slider, Run (a background job) and the last result's verdict. The range
+// and sample count are edited over the RPC for now; a scrub is a look, not
+// an edit, and pushes no undo step (the explode slider's rule).
+void DrawMotionSection(AppState& state) {
+  AssemblyDocument& asmDoc = *state.assembly;
+  ImGui::SeparatorText("Motion");
+  for (MotionStudy& s : asmDoc.GetMotionStudies()) {
+    const bool active = state.activeMotionStudy == s.id;
+    const std::string label = (s.name.empty() ? "(unnamed)" : s.name) +
+                              "###motion_study_" + std::to_string(s.id);
+    if (ImGui::Selectable(label.c_str(), active)) {
+      state.activeMotionStudy = s.id;
+      state.motionT = 0.0f;
+    }
+  }
+  if (ImGui::SmallButton("Add study###motion_add")) {
+    // The first mate that turns or slides. A rotation gets a full turn; a
+    // slide gets a range derived from the placed part's own size, because a
+    // "10 mm" default is right for a drawer and wrong for a dock.
+    const Mate* driver = nullptr;
+    for (const Mate& m : asmDoc.GetMates())
+      if (assembly::MateHasDof(m.type, MateDof::Rotation) ||
+          assembly::MateHasDof(m.type, MateDof::Offset)) {
+        driver = &m;
+        break;
+      }
+    if (driver == nullptr) {
+      state.motionAddRefusal =
+          "no mate here turns or slides — a motion study drives a revolute, "
+          "slider or cylindrical mate";
+    } else {
+      state.motionAddRefusal.clear();
+      MotionStudy s;
+      s.name = "Motion " + std::to_string(asmDoc.GetMotionStudies().size() + 1);
+      s.driverMate = driver->id;
+      if (assembly::MateHasDof(driver->type, MateDof::Rotation)) {
+        s.driverDof = MateDof::Rotation;
+        s.from = 0.0;
+        s.to = 2.0 * 3.14159265358979323846;
+      } else {
+        s.driverDof = MateDof::Offset;
+        s.from = driver->offset;
+        double reach = 10.0;
+        if (const Occurrence* o = asmDoc.FindById(driver->b.occurrenceId))
+          if (const Document* pd = PartDocById(state, o->partId)) {
+            glm::vec3 lo, hi;
+            if (Measure::WorldBounds(pd->GetBodies(), glm::mat4(1.0f), lo, hi))
+              reach = glm::length(hi - lo);
+          }
+        s.to = driver->offset + reach;
+      }
+      SnapshotAssembly(state);
+      state.activeMotionStudy = asmDoc.AddMotionStudy(std::move(s));
+      state.motionT = 0.0f;
+    }
+  }
+  if (!state.motionAddRefusal.empty())
+    TextDisabledWrapped(state.motionAddRefusal.c_str());
+
+  MotionStudy* sel = asmDoc.FindMotionStudyById(state.activeMotionStudy);
+  if (sel == nullptr)
+    return;
+  // Driver: every mate with a degree of freedom, by name.
+  LeftLabel("Driver");
+  const Mate* cur = asmDoc.FindMateById(sel->driverMate);
+  const std::string curLabel =
+      cur ? (cur->name.empty() ? "mate " + std::to_string(cur->id) : cur->name)
+          : "(missing)";
+  if (ImGui::BeginCombo("###motion_driver", curLabel.c_str())) {
+    for (const Mate& m : asmDoc.GetMates()) {
+      const bool rot = assembly::MateHasDof(m.type, MateDof::Rotation);
+      const bool slide = assembly::MateHasDof(m.type, MateDof::Offset);
+      if (!rot && !slide)
+        continue;
+      const std::string item =
+          (m.name.empty() ? "mate " + std::to_string(m.id) : m.name) +
+          "###motion_driver_" + std::to_string(m.id);
+      if (ImGui::Selectable(item.c_str(), m.id == sel->driverMate)) {
+        SnapshotAssembly(state);
+        sel->driverMate = m.id;
+        sel->driverDof = rot ? MateDof::Rotation : MateDof::Offset;
+        state.motionResults.erase(sel->id);
+        asmDoc.BumpVersion();
+      }
+    }
+    ImGui::EndCombo();
+  }
+  const bool rot = sel->driverDof == MateDof::Rotation;
+  const double k = rot ? 180.0 / 3.14159265358979323846 : 1.0;
+  ImGui::Text("%.1f to %.1f %s in %d samples", sel->from * k, sel->to * k,
+              rot ? "deg" : "mm", sel->samples);
+  const std::string why = motion::WhyNot(asmDoc, *sel);
+  if (!why.empty())
+    ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", why.c_str());
+
+  // The scrub: live, no snapshot.
+  LeftLabel("Pose");
+  if (ImGui::SliderFloat("###motion_t", &state.motionT, 0.0f, 1.0f)) {
+    std::string err;
+    ApplyMotionPose(state, sel->id, state.motionT, &err);
+  }
+
+  WrapRow row;
+  row.Next(ButtonWidth("Run"));
+  const bool running = BackgroundJobRunning(state, "motion");
+  if (ImGui::SmallButton(running ? "Running…###motion_run"
+                                 : "Run###motion_run") &&
+      !running) {
+    std::string err;
+    if (!StartMotionRun(state, sel->id, &err))
+      state.motionAddRefusal = err;
+  }
+  row.Next(ButtonWidth("Delete"));
+  if (ImGui::SmallButton("Delete###motion_delete")) {
+    SnapshotAssembly(state);
+    asmDoc.RemoveMotionStudy(sel->id);
+    state.motionResults.erase(sel->id);
+    state.activeMotionStudy = 0;
+    asmDoc.BumpVersion();
+    return;
+  }
+  if (const motion::Result* r = MotionResultFor(state, sel->id)) {
+    if (r->clean)
+      ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f),
+                         "Clean: %zu samples, %zu pair checks, %.1f s",
+                         r->samples.size(), r->pairsChecked, r->seconds);
+    else
+      ImGui::TextColored(
+          ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
+          "NOT clean: worst at sample %zu (%.1f %s)", r->worstSample,
+          r->samples.empty() ? 0.0 : r->samples[r->worstSample].value * k,
+          rot ? "deg" : "mm");
+  }
+}
 
 // The occurrence list + properties editor, drawn in the "Model" panel (where a
 // part tab shows its feature tree) when an assembly tab is active. Edits
@@ -762,6 +902,7 @@ void DrawOccurrencePanel(AppState& state) {
   DrawRelationsSection(state);
   DrawConfigsSection(state);
   DrawExplodedSection(state);
+  DrawMotionSection(state);
   DrawBomSection(state);
 
   ImGui::End();

@@ -17,10 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    86; // v86: the `Frame` feature (a named datum frame: explicit, from one
+    87; // v87: assembly `motion` -- a MotionStudy: one mate DOF driven over a
+        //      range in N samples, solved at each and clash-checked, so a
+        //      mechanism's motion is a thing the document holds
+        //      (docs/agent-scale-plan.md, G2).
+        // (v86: the `Frame` feature (a named datum frame: explicit, from one
         //      or several elements, or offset from another) and the mate
         //      connector anchor `{frame: <id>}` that mates to it by name
-        //      (docs/agent-scale-plan.md, G0).
+        //      (docs/agent-scale-plan.md, G0).)
         // (v85: `Derived.body_names` -- pick a source's bodies by NAME as well
         //      as by their created_by id, because one Import feature creates
         //      every body of a STEP (a camera module arrives as 197)

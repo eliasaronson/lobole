@@ -1,0 +1,342 @@
+#include "remote/RemoteMotion.h"
+
+#include "core/AssemblySolve.h"
+#include "core/MotionStudy.h"
+#include "core/Occurrence.h"
+#include "core/io/Serialization.h"
+#include "ui/AppState.h"
+#include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
+#include "ui/MotionActions.h"
+
+#include <glm/gtc/quaternion.hpp>
+
+#include <cmath>
+#include <span>
+
+using json = nlohmann::json;
+
+namespace remote {
+namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+
+// describe: one row per `m ==` branch below — extend together.
+constexpr MethodDoc MotionMethods[] = {
+    {"add_motion_study",
+     "Define a motion study on the active assembly: ONE mate's degree of "
+     "freedom driven over a range, the assembly solved at every sample, and "
+     "every occurrence pair checked for a clash. {driver: mate id, dof?: "
+     "rotation|offset (inferred from a revolute or slider; a cylindrical "
+     "mate must say which), from, to — DEGREES for a rotation, mm for an "
+     "offset — samples? (default 48), check_clash? (default true), "
+     "clash_mode?: mesh (default, ~10x faster) | exact (the boolean), "
+     "name?}. Returns the study and, if it cannot run, `why_not`. Nothing "
+     "runs until run_motion_study.",
+     "check_clash, clash_mode, dof, driver, from, name, samples, to"},
+    {"set_motion_study",
+     "Edit a study {study, name?, from?, to?, samples?, check_clash?, "
+     "clash_mode?}; a stored result is dropped, since it described the old "
+     "definition.",
+     "check_clash, clash_mode, from, name, samples, study, to"},
+    {"remove_motion_study", "Remove a study by id.", "study"},
+    {"list_motion_studies",
+     "Every study, with whether it has a result and whether one is running.",
+     ""},
+    {"run_motion_study",
+     "Run it: {study, async?, include_poses?}. Synchronous by default and "
+     "returns the COLLISION TABLE — per sample: the driver value, whether "
+     "it solved, the loop residual, and the clashing pairs — plus `clean`, "
+     "`worst_sample`, `table` (the same as text, for a report), "
+     "`deflection_mm` for a mesh check, and `pairs_checked`. "
+     "include_poses adds every occurrence's placement per sample. "
+     "{async: true} runs it as a background job ('motion' in "
+     "background_jobs) and motion_status reads the result when it lands. A "
+     "sample that does not solve is reported unsolved with its residual — "
+     "never drawn in the last good pose's place.",
+     "async, include_poses, study"},
+    {"motion_status",
+     "{study}: whether a run is in progress, and the stored result if one "
+     "has landed (the same shape run_motion_study returns).",
+     "include_poses, study"},
+    {"set_motion_pose",
+     "Scrub: drive the study's mate to {t} (0..1 along the range) and "
+     "re-solve, so the viewport and every query show that pose. No undo "
+     "step, like the explode slider — a scrub is a look, not an edit.",
+     "study, t"},
+    {"export_motion",
+     "Write the run as a GLB with a glTF animation {study, path}: one node "
+     "per occurrence, translation + rotation keyframes at every sample, "
+     "24 frames per second. Refuses without a run, and refuses when any "
+     "sample is unsolved.",
+     "path, study"},
+};
+
+json StudyJson(const AssemblyDocument& asmDoc, const MotionStudy& s) {
+  json j = DocumentIO::MotionStudyToJson(s);
+  const bool rot = s.driverDof == MateDof::Rotation;
+  // The document stores the DOF's own unit; the surface speaks degrees for
+  // a rotation. Both are shown so nobody has to remember which this is.
+  j["unit"] = rot ? "deg" : "mm";
+  j["from"] = rot ? s.from * 180.0 / kPi : s.from;
+  j["to"] = rot ? s.to * 180.0 / kPi : s.to;
+  const std::string why = motion::WhyNot(asmDoc, s);
+  if (!why.empty())
+    j["why_not"] = why;
+  return j;
+}
+
+json ResultJson(const motion::Result& r, const MotionStudy& s,
+                bool includePoses) {
+  json samples = json::array();
+  const bool rot = s.driverDof == MateDof::Rotation;
+  for (size_t i = 0; i < r.samples.size(); i++) {
+    const motion::Sample& sm = r.samples[i];
+    json clashes = json::array();
+    for (const motion::Clash& c : sm.clashes)
+      clashes.push_back(
+          {{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}});
+    json sj{{"index", i},
+            {"t", sm.t},
+            {"value", rot ? sm.value * 180.0 / kPi : sm.value},
+            {"solved", sm.solved},
+            {"errored_mates", sm.erroredMates},
+            {"residual_mm", sm.residualMm},
+            {"clashes", clashes}};
+    if (includePoses) {
+      json poses = json::array();
+      for (const auto& [occId, m] : sm.worlds) {
+        const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
+        poses.push_back({{"occurrence", occId},
+                         {"position", {m[3].x, m[3].y, m[3].z}},
+                         {"orientation", {q.x, q.y, q.z, q.w}}});
+      }
+      sj["poses"] = poses;
+    }
+    samples.push_back(sj);
+  }
+  json out{{"clean", r.clean},
+           {"samples", samples},
+           {"worst_sample", r.worstSample},
+           {"pairs_checked", r.pairsChecked},
+           {"seconds", r.seconds},
+           {"unit", rot ? "deg" : "mm"},
+           {"table", motion::Table(r, s)}};
+  if (s.clashMode == "mesh" && s.checkClash)
+    out["deflection_mm"] = r.deflectionMm;
+  if (r.cancelled)
+    out["cancelled"] = true;
+  if (!r.error.empty())
+    out["error"] = r.error;
+  return out;
+}
+
+AssemblyDocument& NeedAssembly(ui::AppState& state) {
+  if (!state.assembly)
+    throw std::runtime_error(
+        "the active document is not an assembly — switch tabs with "
+        "set_active_part (see list_parts)");
+  return *state.assembly;
+}
+
+MotionStudy& NeedStudy(AssemblyDocument& asmDoc, const RpcParams& p) {
+  const uint64_t id = p.at("study").get<uint64_t>();
+  MotionStudy* s = asmDoc.FindMotionStudyById(id);
+  if (!s) {
+    std::vector<std::string> have;
+    for (const MotionStudy& cand : asmDoc.GetMotionStudies())
+      have.push_back(std::to_string(cand.id) + " (" + cand.name + ")");
+    throw std::runtime_error("no motion study with id " + std::to_string(id) +
+                             "; studies here: " + KnownList(have));
+  }
+  return *s;
+}
+
+} // namespace
+
+std::span<const MethodDoc> MotionMethodDocs() { return MotionMethods; }
+
+std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
+                                    const RpcParams& p) {
+  if (m == "add_motion_study") {
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    MotionStudy s;
+    const uint64_t driver = p.at("driver").get<uint64_t>();
+    const Mate* mate = asmDoc.FindMateById(driver);
+    if (!mate) {
+      std::vector<std::string> have;
+      for (const Mate& cand : asmDoc.GetMates())
+        if (assembly::MateHasDof(cand.type, MateDof::Rotation) ||
+            assembly::MateHasDof(cand.type, MateDof::Offset))
+          have.push_back(std::to_string(cand.id) + " (" + cand.name + ")");
+      throw std::runtime_error(
+          "no mate with id " + std::to_string(driver) +
+          "; mates with a degree of freedom: " + KnownList(have));
+    }
+    const bool canRot = assembly::MateHasDof(mate->type, MateDof::Rotation);
+    const bool canSlide = assembly::MateHasDof(mate->type, MateDof::Offset);
+    if (p.contains("dof")) {
+      s.driverDof =
+          DocumentIO::MateDofFromString(p.at("dof").get<std::string>());
+    } else if (canRot && canSlide) {
+      throw std::runtime_error("mate " + std::to_string(driver) +
+                               " is cylindrical — it both turns and slides; "
+                               "say dof: rotation or dof: offset");
+    } else if (canRot) {
+      s.driverDof = MateDof::Rotation;
+    } else if (canSlide) {
+      s.driverDof = MateDof::Offset;
+    } else {
+      throw std::runtime_error(
+          "mate " + std::to_string(driver) + " (" +
+          DocumentIO::MateToJson(*mate).at("mate_type").get<std::string>() +
+          ") has no degree of freedom to drive — a revolute or cylindrical "
+          "mate turns, a slider or cylindrical mate slides");
+    }
+    if ((s.driverDof == MateDof::Rotation && !canRot) ||
+        (s.driverDof == MateDof::Offset && !canSlide))
+      throw std::runtime_error("mate " + std::to_string(driver) + " has no " +
+                               DocumentIO::MateDofToString(s.driverDof) +
+                               " to drive");
+    s.driverMate = driver;
+    const bool rot = s.driverDof == MateDof::Rotation;
+    s.from = p.at("from").get<double>() * (rot ? kPi / 180.0 : 1.0);
+    s.to = p.at("to").get<double>() * (rot ? kPi / 180.0 : 1.0);
+    if (std::abs(s.to - s.from) < 1e-12)
+      throw std::runtime_error("from and to are equal — nothing would move");
+    s.samples = p.value("samples", 48);
+    if (s.samples < 2)
+      throw std::runtime_error("samples must be at least 2");
+    s.checkClash = p.value("check_clash", true);
+    s.clashMode = p.value("clash_mode", std::string("mesh"));
+    if (s.clashMode != "mesh" && s.clashMode != "exact")
+      throw std::runtime_error("clash_mode '" + s.clashMode +
+                               "' is not one of: mesh, exact");
+    s.name = p.value("name", std::string{});
+    if (s.name.empty())
+      s.name = "Motion " + std::to_string(asmDoc.GetMotionStudies().size() + 1);
+    ui::SnapshotAssembly(state);
+    const uint64_t id = asmDoc.AddMotionStudy(std::move(s));
+    return StudyJson(asmDoc, *asmDoc.FindMotionStudyById(id));
+  }
+  if (m == "set_motion_study") {
+    // rpc-params: check_clash, clash_mode, from, name, samples, study, to
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    MotionStudy& s = NeedStudy(asmDoc, p);
+    ui::SnapshotAssembly(state);
+    const bool rot = s.driverDof == MateDof::Rotation;
+    if (p.contains("name"))
+      s.name = p.at("name").get<std::string>();
+    if (p.contains("from"))
+      s.from = p.at("from").get<double>() * (rot ? kPi / 180.0 : 1.0);
+    if (p.contains("to"))
+      s.to = p.at("to").get<double>() * (rot ? kPi / 180.0 : 1.0);
+    if (p.contains("samples")) {
+      s.samples = p.at("samples").get<int>();
+      if (s.samples < 2)
+        throw std::runtime_error("samples must be at least 2");
+    }
+    if (p.contains("check_clash"))
+      s.checkClash = p.at("check_clash").get<bool>();
+    if (p.contains("clash_mode")) {
+      s.clashMode = p.at("clash_mode").get<std::string>();
+      if (s.clashMode != "mesh" && s.clashMode != "exact")
+        throw std::runtime_error("clash_mode '" + s.clashMode +
+                                 "' is not one of: mesh, exact");
+    }
+    asmDoc.BumpVersion();
+    state.motionResults.erase(s.id); // it described the old definition
+    return StudyJson(asmDoc, s);
+  }
+  if (m == "remove_motion_study") {
+    // rpc-params: study
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    const MotionStudy& s = NeedStudy(asmDoc, p);
+    const uint64_t id = s.id;
+    ui::SnapshotAssembly(state);
+    asmDoc.RemoveMotionStudy(id);
+    state.motionResults.erase(id);
+    return json{{"removed", id}};
+  }
+  if (m == "list_motion_studies") {
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    json out = json::array();
+    const bool running = ui::BackgroundJobRunning(state, "motion");
+    for (const MotionStudy& s : asmDoc.GetMotionStudies()) {
+      json j = StudyJson(asmDoc, s);
+      const motion::Result* r = ui::MotionResultFor(state, s.id);
+      j["has_result"] = r != nullptr;
+      if (r)
+        j["clean"] = r->clean;
+      j["running"] = running;
+      out.push_back(j);
+    }
+    return json{{"studies", out}};
+  }
+  if (m == "run_motion_study") {
+    // rpc-params: async, include_poses, study
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    MotionStudy& s = NeedStudy(asmDoc, p);
+    const bool includePoses = p.value("include_poses", false);
+    if (p.value("async", false)) {
+      std::string err;
+      if (!ui::StartMotionRun(state, s.id, &err))
+        throw std::runtime_error(err);
+      return json{{"started", true}, {"running", true}, {"job", "motion"}};
+    }
+    const motion::Result r = ui::RunMotionNow(state, s.id);
+    if (!r.error.empty())
+      throw std::runtime_error(r.error);
+    return ResultJson(r, s, includePoses);
+  }
+  if (m == "motion_status") {
+    // rpc-params: include_poses, study
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    const MotionStudy& s = NeedStudy(asmDoc, p);
+    const bool includePoses = p.value("include_poses", false);
+    json out{{"running", ui::BackgroundJobRunning(state, "motion")}};
+    if (const motion::Result* r = ui::MotionResultFor(state, s.id)) {
+      out["result"] = ResultJson(*r, s, includePoses);
+      out["has_result"] = true;
+    } else {
+      out["has_result"] = false;
+    }
+    return out;
+  }
+  if (m == "set_motion_pose") {
+    // rpc-params: study, t
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    const MotionStudy& s = NeedStudy(asmDoc, p);
+    const double t = p.at("t").get<double>();
+    if (t < 0.0 || t > 1.0)
+      throw std::runtime_error("t is 0..1 along the study's range");
+    std::string err;
+    if (!ui::ApplyMotionPose(state, s.id, t, &err))
+      throw std::runtime_error(err);
+    const bool rot = s.driverDof == MateDof::Rotation;
+    const double value = motion::ValueAt(s, t);
+    json out{{"t", t},
+             {"value", rot ? value * 180.0 / kPi : value},
+             {"unit", rot ? "deg" : "mm"}};
+    int errored = 0;
+    for (const Mate& mm : asmDoc.GetMates())
+      if (!mm.error.empty())
+        errored++;
+    out["errored_mates"] = errored;
+    return out;
+  }
+  if (m == "export_motion") {
+    // rpc-params: path, study
+    AssemblyDocument& asmDoc = NeedAssembly(state);
+    const MotionStudy& s = NeedStudy(asmDoc, p);
+    const std::string path = p.at("path").get<std::string>();
+    std::string err;
+    size_t nodes = 0, frames = 0;
+    if (!ui::ExportMotionGlb(state, s.id, path, &err, &nodes, &frames))
+      throw std::runtime_error(err);
+    return json{{"path", path}, {"nodes", nodes}, {"frames", frames}};
+  }
+  return std::nullopt;
+}
+
+} // namespace remote

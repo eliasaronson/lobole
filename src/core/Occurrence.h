@@ -206,6 +206,34 @@ struct Relation {
   std::string error;  // set by the solve: a mate gone, a DOF missing
 };
 
+// A motion study (v87, docs/agent-scale-plan.md G2): ONE mate's degree of
+// freedom driven from `from` to `to` in `samples` steps, the assembly solved
+// at each, and every occurrence pair checked for a clash. The definition is
+// persisted; the samples and the collision table are not — they are a
+// product of running it, like a FEM result.
+//
+// "The animation is the deliverable": a crank turned through 720 degrees
+// with sixteen pistons following is the thing a W16 exists to show, and it
+// is worthless unless every one of those poses has been checked. So the
+// check is part of the definition, not a separate verb someone has to know
+// to run.
+struct MotionStudy {
+  uint64_t id = 0;         // stable, shares the assembly's id counter
+  std::string name;        // display label (cosmetic)
+  uint64_t driverMate = 0; // the mate whose DOF is driven
+  MateDof driverDof = MateDof::Rotation;
+  // Range in the DOF's own unit: RADIANS for a rotation, mm for an offset —
+  // the same unit `set_mate` takes, so nothing here converts. The RPC takes
+  // degrees for a rotation and converts once, at the boundary.
+  double from = 0.0;
+  double to = 0.0;
+  int samples = 48; // poses, `to` inclusive; 720 degrees at 15 = 49
+  bool checkClash = true;
+  // "mesh" (the default: triangles, the speed a sweep needs) or "exact"
+  // (the boolean, at a boolean's price, for a final gate).
+  std::string clashMode = "mesh";
+};
+
 // An assembly document: an ordered list of occurrences that *place* the bodies
 // of other parts by explicit transform, plus the mates that constrain them
 // (A3 — re-solved over non-`fixed` occurrences by a placement pass). A
@@ -280,6 +308,16 @@ public:
   Relation* FindRelationById(uint64_t id);
   const Relation* FindRelationById(uint64_t id) const;
 
+  // Motion studies (v87): the same id space and discipline.
+  const std::vector<MotionStudy>& GetMotionStudies() const {
+    return m_motionStudies;
+  }
+  std::vector<MotionStudy>& GetMotionStudies() { return m_motionStudies; }
+  uint64_t AddMotionStudy(MotionStudy study);
+  bool RemoveMotionStudy(uint64_t id);
+  MotionStudy* FindMotionStudyById(uint64_t id);
+  const MotionStudy* FindMotionStudyById(uint64_t id) const;
+
   // Directly set the next-id counter (used by the loader so restored ids are
   // never reissued). No-op if `next` is not greater than the current counter.
   void EnsureNextIdAtLeast(uint64_t next) {
@@ -333,6 +371,7 @@ private:
   std::vector<Mate> m_mates;
   std::vector<ExplodedView> m_explodedViews;
   std::vector<Relation> m_relations;
+  std::vector<MotionStudy> m_motionStudies;
   std::vector<Configuration> m_configurations;
   uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id

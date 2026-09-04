@@ -69,6 +69,7 @@ add_executable(designer_tests
     test_datum.cpp
     test_frame.cpp
     test_meshcollide.cpp
+    test_motion.cpp
     test_revolve.cpp
     test_boolean.cpp
     test_split.cpp
@@ -314,6 +315,13 @@ add_test(NAME assembly_relations_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_relations_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_relations_smoke PROPERTIES TIMEOUT 120)
+
+# Motion studies (agent-scale plan G2): a study over the RPC, run sync and
+# as a job, the collision table, a scrub, the animated GLB, the refusals.
+add_test(NAME motion_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/motion_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(motion_smoke PROPERTIES TIMEOUT 300)
 
 # The SDK (agent-scale plan G1b): the RPC surface is GENERATED from
 # `describe` (so nothing is duplicated and nothing can drift), and only the

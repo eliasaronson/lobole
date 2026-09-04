@@ -1,7 +1,10 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
 #include "ui/AssemblyActions.h"
+#include "ui/MotionActions.h"
+
 #include "ui/ImportJob.h"
+#include <cmath>
 
 // Assembly GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -346,6 +349,81 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(s_App->assembly->GetExplodedViews().empty());
     IM_CHECK_EQ(s_App->activeExplodedView, (uint64_t)0);
+  };
+
+  // G2: a motion study from the panel — Add picks the first mate with a
+  // degree of freedom, the scrub slider drives that mate (no undo step,
+  // the explode rule), Run is a background job whose result lands, and
+  // Delete takes it away.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_motion_study_scrubs_and_runs");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Turning");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence base;
+    base.name = "Base";
+    base.partId = partId;
+    base.fixed = true;
+    const uint64_t baseOcc = s_App->assembly->AddOccurrence(base);
+    Occurrence arm;
+    arm.name = "Arm";
+    arm.partId = partId;
+    arm.position = glm::vec3(30.0f, 0.0f, 0.0f);
+    const uint64_t armOcc = s_App->assembly->AddOccurrence(arm);
+    Mate m;
+    m.type = MateType::Revolute;
+    m.name = "axle";
+    m.a.occurrenceId = baseOcc;
+    m.a.anchor.origin = true;
+    m.b.occurrenceId = armOcc;
+    m.b.anchor.origin = true;
+    m.flipped = false;
+    // Seated ABOVE the base by the base's own height: the two are the same
+    // box, and origin-on-origin would make them coincide and clash at every
+    // angle — which is what the first version of this test found.
+    {
+      glm::vec3 lo, hi;
+      ui::PartDocById(*s_App, partId)
+          ->GetBodies()[0]
+          .shape.GetBoundingBox(lo, hi);
+      m.offset = (hi.z - lo.z) + 1.0f;
+    }
+    const uint64_t axle = s_App->assembly->AddMate(m);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+
+    ctx->ItemClick("//###Model/###motion_add");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->GetMotionStudies().size(), (size_t)1);
+    const MotionStudy& study = s_App->assembly->GetMotionStudies()[0];
+    IM_CHECK_EQ(study.driverMate, axle);
+    IM_CHECK(study.driverDof == MateDof::Rotation);
+    IM_CHECK(std::abs(study.to - 2.0 * 3.14159265358979) < 1e-6);
+    IM_CHECK_EQ(s_App->activeMotionStudy, study.id);
+
+    // The scrub drives the mate to the middle of its range.
+    ctx->ItemInputValue("//###Model/###motion_t", 0.5f);
+    ctx->Yield(2);
+    IM_CHECK(std::abs(s_App->assembly->FindMateById(axle)->rotation -
+                      3.14159265f) < 1e-3f);
+
+    // Run: a job; wait for it to land (a two-body turn is milliseconds).
+    ctx->ItemClick("//###Model/###motion_run");
+    for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, study.id) == nullptr;
+         i++)
+      ctx->Yield();
+    const motion::Result* r = ui::MotionResultFor(*s_App, study.id);
+    IM_CHECK(r != nullptr);
+    IM_CHECK_EQ(r->samples.size(), (size_t)48);
+    IM_CHECK(r->clean); // nothing is in the arm's way
+
+    ctx->ItemClick("//###Model/###motion_delete");
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly->GetMotionStudies().empty());
+    IM_CHECK_EQ(s_App->activeMotionStudy, (uint64_t)0);
   };
 
   // U13d: a row too long for the dock elides and can still be READ. ImGui

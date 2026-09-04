@@ -1,0 +1,253 @@
+#include "core/MotionStudy.h"
+
+#include "core/Document.h"
+#include "core/Measure.h"
+#include "core/MeshCollide.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <map>
+#include <memory>
+
+namespace motion {
+
+double ValueAt(const MotionStudy& study, double t) {
+  return study.from + t * (study.to - study.from);
+}
+
+std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study) {
+  const Mate* m = asmDoc.FindMateById(study.driverMate);
+  if (m == nullptr) {
+    std::string mates;
+    for (const Mate& cand : asmDoc.GetMates())
+      if (assembly::MateHasDof(cand.type, MateDof::Rotation) ||
+          assembly::MateHasDof(cand.type, MateDof::Offset)) {
+        if (!mates.empty())
+          mates += ", ";
+        mates += std::to_string(cand.id) + " (" + cand.name + ")";
+      }
+    return "driver mate " + std::to_string(study.driverMate) +
+           " no longer exists; mates with a degree of freedom: " +
+           (mates.empty() ? std::string("none") : mates);
+  }
+  if (!assembly::MateHasDof(m->type, study.driverDof))
+    return "driver mate " + std::to_string(m->id) + " (" + m->name +
+           ") has no " +
+           (study.driverDof == MateDof::Rotation ? "rotation" : "offset") +
+           " to drive — a revolute or cylindrical mate turns, a slider or "
+           "cylindrical mate slides";
+  if (study.samples < 2)
+    return "a motion study needs at least 2 samples";
+  return {};
+}
+
+namespace {
+
+// One placed body at one sample, for the pair sweep.
+struct Placed {
+  uint64_t root = 0; // top-level occurrence
+  std::string rootName;
+  const Body* body = nullptr;
+  glm::mat4 world{1.0f};
+};
+
+// A mesh per LOCAL shape, built once for the whole run and placed by matrix
+// at every sample — the only reason 48 samples of a 250-occurrence sweep is
+// tractable at all.
+std::shared_ptr<const collide::Mesh> MeshFor(MeshCache& cache,
+                                             const CADShape& shape) {
+  const void* key = shape.GeometryId();
+  const auto it = cache.find(key);
+  if (it != cache.end())
+    return it->second;
+  auto mesh = collide::Mesh::Build(shape);
+  cache[key] = mesh;
+  return mesh;
+}
+
+bool WorldBox(const Body& b, const glm::mat4& world, glm::vec3& lo,
+              glm::vec3& hi) {
+  std::vector<Body> one(1);
+  one[0].shape = b.shape;
+  return Measure::WorldBounds(one, world, lo, hi);
+}
+
+} // namespace
+
+Result Run(const AssemblyDocument& asmDocIn,
+           const assembly::PartResolver& parts,
+           const assembly::AssemblyResolver& assemblies,
+           const MotionStudy& study, const std::function<bool()>& cancelled,
+           const std::function<void(double)>& progress, MeshCache* meshesIn) {
+  const auto t0 = std::chrono::steady_clock::now();
+  Result out;
+  out.error = WhyNot(asmDocIn, study);
+  if (!out.error.empty())
+    return out;
+
+  // A COPY: the run drives a mate through its whole range and the document
+  // on the tab must not be left at the last sample.
+  AssemblyDocument asmDoc = asmDocIn;
+  Mate* driver = asmDoc.FindMateById(study.driverMate);
+
+  MeshCache own;
+  MeshCache& meshes = meshesIn ? *meshesIn : own;
+  size_t worstCount = 0;
+  bool worstSet = false;
+
+  for (int i = 0; i < study.samples; i++) {
+    if (cancelled && cancelled()) {
+      out.cancelled = true;
+      break;
+    }
+    Sample s;
+    s.t = static_cast<double>(i) / static_cast<double>(study.samples - 1);
+    s.value = ValueAt(study, s.t);
+
+    assembly::SetMateDof(*driver, study.driverDof, s.value);
+    assembly::PropagateRelations(asmDoc, driver->id);
+    const assembly::SolveReport rep =
+        assembly::Solve(asmDoc, parts, assemblies);
+    s.erroredMates = rep.erroredMates;
+    s.residualMm = rep.residualMm;
+    s.solved = rep.erroredMates == 0 && rep.loopsClosed;
+
+    auto flat = assembly::Flatten(asmDoc, parts, assemblies);
+    if (!flat) {
+      s.solved = false;
+      out.samples.push_back(std::move(s));
+      out.clean = false;
+      continue;
+    }
+    // Placements: one per top-level occurrence, from the solved document.
+    for (const Occurrence& o : asmDoc.GetOccurrences()) {
+      const glm::mat4 world = glm::translate(glm::mat4(1.0f), o.position) *
+                              glm::mat4_cast(o.orientation);
+      s.worlds.emplace_back(o.id, world);
+    }
+
+    if (study.checkClash) {
+      std::vector<Placed> placed;
+      for (const assembly::FlatInstance& inst : *flat) {
+        if (!inst.visible || inst.part == nullptr)
+          continue;
+        const Occurrence* root = asmDoc.FindById(inst.rootOccurrenceId);
+        for (const Body& b : inst.part->GetBodies()) {
+          if (b.reference || !b.shape.IsValid())
+            continue;
+          placed.push_back(
+              {inst.rootOccurrenceId, root ? root->name : "", &b, inst.world});
+        }
+      }
+      // Boxes first: only pairs whose boxes overlap can clash, and that
+      // clears most of any assembly at every sample for nothing.
+      std::vector<glm::vec3> lo(placed.size()), hi(placed.size());
+      std::vector<bool> ok(placed.size());
+      for (size_t k = 0; k < placed.size(); k++)
+        ok[k] = WorldBox(*placed[k].body, placed[k].world, lo[k], hi[k]);
+      std::map<std::pair<uint64_t, uint64_t>, Clash> found;
+      for (size_t a = 0; a < placed.size(); a++) {
+        if (!ok[a])
+          continue;
+        for (size_t b = a + 1; b < placed.size(); b++) {
+          if (!ok[b] || placed[a].root == placed[b].root)
+            continue; // a part does not clash with itself
+          if (lo[a].x > hi[b].x || lo[b].x > hi[a].x || lo[a].y > hi[b].y ||
+              lo[b].y > hi[a].y || lo[a].z > hi[b].z || lo[b].z > hi[a].z)
+            continue;
+          const auto key =
+              std::make_pair(std::min(placed[a].root, placed[b].root),
+                             std::max(placed[a].root, placed[b].root));
+          if (found.count(key))
+            continue; // this pair is already a clash at this sample
+          out.pairsChecked++;
+          bool hit = false;
+          if (study.clashMode == "exact") {
+            std::vector<Body> ba(1), bb(1);
+            ba[0].shape = placed[a].body->shape;
+            bb[0].shape = placed[b].body->shape;
+            const auto v = Measure::InterferenceVolume(ba, placed[a].world, bb,
+                                                       placed[b].world);
+            hit = v.has_value() && *v > 1e-9;
+          } else {
+            const auto ma = MeshFor(meshes, placed[a].body->shape);
+            const auto mb = MeshFor(meshes, placed[b].body->shape);
+            out.deflectionMm = std::max(
+                out.deflectionMm, std::max(ma->Deflection(), mb->Deflection()));
+            hit = ma->Overlaps(glm::dmat4(placed[a].world), *mb,
+                               glm::dmat4(placed[b].world));
+          }
+          if (hit) {
+            Clash c;
+            c.a = key.first;
+            c.b = key.second;
+            c.aName = placed[a].root == key.first ? placed[a].rootName
+                                                  : placed[b].rootName;
+            c.bName = placed[a].root == key.first ? placed[b].rootName
+                                                  : placed[a].rootName;
+            found[key] = c;
+          }
+        }
+      }
+      for (auto& [key, c] : found)
+        s.clashes.push_back(c);
+    }
+
+    const bool bad = !s.solved || !s.clashes.empty();
+    if (bad)
+      out.clean = false;
+    // The worst sample: the first unsolved one wins outright, else the one
+    // with the most clashes.
+    if (!s.solved && (!worstSet || out.samples[out.worstSample].solved)) {
+      out.worstSample = out.samples.size();
+      worstSet = true;
+      worstCount = SIZE_MAX;
+    } else if (s.solved && s.clashes.size() > worstCount &&
+               (!worstSet || out.samples[out.worstSample].solved)) {
+      out.worstSample = out.samples.size();
+      worstCount = s.clashes.size();
+      worstSet = true;
+    }
+    out.samples.push_back(std::move(s));
+    if (progress)
+      progress(static_cast<double>(i + 1) / static_cast<double>(study.samples));
+  }
+  out.seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  return out;
+}
+
+std::string Table(const Result& result, const MotionStudy& study) {
+  std::string out;
+  const bool deg = study.driverDof == MateDof::Rotation;
+  char line[256];
+  std::snprintf(line, sizeof line, "%-6s %-12s %-8s %-10s %s\n", "#",
+                deg ? "angle (deg)" : "offset (mm)", "solved", "residual",
+                "clashes");
+  out += line;
+  for (size_t i = 0; i < result.samples.size(); i++) {
+    const Sample& s = result.samples[i];
+    const double shown = deg ? s.value * 180.0 / 3.14159265358979 : s.value;
+    std::string clashes;
+    for (const Clash& c : s.clashes) {
+      if (!clashes.empty())
+        clashes += ", ";
+      clashes += c.aName + " x " + c.bName;
+    }
+    std::snprintf(line, sizeof line, "%-6zu %-12.2f %-8s %-10.4f %s\n", i,
+                  shown, s.solved ? "yes" : "NO", s.residualMm,
+                  clashes.empty() ? "-" : clashes.c_str());
+    out += line;
+  }
+  std::snprintf(line, sizeof line, "%s: %zu samples, %zu pair checks, %.2f s\n",
+                result.clean ? "CLEAN" : "NOT CLEAN", result.samples.size(),
+                result.pairsChecked, result.seconds);
+  out += line;
+  return out;
+}
+
+} // namespace motion

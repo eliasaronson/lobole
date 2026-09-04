@@ -9,10 +9,20 @@ namespace collide {
 namespace {
 
 // --- triangle/triangle intersection ----------------------------------------
-// The separating-axis test for two triangles: 11 axes (2 face normals, 9
-// edge-edge cross products). Exact for triangles that properly intersect and
-// for coplanar overlap; a pair that merely touches along an edge may read
-// either way, which is inside the deflection this whole module works to.
+// The separating-axis test for two triangles, over SEVENTEEN axes: the 2 face
+// normals, the 9 edge-edge cross products, and — the six that matter — each
+// triangle's three in-plane edge normals (edge x its own face normal).
+//
+// The usual statement of this test gives only the first eleven, and those are
+// enough ONLY when the triangles are not coplanar. When they are, every one of
+// the eleven is parallel to the shared plane normal, every projection is a
+// point, nothing separates, and the test declares any two coplanar triangles
+// intersecting however far apart they lie. That is not a corner case in CAD:
+// a pin whose end cap is flush with the face it passes through is the normal
+// way parts are drawn, and the slider-crank rig found it as a 0.5 mm
+// clearance hole reported as a clash at a 0.17 mm deflection
+// (docs/agent-scale-plan.md, G2). The in-plane edge normals are the 2D
+// separating axes within that plane, and they decide it.
 
 bool Separated(const glm::dvec3& axis, const glm::dvec3* A,
                const glm::dvec3* B) {
@@ -34,14 +44,22 @@ bool Separated(const glm::dvec3& axis, const glm::dvec3* A,
 bool TrianglesIntersect(const glm::dvec3* A, const glm::dvec3* B) {
   const glm::dvec3 ea[3] = {A[1] - A[0], A[2] - A[1], A[0] - A[2]};
   const glm::dvec3 eb[3] = {B[1] - B[0], B[2] - B[1], B[0] - B[2]};
-  if (Separated(glm::cross(ea[0], ea[1]), A, B))
-    return false;
-  if (Separated(glm::cross(eb[0], eb[1]), A, B))
+  const glm::dvec3 na = glm::cross(ea[0], ea[1]);
+  const glm::dvec3 nb = glm::cross(eb[0], eb[1]);
+  if (Separated(na, A, B) || Separated(nb, A, B))
     return false;
   for (const glm::dvec3& u : ea)
     for (const glm::dvec3& v : eb)
       if (Separated(glm::cross(u, v), A, B))
         return false;
+  // The in-plane edge normals of each triangle: the axes that decide a
+  // coplanar pair, where all of the above degenerate.
+  for (const glm::dvec3& u : ea)
+    if (Separated(glm::cross(u, na), A, B))
+      return false;
+  for (const glm::dvec3& v : eb)
+    if (Separated(glm::cross(v, nb), A, B))
+      return false;
   return true;
 }
 

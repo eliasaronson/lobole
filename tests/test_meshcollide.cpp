@@ -156,3 +156,26 @@ TEST_CASE("Mesh collision is far cheaper than the exact boolean",
   // fast and wrong.
   CHECK(meshHits == exactHits);
 }
+
+// A pin through a clearance hole: the case a mechanism is made of, and the
+// one the slider-crank rig found the module getting wrong — a 0.5 mm radial
+// gap read as a clash at a 0.17 mm deflection.
+TEST_CASE("A pin in a clearance hole is clear", "[collide]") {
+  collide::ClearCache();
+  CADKernel& k = CADKernel::Instance();
+  // A rod-sized plate (so the deflection is the rig's) with a 9 mm hole.
+  CADShape plate = Box({-8, -3, -6}, {78, 3, 6});
+  plate = plate.Difference(
+      k.CreateCylinder(glm::vec3(0, -5, 0), glm::vec3(0, 1, 0), 4.5, 12.0));
+  REQUIRE(plate.IsValid());
+  // An 8 mm pin through it, ending flush with the plate's top face.
+  const CADShape pin =
+      k.CreateCylinder(glm::vec3(0, -22, 0), glm::vec3(0, 1, 0), 4.0, 25.0);
+
+  const bool exact = ExactOverlap(plate, glm::mat4(1.0f), pin, glm::mat4(1.0f));
+  const auto mesh =
+      collide::Overlap(plate, glm::dmat4(1.0), pin, glm::dmat4(1.0));
+  INFO("deflection " << mesh.deflection << " mm against a 0.5 mm gap");
+  CHECK_FALSE(exact);
+  CHECK_FALSE(mesh.intersects);
+}

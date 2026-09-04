@@ -327,7 +327,7 @@ now a direct classification of points down the bore
 has uncommitted local changes, and rewriting a file someone is working in is
 not the port's job.
 
-## G2 — Motion study: a driver, samples, a scrub, an export (three days)
+## G2 — Motion study — SHIPPED 2026-09-04
 
 The assembly grows a `MotionStudy`:
 
@@ -366,13 +366,83 @@ The assembly grows a `MotionStudy`:
   `list_motion_studies`, `run_motion_study {async}`, `set_motion_pose`,
   `export_motion`; MethodDoc rows; MCP gets `motion_study` as one tool.
 
-Gate: `generators/slider_crank.py` — crank, rod, piston in a bore, revolute
-+ revolute + cylindrical, a closed loop (the A6 four-bar's cousin, and the
-engine's atom); `motion_smoke.py` runs 48 samples, asserts the piston's
-stroke equals twice the crank radius at t=0.5, `clean: true`, and the GLB
-loads back with 48 keyframes. A GUI test scrubs the slider and asserts the
-piston moved. **Measure:** 48 samples with the mesh check < 2 s on the
-slider-crank; the number on the gripper's 8 occurrences.
+### As built
+
+A `MotionStudy` on the assembly (v87, golden `assembly/v87-motion-study`,
+history row): driver mate + DOF, a range in the DOF's own unit, a sample
+count, and the clash check's mode. Running it solves at every sample and
+sweeps every occurrence pair; the result is transient, like a FEM result.
+The surface is `add_motion_study` / `set_motion_study` /
+`remove_motion_study` / `list_motion_studies` / `run_motion_study` (sync or
+`async` on the A3 registry) / `motion_status` / `set_motion_pose` /
+`export_motion`, plus a panel section with a scrub slider and Run.
+
+Decisions worth recording:
+
+- **The RPC speaks degrees, the document stores radians.** `set_mate` takes
+  radians, so the study stores what it will write; the conversion happens
+  once, at the boundary, and every response says which unit it is in.
+- **A scrub is a look, not an edit.** `set_motion_pose` pushes no undo step,
+  the explode slider's rule — 48 snapshots per drag would bury the history
+  that matters.
+- **The worker shares nothing.** An async run copies the assembly AND every
+  document under it, and pre-builds the collision meshes on the main thread,
+  because tessellating is the one step that mutates a shape. A synchronous
+  run skips the copies (it is blocking the caller anyway) — copying a
+  Document regenerates it, and an Import re-reads its STEP.
+- **A sample that does not solve is reported unsolved with its residual**,
+  and `export_motion` REFUSES rather than writing an animation that holds a
+  frame there. The GLB is the run's poses, not a guess at them.
+
+The animated GLB is a writer of our own (`core/io/GlbAnimation`), because
+OpenCASCADE's glTF writer emits a static scene and nothing else. It is small:
+glTF 2.0 is a JSON index over one binary buffer, and a rigid mechanism needs
+three accessors per node (times, translations, rotations) with LINEAR
+interpolation. The scene root carries the one Z-up-to-Y-up rotation.
+
+### The bug the acceptance rig found, and it was in G3
+
+`generators/slider_crank.py` is the plan's atom: block, crank, rod, piston,
+a closed loop the A6 solver closes numerically. Built on the SDK, every mate
+between named frames. Its first run reported a clash at every angle — and
+the study was right twice and wrong once:
+
+- the rod's tip really did hit the piston body ahead of its slot (an exact
+  360 mm³, which the boolean confirmed), and the rod's swing really did
+  leave the bore where the barrel started. Both were the rig's geometry, and
+  fixing them is what a kinematic gate is for.
+- but `crank x rod` was reported clashing where the exact boolean said
+  0.5 mm clear, at a 0.17 mm deflection. **G3's triangle test was wrong for
+  COPLANAR triangles.** The usual statement of triangle-triangle SAT gives
+  eleven axes — two face normals and nine edge-edge crosses — and those are
+  enough only when the triangles are not coplanar. When they are, every one
+  of the eleven is parallel to the shared plane normal, nothing can separate,
+  and any two coplanar triangles read as intersecting however far apart they
+  lie. A pin whose end cap is flush with the face it passes through is the
+  ordinary way parts are drawn, so this was not a corner case. Six more axes
+  — each triangle's in-plane edge normals — decide it. Pinned by "A pin in a
+  clearance hole is clear" in `test_meshcollide.cpp`, which fails on the old
+  code.
+
+That is the second time this round that a new gate found a defect in the
+thing built just before it, and it is the argument for building the gate.
+
+**Measured** on the slider-crank, 49 samples of a four-body loop, 196 pair
+checks:
+
+| | exact | mesh |
+|---|---|---|
+| a full turn | 0.35 s | **0.08 s** |
+
+Both report the same verdict (clean), and the piston's stroke is 39.991 mm
+against a crank radius of 20 — the loop solver's own tolerance.
+
+Gate: `tests/test_motion.cpp` (the sampling, the clash the table must find
+and where, exact and mesh agreeing, the refusals, the round trip, the v87
+golden, and the GLB container parsed back), `tests/motion_smoke.py` (the
+whole RPC surface, sync and async, the scrub, the export, the reopen),
+`a_motion_study_scrubs_and_runs` in the GUI suite, and `slider_crank.py` as
+the standing acceptance rig. 1075 headless, 279 GUI.
 
 ## G3 — Mesh interference for sweeps — SHIPPED 2026-09-04
 

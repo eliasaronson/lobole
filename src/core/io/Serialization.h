@@ -99,6 +99,13 @@ RelationKind RelationKindFromString(const std::string& s);
 const char* MateDofToString(MateDof dof);
 MateDof MateDofFromString(const std::string& s);
 
+// Single-motion-study (de)serialization (v87, docs/agent-scale-plan.md G2).
+// The definition only: driver mate + DOF, range in the DOF's own unit,
+// sample count, and the clash check's mode. An unknown DOF or mode is
+// refused naming the accepted ones.
+nlohmann::json MotionStudyToJson(const MotionStudy& study);
+MotionStudy MotionStudyFromJson(const nlohmann::json& j);
+
 // Single-study (de)serialization (v29, FEM); used both for the studies/ dir
 // files and to echo/snapshot studies from the RPCs and Commands. Throws on
 // malformed input.

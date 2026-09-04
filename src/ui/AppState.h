@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Measure.h"
+#include "core/MotionStudy.h"
 #include "core/Occurrence.h"
 #include "core/cam/CamJob.h"
 #include "core/cam/CamSim.h"      // the cutting simulation cursor + stock
@@ -1018,6 +1019,15 @@ struct AppState {
   // front of each solved occurrence transform; the document is untouched.
   uint64_t activeExplodedView = 0; // 0 = none (normal display)
   float explodeFactor = 1.0f;
+
+  // Motion studies (G2): the panel's selection and scrub position, and the
+  // results of runs, by study id. A result is a product of running, like a
+  // FEM result — never saved. Keyed by study id alone: the map is cleared
+  // when the assembly tab changes underneath it (MotionActions).
+  uint64_t activeMotionStudy = 0;
+  float motionT = 0.0f;
+  std::string motionAddRefusal; // why Add/Run refused, shown in the panel
+  std::map<uint64_t, motion::Result> motionResults;
 
   // UI state
   Selection selection; // U1: the one selection set (see SelectionItem)
