@@ -22,10 +22,11 @@ inside another (temp-dir failures) — the tool scripts already self-manage nix.
 **Grep build output for `FAILED`, not just `error:`.** A nix GC can collect the
 ccache derivation the CMake cache points at; every compile then dies with
 `ccache: No such file or directory`, which an `error:`-only filter reads as
-success. Fix: `nix-shell shell.nix --run "cd build && cmake -UCCACHE_PROGRAM
--UCMAKE_CXX_COMPILER_LAUNCHER -UCMAKE_C_COMPILER_LAUNCHER ."`. The same GC
-leaves binaries linked against collected store paths (`libnglib.so` missing) —
-relink to fix.
+success. It takes headers and libraries the same way, and each looks like a
+different bug (`Vulkan::Vulkan includes non-existent path`, `undefined
+reference to vterm_new`). One fix for all of them, across every build tree:
+`tools/fix-stale-nix-cache.sh`. The same GC leaves binaries linked against
+collected store paths (`libnglib.so` missing) — relink to fix.
 
 **Formatting:** `.clang-format` (LLVM, 2-space, 80-col) governs C/C++. Run
 `tools/setup-hooks.sh` once per clone to enable the `.githooks/pre-commit` hook,

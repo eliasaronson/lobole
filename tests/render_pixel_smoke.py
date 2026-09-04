@@ -113,8 +113,28 @@ def main():
                XDG_CONFIG_HOME=os.path.join(scratch, "config"))
     # --offscreen, not --headless: this needs a real renderer, and offscreen
     # has one without a window or a display server.
-    app = launch_app(binary, extra_args=["--offscreen"], env=env,
-                     headless=False)
+    #
+    # A real renderer still needs a DEVICE, and a stock-Ubuntu container has
+    # no Vulkan ICD at all: the app aborts during boot, before it ever reports
+    # a port, so the `ping`-reports-no-GPU skip below never gets to run. No ICD
+    # is an environment, not a defect -- offscreen_smoke's precedent, same
+    # condition, same 77.
+    try:
+        app = launch_app(binary, extra_args=["--offscreen"], env=env,
+                         headless=False)
+    except RuntimeError as e:
+        if "no usable Vulkan device" in str(e) or "VkResult" in str(e):
+            msg = f"no usable Vulkan device here ({e})"
+            # Same rule as a missing baseline below: a skip on a machine that
+            # simply has no ICD, a failure under --require-baseline, where the
+            # driver is pinned and a vanished device means the gate stopped
+            # applying rather than passing.
+            if require:
+                print(f"render_pixel_smoke: {msg}")
+                return 1
+            print(f"render_pixel_smoke: {msg} — skipping")
+            return SKIP
+        raise
     try:
         d = Designer.wait_for(app.port, timeout=120)
         gpu = d.call("ping").get("gpu", "")

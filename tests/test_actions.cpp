@@ -1898,6 +1898,12 @@ TEST_CASE("a fetch runs on the registry and reports through the loop",
   std::filesystem::remove_all(dir);
 }
 
+// Netgen-gated: the job machinery under test is the same either way, but the
+// assertions read the RESULTS of a solve, and a build without a mesher stores
+// none (fem::Mesh returns "built without FEM support"). The stock-Ubuntu CI
+// job is exactly that build.
+#ifdef HAVE_NETGEN
+
 TEST_CASE("a study solved on the registry lands in its own part, not the "
           "active tab",
           "[actions][jobs][fem]") {
@@ -1980,6 +1986,8 @@ TEST_CASE("a study solved on the registry lands in its own part, not the "
   CHECK(report->bodies[0].elements > 0);
   CHECK(ui::MeshReportFor(state, *state.document, studyId) == nullptr);
 }
+
+#endif // HAVE_NETGEN
 
 TEST_CASE("a STEP import runs on the registry and materializes a slice a "
           "poll",

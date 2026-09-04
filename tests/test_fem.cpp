@@ -1078,6 +1078,8 @@ TEST_CASE("a study refuses an unknown analysis or load type", "[fem][enums]") {
 // document's own faces under the renderer.
 // ---------------------------------------------------------------------------
 
+#ifdef HAVE_NETGEN
+
 TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
           "[fem][mesh][jobs]") {
   Document doc;
@@ -1146,3 +1148,5 @@ TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
   CHECK(planned[0].mesh.stats.nodeCount == meshed[0].mesh.stats.nodeCount);
   CHECK(planned[0].mesh.stats.tetCount == meshed[0].mesh.stats.tetCount);
 }
+
+#endif // HAVE_NETGEN

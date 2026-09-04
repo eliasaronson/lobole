@@ -111,14 +111,37 @@ run_tests() {
   fi
 }
 
+# Configure and build, keeping the output in .ci-local/<name>-build.log.
+# Ninja prints a failing compile on its STDOUT, so `> /dev/null` here used to
+# swallow the diagnosis whole: a broken build exited 1 with nothing on screen
+# but a stray CMake warning. Same rule as run_tests — quiet when green, the
+# last 40 lines and a path when red.
+#   run_build <name> <cmake-configure-args...> -- <cmake-build-args...>
+run_build() {
+  local name="$1"; shift
+  local log="$root/.ci-local/$name-build.log"
+  local cfg=() bld=()
+  while [ "$1" != "--" ]; do cfg+=("$1"); shift; done
+  shift
+  bld=("$@")
+  mkdir -p "$root/.ci-local"
+  if nix-shell shell.nix --run "cmake ${cfg[*]}" > "$log" 2>&1 \
+     && nix-shell shell.nix --run "cmake --build ${bld[*]}" >> "$log" 2>&1; then
+    return 0
+  fi
+  tail -40 "$log"
+  fail "$name build FAILED — full log: $log"
+  exit 1
+}
+
 started=$SECONDS
 failures=0
 
 # ---- job 1: what build-and-test does, using this machine's toolchain -------
 if [ "$run_nix" = 1 ]; then
   step "build-and-test (local toolchain)"
-  nix-shell shell.nix --run "cmake -S . -B .ci-local/build -G Ninja -DCMAKE_BUILD_TYPE=Release" > /dev/null
-  nix-shell shell.nix --run "cmake --build .ci-local/build -j$(nproc)" > /dev/null
+  run_build release -S . -B .ci-local/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -- .ci-local/build -j$(nproc)
   run_tests headless "headless suite" \
     nix-shell shell.nix --run "ctest --test-dir .ci-local/build -LE gui -j$(nproc) --output-on-failure"
 
@@ -130,8 +153,8 @@ if [ "$run_nix" = 1 ]; then
   fi
 
   step "build without the test engine"
-  nix-shell shell.nix --run "cmake -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF" > /dev/null
-  nix-shell shell.nix --run "cmake --build .ci-local/build-no-te -j$(nproc)" > /dev/null
+  run_build no-te -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF \
+    -- .ci-local/build-no-te -j$(nproc)
   if nix-shell shell.nix --run "python3 tests/headless_smoke.py .ci-local/build-no-te/designer" > /dev/null \
      && ! .ci-local/build-no-te/designer --gui-tests --hidden 2>/dev/null; then
     ok "engine-free build works and refuses --gui-tests"
@@ -146,8 +169,8 @@ if [ "$run_asan" = 1 ]; then
   # build-asan, not .ci-local/: the same tree tools/run-sanitized-tests.sh
   # uses, so an incremental developer build and this share their objects.
   source "$root/tools/sanitizer-env.sh"
-  nix-shell shell.nix --run "cmake -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON" > /dev/null
-  nix-shell shell.nix --run "cmake --build build-asan -j$(nproc) --target designer designer_tests" > /dev/null
+  run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
+    -- build-asan -j$(nproc) --target designer designer_tests
   run_tests asan "sanitized suite" \
     nix-shell shell.nix --run "ctest --test-dir build-asan -LE gui -j$(nproc) --output-on-failure -E '$SANITIZER_TEST_EXCLUDE'"
 fi
@@ -160,8 +183,8 @@ if [ "$run_tsan" = 1 ]; then
   # occasional audit like tools/coverage.sh, aimed at the parts of the tree
   # that stopped being single-threaded — the import worker, OCC meshing across
   # threads, async FEM, the remote server.
-  nix-shell shell.nix --run "cmake -S . -B build-tsan -G Ninja -DENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo" > /dev/null
-  nix-shell shell.nix --run "cmake --build build-tsan -j$(nproc) --target designer designer_tests" > /dev/null
+  run_build tsan -S . -B build-tsan -G Ninja -DENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -- build-tsan -j$(nproc) --target designer designer_tests
   # -j4, not -j$(nproc): TSan multiplies each process's memory footprint, and
   # a saturated machine turns a race hunt into a timeout hunt.
   run_tests tsan "race suite" \
