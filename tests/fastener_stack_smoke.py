@@ -137,6 +137,42 @@ def main():
         expect("too short" not in why[0],
                f"a blind screw is not judged on reaching a far side: {why}")
 
+        # ---- A blind joint whose AXIS carries on into something else -----
+        # Found building the air-cooled engine: its head bolts stop in a blind
+        # hole in the barrel, and their axis runs on 158 mm further into a
+        # crank web they do not touch. The blind-hole check read the raw
+        # stack's LAST segment, so it refused ("its hole does not go all the
+        # way through") even when `far_end` had said where the joint stops.
+        # The stack stays untruncated on purpose — the washers and nut live in
+        # it — but the question "is the blind hole at the END of the joint" is
+        # exactly what a far end answers.
+        rig, po, p = blind_rig(a)
+        # Something further down the axis that the bolt has nothing to do
+        # with, standing off on its own.
+        far = plate(a, "bystander", 20.0, hole_from=-5.0, hole_depth=1.0)
+        rig.place(far, at=(0, 0, -80))
+        rig.solve()
+        rim = rim_of(p, 19.0)
+        why = None
+        try:
+            rig.bolt(rim, po, standard="iso4762", size="M10")
+        except RuntimeError as e:
+            why = str(e)
+        expect(why is not None and "far_end" in why,
+               f"without a far end it refuses AND names the way through: "
+               f"{why}")
+        floors = a.part("base").body().edges(
+            circular=True, radius=5.5, where=lambda e: e.center.z < 59.0)
+        expect(len(floors) == 1, f"one hole floor in the base: {len(floors)}")
+        base_occ = next(o for o in rig.occurrences() if o.name == "base")
+        fit = rig.bolt(rim, po, standard="iso4762", size="M10",
+                       far_end={**floors[0].ref, "occurrence": base_occ.id})
+        expect(fit["blind"], f"still a blind joint: {fit}")
+        expect(abs(fit["grip_mm"] - 45.0) < 1e-3,
+               f"and still ends at the hole's floor: {fit}")
+        expect("carries on into bystander" in fit["summary"],
+               f"the summary names what it stops short of: {fit['summary']}")
+
         # ---- A THROUGH joint: the two agree there too --------------------
         a.new()
         lower = plate(a, "lower", 20.0)

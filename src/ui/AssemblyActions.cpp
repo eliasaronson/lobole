@@ -3020,10 +3020,30 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                   " — the axis meets its face " + Mm(blocked) +
                   " out and stops. Its hole is not lined up with this one, so "
                   "a fastener here would pass through solid material.");
-    if (blocking->partId != stack.back().partId)
+    // The last part IN THE JOINT, which is not `stack.back()` when a far end
+    // was picked. The stack is deliberately untruncated — everything between
+    // the two picks is still traversed, so the washers and the nut are still
+    // found — but this question is "does the blind hole sit at the END of the
+    // joint", and a far end is precisely the caller saying where that is.
+    //
+    // Reading stack.back() raw refused a perfectly ordinary joint: an
+    // air-cooled barrel's head bolts stop in a blind hole 30 mm down, and
+    // their axis carries on 158 mm further into a crank web that the bolt
+    // does not touch and was told not to (generators/aircooled_engine.py).
+    const parts::StackSegment* jointEnd = &stack.back();
+    if (truncate > 0.0)
+      for (const parts::StackSegment& seg : stack)
+        if (seg.enter < truncate - 1e-6)
+          jointEnd = &seg;
+    if (blocking->partId != jointEnd->partId)
       return fail("the axis runs into " + blocking->part + " " + Mm(into) +
                   " in — its hole does not go all the way through, so a "
-                  "fastener cannot reach the parts beyond it.");
+                  "fastener cannot reach the parts beyond it." +
+                  (truncate > 0.0
+                       ? ""
+                       : std::string(" If the bolt is not meant to reach "
+                                     "them, pick a `far_end` on the part it "
+                                     "does stop in.")));
 
     // A blind hole bounds the length from ABOVE: the screw must not bottom
     // out. Take the longest stocked length that fits, which is also the most
