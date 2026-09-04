@@ -6,11 +6,13 @@
 // split, so it lives here (inline); the heavier tab-slot accessors
 // (SlotDoc/SlotAssembly) are declared here and defined in AppActions.cpp.
 
+#include "cad/CADKernel.h"       // CADShape (the tessellation cache key)
 #include "render/MeshRenderer.h" // LineVertex3D, Vertex3D
 
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -43,18 +45,74 @@ glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId);
 glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o);
 extern const glm::vec3 kBodyPalette[5];
 
-// One part body's tessellation, its two GPU assets, and the resolved look the
-// instances of it draw with. Shared by every occurrence of the part.
-struct SharedBody {
-  uint32_t assetId = 0;
-  // The outline renderer's asset for the same tessellation. Shared for the
-  // same reason: uploading it per occurrence cost 3.2 ms EACH, which was
-  // most of an assembly resync (394 ms of 670 on a 98-instance dock).
-  uint32_t outlineAssetId = 0;
+// ---------------------------------------------------------------------------
+// One BODY's tessellation and its GPU assets, keyed by the SHAPE rather than
+// by the document it belongs to.
+//
+// The part tab rebuilt every mesh on every sync, so switching to a part
+// holding a derived 197-body camera cost 2.2 s (1.6 s tessellation, 0.5 s
+// upload) EVERY time, and the in-context ghost sync re-tessellated every
+// neighbour body on every regeneration of the part being edited. Both draw
+// shapes that did not change — often the very same shapes, since a Derived
+// copy shares its source's TShape.
+//
+// Keyed on CADShape::GeometryId (the shared TShape) and verified with
+// SameGeometryAs, so a placement or an orientation flip is a different
+// entry. The entry holds its CADShape: that keeps the TShape alive, so the
+// id cannot be recycled under the cache.
+struct BodyTessellation {
+  CADShape shape; // the exact key, and what keeps GeometryId() valid
   std::vector<Vertex3D> vertices;
   std::vector<uint32_t> indices;
   std::vector<uint32_t> triangleFaces;
   std::vector<std::vector<glm::vec3>> edges;
+  uint32_t meshAsset = 0;
+  // Created on FIRST use, not with the entry: a reference ghost draws no
+  // outline, and the camera's 197 ghost bodies would otherwise pay for 197
+  // outline uploads nobody looks at.
+  uint32_t outlineAsset = 0;
+  size_t bytes = 0;        // device bytes the two assets hold, for the budget
+  uint64_t lastSerial = 0; // sync it was last used in (LRU)
+};
+
+struct BodyTessellationCache {
+  // Bucketed by TShape address; a bucket holds the placements seen of it.
+  std::unordered_map<const void*,
+                     std::vector<std::shared_ptr<BodyTessellation>>>
+      byShape;
+  uint64_t serial = 0;
+  size_t bytes = 0;
+};
+
+// Same budget rule as the part render cache, and for the same reasons (see
+// kPartRenderCacheBudgetBytes): what is on screen is always resident, and
+// what is not ages out.
+inline constexpr size_t kTessellationCacheBudgetBytes = 256u * 1024 * 1024;
+
+// The tessellation for `shape`, computed once and reused. nullptr when the
+// shape meshes to nothing. The pointer is valid until the next
+// TrimTessellationCache; callers use it within one sync.
+std::shared_ptr<BodyTessellation> TessellationFor(AppState& state,
+                                                  const CADShape& shape);
+// The outline asset for an entry, created on first use. 0 without an
+// outline renderer.
+uint32_t OutlineAssetFor(AppState& state, BodyTessellation& entry);
+// Ages the cache against the budget. Called at the end of a sync, after
+// every entry that sync uses has been touched.
+void TrimTessellationCache(AppState& state);
+// Drops every entry and its assets (shutdown; ReleasePartRenderCache calls it).
+void ReleaseTessellationCache(AppState& state);
+
+// One part body's tessellation, its two GPU assets, and the resolved look the
+// instances of it draw with. Shared by every occurrence of the part.
+struct SharedBody {
+  // The geometry: tessellation + both renderers' assets, owned by the
+  // app-wide shape cache below (BodyTessellation). It used to be owned
+  // here, per part — so a part drawn on its own tab AND in an assembly was
+  // tessellated and uploaded twice, and a Derived copy of it a third time.
+  // Null for a body that meshes to nothing (the index still lines up with
+  // the part's GetBodies()).
+  std::shared_ptr<BodyTessellation> tess;
   glm::vec3 palette{0.7f};
   bool hasMaterial = false;
   glm::vec3 albedo{0.7f};

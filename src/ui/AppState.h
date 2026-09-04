@@ -58,6 +58,7 @@ namespace ui {
 // Per-part tessellation + GPU asset cache; see AppState::partRenderCache.
 // Defined in AppActionsInternal.h, where Vertex3D is complete.
 struct PartRenderCacheStore;
+struct BodyTessellationCache;
 
 struct GeometryChange {
   bool valid = false;
@@ -1613,6 +1614,9 @@ struct AppState {
   // SyncAssemblyRenderers; a shared_ptr so an incomplete type still has a
   // usable implicit destructor here.
   std::shared_ptr<PartRenderCacheStore> partRenderCache;
+  // Per-BODY tessellation + GPU assets keyed by shape identity, shared by
+  // the part tab and the in-context ghosts (AppActionsInternal.h).
+  std::shared_ptr<BodyTessellationCache> tessellationCache;
 
   // Offline render (Render toolbar button); pumped by main.cpp.
   RenderJob renderJob;

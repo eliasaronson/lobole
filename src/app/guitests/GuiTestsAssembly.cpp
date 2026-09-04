@@ -162,8 +162,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     auto entry = s_App->partRenderCache->parts.find(partId);
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
-    const uint32_t meshAsset = entry->second.bodies[0].assetId;
-    const uint32_t outlineAsset = entry->second.bodies[0].outlineAssetId;
+    const uint32_t meshAsset = entry->second.bodies[0].tess->meshAsset;
+    const uint32_t outlineAsset = entry->second.bodies[0].tess->outlineAsset;
     IM_CHECK(meshAsset != 0);
     IM_CHECK(outlineAsset != 0);
 
@@ -175,13 +175,16 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     entry = s_App->partRenderCache->parts.find(partId);
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
-    IM_CHECK_EQ(entry->second.bodies[0].assetId, meshAsset);
-    IM_CHECK_EQ(entry->second.bodies[0].outlineAssetId, outlineAsset);
+    IM_CHECK_EQ(entry->second.bodies[0].tess->meshAsset, meshAsset);
+    IM_CHECK_EQ(entry->second.bodies[0].tess->outlineAsset, outlineAsset);
     IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2);
     IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
 
-    // Editing the part DOES invalidate it: the cache is keyed on the part
-    // document's version, so stale geometry can never survive a regen.
+    // Adding an unrelated body does NOT re-tessellate this one: the shape
+    // cache is keyed on the body's geometry, so an edit elsewhere in the
+    // part costs only the body it changed. (The part-level entry is rebuilt
+    // — it is keyed on the document version — but it comes back pointing at
+    // the same tessellation.)
     ui::SetActivePart(*s_App, 0);
     ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
@@ -191,7 +194,26 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     entry = s_App->partRenderCache->parts.find(partId);
     IM_CHECK(entry != s_App->partRenderCache->parts.end());
     IM_CHECK(!entry->second.bodies.empty());
-    IM_CHECK(entry->second.bodies[0].assetId != meshAsset);
+    IM_CHECK_EQ(entry->second.bodies[0].tess->meshAsset, meshAsset);
+
+    // Editing THIS body does invalidate it: a changed shape is a different
+    // shape, so stale geometry can never survive a regen.
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield();
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_SILENT(box != nullptr);
+    const nlohmann::json before = DocumentIO::FeatureToJson(*box);
+    box->width = 37.0;
+    const nlohmann::json after = DocumentIO::FeatureToJson(*box);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, asmIdx);
+    ctx->Yield(3);
+    entry = s_App->partRenderCache->parts.find(partId);
+    IM_CHECK(entry != s_App->partRenderCache->parts.end());
+    IM_CHECK(!entry->second.bodies.empty());
+    IM_CHECK(entry->second.bodies[0].tess->meshAsset != meshAsset);
   };
 
   // A STEP import runs on a worker thread behind a progress modal.

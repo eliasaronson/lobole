@@ -1,4 +1,5 @@
 #include "ui/AppActions.h"
+
 #include "core/Units.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
@@ -6,6 +7,7 @@
 #include "ui/JobActions.h"
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
+#include <chrono>
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -4254,18 +4256,41 @@ void SyncDocumentRenderers(AppState& state) {
   // list the toolpath is generated from, so what you see is what is cut.
   size_t palette = 0;
   const std::vector<Body>& bodies = ViewportBodies(state);
+  // One submit+wait for every asset this sync uploads, as the assembly sync
+  // does: without it each new body drains the queue on its own.
+  if (state.meshRenderer)
+    state.meshRenderer->BeginAssetBatch();
+  if (state.outlineRenderer)
+    state.outlineRenderer->BeginAssetBatch();
   std::vector<glm::vec3> bodyColors(bodies.size(), glm::vec3(0.7f));
+  // The same phase breakdown the assembly sync logs, for the same reason:
+  // this loop is the app's stall on a part with many bodies (a derived
+  // 197-body camera), and a guess about which phase costs what has been
+  // wrong every time it has been made.
+  using SyncClock = std::chrono::steady_clock;
+  const auto syncStart = SyncClock::now();
+  const auto msSince = [](SyncClock::time_point t) {
+    return std::chrono::duration<double, std::milli>(SyncClock::now() - t)
+        .count();
+  };
+  double tessMs = 0, uploadMs = 0, pickMs = 0;
+  size_t drawnBodies = 0;
   for (size_t bi = 0; bi < bodies.size(); bi++) {
     const auto& body = bodies[bi];
     if (state.hiddenBodies.count(body.createdBy) != 0)
       continue; // hidden (body context menu): no mesh/outline/picking
-    CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
-    if (cadMesh.vertices.empty())
+    const auto tessStart = SyncClock::now();
+    // Cached by shape identity: a body whose shape did not change keeps its
+    // tessellation AND its uploaded asset across syncs and across tabs.
+    const std::shared_ptr<BodyTessellation> tess =
+        TessellationFor(state, body.shape);
+    tessMs += msSince(tessStart);
+    if (!tess)
       continue;
-
-    std::vector<Vertex3D> vertices =
-        CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
-    uint32_t meshId = state.meshRenderer->AddMesh(vertices, cadMesh.indices);
+    drawnBodies++;
+    const auto uploadStart = SyncClock::now();
+    uint32_t meshId = state.meshRenderer->AddInstance(tess->meshAsset);
+    uploadMs += msSince(uploadStart);
     // Albedo is per-instance state (not baked into vertices): palette color
     // by default; a body with an assigned material overrides it with the
     // material's base color and real PBR params.
@@ -4317,14 +4342,17 @@ void SyncDocumentRenderers(AppState& state) {
       state.meshRenderer->SetInstanceGhost(meshId, 0.35f);
     }
     uint32_t outlineId = 0;
+    const auto outlineStart = SyncClock::now();
     if (state.outlineRenderer && !body.reference)
-      outlineId = state.outlineRenderer->AddMesh(vertices, cadMesh.indices);
-    std::vector<std::vector<glm::vec3>> edges =
-        body.shape.GenerateEdgePolylines(0.1);
+      outlineId =
+          state.outlineRenderer->AddInstance(OutlineAssetFor(state, *tess));
+    uploadMs += msSince(outlineStart);
+    const auto pickStart = SyncClock::now();
     if (state.faceSelector)
-      state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices,
-                                  cadMesh.triangleFaces, glm::mat4(1.0f),
-                                  edges);
+      state.faceSelector->AddMesh(meshId, tess->vertices, tess->indices,
+                                  tess->triangleFaces, glm::mat4(1.0f),
+                                  tess->edges);
+    pickMs += msSince(pickStart);
     state.documentMeshes.push_back({meshId,
                                     outlineId,
                                     bi,
@@ -4332,7 +4360,7 @@ void SyncDocumentRenderers(AppState& state) {
                                     glm::mat4(1.0f),
                                     /*leafPartId=*/0,
                                     {},
-                                    std::move(edges)});
+                                    tess->edges});
   }
 
   // Reference geometry is sized from the document's reach
@@ -4403,13 +4431,22 @@ void SyncDocumentRenderers(AppState& state) {
   // expanded primitives) is rebuilt per-frame in UI.cpp, since it must react to
   // edit-mode and selection/hover changes that don't bump the document version.
 
+  if (state.meshRenderer)
+    state.meshRenderer->EndAssetBatch();
+  if (state.outlineRenderer)
+    state.outlineRenderer->EndAssetBatch();
+  TrimTessellationCache(state);
+  const double totalMs = msSince(syncStart);
   if (state.job)
-    LOG_INFO("Job synced: {} parts, {} bodies", state.job->PartCount(),
-             bodies.size());
+    LOG_INFO("Job synced: {} parts, {} bodies in {:.0f} ms [tessellate {:.0f}, "
+             "instance {:.0f}, picking {:.0f}]",
+             state.job->PartCount(), bodies.size(), totalMs, tessMs, uploadMs,
+             pickMs);
   else
-    LOG_INFO("Document synced: {} features, {} bodies",
-             state.document->FeatureCount(),
-             state.document->GetBodies().size());
+    LOG_INFO("Document synced: {} features, {} bodies ({} drawn) in {:.0f} ms "
+             "[tessellate {:.0f}, instance {:.0f}, picking {:.0f}]",
+             state.document->FeatureCount(), state.document->GetBodies().size(),
+             drawnBodies, totalMs, tessMs, uploadMs, pickMs);
 }
 
 bool SyncRayTracingScene(AppState& state, bool groundPlane) {
@@ -4460,7 +4497,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   // re-meshing turns a Render of a 299-part import from ~4 s of pure
   // duplicate OCC work into a copy — and it is a copy of exactly the geometry
   // on screen, so the still cannot disagree with the viewport.
-  const auto cachedBodyFor = [&state](const RTItem& it) -> const SharedBody* {
+  const auto cachedBodyFor =
+      [&state](const RTItem& it) -> const BodyTessellation* {
     if (it.partId == 0 || !state.partRenderCache)
       return nullptr;
     const auto entry = state.partRenderCache->parts.find(it.partId);
@@ -4472,14 +4510,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
         it.bodyIndex >= entry->second.bodies.size())
       return nullptr;
     const SharedBody& sb = entry->second.bodies[it.bodyIndex];
-    return sb.vertices.empty() ? nullptr : &sb;
+    return sb.tess && !sb.tess->vertices.empty() ? sb.tess.get() : nullptr;
   };
 
   glm::vec3 bbMin(FLT_MAX), bbMax(-FLT_MAX);
   size_t reused = 0, meshed = 0;
   for (const RTItem& it : rtItems) {
     const Body& body = *it.body;
-    const SharedBody* cached = cachedBodyFor(it);
+    const BodyTessellation* cached = cachedBodyFor(it);
     CADShape::Mesh cadMesh;
     if (cached == nullptr) {
       cadMesh = body.shape.GenerateMesh(0.1);

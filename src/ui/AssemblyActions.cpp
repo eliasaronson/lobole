@@ -1638,17 +1638,10 @@ void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
     th.join();
 }
 
-// Releases the renderer assets an entry holds. The cache is the only thing
-// referencing them once the instances are gone, so dropping an entry without
-// this leaks a GPU buffer for the life of the process.
-void ReleaseEntryAssets(AppState& state, const PartRenderCacheEntry& entry) {
-  for (const SharedBody& sb : entry.bodies) {
-    if (sb.assetId != 0 && state.meshRenderer)
-      state.meshRenderer->ReleaseAsset(sb.assetId);
-    if (sb.outlineAssetId != 0 && state.outlineRenderer)
-      state.outlineRenderer->ReleaseAsset(sb.outlineAssetId);
-  }
-}
+// Dropping a part's cache entry drops this layer's references to the
+// tessellations it drew with. The SHAPE cache owns those (and the renderer
+// assets with them), so nothing is released here: another tab, or another
+// part deriving the same geometry, may still be drawing them.
 } // namespace
 
 void EvictPartRenderCache(AppState& state, uint64_t partSlotId) {
@@ -1657,16 +1650,150 @@ void EvictPartRenderCache(AppState& state, uint64_t partSlotId) {
   auto it = state.partRenderCache->parts.find(partSlotId);
   if (it == state.partRenderCache->parts.end())
     return;
-  ReleaseEntryAssets(state, it->second);
   state.partRenderCache->parts.erase(it);
 }
 
 void ReleasePartRenderCache(AppState& state) {
-  if (!state.partRenderCache)
+  if (state.partRenderCache) {
+    state.partRenderCache->parts.clear();
+  }
+  ReleaseTessellationCache(state);
+}
+
+// --- the per-BODY tessellation cache (AppActionsInternal.h) ---------------
+
+namespace {
+
+void ReleaseTessellation(AppState& state, const BodyTessellation& entry) {
+  if (state.meshRenderer && entry.meshAsset != 0)
+    state.meshRenderer->ReleaseAsset(entry.meshAsset);
+  if (state.outlineRenderer && entry.outlineAsset != 0)
+    state.outlineRenderer->ReleaseAsset(entry.outlineAsset);
+}
+
+size_t TessellationBytes(const BodyTessellation& entry) {
+  return entry.vertices.size() * sizeof(Vertex3D) +
+         entry.indices.size() * sizeof(uint32_t);
+}
+
+// Looks `shape` up; on a miss adopts `prebuilt` when the caller already
+// meshed it (PrewarmTessellations, on worker threads) and meshes here
+// otherwise. The GPU upload always happens here, on the main thread.
+std::shared_ptr<BodyTessellation>
+LookupOrBuildTessellation(AppState& state, const CADShape& shape,
+                          CpuBody* prebuilt) {
+  if (!state.meshRenderer || !shape.IsValid())
+    return nullptr;
+  if (!state.tessellationCache)
+    state.tessellationCache = std::make_shared<BodyTessellationCache>();
+  BodyTessellationCache& cache = *state.tessellationCache;
+  auto& bucket = cache.byShape[shape.GeometryId()];
+  for (const std::shared_ptr<BodyTessellation>& entry : bucket) {
+    if (!entry->shape.SameGeometryAs(shape))
+      continue;
+    entry->lastSerial = cache.serial;
+    return entry;
+  }
+  auto entry = std::make_shared<BodyTessellation>();
+  entry->shape = shape;
+  if (prebuilt != nullptr && !prebuilt->vertices.empty()) {
+    entry->vertices = std::move(prebuilt->vertices);
+    entry->indices = std::move(prebuilt->indices);
+    entry->triangleFaces = std::move(prebuilt->triangleFaces);
+    entry->edges = std::move(prebuilt->edges);
+  } else {
+    CADShape::Mesh mesh = shape.GenerateMesh(0.1);
+    if (mesh.vertices.empty())
+      return nullptr;
+    entry->vertices = CADMeshConverter::ConvertCADMeshToVertices(mesh);
+    entry->indices = std::move(mesh.indices);
+    entry->triangleFaces = std::move(mesh.triangleFaces);
+    entry->edges = shape.GenerateEdgePolylines(0.1);
+  }
+  entry->meshAsset =
+      state.meshRenderer->CreateAsset(entry->vertices, entry->indices);
+  state.meshRenderer->RetainAsset(entry->meshAsset);
+  entry->bytes = TessellationBytes(*entry);
+  entry->lastSerial = cache.serial;
+  cache.bytes += entry->bytes;
+  bucket.push_back(entry);
+  return entry;
+}
+
+} // namespace
+
+std::shared_ptr<BodyTessellation> TessellationFor(AppState& state,
+                                                  const CADShape& shape) {
+  return LookupOrBuildTessellation(state, shape, nullptr);
+}
+
+uint32_t OutlineAssetFor(AppState& state, BodyTessellation& entry) {
+  if (!state.outlineRenderer)
+    return 0;
+  if (entry.outlineAsset != 0)
+    return entry.outlineAsset;
+  entry.outlineAsset =
+      state.outlineRenderer->CreateAsset(entry.vertices, entry.indices);
+  state.outlineRenderer->RetainAsset(entry.outlineAsset);
+  if (state.tessellationCache) {
+    const size_t extra = TessellationBytes(entry);
+    entry.bytes += extra;
+    state.tessellationCache->bytes += extra;
+  }
+  return entry.outlineAsset;
+}
+
+void TrimTessellationCache(AppState& state) {
+  if (!state.tessellationCache)
     return;
-  for (const auto& [partId, entry] : state.partRenderCache->parts)
-    ReleaseEntryAssets(state, entry);
-  state.partRenderCache->parts.clear();
+  BodyTessellationCache& cache = *state.tessellationCache;
+  cache.serial++;
+  if (cache.bytes <= kTessellationCacheBudgetBytes)
+    return;
+  // Oldest first, and never what this sync drew (serial - 1 after the ++).
+  struct Aged {
+    const void* key;
+    size_t index;
+    uint64_t serial;
+    size_t bytes;
+  };
+  std::vector<Aged> aged;
+  for (const auto& [key, bucket] : cache.byShape)
+    for (size_t i = 0; i < bucket.size(); i++)
+      if (bucket[i]->lastSerial + 1 < cache.serial)
+        aged.push_back({key, i, bucket[i]->lastSerial, bucket[i]->bytes});
+  std::sort(aged.begin(), aged.end(),
+            [](const Aged& a, const Aged& b) { return a.serial < b.serial; });
+  std::map<const void*, std::vector<size_t>> drop;
+  for (const Aged& a : aged) {
+    if (cache.bytes <= kTessellationCacheBudgetBytes)
+      break;
+    cache.bytes -= a.bytes;
+    drop[a.key].push_back(a.index);
+  }
+  for (auto& [key, indices] : drop) {
+    auto& bucket = cache.byShape[key];
+    std::sort(indices.rbegin(), indices.rend());
+    for (size_t i : indices) {
+      // Only the CACHE's hold is dropped: a live instance, or a part render
+      // cache entry still pointing at this tessellation, keeps its own
+      // reference and the buffers with it.
+      ReleaseTessellation(state, *bucket[i]);
+      bucket.erase(bucket.begin() + static_cast<long>(i));
+    }
+    if (bucket.empty())
+      cache.byShape.erase(key);
+  }
+}
+
+void ReleaseTessellationCache(AppState& state) {
+  if (!state.tessellationCache)
+    return;
+  for (const auto& [key, bucket] : state.tessellationCache->byShape)
+    for (const std::shared_ptr<BodyTessellation>& entry : bucket)
+      ReleaseTessellation(state, *entry);
+  state.tessellationCache->byShape.clear();
+  state.tessellationCache->bytes = 0;
 }
 
 // Renders an assembly: one asset per referenced part body, one instance per
@@ -1779,7 +1906,6 @@ void SyncAssemblyRenderers(AppState& state) {
     // must re-tessellate. Materials and appearances bump the version too, and
     // they are baked into the entry, so one key covers both.
     if (it != cache.parts.end() && it->second.docVersion != part->Version()) {
-      ReleaseEntryAssets(state, it->second);
       cache.parts.erase(it);
       it = cache.parts.end();
     }
@@ -1802,45 +1928,25 @@ void SyncAssemblyRenderers(AppState& state) {
       for (size_t bodyIdx = 0; bodyIdx < bodies.size(); bodyIdx++) {
         const auto& body = bodies[bodyIdx];
         SharedBody sb;
-        // Normally the tessellation is already done (PrewarmTessellations,
-        // above); meshing here is the fallback for a part that was not in the
-        // missing list — an in-context ghost path, say — and keeps this loop
-        // correct on its own.
+        // The geometry comes from the app-wide shape cache, so a body drawn
+        // on its own part tab, here, and as a Derived copy is tessellated
+        // and uploaded ONCE. Normally the mesh is already computed
+        // (PrewarmTessellations, above); meshing inside the lookup is the
+        // fallback for a part that was not in the missing list.
         CpuBody* pre = nullptr;
         if (warm != prewarmed.end() && bodyIdx < warm->second.size() &&
             !warm->second[bodyIdx].vertices.empty())
           pre = &warm->second[bodyIdx];
-        if (pre != nullptr) {
-          sb.vertices = std::move(pre->vertices);
-          sb.indices = std::move(pre->indices);
-          sb.triangleFaces = std::move(pre->triangleFaces);
-          sb.edges = std::move(pre->edges);
-        } else {
-          CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
-          if (cadMesh.vertices.empty()) {
-            shared.push_back(std::move(sb)); // keep index alignment; assetId 0
-            continue;
-          }
-          sb.vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
-          sb.indices = std::move(cadMesh.indices);
-          sb.triangleFaces = std::move(cadMesh.triangleFaces);
-          sb.edges = body.shape.GenerateEdgePolylines(0.1);
+        sb.tess = LookupOrBuildTessellation(state, body.shape, pre);
+        if (!sb.tess) {
+          shared.push_back(std::move(sb)); // keep index alignment
+          continue;
         }
         sb.palette = body.hasDisplayColor
                          ? body.displayColor
                          : kBodyPalette[palette++ % std::size(kBodyPalette)];
-        sb.assetId = state.meshRenderer->CreateAsset(sb.vertices, sb.indices);
         if (state.outlineRenderer)
-          sb.outlineAssetId =
-              state.outlineRenderer->CreateAsset(sb.vertices, sb.indices);
-        // Hold both assets for the CACHE, on top of whatever instances take.
-        // The teardown at the head of the next resync removes every instance;
-        // without this retain that drops the refcount to zero and destroys
-        // the upload we are trying to keep.
-        if (sb.assetId != 0)
-          state.meshRenderer->RetainAsset(sb.assetId);
-        if (sb.outlineAssetId != 0 && state.outlineRenderer)
-          state.outlineRenderer->RetainAsset(sb.outlineAssetId);
+          OutlineAssetFor(state, *sb.tess);
         // Resolve order: appearance > material > displayColor > palette
         // (same merge as the part-tab draw loop in AppActions).
         if (!body.material.empty() || body.appearance.Any()) {
@@ -1872,11 +1978,12 @@ void SyncAssemblyRenderers(AppState& state) {
         shared.push_back(std::move(sb));
       }
       for (const SharedBody& sb : entry.bodies) {
-        if (sb.assetId == 0)
+        if (!sb.tess)
           continue;
-        // Both renderers upload the same vertices + indices, hence x2.
-        entry.gpuBytes += 2 * (sb.vertices.size() * sizeof(Vertex3D) +
-                               sb.indices.size() * sizeof(uint32_t));
+        // What this entry keeps alive through its shared_ptr. The shape
+        // cache has its own budget over the same bytes; this one bounds how
+        // many PARTS the assembly layer pins, which is what its LRU is for.
+        entry.gpuBytes += sb.tess->bytes;
       }
       it = cache.parts.emplace(inst.partId, std::move(entry)).first;
       buildMs += elapsedMsSince(buildStart);
@@ -1891,10 +1998,10 @@ void SyncAssemblyRenderers(AppState& state) {
         inst.world;
     for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
       const SharedBody& sb = it->second.bodies[bi];
-      if (sb.assetId == 0)
+      if (!sb.tess)
         continue; // empty body
       const auto instanceStart = SyncClock::now();
-      uint32_t meshId = state.meshRenderer->AddInstance(sb.assetId, xf);
+      uint32_t meshId = state.meshRenderer->AddInstance(sb.tess->meshAsset, xf);
       if (sb.hasMaterial) {
         state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
         state.meshRenderer->SetInstanceProcedural(
@@ -1903,20 +2010,21 @@ void SyncAssemblyRenderers(AppState& state) {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }
       uint32_t outlineId = 0;
-      if (state.outlineRenderer && sb.outlineAssetId != 0) {
+      if (state.outlineRenderer && sb.tess->outlineAsset != 0) {
         // Untransformed vertices + a per-instance model matrix (A2.5): the
         // outline draws at the occurrence transform via a push constant, so a
         // live drag is a SetMeshTransform matrix update, not a re-upload — and
         // since R? the geometry itself is shared, so placing the sixth copy of
         // a bracket uploads nothing at all.
-        outlineId = state.outlineRenderer->AddInstance(sb.outlineAssetId, xf);
+        outlineId =
+            state.outlineRenderer->AddInstance(sb.tess->outlineAsset, xf);
       }
       instanceMs += elapsedMsSince(instanceStart);
       instanceCount++;
       const auto pickStart = SyncClock::now();
       if (state.faceSelector)
-        state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,
-                                    sb.triangleFaces, xf, sb.edges);
+        state.faceSelector->AddMesh(meshId, sb.tess->vertices, sb.tess->indices,
+                                    sb.tess->triangleFaces, xf, sb.tess->edges);
       pickMs += elapsedMsSince(pickStart);
       // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
       // localXf by construction, which is what lets the drag path recompose
@@ -1924,7 +2032,7 @@ void SyncAssemblyRenderers(AppState& state) {
       state.documentMeshes.push_back(
           {meshId, outlineId, bi, occ.id,
            glm::inverse(OccurrenceMatrix(occ)) * inst.world, inst.partId,
-           inst.innerIds, sb.edges});
+           inst.innerIds, sb.tess->edges});
     }
 
     // Section caps (I3). Without these an assembly section shows the inside
@@ -1991,7 +2099,6 @@ void SyncAssemblyRenderers(AppState& state) {
         continue;
       idleBytes -= it->second.gpuBytes;
       dropped += it->second.gpuBytes;
-      ReleaseEntryAssets(state, it->second);
       cache.parts.erase(it);
     }
     LOG_INFO("Part render cache over budget: dropped {} MB of idle geometry",
@@ -2064,7 +2171,10 @@ void SyncInContextGhosts(AppState& state) {
   // One shared asset per context part body (as in SyncAssemblyRenderers),
   // minus everything a ghost doesn't need: outlines, picking, materials.
   const glm::vec3 kGhostTint(0.55f, 0.60f, 0.68f);
-  std::unordered_map<uint64_t, std::vector<uint32_t>> byPart; // partId->assets
+  // partId -> one cache entry per body (nullptr for a body that meshes to
+  // nothing, so the index still lines up with GetBodies()).
+  std::unordered_map<uint64_t, std::vector<std::shared_ptr<BodyTessellation>>>
+      byPart;
   // A5: ghost the whole tree. Editing INTO a sub-assembly is still a non-goal
   // (open its own tab), but the CONTEXT around the part you are editing has
   // to look like the assembly does — a gangway that vanished while you worked
@@ -2081,25 +2191,20 @@ void SyncInContextGhosts(AppState& state) {
       continue;
     auto it = byPart.find(inst.partId);
     if (it == byPart.end()) {
-      std::vector<uint32_t> assets;
-      for (const auto& body : part->GetBodies()) {
-        CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
-        if (cadMesh.vertices.empty()) {
-          assets.push_back(0); // keep index alignment
-          continue;
-        }
-        assets.push_back(state.meshRenderer->CreateAsset(
-            CADMeshConverter::ConvertCADMeshToVertices(cadMesh),
-            cadMesh.indices));
-      }
-      it = byPart.emplace(inst.partId, std::move(assets)).first;
+      // Cached by shape identity (AppActionsInternal.h): the neighbour was
+      // tessellated once, by whichever tab drew it first, and a regeneration
+      // of the part being edited re-instances it rather than rebuilding it.
+      std::vector<std::shared_ptr<BodyTessellation>> tess;
+      for (const auto& body : part->GetBodies())
+        tess.push_back(TessellationFor(state, body.shape));
+      it = byPart.emplace(inst.partId, std::move(tess)).first;
     }
     const glm::mat4 xf = inv * inst.world;
     for (size_t bi = 0; bi < it->second.size(); bi++) {
-      if (it->second[bi] == 0)
+      if (it->second[bi] == nullptr)
         continue; // empty body
       const uint32_t meshId =
-          state.meshRenderer->AddInstance(it->second[bi], xf);
+          state.meshRenderer->AddInstance(it->second[bi]->meshAsset, xf);
       state.meshRenderer->SetInstanceColor(meshId, kGhostTint);
       state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
       // Ghosts are never dragged, so their localXf is unused; keep it

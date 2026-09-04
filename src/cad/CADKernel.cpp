@@ -151,6 +151,17 @@ VolumeCache& TheVolumeCache() {
 
 } // namespace
 
+const void* CADShape::GeometryId() const {
+  return m_shape.IsNull() ? nullptr
+                          : static_cast<const void*>(m_shape.TShape().get());
+}
+
+bool CADShape::SameGeometryAs(const CADShape& other) const {
+  if (m_shape.IsNull() || other.m_shape.IsNull())
+    return false;
+  return m_shape.IsEqual(other.m_shape);
+}
+
 double CADShape::Volume() const {
   if (!IsValid())
     return 0.0;

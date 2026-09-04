@@ -21,6 +21,15 @@ public:
   // Shape operations
   bool IsValid() const;
   double Volume() const;
+  // Geometry identity, for caching what is expensive to compute from a
+  // shape (tessellation, volume). `GeometryId` is the address of the shared
+  // underlying TShape — every copy and every rigid placement of a shape has
+  // the same one, so it buckets; `SameGeometryAs` then compares exactly
+  // (TShape, placement AND orientation, which flips normals). A cache entry
+  // must hold its CADShape so the TShape stays alive and the id cannot be
+  // recycled for a different shape.
+  const void* GeometryId() const;
+  bool SameGeometryAs(const CADShape& other) const;
   void GetBoundingBox(glm::vec3& min, glm::vec3& max) const;
   // Disjoint-lump count (V2 digest): a body that silently split into two
   // solids is invisible in a volume total but not in this.
@@ -275,6 +284,8 @@ class CADShape {
 public:
   CADShape() = default;
   bool IsValid() const { return false; }
+  const void* GeometryId() const { return nullptr; }
+  bool SameGeometryAs(const CADShape&) const { return false; }
   double Volume() const { return 0.0; }
   int SolidCount() const { return 0; }
   void GetBoundingBox(glm::vec3& min, glm::vec3& max) const {
