@@ -134,16 +134,37 @@ methods the SDK actually uses.
 
 ## W3 — a drawing of an assembly — DONE 2026-09-04
 
-Shipped. **The plan's (a) was wrong and is closed without being built**: HLR
-runs ONE pass across all bodies so occlusion is global, and each view looks a
-different way, so there is no per-part projection to share between them. A
-per-VIEW cache already existed (`UpdateDrawingRenders` re-projects only what
-went stale). What was missing was a measurement, and it settles the question:
+Shipped, and **both of the plan's premises turned out to be wrong**. Recorded
+in full because the wrong ones were plausible and the right one changes the
+advice.
 
-    iso view of the engine: 84.3 s total, of which hide 84245 ms, outline 75 ms
+**Wrong premise 1: a per-part projection cache.** Not available. HLR runs ONE
+pass across all bodies so occlusion is global, and every view looks a
+different way, so there is no shared work between views. A per-VIEW cache
+already existed. Closed without being built.
 
-It is all `HLRBRep_Algo::Hide()` — visibility classification. `show_hidden:
-false` does not help (84228 ms, it only filters the output). So:
+**Wrong premise 2: "exact HLR does not scale to an assembly".** It scales
+fine. The cost is about SURFACES, not part count:
+
+| | hide() |
+|---|---|
+| 16 boxes with a bore, one view | 3.1 ms |
+| ONE box + a 4-turn helical spring | 6.4 s |
+| the single-cylinder engine (19 bodies) | 85.1 s |
+| ...the same engine, its 2 valves hidden | **0.0 s** |
+
+Two occurrences are the entire bill. `Hide()` intersects every projected edge
+against every face, and a swept B-spline — a spring, a pipe, a loft — is
+orders of magnitude dearer to intersect than a plane or a cylinder. An
+assembly of prismatic parts draws instantly however many there are; one spring
+does not. `show_hidden: false` does not help either (84228 ms of 84245) — it
+only filters the output.
+
+That reframes the guidance: **fast mode is for models carrying swept
+surfaces, not for assemblies**, and the other way out of a slow sheet is to
+leave the sweeps off it.
+
+What shipped:
 
 * **`quality: "fast"`** — polygonal HLR over the triangulations. Three views of
   the engine in **3.5 s** against >21 minutes; a plain box gives byte-identical

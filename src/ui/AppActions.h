@@ -192,10 +192,12 @@ glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
 // drive in DrawingProjection.cpp is what makes stopping possible at all).
 // 0 = run to completion, which is what every existing caller wants and gets.
 //
-// The budget exists because exact HLR does not scale to an assembly: one view
-// of an eight-part engine is ~84 s and a three-view sheet had not finished
-// after 21 minutes, with no way to interrupt it and the RPC server blocked
-// behind it (docs/agent-scale-followup-plan.md, W3).
+// The budget exists because exact HLR is priced by SURFACE complexity and can
+// therefore surprise you: 16 bored boxes project in 3.1 ms, but one four-turn
+// helical spring takes 6.4 s and the single-cylinder engine took 85 s that
+// fell to 0.0 when its two valve springs were hidden. A three-view sheet of it
+// had not finished after 21 minutes, with no way to interrupt it and the RPC
+// server blocked behind it (docs/agent-scale-followup-plan.md, W3).
 void UpdateDrawingRenders(AppState& state, double budgetSeconds = 0.0);
 
 // Adds a view to the active drawing, choosing the two things a human should

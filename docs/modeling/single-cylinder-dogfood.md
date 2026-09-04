@@ -112,10 +112,18 @@ hold a running mechanism together and say honestly when it cannot, and the
 massing is what the motion study needs to be true about.
 
 The drawing was the one deliverable this test could not produce: a three-view
-sheet had not finished after 21 minutes. It does now, in about three seconds,
-because that turned out to be a defect rather than a property of the model —
-exact HLR spends all of its time in visibility classification and does not
-scale to an assembly. The sheet is projected with `quality="fast"`
-(polygonal HLR), which is a look rather than a dimensionable deliverable;
-`--exact-drawing` asks for the real thing and takes ~84 s a view. See
-docs/agent-scale-followup-plan.md, W3.
+sheet had not finished after 21 minutes. It does now, in about three seconds.
+
+The cause is worth knowing rather than treating as "assemblies are slow",
+which is what I assumed and what the measurement then contradicted. Exact HLR
+of this engine is 85.1 s a view; hide the two valves and it is **0.0 s**. The
+two helical valve springs are the entire bill, and the other seventeen bodies
+— block, crank, rod, piston, head, camshaft, four cap screws — project
+instantly. Sixteen bored boxes project in 3.1 ms. `Hide()` intersects every
+projected edge against every face, and a swept B-spline surface is orders of
+magnitude dearer to intersect than a plane.
+
+So the sheet is projected with `quality="fast"` (polygonal HLR — a look, not
+a dimensionable deliverable), and `--exact-drawing` takes the time. The other
+way out, for a real drawing of this engine, is to leave the springs off the
+sheet. See docs/agent-scale-followup-plan.md, W3.

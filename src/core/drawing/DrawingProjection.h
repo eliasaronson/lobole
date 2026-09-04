@@ -53,9 +53,20 @@ struct SourceRef {
 //
 // Exact runs OCC's curve-based algorithm and is the deliverable: every curve
 // carries a SourceRef back to the 3D edge that made it, which is what a
-// drawing dimension attaches to. It is also the whole cost — on an eight-part
-// engine one view is 84 s, and 84.2 of those seconds are HLRBRep_Algo::Hide()
-// classifying visibility (docs/agent-scale-followup-plan.md, W3).
+// drawing dimension attaches to. It is also where the cost is, and the cost is
+// about SHAPES rather than about how many of them there are:
+//
+//   16 boxes with a bore, one view      3.1 ms   (linear in bodies)
+//   ONE box + a 4-turn helical spring   6.4 s
+//   the single-cylinder engine          85.1 s
+//   ...the same engine, 2 valves hidden  0.0 s
+//
+// Two occurrences are the whole bill. HLRBRep_Algo::Hide() intersects every
+// projected edge against every face, and a swept B-spline surface — a spring,
+// a pipe, a loft — is orders of magnitude dearer to intersect than a plane or
+// a cylinder. So an assembly of prismatic parts draws instantly however many
+// there are, and one spring does not
+// (docs/agent-scale-followup-plan.md, W3).
 //
 // Poly runs the same algorithm over the shapes' TRIANGULATIONS. It is orders
 // of magnitude cheaper and it is a LOOK: the curves come back as polylines

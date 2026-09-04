@@ -2,18 +2,20 @@
 """A drawing of an assembly is affordable, or it says why not
 (docs/agent-scale-followup-plan.md, W3).
 
-Exact HLR does not scale to an assembly. Measured on the single-cylinder
-engine, each figure one export of one sheet:
+Exact HLR is priced by SURFACE COMPLEXITY, not by part count, and that is
+worth stating carefully because the obvious reading is the wrong one:
 
-    one part, iso                       0.00 s
-    a block + one 4-turn helical spring 5.5  s
-    the ASSEMBLY, iso / front / right   66 / 84 / 86 s
-    three views on one sheet            >21 min, abandoned
+    16 boxes with a bore, one view       3.1 ms   <- linear in bodies
+    ONE box + a 4-turn helical spring    6.4 s
+    the single-cylinder engine (19)     85.1 s
+    ...the same engine, 2 valves hidden  0.0 s    <- the springs WERE the bill
 
-and 84.2 of those 84.3 seconds are HLRBRep_Algo::Hide() classifying
-visibility. `show_hidden: false` does not help — it only filters the output.
-Caching between views is not available either: HLR runs ONE pass across all
-bodies so occlusion is global, and every view looks a different way.
+So it is not "assemblies are slow". Hide() intersects every projected edge
+against every face, and a swept B-spline surface is orders of magnitude
+dearer to intersect than a plane or a cylinder. `show_hidden: false` does not
+help — it only filters the output. Caching between views is not available
+either: HLR runs ONE pass across all bodies so occlusion is global, and every
+view looks a different way.
 
 So two levers, and this test holds both:
 

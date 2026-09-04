@@ -20,8 +20,9 @@ inline constexpr int kVersion =
     89; // v89: a drawing view's `quality` — "exact" (curve HLR, every curve
         //      traced to the edge that made it, what a dimension attaches to)
         //      or "fast" (polygonal HLR: orders of magnitude cheaper, and a
-        //      LOOK). An eight-part assembly is ~84 s a view exact, of which
-        //      84.2 is HLRBRep_Algo::Hide()
+        //      LOOK). Exact costs what the SURFACES cost, not what the part
+        //      count costs: 16 bored boxes project in 3.1 ms, one 4-turn
+        //      helical spring in 6.4 s
         //      (docs/agent-scale-followup-plan.md, W3).
         // (v88: relation kinds `chain` (a gear whose ratio keeps its sign — a
         //      chain or belt does not reverse) and `cam` (rotation to offset

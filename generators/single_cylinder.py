@@ -381,12 +381,12 @@ def main():
           f"{glb} ({os.path.getsize(glb) // 1024} kB)")
 
     # ---- and a drawing of it ---------------------------------------------
-    # `quality="fast"` by default, and that is a real choice rather than a
-    # default nobody thought about: exact HLR of this assembly is ~84 s A VIEW
-    # (all of it visibility classification), so a three-view sheet is four
-    # minutes. Fast is polygonal HLR — the same sheet in about 3 s, and a LOOK:
-    # polylines with no source refs, so nothing on it can be dimensioned.
-    # --exact-drawing asks for the deliverable and takes the time.
+    # `quality="fast"` by default, and the reason is narrower than it looks.
+    # Exact HLR of this engine is ~85 s A VIEW — but hide the two valves and
+    # it is 0.0 s. The two helical springs are the entire bill; the other
+    # seventeen bodies project instantly. Fast is polygonal HLR: the same
+    # sheet in about 3 s, and a LOOK — polylines with no source refs, so
+    # nothing on it can be dimensioned. --exact-drawing takes the time.
     rig.activate()
     app.create_drawing(name="engine drawing")
     for i, view in enumerate(("front", "right", "iso")):

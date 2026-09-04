@@ -44,7 +44,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "triangulations: orders of magnitude cheaper, and a LOOK — polylines with "
      "no source refs, so nothing can be dimensioned against them). Exact is "
      "never silently swapped for fast when it is slow; ask for it. An "
-     "eight-part assembly is ~84 s a view exact. ",
+     "exact costs what the SURFACES cost, not the part count: 16 bored "
+     "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. ",
      "base_view, id, name, position, quality, scale, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
@@ -61,7 +62,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "triangulations: orders of magnitude cheaper, and a LOOK — polylines with "
      "no source refs, so nothing can be dimensioned against them). Exact is "
      "never silently swapped for fast when it is slow; ask for it. An "
-     "eight-part assembly is ~84 s a view exact. ",
+     "exact costs what the SURFACES cost, not the part count: 16 bored "
+     "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. ",
      "base_view, drawing, name, orientation, position, quality, scale, "
      "source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
@@ -71,7 +73,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "update: a view still running when it is gone stops, keeps its previous "
      "curves and reports that it ran out, so a slow sheet costs what you said "
      "instead of blocking the server for as long as it takes. Exact HLR is "
-     "~84 s a view on an eight-part assembly and does not scale — a view's "
+     "priced by SURFACE complexity, not part count — 16 bored boxes are "
+     "3.1 ms a view and one 4-turn helical spring is 6.4 s — so a view's "
      "`quality: \"fast\"` is the other lever. Omit for no budget.",
      "budget_s"},
     {"list_drawing_geometry",
@@ -440,7 +443,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     // `budget_s` bounds the whole update. Without one it runs to completion,
-    // which on an assembly is ~84 s a view and looks exactly like a hang.
+    // which on a model carrying a swept surface can be a minute a view and
+    // looks exactly like a hang.
     ui::UpdateDrawingRenders(state, p.value("budget_s", 0.0));
     json views = json::array();
     for (const DrawingView& view : state.drawing->GetViews()) {
