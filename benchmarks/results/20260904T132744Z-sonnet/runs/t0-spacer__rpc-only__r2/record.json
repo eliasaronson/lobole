@@ -1,0 +1,206 @@
+{
+  "task": "t0-spacer",
+  "tier": 0,
+  "arm": "rpc-only",
+  "rep": 2,
+  "model": "sonnet",
+  "id": "t0-spacer__rpc-only__r2",
+  "cost_usd": 0.18755819999999998,
+  "duration_ms": 27484,
+  "num_turns": 13,
+  "tool_calls": 12,
+  "tools_used": {
+    "rpc": 4,
+    "describe": 3,
+    "execute_script": 3,
+    "get_state": 1,
+    "check_geometry": 1
+  },
+  "final_text": "Bbox (40\u00d740\u00d725, Z 0\u219225) and volume (\u03c0\u00b7(20\u00b2\u22126\u00b2)\u00b725 \u2248 28588.5 mm\u00b3) match the spacer exactly, with a valid B-Rep and no feature errors.\n\nBuilt the cylindrical spacer successfully (\u00d840 OD, \u00d812 through-hole, Z 0\u201325).",
+  "error": "",
+  "timed_out": false,
+  "wall_s": 28.9,
+  "input_tokens": 22,
+  "output_tokens": 2147,
+  "exported": true,
+  "passed": 5,
+  "total": 5,
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid",
+      "pass": true,
+      "got": 1
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        40,
+        40,
+        25
+      ],
+      "tol": 0.2,
+      "why": "overall size",
+      "pass": true,
+      "got": [
+        40.0,
+        40.0,
+        25.0
+      ]
+    },
+    {
+      "kind": "volume",
+      "value": 28588.493,
+      "tol_pct": 1.0,
+      "pass": true,
+      "got": 28588.493000000002
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 12,
+      "internal": true,
+      "count": 1,
+      "why": "the bore is a hole, not a boss",
+      "pass": true,
+      "got": {
+        "count": 1,
+        "present": [
+          {
+            "count": 1,
+            "diameter": 12.0,
+            "internal": true
+          }
+        ]
+      }
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 40,
+      "internal": false,
+      "count": 1,
+      "why": "the outside is round",
+      "pass": true,
+      "got": {
+        "count": 1,
+        "present": [
+          {
+            "count": 1,
+            "diameter": 40.0,
+            "internal": false
+          }
+        ]
+      }
+    }
+  ],
+  "facts": {
+    "area": 6371.150000000001,
+    "bbox": {
+      "max": [
+        20.0,
+        20.0,
+        25.0
+      ],
+      "min": [
+        -20.0,
+        -20.0,
+        0.0
+      ],
+      "size": [
+        40.0,
+        40.0,
+        25.0
+      ]
+    },
+    "com": [
+      0.0,
+      0.0,
+      12.5
+    ],
+    "cylinder_groups": [
+      {
+        "count": 1,
+        "diameter": 12.0,
+        "internal": true
+      },
+      {
+        "count": 1,
+        "diameter": 40.0,
+        "internal": false
+      }
+    ],
+    "cylinders": [
+      {
+        "axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "axis_point": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "diameter": 40.0,
+        "faces": 1,
+        "internal": false,
+        "length": 25.0,
+        "radius": 20.0
+      },
+      {
+        "axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "axis_point": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "diameter": 12.0,
+        "faces": 1,
+        "internal": true,
+        "length": 25.0,
+        "radius": 6.0
+      }
+    ],
+    "faces": 4,
+    "faces_by_kind": {
+      "cylinder": 2,
+      "plane": 2
+    },
+    "file": "/home/elias/Documents/Designer/benchmarks/results/20260904T132744Z-sonnet/runs/t0-spacer__rpc-only__r2/part.step",
+    "inclined_planes": 0,
+    "ok": true,
+    "planes": [
+      {
+        "area": 1143.54,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 1143.54,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "offset": 25.0
+      }
+    ],
+    "shells": 1,
+    "solids": 1,
+    "volume": 28588.493000000002
+  },
+  "claimed_success": true,
+  "over_claim": false
+}

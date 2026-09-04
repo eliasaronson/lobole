@@ -1,3 +1,58 @@
+# Second result — 2026-09-04, sonnet, 72 runs
+
+Run after the agent-scale round (docs/agent-scale-plan.md): named datum
+frames (G0), the `batch` RPC (G1a) and the SDK (G1b). All three changed the
+agent-facing surface — the `Frame` dialect in `add_feature`'s description and
+a sentence about `batch` in the scripting guidance — so CLAUDE.md's "no
+benchmark, no claim" required this before any claim that they help.
+
+Same instrument as the first result: the same 8 tasks, 3 arms, 3 reps,
+sonnet, sequential on one machine. Total spend $13.35.
+
+| arm | checks | clean runs | over-claims | tool calls | cost | wall |
+|---|---|---|---|---|---|---|
+| `full` | 117/117 | 24/24 | 0 | 210 | $3.89 | 758 s |
+| `rpc-only` | 117/117 | 24/24 | 0 | 359 | $5.37 | 1172 s |
+| `script-first` | 117/117 | 24/24 | 0 | 230 | $4.09 | 771 s |
+
+Against 2026-08-27 (`b628f9a`): 198/324/211 calls, $4.66/$6.65/$5.24,
+665/1143/747 s.
+
+## What it shows: no regression
+
+Correctness is unchanged and still at the ceiling — every check, every arm,
+zero over-claims. Three workstreams' worth of new surface (a feature type, a
+connector anchor, an RPC, a longer tool description) broke nothing an agent
+does today, which is the question this sweep was owed for and the one it
+answers.
+
+## What it cannot show, and why that is the finding
+
+**None of the eight tasks uses any of it.** They are single-part T0–T3
+builds: no assembly, no mate, no frame, no batch. What they see of this
+round is strictly a longer `add_feature` description and one more sentence
+of guidance — MORE tokens, which should cost more rather than less.
+
+So the cost falling 17–22% and the tool calls rising 6–11% are **uniform
+across all three arms**, including arms that share none of the mechanism a
+change would have to act through. A uniform shift across independent arms is
+the signature of something outside the experiment (model pricing, prompt
+caching, sampling), not of the surface under test. Reading it as a 20%
+improvement would be exactly the lie this file exists to prevent.
+
+The honest summary is one line: **the round is neutral on what the benchmark
+can see, and the benchmark cannot see what the round was for.**
+
+That is the ceiling the first result already named — "the benchmark cannot
+presently detect a correctness regression", every arm at 1.000 — now with a
+concrete instance of the second half: it cannot detect an improvement
+either, because no task exercises the surface that improved. The fix is
+G6 in the agent-scale plan: a task with an assembly and a mate (T4), and one
+with motion (T5). Until those exist, a claim that frames or batches make an
+agent faster has no instrument behind it, and the measurement that DOES
+exist for this round is the gripper rebuild — 652 lines to 228, twelve
+transcribed coordinates to none (docs/agent-scale-plan.md, G1b).
+
 # First result — 2026-08-27, sonnet, 72 runs
 
 Three arms, eight parts, three repetitions each, sequential on one machine

@@ -1,0 +1,21 @@
+{
+  "stamp": "20260904T132744Z",
+  "model": "sonnet",
+  "reps": 3,
+  "tasks": [
+    "t0-plate",
+    "t0-spacer",
+    "t1-l-bracket",
+    "t1-mount-plate",
+    "t2-flange",
+    "t2-stepped-shaft",
+    "t3-gusset-bracket",
+    "t3-parametric-bushing"
+  ],
+  "arms": [
+    "full",
+    "rpc-only",
+    "script-first"
+  ],
+  "git": "8dbadef4"
+}

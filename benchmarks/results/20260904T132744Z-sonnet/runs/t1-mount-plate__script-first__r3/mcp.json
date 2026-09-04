@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "designer": {
+      "command": "/nix/store/3w66mva9m870qs9x2ca4zz9ay61rqb3j-python3-3.14.7-env/bin/python3",
+      "args": [
+        "/home/elias/Documents/Designer/tools/designer_mcp.py",
+        "--port",
+        "34841",
+        "--no-autostart"
+      ]
+    }
+  }
+}

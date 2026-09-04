@@ -1,0 +1,233 @@
+{
+  "task": "t3-parametric-bushing",
+  "tier": 3,
+  "arm": "rpc-only",
+  "rep": 2,
+  "model": "sonnet",
+  "id": "t3-parametric-bushing__rpc-only__r2",
+  "cost_usd": 0.262252,
+  "duration_ms": 48038,
+  "num_turns": 21,
+  "tool_calls": 20,
+  "tools_used": {
+    "help": 3,
+    "describe": 2,
+    "execute_script": 14,
+    "check_geometry": 1
+  },
+  "final_text": "Built successfully: a valid single-body bushing (\u00d820 bore, \u00d832 OD, 30 mm long, centred on Z from 0 to 30) driven by variables `bore`=20 and `wall`=6, with the outer radius expression `(bore + 2*wall)/2` still live for future changes.",
+  "error": "",
+  "timed_out": false,
+  "wall_s": 49.4,
+  "input_tokens": 36,
+  "output_tokens": 3763,
+  "exported": true,
+  "passed": 5,
+  "total": 5,
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid",
+      "pass": true,
+      "got": 1
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        32,
+        32,
+        30
+      ],
+      "tol": 0.2,
+      "why": "the OD followed bore + 2*wall after the edit",
+      "pass": true,
+      "got": [
+        32.0,
+        32.0,
+        30.0
+      ]
+    },
+    {
+      "kind": "volume",
+      "value": 14702.654,
+      "tol_pct": 1.0,
+      "pass": true,
+      "got": 14702.654
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 20,
+      "internal": true,
+      "count": 1,
+      "why": "the bore regenerated to the new value",
+      "pass": true,
+      "got": {
+        "count": 1,
+        "present": [
+          {
+            "count": 1,
+            "diameter": 20.0,
+            "internal": true
+          }
+        ]
+      }
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 32,
+      "internal": false,
+      "count": 1,
+      "why": "the outside is round and followed the expression",
+      "pass": true,
+      "got": {
+        "count": 1,
+        "present": [
+          {
+            "count": 1,
+            "diameter": 32.0,
+            "internal": false
+          }
+        ]
+      }
+    }
+  ],
+  "facts": {
+    "area": 5881.061,
+    "bbox": {
+      "max": [
+        16.0,
+        16.0,
+        30.0
+      ],
+      "min": [
+        -16.0,
+        -16.0,
+        0.0
+      ],
+      "size": [
+        32.0,
+        32.0,
+        30.0
+      ]
+    },
+    "com": [
+      0.0,
+      0.0,
+      15.0
+    ],
+    "cylinder_groups": [
+      {
+        "count": 1,
+        "diameter": 20.0,
+        "internal": true
+      },
+      {
+        "count": 1,
+        "diameter": 32.0,
+        "internal": false
+      }
+    ],
+    "cylinders": [
+      {
+        "axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "axis_point": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "diameter": 32.0,
+        "faces": 1,
+        "internal": false,
+        "length": 30.0,
+        "radius": 16.0
+      },
+      {
+        "axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "axis_point": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "diameter": 20.0,
+        "faces": 1,
+        "internal": true,
+        "length": 30.0,
+        "radius": 10.0
+      }
+    ],
+    "faces": 4,
+    "faces_by_kind": {
+      "cylinder": 2,
+      "plane": 2
+    },
+    "file": "/home/elias/Documents/Designer/benchmarks/results/20260904T132744Z-sonnet/runs/t3-parametric-bushing__rpc-only__r2/part.step",
+    "inclined_planes": 0,
+    "ok": true,
+    "planes": [
+      {
+        "area": 490.088,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "offset": 0.0
+      },
+      {
+        "area": 490.088,
+        "axis_aligned": true,
+        "faces": 1,
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "offset": 30.0
+      }
+    ],
+    "shells": 1,
+    "solids": 1,
+    "volume": 14702.654
+  },
+  "doc_checks": [
+    {
+      "kind": "variable",
+      "name": "bore",
+      "value": 20,
+      "why": "the variable exists and holds the edited value",
+      "pass": true,
+      "got": 20.0,
+      "source": "app"
+    },
+    {
+      "kind": "variable",
+      "name": "wall",
+      "value": 6,
+      "why": "second variable",
+      "pass": true,
+      "got": 6.0,
+      "source": "app"
+    },
+    {
+      "kind": "expr_references",
+      "variable": "bore",
+      "why": "geometry is DRIVEN by the variable, not retyped",
+      "pass": true,
+      "got": true,
+      "source": "app"
+    }
+  ],
+  "claimed_success": true,
+  "over_claim": false
+}
