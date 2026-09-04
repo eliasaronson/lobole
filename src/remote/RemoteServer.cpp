@@ -822,6 +822,10 @@ static const std::set<std::string> kNoPartDoc = {
     // mass_properties aggregates occurrence masses in world space.
     "interference", "contact_report", "compare_geometry", "query_geometry",
     "list_elements", "measure", "frame", "mass_properties", "render_sheet",
+    // get_state reads ANOTHER part when given `part`, and refuses for itself
+    // (naming the tab kind) when it has neither that nor an active part —
+    // the same shape as its neighbours above (W2).
+    "get_state",
     // set_section writes the global viewport clip plane (per-frame UBO,
     // world space); `section` sums the cut area over a part's bodies or,
     // on an assembly tab, over every visible occurrence in place.
@@ -911,8 +915,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "kind"},
     {"get_state",
      "Full snapshot: features (with errors), bodies (volume, bbox), "
-     "selection, camera, undo/redo, rollback, regen summary.",
-     ""},
+     "selection, camera, undo/redo, rollback, regen summary. `part` (a slot "
+     "name, stable id or index) reads ANOTHER part without switching to it — "
+     "the tab-wide fields (selection, camera, undo/redo) then describe the "
+     "active tab still, since that is where they live. Prefer it to "
+     "set_active_part for a read: switching tabs clears the selection, the "
+     "hidden bodies, the measure session and the explode state, which on "
+     "somebody's running instance is their work.",
+     "part"},
     {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
      ""},
     {"redo", "Redo one step.", ""},
@@ -1516,36 +1526,55 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return json{{"asked", asked}, {"cancellable", cancellable}};
   }
   if (m == "get_state") {
+    // Another part, read without activating it. `doc` is the active tab's;
+    // the fields below that are about the DOCUMENT follow `stateDoc`, and the
+    // ones about the tab (selection, camera, history) stay with the tab.
+    Document* stateDoc = doc;
+    if (p.contains("part"))
+      stateDoc = remote::ResolvePartParam(state, p.at("part"));
+    // Off the part gate now (it has to be, to answer for another part), so it
+    // owns the refusal: on an assembly tab with no `part` there is no feature
+    // list to describe, and saying so beats a null dereference.
+    if (stateDoc == nullptr)
+      throw std::runtime_error(
+          std::string("the active document is ") +
+          (state.assembly  ? "an assembly"
+           : state.drawing ? "a drawing"
+           : state.job     ? "a CAM job"
+                           : "not a part") +
+          ", which has no feature list — pass `part` to read one (see "
+          "list_parts), or switch to a part tab");
     json features = json::array();
-    for (size_t i = 0; i < doc->FeatureCount(); i++) {
-      json f = DocumentIO::FeatureToJson(*doc->GetFeature(i));
+    for (size_t i = 0; i < stateDoc->FeatureCount(); i++) {
+      json f = DocumentIO::FeatureToJson(*stateDoc->GetFeature(i));
       f["index"] = i;
       // Regeneration errors, so remote callers see WHY a feature contributed
       // nothing instead of silently reading stale bodies.
-      if (!doc->GetFeature(i)->GetError().empty()) {
-        f["error"] = doc->GetFeature(i)->GetError();
+      if (!stateDoc->GetFeature(i)->GetError().empty()) {
+        f["error"] = stateDoc->GetFeature(i)->GetError();
         // Failure downstream of another failure — usually collateral; fix
         // the first red feature first.
-        if (doc->GetFeature(i)->ErrorAfterEarlierFailure()) {
+        if (stateDoc->GetFeature(i)->ErrorAfterEarlierFailure()) {
           f["after_earlier_failure"] = true;
         }
       }
       // Non-fatal advisory (e.g. a cut that intersected nothing): the feature
       // built a valid result, but likely not the intended one.
-      if (!doc->GetFeature(i)->GetWarning().empty()) {
-        f["warning"] = doc->GetFeature(i)->GetWarning();
+      if (!stateDoc->GetFeature(i)->GetWarning().empty()) {
+        f["warning"] = stateDoc->GetFeature(i)->GetWarning();
       }
       // A Derived copy says whether its source has moved (v84): true/false,
       // or null when the source is not loaded — unknown is not fresh.
-      if (auto* d = dynamic_cast<const DerivedFeature*>(doc->GetFeature(i))) {
+      if (auto* d =
+              dynamic_cast<const DerivedFeature*>(stateDoc->GetFeature(i))) {
         const std::optional<bool> stale = ui::DerivedStale(state, *d);
         f["stale"] = stale.has_value() ? json(*stale) : json(nullptr);
       }
       features.push_back(f);
     }
     json bodies = json::array();
-    for (size_t i = 0; i < doc->GetBodies().size(); i++) {
-      const auto& body = doc->GetBodies()[i];
+    for (size_t i = 0; i < stateDoc->GetBodies().size(); i++) {
+      const auto& body = stateDoc->GetBodies()[i];
       glm::vec3 min, max;
       body.shape.GetBoundingBox(min, max);
       json entry = {{"name", body.name},
@@ -1619,12 +1648,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               {"distance", state.camera->GetDistance()}}},
             {"can_undo", ui::CanGlobalUndo(state)},
             {"can_redo", ui::CanGlobalRedo(state)},
-            {"rollback", doc->Rollback()},
+            {"rollback", stateDoc->Rollback()},
             {"regen",
              [&] {
-               json r = remote::RegenSummaryJson(*doc);
-               r["executed"] = doc->LastRegenStats().executed;
-               r["cached"] = doc->LastRegenStats().cached;
+               json r = remote::RegenSummaryJson(*stateDoc);
+               r["executed"] = stateDoc->LastRegenStats().executed;
+               r["cached"] = stateDoc->LastRegenStats().cached;
                return r;
              }()},
             {"pending_feature_id", state.pendingFeatureId}};

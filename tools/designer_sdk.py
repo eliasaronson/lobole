@@ -337,7 +337,8 @@ class Element:
         here would use."""
         return Frame.from_query(
             self._part, self._part.app.frame(feature_id=self.feature_id,
-                                             element=self.name))
+                                             element=self.name,
+                                             part=self._part.id))
 
     def __repr__(self):
         return f"{type(self).__name__}({self.name!r}, {self.kind})"
@@ -428,7 +429,8 @@ class Body:
 
     def _load(self):
         if self._els is None:
-            r = self._part.app.list_elements(body=self.index)["bodies"][0]
+            r = self._part.app.list_elements(
+                body=self.index, part=self._part.id)["bodies"][0]
             self._els = r
             self._faces = [Face(self._part, self, f) for f in r["faces"]]
             self._edges = [Edge(self._part, self, e) for e in r["edges"]]
@@ -1025,17 +1027,22 @@ class Part(_Tab):
         return hole, fr
 
     # --- reading the model -------------------------------------------------
+    #
+    # None of these activate. A read does not need the tab — the app can reach
+    # any slot's document whether it is active or stashed — and switching to
+    # one is not free: it clears the selection, the hidden bodies, the measure
+    # session, simulation mode and the explode state. Read a part on somebody's
+    # running instance and that was their work
+    # (docs/agent-scale-followup-plan.md, W2).
     def state(self):
-        self.activate()
-        return self.app.get_state()
+        return self.app.get_state(part=self.id)
 
     def bodies(self, reference=None):
-        self.activate()
         """This part's bodies. Cheap: the LIST comes from get_state, and each
         body's faces and edges are read only when asked for. `reference=`
         filters ghosts in or out."""
         out = [Body(self, i, b)
-               for i, b in enumerate(self.app.get_state()["bodies"])]
+               for i, b in enumerate(self.state()["bodies"])]
         if reference is not None:
             out = [b for b in out if b.reference == reference]
         return out
@@ -1060,11 +1067,10 @@ class Part(_Tab):
         return [e for b in self.bodies() for e in b.edges(**kw)]
 
     def volume(self):
-        self.activate()
-        return self.app.mass_properties()["total"]["volume"]
+        return self.app.mass_properties(part=self.id)["total"]["volume"]
 
     def bbox(self):
-        bs = [b for b in self.app.get_state()["bodies"]
+        bs = [b for b in self.state()["bodies"]
               if not b.get("reference")]
         lo = V([min(b["bbox_min"][i] for b in bs) for i in range(3)])
         hi = V([max(b["bbox_max"][i] for b in bs) for i in range(3)])
@@ -1072,11 +1078,10 @@ class Part(_Tab):
 
     # --- the standing check ------------------------------------------------
     def check(self, warn=True):
-        self.activate()
         """Raise if any feature is broken; print advisories. The scripted
         equivalent of looking at the tree — every generator used to hand-roll
         this and most scratch scripts forgot to."""
-        st = self.app.get_state()
+        st = self.state()
         bad = [f for f in st["features"] if f.get("error")]
         if bad:
             raise SdkError("; ".join(f"{f['name']}: {f['error']}"

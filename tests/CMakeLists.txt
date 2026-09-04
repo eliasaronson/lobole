@@ -342,6 +342,12 @@ add_test(NAME fastener_stack_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(fastener_stack_smoke PROPERTIES TIMEOUT 300)
 
+# A read reaches another part by reference and never switches tabs (W2).
+add_test(NAME tabless_read_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tabless_read_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(tabless_read_smoke PROPERTIES TIMEOUT 300)
+
 # The SDK (agent-scale plan G1b): the RPC surface is GENERATED from
 # `describe` (so nothing is duplicated and nothing can drift), and only the
 # semantics describe cannot express are hand-written — reference objects,

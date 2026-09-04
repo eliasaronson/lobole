@@ -14,7 +14,30 @@
 // `remote::HandleXxxRpc(AppState&, [Document&], method, params, out&) -> bool`,
 // carved out of RemoteServer::HandleSemantic (the RemoteConfigurations
 // pattern).
+namespace ui {
+struct AppState;
+}
+
 namespace remote {
+
+// Resolve an optional `part` RPC param — a slot NAME, or a stable PartSlot id
+// as a number or a numeric string, falling back to the slot index — to that
+// part's document, WITHOUT switching the active tab. Throws naming what exists
+// when nothing matches.
+//
+// The app holds exactly one live document: a PartSlot's `doc` is moved into
+// AppState on activation and moved back when the tab leaves, so "the active
+// part" is real in the document layer and most RPCs are gated on it. But a
+// READ does not need it — `ui::PartDocById` reaches any slot whether it is
+// active or stashed — and activating to read is not free: a tab switch clears
+// the selection, the hidden-body set, the measure session, simulation mode and
+// the explode state (ui::ResetActiveTabUiState). An agent reading a part from
+// the human's running instance would silently wipe all of it.
+//
+// So every read-only RPC that can take `part` should
+// (docs/agent-scale-followup-plan.md, W2).
+[[nodiscard]] Document* ResolvePartParam(ui::AppState& state,
+                                         const nlohmann::json& part);
 
 // One entry per RPC method for the describe endpoint. Each domain module
 // keeps a static table ADJACENT to its dispatch if-chain (the drift defense:

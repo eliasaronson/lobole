@@ -34,11 +34,8 @@ using nlohmann::json;
 
 namespace remote {
 
-namespace {
-
-// Resolve an optional `part` RPC param (slot name, or stable PartSlot id as a
-// number or numeric string) to that part's document WITHOUT switching the
-// active tab — kills the set_active_part round-trips for cross-part queries.
+// Declared in RemoteHelpers.h so every domain module can resolve a `part`
+// the same way — see the note there on why a read must not activate a tab.
 Document* ResolvePartParam(ui::AppState& state, const json& part) {
   ui::EnsureParts(state);
   uint64_t id = 0;
@@ -73,6 +70,8 @@ Document* ResolvePartParam(ui::AppState& state, const json& part) {
                              "(see list_parts)");
   return d;
 }
+
+namespace {
 
 // The active part document, required by the part-tab-only inspection RPCs.
 Document& RequirePartDoc(Document* doc, const char* what) {
@@ -279,8 +278,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "feature_errors, bodies:[...B-Rep checks]}.",
      "body"},
     {"mass_properties",
-     "Mass/volume/center-of-mass per body and total (density from materials).",
-     "body"},
+     "Mass/volume/center-of-mass per body and total (density from materials). "
+     "`part` reads another part without switching to it; from an assembly tab "
+     "with no `part`, aggregates every visible occurrence in world space.",
+     "body, part"},
     // This row said "point/distance/angle/radius" for a year and the handler
     // implemented distance. `describe` is what an agent trusts INSTEAD of
     // guessing, so a row that promises a branch nobody wrote is the
@@ -1485,7 +1486,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // carried through its solved occurrence transform — the same placement the
     // interference/BOM paths use). The reply's `bodies` array carries one row
     // per occurrence; `total` is the combined world mass/volume/CoM.
-    if (doc == nullptr && state.assembly) {
+    // An explicit `part` reads THAT part, from any tab and without switching
+    // to one — the assembly aggregate below is what you get when you ask from
+    // an assembly tab and name no part (W2).
+    Document* massDoc = doc;
+    if (p.contains("part"))
+      massDoc = ResolvePartParam(state, p.at("part"));
+    if (massDoc == nullptr && state.assembly) {
       const assembly::PartResolver resolve = [&](uint64_t id) {
         return ui::PartDocById(state, id);
       };
@@ -1514,7 +1521,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         out["skipped"] = am.skipped;
       return out;
     }
-    const auto& bodies = RequirePartDoc(doc, "mass_properties").GetBodies();
+    const auto& bodies = RequirePartDoc(massDoc, "mass_properties").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error(IndexError("body", p.value("body", -1),
