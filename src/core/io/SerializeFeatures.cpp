@@ -701,6 +701,8 @@ json FeatureToJson(const Feature& feature) {
     j["source_name"] = d->sourceName;
     if (!d->bodies.empty())
       j["bodies"] = d->bodies;
+    if (!d->bodyNames.empty())
+      j["body_names"] = d->bodyNames; // v85
     j["placement"] = {{"position", Vec3ToJson(d->position)},
                       {"orientation", QuatToJson(d->orientation)}};
     j["reference"] = d->reference;
@@ -997,8 +999,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(docs/parts/plan.md)"},
     {"Import", 1, "path (STEP/STL/BREP file)"},
     {"Derived", 84,
-     "source_part (a part slot id), bodies?: [created_by ids] (absent = all "
-     "of the source's bodies), placement?: {position [x,y,z], orientation "
+     "source_part (a part slot id), bodies?: [created_by ids] and/or "
+     "body_names?: [names] (both absent = all of the source's bodies; the "
+     "names are what get_state shows, and are the only way to pick from the "
+     "hundreds one Import creates), placement?: {position [x,y,z], orientation "
      "[x,y,z,w]}, reference?: true (a ghost to draw on — absent from mass, "
      "BOM, export, CAM and booleans) | false (an ordinary body of this "
      "part). A COPY of another part's bodies, taken when the feature is "
@@ -1383,6 +1387,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     d->sourceName = j.value("source_name", std::string{});
     if (j.contains("bodies"))
       d->bodies = j.at("bodies").get<std::vector<uint64_t>>();
+    if (j.contains("body_names")) // v85
+      d->bodyNames = j.at("body_names").get<std::vector<std::string>>();
     if (j.contains("placement")) {
       const json& pl = j.at("placement");
       if (pl.contains("position"))

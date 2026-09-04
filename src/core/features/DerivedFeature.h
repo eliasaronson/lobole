@@ -61,6 +61,11 @@ public:
   std::string sourceName;
   // Which of the source's bodies, by their created_by id. Empty = all.
   std::vector<uint64_t> bodies;
+  // ...and/or by NAME (v85). One Import feature creates every body of a
+  // STEP — the Raspberry Pi camera arrives as 197, from pads to the lens —
+  // so a created_by filter cannot pick one of them out. Empty = no name
+  // filter; the two narrow together when both are given.
+  std::vector<std::string> bodyNames;
   // Where the copy sits in THIS part. Identity unless made from an
   // in-context edit, where it is OccMatrix(edited)^-1 * OccMatrix(source).
   glm::vec3 position{0.0f};

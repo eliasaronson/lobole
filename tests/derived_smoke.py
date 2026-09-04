@@ -175,6 +175,28 @@ def main():
                feats)
         vols = sorted(round(b["volume"], 3) for b in bodies(d))
         expect(vols == [800.0, 2000.0, 2000.0], vols)
+        # v85: pick the source's bodies by NAME. One Import creates every
+        # body of a STEP (a camera module arrives as 197), so the created_by
+        # filter cannot reach into it.
+        d.call("set_active_part", part="servo")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Lug", "position": [0, 0, 20],
+            "width": 5, "height": 5, "depth": 5})
+        d.call("set_active_part", part="jaw")
+        r = d.call("add_feature", feature={
+            "type": "Derived", "name": "lug only", "source_part": servo,
+            "body_names": ["Lug"]})
+        expect(r["regen"]["ok"], r)
+        lug = [b for b in bodies(d) if b["name"].endswith("Lug")]
+        expect(len(lug) == 1 and abs(lug[0]["volume"] - 125.0) < 1e-6,
+               f"only the named body came across: {bodies(d)}")
+        refused(d, "add_feature", "no body named 'Flange'", feature={
+            "type": "Derived", "name": "x", "source_part": servo,
+            "body_names": ["Flange"]})
+        refused(d, "add_feature", "narrow TOGETHER", feature={
+            "type": "Derived", "name": "x", "source_part": servo,
+            "bodies": [1], "body_names": ["Lug"]})
+
         print("derived_smoke: ok")
     finally:
         app.terminate()

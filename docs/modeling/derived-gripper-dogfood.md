@@ -126,9 +126,14 @@ empty issue list.
    `list_elements`. Fixed: circles' and arcs' centres count, coincident ones
    merge.
 5. **`add_feature Sketch` refuses an `external` key** (accepted: constraints,
-   entities, name, plane). Over the RPC external geometry is
-   `project_geometry {sketch_id, feature_id, element, kind}` per element,
-   which the Sketch row of `describe` does not say.
+   entities, name, plane). Corrected afterwards: `external` has always
+   worked — what it refuses is an EMPTY one, and mine was empty because the
+   filter above it had found no edges. The strict-key check round-trips the
+   built feature, and an empty list serializes back to nothing, so a real
+   field read as an unknown one. Fixed (a key the type's documented dialect
+   names is accepted when empty), and the Sketch dialect now describes
+   `external` and `face_ref` — that omission is the half of this finding
+   that was right, and why `project_geometry` was hard to find.
 6. **A mate face connector sits at the face centroid.** A plate wider than
    the servo's end face, fastened face-to-face, shifted the body 7 mm.
    Origin-to-origin is the honest mate when a part was placed at its
@@ -138,13 +143,14 @@ empty issue list.
    `cannot use at() with string`. Fixed: the refusal names the
    `{feature_id, element}` contract.
 8. **`get_state` bodies did not say `reference`.** Fixed.
-9. **A cylinder face's `normal` in `list_elements` is the normal at the
-   centroid, not the axis.** I read it as the axis and drilled the servo's
-   end face; the projection of the real hole edges (a degenerate spline,
-   all poles on one line) is what showed the tapped holes run along the
-   servo's thickness — through the side covers, which is how the SO-101
-   holds it. The design changed to two cheeks. The ghost caught the error
-   before any part was printed, which is the feature's whole point.
+9. **I drilled the servo's end face because I read a cylinder's `normal`
+   as its axis.** Not a product gap: `list_elements` reports `axis` on
+   cylindrical, conical and toroidal faces and always has — checked
+   afterwards, and this entry corrected. The projection of the real hole
+   edges is what showed the tapped holes run along the servo's thickness,
+   through the side covers, which is how the SO-101 holds it; the design
+   changed to two cheeks. The ghost caught my error before any part was
+   printed, which is the feature's whole point.
 10. **A circle and a rectangle crossing in one sketch** are refused
     ("profile loops overlap"): the flange disc and its web are two sketches.
 11. **`interference {}` and `contact_report` over 253 occurrences do not
@@ -163,9 +169,10 @@ empty issue list.
     has that name — a good refusal, quoted here because it is the kind the
     others should be.
 15. Derived's `bodies` filter is by `created_by`, and an Import's 197 bodies
-    are ONE `created_by`: the PCB and lens alone (3 bodies) cannot be
-    derived without the 194 pads. A name filter would also have made every
-    timing above smaller. Open.
+    are ONE `created_by`: the PCB and lens alone cannot be derived without
+    the 194 pads. Fixed in v85 — `body_names` picks them by name (verified
+    on a 131-body adapter STEP: two named bodies out of one Import, in
+    0.0 s).
 16. **A drawing view projected the ghosts.** The top view of the body ran
     the HLR over the 197-body camera copy and took the RPC past its 60 s
     client timeout. A ghost is not the part; fixed (drawing views skip

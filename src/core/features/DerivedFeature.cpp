@@ -145,6 +145,29 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
     }
   }
 
+  // The name filter likewise (v85): a source's body names are what
+  // list_elements and get_state show, and are the only handle on the 197
+  // bodies one Import creates.
+  for (const std::string& want : feature.bodyNames) {
+    bool found = false;
+    for (const Body& b : all)
+      if (!b.reference && b.name == want)
+        found = true;
+    if (found)
+      continue;
+    std::string list;
+    size_t shown = 0;
+    for (const Body& b : all) {
+      if (b.reference || shown >= 12)
+        continue;
+      list += (list.empty() ? "" : ", ") + b.name;
+      shown++;
+    }
+    return "source part has no body named '" + want + "' (it has " +
+           std::to_string(have.size()) +
+           " creators and bodies including: " + list + ")";
+  }
+
   std::vector<DerivedBody> taken;
   for (const Body& b : all) {
     if (b.reference)
@@ -152,6 +175,10 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
     if (!feature.bodies.empty() &&
         std::find(feature.bodies.begin(), feature.bodies.end(), b.createdBy) ==
             feature.bodies.end())
+      continue;
+    if (!feature.bodyNames.empty() &&
+        std::find(feature.bodyNames.begin(), feature.bodyNames.end(), b.name) ==
+            feature.bodyNames.end())
       continue;
     std::ostringstream out(std::ios::binary);
     try {
@@ -176,8 +203,16 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
       host.SetAsset(db.asset, std::move(bytes));
     taken.push_back(std::move(db));
   }
-  if (taken.empty())
+  if (taken.empty()) {
+    // Name the cause: a filter that matches nothing is a different mistake
+    // from a source that has nothing to give, and both used to say the
+    // second (bodies + body_names can narrow to the empty set together).
+    if (!feature.bodies.empty() || !feature.bodyNames.empty())
+      return "that filter selects none of the source's bodies (bodies and "
+             "body_names narrow TOGETHER — a body must match both when both "
+             "are given)";
     return "source part has only reference bodies; nothing to derive";
+  }
   feature.snapshot = std::move(taken);
   feature.sourceChainHash = source.TipChainHash();
   return {};

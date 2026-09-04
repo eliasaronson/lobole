@@ -171,9 +171,10 @@ static constexpr MethodDoc ModelingMethods[] = {
      "In an in-context edit (edit_in_context): add a Derived copy of a "
      "neighbour occurrence's part, placed where the ghost is "
      "(OccMatrix(edited)^-1 * OccMatrix(neighbour)); {occurrence, name?, "
-     "reference?: true, bodies?: [created_by ids]}. Returns {index, id, "
+     "reference?: true, bodies?: [created_by ids], body_names?: [names]}. "
+     "Returns {index, id, "
      "regen, digest}.",
-     "bodies, name, occurrence, reference"},
+     "bodies, body_names, name, occurrence, reference"},
     {"modify_feature",
      "Change the feature at `index` to `feature` JSON; one undo step; returns "
      "{regen}. It keeps its IDENTITY: omit \"id\" and the feature keeps the "
@@ -432,6 +433,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     d->reference = p.value("reference", true);
     if (p.contains("bodies"))
       d->bodies = p.at("bodies").get<std::vector<uint64_t>>();
+    if (p.contains("body_names"))
+      d->bodyNames = p.at("body_names").get<std::vector<std::string>>();
     if (const std::string why = ui::PointDerivedAt(state, *d, *pick);
         !why.empty())
       throw std::runtime_error("Derived: " + why);

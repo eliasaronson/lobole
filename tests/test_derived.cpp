@@ -407,6 +407,65 @@ TEST_CASE("a part's own ghosts are not derived further", "[derived]") {
              ContainsSubstring("only reference bodies"));
 }
 
+TEST_CASE("a derived copy picks source bodies by name", "[derived]") {
+  // One Import feature creates every body of a STEP, so a created_by
+  // filter cannot pick one of them: the name is the only handle (v85).
+  auto source = MakeSource();
+  Document host;
+  auto d = std::make_unique<DerivedFeature>("Boss only", 7);
+  d->sourceName = "Servo";
+  d->bodyNames = {"Boss"};
+  REQUIRE(derived::TakeSnapshot(*d, *source, host).empty());
+  host.AddFeature(std::move(d));
+  const uint64_t did = host.GetFeatures()[0]->GetId();
+  REQUIRE(host.Regenerate());
+  REQUIRE(host.GetBodies().size() == 1);
+  CHECK_THAT(VolumeOf(host, did), WithinRel(3.14159265 * 4.0 * 3.0, 1e-4));
+
+  // A name the source does not have is refused, listing what it has.
+  DerivedFeature bad("x", 7);
+  bad.bodyNames = {"Flange"};
+  const std::string why = derived::TakeSnapshot(bad, *source, host);
+  CHECK_THAT(why, ContainsSubstring("no body named 'Flange'"));
+  CHECK_THAT(why, ContainsSubstring("Boss"));
+
+  // Both filters narrow TOGETHER, and selecting nothing says so.
+  DerivedFeature both("y", 7);
+  both.bodies = {BoxId(*source)};
+  both.bodyNames = {"Boss"};
+  CHECK_THAT(derived::TakeSnapshot(both, *source, host),
+             ContainsSubstring("narrow TOGETHER"));
+}
+
+// How tests/golden/v85-derived-by-name.json was made: the source below,
+// with ONE of its two bodies derived BY NAME into a host that draws on the
+// copy. Set DESIGNER_WRITE_GOLDEN=<path> to write it again.
+TEST_CASE("the v85 derived-by-name golden builds from this recipe",
+          "[derived]") {
+  auto source = MakeSource();
+  Document host;
+  auto d = std::make_unique<DerivedFeature>("Boss copy", 7);
+  d->sourceName = "Servo";
+  d->reference = true;
+  d->bodyNames = {"Boss"};
+  REQUIRE(derived::TakeSnapshot(*d, *source, host).empty());
+  host.AddFeature(std::move(d));
+  host.AddFeature(std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, -4.0f),
+                                               20.0, 10.0, 4.0));
+  REQUIRE(host.Regenerate());
+  REQUIRE(host.GetBodies().size() == 2);
+  const char* out = std::getenv("DESIGNER_WRITE_GOLDEN");
+  const fs::path path = out ? fs::path(out) : TempPath("derived-v85.json");
+  REQUIRE(testio::Save(host, path.string()));
+  auto reloaded = testio::Load(path.string());
+  REQUIRE(reloaded);
+  CHECK(reloaded->GetBodies().size() == 2);
+  if (!out) {
+    std::error_code ec;
+    fs::remove(path, ec);
+  }
+}
+
 // How tests/golden/v84-derived-servo.json was made: the source part below,
 // derived (placed, one body filtered out) into a host with a foot drawn on
 // the copy's top face. Set DESIGNER_WRITE_GOLDEN=<path> to write it again;
