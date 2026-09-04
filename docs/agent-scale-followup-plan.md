@@ -199,12 +199,41 @@ spring is round bar coiled up. Dropping it:
 and the engine's animated GLB fell from 10.8 MB to 1.6 MB, because the bore
 was being tessellated too.
 
-The remaining 47 s is OCC's: two 4-turn B-spline sweeps against 17 other
-bodies, with no tuning surface exposed. HLR cost is superlinear in turns (182
-ms / 1.7 s / 6.4 s for 1, 2 and 4 turns), so fewer coils is the only other
-model-side lever. A view that could EXCLUDE named occurrences would let a
-real drawing of this engine be exact everywhere except the springs; it does
-not exist and is not in this plan.
+### Where the remaining 47 s goes, and why we stopped
+
+Traced per pair (the loop is ours, so this is free to ask):
+
+    self-hiding, all 19 shapes      5.5 s   <- 2.8 + 2.7, the two springs
+    occluder pairs                 41.8 s
+
+and every expensive pair is `something x spring`, at **~2.2 s each whatever
+the other shape is** — hiding a bolt behind a spring costs the same as hiding
+the block behind it. The bill is the spring's own surface, re-examined per
+pair, not the interaction.
+
+**A screen-rectangle pair skip was implemented, measured and REVERTED.**
+`Hide(i, j)` cannot matter when the two shapes' projections are disjoint, so
+skipping those pairs is provably safe, and it worked exactly as designed:
+
+| | pairs | skipped | hide |
+|---|---|---|---|
+| engine, front view | 342 | 246 (72%) | 56.8 s vs 58.7 s without |
+| 100 boxes in a 10x10 grid | 9900 | 9000 (91%) | 0.07 s vs 0.10 s without |
+
+Correct — the projection fingerprints are identical across all three engine
+views — and worth nothing. The pairs it removes were already free; OCC is
+fast at "nothing to do here". So it went back out rather than staying as ~50
+lines of unmeasured complexity, and this table is what it left behind.
+
+That puts ~47 s close to the floor for exact HLR on this model. What is left
+is not tuning:
+
+* **Fewer coils.** Cost is superlinear in turns — 182 ms / 1.7 s / 6.4 s for
+  1, 2 and 4 — so a 2-turn spring is roughly a quarter of a 4-turn one.
+* **Leave the sweeps off the sheet.** A view that could EXCLUDE named
+  occurrences would draw this engine's other seventeen bodies exactly and
+  instantly. It does not exist; it is the one feature worth adding here.
+* **`quality: "fast"`**, which is what shipped.
 
 What shipped:
 
