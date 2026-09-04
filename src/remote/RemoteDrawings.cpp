@@ -37,8 +37,15 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"list_drawings", "List drawing documents.", ""},
     {"set_drawing_view",
      "Edit a view {id, position?, scale?, name?, "
-     "show_hidden?, base_view?}; folded axes note.",
-     "base_view, id, name, position, scale, show_hidden"},
+     "show_hidden?, quality?, base_view?}; folded axes note. "
+     "`quality` picks the projection: \"exact\" (the default — curve HLR, "
+     "every curve traced to the 3D edge that made it, which is what a "
+     "dimension attaches to) or \"fast\" (polygonal HLR over the shapes' "
+     "triangulations: orders of magnitude cheaper, and a LOOK — polylines with "
+     "no source refs, so nothing can be dimensioned against them). Exact is "
+     "never silently swapped for fast when it is slow; ask for it. An "
+     "eight-part assembly is ~84 s a view exact. ",
+     "base_view, id, name, position, quality, scale, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}.",
@@ -47,11 +54,26 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Add an HLR view of a part/assembly {drawing, source, orientation, "
      "scale, position}. Omit BOTH scale and position and it is placed the "
      "way the Add view button places it: fitted to the sheet, clear of the "
-     "views already there, and projected (needs_update false).",
-     "base_view, drawing, name, orientation, position, scale, source"},
+     "views already there, and projected (needs_update false). "
+     "`quality` picks the projection: \"exact\" (the default — curve HLR, "
+     "every curve traced to the 3D edge that made it, which is what a "
+     "dimension attaches to) or \"fast\" (polygonal HLR over the shapes' "
+     "triangulations: orders of magnitude cheaper, and a LOOK — polylines with "
+     "no source refs, so nothing can be dimensioned against them). Exact is "
+     "never silently swapped for fast when it is slow; ask for it. An "
+     "eight-part assembly is ~84 s a view exact. ",
+     "base_view, drawing, name, orientation, position, quality, scale, "
+     "source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views", "List views with placement and scale.", ""},
-    {"update_drawing", "Re-project all views from current geometry.", ""},
+    {"update_drawing",
+     "Re-project all views from current geometry. `budget_s` bounds the WHOLE "
+     "update: a view still running when it is gone stops, keeps its previous "
+     "curves and reports that it ran out, so a slow sheet costs what you said "
+     "instead of blocking the server for as long as it takes. Exact HLR is "
+     "~84 s a view on an eight-part assembly and does not scale — a view's "
+     "`quality: \"fast\"` is the other lever. Omit for no budget.",
+     "budget_s"},
     {"list_drawing_geometry",
      "Projected 2D curves of a view (for picking/dimensioning).", "view"},
     {"add_drawing_dim", "Add a driven dimension between picked view geometry.",
@@ -142,6 +164,27 @@ json DrawingIssuesJson(ui::AppState& state) {
     arr.push_back(std::move(ij));
   }
   return arr;
+}
+
+} // namespace
+
+namespace {
+
+// "exact" or "fast", REFUSED by name otherwise. A quality nobody recognises
+// silently becoming "exact" is the substitution this project does not make —
+// a sheet asked for fast and given exact takes a minute and a half a view and
+// looks like a hang, and one asked for exact and given fast is a look
+// presented as a deliverable.
+std::string RequireQuality(const nlohmann::json& j) {
+  const std::string q = j.get<std::string>();
+  if (q != "exact" && q != "fast")
+    throw std::runtime_error(
+        "unknown view quality '" + q +
+        "' — it is \"exact\" (curve HLR: every curve traced to the 3D edge "
+        "that made it, which is what a dimension attaches to) or \"fast\" "
+        "(polygonal HLR: orders of magnitude cheaper, polylines, nothing to "
+        "dimension against)");
+  return q;
 }
 
 } // namespace
@@ -282,6 +325,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     // ones laid themselves out — the same action, two behaviours.
     const bool autoPlace = !p.contains("position") && !p.contains("scale");
     v.scale = p.value("scale", 1.0);
+    if (p.contains("quality"))
+      v.quality = RequireQuality(p.at("quality"));
     if (p.contains("position")) {
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -351,6 +396,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       view->name = p.at("name").get<std::string>();
     if (p.contains("show_hidden"))
       view->showHidden = p.at("show_hidden").get<bool>();
+    if (p.contains("quality"))
+      view->quality = RequireQuality(p.at("quality"));
     if (p.contains("base_view"))
       view->baseViewId = p.at("base_view").get<uint64_t>();
     state.drawing->BumpVersion();
@@ -392,7 +439,9 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "update_drawing") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
-    ui::UpdateDrawingRenders(state); // the explicit re-projection
+    // `budget_s` bounds the whole update. Without one it runs to completion,
+    // which on an assembly is ~84 s a view and looks exactly like a hang.
+    ui::UpdateDrawingRenders(state, p.value("budget_s", 0.0));
     json views = json::array();
     for (const DrawingView& view : state.drawing->GetViews()) {
       json vj = {{"id", view.id}, {"name", view.name}};
@@ -431,7 +480,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                  {"scale", view.scale},
                  {"base_view", view.baseViewId},
                  {"position", {view.position.x, view.position.y}},
-                 {"show_hidden", view.showHidden}};
+                 {"show_hidden", view.showHidden},
+                 {"quality", view.quality}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();
@@ -444,6 +494,15 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                          ? json{{it->second.bboxMin.x, it->second.bboxMin.y},
                                 {it->second.bboxMax.x, it->second.bboxMax.y}}
                          : json(nullptr);
+        // What the projection COST, so "this sheet is slow" is a number
+        // rather than a stopwatch. A view holds no geometry until something
+        // projects it, and the bill is all HLR (W3).
+        if (it->second.updateMs > 0.0 || it->second.hideMs > 0.0) {
+          vj["cost"] = {{"outline_ms", it->second.updateMs},
+                        {"hide_ms", it->second.hideMs},
+                        {"hlr_edges", it->second.dsEdges},
+                        {"bodies", it->second.bodies}};
+        }
         if (!it->second.error.empty())
           vj["error"] = it->second.error;
       } else {

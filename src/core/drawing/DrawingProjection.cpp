@@ -2,6 +2,7 @@
 
 #ifdef HAVE_OPENCASCADE
 
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
@@ -14,14 +15,18 @@
 #include <HLRBRep_Data.hxx>
 #include <HLRBRep_EdgeData.hxx>
 #include <HLRBRep_FaceData.hxx>
+#include <HLRBRep_PolyAlgo.hxx>
+#include <HLRBRep_PolyHLRToShape.hxx>
 #include <OSD.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ2d.hxx>
 #include <gp_Dir.hxx>
@@ -139,6 +144,115 @@ void SampleCurve(const HLRBRep_Curve& gc, double u1, double u2,
   SampleCurve(gc, um, u2, deflection, depth - 1, out);
 }
 
+// Every point of one polyline edge out of the poly shaper's compounds. The
+// shaper's edges are already IN the view plane (z is depth), so the projection
+// is just dropping z.
+void AppendPolyEdge(const TopoDS_Edge& edge, CurveKind kind, bool visible,
+                    std::vector<ProjectedCurve>& out) {
+  TopLoc_Location loc;
+  const Handle(Poly_Polygon3D) poly = BRep_Tool::Polygon3D(edge, loc);
+  ProjectedCurve pc;
+  pc.kind = kind;
+  pc.visible = visible;
+  // No SourceRef: a triangulated silhouette has no model edge behind it. That
+  // is the mode's defining limitation, not an oversight — see the header.
+  if (!poly.IsNull()) {
+    const TColgp_Array1OfPnt& pts = poly->Nodes();
+    pc.points.reserve(pts.Length());
+    for (int i = pts.Lower(); i <= pts.Upper(); ++i) {
+      const gp_Pnt p = pts(i).Transformed(loc.Transformation());
+      pc.points.emplace_back(p.X(), p.Y());
+    }
+  } else {
+    double f = 0.0, l = 0.0;
+    const Handle(Geom_Curve) c = BRep_Tool::Curve(edge, loc, f, l);
+    if (!c.IsNull()) {
+      for (double u : {f, l}) {
+        const gp_Pnt p = c->Value(u).Transformed(loc.Transformation());
+        pc.points.emplace_back(p.X(), p.Y());
+      }
+    } else {
+      // The shaper's edges carry NEITHER a polygon nor a curve — they are
+      // built straight from their two vertices, and asking for a geometry
+      // they do not have is why the first version of this returned 12 edges
+      // and 0 curves on a box. The vertices ARE the segment.
+      TopoDS_Vertex v1, v2;
+      TopExp::Vertices(edge, v1, v2);
+      if (v1.IsNull() || v2.IsNull())
+        return;
+      for (const TopoDS_Vertex& v : {v1, v2}) {
+        const gp_Pnt p = BRep_Tool::Pnt(v);
+        pc.points.emplace_back(p.X(), p.Y());
+      }
+    }
+  }
+  if (pc.points.size() >= 2)
+    out.push_back(std::move(pc));
+}
+
+std::optional<ProjectionResult>
+ProjectPoly(const std::vector<InputBody>& bodies, const gp_Ax2& viewCS,
+            const ProjectionOptions& options, std::string* error) {
+  using Clock = std::chrono::steady_clock;
+  ProjectionResult result;
+  result.mode = ProjectionMode::Poly;
+
+  Handle(HLRBRep_PolyAlgo) algo = new HLRBRep_PolyAlgo();
+  int loaded = 0;
+  const auto t0 = Clock::now();
+  for (const InputBody& body : bodies) {
+    if (body.shape.IsNull())
+      continue;
+    TopoDS_Shape moved =
+        body.shape.Moved(TopLoc_Location(ToTrsf(body.transform)));
+    // Poly HLR reads triangulations, so a shape that carries none produces
+    // nothing at all — silently, which is the one way this mode could lie.
+    // Meshing here rather than trusting the caller is what makes it honest.
+    BRepMesh_IncrementalMesh mesher(moved, std::max(options.deflection, 0.01),
+                                    Standard_False, 0.5, Standard_True);
+    algo->Load(moved);
+    ++loaded;
+  }
+  if (loaded == 0) {
+    if (error)
+      *error = "nothing to project";
+    return std::nullopt;
+  }
+  const auto t1 = Clock::now();
+  algo->Projector(HLRAlgo_Projector(viewCS));
+  algo->Update();
+  const auto t2 = Clock::now();
+  result.stats.updateMs =
+      std::chrono::duration<double, std::milli>(t1 - t0).count(); // meshing
+  result.stats.hideMs =
+      std::chrono::duration<double, std::milli>(t2 - t1).count();
+
+  HLRBRep_PolyHLRToShape shaper;
+  shaper.Update(algo);
+  const struct {
+    TopoDS_Shape shape;
+    CurveKind kind;
+    bool visible;
+  } groups[] = {
+      {shaper.VCompound(), CurveKind::Sharp, true},
+      {shaper.OutLineVCompound(), CurveKind::Outline, true},
+      {shaper.HCompound(), CurveKind::Sharp, false},
+      {shaper.OutLineHCompound(), CurveKind::Outline, false},
+  };
+  for (const auto& g : groups) {
+    if (!options.hiddenLines && !g.visible)
+      continue;
+    if (g.shape.IsNull())
+      continue;
+    for (TopExp_Explorer ex(g.shape, TopAbs_EDGE); ex.More(); ex.Next()) {
+      ++result.stats.dsEdges; // edges the shaper produced, before extraction
+      AppendPolyEdge(TopoDS::Edge(ex.Current()), g.kind, g.visible,
+                     result.curves);
+    }
+  }
+  return result;
+}
+
 } // namespace
 
 std::optional<ProjectionResult>
@@ -168,6 +282,9 @@ ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
     const glm::dvec3 z = -d;
     const gp_Ax2 viewCS(gp_Pnt(0, 0, 0), gp_Dir(z.x, z.y, z.z),
                         gp_Dir(right.x, right.y, right.z));
+
+    if (options.mode == ProjectionMode::Poly)
+      return ProjectPoly(bodies, viewCS, options, error);
 
     Handle(HLRBRep_Algo) algo = new HLRBRep_Algo();
     std::vector<BodyMaps> maps;
@@ -209,7 +326,32 @@ ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
     const auto t0 = Clock::now();
     algo->Update();
     const auto t1 = Clock::now();
-    algo->Hide();
+    // PAIRWISE, not one Hide() call — same work, driven from here.
+    //
+    // Hide() takes no progress range and no cancel flag (OCC 7.9), so an 84 s
+    // view was 84 s of nothing: no progress, no way to stop it, and the RPC
+    // server blocked behind it. HLRBRep_Algo derives from
+    // HLRBRep_InternalAlgo, which exposes Hide(i) — one shape against itself
+    // — and Hide(i, j) — one shape against another. That IS the decomposition
+    // Hide() performs internally, so driving it here changes nothing about
+    // the result and makes the loop ours: it reports where it is and it can
+    // be asked to stop (docs/agent-scale-followup-plan.md, W3).
+    const int nbShapes = algo->NbShapes();
+    bool cancelled = false;
+    for (int i = 1; i <= nbShapes && !cancelled; ++i) {
+      algo->Hide(i);
+      for (int j = 1; j <= nbShapes && !cancelled; ++j) {
+        if (i != j)
+          algo->Hide(i, j);
+        if (options.cancelled && options.cancelled())
+          cancelled = true;
+      }
+    }
+    if (cancelled) {
+      if (error)
+        *error = "cancelled";
+      return std::nullopt;
+    }
     const auto t2 = Clock::now();
     result.stats.updateMs =
         std::chrono::duration<double, std::milli>(t1 - t0).count();

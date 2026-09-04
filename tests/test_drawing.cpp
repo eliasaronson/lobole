@@ -856,6 +856,33 @@ TEST_CASE("Drawing golden loads and round-trips (v53 callouts)",
   fs::remove(tmp);
 }
 
+TEST_CASE("Drawing golden loads and round-trips (v89 view quality)",
+          "[drawing][serialization][golden]") {
+  // v89 added a view's `quality`. The golden carries all three cases that
+  // matter: one view saying "exact", one saying "fast", and one saying
+  // NOTHING — a view written before v89, which must read as exact rather
+  // than as an empty string that matches neither branch.
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "drawing" / "v89-view-quality.json";
+  REQUIRE(fs::exists(golden));
+  auto dwg = testio::LoadDrawing(golden.string());
+  REQUIRE(dwg != nullptr);
+  REQUIRE(dwg->ViewCount() == 3);
+  CHECK(dwg->GetViews()[0].quality == "exact");
+  CHECK(dwg->GetViews()[1].quality == "fast");
+  CHECK(dwg->GetViews()[2].quality == "exact"); // absent = the default
+
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v89_rt.json";
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  CHECK(reloaded->GetViews()[1].quality == "fast");
+  // And the round trip WRITES the default rather than dropping it, so a file
+  // saved once says outright which projection made it.
+  CHECK(reloaded->GetViews()[2].quality == "exact");
+  fs::remove(tmp);
+}
+
 TEST_CASE("a drawing refuses an unknown sheet size or view orientation",
           "[drawing][enums]") {
   // Verified against a running instance before the fix: an A2 drawing whose

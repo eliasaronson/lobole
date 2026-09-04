@@ -17,10 +17,16 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    88; // v88: relation kinds `chain` (a gear whose ratio keeps its sign — a
+    89; // v89: a drawing view's `quality` — "exact" (curve HLR, every curve
+        //      traced to the edge that made it, what a dimension attaches to)
+        //      or "fast" (polygonal HLR: orders of magnitude cheaper, and a
+        //      LOOK). An eight-part assembly is ~84 s a view exact, of which
+        //      84.2 is HLRBRep_Algo::Hide()
+        //      (docs/agent-scale-followup-plan.md, W3).
+        // (v88: relation kinds `chain` (a gear whose ratio keeps its sign — a
         //      chain or belt does not reverse) and `cam` (rotation to offset
         //      through a periodic LIFT TABLE, not a ratio), with the table
-        //      in `lift` (docs/agent-scale-plan.md, G4).
+        //      in `lift` (docs/agent-scale-plan.md, G4).)
         // (v87: assembly `motion` -- a MotionStudy: one mate DOF driven over a
         //      range in N samples, solved at each and clash-checked, so a
         //      mechanism's motion is a thing the document holds

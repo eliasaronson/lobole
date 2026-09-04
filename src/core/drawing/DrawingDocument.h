@@ -91,6 +91,11 @@ struct DrawingView {
       scaleExpr; // optional expression driving `scale` (empty = literal)
   glm::dvec2 position{0.0}; // sheet mm; a child moves only along its fold axis
   bool showHidden = true;
+  // "exact" (the default, and the deliverable) or "fast" — polygonal HLR, a
+  // LOOK at a sheet that would otherwise take a minute and a half a view.
+  // A string rather than the enum so it serializes and refuses by name like
+  // every other enum on the wire (docs/agent-scale-followup-plan.md, W3).
+  std::string quality = "exact";
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured

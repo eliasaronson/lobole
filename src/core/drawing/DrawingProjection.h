@@ -14,6 +14,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -48,6 +49,22 @@ struct SourceRef {
   }
 };
 
+// WHICH HLR, and it is a real choice rather than a quality knob.
+//
+// Exact runs OCC's curve-based algorithm and is the deliverable: every curve
+// carries a SourceRef back to the 3D edge that made it, which is what a
+// drawing dimension attaches to. It is also the whole cost — on an eight-part
+// engine one view is 84 s, and 84.2 of those seconds are HLRBRep_Algo::Hide()
+// classifying visibility (docs/agent-scale-followup-plan.md, W3).
+//
+// Poly runs the same algorithm over the shapes' TRIANGULATIONS. It is orders
+// of magnitude cheaper and it is a LOOK: the curves come back as polylines
+// with NO source refs, so nothing can be dimensioned against them and a
+// circle is a many-sided polygon rather than a circle. Never substituted for
+// Exact when Exact is slow — the caller asks for it and the result says which
+// it got.
+enum class ProjectionMode { Exact, Poly };
+
 struct ProjectedCurve {
   CurveKind kind = CurveKind::Sharp;
   bool visible = true;
@@ -73,6 +90,9 @@ struct ProjectedCurve {
 
 struct ProjectionResult {
   std::vector<ProjectedCurve> curves;
+  // Which mode actually produced these. A caller that asked for Poly and got
+  // it can say so on the sheet; nothing here ever silently downgrades.
+  ProjectionMode mode = ProjectionMode::Exact;
   struct Stats {
     double updateMs = 0.0;     // HLRBRep Update(): outline building
     double hideMs = 0.0;       // HLRBRep Hide(): visibility classification
@@ -82,7 +102,12 @@ struct ProjectionResult {
 };
 
 struct ProjectionOptions {
+  ProjectionMode mode = ProjectionMode::Exact;
   bool hiddenLines = true;
+  // Asked, as the hidden-line classification proceeds, whether to stop.
+  // OCC's Hide() offers no such hook, so this is driven by running its
+  // PAIRWISE form ourselves — see the .cpp. Null means run to completion.
+  std::function<bool()> cancelled;
   // Max chord deviation for discretizing curved edges, in view-plane mm
   // (model scale — callers divide by view scale for sheet-mm control).
   double deflection = 0.05;

@@ -184,7 +184,19 @@ glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
 // HLR-per-view work). Explicit (D2): called on drawing-tab entry and by the
 // update_drawing RPC / panel button — never per frame, since HLR is expensive.
 // Failed views keep their last-good geometry with an error string.
-void UpdateDrawingRenders(AppState& state);
+// Re-project every view of the active drawing whose source has moved.
+//
+// `budgetSeconds` > 0 bounds the WHOLE update: a view still running when the
+// budget is gone stops where it is, keeps its last-good geometry and reports
+// that it ran out (OCC's Hide() has no cancel hook of its own — the pairwise
+// drive in DrawingProjection.cpp is what makes stopping possible at all).
+// 0 = run to completion, which is what every existing caller wants and gets.
+//
+// The budget exists because exact HLR does not scale to an assembly: one view
+// of an eight-part engine is ~84 s and a three-view sheet had not finished
+// after 21 minutes, with no way to interrupt it and the RPC server blocked
+// behind it (docs/agent-scale-followup-plan.md, W3).
+void UpdateDrawingRenders(AppState& state, double budgetSeconds = 0.0);
 
 // Adds a view to the active drawing, choosing the two things a human should
 // not have to compute: a standard scale that makes the part legible on this

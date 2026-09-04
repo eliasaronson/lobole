@@ -7,48 +7,6 @@ an entry when it lands a fix + regression test.
 ---
 
 
-## A drawing view of an ASSEMBLY costs ~80 s, and a sheet of three costs more
-
-Found 2026-09-04 building the single-cylinder engine
-(docs/modeling/single-cylinder-dogfood.md). Exporting a three-view sheet of the
-eight-part engine had not returned after 21 minutes of one core, so the
-generator now leaves the drawing behind `--drawing` and says why.
-
-Measured on that engine, each number one export of one sheet:
-
-| sheet | seconds |
-|---|---|
-| one part (`head`), iso | 0.00 |
-| a plain block, iso | 0.00 |
-| a block + one four-turn helical spring, iso | 5.5 |
-| the assembly, iso | 66.4 |
-| the assembly, front | 84.1 |
-| the assembly, right | 85.8 |
-| the assembly, top | 73.1 |
-
-So it is not the springs, and it is not a degenerate orthographic direction:
-every assembly view lands in the same 66–86 s band, and three of them on
-separate sheets is about four minutes, not twenty-one. Two things to note
-before fixing it. `add_drawing_view` returns in 0.00 s and holds no geometry —
-the whole projection happens at export, so nothing warns the caller what the
-view just cost. And the projection is exact HLR (`HLRBRep_Algo` in
-DrawingProjection.cpp) fed the assembly's solved shapes, which for this model
-means the same eight parts re-projected per view with nothing cached between
-them.
-
-Impact: drawings are unusable on assemblies of this size, and there is no
-progress and no bound while it runs — a client sees only its own timeout, and
-the app keeps burning a core after the client gives up. The fix has three
-separable parts: cache a part's projection per (shape, direction) so shared
-parts and repeated exports are not re-projected; run the export as an A3 job so
-it reports progress and can be cancelled; and offer OCC's polygonal HLR
-(`HLRBRep_PolyAlgo`) as a mode for a look, keeping exact HLR for the
-deliverable.
-
-
----
-
-
 ## `thread/face_pick_fills_the_slot` fails in one shuffled order
 
 Found 2026-09-04 by the standing GUI suite, seed 36636 on shard 2. The Thread

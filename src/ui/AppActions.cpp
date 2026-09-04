@@ -3666,8 +3666,12 @@ uint64_t SourceVersionOf(AppState& state, const DrawingView& view) {
   return 0;
 }
 
-drawing::SheetView ProjectDrawingView(AppState& state,
-                                      const DrawingView& view) {
+drawing::SheetView AssembleSheetView(AppState& state, const DrawingView& view,
+                                     const std::vector<SourceBody>& bodies,
+                                     const drawing::ProjectionResult& proj);
+
+drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
+                                      std::function<bool()> cancelled) {
   drawing::SheetView result;
   result.viewId = view.id;
 
@@ -3692,11 +3696,38 @@ drawing::SheetView ProjectDrawingView(AppState& state,
   OrientationAxes(view.orientation, viewDir, up);
   drawing::ProjectionOptions opts;
   opts.hiddenLines = view.showHidden;
+  opts.mode = view.quality == "fast" ? drawing::ProjectionMode::Poly
+                                     : drawing::ProjectionMode::Exact;
+  opts.cancelled = cancelled;
   auto projected = drawing::ProjectView(inputs, viewDir, up, opts, &error);
   if (!projected) {
     result.error = error;
     return result;
   }
+
+  return AssembleSheetView(state, view, bodies, *projected);
+}
+
+// The cheap half of a view: place the projected curves on the sheet at the
+// view's scale and folded position, and join the projection's index-space
+// SourceRefs to stable ElementRefs.
+//
+// Split from the HLR so the expensive half can run OFF the main thread: this
+// part needs the live documents (their ElementMaps) and the sheet layout, and
+// the part it is split from needs neither (docs/agent-scale-followup-plan.md,
+// W3).
+drawing::SheetView
+AssembleSheetView(AppState& state, const DrawingView& view,
+                  const std::vector<SourceBody>& bodies,
+                  const drawing::ProjectionResult& projection) {
+  drawing::SheetView result;
+  result.viewId = view.id;
+  result.solvedSourceVersion = SourceVersionOf(state, view);
+  result.updateMs = projection.stats.updateMs;
+  result.hideMs = projection.stats.hideMs;
+  result.dsEdges = projection.stats.dsEdges;
+  result.bodies = static_cast<int>(bodies.size());
+  const drawing::ProjectionResult* projected = &projection;
 
   // Map an index-space SourceRef back to a stable ElementRef via the owning
   // body's ElementMap (sourceId is the body index in `bodies`).
@@ -3966,7 +3997,7 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   probe.scale = 1.0;
   probe.position = glm::dvec2(0.0);
   probe.baseViewId = 0; // a folded child would inherit its parent's place
-  const drawing::SheetView sv = ProjectDrawingView(state, probe);
+  const drawing::SheetView sv = ProjectDrawingView(state, probe, nullptr);
   const bool measured = sv.hasGeometry;
   const glm::dvec2 size = measured ? sv.bboxMax - sv.bboxMin : glm::dvec2(0.0);
 
@@ -4108,9 +4139,17 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   return id;
 }
 
-void UpdateDrawingRenders(AppState& state) {
+void UpdateDrawingRenders(AppState& state, double budgetSeconds) {
   if (!state.drawing)
     return;
+  const auto started = std::chrono::steady_clock::now();
+  const auto outOfBudget = [&] {
+    if (budgetSeconds <= 0.0)
+      return false;
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         started)
+               .count() > budgetSeconds;
+  };
   // Re-project only what can have gone stale. HLR is the expensive thing on a
   // sheet (about half a second per view of a 50-occurrence assembly), and
   // export calls this before writing so the file cannot be stale — which made
@@ -4132,7 +4171,30 @@ void UpdateDrawingRenders(AppState& state) {
         continue;
       }
     }
-    drawing::SheetView sv = ProjectDrawingView(state, view);
+    // Before starting, as well as during. A single body's Hide() is ONE
+    // uninterruptible OCC call — the pairwise drive only has somewhere to
+    // stop when there are several shapes to classify against each other — so
+    // without this a sheet whose budget went on view one would still pay for
+    // views two and three in full.
+    drawing::SheetView sv;
+    if (outOfBudget()) {
+      sv.viewId = view.id;
+      sv.solvedSourceVersion = SourceVersionOf(state, view);
+      sv.error = "cancelled";
+    } else {
+      sv = ProjectDrawingView(state, view, outOfBudget);
+    }
+    if (sv.error == "cancelled") {
+      // Out of budget rather than broken. Say which, and say the way through:
+      // a `fast` view of the same geometry is a couple of hundred
+      // milliseconds against a minute and a half.
+      sv.error = "ran out of the update's time budget (" +
+                 std::to_string(static_cast<int>(budgetSeconds)) +
+                 " s) — exact HLR on this source is slower than that. Raise "
+                 "the budget, or set this view's quality to \"fast\" "
+                 "(polygonal HLR: orders of magnitude cheaper, and a look "
+                 "rather than a dimensionable deliverable).";
+    }
     // Keep last-good geometry on failure (design §1): a failed view shows its
     // previous curves with an error, rather than blanking the sheet.
     if (!sv.error.empty() && !sv.hasGeometry) {

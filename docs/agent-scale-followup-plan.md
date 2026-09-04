@@ -132,7 +132,48 @@ methods the SDK actually uses.
 
 ---
 
-## W3 — a drawing of an assembly
+## W3 — a drawing of an assembly — DONE 2026-09-04
+
+Shipped. **The plan's (a) was wrong and is closed without being built**: HLR
+runs ONE pass across all bodies so occlusion is global, and each view looks a
+different way, so there is no per-part projection to share between them. A
+per-VIEW cache already existed (`UpdateDrawingRenders` re-projects only what
+went stale). What was missing was a measurement, and it settles the question:
+
+    iso view of the engine: 84.3 s total, of which hide 84245 ms, outline 75 ms
+
+It is all `HLRBRep_Algo::Hide()` — visibility classification. `show_hidden:
+false` does not help (84228 ms, it only filters the output). So:
+
+* **`quality: "fast"`** — polygonal HLR over the triangulations. Three views of
+  the engine in **3.5 s** against >21 minutes; a plain box gives byte-identical
+  bbox and curve count to exact. It is a LOOK: polylines, no source refs,
+  nothing to dimension against, and it is never substituted silently — an
+  unknown quality is refused by name. Format v89 + golden + history row.
+* **`update_drawing {budget_s}`** — bounds the whole update. This is only
+  possible because OCC's `Hide()` takes no progress range and no cancel flag,
+  and `HLRBRep_Algo` derives from `HLRBRep_InternalAlgo`, which exposes the
+  PAIRWISE `Hide(i)` / `Hide(i, j)` the one-shot call performs internally.
+  Driving that loop ourselves changes nothing (913 curves before, 913 after)
+  and makes stopping possible. A view that runs out keeps its previous curves
+  and says which lever to pull.
+* **The cost is on the record.** `list_drawing_views` reports
+  `{outline_ms, hide_ms, hlr_edges, bodies}` per view, so a slow sheet is a
+  number rather than a stopwatch.
+
+Not done, deliberately: **the export is still synchronous.** Putting it on the
+A3 job registry needs the worker to read shapes the main thread may be
+regenerating — and poly HLR *meshes* them, which writes into the shared TFace.
+The safe version means deep copies, and a copy is only safe if
+`BRepBuilderAPI_Copy` preserves explorer order, since the projection reports
+source EDGE INDICES that `AssembleSheetView` turns into stable names. It holds
+for a box (`test_drawing_hlr.cpp` asks outright) but one box is not evidence
+for a swept spring, and getting it wrong anchors every dimension on the sheet
+to the wrong feature — silently. `budget_s` bounds the damage without betting
+on it.
+
+The original statement:
+
 
 **Measured** on the engine, each figure one export of one sheet:
 

@@ -11,9 +11,14 @@
 #include "core/io/Serialization.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Tool.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Pnt.hxx>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -489,4 +494,48 @@ TEST_CASE("HLR marks full-sweep conic intervals closed",
     if (c.conicRadius > 0.0 && c.visible && !c.closed)
       ++partialVisibleArcs;
   CHECK(partialVisibleArcs > 0);
+}
+
+TEST_CASE("A deep-copied shape projects identically, edge names included",
+          "[drawing][hlr]") {
+  // The precondition for taking HLR off the main thread
+  // (docs/agent-scale-followup-plan.md, W3). A worker cannot read the live
+  // documents' shapes — poly HLR MESHES them, which writes triangulation into
+  // the shared TFace — so it would have to work on copies.
+  //
+  // Copies are only safe if BRepBuilderAPI_Copy preserves EXPLORER ORDER.
+  // The projection reports its source edges as indices, and AssembleSheetView
+  // turns those indices into stable element names through the ElementMap. If
+  // a copy reorders the edges by even one, every dimension on the sheet
+  // silently anchors to the wrong feature — which looks entirely correct.
+  //
+  // So this asks the question outright rather than assuming the answer.
+  BRepPrimAPI_MakeBox mk(40.0, 30.0, 20.0);
+  const TopoDS_Shape original = mk.Shape();
+  const TopoDS_Shape copy = BRepBuilderAPI_Copy(original).Shape();
+
+  TopTools_IndexedMapOfShape a, b;
+  TopExp::MapShapes(original, TopAbs_EDGE, a);
+  TopExp::MapShapes(copy, TopAbs_EDGE, b);
+  REQUIRE(a.Extent() == b.Extent());
+  REQUIRE(a.Extent() == 12);
+
+  // Same index, same edge — compared by the geometry, since the copy shares
+  // no pointers with the original by definition.
+  int matched = 0;
+  for (int i = 1; i <= a.Extent(); ++i) {
+    TopoDS_Vertex a1, a2, b1, b2;
+    TopExp::Vertices(TopoDS::Edge(a.FindKey(i)), a1, a2);
+    TopExp::Vertices(TopoDS::Edge(b.FindKey(i)), b1, b2);
+    if (a1.IsNull() || b1.IsNull())
+      continue;
+    const gp_Pnt pa = BRep_Tool::Pnt(a1);
+    const gp_Pnt pb = BRep_Tool::Pnt(b1);
+    INFO("edge " << i << ": original starts at (" << pa.X() << ", " << pa.Y()
+                 << ", " << pa.Z() << "), copy at (" << pb.X() << ", " << pb.Y()
+                 << ", " << pb.Z() << ")");
+    CHECK(pa.Distance(pb) < 1e-9);
+    ++matched;
+  }
+  CHECK(matched == 12);
 }

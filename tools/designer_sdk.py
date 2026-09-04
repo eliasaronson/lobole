@@ -181,7 +181,24 @@ class App:
             f"{len(self.__dict__.get('_methods', ()))} methods; "
             f"app.methods() lists them")
 
+    # RPCs that make a DIFFERENT tab active as a side effect, so the cached
+    # `_active` below is a lie afterwards. Creating any tab activates it, and
+    # add_drawing_view switches to the drawing it adds to.
+    #
+    # Found by the drawing gate: create_drawing left `_active` pointing at a
+    # part, so the next part.box() short-circuited its own activate() and the
+    # app refused the add_feature with "the active document is a drawing".
+    # A stale cache is worse than no cache, so anything that can move the tab
+    # drops it rather than trying to predict where it landed.
+    _MOVES_TAB = frozenset((
+        "add_part", "add_assembly", "create_drawing", "add_drawing_view",
+        "add_job", "new_project", "open_project", "delete_part",
+        "edit_in_context",
+    ))
+
     def call(self, method, _timeout=None, **params):
+        if method in self._MOVES_TAB:
+            self._active = None
         if _timeout is None:
             return self._remote.call(method, **params)
         return self._remote.request(method, params, timeout=_timeout)

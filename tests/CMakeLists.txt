@@ -348,6 +348,12 @@ add_test(NAME tabless_read_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(tabless_read_smoke PROPERTIES TIMEOUT 300)
 
+# A drawing of an assembly is affordable, or says why not (W3).
+add_test(NAME drawing_quality_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_quality_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(drawing_quality_smoke PROPERTIES TIMEOUT 300)
+
 # The SDK (agent-scale plan G1b): the RPC surface is GENERATED from
 # `describe` (so nothing is duplicated and nothing can drift), and only the
 # semantics describe cannot express are hand-written — reference objects,

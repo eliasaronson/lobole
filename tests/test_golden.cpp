@@ -521,7 +521,12 @@ TEST_CASE("The golden corpus reaches the current kVersion", "[golden]") {
   const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
   int newest = 0;
   std::string newestFile;
-  for (const fs::path& dir : {root, root / "assembly", root / "job"}) {
+  // Four corpora, not three. The comment above warns that forgetting one is
+  // how an audit reported a present golden as missing — and tests/golden/
+  // drawing/ was missing from this very list, so a drawing-only bump could
+  // freeze an artifact the gate would never look at (found adding v89).
+  for (const fs::path& dir :
+       {root, root / "assembly", root / "job", root / "drawing"}) {
     if (!fs::exists(dir))
       continue;
     for (const auto& entry : fs::directory_iterator(dir)) {

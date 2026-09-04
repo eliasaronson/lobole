@@ -50,6 +50,14 @@ struct SheetView {
   // means this view is stale and wants an update. 0 = never projected.
   uint64_t solvedSourceVersion = 0;
   std::string error; // non-empty if projection failed (keeps last-good curves)
+  // What that projection COST. Kept because a drawing view holds no geometry
+  // until it is exported, so nothing else can tell a caller what it just
+  // spent: an assembly view is 66-86 s and looked like a hang
+  // (docs/agent-scale-followup-plan.md, W3).
+  double updateMs = 0.0; // HLR outline building
+  double hideMs = 0.0;   // HLR visibility classification
+  int dsEdges = 0;       // edges in the HLR data structure
+  int bodies = 0;        // solids fed to the one global HLR pass
 };
 
 } // namespace drawing
