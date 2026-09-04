@@ -7,6 +7,49 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## An exact drawing view costs ~2.2 s per SWEPT surface it has to hide behind
+
+Found 2026-09-04 drawing the single-cylinder engine. Exact HLR is priced by
+surface complexity, not part count: 16 bored boxes project in 3.1 ms, but one
+four-turn helical spring is 2.5 s and the engine is 47 s a view.
+
+Traced per pair (`HLRBRep_InternalAlgo::Hide(i, j)`, which the projection now
+drives itself):
+
+    self-hiding, all 19 shapes      5.5 s   (2.8 + 2.7 — the two springs)
+    occluder pairs                 41.8 s
+
+Every expensive pair is `something x spring` at **~2.2 s each whatever the
+other shape is** — hiding a bolt behind a spring costs what hiding the whole
+block behind it costs. So the cost is the spring's own B-spline surface being
+re-examined for every pair, not the interaction between the two shapes.
+
+**What has already been tried, so nobody repeats it** (numbers in
+docs/agent-scale-followup-plan.md, W3):
+
+* the sweep's own knobs are worth nothing — `SetTolerance` 1e-2 buys 8%,
+  `BRepOffsetAPI_MakePipe` is slower, and capping the spine's approximation
+  degree makes it WORSE (degree 3 doubles it: OCC would rather intersect a few
+  high-degree spans than many low-degree ones);
+* skipping occluder pairs whose screen rectangles are disjoint is provably
+  safe and was implemented, measured and reverted — it removes 72-91% of the
+  pairs and saves nothing, because those pairs were already free.
+
+Impact: any model carrying a swept surface — a spring, a pipe, a loft — is
+expensive to draw exactly, and the cost is invisible until export. Mitigated,
+not fixed: `quality: "fast"` (polygonal HLR, ~24x, a look rather than a
+dimensionable deliverable) and `update_drawing {budget_s}` bound it.
+
+The fix worth building is a view that can EXCLUDE named occurrences. This
+engine's other seventeen bodies project exactly and instantly; leaving the two
+springs off the sheet would give a real, dimensionable drawing in near-zero
+time. Everything else here is tuning that has already been measured and does
+not pay.
+
+
+---
+
+
 ## `thread/face_pick_fills_the_slot` fails in one shuffled order
 
 Found 2026-09-04 by the standing GUI suite, seed 36636 on shard 2. The Thread
