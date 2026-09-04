@@ -140,13 +140,25 @@ def main():
     # two thicknesses; its sign follows the hole frame's Z, which is measured
     # rather than assumed.
     seat = PLATE / 2 + THICK / 2
+
+    def gear_z(name):
+        return next(o for o in d.call("list_occurrences")["occurrences"]
+                    if o["name"] == name)["transform"]["position"][2]
+
     for name in occ:
+        # PER GEAR, and then CHECKED. Each hole face carries its own frame,
+        # and nothing makes their Z axes agree: measuring the pinion and
+        # applying its sign to all three was an assumption about the other
+        # two. It happens to hold on this build — the old code seats all
+        # three at z = 0 — which is exactly why it needs an assertion rather
+        # than a reading. A gear that misses its seat sits a whole `seat`
+        # (6.5 mm) off the plate and looks perfectly reasonable in a render.
         d.call("set_mate", id=mates[name], offset=seat)
-    z_now = next(o for o in d.call("list_occurrences")["occurrences"]
-                 if o["name"] == "pinion")["transform"]["position"][2]
-    if z_now < -1e-6:
-        for name in occ:
+        if gear_z(name) < -1e-6:
             d.call("set_mate", id=mates[name], offset=-seat)
+        if abs(gear_z(name)) > 1e-4:
+            raise SystemExit(f"{name} did not seat on the plate: z = "
+                             f"{gear_z(name):.3f}")
     rack = d.call("add_occurrence", part="rack")["id"]
     slider = d.call("add_mate", type="slider", name="rack slide",
                     a={"occurrence": carrier,
