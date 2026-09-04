@@ -374,7 +374,7 @@ loads back with 48 keyframes. A GUI test scrubs the slider and asserts the
 piston moved. **Measure:** 48 samples with the mesh check < 2 s on the
 slider-crank; the number on the gripper's 8 occurrences.
 
-## G3 — Mesh interference for sweeps (one day)
+## G3 — Mesh interference for sweeps — SHIPPED 2026-09-04
 
 `src/core/MeshCollide.{h,cpp}`: an AABB tree per body over
 `CADShape::GenerateMesh(deflection)`, deflection **derived** from the body's
@@ -392,11 +392,51 @@ counts as a clash with no crossing triangles.
   motion study defaults to mesh and the final gate re-runs the worst sample
   exact.
 
-Gate: `test_measure.cpp` cases — overlapping, touching (must NOT clash at
-deflection tolerance: inflate nothing, report `touching` only from exact),
-clear, enclosed; agreement with exact on the gripper assembly.
-**Measure:** the arm's 253 occurrences, all pairs, in under 1 s against
-23 s / 123 s exact.
+### As built
+
+`src/core/MeshCollide.{h,cpp}`: an AABB tree over each shape's triangles,
+descended pair-wise with the separating-axis test on the leaves. Deflection
+is the renderer's own (0.2% of the body's bounding diagonal), so a 2 mm screw
+and a 2 m dock are meshed to the same RELATIVE fidelity and neither carries a
+millimetre constant that is wrong for the other.
+
+Three decisions worth recording:
+
+- **It never reports a distance or a volume.** A volume measured off a
+  tessellation is the tessellation's volume. `interference {method: "mesh"}`
+  returns the pair and `deflection_mm`, and `exact` stays the default and the
+  only thing that reports a number.
+- **A body wholly inside another is a clash**, which no surface-intersection
+  test finds on its own — a bolt buried in a block crosses nothing. The
+  containment check is gated on the boxes NESTING, because it is a ray parity
+  count over every triangle and running one on each side of every *clear*
+  pair would cost more than the tree just saved.
+- **The cache keys on PLACEMENT, not geometry.** A rigid `Transformed()`
+  shares the underlying shape by design, so two occurrences of one part have
+  the same `GeometryId` and sit in different places; keying on geometry would
+  hand the second occurrence the first one's mesh and test every later pair
+  against a body somewhere else. `CADShape::PlacementId()` is new for this.
+
+The RPC parameter is `mode`, not `method`: the python client takes the RPC
+name as its own `method` argument, so a parameter of that name can only be
+reached through `request()`. `help` and `describe` are already stuck there
+and it is not a club to grow — the smoke test found this by failing.
+
+**Measured**, a bored plate swept past a pin over 64 poses, every pose
+agreeing with the exact boolean:
+
+| | exact | mesh |
+|---|---|---|
+| 64 pair tests | 689 ms | **68 ms** |
+
+10x, not the 100x this plan guessed before measuring. That is one sample of
+a 48-step motion study in miniature, and it is the difference between a
+kinematic gate that runs and one nobody waits for.
+
+Gate: `tests/test_meshcollide.cpp` (agreement with the exact boolean on
+overlapping / clear / wholly-enclosed pairs, the deflection scaling with the
+body, the placement-keyed cache, and the speed ratio) plus the `mode: mesh`
+case in `contact_smoke.py`. 1067 headless, 278 GUI.
 
 ## G4 — Cam and chain relations (one day)
 

@@ -6,6 +6,7 @@
 #include "core/FrameMath.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/MeshCollide.h"
 #include "core/Occurrence.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
@@ -331,8 +332,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "sub-assembly is "
      "addressed by path — \"Gangway/Board 19\", or the id chain \"2/17\" "
      "when a name repeats — which is the only way to ask a question that "
-     "spans the boundary (read-only; a sub-assembly is edited on its tab).",
-     "a, b, deadline_s, max_pairs, touch_tol"},
+     "spans the boundary (read-only; a sub-assembly is edited on its tab). "
+     "mode: exact (default — a real boolean, and the clash VOLUME) or "
+     "mesh (triangles + an AABB tree: ~10x faster, a yes/no and no "
+     "volume, decided to the reported deflection_mm; re-run exact on "
+     "anything that must be certain). ",
+     "a, b, deadline_s, max_pairs, mode, touch_tol"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
@@ -699,6 +704,35 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             "' not found (see list_occurrences; a part inside a "
             "sub-assembly is addressed by path, e.g. \"Gangway/Board 19\")");
       };
+      // mode: "exact" (the default — a real boolean, and a volume) or "mesh"
+      // (G3: triangles and an AABB tree; a yes/no, never a distance). A sweep
+      // asks the same question over and over; a verdict asks it once.
+      //
+      // Called `mode` and not `method` on purpose: the python client takes
+      // the RPC name as its own `method` argument, so a parameter of that
+      // name can only be reached through request() — `help` and `describe`
+      // are already stuck there and it is not a club to grow.
+      const std::string mode = p.value("mode", std::string("exact"));
+      if (mode != "exact" && mode != "mesh")
+        throw std::runtime_error("interference mode '" + mode +
+                                 "' is not one of: exact, mesh");
+      double meshDeflection = 0.0;
+      const auto pairMesh = [&](const Target& ta, const Target& tb) {
+        for (const Body& a : ta.bodies) {
+          if (!a.shape.IsValid())
+            continue;
+          for (const Body& b : tb.bodies) {
+            if (!b.shape.IsValid())
+              continue;
+            const collide::Result r = collide::Overlap(
+                a.shape, glm::dmat4(1.0), b.shape, glm::dmat4(1.0));
+            meshDeflection = std::max(meshDeflection, r.deflection);
+            if (r.intersects)
+              return true;
+          }
+        }
+        return false;
+      };
       const auto pairVolume = [&](const Target& ta,
                                   const Target& tb) -> double {
         if (ta.bodies.empty() || tb.bodies.empty())
@@ -750,6 +784,17 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         RunSweep(plan, deadline, [&](size_t ki, size_t kj) {
           const Target& ta = occs[keep[ki]];
           const Target& tb = occs[keep[kj]];
+          if (mode == "mesh") {
+            if (!pairMesh(ta, tb))
+              return;
+            any = true;
+            // No volume: a volume measured off triangles is the
+            // tessellation's volume, and reporting one would invite exactly
+            // the false precision this method is not for.
+            pairs.push_back(
+                {{"a", ta.label}, {"b", tb.label}, {"clash", true}});
+            return;
+          }
           const double v = pairVolume(ta, tb);
           if (v <= 1e-9)
             return;
@@ -759,7 +804,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                            {"clash", true},
                            {"volume", v}});
         });
-        json out{{"clash", any}, {"pairs", pairs}};
+        json out{{"clash", any}, {"pairs", pairs}, {"mode", mode}};
+        if (mode == "mesh")
+          out["deflection_mm"] = meshDeflection;
         AttachSweepCoverage(out, plan, keep.size(), maxPairs, deadline);
         return out;
       }

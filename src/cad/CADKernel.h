@@ -109,6 +109,14 @@ public:
   [[nodiscard]] bool ContainsPoint(const glm::vec3& p,
                                    double tol = 1.0e-6) const;
 
+  // Identity INCLUDING placement: the underlying geometry plus where this
+  // copy of it sits. `GeometryId` alone is the TShape, which a rigid
+  // Transformed() deliberately shares — so two occurrences of one part have
+  // the same GeometryId and different placements, and anything caching
+  // world-space results (a tessellation, a collision mesh) must key on this
+  // instead or hand the second occurrence the first one's geometry.
+  [[nodiscard]] uint64_t PlacementId() const;
+
   // Connector inference (A2.5): every snap candidate a face offers, in ONE
   // pass — each non-degenerate bounding edge's index in the deduplicated
   // TopExp::MapShapes(EDGE) order (the ElementMap::edgeNames convention), its
@@ -335,6 +343,7 @@ public:
   bool CornerPoint(int, int, glm::vec3&) const { return false; }
   bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
   bool ContainsPoint(const glm::vec3&, double = 1.0e-6) const { return false; }
+  uint64_t PlacementId() const { return 0; }
 };
 
 class CADKernel {

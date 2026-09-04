@@ -26,6 +26,16 @@ def expect(condition, message):
         raise AssertionError(message)
 
 
+def refused(d, method, needle, **kw):
+    try:
+        d.call(method, **kw)
+    except RuntimeError as e:
+        expect(needle in str(e),
+               f"{method} refused, but not naming '{needle}': {e}")
+        return
+    raise AssertionError(f"{method} was accepted: {kw}")
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -162,6 +172,24 @@ def main():
         rep = d.call("contact_report", max_pairs=1)
         expect(rep["pairs_checked"] == 1 and rep.get("truncated"),
                f"contact_report honours max_pairs: {rep}")
+
+        # mode: mesh (G3) — the same verdict, from triangles, saying which
+        # mode answered and to what deflection. It never reports a
+        # volume: one measured off a tessellation is the tessellation's.
+        exact = d.call("interference")
+        mesh = d.call("interference", mode="mesh")
+        expect(mesh["mode"] == "mesh" and exact["mode"] == "exact",
+               f"each answer names the mode that decided it: {mesh}, {exact}")
+        expect(mesh["clash"] == exact["clash"],
+               f"mesh agrees with exact on this grid: {mesh} vs {exact}")
+        expect({(p["a"], p["b"]) for p in mesh["pairs"]} ==
+               {(p["a"], p["b"]) for p in exact["pairs"]},
+               f"pair for pair: {mesh['pairs']} vs {exact['pairs']}")
+        expect(all("volume" not in p for p in mesh["pairs"]),
+               f"and reports no volume: {mesh['pairs'][:2]}")
+        expect(mesh.get("deflection_mm", 0) > 0,
+               f"but says how close 'clear' was decided: {mesh}")
+        refused(d, "interference", "not one of: exact, mesh", mode="wibble")
 
         print("contact_smoke: all checks passed")
         return 0

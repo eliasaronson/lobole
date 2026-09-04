@@ -302,6 +302,7 @@ set(core_sources
     src/core/features/DerivedFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
     src/core/features/FrameFeature.cpp
+    src/core/MeshCollide.cpp
     src/core/BodyMode.cpp
     src/core/features/RevolveFeature.cpp
     src/core/features/ShellFeature.cpp

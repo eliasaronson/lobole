@@ -678,6 +678,25 @@ bool CADShape::CornerPoint(int edgeA, int edgeB, glm::vec3& point) const {
   return true;
 }
 
+uint64_t CADShape::PlacementId() const {
+  if (m_shape.IsNull())
+    return 0;
+  uint64_t h = reinterpret_cast<uint64_t>(m_shape.TShape().get());
+  const auto mix = [&h](double v) {
+    // Quantized before hashing: a placement that differs in the last bits of
+    // a float is the same placement, and two of them must not read as
+    // different meshes.
+    const int64_t q = static_cast<int64_t>(std::llround(v * 1.0e6));
+    h ^= static_cast<uint64_t>(q) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+  };
+  const gp_Trsf& t = m_shape.Location().Transformation();
+  for (int row = 1; row <= 3; row++)
+    for (int col = 1; col <= 4; col++)
+      mix(t.Value(row, col));
+  mix(static_cast<double>(m_shape.Orientation()));
+  return h;
+}
+
 bool CADShape::ContainsPoint(const glm::vec3& p, double tol) const {
   if (m_shape.IsNull())
     return false;

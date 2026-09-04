@@ -68,6 +68,7 @@ add_executable(designer_tests
     test_variables.cpp
     test_datum.cpp
     test_frame.cpp
+    test_meshcollide.cpp
     test_revolve.cpp
     test_boolean.cpp
     test_split.cpp
