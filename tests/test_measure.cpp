@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
+#include "core/features/BooleanFeature.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -1075,4 +1076,70 @@ TEST_CASE("Sections work on a body far from the origin", "[measure][section]") {
   caps[0].GetBoundingBox(lo, hi);
   CHECK_THAT(lo.x, WithinAbs(1000.0, 1e-6));
   CHECK_THAT(hi.y, WithinAbs(-497.0, 1e-6));
+}
+
+TEST_CASE("A section says how many ISLANDS the cut crosses",
+          "[measure][section]") {
+  using Catch::Matchers::WithinRel;
+  // docs/dogfood-friction-plan.md, F1. The total area cannot say whether the
+  // material is where you think it is: two boxes side by side and one box of
+  // the same total area section identically. The regions can.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 2, 3, 4));
+  auto one = Measure::CrossSectionRegions(doc.GetBodies(), glm::vec3(0, 0, 2),
+                                          glm::vec3(0, 0, 1));
+  REQUIRE(one.has_value());
+  REQUIRE(one->size() == 1);
+  CHECK_THAT((*one)[0].area, WithinRel(6.0, 1e-6));
+
+  // A second box, clear of the first: same plane, two islands now.
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 1, 3, 4));
+  auto two = Measure::CrossSectionRegions(doc.GetBodies(), glm::vec3(0, 0, 2),
+                                          glm::vec3(0, 0, 1));
+  REQUIRE(two.has_value());
+  REQUIRE(two->size() == 2);
+  // Biggest first, so the part comes before the bit that may not belong.
+  CHECK_THAT((*two)[0].area, WithinRel(6.0, 1e-6));
+  CHECK_THAT((*two)[1].area, WithinRel(3.0, 1e-6));
+  // And each says WHERE it is, which is how you tell which island is which.
+  CHECK_THAT((*two)[1].centroid.x, WithinRel(10.5, 1e-5));
+  // The total is unchanged and still agrees with the sum.
+  auto area = Measure::CrossSectionArea(doc.GetBodies(), glm::vec3(0, 0, 2),
+                                        glm::vec3(0, 0, 1));
+  REQUIRE(area.has_value());
+  CHECK_THAT(*area, WithinRel((*two)[0].area + (*two)[1].area, 1e-9));
+
+  // Regions are PER BODY, and two overlapping bodies are two of them. That
+  // is the honest answer rather than a shortcoming: the document holds them
+  // as two solids, and joining solids is what a Boolean (an extrude's `add`)
+  // is for. A caller asking "is this feature joined to the rest" is asking
+  // about a part that has been through that already.
+  Document touching;
+  touching.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 2, 3, 4));
+  touching.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(1.5, 0, 0), 2, 3, 4));
+  auto overlap = Measure::CrossSectionRegions(
+      touching.GetBodies(), glm::vec3(0, 0, 2), glm::vec3(0, 0, 1));
+  REQUIRE(overlap.has_value());
+  CHECK(overlap->size() == 2);
+
+  // Once they ARE one body, the same geometry is one island — which is the
+  // case that makes the check mean anything: a boss merged into a wall must
+  // not read as separate.
+  Document fused;
+  fused.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 2, 3, 4));
+  fused.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(1.5, 0, 0), 2, 3, 4));
+  fused.AddFeature(std::make_unique<BooleanFeature>(
+      "Join", fused.GetFeature(0)->GetId(), fused.GetFeature(1)->GetId(),
+      BooleanOp::Union));
+  REQUIRE(fused.GetBodies().size() == 1);
+  auto joined = Measure::CrossSectionRegions(
+      fused.GetBodies(), glm::vec3(0, 0, 2), glm::vec3(0, 0, 1));
+  REQUIRE(joined.has_value());
+  CHECK(joined->size() == 1);
 }

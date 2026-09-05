@@ -203,6 +203,19 @@ class App:
             return self._remote.call(method, **params)
         return self._remote.request(method, params, timeout=_timeout)
 
+    def active(self):
+        """The id of the tab that is in front, asked rather than remembered.
+
+        `_MOVES_TAB` above is an optimization, not a source of truth: it saves
+        a round trip on a burst of writes, and a stale entry costs a LOUD
+        refusal ("the active document is not a part") rather than a silent
+        wrong write. This is how you check it, and how a caller that did
+        something the SDK does not know about can resync:
+
+            app._active = app.active()
+        """
+        return self.list_parts()["active_id"]
+
     def methods(self, contains=""):
         """The documented method names, optionally filtered."""
         return sorted(n for n in self._methods if contains in n)
@@ -611,6 +624,23 @@ class SketchBuilder:
                 rest.append((ent, field, expr))
         self._pending_exprs = rest
 
+    def arc(self, center, radius, start_deg, end_deg, construction=False):
+        """An arc, counter-clockwise from `start_deg` to `end_deg`.
+
+        The entity type always existed — `slot` emits two of them — but there
+        was no way to draw one, so every rounded corner in the air-cooled
+        engine is a slot or a polygon. A radius on a drawn profile is the
+        normal case (docs/dogfood-friction-plan.md, F2).
+        """
+        n = len(self.entities)
+        self.entities.append({"type": "arc",
+                              "center": list(_uv(self, center, n, 0, "arc")),
+                              "radius": float(radius),
+                              "start_angle": math.radians(start_deg),
+                              "end_angle": math.radians(end_deg),
+                              "construction": bool(construction)})
+        return self._attach_exprs(1)
+
     def rect(self, c1, c2):
         self.entities.append({"type": "rect", "c1": list(_uv(self, c1)),
                               "c2": list(_uv(self, c2))})
@@ -640,6 +670,38 @@ class SketchBuilder:
             self.line(pts[-1], pts[0])
         return self
 
+    def extent(self):
+        """The (u, v) bounding box of everything drawn so far, as
+        ((umin, vmin), (umax, vmax)).
+
+        Local arithmetic over the entities, so it costs nothing and answers
+        the question a profile most often gets wrong: how far does this
+        actually reach? Expression-valued coordinates are skipped — they are
+        not numbers yet.
+        """
+        lo = [float("inf"), float("inf")]
+        hi = [float("-inf"), float("-inf")]
+        def seen(u, v, pad=0.0):
+            if isinstance(u, str) or isinstance(v, str):
+                return
+            lo[0] = min(lo[0], u - pad); hi[0] = max(hi[0], u + pad)
+            lo[1] = min(lo[1], v - pad); hi[1] = max(hi[1], v + pad)
+        for e in self.entities:
+            t = e.get("type")
+            if t in ("circle", "arc"):
+                c = e["center"]
+                seen(c[0], c[1], float(e.get("radius", 0.0)))
+            elif t == "line":
+                for k in ("a", "b", "p1", "p2", "start", "end"):
+                    if k in e:
+                        seen(e[k][0], e[k][1])
+            elif "position" in e:
+                seen(e["position"][0], e["position"][1])
+        if lo[0] == float("inf"):
+            raise SdkError("nothing drawn yet, or every coordinate is an "
+                           "expression — extent() reads numbers")
+        return (V((lo[0], lo[1], 0)), V((hi[0], hi[1], 0)))
+
     def polygon(self, center, n, r=None, across_flats=None, rotate=0.0):
         """A regular n-gon. `r` is the circumradius; `across_flats` is the
         spanner size, converted rather than approximated."""
@@ -655,7 +717,14 @@ class SketchBuilder:
 
     def slot(self, a, b, width):
         """A rounded slot between two centres — two lines and two arcs, so it
-        is a real closed profile rather than a stadium approximation."""
+        is a real closed profile rather than a stadium approximation.
+
+        IT REACHES HALF ITS WIDTH PAST EACH CENTRE. A slot from (0,0) to
+        (0,43) that is 90 wide spans -45..88, not 0..43 — which is how a crank
+        web drawn round a pin 43 up came to reach z=85 and hit a barrel whose
+        underside is at 82. `extent()` below is the cheap way to check before
+        extruding (docs/dogfood-friction-plan.md, F2).
+        """
         (au, av), (bu, bv) = _uv(self, a), _uv(self, b)
         dx, dy = bu - au, bv - av
         n = math.hypot(dx, dy)
@@ -1082,6 +1151,64 @@ class Part(_Tab):
 
     def edges(self, **kw):
         return [e for b in self.bodies() for e in b.edges(**kw)]
+
+    def islands(self, z=None, normal=(0, 0, 1), origin=None):
+        """The connected regions of material a plane cuts this part into.
+
+        `part.islands(z=200)` cuts a horizontal plane at z=200 and returns the
+        areas, biggest first. Two islands where you expected one means a
+        feature is not joined to the rest THERE, whatever it may be joined to
+        somewhere else — which is how four bolt bosses came to hang off a deck
+        flange with every other check green
+        (docs/dogfood-friction-plan.md, F1).
+        """
+        if origin is None:
+            origin = (0.0, 0.0, float(z or 0.0))
+        r = self.app.section(origin=list(V(origin)), normal=list(V(normal)),
+                             regions=True, part=self.id)
+        return [x["area"] for x in r["regions"]]
+
+    def extrude_shapes(self, plane, draws, distance, name="Shape",
+                       mode=None, **kw):
+        """Extrude several OVERLAPPING shapes as one lump.
+
+        A sketch refuses loops that overlap ("profile loops overlap or nest
+        inconsistently") rather than guessing which one was meant to be a
+        hole — right, but it makes a silhouette drawn from overlapping shapes
+        into one extrude each. `draws` is a list of functions that each draw
+        on a fresh sketch; the first makes the body and the rest add to it.
+
+            p.extrude_shapes(Plane.xz(14), [
+                lambda s: s.polyline(shank_outline),
+                lambda s: s.circle((0, 0), d=70),
+                lambda s: s.circle((0, rod_l), d=40),
+            ], 28.0, name="Rod")
+
+        (docs/dogfood-friction-plan.md, F2)
+        """
+        body = None
+        for i, draw in enumerate(draws):
+            sk = self.sketch(plane, name=f"{name} {i + 1}" if len(draws) > 1
+                             else name)
+            draw(sk)
+            body = self.extrude(sk.add(), distance,
+                                mode=(mode or "new_body") if i == 0 else "add",
+                                name=f"{name} {i + 1}" if len(draws) > 1
+                                else name, **kw)
+        return body
+
+    def render(self, path, view="iso"):
+        """Screenshot this part on its own, fitted. Needs a renderer, so an
+        `--offscreen` instance (a `--headless` one refuses, saying so).
+
+        Here because looking is what caught the defect none of the other
+        checks could: four bolt bosses hanging off a deck flange, one solid
+        body, clean study, bolts correctly sized, `check()` green
+        (docs/dogfood-friction-plan.md, F1).
+        """
+        self.activate()
+        self.app.screenshot(path=path, view=view, fit=True)
+        return path
 
     def material(self, slug, body=None):
         """Give this part's bodies a material, so mass properties and the BOM

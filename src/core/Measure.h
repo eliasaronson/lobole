@@ -383,6 +383,34 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
                                        const glm::vec3& origin,
                                        const glm::vec3& normal);
 
+// The same cut, decomposed into its CONNECTED REGIONS — one entry per island
+// of material the plane crosses, with that island's area and centroid.
+//
+// The total alone cannot answer the question that matters about a section,
+// which is whether the material is where you think it is. An air-cooled
+// barrel with four bolt bosses hanging off its deck flange sections at
+// 3293.76 mm^2 where the sound one sections at 2586.90 — the difference is
+// 706.9, exactly pi*15^2, the boss standing as its OWN island in a number
+// that cannot say so (docs/dogfood-friction-plan.md, F1).
+//
+// It is not a verdict: real parts have islands in section, and a fork has two
+// tines. It makes "is this feature actually joined to the rest here?" a
+// question somebody can ask for the price of a section they were computing
+// anyway — the regions come out of the same boolean, and were being thrown
+// away.
+//
+// PER BODY, and two overlapping bodies are two regions. The document holds
+// them as two solids and joining solids is what a Boolean (an extrude's
+// `add`) is for; a caller asking whether a feature is joined is asking about
+// a part that has been through that already.
+struct SectionRegion {
+  double area = 0.0;
+  glm::vec3 centroid{0.0f};
+};
+std::optional<std::vector<SectionRegion>>
+CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
+                    const glm::vec3& normal);
+
 // The section-cut cap faces (I3 v2, C4): one CADShape per body — the body's
 // intersection with the section plane, lying on the plane — for rendering a
 // filled cut face so a sectioned part reads solid. Same plane as

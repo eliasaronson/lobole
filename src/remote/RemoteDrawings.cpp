@@ -45,8 +45,14 @@ static constexpr MethodDoc DrawingMethods[] = {
      "no source refs, so nothing can be dimensioned against them). Exact is "
      "never silently swapped for fast when it is slow; ask for it. An "
      "exact costs what the SURFACES cost, not the part count: 16 bored "
-     "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. ",
-     "base_view, id, name, position, quality, scale, show_hidden"},
+     "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. "
+     "`hidden` leaves occurrences OFF this view, by id or name, refused if the "
+     "name is not in the source. It is a per-SHEET choice, not a model change. "
+     "Exact HLR is priced by surface complexity, so one swept part can "
+     "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
+     "with its two valve springs left off, while the other seventeen bodies "
+     "still draw exactly. ",
+     "base_view, hidden, id, name, position, quality, scale, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}.",
@@ -63,9 +69,15 @@ static constexpr MethodDoc DrawingMethods[] = {
      "no source refs, so nothing can be dimensioned against them). Exact is "
      "never silently swapped for fast when it is slow; ask for it. An "
      "exact costs what the SURFACES cost, not the part count: 16 bored "
-     "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. ",
-     "base_view, drawing, name, orientation, position, quality, scale, "
-     "source"},
+     "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. "
+     "`hidden` leaves occurrences OFF this view, by id or name, refused if the "
+     "name is not in the source. It is a per-SHEET choice, not a model change. "
+     "Exact HLR is priced by surface complexity, so one swept part can "
+     "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
+     "with its two valve springs left off, while the other seventeen bodies "
+     "still draw exactly. ",
+     "base_view, drawing, hidden, name, orientation, position, quality, "
+     "scale, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views", "List views with placement and scale.", ""},
     {"update_drawing",
@@ -178,6 +190,52 @@ namespace {
 // a sheet asked for fast and given exact takes a minute and a half a view and
 // looks like a hang, and one asked for exact and given fast is a look
 // presented as a deliverable.
+// The occurrences a view leaves off, by id or by name, refused when the name
+// is not in the source assembly — a silent miss would draw the spring you
+// meant to drop and cost a minute a view to find out.
+std::vector<uint64_t> ParseHidden(ui::AppState& state, const DrawingView& view,
+                                  const nlohmann::json& j) {
+  std::vector<uint64_t> out;
+  if (!j.is_array())
+    throw std::runtime_error("`hidden` is an array of occurrence ids or names");
+  const AssemblyDocument* asmDoc = nullptr;
+  for (const ui::PartSlot& slot : state.parts)
+    if (slot.id == view.sourceDocId && slot.kind == ui::DocKind::Assembly)
+      asmDoc = slot.assembly ? slot.assembly.get() : state.assembly.get();
+  for (const auto& e : j) {
+    if (e.is_number_unsigned()) {
+      out.push_back(e.get<uint64_t>());
+      continue;
+    }
+    const std::string name = e.get<std::string>();
+    std::vector<uint64_t> hits;
+    std::vector<std::string> known;
+    if (asmDoc != nullptr)
+      for (const Occurrence& o : asmDoc->GetOccurrences()) {
+        known.push_back(o.name);
+        if (o.name == name)
+          hits.push_back(o.id);
+      }
+    if (hits.empty())
+      throw std::runtime_error("no occurrence '" + name +
+                               "' in this view's source — " + KnownList(known));
+    // A part placed twice answers to one name, and picking the first would
+    // drop one spring and leave the other on the sheet — at a minute a view,
+    // you find out slowly. Same rule as the fastener picks: say which.
+    if (hits.size() > 1) {
+      std::string ids;
+      for (size_t k = 0; k < hits.size(); k++)
+        ids += (k ? ", " : "") + std::to_string(hits[k]);
+      throw std::runtime_error("'" + name + "' is " +
+                               std::to_string(hits.size()) +
+                               " occurrences in this view's source (" + ids +
+                               ") — say which by id, or list them all");
+    }
+    out.push_back(hits.front());
+  }
+  return out;
+}
+
 std::string RequireQuality(const nlohmann::json& j) {
   const std::string q = j.get<std::string>();
   if (q != "exact" && q != "fast")
@@ -330,6 +388,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     v.scale = p.value("scale", 1.0);
     if (p.contains("quality"))
       v.quality = RequireQuality(p.at("quality"));
+    if (p.contains("hidden"))
+      v.hidden = ParseHidden(state, v, p.at("hidden"));
     if (p.contains("position")) {
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -401,6 +461,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       view->showHidden = p.at("show_hidden").get<bool>();
     if (p.contains("quality"))
       view->quality = RequireQuality(p.at("quality"));
+    if (p.contains("hidden"))
+      view->hidden = ParseHidden(state, *view, p.at("hidden"));
     if (p.contains("base_view"))
       view->baseViewId = p.at("base_view").get<uint64_t>();
     state.drawing->BumpVersion();
@@ -485,7 +547,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                  {"base_view", view.baseViewId},
                  {"position", {view.position.x, view.position.y}},
                  {"show_hidden", view.showHidden},
-                 {"quality", view.quality}};
+                 {"quality", view.quality},
+                 {"hidden", view.hidden}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();

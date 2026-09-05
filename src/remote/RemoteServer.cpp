@@ -1755,7 +1755,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         entry["folder"] = state.parts[i].folder;
       arr.push_back(std::move(entry));
     }
-    json out = {{"parts", arr}, {"active", state.activePart}};
+    // `active` is the INDEX (what it has always been); `active_id` is the
+    // same tab's stable id, which is what every other call and every client
+    // handle uses. Without it "which tab is in front?" needed the index and
+    // the list to be cross-referenced by hand, and a client caching the
+    // active tab had no way to check itself
+    // (docs/dogfood-friction-plan.md, papercuts).
+    json out = {{"parts", arr},
+                {"active", state.activePart},
+                {"active_id",
+                 state.activePart >= 0 &&
+                         state.activePart < static_cast<int>(state.parts.size())
+                     ? state.parts[state.activePart].id
+                     : 0}};
     if (!state.tabFolders.empty()) // tab-bar folder registry (may hold empty)
       out["folders"] = state.tabFolders;
     return out;

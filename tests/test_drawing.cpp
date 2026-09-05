@@ -883,6 +883,32 @@ TEST_CASE("Drawing golden loads and round-trips (v89 view quality)",
   fs::remove(tmp);
 }
 
+TEST_CASE("Drawing golden loads and round-trips (v90 hidden occurrences)",
+          "[drawing][serialization][golden]") {
+  // v90 added a view's `hidden`. The golden carries a view that drops two
+  // occurrences and two that drop none, because "absent" and "empty" must
+  // both read as draw-everything.
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "drawing" / "v90-view-hidden.json";
+  REQUIRE(fs::exists(golden));
+  auto dwg = testio::LoadDrawing(golden.string());
+  REQUIRE(dwg != nullptr);
+  REQUIRE(dwg->ViewCount() == 3);
+  CHECK(dwg->GetViews()[0].hidden.empty());
+  REQUIRE(dwg->GetViews()[1].hidden.size() == 2);
+  CHECK(dwg->GetViews()[1].hidden[0] == 7);
+  CHECK(dwg->GetViews()[1].hidden[1] == 9);
+  CHECK(dwg->GetViews()[2].hidden.empty()); // absent = draw everything
+
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v90_rt.json";
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  REQUIRE(reloaded->GetViews()[1].hidden.size() == 2);
+  CHECK(reloaded->GetViews()[0].hidden.empty());
+  fs::remove(tmp);
+}
+
 TEST_CASE("a drawing refuses an unknown sheet size or view orientation",
           "[drawing][enums]") {
   // Verified against a running instance before the fix: an A2 drawing whose

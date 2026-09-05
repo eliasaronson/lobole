@@ -1,0 +1,60 @@
+{
+  "format": "designer-document",
+  "version": 90,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Single-cylinder engine",
+      "document": "General arrangement",
+      "author": "Elias",
+      "date": "2026-09-04"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "front",
+      "source": 3,
+      "orientation": "front",
+      "scale": 0.5,
+      "position": [
+        70.0,
+        150.0
+      ],
+      "show_hidden": true,
+      "quality": "exact"
+    },
+    {
+      "id": 2,
+      "name": "iso",
+      "source": 3,
+      "orientation": "iso",
+      "scale": 0.5,
+      "position": [
+        200.0,
+        150.0
+      ],
+      "show_hidden": false,
+      "quality": "fast",
+      "hidden": [
+        7,
+        9
+      ]
+    },
+    {
+      "id": 3,
+      "name": "right",
+      "source": 3,
+      "orientation": "right",
+      "scale": 0.5,
+      "position": [
+        330.0,
+        150.0
+      ],
+      "show_hidden": true
+    }
+  ],
+  "dims": []
+}

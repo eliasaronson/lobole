@@ -17,13 +17,19 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    89; // v89: a drawing view's `quality` — "exact" (curve HLR, every curve
+    90; // v90: a drawing view's `hidden` — occurrence ids left OFF that view.
+        //      A per-SHEET choice, not a model change, and the difference
+        //      between a dimensionable drawing of a swept-surface model and
+        //      no drawing at all: the single-cylinder engine is 47 s a view
+        //      and 0.0 s without its two valve springs
+        //      (docs/dogfood-friction-plan.md, F4).
+        // (v89: a drawing view's `quality` — "exact" (curve HLR, every curve
         //      traced to the edge that made it, what a dimension attaches to)
         //      or "fast" (polygonal HLR: orders of magnitude cheaper, and a
         //      LOOK). Exact costs what the SURFACES cost, not what the part
         //      count costs: 16 bored boxes project in 3.1 ms, one 4-turn
         //      helical spring in 6.4 s
-        //      (docs/agent-scale-followup-plan.md, W3).
+        //      (docs/agent-scale-followup-plan.md, W3).)
         // (v88: relation kinds `chain` (a gear whose ratio keeps its sign — a
         //      chain or belt does not reverse) and `cam` (rotation to offset
         //      through a periodic LIFT TABLE, not a ratio), with the table

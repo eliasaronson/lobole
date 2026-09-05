@@ -1448,7 +1448,8 @@ json DrawingViewToJson(const DrawingView& v) {
             {"scale", v.scale},
             {"position", {v.position.x, v.position.y}},
             {"show_hidden", v.showHidden},
-            {"quality", v.quality}};
+            {"quality", v.quality},
+            {"hidden", v.hidden}};
   if (v.baseViewId)
     j["base_view"] = v.baseViewId;
   if (!v.scaleExpr.empty())
@@ -1474,6 +1475,7 @@ DrawingView DrawingViewFromJson(const json& j) {
     v.position = {p[0].get<double>(), p[1].get<double>()};
   v.showHidden = j.value("show_hidden", true);
   v.quality = j.value("quality", std::string("exact"));
+  v.hidden = j.value("hidden", std::vector<uint64_t>{});
   return v;
 }
 

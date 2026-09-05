@@ -96,6 +96,16 @@ struct DrawingView {
   // A string rather than the enum so it serializes and refuses by name like
   // every other enum on the wire (docs/agent-scale-followup-plan.md, W3).
   std::string quality = "exact";
+  // Occurrences to leave OFF this view, by id. Empty = draw everything.
+  //
+  // Exact HLR is priced by surface complexity: the single-cylinder engine is
+  // 47 s a view, and 0.0 s with its two valve springs hidden — seventeen of
+  // its nineteen bodies project instantly. Leaving the sweeps off a sheet is
+  // the difference between a real dimensionable drawing and no drawing at all
+  // (docs/dogfood-friction-plan.md, F4).
+  //
+  // Only meaningful for an assembly source; a part has no occurrences.
+  std::vector<uint64_t> hidden;
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured

@@ -321,6 +321,53 @@ def main():
         # cover is left where it was and the thicker plate now runs through
         # it.
         refused(asm.check, "clash")
+
+        # ---- What the friction round added -------------------------------
+        # arc(): the entity type always existed (slot emits two) but there was
+        # no way to draw one, so every rounded corner in the air-cooled engine
+        # is a slot or a polygon (docs/dogfood-friction-plan.md, F2).
+        d = app.part("arcs")
+        sk = d.sketch(sdk.Plane.xy(0), name="D")
+        sk.arc((0, 0), 20.0, 0, 180)
+        sk.line((-20, 0), (20, 0))
+        d.extrude(sk.add(), 5.0, name="D")
+        expect(abs(d.body().volume - math.pi * 400 / 2 * 5) < 1e-3,
+               f"a half-disc prism is pi r^2 / 2 * h: {d.body().volume}")
+
+        # extent(): how far a profile actually REACHES, before extruding it.
+        # A slot reaches half its width past each centre — the thing that put
+        # a crank web through a barrel.
+        probe = d.sketch(sdk.Plane.xz(0), name="probe")
+        probe.slot((0, 0), (0, 43), width=90)
+        lo, hi = probe.extent()
+        expect(abs(lo.y + 45.0) < 1e-6 and abs(hi.y - 88.0) < 1e-6,
+               f"the slot spans -45..88, not 0..43: {lo.y}..{hi.y}")
+
+        # extrude_shapes(): overlapping loops are refused in ONE sketch, so
+        # this is one extrude each, added together.
+        e = app.part("overlap")
+        e.extrude_shapes(sdk.Plane.xy(0), [
+            lambda s: s.circle((0, 0), d=40),
+            lambda s: s.circle((30, 0), d=40),
+        ], 10.0, name="Two bosses")
+        expect(len(e.bodies()) == 1,
+               f"the shapes fused into one body: {len(e.bodies())}")
+
+        # islands(): the check that would have caught four bolt bosses hanging
+        # off a deck flange with every other check green (F1).
+        expect(len(e.islands(z=5)) == 1,
+               f"overlapping bosses are ONE island: {e.islands(z=5)}")
+        f = app.part("apart")
+        f.extrude_shapes(sdk.Plane.xy(0), [
+            lambda s: s.circle((0, 0), d=40),
+            lambda s: s.circle((100, 0), d=40),
+        ], 10.0, name="Two bosses")
+        expect(len(f.islands(z=5)) == 2,
+               f"and separated ones are TWO: {f.islands(z=5)}")
+
+        # material(): a part made of one thing, in one call.
+        f.material("aluminum")
+        expect(f.volume() > 0, "still measurable after a material")
         print("sdk_smoke: ok")
     finally:
         app_proc.terminate()

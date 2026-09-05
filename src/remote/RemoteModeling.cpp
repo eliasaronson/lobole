@@ -176,12 +176,16 @@ static constexpr MethodDoc ModelingMethods[] = {
      "regen, digest}.",
      "bodies, body_names, name, occurrence, reference"},
     {"modify_feature",
-     "Change the feature at `index` to `feature` JSON; one undo step; returns "
-     "{regen}. It keeps its IDENTITY: omit \"id\" and the feature keeps the "
+     "Change a feature to `feature` JSON; one undo step; returns {regen}. "
+     "Name it by `feature_id` (what every other call hands you) or by "
+     "`index` (its position in the tree). REPLACES the whole spec rather "
+     "than patching it, so `feature` must be complete and carry its `type`; "
+     "read it out of get_state, change what you want and send it back. "
+     "It keeps its IDENTITY: omit \"id\" INSIDE the feature and it keeps the "
      "one it has, so references to it (sketch_id, mates, drawing dimensions) "
-     "keep resolving. Pass a different \"id\" only to mean 'this is a "
+     "keep resolving. Pass a different \"id\" there only to mean 'this is a "
      "different feature now', which deliberately dangles those references.",
-     "feature, index"},
+     "feature, feature_id, index"},
     {"set_material",
      "Assign a material slug (see material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
@@ -448,12 +452,48 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                 {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "modify_feature") {
-    const size_t index = p.at("index").get<size_t>();
+    // `feature_id` as well as `index`, because an id is what everything else
+    // hands you and turning one into a position cost a get_state round trip.
+    // NOT `id`: `feature.id` inside the spec already means the feature's own
+    // IDENTITY, and two readings of one word beside each other would be worse
+    // than the round trip (docs/dogfood-friction-plan.md, F3).
+    size_t index = 0;
+    if (p.contains("feature_id")) {
+      const uint64_t fid = p.at("feature_id").get<uint64_t>();
+      bool found = false;
+      for (size_t i = 0; i < doc->FeatureCount(); i++)
+        if (doc->GetFeature(i)->GetId() == fid) {
+          index = i;
+          found = true;
+          break;
+        }
+      if (!found)
+        throw std::runtime_error(
+            "no feature with id " + std::to_string(fid) +
+            " — get_state lists every feature with its id and index");
+    } else if (p.contains("index")) {
+      index = p.at("index").get<size_t>();
+    } else {
+      throw std::runtime_error(
+          "modify_feature needs the feature to change: `feature_id` (what "
+          "every other call hands you) or `index` (its position in the tree)");
+    }
     Feature* feature = doc->GetFeature(index);
     if (!feature)
       throw std::runtime_error(IndexError("feature", index, doc->FeatureCount(),
                                           "get_state lists features with "
                                           "their indices"));
+    // A REPLACEMENT, not a patch, and it has to say so itself. A partial
+    // feature — {"depth": 20} — used to reach FeatureFromJson and come back
+    // as `[json.exception.out_of_range.403] key 'type' not found`, which is
+    // an nlohmann internal rather than a refusal that names what is wanted.
+    if (!p.at("feature").is_object() || !p.at("feature").contains("type"))
+      throw std::runtime_error(
+          "modify_feature REPLACES the whole feature, so `feature` must be a "
+          "complete spec including its `type` — not just the fields you want "
+          "changed. Read the feature out of get_state, change what you want "
+          "and send it back; describe feature_types[] lists the fields each "
+          "type takes.");
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
     RejectUnknownFeatureFields(p.at("feature"),

@@ -375,8 +375,15 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"section",
      "Cross-section area where a plane cuts the bodies; on an assembly tab, "
      "every visible occurrence in place. Omit `offset` to cut through the "
-     "middle of what is shown (the chosen offset comes back).",
-     "base_plane, normal, offset, origin"},
+     "middle of what is shown (the chosen offset comes back). "
+     "{regions: true} also returns each connected ISLAND the cut crosses "
+     "({area, centroid}, biggest first) and `region_count`. The total cannot "
+     "tell you whether the material is where you think it is: a barrel whose "
+     "bolt bosses hang off its deck flange sections at 3293.8 where the sound "
+     "one sections at 2586.9, and the difference is a boss standing as its "
+     "own island. Islands are not a verdict — a fork has two tines — they are "
+     "a question you can ask cheaply.",
+     "base_plane, normal, offset, origin, part, regions"},
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
      "offset}. Works on part AND assembly tabs, with filled cut caps on "
@@ -578,8 +585,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // exactly the models where it matters most.
     std::vector<Body> placed;
     const std::vector<Body>* bodies = nullptr;
-    if (doc != nullptr) {
-      bodies = &doc->GetBodies();
+    // A read, so it reaches another part by reference rather than by
+    // switching to it (docs/agent-scale-followup-plan.md, W2).
+    Document* sectionDoc = doc;
+    if (p.contains("part"))
+      sectionDoc = ResolvePartParam(state, p.at("part"));
+    if (sectionDoc != nullptr) {
+      bodies = &sectionDoc->GetBodies();
     } else if (state.assembly) {
       // A5: the leaf parts of the whole tree, placed.
       for (const assembly::FlatInstance& inst :
@@ -597,7 +609,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       }
       bodies = &placed;
     } else {
-      RequirePartDoc(doc, "section"); // throws with the standard message
+      RequirePartDoc(sectionDoc, "section"); // the standard message
     }
     const auto area = Measure::CrossSectionArea(*bodies, origin, normal);
     if (!area)
@@ -607,6 +619,21 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     json out{{"area", *area}};
     if (derived)
       out["offset"] = usedOffset; // say where it chose to cut
+    // The ISLANDS the cut crosses, biggest first. Off by default because the
+    // total is what most callers want and this costs a second boolean.
+    if (p.value("regions", false)) {
+      const auto regions =
+          Measure::CrossSectionRegions(*bodies, origin, normal);
+      if (!regions)
+        throw std::runtime_error("section regions failed — see the log");
+      json arr = json::array();
+      for (const Measure::SectionRegion& r : *regions)
+        arr.push_back(
+            {{"area", r.area},
+             {"centroid", {r.centroid.x, r.centroid.y, r.centroid.z}}});
+      out["regions"] = arr;
+      out["region_count"] = arr.size();
+    }
     return out;
   }
   if (m == "interference") {

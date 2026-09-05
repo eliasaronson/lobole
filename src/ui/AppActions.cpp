@@ -3632,6 +3632,12 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
       for (const assembly::FlatInstance& inst : *flat) {
         if (!inst.visible)
           continue;
+        // Left off this SHEET, which is not the same as hidden in the model:
+        // `hidden` is per view, so one sheet can drop the springs and another
+        // keep them (F4).
+        if (std::find(view.hidden.begin(), view.hidden.end(),
+                      inst.rootOccurrenceId) != view.hidden.end())
+          continue;
         AppendBodies(*inst.part, glm::dmat4(inst.world), inst.rootOccurrenceId,
                      out);
       }

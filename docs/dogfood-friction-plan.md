@@ -8,9 +8,14 @@ that already shipped and this list, which did not.
 Ordered by what it costs to leave alone. Every item carries the evidence it
 came from; where a fix is speculative it says so.
 
+**Shipped 2026-09-05: F1(a), F1(c), F2, F3, F4 and the papercuts.** What is
+left is F1(b), the literals lint — the only item here that could still be
+wrong about what it is for — and F5, which is a workstream. Results are folded
+into each section below.
+
 ---
 
-## F1 — nothing catches a shape that is CONSISTENT but silly
+## F1 — nothing catches a shape that is CONSISTENT but silly — (a) and (c) DONE
 
 **The evidence.** The air-cooled barrel's four bolt bosses hung in mid-air:
 a d=38 fin relief at r=65 reaches r=46, the d=30 boss only r=50, so the relief
@@ -41,7 +46,8 @@ somebody can ask cheaply. It is advisory, not a refusal: real parts have
 islands in section. OCC already builds the section wires, so this is reporting
 what is thrown away. **Small, and the highest-value item here.**
 
-**(b) The literals lint that G0 deferred.** The boss floated because
+**(b) The literals lint that G0 deferred — NOT DONE, and the one item here
+still worth arguing about.** The boss floated because
 `BOLT_R=65`, `WALL_R=52`, relief `d=38` and boss `d=30` were four independent
 numbers with an unstated relationship. Had the boss diameter been derived —
 `2 * (BOLT_R - WALL_R + 3)` — it could not have floated, and editing the wall
@@ -59,7 +65,7 @@ that the check that caught this was a human eye.
 
 ---
 
-## F2 — the profile vocabulary is thin, and one of its shapes surprises you
+## F2 — the profile vocabulary is thin, and one of its shapes surprises you — DONE
 
 Building parts from sketches instead of primitives is the direction this
 project wants. Two gaps found doing it:
@@ -85,7 +91,7 @@ that would remove the boilerplate without weakening the refusal. **Small.**
 
 ---
 
-## F3 — refusals that are not refusals
+## F3 — refusals that are not refusals — DONE
 
 **`modify_feature` leaks a raw exception.** Sending a partial feature —
 `{"depth": 20.0}` — comes back as:
@@ -107,7 +113,7 @@ round trip. **Small.**
 
 ---
 
-## F4 — a drawing view that can EXCLUDE occurrences
+## F4 — a drawing view that can EXCLUDE occurrences — DONE
 
 Already argued in docs/known-bugs.md and the only fix left worth building for
 drawings. Exact HLR costs ~2.2 s per pair against a swept surface: the engine

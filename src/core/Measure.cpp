@@ -789,6 +789,51 @@ TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
 }
 } // namespace
 
+std::optional<std::vector<SectionRegion>>
+CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
+                    const glm::vec3& normal) {
+  std::vector<SectionRegion> out;
+  if (bodies.empty())
+    return out;
+  try {
+    const TopoDS_Face cutter =
+        BuildSectionCutter(bodies, origin, glm::normalize(normal));
+    for (const auto& b : bodies) {
+      if (b.shape.GetShape().IsNull())
+        continue;
+      BRepAlgoAPI_Common common(b.shape.GetShape(), cutter);
+      if (!common.IsDone())
+        continue;
+      // One FACE per connected island. A face with inner wires is still one
+      // island — an annulus is connected — which is the distinction that
+      // makes this worth reporting rather than counting wires.
+      for (TopExp_Explorer ex(common.Shape(), TopAbs_FACE); ex.More();
+           ex.Next()) {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(ex.Current(), props);
+        if (props.Mass() <= 1e-9)
+          continue;
+        const gp_Pnt c = props.CentreOfMass();
+        out.push_back({props.Mass(), glm::vec3(static_cast<float>(c.X()),
+                                               static_cast<float>(c.Y()),
+                                               static_cast<float>(c.Z()))});
+      }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const SectionRegion& a, const SectionRegion& b) {
+                return a.area > b.area; // biggest first: the part, then the
+                                        // bits that may not belong
+              });
+    return out;
+  } catch (const std::exception& e) {
+    LOG_ERROR("Cross-section regions failed: {}", e.what());
+    return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Cross-section regions failed: {}", e.GetMessageString());
+    return std::nullopt;
+  }
+}
+
 std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
                                        const glm::vec3& origin,
                                        const glm::vec3& normal) {
