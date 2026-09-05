@@ -1576,6 +1576,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     for (size_t i = 0; i < stateDoc->GetBodies().size(); i++) {
       const auto& body = stateDoc->GetBodies()[i];
       glm::vec3 min, max;
+      // The CHEAP box, which is conservative rather than exact: a swept
+      // surface is bounded by its control points, so a helical spring reads
+      // about sixty per cent bigger than it is. get_state is called after
+      // every edit — asking for the exact one here took an engine's build
+      // from 1.6 s to 5.8 s — and a bound that cannot be too SMALL is what
+      // most callers of this field want. `mass_properties` returns the
+      // measured box for the times you want a size.
       body.shape.GetBoundingBox(min, max);
       json entry = {{"name", body.name},
                     {"volume", body.shape.Volume()},

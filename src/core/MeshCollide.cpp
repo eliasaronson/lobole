@@ -279,13 +279,29 @@ bool Mesh::Overlaps(const glm::dmat4& xfA, const Mesh& other,
                innerLo.y >= outerLo.y && innerHi.y <= outerHi.y &&
                innerLo.z >= outerLo.z && innerHi.z <= outerHi.z;
       };
+  // A POINT OF THE MESH, not the centre of its box.
+  //
+  // No triangle crosses, so the other shape is wholly inside this one or
+  // wholly outside it, and ONE point of it decides which. That point has to
+  // belong to the shape: a bounding box's centre does not, and for anything
+  // that WRAPS something else it lands in the void the wrap makes. A cam
+  // bearing cap straddling its shaft is the case that found this — its box
+  // nests inside the camshaft's, its box centre sits 7 mm off the shaft axis
+  // and therefore inside a 13 mm shaft, and the cap was reported as buried in
+  // a camshaft it merely sits over. Exact booleans called the same pose
+  // clear (docs/known-bugs.md).
+  const auto pointOf = [](const Mesh& m, const glm::dmat4& into) {
+    const Tri& t = m.m_tris.front();
+    const glm::dvec3 c = (t.a + t.b + t.c) / 3.0;
+    return glm::dvec3(into * glm::dvec4(c, 1.0));
+  };
   if (boxInside(bLo, bHi, m_min, m_max))
-    return Contains((bLo + bHi) * 0.5);
+    return Contains(pointOf(other, bToA));
   const glm::dmat4 aToB = glm::inverse(bToA);
   glm::dvec3 aLo, aHi;
   TransformBox(aToB, m_min, m_max, aLo, aHi);
   if (boxInside(aLo, aHi, other.m_min, other.m_max))
-    return other.Contains((aLo + aHi) * 0.5);
+    return other.Contains(pointOf(*this, aToB));
   return false;
 }
 

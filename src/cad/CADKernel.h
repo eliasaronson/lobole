@@ -30,7 +30,30 @@ public:
   // recycled for a different shape.
   const void* GeometryId() const;
   bool SameGeometryAs(const CADShape& other) const;
-  void GetBoundingBox(glm::vec3& min, glm::vec3& max) const;
+  // The axis-aligned box, in the shape's own space.
+  //
+  // TWO ANSWERS, and the difference is not precision but PURPOSE.
+  //
+  // The default is fast and CONSERVATIVE: never too small, sometimes too big.
+  // OCC bounds a B-spline by its control points, which for a swept surface
+  // lie outside it — a four-turn helical spring of radius 11 with 3.2 mm wire
+  // (true extent +-12.6) comes back as -24.76..15.34. That is exactly what a
+  // broad phase, a scene-reach or a "does this pair need checking" wants: a
+  // bound that cannot miss, cheaply.
+  //
+  // `tight` evaluates the surfaces instead and returns the real extent. That
+  // is what a PERSON or a script wants, because a part whose reported size is
+  // sixty per cent over its real one reads as a modelling error — it cost an
+  // afternoon on a spring that turned out to be correct. It is not the
+  // default because it took one engine's build from 1.6 s to 4.2 s, and
+  // caching does not help: a regeneration makes new shapes rather than
+  // re-asking about old ones.
+  //
+  // Neither depends on whether the shape has been meshed, which is the
+  // property the .cpp's older comment protects (CAM derives stock and depths
+  // from this box, and a 4 um difference between a meshed and unmeshed part
+  // once reported twelve legitimate rapids as cutting through material).
+  void GetBoundingBox(glm::vec3& min, glm::vec3& max, bool tight = false) const;
   // Disjoint-lump count (V2 digest): a body that silently split into two
   // solids is invisible in a volume total but not in this.
   int SolidCount() const;

@@ -750,14 +750,11 @@ def main():
     rig.activate()
     study = rig.motion(main_mate, dof="rotation", **{"from": 0}, to=720,
                        samples=49, name="two revolutions")
-    # EXACT booleans rather than the mesh default. The mesh pass reports
-    # `camshaft x cam cap` at samples 0, 24 and 48 — exactly crank 0, 360 and
-    # 720, the poses where the driven rotation comes back to a whole turn —
-    # while an exact boolean at those same poses says CLEAR, and the two caps
-    # are 4 mm off a shaft the mesh resolves to 0.97. A false positive at the
-    # identity pose, filed in docs/known-bugs.md. Exact costs 20.7 s here
-    # against 1.1, which is worth it for a gate that has to be believed.
-    app.set_motion_study(study=study["id"], clash_mode="exact")
+    # The mesh default is enough again. It used to report `camshaft x cam cap`
+    # where an exact boolean said clear, which is what turned up the
+    # box-centre containment bug in MeshCollide — a cap that STRADDLES its
+    # shaft has its box nested inside the shaft's and its box centre inside
+    # the shaft itself. Fixed there rather than worked around here.
     r = app.run_motion_study(study=study["id"], include_poses=True)
     print(r["table"])
     piston_occ = rig.occurrence("piston")

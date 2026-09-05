@@ -179,3 +179,46 @@ TEST_CASE("A pin in a clearance hole is clear", "[collide]") {
   CHECK_FALSE(exact);
   CHECK_FALSE(mesh.intersects);
 }
+
+TEST_CASE("A cap that STRADDLES a shaft is clear, not buried in it",
+          "[collide]") {
+  collide::ClearCache();
+  CADKernel& k = CADKernel::Instance();
+  // A camshaft, and a bearing cap sitting over it with a saddle notched out.
+  // The cap's bounding box NESTS inside the shaft's — it is short, narrow and
+  // well within the shaft's length — and its box CENTRE lands in the notch,
+  // which is inside the shaft. Testing that centre said the cap was buried in
+  // a shaft it merely sits on: `camshaft x cam cap` in a clean engine, where
+  // an exact boolean called the same pose clear
+  // (docs/modeling/aircooled-dogfood.md).
+  // The shaft carries a LOBE, which is what makes its bounding box wide
+  // enough to swallow the cap's — without that the boxes do not nest and the
+  // containment path is never reached. That is why this needs a camshaft and
+  // not a plain bar.
+  CADShape shaft =
+      k.CreateCylinder(glm::vec3(0, -90, 0), glm::vec3(0, 1, 0), 13.0, 180.0);
+  shaft = shaft.Union(
+      k.CreateCylinder(glm::vec3(0, -30, 0), glm::vec3(0, 1, 0), 24.0, 16.0));
+  CADShape cap = Box({-20, 45, 0}, {20, 59, 14});
+  cap = cap.Difference(
+      k.CreateCylinder(glm::vec3(0, 40, 0), glm::vec3(0, 1, 0), 17.0, 25.0));
+  REQUIRE(shaft.IsValid());
+  REQUIRE(cap.IsValid());
+
+  const bool exact = ExactOverlap(shaft, glm::mat4(1.0f), cap, glm::mat4(1.0f));
+  const auto mesh =
+      collide::Overlap(shaft, glm::dmat4(1.0), cap, glm::dmat4(1.0));
+  INFO("deflection " << mesh.deflection << " mm against a 4 mm saddle gap");
+  CHECK_FALSE(exact);
+  CHECK_FALSE(mesh.intersects);
+
+  // And the containment path it exercises must still WORK: a pin wholly
+  // inside a block is a clash, whatever the boxes do. That is the case the
+  // box-centre test was written for, and the fix must not lose it.
+  CADShape block = Box({-30, -30, -30}, {30, 30, 30});
+  const CADShape buried =
+      k.CreateCylinder(glm::vec3(0, -10, 0), glm::vec3(0, 1, 0), 3.0, 20.0);
+  const auto swallowed =
+      collide::Overlap(block, glm::dmat4(1.0), buried, glm::dmat4(1.0));
+  CHECK(swallowed.intersects);
+}

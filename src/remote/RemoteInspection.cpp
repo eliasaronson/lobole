@@ -278,7 +278,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "feature_errors, bodies:[...B-Rep checks]}.",
      "body"},
     {"mass_properties",
-     "Mass/volume/center-of-mass per body and total (density from materials). "
+     "Mass/volume/center-of-mass/bbox per body and total (density from "
+     "materials). The bbox here is MEASURED off the surfaces; get_state's is "
+     "a cheap conservative bound that can read ~60% over on a swept surface. "
      "`part` reads another part without switching to it; from an assembly tab "
      "with no `part`, aggregates every visible occurrence in world space.",
      "body, part"},
@@ -1584,6 +1586,19 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                      {bm.centerOfMass.x, bm.centerOfMass.y, bm.centerOfMass.z}},
                     {"inertia", inertia},
                     {"material", bm.material}};
+      // The MEASURED box, evaluated off the surfaces rather than bounded by
+      // their control points. get_state's is the cheap conservative one
+      // because it is recomputed after every edit; this call is the one that
+      // exists to measure, so it pays for the exact answer.
+      {
+        const size_t which = only >= 0 ? static_cast<size_t>(only) : i;
+        if (which < bodies.size()) {
+          glm::vec3 bmin, bmax;
+          bodies[which].shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
+          entry["bbox_min"] = {bmin.x, bmin.y, bmin.z};
+          entry["bbox_max"] = {bmax.x, bmax.y, bmax.z};
+        }
+      }
       if (bm.massKnown) {
         entry["density"] = bm.density;
         entry["mass_g"] = bm.massG;

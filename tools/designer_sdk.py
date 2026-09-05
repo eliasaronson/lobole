@@ -1229,6 +1229,20 @@ class Part(_Tab):
         return self.app.mass_properties(part=self.id)["total"]["volume"]
 
     def bbox(self):
+        """The part's MEASURED extent, from mass_properties.
+
+        Not get_state's, which is a cheap conservative bound — it wraps a
+        swept surface by its control points, so a helical spring reads about
+        sixty per cent over. That box is right for a broad phase and wrong for
+        a person (docs/dogfood-friction-plan.md).
+        """
+        rows = self.app.mass_properties(part=self.id).get("bodies") or []
+        boxes = [(V(r["bbox_min"]), V(r["bbox_max"])) for r in rows
+                 if "bbox_min" in r]
+        if boxes:
+            lo = V([min(b[0][i] for b in boxes) for i in range(3)])
+            hi = V([max(b[1][i] for b in boxes) for i in range(3)])
+            return lo, hi
         bs = [b for b in self.state()["bodies"]
               if not b.get("reference")]
         lo = V([min(b["bbox_min"][i] for b in bs) for i in range(3)])
