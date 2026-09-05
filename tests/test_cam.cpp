@@ -271,6 +271,55 @@ TEST_CASE("cam: a tab is as tall as it was asked to be", "[cam]") {
   CHECK_THAT(tallest, WithinAbs(2.0, 0.3));
 }
 
+TEST_CASE("cam: coming down off a tab is a PLUNGE, at the plunge feed",
+          "[cam]") {
+  // The vertical move at a tab's far edge went in as a Cut at the CUTTING
+  // feed: the cutter is buried and driving straight down into the material,
+  // which is the one move the tool's plunge feed exists to govern. On the
+  // speaker baffle that was ten 3 mm descents at 1200 mm/min where the tool
+  // asks for 400.
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 9;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  op.side = cam::Side::Outside;
+  op.tabCount = 4;
+  op.tabWidth = 6.0;
+  op.tabHeight = 3.0;
+  setup.operations.push_back(op);
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  const cam::Tool* tool = setup.FindTool(1);
+  REQUIRE(tool != nullptr);
+  REQUIRE(tool->feedPlunge < tool->feedCut); // or this test proves nothing
+
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  INFO(tp.error);
+  REQUIRE(tp.error.empty());
+
+  int descents = 0;
+  for (size_t i = 1; i < tp.moves.size(); i++) {
+    const cam::Move& a = tp.moves[i - 1];
+    const cam::Move& b = tp.moves[i];
+    if (b.kind == cam::Move::Kind::Rapid)
+      continue;
+    const bool vertical =
+        std::abs(b.to.x - a.to.x) < 1e-9 && std::abs(b.to.y - a.to.y) < 1e-9;
+    if (!vertical || b.to.z >= a.to.z - 1e-9)
+      continue;
+    descents++;
+    INFO("descent " << descents << " from z " << a.to.z << " to " << b.to.z);
+    CHECK(b.kind == cam::Move::Kind::Plunge);
+    CHECK_THAT(b.feed, WithinAbs(tool->feedPlunge, 1e-9));
+  }
+  // Four tabs, so at least four exits off one.
+  CHECK(descents >= 4);
+}
+
 TEST_CASE("cam: refusals are specific, not silent", "[cam]") {
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();

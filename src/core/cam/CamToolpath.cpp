@@ -568,7 +568,14 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
     const double zEnd = std::max(zPath(s), onTab);
     const glm::dvec2 a = pointAt(prev), b = pointAt(s);
     if (std::abs(zStart - currentZ) > 1e-9) {
-      Emit(tp, Move::Kind::Cut, {a.x, a.y, zStart}, tool.feedCut);
+      // The vertical move at a tab edge. Coming DOWN off a tab is a plunge:
+      // the cutter is buried and feeding straight into the material, which
+      // is the one thing the tool's plunge feed exists to govern -- it went
+      // in at the CUTTING rate, so a 3 mm tab exit ran 1200 mm/min straight
+      // down. Going up is a retract, where the cutting rate is right.
+      const bool descending = zStart < currentZ;
+      Emit(tp, descending ? Move::Kind::Plunge : Move::Kind::Cut,
+           {a.x, a.y, zStart}, descending ? tool.feedPlunge : tool.feedCut);
       currentZ = zStart;
     }
     Emit(tp, Move::Kind::Cut, {b.x, b.y, zEnd},
