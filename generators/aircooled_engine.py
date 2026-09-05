@@ -48,6 +48,25 @@ FLANGE_R = 78.0         # the deck flange the head bolts through
 FLANGE_T = 14.0
 BOLT_R = 65.0           # bolt circle radius, inside the flange
 
+# ---- the bottom end and the timing drive ---------------------------------
+CASE_Y = 78.0           # crankcase half-width (outside)
+CASE_WALL = 24.0        # end-wall thickness, where the mains run
+# Half-depth, DERIVED: the rod's big end orbits at CRANK_R and is 35 in
+# radius itself, so it sweeps a circle of 78 — and the void has to clear that,
+# not merely the crank. At 82 the walls were inside the swing and the study
+# said `crankcase x rod` at 20 of 49 samples.
+CASE_X = CRANK_R + 35.0 + 14.0 + 4.0
+SUMP_Z = -128.0         # the bottom of the sump
+MAIN_D = 50.0           # main journal diameter
+PIN_D = 42.0            # crank pin diameter
+DRIVE_Y = -104.0        # the plane the timing drive runs in, outboard of the
+                        # case's left wall
+CRANK_SPROCKET_R = 32.0 # 1 turn of the crank...
+CAM_SPROCKET_R = 64.0   # ...is half a turn of the cam: 2:1, drawn as it is
+                        # geared
+CHAIN_T = 7.0           # chain thickness, radially
+CHAIN_W = 12.0          # chain width, along Y
+
 
 def bolt_xy():
     """Four head bolts at 45 degrees, derived from the bolt circle rather
@@ -164,6 +183,163 @@ def head(app):
     return p
 
 
+def crankcase(app):
+    """The case and sump: the part everything else hangs off.
+
+    A side silhouette drawn in XZ and extruded along Y — round at the bottom
+    where the sump is, square at the top where the barrel bolts on — then
+    hollowed, then bored for the mains. The hollow is a second silhouette
+    inset from the first, which is what makes the walls a thickness rather
+    than a number typed twice.
+    """
+    p = app.part("crankcase")
+    p.var("case_y", CASE_Y).var("main_d", MAIN_D)
+    deck = BARREL_Z
+
+    def shell(sk, inset):
+        """The case outline, `inset` in from the outside all round: three
+        sides and a round bottom.
+
+        The polyline STOPS at the sump's shoulders and the arc carries on
+        from there. Running it across the bottom as well drew the chord the
+        arc already spans, which is two closed loops sharing their endpoints
+        rather than one outline — "sketch has no closed profile", and quite
+        right.
+        """
+        x = CASE_X - inset
+        sk.polyline([(x, -60.0), (x, deck - inset), (-x, deck - inset),
+                     (-x, -60.0)], close=False)
+        # CCW from 180 to 360 goes through 270 — under the sump. From 0 to
+        # 180 would arc over the top of it, which is a different part.
+        sk.arc((0.0, -60.0), x, 180.0, 360.0)
+
+    # Outside, then the void inside it: one extrude each, because the two
+    # loops would nest and a cut says what is meant more plainly than a
+    # nested profile does.
+    out = p.sketch(Plane.xz(CASE_Y), name="Case outline")
+    shell(out, 0.0)
+    p.extrude(out.add(), 2 * CASE_Y, mode="new_body", name="Case")
+    void = p.sketch(Plane.xz(CASE_Y - CASE_WALL), name="Case void")
+    shell(void, 14.0)
+    p.extrude(void.add(), 2 * (CASE_Y - CASE_WALL), mode="cut", name="Case void")
+    # The bore the barrel's spigot drops into, and the mains.
+    mouth = p.sketch(Plane.xy(deck, flip=True), name="Barrel mouth")
+    mouth.circle((0, 0), d=2 * WALL_R + 1.0)
+    p.extrude(mouth.add(), 30.0, mode="cut", name="Barrel mouth")
+    mains = p.sketch(Plane.xz(CASE_Y + 1), name="Main bearings")
+    # 1.5 mm RADIAL, not 0.25. A running fit is a few tenths in metal, but
+    # the collision mesh's deflection on a part this size is 0.39 mm, so
+    # anything tighter than that reads as contact — `crankcase x crank` at all
+    # 49 samples, which is the mesh telling the truth about its own
+    # resolution rather than about the engine. Same rule as the valve guides.
+    mains.circle((0, 0), d=MAIN_D + 3.0)
+    p.extrude(mains.add(), 2 * CASE_Y + 2, mode="cut", name="Main bearings")
+    # Head-bolt bosses land on the deck, so the studs pull the whole stack
+    # together rather than the barrel alone.
+    holes = p.sketch(Plane.xy(deck, flip=True), name="Barrel bolt holes")
+    for x, y in bolt_xy():
+        holes.circle((x, y), d=11.0)
+    p.extrude(holes.add(), 26.0, mode="cut", name="Barrel bolt holes")
+    p.material("aluminum")
+    p.frame("main", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
+    p.frame("deck", origin=(0, 0, deck), z=(0, 0, 1), x=(1, 0, 0))
+    # ON THE Y AXIS. Written (0, 0, DRIVE_Y) first, which put the timing
+    # drive a metre BELOW the engine instead of outboard of it — the study
+    # reported the chain hitting the valves, which was true of where it was.
+    p.frame("drive", origin=(0, DRIVE_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+def tooth_tip(radius, teeth):
+    """How far a sprocket's teeth actually reach.
+
+    Shared with the chain, because a chain drawn to the PITCH radius has the
+    teeth standing through it — the study said `crank sprocket x timing chain`
+    at all 49 samples, which was true of the geometry as drawn.
+    """
+    return radius + (2 * math.pi * radius / teeth * 0.62) / 2
+
+
+def sprocket(app, name, radius, bore_d, teeth):
+    """A timing sprocket: a rim, a hub, and teeth from a circular pattern.
+
+    The teeth are drawn because the ratio is the RELATION's job, not this
+    geometry's — but a sprocket with no teeth beside a chain is a disc, and
+    the point of drawing the drive is that you can see it is a drive.
+    """
+    p = app.part(name)
+    body = p.sketch(Plane.xz(CHAIN_W / 2), name="Rim")
+    body.circle((0, 0), d=2 * radius)
+    p.extrude(body.add(), CHAIN_W, mode="new_body", name="Rim")
+    # All the teeth in ONE sketch, laid out from the count.
+    #
+    # A circular Pattern was the obvious way and it is refused: a Pattern
+    # repeats a feature that MAKES A BODY, and a tooth added to the rim makes
+    # none — "source body (feature 4) not found". Drawing them is no less
+    # parametric (the count is still the only number) and it is one extrude
+    # instead of a body per tooth and a Boolean to put them back together.
+    tooth_d = 2 * (tooth_tip(radius, teeth) - radius)
+    ring = p.sketch(Plane.xz(CHAIN_W / 2), name="Teeth")
+    for i in range(teeth):
+        a = 2 * math.pi * i / teeth
+        ring.circle((radius * math.sin(a), radius * math.cos(a)), d=tooth_d)
+    p.extrude(ring.add(), CHAIN_W, mode="add", name="Teeth")
+    # THROUGH: the rim spans -CHAIN_W/2..+CHAIN_W/2 about its own origin, so
+    # a cut starting at +CHAIN_W and running CHAIN_W deep stopped short and
+    # left a solid back for the shaft to run into.
+    bore = p.sketch(Plane.xz(CHAIN_W), name="Bore")
+    bore.circle((0, 0), d=bore_d)
+    p.extrude(bore.add(), 2 * CHAIN_W, mode="cut", name="Bore")
+    p.material("steel")
+    p.frame("hub", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+def chain(app, span, tip_a, tip_b):
+    """The timing chain, as the band that wraps both sprockets.
+
+    Two arcs and two tangent lines, which is what a chain path IS — and the
+    tangents are computed rather than eyeballed: for circles of radius r1 and
+    r2 whose centres are `span` apart, the external tangent's normal makes
+    asin((r2 - r1) / span) with the centre line, and it touches each circle at
+    that normal.
+
+    FROZEN geometry: the relation drives the camshaft, and belt paths that
+    follow their sprockets are explicitly out of scope. So it is drawn with
+    running clearance on the sprocket teeth rather than sitting on them — a
+    chain modelled where it really rides would be reported as a clash at every
+    sample, which would be a true statement about geometry that is a
+    deliberate simplification.
+    """
+    p = app.part("timing chain")
+    # 3 mm off the tooth tips: a real chain rides ON them, and at 1 mm the
+    # faceting of a 68 mm radius was enough for the mesh to find contact at
+    # 36 of 49 samples.
+    r1, r2 = tip_a + 3.0, tip_b + 3.0
+
+    def loop(sk, grow):
+        a, b = r1 + grow, r2 + grow
+        beta = math.asin((b - a) / span)
+        n = (math.cos(beta), math.sin(beta))
+        deg = math.degrees(beta)
+        sk.arc((0.0, 0.0), a, 180.0 - deg, 360.0 + deg)
+        sk.line((a * n[0], a * n[1]), (b * n[0], span + b * n[1]))
+        sk.arc((0.0, span), b, deg, 180.0 - deg)
+        sk.line((-b * n[0], span + b * n[1]), (-a * n[0], a * n[1]))
+
+    band = p.sketch(Plane.xz(CHAIN_W / 2), name="Chain")
+    loop(band, CHAIN_T)   # outer
+    loop(band, 0.0)       # inner: NESTED, which a sketch allows — it is a
+                          # hole, not an overlap
+    p.extrude(band.add(), CHAIN_W, mode="new_body", name="Chain")
+    p.material("steel")
+    p.frame("crank_end", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
+    p.check()
+    return p
+
+
 def crank(app):
     """Two stub journals, a pin, and webs shaped between them.
 
@@ -174,37 +350,63 @@ def crank(app):
     """
     p = app.part("crank")
     p.var("crank_r", CRANK_R)
-    for name, y, length, d in (("Journal L", -46.0, 24.0, 50.0),
-                               ("Journal R", 70.0, 24.0, 50.0)):
+    # Journals long enough to RUN IN THE CASE rather than stop in mid-air:
+    # each spans its end wall and the drive side carries on to the sprocket.
+    # The webs sit inboard of them, so the shaft reads main-web-pin-web-main
+    # the way a single's crank actually does.
+    # An extrude from Plane.xz(y) travels toward -Y, so each of these is
+    # placed at the +Y end of what it makes. The mains fill the case's end
+    # walls exactly: wall from CASE_Y - CASE_WALL out to CASE_Y.
+    for name, y, length in (("Main L", -CASE_Y + CASE_WALL, CASE_WALL),
+                            ("Main R", CASE_Y, CASE_WALL)):
         sk = p.sketch(Plane.xz(y), name=name)
-        sk.circle((0, 0), d=d)
-        p.extrude(sk.add(), length, mode="add" if name != "Journal L"
+        sk.circle((0, 0), d=MAIN_D)
+        p.extrude(sk.add(), length, mode="add" if name != "Main L"
                   else "new_body", name=name)
+    # The nose the timing sprocket keys onto, from the case's outer face out
+    # past the drive plane.
+    nose = p.sketch(Plane.xz(-CASE_Y), name="Nose")
+    nose.circle((0, 0), d=34.0)
+    p.extrude(nose.add(), -CASE_Y - (DRIVE_Y - 14), mode="add", name="Nose")
     # The pin: 2 mm diametral clearance in the rod's 46 bore.
-    pin = p.sketch(Plane.xz(30), name="Crank pin")
-    pin.circle((0, "crank_r"), d=42)
-    p.extrude(pin.add(), 60.0, mode="add", name="Crank pin")
-    for y in (-16, 46):
+    pin = p.sketch(Plane.xz(20), name="Crank pin")
+    pin.circle((0, "crank_r"), d=PIN_D)
+    p.extrude(pin.add(), 40.0, mode="add", name="Crank pin")
+    # Beside the pin (which spans -20..20), NOT out at the walls: an extrude
+    # from Plane.xz(-54) travels to -84, straight into the case's end wall.
+    #
+    # And no wider than 44 either side, because the webs rise to z=75 and the
+    # case's top plate starts at 68 — they clear it only through the barrel
+    # mouth, which is a 52.5 radius CYLINDER. At +-54 their corners were
+    # under solid plate: 876 mm3 of it, at every one of the 49 samples.
+    for y in (-20, 44):
         # TWO sketches, because a sketch REFUSES loops that overlap ("profile
         # loops overlap or nest inconsistently") — it will not union them for
         # you. A silhouette drawn as overlapping shapes is therefore one
         # extrude per shape, each adding to the last. More calls, and no
         # guess about which loop was meant to be a hole.
-        # 64 across, not 90: a slot's end cap is HALF ITS WIDTH past the
-        # centre it ends on, so a 90-wide web round a pin at z=43 reached
-        # z=85 — and the barrel's underside is at 82. The motion study called
-        # it `barrel x crank` at seven of the 49 samples. A disc centred on
-        # the axis (what v1 used) hides this: the shape only grows where you
-        # look at it.
+        # WIDTHS SET BY THE SWING, not by taste. A slot's end cap is half its
+        # width past the centre it ends on, so what matters is how far the
+        # shape reaches from the crank AXIS — it sweeps that circle once a
+        # turn. The case's void stops at BARREL_Z - 14 = 68, so:
+        #
+        #   web           43 + 44/2 = 65, clears by 3
+        #   counterweight 34 + 60/2 = 64, clears by 4
+        #
+        # At 64 and 90 they swept 75 and 79 and ground through the case's top
+        # plate at 22 of the 49 samples. A disc centred on the axis (what v1
+        # used) hides this class of error, because the shape only grows where
+        # you are looking at it.
         w = p.sketch(Plane.xz(y), name="Web")
-        w.slot((0, 0), (0, CRANK_R), width=64.0)
-        p.extrude(w.add(), 30.0, mode="add", name="Web")
+        w.slot((0, 0), (0, CRANK_R), width=44.0)
+        p.extrude(w.add(), 24.0, mode="add", name="Web")
         cw = p.sketch(Plane.xz(y), name="Counterweight")
-        cw.slot((0, 0), (0, -34), width=2 * WEB_R)
-        p.extrude(cw.add(), 30.0, mode="add", name="Counterweight")
+        cw.slot((0, 0), (0, -34), width=60.0)
+        p.extrude(cw.add(), 24.0, mode="add", name="Counterweight")
     p.material("steel")
     p.frame("main", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("pin", origin=(0, 0, "crank_r"), z=(0, 1, 0), x=(1, 0, 0))
+    p.frame("drive", origin=(0, DRIVE_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.check()
     return p
 
@@ -304,7 +506,8 @@ def camshaft(app):
     p = app.part("camshaft")
     shaft = p.sketch(Plane.xz(70), name="Shaft")
     shaft.circle((0, 0), d=26)
-    p.extrude(shaft.add(), 140.0, mode="new_body", name="Shaft")
+    # Out to the drive plane, so the cam sprocket has a shaft to sit on.
+    p.extrude(shaft.add(), 70.0 - (DRIVE_Y - 4), mode="new_body", name="Shaft")
     for y in (-14, 30):
         # Base circle, then the nose on top of it — two extrudes, because
         # they overlap (see the crank's note).
@@ -316,24 +519,34 @@ def camshaft(app):
         p.extrude(nose.add(), 16.0, mode="add", name="Lobe nose")
     p.material("steel")
     p.frame("axle", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
+    p.frame("drive", origin=(0, DRIVE_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.check()
     return p
 
 
 def bottom_end(app):
-    """The four parts and the four mates that make them a mechanism."""
+    """Case, barrel, crank, rod, piston — and the mates that make them run.
+
+    The CASE is the fixed part now, not the barrel: a crankshaft runs in its
+    main bearings and the barrel bolts to its deck, which is the order the
+    real thing goes together in and the order the loads take.
+    """
+    k = crankcase(app)
     b, c, r, pi = barrel(app), crank(app), rod(app), piston(app)
     rig = app.assembly("engine")
-    bo = rig.place(b, fixed=True)
+    ko = rig.place(k, fixed=True)
+    bo = rig.place(b, at=(0, 0, 0))
     co = rig.place(c)
     ro = rig.place(r)
     po = rig.place(pi, at=(0, 0, CRANK_R + ROD_L))
-    main = rig.revolute((bo, "crank_axis"), (co, "main"), flipped=False)
+    rig.fasten((ko, "deck"), (bo, "bore_axis"), flipped=False)
+    main = rig.revolute((ko, "main"), (co, "main"), flipped=False)
     rig.revolute((co, "pin"), (ro, "big_end"), flipped=False)
     rig.revolute((ro, "small_end"), (po, "wrist_pin"), flipped=False)
     rig.slider((bo, "bore_axis"), (po, "slide"), flipped=False)
     print("  bottom end solve:", rig.solve())
-    return rig, {"barrel": bo, "crank": co, "rod": ro, "piston": po}, main
+    return rig, {"crankcase": ko, "barrel": bo, "crank": co, "rod": ro,
+                 "piston": po}, main
 
 
 def top_end(app, rig, occ, main_mate):
@@ -372,6 +585,30 @@ def top_end(app, rig, occ, main_mate):
     cam_occ = rig.place(c, at=(0, 0, DECK + 110))
     cam_mate = rig.revolute((ho, "cam_axis"), (cam_occ, "axle"), flipped=False)
     rig.chain(main_mate, cam_mate, teeth_a=1, teeth_b=2, name="timing chain")
+
+    # ---- the timing drive, drawn ----------------------------------------
+    # The relation above is what makes the cam turn at half crank speed. This
+    # is what makes it VISIBLE: two sprockets in the same ratio and the chain
+    # that wraps them, so the drive is a thing you can look at rather than a
+    # rule in a table.
+    span = DECK + 110.0
+    # Bores three millimetres over their shafts, for the same reason the
+    # mains are: the mate holds them, and anything inside the collision
+    # mesh's deflection reads as two solids in one place.
+    cs = sprocket(app, "crank sprocket", CRANK_SPROCKET_R, 37.0, 18)
+    ms = sprocket(app, "cam sprocket", CAM_SPROCKET_R, 29.0, 36)
+    ch = chain(app, span, tooth_tip(CRANK_SPROCKET_R, 18),
+               tooth_tip(CAM_SPROCKET_R, 36))
+    rig.activate()
+    cso = rig.place(cs, at=(0, DRIVE_Y, 0))
+    mso = rig.place(ms, at=(0, DRIVE_Y, span))
+    cho = rig.place(ch, at=(0, DRIVE_Y, 0))
+    # The sprockets ride their shafts, so they turn with them and the study
+    # sees the drive move. The chain is fastened to the CASE: frozen, and
+    # honestly so.
+    rig.revolute((occ["crank"], "drive"), (cso, "hub"), flipped=False)
+    rig.revolute((cam_occ, "drive"), (mso, "hub"), flipped=False)
+    rig.fasten((occ["crankcase"], "drive"), (cho, "crank_end"), flipped=False)
     valves = []
     for i in range(2):
         vo = rig.place(v, at=(-22 + 44 * i, 0, DECK))
