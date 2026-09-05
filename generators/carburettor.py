@@ -48,21 +48,48 @@ BOWL_LO, BOWL_HI = 8.0, 48.0
 
 # ---- the throttle linkage ------------------------------------------------
 # A four-bar: the body is the ground, the throttle lever one crank, the
-# bellcrank the other, and the link rod between them. Equal arms and a
-# coupler the same length as the ground make it a PARALLELOGRAM — it always
-# assembles, it cannot lock, and the throttle follows the bellcrank one for
-# one. Cable pull turns the bellcrank; the loop does the rest.
-ARM = 17.0              # both cranks
+# bellcrank the other, and the link rod between them.
+#
+# A PARALLELOGRAM, and staying one: equal arms and a coupler the length of
+# the ground link. That is the four-bar that always assembles and cannot
+# lock, and it is worth keeping — the version that abandoned it for a
+# general four-bar solved at rest and then jumped between branches at every
+# step of the sweep, 2550 mm2 of bore at one angle and 3080 at the next.
+#
+# The first version's mistake was not the parallelogram. It was pointing
+# both arms ALONG the ground line, which puts the coupler on the line
+# through both pivots — over the bellcrank's own boss, its pin, and anything
+# else that pivot needs. Both arms point PERPENDICULAR to the ground now, so
+# the coupler runs 17 mm clear of both pivots and stays there through the
+# whole swing.
+ARM = 17.0              # the throttle lever's
+BELL_ARM = 18.0         # ...and the bellcrank's, deliberately NOT equal
 GROUND = 34.0           # lever pivot to bellcrank pivot
-CABLE_SWING = 60.0      # how far the cable pulls the bellcrank, degrees
-LEVER_X = -(BARREL_R + 2.0)     # the plane the lever sits in
-# The bellcrank pivots OUTBOARD of the lever and faces back inward, so that
-# both cranks put their pins on the same plane (x = LEVER_X - 3) and a flat
-# link rod can reach both. Offset even six millimetres it could not: the loop
-# came up "off by 6 mm", which is exactly the axial gap between two pins that
-# a planar coupler has no way to span.
-LINK_X = LEVER_X - 6.0
-PIN_X = LEVER_X - 3.0           # the plane both crank pins lie in
+ROD_L = math.hypot(GROUND, BELL_ARM - ARM)
+CABLE_ARM = 16.0        # the arm the cable pulls on, reaching back inboard
+# NEGATIVE, and a butterfly is why that is a free choice: a disc across a
+# bore opens whichever way it turns, so the sign decides where the LINKAGE
+# goes, not whether the throttle opens. Positive swung the cable arm down
+# through the flange and the bracket rib; negative takes it up and outboard,
+# where there is nothing.
+CABLE_SWING = -60.0     # how far the cable pulls the bellcrank, degrees
+
+# ---- and where each piece sits ALONG the spindle -------------------------
+# Every one of these is a face, measured outward from the barrel, and the
+# linkage's whole axial stack is written here rather than deduced at each
+# sketch. Three parts once shared the plane x = -29 and interpenetrated by
+# 130, 162 and 4 mm3 while the loop closed to 1.6e-07: a solved loop says
+# the pins line up, and says nothing whatever about thickness.
+PLATE_T = 3.0           # both crank plates
+ROD_T = 2.5
+PIN_D = 3.0             # the studs the coupler's eyes run on
+CRANK_X = -(BARREL_R + 10.0)        # -34: inboard face of both crank plates
+PIN_STAND = 5.0                     # the coupler's plane, off that face
+ROD_X = CRANK_X - PIN_STAND         # -39
+BRACKET_X = ROD_X - 9.0             # -48: the bracket's outer face
+PIVOT_D = 11.0                      # the boss the bellcrank turns against
+SPRING_X = -(BARREL_R + 1.0)        # -25: where the return spring starts
+SPRING_L = SPRING_X - CRANK_X - 1.0  # ...and how much room it has: 8
 
 
 def body(app):
@@ -115,38 +142,48 @@ def body(app):
     duct.circle((0, 33.0), d=5.0)
     p.extrude(duct.add(), BOWL_X + BOWL_R - VENTURI_R + 2.0, mode="cut",
               name="Jet duct")
-    # The bracket the bellcrank pivots on, reaching out from the barrel, and
-    # the boss the idle stop screws into.
-    # A thin plate BEHIND the linkage, and a gusset tying it to the barrel.
-    # The gusset runs where the lever never sweeps: the arm turns a disc of
-    # radius 22.5 about the spindle, so anything past y = 23 is clear of it,
-    # and the gusset's inner end reaches r = 24 which is the barrel's own
-    # surface. Without the gusset the bracket is another floating bowl.
-    br = p.sketch(Plane.yz(LINK_X - 8.0), name="Linkage bracket")
-    br.slot((GROUND - 12.0, SPINDLE_Z), (GROUND + 6.0, SPINDLE_Z), width=14.0)
+    # ---- the linkage bracket --------------------------------------------
+    # A plate reaching out past the coupler's plane, carrying the pivot the
+    # bellcrank turns on, and a RIB tying it back into the flange. Without
+    # the rib it is another float bowl: metal that exists, checks clean and
+    # is joined to nothing.
+    br = p.sketch(Plane.yz(BRACKET_X), name="Linkage bracket")
+    br.slot((GROUND - 12.0, 7.0), (GROUND + 6.0, SPINDLE_Z), width=14.0)
     p.extrude(br.add(), 4.0, mode="add", name="Linkage bracket")
-    # A boss from the plate up to the pivot face, so the bellcrank turns on
-    # metal rather than 2 mm of air.
-    piv = p.sketch(Plane.yz(LINK_X - 8.0), name="Pivot boss")
-    piv.circle((GROUND, SPINDLE_Z), d=13.0)
+    piv = p.sketch(Plane.yz(BRACKET_X + 4.0), name="Pivot boss")
+    piv.circle((GROUND, SPINDLE_Z), d=PIVOT_D)
     p.extrude(piv.add(), 6.0, mode="add", name="Pivot boss")
-    # The gusset runs BELOW the linkage, at flange height, and out at y > 20
-    # where the lever's 22.5 mm sweep cannot reach it.
-    gus = p.sketch(Plane.xy(0.0), name="Bracket gusset")
-    gus.slot((LINK_X - 4.0, GROUND), (-18.0, 14.0), width=10.0)
-    p.extrude(gus.add(), 12.0, mode="add", name="Bracket gusset")
-    mixh = p.sketch(Plane.xy(BOWL_HI - 4.0), name="Mixture hole")
-    mixh.circle((BARREL_R + 6.0, 0), d=5.2)
-    p.extrude(mixh.add(), 22.0, mode="cut", name="Mixture hole", reversed=True)
-    stop = p.sketch(Plane.yz(LEVER_X - 2.0), name="Idle stop boss")
-    stop.circle((ARM + 3.0, SPINDLE_Z - 13.0), d=13.0)
+    # The rib runs at FLANGE height and comes in to r=23, where there is
+    # flange to land on. Higher up there is nothing to reach: the barrel is
+    # r=24 and its bore is r=15, so a rib that reached the casting above the
+    # flange would be standing in the airstream.
+    rib = p.sketch(Plane.xy(0.0), name="Bracket rib")
+    rib.slot((BRACKET_X + 2.0, GROUND), (-18.0, 14.0), width=10.0)
+    p.extrude(rib.add(), 8.0, mode="add", name="Bracket rib")
+    # ---- the two adjuster screws' holes ----------------------------------
+    # The mixture screw goes down into the WEB between barrel and bowl, and
+    # its mouth is the web's own top face. Seated 6 mm above that it hung in
+    # the air with its head inside the bell mouth, which is the one place on
+    # a carburettor nothing may stand.
+    mixh = p.sketch(Plane.xy(BOWL_HI - 6.0), name="Mixture hole")
+    mixh.circle((BARREL_R + 6.0, 0), d=5.0)
+    p.extrude(mixh.add(), 20.0, mode="cut", name="Mixture hole", reversed=True)
+    stop = p.sketch(Plane.yz(-(BARREL_R + 4.0)), name="Idle stop boss")
+    stop.circle((ARM + 3.0, 4.0), d=13.0)
     p.extrude(stop.add(), 16.0, mode="add", name="Idle stop boss")
-    # And TAPPED, because a screw wants a hole. Both of these read as clashes
-    # otherwise, and they are: a screw modelled inside solid casting is two
-    # solids in one place however ordinary the arrangement looks.
-    sh = p.sketch(Plane.yz(LEVER_X - 3.0), name="Idle stop hole")
-    sh.circle((ARM + 3.0, SPINDLE_Z - 13.0), d=4.4)
-    p.extrude(sh.add(), 18.0, mode="cut", name="Idle stop hole")
+    # Tapped, and cut LAST so it goes through the rib as well as the boss —
+    # a screw modelled inside solid casting is two solids in one place,
+    # however ordinary the arrangement looks.
+    # FROM THE BRACKET'S OUTER FACE, not from somewhere near it. Started 2 mm
+    # inboard, the screw's shank ran through the 2 mm of undrilled plate that
+    # left: 8*pi mm3 exactly, which is what a r=2 shank buried 2 mm comes to.
+    sh = p.sketch(Plane.yz(BRACKET_X - 1.0), name="Idle stop hole")
+    sh.circle((ARM + 3.0, 4.0), d=4.4)
+    p.extrude(sh.add(), 44.0, mode="cut", name="Idle stop hole")
+    # And the bore for the bellcrank's pivot pin, through plate and boss.
+    ph = p.sketch(Plane.yz(BRACKET_X - 1.0), name="Pivot bore")
+    ph.circle((GROUND, SPINDLE_Z), d=6.2)
+    p.extrude(ph.add(), 13.0, mode="cut", name="Pivot bore")
     p.material("aluminum")
     # Z points the way the BODY grows, so mating it to a port frame needs no
     # flip — the same rule the head's own ports follow.
@@ -159,31 +196,28 @@ def body(app):
     # parts in the same place.
     p.frame("float_seat", origin=(BOWL_X, 0, BOWL_LO + 16.0), z=(0, 0, 1),
             x=(1, 0, 0))
-    # Hung on the bracket, beside the linkage it pulls on. Parked on the far
-    # side of the barrel it was a spring floating in mid-air — frozen
-    # geometry still has to be frozen somewhere sensible.
-    p.frame("spring_post", origin=(LINK_X - 10.0, GROUND - 2.0,
-                                   SPINDLE_Z + 12.0), z=(0, 0, -1),
-            x=(1, 0, 0))
-    # The bellcrank's pivot, GROUND away from the throttle's — the fourth bar.
-    # x = (0,0,-1) so the bellcrank's arm points the SAME way as the lever's
-    # (+y) and the coupler spans GROUND. With x = (0,0,1) the arm mapped to
-    # -y, the two pins landed on top of each other, and the solver ran away
-    # from a loop that asks a 34 mm rod to join a point to itself.
-    p.frame("bell_post", origin=(LINK_X, GROUND, SPINDLE_Z), z=(1, 0, 0),
-            x=(0, 0, -1))
-    # The screws stand PROUD of their bosses, entering only at the mouth of
-    # the tapped hole. Modelled buried they read as clashes and they ARE
-    # ones — a screw inside solid casting is two solids in one place, however
-    # ordinary the arrangement looks — and chasing the alignment of a thread
-    # nobody will see is not what this model is for.
-    p.frame("idle_stop", origin=(LEVER_X - 5.0, ARM + 3.0, SPINDLE_Z - 13.0),
+    # The return spring is a coil ROUND THE SPINDLE, in the gap between the
+    # barrel and the lever's hub — which is where a throttle return spring
+    # actually lives. Hung off the bracket instead it was 115 mm3 inside the
+    # plate at one end and in clear air at the other; a frozen spring still
+    # has to be frozen somewhere it could physically be.
+    p.frame("spring_post", origin=(SPRING_X, 0, SPINDLE_Z), z=(-1, 0, 0),
+            x=(0, 0, 1))
+    # The bellcrank's pivot. z faces OUT so the crank grows away from the
+    # casting; x = (0,-1,0) then maps its local +y to world +z, which is the
+    # quarter turn that keeps the coupler off this pivot.
+    p.frame("bell_post", origin=(CRANK_X, GROUND, SPINDLE_Z), z=(-1, 0, 0),
+            x=(0, -1, 0))
+    # The pin the bellcrank turns on, seated against the bracket's outer face.
+    p.frame("pivot_pin", origin=(BRACKET_X - 3.2, GROUND, SPINDLE_Z),
+            z=(1, 0, 0), x=(0, 0, 1))
+    # Both adjusters sit with their tips INSIDE their tapped holes: 4 mm of
+    # engagement, 0.1 mm of clearance, which is a screw in a hole rather
+    # than a screw near one.
+    p.frame("idle_stop", origin=(-(BARREL_R + 8.0), ARM + 3.0, 4.0),
             z=(-1, 0, 0), x=(0, 0, 1))
-    # Into the WEB between barrel and bowl, from above — there is casting
-    # there. Pointed at the barrel from the bowl side it screwed straight
-    # through the venturi.
-    p.frame("mixture", origin=(BARREL_R + 6.0, 0.0, BOWL_HI + 2.0), z=(0, 0, 1),
-            x=(1, 0, 0))
+    p.frame("mixture", origin=(BARREL_R + 6.0, 0.0, BOWL_HI - 10.0),
+            z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
@@ -192,19 +226,26 @@ def spindle(app):
     """The throttle spindle: a shaft across the barrel, long enough to carry
     the lever outside the casting."""
     p = app.part("throttle spindle")
-    length = 2 * (BARREL_R + 4.0)
+    # ASYMMETRIC on purpose. The lever end has to reach out past the return
+    # spring to x = -34, and a shaft that long at BOTH ends runs into the
+    # float bowl, which starts at x = 36. So the mating frame is not the
+    # shaft's middle: it is the point on the shaft that belongs on the
+    # barrel's axis.
+    out = -CRANK_X + 4.0                 # 38 to the lever end
+    length = out + (BARREL_R + 4.0)      # ...and 28 to the other
     sk = p.sketch(Plane.xy(0), name="Shaft")
     sk.circle((0, 0), d=SPINDLE_D)
     p.extrude(sk.add(), length, mode="new_body", name="Shaft")
     p.material("steel")
-    # Its own middle, so it mates to the body's spindle frame centred.
-    p.frame("centre", origin=(0, 0, length / 2), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("centre", origin=(0, 0, out), z=(0, 0, 1), x=(1, 0, 0))
     # The lever end is the one AWAY FROM THE BOWL, and its Z points OUT so
     # whatever mounts here grows away from the casting rather than into it.
     # At the other end the lever sat inside the float bowl, which is what the
     # check reported as `carb body x throttle lever` and `throttle lever x
     # float` in the same breath.
-    p.frame("lever_end", origin=(0, 0, 2.0), z=(0, 0, -1), x=(1, 0, 0))
+    # x = (0,1,0) turns the lever's own +y into the world's +z, which is what
+    # points its arm UP the barrel instead of along the ground link.
+    p.frame("lever_end", origin=(0, 0, 4.0), z=(0, 0, -1), x=(0, 1, 0))
     p.check()
     return p
 
@@ -232,76 +273,106 @@ def disc(app):
 
 
 def lever(app):
-    """The throttle lever, with a hook for the return spring."""
+    """The throttle lever: hub on the spindle, one arm, one pin."""
     p = app.part("throttle lever")
     arm = p.sketch(Plane.xy(0), name="Arm")
     # UP, not down: pointing it the other way swung the arm through the
     # mounting flange, which reaches r=31 and is exactly where the lever sits.
     arm.slot((0, 0), (0, ARM), width=11.0)
-    p.extrude(arm.add(), 3.0, mode="new_body", name="Arm")
+    p.extrude(arm.add(), PLATE_T, mode="new_body", name="Arm")
+    # A SHORT hub. At 7 mm it reached into the coupler's plane and left the
+    # rod 1 mm of daylight; the rod passes 12 mm from this pivot and is 8
+    # wide, so the hub has to stop before x = -38.
     boss = p.sketch(Plane.xy(0), name="Boss")
     boss.circle((0, 0), d=14.0)
-    p.extrude(boss.add(), 7.0, mode="add", name="Boss")
+    p.extrude(boss.add(), 4.0, mode="add", name="Boss")
     bore = p.sketch(Plane.xy(-2.0), name="Bore")
     bore.circle((0, 0), d=SPINDLE_D + 0.4)
     p.extrude(bore.add(), 12.0, mode="cut", name="Bore")
-    hook = p.sketch(Plane.xy(0), name="Hook")
-    hook.circle((0, ARM), d=4.0)
-    p.extrude(hook.add(), 3.0, mode="cut", name="Hook")
+    # The pin the coupler's eye runs on, standing proud of the arm's face.
+    pin = p.sketch(Plane.xy(PLATE_T), name="Pin")
+    pin.circle((0, ARM), d=PIN_D)
+    p.extrude(pin.add(), PIN_STAND, mode="add", name="Pin")
     p.material("steel")
     p.frame("hub", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    # The pin the link rod runs on, on the OUTER face of the arm.
-    p.frame("pin", origin=(0, ARM, 3.0), z=(0, 0, 1), x=(1, 0, 0))
+    # HALFWAY UP the stud, which is the coupler's own plane.
+    p.frame("pin", origin=(0, ARM, PIN_STAND), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
 
 def bellcrank(app):
-    """The other crank: the cable pulls one arm, the link rod drives the
-    other. What turns a straight pull into a rotation."""
+    """The other crank, and an L: the coupler on one arm, the cable on the
+    other, a quarter turn round. What turns a straight pull into rotation."""
     p = app.part("bellcrank")
-    a = p.sketch(Plane.xy(0), name="Arms")
-    a.slot((0, 0), (0, ARM), width=10.0)
-    p.extrude(a.add(), 3.0, mode="new_body", name="Arms")
+    a = p.sketch(Plane.xy(0), name="Rod arm")
+    a.slot((0, 0), (0, BELL_ARM), width=10.0)
+    p.extrude(a.add(), PLATE_T, mode="new_body", name="Rod arm")
+    # PERPENDICULAR to the rod arm, not opposite it. Opposite, it swept the
+    # throttle lever; along +y in the world it has the whole outboard side
+    # of the carburettor to itself.
+    # 16, not 22. The cable arm reaches back INBOARD past the throttle
+    # lever's own hub, and at 22 its rounded end overlapped that hub by
+    # 66 mm3 — with both arms in one plane there is only 34 mm of ground
+    # between the two pivots to share.
     b = p.sketch(Plane.xy(0), name="Cable arm")
-    b.slot((0, 0), (0, -22.0), width=10.0)
-    p.extrude(b.add(), 3.0, mode="add", name="Cable arm")
+    b.slot((0, 0), (-CABLE_ARM, 0), width=10.0)
+    p.extrude(b.add(), PLATE_T, mode="add", name="Cable arm")
+    # The hub runs INBOARD, onto the bracket's pivot boss. Outboard it stood
+    # in the coupler's plane.
     boss = p.sketch(Plane.xy(0), name="Boss")
     boss.circle((0, 0), d=13.0)
-    p.extrude(boss.add(), 6.0, mode="add", name="Boss")
-    bore = p.sketch(Plane.xy(-2.0), name="Bore")
+    p.extrude(boss.add(), 6.0, mode="add", name="Boss", reversed=True)
+    bore = p.sketch(Plane.xy(-8.0), name="Bore")
     bore.circle((0, 0), d=6.4)
-    p.extrude(bore.add(), 12.0, mode="cut", name="Bore")
+    p.extrude(bore.add(), 14.0, mode="cut", name="Bore")
+    pin = p.sketch(Plane.xy(PLATE_T), name="Pin")
+    pin.circle((0, BELL_ARM), d=PIN_D)
+    p.extrude(pin.add(), PIN_STAND, mode="add", name="Pin")
     eye = p.sketch(Plane.xy(-1.0), name="Cable eye")
-    eye.circle((0, -22.0), d=4.0)
+    eye.circle((-CABLE_ARM, 0), d=4.0)
     p.extrude(eye.add(), 6.0, mode="cut", name="Cable eye")
     p.material("steel")
     p.frame("pivot", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("pin", origin=(0, ARM, 3.0), z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("cable", origin=(0, -22.0, 1.5), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("pin", origin=(0, BELL_ARM, PIN_STAND), z=(0, 0, 1),
+            x=(1, 0, 0))
+    p.frame("cable", origin=(-CABLE_ARM, 0, 1.5), z=(0, 0, 1), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+def pivot_pin(app):
+    """The shouldered pin the bellcrank turns on, pressed into the bracket."""
+    p = app.part("pivot pin")
+    p.revolve_profile(
+        [(0.0, 0.0), (5.5, 0.0), (5.5, 3.0), (3.0, 3.0), (3.0, 23.0),
+         (0.0, 23.0)],
+        plane=Plane.xz(), axis="z", name="Pin")
+    p.material("steel")
+    p.frame("head", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
 
 def link_rod(app):
-    """The coupler: a flat bar with an eye at each end."""
+    """The coupler: a flat bar with an eye at each end.
+
+    ROD_L, not GROUND. Made the length of the ground link it was a
+    parallelogram, and a parallelogram's coupler lies along the line through
+    both pivots — over the bellcrank's boss, its pin and anything else that
+    pivot needs.
+    """
     p = app.part("link rod")
-    # It runs from end_a in -y, which is the direction the lever's pin
-    # actually lies from the bellcrank's. Built the other way the rod reached
-    # y=85 while the pin it had to meet was at y=17, and the solver stopped
-    # where it was told to: "loop does not close (off by 68 mm)". A revolute
-    # could in principle spin it round, but a numeric loop solve starts from
-    # where the parts ARE, and a 180-degree flip is not a small correction.
     bar = p.sketch(Plane.xy(0), name="Bar")
-    bar.slot((0, 0), (0, -GROUND), width=8.0)
-    p.extrude(bar.add(), 2.5, mode="new_body", name="Bar")
-    for y in (0.0, -GROUND):
+    bar.slot((0, 0), (0, -ROD_L), width=8.0)
+    p.extrude(bar.add(), ROD_T, mode="new_body", name="Bar")
+    for y in (0.0, -ROD_L):
         e = p.sketch(Plane.xy(-1.0), name="Eye")
-        e.circle((0, y), d=3.2)
+        e.circle((0, y), d=PIN_D + 0.2)
         p.extrude(e.add(), 6.0, mode="cut", name="Eye")
     p.material("steel")
     p.frame("end_a", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("end_b", origin=(0, -GROUND, 0), z=(0, 0, 1), x=(1, 0, 0))
+    p.frame("end_b", origin=(0, -ROD_L, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
@@ -333,21 +404,27 @@ def mixture_screw(app):
 
 
 def spring(app):
-    """The return spring — frozen geometry, like the timing chain.
+    """The return spring: a coil round the spindle, between the barrel and
+    the lever's hub.
 
-    It is drawn where it hangs at rest. A spring that stretched with the
-    throttle would need the two ends to drive its free length, which belt and
-    chain paths are explicitly out of scope for.
+    Frozen geometry, like the timing chain — it is drawn where it sits at
+    rest. A spring that wound up with the throttle would need its two ends to
+    drive its own free length, which is explicitly out of scope.
     """
     p = app.part("throttle spring")
+    turns = 6.0
     p.app.add_feature(feature={
         "type": "Curve3D", "name": "Coil path", "kind": "helix",
-        "origin": [0, 0, 0], "axis": [0, 0, 1], "radius": 4.0,
-        "pitch": 2.6, "turns": 11.0})
+        # 6.5, not 8: the coil sits at z = 18 +/- its radius, and the
+        # mounting flange is r=31 out to z=10. At radius 8 the bottom of
+        # every turn was 0.8 mm inside the flange -- 594 mm3 of spring in
+        # solid aluminium, in the one place a side view does not show it.
+        "origin": [0, 0, 0], "axis": [0, 0, 1], "radius": 6.5,
+        "pitch": SPRING_L / turns, "turns": turns})
     p.app.add_feature(feature={
         "type": "Pipe", "name": "Coil",
         "path_id": p.state()["features"][-1]["id"],
-        "outer_diameter": 1.4, "mode": "add"})
+        "outer_diameter": 1.6, "mode": "add"})
     p.material("steel")
     p.frame("top", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
@@ -383,7 +460,7 @@ def carburettor(app, name="carburettor"):
     """The parts, the assembly and the mates — returned as an Asm to place."""
     b, sp, d = body(app), spindle(app), disc(app)
     lv, spr, fl, jt = lever(app), spring(app), float_(app), jet(app)
-    bc, lr = bellcrank(app), link_rod(app)
+    bc, lr, pp = bellcrank(app), link_rod(app), pivot_pin(app)
     idl, mix = idle_screw(app), mixture_screw(app)
 
     asm = app.assembly(name)
@@ -414,69 +491,79 @@ def carburettor(app, name="carburettor"):
     # and four revolutes, so the assembly stops being a tree and the A6 loop
     # solver has something to do: turn the bellcrank and the butterfly
     # follows, because the geometry says it must.
-    # NO SEED POSITIONS. Placing these "near the answer" was an attempt to
-    # help a loop that was not closing, and it did the opposite: the mates
-    # already put every pin exactly where it belongs (measured: both crank
-    # pins land coincident with the link rod's eyes), and an `at=` only moves
-    # the starting pose away from that. The loop that would not close was a
-    # geometry error every time, never a solver that needed a hint.
-    bco = asm.place(bc)
+    # SEEDED, and the earlier note here saying never to seed was drawn from
+    # a different failure. A seed cannot help a loop that has no solution —
+    # there the residual is a geometry error and a hint only moves the start
+    # further from an answer that does not exist. But this loop has TWO
+    # solutions at every angle, the linkage and its mirror image, and both
+    # close it exactly. Unseeded, the solver took whichever was nearer to
+    # the pose the occurrences happened to be placed in, and picked the
+    # crossed one: it assembled, residual 1e-06, dof 1, and the butterfly
+    # sat edge-on in the bore at rest. The seed is how the branch is chosen.
+    bco = asm.place(bc, at=(CRANK_X, GROUND, SPINDLE_Z))
     cable = asm.revolute((bo, "bell_post"), (bco, "pivot"), flipped=False)
-    lro = asm.place(lr)
+    ppo = asm.place(pp)
+    asm.fasten((bo, "pivot_pin"), (ppo, "head"), flipped=False)
+    lro = asm.place(lr, at=(ROD_X, GROUND, SPINDLE_Z + BELL_ARM))
     asm.revolute((bco, "pin"), (lro, "end_a"), flipped=False)
-    # FLIPPED, and this is the one that took the longest to see. The link
-    # rod's far eye faces +x while the lever's pin faces -x — the rod is
-    # turned end for end relative to the crank it drives, which is what a
-    # coupler does. Unflipped, the solver has to spin the rod 180 degrees to
-    # satisfy the axis, which swings its other eye off the bellcrank and the
-    # loop runs away: "off by 418.1 mm" from a pose whose pins were already
-    # coincident. Flipped it closes to 5e-06 mm.
-    asm.revolute((lro, "end_b"), (lo, "pin"), flipped=True)
+    # Both crank pins now face the same way — the bellcrank's frame is the
+    # one that got turned round — so the coupler needs no flip at either end.
+    # The flip it used to need was the whole reason the parts fought for one
+    # plane: the two cranks grew in opposite directions along the spindle.
+    asm.revolute((lro, "end_b"), (lo, "pin"), flipped=False)
     print("  carburettor solve:", asm.solve())
-    # `connected=False`: a float is SUPPOSED to be surrounded by fuel and a
-    # return spring by air. `clearances=False` because every near miss left is
-    # a fit that was chosen — the butterfly clears its bore by 0.6, the
+    # `connected=False`: a float is SUPPOSED to be surrounded by fuel, and a
+    # return spring by air. `clearances=False` because every near miss left
+    # is a fit that was chosen — the butterfly clears its bore by 0.6, the
     # spindle its bore by 1.0 — and a carburettor is made of running fits.
-    # What is left checked is CLASHES, which is the half with something to say.
-    # `contacts` are the pairs that are SUPPOSED to touch: a crank running on
-    # its pivot boss, a link rod lying against the lever it drives, a screw
-    # entering the mouth of its tapped hole. The check has no way to be told
-    # a contact is intended, so they are named here and everything else is
-    # still a failure.
-    contacts = {("carb body", "bellcrank"), ("carb body", "link rod"),
-                ("carb body", "idle screw"), ("carb body", "mixture screw")}
-    try:
-        asm.check(connected=False, clearances=False)
-    except Exception as err:
-        for pair in contacts:
-            if f"'{pair[0]}'" not in str(err) and f"'{pair[1]}'" not in str(err):
-                raise
-        print("  carburettor: clear apart from the intended contacts "
-              "(pivot bosses and screw mouths)")
-
+    #
+    # NO ALLOWANCE FOR "INTENDED CONTACTS". There was one, and it hid six
+    # real clashes: the test asked whether NEITHER name in a pair appeared in
+    # the message, and since every pair named the body, nothing ever raised.
+    # An escape hatch that wide is not a check with exceptions, it is no
+    # check — and it passed a carburettor whose coupler ran through both the
+    # cranks it joins. Clashes are now a failure, all of them.
+    asm.check(connected=False, clearances=False)
     # ---- and it MOVES ---------------------------------------------------
     # A four-bar that closes is not yet a throttle. What makes it one is that
     # turning the CABLE arm turns the butterfly, and that is measurable
     # rather than assertable: a horizontal plane at spindle height crosses
     # the disc broadside when the throttle is shut and edge-on when it is
-    # open, so the metal it cuts falls. Driving the far end of the loop and
-    # reading the near end is the only check that the linkage transmits
-    # anything -- every mate can be right and the loop still solve as four
-    # bars going slack.
-    def bore_metal():
-        asm.activate()
-        return app.section(origin=[0.0, 0.0, SPINDLE_Z],
-                           normal=[0.0, 0.0, 1.0])["area"]
+    # open, so the metal it cuts falls.
+    #
+    # Through a MOTION STUDY, not `set_mate`. Driving a loop mate with
+    # `set_mate` — even in ten-degree steps, even from the pose the last step
+    # left — lands on a different branch nearly every time: the same
+    # linkage read 2589, 2558, 2719, 2533 mm2 across the bore at 10-degree
+    # intervals, each one a clean solve of a different configuration. The
+    # study walks the same range and tracks it exactly, which is also how it
+    # can say the linkage is clear at all thirteen poses instead of the two
+    # a pair of `set_mate` calls can reach. Recorded in docs/known-bugs.md.
+    def disc_angle(sample, occ_id):
+        q = next(pp["orientation"] for pp in sample["poses"]
+                 if pp["occurrence"] == occ_id)
+        return q
 
-    app.set_mate(id=cable["id"], rotation=0.0)
-    shut = bore_metal()
-    app.set_mate(id=cable["id"], rotation=CABLE_SWING)
-    open_ = bore_metal()
-    app.set_mate(id=cable["id"], rotation=0.0)
-    print(f"  carburettor throttle: bore section {shut:.1f} -> {open_:.1f} "
-          f"mm2 over {CABLE_SWING:.0f} deg of cable arm")
-    if shut - open_ < 300.0:
+    study = asm.motion(cable, dof="rotation", **{"from": 0.0},
+                       to=CABLE_SWING, samples=13, name="throttle travel")
+    r = app.run_motion_study(study=study["id"], include_poses=True)
+    if not r["clean"]:
+        raise RuntimeError("the throttle linkage fouls somewhere in its "
+                           f"travel:\n{r['table']}")
+    # The BUTTERFLY's own rotation, read off the poses. A section through
+    # the bore was the first measure and it cannot be taken here: the study
+    # puts the assembly back where it found it, so the plane sees the shut
+    # throttle twice. The angle is the better quantity anyway — it is the
+    # thing the linkage exists to deliver.
+    do_id = next(o.id for o in asm.occurrences() if o.name == "throttle disc")
+    q0, q1 = (disc_angle(r["samples"][i], do_id) for i in (0, -1))
+    dot = abs(sum(a * b for a, b in zip(q0, q1)))
+    swept = math.degrees(2.0 * math.acos(min(1.0, dot)))
+    print(f"  carburettor throttle: butterfly turns {swept:.1f} deg for "
+          f"{abs(CABLE_SWING):.0f} of cable, clear at all "
+          f"{len(r['samples'])} poses")
+    if swept < 40.0:
         raise RuntimeError(
-            f"the linkage does not open the butterfly: {shut:.1f} -> "
-            f"{open_:.1f} mm2 across the bore")
+            f"the linkage does not open the butterfly: {swept:.1f} deg "
+            f"of disc for {abs(CABLE_SWING):.0f} of cable arm")
     return asm, throttle, cable

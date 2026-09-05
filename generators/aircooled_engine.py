@@ -109,6 +109,11 @@ PORT_D = 30.0           # throat, a shade under the 34 valve head
 # body left was a cam tower. Staggered they are two independent cuts.
 PORT_Z = (26.0, 36.0)
 FLANGE_OD = 62.0
+HEADER_RUN = 100.0      # straight run from the bend to the silencer
+SPIGOT_L = 25.0         # how far the silencer's mouth covers the header
+CAN_R = 45.0
+CAN_L = 160.0
+TAIL_L = 40.0
 FLANGE_T2 = 10.0
 # Outboard of everything on the shaft, and CENTRED on these numbers: the
 # tower is drawn at y + W/2 and extruded -W, so it spans y +- 7. The lobes
@@ -294,9 +299,15 @@ def exhaust(app):
     drawn as a profile.
     """
     p = app.part("exhaust")
+    # THE PROFILE MUST NOT REACH THE AXIS. Starting it at r=0 makes a flange
+    # with no hole in it — a legal shape that builds without a word, because
+    # there is no cut to report "removed no material", no clash and no
+    # island. The pipe then stands on a solid plug and the exhaust breathes
+    # nowhere. Shipped exactly that way twice; `bored_through()` below is
+    # the check that now says so.
     p.revolve_profile(
-        [(0.0, 0.0), (FLANGE_OD / 2, 0.0), (FLANGE_OD / 2, FLANGE_T2),
-         (24.0, FLANGE_T2), (24.0, 18.0), (18.0, 18.0), (18.0, 0.0)],
+        [(PORT_D / 2, 0.0), (FLANGE_OD / 2, 0.0), (FLANGE_OD / 2, FLANGE_T2),
+         (24.0, FLANGE_T2), (24.0, 18.0), (PORT_D / 2, 18.0)],
         plane=Plane.xz(), axis="z", name="Flange")
     # The path: straight out of the flange, then a quarter turn away.
     #
@@ -309,6 +320,11 @@ def exhaust(app):
     for j in range(1, 17):
         t = math.radians(90.0 * j / 16.0)
         pts.append([R * (1.0 - math.cos(t)), 0.0, 40.0 + R * math.sin(t)])
+    # ...and then a straight run out to the silencer. Sampled rather than
+    # given as one long segment: a fit spline through two points a hundred
+    # millimetres apart after a bend has no reason to stay straight.
+    for j in range(1, 9):
+        pts.append([R + HEADER_RUN * j / 8.0, 0.0, 40.0 + R])
     p.app.add_feature(feature={
         "type": "Curve3D", "name": "Header path", "kind": "fit_spline",
         "points": pts})
@@ -317,7 +333,43 @@ def exhaust(app):
         "outer_diameter": 36.0, "wall_thickness": 3.0, "mode": "add"})
     p.material("stainless_steel")
     p.frame("flange", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    # Where the silencer slips on: back from the tip, so its spigot covers
+    # the last of the header rather than butting against thin air.
+    p.frame("tail", origin=(R + HEADER_RUN - SPIGOT_L, 0, 40.0 + R),
+            z=(1, 0, 0), x=(0, 0, 1))
     p.check()
+    # A duct is open or it is not, and this is the one call that asks. The
+    # plane y=0 contains the whole header (it bends in x-z), so an open pipe
+    # is two walls and a plugged one is a single lump.
+    if not p.bored_through(normal=(0, 1, 0)):
+        raise SdkError("the exhaust has no hole through it")
+    return p
+
+
+def muffler(app):
+    """The silencer: a spigot the header slips into, a can, and a tailpipe.
+
+    One revolved profile, outside up and inside back down, which is what a
+    rolled shell with two cones is. The profile never touches the axis, so
+    the thing is a tube end to end — checked, not assumed.
+    """
+    p = app.part("muffler")
+    r_in = 18.5                     # slips over the header's 36 mm tube
+    p.revolve_profile(
+        [(r_in, 0.0), (r_in + 2.5, 0.0), (r_in + 2.5, SPIGOT_L),
+         (CAN_R, SPIGOT_L + 20.0), (CAN_R, SPIGOT_L + 20.0 + CAN_L),
+         (15.0, SPIGOT_L + 40.0 + CAN_L), (15.0, SPIGOT_L + 40.0 + CAN_L
+                                           + TAIL_L),
+         (12.0, SPIGOT_L + 40.0 + CAN_L + TAIL_L),
+         (12.0, SPIGOT_L + 40.0 + CAN_L),
+         (CAN_R - 2.0, SPIGOT_L + 20.0 + CAN_L),
+         (CAN_R - 2.0, SPIGOT_L + 20.0), (r_in, SPIGOT_L)],
+        plane=Plane.xz(), axis="z", name="Shell")
+    p.material("stainless_steel")
+    p.frame("inlet", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    p.check()
+    if not p.bored_through(normal=(0, 1, 0)):
+        raise SdkError("the muffler is a solid slug")
     return p
 
 
@@ -755,7 +807,7 @@ def top_end(app, rig, occ, main_mate):
     # The carburettor is a SUBASSEMBLY of its own — eleven parts and a
     # throttle LINKAGE that closes a loop — placed here as one occurrence.
     carb, throttle, cable = carburettor(app)
-    exh = exhaust(app)
+    exh, muf = exhaust(app), muffler(app)
     b = app.part("barrel")
     ho = rig.place(h, at=(0, 0, DECK))
     rig.fasten((occ["barrel"], "deck"), (ho, "deck"), flipped=False)
@@ -801,6 +853,11 @@ def top_end(app, rig, occ, main_mate):
     rig.fasten((ho, "port_0"), co, flipped=False)
     eo = rig.place(exh, at=(0, 0, DECK + PORT_Z[1]))
     rig.fasten((ho, "port_1"), (eo, "flange"), flipped=False)
+    # The silencer slips onto the header and is clamped there — one fastened
+    # mate, and the spigot covering the last of the pipe is what makes that
+    # read as a joint rather than two tubes that happen to meet.
+    mo = rig.place(muf)
+    rig.fasten((eo, "tail"), (mo, "inlet"), flipped=False)
 
     for i in range(len(CAM_BEARING_Y)):
         capo = rig.place(cap, at=(0, CAM_BEARING_Y[i], DECK + CAM_Z))
@@ -838,6 +895,51 @@ def top_end(app, rig, occ, main_mate):
         valves.append(vo)
     print("  top end solve:", rig.solve())
     return {"head": ho, "camshaft": cam_occ, "valves": valves}, cam_mate
+
+
+# Twenty-odd tabs in one strip is a list you scroll rather than read, so the
+# parts go into folders by what they belong to. The tab bar has had folders
+# since August; nothing until now had enough parts to want them.
+FOLDERS = [
+    ("Bottom end", ["crankcase", "crank", "rod", "piston", "crank sprocket",
+                    "timing chain"]),
+    ("Top end", ["barrel", "head", "cam cap"]),
+    ("Valve train", ["camshaft", "valve", "cam sprocket"]),
+    ("Carburettor", ["carb body", "throttle spindle", "throttle disc",
+                     "throttle lever", "bellcrank", "link rod", "pivot pin",
+                     "idle screw", "mixture screw", "throttle spring",
+                     "float", "main jet"]),
+    ("Exhaust", ["exhaust", "muffler"]),
+]
+
+
+def organise(app):
+    """File the part tabs into folders, and sweep what is left into one.
+
+    The leftovers are the fasteners: they are DERIVED from the holes they go
+    in rather than written down here, so naming them would mean keeping a
+    list in step with a table in the app. Whatever nothing else claimed goes
+    in Fasteners, which is what they are.
+    """
+    named = set()
+    for folder, parts in FOLDERS:
+        have = [n for n in parts
+                if any(x["name"] == n for x in app.list_parts()["parts"])]
+        if not have:
+            continue
+        app.create_folder(folder=folder)
+        app.move_to_folder(folder=folder, part=have)
+        named.update(have)
+    # ...but only the PARTS. `list_parts` lists every tab, assemblies
+    # included, and the first sweep filed the engine and the carburettor
+    # under Fasteners — the two things in the project that are neither.
+    rest = [x["name"] for x in app.list_parts()["parts"]
+            if x["name"] not in named and x.get("type") == "part"]
+    if rest:
+        app.create_folder(folder="Fasteners")
+        app.move_to_folder(folder="Fasteners", part=rest)
+    print(f"  tabs: {len(FOLDERS) + bool(rest)} folders, "
+          f"{len(named) + len(rest)} parts")
 
 
 def main():
@@ -886,6 +988,7 @@ def main():
     ex = app.export_motion(study=study["id"], path=glb)
     print(f"  animation: {ex['nodes']} nodes x {ex['frames']} keyframes -> "
           f"{glb} ({os.path.getsize(glb) // 1024} kB)")
+    organise(app)
     project = os.path.join(a.out, "aircooled.dsgn")
     app.save_project(path=project)
     print(f"  project: {project}")

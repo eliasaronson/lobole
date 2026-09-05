@@ -279,6 +279,95 @@ casting, because its post was a frame on the barrel rather than on the new
 bracket. Same shape of error as the floating bolt bosses and the floating
 float bowl, and again only a picture found it. Three rounds, three of these.
 
+## Round six: what looking at it found
+
+Four defects, all of them reported by the person looking at the renders
+rather than by any check the model runs.
+
+**The exhaust had no hole through it, and this was the third time.** The
+flange is a revolved profile, and the profile started at r=0 — so it swept
+a solid disc with a pipe standing on top of it. Nothing complained, and
+nothing could: a revolve to the axis is a legal shape, there is no cut to
+report "removed no material", no clash, no island, and the part is one
+clean solid. Every check the project owns is about material that should not
+be there or should be joined; none of them is about a VOID that should be
+there.
+
+So there is now a check for it, and it is the dual of `islands()` and the
+same one call: a plane CONTAINING a passage's axis cuts an open duct into
+two lumps, one wall either side of the bore, and a blocked one into one.
+`part.bored_through()`. The exhaust and the silencer both assert it.
+
+**The mixture screw floated above its own hole, with its head inside the
+bell mouth.** It was seated 6 mm above the web it screws into, which put
+its head where the barrel flares. Both numbers came from writing the seat
+height and the tapped hole's mouth separately; they are one number now.
+
+**The linkage went through itself.** Three parts shared the plane x = -29
+and interpenetrated by 130, 162 and 4 mm³ — while the loop closed to
+1.6e-07 and `check()` passed. Two separate things were wrong:
+
+- The four-bar was a parallelogram with both arms pointing ALONG the ground
+  link, which puts the coupler on the line through both pivots. There was
+  nowhere to put the bellcrank's pivot boss, so every attempt to space the
+  parts apart drove one into another. Both arms point perpendicular to the
+  ground now and the coupler runs 17 mm clear of both pivots.
+- `check()` had an allowance for "intended contacts" that was no check at
+  all: it raised only if NEITHER name in a pair appeared in the message, and
+  every pair named the body, so nothing ever raised. It hid all six
+  clashes. The allowance is gone; clashes are a failure, all of them. An
+  escape hatch written to admit two known cases admitted everything, which
+  is exactly the failure mode the project's own "refuse, don't substitute"
+  rule is about — and it was in the script doing the checking.
+
+The axial stack is now written down in one block of constants, as faces
+measured outward from the barrel, instead of being deduced at each sketch.
+A solved loop says the pins line up. It says nothing whatever about
+thickness.
+
+**A frozen spring is only as honest as where it is frozen.** The return
+spring was hung off the bracket, 115 mm³ inside the plate at one end and in
+clear air at the other. It is a coil round the spindle now, in the gap
+between the barrel and the lever's hub, which is where a throttle return
+spring lives. At radius 8 the bottom of every turn was 0.8 mm inside the
+mounting flange — 594 mm³ of spring in solid aluminium, in the one place a
+side view does not show it. Radius 6.5 clears.
+
+**And the linkage is proved through a MOTION STUDY, not `set_mate`.**
+Driving the loop mate a step at a time returned a clean solve and a
+different configuration nearly every time — 2590, 2559, 2719, 2534 mm² of
+bore at ten-degree intervals, one of them with the coupler lying across the
+pivot it turns about. A study over the same range tracks it exactly: 13
+poses, residual 0.0000 throughout, and a clash verdict monotone in the
+angle, which is how the remaining interference (the bellcrank swinging down
+into the flange) got found and fixed by reversing the swing. In
+docs/known-bugs.md; the walk exists in `MotionStudy.cpp` and `set_mate` is
+not using it.
+
+The butterfly turns 66.1° for 60° of cable arm, and the linkage is clear at
+all thirteen poses.
+
+**Seeds, corrected.** An earlier note here said never to seed a loop's
+starting pose. That was drawn from a loop with NO solution, where the
+residual is a geometry error and a hint only starts the solve further from
+an answer that does not exist. This loop has two solutions at every angle —
+the linkage and its mirror — and both close it exactly. Unseeded, it
+assembled crossed: residual 1e-06, dof 1, and the butterfly sitting edge-on
+in the bore at rest. A seed is how the branch is chosen.
+
+## A silencer, and folders
+
+The header runs 100 mm past its bend into a silencer that slips over it —
+one revolved profile, spigot, two cones, a can and a tailpipe, and
+`bored_through()` on that too.
+
+And the part tabs go into folders: Bottom end, Top end, Valve train,
+Carburettor, Exhaust, and whatever is left into Fasteners. Twenty-seven
+parts in six folders. `list_parts` returns every TAB, assemblies included,
+so the first sweep filed the engine and the carburettor under Fasteners —
+the two things in the project that are neither.
+
+
 ## Materials
 
 Every part carries one, so the BOM has masses rather than nulls and the

@@ -1168,6 +1168,25 @@ class Part(_Tab):
                              regions=True, part=self.id)
         return [x["area"] for x in r["regions"]]
 
+    def bored_through(self, normal=(0, 1, 0), origin=(0, 0, 0)):
+        """Is this duct actually open end to end?
+
+        The dual of `islands()`, and the same one call: a plane CONTAINING a
+        passage's axis cuts an open duct's metal into TWO lumps, one wall
+        either side of the bore. A blocked one is still a single lump,
+        because the plug joins the walls across the middle.
+
+        Worth having because nothing else notices. A revolve profile that
+        starts at r=0 is a legal shape and builds without complaint — it is
+        simply solid — so there is no cut to report "removed no material",
+        no clash, and no island. An exhaust shipped that way twice: a flange
+        with a pipe standing on it, and nothing through either.
+
+            if not exhaust.bored_through():
+                raise SdkError("the exhaust is a plug")
+        """
+        return len(self.islands(origin=origin, normal=normal)) >= 2
+
     def extrude_shapes(self, plane, draws, distance, name="Shape",
                        mode=None, **kw):
         """Extrude several OVERLAPPING shapes as one lump.

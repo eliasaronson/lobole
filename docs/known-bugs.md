@@ -7,6 +7,56 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## `set_mate` on a closed loop lands on an arbitrary branch
+
+Found 2026-09-05 building the carburettor's throttle linkage (a four-bar:
+body -> spindle -> lever -> link rod -> bellcrank -> body, four revolutes,
+one degree of freedom).
+
+Driving the loop with `set_mate(id=<cable mate>, rotation=a)` returns a
+CLEAN solve at every angle — `solved`, residual ~1e-06 — and a different
+CONFIGURATION nearly every time. Walking 0 to -60 degrees in ten-degree
+steps, each step starting from the pose the last one left, the metal a plane
+through the bore crosses read:
+
+    0    -10    -20    -30    -40    -50    -60
+    3000 2590   2559   2719   2534   2599   2552   mm2
+
+and the clash list changed with it: `pivot pin x link rod` at one step (the
+coupler lying across the pivot it turns about — the crossed branch), clear
+at the next, `carb body x bellcrank` at the one after. Driving the throttle
+mate instead of the cable mate behaves the same way. It is not the
+parallelogram's own two-configuration ambiguity: making the arms unequal
+(17 and 18 mm, so the two branches are genuinely different lengths apart)
+changed nothing.
+
+**A motion study over the same range tracks it exactly.** Thirteen samples
+from 0 to -60 give a smooth sweep, residual 0.0000 throughout, and a clash
+verdict that is monotone in the angle — clear to -15, then `carb body x
+bellcrank` from -20 on, which is a real interference the model then had
+fixed. So the machinery to walk a loop is present and correct
+(`MotionStudy.cpp`); `set_mate` is not using it.
+
+Impact: any agent or user driving a mechanism a step at a time through
+`set_mate` — the obvious way to pose an assembly — gets poses that look
+solved and are not the mechanism. The failure is silent: nothing in the
+response distinguishes the intended branch from its mirror.
+
+Likely fix: `SolveActiveAssemblyDriven` should seed from the previous pose
+the way the study's walk does, and/or `set_mate` should refuse to move a
+loop DOF by more than a small step at once, naming the study as the way to
+sweep. Until then the generator proves its linkage with a study
+(`generators/carburettor.py`).
+
+Related: the same class of bug was fixed for SCRUBBING in September
+(`tests/scrub_smoke.py`) — a scrub that jumped to a sample could land on the
+mirrored branch at a singularity, and now walks. This is the same fix not
+yet applied to `set_mate`.
+
+
+---
+
+
 ## Scrubbing a motion study with a section on is 45x slower
 
 Measured 2026-09-05 on the air-cooled engine, offscreen:
