@@ -472,6 +472,12 @@ struct Toolpath {
   // left out of this path (ClipToMachine). The verdict says so; a controller
   // never truncates for you -- it alarms on the line, or hits the stop.
   double clippedMm = 0.0;
+  // The targets this operation could NOT follow, one sentence each. An
+  // operation with several targets is generated once per target
+  // (GenerateFramed), and one unusable pick must not throw away the four good
+  // ones -- so this is not `error`, which means the operation produced nothing
+  // at all and makes the post skip it entirely.
+  std::vector<std::string> skipped;
 
   [[nodiscard]] bool Empty() const { return moves.empty(); }
   // Total distance travelled while cutting, in mm — the cheap sanity check a

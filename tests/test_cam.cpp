@@ -5596,3 +5596,195 @@ TEST_CASE("cam machine: a path is clipped to the travel, and says how much",
   INFO(lines[0].text);
   CHECK(lines[0].text.find("left out of the file") != std::string::npos);
 }
+
+TEST_CASE("cam machine: an operation wholly beyond the travel FAILS, it does "
+          "not vanish",
+          "[cam][machine]") {
+  // The gap this closes: the "produced no toolpath" check ran BEFORE the
+  // clip, so a station past the travel came back with no moves, no error and
+  // failed: 0, and the file posted at full length without it. Found on a
+  // 1122 mm speaker baffle whose second driver sat at Y 1046 of 900.
+  auto doc = HoleDoc(8.0, 12.0); // one bore at (20, 15)
+  cam::Setup setup = BasicSetup();
+  const ElementRef wall = HoleWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, wall});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 11;
+  setup.operations.push_back(op);
+  REQUIRE(cam::GenerateAll(setup, doc->GetBodies())[0].error.empty());
+
+  // A machine that reaches 10 mm in X: the bed corner is at the stock's, so
+  // the bore at X 20 is entirely outside it.
+  setup.machine.name = "Stubby";
+  setup.machine.travelMin = {0.0, 0.0, -100.0};
+  setup.machine.travelMax = {10.0, 600.0, 0.0};
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].CutLength() == 0.0);
+  CHECK(paths[0].clippedMm > 0.0);
+  INFO(paths[0].error);
+  CHECK_FALSE(paths[0].error.empty());
+  CHECK(paths[0].error.find("Stubby") != std::string::npos);
+  // ...and the post says so where the operator will read it, rather than
+  // writing a file that is simply short of a hole.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  CHECK(gcode.find("SKIPPED op 11") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Every target of an operation is cut.
+
+namespace {
+std::unique_ptr<Document> ThreeHoleDoc(double dia = 8.0, double height = 12.0) {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               60.0, 30.0, height));
+  uint64_t solid = doc->GetFeature(0)->GetId();
+  for (int i = 0; i < 3; i++) {
+    doc->AddFeature(std::make_unique<CylinderFeature>(
+        "Hole" + std::to_string(i),
+        glm::vec3(15.0f + 15.0f * static_cast<float>(i), 15.0f, -1.0f),
+        glm::vec3(0, 0, 1), dia * 0.5, height + 2.0));
+    const uint64_t cut = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    doc->AddFeature(std::make_unique<BooleanFeature>(
+        "Drilled" + std::to_string(i), solid, cut, BooleanOp::Subtract));
+    solid = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+  }
+  return doc;
+}
+
+// ONE wall reference per bore, in X order. OCC may split a cylindrical face
+// in two, and a test that machined the same hole twice would pass while
+// proving nothing.
+std::vector<ElementRef> HoleWalls(const Document& doc) {
+  std::vector<std::pair<double, ElementRef>> found;
+  for (const Body& b : doc.GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, c, n, u))
+        continue; // a floor or a wall of the block, not a bore
+      glm::vec3 o(0.0f), axis(0.0f), x(0.0f);
+      if (!b.shape.FaceAxis(index, o, axis, x))
+        continue;
+      bool seen = false;
+      for (const auto& [at, ref] : found)
+        if (std::abs(at - static_cast<double>(o.x)) < 1.0)
+          seen = true;
+      if (!seen)
+        found.emplace_back(o.x, ElementRef{b.createdBy, name});
+    }
+  std::sort(found.begin(), found.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+  std::vector<ElementRef> out;
+  for (auto& [at, ref] : found)
+    out.push_back(ref);
+  return out;
+}
+} // namespace
+
+TEST_CASE("cam profile: every target is cut, not just the first",
+          "[cam][profile]") {
+  // Five bolt holes picked into one operation used to bore the first and
+  // leave four standing, with the file posting at full length and `failed: 0`
+  // -- TargetPaths read op.targets.front() and stopped.
+  auto doc = ThreeHoleDoc();
+  const std::vector<ElementRef> walls = HoleWalls(*doc);
+  REQUIRE(walls.size() == 3);
+
+  cam::Setup setup = BasicSetup(); // one 6 mm flat
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, walls[0]});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 3;
+  op.targets.clear();
+  for (const ElementRef& w : walls)
+    op.targets.push_back(cam::Target{0, w});
+  setup.operations.push_back(op);
+
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  CHECK(paths[0].skipped.empty());
+  // A cut near every bore centre, not just the first.
+  const double centres[3] = {15.0, 30.0, 45.0};
+  for (const double cx : centres) {
+    bool cutHere = false;
+    for (const cam::Move& m : paths[0].moves)
+      if (m.kind == cam::Move::Kind::Cut &&
+          glm::length(glm::dvec2(m.to.x - cx, m.to.y - 15.0)) < 2.5)
+        cutHere = true;
+    INFO("bore at X" << cx);
+    CHECK(cutHere);
+  }
+  // Three bores cost about three times one.
+  cam::Setup single = BasicSetup();
+  cam::Operation one = op;
+  one.targets = {cam::Target{0, walls[0]}};
+  single.operations.push_back(one);
+  const auto onePath = cam::GenerateAll(single, doc->GetBodies());
+  REQUIRE(onePath.size() == 1);
+  REQUIRE(onePath[0].CutLength() > 0.0);
+  const double ratio = paths[0].CutLength() / onePath[0].CutLength();
+  INFO("ratio " << ratio);
+  CHECK(ratio > 2.5);
+  CHECK(ratio < 3.5);
+  // ...and the holes come out without cutting the block.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge);
+  CHECK(v.maxGouge < 0.4);
+}
+
+TEST_CASE("cam profile: a target that cannot be followed is NAMED, and the "
+          "others are still cut",
+          "[cam][profile]") {
+  auto doc = ThreeHoleDoc();
+  const std::vector<ElementRef> walls = HoleWalls(*doc);
+  REQUIRE(walls.size() == 3);
+  cam::Setup setup = BasicSetup();
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, walls[0]});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 4;
+  op.targets = {cam::Target{0, walls[0]},
+                cam::Target{0, ElementRef{walls[0].featureId, "no/such/face"}},
+                cam::Target{0, walls[2]}};
+  setup.operations.push_back(op);
+
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  // The operation still ran: one bad pick must not scrap the two good ones,
+  // and `error` would make the post drop the whole operation.
+  CHECK(paths[0].error.empty());
+  CHECK(paths[0].CutLength() > 0.0);
+  REQUIRE(paths[0].skipped.size() == 1);
+  INFO(paths[0].skipped[0]);
+  CHECK(paths[0].skipped[0].find("target 2 of 3") != std::string::npos);
+  CHECK(paths[0].skipped[0].find("no/such/face") != std::string::npos);
+  // The file says it too -- the operator reads the file, not the RPC.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  CHECK(gcode.find("SKIPPED on op 4") != std::string::npos);
+
+  // Every target unusable IS a failed operation, and says which.
+  cam::Setup none = BasicSetup();
+  cam::Operation bad = op;
+  bad.id = 5;
+  bad.targets = {cam::Target{0, ElementRef{walls[0].featureId, "no/such/a"}},
+                 cam::Target{0, ElementRef{walls[0].featureId, "no/such/b"}}};
+  none.operations.push_back(bad);
+  const auto nothing = cam::GenerateAll(none, doc->GetBodies());
+  REQUIRE(nothing.size() == 1);
+  CHECK(nothing[0].moves.empty());
+  INFO(nothing[0].error);
+  CHECK(nothing[0].error.find("no target of this operation") !=
+        std::string::npos);
+}

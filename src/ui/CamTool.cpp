@@ -1148,6 +1148,18 @@ void RunCamVerification(AppState& state) {
   state.camVerdict = cam::Explain(
       insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);
+  // A target one operation could not follow while its others cut. It is not
+  // an `error` -- that would drop the good targets with the bad one -- so
+  // nothing else in the panel would say the file is short of a hole.
+  for (const cam::Toolpath& tp : state.camToolpaths)
+    for (const std::string& why : tp.skipped) {
+      std::string name;
+      for (const cam::Operation& op : setup->operations)
+        if (op.id == tp.operationId)
+          name = op.name;
+      state.camVerdict.push_back(
+          {cam::VerdictLine::Level::Warn, name + ": " + why});
+    }
   // The machine's lines: the parts' reach beyond the travel, or the sheet's
   // overhang -- warnings, never refusals. Cut as far as it reaches.
   for (const cam::VerdictLine& line :

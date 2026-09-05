@@ -2646,6 +2646,49 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
   }
 }
 
+// Which generators read `op.targets.front()` and stop there. Drill walks the
+// list itself (it is what "drill these holes" means) and Face takes no target
+// at all; the other four resolve ONE contour, so several targets on one of
+// them is several runs -- see GenerateFramed.
+bool FollowsOneTargetAtATime(OpType type) {
+  switch (type) {
+  case OpType::Profile:
+  case OpType::Pocket:
+  case OpType::Adaptive:
+  case OpType::EdgeRound:
+    return true;
+  case OpType::Drill:
+  case OpType::Face:
+    return false;
+  }
+  return false;
+}
+
+void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
+                 const std::vector<Body>& bodies, Toolpath& tp,
+                 GenerateContext* ctx) {
+  switch (op.type) {
+  case OpType::Profile:
+    GenerateProfile(setup, op, tool, bodies, tp);
+    break;
+  case OpType::Pocket:
+    GeneratePocket(setup, op, tool, bodies, tp);
+    break;
+  case OpType::Face:
+    GenerateFace(setup, op, tool, bodies, tp);
+    break;
+  case OpType::Drill:
+    GenerateDrill(setup, op, tool, bodies, tp);
+    break;
+  case OpType::Adaptive:
+    GenerateAdaptive(setup, op, tool, bodies, tp, ctx);
+    break;
+  case OpType::EdgeRound:
+    GenerateEdgeRound(setup, op, tool, bodies, tp);
+    break;
+  }
+}
+
 } // namespace
 
 Toolpath GenerateFramed(const Setup& setup, const Operation& op,
@@ -2668,25 +2711,41 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
     return tp;
   }
 
-  switch (op.type) {
-  case OpType::Profile:
-    GenerateProfile(setup, op, *tool, bodies, tp);
-    break;
-  case OpType::Pocket:
-    GeneratePocket(setup, op, *tool, bodies, tp);
-    break;
-  case OpType::Face:
-    GenerateFace(setup, op, *tool, bodies, tp);
-    break;
-  case OpType::Drill:
-    GenerateDrill(setup, op, *tool, bodies, tp);
-    break;
-  case OpType::Adaptive:
-    GenerateAdaptive(setup, op, *tool, bodies, tp, ctx);
-    break;
-  case OpType::EdgeRound:
-    GenerateEdgeRound(setup, op, *tool, bodies, tp);
-    break;
+  // ONE RUN PER TARGET, for the generators that resolve a single contour.
+  // Before this they read targets.front() and dropped the rest in silence:
+  // five bolt holes picked into one operation bored the first and left four
+  // standing, and the file posted at full length with nothing to say about
+  // it. What comes out is what N one-target operations would have produced,
+  // in the order the targets were picked; a target that cannot be followed
+  // goes in `skipped` rather than failing the four that can.
+  if (op.targets.size() > 1 && FollowsOneTargetAtATime(op.type)) {
+    Operation one = op;
+    for (size_t i = 0; i < op.targets.size(); i++) {
+      one.targets = {op.targets[i]};
+      Toolpath sub;
+      GenerateOne(setup, one, *tool, bodies, sub, ctx);
+      if (sub.error.empty() && sub.moves.empty() && !sub.pending)
+        sub.error = "it produced no toolpath — check the operation's "
+                    "depths against the model";
+      if (!sub.error.empty()) {
+        tp.skipped.push_back("target " + std::to_string(i + 1) + " of " +
+                             std::to_string(op.targets.size()) + " (" +
+                             op.targets[i].ref.name + "): " + sub.error);
+        continue;
+      }
+      tp.pending = tp.pending || sub.pending;
+      if (tp.strategy.empty())
+        tp.strategy = sub.strategy;
+      tp.moves.insert(tp.moves.end(), sub.moves.begin(), sub.moves.end());
+      tp.reliefs.insert(tp.reliefs.end(), sub.reliefs.begin(),
+                        sub.reliefs.end());
+    }
+    // Every target refused: there is no operation left, so it fails as one.
+    if (tp.moves.empty() && !tp.pending && !tp.skipped.empty())
+      tp.error = "no target of this operation could be followed. " +
+                 tp.skipped.front();
+  } else {
+    GenerateOne(setup, op, *tool, bodies, tp, ctx);
   }
   if (tp.moves.empty() && tp.error.empty() && !tp.pending)
     tp.error = "this operation produced no toolpath — check its depths "
@@ -2697,9 +2756,24 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   // pass left the verb's path running off the bed while the RPC's file
   // stopped at it (found live, the morning after it shipped).
   glm::dvec3 bedLo(0.0), bedHi(0.0);
-  if (tp.error.empty() && MachineBoundsFramed(setup, bodies, bedLo, bedHi))
+  if (tp.error.empty() && MachineBoundsFramed(setup, bodies, bedLo, bedHi)) {
     ClipToMachine(tp, bedLo, bedHi, setup.safeZ,
                   tool != nullptr ? tool->feedPlunge : 100.0);
+    // Clipped away ENTIRELY: this operation is off the bed, which is not the
+    // same as empty. The "produced no toolpath" check above runs BEFORE the
+    // clip, so a station beyond the travel came back with no moves, no error
+    // and `failed: 0` -- a file that posts at full length with a whole
+    // station missing from it (found on a 1122 mm baffle, 900 mm of Y).
+    if (tp.clippedMm > 0.0 && tp.CutLength() <= 0.0) {
+      tp.moves.clear();
+      tp.error =
+          "every cut of this operation lies beyond " +
+          (setup.machine.name.empty() ? std::string("the machine")
+                                      : setup.machine.name) +
+          "'s travel, so none of it is in the file: move the part on the "
+          "stock, or cut it in a second setup with the sheet slid along";
+    }
+  }
   // The index this setup is cut at rides on every move, so the post emits it
   // and the machine is never asked to guess which way the part is facing.
   // How the part is CLAMPED never gets here: it is already baked into the

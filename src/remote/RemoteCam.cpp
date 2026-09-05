@@ -157,7 +157,10 @@ constexpr MethodDoc kCamMethods[] = {
      "from one operation), finish_stock?, side?: "
      "outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
-     "[{feature_id, element, part?}]}; `part` is the job part the element is "
+     "[{feature_id, element, part?}]}; EVERY target is cut -- five holes "
+     "picked into one operation are five bores, in the order given -- and "
+     "one that cannot be followed is named in cam_toolpath's `skipped` "
+     "without costing the others. `part` is the job part the element is "
      "on (list_elements reports it as `job_part`), and is REQUIRED when the "
      "same element name appears on more than one part of the job -- guessing "
      "there machines the wrong one. Returns its id and every field derived for "
@@ -197,7 +200,11 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm), lowest Z, and the "
-     "error when it produced nothing. The cheap way to check a job. "
+     "error when it produced nothing. `skipped` names the targets of a "
+     "multi-target operation that could not be followed while the others "
+     "could, and `clipped_mm` how much cutting fell beyond the machine's "
+     "travel and is NOT in the file -- both also as `warnings`, which "
+     "carries the work-area verdict too. The cheap way to check a job. "
      "Synchronous by default -- an adaptive pocket costs seconds and this "
      "waits for it. `async: true` hands the adaptive passes to a background "
      "job and answers {pending, queued_passes, job: \"cam\"} at once; "
@@ -237,7 +244,10 @@ constexpr MethodDoc kCamMethods[] = {
      "at, close, play, resolution, setup"},
     {"cam_post",
      "Write the G-code for a setup {setup, path, post?}. Reports the line "
-     "count, the ops it skipped and why. Writes a file; it does not send it "
+     "count, the ops it skipped and why, the targets a multi-target op could "
+     "not follow (`skipped`), how much cutting lay beyond the travel and is "
+     "missing from the file (`clipped_mm`), and `warnings`. Writes a "
+     "file; it does not send it "
      "to a machine. With split_output on the setup, `path` is the base and "
      "one file per tool is written beside it as `<base> - T<n>.<ext>`, each "
      "complete and starting by loading its tool; `files` names every one.",
@@ -333,6 +343,14 @@ cam::PostOptions PostOptsOf(const cam::Setup& setup) {
   cam::PostOptions opts;
   opts.fitArcs = setup.machine.fitArcs;
   return opts;
+}
+
+// An operation's name, for a message about it, by id.
+std::string OpName(const cam::Setup& setup, uint64_t opId) {
+  for (const cam::Operation& op : setup.operations)
+    if (op.id == opId)
+      return op.name;
+  return {};
 }
 
 // The setup that owns an operation, plus the operation itself.
@@ -1307,6 +1325,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
     json ops = json::array();
     double totalCut = 0.0;
+    double totalClipped = 0.0;
     double lowest = 0.0;
     int failed = 0;
     for (const cam::Toolpath& tp : paths) {
@@ -1324,10 +1343,29 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       // strategy.
       if (!tp.strategy.empty())
         oj["strategy"] = tp.strategy;
+      // What this operation lost, and why. Both used to be visible only in
+      // the panel's verdict or in cam_verify — which a caller has to know to
+      // poll for — while the mutating call that made the file said nothing.
+      if (!tp.skipped.empty()) {
+        oj["skipped"] = tp.skipped;
+        for (const std::string& why : tp.skipped)
+          warnings.push_back("op " + std::to_string(tp.operationId) + " '" +
+                             OpName(setup, tp.operationId) + "': " + why);
+      }
+      if (tp.clippedMm > 0.0) {
+        oj["clipped_mm"] = tp.clippedMm;
+        totalClipped += tp.clippedMm;
+      }
       totalCut += tp.CutLength();
       lowest = std::min(lowest, tp.MinZ());
       ops.push_back(std::move(oj));
     }
+    // The machine's own lines of the verdict, through the SAME helper the
+    // panel uses (cam::MachineLines) so the two cannot disagree: what the
+    // spindle cannot reach, and how much cutting the clip left out.
+    for (const cam::VerdictLine& line :
+         cam::MachineLines(setup, ui::JobBodies(state), &paths))
+      warnings.push_back(line.text);
 
     // (Braceless on purpose: rpc_gate_smoke's handler extractor keys on
     // `if (m == "...") {`, and a braced inner dispatch would shadow this
@@ -1336,6 +1374,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                      {"cut_length_mm", totalCut},
                      {"min_z", lowest},
                      {"failed", failed}};
+    if (totalClipped > 0.0)
+      toolpathOut["clipped_mm"] = totalClipped;
     if (!warnings.empty())
       toolpathOut["warnings"] = warnings;
     if (m == "cam_toolpath")
@@ -1376,16 +1416,23 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     for (const char c : gcode)
       if (c == '\n')
         lines++;
-    return json{{"path", path},
-                {"files", files},
-                {"post", post},
-                {"lines", lines},
-                {"operations", ops},
-                {"cut_length_mm", totalCut},
-                {"min_z", lowest},
-                // Surfaced, not buried: a job posted with a failed op is a
-                // part that comes off the machine unfinished.
-                {"failed", failed}};
+    json postOut{{"path", path},
+                 {"files", files},
+                 {"post", post},
+                 {"lines", lines},
+                 {"operations", ops},
+                 {"cut_length_mm", totalCut},
+                 {"min_z", lowest},
+                 // Surfaced, not buried: a job posted with a failed op is a
+                 // part that comes off the machine unfinished.
+                 {"failed", failed}};
+    if (totalClipped > 0.0)
+      postOut["clipped_mm"] = totalClipped;
+    // cam_post never carried these at all, so the one call that WRITES the
+    // file was the one that said least about it.
+    if (!warnings.empty())
+      postOut["warnings"] = warnings;
+    return postOut;
   }
 
   return std::nullopt;

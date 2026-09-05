@@ -438,6 +438,12 @@ bool PostProcess(const std::string& postId, const Setup& setup,
                   tp.error);
       continue;
     }
+    // A target this operation could not follow, while others could: the file
+    // is short of a hole and nothing else would say so.
+    if (opts.comments)
+      for (const std::string& why : tp.skipped)
+        e.Comment("SKIPPED on op " + std::to_string(tp.operationId) + ": " +
+                  why);
     if (tp.Empty())
       continue;
 
