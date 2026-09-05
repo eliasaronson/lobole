@@ -15,6 +15,7 @@ chain — so the kinematics were already proven and the round is about shapes.
 | motion study | 735 checks, 3.9 s | 550 checks, **0.69 s** |
 | animated GLB | 10.8 MB (1.6 after the spring fix) | 2.0 MB |
 | stroke | 86.000 | 86.000 |
+| mass | — | 13.93 kg, every part |
 
 More calls, as expected — a profile is more drawing than a primitive. The
 motion study got **5.7× faster** because the parts are the shapes they should
@@ -66,6 +67,33 @@ asks the right question, and the refusal names `far_end` when there isn't one.
 Fixed with a case in `tests/fastener_stack_smoke.py`. Same family as W1 in
 docs/agent-scale-followup-plan.md: two pieces of code disagreeing about where
 a joint ends.
+
+## Materials
+
+Every part carries one, so the BOM has masses rather than nulls and the
+viewport has something to shade:
+
+| part | material | mass |
+|---|---|---|
+| crank | steel | 6348 g |
+| barrel | aluminum | 3044 g |
+| head | aluminum | 1913 g |
+| rod | steel | 1129 g |
+| camshaft | steel | 651 g |
+| piston | aluminum | 401 g |
+| valve ×2 | stainless steel | 146 g each |
+| ISO 4762 M10x40 ×4 | steel | 38 g each |
+
+Aluminium for the barrel and head is not decoration: the fins are there to
+move heat into the air and the alloy is half the reason that works. The piston
+is aluminium because it is the one reciprocating part whose mass costs you at
+both ends of every stroke, and the valves are stainless because they sit in
+the exhaust stream and have to stay hard hot. 13.93 kg is the core only — no
+crankcase, no flywheel.
+
+`Part.material(slug)` was added to the SDK for this. It is the one verb here
+that MUST activate its tab: a material is written to the feature that created
+the body, and writes stay on the active tab (W2).
 
 ## What it looks like
 

@@ -111,6 +111,9 @@ def barrel(app):
     for x, y in bolt_xy():
         holes.circle((x, y), d=11.0)
     p.extrude(holes.add(), 30.0, mode="cut", name="Head bolt holes")
+    # Aluminium, which is WHY it is finned like that: the fins are there to
+    # move heat into the air, and the alloy is half the reason that works.
+    p.material("aluminum")
     p.frame("crank_axis", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("bore_axis", origin=(0, 0, BARREL_Z), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("deck", origin=(0, 0, DECK), z=(0, 0, 1), x=(1, 0, 0))
@@ -150,6 +153,7 @@ def head(app):
     for x, y in bolt_xy():
         bolts.circle((x, y), d=11.0)
     p.extrude(bolts.add(), FLANGE_T + 2, mode="cut", name="Bolt holes")
+    p.material("aluminum")
     p.frame("deck", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("cam_axis", origin=(0, 0, 110), z=(0, 1, 0), x=(1, 0, 0))
     for i, x in enumerate((-22, 22)):
@@ -198,6 +202,7 @@ def crank(app):
         cw = p.sketch(Plane.xz(y), name="Counterweight")
         cw.slot((0, 0), (0, -34), width=2 * WEB_R)
         p.extrude(cw.add(), 30.0, mode="add", name="Counterweight")
+    p.material("steel")
     p.frame("main", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("pin", origin=(0, 0, "crank_r"), z=(0, 1, 0), x=(1, 0, 0))
     p.check()
@@ -229,6 +234,7 @@ def rod(app):
     bolts = p.sketch(Plane.xz(14), name="Bolt holes")
     bolts.circle((-30, 0), d="bolt").circle((30, 0), d="bolt")
     p.extrude(bolts.add(), 30.0, mode="cut", name="Bolt holes")
+    p.material("steel")
     p.frame("big_end", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("small_end", origin=(0, 0, ROD_L), z=(0, 1, 0), x=(1, 0, 0))
     p.check()
@@ -257,6 +263,9 @@ def piston(app):
     slot = p.sketch(Plane.xz(20), name="Rod slot")
     slot.rect((-26, -SKIRT - 5), (26, 24))
     p.extrude(slot.add(), 40.0, mode="cut", name="Rod slot")
+    # Aluminium: a piston is the one reciprocating part where mass costs
+    # you twice, at both ends of every stroke.
+    p.material("aluminum")
     p.frame("wrist_pin", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("slide", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
@@ -281,6 +290,8 @@ def valve(app):
         # SOLID wire: a spring is round bar coiled up, not tubing.
         "outer_diameter": 3.2, "mode": "add"})
     # Z points DOWN the valve, to match the guide's.
+    # Stainless: a valve sits in the exhaust stream and has to stay hard hot.
+    p.material("stainless_steel")
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, -1), x=(1, 0, 0))
     p.check()
     return p
@@ -303,6 +314,7 @@ def camshaft(app):
         nose = p.sketch(Plane.xz(y), name="Lobe nose")
         nose.slot((0, 0), (0, CAM_LIFT), width=22.0)
         p.extrude(nose.add(), 16.0, mode="add", name="Lobe nose")
+    p.material("steel")
     p.frame("axle", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.check()
     return p

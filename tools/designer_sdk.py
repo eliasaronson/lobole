@@ -1083,6 +1083,21 @@ class Part(_Tab):
     def edges(self, **kw):
         return [e for b in self.bodies() for e in b.edges(**kw)]
 
+    def material(self, slug, body=None):
+        """Give this part's bodies a material, so mass properties and the BOM
+        have a density to work with (and the viewport something to shade).
+
+        `body` picks one by index; the default gives every body of the part
+        the same material, which is what a part made of one thing wants.
+        Unlike the reads above this MUST activate — a material is written to
+        the feature that created the body, and writes stay on the active tab.
+        """
+        self.activate()
+        indices = [body] if body is not None else range(len(self.bodies()))
+        for i in indices:
+            self.app.set_material(body=i, material=slug)
+        return self
+
     def volume(self):
         return self.app.mass_properties(part=self.id)["total"]["volume"]
 
