@@ -385,6 +385,37 @@ void AssertJobParts(const cam::JobDocument& job, const nlohmann::json& expect) {
 // Which face Z zero was picked from. On the SETUP, so a job reopened from its
 // own file still knows — the panel used to ask a session field and answered
 // "Z zero is not set yet" about an origin it had saved and was using.
+// v91: where the bed sits on the sheet, and which corner X0Y0 is measured
+// from. Both decide where the cutting ends up; a setup that loses either
+// comes back cutting somewhere else.
+void AssertCamReach(const std::vector<cam::Setup>& setups,
+                    const nlohmann::json& expect) {
+  if (expect.contains("cam_origin_at")) {
+    const auto& want = expect.at("cam_origin_at");
+    REQUIRE(want.size() == setups.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      const std::string at =
+          setups[i].originAt == cam::OriginAt::StockCentre ? "stock_centre"
+          : setups[i].originAt == cam::OriginAt::ModelMin  ? "model_min"
+          : setups[i].originAt == cam::OriginAt::StockMax  ? "stock_max"
+                                                           : "stock_min";
+      INFO("setup " << i << " origin_at");
+      CHECK(at == want[i].get<std::string>());
+    }
+  }
+  if (expect.contains("cam_reach_offsets")) {
+    const auto& want = expect.at("cam_reach_offsets");
+    REQUIRE(want.size() == setups.size());
+    for (size_t i = 0; i < setups.size(); i++) {
+      INFO("setup " << i << " reach_offset");
+      CHECK_THAT(setups[i].reachOffset.x,
+                 Catch::Matchers::WithinAbs(want[i][0].get<double>(), 1e-9));
+      CHECK_THAT(setups[i].reachOffset.y,
+                 Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-9));
+    }
+  }
+}
+
 void AssertCamTopFace(const std::vector<cam::Setup>& setups,
                       const nlohmann::json& expect) {
   if (!expect.contains("cam_top_face"))
@@ -501,6 +532,7 @@ TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
         AssertCamShapes(j.GetSetups(), expect);
         AssertCamFrames(j.GetSetups(), expect);
         AssertCamStock(j.GetSetups(), bodies, expect);
+        AssertCamReach(j.GetSetups(), expect);
         AssertJobParts(j, expect);
       };
       check(**job);

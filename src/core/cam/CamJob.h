@@ -299,7 +299,7 @@ struct Stock {
 //
 // A picked VERTEX is the obvious fourth option and is deferred: ElementMap
 // has no vertex kind, so it needs plumbing this change does not.
-enum class OriginAt { StockMin, StockCentre, ModelMin };
+enum class OriginAt { StockMin, StockCentre, ModelMin, StockMax };
 
 // WHERE a part sits in the stock, for this setup.
 //
@@ -346,6 +346,22 @@ struct Setup {
   // do not assign it.
   glm::dvec3 origin{0.0, 0.0, 0.0};
   OriginAt originAt = OriginAt::StockMin;
+
+  // WHERE THE MACHINE IS ON THE SHEET, in setup space, measured from the
+  // stock's near corner.
+  //
+  // The reach box has always been travel-sized with its corner AT the stock's
+  // -- fine for a sheet that fits the bed, and an assumption for one that does
+  // not. A 1122 mm baffle on a 900 mm router is slid through and clamped
+  // wherever the work is, so nailing the box to the near corner is a GUESS,
+  // and it was one with teeth: it decided what got clipped, and it moved when
+  // the part was turned round, so spinning a board end-for-end made seven
+  // operations fall off a machine that could reach every one of them.
+  //
+  // Zero (the default) is exactly the old behaviour, so nothing that fits
+  // changes. `DeriveReachOffset` computes the offset that brings the cutting
+  // inside the window, which is what an overhanging sheet actually needs.
+  glm::dvec2 reachOffset{0.0, 0.0};
 
   // How the part is FIXTURED: the rotation taking setup space to model space.
   // A part is modelled where it belongs in the assembly — a speaker baffle

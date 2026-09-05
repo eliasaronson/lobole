@@ -112,7 +112,8 @@ constexpr MethodDoc kCamMethods[] = {
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "
      "element}, flip?, has_rotary_axis?, rotation_a?, fit_arcs?, "
-     "origin_at?: stock_min|stock_centre|model_min, "
+     "origin_at?: stock_min|stock_centre|model_min|stock_max, "
+     "reach_offset?: [x,y] | \"auto\", "
      "order?: authored|tool|part, split_output?: bool (one program per "
      "tool, which forces tool order), "
      "stock?: {mode?: relative|fixed, size?: [x,y,z], place?: [x,y,z], "
@@ -132,14 +133,21 @@ constexpr MethodDoc kCamMethods[] = {
      "call is idempotent. flip turns the fixture over for the second side. "
      "rotation_a is the MACHINE's rotary index and needs has_rotary_axis: "
      "without it no file can carry an A word. "
-     "origin_at is WHERE X0 Y0 IS in the posted file — the corner the "
+     "`reach_offset` is WHERE THE BED IS ON THE SHEET, from the stock's "
+     "near corner: a sheet longer than the machine is slid through and "
+     "clamped where the work is, and without this the reach window is nailed "
+     "to the stock's corner — an assumption that decides what gets clipped "
+     "and that MOVES when you turn the part round. \"auto\" puts the window "
+     "on the cutting. origin_at is WHERE X0 Y0 IS in the posted file — the "
+     "corner the "
      "operator touches off on; the post subtracts it from every coordinate, "
      "and Z comes from the picked top face. stock.mode `fixed` makes the "
      "workpiece the sheet you own (size + place, where the part sits in it) "
      "rather than a shrink-wrap of the part; a sheet smaller than the part is "
      "refused, naming the axis and the shortfall.",
      "fit_arcs, flip, has_rotary_axis, id, lay_face_up, machine, name, "
-     "order, origin_at, post, rotation_a, safe_z, split_output, stock, tool"},
+     "order, origin_at, post, reach_offset, rotation_a, safe_z, split_output, "
+     "stock, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
     {"add_cam_op",
      "Add an operation {setup, type: "
@@ -849,7 +857,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"origin_at",
                   setup.originAt == cam::OriginAt::StockCentre ? "stock_centre"
                   : setup.originAt == cam::OriginAt::ModelMin  ? "model_min"
+                  : setup.originAt == cam::OriginAt::StockMax  ? "stock_max"
                                                                : "stock_min"},
+                 {"reach_offset", {setup.reachOffset.x, setup.reachOffset.y}},
                  {"fit_arcs", setup.machine.fitArcs},
                  {"machine", DocumentIO::MachineToJson(setup.machine)},
                  // How the embedded copy stands against the store, by name:
@@ -909,10 +919,30 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         setup.originAt = cam::OriginAt::StockCentre;
       else if (at == "model_min")
         setup.originAt = cam::OriginAt::ModelMin;
+      else if (at == "stock_max")
+        setup.originAt = cam::OriginAt::StockMax;
       else
         throw std::runtime_error(
             "unknown origin_at '" + at +
-            "'; accepted: stock_min, stock_centre, model_min");
+            "'; accepted: stock_min, stock_centre, model_min, stock_max");
+    }
+    // Where the bed sits on the sheet. "auto" works it out from the
+    // toolpaths, which is the only way anyone would want to supply it.
+    if (p.contains("reach_offset")) {
+      const json& r = p.at("reach_offset");
+      if (r.is_string() && r.get<std::string>() == "auto") {
+        const cam::DerivedReach d =
+            cam::DeriveReachOffset(setup, ui::JobBodies(state));
+        if (!d.ok)
+          throw std::runtime_error(d.why);
+        setup.reachOffset = d.offset;
+      } else if (r.is_array() && r.size() == 2) {
+        setup.reachOffset = glm::dvec2(r[0].get<double>(), r[1].get<double>());
+      } else {
+        throw std::runtime_error(
+            "reach_offset is [x, y] in mm from the stock's near corner, or "
+            "\"auto\" to put the window where the cutting is");
+      }
     }
     if (p.contains("stock")) {
       const json& sj = p.at("stock");

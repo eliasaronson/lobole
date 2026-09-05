@@ -302,6 +302,20 @@ CheckPlacements(const Setup& setup, const std::vector<Body>& bodies);
 // and the shortfall, in words. The bed is never grown to fit.
 [[nodiscard]] std::string MachineWarning(const Setup& setup,
                                          const std::vector<Body>& bodies);
+
+// Where to put the machine's reach window so the CUTTING falls inside it
+// (Setup::reachOffset). A sheet longer than the bed is slid through and
+// clamped where the work is; this works out where that is, from the toolpaths
+// rather than from the sheet. `ok` false with `why` in words when no position
+// helps -- the cutting itself is wider than the travel, which is genuinely two
+// setups and says so.
+struct DerivedReach {
+  glm::dvec2 offset{0.0, 0.0};
+  bool ok = false;
+  std::string why;
+};
+[[nodiscard]] DerivedReach DeriveReachOffset(const Setup& setup,
+                                             const std::vector<Body>& bodies);
 // The stock against the travel, when the parts themselves fit: empty, or a
 // sentence saying which way the sheet hangs off the bed.
 [[nodiscard]] std::string MachineOverhang(const Setup& setup,

@@ -352,7 +352,12 @@ json CamSetupToJson(const cam::Setup& setup) {
   if (setup.originAt != cam::OriginAt::StockMin)
     j["origin_at"] = setup.originAt == cam::OriginAt::StockCentre
                          ? "stock_centre"
-                         : "model_min";
+                     : setup.originAt == cam::OriginAt::StockMax ? "stock_max"
+                                                                 : "model_min";
+  // Where the bed sits on the sheet. Zero is the old behaviour, so a job that
+  // fits its machine writes nothing and reads back identical.
+  if (setup.reachOffset != glm::dvec2(0.0))
+    j["reach_offset"] = {setup.reachOffset.x, setup.reachOffset.y};
   // Which face Z zero came from. Saved because the panel says so — and said
   // "Z zero is not set yet" about a job that had one, every time it was
   // reopened, because the answer lived in the session rather than the job.
@@ -490,11 +495,18 @@ cam::Setup CamSetupFromJson(const json& j) {
       setup.originAt = cam::OriginAt::StockCentre;
     else if (at == "model_min")
       setup.originAt = cam::OriginAt::ModelMin;
+    else if (at == "stock_max")
+      setup.originAt = cam::OriginAt::StockMax;
     else
       throw std::runtime_error(
           "unknown cam origin_at '" + at +
-          "'; this build accepts stock_min, stock_centre, model_min");
+          "'; this build accepts stock_min, stock_centre, model_min, "
+          "stock_max");
   }
+  if (j.contains("reach_offset") && j["reach_offset"].is_array() &&
+      j["reach_offset"].size() == 2)
+    setup.reachOffset = glm::dvec2(j["reach_offset"][0].get<double>(),
+                                   j["reach_offset"][1].get<double>());
   if (j.contains("frame") && j["frame"].is_array() && j["frame"].size() == 4)
     setup.frame =
         glm::dquat(j["frame"][3].get<double>(), j["frame"][0].get<double>(),

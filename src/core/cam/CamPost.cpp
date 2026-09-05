@@ -55,7 +55,32 @@ struct Emitter {
   bool haveA = false;
   double a = std::nan("");
 
-  void Comment(const std::string& text) { out << "(" << text << ")\n"; }
+  // A comment carries text nobody here chose: the setup's name, a tool's
+  // name, an operation's name inside a SKIPPED line. G-code comments do NOT
+  // NEST, so one parenthesis in any of them is a file the controller refuses
+  // to load -- Mach3 says "Nested comment found" and stops, with the offending
+  // name being something a person typed in a panel weeks earlier. Brackets
+  // say the same thing and cannot nest; a newline would end the comment and
+  // turn its tail into a command, so those go too.
+  // Text safe to sit between parentheses. Brackets say the same thing and
+  // cannot nest; a newline would end the comment and turn its tail into a
+  // command.
+  static std::string Safe(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+      if (c == '(')
+        out += '[';
+      else if (c == ')')
+        out += ']';
+      else if (c == '\n' || c == '\r')
+        out += ' ';
+      else
+        out += c;
+    }
+    return out;
+  }
+  void Comment(const std::string& text) { out << "(" << Safe(text) << ")\n"; }
   void Raw(const std::string& text) { out << text << "\n"; }
 
   static bool Differs(double now, double before) {
@@ -462,11 +487,13 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         // message is the only thing that says which tool.
         e.Raw("M5");
         std::ostringstream t;
-        t << "(change to T" << tp.toolNumber;
+        // Parenthesised, so the tool's NAME has to be safe here too -- this
+        // one is built by hand rather than through Comment().
+        t << "change to T" << tp.toolNumber;
         if (tool != nullptr)
           t << ": " << tool->name << " D" << Num(tool->diameter, 3);
-        t << " - set Z zero, then cycle start)";
-        e.Raw(t.str());
+        t << " - set Z zero, then cycle start";
+        e.Comment(t.str());
       }
       if (opts.comments && tool != nullptr) {
         // The SHAPE goes in the comment too. "T2 D6" is the same line for a

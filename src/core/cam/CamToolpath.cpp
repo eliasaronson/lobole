@@ -864,6 +864,13 @@ bool RecomputeOrigin(Setup& setup, const std::vector<Body>& bodies) {
     o.x = (lo.x + hi.x) * 0.5;
     o.y = (lo.y + hi.y) * 0.5;
     break;
+  case OriginAt::StockMax:
+    // The FAR corner. On a sheet slid through the bed the near corner is the
+    // end hanging in the air, which is a datum nobody can touch off on; the
+    // far one is over the table where the cutter can reach it.
+    o.x = hi.x;
+    o.y = hi.y;
+    break;
   case OriginAt::ModelMin: {
     glm::dvec3 mlo(0.0), mhi(0.0);
     if (!ModelBoundsFramed(framed, mlo, mhi))
@@ -2930,6 +2937,67 @@ bool PlacedPartsBounds(const Setup& setup, const std::vector<Body>& bodies,
 }
 } // namespace
 
+DerivedReach DeriveReachOffset(const Setup& setup,
+                               const std::vector<Body>& bodies) {
+  DerivedReach out;
+  const Machine& m = setup.machine;
+  if (!m.HasWorkArea()) {
+    out.why = "this setup's machine states no work area, so there is no "
+              "window to place";
+    return out;
+  }
+  const std::vector<Body> framed = BodiesInSetupFrame(setup, bodies);
+  glm::dvec3 slo(0.0), shi(0.0);
+  if (!StockBoundsFramed(setup, framed, slo, shi)) {
+    out.why = "there is no stock to measure the sheet against";
+    return out;
+  }
+  // What is actually CUT, not what the sheet is: the window has to cover the
+  // toolpaths, and on an overhanging sheet those are a fraction of it.
+  Setup probe = setup;
+  probe.machine = Machine{}; // no work area: generate unclipped
+  glm::dvec2 lo(std::numeric_limits<double>::max());
+  glm::dvec2 hi(std::numeric_limits<double>::lowest());
+  bool any = false;
+  for (const Toolpath& tp : GenerateAll(probe, bodies)) {
+    for (const Move& mv : tp.moves) {
+      lo = glm::min(lo, glm::dvec2(mv.to));
+      hi = glm::max(hi, glm::dvec2(mv.to));
+      any = true;
+    }
+  }
+  if (!any) {
+    out.why = "this setup cuts nothing yet, so there is nowhere to put the "
+              "window";
+    return out;
+  }
+  const glm::dvec2 travel(m.travelMax.x - m.travelMin.x,
+                          m.travelMax.y - m.travelMin.y);
+  const char* axes[2] = {"X", "Y"};
+  for (int a = 0; a < 2; a++) {
+    const double need = hi[a] - lo[a];
+    if (need > travel[a] + 1e-6) {
+      char buf[220];
+      std::snprintf(buf, sizeof(buf),
+                    "the cutting itself spans %.0f mm in %s and %s travels "
+                    "%.0f: no position of the sheet brings it all within "
+                    "reach, so this is two setups",
+                    need, axes[a],
+                    m.name.empty() ? "this machine" : m.name.c_str(),
+                    travel[a]);
+      out.why = buf;
+      return out;
+    }
+    // Centre the window on the cutting, then keep it on the sheet's near side
+    // -- a window starting before the stock is a machine position no sheet
+    // reaches.
+    const double centred = (lo[a] + hi[a]) * 0.5 - travel[a] * 0.5;
+    out.offset[a] = std::max(0.0, centred - slo[a]);
+  }
+  out.ok = true;
+  return out;
+}
+
 std::string MachineWarning(const Setup& setup,
                            const std::vector<Body>& bodies) {
   const Machine& m = setup.machine;
@@ -2946,9 +3014,10 @@ std::string MachineWarning(const Setup& setup,
       char buf[260];
       std::snprintf(buf, sizeof(buf),
                     "the parts need %.0f mm in %s and %s travels %.0f: the "
-                    "last %.0f mm are beyond the machine. It cuts as far as "
-                    "it reaches and stops; the rest is a second setup with "
-                    "the sheet moved along",
+                    "last %.0f mm are beyond the machine. Say where the bed "
+                    "is on the sheet (reach_offset) if the cutting itself "
+                    "fits; otherwise it is a second setup with the sheet "
+                    "moved along",
                     need, axes[a],
                     m.name.empty() ? "this machine" : m.name.c_str(), have,
                     need - have);
@@ -2966,8 +3035,10 @@ bool MachineBoundsFramed(const Setup& setup, const std::vector<Body>& framed,
   glm::dvec3 slo(0.0), shi(0.0);
   if (!StockBoundsFramed(setup, framed, slo, shi))
     return false;
-  lo = slo;
-  hi = slo + (m.travelMax - m.travelMin);
+  // Where the bed sits ON the sheet. Zero is the near corner, which is what
+  // this always assumed and is only an answer for a sheet that fits.
+  lo = slo + glm::dvec3(setup.reachOffset, 0.0);
+  hi = lo + (m.travelMax - m.travelMin);
   return true;
 }
 

@@ -17,7 +17,17 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    90; // v90: a drawing view's `hidden` — occurrence ids left OFF that view.
+    91; // v91: a CAM setup's `reach_offset` -- WHERE THE BED IS ON THE SHEET
+        //      -- and `stock_max` as a work origin. The machine's reach box
+        //      was travel-sized with its corner nailed to the stock's, which
+        //      is an assumption for any sheet longer than the bed: it decided
+        //      what got clipped and it MOVED when the part was turned round,
+        //      so spinning a 1122 mm baffle end-for-end dropped seven
+        //      operations off a machine that could reach every one of them.
+        //      Zero is the old behaviour. `stock_max` exists because the near
+        //      corner of a slid sheet is the end hanging in the air, which is
+        //      a datum nobody can touch off on.
+        // (v90: a drawing view's `hidden` — occurrence ids left OFF that view.
         //      A per-SHEET choice, not a model change, and the difference
         //      between a dimensionable drawing of a swept-surface model and
         //      no drawing at all: the single-cylinder engine is 47 s a view

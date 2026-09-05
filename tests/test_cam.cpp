@@ -271,6 +271,55 @@ TEST_CASE("cam: a tab is as tall as it was asked to be", "[cam]") {
   CHECK_THAT(tallest, WithinAbs(2.0, 0.3));
 }
 
+TEST_CASE("cam: a name with a bracket in it cannot nest a comment",
+          "[cam][post]") {
+  // G-code comments do not nest, and every comment the post writes carries a
+  // name somebody typed: the setup's, a tool's, an operation's. One "(" in
+  // any of them and Mach3 refuses the whole file with "Nested comment found"
+  // -- after the job is on the machine and the stock is clamped.
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  setup.name = "Front (baffle side up)";
+  setup.tools[0].name = "6 mm flat 2F (through cuts)";
+  cam::Operation op;
+  op.id = 1;
+  op.name = "Cut the opening (roughing)";
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 8.0;
+  op.side = cam::Side::Outside;
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  for (const std::string& post : cam::PostIds()) {
+    std::string gcode, error;
+    INFO("post " << post);
+    REQUIRE(cam::PostProcess(post, setup, paths, {}, gcode, &error));
+    // Every line: at most one "(" and it closes before the next one opens.
+    size_t line = 1;
+    int depth = 0;
+    for (const char c : gcode) {
+      if (c == '\n') {
+        INFO("line " << line);
+        CHECK(depth == 0); // a comment that never closed
+        line++;
+      } else if (c == '(') {
+        INFO("line " << line);
+        CHECK(depth == 0); // <-- the nested comment
+        depth++;
+      } else if (c == ')') {
+        depth--;
+      }
+    }
+    // ...and the names are still legible, just bracketed.
+    CHECK(gcode.find("Front [baffle side up]") != std::string::npos);
+    CHECK(gcode.find("6 mm flat 2F [through cuts]") != std::string::npos);
+  }
+}
+
 TEST_CASE("cam: coming down off a tab is a PLUNGE, at the plunge feed",
           "[cam]") {
   // The vertical move at a tab's far edge went in as a Cut at the CUTTING
@@ -5644,6 +5693,83 @@ TEST_CASE("cam machine: a path is clipped to the travel, and says how much",
   REQUIRE(lines.size() == 1);
   INFO(lines[0].text);
   CHECK(lines[0].text.find("left out of the file") != std::string::npos);
+}
+
+TEST_CASE("cam machine: the reach window can be placed ON the sheet",
+          "[cam][machine]") {
+  // The bug this closes: the reach box was travel-sized with its corner
+  // nailed to the STOCK's, so it moved when the part did. Turning a sheet
+  // longer than the bed end-for-end pushed work off a machine that could
+  // reach it perfectly well -- the sheet is slid through and clamped where
+  // the work is, and nothing could say where that was.
+  auto doc = HoleDoc(8.0, 12.0); // one bore at (20, 15) in a 40 x 30 block
+  cam::Setup setup = BasicSetup();
+  const ElementRef wall = HoleWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, cam::Target{0, wall});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 12;
+  setup.operations.push_back(op);
+
+  // A machine that reaches 10 mm in X: anchored at the stock corner, the bore
+  // at X20 is outside it and the operation fails (the previous test).
+  setup.machine.name = "Stubby";
+  setup.machine.travelMin = {0.0, 0.0, -100.0};
+  setup.machine.travelMax = {10.0, 600.0, 0.0};
+  REQUIRE_FALSE(cam::GenerateAll(setup, doc->GetBodies())[0].error.empty());
+
+  // Slide the bed along the sheet and the SAME machine cuts it.
+  const cam::DerivedReach reach =
+      cam::DeriveReachOffset(setup, doc->GetBodies());
+  INFO(reach.why);
+  REQUIRE(reach.ok);
+  setup.reachOffset = reach.offset;
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  CHECK(paths[0].clippedMm == 0.0);
+  CHECK(paths[0].CutLength() > 10.0);
+  // The window really did move: it now starts past the stock's corner.
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::MachineBounds(setup, doc->GetBodies(), lo, hi));
+  CHECK(lo.x > -2.0 + 1e-6);                      // stock min is -2
+  CHECK_THAT(hi.x - lo.x, WithinAbs(10.0, 1e-9)); // still only 10 mm of it
+
+  // A cut WIDER than the travel is not a placement problem, and says so.
+  // The d8 bore with a d6 cutter sweeps its centre round a 1 mm radius, so
+  // the cutting spans 2 mm: the travel has to be under that to be too small,
+  // which is what this asks (4 mm was wrong -- it FITS, and the derivation
+  // was right to say so).
+  cam::Setup narrow = setup;
+  narrow.reachOffset = {0.0, 0.0};
+  narrow.machine.travelMax = {1.0, 600.0, 0.0};
+  const cam::DerivedReach no = cam::DeriveReachOffset(narrow, doc->GetBodies());
+  CHECK_FALSE(no.ok);
+  INFO(no.why);
+  CHECK(no.why.find("two setups") != std::string::npos);
+}
+
+TEST_CASE("cam origin: stock_max is the FAR corner, for a sheet slid through",
+          "[cam][machine]") {
+  // The near corner of an overhanging sheet is the end hanging in the air:
+  // a datum nobody can put a cutter on.
+  auto doc = BlockDoc(); // 40 x 30 x 20, stock -2..42 x -2..32
+  cam::Setup setup = BasicSetup();
+  setup.originAt = cam::OriginAt::StockMin;
+  REQUIRE(cam::RecomputeOrigin(setup, doc->GetBodies()));
+  CHECK_THAT(setup.origin.x, WithinAbs(-2.0, 1e-6));
+  CHECK_THAT(setup.origin.y, WithinAbs(-2.0, 1e-6));
+  const double zWas = setup.origin.z;
+
+  setup.originAt = cam::OriginAt::StockMax;
+  REQUIRE(cam::RecomputeOrigin(setup, doc->GetBodies()));
+  CHECK_THAT(setup.origin.x, WithinAbs(42.0, 1e-6));
+  CHECK_THAT(setup.origin.y, WithinAbs(32.0, 1e-6));
+  // Z is untouched: it is the material top either way.
+  CHECK_THAT(setup.origin.z, WithinAbs(zWas, 1e-9));
 }
 
 TEST_CASE("cam machine: an operation wholly beyond the travel FAILS, it does "
