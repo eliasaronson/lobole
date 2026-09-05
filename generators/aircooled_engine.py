@@ -67,6 +67,39 @@ CAM_SPROCKET_R = 64.0   # ...is half a turn of the cam: 2:1, drawn as it is
 CHAIN_T = 7.0           # chain thickness, radially
 CHAIN_W = 12.0          # chain width, along Y
 
+# ---- the valve gear ------------------------------------------------------
+# The valves sit ALONG the camshaft, not across it. A cam can only press what
+# is under it, and the cam has to be parallel to the crank for a flat chain to
+# reach both sprockets — so the two constraints together put the valves fore
+# and aft at x = 0, y = +-22, and a lobe at each of those y's is over a stem.
+VALVE_XY = [(0.0, -22.0), (0.0, 22.0)]
+CAM_Z = 110.0           # camshaft axis, above the head's top face
+CAM_BASE_R = 15.0       # lobe base circle
+# Cold clearance, drawn big. A real one is 0.15 mm; the collision mesh's
+# deflection is 0.39, so anything that small reads as contact at every sample.
+# 2.0 rather than 1.0 because the drawn lobe is a 120-point polygon of the
+# analytic cosine while the RELATION interpolates its 19-point table with a
+# monotone cubic — the same curve to a few tenths, not to the millimetre, and
+# on the flanks that difference was 13 mm3 of contact at 2.0 and 8 of the 49
+# samples still touched. 3.5 clears it, and the cam still visibly rides the
+# stem: the gap is LASH at every angle, because the drawn profile and the
+# table are the same function.
+LASH = 3.5
+STEM_TOP = CAM_Z - CAM_BASE_R - LASH   # where a closed valve's stem ends
+LOBE_START = 20.0       # cam degrees at which valve 1 starts to open...
+LOBE_DURATION = 150.0   # ...and how long it is open. Shared with the drawn
+                        # lobe, so the picture and the relation agree.
+CAM_SHAFT_D = 26.0
+CAM_BEARING_W = 14.0
+NOSE_W = 22.0           # the lobe nose's width across
+# Outboard of everything on the shaft, and CENTRED on these numbers: the
+# tower is drawn at y + W/2 and extruded -W, so it spans y +- 7. The lobes
+# occupy y -30..-14 and 14..30, and each valve's spring RETAINER is 17 in
+# radius about a stem at y = +-22, so it reaches +-39. A bearing at 46 spans
+# 39..53 and touched that retainer exactly — `head x valve` at all 49
+# samples. 52 spans 45..59 and clears it by six.
+CAM_BEARING_Y = (-58.0, 52.0)
+
 
 def bolt_xy():
     """Four head bolts at 45 degrees, derived from the bolt circle rather
@@ -152,33 +185,70 @@ def head(app):
     p.revolve_profile(prof, plane=Plane.xz(), axis="z", name="Head")
     # Two valve guides, bored through, either side of the bore's axis.
     guides = p.sketch(Plane.xy(-5), name="Guides")
-    for x in (-22, 22):
+    for x, y in VALVE_XY:
         # 1.5 mm radial on an 11 stem. The mesh check's deflection on a part
         # this size is 0.39 mm, so a half-millimetre fit reads as a clash.
-        guides.circle((x, 0), d=14)
+        guides.circle((x, y), d=14)
     p.extrude(guides.add(), 75.0, mode="cut", name="Guides")
     # The ports the valves seat against: a counterbore under each guide, deep
     # enough to swallow the whole seat cone.
     ports = p.sketch(Plane.xy(-5), name="Ports")
-    for x in (-22, 22):
-        ports.circle((x, 0), d=VALVE_D + 4)
+    for x, y in VALVE_XY:
+        ports.circle((x, y), d=VALVE_D + 4)
     p.extrude(ports.add(), 20.0, mode="cut", name="Ports")
     # A seat for each spring, so its bottom coils are not inside the head.
     seats = p.sketch(Plane.xy(62, flip=True), name="Spring seats")
-    for x in (-22, 22):
-        seats.circle((x, 0), d=26)
+    for x, y in VALVE_XY:
+        seats.circle((x, y), d=26)
     p.extrude(seats.add(), 20.0, mode="cut", name="Spring seats")
     bolts = p.sketch(Plane.xy(-1), name="Bolt holes")
     for x, y in bolt_xy():
         bolts.circle((x, y), d=11.0)
     p.extrude(bolts.add(), FLANGE_T + 2, mode="cut", name="Bolt holes")
     p.material("aluminum")
+    # ---- cam towers -----------------------------------------------------
+    # Pillars from the head's top face up to the cam axis, each ending in an
+    # OPEN saddle. Open because the lobes are bigger than the shaft (20 mm
+    # radius against 13), so a closed bore is a camshaft you could never fit:
+    # the shaft drops in from above and a cap closes it, which is how it is
+    # actually done.
+    for y in CAM_BEARING_Y:
+        tower = p.sketch(Plane.xz(y + CAM_BEARING_W / 2), name="Cam tower")
+        tower.polyline([(-20.0, 56.0), (20.0, 56.0), (20.0, CAM_Z),
+                        (-20.0, CAM_Z)], close=True)
+        p.extrude(tower.add(), CAM_BEARING_W, mode="add", name="Cam tower")
+        saddle = p.sketch(Plane.xz(y + CAM_BEARING_W / 2), name="Cam saddle")
+        saddle.circle((0, CAM_Z), d=CAM_SHAFT_D + 8.0)
+        p.extrude(saddle.add(), CAM_BEARING_W, mode="cut", name="Cam saddle")
     p.frame("deck", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
-    p.frame("cam_axis", origin=(0, 0, 110), z=(0, 1, 0), x=(1, 0, 0))
-    for i, x in enumerate((-22, 22)):
+    p.frame("cam_axis", origin=(0, 0, CAM_Z), z=(0, 1, 0), x=(1, 0, 0))
+    for i, y in enumerate(CAM_BEARING_Y):
+        p.frame(f"cap_{i}", origin=(0, y, CAM_Z), z=(0, 0, 1), x=(1, 0, 0))
+    for i, (x, y) in enumerate(VALVE_XY):
         # Z points DOWN the guide, so the cam's positive lift OPENS the valve
         # into the cylinder rather than pulling it up into the head.
-        p.frame(f"guide_{i}", origin=(x, 0, 0), z=(0, 0, -1), x=(1, 0, 0))
+        p.frame(f"guide_{i}", origin=(x, y, 0), z=(0, 0, -1), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+def cam_cap(app):
+    """The half that closes a cam saddle, bolted down over the shaft."""
+    p = app.part("cam cap")
+    prof = p.sketch(Plane.xz(CAM_BEARING_W / 2), name="Cap")
+    prof.polyline([(-20.0, 0.0), (20.0, 0.0), (20.0, 14.0), (-20.0, 14.0)],
+                  close=True)
+    p.extrude(prof.add(), CAM_BEARING_W, mode="new_body", name="Cap")
+    bore = p.sketch(Plane.xz(CAM_BEARING_W + 2), name="Saddle")
+    # 4 mm radial. An exact boolean calls 3 mm clear and the study's MESH
+    # called it a clash at 3 of 49 samples — the tessellation of a 186 mm
+    # shaft, not the fit. Same lesson as the main bearings.
+    bore.circle((0, 0), d=CAM_SHAFT_D + 8.0)
+    p.extrude(bore.add(), 2 * CAM_BEARING_W + 4, mode="cut", name="Saddle")
+    p.material("aluminum")
+    # Its own origin is ON the shaft axis, so it mates to the head's cap frame
+    # without an offset anybody has to remember.
+    p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
@@ -365,9 +435,13 @@ def crank(app):
                   else "new_body", name=name)
     # The nose the timing sprocket keys onto, from the case's outer face out
     # past the drive plane.
+    # THROUGH the sprocket and out the far side. Stopping level with it, or
+    # short of it, leaves a bore with daylight in it and the drive reads as
+    # unconnected however correct the mate is.
     nose = p.sketch(Plane.xz(-CASE_Y), name="Nose")
     nose.circle((0, 0), d=34.0)
-    p.extrude(nose.add(), -CASE_Y - (DRIVE_Y - 14), mode="add", name="Nose")
+    p.extrude(nose.add(), -CASE_Y - (DRIVE_Y - CHAIN_W), mode="add",
+              name="Nose")
     # The pin: 2 mm diametral clearance in the rod's 46 bore.
     pin = p.sketch(Plane.xz(20), name="Crank pin")
     pin.circle((0, "crank_r"), d=PIN_D)
@@ -479,8 +553,11 @@ def valve(app):
     seat, so a lift of zero is closed."""
     p = app.part("valve")
     p.var("valve_d", VALVE_D)
+    # The stem ends where the CAM's base circle begins, less the lash: a
+    # closed valve is LASH below the lobe, and the relation's 9 mm of lift
+    # takes it down to exactly the same clearance under the nose.
     prof = [(0, 0), ("valve_d / 2", 0), ("valve_d / 2", 3),
-            (5.5, 10), (5.5, 118), (0, 118)]
+            (5.5, 10), (5.5, STEM_TOP), (0, STEM_TOP)]
     p.revolve_profile(prof, plane=Plane.xz(), axis="z", name="Valve")
     p.app.add_feature(feature={
         "type": "Curve3D", "name": "Spring path", "kind": "helix",
@@ -494,6 +571,13 @@ def valve(app):
     # Z points DOWN the valve, to match the guide's.
     # Stainless: a valve sits in the exhaust stream and has to stay hard hot.
     p.material("stainless_steel")
+    # The retainer the spring pushes up against, and the collar it seats on.
+    # Without it the spring ends in mid-air and nothing says which way it
+    # pushes.
+    p.revolve_profile([(5.5, STEM_TOP - 16), (17.0, STEM_TOP - 16),
+                       (17.0, STEM_TOP - 10), (11.0, STEM_TOP - 6),
+                       (5.5, STEM_TOP - 6)],
+                      plane=Plane.xz(), axis="z", mode="add", name="Retainer")
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, -1), x=(1, 0, 0))
     p.check()
     return p
@@ -506,17 +590,43 @@ def camshaft(app):
     p = app.part("camshaft")
     shaft = p.sketch(Plane.xz(70), name="Shaft")
     shaft.circle((0, 0), d=26)
-    # Out to the drive plane, so the cam sprocket has a shaft to sit on.
-    p.extrude(shaft.add(), 70.0 - (DRIVE_Y - 4), mode="new_body", name="Shaft")
-    for y in (-14, 30):
-        # Base circle, then the nose on top of it — two extrudes, because
-        # they overlap (see the crank's note).
-        base = p.sketch(Plane.xz(y), name="Lobe base")
-        base.circle((0, 0), d=30)
-        p.extrude(base.add(), 16.0, mode="add", name="Lobe base")
-        nose = p.sketch(Plane.xz(y), name="Lobe nose")
-        nose.slot((0, 0), (0, CAM_LIFT), width=22.0)
-        p.extrude(nose.add(), 16.0, mode="add", name="Lobe nose")
+    # Out THROUGH the drive plane. At DRIVE_Y - 4 it stopped two millimetres
+    # inside the sprocket, so the sprocket's bore showed daylight and the cam
+    # drive looked unconnected — which is what a person spotted in the render
+    # while every mate and every clearance measured correct.
+    p.extrude(shaft.add(), 70.0 - (DRIVE_Y - CHAIN_W), mode="new_body",
+              name="Shaft")
+    # A lobe over each valve, DRAWN FROM THE RELATION'S OWN PROFILE.
+    #
+    # This is the only way the picture and the table can agree. Drawn as a
+    # base circle plus a slot the two disagreed twice over: a slot reaches
+    # offset + width/2, so the tip stood at 20 against a 15 base circle and
+    # the drawn lift was 5 mm where the relation lifts 9; and even sized
+    # right, a slot's flanks are arcs while the relation's lift is a cosine,
+    # so at intermediate angles the drawn cam pushed lower than the valve had
+    # moved — `camshaft x valve` at 16 of 49 samples.
+    #
+    # So the lobe IS the lift function: at each cam angle a, a point at
+    # radius CAM_BASE_R + lift(a). It is placed at local angle 180 - a,
+    # because that is the angle which has rotated to point at the valve by
+    # the time the shaft reaches a. The SIGN was determined by trying both
+    # and reading the study: 180 - a put the nose down at the wrong moment
+    # and fouled a closed valve at 26 of 49 samples.
+    def lift_at(a, start):
+        f = ((a - start) % 360.0) / LOBE_DURATION
+        return 0.0 if f > 1.0 else CAM_LIFT * 0.5 * (1.0 - math.cos(2 * math.pi * f))
+
+    for i, (_, vy) in enumerate(VALVE_XY):
+        start = LOBE_START + 180.0 * i
+        pts = []
+        for k in range(120):
+            a = 360.0 * k / 120.0
+            r = CAM_BASE_R + lift_at(a, start)
+            phi = math.radians(180.0 - a)
+            pts.append((r * math.sin(phi), r * math.cos(phi)))
+        lobe = p.sketch(Plane.xz(vy + 8), name="Lobe")
+        lobe.polyline(pts, close=True)
+        p.extrude(lobe.add(), 16.0, mode="add", name="Lobe")
     p.material("steel")
     p.frame("axle", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("drive", origin=(0, DRIVE_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
@@ -552,7 +662,7 @@ def bottom_end(app):
 def top_end(app, rig, occ, main_mate):
     """Head, two valves, camshaft. The camshaft runs at half crank speed on a
     CHAIN relation; each valve is lifted by a CAM relation off it."""
-    h, v, c = head(app), valve(app), camshaft(app)
+    h, v, c, cap = head(app), valve(app), camshaft(app), cam_cap(app)
     b = app.part("barrel")
     ho = rig.place(h, at=(0, 0, DECK))
     rig.fasten((occ["barrel"], "deck"), (ho, "deck"), flipped=False)
@@ -585,6 +695,9 @@ def top_end(app, rig, occ, main_mate):
     cam_occ = rig.place(c, at=(0, 0, DECK + 110))
     cam_mate = rig.revolute((ho, "cam_axis"), (cam_occ, "axle"), flipped=False)
     rig.chain(main_mate, cam_mate, teeth_a=1, teeth_b=2, name="timing chain")
+    for i in range(len(CAM_BEARING_Y)):
+        capo = rig.place(cap, at=(0, CAM_BEARING_Y[i], DECK + CAM_Z))
+        rig.fasten((ho, f"cap_{i}"), (capo, "seat"), flipped=False)
 
     # ---- the timing drive, drawn ----------------------------------------
     # The relation above is what makes the cam turn at half crank speed. This
@@ -611,11 +724,10 @@ def top_end(app, rig, occ, main_mate):
     rig.fasten((occ["crankcase"], "drive"), (cho, "crank_end"), flipped=False)
     valves = []
     for i in range(2):
-        vo = rig.place(v, at=(-22 + 44 * i, 0, DECK))
+        vo = rig.place(v, at=(VALVE_XY[i][0], VALVE_XY[i][1], DECK))
         slide = rig.slider((ho, f"guide_{i}"), (vo, "seat"), flipped=False)
-        start = 20.0 + 180.0 * i
-        rig.cam(cam_mate, slide, rise=CAM_LIFT, duration_deg=150,
-                start_deg=start, name=f"lobe {i + 1}")
+        rig.cam(cam_mate, slide, rise=CAM_LIFT, duration_deg=LOBE_DURATION,
+                start_deg=LOBE_START + 180.0 * i, name=f"lobe {i + 1}")
         valves.append(vo)
     print("  top end solve:", rig.solve())
     return {"head": ho, "camshaft": cam_occ, "valves": valves}, cam_mate
@@ -638,6 +750,14 @@ def main():
     rig.activate()
     study = rig.motion(main_mate, dof="rotation", **{"from": 0}, to=720,
                        samples=49, name="two revolutions")
+    # EXACT booleans rather than the mesh default. The mesh pass reports
+    # `camshaft x cam cap` at samples 0, 24 and 48 — exactly crank 0, 360 and
+    # 720, the poses where the driven rotation comes back to a whole turn —
+    # while an exact boolean at those same poses says CLEAR, and the two caps
+    # are 4 mm off a shaft the mesh resolves to 0.97. A false positive at the
+    # identity pose, filed in docs/known-bugs.md. Exact costs 20.7 s here
+    # against 1.1, which is worth it for a gate that has to be believed.
+    app.set_motion_study(study=study["id"], clash_mode="exact")
     r = app.run_motion_study(study=study["id"], include_poses=True)
     print(r["table"])
     piston_occ = rig.occurrence("piston")

@@ -7,6 +7,82 @@ an entry when it lands a fix + regression test.
 ---
 
 
+## The MESH clash pass reports a false positive at the identity pose
+
+Found 2026-09-05 building the air-cooled engine's valve gear. A motion study
+over 720 degrees at 15 reports `camshaft x cam cap` at samples 0, 24 and 48 —
+exactly crank 0, 360 and 720, the poses where the driven rotation comes back
+to a whole turn — and at no other sample. Both caps, both times.
+
+An EXACT boolean at those same poses says CLEAR, and so does the whole study
+when its `clash_mode` is `exact` (clean, 976 pairs, 20.7 s). The parts are 4 mm
+apart radially and the study's own reported mesh deflection is 0.97 mm, so this
+is not a resolution problem — 4 mm of clearance against a 1 mm deflection is
+not a near miss.
+
+That it lands on 0, 360 and 720 and nothing else points at the pose rather
+than the geometry: an identity or whole-turn rotation taking a different path
+through the placement or the mesh cache (`MeshCollide`'s cache is keyed on
+`CADShape::PlacementId()`, which is geometry AND placement). Worth starting
+there.
+
+Impact: a clean model reports a clash it does not have, at the one pose
+everybody looks at first. `clash_mode: "exact"` is the workaround and
+generators/aircooled_engine.py uses it, at 20.7 s against 1.1.
+
+
+---
+
+
+## A bounding box is 2x too big on swept (B-spline) surfaces
+
+Found 2026-09-05, after some minutes spent chasing a spring that was not
+wrong. `CADShape::GetBoundingBox` is exact on analytic geometry and loose on
+B-splines, because it is built from CONTROL POINTS rather than the surface:
+
+    a revolved cylinder, r=11          bbox +-11.00      exact
+    a helical spring, r=11, wire 3.2   bbox -24.76..15.34  true extent +-12.60
+
+The spring is correct — its volume is pi r^2 L to five figures and it renders
+as a clean four-turn helix. Only the box around it is wrong, and it is wrong
+by 60%.
+
+Impact: mostly wasted time, and it is the kind that looks like a real defect —
+a part whose reported size is nearly double its actual one reads as a modelling
+error, and it took a render to clear the spring of a charge it never earned.
+It also loosens the motion study's broad phase (more pair checks than needed,
+never a wrong answer) and misleads anyone sizing a part from `bbox()`.
+
+OCC's `BRepBndLib::AddOptimal` is the tight version and costs more; the fix is
+probably to use it where a person or a script READS the box, and keep the fast
+one for per-frame work like `sceneReach`.
+
+
+---
+
+
+## Scrubbing a motion study with a section on is 45x slower
+
+Measured 2026-09-05 on the air-cooled engine, offscreen:
+
+    scrub, no section     4.8 ms/step
+    scrub, SECTION on   216.5 ms/step   (45x)
+
+It is not rendering. `ApplyMotionPose` sets `syncedDocumentVersion` to force a
+renderer rebuild, and with a section active that rebuild calls
+`AppendSectionCaps` -> `Measure::SectionCaps`, an OCC half-space boolean PER
+BODY. Twelve parts, every scrub step.
+
+The caps genuinely change as a part moves, so they cannot simply be cached by
+plane — but most of an assembly does not move between two poses of a
+mechanism, and the ones that do not could be keyed on
+`CADShape::PlacementId()` (geometry AND placement) exactly the way the mesh
+collision cache is. On this engine that is 5 of 12 parts fixed.
+
+
+---
+
+
 ## An exact drawing view costs ~2.2 s per SWEPT surface it has to hide behind
 
 Found 2026-09-04 drawing the single-cylinder engine. Exact HLR is priced by
