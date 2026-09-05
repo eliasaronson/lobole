@@ -182,6 +182,52 @@ tested a bounding box's CENTRE, which for a cap that straddles a shaft lies
 inside the shaft), and a bounding box 60% too big on swept surfaces. Both in
 `fix(collide,cad)`.
 
+## Round four: the carburettor as a SUBASSEMBLY
+
+Seven parts — body, throttle spindle, butterfly, lever, return spring, float,
+main jet — in an assembly of their own that the engine places as ONE
+occurrence. A carburettor is the natural shape for the feature: nobody thinks
+of a float bowl as part of a cylinder head, and the throttle turns inside the
+body whether or not the engine is running. Styled on a Solex H-type: bell
+mouth, fixed venturi, butterfly below it, integral bowl beside the barrel.
+
+Twenty-one BOM rows, 23.14 kg, still clean over 720 degrees.
+
+**A subassembly mates by its own ORIGIN.** It has no frames or faces of its
+own — the app says exactly that — and a mate connector will not take a path
+into one either. So the thing has to be BUILT around the origin you mean to
+mate: the carb body is fixed at its assembly's origin with the flange face
+there, and the engine then needs nothing but its own port frame.
+
+**The three base planes do not extrude the same way.** `xy` goes +Z, `yz` goes
++X, `xz` goes −Y. Assuming the two positives behaved like the third put both
+of the body's cross-drillings outside the part — the spindle bore ran from
+x=44 to x=132 and touched nothing, so the spindle was mated into solid metal,
+and the jet duct said so out loud ("cut removed no material"). Measured on a
+box rather than guessed a second time.
+
+**A butterfly is slotted for its spindle, not drilled** — the spindle lies
+across the disc's face. And its mating frame's Z runs ALONG the spindle, which
+lies *in* the disc's plane; giving it the disc's own normal mates it broadside
+across the barrel.
+
+**The float bowl was floating**, 12 mm clear of the barrel it belongs to, with
+`check()` green because a float legitimately touches nothing. `islands()`
+found it in one call — two regions at every height, the barrel and the bowl —
+which is the same shape of error as the bolt bosses and the reason that check
+exists. A cast web joins them now.
+
+**A float floats and a spring hangs.** The assembly check is run here with
+`connected=False` and `clearances=False`, and both are deliberate: nothing in
+a bowl is supposed to touch, and every near miss left is a fit that was chosen
+— the butterfly clears its bore by 0.6 mm, the spindle by 1.0. What stays
+checked is clashes, which is the half with something to say about a
+carburettor.
+
+The throttle really turns: driving its mate from 0 to 90 degrees takes the
+metal across a horizontal section through the bore from 2701.8 mm² to 2194 —
+the butterfly going from lying across the bore to edge-on in it.
+
 ## Materials
 
 Every part carries one, so the BOM has masses rather than nulls and the

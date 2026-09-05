@@ -25,6 +25,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_sdk import Plane, SdkError, connect  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from carburettor import carburettor  # noqa: E402
 
 # ---- the mechanism, unchanged from v1 so the motion is already proven -----
 BORE = 86.0
@@ -280,36 +282,6 @@ def head(app):
         # Z points DOWN the guide, so the cam's positive lift OPENS the valve
         # into the cylinder rather than pulling it up into the head.
         p.frame(f"guide_{i}", origin=(x, y, 0), z=(0, 0, -1), x=(1, 0, 0))
-    p.check()
-    return p
-
-
-def carburettor(app):
-    """The intake side: a flange, a bell-mouthed body and a float bowl.
-
-    Turned from one profile where it can be — a carburettor's barrel IS a
-    turned part — with the bowl added underneath.
-    """
-    p = app.part("carburettor")
-    # Flange, barrel, and a bell mouth that opens out at the far end.
-    p.revolve_profile(
-        [(0.0, 0.0), (FLANGE_OD / 2, 0.0), (FLANGE_OD / 2, FLANGE_T2),
-         (21.0, FLANGE_T2), (21.0, 54.0), (30.0, 66.0), (30.0, 70.0),
-         (24.0, 70.0), (15.0, 62.0), (15.0, 0.0)],
-        plane=Plane.xz(), axis="z", name="Body")
-    # The float bowl, hung under the barrel.
-    bowl = p.sketch(Plane.xz(24), name="Float bowl")
-    bowl.slot((0, 26.0), (0, 40.0), width=46.0)
-    p.extrude(bowl.add(), 48.0, mode="add", name="Float bowl")
-    hollow = p.sketch(Plane.xz(18), name="Bowl void")
-    hollow.slot((0, 28.0), (0, 38.0), width=34.0)
-    p.extrude(hollow.add(), 36.0, mode="cut", name="Bowl void")
-    p.material("aluminum")
-    # Its own origin is the flange face and its Z points the way the BODY
-    # grows, because aligning two frames matches Z to Z: pointing it back down
-    # the bore mated the carburettor INTO the head, and the study said
-    # `carburettor x valve` at every sample — quite correctly.
-    p.frame("flange", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
@@ -780,7 +752,10 @@ def top_end(app, rig, occ, main_mate):
     """Head, two valves, camshaft. The camshaft runs at half crank speed on a
     CHAIN relation; each valve is lifted by a CAM relation off it."""
     h, v, c, cap = head(app), valve(app), camshaft(app), cam_cap(app)
-    carb, exh = carburettor(app), exhaust(app)
+    # The carburettor is a SUBASSEMBLY of its own — seven parts and a
+    # throttle that turns — placed here as one occurrence.
+    carb, throttle = carburettor(app)
+    exh = exhaust(app)
     b = app.part("barrel")
     ho = rig.place(h, at=(0, 0, DECK))
     rig.fasten((occ["barrel"], "deck"), (ho, "deck"), flipped=False)
@@ -816,9 +791,16 @@ def top_end(app, rig, occ, main_mate):
     # ---- breathing -------------------------------------------------------
     # Each bolts to its own valve's port frame, so which side they land on is
     # the HEAD's business and not a coordinate repeated here.
-    for part, i in ((carb, 0), (exh, 1)):
-        po = rig.place(part, at=(0, 0, DECK + PORT_Z[i]))
-        rig.fasten((ho, f"port_{i}"), (po, "flange"), flipped=False)
+    # A SUB-ASSEMBLY MATES BY ITS OWN ORIGIN. It has no frames or faces of
+    # its own — the app says so outright — and a mate connector will not take
+    # a path into one either, so the origin is the datum and the thing has to
+    # be BUILT around the origin you mean to mate. The carburettor's body is
+    # fixed at its assembly's origin with the flange face there, which is why
+    # this needs nothing but the port frame on the other side.
+    co = rig.place(carb, at=(0, 0, DECK + PORT_Z[0]), name="carburettor")
+    rig.fasten((ho, "port_0"), co, flipped=False)
+    eo = rig.place(exh, at=(0, 0, DECK + PORT_Z[1]))
+    rig.fasten((ho, "port_1"), (eo, "flange"), flipped=False)
 
     for i in range(len(CAM_BEARING_Y)):
         capo = rig.place(cap, at=(0, CAM_BEARING_Y[i], DECK + CAM_Z))

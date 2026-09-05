@@ -1303,10 +1303,16 @@ class Occurrence:
 
 class Asm(_Tab):
     def place(self, part, at=None, fixed=False, name=None):
-        """Place a part. `at` is a world position; leave it out and mate it
-        instead — which is the point."""
+        """Place a part OR ANOTHER ASSEMBLY. `at` is a world position; leave
+        it out and mate it instead — which is the point.
+
+        `add_occurrence` has always taken either ("a part OR another assembly
+        in the active assembly"), and this took only a Part — so a subassembly
+        had to be placed by passing its name as a bare string, which reads
+        like a mistake rather than a feature.
+        """
         self.activate()
-        kw = {"part": part.name if isinstance(part, Part) else part,
+        kw = {"part": part.name if isinstance(part, (Part, Asm)) else part,
               "fixed": fixed}
         if name:
             kw["name"] = name
@@ -1420,14 +1426,18 @@ def _conn(spec):
     its origin."""
     if isinstance(spec, tuple) and len(spec) == 2:
         occ, what = spec
+        # A PATH names a part inside a sub-assembly ("carburettor/carb body"),
+        # which is how the app says to reach one: a sub-assembly occurrence
+        # "has no frames or faces of its own".
+        who = occ if isinstance(occ, str) else occ.id
         if isinstance(what, str):
-            return {"occurrence": occ.id, "frame": what}
+            return {"occurrence": who, "frame": what}
         if isinstance(what, Frame):
-            return {"occurrence": occ.id, "frame": what.name}
+            return {"occurrence": who, "frame": what.name}
         if isinstance(what, Edge):
-            return {"occurrence": occ.id, "face": what.ref}
+            return {"occurrence": who, "face": what.ref}
         if isinstance(what, Face):
-            return {"occurrence": occ.id, "face": what.ref}
+            return {"occurrence": who, "face": what.ref}
         raise SdkError(
             f"a connector is (occurrence, frame name | Frame | Face | Edge), "
             f"not {what!r} — for an occurrence's ORIGIN pass the occurrence "
