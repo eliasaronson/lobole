@@ -152,7 +152,10 @@ claim**, and results are committed, never overwritten.
 ## Driving / screenshotting the running app
 
 The app must own a real renderer to screenshot; true `--headless` has none.
-- **The human's instance is `dev-watch.sh` on port 8799** — a windowed build in
+- **The human's instance is `dev-watch.sh`, and the REGISTRY says which port** —
+  `~/.local/state/designer/instances/*.json`, or `Designer.instances()`. It was
+  8799 when this line was written and has been 9090 since; a number repeated in
+  a doc goes stale while the registry cannot. It is a windowed build in
   their display session that relaunches on rebuild. It is the build under review.
   Read from it (get_state) freely; do NOT mutate their open document — or their
   preferences (`set_settings` writes `~/.config/designer/settings.json`).
@@ -171,7 +174,8 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   It also does NOT isolate `XDG_STATE_HOME`: its autosave lands in the user's
   real `~/.local/state/designer/` and will overwrite an unsaved document's
   recovery copy. Export a scratch one when driving a job.
-  Use a scratch port (NOT 8799). One-shot:
+  Use a scratch port (`tools/scratch_port.py` picks one that is free and
+  unclaimed, and never the human's). One-shot:
   `headless-preview.sh --render PROJECT OUT.png <port>`. Only `ui_action`
   needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
 - **Non-visual checks need no GPU**: `build/designer --headless --remote <port>`.
@@ -194,7 +198,7 @@ git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/work
 (cmake fails without `git submodule update --init`). ~75s to a working binary
 (ccache-warm). It then **picks and prints a scratch port** for that worktree
 (`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
-instances, and never 8799), so you no longer hold one in your head. Integrate
+instances, and never the human's), so you no longer hold one in your head. Integrate
 SERIALLY: merge one branch to main, run suites, then the next.
 
 ## Profiling
