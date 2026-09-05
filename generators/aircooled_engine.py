@@ -85,26 +85,28 @@ def barrel(app):
             + [(WALL_R, DECK - FLANGE_T), (FLANGE_R, DECK - FLANGE_T),
                (FLANGE_R, DECK), (BORE_R, DECK)])
     p.revolve_profile(prof, plane=Plane.xz(), axis="z", name="Barrel")
-    # Fins INTERRUPTED at each bolt, then a boss down the barrel — before the
-    # holes are drilled, or they would be filled in again.
+    # A FULL-HEIGHT boss at each bolt, before the holes are drilled or they
+    # would be filled in again.
     #
-    # Two refusals got this right, and both were the app describing real
-    # geometry rather than complaining. The bolt circle is at r=65, inside the
-    # deck flange but outside the wall, so a blind hole first bottomed out
-    # 3 mm into the topmost fin ("the axis runs into barrel 31 mm in"). Adding
-    # a boss was not enough on its own: the FINS still cross the bolt axis all
-    # the way down, so the stack continued past the blind hole and the axis
-    # was blocked in a segment that was not the last one. A real finned barrel
-    # is cast exactly this way — the fins stop either side of each through-bolt
-    # spigot.
-    notch = p.sketch(Plane.xy(DECK, flip=True), name="Fin relief")
-    for x, y in bolt_xy():
-        notch.circle((x, y), d=38.0)
-    p.extrude(notch.add(), DECK - BARREL_Z, mode="cut", name="Fin relief")
+    # It has to reach INSIDE the wall to be part of the barrel. A boss at
+    # r=65 spans r=50..80, which overlaps the r=52 wall by two millimetres and
+    # merges; the fins, which reach r=72, run into it. That is what an
+    # air-cooled barrel's through-bolt spigot looks like.
+    #
+    # The first attempt relieved the fins with a d=38 cut and then added a
+    # d=30 boss. The relief reaches r=46 and the boss only r=50, so it ate
+    # four millimetres of the wall the boss needed to land on: four pillars
+    # hanging off the deck flange with daylight behind them, one solid body
+    # (so nothing complained) and obviously wrong the moment you look at it.
+    # Nothing here is a substitute for looking at the part.
+    #
+    # Full height rather than 70: below the boss the fins would cross the
+    # bolt axis again, which is the geometry that made `fit_fastener` refuse
+    # in the first place.
     boss = p.sketch(Plane.xy(DECK, flip=True), name="Bolt bosses")
     for x, y in bolt_xy():
         boss.circle((x, y), d=30.0)
-    p.extrude(boss.add(), 70.0, mode="add", name="Bolt bosses")
+    p.extrude(boss.add(), DECK - BARREL_Z, mode="add", name="Bolt bosses")
     holes = p.sketch(Plane.xy(DECK, flip=True), name="Head bolt holes")
     for x, y in bolt_xy():
         holes.circle((x, y), d=11.0)

@@ -44,6 +44,17 @@ in"*. Adding a boss was not enough — the fins still cross the bolt line all
 the way down. A real finned barrel is cast exactly the way the fix models it:
 the fins stop either side of each through-bolt spigot.
 
+**Four bolt bosses hanging in mid-air, and nothing complained.** The first
+version relieved the fins with a d=38 cut at each bolt and then added a d=30
+boss. The relief reaches r=46 and the boss only r=50, so it ate four
+millimetres of the very wall the boss had to land on: four pillars hanging off
+the deck flange with daylight behind them. Every check passed — one solid
+body (the flange joins them at the top), the study clean, the bolts fitted —
+because none of them asks "is this shape sensible". It took a person looking
+at the part. The boss now runs the barrel's full height and overlaps the wall
+by two millimetres, which is what a through-bolt spigot actually is, and the
+fins run into it.
+
 **A blind hole at the end of a truncated joint was refused** — and this one
 was a defect, not geometry. The head bolts stop in a blind hole 30 mm into the
 barrel, and their axis carries on 158 mm further into a crank web they do not
@@ -58,8 +69,8 @@ a joint ends.
 
 ## What it looks like
 
-A finned barrel and head, four bolt bosses running down the outside with the
-fins relieved around them, shaped crank webs and counterweights, a turned
+A finned barrel and head, four bolt bosses running the barrel's full height
+with the fins running into them, shaped crank webs and counterweights, a turned
 piston with a dished underside, a waisted rod, and egg-shaped cam lobes. Every
 one of those came from a profile, and every dimension is still a variable —
 change `FIN_PITCH` and the barrel re-fins itself.
