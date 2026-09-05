@@ -752,9 +752,9 @@ def top_end(app, rig, occ, main_mate):
     """Head, two valves, camshaft. The camshaft runs at half crank speed on a
     CHAIN relation; each valve is lifted by a CAM relation off it."""
     h, v, c, cap = head(app), valve(app), camshaft(app), cam_cap(app)
-    # The carburettor is a SUBASSEMBLY of its own — seven parts and a
-    # throttle that turns — placed here as one occurrence.
-    carb, throttle = carburettor(app)
+    # The carburettor is a SUBASSEMBLY of its own — eleven parts and a
+    # throttle LINKAGE that closes a loop — placed here as one occurrence.
+    carb, throttle, cable = carburettor(app)
     exh = exhaust(app)
     b = app.part("barrel")
     ho = rig.place(h, at=(0, 0, DECK))

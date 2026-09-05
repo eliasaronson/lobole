@@ -228,6 +228,57 @@ The throttle really turns: driving its mate from 0 to 90 degrees takes the
 metal across a horizontal section through the bore from 2701.8 mm² to 2194 —
 the butterfly going from lying across the bore to edge-on in it.
 
+## Round five: a throttle mechanism, not a throttle
+
+Four more parts — bellcrank, link rod, idle stop screw, mixture screw — plus
+a linkage bracket, a pivot boss and a gusset on the casting. Eleven parts,
+25 BOM rows. The point is the loop: body → spindle → lever → link rod →
+bellcrank → body, four revolutes, so the carburettor stops being a tree with
+one turning joint and becomes a four-bar the A6 solver has to close. It
+closes to 1.6e-07 mm.
+
+**Four wrong diagnoses before the right one, and they were all geometry.**
+The loop would not close, and each residual looked like a different bug: "off
+by 68 mm" (link rod pointing away), "off by 6 mm" (the two crank pins in
+different planes), "off by 387.9" then "418.1" (the bellcrank arm reversed).
+Every one of those was a real error and fixing it moved the number. The cause
+of the *last* one was none of them: the closing mate's two axes pointed
+OPPOSITE ways, so the solver had to spin the rod end for end to satisfy the
+axis, which swung its far eye off the crank. `flipped=True` on that one mate
+took 418.1 mm to 5e-06. A coupler in a four-bar is turned end for end
+relative to the crank it drives — the flip is the normal case, not the
+exception, and nothing in the residual says "axis" rather than "position".
+
+**Seeding the poses made it worse.** While the loop was failing I placed the
+new occurrences near where they belonged with `at=`. That is exactly wrong:
+the mates already put every pin where it belongs — measured, both crank pins
+land coincident with the link rod's eyes — and an `at=` only moves the
+starting pose away from the answer. A loop that will not close is a geometry
+error every time; it has never once been a solver wanting a hint. The seeds
+are gone.
+
+**A four-bar that closes is not yet a throttle.** Every mate can be right,
+the loop can solve, and the linkage can still transmit nothing. So the
+generator drives the far end and reads the near end: turn the CABLE arm 60
+degrees and section the assembly horizontally at spindle height. The metal
+that plane crosses falls from 3053.2 to 2480.0 mm² as the butterfly goes from
+lying across the bore to edge-on in it. That is the check — the residual only
+says the bars fit together.
+
+**The intended contacts had to be named.** Four pairs are supposed to touch:
+a crank running on its pivot boss, a link rod lying against the lever it
+drives, two screws entering the mouths of their tapped holes. `check()` has
+no way to be told a contact is deliberate, so the script lists those four
+pairs and still fails on anything else. Worth noticing as a gap: "these two
+are meant to touch" is a property of the model, and it currently lives in the
+script that built it.
+
+**Render before believing.** The return spring passed every check — a spring
+is supposed to touch nothing — and rendered hanging in clear air beside the
+casting, because its post was a frame on the barrel rather than on the new
+bracket. Same shape of error as the floating bolt bosses and the floating
+float bowl, and again only a picture found it. Three rounds, three of these.
+
 ## Materials
 
 Every part carries one, so the BOM has masses rather than nulls and the
