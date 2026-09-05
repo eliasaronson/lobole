@@ -59,8 +59,10 @@ CASE_X = CRANK_R + 35.0 + 14.0 + 4.0
 SUMP_Z = -128.0         # the bottom of the sump
 MAIN_D = 50.0           # main journal diameter
 PIN_D = 42.0            # crank pin diameter
-DRIVE_Y = -104.0        # the plane the timing drive runs in, outboard of the
-                        # case's left wall
+# The plane the timing drive runs in — outboard of the case's left wall AND
+# of the intake, which sticks out to y = -68 and carries a float bowl beyond
+# that. At -104 the carburettor sat in the cam sprocket at every sample.
+DRIVE_Y = -150.0
 CRANK_SPROCKET_R = 32.0 # 1 turn of the crank...
 CAM_SPROCKET_R = 64.0   # ...is half a turn of the cam: 2:1, drawn as it is
                         # geared
@@ -92,6 +94,20 @@ LOBE_DURATION = 150.0   # ...and how long it is open. Shared with the drawn
 CAM_SHAFT_D = 26.0
 CAM_BEARING_W = 14.0
 NOSE_W = 22.0           # the lobe nose's width across
+
+# ---- breathing -----------------------------------------------------------
+# A port per valve, leaving the head sideways along the CAM axis — the valves
+# sit fore and aft, so that is the direction each one's throat can run without
+# crossing the other's. Intake at -Y with the carburettor, exhaust at +Y.
+PORT_D = 30.0           # throat, a shade under the 34 valve head
+# Height up the head for each throat, and they are DIFFERENT on purpose.
+# Both at 30 made the two cylinders coaxial — same axis, same radius, a 20 mm
+# plug of head between them — and OCC's second subtract failed outright: not
+# an error, an empty result, so the head silently ceased to exist and the only
+# body left was a cam tower. Staggered they are two independent cuts.
+PORT_Z = (26.0, 36.0)
+FLANGE_OD = 62.0
+FLANGE_T2 = 10.0
 # Outboard of everything on the shaft, and CENTRED on these numbers: the
 # tower is drawn at y + W/2 and extruded -W, so it spans y +- 7. The lobes
 # occupy y -30..-14 and 14..30, and each valve's spring RETAINER is 17 in
@@ -183,6 +199,42 @@ def head(app):
             + finned_wall(FLANGE_T, 60.0, WALL_R, FIN_R, first=2.0, last=2.0)
             + [(WALL_R, 60.0), (0.0, 60.0)])
     p.revolve_profile(prof, plane=Plane.xz(), axis="z", name="Head")
+    # ---- the ports, BEFORE the valve gear is cut -------------------------------------------------------
+    # Each valve breathes SIDEWAYS: a throat from the valve's own port up out
+    # through the head wall, and a bolting flange around where it comes out.
+    # The valves are fore and aft on the cam axis, so each throat runs along
+    # its own valve's side and the two never meet.
+    #
+    # CUT FIRST, before the guides and ports. Done afterwards, the throat's
+    # cylinder meets the guide bore's at right angles through the same point
+    # and OCC's subtract failed outright — not an error, just an empty result,
+    # so the head silently ceased to exist and the only body left was a cam
+    # tower. Against the plain revolve both cuts are clean.
+    for i, (_, vy) in enumerate(VALVE_XY):
+        # An extrude from Plane.xz(y) always travels toward -Y, so each side
+        # is sketched at the HIGHER end of the span it makes and given the
+        # span's length. Written once for +Y and mirrored by hand, the -Y
+        # throat ran from y=-56 out to -106 — entirely outside a head that
+        # ends at 78 — and cut the head to pieces: it came back as a single
+        # 23885 mm3 body called "Cam tower".
+        sign = 1.0 if vy > 0 else -1.0
+        root = sign * (WALL_R + 6.0)          # where the flange starts
+        face = root + sign * FLANGE_T2        # ...and its outer face
+        span = lambda a, b: (max(a, b), abs(b - a))
+
+        at, length = span(root, face)
+        boss = p.sketch(Plane.xz(at), name="Port flange")
+        boss.circle((0, PORT_Z[i]), d=FLANGE_OD)
+        p.extrude(boss.add(), length, mode="add", name="Port flange")
+
+        # The throat, from the valve's own axis out through that face — it
+        # meets the guide bore on the way, which is what joins port to valve.
+        at, length = span(vy - sign * 12.0, face)
+        thr = p.sketch(Plane.xz(at), name="Port throat")
+        thr.circle((0, PORT_Z[i]), d=PORT_D)
+        p.extrude(thr.add(), length, mode="cut", name="Port throat")
+        p.frame(f"port_{i}", origin=(0, face, PORT_Z[i]), z=(0, sign, 0),
+                x=(1, 0, 0))
     # Two valve guides, bored through, either side of the bore's axis.
     guides = p.sketch(Plane.xy(-5), name="Guides")
     for x, y in VALVE_XY:
@@ -228,6 +280,71 @@ def head(app):
         # Z points DOWN the guide, so the cam's positive lift OPENS the valve
         # into the cylinder rather than pulling it up into the head.
         p.frame(f"guide_{i}", origin=(x, y, 0), z=(0, 0, -1), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+def carburettor(app):
+    """The intake side: a flange, a bell-mouthed body and a float bowl.
+
+    Turned from one profile where it can be — a carburettor's barrel IS a
+    turned part — with the bowl added underneath.
+    """
+    p = app.part("carburettor")
+    # Flange, barrel, and a bell mouth that opens out at the far end.
+    p.revolve_profile(
+        [(0.0, 0.0), (FLANGE_OD / 2, 0.0), (FLANGE_OD / 2, FLANGE_T2),
+         (21.0, FLANGE_T2), (21.0, 54.0), (30.0, 66.0), (30.0, 70.0),
+         (24.0, 70.0), (15.0, 62.0), (15.0, 0.0)],
+        plane=Plane.xz(), axis="z", name="Body")
+    # The float bowl, hung under the barrel.
+    bowl = p.sketch(Plane.xz(24), name="Float bowl")
+    bowl.slot((0, 26.0), (0, 40.0), width=46.0)
+    p.extrude(bowl.add(), 48.0, mode="add", name="Float bowl")
+    hollow = p.sketch(Plane.xz(18), name="Bowl void")
+    hollow.slot((0, 28.0), (0, 38.0), width=34.0)
+    p.extrude(hollow.add(), 36.0, mode="cut", name="Bowl void")
+    p.material("aluminum")
+    # Its own origin is the flange face and its Z points the way the BODY
+    # grows, because aligning two frames matches Z to Z: pointing it back down
+    # the bore mated the carburettor INTO the head, and the study said
+    # `carburettor x valve` at every sample — quite correctly.
+    p.frame("flange", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+def exhaust(app):
+    """The exhaust side: a flange and a header pipe that turns down.
+
+    The bend is a PIPE swept along a drawn path — an arc into a straight —
+    which is what a header is, and it is the one part here that could not be
+    drawn as a profile.
+    """
+    p = app.part("exhaust")
+    p.revolve_profile(
+        [(0.0, 0.0), (FLANGE_OD / 2, 0.0), (FLANGE_OD / 2, FLANGE_T2),
+         (24.0, FLANGE_T2), (24.0, 18.0), (18.0, 18.0), (18.0, 0.0)],
+        plane=Plane.xz(), axis="z", name="Flange")
+    # The path: straight out of the flange, then a quarter turn away.
+    #
+    # Sampled and fitted, because Curve3D offers `fit_spline`, `helix` and
+    # `control_poly` and not an arc — so the bend is 16 points on a circle
+    # and the spline through them. Close enough for a header, and it is the
+    # feature doing what it is for rather than a shape wished into existence.
+    R = 70.0
+    pts = [[0.0, 0.0, 16.0], [0.0, 0.0, 40.0]]
+    for j in range(1, 17):
+        t = math.radians(90.0 * j / 16.0)
+        pts.append([R * (1.0 - math.cos(t)), 0.0, 40.0 + R * math.sin(t)])
+    p.app.add_feature(feature={
+        "type": "Curve3D", "name": "Header path", "kind": "fit_spline",
+        "points": pts})
+    p.app.add_feature(feature={
+        "type": "Pipe", "name": "Header", "path_id": p.state()["features"][-1]["id"],
+        "outer_diameter": 36.0, "wall_thickness": 3.0, "mode": "add"})
+    p.material("stainless_steel")
+    p.frame("flange", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
 
@@ -663,6 +780,7 @@ def top_end(app, rig, occ, main_mate):
     """Head, two valves, camshaft. The camshaft runs at half crank speed on a
     CHAIN relation; each valve is lifted by a CAM relation off it."""
     h, v, c, cap = head(app), valve(app), camshaft(app), cam_cap(app)
+    carb, exh = carburettor(app), exhaust(app)
     b = app.part("barrel")
     ho = rig.place(h, at=(0, 0, DECK))
     rig.fasten((occ["barrel"], "deck"), (ho, "deck"), flipped=False)
@@ -695,6 +813,13 @@ def top_end(app, rig, occ, main_mate):
     cam_occ = rig.place(c, at=(0, 0, DECK + 110))
     cam_mate = rig.revolute((ho, "cam_axis"), (cam_occ, "axle"), flipped=False)
     rig.chain(main_mate, cam_mate, teeth_a=1, teeth_b=2, name="timing chain")
+    # ---- breathing -------------------------------------------------------
+    # Each bolts to its own valve's port frame, so which side they land on is
+    # the HEAD's business and not a coordinate repeated here.
+    for part, i in ((carb, 0), (exh, 1)):
+        po = rig.place(part, at=(0, 0, DECK + PORT_Z[i]))
+        rig.fasten((ho, f"port_{i}"), (po, "flange"), flipped=False)
+
     for i in range(len(CAM_BEARING_Y)):
         capo = rig.place(cap, at=(0, CAM_BEARING_Y[i], DECK + CAM_Z))
         rig.fasten((ho, f"cap_{i}"), (capo, "seat"), flipped=False)

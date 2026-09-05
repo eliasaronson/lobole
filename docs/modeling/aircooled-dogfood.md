@@ -132,6 +132,56 @@ than riding them. A chain modelled where it really sits would be reported as a
 clash at every sample — a true statement about a deliberate simplification, and
 belt paths that follow their sprockets are explicitly out of scope.
 
+## Round three: valve gear that works, and breathing
+
+The camshaft ran along Y while the valves sat across it, so no lobe was ever
+over a stem. Two constraints settle the layout together: a cam can only press
+what is under it, and the cam must be parallel to the crank for a flat chain
+to reach both sprockets — so the valves moved fore and aft to (0, +-22).
+Added spring retainers, cam bearing towers with OPEN saddles and the caps that
+close them, and then an intake and an exhaust.
+
+Fourteen parts, 22.97 kg, 977 pair checks over 720 degrees in 1.8 s, clean.
+
+**The lobe is drawn from the relation's own lift function**, and it took three
+goes. As a base circle plus a slot it disagreed with the table twice: a slot
+reaches `offset + width/2`, so its tip stood at 20 against a 15 base circle —
+5 mm of drawn lift where the relation lifts 9 — and even sized right, a slot's
+flanks are arcs where the relation's lift is a cosine, so the drawn cam pushed
+lower than the valve had moved at 16 of 49 samples. Now each point sits at
+`CAM_BASE_R + lift(a)` placed at `180 - a`, and measured against the relation
+the two agree to 0.01 mm at every angle. The sign of that phase was settled by
+reading the study, not by deriving it.
+
+**The camshaft stopped 2 mm inside its sprocket**, so the bore showed daylight
+and the drive read as unconnected however correct the mate was — spotted in a
+render while every measurement said fine.
+
+**Two OCC booleans failed by returning nothing.** Neither raised an error;
+both just made the head cease to exist, leaving a lone cam tower as the only
+body. A port throat cut after the guide bore, meeting it at right angles
+through the same point, was the first — cutting the throats before the valve
+gear fixes it. The second was subtler: both throats at the same height are
+COAXIAL cylinders with a 20 mm plug of head between them, and the second
+subtract failed. Staggering them (26 and 36) makes two independent cuts. A
+boolean that fails loudly is a bad afternoon; one that succeeds and returns
+emptiness is a worse one.
+
+**A part grows along its frame's Z.** The carburettor's flange frame pointed
+back down its own bore, so aligning it to the head's port mated the whole
+carburettor INTO the head — `carburettor x valve` at every sample, quite
+correctly.
+
+**The timing drive has to clear the intake, not just the case.** At y = -104
+it was outboard of the crankcase wall and straight through the carburettor's
+float bowl. `DRIVE_Y` is -150 now.
+
+Two defects from this round were fixed in the app rather than modelled around:
+a mesh clash where an exact boolean said clear (the containment fallback
+tested a bounding box's CENTRE, which for a cap that straddles a shaft lies
+inside the shaft), and a bounding box 60% too big on swept surfaces. Both in
+`fix(collide,cad)`.
+
 ## Materials
 
 Every part carries one, so the BOM has masses rather than nulls and the
