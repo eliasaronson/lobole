@@ -120,7 +120,30 @@ include(Catch)
 # about a test added here — it named only the topology/FEM gates and never
 # learned about the CAM ones, so the "8 s" inner loop had quietly become 49 s.
 # It also buys `ctest -L cam`, `-L sketch` and friends for free.
-catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS)
+# XDG_STATE_HOME and XDG_CONFIG_HOME point INTO THE BUILD TREE, so no C++
+# test can write to the developer's own state.
+#
+# They could, and did. `Autosaver::StateDir()` falls back to
+# $HOME/.local/state/designer when XDG_STATE_HOME is unset, and the unit tests
+# run in-process with whatever environment ctest was given — so a test that
+# saved a project called RecentProjects::Remember and put its temp directory
+# in the RECENT PROJECTS MENU of the app on that machine. Nine entries like
+# /tmp/nix-shell-3687090-.../designer_save_drawing_tab, pointing at
+# directories deleted seconds later, from three runs of the suite.
+#
+# The python smoke tests already do this per test (smoke_app.py sets both);
+# this is the same isolation for the ones that run in-process, and it covers
+# every future test rather than the one that was noticed. Autosave sidecars
+# for unsaved documents and the instance registry land here too.
+set(DESIGNER_TEST_HOME "${CMAKE_CURRENT_BINARY_DIR}/test-home")
+file(MAKE_DIRECTORY "${DESIGNER_TEST_HOME}/state" "${DESIGNER_TEST_HOME}/config")
+# The semicolon is ESCAPED: unescaped, CMake splits the string into two list
+# elements, so ENVIRONMENT takes the first and the second is read as another
+# property name — and the whole thing is silently dropped. It generated tests
+# with no ENVIRONMENT at all, which looked exactly like it had worked.
+catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
+                     PROPERTIES ENVIRONMENT
+                     "XDG_STATE_HOME=${DESIGNER_TEST_HOME}/state\;XDG_CONFIG_HOME=${DESIGNER_TEST_HOME}/config")
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
 # so the packaged binary can be identified on a display-less machine.
@@ -147,7 +170,9 @@ if(TARGET fem_gpu)
     # skips as FAILURES — which is what a GPU-less machine (a container, a CI
     # runner) sees.
     catch_discover_tests(femgpu_tests ADD_TAGS_AS_LABELS
-                         PROPERTIES RESOURCE_LOCK gpu SKIP_RETURN_CODE 4)
+                         PROPERTIES RESOURCE_LOCK gpu SKIP_RETURN_CODE 4
+                         ENVIRONMENT
+                         "XDG_STATE_HOME=${DESIGNER_TEST_HOME}/state\;XDG_CONFIG_HOME=${DESIGNER_TEST_HOME}/config")
 endif()
 
 # GUI smoke tests drive the real app through ImGui Test Engine. They go
