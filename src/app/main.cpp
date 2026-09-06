@@ -1318,6 +1318,33 @@ static void RecordWindowGeometry(GLFWwindow* w) {
 // Lives here rather than beside RunHeadless because everything it drives —
 // SetupVulkan, the renderer globals, CleanupVulkan — is file-static in this
 // translation unit.
+// Everything that has to be true of the renderers before --offscreen draws:
+// the document->renderer projection, plus the render-quality targets, the
+// section planes and the deform scale, which only matter to a frame.
+//
+// Called from the capture path rather than the tick, which is the whole point
+// of the mode: it draws only when asked, so an edit nobody looks at costs no
+// tessellation and no upload. On a 200-body part that is ~2-5 s of renderer
+// work per edit that used to be spent unconditionally. The RPCs that read the
+// projection (select_face and friends) call ui::SyncRenderersToDocument for
+// themselves; the target maintenance below is a frame's business alone.
+static void SyncOffscreenScene() {
+  ui::SyncRenderersToDocument(g_App);
+  // Skipping the rebinds would leave the mesh renderer sampling destroyed
+  // views on the first quality change.
+  if (g_ShadowRenderer && g_MeshRenderer &&
+      g_ShadowRenderer->SetResolution((uint32_t)g_App.shadowMapSize)) {
+    g_MeshRenderer->RebindShadowMap(g_ShadowRenderer->ShadowMapView());
+  }
+  if (g_SSAORenderer && g_MeshRenderer &&
+      g_SSAORenderer->SetFullResolution(g_App.ssaoFullRes)) {
+    g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+  }
+  for (SceneRenderer* r : g_Scene)
+    r->SetClipPlanes(ui::SectionPlanes(g_App));
+  g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
+}
+
 static std::atomic<bool> g_OffscreenStopRequested{false};
 static void HandleOffscreenStop(int) { g_OffscreenStopRequested = true; }
 
@@ -1491,31 +1518,9 @@ static int RunOffscreen(const CommandLineArgs& args) {
     g_Camera->Update(static_cast<float>(now - last));
     last = now;
 
-    // The per-frame sync the GUI loop does before rendering, minus ImGui:
-    // document edits into the renderers, selection into highlights (only
-    // DrawUI calls this in the GUI — without it a select_face followed by a
-    // screenshot would silently show no highlight), render-quality target
-    // recreation (skipping the rebinds would leave the mesh renderer
-    // sampling destroyed views on the first quality change), section planes.
-    ui::SyncDocumentRenderers(g_App);
-    ui::SyncFieldRenderer(g_App);
+    // Playback is WALL-CLOCK: it has to advance whether or not anybody is
+    // looking, so it ticks here while the projection it feeds does not.
     ui::TickCamPlayback(g_App, now);
-    ui::SyncCamPlayback(g_App);
-    // Per frame on purpose: the resyncs are version-gated and
-    // picking a rim or ticking a washer bumps no version.
-    ui::SyncFastenerGhost(g_App);
-    ui::SyncSelectionHighlights(g_App);
-    if (g_ShadowRenderer && g_MeshRenderer &&
-        g_ShadowRenderer->SetResolution((uint32_t)g_App.shadowMapSize)) {
-      g_MeshRenderer->RebindShadowMap(g_ShadowRenderer->ShadowMapView());
-    }
-    if (g_SSAORenderer && g_MeshRenderer &&
-        g_SSAORenderer->SetFullResolution(g_App.ssaoFullRes)) {
-      g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
-    }
-    for (SceneRenderer* r : g_Scene)
-      r->SetClipPlanes(ui::SectionPlanes(g_App));
-    g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
     // Every long-running operation, from one place (ui/BackgroundJobs.h):
     // whether a background job can finish must not depend on which panel is
     // open, which is what two of them used to depend on.
@@ -1535,6 +1540,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
     std::string shotPath;
     if ((animatingSince < 0 || now - animatingSince > 5.0) &&
         server.WantsScreenshot(shotPath)) {
+      SyncOffscreenScene();
       const glm::mat4 view = g_Camera->GetViewMatrix();
       const glm::mat4 proj = g_Camera->GetProjectionMatrix();
       for (SceneRenderer* r : g_Scene)

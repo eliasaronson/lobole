@@ -99,6 +99,51 @@ def main():
             "width": 20, "height": 12, "depth": 40})
         expect(r.get("regen", {}).get("ok"), f"step regenerates ({r})")
 
+        phase("the projection is LAZY: edits nobody looks at cost nothing")
+        # The mode draws only when asked, so the document->renderer
+        # projection (tessellate + upload EVERY body, which on a 200-body
+        # part is seconds) must not run on the tick after an edit. Read the
+        # app's own sync log rather than a timing, which would be a flake.
+        def syncs():
+            return app.log().count("Document synced")
+
+        before = syncs()
+        for i in range(5):
+            d.call("add_feature", feature={
+                "type": "Box", "name": f"Lazy {i}", "position": [0, 0, 60 + i * 30],
+                "width": 10, "height": 10, "depth": 10})
+        time.sleep(0.5)  # several ticks: an eager loop would have projected
+        expect(syncs() == before,
+               f"5 edits with nothing looking projected nothing "
+               f"({syncs() - before} syncs)")
+        # ...and the deferred work still happens, once, when something looks.
+        d.request("screenshot", {"path": os.path.join(tmp, "lazy.png")})
+        expect(syncs() == before + 1,
+               f"the capture projects exactly once ({syncs() - before})")
+        # The capture is of the CURRENT document, not the last projected one:
+        # every box added above has to be in the count it drew.
+        expect(f"{5 + 2} bodies" in app.log().rsplit("Document synced", 1)[-1],
+               "the projection the capture forced is the current document")
+        for i in reversed(range(2, 7)):  # the five, after Box 1 and Box 2
+            d.call("delete_feature", index=i)
+        time.sleep(0.2)
+
+        phase("a stale projection reports no render id rather than a wrong one")
+        # get_state is the hot poll and does NOT force a projection, so after
+        # an edit the volatile bodies[].mesh id would describe superseded
+        # geometry. It is omitted instead: absent is loud, wrong is silent.
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Stale probe", "position": [0, 0, 200],
+            "width": 10, "height": 10, "depth": 10})
+        bodies = d.call("get_state")["bodies"]
+        expect(all("mesh" not in b for b in bodies),
+               f"no render ids while the projection is behind ({bodies})")
+        d.call("delete_feature", index=2)
+        d.request("screenshot", {"path": os.path.join(tmp, "current.png")})
+        bodies = d.call("get_state")["bodies"]
+        expect(all("mesh" in b for b in bodies),
+               f"render ids are back once something has drawn ({bodies})")
+
         phase("GUI-driving refusals survive, naming the mode")
         expect_error(d, "menu_click", "offscreen", path="Edit/Undo")
         expect_error(d, "key_press", "offscreen", chord="Ctrl+Z")
