@@ -1,0 +1,1080 @@
+#ifdef HAVE_CAM
+
+// The setup and the job document: fixture frames, the indexed 4th axis,
+// the workpiece and where zero is on it, and N parts placed in one sheet.
+// One of five files split from test_cam.cpp
+// (docs/architecture-review-2026-09-06.md, stage 1).
+
+#include "cam_fixtures.h"
+
+TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
+  // Setups are document objects (v58), and since v73 they are objects of a
+  // JOB document rather than of the part (docs/cam/job-document.md). They
+  // describe how to cut the model and change nothing about it, so they must
+  // NOT touch the regen chain hash — a new operation rebuilding the geometry
+  // would be a bug with a long tail. Structural now that the setups live
+  // elsewhere entirely, and still the claim worth asserting.
+  auto doc = BlockDoc();
+  const size_t hashBefore = doc->TipChainHash();
+
+  cam::JobDocument job;
+  cam::Setup& setup = job.AddSetup("Side A");
+  setup.machine.post = "linuxcnc";
+  setup.safeZ = 12.5;
+  setup.tools[0].diameter = 3.175;
+  setup.tools[0].feedCut = 450.0;
+  cam::Operation op;
+  op.id = job.AllocateId();
+  op.name = "Outline";
+  op.type = cam::OpType::Profile;
+  op.topZ = 20.0;
+  op.bottomZ = 0.0;
+  op.stepdown = 4.0;
+  op.tabCount = 3;
+  op.targets.push_back(cam::Target{0, ElementRef{1, "F:box.side"}});
+  setup.operations.push_back(op);
+
+  CHECK(doc->TipChainHash() == hashBefore); // geometry untouched
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_roundtrip.json";
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
+  REQUIRE(back.has_value());
+  const std::vector<cam::Setup>& setups = (*back)->GetSetups();
+  REQUIRE(setups.size() == 1);
+  CHECK(setups[0].name == "Side A");
+  CHECK(setups[0].machine.post == "linuxcnc");
+  CHECK_THAT(setups[0].safeZ, WithinAbs(12.5, 1e-9));
+  REQUIRE(setups[0].tools.size() == 1);
+  CHECK_THAT(setups[0].tools[0].diameter, WithinAbs(3.175, 1e-9));
+  REQUIRE(setups[0].operations.size() == 1);
+  const cam::Operation& backOp = setups[0].operations[0];
+  CHECK(backOp.type == cam::OpType::Profile);
+  CHECK(backOp.tabCount == 3);
+  CHECK_THAT(backOp.stepdown, WithinAbs(4.0, 1e-9));
+  REQUIRE(backOp.targets.size() == 1);
+  CHECK(backOp.targets[0].ref.name == "F:box.side");
+  std::filesystem::remove(path);
+}
+
+// --- C9: the indexed 4th axis ---------------------------------------------
+
+TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
+  // The strongest test available for a rotary index: a part rotated in the
+  // MODEL and machined at A=0 must produce the same toolpath as the
+  // unrotated part machined by a setup indexed to the same angle. If the
+  // setup frame is wrong, the two disagree.
+  auto flat = BlockDoc(40, 30, 20);
+  cam::Setup direct = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 10.0;
+  op.stepdown = 0.0;
+  direct.operations.push_back(op);
+  const cam::Toolpath a = cam::GenerateAll(direct, flat->GetBodies())[0];
+  REQUIRE(a.error.empty());
+
+  // The same block, rotated 90 degrees about X in the model, cut by a setup
+  // indexed 90 degrees the other way — which puts it back.
+  auto turned = std::make_unique<Document>();
+  turned->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  {
+    // Rotate the body itself, so only the setup frame can undo it.
+    std::vector<Body>& bodies = const_cast<std::vector<Body>&>(
+        static_cast<const Document&>(*turned).GetBodies());
+    glm::mat4 m(1.0f);
+    m[1][1] = 0.0f;
+    m[1][2] = 1.0f;
+    m[2][1] = -1.0f;
+    m[2][2] = 0.0f; // +90 about X
+    for (Body& b : bodies)
+      b.shape = b.shape.Transformed(m);
+  }
+  cam::Setup indexed = BasicSetup();
+  // The machine has the axis, and is indexed on it. Both halves are needed:
+  // a rotated FIXTURE never posts an A word (S3).
+  indexed.machine.hasRotaryAxis = true;
+  indexed.rotationA = 90.0;
+  indexed.operations.push_back(op);
+  const cam::Toolpath b = cam::GenerateAll(indexed, turned->GetBodies())[0];
+  INFO(b.error);
+  REQUIRE(b.error.empty());
+
+  CHECK_THAT(b.CutLength(), WithinRel(a.CutLength(), 1e-6));
+  REQUIRE(b.moves.size() == a.moves.size());
+  for (size_t i = 0; i < a.moves.size(); i++) {
+    INFO("move " << i);
+    CHECK_THAT(b.moves[i].to.x, WithinAbs(a.moves[i].to.x, 1e-6));
+    CHECK_THAT(b.moves[i].to.y, WithinAbs(a.moves[i].to.y, 1e-6));
+    CHECK_THAT(b.moves[i].to.z, WithinAbs(a.moves[i].to.z, 1e-6));
+  }
+
+  // Every move of an indexed setup carries its A, so the file states which
+  // way the part is facing rather than assuming.
+  for (const cam::Move& m : b.moves) {
+    CHECK(m.hasA);
+    CHECK_THAT(m.a, WithinAbs(90.0, 1e-9));
+  }
+  for (const cam::Move& m : a.moves)
+    CHECK_FALSE(m.hasA); // a 3-axis job says nothing about A
+
+  // And the posted file turns the table BEFORE it goes down.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", indexed, {b}, {}, gcode, &error));
+  const size_t aWord = gcode.find("A90");
+  REQUIRE(aWord != std::string::npos);
+  const size_t firstCut = gcode.find("\nG1 ");
+  REQUIRE(firstCut != std::string::npos);
+  CHECK(aWord < firstCut);
+  // …and the tool is at safe Z when it turns. Checked as the STATE at that
+  // line rather than as "the previous line is a retract": the retract is
+  // modal, so when the tool is already clear the post correctly emits
+  // nothing, and asserting on the text would fail for the right reason.
+  double modalZ = std::nan("");
+  bool sawIndexAtSafeZ = false;
+  size_t at = 0;
+  while (at < gcode.size()) {
+    const size_t end = std::min(gcode.find('\n', at), gcode.size());
+    const std::string line = gcode.substr(at, end - at);
+    at = end + 1;
+    const size_t zAt = line.find('Z');
+    if (zAt != std::string::npos && line[0] == 'G')
+      modalZ = std::stod(line.substr(zAt + 1));
+    if (line.find('A') != std::string::npos && line[0] == 'G') {
+      INFO("index at Z " << modalZ);
+      CHECK_THAT(modalZ, WithinAbs(indexed.safeZ, 1e-9));
+      sawIndexAtSafeZ = true;
+    }
+  }
+  CHECK(sawIndexAtSafeZ);
+}
+
+TEST_CASE("cam: an indexed job is verified in its own frame", "[cam]") {
+  // The gap C9 opened and this closes: the posted file is in SETUP space, so
+  // everything it is compared against has to be. Verifying an indexed job
+  // against the unrotated part compares a program with a part that is not in
+  // front of it — and reports a fictional gouge through the whole block.
+  auto turned = std::make_unique<Document>();
+  turned->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  {
+    std::vector<Body>& bodies = const_cast<std::vector<Body>&>(
+        static_cast<const Document&>(*turned).GetBodies());
+    glm::mat4 m(1.0f);
+    m[1][1] = 0.0f;
+    m[1][2] = 1.0f;
+    m[2][1] = -1.0f;
+    m[2][2] = 0.0f; // +90 about X
+    for (Body& b : bodies)
+      b.shape = b.shape.Transformed(m);
+  }
+
+  cam::Setup indexed = BasicSetup();
+  // The machine has the axis, and is indexed on it. Both halves are needed:
+  // a rotated FIXTURE never posts an A word (S3).
+  indexed.machine.hasRotaryAxis = true;
+  indexed.rotationA = 90.0;
+  // Derived, not typed: the depths must come from the frame the cut happens
+  // in, which is the other half of the same bug.
+  indexed.safeZ = cam::DeriveSafeZ(indexed, turned->GetBodies());
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(indexed, turned->GetBodies(), lo, hi));
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 8.0;
+  indexed.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(indexed, turned->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", indexed, paths, {}, gcode, &error));
+
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, indexed, turned->GetBodies(), 0.5);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " rapids "
+                << v.rapidsThroughStock);
+  REQUIRE(v.cells > 0);
+  // Profiling outside the part removes the margin and must not touch it.
+  CHECK(v.maxGouge < 0.6);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+// --- S1-S3: the fixture frame is not a 4th axis ---------------------------
+
+namespace {
+
+// A block turned 90 degrees about X in the MODEL, so only the setup can put
+// it back. Shared by the frame tests below.
+std::unique_ptr<Document> TurnedBlockDoc() {
+  auto turned = std::make_unique<Document>();
+  turned->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  std::vector<Body>& bodies = const_cast<std::vector<Body>&>(
+      static_cast<const Document&>(*turned).GetBodies());
+  glm::mat4 m(1.0f);
+  m[1][1] = 0.0f;
+  m[1][2] = 1.0f;
+  m[2][1] = -1.0f;
+  m[2][2] = 0.0f; // +90 about X
+  for (Body& b : bodies)
+    b.shape = b.shape.Transformed(m);
+  return turned;
+}
+
+cam::Operation ProfileOp() {
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 10.0;
+  op.stepdown = 0.0;
+  return op;
+}
+
+} // namespace
+
+TEST_CASE("cam: a fixture frame cuts what a rotary index would", "[cam]") {
+  // The composition order, pinned. A setup whose FRAME is 90 degrees about X
+  // must cut exactly what a setup indexed to A=90 cuts: they are the same
+  // orientation stated two ways, and the only difference is what the file
+  // says about the machine (the next test). Getting the order wrong — the
+  // index composed before the fixture rather than after — fails here.
+  auto turned = TurnedBlockDoc();
+
+  cam::Setup indexed = BasicSetup();
+  indexed.machine.hasRotaryAxis = true;
+  indexed.rotationA = 90.0;
+  indexed.operations.push_back(ProfileOp());
+  const cam::Toolpath a = cam::GenerateAll(indexed, turned->GetBodies())[0];
+  INFO(a.error);
+  REQUIRE(a.error.empty());
+
+  cam::Setup clamped = BasicSetup();
+  // The same turn, as a fixture: the quaternion for +90 about X.
+  const double h = glm::radians(90.0) * 0.5;
+  clamped.frame = glm::dquat(std::cos(h), std::sin(h), 0.0, 0.0);
+  clamped.operations.push_back(ProfileOp());
+  const cam::Toolpath b = cam::GenerateAll(clamped, turned->GetBodies())[0];
+  INFO(b.error);
+  REQUIRE(b.error.empty());
+
+  REQUIRE(b.moves.size() == a.moves.size());
+  CHECK_THAT(b.CutLength(), WithinRel(a.CutLength(), 1e-9));
+  for (size_t i = 0; i < a.moves.size(); i++) {
+    INFO("move " << i);
+    CHECK_THAT(b.moves[i].to.x, WithinAbs(a.moves[i].to.x, 1e-9));
+    CHECK_THAT(b.moves[i].to.y, WithinAbs(a.moves[i].to.y, 1e-9));
+    CHECK_THAT(b.moves[i].to.z, WithinAbs(a.moves[i].to.z, 1e-9));
+  }
+}
+
+TEST_CASE("cam: clamping a part flat posts no rotary move", "[cam]") {
+  // The bug this whole change exists for: laying a panel flat on the bed used
+  // to be spelled `rotationA`, so a 3-axis router was handed `G0 A90`.
+  auto turned = TurnedBlockDoc();
+  cam::Setup clamped = BasicSetup();
+  const double h = glm::radians(90.0) * 0.5;
+  clamped.frame = glm::dquat(std::cos(h), std::sin(h), 0.0, 0.0);
+  clamped.safeZ = cam::DeriveSafeZ(clamped, turned->GetBodies());
+  clamped.operations.push_back(ProfileOp());
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(clamped, turned->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  for (const cam::Move& m : paths[0].moves)
+    CHECK_FALSE(m.hasA);
+
+  for (const char* post : {"mach3", "linuxcnc"}) {
+    INFO(post);
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess(post, clamped, paths, {}, gcode, &error));
+    // Not one A word, in any line, in either dialect.
+    CHECK(gcode.find(" A") == std::string::npos);
+    CHECK(gcode.find("\nA") == std::string::npos);
+  }
+
+  // And a machine that HAS the axis but is not indexed on it says nothing
+  // either: the flag alone is not a reason to move a table.
+  cam::Setup rotary = clamped;
+  rotary.machine.hasRotaryAxis = true;
+  const std::vector<cam::Toolpath> rp =
+      cam::GenerateAll(rotary, turned->GetBodies());
+  for (const cam::Move& m : rp[0].moves)
+    CHECK_FALSE(m.hasA);
+}
+
+TEST_CASE("cam: a clamped part verifies in the frame it was cut in", "[cam]") {
+  // The verifier frames its own bodies, so this should pass on arrival — and
+  // if the frame composes the wrong way it reports a part cut in mid-air.
+  auto turned = TurnedBlockDoc();
+  cam::Setup clamped = BasicSetup();
+  const double h = glm::radians(90.0) * 0.5;
+  clamped.frame = glm::dquat(std::cos(h), std::sin(h), 0.0, 0.0);
+  clamped.safeZ = cam::DeriveSafeZ(clamped, turned->GetBodies());
+
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(clamped, turned->GetBodies(), lo, hi));
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 8.0;
+  clamped.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(clamped, turned->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", clamped, paths, {}, gcode, &error));
+
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, clamped, turned->GetBodies(), 0.5);
+  INFO("gouge " << v.maxGouge << " rapids " << v.rapidsThroughStock);
+  REQUIRE(v.cells > 0);
+  CHECK(v.maxGouge < 0.6);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+TEST_CASE("cam: any flat face can be laid up, and twice is once", "[cam]") {
+  const glm::dquat id(1.0, 0.0, 0.0, 0.0);
+
+  // A face already under the spindle asks for no change at all. Without the
+  // idempotence the pick would drift the part a little on every click.
+  CHECK(glm::length(cam::SolveFaceUp({0.0, 0.0, 1.0}, id) - id) < 1e-12);
+
+  // Every direction works, including the two `SolveIndexA` must refuse: a
+  // clamp is not a trunnion, and a panel standing on its edge is the case
+  // that started this (docs/cam/setup-frame.md).
+  const std::vector<glm::dvec3> normals = {
+      {0.0, 1.0, 0.0},  {0.0, -1.0, 0.0}, {1.0, 0.0, 0.0},
+      {-1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.6, -0.48, 0.64}};
+  for (const glm::dvec3& n : normals) {
+    INFO("normal " << n.x << " " << n.y << " " << n.z);
+    const glm::dquat f = cam::SolveFaceUp(n, id);
+    // The frame maps the spindle to the face, so undoing it lays the face
+    // flat: that is the whole contract, and it is what the pipeline relies on.
+    const glm::dvec3 up =
+        glm::transpose(glm::dmat3(glm::mat3_cast(f))) * glm::normalize(n);
+    CHECK_THAT(up.z, WithinAbs(1.0, 1e-12));
+    // Asking again for the same face, from the frame it produced, is a no-op.
+    const glm::dquat again = cam::SolveFaceUp(n, f);
+    CHECK(glm::length(again - f) < 1e-9);
+  }
+}
+
+TEST_CASE("cam: a flipped setup cuts the other side", "[cam]") {
+  // A flip job is two setups on ONE part. The second's frame is derived from
+  // the first, so the two cannot disagree about which part they are cutting.
+  const glm::dquat id(1.0, 0.0, 0.0, 0.0);
+  const glm::dquat back = cam::FlipFrame(id);
+
+  // What faced the spindle now faces the bed, and the other way round.
+  const glm::dmat3 m(glm::mat3_cast(back));
+  const glm::dvec3 up = m * glm::dvec3(0.0, 0.0, 1.0);
+  CHECK_THAT(up.z, WithinAbs(-1.0, 1e-12));
+  // Flipping twice is where it started.
+  const glm::dquat there = cam::FlipFrame(back);
+  CHECK(std::abs(std::abs(there.w) - 1.0) < 1e-12);
+
+  // And a real cut: the block's underside becomes the top face.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup flipped = BasicSetup();
+  flipped.frame = back;
+  flipped.safeZ = cam::DeriveSafeZ(flipped, doc->GetBodies());
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(flipped, doc->GetBodies(), lo, hi));
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 8.0;
+  flipped.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(flipped, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  for (const cam::Move& m2 : paths[0].moves)
+    CHECK_FALSE(m2.hasA);
+}
+
+// --- W1-W3: the workpiece, and where zero is on it ------------------------
+
+TEST_CASE("cam: the posted file measures from the picked corner", "[cam]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup s = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  s.operations.push_back(op);
+
+  // An origin of (0,0,0) is what every job carried before v68, and it must
+  // post EXACTLY what it always did — that is what confines this change.
+  cam::Setup zeroed = s;
+  zeroed.origin = glm::dvec3(0.0);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(zeroed, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  std::string atZero, error;
+  REQUIRE(cam::PostProcess("linuxcnc", zeroed, paths, {}, atZero, &error));
+
+  // Now zero on the stock's min corner, which is where an operator touches
+  // off. Same cut, different words for it.
+  cam::Setup corner = s;
+  corner.originAt = cam::OriginAt::StockMin;
+  REQUIRE(cam::RecomputeOrigin(corner, doc->GetBodies()));
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(corner, doc->GetBodies(), lo, hi));
+  CHECK_THAT(corner.origin.x, WithinAbs(lo.x, 1e-9));
+  CHECK_THAT(corner.origin.y, WithinAbs(lo.y, 1e-9));
+  CHECK_THAT(corner.origin.z, WithinAbs(hi.z, 1e-9)); // the top of the material
+
+  std::string shifted;
+  REQUIRE(cam::PostProcess("linuxcnc", corner, paths, {}, shifted, &error));
+  CHECK(shifted != atZero);
+
+  // Every coordinate moved by exactly the origin, and no further. Compare the
+  // CUTTING moves: the leading retract is a bare `G0 Z`, so both files are
+  // still at whatever X/Y the machine was left at and the parser starts both
+  // from the same nothing.
+  const auto cutting = [](const cam::GProgram& p) {
+    std::vector<glm::dvec3> out;
+    for (const cam::GMove& m : p.moves)
+      if (!m.rapid)
+        out.push_back(m.to);
+    return out;
+  };
+  const cam::GProgram a = cam::ParseGcode(atZero);
+  const cam::GProgram b = cam::ParseGcode(shifted);
+  const std::vector<glm::dvec3> ca = cutting(a), cb = cutting(b);
+  REQUIRE(ca.size() == cb.size());
+  REQUIRE(ca.size() > 20);
+  for (size_t i = 0; i < ca.size(); i++) {
+    INFO("cut " << i);
+    const glm::dvec3 d = ca[i] - cb[i];
+    CHECK_THAT(d.x, WithinAbs(corner.origin.x, 2e-4)); // 4 decimals posted
+    CHECK_THAT(d.y, WithinAbs(corner.origin.y, 2e-4));
+    CHECK_THAT(d.z, WithinAbs(corner.origin.z, 2e-4));
+  }
+
+  // And read back through the setup they belong to, the two are the SAME
+  // program — which is what every consumer that compares a file to the model
+  // relies on.
+  const std::vector<glm::dvec3> back =
+      cutting(cam::ProgramInSetupSpace(shifted, corner));
+  REQUIRE(back.size() == ca.size());
+  for (size_t i = 0; i < ca.size(); i++) {
+    INFO("cut " << i);
+    CHECK(glm::length(back[i] - ca[i]) < 2e-4);
+  }
+
+  // Arc centres are INCREMENTAL, so they are immune to the offset. Posting
+  // with arcs on and comparing the I/J words proves it rather than assuming.
+  cam::PostOptions arcs;
+  arcs.fitArcs = true;
+  std::string arcZero, arcShift;
+  REQUIRE(cam::PostProcess("linuxcnc", zeroed, paths, arcs, arcZero, &error));
+  REQUIRE(cam::PostProcess("linuxcnc", corner, paths, arcs, arcShift, &error));
+  const auto ijWords = [](const std::string& g) {
+    std::vector<std::string> out;
+    std::istringstream in(g);
+    for (std::string line; std::getline(in, line);)
+      for (size_t i = 0; i < line.size(); i++)
+        if ((line[i] == 'I' || line[i] == 'J') &&
+            (i == 0 || line[i - 1] == ' '))
+          out.push_back(line.substr(i, line.find(' ', i) - i));
+    return out;
+  };
+  CHECK(ijWords(arcZero) == ijWords(arcShift));
+}
+
+TEST_CASE("cam: a fixed workpiece is the sheet, not a shrink-wrap", "[cam]") {
+  auto doc = BlockDoc(200, 120, 18);
+  cam::Setup s = BasicSetup();
+  s.stock.mode = cam::StockMode::Fixed;
+  s.stock.size = {600.0, 400.0, 18.0};
+  s.stock.place = {0.5, 0.5, 1.0};
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT(hi.x - lo.x, WithinAbs(600.0, 1e-6));
+  CHECK_THAT(hi.y - lo.y, WithinAbs(400.0, 1e-6));
+  // An 18 mm part in an 18 mm board is a FIT, not a shortfall: OCC's bbox
+  // gap makes an exact match measure a hair short every time.
+  CHECK_THAT(hi.z - lo.z, WithinAbs(18.0, 1e-3));
+  CHECK(cam::StockRefusal(s, doc->GetBodies()).empty());
+
+  // Relative mode is untouched: the box every job had before v68.
+  cam::Setup rel = s;
+  rel.stock.mode = cam::StockMode::Relative;
+  glm::dvec3 rlo(0.0), rhi(0.0);
+  REQUIRE(cam::StockBounds(rel, doc->GetBodies(), rlo, rhi));
+  CHECK_THAT(rhi.x - rlo.x, WithinAbs(204.0, 1e-6)); // 200 + 2 mm each side
+
+  // A sheet smaller than the part is REFUSED, and says which axis and by how
+  // much — "get a bigger board" is a different instruction from "draw
+  // something", and both used to arrive as the same sentence.
+  cam::Setup small = s;
+  small.stock.size = {100.0, 400.0, 18.0};
+  glm::dvec3 slo(0.0), shi(0.0);
+  CHECK_FALSE(cam::StockBounds(small, doc->GetBodies(), slo, shi));
+  const std::string why = cam::StockRefusal(small, doc->GetBodies());
+  INFO(why);
+  CHECK(why.find("100") != std::string::npos);
+  CHECK(why.find("200") != std::string::npos);
+  CHECK(why.find(" X ") != std::string::npos);
+  // And the verbs refuse with those words rather than "there is no solid".
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(small, doc->GetBodies(), cam::OpType::Profile, {});
+  CHECK_FALSE(derived.ok);
+  CHECK(derived.why == why);
+}
+
+TEST_CASE("cam: where the part sits in the sheet is a placement", "[cam]") {
+  auto doc = BlockDoc(200, 120, 18); // spans 0..200, 0..120, 0..18
+  cam::Setup s = BasicSetup();
+  s.stock.mode = cam::StockMode::Fixed;
+  s.stock.size = {600.0, 400.0, 18.0};
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  s.stock.place = {0.0, 0.0, 1.0}; // part's low face on the stock's low face
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT(lo.x, WithinAbs(0.0, 1e-6));
+  s.stock.place = {1.0, 0.0, 1.0}; // …and its high face on the stock's high
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT(hi.x, WithinAbs(200.0, 1e-6));
+  s.stock.place = {0.5, 0.5, 1.0};
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+  CHECK_THAT((lo.x + hi.x) * 0.5, WithinAbs(100.0, 1e-6)); // part's own centre
+}
+
+TEST_CASE("cam: every origin corner is where it says it is", "[cam]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup s = BasicSetup();
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(s, doc->GetBodies(), lo, hi));
+
+  const auto originFor = [&](cam::OriginAt at) {
+    cam::Setup c = s;
+    c.originAt = at;
+    REQUIRE(cam::RecomputeOrigin(c, doc->GetBodies()));
+    return c.origin;
+  };
+  const glm::dvec3 stockMin = originFor(cam::OriginAt::StockMin);
+  CHECK_THAT(stockMin.x, WithinAbs(lo.x, 1e-9));
+  CHECK_THAT(stockMin.y, WithinAbs(lo.y, 1e-9));
+  const glm::dvec3 centre = originFor(cam::OriginAt::StockCentre);
+  CHECK_THAT(centre.x, WithinAbs((lo.x + hi.x) * 0.5, 1e-9));
+  const glm::dvec3 modelMin = originFor(cam::OriginAt::ModelMin);
+  CHECK_THAT(modelMin.x, WithinAbs(lo.x + s.stock.margin.x, 1e-6));
+  // Every one of them touches off on the TOP of the material.
+  for (const glm::dvec3& o : {stockMin, centre, modelMin})
+    CHECK_THAT(o.z, WithinAbs(hi.z, 1e-9));
+
+  // Re-deriving is idempotent: the origin does not walk when the panel calls
+  // this on every stock edit.
+  cam::Setup c = s;
+  REQUIRE(cam::RecomputeOrigin(c, doc->GetBodies()));
+  const glm::dvec3 once = c.origin;
+  REQUIRE(cam::RecomputeOrigin(c, doc->GetBodies()));
+  CHECK(glm::length(c.origin - once) < 1e-12);
+}
+
+TEST_CASE("cam job: two parts in one setup, placed apart", "[cam][job]") {
+  // The case the whole job document exists for: two brackets cut from one
+  // sheet. Before v73 a cam::Setup lived in Document::m_camSetups, so this
+  // could not be said at all (docs/cam/job-document.md).
+  //
+  // The bodies arrive already stamped with the job part they came from --
+  // that is what ui::JobBodies does -- so this exercises the core rule
+  // without a running app: a placement moves the part it names, in setup
+  // space, and nothing else.
+  Document a;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+  Document b;
+  b.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 40, 30, 10));
+
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+
+  std::vector<Body> bodies;
+  for (const Body& body : a.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pa;
+  }
+  for (const Body& body : b.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pb;
+  }
+  REQUIRE(bodies.size() == 2);
+
+  // Unplaced, the two sit on top of each other: "nobody has said where" is
+  // the origin, which is honest and is not a layout.
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  const double stacked = hi.x - lo.x;
+
+  // Place the second 200 mm along, and the stock has to cover both.
+  cam::Placement place;
+  place.id = job.AllocateId();
+  place.jobPartId = pb;
+  place.pos = {200.0, 0.0};
+  setup.placements.push_back(place);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK(hi.x - lo.x > stacked + 190.0);
+
+  // A part on the sheet but not cut this run leaves the stock to the other
+  // one (PrusaSlicer's ModelInstance::printable, the same idea).
+  setup.placements[0].enabled = false;
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK_THAT(hi.x - lo.x, WithinAbs(stacked, 1e-6));
+}
+
+TEST_CASE("cam job: a part placed twice is refused, not half cut",
+          "[cam][job]") {
+  // The data model holds instances -- a placement per copy, the way every
+  // slicer models them -- and the generator does not cut them yet: a region
+  // resolves to the first body that answers, so the second copy would be
+  // skipped and the posted file would look right. That is the failure mode
+  // this project refuses everywhere else.
+  cam::JobDocument job;
+  const uint64_t part = job.AddPart(1, "Bracket");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  for (int i = 0; i < 2; i++) {
+    cam::Placement p;
+    p.id = job.AllocateId();
+    p.jobPartId = part;
+    p.pos = {i * 100.0, 0.0};
+    setup.placements.push_back(p);
+  }
+  const std::string why = cam::PlacementRefusal(setup, {});
+  CHECK(why.find("twice") != std::string::npos);
+
+  // And it reaches the toolpaths, not just a checker nobody calls.
+  cam::Operation op;
+  op.id = job.AllocateId();
+  op.type = cam::OpType::Profile;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, {});
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].error == why);
+
+  // Disabling one is the way out, and it works.
+  setup.placements[1].enabled = false;
+  CHECK(cam::PlacementRefusal(setup, {}).empty());
+}
+
+TEST_CASE("cam job: dropping a part takes its placements and targets",
+          "[cam][job]") {
+  // A target on a part the job no longer holds would resolve against
+  // whatever body answered to the same element name -- the wrong bracket,
+  // cut for real. Two parts in one job can easily share both.
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  for (uint64_t part : {pa, pb}) {
+    cam::Placement p;
+    p.id = job.AllocateId();
+    p.jobPartId = part;
+    setup.placements.push_back(p);
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.targets.push_back(cam::Target{part, ElementRef{7, "1/face0"}});
+    setup.operations.push_back(op);
+  }
+  setup.topFace = cam::Target{pb, ElementRef{7, "1/face5"}};
+
+  REQUIRE(job.RemovePart(pb));
+  const cam::Setup& after = *job.FindSetup(setup.id);
+  REQUIRE(after.placements.size() == 1);
+  CHECK(after.placements[0].jobPartId == pa);
+  REQUIRE(after.operations.size() == 2);
+  CHECK(after.operations[0].targets.size() == 1);
+  CHECK(after.operations[1].targets.empty()); // its only target went with B
+  CHECK(!after.topFace.IsSet());              // and so did Z zero
+}
+
+TEST_CASE("cam job: a part off the sheet is a state, then a refusal",
+          "[cam][job]") {
+  // The first draft of the job plan made this a refusal at DRAG time. Both
+  // slicers do it the other way -- a state per placement, computed when
+  // asked -- and they are right: a sheet is laid out THROUGH the states
+  // where a part is half off the edge, and blocking the drag makes the
+  // layout impossible to reach. So: three states here, and the refusal at
+  // the post, where the mistake becomes G-code.
+  Document a;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+
+  cam::JobDocument job;
+  const uint64_t part = job.AddPart(1, "A");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  // A sheet you actually own: 200 x 200, the part referenced from its corner.
+  setup.stock.mode = cam::StockMode::Fixed;
+  setup.stock.size = {200.0, 200.0, 12.0};
+  setup.stock.place = {0.0, 0.0, 1.0};
+
+  std::vector<Body> bodies;
+  for (const Body& b : a.GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = part;
+  }
+
+  cam::Placement place;
+  place.id = job.AllocateId();
+  place.jobPartId = part;
+  setup.placements.push_back(place);
+
+  auto fitOf = [&]() {
+    const std::vector<cam::PlacementFit> f =
+        cam::CheckPlacements(setup, bodies);
+    REQUIRE(f.size() == 1);
+    return f[0].fit;
+  };
+
+  CHECK(fitOf() == cam::Fit::Inside);
+  CHECK(cam::PlacementRefusal(setup, bodies).empty());
+
+  // Hanging over the edge: the cut runs off the workpiece.
+  setup.placements[0].pos = {180.0, 0.0};
+  CHECK(fitOf() == cam::Fit::PartlyOutside);
+  CHECK(cam::PlacementRefusal(setup, bodies).find("hangs over") !=
+        std::string::npos);
+
+  // Not on it at all is a DIFFERENT mistake, and usually a different fix.
+  setup.placements[0].pos = {900.0, 0.0};
+  CHECK(fitOf() == cam::Fit::FullyOutside);
+  CHECK(cam::PlacementRefusal(setup, bodies).find("not on the stock") !=
+        std::string::npos);
+
+  // A placement that is not cut this run is not asked to fit.
+  setup.placements[0].enabled = false;
+  CHECK(fitOf() == cam::Fit::Inside);
+  CHECK(cam::PlacementRefusal(setup, bodies).empty());
+}
+
+TEST_CASE("cam job: relative stock is drawn around every placed part",
+          "[cam][job]") {
+  // The other half of "the stock is the sheet": relative stock spans the
+  // whole arrangement, so nothing can be outside it by construction -- and
+  // adding a second part grows the workpiece rather than cropping it.
+  Document a, b;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+  b.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 40, 30, 10));
+
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  std::vector<Body> bodies;
+  for (const Body& body : a.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pa;
+  }
+  for (const Body& body : b.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pb;
+  }
+  for (uint64_t part : {pa, pb}) {
+    cam::Placement p;
+    p.id = job.AllocateId();
+    p.jobPartId = part;
+    if (part == pb)
+      p.pos = {300.0, 0.0};
+    setup.placements.push_back(p);
+  }
+
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK(hi.x - lo.x > 330.0); // both parts plus their margins
+  for (const cam::PlacementFit& f : cam::CheckPlacements(setup, bodies))
+    CHECK(f.fit == cam::Fit::Inside);
+
+  // Stacked, though, is scrap either way: whichever is cut second comes out
+  // of the first one's offcut.
+  setup.placements[1].pos = {0.0, 0.0};
+  const std::vector<cam::PlacementFit> fits =
+      cam::CheckPlacements(setup, bodies);
+  REQUIRE(fits.size() == 2);
+  CHECK(fits[0].overlaps.size() == 1);
+  CHECK(cam::PlacementRefusal(setup, bodies).find("on top of each other") !=
+        std::string::npos);
+}
+
+TEST_CASE("cam job: what order it cuts in", "[cam][job]") {
+  // With one part, authoring order IS cutting order and this field would
+  // never have been noticed. With four it is the difference between one tool
+  // change per tool and one per part per tool -- CamPost emits a change on
+  // every change of tool number, so the natural authoring order (per part)
+  // is the expensive one (docs/cam/job-document.md J5).
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+
+  // Authored per part, which is how anyone would build it: rough A, finish
+  // A, rough B, finish B -- four tool changes for two tools.
+  struct Row {
+    uint64_t part;
+    int tool;
+  };
+  const Row rows[] = {{pa, 1}, {pa, 2}, {pb, 1}, {pb, 2}};
+  for (const Row& r : rows) {
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.toolNumber = r.tool;
+    op.targets.push_back(cam::Target{r.part, ElementRef{1, "1/face0"}});
+    setup.operations.push_back(op);
+  }
+
+  auto toolsOf = [&]() {
+    std::vector<int> out;
+    for (size_t i : cam::CuttingOrder(setup))
+      out.push_back(setup.operations[i].toolNumber);
+    return out;
+  };
+  auto partsOf = [&]() {
+    std::vector<uint64_t> out;
+    for (size_t i : cam::CuttingOrder(setup))
+      out.push_back(setup.operations[i].targets.front().jobPartId);
+    return out;
+  };
+
+  CHECK(toolsOf() == std::vector<int>{1, 2, 1, 2}); // authored: as written
+
+  setup.order = cam::OrderOutputBy::Tool;
+  CHECK(toolsOf() == std::vector<int>{1, 1, 2, 2}); // one change per tool
+  CHECK(partsOf() == std::vector<uint64_t>{pa, pb, pa, pb});
+
+  setup.order = cam::OrderOutputBy::Part;
+  CHECK(partsOf() == std::vector<uint64_t>{pa, pa, pb, pb});
+  CHECK(toolsOf() == std::vector<int>{1, 2, 1, 2}); // stable within a part
+}
+
+TEST_CASE("cam job: grouping keeps first-appearance order", "[cam][job]") {
+  // Grouped, not SORTED. A tool table is not ordered by how early each
+  // cutter is wanted, so sorting the key would move a roughing pass after a
+  // finishing one that happens to carry a lower number.
+  cam::JobDocument job;
+  cam::Setup& setup = job.AddSetup("Sheet");
+  for (int tool : {7, 3, 7, 3}) {
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.toolNumber = tool;
+    setup.operations.push_back(op);
+  }
+  setup.order = cam::OrderOutputBy::Tool;
+  std::vector<int> got;
+  for (size_t i : cam::CuttingOrder(setup))
+    got.push_back(setup.operations[i].toolNumber);
+  CHECK(got == std::vector<int>{7, 7, 3, 3}); // 7 first: it was wanted first
+}
+
+TEST_CASE("cam job: an unknown cutting order is refused", "[cam][job]") {
+  // The rule this project applies everywhere: a job that silently posts in
+  // an order other than the one it names is a broken cutter, and every
+  // plausible substitute produces a file that looks right.
+  const std::string bad = R"({"format":"designer-document","version":75,
+    "kind":"job","cam":[{"id":1,"name":"J","order":"fixture"}]})";
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_bad_order.json";
+  std::ofstream(path) << bad;
+  auto loaded = DocumentIO::LoadJob(path.string());
+  REQUIRE_FALSE(loaded.has_value());
+  CHECK(loaded.error().find("authored, tool or part") != std::string::npos);
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("cam job: two parts, clamped differently, one sheet", "[cam][job]") {
+  // The case the whole per-part frame exists for, and the one this plan
+  // argued hardest for: a speaker cabinet's baffle and a rail, each modelled
+  // in the orientation it has in the assembly, both cut from one board. They
+  // need two fixture frames and one stock, which a per-SETUP frame cannot
+  // say (docs/cam/job-document.md, docs/cam/setup-frame.md).
+  Document baffle, rail;
+  // 210 wide, 16 thick, 400 tall: standing upright, like a real baffle.
+  baffle.AddFeature(
+      std::make_unique<BoxFeature>("Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
+  // 300 long, 60 tall, 18 thick: on its edge.
+  rail.AddFeature(
+      std::make_unique<BoxFeature>("Rail", glm::vec3(0, 0, 0), 300, 60, 18));
+
+  cam::JobDocument job;
+  const uint64_t pb = job.AddPart(1, "Baffle");
+  const uint64_t pr = job.AddPart(2, "Rail");
+  cam::Setup& setup = job.AddSetup("Sheet");
+
+  std::vector<Body> bodies;
+  for (const Body& b : baffle.GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = pb;
+  }
+  for (const Body& b : rail.GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = pr;
+  }
+
+  // Lay the baffle on its big face (normal along Y) and leave the rail as
+  // modelled. Only the baffle turns.
+  cam::Placement pl;
+  pl.id = job.AllocateId();
+  pl.jobPartId = pb;
+  pl.frame = cam::SolveFaceUp(glm::dvec3(0, 1, 0), glm::dquat(1, 0, 0, 0));
+  setup.placements.push_back(pl);
+
+  CHECK(!cam::FrameIsSquare(setup, pb)); // the baffle is clamped
+  CHECK(cam::FrameIsSquare(setup, pr));  // the rail is as modelled
+  CHECK(cam::FrameIsSquare(setup));      // and so is the setup itself
+
+  const std::vector<Body> framed = cam::BodiesInSetupFrame(setup, bodies);
+  REQUIRE(framed.size() == 2);
+  const auto extent = [](const Body& b) {
+    glm::vec3 lo, hi;
+    b.shape.GetBoundingBox(lo, hi);
+    return hi - lo;
+  };
+  // Laid flat, the baffle is 210 x 400 on the bed and 16 thick -- it is the
+  // Z extent that says it worked, since upright it was 400 tall.
+  const glm::vec3 eb = extent(framed[0]);
+  CHECK_THAT(eb.z, WithinAbs(16.0, 1e-3));
+  CHECK_THAT(std::max(eb.x, eb.y), WithinAbs(400.0, 1e-3));
+  // The rail did not move: 18 thick, as modelled.
+  const glm::vec3 er = extent(framed[1]);
+  CHECK_THAT(er.z, WithinAbs(18.0, 1e-3));
+
+  // One sheet covers both, and it is 16-to-18 thick rather than 400.
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, bodies, lo, hi));
+  CHECK(hi.z - lo.z < 40.0);
+}
+
+TEST_CASE("cam job: a per-part frame survives a save and reload",
+          "[cam][job]") {
+  // v76. A frame that reloads as "as modelled" is a part cut in an
+  // orientation it was not clamped in -- the failure setup-frame.md's own
+  // golden exists for, one level down.
+  cam::JobDocument job;
+  const uint64_t part = job.AddPart(1, "Baffle");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  cam::Placement pl;
+  pl.id = job.AllocateId();
+  pl.jobPartId = part;
+  pl.frame = cam::SolveFaceUp(glm::dvec3(0, 1, 0), glm::dquat(1, 0, 0, 0));
+  setup.placements.push_back(pl);
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_part_frame.json";
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
+  REQUIRE(back.has_value());
+  const cam::Setup& read = (*back)->GetSetups()[0];
+  REQUIRE(read.placements.size() == 1);
+  REQUIRE(read.placements[0].frame.has_value());
+  CHECK(!cam::FrameIsSquare(read, part));
+  CHECK_THAT(read.placements[0].frame->w, WithinAbs(pl.frame->w, 1e-12));
+  CHECK_THAT(read.placements[0].frame->x, WithinAbs(pl.frame->x, 1e-12));
+
+  // And a placement WITHOUT one still means "as the setup says", rather than
+  // reloading as an identity that quietly un-clamps the part.
+  cam::JobDocument plain;
+  const uint64_t p2 = plain.AddPart(1, "Panel");
+  cam::Setup& s2 = plain.AddSetup("Sheet");
+  s2.frame = cam::SolveFaceUp(glm::dvec3(0, 1, 0), glm::dquat(1, 0, 0, 0));
+  cam::Placement bare;
+  bare.id = plain.AllocateId();
+  bare.jobPartId = p2;
+  s2.placements.push_back(bare);
+  REQUIRE(DocumentIO::SaveJob(plain, path.string()).has_value());
+  auto back2 = DocumentIO::LoadJob(path.string());
+  REQUIRE(back2.has_value());
+  const cam::Setup& read2 = (*back2)->GetSetups()[0];
+  CHECK_FALSE(read2.placements[0].frame.has_value());
+  CHECK(!cam::FrameIsSquare(read2, p2)); // the setup's frame still applies
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("cam job: the same element name on two parts is refused, not guessed",
+          "[cam][job]") {
+  // Found by driving the RPC, not by reading the code: two boxes in two
+  // documents both have feature id 1 and both have a face called "1/face5",
+  // so a target of {feature_id: 1, element: "1/face5"} names TWO faces. The
+  // qualifier exists for this, and resolving it by searching for the first
+  // body that answers threw the qualifier away again — it cut the first
+  // part, silently, whichever one you meant.
+  //
+  // This exercises the resolver's rule directly; ui::TargetFor is where the
+  // app applies it, over both doors.
+  const auto owners = [](const std::vector<Body>& bodies,
+                         const ElementRef& ref) {
+    std::vector<uint64_t> out;
+    for (const Body& b : bodies) {
+      if (b.createdBy != ref.featureId || !b.elementMap.Resolve(ref.name))
+        continue;
+      if (std::find(out.begin(), out.end(), b.jobPartId) == out.end())
+        out.push_back(b.jobPartId);
+    }
+    return out;
+  };
+
+  Document a, b;
+  a.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 30, 10));
+  b.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 60, 50, 10));
+  std::vector<Body> bodies;
+  for (const Body& body : a.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = 1;
+  }
+  for (const Body& body : b.GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = 2;
+  }
+  REQUIRE(bodies.size() == 2);
+  // Two independently modelled boxes really do collide on both halves of an
+  // ElementRef. That is the premise, so assert it rather than assume it.
+  CHECK(bodies[0].createdBy == bodies[1].createdBy);
+
+  const std::string name = bodies[0].elementMap.names.begin()->second;
+  const ElementRef shared{bodies[0].createdBy, name};
+  CHECK(owners(bodies, shared).size() == 2); // ambiguous: must be refused
+
+  // A name only one part owns still resolves without help. (Boxes of
+  // different sizes still share face names, so make one unique by hand.)
+  bodies[1].elementMap.names.begin()->second = "unique/face";
+  const ElementRef only{bodies[1].createdBy, "unique/face"};
+  const std::vector<uint64_t> one = owners(bodies, only);
+  REQUIRE(one.size() == 1);
+  CHECK(one[0] == 2);
+}
+
+#endif // HAVE_CAM

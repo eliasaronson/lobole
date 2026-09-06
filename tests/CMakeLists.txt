@@ -60,6 +60,10 @@ add_executable(designer_tests
     test_frame_timer.cpp
     test_terminal.cpp
     test_cam.cpp
+    test_cam_verify.cpp
+    test_cam_setup.cpp
+    test_cam_machine.cpp
+    test_cam_tools.cpp
     test_cam_sim.cpp
     test_command_modify.cpp
     test_reorder.cpp
@@ -104,6 +108,26 @@ add_executable(designer_tests
 # failing to compile. Test the actions layer, not the widgets.
 target_link_libraries(designer_tests PRIVATE designer_app designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+# Precompiled headers. designer_core has carried one since round 1 for the same
+# reason (CMakeLists.txt): the OpenCASCADE tree behind core/Document.h is
+# ~146k preprocessed lines and re-parses in every TU that touches a Document,
+# which is 52 of the 163 test files. Catch2's macros are on top of that in 79.
+#
+# It is also what pays for splitting a big test file: five files re-parse the
+# same headers five times, so test_cam.cpp's split cost 21 s of duplicated
+# parsing before this line existed (docs/architecture-review-2026-09-06.md, §2
+# — split first, PCH second, and never one without the other).
+target_precompile_headers(designer_tests PRIVATE
+    <catch2/catch_test_macros.hpp>
+    <catch2/matchers/catch_matchers_floating_point.hpp>
+    <catch2/matchers/catch_matchers_string.hpp>
+    "${CMAKE_SOURCE_DIR}/src/core/Document.h"
+    "${CMAKE_SOURCE_DIR}/src/core/Feature.h"
+    <glm/glm.hpp>
+    <nlohmann/json.hpp>
+    <vector> <string> <memory> <optional> <map> <set> <filesystem> <cmath>
+)
 target_compile_definitions(designer_tests PRIVATE
     DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     # So a test can compare its own mtime against the source it was built

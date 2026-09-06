@@ -1,0 +1,736 @@
+#ifdef HAVE_CAM
+
+// What the CUTTER's own geometry does: tool shapes, edge breaks, drilling
+// and pecking, corner relief, lead arcs, and roughing then finishing.
+// One of five files split from test_cam.cpp
+// (docs/architecture-review-2026-09-06.md, stage 1).
+
+#include "cam_fixtures.h"
+
+TEST_CASE("cam: a ball nose steps over by the cusp it leaves", "[cam]") {
+  // A flat mill's floor is flat whatever the stepover, so 45% of the cutter
+  // stands. A ball nose leaves a cusp between passes, and the height of that
+  // cusp is what decides the step. Before this a ball cleared a pocket on
+  // exactly the flat mill's path — same length, same everything — and left
+  // 160 mm2 of scallop that only the verifier ever mentioned.
+  cam::Tool flat;
+  flat.number = 1;
+  flat.diameter = 6.0;
+  cam::Tool ball = flat;
+  ball.type = cam::ToolType::Ball;
+
+  CHECK_THAT(cam::DerivedStepover(flat), WithinAbs(0.45, 1e-9));
+  const double s = cam::DerivedStepover(ball);
+  INFO("ball stepover fraction " << s);
+  CHECK(s < 0.45); // finer than a flat mill's
+  CHECK(s > 0.02); // and not so fine it never finishes
+
+  // It really is the cusp equation: stepping `s * d` apart on a ball of
+  // radius r leaves r - sqrt(r^2 - (step/2)^2), and that must be the 2% of
+  // the radius the derivation asks for.
+  const double r = ball.diameter * 0.5;
+  const double step = s * ball.diameter;
+  const double cusp = r - std::sqrt(std::max(0.0, r * r - step * step * 0.25));
+  INFO("cusp " << cusp << " vs target " << r * 0.02);
+  CHECK_THAT(cusp, WithinRel(r * 0.02, 1e-6));
+
+  // Bigger cutter, bigger step — the rule is in the tool, not in millimetres.
+  cam::Tool big = ball;
+  big.diameter = 12.0;
+  CHECK(cam::DerivedStepover(big) * big.diameter >
+        cam::DerivedStepover(ball) * ball.diameter);
+
+  // And a derived operation picks it up rather than hard-coding 0.45.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/false);
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  cam::Setup setup = BasicSetup();
+  setup.tools[0].type = cam::ToolType::Ball;
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.stepover,
+             WithinAbs(cam::DerivedStepover(setup.tools[0]), 1e-9));
+}
+
+TEST_CASE("cam: a cone is refused a floor to clear", "[cam]") {
+  // A V-bit or a drill point run along a floor leaves a groove as deep as the
+  // pass, not a floor. A ball nose is fine — it leaves a cusp, and the step
+  // is sized for it — so this refuses only the shapes that have no answer.
+  auto doc = FlangeDoc(/*holeDia=*/0.0, /*boss=*/false);
+  const ElementRef floor = PocketFloorRef(*doc);
+  REQUIRE(floor.IsSet());
+  for (const auto& [type, word] :
+       std::vector<std::pair<cam::ToolType, const char*>>{
+           {cam::ToolType::VBit, "V-bit"}, {cam::ToolType::Drill, "drill"}}) {
+    cam::Setup s = BasicSetup();
+    s.tools[0].type = type;
+    s.tools[0].tipAngleDeg = 90.0;
+    for (const cam::OpType op :
+         {cam::OpType::Pocket, cam::OpType::Face, cam::OpType::Adaptive}) {
+      const cam::DerivedOp d =
+          cam::DeriveOperation(s, doc->GetBodies(), op, cam::Target{0, floor});
+      INFO(word << " / op " << static_cast<int>(op) << ": " << d.why);
+      CHECK_FALSE(d.ok);
+      CHECK(d.why.find(word) != std::string::npos);
+    }
+  }
+  // Flat and ball are both allowed — the ball with a finer step.
+  for (const cam::ToolType type : {cam::ToolType::Flat, cam::ToolType::Ball}) {
+    cam::Setup s = BasicSetup();
+    s.tools[0].type = type;
+    const cam::DerivedOp d = cam::DeriveOperation(
+        s, doc->GetBodies(), cam::OpType::Pocket, cam::Target{0, floor});
+    INFO(d.why);
+    CHECK(d.ok);
+  }
+}
+
+// --- R15: tool shapes and the edge break -------------------------------------
+
+TEST_CASE("cam: a tool's shape is what the cutter leaves", "[cam]") {
+  // TipHeight is the one place the tool's profile is written down; the
+  // verifier's material removal and the edge geometry both read it, so they
+  // cannot disagree about the shape of the cutter.
+  const cam::Tool flat = ShapedTool(cam::ToolType::Flat, 6.0);
+  CHECK_THAT(cam::TipHeight(flat, 0.0), WithinAbs(0.0, 1e-12));
+  CHECK_THAT(cam::TipHeight(flat, 3.0), WithinAbs(0.0, 1e-12));
+
+  // A Ø6 ball: flat at the tip, a full radius up at its edge.
+  const cam::Tool ball = ShapedTool(cam::ToolType::Ball, 6.0);
+  CHECK_THAT(cam::TipHeight(ball, 0.0), WithinAbs(0.0, 1e-12));
+  CHECK_THAT(cam::TipHeight(ball, 3.0), WithinAbs(3.0, 1e-9));
+  CHECK_THAT(cam::TipHeight(ball, 1.8), WithinAbs(3.0 - 2.4, 1e-9)); // 3-4-5
+
+  // A 90 degree V-bit rises one millimetre per millimetre out from the axis;
+  // a 60 degree one rises faster.
+  CHECK_THAT(cam::TipHeight(ShapedTool(cam::ToolType::VBit, 6.0, 90.0), 2.0),
+             WithinAbs(2.0, 1e-9));
+  CHECK_THAT(cam::TipHeight(ShapedTool(cam::ToolType::VBit, 6.0, 60.0), 2.0),
+             WithinAbs(2.0 / std::tan(std::numbers::pi / 6.0), 1e-9));
+}
+
+TEST_CASE("cam: a V-bit chamfers the edge it is pointed at", "[cam]") {
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 90.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  // Nothing typed: the edge is the wall's own top (z = 20), and the bevel is
+  // the biggest a Ø12 90-degree bit can cut — its radius, 6 mm — which at
+  // 45 degrees is 6 mm deep.
+  CHECK_THAT(derived.op.topZ, WithinAbs(20.0, 1e-6));
+  CHECK_THAT(derived.op.edgeSize, WithinAbs(6.0, 1e-6));
+  CHECK_THAT(derived.op.bottomZ, WithinAbs(14.0, 1e-6));
+
+  cam::Setup job = setup;
+  cam::Operation op = derived.op;
+  op.id = 1;
+  op.edgeSize = 2.0; // a 2 mm chamfer instead
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  // One lap, its axis ON the contour, two millimetres down: the cone's flank
+  // is the bevel, so the tip lands exactly on the wall at its bottom.
+  CHECK_THAT(paths[0].MinZ(), WithinAbs(18.0, 1e-6));
+  double onContour = 0.0, cuts = 0.0;
+  for (const cam::Move& mv : paths[0].moves) {
+    if (mv.kind == cam::Move::Kind::Rapid)
+      continue;
+    cuts++;
+    // The block is 40 x 30 at the origin: a point on its outline has x or y
+    // on one of the four sides.
+    const bool onX =
+        std::abs(mv.to.x) < 1e-6 || std::abs(mv.to.x - 40.0) < 1e-6;
+    const bool onY =
+        std::abs(mv.to.y) < 1e-6 || std::abs(mv.to.y - 30.0) < 1e-6;
+    if (onX || onY)
+      onContour++;
+  }
+  CHECK(cuts > 4);
+  CHECK(onContour == cuts);
+}
+
+TEST_CASE("cam: a ball nose rounds the edge over an arc", "[cam]") {
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  setup.tools = {ShapedTool(cam::ToolType::Ball, 6.0)};
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  CHECK(derived.op.name == "Round the edge");
+  CHECK_THAT(derived.op.edgeSize, WithinAbs(3.0, 1e-6)); // the ball's radius
+
+  cam::Setup job = setup;
+  cam::Operation op = derived.op;
+  op.id = 1;
+  job.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(job, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+
+  // The passes walk the arc: pass i has its centre R + r from the round's
+  // own axis (3 mm in from the wall, 3 mm below the top) at angle t, and its
+  // leftmost lap therefore runs at a known x and a known Z. Assert the
+  // programme contains each of them — the ramp into a pass shares the XY and
+  // sits above it, so looking for the depth itself is the honest check.
+  const double R = 3.0, r = 3.0;
+  const int passes =
+      static_cast<int>(std::ceil(R * std::numbers::pi * 0.5 / (0.45 * 6.0)));
+  REQUIRE(passes >= 2);
+  for (int i = 0; i <= passes; i++) {
+    const double t = std::numbers::pi * 0.5 * (1.0 - double(i) / passes);
+    const double x = R - (R + r) * std::cos(t); // the lap's left side
+    const double z = 20.0 - R + (R + r) * std::sin(t) - r; // the ball's TIP
+    int at = 0;
+    for (const cam::Move& mv : paths[0].moves)
+      if (mv.kind != cam::Move::Kind::Rapid && std::abs(mv.to.x - x) < 1e-4 &&
+          std::abs(mv.to.z - z) < 1e-4)
+        at++;
+    INFO("pass " << i << " expected x " << x << " z " << z);
+    CHECK(at >= 2); // both ends of that side, at depth
+  }
+  // It grazes the flat top on the first pass and hangs its own radius below
+  // the deepest contact on the last.
+  CHECK_THAT(paths[0].MinZ(), WithinAbs(20.0 - R - r, 1e-6));
+}
+
+TEST_CASE("cam: a flat mill is refused an edge break", "[cam]") {
+  auto doc = BlockDoc();
+  const cam::Setup setup = BasicSetup(); // a 6 mm FLAT end mill
+  const ElementRef wall = SideWall(*doc);
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::EdgeRound, cam::Target{0, wall});
+  REQUIRE_FALSE(derived.ok);
+  // Names the tool it has and the two that would work — substituting one
+  // would cut a square step where a chamfer was asked for.
+  CHECK(derived.why.find("flat end mill") != std::string::npos);
+  CHECK(derived.why.find("ball") != std::string::npos);
+  CHECK(derived.why.find("V-bit") != std::string::npos);
+
+  // Asked for a bevel wider than the cutter can reach, it says how wide it
+  // can go rather than cutting a smaller one silently.
+  cam::Setup vee = setup;
+  vee.tools = {ShapedTool(cam::ToolType::VBit, 6.0, 90.0)};
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::EdgeRound;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 10.0;
+  op.edgeSize = 8.0; // the tool's radius is 3
+  op.targets = {{0, wall}};
+  vee.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(vee, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].moves.empty());
+  CHECK(paths[0].error.find("3 mm bevel at most") != std::string::npos);
+}
+
+TEST_CASE("cam: a tool's shape survives a save and reload", "[cam]") {
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "designer_cam_toolshape.json";
+  {
+    cam::JobDocument job;
+    cam::Setup& setup = job.AddSetup();
+    setup.name = "Job";
+    setup.tools = {ShapedTool(cam::ToolType::VBit, 12.0, 60.0)};
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.type = cam::OpType::EdgeRound;
+    op.topZ = 20.0;
+    op.bottomZ = 16.0;
+    op.edgeSize = 2.5;
+    setup.operations.push_back(op);
+    REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  }
+  auto loaded = DocumentIO::LoadJob(path.string());
+  REQUIRE(loaded.has_value());
+  REQUIRE((*loaded)->GetSetups().size() == 1);
+  const cam::Setup& setup = (*loaded)->GetSetups()[0];
+  REQUIRE(setup.tools.size() == 1);
+  // A V-bit that reloads as a flat mill is a chamfer that reloads as a
+  // square step — the substitution this project refuses everywhere else.
+  CHECK(setup.tools[0].type == cam::ToolType::VBit);
+  CHECK_THAT(setup.tools[0].tipAngleDeg, WithinAbs(60.0, 1e-9));
+  REQUIRE(setup.operations.size() == 1);
+  CHECK(setup.operations[0].type == cam::OpType::EdgeRound);
+  CHECK_THAT(setup.operations[0].edgeSize, WithinAbs(2.5, 1e-9));
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("cam drill: a hole wider than the tool is bored, not refused",
+          "[cam][drill]") {
+  auto doc = HoleDoc(8.0, 12.0);   // 12 thick: under three diameters deep
+  cam::Setup setup = BasicSetup(); // one 6 mm flat
+  const ElementRef wall = HoleWall(*doc);
+  REQUIRE(wall.IsSet());
+  const cam::DerivedOp d = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, wall});
+  REQUIRE(d.ok);
+  cam::Operation op = d.op;
+  op.id = 7;
+  CHECK(op.peck == 0.0); // ~14 mm deep with a 6 mm tool: under three diameters
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  CHECK(paths[0].error.empty());
+  // A bore walks a circle the tool's radius inside the wall: the cut moves
+  // vary in X and Y, and the lowest of them reaches the bottom.
+  double lo = 1e9, minX = 1e9, maxX = -1e9;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut) {
+      lo = std::min(lo, m.to.z);
+      minX = std::min(minX, m.to.x);
+      maxX = std::max(maxX, m.to.x);
+    }
+  CHECK_THAT(lo, WithinAbs(op.bottomZ, 1e-6));
+  CHECK_THAT(maxX - minX, WithinAbs(2.0, 1e-3)); // (8 - 6) mm of centre travel
+  // ...and it makes the hole without cutting the block: no gouge.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover);
+  CHECK(v.maxGouge < 0.4);
+
+  // A hole wider than two tools is rings, the wall last.
+  auto wide = HoleDoc(20.0);
+  cam::Setup rings = BasicSetup();
+  const cam::DerivedOp dw =
+      cam::DeriveOperation(rings, wide->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*wide)});
+  REQUIRE(dw.ok);
+  cam::Operation ringOp = dw.op;
+  ringOp.id = 8;
+  rings.operations.push_back(ringOp);
+  const auto ringPaths = cam::GenerateAll(rings, wide->GetBodies());
+  REQUIRE(ringPaths.size() == 1);
+  CHECK(ringPaths[0].error.empty());
+  // The LAST cut is on the wall's circle: radius 10 - 3 = 7 from the centre.
+  const cam::Move& last = ringPaths[0].moves[ringPaths[0].moves.size() - 2];
+  CHECK_THAT(glm::length(glm::dvec2(last.to.x - 20.0, last.to.y - 15.0)),
+             WithinAbs(7.0, 1e-3));
+
+  // A hole SMALLER than the tool is still a refusal: it would not fit in.
+  auto small = HoleDoc(4.0);
+  cam::Setup tight = BasicSetup();
+  const cam::DerivedOp ds =
+      cam::DeriveOperation(tight, small->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*small)});
+  REQUIRE(ds.ok);
+  cam::Operation smallOp = ds.op;
+  smallOp.id = 9;
+  tight.operations.push_back(smallOp);
+  const auto smallPaths = cam::GenerateAll(tight, small->GetBodies());
+  REQUIRE(smallPaths.size() == 1);
+  CHECK(smallPaths[0].error.find("would not fit") != std::string::npos);
+}
+
+TEST_CASE("cam drill: a deep hole pecks, retracting fully each time",
+          "[cam][drill]") {
+  auto doc = HoleDoc(6.0, 30.0); // 30 deep with a 6 mm tool: five diameters
+  cam::Setup setup = BasicSetup();
+  const cam::DerivedOp d =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*doc)});
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.peck, WithinAbs(6.0, 1e-9)); // derived: the tool's diameter
+  cam::Operation op = d.op;
+  op.id = 3;
+  setup.operations.push_back(op);
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  CHECK(paths[0].error.empty());
+  // Plunges step down a peck at a time, and every retract goes back to the
+  // hole's top -- the chips have to come out.
+  int plunges = 0, retractsToTop = 0;
+  for (size_t i = 1; i < paths[0].moves.size(); i++) {
+    const cam::Move& m = paths[0].moves[i];
+    if (m.kind == cam::Move::Kind::Plunge) {
+      plunges++;
+      // One peck, plus the half-millimetre of re-entry above the last floor.
+      CHECK(paths[0].moves[i - 1].to.z - m.to.z <= 6.5 + 1e-6);
+    }
+    if (m.kind == cam::Move::Kind::Rapid &&
+        m.to.z > paths[0].moves[i - 1].to.z &&
+        std::abs(m.to.z - op.topZ) < 1e-6)
+      retractsToTop++;
+  }
+  CHECK(plunges >= 5);
+  CHECK(retractsToTop >= 4);
+  // The value survives a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  CHECK_THAT(DocumentIO::CamSetupFromJson(j).operations[0].peck,
+             WithinAbs(6.0, 1e-9));
+}
+
+// ---------------------------------------------------------------------------
+// R4: corner relief.
+
+TEST_CASE("cam relief: a dogbone clears a pocket's corners, and the verifier "
+          "knows it is not a gouge",
+          "[cam][relief]") {
+  // A 60 x 40 x 20 block with a 30 x 20 pocket 8 deep in its top.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               60.0, 40.0, 20.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<BoxFeature>("Void", glm::vec3(15, 10, 12),
+                                               30.0, 20.0, 20.0));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocketed", block, voidId,
+                                                   BooleanOp::Subtract));
+  ElementRef floor;
+  for (const Body& b : doc->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+          std::abs(o.z - 12.0f) < 1e-4f)
+        floor = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(floor.IsSet());
+
+  const auto job = [&](cam::CornerRelief relief) {
+    cam::Setup setup = BasicSetup(); // one 6 mm flat
+    cam::Operation op;
+    op.id = 1;
+    op.type = cam::OpType::Pocket;
+    op.side = cam::Side::Inside;
+    op.topZ = 21.0;
+    op.bottomZ = 12.0;
+    op.stepdown = 4.0;
+    op.cornerRelief = relief;
+    op.targets = {cam::Target{0, floor}};
+    setup.operations.push_back(op);
+    return setup;
+  };
+
+  cam::Setup plain = job(cam::CornerRelief::None);
+  auto plainPaths = cam::GenerateAll(plain, doc->GetBodies());
+  REQUIRE(plainPaths.size() == 1);
+  REQUIRE(plainPaths[0].error.empty());
+  CHECK(plainPaths[0].reliefs.empty());
+  std::string plainG, error;
+  REQUIRE(cam::PostProcess("mach3", plain, plainPaths, {}, plainG, &error));
+  // The material standing at the pocket's corner: a round cutter following
+  // a square ring leaves it. Read off the machined height map at a cell
+  // just inside the corner -- the verifier's leftover count would not say,
+  // because leftover is measured only where the tool went, and a corner
+  // radius is exactly where it did not.
+  const auto heightAt = [](const cam::Inspection& insp, double x, double y) {
+    const int i = static_cast<int>((x - insp.machined.x0) / insp.machined.res);
+    const int j = static_cast<int>((y - insp.machined.y0) / insp.machined.res);
+    return static_cast<double>(insp.machined.At(i, j));
+  };
+  const cam::Inspection before =
+      cam::Inspect(plainG, plain, doc->GetBodies(), 0.25);
+  REQUIRE(before.ok);
+  INFO("before: corner at " << heightAt(before, 15.4, 10.4));
+  CHECK(heightAt(before, 15.4, 10.4) > 19.0); // uncut: the block's top
+
+  cam::Setup boned = job(cam::CornerRelief::Dogbone);
+  auto bonedPaths = cam::GenerateAll(boned, doc->GetBodies());
+  REQUIRE(bonedPaths.size() == 1);
+  REQUIRE(bonedPaths[0].error.empty());
+  CHECK(bonedPaths[0].reliefs.size() == 4); // one per corner, told once
+  // The bites go OUT of the pocket: some cut lies beyond the wall ring, past
+  // the pocket's corner by up to the tool's radius.
+  double farthest = 0.0;
+  for (const cam::Move& m : bonedPaths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut)
+      farthest = std::max(
+          farthest, std::max(std::abs(m.to.x - 30.0) - 12.0,
+                             std::abs(m.to.y - 20.0) - 7.0)); // ring half-sizes
+  CHECK(farthest > 1.0);
+  CHECK(farthest < 3.0 + 1e-6);
+  std::string bonedG;
+  REQUIRE(cam::PostProcess("mach3", boned, bonedPaths, {}, bonedG, &error));
+  // Without being told, the verifier calls the bites a gouge -- they ARE
+  // cuts into the model. Told, it does not, and it says how many corners.
+  const cam::Verdict naive =
+      cam::VerifyGcode(bonedG, boned, doc->GetBodies(), 0.25);
+  CHECK(naive.maxGouge > 1.0);
+  const cam::Inspection after = cam::Inspect(bonedG, boned, doc->GetBodies(),
+                                             0.25, bonedPaths[0].reliefs);
+  const cam::Verdict& told = after.verdict;
+  INFO("told: gouge " << told.maxGouge << ", corner at "
+                      << heightAt(after, 15.4, 10.4));
+  CHECK(told.maxGouge < 0.4);
+  CHECK(told.reliefs == 4);
+  CHECK(heightAt(after, 15.4, 10.4) < 12.5); // the corner is cleared
+  bool said = false;
+  for (const cam::VerdictLine& line : cam::Explain(told, 0.4, 0.0, false))
+    said = said ||
+           line.text.find("4 inside corners relieved") != std::string::npos;
+  CHECK(said);
+
+  // A T-bone runs along a wall instead of the bisector: its bites lie on the
+  // ring's edge lines, so they reach past the corner in ONE axis only.
+  cam::Setup tboned = job(cam::CornerRelief::TBone);
+  auto tPaths = cam::GenerateAll(tboned, doc->GetBodies());
+  REQUIRE(tPaths.size() == 1);
+  REQUIRE(tPaths[0].error.empty());
+  CHECK(tPaths[0].reliefs.size() == 4);
+  // Counted as distinct places, not per depth pass.
+  std::set<std::pair<long, long>> bites;
+  for (const cam::Move& m : tPaths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut &&
+        (std::abs(m.to.x - 30.0) > 12.0 + 1e-6 ||
+         std::abs(m.to.y - 20.0) > 7.0 + 1e-6)) {
+      const bool onX = std::abs(std::abs(m.to.y - 20.0) - 7.0) < 1e-6;
+      const bool onY = std::abs(std::abs(m.to.x - 30.0) - 12.0) < 1e-6;
+      CHECK((onX || onY)); // every bite lies on a wall line
+      bites.emplace(std::lround(m.to.x * 1000.0), std::lround(m.to.y * 1000.0));
+    }
+  CHECK(bites.size() == 4);
+
+  // The value survives a save, and an unknown one is refused.
+  const auto j = DocumentIO::CamSetupToJson(boned);
+  CHECK(DocumentIO::CamSetupFromJson(j).operations[0].cornerRelief ==
+        cam::CornerRelief::Dogbone);
+  nlohmann::json bad = j;
+  bad["operations"][0]["corner_relief"] = "vbone";
+  CHECK_THROWS_WITH(DocumentIO::CamSetupFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("tbone"));
+}
+
+TEST_CASE("cam relief: an outside profile relieves the part's inner corner "
+          "and nothing else",
+          "[cam][relief]") {
+  // An L: a 60 x 40 block with a 30 x 20 bite out of one corner.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                               60.0, 40.0, 12.0));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(std::make_unique<BoxFeature>("Bite", glm::vec3(30, 20, -1),
+                                               40.0, 30.0, 20.0));
+  const uint64_t bite = doc->GetFeature(1)->GetId();
+  doc->AddFeature(
+      std::make_unique<BooleanFeature>("L", block, bite, BooleanOp::Subtract));
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 13.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  op.cornerRelief = cam::CornerRelief::Dogbone;
+  setup.operations.push_back(op);
+  auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  // The L has one inner corner, at (30, 20); the outer corners are the
+  // cutter's to make sharp and get no bone.
+  REQUIRE(paths[0].reliefs.size() == 1);
+  CHECK_THAT(glm::distance(paths[0].reliefs[0].at, glm::dvec2(30.0, 20.0)),
+             WithinAbs(3.0 * std::sqrt(2.0),
+                       0.05)); // the path corner, r off each wall
+}
+
+// ---------------------------------------------------------------------------
+// R5: lead arcs.
+
+TEST_CASE("cam lead: a profile leaves the wall on a tangent arc",
+          "[cam][lead]") {
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0; // several passes: a lead on each, the last one checked
+  op.leadArcs = true;
+  setup.operations.push_back(op);
+  auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  // The last cutting moves before the final retract walk AWAY from the
+  // block: their distance from the part's outline grows from the tool's
+  // radius to twice it, and none of them comes closer than the radius.
+  const auto& moves = paths[0].moves;
+  REQUIRE(moves.size() > 12);
+  REQUIRE(moves.back().kind == cam::Move::Kind::Rapid);
+  const auto outlineDistance = [](const glm::dvec3& p) {
+    const double dx = std::max({0.0 - p.x, p.x - 40.0, 0.0});
+    const double dy = std::max({0.0 - p.y, p.y - 30.0, 0.0});
+    return std::hypot(dx, dy);
+  };
+  const size_t end = moves.size() - 1;
+  const double atWall = outlineDistance(moves[end - 9].to);
+  const double offWall = outlineDistance(moves[end - 1].to);
+  INFO("at wall " << atWall << ", off wall " << offWall);
+  CHECK_THAT(atWall, WithinAbs(3.0, 0.05));
+  CHECK_THAT(offWall, WithinAbs(6.0, 0.1));
+  for (size_t i = end - 9; i < end; i++)
+    CHECK(outlineDistance(moves[i].to) > 3.0 - 1e-6);
+  // ...and it is still a clean cut: nothing gouged by the arc.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  CHECK(v.maxGouge < 0.4);
+
+  // Inside an opening with no room for the arc, refused in words.
+  auto doc2 = std::make_unique<Document>();
+  doc2->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                                60.0, 40.0, 12.0));
+  const uint64_t block = doc2->GetFeature(0)->GetId();
+  // A 10 mm slot: room for a 6 mm tool (offset 3 each side leaves 4), not
+  // for the tool plus a 3 mm lead (the arc's end is 6 off the near wall and
+  // the cutter reaches 9; with 3 to spare from the far wall that needs 12).
+  doc2->AddFeature(std::make_unique<BoxFeature>("Slot", glm::vec3(10, 15, -1),
+                                                40.0, 10.0, 20.0));
+  const uint64_t slot = doc2->GetFeature(1)->GetId();
+  doc2->AddFeature(std::make_unique<BooleanFeature>("Slotted", block, slot,
+                                                    BooleanOp::Subtract));
+  ElementRef wall;
+  for (const Body& b : doc2->GetBodies())
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (b.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.01f &&
+          o.x > 9.0f && o.x < 51.0f && o.y > 14.0f && o.y < 26.0f)
+        wall = ElementRef{b.createdBy, name};
+    }
+  REQUIRE(wall.IsSet());
+  cam::Setup inside = BasicSetup();
+  cam::Operation in;
+  in.id = 2;
+  in.type = cam::OpType::Profile;
+  in.side = cam::Side::Inside;
+  in.topZ = 13.0;
+  in.bottomZ = -1.0;
+  in.stepdown = 5.0;
+  in.leadArcs = true;
+  in.targets = {cam::Target{0, wall}};
+  inside.operations.push_back(in);
+  auto inPaths = cam::GenerateAll(inside, doc2->GetBodies());
+  REQUIRE(inPaths.size() == 1);
+  INFO(inPaths[0].error);
+  CHECK(inPaths[0].error.find("lead arc") != std::string::npos);
+  CHECK(inPaths[0].error.find("room") != std::string::npos);
+  // Without the lead the same opening cuts.
+  inside.operations[0].leadArcs = false;
+  auto plainPaths = cam::GenerateAll(inside, doc2->GetBodies());
+  REQUIRE(plainPaths.size() == 1);
+  CHECK(plainPaths[0].error.empty());
+  // The flag survives a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  CHECK(DocumentIO::CamSetupFromJson(j).operations[0].leadArcs);
+}
+
+// ---------------------------------------------------------------------------
+// R6: rough then finish.
+
+TEST_CASE("cam finish: one operation roughs with one tool and finishes with "
+          "another",
+          "[cam][finish]") {
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Tool fine = setup.tools[0];
+  fine.number = 2;
+  fine.diameter = 3.0;
+  setup.tools.push_back(fine);
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Outside;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0;
+  op.finishTool = 2;
+  op.finishStock = cam::DefaultFinishStock(setup.tools[0]); // 0.6
+  setup.operations.push_back(op);
+
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 2); // two toolpaths from one operation
+  CHECK(paths[0].operationId == 1);
+  CHECK(paths[1].operationId == 1);
+  CHECK(paths[0].toolNumber == 1);
+  CHECK(!paths[0].finish);
+  CHECK(paths[1].toolNumber == 2);
+  CHECK(paths[1].finish);
+  INFO(paths[1].error);
+  CHECK(paths[1].error.empty());
+  const auto outlineDistance = [](const glm::dvec3& p) {
+    const double dx = std::max({0.0 - p.x, p.x - 40.0, 0.0});
+    const double dy = std::max({0.0 - p.y, p.y - 30.0, 0.0});
+    return std::hypot(dx, dy);
+  };
+  // The rough never comes nearer the final wall than its radius plus what
+  // it leaves; the finish runs at exactly its own radius from the wall,
+  // in ONE pass at the full depth.
+  double roughNearest = 1e9, finishNearest = 1e9, finishFarthest = 0.0;
+  double finishLowest = 1e9, finishHighest = -1e9;
+  for (const cam::Move& m : paths[0].moves)
+    if (m.kind == cam::Move::Kind::Cut)
+      roughNearest = std::min(roughNearest, outlineDistance(m.to));
+  for (const cam::Move& m : paths[1].moves)
+    if (m.kind == cam::Move::Kind::Cut) {
+      finishNearest = std::min(finishNearest, outlineDistance(m.to));
+      finishFarthest = std::max(finishFarthest, outlineDistance(m.to));
+      finishLowest = std::min(finishLowest, m.to.z);
+      finishHighest = std::max(finishHighest, m.to.z);
+    }
+  INFO("rough nearest " << roughNearest << ", finish " << finishNearest << ".."
+                        << finishFarthest);
+  CHECK(roughNearest > 3.0 + 0.6 - 0.02); // within the offset's chord tolerance
+  CHECK_THAT(finishNearest, WithinAbs(1.5, 1e-3));
+  CHECK(finishFarthest < 1.5 + 0.01); // no corner rounding beyond the tool
+  CHECK_THAT(finishLowest, WithinAbs(-1.0, 1e-6));
+  CHECK(finishHighest <= 21.0 + 1e-6);
+  // Together: a clean part.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " at "
+                << v.leftoverAt.x << "," << v.leftoverAt.y << " regions "
+                << v.leftoverRegions << " area " << v.leftoverArea);
+  CHECK(v.maxGouge < 0.4);
+  CHECK(v.maxLeftover < 0.5); // the rough's 0.6 is gone
+
+  // A file per tool splits the two: tool order sorts TOOLPATHS.
+  setup.splitOutput = true;
+  const auto ordered = cam::GenerateAll(setup, doc->GetBodies());
+  std::vector<cam::PostFile> files;
+  REQUIRE(cam::PostProcessSplit("mach3", setup, ordered, {}, files, &error));
+  REQUIRE(files.size() == 2);
+  CHECK(files[0].tool == 1);
+  CHECK(files[1].tool == 2);
+
+  // A finishing tool the setup does not have is said, on the finish path.
+  cam::Setup missing = setup;
+  missing.operations[0].finishTool = 9;
+  const auto bad = cam::GenerateAll(missing, doc->GetBodies());
+  REQUIRE(bad.size() == 2);
+  CHECK(bad[1].error.find("finishing tool 9") != std::string::npos);
+
+  // The fields survive a save.
+  const auto j = DocumentIO::CamSetupToJson(setup);
+  const cam::Setup back = DocumentIO::CamSetupFromJson(j);
+  CHECK(back.operations[0].finishTool == 2);
+  CHECK_THAT(back.operations[0].finishStock, WithinAbs(0.6, 1e-9));
+}
+
+#endif // HAVE_CAM
