@@ -1,6 +1,12 @@
 # Architecture review round 2 (2026-09-06) — the oversized units
 
-> Status: **PLAN. Nothing shipped.** Round 1
+> Status: **stages 1, 2, 3 (first wave) and 5 SHIPPED** on branch `wtarch`
+> (d12ac214, 0d6097a3, 757c862d, 47301121). Two live bugs fell out of the work
+> and are fixed: `-DENABLE_CAM=OFF` did not compile, and a CAM job file with a
+> typo in an operation type loaded as a PROFILE. Section 11 records what the
+> measurements got wrong. The rest of the plan below is unshipped.
+>
+> Originally:  **PLAN. Nothing shipped.** Round 1
 > (docs/architecture-review-2026-08-24.md) fixed the duplicated Vulkan
 > helpers, the dead code, the `GuiTests.cpp` monolith, the feature-type table
 > and a contained `ui/` decoupling. It *measured* two problems and scheduled
@@ -336,13 +342,13 @@ Ordered so that each stage is independently shippable and independently
 revertible. Nothing here changes behavior; every stage's success criterion is
 **identical behavior**, so the verification is the same each time.
 
-| # | Stage | Files | Risk | Why this order |
+| # | Stage | Files | Risk | State |
 |---|---|---|---|---|
-| 1 | `tests/` splits (§9) | 3 test files | none | Free, and proves the label/ctest plumbing survives a split before touching `src` |
-| 2 | `CamToolpath` → 6 files + strategy table (§7) | `core/cam/` | low | `core/` has real unit tests; the table closes a shipped bug class |
-| 3 | `AppActions` → 12 files, umbrella header kept (§3) | `ui/` | low | Pure cuts along existing anonymous-namespace boundaries |
+| 1 | `tests/` splits (§9) | 3 test files | none | **done** `d12ac214` |
+| 2 | `CamToolpath` → 6 files + strategy table (§7) | `core/cam/` | low | **done** `0d6097a3` |
+| 3 | `AppActions` → 12 files, umbrella header kept (§3) | `ui/` | low | **wave 1 done** `757c862d` — 3 of 13 |
 | 4 | Retire the umbrella: 55 includers name the narrow header | `ui/`, `remote/`, `app/` | low, tedious | This is where the compile win is realized |
-| 5 | `designer_app` PCH (§2) | `CMakeLists.txt` | low | Pays back stage 3's duplicated header parsing |
+| 5 | `designer_app` PCH (§2) | `CMakeLists.txt` | low | **done** `47301121` |
 | 6 | `AssemblyActions` → 5 files (§6) | `ui/` | low | Two blocks become headless-testable |
 | 7 | **8a** — `RemoteServer` → session / ui-actions / dispatch (§4) | `remote/` | low | Mechanical; captures most of §4's size win with none of its risk |
 | 8 | **8b** — four string sets → `MethodDoc` columns, one module at a time (§4) | `remote/` | low–medium | Strangled, not swapped: table and chain co-exist behind an agreement test |
@@ -412,3 +418,75 @@ is **$180 and must be asked for first**. Design stages 7–8 to not need one.
   includes. Do it as its own round, against a pixel diff.
 - **Don't do stage 5 (the PCH) alone** and declare the compile problem solved.
   It is 9%.
+
+---
+
+## 11. What actually happened (2026-09-06/07)
+
+### The two bugs
+
+**`-DENABLE_CAM=OFF` did not compile.** `test_cam.cpp` carried
+`#endif // HAVE_CAM` at line 4322 with 38 test cases appended *after* it. With
+CAM off -- a configuration `CMakeLists.txt` supports and prints a status line
+for -- those 1,640 lines compiled with no cam headers: 36 errors. Nobody saw
+it because the marker was in the middle of a 6,000-line file. Splitting the
+file fixes it by construction, and all five parts now compile clean either way.
+
+**A typo in a job file loaded as a profile.** `SerializeCam`'s
+`OpTypeFromName` ended in `return cam::OpType::Profile`, so `"type": "pocekt"`
+came back as a different strategy against a different region, posted and cut
+without a word. Exactly the class the 2026-08-24 round swept (follow-up E) --
+it was simply not in the enum-parser sweep. It refuses now, with a
+sabotage-checked test.
+
+Both were found by *moving* code, not by reading it. That is the argument for
+the round.
+
+### Where the compile time went
+
+| | wall | CPU |
+|---|---|---|
+| `designer_tests`, no PCH | 79.6 s | 1059 s |
+| `designer_tests`, PCH | **61.7 s** | **866 s** |
+| `designer_app`, no PCH | 66.7 s | 1024 s |
+| `designer_app`, PCH | **53.0 s** | **780 s** |
+
+Section 2's thesis held: the split raised total CPU (test_cam's five files
+cost 21 s of duplicated parsing) and the PCH more than paid it back.
+
+### Three measurements this round got wrong
+
+1. **Stage 1's scope.** The plan named three test files. Measured serially,
+   `test_projectmerge.cpp` is 12.3 s of which only 2.5 s is headers — 961
+   lines, nothing to split — and `test_actions.cpp` is similar. Only
+   `test_cam.cpp` (24.8 s, 5,965 lines) was worth it. The plan's own §2
+   argument, applied to itself.
+2. **The region checker.** A script reported all four candidate `AppActions`
+   regions as having no helper crossing their boundary. It was skipping the
+   contents of every anonymous namespace, so it had checked nothing; the
+   compiler caught it, and the corrected script found seven real crossings.
+   A "clean" result from a script that finds nothing looks exactly like a
+   script that looks at nothing.
+3. **The PCH, twice.** The first A/B said the PCH cost 34% *more* CPU — that
+   run was cold and the machine was loaded, and a repeat of the identical
+   configuration came in 45% faster. The second said it was a clear win, but
+   was measured against a build where the ImGui TUs were failing fast (see
+   the `IMGUI_DEFINE_MATH_OPERATORS` note in CMakeLists.txt) and so not
+   paying their usual cost. Only the third — everything compiling, two
+   samples each way — is the one quoted above. One sample of a build time on
+   a shared machine is not a measurement.
+
+### The pixel gate now runs here
+
+`tests/render_pixel_smoke.py` has existed since 2026-09-01 to automate what
+the 2026-08-24 round did by hand, and was skipping on this machine for want of
+a baseline for its GPU. Stage 3 moves `SyncDocumentRenderers`, which no test
+covers, so a baseline was recorded from the build *before* the split; the
+build after matches it at 86,763 bytes identical. The baseline is committed,
+so the gate now runs on this device instead of skipping.
+
+### Still to do
+
+Stage 3 has ten of its thirteen subjects left (`AppActions.cpp` is 3,933 lines,
+down from 6,428), then stages 4, 6-11. Stage 3's remaining regions need the
+corrected boundary check run over each before it moves.
