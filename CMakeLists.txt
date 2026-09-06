@@ -746,6 +746,46 @@ add_library(designer_app STATIC
     ${IMGUI_DIR}/imgui_widgets.cpp)
 target_include_directories(designer_app PUBLIC src)
 target_link_libraries(designer_app PUBLIC designer_core ${LIBRARIES})
+
+# The vendored sources are compiled here too, and they must NOT get the PCH
+# below: ImGui's own .cpp files `#define IMGUI_DEFINE_MATH_OPERATORS` before
+# including imgui.h, and ui/AppState.h (the PCH's whole point) pulls imgui.h in
+# ahead of them. imgui_draw.cpp then fails on its own header. They are also the
+# files with the least to gain -- none of them includes anything of ours.
+set_source_files_properties(
+    ${NFD_SOURCES}
+    ${IMGUI_TEST_ENGINE_SOURCES}
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
+# Precompiled header. designer_core has had one since the 2026-08-24 round for
+# the same reason; the app target never got one, and it is the larger half.
+#
+# What it is paying for: ui/AppState.h preprocesses to 224k lines and 65 files
+# include it, because core/Document.h behind it drags in the whole OpenCASCADE
+# tree (146k lines on its own -- 53% of a typical UI translation unit).
+#
+# It is also the counterpart to splitting the big files. A split makes N
+# translation units re-parse what one used to parse once, so the split alone
+# raises total CPU while it lowers the critical path; the PCH is what pays that
+# back. Do not remove one without the other
+# (docs/architecture-review-2026-09-06.md, section 2).
+#
+# PRIVATE, like designer_core's: it applies to this target's own sources, not
+# to everything that links it.
+
+target_precompile_headers(designer_app PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/ui/AppState.h"
+    <glm/glm.hpp>
+    <nlohmann/json.hpp>
+    <vector> <string> <memory> <optional> <map> <set> <algorithm> <cmath>
+)
 if(ENABLE_TEST_ENGINE)
   # PUBLIC, not PRIVATE: GuiTests*.cpp and the app both switch on it, and a
   # consumer linking this library must agree about ImGui's ABI.
