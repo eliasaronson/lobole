@@ -633,6 +633,9 @@ set(app_sources
     src/ui/DerivedActions.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
+    src/ui/ProjectActions.cpp
+    src/ui/RendererSync.cpp
+    src/ui/MeasureActions.cpp
     src/ui/AssemblyActions.cpp
     src/ui/MotionActions.cpp
     src/ui/JobActions.cpp

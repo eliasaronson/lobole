@@ -18,7 +18,12 @@
 
 class Document;
 class AssemblyDocument;
+class DrawingDocument;
 struct Occurrence;
+struct Body;
+namespace cam {
+struct JobDocument;
+} // namespace cam
 
 namespace ui {
 
@@ -172,5 +177,23 @@ void EvictPartRenderCache(AppState& state, uint64_t partSlotId);
 // Defined in AssemblyActions.cpp; called by SyncDocumentRenderers (AppActions).
 void SyncAssemblyRenderers(AppState& state);
 void SyncInContextGhosts(AppState& state);
+
+// ---------------------------------------------------------------------------
+// The tab slots. AppActions.cpp owns the active-tab machinery -- which slot is
+// live, what gets stashed when you leave it -- and ProjectActions.cpp opens and
+// saves the slots that machinery manages. These are the seam between the two;
+// they were file-static while both lived in one 6,400-line file.
+Document* SlotDoc(AppState& state, size_t i);
+AssemblyDocument* SlotAssembly(AppState& state, size_t i);
+DrawingDocument* SlotDrawing(AppState& state, size_t i);
+cam::JobDocument* SlotJob(AppState& state, size_t i);
+void StashActive(AppState& state);
+void ActivateSlot(AppState& state, size_t index);
+void ResetActiveTabUiState(AppState& state);
+
+// The section cut's cap meshes, built in AppActions.cpp next to the rest of
+// the section machinery and drawn by SyncDocumentRenderers in RendererSync.cpp.
+void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
+                       const std::vector<glm::vec3>& bodyColors);
 
 } // namespace ui
