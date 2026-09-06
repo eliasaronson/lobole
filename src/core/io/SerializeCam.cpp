@@ -1,5 +1,6 @@
 #include "core/cam/CamJob.h"
-#include "core/cam/CamMachine.h"  // MachineFileName
+#include "core/cam/CamMachine.h" // MachineFileName
+#include "core/cam/CamOpType.h"
 #include "core/cam/CamPost.h"     // PostExists, PostIds
 #include "core/cam/CamToolpath.h" // FrameIsSquare
 #include "core/io/Serialization.h" // WriteTextAtomic
@@ -24,35 +25,20 @@ using nlohmann::json;
 
 namespace {
 
-const char* OpTypeName(cam::OpType t) {
-  switch (t) {
-  case cam::OpType::Pocket:
-    return "pocket";
-  case cam::OpType::Face:
-    return "face";
-  case cam::OpType::Drill:
-    return "drill";
-  case cam::OpType::Adaptive:
-    return "adaptive";
-  case cam::OpType::EdgeRound:
-    return "edge_round";
-  default:
-    return "profile";
-  }
-}
-
-cam::OpType OpTypeFromName(const std::string& s) {
-  if (s == "pocket")
-    return cam::OpType::Pocket;
-  if (s == "face")
-    return cam::OpType::Face;
-  if (s == "drill")
-    return cam::OpType::Drill;
-  if (s == "adaptive")
-    return cam::OpType::Adaptive;
-  if (s == "edge_round")
-    return cam::OpType::EdgeRound;
-  return cam::OpType::Profile;
+// The type for a saved name. This used to `return cam::OpType::Profile` for
+// anything it did not recognise, so a job file with a typo in it -- or a
+// merged one, or a hand-edited one, which the directory format invites --
+// loaded that operation as a PROFILE: a different strategy against a
+// different region, posted and cut without a word. Same rule as the rest of
+// the loader now (docs/architecture-review-2026-08-24.md, follow-up E):
+// refuse, naming what IS accepted.
+cam::OpType OpTypeFromJson(const std::string& s) {
+  cam::OpType t{};
+  if (cam::TryOpTypeFromName(s, t))
+    return t;
+  throw std::runtime_error("unknown CAM operation type '" + s +
+                           "' (expected one of: " + cam::OpTypeNameList() +
+                           ")");
 }
 
 const char* ToolTypeName(cam::ToolType t) {
@@ -419,7 +405,7 @@ json CamSetupToJson(const cam::Setup& setup) {
   for (const cam::Operation& op : setup.operations) {
     json oj = {{"id", op.id},
                {"name", op.name},
-               {"type", OpTypeName(op.type)},
+               {"type", cam::OpTypeName(op.type)},
                {"tool", op.toolNumber},
                {"top_z", op.topZ},
                {"bottom_z", op.bottomZ}};
@@ -582,7 +568,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     cam::Operation op;
     op.id = oj.value("id", uint64_t{0});
     op.name = oj.value("name", std::string());
-    op.type = OpTypeFromName(oj.value("type", std::string("profile")));
+    op.type = OpTypeFromJson(oj.value("type", std::string("profile")));
     op.toolNumber = oj.value("tool", 1);
     op.topZ = oj.value("top_z", 0.0);
     op.bottomZ = oj.value("bottom_z", -1.0);

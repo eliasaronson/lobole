@@ -1077,4 +1077,67 @@ TEST_CASE("cam job: the same element name on two parts is refused, not guessed",
   CHECK(one[0] == 2);
 }
 
+TEST_CASE("cam: an unknown operation type in a job file is REFUSED", "[cam]") {
+  // It used to load as a PROFILE. `OpTypeFromName` ended in
+  // `return cam::OpType::Profile`, so "pocekt" -- or a merged file, or a
+  // hand-edited one, which the one-file-per-item directory format invites --
+  // came back as a different strategy against a different region, and was
+  // posted and cut without a word. Same class as the mate type that loaded as
+  // Fastened and solved perfectly well with the wrong degrees of freedom
+  // (docs/architecture-review-2026-08-24.md, follow-up E).
+  cam::JobDocument job;
+  cam::Setup& setup = job.AddSetup("Side A");
+  cam::Operation op;
+  op.id = job.AllocateId();
+  op.name = "Clear it";
+  op.type = cam::OpType::Pocket;
+  setup.operations.push_back(op);
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_bad_optype.json";
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+
+  // Corrupt exactly one character of the type, as a typo would.
+  std::string text;
+  {
+    std::ifstream in(path);
+    text.assign(std::istreambuf_iterator<char>(in),
+                std::istreambuf_iterator<char>());
+  }
+  REQUIRE(text.find("\"pocket\"") != std::string::npos);
+  text.replace(text.find("\"pocket\""), 8, "\"pocekt\"");
+  {
+    std::ofstream out(path);
+    out << text;
+  }
+
+  // The refusal names the value AND what would have been accepted, so the
+  // typo is fixable from the message alone.
+  auto back = DocumentIO::LoadJob(path.string());
+  REQUIRE_FALSE(back.has_value());
+  const std::string why = back.error();
+  INFO("refusal: " << why);
+  CHECK(why.find("pocekt") != std::string::npos);
+  CHECK(why.find("pocket") != std::string::npos);
+  CHECK(why.find("edge_round") != std::string::npos);
+}
+
+TEST_CASE("cam: every operation type round-trips through its name", "[cam]") {
+  // The table is the one place a type's name is written down. If a row is
+  // ever added with a name the reader does not accept -- or removed while a
+  // writer still emits it -- this fails rather than a job file silently
+  // changing strategy on reload.
+  for (const cam::OpTypeRow& row : cam::OpTypes()) {
+    cam::OpType back{};
+    INFO("row " << row.name);
+    REQUIRE(cam::TryOpTypeFromName(row.name, back));
+    CHECK(back == row.type);
+    CHECK(std::string(cam::OpTypeName(row.type)) == row.name);
+    CHECK(cam::OpTypeNameList().find(row.name) != std::string::npos);
+  }
+  cam::OpType unused{};
+  CHECK_FALSE(cam::TryOpTypeFromName("no_such_op", unused));
+  CHECK_FALSE(cam::TryOpTypeFromName("", unused));
+}
+
 #endif // HAVE_CAM

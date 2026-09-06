@@ -1,5 +1,7 @@
 #include "remote/RemoteCam.h"
 
+#include "core/cam/CamOpType.h"
+
 #ifdef HAVE_CAM
 
 #include "core/Document.h"
@@ -277,18 +279,10 @@ const char* SideName(cam::Side s) {
                                 : "outside";
 }
 
-// One table, both directions. The previous pair had a `default:` on the way
-// out, so OpType::Adaptive was REPORTED as "profile" — a wrong readout,
-// which is worse than the error the way in gave.
-struct TypeRow {
-  cam::OpType type;
-  const char* name;
-};
-constexpr TypeRow kTypes[] = {
-    {cam::OpType::Profile, "profile"},   {cam::OpType::Pocket, "pocket"},
-    {cam::OpType::Face, "face"},         {cam::OpType::Drill, "drill"},
-    {cam::OpType::Adaptive, "adaptive"}, {cam::OpType::EdgeRound, "edge_round"},
-};
+// The operation type's names moved to core/cam/CamOpType.h, which is the one
+// row per type the loader, the RPC surface and the toolpath generator all
+// read. The row ORDER there is this table's old order, so the refusal below
+// still names them in the same sequence, character for character.
 
 // The tool's shape, same table-both-ways discipline: a name we do not know is
 // refused, never silently read as the flat mill everything used to assume.
@@ -320,21 +314,14 @@ cam::ToolType ToolTypeFrom(const std::string& s) {
   throw std::runtime_error("unknown tool type '" + s + "'; use " + known);
 }
 
-const char* TypeName(cam::OpType t) {
-  for (const TypeRow& row : kTypes)
-    if (row.type == t)
-      return row.name;
-  return "profile";
-}
+const char* TypeName(cam::OpType t) { return cam::OpTypeName(t); }
 
 cam::OpType TypeFrom(const std::string& s) {
-  for (const TypeRow& row : kTypes)
-    if (s == row.name)
-      return row.type;
-  std::string known;
-  for (const TypeRow& row : kTypes)
-    known += (known.empty() ? "" : ", ") + std::string(row.name);
-  throw std::runtime_error("unknown operation type '" + s + "'; use " + known);
+  cam::OpType t{};
+  if (cam::TryOpTypeFromName(s, t))
+    return t;
+  throw std::runtime_error("unknown operation type '" + s + "'; use " +
+                           cam::OpTypeNameList());
 }
 
 cam::Setup& RequireSetup(cam::JobDocument& job, uint64_t id) {

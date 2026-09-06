@@ -1,0 +1,561 @@
+#include "core/cam/CamToolpath.h"
+
+#include "core/cam/CamToolpathInternal.h"
+
+#include "core/Measure.h"
+#include "core/cam/CamAdaptive.h"
+
+#include <clipper2/clipper.h>
+
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepLProp_SLProps.hxx>
+#include <BRepTools.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <GCPnts_QuasiUniformDeflection.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Wire.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Pnt.hxx>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <limits>
+#include <numbers>
+#include <optional>
+#include <string>
+
+#include <glm/trigonometric.hpp>
+
+// Deriving an operation from a pick: depths, stepover, tool changes, the
+// edge break a tool can make, and reordering.
+
+// One of six files split from CamToolpath.cpp
+// (docs/architecture-review-2026-09-06.md, stage 2).
+
+namespace cam {
+
+using namespace detail;
+
+namespace {
+
+// Where this body's part sits in the stock, or null when nobody has said.
+const Placement* PlacementForBody(const Setup& setup, const Body& b) {
+  if (b.jobPartId == 0)
+    return nullptr;
+  for (const Placement& p : setup.placements)
+    if (p.jobPartId == b.jobPartId)
+      return &p;
+  return nullptr;
+}
+
+} // namespace
+
+namespace detail {
+
+// The largest break this tool can make within `window` mm of wall below the
+// top edge, or the size asked for, checked against the tool.
+EdgeBreak EdgeBreakFor(const Tool& tool, double asked, double window) {
+  EdgeBreak out;
+  const double r = tool.diameter * 0.5;
+  if (tool.type == ToolType::Flat || tool.type == ToolType::Drill) {
+    out.why = "tool " + std::to_string(tool.number) + " is a " +
+              (tool.type == ToolType::Flat ? "flat end mill" : "drill") +
+              " — breaking an edge needs a ball nose (a roundover) or a V-bit "
+              "(a chamfer). Set the tool's type.";
+    return out;
+  }
+  if (tool.type == ToolType::VBit) {
+    const double half = glm::radians(tool.tipAngleDeg * 0.5);
+    const double tanHalf = std::tan(half);
+    if (tanHalf < 1e-9 || half >= glm::radians(89.9)) {
+      out.why = "a V-bit with a " + Round2(tool.tipAngleDeg) +
+                " degree included angle has no flank to cut a bevel with";
+      return out;
+    }
+    // cot(half) mm of depth per mm of width; the bevel must fit the wall,
+    // and the flank must reach the top surface (so w <= the tool radius).
+    const double cot = 1.0 / tanHalf;
+    const double fits = std::min(r, window / cot);
+    out.size = asked > 0.0 ? asked : fits;
+    if (out.size > r + 1e-9) {
+      out.why = "tool " + std::to_string(tool.number) + " is " +
+                Round2(tool.diameter) + " mm across, so its flank can cut a " +
+                Round2(r) + " mm bevel at most — " + Round2(out.size) +
+                " mm would bury the shank";
+      return out;
+    }
+    out.depth = out.size * cot;
+  } else {
+    out.size = asked > 0.0 ? asked : std::min(r, window);
+    // The ball hangs its own radius below the deepest contact point.
+    out.depth = out.size + r;
+  }
+  if (out.size <= 1e-9) {
+    out.why =
+        "there is no room for a break here — the wall below the edge is " +
+        Round2(window) + " mm";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+} // namespace detail
+
+DerivedOp DeriveOperation(const Setup& setup,
+                          const std::vector<Body>& rawBodies, OpType type,
+                          const Target& target, int toolNumber) {
+  // Depths are read in the frame the machine cuts in, or an indexed setup
+  // derives them from the wrong axis (C9).
+  const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
+  DerivedOp out;
+  if (setup.tools.empty()) {
+    out.why = "add a tool first — every depth here comes from its diameter";
+    return out;
+  }
+  // Every derived number below is a fraction of the cutter, so deriving for
+  // one tool and cutting with another is a stepdown meant for a 6 mm end mill
+  // handed to a 3 mm one.
+  const Tool* named = toolNumber > 0 ? setup.FindTool(toolNumber) : nullptr;
+  if (toolNumber > 0 && named == nullptr) {
+    out.why =
+        "there is no tool " + std::to_string(toolNumber) + " in this setup";
+    return out;
+  }
+  const Tool& tool = named != nullptr ? *named : setup.tools.front();
+  // A V-bit or a drill point is a CONE: run along a floor it leaves a groove
+  // as deep as the pass, not a floor. A ball nose is fine — it leaves a cusp,
+  // and `DerivedStepover` sizes the step so that cusp is a fifth of a percent
+  // of the cutter. A cone has no such number, so this refuses instead of
+  // cutting something plausible and wrong.
+  if ((type == OpType::Pocket || type == OpType::Face ||
+       type == OpType::Adaptive) &&
+      (tool.type == ToolType::VBit || tool.type == ToolType::Drill)) {
+    out.why = "tool " + std::to_string(tool.number) + " is a " +
+              (tool.type == ToolType::VBit ? "V-bit" : "drill") +
+              " — a cone cannot clear a floor flat, it ploughs a groove the "
+              "depth of the pass. Use a flat end mill, or a ball nose if a "
+              "scalloped floor is acceptable.";
+    return out;
+  }
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBoundsFramed(setup, bodies, lo, hi)) {
+    // Two different reasons land here now — no solid at all, and a fixed
+    // workpiece too small for the part — and saying which is the difference
+    // between "draw something" and "get a bigger board".
+    out.why = StockRefusal(setup, bodies);
+    if (out.why.empty())
+      out.why = "there is no solid in this part yet, so there is no stock";
+    return out;
+  }
+
+  Operation op;
+  op.type = type;
+  op.toolNumber = tool.number;
+  // Half the cutter per pass and 45% of it per step-over: the rule of thumb
+  // every 2.5D job starts from, expressed in the tool rather than in
+  // millimetres so it stays right for a 1 mm cutter and a 12 mm one.
+  op.stepdown = DerivedStepdown(tool);
+  op.stepover = DerivedStepover(tool);
+
+  // The model's own box, as opposed to the stock's: "does this wall go all
+  // the way through" is a question about the part.
+  const double modelBottom = lo.z + setup.stock.bottomMargin;
+
+  switch (type) {
+  case OpType::Adaptive: // the strategy, derived exactly like the verb it is
+  case OpType::Pocket: {
+    if (IsWallFace(bodies, target.ref)) {
+      out.why = "click the pocket's FLOOR — a wall says where to go round, "
+                "not how deep to go. Cut it out follows a wall.";
+      return out;
+    }
+    const FaceRegion region = PickedFaceRegion(bodies, target.ref);
+    if (!region.ok) {
+      out.why = region.why;
+      return out;
+    }
+    op.name = "Clear pocket";
+    op.targets = {target};
+    op.bottomZ = region.z;  // the floor is the face you clicked
+    op.topZ = hi.z;         // …down from the top of the stock
+    op.side = Side::Inside; // a pocket is cut from inside its own boundary
+    // Deeper than one cutter diameter is the regime where adaptive clearing
+    // pays: a constant angle of engagement lets a small spindle take the
+    // whole depth, where concentric rings take the cutter's full width on
+    // the first lap of every pass. Still one verb — the strategy is a
+    // consequence of the geometry, not a question for the user (C8). The
+    // Advanced disclosure can force either.
+    if (AdaptiveAvailable() && op.topZ - op.bottomZ > tool.diameter)
+      op.type = OpType::Adaptive;
+    if (op.bottomZ >= op.topZ - 1e-9) {
+      out.why = "that face is already the top of the stock — there is "
+                "nothing above it to clear";
+      return out;
+    }
+    break;
+  }
+  case OpType::Profile: {
+    op.name = "Cut out";
+    op.side = Side::Outside;
+    op.topZ = hi.z;
+    // Through the part and a whisker into the spoilboard, which is what
+    // "cut it out" means — a profile that stops on the last skin leaves the
+    // part welded to the stock.
+    op.bottomZ = lo.z;
+    if (IsWallFace(bodies, target.ref)) {
+      // A wall names the contour to follow AND how far down to follow it.
+      const WallContour wall = PickedWallContour(bodies, target.ref);
+      if (!wall.ok) {
+        out.why = wall.why;
+        return out;
+      }
+      op.targets = {target};
+      op.side = wall.opening ? Side::Inside : Side::Outside;
+      op.name = wall.opening ? "Cut the opening" : "Cut out";
+      // A wall that stops short of the bottom of the part is a step, not a
+      // through cut: follow it exactly that far. One that reaches the bottom
+      // is through, so it carries on into the spoilboard like any cut-out.
+      if (wall.bottomZ > modelBottom + 1e-6)
+        op.bottomZ = wall.bottomZ;
+    } else if (target.IsSet()) {
+      const FaceRegion region = PickedFaceRegion(bodies, target.ref);
+      if (!region.ok) {
+        out.why = region.why;
+        return out;
+      }
+      // "Cut it out" follows the part's OWN side, and a level face only says
+      // where that is when nothing stands around it. Click the floor of a
+      // pocket and this used to route a full-depth contour around the pocket
+      // — a slot through the middle of the board, 22 mm into a 20 mm plate,
+      // reported by the verifier as scrap (docs/cam/dogfood-round.md). The
+      // mirror of this mistake was already guarded: a pocket asked for on a
+      // WALL says "click the pocket's FLOOR".
+      //
+      // The test is what the words mean: is there material immediately
+      // outside this contour, just above its own plane? On the top of a part
+      // there is nothing above; on a pocket floor there are its walls.
+      Clipper2Lib::Paths64 outer;
+      for (const Loop& l : region.loops)
+        if (!l.hole)
+          outer.push_back(ToClipper(l.pts));
+      if (!outer.empty()) {
+        const Clipper2Lib::Paths64 ring =
+            Clipper2Lib::Difference(Offset(outer, tool.diameter), outer,
+                                    Clipper2Lib::FillRule::NonZero);
+        Clipper2Lib::Paths64 solid, voids;
+        for (const Loop& l : SectionLoops(bodies, region.z + 1e-3))
+          (l.hole ? voids : solid).push_back(ToClipper(l.pts));
+        const Clipper2Lib::Paths64 above = Clipper2Lib::Difference(
+            solid, voids, Clipper2Lib::FillRule::NonZero);
+        const double ringArea = std::abs(Clipper2Lib::Area(ring));
+        const double buried = std::abs(Clipper2Lib::Area(Clipper2Lib::Intersect(
+            ring, above, Clipper2Lib::FillRule::NonZero)));
+        if (ringArea > 0.0 && buried > ringArea * 0.25) {
+          // Lead with the verb they want. The first version of this said
+          // what was wrong and offered two alternatives in one sentence, and
+          // was read as "pockets are picked by their walls" — which is the
+          // opposite of true. A pocket is picked by its FLOOR; a wall only
+          // comes into it for an opening that goes all the way through, and
+          // has no floor to pick.
+          out.why =
+              "that is the floor of a pocket — use \"Clear a pocket\" on it. "
+              "(\"Cut it out\" follows the part's own side, or the wall of an "
+              "opening that goes all the way through. Around a pocket floor "
+              "it would route a slot through the part.)";
+          return out;
+        }
+      }
+      op.targets = {target};
+    }
+    // Tabs, so the part does not break free under the cutter on the last
+    // pass. Sized from the tool (a tab narrower than the cutter is cut away
+    // as the tool passes) and from the depth, with a floor so a shallow part
+    // still gets a tab rather than a scratch. An OPENING needs none: the slug
+    // that falls out of it is scrap, and tabbing it only leaves stubs to
+    // clean off the part.
+    if (op.side != Side::Inside) {
+      op.tabCount = 4;
+      op.tabWidth = tool.diameter * 2.0;
+      op.tabHeight = std::max(0.5, (op.topZ - op.bottomZ) * 0.2);
+    }
+    break;
+  }
+  case OpType::Face: {
+    op.name = "Face top";
+    op.topZ = hi.z;
+    op.bottomZ = hi.z - setup.stock.margin.z; // the part's own top
+    if (setup.stock.margin.z <= 1e-9) {
+      out.why = "there is no stock above the part to face — the top of the "
+                "part is already the top of the stock (Stock and safety > "
+                "Above the part sets how much sits above it)";
+      return out;
+    }
+    break;
+  }
+  case OpType::EdgeRound: {
+    // Derives from the wall it breaks: the edge is the wall's own top, and
+    // the break is the biggest the tool can make without running past the
+    // bottom of that wall. Both numbers come from geometry the user clicked.
+    if (!target.IsSet()) {
+      out.why = "an edge break follows a wall — pick the vertical face whose "
+                "top edge to round or chamfer";
+      return out;
+    }
+    const WallContour wall = PickedWallContour(bodies, target.ref);
+    if (!wall.ok) {
+      out.why = wall.why;
+      return out;
+    }
+    const EdgeBreak brk = EdgeBreakFor(tool, 0.0, wall.topZ - wall.bottomZ);
+    if (!brk.ok) {
+      out.why = brk.why;
+      return out;
+    }
+    op.name = tool.type == ToolType::Ball ? "Round the edge" : "Chamfer edge";
+    op.targets = {target};
+    op.side = wall.opening ? Side::Inside : Side::Outside;
+    op.topZ = wall.topZ;
+    op.bottomZ = wall.topZ - brk.depth;
+    op.edgeSize = brk.size;
+    break;
+  }
+  case OpType::Drill: {
+    // Derives from the hole it makes: top from the stock (entry rapids
+    // belong above it — an explicit part-top here once rapided through the
+    // millimetre of stock over the part), bottom from the hole's own
+    // extent. The old refusal ("…not a verb") fired even when the caller
+    // passed cylindrical targets, leaving explicit top_z+bottom_z as the
+    // undocumented way in.
+    if (!target.IsSet()) {
+      out.why = "drill derives from the holes it makes — pass targets: the "
+                "cylindrical faces to drill (list_elements names them)";
+      return out;
+    }
+    op.name = "Drill";
+    op.topZ = hi.z;
+    bool found = false;
+    for (const Body& body : bodies) {
+      if (body.createdBy != target.ref.featureId || !body.shape.IsValid())
+        continue;
+      const std::optional<int> idx = body.elementMap.Resolve(target.ref.name);
+      if (!idx)
+        continue;
+      glm::vec3 origin(0.0f), axis(0.0f), xAxis(0.0f);
+      if (!body.shape.FaceAxis(*idx, origin, axis, xAxis)) {
+        out.why = "drilling picks cylindrical faces — that one is not a "
+                  "cylinder (list_elements shows each face's kind)";
+        return out;
+      }
+      if (std::abs(axis.z) < 0.99f) {
+        out.why = "that hole does not point at the spindle — lay a face up "
+                  "to clamp the part so it does, or drill it in another setup";
+        return out;
+      }
+      int i = 0;
+      for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+           ex.Next(), i++) {
+        if (i != *idx)
+          continue;
+        Bnd_Box box;
+        BRepBndLib::Add(ex.Current(), box);
+        if (!box.IsVoid()) {
+          double x0, y0, z0, x1, y1, z1;
+          box.Get(x0, y0, z0, x1, y1, z1);
+          // A through hole drills to the part's bottom face, a blind one
+          // to its own floor — the face's extent says which.
+          op.bottomZ = z0;
+          found = true;
+        }
+        break;
+      }
+      if (found)
+        break;
+    }
+    if (!found) {
+      out.why = "that face is not on a body this job can machine";
+      return out;
+    }
+    op.targets = {target};
+    // Pecking, derived from the cutter: a hole deeper than three diameters
+    // packs its flutes, so retract every diameter and let the chips out.
+    if (const Tool* drill = setup.FindTool(op.toolNumber);
+        drill != nullptr && op.topZ - op.bottomZ > 3.0 * drill->diameter)
+      op.peck = drill->diameter;
+    break;
+  }
+  }
+
+  out.op = op;
+  out.ok = true;
+  return out;
+}
+
+int RederiveDepths(Setup& setup, const std::vector<Body>& bodies) {
+  int moved = 0;
+  for (Operation& op : setup.operations) {
+    if (op.targets.empty())
+      continue;
+    const DerivedOp d = DeriveOperation(setup, bodies, op.type,
+                                        op.targets.front(), op.toolNumber);
+    if (!d.ok)
+      continue;
+    // Depths only. The tool, the tabs, the stepover and anything else typed
+    // are answers to different questions and the frame did not change them.
+    if (std::abs(op.topZ - d.op.topZ) > 1e-9 ||
+        std::abs(op.bottomZ - d.op.bottomZ) > 1e-9) {
+      op.topZ = d.op.topZ;
+      op.bottomZ = d.op.bottomZ;
+      moved++;
+    }
+  }
+  return moved;
+}
+
+double DerivedStepover(const Tool& tool) {
+  if (tool.type != ToolType::Ball)
+    return 0.45;
+  const double r = std::max(1e-6, tool.diameter * 0.5);
+  const double cusp = r * 0.02;
+  const double step =
+      2.0 * std::sqrt(std::max(0.0, 2.0 * r * cusp - cusp * cusp));
+  // As a fraction of the DIAMETER, which is what every reader of `stepover`
+  // multiplies by. Never wider than the flat-mill rule: a ball that stepped
+  // further than a flat mill would be cutting with its shank.
+  return std::clamp(step / tool.diameter, 0.02, 0.45);
+}
+
+bool Retool(const Setup& setup, Operation& op, int toolNumber,
+            std::string& why) {
+  const Tool* next = setup.FindTool(toolNumber);
+  if (next == nullptr) {
+    why = "there is no tool " + std::to_string(toolNumber) + " in this setup";
+    return false;
+  }
+  const Tool* prev = setup.FindTool(op.toolNumber);
+  // "Still derived" is the test, not "never edited": a stepdown equal to the
+  // old cutter's own derivation is one nobody has stated, so it follows.
+  const bool derived = op.stepdown <= 0.0 ||
+                       (prev != nullptr &&
+                        std::abs(op.stepdown - DerivedStepdown(*prev)) < 1e-9);
+  op.toolNumber = next->number;
+  if (derived)
+    op.stepdown = DerivedStepdown(*next);
+  return true;
+}
+
+bool MoveOperation(Setup& setup, uint64_t opId, size_t toIndex) {
+  std::vector<Operation>& ops = setup.operations;
+  size_t from = ops.size();
+  for (size_t i = 0; i < ops.size(); i++)
+    if (ops[i].id == opId)
+      from = i;
+  if (from == ops.size() || toIndex >= ops.size())
+    return false;
+  if (from == toIndex)
+    return true;
+  const Operation moved = ops[from];
+  ops.erase(ops.begin() + static_cast<ptrdiff_t>(from));
+  ops.insert(ops.begin() + static_cast<ptrdiff_t>(toIndex), moved);
+  return true;
+}
+
+std::vector<Body> BodiesInSetupFrame(const Setup& setup,
+                                     const std::vector<Body>& in) {
+  if (SetupIsSquare(setup) && setup.placements.empty())
+    return in;
+
+  std::vector<Body> out;
+  out.reserve(in.size());
+  for (const Body& b : in) {
+    // Where the part sits in the stock composes HERE and nowhere else, after
+    // the fixture frame and in setup space -- which is what makes "where on
+    // the sheet" an in-plane statement rather than a fourth way to tilt a
+    // part (docs/cam/job-document.md). setup-frame.md learned what a second
+    // copy of this transform costs.
+    const Placement* place = PlacementForBody(setup, b);
+    if (place != nullptr && !place->enabled)
+      continue; // on the sheet, not cut this run
+    // Undo the fixture frame THIS part is clamped in -- which may not be the
+    // setup's (v76): a sheet can hold a baffle laid on its face beside a rail
+    // laid on its edge. The part turns under a spindle that always points
+    // down, which is what both a clamp and an indexed trunnion amount to, and
+    // a rotation's inverse is its transpose.
+    const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup, b.jobPartId));
+    glm::mat4 m(1.0f);
+    for (int col = 0; col < 3; col++)
+      for (int row = 0; row < 3; row++)
+        m[col][row] = static_cast<float>(toSetup[col][row]);
+    if (place != nullptr) {
+      const float c =
+          static_cast<float>(std::cos(glm::radians(place->rotZdeg)));
+      const float sn =
+          static_cast<float>(std::sin(glm::radians(place->rotZdeg)));
+      glm::mat4 t(1.0f);
+      t[0][0] = c;
+      t[0][1] = sn;
+      t[1][0] = -sn;
+      t[1][1] = c;
+      t[3][0] = static_cast<float>(place->pos.x);
+      t[3][1] = static_cast<float>(place->pos.y);
+      m = t * m;
+    }
+    Body copy = b; // keeps createdBy and the element map: names must survive
+    if (b.shape.IsValid())
+      copy.shape = b.shape.Transformed(m);
+    out.push_back(std::move(copy));
+  }
+  return out;
+}
+
+bool SolveIndexA(const glm::dvec3& normal, double& degrees) {
+  const double len = glm::length(normal);
+  if (len < 1e-9)
+    return false;
+  const glm::dvec3 n = normal / len;
+  // A rotation about X cannot move the X component, so a face with one
+  // cannot be brought to face the spindle.
+  if (std::abs(n.x) > 1e-3)
+    return false;
+  // R_x(A) * n = +Z has the solution A = atan2(ny, nz): sin A = ny and
+  // cos A = nz, which is consistent because ny^2 + nz^2 = 1 here.
+  degrees = glm::degrees(std::atan2(n.y, n.z));
+  return true;
+}
+
+double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return setup.safeZ;
+  // Clear the stock top by a fraction of the job's own height, with a floor
+  // so a thin plate still gets real clearance rather than a scrape.
+  return hi.z + std::max(2.0, (hi.z - lo.z) * 0.1);
+}
+
+double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
+  double minutes = 0.0;
+  for (const Toolpath& tp : paths) {
+    for (size_t i = 1; i < tp.moves.size(); i++) {
+      const double len = glm::length(tp.moves[i].to - tp.moves[i - 1].to);
+      if (len < 1e-12)
+        continue;
+      double feed = tp.moves[i].feed;
+      if (tp.moves[i].kind == Move::Kind::Rapid)
+        feed = setup.rapidFeed; // 0 = not stated, so not counted
+      if (feed > 1e-9)
+        minutes += len / feed;
+    }
+  }
+  return minutes;
+}
+
+} // namespace cam
