@@ -4,6 +4,7 @@
 
 #include "common/Logger.h"
 #include "core/Document.h"
+#include "core/cam/CamFeeds.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
@@ -1160,6 +1161,10 @@ void RunCamVerification(AppState& state) {
       state.camVerdict.push_back(
           {cam::VerdictLine::Level::Warn, name + ": " + why});
     }
+  // Feeds and speeds against the material being cut: the same lines the RPC
+  // returns, so the panel and a script cannot disagree about them.
+  for (const std::string& w : cam::FeedWarnings(*setup, ui::JobBodies(state)))
+    state.camVerdict.push_back({cam::VerdictLine::Level::Warn, w});
   // The machine's lines: the parts' reach beyond the travel, or the sheet's
   // overhang -- warnings, never refusals. Cut as far as it reaches.
   for (const cam::VerdictLine& line :

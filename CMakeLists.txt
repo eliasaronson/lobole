@@ -424,6 +424,7 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     list(APPEND core_sources src/core/cam/CamToolpath.cpp
                              src/core/cam/CamPost.cpp
                              src/core/cam/CamVerify.cpp
+                             src/core/cam/CamFeeds.cpp
                              src/core/cam/CamSim.cpp
                              src/core/cam/CamStockMesh.cpp)
     message(STATUS "Clipper2 found - CAM enabled")

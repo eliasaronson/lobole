@@ -3,6 +3,7 @@
 #ifdef HAVE_CAM
 
 #include "core/Document.h"
+#include "core/cam/CamFeeds.h"
 #include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamSim.h"
@@ -1396,6 +1397,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     for (const cam::VerdictLine& line :
          cam::MachineLines(setup, ui::JobBodies(state), &paths))
       warnings.push_back(line.text);
+    // Does this cutter, at these numbers, actually cut? The app has the
+    // diameter, the flutes, the feed, the spindle and the body's material,
+    // and used to say nothing while a job posted at a third of the chip load
+    // it needed.
+    for (const std::string& w : cam::FeedWarnings(setup, ui::JobBodies(state)))
+      warnings.push_back(w);
 
     // (Braceless on purpose: rpc_gate_smoke's handler extractor keys on
     // `if (m == "...") {`, and a braced inner dispatch would shadow this

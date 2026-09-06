@@ -3,6 +3,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/cam/CamAdaptive.h"
+#include "core/cam/CamFeeds.h"
 #include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamStockMesh.h"
@@ -5693,6 +5694,76 @@ TEST_CASE("cam machine: a path is clipped to the travel, and says how much",
   REQUIRE(lines.size() == 1);
   INFO(lines[0].text);
   CHECK(lines[0].text.find("left out of the file") != std::string::npos);
+}
+
+TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
+          "[cam][feeds]") {
+  // The real numbers off the speaker baffle: a 6 mm FOUR-flute at 9000 rpm
+  // and 1200 mm/min is 0.033 mm/tooth in MDF. It cut both recesses and a
+  // d148 opening CLEANLY at that load, then packed and grabbed in a d100
+  // slot of the same depth -- so the chip-load line is a note about heat and
+  // tool life, and the chip-ROOM line is the one that saw it coming.
+  // Everything needed to say either was already on the setup.
+  auto doc = BlockDoc();
+  for (Body& b : const_cast<std::vector<Body>&>(doc->GetBodies()))
+    b.material = "mdf";
+  cam::Setup setup = BasicSetup();
+  setup.machine.name = "6090";
+  setup.machine.rapidFeed = 1500.0;
+  setup.tools[0].diameter = 6.0;
+  setup.tools[0].flutes = 4;
+  setup.tools[0].spindleRpm = 9000.0;
+  setup.tools[0].feedCut = 1200.0;
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = -0.5; // 20.5 mm of full-width slot with a 6 mm cutter
+  op.stepdown = 2.5;
+  op.side = cam::Side::Outside;
+  setup.operations.push_back(op);
+
+  const std::vector<std::string> why =
+      cam::FeedWarnings(setup, doc->GetBodies());
+  for (const std::string& w : why)
+    INFO(w);
+  REQUIRE(why.size() >= 3);
+  const auto says = [&](const char* txt) {
+    for (const std::string& w : why)
+      if (w.find(txt) != std::string::npos)
+        return true;
+    return false;
+  };
+  CHECK(says("0.033 mm/tooth"));       // the number it actually runs at
+  CHECK(says("heat and tool life"));   // the honest cost -- it DID cut
+  CHECK(says("no feed here reaches")); // the machine cannot reach the band
+  CHECK(says("1500"));                 // the ceiling, by name
+  CHECK(says("the cut that bites"));   // chip ROOM: what actually grabbed
+
+  // The band is a scaling rule: 6 mm in sheet goods is 0.12-0.24 mm/tooth.
+  const cam::ChiploadBand band = cam::BandFor(cam::CutClass::Sheet, 6.0);
+  REQUIRE(band.known);
+  CHECK_THAT(band.min, WithinAbs(0.12, 1e-9));
+  CHECK_THAT(band.max, WithinAbs(0.24, 1e-9));
+
+  // Two flutes at the same spindle IS reachable, which is the advice given.
+  setup.tools[0].flutes = 2;
+  setup.tools[0].spindleRpm = 6000.0;
+  setup.tools[0].feedCut = 1440.0; // 6000 * 2 * 0.12
+  const std::vector<std::string> ok =
+      cam::FeedWarnings(setup, doc->GetBodies());
+  for (const std::string& w : ok)
+    INFO(w);
+  CHECK(ok.empty());
+
+  // A body nobody labelled gets NO band rather than one from nowhere.
+  for (Body& b : const_cast<std::vector<Body>&>(doc->GetBodies()))
+    b.material.clear();
+  setup.tools[0].flutes = 4;
+  setup.tools[0].spindleRpm = 9000.0;
+  setup.tools[0].feedCut = 1200.0;
+  CHECK(cam::FeedWarnings(setup, doc->GetBodies()).empty());
 }
 
 TEST_CASE("cam machine: the reach window can be placed ON the sheet",
