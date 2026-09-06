@@ -889,13 +889,46 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
   }
 }
 
+namespace {
+// Quantized so a plane that differs in the last bits of a float is the same
+// plane, for the same reason PlacementId quantizes its own.
+void AppendQuantized(std::string& key, double v) {
+  key += std::to_string(static_cast<int64_t>(std::llround(v * 1.0e6)));
+  key += ',';
+}
+
+std::string CapKey(const Body& b, const glm::vec3& origin,
+                   const glm::vec3& normal,
+                   const std::vector<glm::vec4>& trimPlanes) {
+  std::string key = std::to_string(b.shape.PlacementId());
+  key += '|';
+  for (int i = 0; i < 3; i++)
+    AppendQuantized(key, origin[i]);
+  for (int i = 0; i < 3; i++)
+    AppendQuantized(key, normal[i]);
+  key += '|';
+  for (const glm::vec4& t : trimPlanes)
+    for (int i = 0; i < 4; i++)
+      AppendQuantized(key, t[i]);
+  return key;
+}
+
+// Big enough that a scrub of a large assembly hits all the way through (the
+// engine is 27 parts x one plane), small enough that it cannot grow without
+// bound over a session of moving cuts about.
+constexpr size_t kMaxCapCache = 512;
+} // namespace
+
 std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
                                   const glm::vec3& origin,
                                   const glm::vec3& normal,
-                                  const std::vector<glm::vec4>& trimPlanes) {
+                                  const std::vector<glm::vec4>& trimPlanes,
+                                  SectionCapCache* cache) {
   std::vector<CADShape> caps;
   if (bodies.empty())
     return caps;
+  if (cache != nullptr && cache->entries.size() > kMaxCapCache)
+    cache->Clear(); // wholesale, never one at a time — see the header
   try {
     const TopoDS_Face cutter =
         BuildSectionCutter(bodies, origin, glm::normalize(normal));
@@ -904,6 +937,27 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
         caps.emplace_back(); // keep alignment with bodies[]
         continue;
       }
+      // The cutter is an oversized quad covering EVERY body, so a body's cap
+      // does not depend on the quad's exact size — only on the body and the
+      // planes. That is what lets the key leave the other bodies out, and it
+      // matters: in a mechanism something always moves, so a key that
+      // included the scene's extent would miss on every step.
+      std::string key;
+      if (cache != nullptr) {
+        key = CapKey(b, origin, normal, trimPlanes);
+        const auto it = cache->entries.find(key);
+        if (it != cache->entries.end()) {
+          cache->hits++;
+          caps.push_back(it->second.cap);
+          continue;
+        }
+        cache->misses++;
+      }
+      const auto remember = [&](const CADShape& cap) {
+        if (cache != nullptr)
+          cache->entries.emplace(key, SectionCapCache::Entry{b.shape, cap});
+        caps.push_back(cap);
+      };
       BRepAlgoAPI_Common common(b.shape.GetShape(), cutter);
       // A body that doesn't meet the plane yields an empty compound (not
       // null); keep a cap only when it has real area, so callers can test
@@ -941,11 +995,11 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
         GProp_GProps props;
         BRepGProp::SurfaceProperties(capShape, props);
         if (props.Mass() > 1e-9) {
-          caps.emplace_back(capShape);
+          remember(CADShape(capShape));
           continue;
         }
       }
-      caps.emplace_back();
+      remember(CADShape()); // no cut here, and that is worth caching too
     }
   } catch (const std::exception& e) {
     LOG_ERROR("Section caps failed: {}", e.what());

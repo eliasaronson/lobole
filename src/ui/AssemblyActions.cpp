@@ -2103,9 +2103,16 @@ void SyncAssemblyRenderers(AppState& state) {
         if (j != i && SectionPlaneInPartSpace(planes[j], xf, to, tn))
           trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
       }
+      // CACHED, and this is the path that pays: the plane is put into the
+      // PART's space, so a part that has not moved between two poses of a
+      // mechanism asks for the same cap of the same bodies about the same
+      // plane. Scrubbing the air-cooled engine with one section on cost
+      // 913 ms/step against 9.5 without — an OCC half-space boolean per
+      // body, every step, for 27 parts of which four move.
       AppendCapMeshes(state,
                       Measure::SectionCaps(part->GetBodies(), localOrigin,
-                                           localNormal, trim),
+                                           localNormal, trim,
+                                           &state.sectionCapCache),
                       capColors, xf, glm::normalize(glm::vec3(planes[i])));
     }
   }

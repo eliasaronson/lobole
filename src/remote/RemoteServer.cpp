@@ -106,6 +106,26 @@ inline long SockWrite(int fd, const void* b, size_t n) {
 
 using nlohmann::json;
 
+namespace {
+// True when the executable this process is running has been replaced or
+// removed on disk since it started. See the `ping` handler for why.
+bool BinaryReplaced() {
+#ifdef __linux__
+  std::error_code ec;
+  const std::string exe =
+      std::filesystem::read_symlink("/proc/self/exe", ec).string();
+  if (ec)
+    return false;
+  static const std::string kDeleted = " (deleted)";
+  return exe.size() >= kDeleted.size() &&
+         exe.compare(exe.size() - kDeleted.size(), kDeleted.size(), kDeleted) ==
+             0;
+#else
+  return false;
+#endif
+}
+} // namespace
+
 static RemoteServer* s_Instance = nullptr;
 #ifdef HAVE_TEST_ENGINE
 static ImGuiTest* s_UiActionTest = nullptr;
@@ -897,8 +917,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "method"},
     {"ping",
      "Liveness check; returns {ok, app, port, mode, ui_actions, project, "
-     "dirty, gpu}. `gpu` is the device that answers renders — empty under "
-     "--headless, which has no renderer.",
+     "dirty, gpu, binary_replaced}. `gpu` is the device that answers "
+     "renders — empty under --headless, which has no renderer. "
+     "`binary_replaced` is true when this process is running an executable "
+     "that has since been rebuilt on disk: it will keep serving the OLD "
+     "code, which is indistinguishable from a missing feature or a "
+     "regression unless you ask.",
      ""},
     {"background_jobs",
      "Every long operation running off the frame, as {jobs: [{kind, label, "
@@ -1497,7 +1521,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // Help > About — both out of reach of the caller writing the
             // report. It is also what lets a pixel baseline be keyed to the
             // device that produced it (tests/render_pixel_smoke.py).
-            {"gpu", state.gpuName}};
+            {"gpu", state.gpuName},
+            // Whether this instance is still running the binary that is on
+            // disk. A rebuild REPLACES the file; a process already running
+            // keeps the old inode, serves happily, and answers questions
+            // about a build nobody can look at any more. That cost this
+            // project two diagnosis detours in one day — once concluding a
+            // feature that had just been added did not work, because the
+            // instance answering had been started before it was.
+            //
+            // Linux makes it a one-liner: /proc/self/exe still resolves, and
+            // the kernel appends " (deleted)" when the file it named is gone.
+            // No build stamp to keep in step with anything.
+            {"binary_replaced", BinaryReplaced()}};
   }
   if (m == "background_jobs") {
     json jobs = json::array();

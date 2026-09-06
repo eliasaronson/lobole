@@ -120,6 +120,34 @@ def main():
         d.call("redo")
         expect(abs(d.call("list_occurrences")["occurrences"][0]
                    ["transform"]["position"][1] - 2.0) < 1e-5, "redo re-moved")
+
+        # EITHER HALF ALONE. `add_occurrence` places a part from {position}
+        # by itself, and this call used to throw the raw nlohmann `key
+        # 'orientation' not found` for the same object — a message naming
+        # neither the RPC nor the field that is optional in its sibling.
+        d.call("set_occurrence_transform", id=oid,
+               transform={"rotate": {"axis": [0, 0, 1], "angle_deg": 90}})
+        turned = d.call("list_occurrences")["occurrences"][0]
+        expect(abs(turned["transform"]["position"][1] - 2.0) < 1e-5,
+               f"orientation alone left the position: {turned}")
+        expect(abs(turned["transform"]["orientation"][2] - 0.7071) < 1e-3,
+               f"...and did turn it: {turned}")
+        d.call("set_occurrence_transform", id=oid,
+               transform={"position": [4, 5, 6]})
+        slid = d.call("list_occurrences")["occurrences"][0]
+        expect(abs(slid["transform"]["position"][0] - 4.0) < 1e-5,
+               f"position alone moved it: {slid}")
+        expect(abs(slid["transform"]["orientation"][2] - 0.7071) < 1e-3,
+               f"...and kept the orientation: {slid}")
+        # Neither half moves nothing, and says so rather than succeeding.
+        try:
+            d.call("set_occurrence_transform", id=oid, transform={})
+            raise AssertionError("an empty transform was accepted")
+        except RuntimeError as e:
+            expect("omitting both" in str(e), f"the refusal explains: {e}")
+        d.call("set_occurrence_transform", id=oid,
+               transform={"position": [1, 2, 3], "orientation": [0, 0, 0, 1]})
+
         # Leave it where it started for the round-trip below.
         d.call("undo")
 

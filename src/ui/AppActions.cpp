@@ -3547,7 +3547,9 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
     for (size_t j = 0; j < planes.size(); j++)
       if (j != i && glm::length(glm::vec3(planes[j])) > 1e-6f)
         trim.push_back(planes[j]);
-    AppendCapMeshes(state, Measure::SectionCaps(bodies, planeOrigin, n, trim),
+    AppendCapMeshes(state,
+                    Measure::SectionCaps(bodies, planeOrigin, n, trim,
+                                         &state.sectionCapCache),
                     bodyColors, glm::mat4(1.0f), n);
   }
 }

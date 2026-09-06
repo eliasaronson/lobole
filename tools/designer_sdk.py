@@ -294,7 +294,20 @@ def connect(port=None, host="127.0.0.1"):
                                for i in found)
             raise SdkError(f"several instances are running, pass port=: "
                            f"{listed}")
-    return App(_Remote.wait_for(int(port)))
+    app = App(_Remote.wait_for(int(port)))
+    # A process keeps running the binary it started with. If that file has
+    # since been rebuilt, this instance answers for code nobody can look at
+    # any more — and the answers are indistinguishable from a missing feature
+    # or a regression. Said once, loudly, at the point of connection, because
+    # the alternative is finding out from a measurement that makes no sense.
+    try:
+        if app.ping().get("binary_replaced"):
+            print(f"WARNING: the instance on port {port} is running a binary "
+                  f"that has been rebuilt since it started. Restart it, or "
+                  f"you are testing the old code.", file=sys.stderr)
+    except Exception:
+        pass  # an old build with no such field: not worth failing a connect
+    return app
 
 
 # --------------------------------------------------------------------------

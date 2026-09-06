@@ -56,23 +56,77 @@ that cost nothing was setting the input to a full turn and asking whether
 the output came back.
 
 
-## Scrubbing a motion study with a section on is 45x slower
+---
 
-Measured 2026-09-05 on the air-cooled engine, offscreen:
 
-    scrub, no section     4.8 ms/step
-    scrub, SECTION on   216.5 ms/step   (45x)
+## A running instance keeps serving the binary it started with — FIXED 2026-09-06
 
-It is not rendering. `ApplyMotionPose` sets `syncedDocumentVersion` to force a
-renderer rebuild, and with a section active that rebuild calls
-`AppendSectionCaps` -> `Measure::SectionCaps`, an OCC half-space boolean PER
-BODY. Twelve parts, every scrub step.
+Cost two diagnosis detours on 2026-09-06 alone. A rebuild REPLACES
+`build/designer`; a process already running holds the old inode and carries
+on answering, correctly, for code that is no longer on disk. Once that
+looked like a feature added ten minutes earlier not working — the field was
+simply absent from a `ping` served by an older build. Once an instance that
+had failed to bind the port left an OLDER one answering on it, so a restart
+appeared to do nothing.
 
-The caps genuinely change as a part moves, so they cannot simply be cached by
-plane — but most of an assembly does not move between two poses of a
-mechanism, and the ones that do not could be keyed on
-`CADShape::PlacementId()` (geometry AND placement) exactly the way the mesh
-collision cache is. On this engine that is 5 of 12 parts fixed.
+It is indistinguishable from a missing feature or a regression, and there
+was nothing to ask. The `conventions` test added the same day covers the
+TEST binary; it says nothing about a long-running app.
+
+**Fixed:** `ping` returns `binary_replaced`, and the SDK's `connect()` warns
+on stderr when it is true. On Linux `/proc/self/exe` still resolves after
+the file is replaced and the kernel appends " (deleted)", so this needs no
+build stamp and nothing to keep in step. Other platforms report false — the
+mechanism is Linux-specific; a portable version would need a stamp compiled
+in.
+
+Not covered: an instance started from a DIFFERENT tree (a worktree's
+`build/designer`) is not stale, it is simply another build, and `ping`'s
+`port`/`project` are what say which.
+
+
+---
+
+
+## Scrubbing a motion study with a section on — 5.4x FASTER 2026-09-06
+
+Measured 2026-09-05 on the air-cooled engine, offscreen, and re-measured on
+09-06 after the engine had grown to 27 parts:
+
+    scrub, no section       9.5 ms/step
+    scrub, SECTION on     913.6 ms/step   (96x)
+    ...with cap caching   168.5 ms/step   (26x, 5.4x faster)
+
+It is not rendering. Every scrub step rebuilds the scene, and with a section
+active that recomputes each body's CUT FACE through an OCC boolean — per
+body, every step.
+
+**The original entry named the wrong function**, which is worth keeping
+because it cost an hour: `AppendSectionCaps` (AppActions.cpp) is the PART
+tab's path and is never called on an assembly. An instrumented build logged
+nothing at all during an assembly scrub. The assembly's caps come from
+`SyncAssemblyRenderers` (AssemblyActions.cpp), which does something better
+already: it puts the section plane into each PART's own space rather than
+transforming the bodies, so a part that has not moved between two poses asks
+for the same cap, of the same bodies, about the same plane.
+
+That is exactly a cache key, and it is now `Measure::SectionCapCache` on
+AppState — `CADShape::PlacementId()` (geometry AND placement) plus the
+planes. On this engine 23 of 27 parts hit every step.
+
+**Why an entry holds the source shape as well as the answer.** PlacementId
+mixes the TShape's address, and a freed TShape's address is reused by the
+next allocation; a cache keeping only the answer would serve it for a
+different shape. That is precisely how an earlier bbox cache came to fail a
+determinism test in parallel and pass alone (and was removed). Holding the
+source keeps the address reserved for as long as the key naming it exists,
+and the cache is cleared WHOLESALE at 512 entries rather than evicting one
+at a time, so no key ever outlives its shape.
+
+What is left is real work: the four parts that actually move — crank, rod,
+piston, valves — need a new cap at every pose, and they are the shapes with
+the most faces. Removing that needs a cheaper cut than an OCC boolean, not a
+better cache.
 
 
 ---
@@ -170,7 +224,7 @@ fuzzy value the contact report already uses for its touching band.
 
 ---
 
-## `set_occurrence_transform` demands an orientation `add_occurrence` does not
+## `set_occurrence_transform` demanded an orientation `add_occurrence` does not — FIXED 2026-09-06
 
 Found 2026-09-01 while driving the fastener check from a script. Both RPCs take
 a `transform`, and `add_occurrence` treats its `orientation` as optional
@@ -183,9 +237,10 @@ document.
 about: a message with no correction in it, on a surface where the sibling call
 accepts the same object. Moving a part along one axis is the common case.
 
-**Fix:** default `orientation` to the occurrence's current one, as
-`add_occurrence` defaults it to identity. Same for `position`, so either half
-of a transform can be set alone.
+**FIXED 2026-09-06.** Either half may be omitted and keeps its current
+value, so sliding a part along one axis needs no quaternion; omitting BOTH
+is refused, naming the three keys it accepts. `tests/assembly_smoke.py`
+covers all three cases. `describe` says so.
 
 
 ## The viewport tears on the external monitor (environment, not the app)

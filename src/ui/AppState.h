@@ -1627,6 +1627,10 @@ struct AppState {
   // Per-BODY tessellation + GPU assets keyed by shape identity, shared by
   // the part tab and the in-context ghosts (AppActionsInternal.h).
   std::shared_ptr<BodyTessellationCache> tessellationCache;
+  // Section CAPS, keyed by shape placement + planes. Scrubbing a mechanism
+  // with a cut on rebuilt every cap every step — an OCC half-space boolean
+  // per body — and most of an assembly does not move between two poses.
+  Measure::SectionCapCache sectionCapCache;
 
   // Offline render (Render toolbar button); pumped by main.cpp.
   RenderJob renderJob;

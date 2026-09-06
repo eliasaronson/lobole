@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Measurement over stable element names (inspection I1, faces/edges v1):
@@ -432,9 +433,40 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
 // each {xyz = normal, w = distance} keeping dot(n,p) <= w. A cap must be cut
 // back to their kept side or it juts out past the neighbouring cut — the
 // "floating lid" you get when two sections meet.
-std::vector<CADShape>
-SectionCaps(const std::vector<Body>& bodies, const glm::vec3& origin,
-            const glm::vec3& normal,
-            const std::vector<glm::vec4>& trimPlanes = {});
+// Caps are recomputed for every body on every frame the scene rebuilds,
+// which makes SCRUBBING a mechanism with a section on cost an OCC half-space
+// boolean per body per step: measured at 9.5 ms/step without a section and
+// 913.6 with one on the air-cooled engine, 96x. Most of an assembly does not
+// move between two poses of a mechanism, and a body that has not moved has
+// the same cap.
+//
+// The key is `CADShape::PlacementId()` — geometry AND placement — plus the
+// planes. Note what an entry HOLDS: the source shape as well as the cap.
+// PlacementId mixes the TShape's address, and a freed TShape's address can
+// be recycled by the next one allocated; a cache that kept only the answer
+// would then serve it for a different shape. That is exactly how an earlier
+// bbox cache came to fail a determinism test in parallel and pass alone.
+// Holding the source keeps the address reserved for as long as the key
+// naming it exists, and the cache is CLEARED WHOLESALE when it grows rather
+// than evicting entries one at a time, so no key ever outlives its shape.
+struct SectionCapCache {
+  struct Entry {
+    CADShape source;
+    CADShape cap;
+  };
+  std::unordered_map<std::string, Entry> entries;
+  uint64_t hits = 0, misses = 0;
+  void Clear() {
+    entries.clear();
+    hits = 0;
+    misses = 0;
+  }
+};
+
+std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
+                                  const glm::vec3& origin,
+                                  const glm::vec3& normal,
+                                  const std::vector<glm::vec4>& trimPlanes = {},
+                                  SectionCapCache* cache = nullptr);
 
 } // namespace Measure

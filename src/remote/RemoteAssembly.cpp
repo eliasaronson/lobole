@@ -54,7 +54,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "bounds"},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
-     "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}.",
+     "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
+     "be omitted and keeps its current value, so sliding a part along one "
+     "axis needs no quaternion.",
      "id, transform"},
     {"set_occurrence_visible", "Show/hide an occurrence.", "id, visible"},
     {"set_occurrence_fixed", "Fix/free an occurrence for the solver.",
@@ -571,13 +573,31 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     ui::SnapshotAssembly(state);
     if (m == "set_occurrence_transform") {
+      // EITHER HALF ALONE. `add_occurrence` treats `orientation` as optional
+      // and places a part from `{position}` by itself; this threw the raw
+      // nlohmann error `key 'orientation' not found`, which names neither
+      // the RPC nor the field that is optional three lines away in the same
+      // document. Moving a part along one axis is the common case, and the
+      // occurrence's current pose is the only sensible default for the half
+      // the caller did not mention.
       const json t = NormalizeTransform(p.at("transform"));
-      const json& pos = t.at("position");
-      occ->position = glm::vec3(pos.at(0).get<float>(), pos.at(1).get<float>(),
-                                pos.at(2).get<float>());
-      const json& q = t.at("orientation"); // [x,y,z,w]
-      occ->orientation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
-                                   q.at(1).get<float>(), q.at(2).get<float>());
+      if (t.contains("position")) {
+        const json& pos = t.at("position");
+        occ->position =
+            glm::vec3(pos.at(0).get<float>(), pos.at(1).get<float>(),
+                      pos.at(2).get<float>());
+      }
+      if (t.contains("orientation")) {
+        const json& q = t.at("orientation"); // [x,y,z,w]
+        occ->orientation =
+            glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
+                      q.at(1).get<float>(), q.at(2).get<float>());
+      }
+      if (!t.contains("position") && !t.contains("orientation"))
+        throw std::runtime_error(
+            "set_occurrence_transform: give `position`, `orientation` "
+            "([x,y,z,w]) or `rotate` ({axis, angle_deg}) — whichever you "
+            "omit keeps its current value, but omitting both moves nothing");
     } else if (m == "set_occurrence_visible") {
       occ->visible = p.at("visible").get<bool>();
     } else if (m == "set_occurrence_fixed") {
