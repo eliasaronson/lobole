@@ -167,7 +167,12 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   the whole framebuffer** — anything that draws full-window looks perfect here
   while being scaled and offset in the real app, so that class of bug is
   invisible offscreen and needs a windowed GUI test
-  (`cam/simulation_plays_and_gives_it_back` asserts it). A new scene renderer
+  (`cam/simulation_plays_and_gives_it_back` asserts it). It projects the
+  document into the renderers only when something LOOKS (a capture, or an RPC
+  that resolves an element to a mesh) — on a 200-body part that took an edit
+  from 1778 ms back to 141 ms — so `get_state` omits `bodies[].mesh` while the
+  projection is behind rather than reporting the previous edit's id
+  (docs/rendering/offscreen-lazy-projection.md). A new scene renderer
   goes in `RegisterSceneRenderers()`/`ShutdownSceneRenderers()` in main.cpp and
   nowhere else; `test_conventions.cpp` fails if it is missing from either
   (docs/rendering/renderer-wiring.md).

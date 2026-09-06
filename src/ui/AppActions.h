@@ -457,6 +457,32 @@ void FitCameraToSelection(AppState& state);
 // changed (edit, undo, redo). Call once per frame before drawing.
 void SyncDocumentRenderers(AppState& state);
 
+// The whole document->renderer projection as ONE idempotent unit, in the
+// order the steps depend on each other. Every step is version- or key-gated,
+// so calling it when nothing changed is a handful of branches — which is what
+// lets a caller that cannot know whether it is needed simply call it.
+//
+// It exists for --offscreen, which draws only when asked and therefore runs
+// this LAZILY: the tick does not project, and everything that reads what the
+// projection produces — a capture, and the RPCs that resolve an element to a
+// render mesh — calls this first. The saving is not small: on a 200-body part
+// a resync costs ~2-5 s (the tessellation cache does not survive a full
+// regen), which an agent that never looks at the model used to pay on EVERY
+// edit. The windowed loop draws every frame, so it still projects inline.
+//
+// A reader that forgets to call it does not fail loudly: `documentMeshes`
+// still maps body index -> mesh id, for the PREVIOUS geometry. Ask
+// RenderMeshesCurrent() rather than assuming.
+void SyncRenderersToDocument(AppState& state);
+
+// Are `documentMeshes` (and the picking data beside them) the projection of
+// the CURRENT tab at its CURRENT version? False when nothing has been
+// projected yet, when an edit has landed since, and always without a
+// renderer. Volatile render ids must not be reported when this is false: the
+// list still has the right SHAPE, so an index reads back a plausible id
+// belonging to superseded geometry.
+bool RenderMeshesCurrent(AppState& state);
+
 // Drops every cached part tessellation and releases the GPU assets it holds
 // (AppState::partRenderCache). MUST run while the renderers are still alive —
 // the cache stores asset ids, and the release is what frees their buffers —

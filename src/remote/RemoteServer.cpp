@@ -1615,6 +1615,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       features.push_back(f);
     }
     json bodies = json::array();
+    // A windowed instance projects every frame regardless, so pulling it
+    // here is version-gated to nothing — and it closes the narrow window
+    // where an RPC edit is answered before the frame that would have
+    // projected it, which would make `mesh` blink out of a GUI session's
+    // get_state. --offscreen must NOT be pulled here: this is the hot poll,
+    // and forcing the projection there is exactly what made an edit on a
+    // 200-body part cost seconds.
+    if (m_mode == RemoteMode::Gui)
+      ui::SyncRenderersToDocument(state);
+    // Asked once, not per body: do the render ids below describe THIS version
+    // of the document?
+    const bool renderMeshesCurrent = ui::RenderMeshesCurrent(state);
     for (size_t i = 0; i < stateDoc->GetBodies().size(); i++) {
       const auto& body = stateDoc->GetBodies()[i];
       glm::vec3 min, max;
@@ -1644,8 +1656,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         entry["appearance"] = std::move(a);
       }
       // Render/picking mesh id (used by select_face); ids change on
-      // regeneration, so always read them fresh from here
-      if (i < state.documentMeshes.size()) {
+      // regeneration, so always read them fresh from here. OMITTED rather
+      // than guessed when the projection is behind the document (--offscreen
+      // projects lazily): the list is still the right LENGTH after an edit,
+      // so an index would read back a plausible id for superseded geometry —
+      // select_face would then pick a real face that is not this one. An
+      // absent key is a loud failure; a wrong id is a silent one.
+      if (renderMeshesCurrent && i < state.documentMeshes.size()) {
         entry["mesh"] = state.documentMeshes[i].meshId;
       }
       bodies.push_back(entry);
@@ -1708,6 +1725,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"pending_feature_id", state.pendingFeatureId}};
   }
   if (m == "rt_build") {
+    // SyncRayTracingScene reads the raster sync's tessellation cache when it
+    // has one, which is the difference between a copy and re-meshing every
+    // body; under a lazy projection there is nothing there until we ask.
+    ui::SyncRenderersToDocument(state);
     // Build the ray-tracing acceleration structures from the current document.
     // Verification hook for the offline-render work (R4).
     bool ok = ui::SyncRayTracingScene(state);
@@ -1741,6 +1762,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       throw std::runtime_error("unknown backdrop: " + backdrop +
                                "; backdrops: studio, environment");
     }
+    // As rt_build: the still is built from the raster tessellation cache when
+    // there is one, and a lazy projection has not filled it yet.
+    ui::SyncRenderersToDocument(state);
     std::string error, warning;
     bool ok =
         ui::RenderStillBlocking(state, width, height, samples, path, seed,
@@ -2080,6 +2104,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.faceSelector || !state.meshRenderer)
       throw std::runtime_error(
           "face selection needs render meshes — unavailable in --headless");
+    // --offscreen projects the document into the renderers only when
+    // something reads it (ui::SyncRenderersToDocument). This is one of those
+    // readers: without it, every id below belongs to the geometry as it was
+    // before the last edit — a face that resolves, and is the wrong face.
+    ui::SyncRenderersToDocument(state);
     uint32_t mesh = 0, face = 0;
     if (p.contains("element")) {
       // Stable element name (list_elements), e.g. {"element": "2/g4"} — no
@@ -2179,6 +2208,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.faceSelector)
       throw std::runtime_error(
           "face selection needs render meshes — unavailable in --headless");
+    ui::SyncRenderersToDocument(state); // resolves through documentMeshes
     const ui::SelectionItem* it =
         state.selection.First(ui::SelectionItem::Kind::Face);
     uint32_t mesh = 0, face = 0;

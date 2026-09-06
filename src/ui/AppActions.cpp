@@ -60,6 +60,8 @@
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/AssemblyActions.h"
+#include "ui/CamPlayback.h"  // SyncCamPlayback (SyncRenderersToDocument)
+#include "ui/FastenerTool.h" // SyncFastenerGhost (SyncRenderersToDocument)
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
@@ -80,6 +82,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <set>
 #include <unordered_map>
 
@@ -4288,24 +4291,39 @@ void SyncGeometryDelta(AppState& state) {
       add(state.deltaExtraShape, glm::vec3(0.02f, 0.35f, 0.06f));
 }
 
-void SyncDocumentRenderers(AppState& state) {
-  if (!state.meshRenderer)
-    return;
-  // Which active tab drives the sync, and its change counter.
-  uint64_t activeVersion;
+// Which active tab drives the sync, and its change counter. Empty = no tab
+// whose geometry the renderers mirror. NOT a sentinel value: a fresh document
+// and a fresh drawing are both at version 0, and reading that as "nothing to
+// sync" would skip the resync that CLEARS the previous tab's meshes.
+static std::optional<uint64_t> ActiveRenderVersion(AppState& state) {
   if (state.assembly)
-    activeVersion = state.assembly->Version();
-  else if (state.drawing)
-    activeVersion = state.drawing->Version();
-  else if (state.document)
-    activeVersion = state.document->Version();
-  else if (state.job)
+    return state.assembly->Version();
+  if (state.drawing)
+    return state.drawing->Version();
+  if (state.document)
+    return state.document->Version();
+  if (state.job)
     // A job's own version, mixed with every source part's: the job draws
     // OTHER documents' bodies, so a model edit in one of them has to reach
     // the viewport (ui::JobBodies keeps the same key).
-    activeVersion = JobRenderVersion(state);
-  else
+    return JobRenderVersion(state);
+  return std::nullopt;
+}
+
+bool RenderMeshesCurrent(AppState& state) {
+  if (!state.meshRenderer)
+    return false;
+  const std::optional<uint64_t> active = ActiveRenderVersion(state);
+  return active && *active == state.syncedDocumentVersion;
+}
+
+void SyncDocumentRenderers(AppState& state) {
+  if (!state.meshRenderer)
     return;
+  const std::optional<uint64_t> active = ActiveRenderVersion(state);
+  if (!active)
+    return;
+  const uint64_t activeVersion = *active;
   // Section caps (C4): a change to the clip plane forces a rebuild so the
   // filled cut faces follow it. Gated on nothing being INTERACTED with, so
   // caps settle on release rather than every drag frame — the shader clip
@@ -4557,6 +4575,16 @@ void SyncDocumentRenderers(AppState& state) {
              "[tessellate {:.0f}, instance {:.0f}, picking {:.0f}]",
              state.document->FeatureCount(), state.document->GetBodies().size(),
              drawnBodies, totalMs, tessMs, uploadMs, pickMs);
+}
+
+void SyncRenderersToDocument(AppState& state) {
+  SyncDocumentRenderers(state);
+  SyncFieldRenderer(state);
+  SyncCamPlayback(state);
+  SyncFastenerGhost(state);
+  // Last: it reads the meshes the first step just rebuilt. Before them, it
+  // would highlight ids that no longer exist.
+  SyncSelectionHighlights(state);
 }
 
 bool SyncRayTracingScene(AppState& state, bool groundPlane) {
