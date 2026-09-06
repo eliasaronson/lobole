@@ -234,6 +234,18 @@ class App:
         """Switch to (or create) a part tab and return a `Part`."""
         return _open_tab(self, name, "part", create)
 
+    def parts(self):
+        """The PART tabs only. `list_parts` lists every tab — assemblies and
+        drawings included, whatever its name says — and taking it at its
+        word filed an engine and a carburettor under Fasteners."""
+        return [x for x in self.list_parts()["parts"]
+                if x.get("type") == "part"]
+
+    def assemblies(self):
+        """The ASSEMBLY tabs only. See `parts()`."""
+        return [x for x in self.list_parts()["parts"]
+                if x.get("type") == "assembly"]
+
     def assembly(self, name=None, create=True):
         return _open_tab(self, name, "assembly", create)
 
@@ -1045,6 +1057,14 @@ class Part(_Tab):
 
         This is the thing a mate anchors to BY NAME, so the assembly follows
         the geometry instead of a number someone read off it.
+
+        CREATES a frame. To ask where one ENDED UP once the part is placed,
+        the same verb one class away does the opposite: `occ.frame("pin")`
+        returns its origin and axes in world space. Worth saying here
+        because that is not guessable — a whole round of this project
+        answered "which way does this arm point, where does that pin land"
+        by transforming bounding-box corners in Python, having written this
+        form twenty times without meeting the other one.
         """
         if of is not None:
             els = of if isinstance(of, (list, tuple)) else [of]
@@ -1311,10 +1331,33 @@ class Occurrence:
         self.part_id = raw.get("part_id")
 
     def frame(self, name=None):
+        """WHERE a named frame of this occurrence is, in world space.
+
+        The read half of `Part.frame(...)`, which creates them. Origin and
+        axes as the assembly has them placed, so "which way does this grow"
+        and "did that pin land on the coupler's plane" are one call each.
+        """
         kw = {"occurrence": self.id}
         if name is not None:
             kw["frame"] = name
         return Frame.from_query(self.asm, self.asm.app.frame(**kw), name=name)
+
+    def bbox(self):
+        """This occurrence's WORLD bounding box, as (min, max).
+
+        Not the part's own box transformed: that is a box around a rotated
+        box, and reading one as if it were the part put the throttle lever
+        at z 8..40 when it came near neither end.
+        """
+        self.asm.activate()
+        o = _only([x for x in self.asm.app.list_occurrences(bounds=True)
+                   ["occurrences"] if x["id"] == self.id],
+                  "occurrence", {"id": self.id})
+        if "bbox_min" not in o:
+            raise SdkError(
+                f"'{self.name}' has no geometry to bound — an empty part, "
+                "or one whose bodies all failed to build")
+        return tuple(o["bbox_min"]), tuple(o["bbox_max"])
 
     def __repr__(self):
         return f"Occurrence({self.name!r}, id={self.id})"
@@ -1416,17 +1459,54 @@ class Asm(_Tab):
         self.activate()
         return self.app.solve_assembly()
 
-    def check(self, connected=True, clearances=True):
-        self.activate()
+    def check(self, connected=True, clearances=True, allow=None):
         """The assembly's standing check: nothing clashing, nothing floating,
         and no near miss under a millimetre — which is almost always an
         arithmetic slip, and is exactly what a transcribed coordinate
-        produces."""
+        produces.
+
+        `allow` is for contacts that are MEANT to happen — a screw entering
+        the mouth of its tapped hole, a crank running on its pivot boss —
+        which are two solids touching and have no other way to be declared.
+        It maps an exact pair of occurrence names to the most cubic
+        millimetres of overlap that is still fine:
+
+            asm.check(allow={("carb body", "idle screw"): 2.0})
+
+        Three rules, and each one is there because the version without it
+        failed: the pair is matched EXACTLY, not by substring; going over
+        the ceiling is still a failure, so a screw touching by 1 mm3 passes
+        while a coupler through a crank at 130 does not; and an allowance
+        that matched no clash at all is itself an error, so the list cannot
+        quietly rot as the model changes underneath it.
+
+        The version this replaces asked whether NEITHER name in a pair
+        appeared in the error message. Every pair named the body, so nothing
+        ever raised, and it hid six real clashes including a coupler running
+        through both cranks it joins. An escape hatch written to admit two
+        known cases admitted everything.
+        """
+        self.activate()
         r = self.app.contact_report()
-        problems = []
-        if r.get("clashes"):
-            problems.append(f"{len(r['clashes'])} clash(es): "
-                            f"{r['clashes'][:4]}")
+        allow = {tuple(sorted(k)): v for k, v in (allow or {}).items()}
+        problems, used = [], set()
+        over = []
+        for c in r.get("clashes", []):
+            key = tuple(sorted((c["a"], c["b"])))
+            cap = allow.get(key)
+            if cap is None:
+                over.append(c)
+                continue
+            used.add(key)
+            if c["volume"] > cap:
+                over.append(dict(c, allowed=cap))
+        if over:
+            problems.append(f"{len(over)} clash(es): {over[:4]}")
+        stale = sorted(set(allow) - used)
+        if stale:
+            problems.append(
+                f"{len(stale)} allowance(s) matched nothing and should go: "
+                f"{stale}")
         if connected and len(r.get("components", [])) > 1:
             problems.append(
                 f"{len(r['components'])} disconnected group(s) — something is "

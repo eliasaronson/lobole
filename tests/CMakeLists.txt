@@ -105,7 +105,11 @@ add_executable(designer_tests
 target_link_libraries(designer_tests PRIVATE designer_app designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(designer_tests PRIVATE
-    DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    # So a test can compare its own mtime against the source it was built
+    # from: a stale binary fails like a regression, and twice in one round
+    # it was one.
+    DESIGNER_TEST_BINARY="$<TARGET_FILE:designer_tests>")
 
 include(CTest)
 include(Catch)

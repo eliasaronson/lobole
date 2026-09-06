@@ -402,3 +402,50 @@ TEST_CASE("every scene renderer is in the draw-order registry",
   // by doing nothing at all.
   CHECK(checked >= 6);
 }
+
+// --- The binary you are testing is the source you are looking at -----------
+
+TEST_CASE("conventions: this binary is not older than the source",
+          "[conventions]") {
+  // Twice in one round a commit from a PARALLEL SESSION changed C++ under a
+  // build tree, and the suite failed in a way that read as the round's own
+  // work: first the frozen CAM golden, then three version/golden gates. Both
+  // times the answer was `ninja`, and both times it cost a diagnosis detour
+  // to get there — a stale binary produces failures that are indistinguishable
+  // from real regressions, because for the source in front of you they ARE
+  // wrong answers.
+  //
+  // Rebuilds here are ccache-warm, so a false positive costs seconds and a
+  // false negative costs what it cost twice.
+  const fs::path exe = fs::path(DESIGNER_TEST_BINARY);
+  if (!fs::exists(exe))
+    return; // installed or relocated: nothing to compare against
+  const auto built = fs::last_write_time(exe);
+  fs::path newest;
+  fs::file_time_type newestAt{};
+  for (const char* dir : {"src", "tests"}) {
+    const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / dir;
+    if (!fs::exists(root))
+      continue;
+    for (const auto& e : fs::recursive_directory_iterator(root)) {
+      if (!e.is_regular_file())
+        continue;
+      const std::string ext = e.path().extension().string();
+      if (ext != ".cpp" && ext != ".h" && ext != ".hpp")
+        continue;
+      const auto at = fs::last_write_time(e.path());
+      if (newest.empty() || at > newestAt) {
+        newest = e.path();
+        newestAt = at;
+      }
+    }
+  }
+  if (newest.empty())
+    return;
+  INFO(Relative(newest)
+       << " is newer than the test binary — you are running a build that "
+          "does not contain it, and any failure below may be its absence "
+          "rather than a regression. Rebuild: nix-shell shell.nix --run "
+          "\"cd build && ninja designer designer_tests\"");
+  CHECK(newestAt <= built);
+}

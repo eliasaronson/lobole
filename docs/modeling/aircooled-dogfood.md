@@ -333,27 +333,43 @@ spring lives. At radius 8 the bottom of every turn was 0.8 mm inside the
 mounting flange — 594 mm³ of spring in solid aluminium, in the one place a
 side view does not show it. Radius 6.5 clears.
 
-**And the linkage is proved through a MOTION STUDY, not `set_mate`.**
-Driving the loop mate a step at a time returned a clean solve and a
-different configuration nearly every time — 2590, 2559, 2719, 2534 mm² of
-bore at ten-degree intervals, one of them with the coupler lying across the
-pivot it turns about. A study over the same range tracks it exactly: 13
-poses, residual 0.0000 throughout, and a clash verdict monotone in the
-angle, which is how the remaining interference (the bellcrank swinging down
-into the flange) got found and fixed by reversing the swing. In
-docs/known-bugs.md; the walk exists in `MotionStudy.cpp` and `set_mate` is
-not using it.
+**The linkage is proved through a MOTION STUDY — and the reason given here
+for that was wrong.** Driving the loop mate a step at a time returned a
+clean solve and a different configuration nearly every time: 2590, 2559,
+2719, 2534 mm² of bore at what were meant to be ten-degree intervals, one
+pose with the coupler lying across the pivot it turns about. That was
+written up as the loop solver picking arbitrary branches, and a whole
+redesign was done on the strength of it.
+
+It was a UNIT bug. `set_mate`'s `rotation` went straight into a field
+`Occurrence.h` stores in RADIANS, and its `describe` entry named no unit at
+all, so 60 meant 197.7° and the "ten-degree walk" really asked for 213, 66,
+279, 132, 345, 198. The solver was answering the question exactly. Setting
+2π and getting the pose at 0 back is what finally showed it — one call,
+after two plausible diagnoses had been acted on. Fixed by giving it a name
+that says what it is, `rotation_deg`, rather than by changing `rotation`:
+relations speak radians on purpose, and converting the mate alone made
+`dof_b = ratio · dof_a + phase` incoherent (docs/known-bugs.md).
+
+The study is still the better instrument, for a different reason: it walks
+its samples in order and reports a clash verdict at every one, which is how
+the remaining interference — the bellcrank swinging down into the flange —
+got found and fixed by reversing the swing.
 
 The butterfly turns 66.1° for 60° of cable arm, and the linkage is clear at
 all thirteen poses.
 
-**Seeds, corrected.** An earlier note here said never to seed a loop's
-starting pose. That was drawn from a loop with NO solution, where the
-residual is a geometry error and a hint only starts the solve further from
-an answer that does not exist. This loop has two solutions at every angle —
-the linkage and its mirror — and both close it exactly. Unseeded, it
-assembled crossed: residual 1e-06, dof 1, and the butterfly sitting edge-on
-in the bore at rest. A seed is how the branch is chosen.
+**Seeds.** An earlier note here said never to seed a loop's starting pose,
+having been drawn from a loop with NO solution — where the residual is a
+geometry error and a hint only starts the solve further from an answer that
+does not exist. This loop has two solutions at every angle, the linkage and
+its mirror, and both close it exactly; unseeded it assembled crossed, with
+the butterfly edge-on in the bore at rest. So a seed does choose the branch.
+Worth saying plainly, though, that this was found in the same stretch as the
+unit bug above and the two were not cleanly separated at the time: the
+seeded build is the one that shipped and is clean, but how much of the
+original crossing was the seed and how much was 197.7° arriving as 60 has
+not been measured.
 
 ## A silencer, and folders
 

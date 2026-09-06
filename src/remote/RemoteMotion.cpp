@@ -53,8 +53,12 @@ constexpr MethodDoc MotionMethods[] = {
      "{async: true} runs it as a background job ('motion' in "
      "background_jobs) and motion_status reads the result when it lands. A "
      "sample that does not solve is reported unsolved with its residual — "
-     "never drawn in the last good pose's place.",
-     "async, include_poses, study"},
+     "never drawn in the last good pose's place. The run happens on a COPY, "
+     "so the assembly is left where it was; `leave_at` (\"last\", "
+     "\"start\", or a sample index) scrubs it to one of the samples "
+     "afterwards, which is how anything about the far end of the travel — a "
+     "section, a mass property, a measurement — can be asked at all.",
+     "async, include_poses, leave_at, study"},
     {"motion_status",
      "{study}: whether a run is in progress, and the stored result if one "
      "has landed (the same shape run_motion_study returns).",
@@ -275,7 +279,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     return json{{"studies", out}};
   }
   if (m == "run_motion_study") {
-    // rpc-params: async, include_poses, study
+    // rpc-params: async, include_poses, leave_at, study
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
@@ -288,7 +292,44 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     const motion::Result r = ui::RunMotionNow(state, s.id);
     if (!r.error.empty())
       throw std::runtime_error(r.error);
-    return ResultJson(r, s, includePoses);
+    json out = ResultJson(r, s, includePoses);
+    // A run happens on a COPY, so the assembly is left exactly where it was
+    // — which means nothing about the far end of the travel can be measured
+    // afterwards. `section` after a throttle study saw the shut throttle
+    // twice, and the only way out was reading orientations from the poses
+    // and doing quaternion arithmetic in the caller. `leave_at` scrubs the
+    // live assembly to one of the samples instead, through the same walk
+    // the scrub uses, so it arrives on the branch the run found rather than
+    // on whichever one a jump would have landed on.
+    if (p.contains("leave_at")) {
+      const json& at = p.at("leave_at");
+      const int n = static_cast<int>(r.samples.size());
+      int idx = 0;
+      if (at.is_string()) {
+        const std::string w = at.get<std::string>();
+        if (w == "last")
+          idx = n - 1;
+        else if (w == "start")
+          idx = 0;
+        else
+          throw std::runtime_error(
+              "leave_at: \"start\", \"last\", or a sample index 0.." +
+              std::to_string(n - 1) + " — got " + at.dump());
+      } else {
+        idx = at.get<int>();
+        if (idx < 0 || idx >= n)
+          throw std::runtime_error("leave_at: sample " + std::to_string(idx) +
+                                   " of a study with " + std::to_string(n) +
+                                   " — the range is 0.." +
+                                   std::to_string(n - 1));
+      }
+      std::string err;
+      const double t = n > 1 ? double(idx) / double(n - 1) : 0.0;
+      if (!ui::ApplyMotionPose(state, s.id, t, &err))
+        throw std::runtime_error(err);
+      out["left_at"] = idx;
+    }
+    return out;
   }
   if (m == "motion_status") {
     // rpc-params: include_poses, study

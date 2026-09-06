@@ -64,7 +64,11 @@ PIN_D = 42.0            # crank pin diameter
 # The plane the timing drive runs in — outboard of the case's left wall AND
 # of the intake, which sticks out to y = -68 and carries a float bowl beyond
 # that. At -104 the carburettor sat in the cam sprocket at every sample.
-DRIVE_Y = -150.0
+# Far enough out that the CARBURETTOR fits between the head and the chain:
+# the carb is 70 mm from its flange face, the head's own flange reaches 78,
+# and at -150 the sprocket left 66 mm for it. Nothing said so until the
+# engine grew a top-level clash check.
+DRIVE_Y = -175.0
 CRANK_SPROCKET_R = 32.0 # 1 turn of the crank...
 CAM_SPROCKET_R = 64.0   # ...is half a turn of the cam: 2:1, drawn as it is
                         # geared
@@ -107,7 +111,12 @@ PORT_D = 30.0           # throat, a shade under the 34 valve head
 # plug of head between them — and OCC's second subtract failed outright: not
 # an error, an empty result, so the head silently ceased to exist and the only
 # body left was a cam tower. Staggered they are two independent cuts.
-PORT_Z = (26.0, 36.0)
+# High enough that the port's own d=62 boss clears the CYLINDER BARREL
+# below it: the boss reaches 31 mm under the port centre, the barrel's top
+# stands 6 mm above the deck, and at 26 the two occupied the same 5 mm —
+# reported for years as `barrel x head` and never looked at, because nothing
+# ran a clash check on the engine at all.
+PORT_Z = (40.0, 50.0)
 FLANGE_OD = 62.0
 HEADER_RUN = 100.0      # straight run from the bend to the silencer
 SPIGOT_L = 25.0         # how far the silencer's mouth covers the header
@@ -225,11 +234,19 @@ def head(app):
         # ends at 78 — and cut the head to pieces: it came back as a single
         # 23885 mm3 body called "Cam tower".
         sign = 1.0 if vy > 0 else -1.0
-        root = sign * (WALL_R + 6.0)          # where the flange starts
+        # OUTSIDE the head's own deck flange, which reaches FLANGE_R. At
+        # WALL_R + 6 the port face stood at |y| = 68 while the casting
+        # carried on to 78, so everything bolted to it — the carburettor,
+        # the exhaust — was mated 10 mm inside solid aluminium: 5795 and
+        # 3628 mm3 of it, present since the ports were drawn.
+        root = sign * (FLANGE_R + 2.0)        # where the flange starts
         face = root + sign * FLANGE_T2        # ...and its outer face
         span = lambda a, b: (max(a, b), abs(b - a))
 
-        at, length = span(root, face)
+        # ONE LONG BOSS, from the head's wall out to that face, rather than
+        # a disc at the end of it: a 10 mm pad standing 26 mm off the
+        # casting is joined to it by nothing.
+        at, length = span(sign * WALL_R, face)
         boss = p.sketch(Plane.xz(at), name="Port flange")
         boss.circle((0, PORT_Z[i]), d=FLANGE_OD)
         p.extrude(boss.add(), length, mode="add", name="Port flange")
@@ -264,6 +281,15 @@ def head(app):
     for x, y in bolt_xy():
         bolts.circle((x, y), d=11.0)
     p.extrude(bolts.add(), FLANGE_T + 2, mode="cut", name="Bolt holes")
+    # ...and a way in for the SOCKETS. The bolt circle is at r=65 and the
+    # fins reach 72, so every bolt head sat inside the fin stack — 865 mm3
+    # each, four of them, present since the head was drawn and invisible
+    # because nothing ran a clash check on the engine. A real head notches
+    # its fins for the spanner; this is that notch.
+    access = p.sketch(Plane.xy(FLANGE_T), name="Bolt access")
+    for x, y in bolt_xy():
+        access.circle((x, y), d=20.0)
+    p.extrude(access.add(), 34.0, mode="cut", name="Bolt access")
     p.material("aluminum")
     # ---- cam towers -----------------------------------------------------
     # Pillars from the head's top face up to the cam axis, each ending in an
@@ -923,8 +949,8 @@ def organise(app):
     """
     named = set()
     for folder, parts in FOLDERS:
-        have = [n for n in parts
-                if any(x["name"] == n for x in app.list_parts()["parts"])]
+        known = {x["name"] for x in app.parts()}
+        have = [n for n in parts if n in known]
         if not have:
             continue
         app.create_folder(folder=folder)
@@ -933,8 +959,7 @@ def organise(app):
     # ...but only the PARTS. `list_parts` lists every tab, assemblies
     # included, and the first sweep filed the engine and the carburettor
     # under Fasteners — the two things in the project that are neither.
-    rest = [x["name"] for x in app.list_parts()["parts"]
-            if x["name"] not in named and x.get("type") == "part"]
+    rest = [x["name"] for x in app.parts() if x["name"] not in named]
     if rest:
         app.create_folder(folder="Fasteners")
         app.move_to_folder(folder="Fasteners", part=rest)
@@ -988,6 +1013,21 @@ def main():
     ex = app.export_motion(study=study["id"], path=glb)
     print(f"  animation: {ex['nodes']} nodes x {ex['frames']} keyframes -> "
           f"{glb} ({os.path.getsize(glb) // 1024} kB)")
+    # ---- and the whole engine, checked ---------------------------------
+    # The assembly never had a top-level clash check, and eight of them had
+    # been sitting in it since the parts were drawn: both manifolds mated
+    # 10 mm inside the head's own deck flange (5796 and 3628 mm3), the
+    # intake boss through the top of the cylinder barrel, and all four bolt
+    # heads buried in the cooling fins. The motion study cannot see any of
+    # it — it skips pairs that are rigid to each other, by design, and every
+    # one of these is bolted solid.
+    #
+    # `connected=False` because the piston and the valves are held by mates
+    # rather than by touching anything, and `clearances=False` because the
+    # running fits are deliberate. What is left is clashes, and there are
+    # none.
+    rig.check(connected=False, clearances=False)
+    print("  engine: no part is inside another")
     organise(app)
     project = os.path.join(a.out, "aircooled.dsgn")
     app.save_project(path=project)

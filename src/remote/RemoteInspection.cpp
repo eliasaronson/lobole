@@ -213,6 +213,19 @@ void AttachSweepCoverage(nlohmann::json& out, const SweepPlan& plan,
       "assembly.";
 }
 
+// WHERE an overlap is, for anything that reports one. A pair name and a
+// volume identify the two parts and nothing about which of their features
+// are in each other; on two plates carrying three bosses and a pin apiece
+// that is a guessing game, and it cost four build-and-look cycles on the
+// carburettor round. Omitted entirely when the pair merely touches or is
+// clear, so its presence means "there is solid in solid, here".
+void AddOverlapSite(json& j, const Measure::SetContact& c) {
+  if (!c.overlaps)
+    return;
+  j["centroid"] = {c.centroid.x, c.centroid.y, c.centroid.z};
+  j["bbox_min"] = {c.overlapMin.x, c.overlapMin.y, c.overlapMin.z};
+  j["bbox_max"] = {c.overlapMax.x, c.overlapMax.y, c.overlapMax.z};
+}
 const char* ContactState(const Measure::SetContact& c, double touchTol) {
   if (c.volume > 1e-9)
     return "clash";
@@ -350,7 +363,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "response). Assembly tab: over occurrences, plus "
      "intended-vs-realized mate diffs when mates exist. Part tab: over the "
      "part's BODIES — catches a bracket floating inside one part, which "
-     "the occurrence-level sweep cannot see.",
+     "the occurrence-level sweep cannot see. Each CLASH also carries "
+     "`centroid` and `bbox_min`/`bbox_max`: WHERE the solid-in-solid is, "
+     "so a pair of names and a volume is not the whole answer.",
      "deadline_s, max_pairs, near_tol, touch_tol"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
@@ -864,13 +879,15 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             "interference check failed — an OpenCASCADE boolean/extrema "
             "threw, usually on an invalid or empty body; run "
             "check_geometry on both sides");
-      return json{{"clash", c->volume > 1e-9},
-                  {"volume", c->volume},
-                  {"distance", c->distance},
-                  {"state", ContactState(*c, touchTol)},
-                  {"mode", mode},
-                  {"a", ta.label},
-                  {"b", tb.label}};
+      json out{{"clash", c->volume > 1e-9},
+               {"volume", c->volume},
+               {"distance", c->distance},
+               {"state", ContactState(*c, touchTol)},
+               {"mode", mode},
+               {"a", ta.label},
+               {"b", tb.label}};
+      AddOverlapSite(out, *c);
+      return out;
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const double touchTol = p.value("touch_tol", 1e-3);
@@ -891,10 +908,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           "interference check failed — an OpenCASCADE boolean/extrema "
           "threw, usually on an invalid or empty body; run "
           "check_geometry on both sides");
-    return json{{"clash", c->volume > 1e-9},
-                {"volume", c->volume},
-                {"distance", c->distance},
-                {"state", ContactState(*c, touchTol)}};
+    json out{{"clash", c->volume > 1e-9},
+             {"volume", c->volume},
+             {"distance", c->distance},
+             {"state", ContactState(*c, touchTol)}};
+    AddOverlapSite(out, *c);
+    return out;
   }
   if (m == "query_geometry") {
     // Declarative geometry predicates with an assertion built in (survey
@@ -1332,11 +1351,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                            {"volume", c->volume}});
           if (std::string_view(st) != "clear")
             parent[find(i)] = find(j);
-          if (std::string_view(st) == "clash")
-            clashes.push_back({{"a", ents[i].body->name},
-                               {"b", ents[j].body->name},
-                               {"volume", c->volume}});
-          else if (c->distance > touchTol && c->distance <= nearTol)
+          if (std::string_view(st) == "clash") {
+            json clash{{"a", ents[i].body->name},
+                       {"b", ents[j].body->name},
+                       {"volume", c->volume}};
+            AddOverlapSite(clash, *c);
+            clashes.push_back(std::move(clash));
+          } else if (c->distance > touchTol && c->distance <= nearTol)
             nearMisses.push_back({{"a", ents[i].body->name},
                                   {"b", ents[j].body->name},
                                   {"distance", c->distance}});
@@ -1450,11 +1471,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           touchingIds.insert({std::min(ents[i].occ->id, ents[j].occ->id),
                               std::max(ents[i].occ->id, ents[j].occ->id)});
         }
-        if (std::string_view(st) == "clash")
-          clashes.push_back({{"a", ents[i].occ->name},
-                             {"b", ents[j].occ->name},
-                             {"volume", c->volume}});
-        else if (c->distance > touchTol && c->distance <= nearTol)
+        if (std::string_view(st) == "clash") {
+          json clash{{"a", ents[i].occ->name},
+                     {"b", ents[j].occ->name},
+                     {"volume", c->volume}};
+          AddOverlapSite(clash, *c);
+          clashes.push_back(std::move(clash));
+        } else if (c->distance > touchTol && c->distance <= nearTol)
           nearMisses.push_back({{"a", ents[i].occ->name},
                                 {"b", ents[j].occ->name},
                                 {"distance", c->distance}});

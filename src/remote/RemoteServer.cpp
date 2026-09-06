@@ -986,7 +986,13 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"reset_layout", "Reset the dock layout.", ""},
     {"add_part", "Add a new empty part tab.", "name"},
     {"add_assembly", "Add an assembly tab.", "name"},
-    {"list_parts", "List project tabs (parts, assemblies, drawings).", ""},
+    {"list_parts",
+     "List project TABS — every one, with `type`: part | assembly | "
+     "drawing. Not parts alone, whatever the name says: a sweep that filed "
+     "'everything list_parts returned and nothing else claimed' into a "
+     "Fasteners folder put the engine and the carburettor there. Filter on "
+     "`type` unless you mean all three.",
+     ""},
     {"rename_part", "Rename a part.", "new_name, part"},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path"},
     {"menu_items",

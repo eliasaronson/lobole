@@ -46,8 +46,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"remove_occurrence", "Remove an occurrence by id.", "id"},
     {"list_occurrences",
      "List occurrences with transforms, state and ref_kind (part|assembly); a "
-     "sub-assembly also reports leaf_count and the leaves' paths.",
-     ""},
+     "sub-assembly also reports leaf_count and the leaves' paths. "
+     "{bounds: true} adds each one's WORLD bbox_min/bbox_max — the extent "
+     "where it actually sits, which get_state cannot give you because its "
+     "boxes are in the part's own space. For a single named point or axis "
+     "use `frame` with an occurrence instead.",
+     "bounds"},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}.",
@@ -68,12 +72,26 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "id|name of that part>} (v86 — the mate as DESIGNED: a bolt-circle "
      "centre, a shaft axis), {occurrence, face: {feature_id, element}, "
      "snap_edge?} (a face's centroid + normal, or a snapped hole centre), or "
-     "{occurrence, origin: true}; inner_path? reaches into a sub-assembly.",
-     "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, type"},
-    {"set_mate", "Edit a mate's parameters.",
-     "ball_rotation, dx, dy, flipped, id, name, offset, rotation"},
+     "{occurrence, origin: true}; inner_path? reaches into a sub-assembly. "
+     "The mate's starting position along whatever it leaves free is "
+     "`rotation` (RADIANS) or `rotation_deg`, and `offset` in mm.",
+     "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, "
+     "rotation_deg, type"},
+    {"set_mate",
+     "Edit a mate's parameters, and the way to POSE a mechanism: turn a "
+     "revolute or cylindrical mate with `rotation` (RADIANS) or "
+     "`rotation_deg` — not both — slide it with `offset` (mm), and the "
+     "solver holds what you set instead of treating it as one more unknown. "
+     "To sweep a range rather than jump to one pose use a motion study: it "
+     "walks its samples in order, so each solve starts from the last and a "
+     "closed loop stays on the branch it is already on.",
+     "ball_rotation, dx, dy, flipped, id, name, offset, rotation, "
+     "rotation_deg"},
     {"remove_mate", "Remove a mate by id.", "id"},
-    {"list_mates", "List mates with status/errors.", ""},
+    {"list_mates",
+     "List mates with status/errors. Each carries `rotation` in radians and "
+     "`rotation_deg` beside it.",
+     ""},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam, a: mate id, b: mate id}: "
@@ -222,6 +240,50 @@ json NormalizeTransform(json t) {
   t["orientation"] = {q.x, q.y, q.z, q.w};
   t.erase("rotate");
   return t;
+}
+
+// A mate's rotational DOF is stored, and carried across this boundary, in
+// RADIANS -- `phase` on a relation is radians for the same reason, and a
+// rack's ratio is mm per radian, so degrees here would make `dof_b = ratio *
+// dof_a + phase` incoherent.
+//
+// The bug was never the unit. It was that `rotation` NAMED no unit, in a
+// file whose other angles all do: `transform.rotate.angle_deg`,
+// `duration_deg` and `start_deg` on a cam relation, a motion study's
+// degrees-in-degrees-out. So `set_mate(rotation=60)` looked like 60 degrees
+// and pinned the mate to 60 radians -- 3437.7 degrees, 197.7 folded -- and
+// stepping a linkage 10, 20, 30, 40, 50, 60 really asked for 213, 66, 279,
+// 132, 345, 198. That reads exactly like a loop solver jumping between
+// branches, and was diagnosed as one twice.
+//
+// So `rotation_deg` joins the family that says what it means, and every
+// response carries both. Converting `rotation` itself to degrees was tried
+// first and reverted: it left relations speaking radians and mates speaking
+// degrees, which is a worse trap than the one being fixed.
+constexpr double kDegPerRad = 57.29577951308232;
+
+// Radians from whichever the caller used, refusing both at once — a mate
+// pinned to two different angles has no right answer. Takes the values
+// rather than the params so both key names stay visible at the call site:
+// `rpc_params_gate` reads the handler for the keys it touches, and a helper
+// that reached into `p` itself made add_mate look as though it had quietly
+// stopped accepting either.
+float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
+                          float current) {
+  if (hasRad && hasDeg)
+    throw std::runtime_error(
+        "pass rotation (radians) or rotation_deg, not both");
+  if (hasDeg)
+    return static_cast<float>(deg / kDegPerRad);
+  if (hasRad)
+    return static_cast<float>(rad);
+  return current;
+}
+
+json MateJson(const Mate& m) {
+  json j = DocumentIO::MateToJson(m);
+  j["rotation_deg"] = m.rotation * kDegPerRad;
+  return j;
 }
 
 // Error-audit round: "no such occurrence" names what DOES exist (id + name)
@@ -429,12 +491,58 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // still address top-level occurrences, which is why `leaves` is a plain
     // list and not a set of handles.
     std::map<uint64_t, std::vector<std::string>> leavesByRoot;
+    // ...and their bounds, because a placed SUB-ASSEMBLY has no part document
+    // to measure: asking for its extent by way of `partId` returns nothing,
+    // which is worse than refusing — the caller reads a missing key as "no
+    // geometry" rather than "not implemented for this kind".
+    std::map<uint64_t, std::pair<glm::vec3, glm::vec3>> boundsByRoot;
     for (const assembly::FlatInstance& inst : ui::FlattenActiveAssembly(state))
-      if (inst.visible)
+      if (inst.visible) {
         leavesByRoot[inst.rootOccurrenceId].push_back(inst.path);
+        glm::vec3 lmn(0.0f), lmx(0.0f);
+        if (inst.part != nullptr &&
+            Measure::WorldBounds(inst.part->GetBodies(), inst.world, lmn,
+                                 lmx)) {
+          const auto it = boundsByRoot.find(inst.rootOccurrenceId);
+          if (it == boundsByRoot.end())
+            boundsByRoot[inst.rootOccurrenceId] = {lmn, lmx};
+          else {
+            it->second.first = glm::min(it->second.first, lmn);
+            it->second.second = glm::max(it->second.second, lmx);
+          }
+        }
+      }
+    // WHERE each one actually is, on request. `get_state` gives a body's
+    // bbox in its PART's space, and there was nothing that gave an
+    // occurrence's extent where it sits — so the carburettor round rolled
+    // its own by transforming the eight corners of the local box, which is
+    // a box around a rotated box and not the part: it claimed the throttle
+    // lever spanned z 8..40 when the real part came near neither end, and
+    // two diagnoses were made from it. Opt-in because it is a bbox per
+    // occurrence and a 197-body import is a listing people do casually.
+    const bool wantBounds = p.value("bounds", false);
     json arr = json::array();
     for (const Occurrence& o : state.assembly->GetOccurrences()) {
       json oj = DocumentIO::OccurrenceToJson(o);
+      if (wantBounds) {
+        glm::vec3 bmn(0.0f), bmx(0.0f);
+        bool have = false;
+        if (o.refKind == OccurrenceRef::Assembly) {
+          const auto it = boundsByRoot.find(o.id);
+          if (it != boundsByRoot.end()) {
+            bmn = it->second.first;
+            bmx = it->second.second;
+            have = true;
+          }
+        } else if (Document* pd = ui::PartDocById(state, o.partId)) {
+          have = Measure::WorldBounds(pd->GetBodies(), ui::OccurrenceMatrix(o),
+                                      bmn, bmx);
+        }
+        if (have) {
+          oj["bbox_min"] = {bmn.x, bmn.y, bmn.z};
+          oj["bbox_max"] = {bmx.x, bmx.y, bmx.z};
+        }
+      }
       if (o.refKind == OccurrenceRef::Assembly) {
         const auto it = leavesByRoot.find(o.id);
         oj["leaf_count"] =
@@ -648,14 +756,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         out["inner_path"] = c.at("inner_path");
       return out;
     };
-    json mateJson = {{"id", 0},
-                     {"name", p.value("name", std::string{"Mate"})},
-                     {"mate_type", p.value("type", std::string{"fastened"})},
-                     {"a", connToJson(p.at("a"))},
-                     {"b", connToJson(p.at("b"))},
-                     {"flipped", p.value("flipped", true)},
-                     {"rotation", p.value("rotation", 0.0f)},
-                     {"offset", p.value("offset", 0.0f)}};
+    json mateJson = {
+        {"id", 0},
+        {"name", p.value("name", std::string{"Mate"})},
+        {"mate_type", p.value("type", std::string{"fastened"})},
+        {"a", connToJson(p.at("a"))},
+        {"b", connToJson(p.at("b"))},
+        {"flipped", p.value("flipped", true)},
+        {"rotation",
+         MateRotationRadians(p.contains("rotation"), p.value("rotation", 0.0),
+                             p.contains("rotation_deg"),
+                             p.value("rotation_deg", 0.0), 0.0f)},
+        {"offset", p.value("offset", 0.0f)}};
     if (p.contains("dx"))
       mateJson["dx"] = p.at("dx"); // planar
     if (p.contains("dy"))
@@ -697,8 +809,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (!mate)
       throw std::runtime_error("no such mate");
     ui::SnapshotAssembly(state);
-    if (p.contains("rotation"))
-      mate->rotation = p.at("rotation").get<float>();
+    if (p.contains("rotation") || p.contains("rotation_deg"))
+      mate->rotation =
+          MateRotationRadians(p.contains("rotation"), p.value("rotation", 0.0),
+                              p.contains("rotation_deg"),
+                              p.value("rotation_deg", 0.0), mate->rotation);
     if (p.contains("offset"))
       mate->offset = p.at("offset").get<float>();
     if (p.contains("flipped"))
@@ -723,7 +838,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     ui::SolveActiveAssemblyDriven(state, mate->id,
                                   p.contains("offset") ? MateDof::Offset
                                                        : MateDof::Rotation);
-    json out = DocumentIO::MateToJson(*mate);
+    json out = MateJson(*mate);
     if (!mate->error.empty())
       out["error"] = mate->error;
     return out;
@@ -748,7 +863,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "set_active_part (see list_parts)");
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
-      json mj = DocumentIO::MateToJson(mate);
+      json mj = MateJson(mate);
       if (!mate.error.empty())
         mj["error"] = mate.error;
       arr.push_back(mj);

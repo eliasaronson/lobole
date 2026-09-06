@@ -82,6 +82,15 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
 struct SetContact {
   double volume = 0.0;   // total pairwise intersection volume
   double distance = 0.0; // min body-to-body separation, 0 when overlapping
+  // WHERE the overlap is, when there is one: the volume-weighted centre of
+  // the intersection solid and its bounds, in the same world the bodies were
+  // placed in. Only the volume used to come back, and "throttle lever x
+  // bellcrank, 66.26 mm3" between two plates carrying three bosses and a pin
+  // each is a guessing game — it cost four build-and-look cycles on the
+  // carburettor round alone. The intersection is already built to weigh it.
+  bool overlaps = false;
+  glm::dvec3 centroid{0.0};
+  glm::dvec3 overlapMin{0.0}, overlapMax{0.0};
 };
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,

@@ -7,54 +7,53 @@ an entry when it lands a fix + regression test.
 ---
 
 
-## `set_mate` on a closed loop lands on an arbitrary branch
+## `set_mate`'s `rotation` named no unit, and everyone read it as degrees — FIXED 2026-09-06
 
-Found 2026-09-05 building the carburettor's throttle linkage (a four-bar:
-body -> spindle -> lever -> link rod -> bellcrank -> body, four revolutes,
-one degree of freedom).
+Found 2026-09-05 building the carburettor's throttle linkage, misdiagnosed
+twice as a loop-solver branch problem, and measured on 09-06.
 
-Driving the loop with `set_mate(id=<cable mate>, rotation=a)` returns a
-CLEAN solve at every angle — `solved`, residual ~1e-06 — and a different
-CONFIGURATION nearly every time. Walking 0 to -60 degrees in ten-degree
-steps, each step starting from the pose the last one left, the metal a plane
-through the bore crosses read:
+A mate's rotational DOF is radians (`Occurrence.h`). `set_mate` took a
+parameter called `rotation` and wrote it straight in, and its `describe`
+entry was `"Edit a mate's parameters."` — no unit anywhere. Every other
+angle in the same file names its own: `transform.rotate.angle_deg`,
+`duration_deg` and `start_deg` on a cam relation, and a motion study's
+from/to, which are degrees and convert at this boundary.
 
-    0    -10    -20    -30    -40    -50    -60
-    3000 2590   2559   2719   2534   2599   2552   mm2
+So `set_mate(rotation=60)` reads as 60 degrees and pins the mate to 60
+RADIANS: 3437.7 degrees, 197.7 once folded. Walking a linkage 10, 20, 30,
+40, 50, 60 really asked for 213, 66, 279, 132, 345, 198, and the poses that
+came back looked random — a clean solve every step, a different
+configuration each time, the coupler lying across its own pivot at one of
+them. It was written up here as the loop solver picking arbitrary branches.
+It was not: the solver answered exactly what it was asked.
 
-and the clash list changed with it: `pivot pin x link rod` at one step (the
-coupler lying across the pivot it turns about — the crossed branch), clear
-at the next, `carb body x bellcrank` at the one after. Driving the throttle
-mate instead of the cable mate behaves the same way. It is not the
-parallelogram's own two-configuration ambiguity: making the arms unequal
-(17 and 18 mm, so the two branches are genuinely different lengths apart)
-changed nothing.
+The measurement that settled it, on the carburettor's cable mate:
 
-**A motion study over the same range tracks it exactly.** Thirteen samples
-from 0 to -60 give a smooth sweep, residual 0.0000 throughout, and a clash
-verdict that is monotone in the angle — clear to -15, then `carb body x
-bellcrank` from -20 on, which is a real interference the model then had
-fixed. So the machinery to walk a loop is present and correct
-(`MotionStudy.cpp`); `set_mate` is not using it.
+    set_mate rotation=0.0000  -> bore 2999.6 mm2
+    set_mate rotation=6.2832  -> bore 2999.6 mm2     (2*pi: the same pose)
 
-Impact: any agent or user driving a mechanism a step at a time through
-`set_mate` — the obvious way to pose an assembly — gets poses that look
-solved and are not the mechanism. The failure is silent: nothing in the
-response distinguishes the intended branch from its mirror.
+`rotation` had NO test coverage anywhere in the suite — only `offset` was
+exercised — which is how a parameter with an unstated unit survived.
 
-Likely fix: `SolveActiveAssemblyDriven` should seed from the previous pose
-the way the study's walk does, and/or `set_mate` should refuse to move a
-loop DOF by more than a small step at once, naming the study as the way to
-sweep. Until then the generator proves its linkage with a study
-(`generators/carburettor.py`).
+**Fixed by naming it, not by changing it.** `rotation_deg` now sits beside
+`rotation` on `add_mate`/`set_mate`, passing both is refused, and every mate
+in a response carries both. Converting `rotation` itself to degrees was
+tried first and reverted: relations speak radians on purpose (`phase` is
+documented "in b's unit (rad or mm)" and a rack's ratio is mm per radian),
+so degrees on the mate would have made `dof_b = ratio * dof_a + phase`
+incoherent — a worse trap than the one being fixed. `assembly_relations_
+smoke` and `motion_smoke` both failed on the conversion and are what showed
+this.
 
-Related: the same class of bug was fixed for SCRUBBING in September
-(`tests/scrub_smoke.py`) — a scrub that jumped to a sample could land on the
-mirrored branch at a singularity, and now walks. This is the same fix not
-yet applied to `set_mate`.
+`tests/headless_smoke.py` now covers it: the two spellings are one pose, a
+360 round-trip returns to 0, and passing both at once is refused.
 
-
----
+The lesson worth keeping is not about units. Two consecutive diagnoses —
+"the solver picks branches", then "a parallelogram is doubly-solvable" —
+were built on the reading rather than on the reading's units, and both were
+plausible enough to act on; one of them redesigned the linkage. The check
+that cost nothing was setting the input to a full turn and asking whether
+the output came back.
 
 
 ## Scrubbing a motion study with a section on is 45x slower

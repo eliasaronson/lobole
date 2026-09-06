@@ -88,6 +88,12 @@ PIN_STAND = 5.0                     # the coupler's plane, off that face
 ROD_X = CRANK_X - PIN_STAND         # -39
 BRACKET_X = ROD_X - 9.0             # -48: the bracket's outer face
 PIVOT_D = 11.0                      # the boss the bellcrank turns against
+# The idle stop's boss is d=13, so its centre has to clear its own radius
+# above the MOUNTING FACE. At 4 the boss reached z = -2.5 — behind the
+# flange, inside whatever the carburettor is bolted to, which is exactly
+# where it turned up once the engine grew a clash check: 205 mm3 of boss
+# inside the cylinder head's intake port.
+IDLE_Z = 8.0
 SPRING_X = -(BARREL_R + 1.0)        # -25: where the return spring starts
 SPRING_L = SPRING_X - CRANK_X - 1.0  # ...and how much room it has: 8
 
@@ -169,7 +175,7 @@ def body(app):
     mixh.circle((BARREL_R + 6.0, 0), d=5.0)
     p.extrude(mixh.add(), 20.0, mode="cut", name="Mixture hole", reversed=True)
     stop = p.sketch(Plane.yz(-(BARREL_R + 4.0)), name="Idle stop boss")
-    stop.circle((ARM + 3.0, 4.0), d=13.0)
+    stop.circle((ARM + 3.0, IDLE_Z), d=13.0)
     p.extrude(stop.add(), 16.0, mode="add", name="Idle stop boss")
     # Tapped, and cut LAST so it goes through the rib as well as the boss —
     # a screw modelled inside solid casting is two solids in one place,
@@ -178,7 +184,7 @@ def body(app):
     # inboard, the screw's shank ran through the 2 mm of undrilled plate that
     # left: 8*pi mm3 exactly, which is what a r=2 shank buried 2 mm comes to.
     sh = p.sketch(Plane.yz(BRACKET_X - 1.0), name="Idle stop hole")
-    sh.circle((ARM + 3.0, 4.0), d=4.4)
+    sh.circle((ARM + 3.0, IDLE_Z), d=4.4)
     p.extrude(sh.add(), 44.0, mode="cut", name="Idle stop hole")
     # And the bore for the bellcrank's pivot pin, through plate and boss.
     ph = p.sketch(Plane.yz(BRACKET_X - 1.0), name="Pivot bore")
@@ -214,7 +220,7 @@ def body(app):
     # Both adjusters sit with their tips INSIDE their tapped holes: 4 mm of
     # engagement, 0.1 mm of clearance, which is a screw in a hole rather
     # than a screw near one.
-    p.frame("idle_stop", origin=(-(BARREL_R + 8.0), ARM + 3.0, 4.0),
+    p.frame("idle_stop", origin=(-(BARREL_R + 8.0), ARM + 3.0, IDLE_Z),
             z=(-1, 0, 0), x=(0, 0, 1))
     p.frame("mixture", origin=(BARREL_R + 6.0, 0.0, BOWL_HI - 10.0),
             z=(0, 0, 1), x=(1, 0, 0))
@@ -531,14 +537,15 @@ def carburettor(app, name="carburettor"):
     # the disc broadside when the throttle is shut and edge-on when it is
     # open, so the metal it cuts falls.
     #
-    # Through a MOTION STUDY, not `set_mate`. Driving a loop mate with
-    # `set_mate` — even in ten-degree steps, even from the pose the last step
-    # left — lands on a different branch nearly every time: the same
-    # linkage read 2589, 2558, 2719, 2533 mm2 across the bore at 10-degree
-    # intervals, each one a clean solve of a different configuration. The
-    # study walks the same range and tracks it exactly, which is also how it
-    # can say the linkage is clear at all thirteen poses instead of the two
-    # a pair of `set_mate` calls can reach. Recorded in docs/known-bugs.md.
+    # Through a MOTION STUDY. `set_mate` reads the same range as a series of
+    # unrelated poses -- 2589, 2558, 2719, 2533 mm2 at what were meant to be
+    # ten-degree steps -- but that was a UNIT bug, not the solver: `rotation`
+    # is RADIANS and named no unit, so 60 meant 197.7 and the walk asked for
+    # 213, 66, 279, 132. There is a `rotation_deg` now (docs/known-bugs.md).
+    # The study is
+    # still the right instrument here, because it reports a clash verdict at
+    # every one of its thirteen poses instead of the two a pair of set_mate
+    # calls can reach.
     def disc_angle(sample, occ_id):
         q = next(pp["orientation"] for pp in sample["poses"]
                  if pp["occurrence"] == occ_id)

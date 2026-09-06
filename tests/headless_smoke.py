@@ -24,6 +24,15 @@ from designer_remote import Designer  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 
+def pose_of(d, occ_id):
+    """An occurrence's placed position — enough to tell two poses apart."""
+    o = next(x for x in d.call("list_occurrences")["occurrences"]
+             if x["id"] == occ_id)
+    return tuple(o["transform"]["position"]) + tuple(
+        o["transform"]["orientation"])
+
+
+
 
 
 # Phase logging: this suite runs under `ctest -j`, where a rare failure used
@@ -950,6 +959,43 @@ def main():
                      if o["id"] == o2)
         expect(abs(o2occ["transform"]["position"][2] - (-3.0)) < 1e-3,
                f"negative offset seats CubeB at -Z (z=-3): {o2occ}")
+        # The mate's rotational DOF is RADIANS, and `rotation_deg` is the
+        # named alias beside it. Nothing here covered `rotation` at all —
+        # only `offset` — which is how a parameter that named no unit came
+        # to be read as degrees by every caller: `set_mate(rotation=60)`
+        # looked like 60 degrees and pinned the mate to 197.7, so a linkage
+        # stepped 10, 20, 30 landed on 213, 66, 279. That reads as a loop
+        # solver picking branches at random, and was diagnosed as one twice.
+        d.call("set_mate", id=rev["id"], offset=0.0)
+        d.call("set_mate", id=rev["id"], rotation=0.0)
+        base = pose_of(d, o2)
+        d.call("set_mate", id=rev["id"], rotation_deg=90.0)
+        back = next(m for m in d.call("list_mates")["mates"]
+                    if m["id"] == rev["id"])
+        expect(abs(back["rotation_deg"] - 90.0) < 1e-3,
+               f"rotation_deg round-trips: {back['rotation_deg']}")
+        expect(abs(back["rotation"] - math.pi / 2) < 1e-6,
+               f"...and `rotation` is the radians beside it: {back}")
+        quarter = pose_of(d, o2)
+        expect(quarter != base, "90 degrees actually moved it")
+        # The two spellings are the same pose, which is the whole point of
+        # the alias: whichever the caller reaches for, it means one angle.
+        d.call("set_mate", id=rev["id"], rotation=math.pi / 2)
+        expect(all(abs(a - b) < 1e-3 for a, b in zip(pose_of(d, o2), quarter)),
+               "rotation=pi/2 and rotation_deg=90 are one pose")
+        # And a whole turn is the identity in either spelling.
+        d.call("set_mate", id=rev["id"], rotation_deg=360.0)
+        expect(all(abs(a - b) < 1e-3 for a, b in zip(pose_of(d, o2), base)),
+               "360 degrees returns to where 0 put it")
+        # Both at once has no right answer, so it is refused rather than
+        # resolved in favour of one of them.
+        try:
+            d.call("set_mate", id=rev["id"], rotation=1.0, rotation_deg=90.0)
+            raise AssertionError("two angles for one mate were accepted")
+        except RuntimeError as e:
+            expect("not both" in str(e),
+                   f"the refusal says what is wrong: {e}")
+        d.call("set_mate", id=rev["id"], rotation=0.0)
         d.call("remove_mate", id=rev["id"])
 
         phase("Cross-part list_elements/measure from the ASSEMBLY tab")

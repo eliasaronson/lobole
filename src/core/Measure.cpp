@@ -413,6 +413,8 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     // Volume pass: only box-overlapping pairs can intersect (same pruning
     // rationale as InterferenceVolume — a boolean is thousands of box tests).
     SetContact out;
+    glm::dvec3 weighted(0.0);
+    Bnd_Box overlapBox;
     struct Cand {
       double boxDist;
       size_t i, j;
@@ -443,10 +445,28 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
           continue;
         GProp_GProps props;
         BRepGProp::VolumeProperties(common.Shape(), props);
-        out.volume += std::max(0.0, props.Mass());
+        const double v = std::max(0.0, props.Mass());
+        out.volume += v;
+        if (v > 0.0) {
+          // Weighted by volume, so several overlapping pairs report the
+          // centre of the interference rather than the centre of the last
+          // one found.
+          const gp_Pnt c = props.CentreOfMass();
+          weighted += v * glm::dvec3(c.X(), c.Y(), c.Z());
+          BRepBndLib::Add(common.Shape(), overlapBox);
+          out.overlaps = true;
+        }
       }
-    if (out.volume > 0.0)
+    if (out.volume > 0.0) {
+      out.centroid = weighted / out.volume;
+      if (out.overlaps && !overlapBox.IsVoid()) {
+        double lo[3], hi[3];
+        overlapBox.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+        out.overlapMin = {lo[0], lo[1], lo[2]};
+        out.overlapMax = {hi[0], hi[1], hi[2]};
+      }
       return out; // overlapping sets: separation is 0 by definition
+    }
 
     // Distance pass: probe in ascending box-distance order and stop once a
     // pair's box bound (a lower bound on its exact distance) can no longer
