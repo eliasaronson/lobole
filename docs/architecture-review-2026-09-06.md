@@ -550,8 +550,40 @@ speed, the full-build number is the wrong instrument.** It was also the wrong
 instrument in section 2, where the split "raised total CPU" while cutting the
 critical path -- same measurement error, opposite direction.
 
+### Stage 8 shipped, and what building it found
+
+The registry was safer than the plan feared and the migration order is why: the
+flags were generated FROM the four sets, then re-derived by an independent
+parse of the written source -- 230 rows, zero disagreements -- before the sets
+were deleted.
+
+Two things worth recording:
+
+- **Three names in those lists were for methods that do not exist**
+  (`export_mesh`, `move_feature`, `rename_feature`). Never a live bug -- they
+  simply never matched -- but it is exactly what a list apart from its
+  handlers accumulates, and a flag on a row cannot drift that way.
+- **The part gate was carrying a fact in two places.** It read
+  `!doc && !kNoPartDoc.count(m) && !IsUiAction(m) && IsKnownMethod(m)`; three
+  of those four lookups are about something the row can simply state. A ui
+  action never needs a part tab, so its row says `UiAction` and not
+  `NeedsPart`, and the gate is one mask test. The `IsKnownMethod` clause is
+  preserved by construction: an unknown method has no row, so it has no flags,
+  so a typo still falls through to "unknown method" rather than being answered
+  with "switch to a part tab".
+
+Still outstanding from section 4's rationale: `rpc_gate_smoke.py` can now read
+the table instead of parsing C++ with a regex that a braced `if (m=="…") {`
+defeats. Worth doing; not done here.
+
 ### Still to do
 
-Stage 3 has ten of its thirteen subjects left (`AppActions.cpp` is 3,933 lines,
-down from 6,428), then stages 4, 6-11. Stage 3's remaining regions need the
-corrected boundary check run over each before it moves.
+Stages 1-6 and 8 are done. `AppActions.cpp` and `AppActions.h` no longer
+exist; `AssemblyActions.cpp` is 487 lines and `RemoteServer.cpp` is 82.
+
+What is left is stage 7 (`SketchInteraction.cpp`, 4,278 lines) and stage 11
+(tool state into `ui/state/*.h`). Stage 7 is the one this round has been
+calling the riskiest since it was written: its 843-line router is a pipeline
+whose ordering is load-bearing and recorded only in comments, and its coverage
+is 37 GUI tests with nothing headless. 7a -- the five non-router blocks -- is
+plain cuts and can go any time.
