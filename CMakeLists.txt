@@ -1017,6 +1017,11 @@ set(SHADOW_MISS_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/shadow.rmiss")
 set(SHADOW_MISS_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/shadow.spv")
 compile_rt_shader(shadow_miss_shader ${SHADOW_MISS_SHADER_SOURCE} ${SHADOW_MISS_SHADER_OUTPUT})
 
+# Section any-hit: the clip planes, applied where a ray tracer can act on them.
+set(SECTION_AHIT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/section.rahit")
+set(SECTION_AHIT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/section.spv")
+compile_rt_shader(section_ahit_shader ${SECTION_AHIT_SHADER_SOURCE} ${SECTION_AHIT_SHADER_OUTPUT})
+
 # Compile outline shaders
 set(OUTLINE_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/outline.vert")
 set(OUTLINE_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/outline_vert.spv")
@@ -1115,7 +1120,7 @@ set(STOCK_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/stock_frag.spv")
 compile_shader(stock_frag_shader ${STOCK_FRAG_SHADER_SOURCE} ${STOCK_FRAG_SHADER_OUTPUT})
 
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader ssao_upsample_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader stock_vert_shader stock_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader section_ahit_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader ssao_upsample_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader stock_vert_shader stock_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)

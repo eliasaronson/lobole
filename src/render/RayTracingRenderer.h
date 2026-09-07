@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/ClipPlanes.h"
+
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -92,6 +94,11 @@ struct RTStillDesc {
   bool outlines = true;
   glm::vec3 outlineColor{0.2f, 0.2f, 0.2f};
   float outlineWidth = 1.5f; // pixels, at the still's own resolution
+  // Section cuts, from ui::SectionPlanes -- the same array main.cpp hands
+  // every raster renderer, so a still and the viewport cannot disagree about
+  // what has been cut away. A ray tracer cannot discard in closest-hit, so
+  // these are applied by an any-hit shader (section.rahit).
+  ClipPlaneArray clipPlanes = NoClipPlanes();
 };
 
 class RayTracingRenderer {
@@ -265,6 +272,7 @@ private:
   VkImageView m_auxImageView = VK_NULL_HANDLE;
   uint32_t m_auxScale = 1;
   bool m_stillOutlines = true;
+  bool m_stillHasClip = false; // any section plane live this render
   glm::vec3 m_stillOutlineColor{0.2f};
   float m_stillOutlineWidth = 1.5f;
   // Traces the outline G-buffer and returns the per-output-pixel edge

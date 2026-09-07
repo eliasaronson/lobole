@@ -20,6 +20,10 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 fillColor;
     vec4 rimDir;
     vec4 rimColor;
+    // Section planes; a hit is removed where dot(n, p) > w. clipInfo.x is how
+    // many are live, so a scene with no section costs one compare per ray.
+    vec4 clipPlanes[4];
+    vec4 clipInfo;
 } ubo;
 
 // Per-sample RNG seed data (raygen only).
@@ -79,7 +83,13 @@ void main() {
     // params.y, not a literal: the old 10000 was a LENGTH, and the unit is
     // the model's. A 6 m dock has to be framed from ~11 m away, so every
     // primary ray missed and the still came back as pure environment.
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xff, 0, 0, 0, origin.xyz,
+    // OpaqueEXT SKIPS the any-hit stage, which is where section cuts are
+    // applied -- with a section live the flag would render the model uncut.
+    // It is kept when nothing is cut, so a scene with no section pays none of
+    // the traversal cost any-hit brings.
+    uint rayFlags = ubo.clipInfo.x > 0.5 ? gl_RayFlagsNoneEXT
+                                         : gl_RayFlagsOpaqueEXT;
+    traceRayEXT(topLevelAS, rayFlags, 0xff, 0, 0, 0, origin.xyz,
                 0.001, direction.xyz, ubo.params.y, 0);
 
     if (pc.auxPass != 0u) {
