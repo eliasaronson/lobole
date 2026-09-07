@@ -77,6 +77,35 @@ void FaceSelector::Clear() {
 
 void FaceSelector::ExtractFaces(MeshData& meshData) {
   meshData.faces.clear();
+  // The placement-derived values first, so they are right even for a mesh
+  // with no triangles to walk below.
+  meshData.invTransform = glm::inverse(meshData.transform);
+  const glm::mat3 basis(meshData.transform);
+  const float det = glm::determinant(basis);
+  meshData.normalToWorld = glm::transpose(glm::mat3(meshData.invTransform)) *
+                           (det < 0.0f ? -1.0f : 1.0f);
+  meshData.hasBounds = false;
+  meshData.boundsMin = glm::vec3(0.0f);
+  meshData.boundsMax = glm::vec3(0.0f);
+
+  // The box has to cover everything PICKABLE, which is triangles AND edge
+  // polylines. A mesh can carry edges and no triangles -- the sketch and
+  // datum meshes do -- and bounding only the triangles gave those an empty
+  // box, which a prune reads as "nothing here" and skips: every edge of
+  // every such mesh became unpickable.
+  const auto cover = [&meshData](const glm::vec3& p) {
+    if (!meshData.hasBounds) {
+      meshData.boundsMin = meshData.boundsMax = p;
+      meshData.hasBounds = true;
+    } else {
+      meshData.boundsMin = glm::min(meshData.boundsMin, p);
+      meshData.boundsMax = glm::max(meshData.boundsMax, p);
+    }
+  };
+  for (const auto& poly : meshData.edgePolylines)
+    for (const glm::vec3& p : poly)
+      cover(glm::vec3(meshData.transform * glm::vec4(p, 1.0f)));
+
   if (meshData.triangleFaces.empty())
     return;
 
@@ -105,6 +134,14 @@ void FaceSelector::ExtractFaces(MeshData& meshData) {
     const glm::vec3 v0 = transformed(i0);
     const glm::vec3 v1 = transformed(i1);
     const glm::vec3 v2 = transformed(i2);
+
+    // The world AABB rides along with a walk that already visits every
+    // triangle in world space, so it cannot disagree with the geometry a
+    // pick will test — and UpdateMeshTransform re-runs this, so it cannot
+    // outlive a placement either.
+    cover(v0);
+    cover(v1);
+    cover(v2);
 
     const glm::vec3 cross = glm::cross(v1 - v0, v2 - v0);
     const float area = 0.5f * glm::length(cross);
@@ -170,40 +207,78 @@ Ray FaceSelector::ScreenToWorldRay(float screenX, float screenY,
   return ray;
 }
 
+// Slab test against a world-space AABB. Callers check `hasBounds` first: a
+// mesh with no triangles has nothing to hit, and an empty box must read as a
+// MISS rather than as everywhere.
+bool FaceSelector::RayHitsBounds(const Ray& ray, const glm::vec3& boundsMin,
+                                 const glm::vec3& boundsMax) {
+  float tMin = 0.0f;
+  float tMax = std::numeric_limits<float>::max();
+  for (int a = 0; a < 3; a++) {
+    const float d = ray.direction[a];
+    if (std::abs(d) < 1e-12f) {
+      // Parallel to this pair of planes: inside them, or nowhere.
+      if (ray.origin[a] < boundsMin[a] || ray.origin[a] > boundsMax[a])
+        return false;
+      continue;
+    }
+    const float inv = 1.0f / d;
+    float t0 = (boundsMin[a] - ray.origin[a]) * inv;
+    float t1 = (boundsMax[a] - ray.origin[a]) * inv;
+    if (t0 > t1)
+      std::swap(t0, t1);
+    tMin = std::max(tMin, t0);
+    tMax = std::min(tMax, t1);
+    if (tMin > tMax)
+      return false;
+  }
+  return true;
+}
+
 RayHit FaceSelector::PickFace(const Ray& ray) const {
   RayHit closestHit;
   closestHit.distance = std::numeric_limits<float>::max();
 
-  int totalFacesChecked = 0;
-  int totalMeshes = m_meshes.size();
+  LOG_TRACE("Testing ray against {} meshes", m_meshes.size());
 
-  LOG_TRACE("Testing ray against {} meshes", totalMeshes);
+  for (const auto& mesh : m_meshes) {
+    // The box first. On an assembly the ray crosses one or two parts and
+    // misses the rest, and a MISS used to cost exactly as much as a hit —
+    // every triangle of every occurrence, whether the ray came near it or
+    // not. On a 241-occurrence engine that was 42% of the app's CPU, every
+    // frame the cursor was over the viewport
+    // (docs/performance/hover-pick.md).
+    if (!mesh->hasBounds ||
+        !RayHitsBounds(ray, mesh->boundsMin, mesh->boundsMax))
+      continue;
 
-  for (size_t meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++) {
-    const auto& mesh = m_meshes[meshIdx];
-    totalFacesChecked += mesh->faces.size();
-
-    auto transformed = [&](uint32_t idx) {
-      const auto& p = mesh->vertices[idx].position;
-      return glm::vec3(mesh->transform * glm::vec4(p[0], p[1], p[2], 1.0f));
-    };
+    // The ray goes into MESH space; the vertices stay where they are. The
+    // local direction is deliberately NOT renormalised, so `t` remains the
+    // parameter along the WORLD ray — distances stay comparable between
+    // meshes of different scale, and the hit point comes back exactly.
+    Ray local;
+    local.origin = glm::vec3(mesh->invTransform * glm::vec4(ray.origin, 1.0f));
+    local.direction = glm::mat3(mesh->invTransform) * ray.direction;
 
     // Test every triangle; the hit maps back to its B-Rep face
     for (size_t t = 0; t < mesh->triangleFaces.size(); t++) {
-      const glm::vec3 v0 = transformed(mesh->indices[t * 3]);
-      const glm::vec3 v1 = transformed(mesh->indices[t * 3 + 1]);
-      const glm::vec3 v2 = transformed(mesh->indices[t * 3 + 2]);
+      const glm::vec3& v0 = mesh->vertices[mesh->indices[t * 3]].position;
+      const glm::vec3& v1 = mesh->vertices[mesh->indices[t * 3 + 1]].position;
+      const glm::vec3& v2 = mesh->vertices[mesh->indices[t * 3 + 2]].position;
 
       float distance;
       glm::vec3 hitPoint;
-      if (RayTriangleIntersect(ray, v0, v1, v2, distance, hitPoint)) {
+      if (RayTriangleIntersect(local, v0, v1, v2, distance, hitPoint)) {
         if (distance < closestHit.distance && distance > 0.0f) {
           const uint32_t faceId = mesh->triangleFaces[t];
           closestHit.hit = true;
           closestHit.distance = distance;
-          closestHit.point = hitPoint;
+          // From the WORLD ray at the same parameter, not by transforming
+          // the local point back: same answer, one fewer matrix.
+          closestHit.point = ray.origin + ray.direction * distance;
           // Geometric normal of the hit triangle (points outward)
-          closestHit.normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
+          closestHit.normal = glm::normalize(mesh->normalToWorld *
+                                             glm::cross(v1 - v0, v2 - v0));
           closestHit.meshId = mesh->meshId;
           closestHit.faceIndex = faceId;
         }
@@ -225,6 +300,10 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
 }
 
 EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
+  return PickEdge(ray, PickFace(ray));
+}
+
+EdgeHit FaceSelector::PickEdge(const Ray& ray, const RayHit& occluder) const {
   // Pick radius as an angle off the ray (~0.8° ≈ a handful of pixels at a
   // typical FOV), so the tolerance tracks zoom without needing the camera.
   constexpr float kTanPickAngle = 0.014f;
@@ -240,9 +319,24 @@ EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
   // This is a depth tolerance, not a screen-pick tolerance: scaling it by
   // camera distance admits visibly hidden edges on ordinary-sized parts.
   constexpr float kOcclusionDepthEpsilon = 1e-2f; // mm, tessellation slack
-  const RayHit occluder = PickFace(ray);
 
   for (const auto& mesh : m_meshes) {
+    // The edges of a mesh the ray cannot reach cannot be picked either. The
+    // box is grown by the pick radius at the mesh's own depth, because an
+    // edge is pickable from slightly OUTSIDE the surface it bounds — a
+    // silhouette edge is exactly on the box, and clipping it to the box
+    // would make the outline of every part unclickable.
+    if (!mesh->hasBounds)
+      continue;
+    {
+      const glm::vec3 c = 0.5f * (mesh->boundsMin + mesh->boundsMax);
+      const float depth = glm::dot(c - ray.origin, ray.direction);
+      const float pad =
+          std::max(kTanPickAngle * std::max(depth, 0.0f), kMinRadius);
+      if (!RayHitsBounds(ray, mesh->boundsMin - glm::vec3(pad),
+                         mesh->boundsMax + glm::vec3(pad)))
+        continue;
+    }
     for (size_t e = 0; e < mesh->edgePolylines.size(); e++) {
       const auto& poly = mesh->edgePolylines[e];
       for (size_t i = 0; i + 1 < poly.size(); i++) {

@@ -7,6 +7,8 @@
 #include "cad/FaceSelector.h"
 #include "render/Camera.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -315,4 +317,120 @@ TEST_CASE("PickEdge rejects a slightly hidden edge at normal camera distance",
   ray.origin = glm::vec3(12.0f, 1.0f, 1.0f);
   ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
   CHECK_FALSE(selector.PickEdge(ray).hit);
+}
+
+// ---- Placement invariance: the pick answer must not depend on HOW the mesh
+// got where it is. This is the property the mesh-space ray put at risk --
+// it transforms the ray by the inverse placement instead of every vertex by
+// the placement, and the hit normal then has to come back out through the
+// inverse-transpose. A MIRRORED placement is the case that bites:
+// cross(Ma, Mb) = det(M) M^-T cross(a, b), so without the sign the normal
+// points into the solid, and a normal is what orients a sketch on a face.
+TEST_CASE("a pick reads the same under any placement", "[picking][placement]") {
+  CADShape::Mesh mesh = BoxMesh(); // spans (0,0,0)..(2,2,2)
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  // Aim at the +X face of the box AFTER placement, from outside along +X.
+  auto pickPlusX = [&](const glm::mat4& placement,
+                       const glm::vec3& faceCentre) {
+    FaceSelector selector;
+    selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces, placement);
+    Ray ray;
+    ray.origin = faceCentre + glm::vec3(20.0f, 0.0f, 0.0f);
+    ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+    return selector.PickFace(ray);
+  };
+
+  SECTION("identity") {
+    const RayHit h = pickPlusX(glm::mat4(1.0f), glm::vec3(2, 1, 1));
+    REQUIRE(h.hit);
+    CHECK_THAT(h.point.x, WithinAbs(2.0f, 1e-3f));
+    CHECK_THAT(h.normal.x, WithinAbs(1.0f, 1e-3f)); // outward, towards the eye
+  }
+  SECTION("translated") {
+    const glm::mat4 m =
+        glm::translate(glm::mat4(1.0f), glm::vec3(100.0f, 0.0f, 0.0f));
+    const RayHit h = pickPlusX(m, glm::vec3(102, 1, 1));
+    REQUIRE(h.hit);
+    CHECK_THAT(h.point.x, WithinAbs(102.0f, 1e-3f));
+    CHECK_THAT(h.normal.x, WithinAbs(1.0f, 1e-3f));
+    CHECK_THAT(h.distance, WithinAbs(20.0f, 1e-3f)); // world units, not local
+  }
+  SECTION("rotated a quarter turn about Z") {
+    // (0..2, 0..2) about Z becomes (-2..0, 0..2); the +X-facing surface is
+    // then the one that was +Y, at x = 0.
+    const glm::mat4 m =
+        glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 0, 1));
+    const RayHit h = pickPlusX(m, glm::vec3(0, 1, 1));
+    REQUIRE(h.hit);
+    CHECK_THAT(h.point.x, WithinAbs(0.0f, 1e-3f));
+    CHECK_THAT(h.normal.x, WithinAbs(1.0f, 1e-3f));
+  }
+  SECTION("uniformly scaled") {
+    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(3.0f));
+    const RayHit h = pickPlusX(m, glm::vec3(6, 3, 3));
+    REQUIRE(h.hit);
+    CHECK_THAT(h.point.x, WithinAbs(6.0f, 1e-3f));
+    CHECK_THAT(h.normal.x, WithinAbs(1.0f, 1e-3f));
+    // The distance is in WORLD units: 20 from the eye to the face, whatever
+    // the mesh's own scale. A local-space `t` would report 20/3 here.
+    CHECK_THAT(h.distance, WithinAbs(20.0f, 1e-3f));
+  }
+  SECTION("mirrored across X") {
+    // The box now spans x -2..0, and the surface the ray meets is the one
+    // that was at x = 0.
+    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(-1, 1, 1));
+    const RayHit h = pickPlusX(m, glm::vec3(0, 1, 1));
+    REQUIRE(h.hit);
+    CHECK_THAT(h.point.x, WithinAbs(0.0f, 1e-3f));
+    // -1, INWARD, and that is the answer this has always given: the hit
+    // normal is the cross product of the placed triangle's edges, and a
+    // mirror reverses winding — cross(Ma, Mb) = det(M) M^-T cross(a, b).
+    // ExtractFaces builds Face::normal the same way, so GetFaceNormal agrees
+    // with it and the selector is at least self-consistent.
+    //
+    // Pinned rather than corrected: this is a placement bug, not a picking
+    // one, and a performance change is the wrong place to alter what a
+    // mirrored occurrence reports to sketch-on-face and orient_to_face. The
+    // sign(det) factor in `normalToWorld` exists to REPRODUCE it, so the
+    // mesh-space ray answers exactly as the world-space vertices did.
+    CHECK_THAT(h.normal.x, WithinAbs(-1.0f, 1e-3f));
+  }
+}
+
+TEST_CASE("the bounds prune never loses a hit", "[picking][placement]") {
+  // The prune is the whole point of the change, so it needs the case where a
+  // cheap box test could wrongly reject: many meshes, the ray passing close
+  // by the others on its way to the one it hits.
+  CADShape::Mesh mesh = BoxMesh();
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  FaceSelector selector;
+  for (int i = 0; i < 20; i++) {
+    const glm::mat4 m = glm::translate(
+        glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, static_cast<float>(i) * 2.5f));
+    selector.AddMesh(static_cast<uint32_t>(100 + i), vertices, mesh.indices,
+                     mesh.triangleFaces, m);
+  }
+
+  // A ray down -X at each box in the stack must find THAT box, not its
+  // neighbour and not nothing.
+  for (int i = 0; i < 20; i++) {
+    Ray ray;
+    ray.origin = glm::vec3(30.0f, 1.0f, static_cast<float>(i) * 2.5f + 1.0f);
+    ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+    const RayHit h = selector.PickFace(ray);
+    INFO("box " << i);
+    REQUIRE(h.hit);
+    CHECK(h.meshId == static_cast<uint32_t>(100 + i));
+    CHECK_THAT(h.point.x, WithinAbs(2.0f, 1e-3f));
+  }
+
+  // And a ray that passes the whole stack by hits nothing.
+  Ray miss;
+  miss.origin = glm::vec3(30.0f, 50.0f, 0.0f);
+  miss.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  CHECK_FALSE(selector.PickFace(miss).hit);
 }

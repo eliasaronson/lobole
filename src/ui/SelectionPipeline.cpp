@@ -138,9 +138,18 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
       out.push_back(c);
     }
   }
+  // ONE face pick for the whole function. Three call sites wanted it — the
+  // occurrence branch, the face/body branch, and PickEdge, which needs it as
+  // an occluder — and each used to run its own full sweep of every triangle
+  // in the scene, every frame the cursor was over the viewport.
+  const bool wantsFace = (kinds & (KindBit(SelectionItem::Kind::Occurrence) |
+                                   KindBit(SelectionItem::Kind::Edge) |
+                                   KindBit(SelectionItem::Kind::Face) |
+                                   KindBit(SelectionItem::Kind::Body))) != 0;
+  const RayHit face = wantsFace ? state.faceSelector->PickFace(ray) : RayHit{};
+
   if (kinds & KindBit(SelectionItem::Kind::Occurrence)) {
     // Assembly tab: a face hit selects the whole occurrence it belongs to.
-    const RayHit face = state.faceSelector->PickFace(ray);
     if (face.hit) {
       for (const DocumentRenderMesh& m : state.documentMeshes) {
         if (m.meshId == face.meshId && m.occurrenceId != 0) {
@@ -153,7 +162,7 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
     }
   }
   if (kinds & KindBit(SelectionItem::Kind::Edge)) {
-    const EdgeHit edge = state.faceSelector->PickEdge(ray);
+    const EdgeHit edge = state.faceSelector->PickEdge(ray, face);
     if (edge.hit) {
       if (state.assembly) {
         // Assembly tab (measure): the item carries the occurrence in `id`.
@@ -172,7 +181,6 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
   }
   if (kinds & (KindBit(SelectionItem::Kind::Face) |
                KindBit(SelectionItem::Kind::Body))) {
-    const RayHit face = state.faceSelector->PickFace(ray);
     if (face.hit) {
       if (kinds & KindBit(SelectionItem::Kind::Face)) {
         if (state.assembly) {
