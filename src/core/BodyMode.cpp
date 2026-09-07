@@ -83,8 +83,25 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                       (boolErr.empty() ? "" : ": " + boolErr));
       return false;
     }
-    if (warning &&
-        VolumeUnchanged(bodies[target].shape.Volume(), fused.Volume())) {
+    // A union can only ADD. OCC will occasionally hand back a shape that is
+    // valid and smaller — an empty one, even — for a fuse it could not do,
+    // and accepting it silently deletes the body: a swept tube whose end cap
+    // lands inside the block it is being added to did exactly that, and the
+    // manifold it belonged to came back as one flange with no log. Losing
+    // material here is never right, so say so instead.
+    const double before = bodies[target].shape.Volume();
+    const double after = fused.Volume();
+    if (before > 1e-9 && after < before - 1e-6 * std::max(before, 1.0)) {
+      Fail(error, "add LOST material from body '" + bodies[target].name +
+                      "' (" + std::to_string(before) + " mm3 to " +
+                      std::to_string(after) +
+                      ") — a union cannot shrink what it joins, so the "
+                      "kernel could not do this fuse; move the tool so it "
+                      "meets the body across a face rather than ending "
+                      "inside it");
+      return false;
+    }
+    if (warning && VolumeUnchanged(before, after)) {
       *warning = "add merged no new material — the tool lies entirely inside "
                  "the target body (check the sketch plane and profile)";
     }

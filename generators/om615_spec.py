@@ -85,7 +85,11 @@ NOSE_Y = -293.0           # where the nose ends, ahead of the damper
 FLANGE_D = 110.0          # flywheel flange
 FLANGE_T = 12.0
 FLANGE_Y = 240.0          # far enough aft of the rear main for the seal
-FLYWHEEL_BOLT_PCD = 74.0
+# The bolt circle is bounded on BOTH sides: outside the spigot the flywheel
+# centres on, and inside the crank's rear seal land — at 74 the bolts ran out
+# through the land and into the seal that runs on it.
+FLYWHEEL_BOLT_PCD = 58.0
+FLYWHEEL_SPIGOT_D = 42.0
 FLYWHEEL_BOLTS = 6
 
 # ---- the block -------------------------------------------------------------
@@ -96,6 +100,12 @@ CASE_X = 100.0            # half-width of the crankcase skirt. NOT styling:
                           # walls is 14 mm narrower again
 BLOCK_Y0 = -205.0         # front face = the front main web's own face
 BLOCK_Y1 = 215.0          # rear face (the bellhousing flange)
+# Sump bolt centres. Squeezed from both sides: outboard of the pan flange's
+# inner edge (a hole that breaks out of the face it seats on has no rim a
+# fastener can be fitted to) and inboard of the block's own chamfered rail.
+PAN_BOLT_X = 88.0
+PAN_BOX_INSET = 20.0      # how much narrower the pan's box is than the block
+CASE_CHAMFER = 6.0        # the crankcase's lower outer edges
 PAN_RAIL = -92.0          # the sump rail. Deep enough that the rod CAP,
                           # whose corner reaches 83.8 below the axis at BDC,
                           # is not scraping it
@@ -146,6 +156,8 @@ OIL_RISER_X = -62.0
 OIL_RISER_D = 8.0
 COVER_GASKET_T = 2.0
 CAM_GASKET_T = 3.0
+COVER_LIP = 5.0           # how far the cam cover overhangs the head
+HEAD_CHAMFER = 10.0       # the head's lower outer edges
 
 # ---- the head --------------------------------------------------------------
 FIRE_FACE = DECK + GASKET_T          # 238.5, the head's underside
@@ -180,12 +192,17 @@ GUIDE_Z = FIRE_FACE + 16.0           # where the guide's bore starts
 VALVE_LIFT = 8.0
 PORT_D = {"intake": 30.0, "exhaust": 28.0}
 PORT_Z = FIRE_FACE + 34.0            # where a port leaves the side face
-# Two studs per port, fore and aft of it at the port's own height. Above and
-# below was the obvious place and there is no room: the upper pair runs into
-# the head's side coolant channel and the lower into the seat counterbore.
-MANIFOLD_BOLT_DY = 24.0
+# Two studs per port, ABOVE and BELOW it. Fore and aft was the obvious place
+# and it is the injector's: an injector comes out of this same face 38 mm
+# behind its port, and a flange wide enough to reach studs at 24 is a flange
+# through the injector. Above and below, the upper stud stops short of the
+# head's side coolant channel (x 48..70) and the lower one clears the seat
+# counterbore, because both are only 15 mm deep.
+MANIFOLD_BOLT_DZ = 26.0
 MANIFOLD_BOLT_D = 9.0
-MANIFOLD_PAD = 12.0                  # how thick a manifold's flange is
+MANIFOLD_PAD = 20.0                  # how thick a manifold's flange is
+MANIFOLD_PAD_HY = 24.0               # ...and how far it reaches in y and z
+MANIFOLD_PAD_HZ = 34.0
 MANIFOLD_GASKET_T = 2.0
 MANIFOLD_STUD_DEPTH = 15.0           # shallow ON PURPOSE: 26 deep and the
                                      # stud runs into the head bolt's own
@@ -194,12 +211,19 @@ MANIFOLD_STUD_DEPTH = 15.0           # shallow ON PURPOSE: 26 deep and the
 MANIFOLD_CONVERGE = 0.75             # how far each runner draws in toward
                                      # the log — at 0.34 the intake runner's
                                      # bore swallowed its own outer stud
-# The exhaust log and the inlet log, both along the crank axis outboard of
-# their own side of the head.
-EXH_LOG = (150.0, FIRE_FACE + 20.0, 46.0, 38.0)      # x, z, od, bore
-INT_LOG = (-148.0, FIRE_FACE + 38.0, 64.0, 52.0)
-EXH_RUNNER_D = 36.0
-INT_RUNNER_D = 42.0
+# Both manifolds are LOGS with curved branches — swept along fitted splines,
+# not straight cylinders between two flanges. A runner leaves its port on the
+# port's own axis and arrives at the log on the log's, and everything between
+# is a curve; and the branches are built SOLID and bored afterwards, because
+# two hollow tubes unioned leave each one's wall across the other's throat.
+#
+# (x, z, outer, bore) for each log, and the outer/bore of its branches.
+INT_LOG = (-132.0, FIRE_FACE + 130.0, 78.0, 62.0)    # high, like the real one
+INT_LOG_Y = (-172.0, 172.0)
+INT_RUNNER = (42.0, 32.0)
+EXH_LOG = (138.0, FIRE_FACE + 14.0, 62.0, 50.0)
+EXH_LOG_Y = (-72.0, 162.0)
+EXH_RUNNER = (44.0, 34.0)
 # The spring sits in a POCKET sunk below the rocker chamber's floor. On the
 # floor itself there are only 20 mm between the seat and the retainer, which
 # is a spring whose coils are closer together than its wire is thick.
@@ -356,13 +380,16 @@ DAMPER_SEAT = (-290.0, -260.0)
 DAMPER_Y = -290.0         # where the damper's own rear face sits
 COVER_Y0 = -260.0         # the timing cover's front face
 COVER_WALL = 6.0
-# Where the front cover bolts up. The ones below the deck go into the BLOCK,
-# the ones above it into the HEAD — one list, so the cover cannot grow a hole
-# that lands on nothing.
+# Where the front cover bolts up: into the BLOCK below the deck and into the
+# HEAD above it. Two lists, because the two faces have different things in
+# the way — at x = 64 the upper pair went straight through the outermost head
+# bolt's own boss, and a boss with a hole across its top face comes back as a
+# rim SPLIT in two, which no fastener can be fitted to. The head's pair sits
+# in its side wall instead, outboard of the rocker chamber at 78.
 COVER_BOLTS = [(sx * x, z) for x, z in ((93.0, -80.0), (93.0, -20.0),
                                         (93.0, 40.0), (64.0, 110.0),
-                                        (64.0, 180.0), (64.0, 250.0),
-                                        (64.0, 320.0)) for sx in (-1, 1)]
+                                        (64.0, 180.0)) for sx in (-1, 1)]
+COVER_BOLTS_HEAD = [(sx * 82.0, z) for z in (250.0, 320.0) for sx in (-1, 1)]
 COVER_FRONT_T = 10.0      # thicker, because the front seal lives in it
 # The chain case has to clear the CAM SPROCKET, which at 44 teeth of 3/8
 # reaches 72 mm from the cam axis — above the head's own top face. A real
@@ -374,7 +401,8 @@ REAR_SEAL_Y = 224.0
 # ---- oiling ----------------------------------------------------------------
 SUMP_DEPTH = 105.0        # below the pan rail
 SUMP_Z = PAN_RAIL - SUMP_DEPTH
-SUMP_Y0 = -248.0          # the pan runs forward under the timing cover
+SUMP_Y0 = -260.0          # the pan runs forward to the chain case's own
+                          # front face, because the case's floor is open
 SUMP_Y1 = 205.0
 # The pump hangs off the block's front face inside the chain case. Its height
 # is squeezed from both ends: the chain has to be longer than the two
@@ -383,6 +411,16 @@ SUMP_Y1 = 205.0
 OIL_PUMP_Z = -64.0
 OIL_GEAR_D = 30.0
 OIL_GEAR_W = 20.0
+
+# ---- how it is held ---------------------------------------------------------
+# A mount pad each side of the crankcase, between the ribs, and a bracket
+# bolted to it. The bolts are SHALLOW on purpose: the wall they go into is
+# only 14 mm thick (the bays inside reach x = 86) and a deeper one is a bolt
+# into the crankcase.
+MOUNT_Y = -60.0
+MOUNT_BOLT_DEPTH = 12.0
+MOUNT_BOLTS = [(-15.0, 10.0), (15.0, 10.0), (0.0, 48.0)]   # (dy, z)
+MOUNT_BOLT_D = 11.0
 
 # ---- cooling ---------------------------------------------------------------
 WATER_PUMP_Y = -272.0

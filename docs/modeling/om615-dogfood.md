@@ -138,3 +138,80 @@ Every one of these was found by a check, not by looking:
 - **An occurrence's reported position is its part ORIGIN.** The camshaft's
   origin is 372 mm below its own axis, so it "travels" 745 mm in a study
   that only rotates it. Measure a piston at its crown, not at its pin.
+
+## Round two: the manifolds, the fasteners, and what the user saw
+
+A look at the built engine turned up eight things, and every one of them was
+real: the intake manifold was a set of straight pipes that did not meet their
+ports, both castings were boxes, there were two holes straight into the
+engine, the injectors were buried inside the intake log, and there were no
+fasteners and no engine mounts at all — the sump was "just sitting there".
+
+What it is now: 76 parts, **241 occurrences**, 40 real fasteners derived from
+the holes they go in, and the same gate — 10491 exact-boolean pair checks over
+two crank revolutions, clean.
+
+**Both manifolds are LOGS with curved branches**, swept as pipes along fitted
+splines rather than straight cylinders between two flanges: a runner leaves
+its port on the port's own axis and arrives at the log on the log's, and
+everything between is a curve. Each is built solid and bored afterwards,
+because two hollow tubes unioned leave each one's wall across the other's
+throat.
+
+### A third app defect, and the two-hour version of it
+
+**`add` on a body the new material does not touch does not union.** It keeps
+the connected lump and drops the rest — so four flange pads added before the
+log that joins them left one flange and one runner, silently. Everything here
+is built log-first now, each step touching what is already there.
+
+Worse, and now fixed: **a fuse that OCC could not do came back valid, smaller,
+and silent.** A swept tube whose end cap lands *inside* the block it is being
+added to made a union that returned an EMPTY solid — the whole manifold
+vanished, with no error on any feature. A union can only add, so
+`ApplyBodyMode` now refuses a fuse whose result has less volume than the body
+it started from and says which body and how much (`BodyMode.cpp`). The
+modelling fix is in the same spirit: a runner starts flush ON the flange face
+with a short straight run out of it, so it passes through the pad rather than
+ending inside it.
+
+### Fitting forty fasteners taught five things
+
+- **A threaded hole's major diameter IS the bolt's nominal.** Drawn at a
+  tapping-drill size, all forty bolts read as steel inside steel for their
+  whole engagement — twenty clashes that were nothing but that.
+- **A hole that is not one of the standard's own clearances is refused**, and
+  rightly: 8.5 is not an M8 clearance (8.4 / 9 / 10 are) and 12.5 is not an
+  M12 one. "The bolt plus a half" is not a size.
+- **A rim SPLIT into two arcs is not a rim** a fastener can be fitted to, and
+  three different things caused one: a cam-cover bolt drilled through the
+  outermost head bolt's own boss, a boss that ran past the head's end face,
+  and a sump bolt that broke out of the flange's inner edge. All three are
+  "something crosses the face this hole seats on".
+- **Matching a rim to its own hole floor is a match in WORLD space.** The
+  flywheel's bolt circle is in its local XY and the crank's is in its local
+  XZ; comparing (x, y) to (x, y) put every flywheel bolt 64 mm off its axis.
+- **A bolt circle is bounded on both sides.** The flywheel's has to clear the
+  spigot it centres on and stay inside the crank's rear seal land — at 74 mm
+  the bolts ran out through the land and into the seal that runs on it.
+
+### The two holes into the engine
+
+- **The top one was the head/cover joint.** The cover's rail, its gasket and
+  the head's own 8 mm wall all ended on the same line. The cover OVERHANGS
+  the head now — but in x only: lipped in y as well, the gasket ran past the
+  notch cut for the cam nose and the camshaft came through 5 mm of gasket at
+  every crank angle.
+- **The bottom one was the chain case meeting the sump.** The case's floor is
+  open on purpose (it drains into the sump, and the oil pump's sprocket has
+  to hang through it), so the pan's flange has to run forward underneath it.
+  Stopped at the block's front face, the two left a slot into the crankcase.
+
+### Less boxy
+
+The crankcase and the head are drawn as SECTIONS with chamfered outer edges
+and extruded along the engine, not as boxes; the sump tapers to a narrower
+floor; the cam cover is a rail, a step and a raised roof. A casting has draft
+where a box has a corner, and that is most of what makes one look like the
+other. It also moved the sump bolts twice: they have to sit outboard of the
+pan flange's inner edge and inboard of the block's now-chamfered rail.

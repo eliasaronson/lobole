@@ -222,8 +222,15 @@ def front_and_rear(app, rig, occ, main):
     app.add_relation(type="chain", a=main["id"], b=wp_mate["id"],
                      ratio=(PULLEY_D - 16.0) / (WP_PULLEY_D - 16.0),
                      name="fan belt")
+    # The mounts it hangs on.
+    for side, nm in (("left", "mount_left"), ("right", "mount_right")):
+        mb = B.engine_mount(app, side)
+        rig.activate()
+        mo = rig.place(mb)
+        rig.fasten((bo, nm), (mo, "pad"), flipped=False)
     _solved("front and rear", rig)
-    return {"crank_sprocket": cso, "cover": cv, "flywheel": fo}
+    return {"crank_sprocket": cso, "cover": cv, "flywheel": fo,
+            "sump": pn, "crank": co}
 
 
 def top_end(app, rig, occ, main):
@@ -374,6 +381,7 @@ FOLDERS = [
                   "oil pump sprocket", "oil pump chain"]),
     ("Cooling", ["water pump", "water pump shaft", "impeller",
                  "water pump pulley", "fan belt"]),
+    ("Mounts", ["engine mount left", "engine mount right"]),
 ]
 
 
@@ -434,8 +442,9 @@ def main():
     t0 = time.time()
     rig = app.assembly("engine")
     occ, main_mate = bottom_end(app, rig)
-    front_and_rear(app, rig, occ, main_mate)
+    front = front_and_rear(app, rig, occ, main_mate)
     top, cam_mate = top_end(app, rig, occ, main_mate)
+    fasteners(app, rig, occ, top, front)
     for part in app.list_parts()["parts"]:
         if part["name"] == "Part 1":
             app.delete_part(part=part["name"])
@@ -522,6 +531,108 @@ def _firing_order(r, valves):
     # Say it starting at cylinder one, which is how anyone quotes it.
     i = order.index(1)
     return "-".join(str(k) for k in order[i:] + order[:i])
+
+
+
+def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
+             size, n, what, centres=None, rim_key=None, far_key=None):
+    """Fit `n` real fasteners, each derived from the hole it goes in.
+
+    A blind hole needs its FAR END said outright — the probe follows the
+    axis on past the joint and finds material three parts away otherwise —
+    so every set here names the floor of the hole it threads into, matched
+    to its own rim by position rather than by order.
+    """
+    rims = part.body().edges(circular=True, radius=rim_r,
+                             where=lambda e: abs(rim_at(e)) < 0.6)
+    floors = far_part.body().edges(circular=True, radius=far_r,
+                                   where=lambda e: abs(far_at(e)) < 0.6)
+    if len(rims) < n or len(floors) < n:
+        raise SdkError(f"{what}: {len(rims)} rims and {len(floors)} hole "
+                       f"floors, expected at least {n} of each")
+    # Pick by POSITION, not by count. A boss's top face is an annulus and a
+    # blind hole's floor is a disc, and a model this size has other edges of
+    # the same radius at the same height — matching the two lists by order
+    # is how a bolt ends up in the wrong hole.
+    if centres:
+        near = []
+        for c in centres:
+            # A rim can come back SPLIT into two arcs (the element name then
+            # carries a `.n`), and half a circle is not a rim the app will
+            # take: "a cylindrical face has an axis but no direction". Prefer
+            # the whole one at that centre.
+            at = [e for e in rims
+                  if (e.center.x - c[0]) ** 2 + (e.center.y - c[1]) ** 2 < 1.0]
+            if not at:
+                raise SdkError(f"{what}: no rim at {c}")
+            # Prefer an element the toponamer did not have to disambiguate:
+            # where a hole's seat face is CROSSED by something else its rim
+            # comes back as two arcs, and half a circle is not a rim a
+            # fastener can be fitted to.
+            whole = [e for e in at if "." not in e.ref["element"]]
+            hit = (whole or at)[0]
+            near.append(hit)
+        rims = near
+    # Matching a rim to its own hole floor is a match in WORLD space, and the
+    # two parts need not be drawn on the same axis: the flywheel's bolt
+    # circle is in its local XY and the crank's is in its local XZ, so
+    # comparing (x, y) to (x, y) put every bolt 64 mm off its own axis.
+    rk = rim_key or (lambda e: (e.center.x, e.center.y))
+    fk = far_key or (lambda e: (e.center.x, e.center.y))
+    fitted = []
+    for rim in rims[:n]:
+        a0, a1 = rk(rim)
+        floor = min(floors, key=lambda e: (fk(e)[0] - a0) ** 2
+                    + (fk(e)[1] - a1) ** 2)
+        # A generous timeout: fitting probes the whole assembly along the
+        # bolt's axis, and by the fortieth fastener there is a lot of it.
+        fitted.append(rig.bolt(rim, occ, standard="iso4762", size=size,
+                               far_end={**floor.ref,
+                                        "occurrence": far_occ.id},
+                               _timeout=600))
+    print(f"  {what}: {n} x {fitted[0]['size']} x "
+          f"{fitted[0]['length_mm']} mm")
+    return fitted
+
+
+def fasteners(app, rig, occ, top, front):
+    """The bolts that actually hold it together — head, mains, sump and
+    flywheel. Each is DERIVED from its hole: nothing here says a length."""
+    blk, hd = app.part("block"), app.part("cylinder head")
+    pan, fw = app.part("sump"), app.part("flywheel")
+    crk, cap = app.part("crankshaft"), app.part("main cap")
+    rig.activate()
+    _bolt_up(rig, top["head"], hd, (HEAD_BOLT_D + 1.0) / 2.0,
+             lambda e: e.center.z - T.HEAD_BOLT_SEAT,
+             occ["block"], blk, HEAD_BOLT_D / 2.0,
+             lambda e: e.center.z - (DECK - 60.0), "M12", len(HEAD_BOLT),
+             "head bolts", centres=HEAD_BOLT)
+    _bolt_up(rig, front["sump"], pan, 4.5,
+             lambda e: e.center.z - (PAN_RAIL - 6.0),
+             occ["block"], blk, 4.0,
+             lambda e: e.center.z - (PAN_RAIL + 20.0), "M8",
+             2 * len(B._pan_bolt_y()), "sump bolts",
+             centres=[(sx * PAN_BOLT_X, y) for y in B._pan_bolt_y()
+                      for sx in (-1, 1)])
+    _bolt_up(rig, front["flywheel"], fw, 5.5,
+             lambda e: e.center.z - B.FLYWHEEL_T,
+             front["crank"], crk, 5.0,
+             lambda e: e.center.y - (FLANGE_Y + FLANGE_T + 9.0 - 40.0),
+             "M10", FLYWHEEL_BOLTS, "flywheel bolts",
+             rim_key=lambda e: (e.center.x, -e.center.y),
+             far_key=lambda e: (e.center.x, e.center.z))
+    # A cap is drawn about ITS OWN origin and placed at its main's y, so its
+    # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
+    # block's hole floors are measured in. Both have to be said.
+    for i, c in enumerate(occ["caps"]):
+        _bolt_up(rig, c, app.part("centre main cap" if i == 2 else "main cap"),
+                 B.CAP_CLEARANCE_D / 2.0,
+                 lambda e: e.center.z + CAP_DEPTH,
+                 occ["block"], blk, CAP_BOLT_D / 2.0,
+                 lambda e: e.center.z - 46.0, "M12", 2,
+                 f"main cap {i + 1} bolts",
+                 centres=[(-CAP_BOLT_X, 0.0), (CAP_BOLT_X, 0.0)],
+                 rim_key=lambda e, y=MAIN_Y[i]: (e.center.x, e.center.y + y))
 
 
 if __name__ == "__main__":

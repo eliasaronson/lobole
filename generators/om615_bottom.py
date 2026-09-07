@@ -59,6 +59,27 @@ def axis_plane(start, direction):
     return Plane(start, tuple(dd), tuple(u))
 
 
+def spline_tube(p, points, od, name, mode="add", wall=0.0):
+    """A pipe swept along a spline fitted through `points`.
+
+    This is how a manifold runner is shaped, and the reason it matters is
+    that a straight cylinder between two flanges is not one: a runner leaves
+    the port on the port's own axis and arrives at the log on the log's, and
+    everything in between is a curve. Build the branches SOLID and subtract
+    their bores afterwards — two hollow tubes unioned leave each one's wall
+    across the other's throat, which is a manifold that does not flow.
+    """
+    p.app.add_feature(feature={
+        "type": "Curve3D", "name": f"{name} path", "kind": "fit_spline",
+        "points": [list(V(q)) for q in points]})
+    path = p.state()["features"][-1]["id"]
+    f = {"type": "Pipe", "name": name, "path_id": path,
+         "outer_diameter": od, "mode": mode}
+    if wall:
+        f["wall_thickness"] = wall
+    p.app.add_feature(feature=f)
+
+
 def bore(p, start, target, d, name, over=6.0):
     """Cut a round hole from `start` toward `target`, running past it by
     `over` so it always breaks through into what it is aimed at."""
@@ -68,6 +89,9 @@ def bore(p, start, target, d, name, over=6.0):
 # lives in om615_spec.
 # How far down the webs are cut away for the pistons: below the lowest the
 # skirt reaches at BDC, and clear of the main tunnel's own 32 mm radius.
+CAP_CLEARANCE_D = 13.0            # M12 Close. A hole that is not one of the
+                                  # standard's own clearances is refused, and
+                                  # 12.5 (the bolt plus a half) is not.
 BDC_RELIEF_Z = 62.0
 BELT_GROOVE_D = 12.0              # how deep a pulley's vee is...
 BELT_GROOVE_H = 6.0               # ...and half how wide at its mouth
@@ -92,8 +116,15 @@ def block(app):
     (p.var("bore", BORE).var("stroke", STROKE).var("deck", DECK)
       .var("bore_pitch", BORE_PITCH))
     length = BLOCK_Y1 - BLOCK_Y0
-    slab(p, -CASE_X, BLOCK_Y0, PAN_RAIL, CASE_X, BLOCK_Y1, BLOCK_STEP,
-         "Crankcase")
+    # The crankcase is a SECTION with its lower outer edges chamfered, not a
+    # box. A casting has draft where a box has a corner, and the sump rail is
+    # narrower than the skirt for the same reason a real one is.
+    c = CASE_CHAMFER
+    sec = p.sketch(Plane.xz(BLOCK_Y1), name="Crankcase")
+    sec.polyline([(-CASE_X + c, PAN_RAIL), (CASE_X - c, PAN_RAIL),
+                  (CASE_X, PAN_RAIL + c), (CASE_X, BLOCK_STEP),
+                  (-CASE_X, BLOCK_STEP), (-CASE_X, PAN_RAIL + c)])
+    p.extrude(sec.add(), BLOCK_Y1 - BLOCK_Y0, mode="new_body", name="Crankcase")
     slab(p, -DECK_X, BLOCK_Y0, BLOCK_STEP, DECK_X, BLOCK_Y1, DECK,
          "Cylinder block", mode="add")
     return _block_rest(p, length)
@@ -173,14 +204,17 @@ def _block_rest(p, length):
     caps = p.sketch(Plane.xy(0.0), name="Main cap bolt holes")
     for y in MAIN_Y:
         for sx in (-1, 1):
-            caps.circle((sx * CAP_BOLT_X, y), d=CAP_BOLT_D - 1.5)
+            # NOMINAL, not a tapping drill: a threaded hole's major diameter
+            # is the bolt's own, and drawn 1.5 under it every bolt in the
+            # engine reads as steel inside steel for its whole engagement.
+            caps.circle((sx * CAP_BOLT_X, y), d=CAP_BOLT_D)
     p.extrude(caps.add(), 46.0, mode="cut", name="Main cap bolt holes")
 
     # Head bolts: blind in the deck, ten of them, on the list the HEAD drills
     # through — one list, not two that agree until one is edited.
     deck = p.sketch(Plane.xy(DECK, flip=True), name="Head bolt holes")
     for x, y in HEAD_BOLT:
-        deck.circle((x, y), d=HEAD_BOLT_D - 1.5)
+        deck.circle((x, y), d=HEAD_BOLT_D)
     p.extrude(deck.add(), 60.0, mode="cut", name="Head bolt holes")
 
     # The centre main carries the thrust: a recess each side of its web for
@@ -196,8 +230,7 @@ def _block_rest(p, length):
     # the ones above it are the HEAD's, and both come off COVER_BOLTS.
     fr = p.sketch(Plane.xz(BLOCK_Y0 + 22.0), name="Cover bolt holes")
     for x, z in COVER_BOLTS:
-        if z < DECK - 20.0:
-            fr.circle((x, z), d=7.5)
+        fr.circle((x, z), d=7.5)
     p.extrude(fr.add(), 22.0, mode="cut", name="Cover bolt holes")
 
     # ...and the rear seal carrier's, in the rear face.
@@ -210,7 +243,7 @@ def _block_rest(p, length):
     rail = p.sketch(Plane.xy(PAN_RAIL), name="Sump bolt holes")
     for y in _pan_bolt_y():
         for sx in (-1, 1):
-            rail.circle((sx * (CASE_X - 9.0), y), d=8.0)
+            rail.circle((sx * PAN_BOLT_X, y), d=8.0)
     p.extrude(rail.add(), 20.0, mode="cut", name="Sump bolt holes")
 
     # Ribs down the crankcase's flanks, over each main web — which is where
@@ -224,6 +257,13 @@ def _block_rest(p, length):
                           (sx * (CASE_X + 7.0), BLOCK_STEP - 16.0),
                           (sx * CASE_X, BLOCK_STEP - 2.0)])
             p.extrude(rib.add(), 16.0, mode="add", name=f"Rib {i}{sx}")
+
+    # The engine's own mounting pads, one each side between the ribs.
+    for sx in (-1, 1):
+        for dy, z in MOUNT_BOLTS:
+            bore(p, (sx * CASE_X, MOUNT_Y + dy, z),
+                 (sx * (CASE_X - MOUNT_BOLT_DEPTH), MOUNT_Y + dy, z),
+                 MOUNT_BOLT_D - 1.5, f"Mount bolt {sx}{dy}", over=0.0)
 
     # ---- the galleries --------------------------------------------------
     # Oil: one gallery the length of the skirt wall, a cross-drilling down to
@@ -278,6 +318,9 @@ def _block_rest(p, length):
     p.frame("oil_chain", origin=(0, OIL_DRIVE_Y, OIL_PUMP_Z), z=(0, 1, 0),
             x=(1, 0, 0))
     p.frame("belt", origin=(0, BELT_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
+    for sx, nm in ((-1, "mount_left"), (1, "mount_right")):
+        p.frame(nm, origin=(sx * CASE_X, MOUNT_Y, 0), z=(0, 0, 1),
+                x=(sx, 0, 0))
     for sy, nm in ((-1, "thrust_f"), (1, "thrust_r")):
         p.frame(nm, origin=(0, MAIN_Y[2] + sy * (BULKHEAD_T / 2.0
                                                  - THRUST_T / 2.0), 0),
@@ -368,14 +411,14 @@ def crankshaft(app):
                   "Rear journal extension")
     round_section(BLOCK_Y1, FLANGE_Y, REAR_SEAL_D, "Rear seal land")
     round_section(FLANGE_Y, FLANGE_Y + FLANGE_T, FLANGE_D, "Flywheel flange")
-    round_section(FLANGE_Y + FLANGE_T, FLANGE_Y + FLANGE_T + 8.0, 48.0,
-                  "Flywheel spigot")
+    round_section(FLANGE_Y + FLANGE_T, FLANGE_Y + FLANGE_T + 8.0,
+                  FLYWHEEL_SPIGOT_D, "Flywheel spigot")
 
     bolts = p.sketch(Plane.xz(FLANGE_Y + FLANGE_T + 9.0), name="Flywheel bolts")
     for i in range(FLYWHEEL_BOLTS):
         a = 2 * math.pi * i / FLYWHEEL_BOLTS
         bolts.circle((FLYWHEEL_BOLT_PCD / 2.0 * math.cos(a),
-                      FLYWHEEL_BOLT_PCD / 2.0 * math.sin(a)), d=10.5)
+                      FLYWHEEL_BOLT_PCD / 2.0 * math.sin(a)), d=10.0)
     p.extrude(bolts.add(), 40.0, mode="cut", name="Flywheel bolt holes")
     # The nose bolt that holds the damper on.
     nb = p.sketch(Plane.xz(NOSE_Y + 40.0), name="Nose bolt hole")
@@ -652,7 +695,7 @@ def main_cap(app, name="main cap", thrust=False):
     p.extrude(bore.add(), 2 * t, mode="cut", name="Bore")
     bolts = p.sketch(Plane.xy(-CAP_DEPTH - 1.0), name="Bolt holes")
     for sx in (-1, 1):
-        bolts.circle((sx * CAP_BOLT_X, 0), d=CAP_BOLT_D + 0.5)
+        bolts.circle((sx * CAP_BOLT_X, 0), d=CAP_CLEARANCE_D)  # M12 Close
     p.extrude(bolts.add(), CAP_DEPTH + 2.0, mode="cut", name="Bolt holes")
     if thrust:
         for sy in (-1, 1):
@@ -685,9 +728,11 @@ def flywheel(app):
     """A dished flywheel: a heavy rim, a clutch face, and the six bolts that
     hold it to the crank flange. Its origin is the face it bolts to."""
     p = app.part("flywheel")
-    p.revolve_profile([(24.2, 0), (FLYWHEEL_D / 2.0, 0),
+    p.revolve_profile([(FLYWHEEL_SPIGOT_D / 2.0 + 0.2, 0),
+                       (FLYWHEEL_D / 2.0, 0),
                        (FLYWHEEL_D / 2.0, 16.0), (95.0, 16.0),
-                       (95.0, FLYWHEEL_T), (24.2, FLYWHEEL_T)],
+                       (95.0, FLYWHEEL_T),
+                       (FLYWHEEL_SPIGOT_D / 2.0 + 0.2, FLYWHEEL_T)],
                       plane=Plane.xz(), axis="z", name="Flywheel")
     bolts = p.sketch(Plane.xy(-1.0), name="Flywheel bolt holes")
     for i in range(FLYWHEEL_BOLTS):
@@ -820,7 +865,7 @@ def sump(app):
     4 mm wall's void, which is 14 bolts through nothing.
     """
     p = app.part("sump")
-    bx, w = CASE_X - 12.0, SUMP_WALL
+    bx, w = CASE_X - PAN_BOX_INSET, SUMP_WALL
     floor = bx - 26.0
 
     def section(sk, o):
@@ -835,16 +880,19 @@ def sump(app):
     section(inner, w)
     p.extrude(inner.add(), SUMP_Y1 - SUMP_Y0 - 2 * w, mode="cut",
               name="Pan inside")
+    # The chain case's floor is OPEN — it drains into the sump — so the pan's
+    # flange has to run forward under it. Stopped at the block's front face,
+    # the two left a slot straight into the crankcase.
     # The flange it bolts up with, on the block's own bolt centres. Nested
     # rectangles, so it is a rim and not a lid.
     flange = p.sketch(Plane.xy(PAN_RAIL - 6.0), name="Flange")
-    flange.rect((-CASE_X, BLOCK_Y0), (CASE_X, BLOCK_Y1))
-    flange.rect((-bx + w, BLOCK_Y0 + 14.0), (bx - w, BLOCK_Y1 - 14.0))
+    flange.rect((-CASE_X, COVER_Y0), (CASE_X, BLOCK_Y1))
+    flange.rect((-bx + w, COVER_Y0 + 14.0), (bx - w, BLOCK_Y1 - 14.0))  # rim
     p.extrude(flange.add(), 6.0, mode="add", name="Flange")
     holes = p.sketch(Plane.xy(PAN_RAIL - 7.0), name="Bolt holes")
     for y in _pan_bolt_y():
         for sx in (-1, 1):
-            holes.circle((sx * (CASE_X - 9.0), y), d=8.5)
+            holes.circle((sx * PAN_BOLT_X, y), d=9.0)  # M8 Normal
     p.extrude(holes.add(), 8.0, mode="cut", name="Bolt holes")
     # A drain boss at the deepest, rearmost corner, standing PROUD of the
     # floor — inside it would be a lump in the oil.
@@ -873,7 +921,7 @@ def sump_gasket(app):
     holes = p.sketch(Plane.xy(-3.0), name="Bolt holes")
     for y in _pan_bolt_y():
         for sx in (-1, 1):
-            holes.circle((sx * (CASE_X - 9.0), y), d=8.5)
+            holes.circle((sx * PAN_BOLT_X, y), d=9.0)  # M8 Normal
     p.extrude(holes.add(), 4.0, mode="cut", name="Bolt holes")
     p.material("rubber")
     # Its origin is its TOP face, the one against the block's rail.
@@ -1136,10 +1184,10 @@ def _cover_outline(sk, inset=0.0, open_floor=False):
     k = inset
     floor = PAN_RAIL - 1.0 if open_floor else PAN_RAIL + k
     sk.polyline([(-100.0 + k, floor), (100.0 - k, floor),
-                 (100.0 - k, 110.0), (80.0 - k, 130.0),
-                 (80.0 - k, COVER_TOP - 30.0), (40.0, COVER_TOP - k),
-                 (-40.0, COVER_TOP - k), (-80.0 + k, COVER_TOP - 30.0),
-                 (-80.0 + k, 130.0), (-100.0 + k, 110.0)])
+                 (100.0 - k, 110.0), (88.0 - k, 130.0),
+                 (88.0 - k, COVER_TOP - 30.0), (40.0, COVER_TOP - k),
+                 (-40.0, COVER_TOP - k), (-88.0 + k, COVER_TOP - 30.0),
+                 (-88.0 + k, 130.0), (-100.0 + k, 110.0)])
 
 
 def timing_cover(app):
@@ -1161,7 +1209,7 @@ def timing_cover(app):
     wp.circle((0, WATER_PUMP_Z), d=60.0)
     p.extrude(wp.add(), COVER_FRONT_T + 2.0, mode="cut", name="Water pump")
     holes = p.sketch(Plane.xz(back), name="Bolt holes")
-    for x, z in COVER_BOLTS:
+    for x, z in COVER_BOLTS + COVER_BOLTS_HEAD:
         holes.circle((x, z), d=9.0)
     p.extrude(holes.add(), back - COVER_Y0, mode="cut", name="Bolt holes")
     p.material("aluminum")
@@ -1181,7 +1229,7 @@ def timing_cover_gasket(app):
     _cover_outline(sk, inset=16.0)
     p.extrude(sk.add(), COVER_GASKET_T, mode="new_body", name="Gasket")
     holes = p.sketch(Plane.xz(BLOCK_Y0 + 1.0), name="Bolt holes")
-    for x, z in COVER_BOLTS:
+    for x, z in COVER_BOLTS + COVER_BOLTS_HEAD:
         holes.circle((x, z), d=9.0)
     p.extrude(holes.add(), COVER_GASKET_T + 2.0, mode="cut", name="Bolt holes")
     p.material("rubber")
@@ -1279,5 +1327,36 @@ def vee_pulley(app, name, d, bore_d, width=16.0):
     p.material("steel")
     p.frame("hub", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("belt", origin=(0, 0, width / 2.0), z=(0, 0, 1), x=(1, 0, 0))
+    p.check()
+    return p
+
+
+# --------------------------------------------------------- how it is held
+MOUNT_W = 52.0            # the bracket's width along the engine
+MOUNT_REACH = 52.0        # how far its foot sticks out past the block
+
+
+def engine_mount(app, side):
+    """A cast mounting bracket: a plate against the crankcase's own pad and a
+    foot standing out from it with the rubber mount's bolt through it.
+
+    Drawn once and placed twice — the frame it mates to is the mirror, which
+    is why its own x runs OUTWARD from the block rather than along +X.
+    """
+    p = app.part(f"engine mount {side}")
+    x0 = CASE_X
+    sec = p.sketch(Plane.xz(MOUNT_Y + MOUNT_W / 2.0), name="Bracket")
+    sec.polyline([(x0, 62.0), (x0 + 9.0, 62.0), (x0 + 9.0, 8.0),
+                  (x0 + MOUNT_REACH, 8.0), (x0 + MOUNT_REACH, -14.0),
+                  (x0, -14.0)])
+    p.extrude(sec.add(), MOUNT_W, mode="new_body", name="Bracket")
+    for dy, z in MOUNT_BOLTS:
+        bore(p, (x0 + 10.0, MOUNT_Y + dy, z), (x0 - 1.0, MOUNT_Y + dy, z),
+             MOUNT_BOLT_D, f"Bolt hole {dy}", over=0.0)
+    m = p.sketch(Plane.xy(-16.0), name="Mount hole")
+    m.circle((x0 + MOUNT_REACH - 18.0, MOUNT_Y), d=20.0)
+    p.extrude(m.add(), 28.0, mode="cut", name="Mount hole")
+    p.material("steel")
+    p.frame("pad", origin=(x0, MOUNT_Y, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()
     return p
