@@ -91,9 +91,17 @@ GProgram ParseGcode(std::string_view text) {
     clean.reserve(line.size());
     int depth = 0;
     for (const char c : line) {
-      if (c == '(')
+      if (c == '(') {
+        // A controller does not nest these. Ours survives it and used to say
+        // nothing, so a file Mach3 refuses to load ("Nested comment found")
+        // passed verification.
+        if (depth > 0)
+          out.warnings.push_back(
+              "line " + std::to_string(lineNo) +
+              ": nested comment -- a second '(' before the first is closed. "
+              "Mach3 refuses the whole file for this");
         depth++;
-      else if (c == ')')
+      } else if (c == ')')
         depth = std::max(0, depth - 1);
       else if (c == ';')
         break;
@@ -639,6 +647,31 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   out.verdict.reliefs = static_cast<int>(reliefs.size());
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
+
+  // Can the machine actually GO where the file asks? Checked on the posted
+  // file, not on the toolpath that produced it -- the generator's own idea of
+  // reach was wrong once already, and a check that reads the artifact cannot
+  // inherit the mistake. Arcs are chords by now, so this measures what a
+  // circle SWEEPS. Skipped when the machine states no work area, which is
+  // most of the corpus.
+  glm::dvec3 bedLo(0.0), bedHi(0.0);
+  if (MachineBounds(setup, bodies, bedLo, bedHi)) {
+    const char axes[2] = {'X', 'Y'};
+    for (const GMove& mv : program.moves) {
+      for (int a = 0; a < 2; a++) {
+        const double over = std::max(bedLo[a] - mv.to[a], mv.to[a] - bedHi[a]);
+        if (over <= 1e-6)
+          continue;
+        out.verdict.outsideTravel++;
+        if (over > out.verdict.worstOvershoot) {
+          out.verdict.worstOvershoot = over;
+          out.verdict.outsideAxis = axes[a];
+        }
+        if (out.verdict.firstOutsideLine == 0)
+          out.verdict.firstOutsideLine = mv.line;
+      }
+    }
+  }
   out.machined = std::move(machined);
   out.touched = std::move(touched);
   out.ok = true;
@@ -735,6 +768,16 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   "Rapid through material at line %d — raise Safe Z, or start "
                   "the job higher.",
                   v.firstBadLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.outsideTravel > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "%d move%s ask for somewhere the machine cannot go — %.1f mm "
+                  "past its %c travel, first at line %d. The controller alarms "
+                  "or hits a stop; say where the bed sits on the sheet "
+                  "(reach_offset), or move the part.",
+                  v.outsideTravel, v.outsideTravel == 1 ? "" : "s",
+                  v.worstOvershoot, v.outsideAxis, v.firstOutsideLine);
     out.push_back({VerdictLine::Level::Bad, buf});
   }
   if (v.maxLeftover > tolerance) {

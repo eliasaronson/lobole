@@ -403,6 +403,24 @@ void AssertCamReach(const std::vector<cam::Setup>& setups,
       CHECK(at == want[i].get<std::string>());
     }
   }
+  if (expect.contains("cam_tool_chiploads")) {
+    // v92: a cutter's own chip-load figures. A tool that loses them falls
+    // back to a rule off its diameter, silently cutting the citation off
+    // every finding it appears in.
+    const auto& want = expect.at("cam_tool_chiploads");
+    std::vector<std::pair<double, double>> got;
+    for (const cam::Setup& s : setups)
+      for (const cam::Tool& t : s.tools)
+        got.emplace_back(t.chiploadMin, t.chiploadMax);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("tool " << i << " chipload");
+      CHECK_THAT(got[i].first,
+                 Catch::Matchers::WithinAbs(want[i][0].get<double>(), 1e-12));
+      CHECK_THAT(got[i].second,
+                 Catch::Matchers::WithinAbs(want[i][1].get<double>(), 1e-12));
+    }
+  }
   if (expect.contains("cam_reach_offsets")) {
     const auto& want = expect.at("cam_reach_offsets");
     REQUIRE(want.size() == setups.size());

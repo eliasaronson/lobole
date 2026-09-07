@@ -124,7 +124,11 @@ constexpr MethodDoc kCamMethods[] = {
      "one of its "
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
-     "spindle_rpm?, flutes?}} — the tool is added when the number is new. "
+     "spindle_rpm?, flutes?, chipload_min?, chipload_max?}} — the tool is "
+     "added when the number is new. chipload_min/max are mm per tooth THIS "
+     "cutter wants in the material this setup cuts (a vendor's chart), given "
+     "as a pair or not at all; without them the chip-load check falls back "
+     "to a rule off the diameter, and every finding cites which it used. "
      "tool_type is the shape of the end: it decides what the verifier thinks "
      "was removed, and an edge_round op reads it to know whether it is "
      "cutting a bevel (vbit, tip_angle is the INCLUDED angle) or an arc "
@@ -1015,8 +1019,18 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       tool->feedCut = tj.value("feed_cut", tool->feedCut);
       tool->feedPlunge = tj.value("feed_plunge", tool->feedPlunge);
       tool->spindleRpm = tj.value("spindle_rpm", tool->spindleRpm);
+      tool->chiploadMin = tj.value("chipload_min", tool->chiploadMin);
+      tool->chiploadMax = tj.value("chipload_max", tool->chiploadMax);
       if (tool->diameter <= 0.0)
         throw std::runtime_error("tool diameter must be positive");
+      // Half a band is not a band, and a backwards one is a typo that would
+      // pass every feed silently. Refused rather than repaired.
+      if ((tool->chiploadMin > 0.0) != (tool->chiploadMax > 0.0))
+        throw std::runtime_error(
+            "chipload_min and chipload_max come as a pair; give both, or "
+            "neither and the check falls back to a rule off the diameter");
+      if (tool->chiploadMin > 0.0 && tool->chiploadMax <= tool->chiploadMin)
+        throw std::runtime_error("chipload_max must be above chipload_min");
     }
     return json{{"id", setup.id}};
   }
@@ -1324,6 +1338,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     }
 
     json ops = json::array();
+    json toolpathExtra = json::object();
     double totalCut = 0.0;
     double totalClipped = 0.0;
     double lowest = 0.0;
@@ -1370,8 +1385,38 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // diameter, the flutes, the feed, the spindle and the body's material,
     // and used to say nothing while a job posted at a third of the chip load
     // it needed.
-    for (const std::string& w : cam::FeedWarnings(setup, ui::JobBodies(state)))
-      warnings.push_back(w);
+    // `unchecked` is the other half: an empty answer used to mean both
+    // "fine" and "nobody looked", which are not the same answer.
+    const cam::FeedReport feeds = cam::FeedsFor(setup, ui::JobBodies(state));
+    json feedsOut = json::object();
+    if (!feeds.findings.empty()) {
+      json list = json::array();
+      for (const cam::Finding& f : feeds.findings) {
+        warnings.push_back(f.text);
+        json fj = {{"tool", f.tool}, {"source", f.source}, {"says", f.text}};
+        // The arithmetic beside the sentence, so a caller can compare
+        // numbers rather than parse prose -- and argue with the limit.
+        if (f.measured > 0.0) {
+          fj["chipload_mm_per_tooth"] = f.measured;
+          fj["band_min"] = f.bandMin;
+          fj["band_max"] = f.bandMax;
+        }
+        list.push_back(std::move(fj));
+      }
+      feedsOut["findings"] = std::move(list);
+    }
+    // `unchecked` gets its OWN channel and stays OUT of `warnings`. Both
+    // halves have to be visible -- an empty answer must not read as "fine" --
+    // but they are different claims: a warning says something is wrong with
+    // this job, and this says nobody looked. Conflating them makes every job
+    // on an unlabelled body warn, and a verdict that cries wolf is one people
+    // learn to scroll past (which is the lesson the chip-load wording already
+    // cost us). The panel shows it as its own line; `feeds.unchecked` is
+    // where a script reads it.
+    if (!feeds.unchecked.empty())
+      feedsOut["unchecked"] = feeds.unchecked;
+    if (!feedsOut.empty())
+      toolpathExtra["feeds"] = std::move(feedsOut);
 
     // (Braceless on purpose: rpc_gate_smoke's handler extractor keys on
     // `if (m == "...") {`, and a braced inner dispatch would shadow this
@@ -1384,6 +1429,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       toolpathOut["clipped_mm"] = totalClipped;
     if (!warnings.empty())
       toolpathOut["warnings"] = warnings;
+    for (auto& [k, v] : toolpathExtra.items())
+      toolpathOut[k] = v;
     if (m == "cam_toolpath")
       return toolpathOut;
 
@@ -1434,6 +1481,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"failed", failed}};
     if (totalClipped > 0.0)
       postOut["clipped_mm"] = totalClipped;
+    for (auto& [k, v] : toolpathExtra.items())
+      postOut[k] = v;
     // cam_post never carried these at all, so the one call that WRITES the
     // file was the one that said least about it.
     if (!warnings.empty())

@@ -53,6 +53,13 @@ struct GMove {
 struct GProgram {
   std::vector<GMove> moves;
   std::vector<std::string> errors; // malformed words, NaN coordinates, …
+  // Things a CONTROLLER would refuse that this parser survives. Ours counts
+  // parenthesis depth and carries on; Mach3 stops on the second "(" with
+  // "Nested comment found" and loads nothing. So the verifier once blessed a
+  // file no machine would take, which is the exact shape of failure this
+  // whole module exists to catch (a tool named "6 mm flat 2F (through cuts)"
+  // did it). Warnings, not errors: the parse itself is fine.
+  std::vector<std::string> warnings;
 };
 
 // Modal G-code: G0/G1 with X/Y/Z/F, T for the tool, M6 for a tool change,
@@ -134,6 +141,22 @@ struct Verdict {
   glm::dvec2 gougeAt{0.0};
   glm::dvec2 leftoverAt{0.0};
   int rapidsThroughStock = 0; // rapid moves that pass through material
+  // Moves in the POSTED FILE that ask for somewhere the machine cannot go.
+  // Checked on the artifact rather than on the generator that made it: the
+  // generator's own idea of reach was wrong once already (it nailed the
+  // travel box to the stock's corner, so turning a part round moved the
+  // machine), and a check that reads the file cannot inherit that mistake.
+  // Arcs are re-expanded to chords before this, so a circle is measured by
+  // what it SWEEPS and not by its endpoints -- sampling endpoints understated
+  // a d148 bore's extent by 18 mm.
+  //
+  // Not a gouge and not scrap: the controller alarms or hits a stop, so the
+  // job simply cannot run. That is still Safe() = false, because "safe" here
+  // means the file is fit to send.
+  int outsideTravel = 0;
+  int firstOutsideLine = 0;
+  double worstOvershoot = 0.0; // mm past the limit, on `outsideAxis`
+  char outsideAxis = 'X';
   // Corners the program relieved on purpose (R4): cells inside a relief's
   // bite are not gouge, and the verdict says how many there were.
   int reliefs = 0;
@@ -171,7 +194,8 @@ struct Verdict {
   // Safe: nothing here scraps the part or breaks the tool. A gouge and a rapid
   // through material are unambiguous — no job wants either, ever.
   [[nodiscard]] bool Safe(double tolerance) const {
-    return maxGouge <= tolerance && rapidsThroughStock == 0;
+    return maxGouge <= tolerance && rapidsThroughStock == 0 &&
+           outsideTravel == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
   // This one is SOFTER, because a height map cannot watch a slug fall out of a

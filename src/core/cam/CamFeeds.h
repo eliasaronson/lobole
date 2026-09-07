@@ -41,18 +41,50 @@ enum class CutClass {
 [[nodiscard]] const char* CutClassName(CutClass c);
 
 // Chip load per tooth, in mm, for a cutter of `diameter`. `known` false for
-// a material nobody stated -- silence is better than a band from nowhere.
+// a material nobody stated -- a band from nowhere is worse than none, and
+// `FeedReport::unchecked` says so out loud rather than going quiet.
+//
+// `source` is where the numbers came from, and it travels with every finding:
+// a limit nobody can trace is a limit nobody can argue with.
 struct ChiploadBand {
   double min = 0.0;
   double max = 0.0;
   bool known = false;
+  std::string source;
 };
+// The default band: a SCALING RULE, a fraction of the cutter's diameter per
+// material class. `ToolBandFor` prefers the cutter's own stated figures when
+// it has them -- a vendor's chart for that exact tool beats any rule.
 [[nodiscard]] ChiploadBand BandFor(CutClass c, double diameter);
+[[nodiscard]] ChiploadBand ToolBandFor(const Tool& t, CutClass c);
 
-// One line per thing worth saying about this setup's feeds, speeds and
-// cutters, in the same words the panel and the RPC both use. Empty when
-// everything is in band or no material is stated.
-[[nodiscard]] std::vector<std::string>
-FeedWarnings(const Setup& setup, const std::vector<Body>& bodies);
+// One thing worth saying about a cutter, with the arithmetic that says it.
+// The numbers are carried beside the sentence so a caller can compare them
+// instead of parsing prose, and so the limit can be argued with.
+struct Finding {
+  int tool = 0;
+  double measured = 0.0; // mm/tooth this setup actually runs at, 0 if n/a
+  double bandMin = 0.0;
+  double bandMax = 0.0;
+  std::string source; // where the band came from
+  std::string text;   // the sentence, citation inline
+};
+
+// What can be said about this setup's feeds, speeds and cutters -- and what
+// CANNOT, which is the half that used to be silence. An empty `findings` with
+// an empty `unchecked` means checked and fine; an empty `findings` with
+// something in `unchecked` means nobody looked, and those are not the same
+// answer (text-to-cad's dfam-check grades the second "need more info", and
+// it is right to).
+struct FeedReport {
+  std::vector<Finding> findings;
+  std::vector<std::string> unchecked;
+  [[nodiscard]] bool Empty() const {
+    return findings.empty() && unchecked.empty();
+  }
+};
+
+[[nodiscard]] FeedReport FeedsFor(const Setup& setup,
+                                  const std::vector<Body>& bodies);
 
 } // namespace cam

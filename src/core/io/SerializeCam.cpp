@@ -136,6 +136,12 @@ json ToolToJson(const cam::Tool& t) {
     tj["tool_type"] = cam::ToolTypeName(t.type);
     tj["tip_angle"] = t.tipAngleDeg;
   }
+  // Only when somebody stated them, so a job of tools nobody has charted
+  // re-saves byte-identically (v92).
+  if (t.chiploadMin > 0.0 || t.chiploadMax > 0.0) {
+    tj["chipload_min"] = t.chiploadMin;
+    tj["chipload_max"] = t.chiploadMax;
+  }
   return tj;
 }
 
@@ -151,6 +157,8 @@ cam::Tool ToolFromJson(const json& tj) {
   t.spindleRpm = tj.value("spindle_rpm", 10000.0);
   t.type = ToolTypeFromName(tj.value("tool_type", std::string("flat")));
   t.tipAngleDeg = tj.value("tip_angle", 90.0);
+  t.chiploadMin = tj.value("chipload_min", 0.0);
+  t.chiploadMax = tj.value("chipload_max", 0.0);
   return t;
 }
 
