@@ -66,11 +66,11 @@ after the sharder re-runs the whole GUI suite serially for 6 minutes:**
 |---|---|---|
 | headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~83 s (1113) |
 | **inner loop** | `tools/test-fast.sh` | **~19 s** (1094 of 1113) |
-| GUI | `./tools/gui-tests-xvfb.sh` | ~100 s |
+| GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
 | the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
-unsharded — ~365 s against ~100 s. It keeps the `gui` label so the headless
+unsharded — ~365 s against ~130 s. It keeps the `gui` label so the headless
 run excludes it; the four python ones also carry **`pygui`**, which is why the
 row above asks for a label instead of excluding `gui_smoke` by name. Full
 verification is ~5 min, not ~10.
@@ -90,7 +90,7 @@ buys back the coverage.
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
   — ~83 s for 1113 tests, of which the SIMP gate alone is 77 s of CPU and four
   CAM clearing cases 138 s between them. **Inner loop: `tools/test-fast.sh`
-  (~10 s)**; full suite before committing. Each `nix-shell` costs
+  (~19 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 282 tests in **~130 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
