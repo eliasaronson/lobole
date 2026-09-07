@@ -102,7 +102,7 @@ active that recomputes each body's CUT FACE through an OCC boolean — per
 body, every step.
 
 **The original entry named the wrong function**, which is worth keeping
-because it cost an hour: `AppendSectionCaps` (AppActions.cpp) is the PART
+because it cost an hour: `AppendSectionCaps` (ViewActions.cpp, was AppActions.cpp) is the PART
 tab's path and is never called on an assembly. An instrumented build logged
 nothing at all during an assembly scrub. The assembly's caps come from
 `SyncAssemblyRenderers` (AssemblyActions.cpp), which does something better
@@ -775,7 +775,7 @@ made this smaller than the reverted attempt:
   the declaration that everything above it is already clear, which is what
   lets an opening that starts below the stock top be profiled at all.
 
-`ProjectedOutlines` (CamToolpath.cpp) walks the passes unioning as it goes.
+`ProjectedOutlines` (CamGeometry.cpp, was CamToolpath.cpp) walks the passes unioning as it goes.
 Below the model it adds nothing and the last projection stands, which is what
 a through cut needs and what the old `lastFound` was for — except that
 `lastFound` carried the last *section*, so it propagated the notch to every

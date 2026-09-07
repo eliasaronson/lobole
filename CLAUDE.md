@@ -64,8 +64,8 @@ after the sharder re-runs the whole GUI suite serially for 6 minutes:**
 
 | what | command | cost |
 |---|---|---|
-| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~79 s (937) |
-| **inner loop** | `tools/test-fast.sh` | **~10 s** (919 of 937) |
+| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~83 s (1113) |
+| **inner loop** | `tools/test-fast.sh` | **~19 s** (1094 of 1113) |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~100 s |
 | the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 
@@ -88,11 +88,11 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~79 s for 937 tests, of which the SIMP gate alone is 77 s of CPU and four
+  — ~83 s for 1113 tests, of which the SIMP gate alone is 77 s of CPU and four
   CAM clearing cases 138 s between them. **Inner loop: `tools/test-fast.sh`
   (~10 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 241 tests in **~100 s**
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 282 tests in **~130 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
   (11 s), `--serial` for debugging, `--in-order` to switch the shuffle off.
@@ -103,6 +103,11 @@ buys back the coverage.
   so concurrent runs (parallel agents) are safe — the shards are one suite.
   The runner asserts every listed test ran, so a bad partition fails loudly
   instead of skipping tests. `--record-times` refreshes the balance data.
+- **`-DENABLE_CAM=OFF` is a supported configuration and CI builds AND tests it**
+  on every push (968 tests). It had silently not linked for weeks before
+  2026-09-07, because nothing built it. `ping` reports which optional
+  subsystems a build has (`features`), and the smokes gate on that rather than
+  on catching "unknown method", which would equally swallow a real typo.
 - Known flakes — rerun, don't chase: femgpu "TopologyOptimize…". The
   `headless_smoke` autosave flake was a real bug, fixed 2026-08-19 (a document
   version number used as a document identity, ee247f9) — a "flaky under load"
@@ -235,13 +240,29 @@ to look at; neither reports device memory, which nothing does yet.
 
 ## Architecture pointers (edit the domain module, not the monolith)
 
-- RPC handlers: `src/remote/Remote{Modeling,Assembly,Inspection,…}.cpp`
-  (dispatched by RemoteServer.cpp). Add new RPCs to the domain module.
+- RPC handlers: `src/remote/Remote{Modeling,Assembly,Inspection,…}.cpp`,
+  dispatched by `RemoteDispatch.cpp` (the socket is `RemoteSession.cpp`, the
+  GUI-action queue `RemoteUiActions.cpp`; `RemoteServer.cpp` is now just the
+  class). Add new RPCs to the domain module — and a row in its `MethodDoc`
+  table, whose `flags` column is what gates it (NeedsPart / NotInBatch /
+  Deferrable / UiAction). There is no separate gate list to remember.
 - Serialization: `src/core/io/Serialize{Features,Assembly,Studies,Configurations}.cpp`.
 - Core is split by domain: `src/core/{features,sketch,drawing,fem,io}/`; the
   document model (Document/Feature/Command/Expression) stays flat in `src/core/`.
 - `main.cpp` + the renderers are the untested Vulkan layer — verified via
-  gui_smoke + screenshots, not unit tests.
+  gui_smoke + screenshots, not unit tests. `tests/render_pixel_smoke.py` is the
+  one automated check on them: it re-renders a fixed scene and diffs the PNG
+  byte-for-byte against a per-GPU baseline, so run it after ANYTHING that
+  touches `RendererSync.cpp` or the renderers, which no unit test covers.
+- The `ui/` actions layer is one file per subject (`ProjectActions`,
+  `DocumentSlots`, `ViewActions`, `DrawingActions`, `MeasureActions`,
+  `RendererSync`, `CreateActions`, `SceneOverlays`, `SketchOverlay`,
+  `VariableActions`, `ImportActions`, …), each with its own header. There is no
+  `AppActions` any more; helpers shared between them live in
+  `AppActionsInternal.h`. Same shape in `core/cam/` (`CamGeometry`, `CamSetup`,
+  `CamPicks`, `CamDerive`, `CamStrategies`, `CamTravel`) and for the sketch
+  session (`SketchTools`, `SketchDimensions`, `SketchPick`, `SketchOps`, …).
+  docs/architecture-review-2026-09-06.md is why.
 
 Deeper project state, decisions, and gotchas live in Claude's memory
 (`~/.claude/projects/.../memory/`).
