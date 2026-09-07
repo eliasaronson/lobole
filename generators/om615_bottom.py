@@ -204,17 +204,17 @@ def _block_rest(p, length):
     caps = p.sketch(Plane.xy(0.0), name="Main cap bolt holes")
     for y in MAIN_Y:
         for sx in (-1, 1):
-            # NOMINAL, not a tapping drill: a threaded hole's major diameter
-            # is the bolt's own, and drawn 1.5 under it every bolt in the
-            # engine reads as steel inside steel for its whole engagement.
-            caps.circle((sx * CAP_BOLT_X, y), d=CAP_BOLT_D)
+            # Nominal plus TAP_FIT — see the spec: at exactly nominal the
+            # bolt and the hole are the same cylinder, which OCC's boolean
+            # does not survive once the part is off its own axes.
+            caps.circle((sx * CAP_BOLT_X, y), d=CAP_BOLT_D + TAP_FIT)
     p.extrude(caps.add(), 46.0, mode="cut", name="Main cap bolt holes")
 
     # Head bolts: blind in the deck, ten of them, on the list the HEAD drills
     # through — one list, not two that agree until one is edited.
     deck = p.sketch(Plane.xy(DECK, flip=True), name="Head bolt holes")
     for x, y in HEAD_BOLT:
-        deck.circle((x, y), d=HEAD_BOLT_D)
+        deck.circle((x, y), d=HEAD_BOLT_D + TAP_FIT)
     p.extrude(deck.add(), 60.0, mode="cut", name="Head bolt holes")
 
     # The centre main carries the thrust: a recess each side of its web for
@@ -243,7 +243,7 @@ def _block_rest(p, length):
     rail = p.sketch(Plane.xy(PAN_RAIL), name="Sump bolt holes")
     for y in _pan_bolt_y():
         for sx in (-1, 1):
-            rail.circle((sx * PAN_BOLT_X, y), d=8.0)
+            rail.circle((sx * PAN_BOLT_X, y), d=PAN_BOLT_D + TAP_FIT)
     p.extrude(rail.add(), 20.0, mode="cut", name="Sump bolt holes")
 
     # Ribs down the crankcase's flanks, over each main web — which is where
@@ -418,7 +418,8 @@ def crankshaft(app):
     for i in range(FLYWHEEL_BOLTS):
         a = 2 * math.pi * i / FLYWHEEL_BOLTS
         bolts.circle((FLYWHEEL_BOLT_PCD / 2.0 * math.cos(a),
-                      FLYWHEEL_BOLT_PCD / 2.0 * math.sin(a)), d=10.0)
+                      FLYWHEEL_BOLT_PCD / 2.0 * math.sin(a)),
+                     d=FLYWHEEL_BOLT_D + TAP_FIT)
     p.extrude(bolts.add(), 40.0, mode="cut", name="Flywheel bolt holes")
     # The nose bolt that holds the damper on.
     nb = p.sketch(Plane.xz(NOSE_Y + 40.0), name="Nose bolt hole")
@@ -855,6 +856,20 @@ SUMP_WALL = 4.0
 DRAIN_D = 18.0
 
 
+def pan_inner_half_width(z):
+    """How wide the pan's CAVITY is at height z — the same tapering section
+    `sump()` draws, offset by its wall. The strainer lies in the oil, so it
+    is this that says how long it can be; drawn 40 mm each side of the tube
+    it stood 20 mm out through the pan's flank."""
+    bx, w = CASE_X - PAN_BOX_INSET, SUMP_WALL
+    floor = bx - 26.0
+    lo, hi = SUMP_Z + w, SUMP_Z + 44.0
+    if z >= hi:
+        return bx - w
+    f = max(0.0, (z - lo) / (hi - lo))
+    return (floor - w) + (bx - floor) * f
+
+
 def sump(app):
     """A pressed steel pan, drawn as a SECTION and extruded along the engine:
     wide at the rail, tapering to a narrower floor. A box is quicker and
@@ -942,13 +957,6 @@ def drain_plug(app):
 
 
 # ------------------------------------------------------- the timing drive
-def tooth_tip(radius, teeth):
-    """How far a sprocket's teeth actually reach — shared with the chain,
-    because a chain drawn to the PITCH radius has the teeth standing through
-    it."""
-    return radius + (2 * math.pi * radius / teeth * 0.62) / 2
-
-
 def sprocket(app, name, radius, bore_d, teeth, width, hub_d=None,
              phase_deg=0.0):
     """A chain sprocket: a rim, drawn teeth, and a bore.
@@ -996,7 +1004,7 @@ def chain(app, name, span, tip_a, tip_b, width, thickness=CHAIN_T):
     about a deliberate simplification.
     """
     p = app.part(name)
-    r1, r2 = tip_a + 3.0, tip_b + 3.0
+    r1, r2 = tip_a + CHAIN_CLEAR, tip_b + CHAIN_CLEAR
 
     def loop(sk, grow):
         a, b = r1 + grow, r2 + grow
@@ -1019,10 +1027,50 @@ def chain(app, name, span, tip_a, tip_b, width, thickness=CHAIN_T):
     return p
 
 
-def chain_rail(app, name, z0, z1, x, bow, width):
-    """A chain guide: a plastic-faced rail bowed toward the chain's slack
-    run, on a pivot at one end. Drawn as the shoe, which is the part that
-    does the work."""
+def cover_inner_x(z):
+    """Half-width of the chain case's CAVITY at height z — the same outline
+    `_cover_outline` draws, offset by its own wall. Anything that lives
+    inside the case measures itself against this."""
+    k = COVER_WALL
+    rows = [(PAN_RAIL - 1.0, 100.0 - k), (110.0, 100.0 - k),
+            (130.0, 88.0 - k), (COVER_TOP - 30.0, 88.0 - k),
+            (COVER_TOP - k, 40.0)]
+    if z <= rows[0][0]:
+        return rows[0][1]
+    for (z0, x0), (z1, x1) in zip(rows, rows[1:]):
+        if z <= z1:
+            return x0 + (x1 - x0) * (z - z0) / (z1 - z0)
+    return rows[-1][1]
+
+
+RAIL_GAP = 1.5      # running clearance between a rail's shoe and the chain
+RAIL_RIB = 9.0      # how thick the rail is at its ends, before the rib
+
+
+def chain_run_x(z, span, tip_a, tip_b, thickness=CHAIN_T):
+    """Where the drawn chain's OUTER surface is at height z, on the +x run.
+
+    The same tangent `chain()` draws, solved for x — so a rail placed against
+    it cannot be inside the chain it guides. Placed by eye, both rails were:
+    17 cm^3 of guide rail in the chain, each.
+    """
+    a, b = tip_a + CHAIN_CLEAR + thickness, tip_b + CHAIN_CLEAR + thickness
+    beta = math.asin((b - a) / span)
+    c, sn = math.cos(beta), math.sin(beta)
+    p1, p2 = (a * c, a * sn), (b * c, span + b * sn)
+    return p1[0] + (p2[0] - p1[0]) * (z - p1[1]) / (p2[1] - p1[1])
+
+
+def chain_rail(app, name, z0, z1, side, span, tip_a, tip_b, bow, width):
+    """A chain guide: a plastic-faced rail along one run of the chain, on a
+    pivot at its lower end.
+
+    Its SHOE is the chain's own tangent line stood off by RAIL_GAP — it has
+    to be straight, because the chain here is frozen geometry and a shoe
+    bowed into it is a shoe through it. The `bow` is on the BACK instead,
+    which is where a real rail carries its stiffening rib anyway: thick in
+    the middle, thin at the ends where it is held.
+    """
     p = app.part(name)
     sk = p.sketch(Plane.xz(width / 2.0), name="Rail")
     n = 9
@@ -1030,16 +1078,24 @@ def chain_rail(app, name, z0, z1, x, bow, width):
     for i in range(n):
         f = i / (n - 1.0)
         z = z0 + (z1 - z0) * f
-        b = bow * math.sin(math.pi * f)
-        face.append((x + b, z))
-        back.append((x + b + 9.0, z))
+        shoe = chain_run_x(z, span, tip_a, tip_b) + RAIL_GAP
+        rib = RAIL_RIB + bow * math.sin(math.pi * f)
+        # ...and the rib stops at the chain case's own wall. It is the only
+        # thing out there, and a rail bowed 14 mm proud of a shoe already
+        # 63 mm out is 4 mm into the casting for most of its length.
+        room = cover_inner_x(z) - RAIL_GAP
+        face.append((side * shoe, z))
+        back.append((side * min(shoe + rib, room), z))
     sk.polyline(face + list(reversed(back)))
     p.extrude(sk.add(), width, mode="new_body", name="Rail")
     p.material("rubber")
     # Drawn in ENGINE coordinates like the chain it guides, so a frame that
     # only translates puts it where it was drawn.
     p.frame("plane", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
-    p.frame("pivot", origin=(x + 4.5, 0, z0), z=(0, 1, 0), x=(1, 0, 0))
+    p.frame("pivot", origin=(side * (chain_run_x(z0, span, tip_a, tip_b)
+                                     + RAIL_GAP + RAIL_RIB / 2.0), 0, z0),
+            z=(0, 1, 0), x=(1, 0, 0))
+
     p.check()
     return p
 
@@ -1057,8 +1113,12 @@ OIL_BODY_Y = (-246.0, -224.0)
 OIL_GEAR_R = OIL_GEAR_D / 2.0 - 3.0
 OIL_GEAR_TIP = OIL_GEAR_R * (1.0 + math.pi * 0.62 / 10.0)
 OIL_GEAR_X = (0.0, 2.0 * OIL_GEAR_TIP)
-OIL_BODY_H = OIL_GEAR_D / 2.0 + 6.0
 OIL_BRACKET_Z = (OIL_PUMP_Z + 6.0, OIL_PUMP_Z + 18.0)
+# The two arms straddle the drive chain, so where they START is the chain's
+# own wrap round the pump sprocket — not a number. At 26 they were 6 mm
+# inside it, and only at the arms' own height, which is why nothing showed.
+OIL_ARM_X = (chain_outer(OIL_PCD, OIL_PUMP_TEETH, OIL_CHAIN_T) + 2.0,
+             chain_outer(OIL_PCD, OIL_PUMP_TEETH, OIL_CHAIN_T) + 18.0)
 PICKUP_Y = -230.0                 # inside the sump's front wall, not in it
 # ...and OUTBOARD of the driven sprocket, whose teeth reach 24 mm from the
 # pump's axis: down the middle it was a tube through a sprocket.
@@ -1081,7 +1141,8 @@ def oil_pump(app):
     p.extrude(body.add(), y1 - y0, mode="new_body", name="Body")
     for sx in (-1, 1):
         arm = p.sketch(Plane.xz(BLOCK_Y0), name="Bracket arm")
-        arm.rect((sx * 26.0, OIL_BRACKET_Z[0]), (sx * 42.0, OIL_BRACKET_Z[1]))
+        arm.rect((sx * OIL_ARM_X[0], OIL_BRACKET_Z[0]),
+                 (sx * OIL_ARM_X[1], OIL_BRACKET_Z[1]))
         p.extrude(arm.add(), BLOCK_Y0 - y1, mode="add", name="Bracket arm")
     # Two cuts, not one sketch with two circles: the pockets OVERLAP, which
     # is what makes it a gear pump, and overlapping loops in one profile are
@@ -1099,7 +1160,8 @@ def oil_pump(app):
     p.extrude(shafts.add(), 60.0, mode="cut", name="Shaft bores")
     holes = p.sketch(Plane.xz(BLOCK_Y0), name="Mount holes")
     for sx in (-1, 1):
-        holes.circle((sx * 34.0, OIL_BRACKET_Z[0] + 6.0), d=9.0)
+        holes.circle((sx * sum(OIL_ARM_X) / 2.0,
+                      OIL_BRACKET_Z[0] + 6.0), d=9.0)
     p.extrude(holes.add(), BLOCK_Y0 - y1, mode="cut", name="Mount holes")
     # The pickup's mouth, in the bottom of the body.
     inlet = p.sketch(Plane.xz(y1 - 6.0), name="Inlet")
@@ -1163,7 +1225,8 @@ def oil_pickup(app):
     # The strainer lies in the OIL, which means inside the pan's own walls —
     # hung off the pump's front face it was through the pan's nose.
     strain = p.sketch(Plane.xy(bottom - 10.0), name="Strainer")
-    strain.rect((x - 40.0, PICKUP_Y - 12.0), (x + 40.0, PICKUP_Y + 22.0))
+    hw = pan_inner_half_width(bottom - 10.0) - 4.0
+    strain.rect((-hw, PICKUP_Y - 12.0), (hw, PICKUP_Y + 22.0))
     p.extrude(strain.add(), 10.0, mode="add", name="Strainer")
     p.material("steel")
     p.frame("flange", origin=(x, PICKUP_Y, top), z=(0, 0, -1), x=(1, 0, 0))

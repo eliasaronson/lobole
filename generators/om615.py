@@ -130,9 +130,9 @@ def front_and_rear(app, rig, occ, main):
     # builder puts sprocket A at its own origin and B at (0, span), and the
     # pump is below the crank.
     oil_chain = B.chain(app, "oil pump chain", -OIL_PUMP_Z,
-                        B.tooth_tip(OIL_PCD / 2.0, OIL_PUMP_TEETH),
-                        B.tooth_tip(OIL_CRANK_PCD / 2.0, OIL_CRANK_TEETH),
-                        OIL_CHAIN_W, thickness=5.0)
+                        tooth_tip(OIL_PCD / 2.0, OIL_PUMP_TEETH),
+                        tooth_tip(OIL_CRANK_PCD / 2.0, OIL_CRANK_TEETH),
+                        OIL_CHAIN_W, thickness=OIL_CHAIN_T)
     pump, pump_cover = B.oil_pump(app), B.oil_pump_cover(app)
     g1 = B.oil_pump_gear(app, "oil pump gear")
     g2 = B.oil_pump_gear(app, "oil pump idler gear",
@@ -256,13 +256,14 @@ def top_end(app, rig, occ, main):
     gaskets = {k: T.manifold_gasket(app, k) for k in VALVE}
     ms = B.sprocket(app, "cam sprocket", CAM_PCD / 2.0, 30.0, CAM_TEETH,
                     CHAIN_W, hub_d=60.0)
-    tchain = B.chain(app, "timing chain", CAM_Z,
-                     B.tooth_tip(CRANK_PCD / 2.0, CRANK_TEETH),
-                     B.tooth_tip(CAM_PCD / 2.0, CAM_TEETH), CHAIN_W)
+    tips = (tooth_tip(CRANK_PCD / 2.0, CRANK_TEETH),
+            tooth_tip(CAM_PCD / 2.0, CAM_TEETH))
+    tchain = B.chain(app, "timing chain", CAM_Z, *tips, CHAIN_W)
     guide_rail = B.chain_rail(app, "chain guide rail", 40.0, CAM_Z - 90.0,
-                              -46.0, -14.0, CHAIN_W)
+                              -1, CAM_Z, *tips, bow=10.0, width=CHAIN_W)
     tension_rail = B.chain_rail(app, "chain tensioner rail", 40.0,
-                                CAM_Z - 90.0, 37.0, 14.0, CHAIN_W)
+                                CAM_Z - 90.0, 1, CAM_Z, *tips, bow=14.0,
+                                width=CHAIN_W)
 
     rig.activate()
     bo = occ["block"]
@@ -455,8 +456,26 @@ def main():
     # `connected=False` because the pistons, valves and rockers are held by
     # mates rather than by touching, and `clearances=False` because every
     # running fit in this engine is a deliberate half-millimetre.
-    rig.check(connected=False, clearances=False)
-    print("  assembled: no part is inside another")
+    #
+    # The BUDGET is the point. contact_report is bounded — closest pairs
+    # first, then it stops and says so — and at its defaults it reached 145
+    # of this engine's 790 candidate pairs, found nothing, and read as a
+    # clean bill of health. It is also the only check that looks at parts
+    # RIGID to each other, which a motion study skips by design: between
+    # them, the two of them had never examined 72 real overlaps.
+    report = rig.check(connected=False, clearances=False,
+                       max_pairs=20000, deadline_s=900, _timeout=1800)
+    # `pairs` is the per-pair DETAIL, not a count — printing it dumps every
+    # pair in the engine.
+    print(f"  assembled: no part is inside another — "
+          f"{report['pairs_checked']} of {len(report['pairs'])} pairs, "
+          f"exactly")
+    # Not a failure, and worth saying out loud rather than swallowing: a
+    # mate on a running fit is a mate that must NOT touch, and an engine is
+    # mostly those.
+    print(f"    ({len(report['unrealized_mates'])} mates hold a clearance "
+          f"rather than a contact; {len(report['unmated_contacts'])} pairs "
+          f"touch without a mate)")
 
     if not a.no_study:
         study, r = run_engine(app, rig, main_mate, top, a.samples,
@@ -604,19 +623,19 @@ def fasteners(app, rig, occ, top, front):
     rig.activate()
     _bolt_up(rig, top["head"], hd, (HEAD_BOLT_D + 1.0) / 2.0,
              lambda e: e.center.z - T.HEAD_BOLT_SEAT,
-             occ["block"], blk, HEAD_BOLT_D / 2.0,
+             occ["block"], blk, (HEAD_BOLT_D + TAP_FIT) / 2.0,
              lambda e: e.center.z - (DECK - 60.0), "M12", len(HEAD_BOLT),
              "head bolts", centres=HEAD_BOLT)
     _bolt_up(rig, front["sump"], pan, 4.5,
              lambda e: e.center.z - (PAN_RAIL - 6.0),
-             occ["block"], blk, 4.0,
+             occ["block"], blk, (PAN_BOLT_D + TAP_FIT) / 2.0,
              lambda e: e.center.z - (PAN_RAIL + 20.0), "M8",
              2 * len(B._pan_bolt_y()), "sump bolts",
              centres=[(sx * PAN_BOLT_X, y) for y in B._pan_bolt_y()
                       for sx in (-1, 1)])
     _bolt_up(rig, front["flywheel"], fw, 5.5,
              lambda e: e.center.z - B.FLYWHEEL_T,
-             front["crank"], crk, 5.0,
+             front["crank"], crk, (FLYWHEEL_BOLT_D + TAP_FIT) / 2.0,
              lambda e: e.center.y - (FLANGE_Y + FLANGE_T + 9.0 - 40.0),
              "M10", FLYWHEEL_BOLTS, "flywheel bolts",
              rim_key=lambda e: (e.center.x, -e.center.y),
@@ -628,7 +647,7 @@ def fasteners(app, rig, occ, top, front):
         _bolt_up(rig, c, app.part("centre main cap" if i == 2 else "main cap"),
                  B.CAP_CLEARANCE_D / 2.0,
                  lambda e: e.center.z + CAP_DEPTH,
-                 occ["block"], blk, CAP_BOLT_D / 2.0,
+                 occ["block"], blk, (CAP_BOLT_D + TAP_FIT) / 2.0,
                  lambda e: e.center.z - 46.0, "M12", 2,
                  f"main cap {i + 1} bolts",
                  centres=[(-CAP_BOLT_X, 0.0), (CAP_BOLT_X, 0.0)],

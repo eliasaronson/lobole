@@ -22,14 +22,21 @@ import om615_bottom as B  # noqa: E402  (ring(), shared by both ends)
 # zero deep.
 CHAMBER_FLOOR = FIRE_FACE + 62.0
 CHAMBER_X = 78.0
+# The island the spring pocket's annulus leaves standing around each guide.
+# It is not a BOSS: nothing is added here, because the ladder jacket never
+# comes near the guides.
 GUIDE_BOSS_D = 24.0
-GUIDE_TOP = GUIDE_Z + GUIDE_LEN
-# 20, not 24: the outermost head bolts are 11 mm from the head's own end
-# face, and a boss that runs past it comes back as a rim SPLIT into two
-# arcs — which is half a circle, and a fastener cannot be fitted to one.
-HEAD_BOLT_BOSS_D = 20.0
 HEAD_BOLT_SEAT = CHAMBER_FLOOR + 20.0
 CAM_PEDESTAL_X = 34.0
+# Both plugs reach PAST the point they are aimed at, into the pre-chamber —
+# which is the point of them, and is why the pre-chamber is drilled for both.
+GLOW_HEAD_D = 17.0
+INJ_HEAD_D = 22.0
+PLUG_REACH_PAST = 4.0
+PLUG_WELL_DEPTH = 5.0
+PLUG_MOUTH_BACK = 8.0                # how far outside the face each bore
+                                     # starts, so the shank's proud 3 mm has
+                                     # somewhere to be
 CAM_CAP_BOLT_X = 26.0
 CAM_CAP_BOLT_D = 9.0
 # The head's water jacket is a LADDER, not a slab: a channel up each side
@@ -52,6 +59,14 @@ HEAD_GALLERY_Z = CHAMBER_FLOOR + 6.0
 OUTLET_Y = 150.0
 OUTLET_D = 28.0
 PEDESTAL_TOP = ROCKER_Z + 16.0
+# A rocker post stands over a head bolt: the shaft is at x = 60 and the bolt
+# at 58, so they cannot both have the same 20 mm of chamber. So the post is
+# a CORBEL — a rib on the chamber wall for its full height, reaching in to
+# the shaft only above the bolt's head. Drawn as one pillar it swallowed the
+# bolt head whole, ten times, and nothing outside the head showed it.
+HEAD_BOLT_HEAD_H = HEAD_BOLT_D          # ISO 4762: head height = the size
+POST_ROOT_X = HEAD_BOLT_X + HEAD_BOLT_BOSS_D / 2.0 + 2.0
+POST_CORBEL_Z = HEAD_BOLT_SEAT + HEAD_BOLT_HEAD_H + 2.0
 
 
 def head(app):
@@ -90,14 +105,18 @@ def head(app):
         p.extrude(ped.add(), CAM_Z - CHAMBER_FLOOR, mode="add",
                   name=f"Cam saddle {i + 1}")
         for sx in (-1, 1):
-            r = p.sketch(Plane.xy(CHAMBER_FLOOR), name=f"Rocker post {i}{sx}")
             # Out to the chamber wall, not past it: the posts stand above
             # the head's own top face, and 4 mm proud of the wall is 4 mm
-            # into the cam cover.
-            r.rect((sx * (ROCKER_PIVOT_X - 12.0), y - CAM_BEARING_W / 2.0),
-                   (sx * CHAMBER_X, y + CAM_BEARING_W / 2.0))
-            p.extrude(r.add(), PEDESTAL_TOP - CHAMBER_FLOOR, mode="add",
-                      name=f"Rocker post {i}{sx}")
+            # into the cam cover. And in only as far as the head bolt under
+            # it allows, until the bolt's head is behind us.
+            for j, (x0, z0) in enumerate(
+                    ((POST_ROOT_X, CHAMBER_FLOOR),
+                     (ROCKER_PIVOT_X - 12.0, POST_CORBEL_Z))):
+                r = p.sketch(Plane.xy(z0), name=f"Rocker post {i}{sx}{j}")
+                r.rect((sx * x0, y - CAM_BEARING_W / 2.0),
+                       (sx * CHAMBER_X, y + CAM_BEARING_W / 2.0))
+                p.extrude(r.add(), PEDESTAL_TOP - z0, mode="add",
+                          name=f"Rocker post {i}{sx}{j}")
 
     # ---- the water jacket ------------------------------------------------
     for sx in (-1, 1):
@@ -114,11 +133,11 @@ def head(app):
                      (sx * COLUMN_X[1], y + COLUMN_HY))
             p.extrude(col.add(), JACKET_Z[1] - TRANSFER_TOP + 2.0, mode="cut",
                       name=f"Coolant column {i}{sx}")
-    # Guide bosses and head bolt bosses stand through it all.
-    for k, cy in enumerate(CYL_Y):
-        for kind, (vx, dy) in VALVE.items():
-            B.disc(p, (vx, cy + dy), GUIDE_BOSS_D, FIRE_FACE, GUIDE_TOP,
-                   f"Guide boss {k + 1} {kind}")
+    # Head bolt bosses stand through it all — they are at x = 58 and the
+    # jacket's side channel is 48..70, so without them a head bolt is drilled
+    # into water. There are NO guide bosses: this jacket is a ladder, and it
+    # never reaches the guides at x = +-18, so eight of them added nothing
+    # and said so ("add merged no new material") on every single run.
     for x, y in HEAD_BOLT:
         B.disc(p, (x, y), HEAD_BOLT_BOSS_D, FIRE_FACE, HEAD_BOLT_SEAT,
                "Head bolt boss")
@@ -184,12 +203,24 @@ def head(app):
         thr.circle((PRE_X, cy + PRE_DY), d=PRE_THROAT_D)
         p.extrude(thr.add(), PRE_Z[0] - FIRE_FACE, mode="cut",
                   name=f"Pre-chamber throat {k + 1}")
-        for nm, face, target, d in (("injector", INJ_FACE, INJ_TARGET, INJ_D),
-                                    ("glow plug", GLOW_FACE, GLOW_TARGET,
-                                     GLOW_D)):
-            B.bore(p, (face[0], cy + face[1], face[2]),
-                   (target[0], cy + target[1], target[2]), d,
-                   f"{nm} bore {k + 1}")
+        for nm, face, target, d, hd in (
+                ("injector", INJ_FACE, INJ_TARGET, INJ_D, INJ_HEAD_D),
+                ("glow plug", GLOW_FACE, GLOW_TARGET, GLOW_D, GLOW_HEAD_D)):
+            start = V((face[0], cy + face[1], face[2]))
+            end = V((target[0], cy + target[1], target[2]))
+            axis = (end - start).unit()
+            # Both bores start OUTSIDE the face, not on it. The plug's shank
+            # stands 3 mm proud and its shoulder is a disc square to its own
+            # INCLINED axis, while the face is a flat wall — so a hole that
+            # begins exactly on the face leaves a sliver of each plug inside
+            # the head, one for every plug in the engine.
+            mouth = start - axis * PLUG_MOUTH_BACK
+            B.bore(p, tuple(mouth), tuple(end), d, f"{nm} bore {k + 1}")
+            # ...and a WELL round the mouth, for the shoulder to land in.
+            B.bore(p, tuple(mouth),
+                   tuple(mouth + axis * (PLUG_MOUTH_BACK
+                                         + PLUG_WELL_DEPTH)),
+                   hd + FIT, f"{nm} well {k + 1}", over=0.0)
 
     # The manifolds' studs, two per port.
     for cy in CYL_Y:
@@ -389,14 +420,19 @@ def valve_spring(app):
     # on this valve five put the coils closer together than the wire is
     # thick — a spring drawn coil-bound before it has compressed at all.
     turns = 4.0
-    if free / turns <= SPRING_WIRE:
+    # The helix is the WIRE'S CENTRELINE, so it starts half a wire above the
+    # seat and ends half a wire below the top — laid on z = 0 the bottom
+    # coil's underside was 2 mm inside the head's own spring pocket, and
+    # `free` is the height of the spring, not of its path.
+    pitch = (free - SPRING_WIRE) / turns
+    if pitch <= SPRING_WIRE:
         raise SdkError(f"the valve spring is {free:.1f} long over {turns} "
                        f"turns: its coils are closer than the {SPRING_WIRE} "
                        f"mm wire is thick")
     p.app.add_feature(feature={
         "type": "Curve3D", "name": "Spring path", "kind": "helix",
-        "origin": [0, 0, 0], "axis": [0, 0, 1], "radius": SPRING_D / 2.0,
-        "pitch": free / turns, "turns": turns})
+        "origin": [0, 0, SPRING_WIRE / 2.0], "axis": [0, 0, 1],
+        "radius": SPRING_D / 2.0, "pitch": pitch, "turns": turns})
     coil = p.state()["features"][-1]["id"]
     # SOLID wire (no wall_thickness): a spring is round bar coiled up, not
     # tubing — and a bore is a second swept surface for a drawing's
@@ -411,10 +447,15 @@ def valve_spring(app):
 
 
 def spring_retainer(app):
+    """A dished washer whose BORE is the collet's cone, which is what locks
+    the pair onto the stem. Its top is flush with the collet's, because a
+    retainer taller than the cone has nothing to wedge against."""
     p = app.part("spring retainer")
-    p.revolve_profile([(STEM_D / 2.0 + 0.5, 0), (RETAINER_D / 2.0, 0),
-                       (RETAINER_D / 2.0, 4.0), (STEM_D / 2.0 + 4.0, 10.0),
-                       (STEM_D / 2.0 + 0.5, 10.0)],
+    h = COLLET_H + COLLET_DROP
+    p.revolve_profile([(collet_r(0.0) + COLLET_FIT, 0),
+                       (RETAINER_D / 2.0, 0), (RETAINER_D / 2.0, 3.0),
+                       (collet_r(h) + COLLET_FIT + 4.0, h),
+                       (collet_r(h) + COLLET_FIT, h)],
                       plane=Plane.xz(), axis="z", name="Retainer")
     p.material("steel")
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
@@ -430,8 +471,8 @@ def collet(app):
     # above it. Bored to the groove's root all the way up, a collet is
     # inside the stem everywhere the groove is not.
     root = STEM_D / 2.0 - 1.1
-    p.revolve_profile([(root, 0), (STEM_D / 2.0 + 3.0, 0),
-                       (STEM_D / 2.0 + 5.5, 7.0), (STEM_D / 2.0 + 0.2, 7.0),
+    p.revolve_profile([(root, 0), (COLLET_R0, 0),
+                       (COLLET_R1, COLLET_H), (STEM_D / 2.0 + 0.2, COLLET_H),
                        (STEM_D / 2.0 + 0.2, 3.5), (root, 3.5)],
                       plane=Plane.xz(), axis="z", angle=170.0, name="Collet")
     p.material("steel")
@@ -452,6 +493,16 @@ def prechamber(app):
                        (PRE_D / 2.0 - 5.0, h - 7.0),
                        (PRE_D / 2.0 - 5.0, 8.0), (PRE_THROAT_D / 2.0, 8.0)],
                       plane=Plane.xz(), axis="z", name="Pre-chamber")
+    # The injector and the glow plug come THROUGH its wall — that is what a
+    # pre-chamber is for. Drilled in the part's own coordinates, which are
+    # the engine's shifted by where it sits: the two are a pure translation,
+    # and every cylinder's plugs stand in the same place relative to it.
+    off = V((PRE_X, PRE_DY, PRE_Z[0]))
+    for nm, face, target, d in (("injector", INJ_FACE, INJ_TARGET, INJ_D),
+                                ("glow plug", GLOW_FACE, GLOW_TARGET,
+                                 GLOW_D)):
+        B.bore(p, tuple(V(face) - off), tuple(V(target) - off), d + FIT,
+               f"{nm} bore")
     p.material("stainless_steel")
     p.frame("seat", origin=(0, 0, h), z=(0, 0, -1), x=(1, 0, 0))
     p.check()
@@ -474,13 +525,13 @@ def _plug(app, name, d, reach, head_len, head_d, material="steel"):
 
 
 def glow_plug(app):
-    reach = (V(GLOW_TARGET) - V(GLOW_FACE)).length() + 4.0
-    return _plug(app, "glow plug", GLOW_D - FIT, reach, 22.0, 17.0)
+    reach = (V(GLOW_TARGET) - V(GLOW_FACE)).length() + PLUG_REACH_PAST
+    return _plug(app, "glow plug", GLOW_D - FIT, reach, 22.0, GLOW_HEAD_D)
 
 
 def injector(app):
-    reach = (V(INJ_TARGET) - V(INJ_FACE)).length() + 4.0
-    return _plug(app, "injector", INJ_D - FIT, reach, 46.0, 22.0)
+    reach = (V(INJ_TARGET) - V(INJ_FACE)).length() + PLUG_REACH_PAST
+    return _plug(app, "injector", INJ_D - FIT, reach, 46.0, INJ_HEAD_D)
 
 
 # ---------------------------------------------------------- the valve gear
@@ -606,8 +657,13 @@ def rocker(app):
 
 
 def rocker_shaft(app):
-    p = B.ring(app, "rocker shaft", ROCKER_SHAFT_D, 8.0,
-               BLOCK_Y1 - BLOCK_Y0 - 24.0, material="steel")
+    """As long as the ROCKER CHAMBER allows, not the head: the chamber is
+    not centred (the head runs further back than forward), and a shaft cut
+    to the head's length and then centred came 1 mm out through the front of
+    the cam cover's gasket."""
+    half = min(BLOCK_Y1, -BLOCK_Y0) - 8.0 - 2.0
+    p = B.ring(app, "rocker shaft", ROCKER_SHAFT_D, 8.0, 2 * half,
+               material="steel")
     return p
 
 
@@ -752,9 +808,26 @@ def _manifold(app, name, kind, log, runner, material):
     p.extrude(fl.add(), 16.0, mode="add", name="Outlet flange")
 
     # ...and only now the inside, so every branch opens into the log.
+    #
+    # And each bore is WEIGHED. A pipe swept round a bend tighter than its
+    # own radius crosses itself; OCC cuts with it and reports nothing, and
+    # one such bore took 91% of this manifold with it. What survived was a
+    # lump that touched nothing, so no clash check said a word either. A cut
+    # cannot remove more than the tool it cuts with.
     for k, cy in enumerate(CYL_Y):
-        B.spline_tube(p, _runner_path(kind, cy, log), r_bore,
-                      f"Runner bore {k + 1}", mode="cut")
+        path = _runner_path(kind, cy, log)
+        span = sum((V(b) - V(a)).length() for a, b in zip(path, path[1:]))
+        room = math.pi * (r_bore / 2.0) ** 2 * span * 1.4
+        before = p.volume()
+        B.spline_tube(p, path, r_bore, f"Runner bore {k + 1}", mode="cut")
+        gone = before - p.volume()
+        if gone > room:
+            raise SdkError(
+                f"{name}: boring runner {k + 1} removed {gone:.0f} mm3, and "
+                f"the bore itself is at most {room:.0f} — the swept pipe "
+                f"crosses itself. Give the runner more length to turn in "
+                f"(its bend has to be wider than its own {r_bore / 2:.0f} "
+                f"mm radius).")
     # The bore stops short of the log's CLOSED end — a manifold open at both
     # ends is a pipe.
     cap = 14.0
@@ -772,33 +845,79 @@ def _manifold(app, name, kind, log, runner, material):
     p.frame("face", origin=(sx * HEAD_X, 0, PORT_Z), z=(0, 0, 1),
             x=(1, 0, 0))
     p.check()
+    # ...and nothing on it may cross the face it bolts to. Everything on a
+    # manifold is placed relative to that plane, so one measurement covers
+    # every runner, pad and flange at once — and it is the one that caught
+    # the tilted end caps.
+    lo, hi = p.bbox()
+    reach = lo[0] if kind == "exhaust" else -hi[0]
+    if reach < HEAD_X + MANIFOLD_GASKET_T - 1e-6:
+        raise SdkError(
+            f"{name} reaches {abs(reach):.2f} mm from the engine's centre "
+            f"and the head's gasket face is at "
+            f"{HEAD_X + MANIFOLD_GASKET_T:.2f} — "
+            f"{HEAD_X + MANIFOLD_GASKET_T - reach:.2f} mm of it is inside "
+            f"the cylinder head")
     return p
+
+
+def _lead_in(x0, x1, y, z, n=4):
+    """`n` COLLINEAR points from the flange face out along the port's axis.
+
+    Two of them are not enough, and that is the whole reason this exists. A
+    fitted spline's end tangent comes from the fit, not from its first chord
+    — so a path that begins with one straight segment and then turns leaves
+    the first point at an angle, and a Pipe's end cap is square to THAT. The
+    exhaust runner's cap tilted 9 mm back behind its own start: through the
+    gasket and into the cylinder head, on all four runners, both sides.
+    Three points leaves 0.75 mm of it; four leaves none.
+    """
+    return [(x0 + (x1 - x0) * i / (n - 1.0), y, z) for i in range(n)]
 
 
 def _runner_path(kind, cy, log):
     """The points a fitted spline sweeps a runner along: flush with the
-    flange face, a short STRAIGHT run out of it, then round onto the log.
+    flange face, a STRAIGHT run out of it, then round onto the log.
 
-    Two things are load-bearing here. The tube starts exactly ON the face,
-    not inside the pad — a tube whose end cap lies within the pad makes a
-    union OCC returns EMPTY, silently, and the whole manifold vanishes. And
-    the first two points share a y and a z, so the tube leaves square to the
-    face: on the port's own inclined axis the end cap tilts, and 10 mm of it
-    is then behind the gasket, inside the head.
+    The tube starts exactly ON the face, not inside the pad — a tube whose
+    end cap lies within the pad makes a union OCC returns EMPTY, silently,
+    and the whole manifold vanishes.
     """
     lx, lz = log[0], log[1]
     sx = -1 if kind == "intake" else 1
     y = cy + VALVE[kind][1]
     x0 = sx * (HEAD_X + MANIFOLD_GASKET_T)
+    r_od = (INT_RUNNER if kind == "intake" else EXH_RUNNER)[0]
+    # Where the runner TURNS, its outer surface swings back toward the head
+    # by its own radius. So the straight run clears the flange pad and the
+    # bend stands a radius clear of the HEAD'S FACE — bent 10 mm off it, the
+    # intake's elbow was 8 mm inside the cylinder head over its whole climb.
+    #
+    # And every point after it runs further out than the one before. The
+    # path is a FITTED spline: give it a point that doubles back by 2 mm and
+    # the swept pipe crosses itself, which OCC fuses to an empty solid and
+    # takes the whole log with it.
+    straight = x0 + sx * (MANIFOLD_PAD + 4.0)
+    bend = straight + sx * max(6.0, HEAD_X + MANIFOLD_GASKET_T
+                               + r_od / 2.0 + 2.0 - abs(straight))
+    land = land_y(kind, cy)
+    lead = _lead_in(x0, straight, y, PORT_Z)
     if kind == "intake":
-        return [(x0, y, PORT_Z), (x0 - 10.0, y, PORT_Z),
-                (x0 - 26.0, y - 1.0, PORT_Z + 26.0),
-                (lx + 6.0, cy * 0.95, (PORT_Z + lz) / 2.0 + 10.0),
-                (lx, cy * 0.9, lz)]
-    return [(x0, y, PORT_Z), (x0 + 10.0, y, PORT_Z),
-            (x0 + 24.0, y, PORT_Z - 8.0),
-            (lx - 8.0, cy * 0.7 + 20.0, lz + 11.0),
-            (lx, cy * 0.55 + 30.0, lz)]
+        return lead + [
+                (bend, y - 1.0, PORT_Z + 26.0),
+                (lx + 6.0, y + (land - y) * 0.85,
+                 (PORT_Z + lz) / 2.0 + 10.0),
+                (lx, land, lz)]
+    # The exhaust swings a long way in y, so its points are spread along the
+    # whole standoff rather than crowded near the flange: a runner that does
+    # all its turning in the first 30 mm is a pipe tighter than its own
+    # radius, which crosses itself.
+    run = abs(lx - x0)
+    dy = land - y
+    return lead + [
+            (x0 + sx * run * 0.45, y + dy * 0.10, PORT_Z - 7.0),
+            (x0 + sx * run * 0.78, y + dy * 0.58, lz + 9.0),
+            (lx, land, lz)]
 
 
 def exhaust_manifold(app):

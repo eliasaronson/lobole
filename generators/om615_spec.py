@@ -122,7 +122,18 @@ BULKHEAD_T = 26.0         # main bearing web thickness. Bounded ABOVE by the
                           # webs start where the journal ends, so a bearing
                           # web thicker than that is inside them.
 CAP_BOLT_X = 46.0         # main cap bolts, either side of the journal
+# A tapped hole is drawn at the bolt's NOMINAL diameter — a thread's major
+# diameter is the bolt's own, and drawn at the tapping drill every bolt in
+# the engine reads as steel inside steel for its whole engagement. Plus a
+# TENTH, and that tenth is not cosmetic: at exactly nominal the bolt's shank
+# and the hole's wall are the same cylinder, and OCC's boolean walks off the
+# end of its own pave list on two coincident cylinders. It survives while
+# the part sits on the axes and SEGFAULTS the moment the crankshaft turns
+# 15 degrees and the coincidence becomes a near-coincidence.
+TAP_FIT = 0.1
 CAP_BOLT_D = 12.0
+PAN_BOLT_D = 8.0
+FLYWHEEL_BOLT_D = 10.0
 CAP_DEPTH = 42.0          # the cap's own depth below the parting line
 CAP_X = 60.0              # half-width of the cap and of its register
 JACKET_T = 6.0            # cylinder wall between bore and water jacket
@@ -131,7 +142,20 @@ HEAD_BOLT_D = 12.0
 # pitch, five a side. They are what clamps the gasket, so they live in ONE
 # list that the block drills blind and the head drills through.
 HEAD_BOLT_X = 58.0
-HEAD_BOLT = [(sx * HEAD_BOLT_X, y) for y in MAIN_Y for sx in (-1, 1)]
+# 20, not 24: the outermost head bolts are close to the head's own end face,
+# and a boss that runs past it comes back as a rim SPLIT into two arcs —
+# which is half a circle, and a fastener cannot be fitted to one.
+HEAD_BOLT_BOSS_D = 20.0
+# Anything that stands INSIDE the rocker chamber is bounded by where that
+# chamber ends — and the head is not symmetric about zero, so it is the
+# SHORTER end that says where. A boss straddling the end wall splits its own
+# rim in two the same way: the outer bolts sat on the main webs, and the two
+# at the front had no whole rim at all.
+CHAMBER_Y = min(BLOCK_Y1, -BLOCK_Y0) - 8.0
+HEAD_BOLT_OUTER_Y = CHAMBER_Y - HEAD_BOLT_BOSS_D / 2.0 - 2.0
+HEAD_BOLT = [(sx * HEAD_BOLT_X,
+              max(-HEAD_BOLT_OUTER_Y, min(HEAD_BOLT_OUTER_Y, y)))
+             for y in MAIN_Y for sx in (-1, 1)]
 JACKET_X = 52.0           # the water jacket's outer wall, inboard of the
                           # head bolts and outboard of the liners
 JACKET_Z0 = 112.0
@@ -184,7 +208,9 @@ VALVE = {"intake": (-VALVE_X, -VALVE_DY), "exhaust": (VALVE_X, VALVE_DY)}
 STEM_D = 9.0
 VALVE_HEAD_D = {"intake": 36.0, "exhaust": 32.0}
 SEAT_ANGLE = 45.0
-SEAT_OD = {k: d + 8.0 for k, d in VALVE_HEAD_D.items()}
+# +6, not +8: staggered across the bore the two rings are 41.2 mm apart and
+# at +8 their rims are 42 — they overlapped each other by eight tenths.
+SEAT_OD = {k: d + 6.0 for k, d in VALVE_HEAD_D.items()}
 SEAT_T = 6.0
 GUIDE_OD = 15.0
 GUIDE_LEN = 42.0          # ends BELOW where the retainer comes down to
@@ -211,6 +237,8 @@ MANIFOLD_STUD_DEPTH = 15.0           # shallow ON PURPOSE: 26 deep and the
 MANIFOLD_CONVERGE = 0.75             # how far each runner draws in toward
                                      # the log — at 0.34 the intake runner's
                                      # bore swallowed its own outer stud
+INT_CONVERGE = 0.90                  # the intake barely converges: it is a
+                                     # plenum with four stubs, not a header
 # Both manifolds are LOGS with curved branches — swept along fitted splines,
 # not straight cylinders between two flanges. A runner leaves its port on the
 # port's own axis and arrives at the log on the log's, and everything between
@@ -218,12 +246,35 @@ MANIFOLD_CONVERGE = 0.75             # how far each runner draws in toward
 # two hollow tubes unioned leave each one's wall across the other's throat.
 #
 # (x, z, outer, bore) for each log, and the outer/bore of its branches.
-INT_LOG = (-132.0, FIRE_FACE + 130.0, 78.0, 62.0)    # high, like the real one
+INT_LOG = (-140.0, FIRE_FACE + 130.0, 78.0, 62.0)   # high, like the real one
 INT_LOG_Y = (-172.0, 172.0)
 INT_RUNNER = (42.0, 32.0)
-EXH_LOG = (138.0, FIRE_FACE + 14.0, 62.0, 50.0)
 EXH_LOG_Y = (-72.0, 162.0)
 EXH_RUNNER = (44.0, 34.0)
+
+
+def land_y(kind, cy):
+    """Where a runner MEETS its log — drawn in toward the log's middle by
+    MANIFOLD_CONVERGE, which is what makes the exhaust side a four-into-one
+    instead of four stubs into a pipe."""
+    span = INT_LOG_Y if kind == "intake" else EXH_LOG_Y
+    mid = sum(span) / 2.0
+    c = INT_CONVERGE if kind == "intake" else MANIFOLD_CONVERGE
+    return mid + (cy + VALVE[kind][1] - mid) * c
+
+
+# How far the longest runner has to swing sideways to reach the collector...
+EXH_SWEEP = max(abs(land_y("exhaust", cy) - (cy + VALVE["exhaust"][1]))
+                for cy in CYL_Y)
+# ...and therefore how far OUT the collector stands. A tube swept round a
+# bend tighter than its own radius crosses itself; OCC cuts with such a pipe
+# without complaint and takes the rest of the manifold with it — 91% of this
+# one, leaving a lump that no longer touched anything and so no longer
+# clashed with anything either. So the standoff is DERIVED: about as much
+# length as the runner swings sideways, and never less than the tube itself.
+EXH_LOG = (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD
+           + max(1.4 * EXH_SWEEP, 1.5 * EXH_RUNNER[0]),
+           FIRE_FACE + 14.0, 62.0, 50.0)
 # The spring sits in a POCKET sunk below the rocker chamber's floor. On the
 # floor itself there are only 20 mm between the seat and the retainer, which
 # is a spring whose coils are closer together than its wire is thick.
@@ -236,6 +287,21 @@ RETAINER_D = 34.0
 # carries on past its valve pad toward the cam, and at full lift that part
 # of it swings down past a retainer sitting at the very top of the stem.
 RETAINER_DROP = 24.0
+# The collet's outer CONE. The retainer's bore is the same taper — that
+# wedge is the whole point of a split collet — so both are derived from one
+# place: given a plain cylindrical bore the retainer sat over the entire
+# cone, half a cubic centimetre of steel in the same place, sixteen times.
+COLLET_H = 7.0
+COLLET_R0 = STEM_D / 2.0 + 3.0     # at the collet's own bottom face
+COLLET_R1 = STEM_D / 2.0 + 5.5     # ...and COLLET_H above it
+COLLET_DROP = 0.5                  # how far the retainer seats BELOW it
+COLLET_FIT = 0.2                   # drawn just clear, not wedged tight
+
+
+def collet_r(z):
+    """The collet cone's radius at height z above the RETAINER's own seat."""
+    cz = z - COLLET_DROP
+    return COLLET_R0 + (COLLET_R1 - COLLET_R0) * cz / COLLET_H
 STEM_SEAL_D = 18.0
 STEM_SEAL_H = 8.0
 # The pre-chamber: what makes it this engine and not a direct-injection four.
@@ -263,7 +329,11 @@ CAM_Z = HEAD_TOP                     # 372.5: the saddles ARE the top face
 CAM_SHAFT_D = 32.0
 CAM_JOURNAL_D = 44.0
 CAM_BEARING_W = 20.0
-CAM_BEARING_Y = list(MAIN_Y)         # over the webs, as the mains are
+# Over the webs like the mains, but the outer pair pulled IN: a saddle on
+# the outermost web puts its cap and its rocker post through the cam cover's
+# own end wall, and through its gasket's rim. Same bound as the head bolts.
+CAM_OUTER_Y = CHAMBER_Y - CAM_BEARING_W / 2.0 - 3.0
+CAM_BEARING_Y = [-CAM_OUTER_Y, -97.0, 0.0, 97.0, CAM_OUTER_Y]
 CAM_BASE_R = 20.0
 CAM_LOBE_W = 16.0
 # The rocker shafts, outboard of both valves — but INBOARD enough that a
@@ -348,7 +418,11 @@ OIL_PUMP_TEETH = 14       # ...and the pump's. 1:1, because the pump has to
                           # its own teeth through that floor
 DRIVE_Y = -232.5          # the plane the timing chain runs in
 CHAIN_W = 17.0            # duplex, across the two strands
-CHAIN_T = 7.0             # radial thickness of the drawn chain
+CHAIN_T = 6.0             # radial thickness of the drawn chain
+CHAIN_CLEAR = 3.0         # ...and how far off the tooth tips it is drawn.
+                          # Both feed COVER_TOP and the oil pump's headroom:
+                          # the wrap round the crank sprocket is what the
+                          # pump has to fit under.
 
 
 def sprocket_pcd(teeth, pitch=CHAIN_PITCH):
@@ -358,20 +432,38 @@ def sprocket_pcd(teeth, pitch=CHAIN_PITCH):
 
 CRANK_PCD = sprocket_pcd(CRANK_TEETH)        # 66.9
 CAM_PCD = sprocket_pcd(CAM_TEETH)            # 133.5
-# The chain case has to clear the CAM SPROCKET, which at 44 teeth of 3/8
-# reaches 72 mm from the cam axis — well above the head's own top face. A
-# real overhead-cam engine's front cover is taller than its head, for
-# exactly this reason.
-COVER_TOP = CAM_Z + CAM_PCD / 2.0 + 14.0
+
+
+def tooth_tip(radius, teeth):
+    """How far a sprocket's teeth actually reach — shared with the chain,
+    because a chain drawn to the PITCH radius has the teeth standing through
+    it."""
+    return radius + (2 * math.pi * radius / teeth * 0.62) / 2
+
+
+def chain_outer(pcd, teeth, thickness=CHAIN_T):
+    """How far the drawn chain reaches from a sprocket's axis: the tooth tip,
+    the clearance it is drawn off the tips, and its own thickness. Anything
+    that has to stay out of the drive measures itself against THIS."""
+    return tooth_tip(pcd / 2.0, teeth) + CHAIN_CLEAR + thickness
+
+
 OIL_PCD = sprocket_pcd(OIL_PUMP_TEETH)
 OIL_CRANK_PCD = sprocket_pcd(OIL_CRANK_TEETH)
 OIL_CHAIN_W = 9.0
+OIL_CHAIN_T = 5.0         # the oil chain is a lighter one than the timing's
 
 # The crank nose, laid out end to end so nothing on it overlaps anything
 # else. Each is (start, end) in y, front main journal face first.
-NOSE_SHOULDER = (-214.0, -209.0)
-OIL_DRIVE_Y = -219.0      # the oil pump chain's plane
-OIL_SPROCKET = (-224.0, -214.0)
+# The oil chain's plane sits AFT of the pump body's rear face: on the pump's
+# own centreline it was half a millimetre into it. And the shoulder behind
+# it is DERIVED from that plane, because the sprocket and the chain are both
+# as wide as the chain — a shoulder placed by eye left both of them half a
+# millimetre inside the crankshaft.
+OIL_DRIVE_Y = -216.0      # the oil pump chain's plane
+NOSE_SHOULDER = (OIL_DRIVE_Y + OIL_CHAIN_W / 2.0 + 1.0,
+                 OIL_DRIVE_Y + OIL_CHAIN_W / 2.0 + 4.0)
+OIL_SPROCKET = (OIL_DRIVE_Y - OIL_CHAIN_W / 2.0 - 3.5, NOSE_SHOULDER[0])
 TIMING_SPROCKET = (DRIVE_Y - CHAIN_W / 2.0, DRIVE_Y + CHAIN_W / 2.0)
 FRONT_SEAL_LAND = (-260.0, -241.0)
 FRONT_SEAL_D = 50.0
@@ -380,6 +472,11 @@ DAMPER_SEAT = (-290.0, -260.0)
 DAMPER_Y = -290.0         # where the damper's own rear face sits
 COVER_Y0 = -260.0         # the timing cover's front face
 COVER_WALL = 6.0
+# The chain case has to clear the CHAIN, not the cam sprocket — the wrap
+# stands a clearance and a chain thickness proud of the teeth, and a roof
+# sized to the sprocket alone was 5 mm inside it. A real overhead-cam
+# engine's front cover is taller than its head, for exactly this reason.
+COVER_TOP = CAM_Z + chain_outer(CAM_PCD, CAM_TEETH) + COVER_WALL + 4.0
 # Where the front cover bolts up: into the BLOCK below the deck and into the
 # HEAD above it. Two lists, because the two faces have different things in
 # the way — at x = 64 the upper pair went straight through the outermost head
@@ -408,9 +505,13 @@ SUMP_Y1 = 205.0
 # is squeezed from both ends: the chain has to be longer than the two
 # sprockets' tip radii together, and everything on it — body, gears, driven
 # sprocket — has to clear the case's floor at the pan rail.
-OIL_PUMP_Z = -64.0
 OIL_GEAR_D = 30.0
 OIL_GEAR_W = 20.0
+OIL_BODY_H = OIL_GEAR_D / 2.0 + 6.0     # half the pump body's height
+# ...and its axis is DERIVED from the top of that body: what is directly
+# above the pump is the timing chain's wrap round the crank sprocket, and a
+# pump placed by eye had its front top corner 1.4 mm inside it.
+OIL_PUMP_Z = -(chain_outer(CRANK_PCD, CRANK_TEETH) + 3.0 + OIL_BODY_H)
 
 # ---- how it is held ---------------------------------------------------------
 # A mount pad each side of the crankcase, between the ribs, and a bracket
