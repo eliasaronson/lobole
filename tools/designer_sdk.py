@@ -1472,7 +1472,7 @@ class Asm(_Tab):
         self.activate()
         return self.app.solve_assembly()
 
-    def check(self, connected=True, clearances=True, allow=None):
+    def check(self, connected=True, clearances=True, allow=None, **kw):
         """The assembly's standing check: nothing clashing, nothing floating,
         and no near miss under a millimetre — which is almost always an
         arithmetic slip, and is exactly what a transcribed coordinate
@@ -1500,7 +1500,7 @@ class Asm(_Tab):
         known cases admitted everything.
         """
         self.activate()
-        r = self.app.contact_report()
+        r = self.app.contact_report(**kw)
         allow = {tuple(sorted(k)): v for k, v in (allow or {}).items()}
         problems, used = [], set()
         over = []
@@ -1527,6 +1527,13 @@ class Asm(_Tab):
         if clearances and r.get("near_misses"):
             problems.append(f"{len(r['near_misses'])} near miss(es) under "
                             f"1 mm: {r['near_misses'][:4]}")
+        # The sweep is BOUNDED and says so; "no clashes among the pairs I got
+        # to" is not "no clashes". Dropping that made a 241-occurrence engine
+        # whose sweep reached 145 of 790 pairs read as a clean bill of health.
+        # Raise the budget (max_pairs, deadline_s) rather than ignoring it.
+        if r.get("truncated"):
+            problems.append("the sweep was TRUNCATED, so this is not a clean "
+                            "bill of health: " + str(r.get("truncation", "")))
         if problems:
             raise SdkError("; ".join(problems))
         return r
