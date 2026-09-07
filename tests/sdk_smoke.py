@@ -85,6 +85,29 @@ def check_generated_surface(app):
                f"it from app.enums instead")
 
 
+def check_verdict_contracts(app, asm):
+    """A wrapper that answers a VERDICT must account for every field its RPC
+    returns — a key it does not read is a caveat the caller never hears.
+
+    `Asm.check` read `clashes` and dropped `truncated`, so a 241-occurrence
+    engine whose bounded sweep reached 145 of 790 pairs came back as an
+    unqualified pass, twice, in a report to a human. The table lives beside
+    the wrapper in the SDK; this is what keeps it honest in both directions.
+    """
+    for name, contract in sdk.VERDICT_CONTRACTS.items():
+        asm.activate()
+        got = set(app.call(contract["rpc"]))
+        known = set(contract["consumed"]) | set(contract["ignored"])
+        expect(not (got - known),
+               f"{name} accounts for every key {contract['rpc']} returns "
+               f"(unaccounted: {sorted(got - known)})")
+        gone = set(contract["consumed"]) - got - set(contract.get("optional",
+                                                                   ()))
+        expect(not gone,
+               f"{name} consumes only keys {contract['rpc']} still returns "
+               f"(gone: {sorted(gone)})")
+
+
 def build_piston(part):
     """A piston, in the terms a piston is described in. Every dimension is a
     variable and every position comes from geometry or from the plane."""
@@ -269,6 +292,7 @@ def main():
         asm.activate()
         asm.fasten((a, "seat"), c, flipped=False)
         asm.check(clearances=False)
+        check_verdict_contracts(app, asm)
         expect(abs(c.frame().origin.z - 8.0) < 0.01,
                f"the cover sits on the plate's 8 mm top face: "
                f"{c.frame().origin}")

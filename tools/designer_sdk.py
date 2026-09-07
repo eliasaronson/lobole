@@ -1534,9 +1534,53 @@ class Asm(_Tab):
         if r.get("truncated"):
             problems.append("the sweep was TRUNCATED, so this is not a clean "
                             "bill of health: " + str(r.get("truncation", "")))
+        if r.get("unrealized_mates"):
+            problems.append(
+                f"{len(r['unrealized_mates'])} mate(s) did not achieve what "
+                f"they say: {r['unrealized_mates'][:4]}")
         if problems:
             raise SdkError("; ".join(problems))
         return r
+
+
+# A wrapper that answers a VERDICT — "is this clean?" — must account for
+# every field its RPC returns, because a key it does not read is a caveat the
+# caller never hears. `Asm.check` read `clashes` and dropped `truncated`, and
+# a 241-occurrence engine whose bounded sweep reached 145 of 790 pairs came
+# back as an unqualified pass. `tests/sdk_smoke.py` compares this table
+# against the live response, so the server growing a key fails the gate until
+# somebody decides what it means here.
+VERDICT_CONTRACTS = {
+    "Asm.check": {
+        "rpc": "contact_report",
+        "consumed": {
+            "clashes",            # the verdict itself
+            "components",         # >1 means something is floating
+            "near_misses",        # a gap under near_tol
+            "truncated",          # ...and whether any of the above is final
+            "truncation",
+            "unrealized_mates",   # a mate that did not achieve what it says
+        },
+        "ignored": {
+            "pairs": "the per-pair detail behind clashes/near_misses",
+            "pairs_checked": "coverage detail; `truncated` is the verdict",
+            "pairs_unchecked": "quoted by `truncation` when it matters",
+            "pairs_box_cleared": "coverage detail",
+            "elapsed_s": "cost, not correctness",
+            "occurrences": "how many were swept",
+            "connected": "the boolean behind `components`",
+            "near_tol": "the tolerance `near_misses` was found at",
+            "touch_tol": "the tolerance `clashes` was split from touching at",
+            "unmated_contacts": "parts that touch without a mate — designed "
+                                "contact is normal in an engine, so this is "
+                                "advisory and printed, never raised",
+        },
+        # Present only when they APPLY: the sweep says how far it got only
+        # when it stopped early. They are still `consumed` — the whole point
+        # of the gate — but their absence is not a rename.
+        "optional": {"truncated", "truncation", "pairs_unchecked"},
+    },
+}
 
 
 def _conn(spec):

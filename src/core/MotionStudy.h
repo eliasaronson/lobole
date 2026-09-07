@@ -33,6 +33,13 @@ namespace motion {
 struct Clash {
   uint64_t a = 0, b = 0; // top-level occurrence ids
   std::string aName, bName;
+  // WHERE the overlap is, for the same reason contact_report carries it: a
+  // pair of names is a guessing game on an assembly with eight of each. An
+  // exact check already builds the intersection to weigh it, so this is free
+  // there; a MESH check only answers yes, and leaves `known` false.
+  bool known = false;
+  double volume = 0.0;
+  glm::dvec3 centroid{0.0};
 };
 
 struct Sample {

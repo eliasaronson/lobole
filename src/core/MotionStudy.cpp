@@ -214,13 +214,27 @@ Result Run(const AssemblyDocument& asmDocIn,
             continue; // this pair is already a clash at this sample
           out.pairsChecked++;
           bool hit = false;
+          bool known = false;
+          double volume = 0.0;
+          glm::dvec3 centroid(0.0);
           if (study.clashMode == "exact") {
             std::vector<Body> ba(1), bb(1);
             ba[0].shape = placed[a].body->shape;
             bb[0].shape = placed[b].body->shape;
-            const auto v = Measure::InterferenceVolume(ba, placed[a].world, bb,
-                                                       placed[b].world);
-            hit = v.has_value() && *v > 1e-9;
+            // ContactBetween, not InterferenceVolume: it is the same boolean
+            // and it hands back WHERE the overlap is as well as how much,
+            // which is what a caller needs to act on the answer. It is also
+            // the one the named-pair `interference` RPC and contact_report
+            // take, so the two checks now agree rather than differing by a
+            // fuzz nobody could see.
+            const auto c = Measure::ContactBetween(ba, placed[a].world, bb,
+                                                   placed[b].world);
+            if (c) {
+              known = true;
+              volume = c->volume;
+              centroid = c->centroid;
+              hit = c->volume > 1e-9;
+            }
           } else {
             const auto ma = MeshFor(meshes, placed[a].body->shape);
             const auto mb = MeshFor(meshes, placed[b].body->shape);
@@ -231,6 +245,9 @@ Result Run(const AssemblyDocument& asmDocIn,
           }
           if (hit) {
             Clash c;
+            c.known = known;
+            c.volume = volume;
+            c.centroid = centroid;
             c.a = key.first;
             c.b = key.second;
             c.aName = placed[a].root == key.first ? placed[a].rootName
