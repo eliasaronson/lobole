@@ -675,6 +675,12 @@ set(app_sources
     src/ui/CommandPalette.cpp
     src/ui/Commands.cpp
     src/ui/SketchInteraction.cpp
+    src/ui/SketchTools.cpp
+    src/ui/SketchDimensions.cpp
+    src/ui/SketchToolOverlay.cpp
+    src/ui/SketchDimensionDraw.cpp
+    src/ui/SketchPick.cpp
+    src/ui/SketchOps.cpp
     src/ui/Toolbar.cpp
     src/render/RenderSheet.cpp
     src/render/Screenshot.cpp
