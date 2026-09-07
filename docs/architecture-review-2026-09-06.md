@@ -1,7 +1,8 @@
 # Architecture review round 2 (2026-09-06) — the oversized units
 
-> Status: **stages 1, 2, 3 (first wave) and 5 SHIPPED**, plus the two bug
-> sweeps they started (`202e454e`, `9222aaba`) on branch `wtarch`
+> Status: **stages 1-6, 7a and 8 SHIPPED**, plus the two bug sweeps they
+> started (`202e454e`, `9222aaba`). Only 7b (the sketch router) and 11 (tool
+> state) remain, and both are optional on branch `wtarch`
 > (d12ac214, 0d6097a3, 757c862d, 47301121). Two live bugs fell out of the work
 > and are fixed: `-DENABLE_CAM=OFF` did not compile, and a CAM job file with a
 > typo in an operation type loaded as a PROFILE. Section 11 records what the
@@ -576,14 +577,44 @@ Still outstanding from section 4's rationale: `rpc_gate_smoke.py` can now read
 the table instead of parsing C++ with a regex that a braced `if (m=="…") {`
 defeats. Worth doing; not done here.
 
+### Where the tree ended up
+
+Every file this round was written about:
+
+| | before | after |
+|---|---|---|
+| `ui/AppActions.cpp` | 6,428 | **gone** -- 11 files, largest 1,049 |
+| `ui/AppActions.h` | 864 | **gone** -- 13 headers, largest 25 declarations |
+| `ui/SketchInteraction.cpp` | 4,278 | **936** (the router) + 6 files |
+| `ui/AssemblyActions.cpp` | 3,353 | **487** + 5 files |
+| `core/cam/CamToolpath.cpp` | 3,306 | **gone** -- 6 files |
+| `remote/RemoteServer.cpp` | 2,948 | **82** + 3 files |
+| `tests/test_cam.cpp` | 5,965 | 5 files |
+
+The largest hand-written file in `src/` is now `app/guitests/GuiTestsCam.cpp`
+at 2,602, and the largest non-test one is `app/main.cpp` at 2,539 -- which
+this round deliberately did not touch (it has no test coverage at all; see
+"What not to do").
+
 ### Still to do
 
 Stages 1-6 and 8 are done. `AppActions.cpp` and `AppActions.h` no longer
 exist; `AssemblyActions.cpp` is 487 lines and `RemoteServer.cpp` is 82.
 
-What is left is stage 7 (`SketchInteraction.cpp`, 4,278 lines) and stage 11
-(tool state into `ui/state/*.h`). Stage 7 is the one this round has been
-calling the riskiest since it was written: its 843-line router is a pipeline
-whose ordering is load-bearing and recorded only in comments, and its coverage
-is 37 GUI tests with nothing headless. 7a -- the five non-router blocks -- is
-plain cuts and can go any time.
+**7b and 11, and neither is urgent.**
+
+7b is the 843-line router. 7a moved everything around it, so what is left is
+one file that is one function, and the caution that has applied since this
+plan was written still applies: the ordering is load-bearing, it is recorded
+only in comments (including one about a latent use-after-free), and the
+coverage is 37 GUI tests with nothing headless. The cut is by PHASE, one phase
+per commit, with the shuffled GUI suite between each. It is worth doing when
+a sketch feature next needs the room -- not as a standalone sweep.
+
+11 is cosmetic: the per-tool structs inside `AppState.h` move to
+`ui/state/*.h`. It does not shrink the preprocessed size for anyone, it only
+makes ownership legible. Do it or drop it.
+
+One follow-up unlocked by stage 8 and not done: `rpc_gate_smoke.py` can now
+read the `flags` column instead of parsing C++ with a regex that a braced
+`if (m=="…") {` defeats.
