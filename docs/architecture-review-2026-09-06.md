@@ -1,6 +1,7 @@
 # Architecture review round 2 (2026-09-06) — the oversized units
 
-> Status: **stages 1, 2, 3 (first wave) and 5 SHIPPED** on branch `wtarch`
+> Status: **stages 1, 2, 3 (first wave) and 5 SHIPPED**, plus the two bug
+> sweeps they started (`202e454e`, `9222aaba`) on branch `wtarch`
 > (d12ac214, 0d6097a3, 757c862d, 47301121). Two live bugs fell out of the work
 > and are fixed: `-DENABLE_CAM=OFF` did not compile, and a CAM job file with a
 > typo in an operation type loaded as a PROFILE. Section 11 records what the
@@ -440,7 +441,27 @@ it was simply not in the enum-parser sweep. It refuses now, with a
 sabotage-checked test.
 
 Both were found by *moving* code, not by reading it. That is the argument for
-the round.
+the round. Both also turned out to be one instance of something larger, and
+the follow-ups were where the value was.
+
+**The enum sweep was incomplete, not wrong.** Re-run with the right shape to
+look for -- a function RETURNING an enum from a string with a fallback return,
+as opposed to one returning `bool`/`optional` whose caller refuses -- the whole
+tree has three left, all CAM, all written after the 2026-08-24 sweep:
+`ToolTypeFromName` -> Flat, `SideFromName` -> Outside, and `SideFrom` (the RPC)
+-> Outside. `side` was silent on BOTH sides, so `add_cam_op(side: "insde")`
+posted a program that cuts air. All three refuse now, sabotage-checked.
+
+**`-DENABLE_CAM=OFF` had not linked since CAM shipped** on 2026-08-21: 36
+compile errors and nine undefined symbols, in a configuration CMake accepts and
+prints a status line for, unnoticed for two and a half weeks because nothing
+built it. The interesting part is that stage 2 is what made it fixable. CAM is
+optional ON Clipper2, and once `CamToolpath.cpp` was six files, three of them
+turned out to use no Clipper2 at all -- so the feature boundary could move to
+where it actually is (the job document's names, frames, bounds, picks and order
+build either way; only the polygon offsetting is optional). CI now builds and
+tests it, which the workflow already knew to do for the test-engine-free build:
+*"a configuration nobody compiles breaks silently."*
 
 ### Where the compile time went
 
