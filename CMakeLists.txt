@@ -679,6 +679,9 @@ set(app_sources
     src/render/RenderSheet.cpp
     src/render/Screenshot.cpp
     src/remote/RemoteServer.cpp
+    src/remote/RemoteSession.cpp
+    src/remote/RemoteDispatch.cpp
+    src/remote/RemoteUiActions.cpp
     src/remote/RemoteConfigurations.cpp
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
