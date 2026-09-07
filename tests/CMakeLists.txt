@@ -459,6 +459,15 @@ add_test(NAME contact_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(contact_smoke PROPERTIES TIMEOUT 120)
 
+# The clash sweep runs its booleans on every core. A race in OpenCASCADE's
+# lazily-filled per-shape caches, or a `record` that stops running in plan
+# order, corrupts an ANSWER rather than crashing — so this diffs a
+# one-thread report against an all-thread one, byte for byte.
+add_test(NAME sweep_parallel_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sweep_parallel_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sweep_parallel_smoke PROPERTIES TIMEOUT 300)
+
 # Two widgets in one window must not answer to one ImGui id. A source check,
 # because neither ImGui nor the test engine can see it: ImGui notices only
 # while the mouse is over one of the pair, and the engine gathers items BY id,

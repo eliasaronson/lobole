@@ -3,6 +3,7 @@
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
+#include "core/Parallel.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -193,7 +194,14 @@ Result Run(const AssemblyDocument& asmDocIn,
       std::vector<bool> ok(placed.size());
       for (size_t k = 0; k < placed.size(); k++)
         ok[k] = WorldBox(*placed[k].body, placed[k].world, lo[k], hi[k]);
-      std::map<std::pair<uint64_t, uint64_t>, Clash> found;
+      // Candidates first, then the booleans on every core. A contact
+      // check is ~161 ms and this study is 20,403 of them: run serially it
+      // was 3292 s, which was 85% of a whole generator run.
+      struct Cand {
+        size_t a, b;
+        std::pair<uint64_t, uint64_t> key;
+      };
+      std::vector<Cand> cands;
       for (size_t a = 0; a < placed.size(); a++) {
         if (!ok[a])
           continue;
@@ -207,56 +215,78 @@ Result Run(const AssemblyDocument& asmDocIn,
           if (lo[a].x > hi[b].x || lo[b].x > hi[a].x || lo[a].y > hi[b].y ||
               lo[b].y > hi[a].y || lo[a].z > hi[b].z || lo[b].z > hi[a].z)
             continue;
-          const auto key =
-              std::make_pair(std::min(placed[a].root, placed[b].root),
-                             std::max(placed[a].root, placed[b].root));
-          if (found.count(key))
-            continue; // this pair is already a clash at this sample
-          out.pairsChecked++;
-          bool hit = false;
-          bool known = false;
-          double volume = 0.0;
-          glm::dvec3 centroid(0.0);
-          if (study.clashMode == "exact") {
-            std::vector<Body> ba(1), bb(1);
-            ba[0].shape = placed[a].body->shape;
-            bb[0].shape = placed[b].body->shape;
-            // ContactBetween, not InterferenceVolume: it is the same boolean
-            // and it hands back WHERE the overlap is as well as how much,
-            // which is what a caller needs to act on the answer. It is also
-            // the one the named-pair `interference` RPC and contact_report
-            // take, so the two checks now agree rather than differing by a
-            // fuzz nobody could see.
-            const auto c = Measure::ContactBetween(ba, placed[a].world, bb,
-                                                   placed[b].world);
-            if (c) {
-              known = true;
-              volume = c->volume;
-              centroid = c->centroid;
-              hit = c->volume > 1e-9;
-            }
-          } else {
-            const auto ma = MeshFor(meshes, placed[a].body->shape);
-            const auto mb = MeshFor(meshes, placed[b].body->shape);
-            out.deflectionMm = std::max(
-                out.deflectionMm, std::max(ma->Deflection(), mb->Deflection()));
-            hit = ma->Overlaps(glm::dmat4(placed[a].world), *mb,
-                               glm::dmat4(placed[b].world));
-          }
-          if (hit) {
-            Clash c;
-            c.known = known;
-            c.volume = volume;
-            c.centroid = centroid;
-            c.a = key.first;
-            c.b = key.second;
-            c.aName = placed[a].root == key.first ? placed[a].rootName
-                                                  : placed[b].rootName;
-            c.bName = placed[a].root == key.first ? placed[b].rootName
-                                                  : placed[a].rootName;
-            found[key] = c;
-          }
+          cands.push_back({a,
+                           b,
+                           {std::min(placed[a].root, placed[b].root),
+                            std::max(placed[a].root, placed[b].root)}});
         }
+      }
+      // The serial loop used to skip a candidate whose ROOT pair had already
+      // clashed at this sample. That rule is inherently sequential, so it
+      // moves to the merge below, which keeps the FIRST in candidate order —
+      // the same one it kept before. `pairsChecked` therefore counts every
+      // boolean actually run, which is what it always claimed to be.
+      struct Hit {
+        bool hit = false, known = false;
+        double volume = 0.0, deflection = 0.0;
+        glm::dvec3 centroid{0.0};
+      };
+      std::vector<Hit> hits(cands.size());
+      // Mesh mode caches per shape in a shared map, so every mesh it will
+      // want is built HERE, single-threaded, before anything reads it.
+      if (study.clashMode != "exact")
+        for (const Cand& c : cands) {
+          MeshFor(meshes, placed[c.a].body->shape);
+          MeshFor(meshes, placed[c.b].body->shape);
+        }
+      parallel::For(cands.size(), [&](size_t k) {
+        const Cand& cd = cands[k];
+        Hit& h = hits[k];
+        if (study.clashMode == "exact") {
+          std::vector<Body> ba(1), bb(1);
+          ba[0].shape = placed[cd.a].body->shape;
+          bb[0].shape = placed[cd.b].body->shape;
+          // ContactBetween, not InterferenceVolume: it is the same boolean
+          // and it hands back WHERE the overlap is as well as how much,
+          // which is what a caller needs to act on the answer. It is also
+          // the one the named-pair `interference` RPC and contact_report
+          // take, so the two checks now agree rather than differing by a
+          // fuzz nobody could see.
+          const auto c = Measure::ContactBetween(ba, placed[cd.a].world, bb,
+                                                 placed[cd.b].world);
+          if (c) {
+            h.known = true;
+            h.volume = c->volume;
+            h.centroid = c->centroid;
+            h.hit = c->volume > 1e-9;
+          }
+        } else {
+          const auto ma = MeshFor(meshes, placed[cd.a].body->shape);
+          const auto mb = MeshFor(meshes, placed[cd.b].body->shape);
+          h.deflection = std::max(ma->Deflection(), mb->Deflection());
+          h.hit = ma->Overlaps(glm::dmat4(placed[cd.a].world), *mb,
+                               glm::dmat4(placed[cd.b].world));
+        }
+      });
+      std::map<std::pair<uint64_t, uint64_t>, Clash> found;
+      for (size_t k = 0; k < cands.size(); k++) {
+        const Cand& cd = cands[k];
+        const Hit& h = hits[k];
+        out.pairsChecked++;
+        out.deflectionMm = std::max(out.deflectionMm, h.deflection);
+        if (!h.hit || found.count(cd.key))
+          continue;
+        Clash c;
+        c.known = h.known;
+        c.volume = h.volume;
+        c.centroid = h.centroid;
+        c.a = cd.key.first;
+        c.b = cd.key.second;
+        c.aName = placed[cd.a].root == cd.key.first ? placed[cd.a].rootName
+                                                    : placed[cd.b].rootName;
+        c.bName = placed[cd.a].root == cd.key.first ? placed[cd.b].rootName
+                                                    : placed[cd.a].rootName;
+        found[cd.key] = c;
       }
       for (auto& [key, c] : found)
         s.clashes.push_back(c);

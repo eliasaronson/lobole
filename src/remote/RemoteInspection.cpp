@@ -8,6 +8,7 @@
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
 #include "core/Occurrence.h"
+#include "core/Parallel.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
@@ -23,13 +24,17 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -119,42 +124,87 @@ struct SweepPlan {
   double elapsed = 0.0;       // seconds spent on the exact checks
 };
 
-// Walks a plan's exact pairs until the deadline, calling `check(i, j)`.
-// Returns how many were checked; the rest are folded into the plan's
-// over-budget count so the coverage report covers both reasons.
-template <typename F>
-size_t RunSweep(SweepPlan& plan, double deadlineSeconds, F&& check) {
+// Runs the plan's exact pairs, IN PARALLEL, then hands each result to
+// `record(i, j, result)` on the calling thread in PLAN ORDER.
+//
+// The split into `compute` and `record` is not a style choice. `record`
+// touches shared json, a union-find and a set; `compute` touches nothing but
+// its own two shapes. Only the second of those can run on twenty-two threads
+// at once, and a contact check is 161 ms of OpenCASCADE boolean — a
+// 49-sample motion study on this engine is 20,403 of them, 3292 s on one
+// core. Recording in plan order is what keeps the response byte-identical to
+// a serial sweep, so the two can be diffed (`sweep_parallel_smoke.py`).
+//
+// Pairs are DISPATCHED in plan order — closest box gap first — and the
+// deadline stops new dispatches rather than cancelling running ones, so the
+// set that gets checked is still a PREFIX of the plan and `truncation` still
+// means "the closest N". A boolean already running cannot be preempted; the
+// reported `elapsed_s` is the honest number either way.
+//
+// OpenCASCADE fills caches lazily ON the shape, and one body appears in many
+// pairs, so shapes must be warm before the workers start. They are:
+// `Measure::WorldBounds` runs over every entity, single-threaded, while the
+// plan is being built.
+template <typename C, typename R>
+size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
+                R&& record) {
+  using Result = decltype(compute(size_t{0}, size_t{0}));
   const auto start = std::chrono::steady_clock::now();
   const bool timed = deadlineSeconds > 0.0;
-  plan.elapsed = 0.0;
-  // The deadline is checked BETWEEN pairs: one contact check between two
-  // imported servos has been measured at 100 s on its own, and no bound
-  // here can preempt an OpenCASCADE boolean already running. `elapsed_s`
-  // in the response is the honest number.
-  for (size_t k = 0; k < plan.exact.size(); ++k) {
-    // Every pair, not every eighth: one contact check between two imported
-    // servos is seconds, so sampling the clock in batches overran a 20 s
-    // deadline by 100 s. Reading a steady_clock is nanoseconds.
-    if (timed) {
-      const double elapsed = std::chrono::duration<double>(
-                                 std::chrono::steady_clock::now() - start)
-                                 .count();
-      if (elapsed > deadlineSeconds) {
-        if (plan.overBudget == 0 || plan.gap[k] < plan.overBudgetGap)
-          plan.overBudgetGap = plan.gap[k];
-        plan.overBudget += plan.exact.size() - k;
-        plan.exact.resize(k);
-        plan.gap.resize(k);
-        plan.elapsed = elapsed;
-        return k;
+  const size_t n = plan.exact.size();
+  const auto elapsedNow = [&start] {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         start)
+        .count();
+  };
+
+  std::vector<Result> results(n);
+  std::atomic<size_t> next{0};
+  std::atomic<size_t> stopAt{n}; // first pair the deadline turned away
+  const auto worker = [&] {
+    for (;;) {
+      const size_t k = next.fetch_add(1, std::memory_order_relaxed);
+      if (k >= stopAt.load(std::memory_order_relaxed))
+        return;
+      // Every pair, not every eighth: one contact check between two imported
+      // servos is seconds, so sampling the clock in batches overran a 20 s
+      // deadline by 100 s. Reading a steady_clock is nanoseconds.
+      if (timed && elapsedNow() > deadlineSeconds) {
+        size_t seen = stopAt.load(std::memory_order_relaxed);
+        while (k < seen && !stopAt.compare_exchange_weak(
+                               seen, k, std::memory_order_relaxed))
+          ;
+        return;
       }
+      results[k] = compute(plan.exact[k].first, plan.exact[k].second);
     }
-    check(plan.exact[k].first, plan.exact[k].second);
+  };
+
+  const size_t threads = std::min<size_t>(n, parallel::Workers());
+  if (threads <= 1) {
+    worker();
+  } else {
+    std::vector<std::thread> pool;
+    pool.reserve(threads - 1);
+    for (size_t t = 1; t < threads; ++t)
+      pool.emplace_back(worker);
+    worker(); // this thread pulls its share rather than idling
+    for (std::thread& t : pool)
+      t.join();
   }
-  plan.elapsed =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
-          .count();
-  return plan.exact.size();
+
+  const size_t checked = std::min(stopAt.load(), n);
+  for (size_t k = 0; k < checked; ++k)
+    record(plan.exact[k].first, plan.exact[k].second, results[k]);
+
+  plan.elapsed = elapsedNow();
+  if (checked < n) {
+    plan.overBudgetGap = plan.gap[checked];
+    plan.overBudget += n - checked;
+    plan.exact.resize(checked);
+    plan.gap.resize(checked);
+  }
+  return checked;
 }
 
 SweepPlan PlanSweep(const std::vector<glm::vec3>& mins,
@@ -829,29 +879,31 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         SweepPlan plan = PlanSweep(km, kx, 0.0, maxPairs);
         json pairs = json::array();
         bool any = false;
-        RunSweep(plan, deadline, [&](size_t ki, size_t kj) {
-          const Target& ta = occs[keep[ki]];
-          const Target& tb = occs[keep[kj]];
-          if (mode == "mesh") {
-            if (!pairMesh(ta, tb))
-              return;
-            any = true;
-            // No volume: a volume measured off triangles is the
-            // tessellation's volume, and reporting one would invite exactly
-            // the false precision this method is not for.
-            pairs.push_back(
-                {{"a", ta.label}, {"b", tb.label}, {"clash", true}});
-            return;
-          }
-          const double v = pairVolume(ta, tb);
-          if (v <= 1e-9)
-            return;
-          any = true;
-          pairs.push_back({{"a", ta.label},
-                           {"b", tb.label},
-                           {"clash", true},
-                           {"volume", v}});
-        });
+        // -1 = clear. In mesh mode a hit carries no volume: a volume
+        // measured off triangles is the TESSELLATION's volume, and reporting
+        // one would invite exactly the false precision this method is not
+        // for — so mesh answers 0 and exact answers the volume it found.
+        RunSweep(
+            plan, deadline,
+            [&](size_t ki, size_t kj) -> double {
+              const Target& ta = occs[keep[ki]];
+              const Target& tb = occs[keep[kj]];
+              if (mode == "mesh")
+                return pairMesh(ta, tb) ? 0.0 : -1.0;
+              const double v = pairVolume(ta, tb);
+              return v > 1e-9 ? v : -1.0;
+            },
+            [&](size_t ki, size_t kj, double v) {
+              if (v < 0.0)
+                return;
+              any = true;
+              json hit{{"a", occs[keep[ki]].label},
+                       {"b", occs[keep[kj]].label},
+                       {"clash", true}};
+              if (mode != "mesh")
+                hit["volume"] = v;
+              pairs.push_back(std::move(hit));
+            });
         json out{{"clash", any}, {"pairs", pairs}, {"mode", mode}};
         if (mode == "mesh")
           out["deflection_mm"] = meshDeflection;
@@ -1457,35 +1509,37 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const size_t maxPairs = p.value("max_pairs", size_t{4000});
     const double deadline = p.value("deadline_s", 20.0);
     SweepPlan plan = PlanSweep(mins, maxs, nearTol, maxPairs);
-    RunSweep(plan, deadline, [&](size_t i, size_t j) {
-      {
-        const auto c = Measure::ContactBetween(ents[i].bodies, ents[i].xf,
-                                               ents[j].bodies, ents[j].xf);
-        if (!c)
-          return;
-        const char* st = ContactState(*c, touchTol);
-        pairs.push_back({{"a", ents[i].occ->name},
-                         {"b", ents[j].occ->name},
-                         {"state", st},
-                         {"distance", c->distance},
-                         {"volume", c->volume}});
-        if (std::string_view(st) != "clear") {
-          parent[find(i)] = find(j);
-          touchingIds.insert({std::min(ents[i].occ->id, ents[j].occ->id),
-                              std::max(ents[i].occ->id, ents[j].occ->id)});
-        }
-        if (std::string_view(st) == "clash") {
-          json clash{{"a", ents[i].occ->name},
-                     {"b", ents[j].occ->name},
-                     {"volume", c->volume}};
-          AddOverlapSite(clash, *c);
-          clashes.push_back(std::move(clash));
-        } else if (c->distance > touchTol && c->distance <= nearTol)
-          nearMisses.push_back({{"a", ents[i].occ->name},
-                                {"b", ents[j].occ->name},
-                                {"distance", c->distance}});
-      }
-    });
+    RunSweep(
+        plan, deadline,
+        [&](size_t i, size_t j) {
+          return Measure::ContactBetween(ents[i].bodies, ents[i].xf,
+                                         ents[j].bodies, ents[j].xf);
+        },
+        [&](size_t i, size_t j, const std::optional<Measure::SetContact>& c) {
+          if (!c)
+            return;
+          const char* st = ContactState(*c, touchTol);
+          pairs.push_back({{"a", ents[i].occ->name},
+                           {"b", ents[j].occ->name},
+                           {"state", st},
+                           {"distance", c->distance},
+                           {"volume", c->volume}});
+          if (std::string_view(st) != "clear") {
+            parent[find(i)] = find(j);
+            touchingIds.insert({std::min(ents[i].occ->id, ents[j].occ->id),
+                                std::max(ents[i].occ->id, ents[j].occ->id)});
+          }
+          if (std::string_view(st) == "clash") {
+            json clash{{"a", ents[i].occ->name},
+                       {"b", ents[j].occ->name},
+                       {"volume", c->volume}};
+            AddOverlapSite(clash, *c);
+            clashes.push_back(std::move(clash));
+          } else if (c->distance > touchTol && c->distance <= nearTol)
+            nearMisses.push_back({{"a", ents[i].occ->name},
+                                  {"b", ents[j].occ->name},
+                                  {"distance", c->distance}});
+        });
     std::map<size_t, std::vector<std::string>> comps;
     for (size_t i = 0; i < ents.size(); ++i)
       comps[find(i)].push_back(ents[i].occ->name);
