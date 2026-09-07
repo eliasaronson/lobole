@@ -17,6 +17,7 @@
 #include <vector>
 
 class Document;
+class SketchFeature;
 class AssemblyDocument;
 class DrawingDocument;
 struct Occurrence;
@@ -195,5 +196,16 @@ void ResetActiveTabUiState(AppState& state);
 // the section machinery and drawn by SyncDocumentRenderers in RendererSync.cpp.
 void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
                        const std::vector<glm::vec3>& bodyColors);
+
+// The colour a sketch's lines are drawn in, beside the walk that draws them:
+// SceneOverlays.cpp uses it for every sketch that is not being edited, and
+// SketchOverlay.cpp for the one that is, and two copies would drift.
+inline constexpr glm::vec3 kSketchColor{0.40f, 0.72f, 1.00f};
+
+// One sketch's entities as 3D line vertices. Defined in SceneOverlays.cpp,
+// which draws the sketches that are NOT being edited; SketchOverlay.cpp wants
+// the same walk for the one that is.
+void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
+                       std::vector<LineVertex3D>& out);
 
 } // namespace ui

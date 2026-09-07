@@ -3259,4 +3259,92 @@ void MaterializeImportedAssembly(AppState& state,
   FitCameraToDocument(state);
 }
 
+// ---------------------------------------------------------------------------
+// Occurrence placement and part lookup, from AppActions.cpp
+// (docs/architecture-review-2026-09-06.md, stage 3, third wave). They were in
+// the monolith because the lifecycle and drawing code needed them too;
+// AppActionsInternal.h keeps declaring the two that still cross a file, and
+// they are defined here now, with the assembly they describe.
+
+// An occurrence's placement as a model matrix (translate ∘ rotate).
+glm::mat4 OccurrenceMatrix(const Occurrence& o) {
+  return glm::translate(glm::mat4(1.0f), o.position) *
+         glm::mat4_cast(o.orientation);
+}
+
+// Exploded-view display (A4): the occurrence's factor-scaled world offset in
+// the active exploded view (zero when none / no step). PURE VIEW STATE —
+// composed into rendered/picked transforms only, never into the document.
+glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
+  if (!state.activeExplodedView || !state.assembly)
+    return glm::vec3(0.0f);
+  const ExplodedView* v =
+      state.assembly->FindExplodedViewById(state.activeExplodedView);
+  if (!v)
+    return glm::vec3(0.0f);
+  for (const ExplodeStep& s : v->steps)
+    if (s.occurrenceId == occId)
+      return s.offset * state.explodeFactor;
+  return glm::vec3(0.0f);
+}
+
+// What an occurrence renders (and picks) at: the solved placement, displaced
+// by the active exploded view.
+glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
+  return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) *
+         OccurrenceMatrix(o);
+}
+
+glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o) {
+  return DisplayMatrix(state, o);
+}
+
+// The part document an occurrence references, by stable id (active or stashed).
+Document* PartDocById(AppState& state, uint64_t partId) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == DocKind::Part && state.parts[i].id == partId)
+      return SlotDoc(state, i);
+  return nullptr;
+}
+
+// The ASSEMBLY document an occurrence references (A5), by the same stable slot
+// id — an occurrence's `partId` resolves against parts or assemblies
+// depending on its refKind. Null when the id is not an assembly slot.
+AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == DocKind::Assembly && state.parts[i].id == slotId)
+      return SlotAssembly(state, i);
+  return nullptr;
+}
+
+// The two resolvers Flatten wants, bound to this AppState. Every walker that
+// needs the leaf parts of the active assembly goes through here, so none of
+// them has to know how slots are stored.
+assembly::PartResolver PartResolverFor(AppState& state) {
+  return [&state](uint64_t id) -> const Document* {
+    return PartDocById(state, id);
+  };
+}
+assembly::AssemblyResolver AssemblyResolverFor(AppState& state) {
+  return [&state](uint64_t id) -> const AssemblyDocument* {
+    return AssemblyDocById(state, id);
+  };
+}
+
+// The leaf parts of the active assembly, placed. Empty (with the reason
+// logged once) when the tree cannot be walked — a cycle, or nesting past the
+// depth cap. Callers render/aggregate what they get; refusing to draw
+// anything at all would hide the model AND the message.
+std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state) {
+  if (!state.assembly)
+    return {};
+  auto flat = assembly::Flatten(*state.assembly, PartResolverFor(state),
+                                AssemblyResolverFor(state));
+  if (!flat) {
+    LOG_ERROR("Assembly cannot be walked: {}", flat.error());
+    return {};
+  }
+  return *flat;
+}
+
 } // namespace ui

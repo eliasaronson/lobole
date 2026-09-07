@@ -817,4 +817,125 @@ void AppendCalibrationMarkers(AppState& state, std::vector<PrimVertex>& out) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// What is selected, from AppActions.cpp
+// (docs/architecture-review-2026-09-06.md, stage 3, third wave). This file
+// already turned a click into a SelectionItem; these are the questions the rest
+// of the app asks about the result, and the pruning that keeps it honest when
+// the document changes underneath it.
+
+// SyncAssemblyRenderers / SyncInContextGhosts / EvictPartRenderCache are
+// defined in AssemblyActions.cpp (the assembly domain, extracted from this TU)
+// and declared in AppActionsInternal.h, which this TU now includes for the
+// render-cache types — so the hand-copied declarations that used to sit here
+// are gone, and cannot drift from the real ones.
+
+uint64_t SelectedFeatureId(const AppState& state) {
+  const SelectionItem* it = state.selection.First(SelectionItem::Kind::Feature);
+  return it != nullptr ? it->id : 0;
+}
+
+Feature* SelectedFeature(AppState& state, size_t* indexOut) {
+  const uint64_t id = SelectedFeatureId(state);
+  if (id == 0 || !state.document)
+    return nullptr;
+  return state.document->FindFeatureById(id, indexOut);
+}
+
+int SelectedFeatureIndexOrMinus1(AppState& state) {
+  size_t index = 0;
+  return SelectedFeature(state, &index) != nullptr ? static_cast<int>(index)
+                                                   : -1;
+}
+
+void SelectFeature(AppState& state, uint64_t featureId) {
+  state.selection.Replace({SelectionItem::Kind::Feature, featureId, {}});
+}
+
+void OpenFeatureEditor(AppState& state, uint64_t featureId) {
+  if (!state.document || state.document->FindFeatureById(featureId) == nullptr)
+    return;
+  SelectFeature(state, featureId);
+  state.editFeatureId = featureId; // the Tool window shows the editor session
+}
+
+void SelectFeatureByIndex(AppState& state, size_t index) {
+  if (!state.document || index >= state.document->FeatureCount())
+    return;
+  SelectFeature(state, state.document->GetFeature(index)->GetId());
+}
+
+uint64_t SelectedOccurrenceId(const AppState& state) {
+  const SelectionItem* it =
+      state.selection.First(SelectionItem::Kind::Occurrence);
+  return it != nullptr ? it->id : 0;
+}
+
+std::vector<uint64_t> SelectedOccurrenceIds(const AppState& state) {
+  // The selection has always been a SET — the viewport has ctrl-clicked
+  // occurrences into it since U1d — and SelectedOccurrenceId returning only
+  // the FIRST is what made every consumer single-select. This is the same
+  // question asked without that narrowing.
+  std::vector<uint64_t> out;
+  for (const SelectionItem& it : state.selection.items)
+    if (it.kind == SelectionItem::Kind::Occurrence && it.id != 0)
+      out.push_back(it.id);
+  return out;
+}
+
+uint64_t SelectedMateId(const AppState& state) {
+  const SelectionItem* it = state.selection.First(SelectionItem::Kind::Mate);
+  return it != nullptr ? it->id : 0;
+}
+
+namespace {
+// Replace only the given kind's items (occurrence and mate selections are
+// independent, as their pre-U1 fields were); id 0 just removes the kind.
+void ReplaceKind(Selection& sel, SelectionItem::Kind kind, uint64_t id) {
+  auto& items = sel.items;
+  items.erase(
+      std::remove_if(items.begin(), items.end(),
+                     [&](const SelectionItem& it) { return it.kind == kind; }),
+      items.end());
+  if (id != 0)
+    items.push_back({kind, id, {}});
+}
+} // namespace
+
+void SelectMate(AppState& state, uint64_t mateId) {
+  ReplaceKind(state.selection, SelectionItem::Kind::Mate, mateId);
+}
+
+void PruneSelection(AppState& state) {
+  auto& items = state.selection.items;
+  items.erase(
+      std::remove_if(
+          items.begin(), items.end(),
+          [&](const SelectionItem& it) {
+            switch (it.kind) {
+            case SelectionItem::Kind::Feature:
+              return !state.document ||
+                     state.document->FindFeatureById(it.id) == nullptr;
+            case SelectionItem::Kind::Occurrence:
+              return !state.assembly ||
+                     state.assembly->FindById(it.id) == nullptr;
+            case SelectionItem::Kind::Mate:
+              return !state.assembly ||
+                     state.assembly->FindMateById(it.id) == nullptr;
+            case SelectionItem::Kind::Operation: {
+              if (!state.job)
+                return true;
+              for (const cam::Setup& s : state.job->GetSetups())
+                for (const cam::Operation& op : s.operations)
+                  if (op.id == it.id)
+                    return false;
+              return true;
+            }
+            default:
+              return false; // geometry refs resolve lazily; stale = no-op
+            }
+          }),
+      items.end());
+}
+
 } // namespace ui

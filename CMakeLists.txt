@@ -639,7 +639,6 @@ set(app_sources
     src/ui/FastenerTool.cpp
     src/ui/DerivedActions.cpp
     src/ui/FileDialogs.cpp
-    src/ui/AppActions.cpp
     src/ui/ProjectActions.cpp
     src/ui/RendererSync.cpp
     src/ui/MeasureActions.cpp
@@ -647,6 +646,10 @@ set(app_sources
     src/ui/DocumentSlots.cpp
     src/ui/ViewActions.cpp
     src/ui/DrawingActions.cpp
+    src/ui/SceneOverlays.cpp
+    src/ui/VariableActions.cpp
+    src/ui/SketchOverlay.cpp
+    src/ui/ImportActions.cpp
     src/ui/AssemblyActions.cpp
     src/ui/MotionActions.cpp
     src/ui/JobActions.cpp
