@@ -654,8 +654,12 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   // inherit the mistake. Arcs are chords by now, so this measures what a
   // circle SWEEPS. Skipped when the machine states no work area, which is
   // most of the corpus.
+  // ...Framed, because `bodies` here already IS framed (above). MachineBounds
+  // frames what it is given, so passing these applied the setup rotation
+  // TWICE -- which is invisible on an identity frame and put every move of a
+  // baffle clamped face-up 391 mm outside its own machine.
   glm::dvec3 bedLo(0.0), bedHi(0.0);
-  if (MachineBounds(setup, bodies, bedLo, bedHi)) {
+  if (MachineBoundsFramed(setup, bodies, bedLo, bedHi)) {
     const char axes[2] = {'X', 'Y'};
     for (const GMove& mv : program.moves) {
       for (int a = 0; a < 2; a++) {

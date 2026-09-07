@@ -1197,6 +1197,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"leftover_regions", v.leftoverRegions},
                 {"leftover_biggest", biggest},
                 {"rapids_through_stock", v.rapidsThroughStock},
+                // Moves the machine cannot reach. A verdict field nothing
+                // reports is the same silence this check exists to end.
+                {"outside_travel", v.outsideTravel},
+                {"outside_travel_axis", std::string(1, v.outsideAxis)},
+                {"outside_travel_overshoot_mm", v.worstOvershoot},
+                {"first_outside_line", v.firstOutsideLine},
                 {"first_bad_line", v.firstBadLine},
                 {"resolution_mm", res},
                 {"cells", v.cells},

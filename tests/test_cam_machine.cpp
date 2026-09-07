@@ -836,6 +836,27 @@ TEST_CASE("cam verify: the POSTED FILE is checked against the travel",
     if (l.text.find("cannot go") != std::string::npos)
       said = true;
   CHECK(said);
+
+  // ...and on a part that is CLAMPED, not modelled flat. `Inspect` frames the
+  // bodies before this check, so framing them again inside it applied the
+  // setup rotation twice -- which an identity frame cannot show. A baffle
+  // laid face-up read every one of its 6809 moves as 391 mm outside a machine
+  // that reaches all of them.
+  cam::Setup turned = setup;
+  turned.frame = glm::dquat(glm::dvec3(-glm::half_pi<double>(), 0.0, 0.0));
+  turned.machine = cam::Machine{};
+  turned.machine.name = "Roomy";
+  turned.machine.travelMin = {0.0, 0.0, -100.0};
+  turned.machine.travelMax = {600.0, 900.0, 0.0}; // reaches the lot
+  REQUIRE(cam::RecomputeOrigin(turned, doc->GetBodies()));
+  const auto turnedPaths = cam::GenerateAll(turned, doc->GetBodies());
+  std::string turnedGcode;
+  REQUIRE(
+      cam::PostProcess("mach3", turned, turnedPaths, {}, turnedGcode, &error));
+  const cam::Verdict tv =
+      cam::VerifyGcode(turnedGcode, turned, doc->GetBodies(), 0.25);
+  INFO("outside " << tv.outsideTravel << " worst " << tv.worstOvershoot);
+  CHECK(tv.outsideTravel == 0);
 }
 
 TEST_CASE("cam verify: a nested comment is a file no controller will load",
