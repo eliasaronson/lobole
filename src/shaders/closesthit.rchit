@@ -39,6 +39,10 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 fillColor;
     vec4 rimDir;
     vec4 rimColor;
+    // Section planes; a hit is removed where dot(n, p) > w. clipInfo.x is how
+    // many are live, so a scene with no section costs one compare per ray.
+    vec4 clipPlanes[4];
+    vec4 clipInfo;
 } ubo;
 
 // Per-body vertex/index data reached by device address. std430 float/uint
@@ -170,8 +174,14 @@ Vertex unpackVertex(GeometryInfo g, uint index) {
 // Whether a ray from `origin` along `dir` hits any geometry within `tMax`.
 bool traceOcclusion(vec3 origin, vec3 dir, float tMax) {
     isShadowed = true;
-    uint flags = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT |
-                 gl_RayFlagsSkipClosestHitShaderEXT;
+    // OpaqueEXT skips any-hit, and any-hit is what removes sectioned material.
+    // Left on with a section live, cut-away material keeps casting shadows and
+    // occluding AO -- a correctly cut model lit by geometry that is no longer
+    // there, which reads as a lighting bug rather than a section one. Dropped
+    // only when something IS cut, so the common path keeps the fast flag.
+    uint flags = gl_RayFlagsTerminateOnFirstHitEXT |
+                 gl_RayFlagsSkipClosestHitShaderEXT |
+                 (ubo.clipInfo.x > 0.5 ? 0u : gl_RayFlagsOpaqueEXT);
     // sbtRecordOffset 0 keeps the ray in the single hit region; missIndex 1 is
     // the shadow-miss shader, which clears isShadowed on a miss.
     traceRayEXT(topLevelAS, flags, 0xff, 0, 0, 1, origin, 0.001, dir, tMax, 1);

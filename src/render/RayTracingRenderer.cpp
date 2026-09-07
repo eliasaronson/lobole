@@ -257,9 +257,9 @@ bool RayTracingRenderer::CreateRTPipeline() {
   // Create descriptor set layout. Bindings are shared by the whole offline
   // pipeline; per-body vertex/index data is reached through buffer-reference
   // addresses in the GeometryInfo SSBO (binding 3), not per-body descriptors.
-  const VkShaderStageFlags allRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
-                                   VK_SHADER_STAGE_MISS_BIT_KHR |
-                                   VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+  const VkShaderStageFlags allRT =
+      VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
   std::vector<VkDescriptorSetLayoutBinding> bindings = {
       // 0: TLAS
       {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1,
@@ -270,9 +270,11 @@ bool RayTracingRenderer::CreateRTPipeline() {
        nullptr},
       // 2: camera + light UBO
       {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, allRT, nullptr},
-      // 3: GeometryInfo[] (per-body vertex/index addresses + material index)
+      // 3: GeometryInfo[] (per-body vertex/index addresses + material index).
+      //    The any-hit stage reads it too, to spare the ground plane a cut.
       {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
+       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+       nullptr},
       // 4: RTMaterial[]
       {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
@@ -333,12 +335,15 @@ bool RayTracingRenderer::CreateRTPipeline() {
       vkutil::LoadShaderModule(m_device, "closesthit.spv");
   VkShaderModule shadowMissModule =
       vkutil::LoadShaderModule(m_device, "shadow.spv");
+  VkShaderModule sectionAnyHitModule =
+      vkutil::LoadShaderModule(m_device, "section.spv");
   if (raygenModule == VK_NULL_HANDLE || missModule == VK_NULL_HANDLE ||
       closesthitModule == VK_NULL_HANDLE ||
-      shadowMissModule == VK_NULL_HANDLE) {
+      shadowMissModule == VK_NULL_HANDLE ||
+      sectionAnyHitModule == VK_NULL_HANDLE) {
     LOG_ERROR("Ray Tracing: failed to load RT shaders");
-    for (VkShaderModule m :
-         {raygenModule, missModule, closesthitModule, shadowMissModule})
+    for (VkShaderModule m : {raygenModule, missModule, closesthitModule,
+                             shadowMissModule, sectionAnyHitModule})
       vkDestroyShaderModule(m_device, m, nullptr);
     return false;
   }
@@ -352,7 +357,9 @@ bool RayTracingRenderer::CreateRTPipeline() {
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, closesthitModule, "main", nullptr},
       {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-       VK_SHADER_STAGE_MISS_BIT_KHR, shadowMissModule, "main", nullptr}};
+       VK_SHADER_STAGE_MISS_BIT_KHR, shadowMissModule, "main", nullptr},
+      {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+       VK_SHADER_STAGE_ANY_HIT_BIT_KHR, sectionAnyHitModule, "main", nullptr}};
 
   // Shader groups
   std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups = {
@@ -364,11 +371,12 @@ bool RayTracingRenderer::CreateRTPipeline() {
       {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr,
        VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 1, VK_SHADER_UNUSED_KHR,
        VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR, nullptr},
-      // Hit group (closest hit)
+      // Hit group (closest hit + the section any-hit). Filling the any-hit
+      // slot that was already here leaves the GROUP COUNT alone, so the
+      // shader binding table's strides and regions are untouched.
       {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr,
        VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
-       VK_SHADER_UNUSED_KHR, 2, VK_SHADER_UNUSED_KHR, VK_SHADER_UNUSED_KHR,
-       nullptr},
+       VK_SHADER_UNUSED_KHR, 2, 4, VK_SHADER_UNUSED_KHR, nullptr},
       // Shadow miss group
       {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR, nullptr,
        VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR, 3, VK_SHADER_UNUSED_KHR,
@@ -394,6 +402,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
     vkDestroyShaderModule(m_device, missModule, nullptr);
     vkDestroyShaderModule(m_device, closesthitModule, nullptr);
     vkDestroyShaderModule(m_device, shadowMissModule, nullptr);
+    vkDestroyShaderModule(m_device, sectionAnyHitModule, nullptr);
     return false;
   }
 
@@ -402,6 +411,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
   vkDestroyShaderModule(m_device, missModule, nullptr);
   vkDestroyShaderModule(m_device, closesthitModule, nullptr);
   vkDestroyShaderModule(m_device, shadowMissModule, nullptr);
+  vkDestroyShaderModule(m_device, sectionAnyHitModule, nullptr);
 
   LOG_INFO("Ray Tracing: RT pipeline created successfully");
   return true;
@@ -663,6 +673,12 @@ struct RTUniforms {
   glm::vec4 fillColor;
   glm::vec4 rimDir;
   glm::vec4 rimColor;
+  // Section planes (ClipPlanes.h's convention: xyz = world normal, w =
+  // distance, a hit removed when dot(n, p) > w; an all-zero slot disabled).
+  glm::vec4 clipPlanes[kMaxClipPlanes];
+  // x = how many of them are live. Kept as a count so the hot path can skip
+  // the whole test with one compare instead of four length checks per ray.
+  glm::vec4 clipInfo;
 };
 
 glm::vec3 ACESFilm(const glm::vec3& x) {
@@ -815,6 +831,15 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   u.fillColor = glm::vec4(glm::vec3(conv::kFillLight), 1.0f);
   u.rimDir = glm::vec4(-toRim, conv::kRimLight.a);
   u.rimColor = glm::vec4(glm::vec3(conv::kRimLight), 1.0f);
+  // Section planes, compacted so the shader's count is the loop bound.
+  int live = 0;
+  for (const glm::vec4& pl : desc.clipPlanes)
+    if (glm::length(glm::vec3(pl)) > 1e-6f)
+      u.clipPlanes[live++] = pl;
+  for (int i = live; i < kMaxClipPlanes; ++i)
+    u.clipPlanes[i] = glm::vec4(0.0f);
+  u.clipInfo = glm::vec4(static_cast<float>(live), 0.0f, 0.0f, 0.0f);
+  m_stillHasClip = live > 0;
   u.params = glm::vec4(static_cast<float>(desc.prefilterMips), desc.rayFar,
                        desc.aoRadius, desc.studioBackdrop ? 1.0f : 0.0f);
 
@@ -1348,7 +1373,14 @@ bool RayTracingRenderer::CreateBottomLevelAS() {
     VkAccelerationStructureGeometryKHR asGeom{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
     asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    asGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    // NOT VK_GEOMETRY_OPAQUE_BIT_KHR. That flag is a property of the
+    // acceleration structure and suppresses the any-hit stage outright, so
+    // section.rahit never ran and a sectioned still came back uncut -- with
+    // no error anywhere, because declaring geometry opaque is a promise the
+    // driver is entitled to keep. Opacity is decided per RAY instead
+    // (gl_RayFlagsOpaqueEXT in raygen/closesthit, dropped only when a plane
+    // is live), which costs nothing when nothing is cut and still lets a cut
+    // through when something is.
     auto& tri = asGeom.geometry.triangles;
     tri.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;

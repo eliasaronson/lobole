@@ -1,0 +1,70 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference2 : require
+
+// Section cuts for the path-traced still.
+//
+// The raster passes discard a FRAGMENT past a clip plane (mesh.frag and
+// friends, all reading ui::SectionPlanes through ClipPlanes.h). A ray tracer
+// cannot do that in closest-hit: by then traversal has already committed to
+// the nearest surface, and rejecting it there would leave a hole rather than
+// reveal what is behind it. Any-hit is the stage that can — ignoring an
+// intersection lets traversal carry on and find the next surface along the
+// ray, which is exactly what a cut-open view is.
+//
+// Same rule as ClipPlanes.h so a ray and a fragment agree to the letter:
+// removed where dot(n, p) > w for ANY live plane.
+
+layout(binding = 2, set = 0) uniform UniformBufferObject {
+    mat4 viewInverse;
+    mat4 projInverse;
+    vec4 viewPos;
+    vec4 lightDir;
+    vec4 lightColor;
+    vec4 ambientColor;
+    vec4 params;
+    vec4 fillDir;
+    vec4 fillColor;
+    vec4 rimDir;
+    vec4 rimColor;
+    // Section planes; a hit is removed where dot(n, p) > w. clipInfo.x is how
+    // many are live, so a scene with no section costs one compare per ray.
+    vec4 clipPlanes[4];
+    vec4 clipInfo;
+} ubo;
+
+// Geometry flags, to spare the backdrop below. Must match closesthit.rchit.
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer FloatBuf { float f[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer UintBuf { uint u[]; };
+const uint kFlagShadowCatcher = 1u;
+struct GeometryInfo {
+    FloatBuf verts;
+    UintBuf inds;
+    uint materialIndex;
+    uint flags;
+    uint pad0;
+    uint pad1;
+};
+layout(binding = 3, set = 0, std430) readonly buffer GeometryInfos {
+    GeometryInfo geoms[];
+};
+
+void main() {
+    int live = int(ubo.clipInfo.x + 0.5);
+    if (live == 0)
+        return; // no section: every hit stands
+
+    // The ground is scenery, not model. Cutting it leaves the shadow catcher
+    // ending in mid-air at the plane, with the backdrop showing through the
+    // gap — a section through the part should not saw the floor in half.
+    if ((geoms[gl_InstanceCustomIndexEXT].flags & kFlagShadowCatcher) != 0u)
+        return;
+
+    vec3 p = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
+    for (int i = 0; i < live; i++) {
+        vec4 pl = ubo.clipPlanes[i];
+        if (dot(pl.xyz, p) > pl.w) {
+            ignoreIntersectionEXT;
+        }
+    }
+}

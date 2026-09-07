@@ -1830,11 +1830,11 @@ void ReleaseTessellationCache(AppState& state) {
 
 // Renders an assembly: one asset per referenced part body, one instance per
 // occurrence. Assets are shared across occurrences of the same part.
-namespace {
 // The section plane in ONE occurrence's part space. A world plane
 // {n, d} and a rigid placement M = [R|t] give n' = Rᵀn and d' = d - n·t:
 // caps are computed on the part's own bodies (which is where its geometry
-// lives) and placed by M afterwards.
+// lives) and placed by M afterwards. Declared in AppActions.h — the still
+// needs the same trip inward, and two copies of this would drift.
 bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
                              glm::vec3& localOrigin, glm::vec3& localNormal) {
   const glm::vec3 n(world);
@@ -1846,7 +1846,6 @@ bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
   localOrigin = localNormal * (world.w - glm::dot(n, t));
   return true;
 }
-} // namespace
 
 void SyncAssemblyRenderers(AppState& state) {
   if (!state.partRenderCache)

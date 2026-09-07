@@ -481,6 +481,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     size_t bodyIndex = 0;
   };
   std::vector<RTItem> rtItems;
+  // Section caps are computed per PART (Measure::SectionCaps takes a body
+  // list and returns one cap each), so the cap pass below needs the parts as
+  // parts -- rtItems has already been flattened to individual bodies.
+  struct CapSource {
+    const std::vector<Body>* bodies;
+    glm::mat4 xf;
+  };
+  std::vector<CapSource> capSources;
   if (state.assembly) {
     // A5: the leaf parts of the whole tree — a nested assembly must appear in
     // the path-traced still as well as the viewport.
@@ -491,6 +499,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
       for (size_t bi = 0; bi < bodies.size(); bi++)
         rtItems.push_back(
             {&bodies[bi], inst.world, inst.partId, inst.part->Version(), bi});
+      capSources.push_back({&bodies, inst.world});
     }
   } else if (state.job) {
     // A job tab ray-traces what it draws: the parts laid out.
@@ -499,6 +508,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   } else if (state.document) {
     for (const auto& body : state.document->GetBodies())
       rtItems.push_back({&body, glm::mat4(1.0f)});
+    capSources.push_back({&state.document->GetBodies(), glm::mat4(1.0f)});
   }
 
   state.rayTracer->ClearGeometry();
@@ -622,6 +632,84 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
            "cache, {} tessellated here)",
            state.rayTracer->GeometryCount(), reused, meshed);
 
+  // ---- Section cut caps -------------------------------------------------
+  // section.rahit removes the material past a plane, which leaves a solid
+  // looking like a shell: you see straight through the wall into the inside
+  // of the far surface. The raster viewport fills that with a cap per body
+  // per plane, and this is the same Measure::SectionCaps call it makes, so
+  // both renderers cut the same shape and fill it the same way.
+  //
+  // The cap carries the body's BASE colour and no procedural grain, matching
+  // AppendCapMeshes. End grain on a cut wooden face would be more truthful,
+  // but the viewport does not draw it and disagreeing with the screen is the
+  // thing this whole change exists to stop.
+  {
+    const ClipPlaneArray worldPlanes = SectionPlanes(state);
+    size_t capCount = 0;
+    for (const CapSource& src : capSources) {
+      for (size_t i = 0; i < worldPlanes.size(); i++) {
+        glm::vec3 localOrigin, localNormal;
+        if (!SectionPlaneInPartSpace(worldPlanes[i], src.xf, localOrigin,
+                                     localNormal))
+          continue;
+        // Every OTHER plane trims this cap, or two cuts leave each other's
+        // fill hanging in space past the corner.
+        std::vector<glm::vec4> trim;
+        for (size_t j = 0; j < worldPlanes.size(); j++) {
+          glm::vec3 to, tn;
+          if (j != i && SectionPlaneInPartSpace(worldPlanes[j], src.xf, to, tn))
+            trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
+        }
+        // Cached on (bodies, plane): an assembly asks for the same cap of the
+        // same part about the same plane every render.
+        const std::vector<CADShape> shapes =
+            Measure::SectionCaps(*src.bodies, localOrigin, localNormal, trim,
+                                 &state.sectionCapCache);
+        const glm::vec3 worldNormal = glm::normalize(glm::vec3(worldPlanes[i]));
+        for (size_t bi = 0; bi < shapes.size() && bi < src.bodies->size();
+             bi++) {
+          if (!shapes[bi].IsValid())
+            continue;
+          CADShape::Mesh cm = shapes[bi].GenerateMesh(0.05);
+          if (cm.vertices.empty())
+            continue;
+          std::vector<Vertex3D> cv =
+              CADMeshConverter::ConvertCADMeshToVertices(cm);
+          const glm::mat3 rot(src.xf);
+          for (Vertex3D& v : cv) {
+            v.position = glm::vec3(src.xf * glm::vec4(v.position, 1.0f));
+            v.normal = glm::normalize(rot * v.normal);
+            // The cap lies exactly ON the plane, where the any-hit test
+            // dot(n, p) > w is a coin toss in floating point -- half the cap
+            // would be cut away by the very plane that created it. Nudge it
+            // to the kept side; 1e-3 of a millimetre is invisible.
+            v.position -= worldNormal * 1e-3f;
+          }
+          const Body& b = (*src.bodies)[bi];
+          CADMaterials::MaterialProperties cmat =
+              CADMaterials::MaterialLibrary::GetMaterial(
+                  b.material.empty()
+                      ? CADMaterials::MaterialType::DEFAULT
+                      : CADMaterials::MaterialLibrary::FromSlug(b.material));
+          if (b.appearance.color)
+            cmat.baseColor = *b.appearance.color;
+          RTMaterial crm{};
+          crm.baseColor = cmat.baseColor;
+          crm.metallic = cmat.metallic;
+          crm.roughness = cmat.roughness;
+          crm.emissive = glm::vec3(0.0f);
+          crm.specular = glm::vec3(cmat.specular);
+          crm.transmission = 0.0f; // procParams left at 0: no grain on a cap
+          state.rayTracer->AddGeometry(cv, cm.indices,
+                                       state.rayTracer->AddMaterial(crm));
+          capCount++;
+        }
+      }
+    }
+    if (capCount > 0)
+      LOG_INFO("Ray tracing scene: {} section cut caps", capCount);
+  }
+
   // What the ray tracer was given, for the still to size its ray limits from
   // (MakeStillDesc). Recorded before the ground plane, which is derived from
   // these bounds in turn.
@@ -699,6 +787,10 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
   // the still cannot disagree with the screen about what an edge looks like.
   // main.cpp runs it in WIREFRAME mode, which is why this reads wireframeColor
   // and lineWidth rather than the outline pair.
+  // The live section cuts, from the same call main.cpp hands every raster
+  // renderer -- so a still and the viewport cut on the same planes or neither
+  // does. Applied by section.rahit, since closest-hit is too late to discard.
+  desc.clipPlanes = SectionPlanes(state);
   desc.outlines = outlines;
   if (state.outlineRenderer) {
     const OutlineSettings& os = state.outlineRenderer->GetOutlineSettings();

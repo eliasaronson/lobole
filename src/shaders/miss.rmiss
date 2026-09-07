@@ -27,6 +27,10 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 fillColor;
     vec4 rimDir;
     vec4 rimColor;
+    // Section planes; a hit is removed where dot(n, p) > w. clipInfo.x is how
+    // many are live, so a scene with no section costs one compare per ray.
+    vec4 clipPlanes[4];
+    vec4 clipInfo;
 } ubo;
 
 // Full-resolution source HDRI (the prefilter chain's base mip is only 128x64,

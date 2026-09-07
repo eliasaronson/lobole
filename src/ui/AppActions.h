@@ -420,6 +420,14 @@ void ArmSectionFacePick(AppState& state, uint64_t sectionId);
 // Routed here by SlotPickClicked when that slot is armed.
 void SectionFacePicked(AppState& state, const SelectionItem& item);
 ClipPlaneArray SectionPlanes(const AppState& state); // enabled ones, padded
+
+// A world section plane in ONE occurrence's part space. Caps are computed on
+// the part's own bodies (which is where its geometry lives) and placed by the
+// occurrence transform afterwards, so the plane has to make the trip inward
+// first. Returns false for a disabled (all-zero) plane. Shared by the raster
+// assembly sync and the ray-traced still — one copy of n' = Rᵀn, d' = d - n·t.
+bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
+                             glm::vec3& localOrigin, glm::vec3& localNormal);
 bool SectionActive(const AppState& state);
 
 // The cut the sketch slice wants, or nullopt when it is off, no sketch is
