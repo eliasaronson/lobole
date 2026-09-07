@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -207,5 +208,33 @@ inline constexpr glm::vec3 kSketchColor{0.40f, 0.72f, 1.00f};
 // the same walk for the one that is.
 void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
                        std::vector<LineVertex3D>& out);
+
+// One body's CPU-side mesh, and a batch of them keyed by part slot: what the
+// prewarm produces and the sync consumes. Defined in TessellationCache.cpp.
+struct CpuBody {
+  std::vector<Vertex3D> vertices;
+  std::vector<uint32_t> indices;
+  std::vector<uint32_t> triangleFaces;
+  std::vector<std::vector<glm::vec3>> edges;
+};
+using PrewarmedParts = std::unordered_map<uint64_t, std::vector<CpuBody>>;
+
+// Tessellates the given parts across threads, ahead of the sync loop that
+// consumes them. Work is GROUPED BY TSHAPE, so two threads can never mesh
+// shapes that share one -- see the comment on the definition.
+void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
+                          PrewarmedParts& out);
+
+// The cached tessellation for a shape, built now if it is not there. Pass the
+// prewarmed CPU mesh when the prewarm already produced one; the GPU upload
+// always happens on the main thread.
+std::shared_ptr<BodyTessellation>
+LookupOrBuildTessellation(AppState& state, const CADShape& shape,
+                          CpuBody* prebuilt);
+
+// A millimetre figure for a message, trimmed and without a signed zero --
+// "the axis meets its face -0 mm away" is not a sentence anyone should read.
+// Defined in Bom.cpp; FastenerActions.cpp writes the same kind of refusal.
+std::string Mm(double v);
 
 } // namespace ui

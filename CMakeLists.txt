@@ -651,6 +651,11 @@ set(app_sources
     src/ui/SketchOverlay.cpp
     src/ui/ImportActions.cpp
     src/ui/AssemblyActions.cpp
+    src/ui/Bom.cpp
+    src/ui/MateActions.cpp
+    src/ui/GizmoInput.cpp
+    src/ui/TessellationCache.cpp
+    src/ui/FastenerActions.cpp
     src/ui/MotionActions.cpp
     src/ui/JobActions.cpp
     src/ui/MachineActions.cpp

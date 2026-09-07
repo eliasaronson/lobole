@@ -89,6 +89,7 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 // Pushing the document at the renderers: meshes and outlines for the active
 // tab, the geometry-delta overlay, the ray-traced scene, and a still render.
@@ -1010,6 +1011,450 @@ void PumpRenderJob(AppState& state) {
   std::string err;
   bool ok = state.rayTracer->ReadbackStill(job.totalSamples, job.outPath, &err);
   finish(ok, err.empty() ? "readback failed" : err);
+}
+
+// ---------------------------------------------------------------------------
+// The ASSEMBLY tab's renderer sync, from AssemblyActions.cpp
+// (docs/architecture-review-2026-09-06.md, stage 6). It is the same job as
+// SyncDocumentRenderers above -- push what the tab shows at the renderers --
+// for a different kind of tab, and the two were in different files only
+// because the monolith they came from was split by document kind first.
+
+// Renders an assembly: one asset per referenced part body, one instance per
+// occurrence. Assets are shared across occurrences of the same part.
+// The section plane in ONE occurrence's part space. A world plane
+// {n, d} and a rigid placement M = [R|t] give n' = Rᵀn and d' = d - n·t:
+// caps are computed on the part's own bodies (which is where its geometry
+// lives) and placed by M afterwards. Declared in AppActions.h — the still
+// needs the same trip inward, and two copies of this would drift.
+bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
+                             glm::vec3& localOrigin, glm::vec3& localNormal) {
+  const glm::vec3 n(world);
+  if (glm::length(n) < 1e-6f)
+    return false;
+  const glm::mat3 basis(xf);
+  const glm::vec3 t(xf[3]);
+  localNormal = glm::normalize(glm::transpose(basis) * n);
+  localOrigin = localNormal * (world.w - glm::dot(n, t));
+  return true;
+}
+
+void SyncAssemblyRenderers(AppState& state) {
+  if (!state.partRenderCache)
+    state.partRenderCache = std::make_shared<PartRenderCacheStore>();
+  PartRenderCacheStore& cache = *state.partRenderCache;
+  cache.syncSerial++;
+  // Which parts this sync actually drew. They are never evicted below — you
+  // cannot drop what is on screen — and everything else ages against the
+  // budget.
+  std::unordered_set<uint64_t> touched;
+
+  // One submit+wait for every asset this sync uploads, instead of one per
+  // buffer. A cold 299-part build creates 1196 buffers; unbatched that is
+  // 1196 queue drains. Closed at the end of the function (and defensively by
+  // the renderers' Render()).
+  if (state.meshRenderer)
+    state.meshRenderer->BeginAssetBatch();
+  if (state.outlineRenderer)
+    state.outlineRenderer->BeginAssetBatch();
+
+  // This function has been the app's worst stall twice (per-occurrence
+  // outline uploads, then the un-cached rebuild), and both times the guess
+  // about which half was slow was wrong. The breakdown is logged, so the next
+  // regression is read rather than re-profiled.
+  using SyncClock = std::chrono::steady_clock;
+  const auto syncStart = SyncClock::now();
+  // Device ALLOCATIONS this sync makes, not bytes — a work-volume signal the
+  // phase timings above cannot give. Each buffer and image takes its own
+  // vkAllocateMemory (no sub-allocator), and a cold 299-part build makes 1196
+  // of them; a sync that suddenly makes ten times what it used to has stopped
+  // reusing something, which shows here before it shows in the clock.
+  // (No device we target imposes a limit — see VulkanCommon.h.)
+  const uint64_t allocsAtStart = vkutil::TotalDeviceAllocations();
+  double buildMs = 0, instanceMs = 0, pickMs = 0, prewarmMs = 0;
+  size_t builtParts = 0, instanceCount = 0;
+  const auto elapsedMsSince = [](SyncClock::time_point t) {
+    return std::chrono::duration<double, std::milli>(SyncClock::now() - t)
+        .count();
+  };
+
+  // Which parts this sync will have to tessellate, gathered BEFORE the loop
+  // so they can be meshed in parallel (PrewarmTessellations). On a warm cache
+  // this list is empty and the whole phase costs one walk of the tree.
+  const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
+  PrewarmedParts prewarmed;
+  {
+    std::vector<uint64_t> missing;
+    std::unordered_set<uint64_t> seen;
+    for (const assembly::FlatInstance& inst : flat) {
+      if (!inst.visible || !seen.insert(inst.partId).second)
+        continue;
+      const Document* part = PartDocById(state, inst.partId);
+      if (part == nullptr)
+        continue;
+      const auto entry = cache.parts.find(inst.partId);
+      if (entry == cache.parts.end() ||
+          entry->second.docVersion != part->Version())
+        missing.push_back(inst.partId);
+    }
+    if (!missing.empty()) {
+      const auto warmStart = SyncClock::now();
+      PrewarmTessellations(state, missing, prewarmed);
+      prewarmMs = elapsedMsSince(warmStart);
+    }
+  }
+
+  // A5: the LEAF parts of the tree, placed. A top-level part occurrence is a
+  // one-element subtree, so this loop is unchanged for a flat assembly — and
+  // instancing survives nesting, because a FlatInstance still carries its
+  // partId and the mesh-asset cache is keyed on that (six barrels in two
+  // nested assemblies remain one asset).
+  for (const assembly::FlatInstance& inst : flat) {
+    if (!inst.visible)
+      continue; // hidden here, or inside a hidden sub-assembly
+    Document* part = PartDocById(state, inst.partId);
+    if (!part)
+      continue; // dangling reference (part deleted) — skip
+    // The occurrence this leaf belongs to at the TOP level: what selection,
+    // explode and picking address. A leaf inside a sub-assembly reports its
+    // sub-assembly's occurrence, which is what makes it one unit.
+    const Occurrence* rootOcc = state.assembly->FindById(inst.rootOccurrenceId);
+    if (rootOcc == nullptr)
+      continue;
+    const Occurrence& occ = *rootOcc;
+
+    touched.insert(inst.partId);
+    auto it = cache.parts.find(inst.partId);
+    // A hit is only a hit at the SAME document version: a regenerated part
+    // must re-tessellate. Materials and appearances bump the version too, and
+    // they are baked into the entry, so one key covers both.
+    if (it != cache.parts.end() && it->second.docVersion != part->Version()) {
+      cache.parts.erase(it);
+      it = cache.parts.end();
+    }
+    if (it == cache.parts.end()) {
+      const auto buildStart = SyncClock::now();
+      builtParts++;
+      // First time we see this part at this version: tessellate its bodies +
+      // create assets. Everything below is what the cache exists to skip.
+      PartRenderCacheEntry entry;
+      entry.docVersion = part->Version();
+      std::vector<SharedBody>& shared = entry.bodies;
+      const auto& bodies = part->GetBodies();
+      // The fallback palette is seeded from the PART, not from the order
+      // parts happen to be encountered in. It used to be a counter running
+      // across the whole assembly, so hiding one occurrence could renumber
+      // every part after it and silently recolour unrelated geometry — and a
+      // cached colour would then disagree with a freshly built one.
+      size_t palette = static_cast<size_t>(inst.partId);
+      const auto warm = prewarmed.find(inst.partId);
+      for (size_t bodyIdx = 0; bodyIdx < bodies.size(); bodyIdx++) {
+        const auto& body = bodies[bodyIdx];
+        SharedBody sb;
+        // A Derived ghost is drawn on its OWN part's tab and nowhere else:
+        // in the assembly the thing it copies is already here, at its own
+        // occurrence. Drawing both put a second servo and a second horn
+        // inside the real ones — visibly a different colour, offset by the
+        // copy's placement, and impossible to select apart. PrewarmTessella-
+        // tions already skipped them; this loop did not, so they were meshed
+        // on the fallback path and instanced anyway. The empty slot keeps
+        // bodyIdx aligned with the part's GetBodies() (picking reads it).
+        if (body.reference) {
+          shared.push_back(std::move(sb));
+          continue;
+        }
+        // The geometry comes from the app-wide shape cache, so a body drawn
+        // on its own part tab, here, and as a Derived copy is tessellated
+        // and uploaded ONCE. Normally the mesh is already computed
+        // (PrewarmTessellations, above); meshing inside the lookup is the
+        // fallback for a part that was not in the missing list.
+        CpuBody* pre = nullptr;
+        if (warm != prewarmed.end() && bodyIdx < warm->second.size() &&
+            !warm->second[bodyIdx].vertices.empty())
+          pre = &warm->second[bodyIdx];
+        sb.tess = LookupOrBuildTessellation(state, body.shape, pre);
+        if (!sb.tess) {
+          shared.push_back(std::move(sb)); // keep index alignment
+          continue;
+        }
+        sb.palette = body.hasDisplayColor
+                         ? body.displayColor
+                         : kBodyPalette[palette++ % std::size(kBodyPalette)];
+        if (state.outlineRenderer)
+          OutlineAssetFor(state, *sb.tess);
+        // Resolve order: appearance > material > displayColor > palette
+        // (same merge as the part-tab draw loop in AppActions).
+        if (!body.material.empty() || body.appearance.Any()) {
+          CADMaterials::MaterialProperties mat =
+              CADMaterials::MaterialLibrary::GetMaterial(
+                  CADMaterials::MaterialLibrary::FromSlug(body.material));
+          if (body.material.empty()) {
+            mat.baseColor = sb.palette;
+            mat.metallic = 0.0f;
+            mat.roughness = 0.6f;
+            mat.specular = 0.5f;
+            mat.reflectance = 0.04f;
+            mat.procPattern = 0;
+          }
+          if (body.appearance.color)
+            mat.baseColor = *body.appearance.color;
+          if (body.appearance.roughness)
+            mat.roughness = *body.appearance.roughness;
+          if (body.appearance.metallic)
+            mat.metallic = *body.appearance.metallic;
+          sb.hasMaterial = true;
+          sb.albedo = mat.baseColor;
+          sb.pbr = glm::vec4(mat.metallic, mat.roughness, mat.specular,
+                             mat.reflectance);
+          sb.procPattern = mat.procPattern;
+          sb.grainScale = mat.grainScale;
+          sb.grainContrast = mat.grainContrast;
+        }
+        shared.push_back(std::move(sb));
+      }
+      for (const SharedBody& sb : entry.bodies) {
+        if (!sb.tess)
+          continue;
+        // What this entry keeps alive through its shared_ptr. The shape
+        // cache has its own budget over the same bytes; this one bounds how
+        // many PARTS the assembly layer pins, which is what its LRU is for.
+        entry.gpuBytes += sb.tess->bytes;
+      }
+      it = cache.parts.emplace(inst.partId, std::move(entry)).first;
+      buildMs += elapsedMsSince(buildStart);
+    }
+    it->second.lastUsed = cache.syncSerial;
+
+    // The flattened world transform, offset by the TOP-LEVEL occurrence's
+    // explode vector — exploding a sub-assembly moves the whole unit, not
+    // each of its parts to its own corner.
+    const glm::mat4 xf =
+        glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
+        inst.world;
+    for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
+      const SharedBody& sb = it->second.bodies[bi];
+      if (!sb.tess)
+        continue; // empty body
+      const auto instanceStart = SyncClock::now();
+      uint32_t meshId = state.meshRenderer->AddInstance(sb.tess->meshAsset, xf);
+      if (sb.hasMaterial) {
+        state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
+        state.meshRenderer->SetInstanceProcedural(
+            meshId, sb.procPattern, sb.grainScale, sb.grainContrast);
+      } else {
+        state.meshRenderer->SetInstanceColor(meshId, sb.palette);
+      }
+      uint32_t outlineId = 0;
+      if (state.outlineRenderer && sb.tess->outlineAsset != 0) {
+        // Untransformed vertices + a per-instance model matrix (A2.5): the
+        // outline draws at the occurrence transform via a push constant, so a
+        // live drag is a SetMeshTransform matrix update, not a re-upload — and
+        // since R? the geometry itself is shared, so placing the sixth copy of
+        // a bracket uploads nothing at all.
+        outlineId =
+            state.outlineRenderer->AddInstance(sb.tess->outlineAsset, xf);
+      }
+      instanceMs += elapsedMsSince(instanceStart);
+      instanceCount++;
+      const auto pickStart = SyncClock::now();
+      if (state.faceSelector)
+        state.faceSelector->AddMesh(meshId, sb.tess->vertices, sb.tess->indices,
+                                    sb.tess->triangleFaces, xf, sb.tess->edges);
+      pickMs += elapsedMsSince(pickStart);
+      // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
+      // localXf by construction, which is what lets the drag path recompose
+      // it per frame without a resync.
+      state.documentMeshes.push_back(
+          {meshId, outlineId, bi, occ.id,
+           glm::inverse(OccurrenceMatrix(occ)) * inst.world, inst.partId,
+           inst.innerIds, sb.tess->edges});
+    }
+
+    // Section caps (I3). Without these an assembly section shows the inside
+    // of hollow shells — the geometry is clipped by the shader but the cut
+    // has no surface, which reads as "section view is broken" rather than as
+    // a section. One call per LEAF instance: the plane lands somewhere
+    // different in each part's own space, and a part nested two levels down
+    // gets there through its composed world transform.
+    const ClipPlaneArray planes = SectionPlanes(state);
+    std::vector<glm::vec3> capColors;
+    for (size_t i = 0; i < planes.size(); i++) {
+      glm::vec3 localOrigin, localNormal;
+      if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
+        continue;
+      if (capColors.empty()) {
+        capColors.reserve(it->second.bodies.size());
+        for (const SharedBody& sb : it->second.bodies)
+          capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
+      }
+      // The other sections, also in this part's space, trim this cap.
+      std::vector<glm::vec4> trim;
+      for (size_t j = 0; j < planes.size(); j++) {
+        glm::vec3 to, tn;
+        if (j != i && SectionPlaneInPartSpace(planes[j], xf, to, tn))
+          trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
+      }
+      // CACHED, and this is the path that pays: the plane is put into the
+      // PART's space, so a part that has not moved between two poses of a
+      // mechanism asks for the same cap of the same bodies about the same
+      // plane. Scrubbing the air-cooled engine with one section on cost
+      // 913 ms/step against 9.5 without — an OCC half-space boolean per
+      // body, every step, for 27 parts of which four move.
+      AppendCapMeshes(state,
+                      Measure::SectionCaps(part->GetBodies(), localOrigin,
+                                           localNormal, trim,
+                                           &state.sectionCapCache),
+                      capColors, xf, glm::normalize(glm::vec3(planes[i])));
+    }
+  }
+  // Land every upload this sync recorded before anything reads the assets.
+  if (state.meshRenderer)
+    state.meshRenderer->EndAssetBatch();
+  if (state.outlineRenderer)
+    state.outlineRenderer->EndAssetBatch();
+
+  // Age out what is not on screen, down to kPartRenderCacheBudgetBytes.
+  //
+  // This was once a strict "release anything not drawn this sync", which
+  // looked tidy and made two assembly tabs THRASH: alternating between two
+  // 299-part assemblies re-tessellated all 299 every switch (4.2 s each), so
+  // the cache bought exactly nothing in a multi-assembly project. Keeping
+  // everything instead grows without bound across imports. Hence a budget,
+  // evicting least-recently-drawn first — and never a part drawn this sync,
+  // whose assets are in use.
+  size_t idleBytes = 0;
+  std::vector<std::pair<uint64_t, uint64_t>> idle; // (lastUsed, partId)
+  for (const auto& [partId, entry] : cache.parts) {
+    if (touched.count(partId) != 0)
+      continue;
+    idleBytes += entry.gpuBytes;
+    idle.emplace_back(entry.lastUsed, partId);
+  }
+  if (idleBytes > kPartRenderCacheBudgetBytes) {
+    std::sort(idle.begin(), idle.end()); // oldest first
+    size_t dropped = 0;
+    for (const auto& [lastUsed, partId] : idle) {
+      if (idleBytes <= kPartRenderCacheBudgetBytes)
+        break;
+      auto it = cache.parts.find(partId);
+      if (it == cache.parts.end())
+        continue;
+      idleBytes -= it->second.gpuBytes;
+      dropped += it->second.gpuBytes;
+      cache.parts.erase(it);
+    }
+    LOG_INFO("Part render cache over budget: dropped {} MB of idle geometry",
+             dropped / (1024 * 1024));
+  }
+
+  // (Highlights re-apply themselves: they are a per-frame projection of the
+  // Selection now — see SyncSelectionHighlights.)
+  LOG_INFO("Assembly synced: {} occurrences, {} instances, {} parts cached "
+           "({} tessellated) in {:.0f} ms [build {:.0f}, instances {:.0f}, "
+           "picking {:.0f}, of which parallel tessellation {:.0f}], "
+           "{} device allocations ({} total)",
+           state.assembly->OccurrenceCount(), instanceCount, cache.parts.size(),
+           builtParts, elapsedMsSince(syncStart), buildMs, instanceMs, pickMs,
+           prewarmMs, vkutil::TotalDeviceAllocations() - allocsAtStart,
+           vkutil::TotalDeviceAllocations());
+}
+
+// In-context editing (A4): appends the context assembly's other occurrences
+// as GHOST instances around the active part — alpha-blended, unpickable, no
+// outlines. The part stays at identity; each ghost renders at
+// OccMatrix(edited)⁻¹ · OccMatrix(other), so every spatial relationship reads
+// the same as in the assembly with zero changes to part tooling. Before
+// placing ghosts the context re-solves if any referenced part regenerated
+// (this runs inside the version-gated resync, so a part edit updates the
+// ghosts in the same frame — mates track live).
+void SyncInContextGhosts(AppState& state) {
+  if (!state.inContext.assemblySlotId)
+    return;
+  PartSlot* asmSlot = nullptr;
+  for (PartSlot& s : state.parts)
+    if (s.kind == DocKind::Assembly && s.id == state.inContext.assemblySlotId)
+      asmSlot = &s;
+  if (!asmSlot || !asmSlot->assembly)
+    return; // the context assembly is gone; the mode quietly shows nothing
+  AssemblyDocument& asmDoc = *asmSlot->assembly;
+  const assembly::PartResolver resolve =
+      [&state](uint64_t partId) -> const Document* {
+    return PartDocById(state, partId);
+  };
+
+  // Stale check against the stashed slot's stamps (the active-tab machinery
+  // in SolveActiveAssembly/AssemblyPartsStale can't see a stashed assembly).
+  bool stale = false;
+  for (const Occurrence& occ : asmDoc.GetOccurrences()) {
+    const Document* part = PartDocById(state, occ.partId);
+    if (!part)
+      continue;
+    const auto it = asmSlot->solvedPartVersions.find(occ.partId);
+    if (it == asmSlot->solvedPartVersions.end() ||
+        it->second != part->Version()) {
+      stale = true;
+      break;
+    }
+  }
+  if (stale) {
+    assembly::Solve(asmDoc, resolve, AssemblyResolverFor(state));
+    asmDoc.BumpVersion();
+    asmSlot->solvedPartVersions.clear();
+    for (const Occurrence& occ : asmDoc.GetOccurrences())
+      if (const Document* part = PartDocById(state, occ.partId))
+        asmSlot->solvedPartVersions[occ.partId] = part->Version();
+  }
+
+  const Occurrence* edited = asmDoc.FindById(state.inContext.occurrenceId);
+  if (!edited)
+    return;
+  const glm::mat4 inv = glm::inverse(OccurrenceMatrix(*edited));
+
+  // One shared asset per context part body (as in SyncAssemblyRenderers),
+  // minus everything a ghost doesn't need: outlines, picking, materials.
+  const glm::vec3 kGhostTint(0.55f, 0.60f, 0.68f);
+  // partId -> one cache entry per body (nullptr for a body that meshes to
+  // nothing, so the index still lines up with GetBodies()).
+  std::unordered_map<uint64_t, std::vector<std::shared_ptr<BodyTessellation>>>
+      byPart;
+  // A5: ghost the whole tree. Editing INTO a sub-assembly is still a non-goal
+  // (open its own tab), but the CONTEXT around the part you are editing has
+  // to look like the assembly does — a gangway that vanished while you worked
+  // would be worse than no context at all.
+  auto flat = assembly::Flatten(asmDoc, PartResolverFor(state),
+                                AssemblyResolverFor(state));
+  if (!flat)
+    return; // a cycle: the resync that draws the real thing already said so
+  for (const assembly::FlatInstance& inst : *flat) {
+    if (!inst.visible || inst.rootOccurrenceId == edited->id)
+      continue;
+    Document* part = PartDocById(state, inst.partId);
+    if (!part)
+      continue;
+    auto it = byPart.find(inst.partId);
+    if (it == byPart.end()) {
+      // Cached by shape identity (AppActionsInternal.h): the neighbour was
+      // tessellated once, by whichever tab drew it first, and a regeneration
+      // of the part being edited re-instances it rather than rebuilding it.
+      std::vector<std::shared_ptr<BodyTessellation>> tess;
+      for (const auto& body : part->GetBodies())
+        tess.push_back(TessellationFor(state, body.shape));
+      it = byPart.emplace(inst.partId, std::move(tess)).first;
+    }
+    const glm::mat4 xf = inv * inst.world;
+    for (size_t bi = 0; bi < it->second.size(); bi++) {
+      if (it->second[bi] == nullptr)
+        continue; // empty body
+      const uint32_t meshId =
+          state.meshRenderer->AddInstance(it->second[bi]->meshAsset, xf);
+      state.meshRenderer->SetInstanceColor(meshId, kGhostTint);
+      state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
+      // Ghosts are never dragged, so their localXf is unused; keep it
+      // honest anyway rather than leaving a lie in the record.
+      state.documentMeshes.push_back(
+          {meshId, /*outlineId=*/0, bi, inst.rootOccurrenceId, inst.world, {}});
+    }
+  }
 }
 
 } // namespace ui
