@@ -301,6 +301,87 @@ TEST_CASE("Translate moves the bounding box", "[kernel][transform]") {
   CHECK_THAT(box.Volume(), WithinRel(1.0, 1e-6));
 }
 
+TEST_CASE("an in-place transform forgets the memoized bounding box",
+          "[kernel][bbox]") {
+  // GetBoundingBox remembers its answer on the shape. The five transforms
+  // that replace the shape IN PLACE are the only way that answer can become
+  // a lie, so each is asked before and after: a memo that survived one of
+  // them would report where the body USED to be, and CAM would cut it there.
+  const auto span = [](const CADShape& s) {
+    glm::vec3 lo(0.0f), hi(0.0f);
+    s.GetBoundingBox(lo, hi);
+    return std::pair<glm::vec3, glm::vec3>(lo, hi);
+  };
+
+  SECTION("Translate") {
+    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
+    CHECK_THAT(span(b).first.x, WithinAbs(0.0f, 1e-4f)); // warms the memo
+    b.Translate(glm::vec3(10, 0, 0));
+    CHECK_THAT(span(b).first.x, WithinAbs(10.0f, 1e-3f));
+    CHECK_THAT(span(b).second.x, WithinAbs(11.0f, 1e-3f));
+  }
+  SECTION("Rotate") {
+    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
+    CHECK_THAT(span(b).second.x, WithinAbs(1.0f, 1e-4f));
+    b.Rotate(glm::vec3(0, 0, 1), 3.14159265358979 / 2.0);
+    // A quarter turn about +Z puts the x span where the y span was, negated.
+    CHECK_THAT(span(b).first.x, WithinAbs(-1.0f, 1e-3f));
+    CHECK_THAT(span(b).second.x, WithinAbs(0.0f, 1e-3f));
+  }
+  SECTION("Scale") {
+    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
+    CHECK_THAT(span(b).second.z, WithinAbs(1.0f, 1e-4f));
+    b.Scale(3.0);
+    CHECK_THAT(span(b).second.z, WithinAbs(3.0f, 1e-3f));
+  }
+  SECTION("RotateAbout") {
+    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
+    CHECK_THAT(span(b).first.y, WithinAbs(0.0f, 1e-4f));
+    b.RotateAbout(glm::vec3(10, 0, 0), glm::vec3(0, 0, 1),
+                  3.14159265358979 / 2.0);
+    // A quarter turn about the pivot at (10,0,0) swings the unit box round
+    // to x 9..10, y -10..-9.
+    CHECK_THAT(span(b).first.y, WithinAbs(-10.0f, 1e-3f));
+    CHECK_THAT(span(b).second.y, WithinAbs(-9.0f, 1e-3f));
+    CHECK_THAT(span(b).first.x, WithinAbs(9.0f, 1e-3f));
+  }
+  SECTION("Mirror") {
+    CADShape b = CADKernel::Instance().CreateBox(glm::vec3(0), glm::vec3(1));
+    CHECK_THAT(span(b).second.x, WithinAbs(1.0f, 1e-4f));
+    b.Mirror(glm::vec3(0), glm::vec3(1, 0, 0));
+    CHECK_THAT(span(b).first.x, WithinAbs(-1.0f, 1e-3f));
+    CHECK_THAT(span(b).second.x, WithinAbs(0.0f, 1e-3f));
+  }
+}
+
+TEST_CASE("the two bounding-box flavours keep their own memo",
+          "[kernel][bbox]") {
+  // Conservative and tight are separate answers with separate slots. Asking
+  // one must not hand back the other's box — on a swept or B-spline surface
+  // they differ by tens of percent, which is exactly where it would matter.
+  CADShape s = CADKernel::Instance().CreateSphere(glm::vec3(0, 0, 0), 5.0);
+  CADShape fresh = CADKernel::Instance().CreateSphere(glm::vec3(0, 0, 0), 5.0);
+
+  glm::vec3 tLo(0.0f), tHi(0.0f), cLo(0.0f), cHi(0.0f);
+  s.GetBoundingBox(cLo, cHi, /*tight=*/false); // conservative first
+  s.GetBoundingBox(tLo, tHi, /*tight=*/true);
+  glm::vec3 fLo(0.0f), fHi(0.0f);
+  fresh.GetBoundingBox(fLo, fHi, /*tight=*/true); // tight first, cold shape
+  CHECK_THAT(tLo.x, WithinAbs(fLo.x, 1e-9f));
+  CHECK_THAT(tHi.z, WithinAbs(fHi.z, 1e-9f));
+
+  // Tight is never larger than conservative, and both bound the sphere.
+  CHECK(tLo.x >= cLo.x - 1e-6f);
+  CHECK(tHi.x <= cHi.x + 1e-6f);
+  CHECK_THAT(tHi.x, WithinAbs(5.0f, 1e-3f));
+
+  // A second ask is the memo, and it agrees with the first to the bit.
+  glm::vec3 again(0.0f), againHi(0.0f);
+  s.GetBoundingBox(again, againHi, /*tight=*/true);
+  CHECK(again == tLo);
+  CHECK(againHi == tHi);
+}
+
 TEST_CASE("GenerateMesh produces triangles for a box", "[kernel][mesh]") {
   CADShape box = CADKernel::Instance().CreateBox(1.0, 1.0, 1.0);
   CADShape::Mesh mesh = box.GenerateMesh();

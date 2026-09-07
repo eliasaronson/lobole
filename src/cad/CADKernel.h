@@ -45,14 +45,38 @@ public:
   // is what a PERSON or a script wants, because a part whose reported size is
   // sixty per cent over its real one reads as a modelling error — it cost an
   // afternoon on a spring that turned out to be correct. It is not the
-  // default because it took one engine's build from 1.6 s to 4.2 s, and
-  // caching does not help: a regeneration makes new shapes rather than
-  // re-asking about old ones.
+  // default because it took one engine's build from 1.6 s to 4.2 s.
+  //
+  // BOTH answers are MEMOIZED on the shape, a slot each. Neither reads
+  // anything but `m_shape`, and a shape is immutable except through the five
+  // in-place transforms below — which drop both slots, because they go
+  // through SetShape — so a remembered box cannot go stale. A regeneration
+  // builds NEW shapes, which start cold. That is what makes a memo HERE work
+  // where keying an outside cache on PlacementId did not: the repeat asks are
+  // about the same shape OBJECT, not about a rebuilt one.
+  //
+  // It earns its place because callers re-ask constantly for a number that
+  // only a regen can change. The section tool asked four times a frame
+  // through every visible body of an assembly: 54% of the app's entire CPU
+  // and 5.6 -> 30 ms of frame time on a 33-occurrence engine, for the same
+  // box every time (docs/performance/shape-bounds-memo.md).
+  //
+  // THREADING: filling a slot writes to the shape, so it lives by the rule
+  // the parallel clash sweep already set — OpenCASCADE fills its own caches
+  // lazily on the shape too, so shapes are warmed SINGLE-THREADED before any
+  // worker touches them (`Measure::WorldBounds` over every entity in
+  // RemoteInspection.cpp, `MeshFor` over every candidate in MotionStudy.cpp).
+  // A worker asking about a shape only it holds — the per-thread copies both
+  // sweeps make — is safe either way.
   //
   // Neither depends on whether the shape has been meshed, which is the
   // property the .cpp's older comment protects (CAM derives stock and depths
   // from this box, and a 4 um difference between a meshed and unmeshed part
   // once reported twelve legitimate rapids as cutting through material).
+  // The memo makes that invariant load-bearing rather than merely tidy:
+  // GenerateMesh writes a triangulation INTO the shape, so a box that read
+  // one would be remembered from before the mesh existed and quietly disagree
+  // with the same call made after.
   void GetBoundingBox(glm::vec3& min, glm::vec3& max, bool tight = false) const;
   // Disjoint-lump count (V2 digest): a body that silently split into two
   // solids is invisible in a volume total but not in this.
@@ -220,7 +244,22 @@ public:
   GenerateEdgePolylines(double deflection = 0.1) const;
 
 private:
+  // The ONE way the shape is replaced, because it is also what forgets the
+  // memoized boxes. A bare `m_shape = ` anywhere in this class would keep a
+  // box that describes the shape it USED to be — a silent wrong answer, of
+  // the kind that reaches CAM as a stock size. `tests/test_conventions.cpp`
+  // fails on one.
+  void SetShape(const TopoDS_Shape& shape);
+
   TopoDS_Shape m_shape;
+
+  // GetBoundingBox's memo: slot 0 conservative, slot 1 tight. Mutable
+  // because asking a shape how big it is does not change it — see the long
+  // note on GetBoundingBox for why it cannot go stale, and for the
+  // single-threaded-warm rule it shares with OCC's own lazy caches.
+  mutable bool m_boxValid[2] = {false, false};
+  mutable glm::vec3 m_boxMin[2] = {glm::vec3(0.0f), glm::vec3(0.0f)};
+  mutable glm::vec3 m_boxMax[2] = {glm::vec3(0.0f), glm::vec3(0.0f)};
 };
 
 class CADKernel {

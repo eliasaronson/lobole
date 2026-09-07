@@ -97,6 +97,14 @@ CADShape::CADShape(const TopoDS_Shape& shape) : m_shape(shape) {}
 
 CADShape::~CADShape() {}
 
+// Replacing the shape forgets what we remembered about the old one.
+// Every in-place transform below goes through here for that reason;
+// test_conventions.cpp fails on an assignment that does not.
+void CADShape::SetShape(const TopoDS_Shape& shape) {
+  m_shape = shape;
+  m_boxValid[0] = m_boxValid[1] = false;
+}
+
 bool CADShape::IsValid() const { return !m_shape.IsNull(); }
 
 namespace {
@@ -208,17 +216,28 @@ bool CADShape::ComputeMassProps(MassProps& out) const {
   return true;
 }
 
-// NOT CACHED, and that is deliberate. A cache keyed on PlacementId was tried
-// and removed: it bought nothing measurable (a regeneration makes NEW shapes
-// rather than re-asking about old ones), and PlacementId is derived from the
-// TShape's ADDRESS, which the allocator recycles — a freed shape's box can
-// then be handed to whatever lands on that address next. It showed up as the
-// determinism test failing under a parallel run and passing alone, which is
-// exactly how that bug would look.
+// Memoized ON THE SHAPE, one slot per flavour (see the header for why a
+// remembered box cannot go stale, and for the warm-single-threaded rule).
+//
+// An OUTSIDE cache keyed on PlacementId was tried before this and removed,
+// and the difference is the whole point: PlacementId is derived from the
+// TShape's ADDRESS, which the allocator recycles, so a freed shape's box
+// could be handed to whatever landed on that address next — it showed up as
+// the determinism test failing under a parallel run and passing alone. A slot
+// that lives in the shape has no key to collide: it is reachable only from
+// the object whose TShape it describes, and that object is what keeps the
+// TShape alive.
 void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
                               bool tight) const {
   if (!IsValid()) {
     min = max = glm::vec3(0.0f);
+    return;
+  }
+
+  const int slot = tight ? 1 : 0;
+  if (m_boxValid[slot]) {
+    min = m_boxMin[slot];
+    max = m_boxMax[slot];
     return;
   }
 
@@ -240,9 +259,9 @@ void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
     // analytic cylinder was exact.
     //
     // It costs: uncached it took the air-cooled engine's build from 1.6 s to
-    // 4.2 s, and caching by PlacementId does not help because a regeneration
-    // makes new shapes rather than re-asking about old ones. Hence the flag
-    // rather than a switch — see the header.
+    // 4.2 s. The memo above pays the first ask back on every later one, but a
+    // build asks about each new shape ONCE, so the flag still earns its place
+    // — see the header.
     BRepBndLib::AddOptimal(m_shape, box, /*useTriangulation=*/Standard_False,
                            /*useShapeTolerance=*/Standard_False);
   } else {
@@ -257,6 +276,11 @@ void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max,
   } else {
     min = max = glm::vec3(0.0f);
   }
+  // A void box is remembered too: it is an answer, and re-deriving it costs
+  // the same full traversal as any other.
+  m_boxMin[slot] = min;
+  m_boxMax[slot] = max;
+  m_boxValid[slot] = true;
 }
 
 CADShape CADShape::Union(const CADShape& other) const {
@@ -366,7 +390,7 @@ void CADShape::Translate(const glm::vec3& offset) {
 
   BRepBuilderAPI_Transform transformer(m_shape, transform);
   if (transformer.IsDone()) {
-    m_shape = transformer.Shape();
+    SetShape(transformer.Shape());
   }
 }
 
@@ -380,7 +404,7 @@ void CADShape::Rotate(const glm::vec3& axis, double angle) {
 
   BRepBuilderAPI_Transform transformer(m_shape, transform);
   if (transformer.IsDone()) {
-    m_shape = transformer.Shape();
+    SetShape(transformer.Shape());
   }
 }
 
@@ -393,7 +417,7 @@ void CADShape::Scale(double factor) {
 
   BRepBuilderAPI_Transform transformer(m_shape, transform);
   if (transformer.IsDone()) {
-    m_shape = transformer.Shape();
+    SetShape(transformer.Shape());
   }
 }
 
@@ -408,7 +432,7 @@ void CADShape::RotateAbout(const glm::vec3& point, const glm::vec3& dir,
 
   BRepBuilderAPI_Transform transformer(m_shape, transform);
   if (transformer.IsDone()) {
-    m_shape = transformer.Shape();
+    SetShape(transformer.Shape());
   }
 }
 
@@ -424,7 +448,7 @@ void CADShape::Mirror(const glm::vec3& point, const glm::vec3& normal) {
 
   BRepBuilderAPI_Transform transformer(m_shape, transform);
   if (transformer.IsDone()) {
-    m_shape = transformer.Shape();
+    SetShape(transformer.Shape());
   }
 }
 

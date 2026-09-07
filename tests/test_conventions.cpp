@@ -530,3 +530,42 @@ TEST_CASE("every feature reference is reported by VisitFeatureRefs",
   }());
   CHECK(problems.empty());
 }
+
+TEST_CASE("CADShape replaces its shape only through SetShape", "[convention]") {
+  // GetBoundingBox memoizes on the shape, so whatever replaces `m_shape` has
+  // to forget the boxes. SetShape is that one place. A bare `m_shape = `
+  // added later would keep a box describing the shape it USED to be — and
+  // that number reaches CAM as a stock size, which is the wrong place to
+  // discover it.
+  const fs::path src = fs::path(DESIGNER_SOURCE_DIR) / "src/cad/CADKernel.cpp";
+  REQUIRE(fs::exists(src));
+  std::ifstream f(src);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  const std::string text = ss.str();
+
+  // The definition of SetShape itself is the one allowed assignment; count
+  // by line so the message can point at the offender.
+  std::vector<int> offenders;
+  int line = 0;
+  bool inSetShape = false;
+  std::istringstream lines(text);
+  for (std::string l; std::getline(lines, l);) {
+    line++;
+    if (l.find("void CADShape::SetShape(") != std::string::npos)
+      inSetShape = true;
+    else if (inSetShape && l.rfind("}", 0) == 0)
+      inSetShape = false;
+    if (l.find("m_shape =") == std::string::npos || inSetShape)
+      continue;
+    offenders.push_back(line);
+  }
+  INFO("CADKernel.cpp assigns m_shape outside SetShape at line(s):\n"
+       << [&] {
+            std::string s;
+            for (int n : offenders)
+              s += "  " + std::to_string(n) + "\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
