@@ -3,6 +3,10 @@
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 1, set = 0, rgba32f) uniform image2D image;
+// Primary-hit G-buffer for the outline pass. Written by ONE extra launch (see
+// the auxPass push constant), which may run at a higher resolution than the
+// still so the lines come out antialiased rather than stair-stepped.
+layout(binding = 9, set = 0, rgba32ui) uniform uimage2D auxImage;
 
 layout(binding = 2, set = 0) uniform UniformBufferObject {
     mat4 viewInverse;
@@ -12,19 +16,36 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightColor;
     vec4 ambientColor;
     vec4 params;      // x = prefilter mips, y = ray far, z = AO radius
+    vec4 fillDir;     // unused here; the block must match closesthit.rchit
+    vec4 fillColor;
+    vec4 rimDir;
+    vec4 rimColor;
+    // Section planes; a hit is removed where dot(n, p) > w. clipInfo.x is how
+    // many are live, so a scene with no section costs one compare per ray.
+    vec4 clipPlanes[4];
+    vec4 clipInfo;
 } ubo;
 
 // Per-sample RNG seed data (raygen only).
 layout(push_constant) uniform PushConstants {
     uint sampleIndex;
     uint frameSeed;
+    // 1 = the outline G-buffer launch: trace one unjittered ray through the
+    // pixel centre and write auxImage instead of accumulating radiance.
+    uint auxPass;
 } pc;
 
-// Radiance + RNG state threaded through the hit shaders (soft shadows / AO
-// consume the same stream so batches don't correlate).
+// Radiance + RNG state, plus the primary-hit G-buffer the outline pass reads.
+// The viewport draws crisp edges over every body and the still drew none, so a
+// row of butted deck boards came back as one continuous slab. gnormal is the
+// FACE normal, not the interpolated one: a hard edge is then an exact
+// discontinuity, while a finely tessellated cylinder is not.
 struct RayPayload {
     vec3 radiance;
     uint rngState;
+    vec3 gnormal;
+    float hitT;   // < 0.0 on a miss
+    uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
 };
 layout(location = 0) rayPayloadEXT RayPayload payload;
 
@@ -42,11 +63,13 @@ void main() {
         pcgHash(pixelIndex) ^ pcgHash(pc.sampleIndex ^ (pc.frameSeed * 9781u));
 
     // Sub-pixel jitter (uniform over the pixel) gives free anti-aliasing as
-    // samples accumulate.
+    // samples accumulate. The G-buffer launch takes the pixel centre instead:
+    // it is a single sample and a jittered one would ripple every edge.
     payload.rngState = payload.rngState * 747796405u + 2891336453u;
     float jx = float((payload.rngState >> 8) & 0xFFFFu) / 65536.0;
     payload.rngState = payload.rngState * 747796405u + 2891336453u;
     float jy = float((payload.rngState >> 8) & 0xFFFFu) / 65536.0;
+    if (pc.auxPass != 0u) { jx = 0.5; jy = 0.5; }
 
     const vec2 pixel = vec2(gl_LaunchIDEXT.xy) + vec2(jx, jy);
     const vec2 inUV = pixel / vec2(gl_LaunchSizeEXT.xy);
@@ -60,8 +83,26 @@ void main() {
     // params.y, not a literal: the old 10000 was a LENGTH, and the unit is
     // the model's. A 6 m dock has to be framed from ~11 m away, so every
     // primary ray missed and the still came back as pure environment.
-    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xff, 0, 0, 0, origin.xyz,
+    // OpaqueEXT SKIPS the any-hit stage, which is where section cuts are
+    // applied -- with a section live the flag would render the model uncut.
+    // It is kept when nothing is cut, so a scene with no section pays none of
+    // the traversal cost any-hit brings.
+    uint rayFlags = ubo.clipInfo.x > 0.5 ? gl_RayFlagsNoneEXT
+                                         : gl_RayFlagsOpaqueEXT;
+    traceRayEXT(topLevelAS, rayFlags, 0xff, 0, 0, 0, origin.xyz,
                 0.001, direction.xyz, ubo.params.y, 0);
+
+    if (pc.auxPass != 0u) {
+        // Face normal at half precision (ample for a 60-degree threshold),
+        // hit distance, and the id that separates one body from the next.
+        uvec4 aux;
+        aux.x = packHalf2x16(payload.gnormal.xy);
+        aux.y = packHalf2x16(vec2(payload.gnormal.z, 0.0));
+        aux.z = floatBitsToUint(payload.hitT);
+        aux.w = payload.instId;
+        imageStore(auxImage, ivec2(gl_LaunchIDEXT.xy), aux);
+        return;
+    }
 
     // Accumulate (sum); the CPU divides by the sample count on readback.
     vec3 prev = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;

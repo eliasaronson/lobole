@@ -673,8 +673,10 @@ TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
   op.side = cam::Side::Outside;
   setup.operations.push_back(op);
 
-  const std::vector<std::string> why =
-      cam::FeedWarnings(setup, doc->GetBodies());
+  const cam::FeedReport report = cam::FeedsFor(setup, doc->GetBodies());
+  std::vector<std::string> why;
+  for (const cam::Finding& f : report.findings)
+    why.push_back(f.text);
   for (const std::string& w : why)
     INFO(w);
   REQUIRE(why.size() >= 3);
@@ -700,11 +702,12 @@ TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
   setup.tools[0].flutes = 2;
   setup.tools[0].spindleRpm = 6000.0;
   setup.tools[0].feedCut = 1440.0; // 6000 * 2 * 0.12
-  const std::vector<std::string> ok =
-      cam::FeedWarnings(setup, doc->GetBodies());
-  for (const std::string& w : ok)
-    INFO(w);
-  CHECK(ok.empty());
+  const cam::FeedReport clean = cam::FeedsFor(setup, doc->GetBodies());
+  for (const cam::Finding& f : clean.findings)
+    INFO(f.text);
+  for (const std::string& u : clean.unchecked)
+    INFO("unchecked: " << u);
+  CHECK(clean.Empty());
 
   // A body nobody labelled gets NO band rather than one from nowhere.
   for (Body& b : const_cast<std::vector<Body>&>(doc->GetBodies()))
@@ -712,7 +715,165 @@ TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
   setup.tools[0].flutes = 4;
   setup.tools[0].spindleRpm = 9000.0;
   setup.tools[0].feedCut = 1200.0;
-  CHECK(cam::FeedWarnings(setup, doc->GetBodies()).empty());
+  const cam::FeedReport blind = cam::FeedsFor(setup, doc->GetBodies());
+  CHECK(blind.findings.empty());
+  REQUIRE(blind.unchecked.size() == 1);
+  INFO(blind.unchecked[0]);
+  CHECK(blind.unchecked[0].find("no material") != std::string::npos);
+  CHECK_FALSE(blind.Empty()); // NOT silence
+}
+
+TEST_CASE("cam feeds: a cutter's own figures beat the rule, and say so",
+          "[cam][feeds]") {
+  // There is no ISO for cutting data the way there is for fastener geometry,
+  // so the app ships a scaling rule and takes a vendor's numbers when it has
+  // them. Which one was used travels WITH the finding: a limit nobody can
+  // trace is a limit nobody can argue with.
+  auto doc = BlockDoc();
+  for (Body& b : const_cast<std::vector<Body>&>(doc->GetBodies()))
+    b.material = "mdf";
+  cam::Setup setup = BasicSetup();
+  setup.machine.rapidFeed = 6000.0; // roomy: not the limiting factor here
+  setup.tools[0].diameter = 6.0;
+  setup.tools[0].flutes = 2;
+  setup.tools[0].spindleRpm = 12000.0;
+  setup.tools[0].feedCut = 2400.0; // 0.100 mm/tooth
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Pocket; // shallow: no chip-room finding to confuse
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 18.0;
+  op.stepdown = 2.0;
+  op.side = cam::Side::Inside;
+  setup.operations.push_back(op);
+
+  // The rule: sheet goods at 0.020-0.040 x 6 mm = 0.12-0.24. 0.100 is under.
+  const cam::FeedReport byRule = cam::FeedsFor(setup, doc->GetBodies());
+  REQUIRE(byRule.findings.size() == 1);
+  INFO(byRule.findings[0].text);
+  CHECK_THAT(byRule.findings[0].measured, WithinAbs(0.100, 1e-9));
+  CHECK_THAT(byRule.findings[0].bandMin, WithinAbs(0.12, 1e-9));
+  CHECK(byRule.findings[0].source.find("scaling rule") != std::string::npos);
+  CHECK(byRule.findings[0].text.find("scaling rule") != std::string::npos);
+
+  // This cutter's maker says 0.05-0.15 for it. Now 0.100 is IN band, and
+  // nothing is reported -- the rule was the weaker evidence all along.
+  setup.tools[0].chiploadMin = 0.05;
+  setup.tools[0].chiploadMax = 0.15;
+  const cam::FeedReport byChart = cam::FeedsFor(setup, doc->GetBodies());
+  for (const cam::Finding& f : byChart.findings)
+    INFO(f.text);
+  CHECK(byChart.Empty());
+
+  // ...and when the cutter's own figures DO bite, they are cited as the
+  // source rather than the rule.
+  setup.tools[0].chiploadMin = 0.20;
+  setup.tools[0].chiploadMax = 0.30;
+  const cam::FeedReport tight = cam::FeedsFor(setup, doc->GetBodies());
+  REQUIRE(tight.findings.size() >= 1);
+  INFO(tight.findings[0].text);
+  CHECK(tight.findings[0].source.find("own stated") != std::string::npos);
+  CHECK_THAT(tight.findings[0].bandMin, WithinAbs(0.20, 1e-9));
+
+  // A tool that states no spindle speed is UNCHECKED, not fine.
+  setup.tools[0].chiploadMin = 0.0;
+  setup.tools[0].chiploadMax = 0.0;
+  setup.tools[0].spindleRpm = 0.0;
+  const cam::FeedReport dumb = cam::FeedsFor(setup, doc->GetBodies());
+  CHECK(dumb.findings.empty());
+  REQUIRE(dumb.unchecked.size() == 1);
+  INFO(dumb.unchecked[0]);
+  CHECK(dumb.unchecked[0].find("spindle rpm") != std::string::npos);
+}
+
+TEST_CASE("cam verify: the POSTED FILE is checked against the travel",
+          "[cam][machine]") {
+  // On the artifact, not on the generator that made it. The generator's own
+  // idea of reach was wrong once already -- it nailed the travel box to the
+  // stock's corner, so turning a part round moved the machine -- and a check
+  // that reads the file cannot inherit that mistake.
+  auto doc = BlockDoc(); // 40 x 30 x 20
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 8.0;
+  op.side = cam::Side::Outside;
+  setup.operations.push_back(op);
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+
+  const auto paths = cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+
+  // No work area stated: not checked, and every existing job stays as it was.
+  {
+    const cam::Verdict v =
+        cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.25);
+    CHECK(v.outsideTravel == 0);
+  }
+  // A machine that cannot reach the far side of its own stock. The file is
+  // unchanged -- only the claim about the machine is -- so this is the check
+  // catching what the generator's clip would have hidden.
+  cam::Setup small = setup;
+  small.machine.name = "Stubby";
+  small.machine.travelMin = {0.0, 0.0, -100.0};
+  small.machine.travelMax = {20.0, 600.0, 0.0};
+  const cam::Verdict v = cam::VerifyGcode(gcode, small, doc->GetBodies(), 0.25);
+  INFO("outside " << v.outsideTravel << " worst " << v.worstOvershoot);
+  CHECK(v.outsideTravel > 0);
+  CHECK(v.outsideAxis == 'X');
+  CHECK(v.worstOvershoot > 10.0); // the block alone is 44 mm of stock
+  CHECK(v.firstOutsideLine > 0);
+  CHECK_FALSE(v.Safe(0.4)); // a file the controller alarms on is not safe
+  const auto lines = cam::Explain(v, 0.4, 1.0);
+  bool said = false;
+  for (const cam::VerdictLine& l : lines)
+    if (l.text.find("cannot go") != std::string::npos)
+      said = true;
+  CHECK(said);
+
+  // ...and on a part that is CLAMPED, not modelled flat. `Inspect` frames the
+  // bodies before this check, so framing them again inside it applied the
+  // setup rotation twice -- which an identity frame cannot show. A baffle
+  // laid face-up read every one of its 6809 moves as 391 mm outside a machine
+  // that reaches all of them.
+  cam::Setup turned = setup;
+  turned.frame = glm::dquat(glm::dvec3(-glm::half_pi<double>(), 0.0, 0.0));
+  turned.machine = cam::Machine{};
+  turned.machine.name = "Roomy";
+  turned.machine.travelMin = {0.0, 0.0, -100.0};
+  turned.machine.travelMax = {600.0, 900.0, 0.0}; // reaches the lot
+  REQUIRE(cam::RecomputeOrigin(turned, doc->GetBodies()));
+  const auto turnedPaths = cam::GenerateAll(turned, doc->GetBodies());
+  std::string turnedGcode;
+  REQUIRE(
+      cam::PostProcess("mach3", turned, turnedPaths, {}, turnedGcode, &error));
+  const cam::Verdict tv =
+      cam::VerifyGcode(turnedGcode, turned, doc->GetBodies(), 0.25);
+  INFO("outside " << tv.outsideTravel << " worst " << tv.worstOvershoot);
+  CHECK(tv.outsideTravel == 0);
+}
+
+TEST_CASE("cam verify: a nested comment is a file no controller will load",
+          "[cam][post]") {
+  // Our parser counts depth and carries on; Mach3 stops on the second "(",
+  // refuses the whole file, and the verifier used to call it ok.
+  const cam::GProgram good = cam::ParseGcode("(tool 1: 6 mm flat)\nG0 X1\n");
+  CHECK(good.warnings.empty());
+  const cam::GProgram bad =
+      cam::ParseGcode("(tool 1: 6 mm flat 2F (through cuts) D6)\nG0 X1\n");
+  REQUIRE(bad.warnings.size() == 1);
+  INFO(bad.warnings[0]);
+  CHECK(bad.warnings[0].find("nested comment") != std::string::npos);
+  CHECK(bad.warnings[0].find("line 1") != std::string::npos);
+  // The moves still parse: it is a warning about the FILE, not a parse error.
+  CHECK(bad.errors.empty());
+  CHECK(bad.moves.size() == 1);
 }
 
 TEST_CASE("cam machine: the reach window can be placed ON the sheet",

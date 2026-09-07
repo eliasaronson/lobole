@@ -420,6 +420,14 @@ void ArmSectionFacePick(AppState& state, uint64_t sectionId);
 // Routed here by SlotPickClicked when that slot is armed.
 void SectionFacePicked(AppState& state, const SelectionItem& item);
 ClipPlaneArray SectionPlanes(const AppState& state); // enabled ones, padded
+
+// A world section plane in ONE occurrence's part space. Caps are computed on
+// the part's own bodies (which is where its geometry lives) and placed by the
+// occurrence transform afterwards, so the plane has to make the trip inward
+// first. Returns false for a disabled (all-zero) plane. Shared by the raster
+// assembly sync and the ray-traced still — one copy of n' = Rᵀn, d' = d - n·t.
+bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
+                             glm::vec3& localOrigin, glm::vec3& localNormal);
 bool SectionActive(const AppState& state);
 
 // The cut the sketch slice wants, or nullopt when it is off, no sketch is
@@ -535,8 +543,11 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 
 // Builds the offline-render descriptor from the current app state (camera +
 // shared IBL maps) for a `width`x`height` still with the given RNG seed.
+// `outlines` is ANDed with the viewport's own outline mode, so a still draws
+// edges exactly when the screen it came from does.
 ::RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
-                            uint32_t seed);
+                            uint32_t seed, bool studioBackdrop = true,
+                            bool outlines = true);
 
 // Full synchronous offline still: sync the scene, build ASes, trace `samples`
 // samples, tonemap and write a PNG to `path`. Blocks until done. Returns false
@@ -550,7 +561,7 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
                          std::string* warning = nullptr,
-                         bool studioBackdrop = true);
+                         bool studioBackdrop = true, bool outlines = true);
 
 // Advances an active AppState::renderJob by one sample batch per call (the
 // non-blocking counterpart of RenderStillBlocking). Call once per UI frame on

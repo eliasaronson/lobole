@@ -5,10 +5,17 @@
 
 #include "grain.glsl"  // procedural wood/plywood grain, shared with mesh.frag
 
-// Radiance + RNG state (shared with raygen).
+// Radiance + RNG state, plus the primary-hit G-buffer the outline pass reads.
+// The viewport draws crisp edges over every body and the still drew none, so a
+// row of butted deck boards came back as one continuous slab. gnormal is the
+// FACE normal, not the interpolated one: a hard edge is then an exact
+// discontinuity, while a finely tessellated cylinder is not.
 struct RayPayload {
     vec3 radiance;
     uint rngState;
+    vec3 gnormal;
+    float hitT;   // < 0.0 on a miss
+    uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
 };
 layout(location = 0) rayPayloadInEXT RayPayload payload;
 layout(location = 1) rayPayloadEXT bool isShadowed;
@@ -25,6 +32,17 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightColor;
     vec4 ambientColor;
     vec4 params;      // x = prefilter mips, y = ray far, z = AO, w = backdrop
+    // The viewport's other two lights (conv::kFillLight / kRimLight). The
+    // still ran the key alone, which is why wood came out flat: the cool fill
+    // and the rim are what give a face its form and its edge separation.
+    vec4 fillDir;     // xyz = travel direction, w = intensity
+    vec4 fillColor;
+    vec4 rimDir;
+    vec4 rimColor;
+    // Section planes; a hit is removed where dot(n, p) > w. clipInfo.x is how
+    // many are live, so a scene with no section costs one compare per ray.
+    vec4 clipPlanes[4];
+    vec4 clipInfo;
 } ubo;
 
 // Per-body vertex/index data reached by device address. std430 float/uint
@@ -156,8 +174,14 @@ Vertex unpackVertex(GeometryInfo g, uint index) {
 // Whether a ray from `origin` along `dir` hits any geometry within `tMax`.
 bool traceOcclusion(vec3 origin, vec3 dir, float tMax) {
     isShadowed = true;
-    uint flags = gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT |
-                 gl_RayFlagsSkipClosestHitShaderEXT;
+    // OpaqueEXT skips any-hit, and any-hit is what removes sectioned material.
+    // Left on with a section live, cut-away material keeps casting shadows and
+    // occluding AO -- a correctly cut model lit by geometry that is no longer
+    // there, which reads as a lighting bug rather than a section one. Dropped
+    // only when something IS cut, so the common path keeps the fast flag.
+    uint flags = gl_RayFlagsTerminateOnFirstHitEXT |
+                 gl_RayFlagsSkipClosestHitShaderEXT |
+                 (ubo.clipInfo.x > 0.5 ? 0u : gl_RayFlagsOpaqueEXT);
     // sbtRecordOffset 0 keeps the ray in the single hit region; missIndex 1 is
     // the shadow-miss shader, which clears isShadowed on a miss.
     traceRayEXT(topLevelAS, flags, 0xff, 0, 0, 1, origin, 0.001, dir, tMax, 1);
@@ -199,6 +223,30 @@ void main() {
     vec3 V = normalize(ubo.viewPos.xyz - worldPos);
     if (dot(N, V) < 0.0) N = -N;
 
+    // G-buffer for the outline pass, written before the shadow-catcher branch
+    // below returns. The FACE normal (from the triangle, not the interpolated
+    // vertex normals) is what makes a hard edge an exact discontinuity.
+    //
+    // NOT flipped toward the viewer, unlike the shading normal N above. The
+    // flip manufactures a 180-degree discontinuity wherever two neighbouring
+    // facets straddle grazing incidence -- which is every silhouette on every
+    // curved surface -- and the outline pass drew a band of false edges down
+    // the side of each barrel because of it. Consistent winding already gives
+    // neighbouring facets consistent normals.
+    vec3 faceCross = cross(v1.pos - v0.pos, v2.pos - v0.pos);
+    // A sliver triangle's cross product is noise; its normalize() would be a
+    // random direction and a random edge with it.
+    payload.gnormal = length(faceCross) > 1e-12
+                          ? normalize(mat3(gl_ObjectToWorldEXT) * faceCross)
+                          : N;
+    payload.hitT = gl_HitTEXT;
+    // The ground is invisible, so it reads as background: a body still gets a
+    // silhouette against it, and the quad's own far border draws no horizon.
+    payload.instId = (g.flags & kFlagShadowCatcher) != 0u
+                         ? 0u
+                         : gl_InstanceCustomIndexEXT + 1u;
+    if (payload.instId == 0u) payload.hitT = -1.0;
+
     // ---- Shadow catcher (the ground plane): show the environment as if the
     // ray had missed, darkened by key-light shadow + contact occlusion. Keeps
     // the backdrop photographic while giving bodies something to sit on. ----
@@ -231,13 +279,20 @@ void main() {
     grain_apply(mat.baseColor, roughness, mat.procParams, pos,
                 abs(dot(nrm, grain_axisUnit(int(mat.procParams.w + 0.5)))));
 
-    // ---- Direct key light with a soft (area) shadow ----
+    // ---- The three-light rig, exactly as the viewport draws it: only the
+    // KEY is shadowed; fill and rim are the soft fill that keeps shadows from
+    // going black (mesh.frag's rule, and the reason the still used to read
+    // flat -- it ran the key alone). ----
     vec3 L = normalize(-ubo.lightDir.xyz);
     vec3 lightColor = ubo.lightColor.rgb * ubo.lightDir.w;
     // Jitter the shadow ray in a small cone -> penumbrae as samples accumulate.
     vec3 Ls = coneSample(L, kSunCos, payload.rngState);
     float shadow = traceOcclusion(worldPos + N * 0.001, Ls, ubo.params.y) ? 0.0 : 1.0;
     vec3 direct = directLight(N, V, L, lightColor, mat, roughness) * shadow;
+    direct += directLight(N, V, normalize(-ubo.fillDir.xyz),
+                          ubo.fillColor.rgb * ubo.fillDir.w, mat, roughness);
+    direct += directLight(N, V, normalize(-ubo.rimDir.xyz),
+                          ubo.rimColor.rgb * ubo.rimDir.w, mat, roughness);
 
     // ---- IBL ambient (split-sum, shared with the raster viewport) ----
     vec3 R = reflect(-V, N);

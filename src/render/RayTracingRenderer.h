@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/ClipPlanes.h"
+
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -79,10 +81,24 @@ struct RTStillDesc {
   // HDRI still lights it and still fills its reflections — it just stops
   // being the background.
   bool studioBackdrop = true;
-  // TOWARD the still's key light. Zero = use the shared rig
-  // (conv::kKeyLightDir), which is what the viewport draws with.
+  // TOWARD each light. Zero = fall back to the shared rig (conv::kKeyLightDir
+  // and friends), which is what the viewport draws with. The still derives all
+  // three from the camera instead, so the rig stays a rig from any viewpoint.
   glm::vec3 keyLightDir{0.0f};
+  glm::vec3 fillLightDir{0.0f};
+  glm::vec3 rimLightDir{0.0f};
   uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
+  // Edges over the traced image, the way the viewport draws them. Without
+  // them a row of butted boards renders as one continuous slab -- the single
+  // biggest reason a still read as softer than the screen it came from.
+  bool outlines = true;
+  glm::vec3 outlineColor{0.2f, 0.2f, 0.2f};
+  float outlineWidth = 1.5f; // pixels, at the still's own resolution
+  // Section cuts, from ui::SectionPlanes -- the same array main.cpp hands
+  // every raster renderer, so a still and the viewport cannot disagree about
+  // what has been cut away. A ray tracer cannot discard in closest-hit, so
+  // these are applied by an any-hit shader (section.rahit).
+  ClipPlaneArray clipPlanes = NoClipPlanes();
 };
 
 class RayTracingRenderer {
@@ -247,6 +263,21 @@ private:
   VkImage m_stillImage = VK_NULL_HANDLE; // rgba32f accumulation
   VkDeviceMemory m_stillImageMemory = VK_NULL_HANDLE;
   VkImageView m_stillImageView = VK_NULL_HANDLE;
+  // Outline G-buffer (rgba32ui: packed face normal, hit distance, body id),
+  // traced by one extra primary-ray launch. It runs at m_auxScale x the still
+  // so the edge mask can be downsampled into coverage -- an aliased 1 px line
+  // is exactly the "cheap render" look this pass exists to remove.
+  VkImage m_auxImage = VK_NULL_HANDLE;
+  VkDeviceMemory m_auxImageMemory = VK_NULL_HANDLE;
+  VkImageView m_auxImageView = VK_NULL_HANDLE;
+  uint32_t m_auxScale = 1;
+  bool m_stillOutlines = true;
+  bool m_stillHasClip = false; // any section plane live this render
+  glm::vec3 m_stillOutlineColor{0.2f};
+  float m_stillOutlineWidth = 1.5f;
+  // Traces the outline G-buffer and returns the per-output-pixel edge
+  // coverage in [0,1], or an empty vector when outlines are off.
+  std::vector<float> TraceOutlineCoverage();
   VkBuffer m_stillUBO = VK_NULL_HANDLE; // camera + light UBO
   VkDeviceMemory m_stillUBOMemory = VK_NULL_HANDLE;
   VkBuffer m_stillGeomInfo = VK_NULL_HANDLE; // GeometryInfo[] SSBO

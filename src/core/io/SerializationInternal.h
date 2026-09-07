@@ -17,7 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    91; // v91: a CAM setup's `reach_offset` -- WHERE THE BED IS ON THE SHEET
+    92; // v92: a CAM tool's `chipload_min`/`chipload_max` -- what THIS cutter
+        //      wants per tooth, when somebody has a vendor's chart for it.
+        //      Absent (the default) falls back to a scaling rule off the
+        //      diameter, and every finding CITES which of the two it used:
+        //      cutting data is empirical and published as vendor copyright,
+        //      so there is no standard to vendor the way ISO fastener
+        //      geometry could be. Written only when stated, so a job of
+        //      uncharted tools re-saves byte-identically.
+        // (v91: a CAM setup's `reach_offset` -- WHERE THE BED IS ON THE SHEET
         //      -- and `stock_max` as a work origin. The machine's reach box
         //      was travel-sized with its corner nailed to the stock's, which
         //      is an assumption for any sheet longer than the bed: it decided

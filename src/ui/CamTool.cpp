@@ -1163,8 +1163,13 @@ void RunCamVerification(AppState& state) {
     }
   // Feeds and speeds against the material being cut: the same lines the RPC
   // returns, so the panel and a script cannot disagree about them.
-  for (const std::string& w : cam::FeedWarnings(*setup, ui::JobBodies(state)))
-    state.camVerdict.push_back({cam::VerdictLine::Level::Warn, w});
+  const cam::FeedReport feeds = cam::FeedsFor(*setup, ui::JobBodies(state));
+  for (const cam::Finding& f : feeds.findings)
+    state.camVerdict.push_back({cam::VerdictLine::Level::Warn, f.text});
+  // What could NOT be checked, said as such: silence reads as approval.
+  for (const std::string& u : feeds.unchecked)
+    state.camVerdict.push_back(
+        {cam::VerdictLine::Level::Warn, "Not checked: " + u});
   // The machine's lines: the parts' reach beyond the travel, or the sheet's
   // overhang -- warnings, never refusals. Cut as far as it reaches.
   for (const cam::VerdictLine& line :

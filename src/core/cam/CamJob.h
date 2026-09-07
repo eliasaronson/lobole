@@ -53,6 +53,21 @@ struct Tool {
   double feedCut = 300.0;    // mm/min in XY
   double feedPlunge = 100.0; // mm/min in Z
   double spindleRpm = 10000.0;
+  // What THIS cutter wants per tooth, in mm, when somebody knows -- a tool
+  // vendor's chart for this cutter in the material this setup cuts. Zero (the
+  // default) means nobody said, and the check falls back to a scaling rule off
+  // the diameter (CamFeeds.h). Evidence beats a rule, and the finding cites
+  // which one it used, because a limit nobody can trace is a limit nobody can
+  // argue with.
+  //
+  // On the TOOL rather than in a table of our own because there is no open
+  // standard to vendor here: fastener geometry is ISO because parts must
+  // interchange, while cutting data is empirical, machine-dependent and
+  // published as vendor copyright. So we ship a conservative rule and let the
+  // real numbers be typed in beside the feed they belong to -- and a machine's
+  // tool library carries them into every new setup for free.
+  double chiploadMin = 0.0;
+  double chiploadMax = 0.0;
   bool operator==(const Tool&) const = default;
 };
 

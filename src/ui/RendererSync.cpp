@@ -481,6 +481,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     size_t bodyIndex = 0;
   };
   std::vector<RTItem> rtItems;
+  // Section caps are computed per PART (Measure::SectionCaps takes a body
+  // list and returns one cap each), so the cap pass below needs the parts as
+  // parts -- rtItems has already been flattened to individual bodies.
+  struct CapSource {
+    const std::vector<Body>* bodies;
+    glm::mat4 xf;
+  };
+  std::vector<CapSource> capSources;
   if (state.assembly) {
     // A5: the leaf parts of the whole tree — a nested assembly must appear in
     // the path-traced still as well as the viewport.
@@ -491,6 +499,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
       for (size_t bi = 0; bi < bodies.size(); bi++)
         rtItems.push_back(
             {&bodies[bi], inst.world, inst.partId, inst.part->Version(), bi});
+      capSources.push_back({&bodies, inst.world});
     }
   } else if (state.job) {
     // A job tab ray-traces what it draws: the parts laid out.
@@ -499,6 +508,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   } else if (state.document) {
     for (const auto& body : state.document->GetBodies())
       rtItems.push_back({&body, glm::mat4(1.0f)});
+    capSources.push_back({&state.document->GetBodies(), glm::mat4(1.0f)});
   }
 
   state.rayTracer->ClearGeometry();
@@ -622,6 +632,84 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
            "cache, {} tessellated here)",
            state.rayTracer->GeometryCount(), reused, meshed);
 
+  // ---- Section cut caps -------------------------------------------------
+  // section.rahit removes the material past a plane, which leaves a solid
+  // looking like a shell: you see straight through the wall into the inside
+  // of the far surface. The raster viewport fills that with a cap per body
+  // per plane, and this is the same Measure::SectionCaps call it makes, so
+  // both renderers cut the same shape and fill it the same way.
+  //
+  // The cap carries the body's BASE colour and no procedural grain, matching
+  // AppendCapMeshes. End grain on a cut wooden face would be more truthful,
+  // but the viewport does not draw it and disagreeing with the screen is the
+  // thing this whole change exists to stop.
+  {
+    const ClipPlaneArray worldPlanes = SectionPlanes(state);
+    size_t capCount = 0;
+    for (const CapSource& src : capSources) {
+      for (size_t i = 0; i < worldPlanes.size(); i++) {
+        glm::vec3 localOrigin, localNormal;
+        if (!SectionPlaneInPartSpace(worldPlanes[i], src.xf, localOrigin,
+                                     localNormal))
+          continue;
+        // Every OTHER plane trims this cap, or two cuts leave each other's
+        // fill hanging in space past the corner.
+        std::vector<glm::vec4> trim;
+        for (size_t j = 0; j < worldPlanes.size(); j++) {
+          glm::vec3 to, tn;
+          if (j != i && SectionPlaneInPartSpace(worldPlanes[j], src.xf, to, tn))
+            trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
+        }
+        // Cached on (bodies, plane): an assembly asks for the same cap of the
+        // same part about the same plane every render.
+        const std::vector<CADShape> shapes =
+            Measure::SectionCaps(*src.bodies, localOrigin, localNormal, trim,
+                                 &state.sectionCapCache);
+        const glm::vec3 worldNormal = glm::normalize(glm::vec3(worldPlanes[i]));
+        for (size_t bi = 0; bi < shapes.size() && bi < src.bodies->size();
+             bi++) {
+          if (!shapes[bi].IsValid())
+            continue;
+          CADShape::Mesh cm = shapes[bi].GenerateMesh(0.05);
+          if (cm.vertices.empty())
+            continue;
+          std::vector<Vertex3D> cv =
+              CADMeshConverter::ConvertCADMeshToVertices(cm);
+          const glm::mat3 rot(src.xf);
+          for (Vertex3D& v : cv) {
+            v.position = glm::vec3(src.xf * glm::vec4(v.position, 1.0f));
+            v.normal = glm::normalize(rot * v.normal);
+            // The cap lies exactly ON the plane, where the any-hit test
+            // dot(n, p) > w is a coin toss in floating point -- half the cap
+            // would be cut away by the very plane that created it. Nudge it
+            // to the kept side; 1e-3 of a millimetre is invisible.
+            v.position -= worldNormal * 1e-3f;
+          }
+          const Body& b = (*src.bodies)[bi];
+          CADMaterials::MaterialProperties cmat =
+              CADMaterials::MaterialLibrary::GetMaterial(
+                  b.material.empty()
+                      ? CADMaterials::MaterialType::DEFAULT
+                      : CADMaterials::MaterialLibrary::FromSlug(b.material));
+          if (b.appearance.color)
+            cmat.baseColor = *b.appearance.color;
+          RTMaterial crm{};
+          crm.baseColor = cmat.baseColor;
+          crm.metallic = cmat.metallic;
+          crm.roughness = cmat.roughness;
+          crm.emissive = glm::vec3(0.0f);
+          crm.specular = glm::vec3(cmat.specular);
+          crm.transmission = 0.0f; // procParams left at 0: no grain on a cap
+          state.rayTracer->AddGeometry(cv, cm.indices,
+                                       state.rayTracer->AddMaterial(crm));
+          capCount++;
+        }
+      }
+    }
+    if (capCount > 0)
+      LOG_INFO("Ray tracing scene: {} section cut caps", capCount);
+  }
+
   // What the ray tracer was given, for the still to size its ray limits from
   // (MakeStillDesc). Recorded before the ground plane, which is derived from
   // these bounds in turn.
@@ -692,9 +780,24 @@ bool StillFramesGeometry(const RTStillDesc& desc, const glm::vec3& min,
 }
 
 RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
-                          uint32_t seed, bool studioBackdrop) {
+                          uint32_t seed, bool studioBackdrop, bool outlines) {
   RTStillDesc desc;
   desc.studioBackdrop = studioBackdrop;
+  // Edges, colour and width all come from the renderer the viewport uses, so
+  // the still cannot disagree with the screen about what an edge looks like.
+  // main.cpp runs it in WIREFRAME mode, which is why this reads wireframeColor
+  // and lineWidth rather than the outline pair.
+  // The live section cuts, from the same call main.cpp hands every raster
+  // renderer -- so a still and the viewport cut on the same planes or neither
+  // does. Applied by section.rahit, since closest-hit is too late to discard.
+  desc.clipPlanes = SectionPlanes(state);
+  desc.outlines = outlines;
+  if (state.outlineRenderer) {
+    const OutlineSettings& os = state.outlineRenderer->GetOutlineSettings();
+    desc.outlines = outlines && os.mode != OutlineMode::NONE;
+    desc.outlineColor = glm::vec3(os.wireframeColor);
+    desc.outlineWidth = os.lineWidth;
+  }
   desc.width = width;
   desc.height = height;
   desc.seed = seed;
@@ -731,13 +834,13 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
              desc.rayFar, desc.aoRadius, diag,
              glm::length(desc.cameraPos - centre));
   }
-  // The still's key light is placed OFF the camera axis. The shared rig
+  // The still's rig is placed OFF the camera axis. The shared rig
   // (conv::kKeyLightDir) sits 18.7 degrees from the default view direction —
   // a headlamp: it flattens the form, and it throws the shadow directly
   // behind the model where the model hides it, so "Ground shadows" looked
-  // like it did nothing. The viewport can live with that (it has outlines
-  // and SSAO doing the shape definition); a path-traced still has neither
-  // and must be LIT for the picture.
+  // like it did nothing. The viewport can live with that (SSAO and its
+  // outlines do the shape definition); the still now draws outlines too, but
+  // it still has no SSAO and must be LIT for the picture.
   //
   // 40 degrees to the camera's left and 45 up, derived from the camera so it
   // stays off-axis from any viewpoint. Left because the shadow then falls to
@@ -760,6 +863,18 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
         std::cos(swing) * flat - std::sin(swing) * right; // toward its left
     desc.keyLightDir =
         glm::normalize(std::cos(lift) * swung + std::sin(lift) * up);
+    // Fill opposite the key and barely lifted, to open the shadow side
+    // without casting a second one; rim from behind and high, for the bright
+    // edge that separates a body from what is behind it. Both carry the
+    // shared rig's colour and intensity (cool 0.4, neutral 0.6) — only the
+    // placement is derived here, so the three stay a rig from any viewpoint.
+    const glm::vec3 fillSwung = std::cos(glm::radians(60.0f)) * flat +
+                                std::sin(glm::radians(60.0f)) * right;
+    desc.fillLightDir =
+        glm::normalize(std::cos(glm::radians(15.0f)) * fillSwung +
+                       std::sin(glm::radians(15.0f)) * up);
+    desc.rimLightDir = glm::normalize(-flat * std::cos(glm::radians(55.0f)) +
+                                      up * std::sin(glm::radians(55.0f)));
   }
   if (state.ibl) {
     desc.environment = state.ibl->EnvironmentView();
@@ -776,7 +891,8 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
-                         std::string* warning, bool studioBackdrop) {
+                         std::string* warning, bool studioBackdrop,
+                         bool outlines) {
   auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -789,7 +905,8 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   if (samples == 0)
     samples = 1;
 
-  RTStillDesc desc = MakeStillDesc(state, width, height, seed, studioBackdrop);
+  RTStillDesc desc =
+      MakeStillDesc(state, width, height, seed, studioBackdrop, outlines);
   if (warning && state.rtSceneValid &&
       !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
     *warning = "the camera framed no geometry — the still is the backdrop "
@@ -852,7 +969,7 @@ void PumpRenderJob(AppState& state) {
       return;
     }
     RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed,
-                                     job.studioBackdrop);
+                                     job.studioBackdrop, job.outlines);
     // Saved is not the same as good: a still whose scene is entirely outside
     // the frustum is a valid PNG of the backdrop, and the modal used to
     // report that as a plain success.
