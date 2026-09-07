@@ -46,8 +46,11 @@ constexpr MethodDoc MotionMethods[] = {
     {"run_motion_study",
      "Run it: {study, async?, include_poses?}. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "
-     "it solved, the loop residual, and the clashing pairs — plus `clean`, "
-     "`worst_sample`, `table` (the same as text, for a report), "
+     "it solved, the loop residual, and the clashing pairs (each with its "
+     "`volume` and `centroid` under an EXACT check, which is how a pair of "
+     "names becomes something to act on; a mesh check knows only THAT, and "
+     "says nothing rather than a zero that reads like a measurement) — plus "
+     "`clean`, `worst_sample`, `table` (the same as text, for a report), "
      "`deflection_mm` for a mesh check, and `pairs_checked`. "
      "include_poses adds every occurrence's placement per sample. "
      "{async: true} runs it as a background job ('motion' in "
@@ -97,9 +100,16 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
   for (size_t i = 0; i < r.samples.size(); i++) {
     const motion::Sample& sm = r.samples[i];
     json clashes = json::array();
-    for (const motion::Clash& c : sm.clashes)
-      clashes.push_back(
-          {{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}});
+    for (const motion::Clash& c : sm.clashes) {
+      json j{{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}};
+      // An exact check knows how much and where; a mesh one only knows THAT,
+      // and says nothing rather than a zero that reads like a measurement.
+      if (c.known) {
+        j["volume"] = c.volume;
+        j["centroid"] = {c.centroid.x, c.centroid.y, c.centroid.z};
+      }
+      clashes.push_back(std::move(j));
+    }
     json sj{{"index", i},
             {"t", sm.t},
             {"value", rot ? sm.value * 180.0 / kPi : sm.value},
