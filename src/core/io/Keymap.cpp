@@ -234,6 +234,10 @@ const Binding kDefaults[] = {
     {"sketch.paste_linked", Context::Sketch, "Paste linked", "Modify",
      "Ctrl+Shift+V"},
 
+    // F7 is Inventor's Slice Graphics, which is the same gesture.
+    {"sketch.toggle_slice", Context::Sketch, "Slice at the sketch plane",
+     "Modify", "F7"},
+
     {"sketch.constraint_horizontal", Context::Sketch, "Horizontal", "Constrain",
      "H"},
     {"sketch.constraint_vertical", Context::Sketch, "Vertical", "Constrain",

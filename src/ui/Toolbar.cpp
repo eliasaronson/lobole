@@ -651,6 +651,17 @@ void DrawSketchModeToolbar(AppState& state) {
                 edit.autoConstrain);
   CommandButton(state, ICON_FA_EYE "###tb_sk_glyphs", "sketch.toggle_glyphs",
                 "Show constraint glyphs", edit.showConstraintGlyphs);
+  // Slice at the sketch plane: what helps when the sketch is INSIDE existing
+  // material, where there is no consuming feature for the automatic rollback
+  // to stop before. Greyed with a reason rather than clicking to no effect.
+  const std::string sliceTip =
+      (state.sketchSlice || CanSketchSlice(state))
+          ? "Slice at the sketch plane \xe2\x80\x94 hide everything between "
+            "the camera and the sketch"
+          : "Slice at the sketch plane \xe2\x80\x94 no clip plane free, all "
+            "four section planes are in use";
+  CommandButton(state, ICON_FA_CIRCLE_HALF_STROKE "###tb_sk_slice",
+                "sketch.toggle_slice", sliceTip.c_str(), state.sketchSlice);
   Divider();
 
   // Insert reference image (U8 polish): file dialog, then the fresh image's

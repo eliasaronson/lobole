@@ -32,6 +32,11 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(parentId); // the plane this one is offset/angled from
+    VisitRefs(axis, visit);
+  }
+
   [[nodiscard]] bool IsDatum() const override { return true; }
 
   void VisitExprs(const ExprVisitor& visit) override {

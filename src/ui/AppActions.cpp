@@ -2411,7 +2411,93 @@ void StampAllSaved(AppState& state) {
     state.lastSavedVersion = state.document ? state.document->Version() : 0;
   state.projectMetaDirty = false;
 }
+
+// The saved-version counter for `doc`, or null when it is not a document this
+// app is tracking. The active slot's counter lives on AppState (its slot copy
+// is stale until StashActive writes it back), which is why this is not a
+// plain index.
+uint64_t* SavedVersionFor(AppState& state, const Document* doc) {
+  if (doc == nullptr)
+    return nullptr;
+  if (state.parts.empty())
+    return state.document.get() == doc ? &state.lastSavedVersion : nullptr;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (SlotDoc(state, i) != doc)
+      continue;
+    return static_cast<int>(i) == state.activePart
+               ? &state.lastSavedVersion
+               : &state.parts[i].lastSavedVersion;
+  }
+  return nullptr;
+}
+
+// Moves a document's VIEW rollback without changing whether it counts as
+// modified. Opening a sketch to look at it must not dirty the project: the
+// marker never reaches the file, but SetViewRollback regenerates, every
+// Regenerate bumps Version(), and dirty is measured as Version() != saved.
+// So a document that was clean is re-stamped at its new version; one that was
+// already dirty (the user has edited something) is left alone, in both
+// directions.
+void SetViewRollbackKeepingDirt(AppState& state, Document* doc, int index) {
+  uint64_t* saved = SavedVersionFor(state, doc);
+  const bool wasClean = saved != nullptr && doc->Version() == *saved;
+  doc->SetViewRollback(index);
+  if (wasClean)
+    *saved = doc->Version();
+}
+
+// Every document this app holds, active slot included.
+template <typename F> void ForEachDocument(AppState& state, F&& fn) {
+  if (state.parts.empty()) {
+    if (state.document != nullptr)
+      fn(state.document.get());
+    return;
+  }
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (Document* d = SlotDoc(state, i); d != nullptr)
+      fn(d);
+}
+
 } // namespace
+
+void SyncSketchViewRollback(AppState& state) {
+  SketchViewRollback& applied = state.sketchViewRollback;
+  Document* doc = state.document.get();
+  const uint64_t wantSketch =
+      doc != nullptr ? state.sketchEdit.activeSketchId : uint64_t{0};
+  const uint64_t wantDoc = wantSketch != 0 ? doc->InstanceId() : uint64_t{0};
+  const uint64_t version = doc != nullptr ? doc->Version() : uint64_t{0};
+  // The overwhelmingly common frame: same sketch, same tab, nothing edited.
+  if (wantSketch == applied.sketchId && wantDoc == applied.documentId &&
+      version == applied.documentVersion)
+    return;
+
+  // The old marker need not be on the tab that is open now — switching tabs
+  // is one of the ways a sketch session ends, and a marker left behind is a
+  // model with its features missing and no sketch open to explain why.
+  if (applied.documentId != 0 && applied.documentId != wantDoc) {
+    const uint64_t stale = applied.documentId;
+    ForEachDocument(state, [&](Document* d) {
+      if (d->InstanceId() == stale && d->ViewRollback() >= 0)
+        SetViewRollbackKeepingDirt(state, d, -1);
+    });
+  }
+
+  if (wantSketch == 0) {
+    if (doc != nullptr && doc->ViewRollback() >= 0)
+      SetViewRollbackKeepingDirt(state, doc, -1);
+    applied = {};
+    return;
+  }
+
+  // -1 (nothing consumes this sketch, or it is gone) clears the marker: a
+  // brand-new sketch, or the last feature in the tree, has nothing built from
+  // it to be in the way. Rolling back to the sketch's own position instead
+  // would blank every unrelated feature after it, which is worse than the
+  // problem being fixed.
+  SetViewRollbackKeepingDirt(state, doc, doc->FirstConsumerIndex(wantSketch));
+  applied = {wantSketch, wantDoc, doc->Version()};
+}
 
 bool ProjectDirty(AppState& state) {
   if (state.projectMetaDirty)
@@ -3293,6 +3379,36 @@ bool SectionSourceResolved(const AppState& state,
   return resolved;
 }
 
+std::optional<glm::vec4> SketchSlicePlane(const AppState& state) {
+  if (!state.sketchSlice || state.sketchEdit.activeSketchId == 0 ||
+      state.document == nullptr || state.camera == nullptr)
+    return std::nullopt;
+  const SketchFeature* sk = nullptr;
+  for (const auto& f : state.document->GetFeatures())
+    if (f->GetId() == state.sketchEdit.activeSketchId) {
+      sk = dynamic_cast<const SketchFeature*>(f.get());
+      break;
+    }
+  if (sk == nullptr)
+    return std::nullopt;
+
+  // Remove the half TOWARD the camera. The clip convention here is not the
+  // GL one: mesh.vert writes a plain varying and the fragment stage discards
+  // where dot(n, p) - w is POSITIVE (which is also why a disabled slot is
+  // -1e9), so the normal points at the half that goes away — it must oppose
+  // the view direction, not follow it.
+  //
+  // Camera-relative rather than fixed to the sketch normal because orbiting
+  // to the far side of the plane would otherwise cut away everything you can
+  // see instead of revealing it; Inventor's Slice Graphics and Fusion's Slice
+  // both follow the view for the same reason. Edge-on (facing ~ 0) there is
+  // no near half to speak of and either answer is as good.
+  const glm::vec3 n0 = glm::normalize(sk->plane.GetNormal());
+  const float facing = glm::dot(n0, state.camera->GetForward());
+  const glm::vec3 n = facing > 0.0f ? -n0 : n0;
+  return glm::vec4(n, glm::dot(sk->plane.GetOrigin(), n));
+}
+
 ClipPlaneArray SectionPlanes(const AppState& state) {
   ClipPlaneArray planes = NoClipPlanes();
   size_t slot = 0;
@@ -3306,14 +3422,33 @@ ClipPlaneArray SectionPlanes(const AppState& state) {
       continue;
     planes[slot++] = SectionPlaneOf(state, s);
   }
+  // The sketch slice rides in the last free slot rather than in the section
+  // list, so it cannot be edited or deleted as if it were a cut the user set
+  // up. Passing through here is what gives it filled cut faces for free —
+  // AppendSectionCaps reads this array, not state.sections. With all four
+  // slots spoken for it does not silently not slice; CanSketchSlice() is
+  // false and the toolbar says why.
+  if (slot < planes.size())
+    if (const auto slice = SketchSlicePlane(state))
+      planes[slot++] = *slice;
   return planes;
+}
+
+bool CanSketchSlice(const AppState& state) {
+  size_t used = 0;
+  for (const AppState::SectionView& s : state.sections)
+    if (s.visible && SectionSourceResolved(state, s))
+      used++;
+  return used < static_cast<size_t>(kMaxClipPlanes);
 }
 
 bool SectionActive(const AppState& state) {
   for (const AppState::SectionView& s : state.sections)
     if (s.visible)
       return true;
-  return false;
+  // The sketch slice is a cut like any other to everything downstream of
+  // here (cap fills, the "sectioned" state the exporters refuse on).
+  return SketchSlicePlane(state).has_value();
 }
 
 AppState::SectionView* FindSection(AppState& state, uint64_t id) {
@@ -4578,6 +4713,7 @@ void SyncDocumentRenderers(AppState& state) {
 }
 
 void SyncRenderersToDocument(AppState& state) {
+  SyncSketchViewRollback(state);
   SyncDocumentRenderers(state);
   SyncFieldRenderer(state);
   SyncCamPlayback(state);

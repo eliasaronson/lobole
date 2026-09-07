@@ -31,6 +31,11 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(bodyId);
+    VisitRefs(faces, visit);
+  }
+
   [[nodiscard]] std::string WhyIncomplete() const override {
     return faces.empty() ? "pick at least one face to taper" : "";
   }

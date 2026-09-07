@@ -721,6 +721,15 @@ public:
   // good entity positions rather than failing the history.
   bool Execute(RegenContext&) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(planeRef);           // a DatumPlane this sketch tracks
+    VisitRefs(faceRef, visit); // ...or a body face it is attached to
+    for (const sketch::DerivedOp& op : derived)
+      visit(op.sourceSketchId); // LinkedCopy across sketches
+    for (const sketch::ExternalGeom& e : external)
+      VisitRefs(e.ref, visit); // live projected geometry
+  }
+
   // Dimensional-constraint (value, expression) pairs PLUS the
   // expression-driven entity coordinate fields (entityExprs); see
   // Feature::VisitExprs. Visiting the entity fields is what makes entity

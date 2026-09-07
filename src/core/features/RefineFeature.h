@@ -28,5 +28,9 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(bodyId);
+  }
+
   uint64_t bodyId = 0; // producing-feature id of the body to refine
 };

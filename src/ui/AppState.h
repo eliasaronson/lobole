@@ -134,6 +134,24 @@ enum class SketchTool {
 // lives in the Document (as a SketchFeature); this only holds which sketch is
 // being edited (by stable id, so it survives undo reindexing), the current
 // tool, and the in-progress two-click drawing state.
+// Which sketch the document's transient view rollback is applied for, and
+// where. Kept beside the sketch session rather than in it because
+// SketchEditState is wholesale-reset at seventeen sites, several of which are
+// teardown paths (a tab switch, an undo that removed the sketch, File/New) —
+// a marker that survived one of those is a model with its features missing
+// and no sketch open to explain why. ui::SyncSketchViewRollback reconciles
+// these against sketchEdit.activeSketchId once per frame.
+struct SketchViewRollback {
+  uint64_t sketchId = 0;   // the sketch it was computed for (0 = none)
+  uint64_t documentId = 0; // Document::InstanceId() that holds the marker
+  // The document version the marker was computed AT. A marker is an INDEX,
+  // and an undo or an edit elsewhere in the tree moves what that index names
+  // — so it is recomputed whenever the document changes, not only when the
+  // sketch opens. Applying it bumps the version once and this records the
+  // result, so there is no loop.
+  uint64_t documentVersion = 0;
+};
+
 struct SketchEditState {
   bool pickingPlane = false;   // "New Sketch" armed, waiting for a plane/face
   uint64_t activeSketchId = 0; // 0 = not editing a sketch
@@ -1149,6 +1167,14 @@ struct AppState {
   };
   std::vector<SectionView> sections;
   uint64_t nextSectionId = 1;
+  // Slice at the sketch plane while editing a sketch (Inventor's F7 "Slice
+  // Graphics", Fusion's Sketch Palette checkbox): everything between you and
+  // the sketch is cut away, which is the only thing that helps when the
+  // sketch is INSIDE existing material and so has no consuming feature to
+  // roll back past. Session state, sticky across sketches on purpose — it is
+  // a way of looking, not a property of any one sketch, so it never reaches
+  // the file and costs no format version.
+  bool sketchSlice = false;
   // The Section tool window is open. The sections outlive it: closing the
   // tool does not undo the cut you set up.
   bool sectionToolOpen = false;
@@ -1315,6 +1341,7 @@ struct AppState {
   uint64_t dimDrag = 0; // id of the dimension whose label is being dragged
 
   SketchEditState sketchEdit;
+  SketchViewRollback sketchViewRollback;
   SketchDragSession sketchDrag;
   SlotPickState slotPick; // U3/U7: armed tool-session pick slot
   MeasureState measure;

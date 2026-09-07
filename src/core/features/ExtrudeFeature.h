@@ -37,6 +37,11 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(sketchId);
+    VisitRefs(endTarget, visit); // "up to face"
+  }
+
   const CADShape* CutToolShape() const override {
     return mode == ExtrudeMode::Cut && m_cutTool.IsValid() ? &m_cutTool
                                                            : nullptr;

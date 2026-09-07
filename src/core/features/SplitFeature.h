@@ -49,6 +49,12 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(bodyId);
+    visit(datumId); // Plane knife
+    VisitRefs(face, visit);
+  }
+
   [[nodiscard]] std::string WhyIncomplete() const override {
     if (bodyId == 0)
       return "pick the body to split";

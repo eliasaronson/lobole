@@ -138,6 +138,30 @@ bool Document::ReplaceFeature(size_t index, std::unique_ptr<Feature> feature) {
   return true;
 }
 
+int Document::FirstConsumerIndex(uint64_t featureId) const {
+  if (featureId == 0)
+    return -1;
+  size_t own = m_features.size();
+  for (size_t i = 0; i < m_features.size(); i++) {
+    if (m_features[i]->GetId() == featureId) {
+      own = i;
+      break;
+    }
+  }
+  if (own == m_features.size())
+    return -1; // no such feature
+  for (size_t i = own + 1; i < m_features.size(); i++) {
+    bool consumes = false;
+    m_features[i]->VisitFeatureRefs([&](uint64_t id) {
+      if (id == featureId)
+        consumes = true;
+    });
+    if (consumes)
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
 bool Document::Regenerate() {
   // Deferred while a BulkEdit guard is held: a loader adds N features (and
   // sets rollback, parameters, the active configuration) and gets exactly one
@@ -164,10 +188,10 @@ bool Document::Regenerate() {
 
   // Rollback bar: only the prefix regenerates; the tail keeps its params but
   // contributes nothing (and holds no stale errors).
+  const int marker = EffectiveRollback();
   const size_t upTo =
-      m_rollback < 0
-          ? m_features.size()
-          : std::min(m_features.size(), static_cast<size_t>(m_rollback));
+      marker < 0 ? m_features.size()
+                 : std::min(m_features.size(), static_cast<size_t>(marker));
   for (size_t i = upTo; i < m_features.size(); i++) {
     m_features[i]->ClearError();
     m_features[i]->ClearWarning();

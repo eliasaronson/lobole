@@ -1,11 +1,43 @@
 #include "core/Feature.h"
 
+#include "core/AxisRef.h"
+
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
+
+void VisitRefs(const AxisRef& ref, const Feature::RefVisitor& visit) {
+  // Only the id this KIND resolves. Moving an axis from a sketch line back to
+  // X leaves sketchId set, and reporting it then would claim a dependency the
+  // feature does not have — the one place over-reporting is not harmless,
+  // since it would roll a sketch edit back past features that do not use it.
+  // No default: a new AxisRef kind has to be answered here.
+  switch (ref.kind) {
+  case AxisRef::Kind::SketchLine:
+    visit(ref.sketchId);
+    break;
+  case AxisRef::Kind::DatumAxis:
+    visit(ref.datumAxisId);
+    break;
+  case AxisRef::Kind::X:
+  case AxisRef::Kind::Y:
+  case AxisRef::Kind::Z:
+    break;
+  }
+}
+
+void VisitRefs(const ElementRef& ref, const Feature::RefVisitor& visit) {
+  visit(ref.featureId); // the feature whose body owns the named element
+}
+
+void VisitRefs(const std::vector<ElementRef>& refs,
+               const Feature::RefVisitor& visit) {
+  for (const ElementRef& r : refs)
+    VisitRefs(r, visit);
+}
 
 const Feature* RegenContext::FindById(uint64_t id) const {
   if (id == 0)

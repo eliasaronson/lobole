@@ -38,6 +38,9 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  // Names no other feature: a 3D curve is its own points.
+  void VisitFeatureRefs(const RefVisitor&) const override {}
+
   [[nodiscard]] bool IsDatum() const override { return true; }
   void VisitExprs(const ExprVisitor& visit) override;
 

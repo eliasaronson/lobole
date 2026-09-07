@@ -53,6 +53,12 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  // Names no feature of THIS history, on purpose. `sourcePart` is a part
+  // slot, and `bodies` are created_by ids in the SOURCE document — neither is
+  // an index into the tree this feature lives in. What the snapshot depends
+  // on is tracked by the chain hash instead (D1).
+  void VisitFeatureRefs(const RefVisitor&) const override {}
+
   std::string WhyIncomplete() const override;
 
   // The part slot the snapshot was taken from, and its name at that time —
