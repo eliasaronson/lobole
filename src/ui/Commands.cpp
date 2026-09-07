@@ -649,6 +649,27 @@ const std::vector<Command>& Table() {
         "assembly.fastener", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) { OpenFastenerTool(s); });
 
+    // Hide needs something picked — from the list or from the viewport, which
+    // both land in the same selection. Show all is offered only when there is
+    // something hidden to show, so the palette does not advertise a no-op.
+    add(
+        "assembly.hide",
+        [](AppState& s) {
+          return s.assembly != nullptr && !SelectedOccurrenceIds(s).empty();
+        },
+        [](AppState& s) { ToggleSelectedOccurrencesVisible(s); });
+    add(
+        "assembly.show_all",
+        [](AppState& s) {
+          if (s.assembly == nullptr)
+            return false;
+          for (const Occurrence& o : s.assembly->GetOccurrences())
+            if (!o.visible)
+              return true;
+          return false;
+        },
+        [](AppState& s) { ShowAllOccurrences(s); });
+
     // ----------------------------------------------------------- Drawing
     add("drawing.add_view", nullptr,
         [](AppState& s) { RequestPopup(s, "add_view"); });

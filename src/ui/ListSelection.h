@@ -46,6 +46,13 @@ void ListRowContext(AppState& state, SelectionItem::Kind kind, uint64_t id,
 // would remove. `noun` is singular.
 [[nodiscard]] std::string DeleteLabel(size_t count, const char* noun);
 
+// The same shape for any other row verb: "Hide occurrence" / "Hide 3
+// occurrences". A menu item that names one row while acting on five is how a
+// multi-selection gets edited by accident, so every verb counts what it will
+// touch the way Delete does.
+[[nodiscard]] std::string RowActionLabel(const char* verb, size_t count,
+                                         const char* noun);
+
 // Removes whatever the selection holds of the kinds a list can delete —
 // features on a part tab, occurrences on an assembly tab, operations on a
 // job tab — as ONE undo step where the tab has undo. Returns how many went;

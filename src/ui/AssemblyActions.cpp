@@ -156,6 +156,59 @@ int DeleteSelectedOccurrences(AppState& state) {
   return removed;
 }
 
+int SetOccurrencesVisible(AppState& state, const std::vector<uint64_t>& ids,
+                          bool visible) {
+  if (state.assembly == nullptr || ids.empty())
+    return 0;
+  // Snapshot ONCE, and only if something will actually change: a Show over an
+  // already-visible selection should not leave an undo step that does nothing
+  // when you press Ctrl+Z.
+  int changed = 0;
+  for (const uint64_t id : ids) {
+    const Occurrence* o = state.assembly->FindById(id);
+    if (o != nullptr && o->visible != visible)
+      changed++;
+  }
+  if (changed == 0)
+    return 0;
+  SnapshotAssembly(state);
+  for (const uint64_t id : ids) {
+    Occurrence* o = state.assembly->FindById(id);
+    if (o != nullptr)
+      o->visible = visible;
+  }
+  // The version is what the renderer resyncs against; no solve, because
+  // visibility is not an input to one.
+  state.assembly->BumpVersion();
+  return changed;
+}
+
+bool SelectionWouldHide(const AppState& state) {
+  if (state.assembly == nullptr)
+    return false;
+  for (const uint64_t id : SelectedOccurrenceIds(state)) {
+    const Occurrence* o = state.assembly->FindById(id);
+    if (o != nullptr && o->visible)
+      return true;
+  }
+  return false;
+}
+
+int ToggleSelectedOccurrencesVisible(AppState& state) {
+  const std::vector<uint64_t> ids = SelectedOccurrenceIds(state);
+  return SetOccurrencesVisible(state, ids, !SelectionWouldHide(state));
+}
+
+int ShowAllOccurrences(AppState& state) {
+  if (state.assembly == nullptr)
+    return 0;
+  std::vector<uint64_t> hidden;
+  for (const Occurrence& o : state.assembly->GetOccurrences())
+    if (!o.visible)
+      hidden.push_back(o.id);
+  return SetOccurrencesVisible(state, hidden, true);
+}
+
 void SelectOccurrence(AppState& state, uint64_t occId) {
   // Occurrence items replace only their own kind (a selected mate stays, as
   // with the old separate fields). Highlights are applied by the per-frame

@@ -296,6 +296,14 @@ const Binding kDefaults[] = {
     {"assembly.fastener", Context::Assembly, "Fastener (pick a hole's rim)",
      "Standard parts", "F"},
 
+    // Display only — hiding a part does not suppress it, so nothing moves.
+    // One key for both directions (it shows what it hid), and Shift+H for
+    // the way back when the hidden row is off the bottom of the list.
+    {"assembly.hide", Context::Assembly, "Hide / show the selected parts",
+     "Display", "H"},
+    {"assembly.show_all", Context::Assembly, "Show every hidden part",
+     "Display", "Shift+H"},
+
     // --------------------------------------------------------------- Drawing
     {"drawing.add_view", Context::Drawing, "Add view", "Sheet", "I"},
     {"drawing.update", Context::Drawing, "Update views (re-project)", "Sheet",
