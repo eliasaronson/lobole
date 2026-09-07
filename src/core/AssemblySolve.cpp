@@ -574,26 +574,45 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
     }
     usable[i] = true;
   }
-  // Walk the relation graph from the driven mate (or from every A when
-  // unprompted). A mate reached once is settled; a later relation that
-  // would move it again is left to the loop solver's rows, which is where
-  // an inconsistent set belongs.
+  // Walk the relation graph from the driven mate FIRST, and only then from
+  // whatever it did not reach. A mate reached once is settled; a later
+  // relation that would move it again is left to the loop solver's rows,
+  // which is where an inconsistent set belongs.
+  //
+  // The two-phase order is the point. Seeding every A at once and letting
+  // the LIFO decide meant a relation whose A is a FREE mate could win the
+  // race for a mate the driver was about to set — and then write it from a
+  // stale value. A cam lifting a valve through a rocker is exactly that
+  // shape: the cam relation drives the valve's slide, and the rack that
+  // makes the rocker follow has the rocker as its A. Reached from the
+  // rocker instead, the rack drove the VALVE from last sample's rocker
+  // angle, and the pair ran away to 60 mm of lift on an 8 mm cam.
   std::vector<uint64_t> frontier;
   std::vector<uint64_t> settled;
   const auto isSettled = [&](uint64_t id) {
     return std::find(settled.begin(), settled.end(), id) != settled.end();
   };
-  if (drivenMateId != 0) {
-    frontier.push_back(drivenMateId);
-    settled.push_back(drivenMateId);
-  } else {
+  const auto seedRest = [&]() {
     for (size_t i = 0; i < rels.size(); i++)
       if (usable[i] && !isSettled(rels[i].mateA)) {
         frontier.push_back(rels[i].mateA);
         settled.push_back(rels[i].mateA);
       }
+  };
+  bool seededRest = false;
+  if (drivenMateId != 0) {
+    frontier.push_back(drivenMateId);
+    settled.push_back(drivenMateId);
+  } else {
+    seedRest();
+    seededRest = true;
   }
-  while (!frontier.empty()) {
+  while (!frontier.empty() || !seededRest) {
+    if (frontier.empty()) {
+      seedRest();
+      seededRest = true;
+      continue;
+    }
     const uint64_t from = frontier.back();
     frontier.pop_back();
     for (size_t i = 0; i < rels.size(); i++) {
@@ -631,8 +650,10 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById, const Driven& driven) {
   SolveReport report;
   // Relations hold before anything is placed: in a mate tree this IS their
-  // enforcement; in a loop they are rows below as well.
-  (void)PropagateRelations(asmDoc, 0);
+  // enforcement; in a loop they are rows below as well. A solve that KNOWS
+  // what is being driven says so, so the driver's own chain settles before
+  // anything else claims a mate on it.
+  (void)PropagateRelations(asmDoc, driven.mate);
 
   // Pre-derive both connector frames for every mate; a mate whose connectors
   // don't resolve (dangling ref / missing part) is stamped errored and sits

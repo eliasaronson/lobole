@@ -335,6 +335,89 @@ TEST_CASE("A chain keeps the sign a gear reverses", "[assembly][relations]") {
   CHECK_THAT(t.asmDoc.FindMateById(t.axleB)->rotation, WithinAbs(0.2f, 1e-5f));
 }
 
+TEST_CASE("The DRIVEN mate's chain settles before any other source",
+          "[assembly][relations][cam]") {
+  // A valve gear: a camshaft on a chain off the crank, a cam relation
+  // lifting the valve's slide, and a rack that makes the ROCKER follow that
+  // slide — backwards, which is the only way round a cam can be read.
+  //
+  // The rack's A is the rocker, and the rocker is free. Seeding every
+  // relation's A at once and letting the walk order decide let the rack win
+  // the race for the slide and write it from the rocker's LAST value, which
+  // fed back on itself: an 8 mm cam lifted its valve 60 mm.
+  Document empty;
+  AssemblyDocument d;
+  Occurrence head;
+  head.name = "Head";
+  head.partId = 1;
+  head.fixed = true;
+  const uint64_t headId = d.AddOccurrence(std::move(head));
+  const auto add = [&](const char* name, uint64_t partId) {
+    Occurrence o;
+    o.name = name;
+    o.partId = partId;
+    return d.AddOccurrence(std::move(o));
+  };
+  const uint64_t crankId = add("Crank", 2), camId = add("Cam", 3);
+  const uint64_t rockerId = add("Rocker", 4), valveId = add("Valve", 5);
+  const uint64_t crank = d.AddMate(Revolute(headId, crankId));
+  const uint64_t cam = d.AddMate(Revolute(headId, camId));
+  const uint64_t rocker = d.AddMate(Revolute(headId, rockerId));
+  Mate slide;
+  slide.type = MateType::Slider;
+  slide.a = Origin(headId);
+  slide.b = Origin(valveId);
+  slide.flipped = false;
+  const uint64_t valve = d.AddMate(std::move(slide));
+
+  Relation chain;
+  chain.kind = RelationKind::Chain;
+  chain.mateA = crank;
+  chain.mateB = cam;
+  chain.dofA = chain.dofB = MateDof::Rotation;
+  chain.ratio = 0.5;
+  d.AddRelation(chain);
+  Relation lobe;
+  lobe.kind = RelationKind::Cam;
+  lobe.mateA = cam;
+  lobe.mateB = valve;
+  lobe.dofA = MateDof::Rotation;
+  lobe.dofB = MateDof::Offset;
+  for (int i = 0; i <= 18; i++) {
+    const double f = i / 18.0;
+    lobe.lift.emplace_back(f * 180.0,
+                           8.0 * 0.5 * (1.0 - std::cos(2.0 * M_PI * f)));
+  }
+  lobe.lift.emplace_back(270.0, 0.0);
+  d.AddRelation(lobe);
+  Relation follow;
+  follow.kind = RelationKind::Rack;
+  follow.mateA = rocker;
+  follow.mateB = valve;
+  follow.dofA = MateDof::Rotation;
+  follow.dofB = MateDof::Offset;
+  follow.ratio = 50.0;
+  d.AddRelation(follow);
+
+  // Two turns of the crank, the way a motion study drives one.
+  for (int step = 0; step <= 24; step++) {
+    const double deg = step * 30.0;
+    d.FindMateById(crank)->rotation = static_cast<float>(deg * M_PI / 180.0);
+    assembly::Solve(d, NoParts(), nullptr, {crank, MateDof::Rotation});
+    const double lift = d.FindMateById(valve)->offset;
+    INFO("crank " << deg << " deg");
+    CHECK(lift >= -1e-4);
+    CHECK(lift <= 8.0 + 1e-4);
+    // ...and the rocker follows the valve, not the other way about.
+    CHECK_THAT(d.FindMateById(rocker)->rotation * 50.0, WithinAbs(lift, 1e-3));
+  }
+  // The peak: the cam turns at half crank speed, so 90 of cam is 180 of
+  // crank, and that is where an 8 mm lobe is 8 mm up.
+  d.FindMateById(crank)->rotation = static_cast<float>(M_PI);
+  assembly::Solve(d, NoParts(), nullptr, {crank, MateDof::Rotation});
+  CHECK_THAT(d.FindMateById(valve)->offset, WithinAbs(8.0, 1e-3));
+}
+
 TEST_CASE("A cam lifts its follower by a table, not a ratio",
           "[assembly][relations][cam]") {
   // A 6 mm lobe rising over the first 180 degrees and dwelling after.
@@ -366,6 +449,32 @@ TEST_CASE("A cam lifts its follower by a table, not a ratio",
     const double numeric =
         (CamLift(lobe, a + 1e-5) - CamLift(lobe, a - 1e-5)) / 2e-5;
     CHECK_THAT(before, WithinAbs(numeric, 0.02));
+  }
+  SECTION("a lobe that does not begin at zero is still shut before it") {
+    // The engine's own case: a lobe phased to open at 74 degrees, whose
+    // table therefore BEGINS at 74 and whose flat span wraps past the end of
+    // the turn. Asking below the first angle is not asking before the start;
+    // it is asking inside that wrapped span. Read as "before the table", the
+    // Hermite cubic extrapolated backwards out of the interval its own
+    // endpoints define and answered 60 mm of lift on an 8 mm lobe.
+    std::vector<std::pair<double, double>> phased;
+    for (int i = 0; i <= 18; i++) {
+      const double f = i / 18.0;
+      phased.emplace_back(74.0 + f * 112.0,
+                          8.0 * 0.5 * (1.0 - std::cos(2.0 * M_PI * f)));
+    }
+    phased.emplace_back(310.0, 0.0); // the dwell, in the middle of the rest
+    const auto at = [&](double deg) {
+      return CamLift(phased, deg * M_PI / 180.0);
+    };
+    CHECK_THAT(at(0.0), WithinAbs(0.0, 1e-6));
+    CHECK_THAT(at(74.0), WithinAbs(0.0, 1e-6));
+    CHECK_THAT(at(130.0), WithinAbs(8.0, 1e-6)); // the peak, 56 in
+    CHECK_THAT(at(186.0), WithinAbs(0.0, 1e-6));
+    for (double deg = 0.0; deg < 360.0; deg += 1.0) {
+      CHECK(at(deg) >= -1e-6);
+      CHECK(at(deg) <= 8.0 + 1e-6);
+    }
   }
   SECTION("an empty or one-point table is flat, never a crash") {
     CHECK_THAT(CamLift({}, 1.0), WithinAbs(0.0, 1e-12));
