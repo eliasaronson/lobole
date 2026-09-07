@@ -45,8 +45,6 @@ namespace cam {
 
 using namespace detail;
 
-namespace {} // namespace
-
 namespace detail {
 
 // The largest break this tool can make within `window` mm of wall below the

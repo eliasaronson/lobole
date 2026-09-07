@@ -643,6 +643,10 @@ set(app_sources
     src/ui/ProjectActions.cpp
     src/ui/RendererSync.cpp
     src/ui/MeasureActions.cpp
+    src/ui/CreateActions.cpp
+    src/ui/DocumentSlots.cpp
+    src/ui/ViewActions.cpp
+    src/ui/DrawingActions.cpp
     src/ui/AssemblyActions.cpp
     src/ui/MotionActions.cpp
     src/ui/JobActions.cpp
