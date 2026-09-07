@@ -50,7 +50,12 @@ void DrawRenderModal(AppState& state) {
       {"1920 x 1080", 1920, 1080},      {"1280 x 720", 1280, 720},
       {"960 x 540", 960, 540},          {"640 x 480", 640, 480}};
   static int resIdx = 2; // 1920 x 1080, the old default
-  static int samples = 128;
+  // 512, not 128: measured on a 4060, tracing is not what a still costs. At
+  // 720p the sample count does not move the wall clock at all; at 4K eight
+  // times the samples buys 1.7x, because scene sync, the AS build, the
+  // readback and the PNG encode dominate. Noise falls as 1/sqrt(N), so this
+  // is most of a stop and a half of cleanliness for nothing.
+  static int samples = 512;
   static bool ground = true;
   static bool studio = true;
 

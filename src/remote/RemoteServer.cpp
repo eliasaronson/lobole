@@ -977,10 +977,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "camera math). Needs a renderer.",
      "focus, path, views"},
     {"render_still",
-     "Path-traced still to {path} (ray tracing; needs GPU support). "
+     "Path-traced still to {path} (ray tracing; needs GPU support). Defaults "
+     "to 1920x1080 at 512 samples, the same as the GUI's Render dialog. "
      "`backdrop`: studio (a neutral sweep, the default) or environment (the "
-     "HDRI itself).",
-     "backdrop, ground, height, path, samples, seed, width"},
+     "HDRI itself). `outlines`: edges over the image, as the viewport draws "
+     "them (default true).",
+     "backdrop, ground, height, outlines, path, samples, seed, width"},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
      "shadow_map, shadows, ssao"},
@@ -1788,14 +1790,28 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           "this assembly has no occurrences — there is nothing to render");
     // Offline path-traced still to a PNG. Runs synchronously on the main thread
     // (ProcessPending) using the same idle-queue one-shot submits as the AS
-    // build, so it needs no swapchain interaction. Parameters default to a
-    // small deterministic render for smoke tests.
-    uint32_t width = p.value("width", 640u);
-    uint32_t height = p.value("height", 480u);
-    uint32_t samples = p.value("samples", 64u);
+    // build, so it needs no swapchain interaction.
+    //
+    // The defaults used to be 640x480 at 64 samples — a size chosen for smoke
+    // tests, which every scripted and agent-driven render then inherited while
+    // the GUI dialog defaulted to 1920x1080. A picture that small reads as a
+    // low-resolution render of a high-resolution model, and that was most of
+    // what "the exported render looks worse than the app" meant. The GUI's
+    // default is the default here too now. Samples are close to free: at 720p
+    // the sample count does not move the wall clock at all, and at 4K eight
+    // times the samples costs 1.7x, because the fixed costs (scene sync, AS
+    // build, readback, PNG encode) dominate. Tests that want the old cheap
+    // render pass width/height/samples explicitly.
+    uint32_t width = p.value("width", 1920u);
+    uint32_t height = p.value("height", 1080u);
+    uint32_t samples = p.value("samples", 512u);
     uint32_t seed = p.value("seed", 1u);
     std::string path = p.value("path", std::string("render.png"));
     bool ground = p.value("ground", true); // shadow-catcher plane
+    // Edges over the traced image. On by default because the viewport draws
+    // them and their absence is what made butted boards render as one slab;
+    // false renders the bare path-traced image.
+    const bool outlines = p.value("outlines", true);
     // "studio" (default) shows a neutral sweep; "environment" shows the HDRI
     // itself, which is what it was before there was a choice.
     const std::string backdrop = p.value("backdrop", std::string("studio"));
@@ -1807,9 +1823,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // there is one, and a lazy projection has not filled it yet.
     ui::SyncRenderersToDocument(state);
     std::string error, warning;
-    bool ok =
-        ui::RenderStillBlocking(state, width, height, samples, path, seed,
-                                ground, &error, &warning, backdrop == "studio");
+    bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
+                                      ground, &error, &warning,
+                                      backdrop == "studio", outlines);
     json result = {{"ok", ok},         {"path", path},       {"width", width},
                    {"height", height}, {"samples", samples}, {"error", error}};
     // The postcondition a screenshot already carries: saying "ok" about a

@@ -1558,7 +1558,7 @@ def orient_to_face() -> dict:
           "— samples=64 is a fast preview, 512+ presentation quality. ground "
           "adds a shadow-catcher plane. Requires a ray-tracing GPU (errors "
           "otherwise). Optional path also keeps the PNG.")
-def render_still(width: int = 640, height: int = 480, samples: int = 64,
+def render_still(width: int = 1920, height: int = 1080, samples: int = 512,
                  seed: int = 1, ground: bool = True, path: str = "") -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_still.png")
     r = _call("render_still", width=width, height=height, samples=samples,

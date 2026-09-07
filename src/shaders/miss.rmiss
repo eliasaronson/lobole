@@ -1,9 +1,17 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
+// Radiance + RNG state, plus the primary-hit G-buffer the outline pass reads.
+// The viewport draws crisp edges over every body and the still drew none, so a
+// row of butted deck boards came back as one continuous slab. gnormal is the
+// FACE normal, not the interpolated one: a hard edge is then an exact
+// discontinuity, while a finely tessellated cylinder is not.
 struct RayPayload {
     vec3 radiance;
     uint rngState;
+    vec3 gnormal;
+    float hitT;   // < 0.0 on a miss
+    uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
 };
 layout(location = 0) rayPayloadInEXT RayPayload payload;
 
@@ -15,6 +23,10 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightColor;
     vec4 ambientColor;
     vec4 params;      // x = prefilter mips, y = ray far, z = AO, w = backdrop
+    vec4 fillDir;     // unused here; the block must match closesthit.rchit
+    vec4 fillColor;
+    vec4 rimDir;
+    vec4 rimColor;
 } ubo;
 
 // Full-resolution source HDRI (the prefilter chain's base mip is only 128x64,
@@ -55,6 +67,12 @@ vec3 studioBackdrop(vec3 dir) {
 }
 
 void main() {
+    // No geometry: the outline pass reads this as the background, so anything
+    // drawn against it gets a silhouette.
+    payload.gnormal = vec3(0.0);
+    payload.hitT = -1.0;
+    payload.instId = 0u;
+
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
     payload.radiance = ubo.params.w != 0.0
         ? studioBackdrop(dir)
