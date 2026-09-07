@@ -98,10 +98,14 @@ void ListRowContext(AppState& state, SelectionItem::Kind kind, uint64_t id,
   Anchor(state, kind) = id;
 }
 
-std::string DeleteLabel(size_t count, const char* noun) {
+std::string RowActionLabel(const char* verb, size_t count, const char* noun) {
   if (count <= 1)
-    return std::string("Delete ") + noun;
-  return "Delete " + std::to_string(count) + " " + noun + "s";
+    return std::string(verb) + " " + noun;
+  return std::string(verb) + " " + std::to_string(count) + " " + noun + "s";
+}
+
+std::string DeleteLabel(size_t count, const char* noun) {
+  return RowActionLabel("Delete", count, noun);
 }
 
 int DeleteSelection(AppState& state) {

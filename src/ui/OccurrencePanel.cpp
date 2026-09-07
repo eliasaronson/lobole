@@ -761,21 +761,32 @@ void DrawOccurrencePanel(AppState& state) {
     const std::string suffix = std::to_string(o.id);
     bool vis = o.visible;
     if (ImGui::Checkbox(("###occ_vis_" + suffix).c_str(), &vis)) {
-      SnapshotAssembly(state);
-      asmDoc.FindById(o.id)->visible = vis;
-      asmDoc.BumpVersion();
+      // The box is the ROW's own control: it toggles the row it sits on, not
+      // the selection, which is why it goes through the shared verb with a
+      // one-id list rather than the selection-wide one below.
+      SetOccurrencesVisible(state, {o.id}, vis);
     }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(o.visible ? "Hide" : "Show");
     ImGui::SameLine();
     const std::string label =
         (o.name.empty() ? RefNameById(state, o) : o.name) +
         (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
         (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
+    // A hidden row reads as dimmed — the feature tree's Bodies list already
+    // says "not in the viewport" this way, and an unchecked box three pixels
+    // wide is not the difference you notice while hunting the part you hid.
+    if (!o.visible)
+      ImGui::PushStyleColor(ImGuiCol_Text,
+                            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     // Ctrl-click adds and removes, Shift-click ranges, a plain click
     // replaces — the one list gesture (ListSelection.h). Own kind only: a
     // selected mate stays, as the old separate fields let it.
     if (SelectableEllipsis(label, IsOccurrenceSelected(state, o.id)))
       ListRowClicked(state, SelectionItem::Kind::Occurrence, o.id, occOrder,
                      /*ownKindOnly=*/true);
+    if (!o.visible)
+      ImGui::PopStyleColor();
 
     // Right-click the row to go to what it references: the shortcut for the
     // "Open"/"Edit" button below, which needs the row selected first and only
@@ -802,6 +813,19 @@ void DrawOccurrencePanel(AppState& state) {
         ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
                                       : "That part is not in this project");
       }
+      // Hide/Show, on the row you aimed at and on everything else selected
+      // with it. ONE verb rather than a pair: it hides while any of the
+      // selection is still visible and shows once none of it is, so the menu
+      // item (and H) undoes itself, and the label always names what the click
+      // will do. Display only — a hidden occurrence still solves and still
+      // holds its mates.
+      const size_t pickedVis = SelectedOccurrenceIds(state).size();
+      const std::string visItem =
+          RowActionLabel(SelectionWouldHide(state) ? "Hide" : "Show", pickedVis,
+                         "occurrence") +
+          "###occ_hide";
+      if (ImGui::MenuItem(visItem.c_str()))
+        ToggleSelectedOccurrencesVisible(state); // rows keep their places
       // Delete belongs HERE, on the thing being deleted. It existed only as a
       // button in the "Selected occurrence" editor below the list, which you
       // reach by selecting a row first and which is off the bottom of a short

@@ -150,6 +150,29 @@ void StartMateEdit(AppState& state, uint64_t mateId);
 // Delete key reach this through ListSelection.h.
 int DeleteSelectedOccurrences(AppState& state);
 
+// Show/hide occurrences — the display flag every renderer, the BOM and the
+// mass total already read (`Occurrence::visible`), NOT a suppression: a
+// hidden part still solves, so hiding the block to see the crank inside it
+// cannot move anything. One snapshot for the batch, so unhiding twenty parts
+// is one Ctrl+Z. Returns how many rows actually changed.
+int SetOccurrencesVisible(AppState& state, const std::vector<uint64_t>& ids,
+                          bool visible);
+
+// True when the selection's Hide/Show verb would HIDE: any of it is still
+// visible. False once every selected row is hidden, which is what makes the
+// one verb (the menu item, and the key) undo itself. The menu labels itself
+// from this, so the label and the action can never disagree.
+[[nodiscard]] bool SelectionWouldHide(const AppState& state);
+
+// Hide the selected occurrences, or show them once they are all hidden.
+// Returns how many changed; 0 with nothing selected.
+int ToggleSelectedOccurrencesVisible(AppState& state);
+
+// Un-hide every occurrence in the active assembly — the way back when the
+// hidden row is off the bottom of a 200-part list. Returns how many were
+// hidden.
+int ShowAllOccurrences(AppState& state);
+
 void MateConnectorPicked(AppState& state, const SelectionItem& item);
 
 void AcceptMateTool(AppState& state);

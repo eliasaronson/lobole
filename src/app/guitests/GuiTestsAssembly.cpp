@@ -1025,6 +1025,142 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->assembly->FindById(doomed) == nullptr);
   };
 
+  // Hide is on the ROW's own menu, next to Open and Delete, and a hidden row
+  // reads as hidden without opening anything: it dims. The pair matters more
+  // than either half — the checkbox alone shipped for a year and the answer
+  // to "how do I hide this" was still a three-pixel box with no label.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_part_is_hidden_from_its_own_row");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
+    std::vector<uint64_t> ids;
+    for (int i = 0; i < 2; ++i) {
+      Occurrence o;
+      o.name = "Block " + std::to_string(i + 1);
+      o.partId = partId;
+      o.position = glm::vec3(static_cast<float>(i) * 40.0f, 0.0f, 0.0f);
+      ids.push_back(s_App->assembly->AddOccurrence(o));
+    }
+    ctx->Yield(4);
+
+    const std::string row = "//###Model/###occ_" + std::to_string(ids[0]);
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    // The label names the direction, so the menu can never offer "Hide" on a
+    // part that is already hidden.
+    IM_CHECK(ctx->ItemExists("//$FOCUSED/Hide occurrence###occ_hide"));
+    ctx->ItemClick("//$FOCUSED/###occ_hide");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->assembly->FindById(ids[0])->visible);
+    IM_CHECK(s_App->assembly->FindById(ids[1])->visible); // only the one
+    // The row's own box agrees with the flag: one state, two affordances.
+    IM_CHECK_EQ(
+        ctx->ItemIsChecked(
+            ("//###Model/###occ_vis_" + std::to_string(ids[0])).c_str()),
+        false);
+
+    // The one verb undoes itself: the same item now reads Show.
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("//$FOCUSED/Show occurrence###occ_hide"));
+    ctx->ItemClick("//$FOCUSED/###occ_hide");
+    ctx->Yield(3);
+    IM_CHECK(s_App->assembly->FindById(ids[0])->visible);
+
+    // And it is one undo step, not a flag edit nobody can take back.
+    ctx->ItemClick(row.c_str(), ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    ctx->ItemClick("//$FOCUSED/###occ_hide");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->assembly->FindById(ids[0])->visible);
+    IM_CHECK(ui::UndoAssembly(*s_App));
+    ctx->Yield(3);
+    IM_CHECK(s_App->assembly->FindById(ids[0])->visible);
+  };
+
+  // H hides everything selected — from the list or from the viewport, which
+  // are the same selection — as ONE step, and Shift+H brings back what is
+  // hidden without hunting for the rows. Hiding is DISPLAY: the occurrences
+  // stay in the assembly, keep their mates, and nothing moves.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "h_hides_the_selection_and_shift_h_shows_it_again");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Rig"));
+    std::vector<uint64_t> ids;
+    for (int i = 0; i < 3; ++i) {
+      Occurrence o;
+      o.name = "Block " + std::to_string(i + 1);
+      o.partId = partId;
+      o.position = glm::vec3(static_cast<float>(i) * 40.0f, 0.0f, 0.0f);
+      ids.push_back(s_App->assembly->AddOccurrence(o));
+    }
+    ctx->Yield(4);
+    const auto row = [&](size_t i) {
+      return "//###Model/###occ_" + std::to_string(ids[i]);
+    };
+    const auto visible = [&](size_t i) {
+      return s_App->assembly->FindById(ids[i])->visible;
+    };
+
+    ctx->ItemClick(row(0).c_str());
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->ItemClick(row(1).c_str());
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedOccurrenceIds(*s_App).size(), (size_t)2);
+
+    ctx->KeyPress(ImGuiKey_H);
+    ctx->Yield(3);
+    IM_CHECK(!visible(0));
+    IM_CHECK(!visible(1));
+    IM_CHECK(visible(2));
+    // Every one of them is still placed and still solvable — a hidden part is
+    // not a suppressed one.
+    IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), (size_t)3);
+
+    // The key undoes itself too: pressed again on the same (now wholly
+    // hidden) selection, it shows.
+    ctx->KeyPress(ImGuiKey_H);
+    ctx->Yield(3);
+    IM_CHECK(visible(0));
+    IM_CHECK(visible(1));
+
+    // One snapshot for the batch: two hidden rows come back on one Ctrl+Z.
+    ctx->KeyPress(ImGuiKey_H);
+    ctx->Yield(3);
+    IM_CHECK(!visible(0));
+    IM_CHECK(ui::UndoAssembly(*s_App));
+    ctx->Yield(3);
+    IM_CHECK(visible(0));
+    IM_CHECK(visible(1));
+
+    // Shift+H needs no selection at all — the way back when the row you hid
+    // is off the bottom of a 200-part list.
+    ctx->KeyPress(ImGuiKey_H);
+    ctx->Yield(3);
+    IM_CHECK(!visible(0));
+    ui::SelectOccurrence(*s_App, 0);
+    ctx->Yield();
+    ctx->KeyPress(ImGuiMod_Shift | ImGuiKey_H);
+    ctx->Yield(3);
+    IM_CHECK(visible(0));
+    IM_CHECK(visible(1));
+    IM_CHECK(visible(2));
+  };
+
   // Ctrl-click several rows, press Delete, and they all go.
   //
   // The selection has been a SET since U1d and the viewport has ctrl-clicked
