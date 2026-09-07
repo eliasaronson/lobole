@@ -1140,4 +1140,93 @@ TEST_CASE("cam: every operation type round-trips through its name", "[cam]") {
   CHECK_FALSE(cam::TryOpTypeFromName("", unused));
 }
 
+TEST_CASE("cam: an unknown tool type or side in a job file is REFUSED",
+          "[cam]") {
+  // The two CAM enums the 2026-08-24 enum sweep never reached, because the
+  // CAM loader was written after it. Both had the shape that sweep existed to
+  // remove, and both matter to the metal:
+  //
+  //   tool_type -> Flat  : a ball nose steps over by the cusp it leaves and a
+  //                        V-bit chamfers by its angle. Read either as a flat
+  //                        mill and the path is a square-shouldered cut --
+  //                        which the verifier, modelling the same wrong tool,
+  //                        then calls clean.
+  //   side      -> Outside: a pocket clearing outside its own boundary has
+  //                        nothing to remove. This exact result already
+  //                        shipped once, when `side` was not serialized at
+  //                        all (the v62 fix).
+  const auto save = [](cam::JobDocument& job) {
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "cam_bad_enum.json";
+    REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+    return path;
+  };
+  const auto corrupt = [](const std::filesystem::path& path,
+                          const std::string& from, const std::string& to) {
+    std::string text;
+    {
+      std::ifstream in(path);
+      text.assign(std::istreambuf_iterator<char>(in),
+                  std::istreambuf_iterator<char>());
+    }
+    REQUIRE(text.find(from) != std::string::npos);
+    text.replace(text.find(from), from.size(), to);
+    std::ofstream out(path);
+    out << text;
+  };
+
+  SECTION("tool type") {
+    cam::JobDocument job;
+    cam::Setup& setup = job.AddSetup("Side A");
+    setup.tools[0].type = cam::ToolType::Ball;
+    const auto path = save(job);
+    corrupt(path, "\"ball\"", "\"bal\"");
+    auto back = DocumentIO::LoadJob(path.string());
+    REQUIRE_FALSE(back.has_value());
+    INFO("refusal: " << back.error());
+    CHECK(back.error().find("bal") != std::string::npos);
+    CHECK(back.error().find("vbit") != std::string::npos);
+  }
+
+  SECTION("side") {
+    cam::JobDocument job;
+    cam::Setup& setup = job.AddSetup("Side A");
+    cam::Operation op;
+    op.id = job.AllocateId();
+    op.name = "Clear it";
+    op.type = cam::OpType::Pocket;
+    op.side = cam::Side::Inside;
+    setup.operations.push_back(op);
+    const auto path = save(job);
+    corrupt(path, "\"inside\"", "\"insde\"");
+    auto back = DocumentIO::LoadJob(path.string());
+    REQUIRE_FALSE(back.has_value());
+    INFO("refusal: " << back.error());
+    CHECK(back.error().find("insde") != std::string::npos);
+    CHECK(back.error().find("outside") != std::string::npos);
+  }
+}
+
+TEST_CASE("cam: every tool type and side round-trips through its name",
+          "[cam]") {
+  for (const cam::ToolTypeRow& row : cam::ToolTypes()) {
+    cam::ToolType back{};
+    INFO("tool " << row.name);
+    REQUIRE(cam::TryToolTypeFromName(row.name, back));
+    CHECK(back == row.type);
+    CHECK(std::string(cam::ToolTypeName(row.type)) == row.name);
+  }
+  for (const cam::SideRow& row : cam::Sides()) {
+    cam::Side back{};
+    INFO("side " << row.name);
+    REQUIRE(cam::TrySideFromName(row.name, back));
+    CHECK(back == row.side);
+    CHECK(std::string(cam::SideName(row.side)) == row.name);
+  }
+  cam::ToolType t{};
+  cam::Side sd{};
+  CHECK_FALSE(cam::TryToolTypeFromName("endmill", t));
+  CHECK_FALSE(cam::TrySideFromName("left", sd));
+}
+
 #endif // HAVE_CAM

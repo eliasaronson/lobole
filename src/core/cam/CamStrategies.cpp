@@ -1,6 +1,6 @@
 #include "core/cam/CamToolpath.h"
 
-#include "core/cam/CamOpType.h"
+#include "core/cam/CamNames.h"
 #include "core/cam/CamToolpathInternal.h"
 
 #include "core/Measure.h"

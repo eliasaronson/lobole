@@ -1,6 +1,6 @@
 #include "remote/RemoteCam.h"
 
-#include "core/cam/CamOpType.h"
+#include "core/cam/CamNames.h"
 
 #ifdef HAVE_CAM
 
@@ -266,52 +266,33 @@ constexpr MethodDoc kCamMethods[] = {
 };
 
 cam::Side SideFrom(const std::string& s) {
-  if (s == "inside")
-    return cam::Side::Inside;
-  if (s == "on")
-    return cam::Side::On;
-  return cam::Side::Outside;
+  cam::Side side{};
+  if (cam::TrySideFromName(s, side))
+    return side;
+  // `side` was the one CAM enum that was silent on BOTH sides -- here and in
+  // the loader. add_cam_op(side: "insde") became an OUTSIDE cut: for a pocket
+  // that is a pass around the outside of a boundary with nothing to remove,
+  // which posts as a program that cuts air.
+  throw std::runtime_error("unknown side '" + s + "'; use " +
+                           cam::SideNameList());
 }
 
-const char* SideName(cam::Side s) {
-  return s == cam::Side::Inside ? "inside"
-         : s == cam::Side::On   ? "on"
-                                : "outside";
-}
-
-// The operation type's names moved to core/cam/CamOpType.h, which is the one
+// The operation type's names moved to core/cam/CamNames.h, which is the one
 // row per type the loader, the RPC surface and the toolpath generator all
 // read. The row ORDER there is this table's old order, so the refusal below
 // still names them in the same sequence, character for character.
 
-// The tool's shape, same table-both-ways discipline: a name we do not know is
-// refused, never silently read as the flat mill everything used to assume.
-struct ToolTypeRow {
-  cam::ToolType type;
-  const char* name;
-};
-constexpr ToolTypeRow kToolTypes[] = {
-    {cam::ToolType::Flat, "flat"},
-    {cam::ToolType::Ball, "ball"},
-    {cam::ToolType::VBit, "vbit"},
-    {cam::ToolType::Drill, "drill"},
-};
-
-const char* ToolTypeName(cam::ToolType t) {
-  for (const ToolTypeRow& row : kToolTypes)
-    if (row.type == t)
-      return row.name;
-  return "flat";
-}
+// The tool's shape and the side both moved to core/cam/CamNames.h, which is
+// the one row per value the loader, the RPC surface and the toolpath
+// generator read. The row ORDER there is these tables' old order, so the
+// refusals still name them in the same sequence, character for character.
 
 cam::ToolType ToolTypeFrom(const std::string& s) {
-  for (const ToolTypeRow& row : kToolTypes)
-    if (s == row.name)
-      return row.type;
-  std::string known;
-  for (const ToolTypeRow& row : kToolTypes)
-    known += (known.empty() ? "" : ", ") + std::string(row.name);
-  throw std::runtime_error("unknown tool type '" + s + "'; use " + known);
+  cam::ToolType t{};
+  if (cam::TryToolTypeFromName(s, t))
+    return t;
+  throw std::runtime_error("unknown tool type '" + s + "'; use " +
+                           cam::ToolTypeNameList());
 }
 
 const char* TypeName(cam::OpType t) { return cam::OpTypeName(t); }
@@ -462,11 +443,12 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
 }
 
 json ToolJson(const cam::Tool& t) {
-  return json{{"number", t.number},         {"name", t.name},
-              {"diameter", t.diameter},     {"tool_type", ToolTypeName(t.type)},
-              {"tip_angle", t.tipAngleDeg}, {"flutes", t.flutes},
-              {"feed_cut", t.feedCut},      {"feed_plunge", t.feedPlunge},
-              {"spindle_rpm", t.spindleRpm}};
+  return json{
+      {"number", t.number},         {"name", t.name},
+      {"diameter", t.diameter},     {"tool_type", cam::ToolTypeName(t.type)},
+      {"tip_angle", t.tipAngleDeg}, {"flutes", t.flutes},
+      {"feed_cut", t.feedCut},      {"feed_plunge", t.feedPlunge},
+      {"spindle_rpm", t.spindleRpm}};
 }
 
 json OpJson(const cam::Operation& op) {
@@ -501,7 +483,7 @@ json OpJson(const cam::Operation& op) {
   // and adaptive, the one strategy that reads it, then cleared outside a
   // boundary with nothing beyond it and produced silence.
   if (op.type != cam::OpType::Face && op.type != cam::OpType::Drill) {
-    j["side"] = SideName(op.side);
+    j["side"] = cam::SideName(op.side);
     if (op.tabCount > 0)
       j["tabs"] = {{"count", op.tabCount},
                    {"width", op.tabWidth},

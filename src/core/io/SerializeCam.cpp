@@ -1,6 +1,6 @@
 #include "core/cam/CamJob.h"
 #include "core/cam/CamMachine.h" // MachineFileName
-#include "core/cam/CamOpType.h"
+#include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"     // PostExists, PostIds
 #include "core/cam/CamToolpath.h" // FrameIsSquare
 #include "core/io/Serialization.h" // WriteTextAtomic
@@ -41,46 +41,30 @@ cam::OpType OpTypeFromJson(const std::string& s) {
                            ")");
 }
 
-const char* ToolTypeName(cam::ToolType t) {
-  switch (t) {
-  case cam::ToolType::Ball:
-    return "ball";
-  case cam::ToolType::VBit:
-    return "vbit";
-  case cam::ToolType::Drill:
-    return "drill";
-  default:
-    return "flat";
-  }
-}
-
 cam::ToolType ToolTypeFromName(const std::string& s) {
-  if (s == "ball")
-    return cam::ToolType::Ball;
-  if (s == "vbit")
-    return cam::ToolType::VBit;
-  if (s == "drill")
-    return cam::ToolType::Drill;
-  return cam::ToolType::Flat;
-}
-
-const char* SideName(cam::Side s) {
-  switch (s) {
-  case cam::Side::Inside:
-    return "inside";
-  case cam::Side::On:
-    return "on";
-  default:
-    return "outside";
-  }
+  cam::ToolType t{};
+  if (cam::TryToolTypeFromName(s, t))
+    return t;
+  // Used to return ToolType::Flat. A ball nose steps over by the cusp it
+  // leaves and a V-bit chamfers by its angle; read either as a flat mill and
+  // the toolpath is a square-shouldered cut that the verifier -- which models
+  // the same wrong tool -- calls clean.
+  throw std::runtime_error("unknown CAM tool type '" + s +
+                           "' (expected one of: " + cam::ToolTypeNameList() +
+                           ")");
 }
 
 cam::Side SideFromName(const std::string& s) {
-  if (s == "inside")
-    return cam::Side::Inside;
-  if (s == "on")
-    return cam::Side::On;
-  return cam::Side::Outside;
+  cam::Side side{};
+  if (cam::TrySideFromName(s, side))
+    return side;
+  // Used to return Side::Outside. This field has already cost one bug in
+  // exactly this shape: when `side` was not serialized at all (before v62) a
+  // pocket reloaded clearing OUTSIDE its own boundary, where there is
+  // nothing, and produced no toolpath. A misspelt `side` did the same thing,
+  // and said as little.
+  throw std::runtime_error("unknown CAM side '" + s +
+                           "' (expected one of: " + cam::SideNameList() + ")");
 }
 
 // In what order the operations cut (v75). An unknown string is REFUSED
@@ -149,7 +133,7 @@ json ToolToJson(const cam::Tool& t) {
   // Written only when it is not the flat mill everything assumed before
   // v66, so a job of plain end mills re-saves byte-identically.
   if (t.type != cam::ToolType::Flat) {
-    tj["tool_type"] = ToolTypeName(t.type);
+    tj["tool_type"] = cam::ToolTypeName(t.type);
     tj["tip_angle"] = t.tipAngleDeg;
   }
   return tj;
@@ -422,7 +406,7 @@ json CamSetupToJson(const cam::Setup& setup) {
     // A job that worked before the save did not work after it
     // (docs/cam/dogfood-round.md).
     if (op.type != cam::OpType::Face && op.type != cam::OpType::Drill)
-      oj["side"] = SideName(op.side);
+      oj["side"] = cam::SideName(op.side);
     if (!op.climb)
       oj["climb"] = false;
     // Written only when set, so an operation that goes around its islands —

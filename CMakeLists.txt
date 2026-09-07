@@ -421,7 +421,7 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     # struct they both pass around.
     target_compile_definitions(clipper2 PUBLIC USINGZ)
     set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    list(APPEND core_sources src/core/cam/CamOpType.cpp
+    list(APPEND core_sources src/core/cam/CamNames.cpp
                              src/core/cam/CamGeometry.cpp
                              src/core/cam/CamSetup.cpp
                              src/core/cam/CamPicks.cpp

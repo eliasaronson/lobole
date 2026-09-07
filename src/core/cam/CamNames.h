@@ -5,7 +5,8 @@
 #include <span>
 #include <string>
 
-// ONE row per operation type.
+// ONE row per value of every CAM enum that has a NAME -- in a job file and
+// over the RPC surface, which have always been the same strings.
 //
 // Before this, an OpType's properties were spread over six files: the
 // generator switch and the `FollowsOneTargetAtATime` predicate in
@@ -50,5 +51,35 @@ bool TryOpTypeFromName(const std::string& s, OpType& out);
 std::string OpTypeNameList();
 
 bool FollowsOneTargetAtATime(OpType t);
+
+// The tool's shape. Refusing here is what RemoteCam's own table already said
+// it was for -- "a name we do not know is refused, never silently read as the
+// flat mill everything used to assume" -- but only the RPC side did it. The
+// LOADER returned ToolType::Flat, so a job file with a typo came back as a
+// flat mill: a ball nose's cusp stepover and a V-bit's chamfer both silently
+// become a square-shouldered cut.
+struct ToolTypeRow {
+  ToolType type;
+  const char* name;
+};
+std::span<const ToolTypeRow> ToolTypes();
+const char* ToolTypeName(ToolType t);
+bool TryToolTypeFromName(const std::string& s, ToolType& out);
+std::string ToolTypeNameList();
+
+// Which side of the contour the cutter runs. Silent on BOTH sides until now,
+// and this one has already cost a bug once: a pocket whose `side` was not
+// serialized came back clearing OUTSIDE its own boundary, where there is
+// nothing, and produced no toolpath at all (the v62 fix). That was the field
+// going missing; this is the same field arriving misspelt, with the same
+// result and no message either way.
+struct SideRow {
+  Side side;
+  const char* name;
+};
+std::span<const SideRow> Sides();
+const char* SideName(Side s);
+bool TrySideFromName(const std::string& s, Side& out);
+std::string SideNameList();
 
 } // namespace cam

@@ -15,7 +15,7 @@
 #include "core/cam/CamAdaptive.h"
 #include "core/cam/CamFeeds.h"
 #include "core/cam/CamMachine.h"
-#include "core/cam/CamOpType.h"
+#include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamStockMesh.h"
 #include "core/cam/CamToolpath.h"
