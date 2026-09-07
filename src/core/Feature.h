@@ -116,6 +116,14 @@ public:
   const std::string& GetMaterial() const { return m_material; }
   void SetMaterial(const std::string& material) { m_material = material; }
 
+  // Does this feature work out its body's material itself, rather than just
+  // stamping m_material? Derived inherits the SOURCE body's when its own is
+  // empty, and a Fastener defaults to steel — so neither can be re-stamped
+  // from m_material after a cached regeneration. Everything else can, which
+  // is what lets Document strip `material` from the chain hash and makes a
+  // recolour a cache hit instead of a full rebuild of the part.
+  virtual bool StampsOwnMaterial() const { return false; }
+
   // Visual override applied to this feature's bodies on top of the material
   // (persistent + serialized, v54). Empty (no field set) = pure material.
   const Appearance& GetAppearance() const { return m_appearance; }

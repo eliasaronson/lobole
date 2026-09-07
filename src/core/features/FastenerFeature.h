@@ -38,6 +38,10 @@ public:
     return std::make_unique<FastenerFeature>(*this);
   }
 
+  // defaults to steel when its own is empty, so Document's
+  // material re-stamp must leave it alone.
+  bool StampsOwnMaterial() const override { return true; }
+
   bool Execute(RegenContext& ctx) override;
 
   // Names no other feature: the whole part is derived from the standard.

@@ -951,11 +951,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // most callers of this field want. `mass_properties` returns the
       // measured box for the times you want a size.
       body.shape.GetBoundingBox(min, max);
-      json entry = {{"name", body.name},
-                    {"volume", body.shape.Volume()},
-                    {"material", body.material},
-                    {"bbox_min", Vec3ToJson(min)},
-                    {"bbox_max", Vec3ToJson(max)}};
+      // `created_by` is here because it is FREE here and expensive
+      // anywhere else: it was only ever readable from list_elements, which
+      // enumerates every face and edge of the body to hand back one
+      // integer. The SDK reads it after each extrude to return the body it
+      // made, so a cylinder head paid 341 ms a time, 161 times, for 55 s of
+      // full surface analysis it never looked at.
+      json entry = {
+          {"name", body.name},           {"volume", body.shape.Volume()},
+          {"material", body.material},   {"created_by", body.createdBy},
+          {"bbox_min", Vec3ToJson(min)}, {"bbox_max", Vec3ToJson(max)}};
       if (body.reference) // a Derived ghost: drawn on, weighed as nothing
         entry["reference"] = true;
       if (body.appearance.Any()) { // v54 visual override, set_appearance

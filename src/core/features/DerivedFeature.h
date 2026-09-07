@@ -52,6 +52,10 @@ public:
     return std::make_unique<DerivedFeature>(*this);
   }
 
+  // inherits the SOURCE body's material when its own is empty, so Document's
+  // material re-stamp must leave it alone.
+  bool StampsOwnMaterial() const override { return true; }
+
   bool Execute(RegenContext& ctx) override;
   // Names no feature of THIS history, on purpose. `sourcePart` is a part
   // slot, and `bodies` are created_by ids in the SOURCE document — neither is

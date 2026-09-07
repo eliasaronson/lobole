@@ -232,6 +232,42 @@ TEST_CASE("Incremental regeneration re-runs only from the first change",
   CHECK(doc.GetBodies().size() == 3);
 }
 
+TEST_CASE("A material change rebuilds nothing", "[document][regen][cache]") {
+  // A recolour is not a shape. Before the material was stripped from the
+  // chain hash, setting one on the FIRST feature re-ran every feature after
+  // it: 42.7 s on a manifold and 17.5 s on a cylinder head, per part, for a
+  // change its own RPC handler describes as "PBR/albedo but not geometry".
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0, 1.0, 1.0));
+  REQUIRE(doc.Regenerate());
+
+  // The FIRST feature: the worst case, since everything is downstream of it.
+  doc.GetFeature(0)->SetMaterial("steel");
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 0);
+  CHECK(doc.LastRegenStats().cached == 3);
+  // ...and it took effect anyway, which is the half a strip alone would lose:
+  // the material reaches physics (BOM, FEM) through Body::material, so the
+  // stamp pass has to run on a cache hit as well as on a rebuild.
+  REQUIRE(doc.GetBodies().size() == 3);
+  CHECK(doc.GetBodies()[0].material == "steel");
+  CHECK(doc.GetBodies()[1].material.empty());
+
+  // Clearing it is a cache hit too, and also lands.
+  doc.GetFeature(0)->SetMaterial("");
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 0);
+  CHECK(doc.GetBodies()[0].material.empty());
+
+  // Geometry is untouched throughout.
+  CHECK_THAT(doc.GetBodies()[2].shape.Volume(), WithinRel(3.0, 1e-9));
+}
+
 TEST_CASE("Expression edits invalidate the cache through parameters",
           "[document][regen][cache]") {
   Document doc;

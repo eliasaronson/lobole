@@ -185,6 +185,19 @@ bool Document::Regenerate() {
       if (const Feature* f = FindFeatureById(b.createdBy))
         b.appearance = f->GetAppearance();
   };
+  // Material, for the same reason and by the same key. It used to be stamped
+  // only where a body is CREATED, which meant a recolour changed the feature
+  // JSON, changed the chain hash, and re-ran every boolean after it: setting
+  // one material on the intake manifold cost 42.7 s, and on the cylinder
+  // head 17.5 s, for a change its own handler describes as "PBR/albedo but
+  // not geometry". Features that work their material out from something
+  // other than m_material say so and are left alone.
+  const auto stampMaterial = [this] {
+    for (Body& b : m_bodies)
+      if (const Feature* f = FindFeatureById(b.createdBy))
+        if (!f->StampsOwnMaterial())
+          b.material = f->GetMaterial();
+  };
 
   // Rollback bar: only the prefix regenerates; the tail keeps its params but
   // contributes nothing (and holds no stale errors).
@@ -243,9 +256,12 @@ bool Document::Regenerate() {
     nlohmann::json fj = DocumentIO::FeatureToJson(*m_features[i]);
     fj.erase("images");
     fj.erase("next_image_id");
-    // Appearance is cosmetic (the stamp pass reapplies it after any cache
-    // hit): keep it out of the hash so a recolor never rebuilds geometry.
+    // Appearance and material are cosmetic to the GEOMETRY (both stamp
+    // passes reapply them after any cache hit): keep them out of the hash so
+    // a recolour never rebuilds. Material still reaches physics — the BOM and
+    // FEM read Body::material, which the stamp sets.
     fj.erase("appearance");
+    fj.erase("material");
     // An import is WHAT it imports, not where the file sits: a save adopts
     // staged files into the project directory and rewrites the path, which
     // must not read as a changed part (every Derived copy of an imported
@@ -323,6 +339,7 @@ bool Document::Regenerate() {
                "executed, {} advisories restored",
                m_bodies.size(), upTo, datums, bakedWarnings.size());
       stampAppearance();
+      stampMaterial();
       return datumsOk;
     }
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");
@@ -395,6 +412,7 @@ bool Document::Regenerate() {
     }
   }
   stampAppearance();
+  stampMaterial();
   return allOk;
 }
 

@@ -493,6 +493,13 @@ class Body:
 
     @property
     def created_by(self):
+        # From the CHEAP body list when it is there. This one integer used to
+        # come from `list_elements`, which enumerates every face and edge of
+        # the body to produce it — and `_body_from` reads it after every
+        # extrude, so building a cylinder head spent 55 s on surface analysis
+        # nobody asked for.
+        if "created_by" in self._raw:
+            return self._raw["created_by"]
         return self._load()["created_by"]
 
     def faces(self, kind=None, where=None, normal=None, radius=None,
@@ -1472,7 +1479,8 @@ class Asm(_Tab):
         self.activate()
         return self.app.solve_assembly()
 
-    def check(self, connected=True, clearances=True, allow=None, **kw):
+    def check(self, connected=True, clearances=True, realized=False,
+              allow=None, **kw):
         """The assembly's standing check: nothing clashing, nothing floating,
         and no near miss under a millimetre — which is almost always an
         arithmetic slip, and is exactly what a transcribed coordinate
@@ -1534,7 +1542,14 @@ class Asm(_Tab):
         if r.get("truncated"):
             problems.append("the sweep was TRUNCATED, so this is not a clean "
                             "bill of health: " + str(r.get("truncation", "")))
-        if r.get("unrealized_mates"):
+        # ...but only when asked. A mate between two parts on a RUNNING FIT
+        # is a mate that deliberately does not touch — a crank in its
+        # bearings, a piston in its bore, a valve in its guide — and an
+        # engine is mostly those: 113 of this one's 227 mates, all correct.
+        # Raised by default it was a gate that no assembly with a clearance
+        # in it could ever pass. The count comes back either way, so a
+        # caller that wants it still hears it.
+        if realized and r.get("unrealized_mates"):
             problems.append(
                 f"{len(r['unrealized_mates'])} mate(s) did not achieve what "
                 f"they say: {r['unrealized_mates'][:4]}")
@@ -1559,7 +1574,9 @@ VERDICT_CONTRACTS = {
             "near_misses",        # a gap under near_tol
             "truncated",          # ...and whether any of the above is final
             "truncation",
-            "unrealized_mates",   # a mate that did not achieve what it says
+            "unrealized_mates",   # a mate whose parts do not touch — read
+                                  # under `realized=`, because a running fit
+                                  # is a mate that must NOT touch
         },
         "ignored": {
             "pairs": "the per-pair detail behind clashes/near_misses",
