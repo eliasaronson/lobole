@@ -506,6 +506,34 @@ covers, so a baseline was recorded from the build *before* the split; the
 build after matches it at 86,763 bytes identical. The baseline is committed,
 so the gate now runs on this device instead of skipping.
 
+### Stage 4's premise is mostly gone, and stage 5 is why
+
+The plan costed retiring the umbrella header at 4.6 s per translation unit
+across 65 includers. That was measured BEFORE the PCH existed. Re-measured
+with it, on a TU compiled exactly as the build compiles it:
+
+| | compile |
+|---|---|
+| the PCH alone | 1.49 s |
+| `+ ui/AppState.h` | 1.56 s (free -- it is in the PCH) |
+| `+ ui/AppActions.h` | 2.19 s |
+
+So the umbrella's own marginal cost is **0.70 s**, not 4.6 s: stage 5 already
+absorbed the OpenCASCADE bulk behind `AppState.h`, which was most of it.
+Across 65 includers that is ~45 s of CPU on a full build -- about 6% of the
+app target -- in exchange for touching 65 files, every one of which is a
+merge-conflict surface (this round's own merge with main is the example).
+
+Adding `AppActions.h` to the PCH would capture the 6% for nothing, and should
+NOT be done: it would make every edit to that header rebuild all 211 app TUs
+instead of its 65 includers, which is the opposite of what this round is for.
+
+**What remains of stage 4 is an architectural argument, not a performance
+one:** a 170-declaration header that 65 files include is bad structure whether
+or not it is slow, and splitting it means a change to drawing actions stops
+touching a header that half the app reads. That is worth doing, and it is
+worth doing knowing it buys ~6% rather than the 30% the plan implied.
+
 ### Still to do
 
 Stage 3 has ten of its thirteen subjects left (`AppActions.cpp` is 3,933 lines,
