@@ -3,9 +3,6 @@
 #include "core/cam/CamToolpathInternal.h"
 
 #include "core/Measure.h"
-#include "core/cam/CamAdaptive.h"
-
-#include <clipper2/clipper.h>
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -192,6 +189,14 @@ DerivedReach DeriveReachOffset(const Setup& setup,
     out.why = "there is no stock to measure the sheet against";
     return out;
   }
+#ifndef HAVE_CAM
+  // Where the window goes is decided by what the job actually CUTS, and this
+  // build has no toolpath generator to ask. Refusing says so; guessing from
+  // the stock would place the window over a sheet that is mostly overhang.
+  out.why = "this build cannot generate toolpaths, so there is nothing to "
+            "measure the reach window against";
+  return out;
+#else
   // What is actually CUT, not what the sheet is: the window has to cover the
   // toolpaths, and on an overhanging sheet those are a fraction of it.
   Setup probe = setup;
@@ -236,6 +241,7 @@ DerivedReach DeriveReachOffset(const Setup& setup,
   }
   out.ok = true;
   return out;
+#endif // HAVE_CAM
 }
 
 std::string MachineWarning(const Setup& setup,
@@ -453,6 +459,12 @@ std::string PlacementRefusal(const Setup& setup,
   return "";
 }
 
+// Generating a toolpath is what ENABLE_CAM is optional ON: these three call
+// into CamStrategies, which offsets polygons with Clipper2. Everything above
+// -- placements, cutting order, the machine's travel -- is arithmetic on the
+// job document and is built either way.
+#ifdef HAVE_CAM
+
 std::vector<Toolpath> GenerateAll(const Setup& setup,
                                   const std::vector<Body>& bodies,
                                   GenerateContext* ctx) {
@@ -542,5 +554,7 @@ std::vector<Toolpath> GenerateOp(const Setup& setup, const Operation& op,
                                  GenerateContext* ctx) {
   return GenerateOpFramed(setup, op, BodiesInSetupFrame(setup, bodies), ctx);
 }
+
+#endif // HAVE_CAM
 
 } // namespace cam

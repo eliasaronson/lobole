@@ -205,33 +205,6 @@ double Perimeter(const std::vector<glm::dvec2>& pts) {
   return total;
 }
 
-// Walks one wire into an ordered polyline, honouring edge orientation so the
-// points come out in sequence rather than in map order.
-std::vector<glm::dvec2> WireToLoop(const TopoDS_Wire& wire, double deflection) {
-  std::vector<glm::dvec2> pts;
-  BRepTools_WireExplorer ex(wire);
-  for (; ex.More(); ex.Next()) {
-    const TopoDS_Edge& edge = ex.Current();
-    BRepAdaptor_Curve curve(edge);
-    GCPnts_QuasiUniformDeflection sampler(curve, deflection);
-    if (!sampler.IsDone())
-      continue;
-    const int n = sampler.NbPoints();
-    const bool reversed = edge.Orientation() == TopAbs_REVERSED;
-    for (int k = 0; k < n; k++) {
-      const gp_Pnt p = sampler.Value(reversed ? n - k : k + 1);
-      const glm::dvec2 xy(p.X(), p.Y());
-      // The last point of one edge is the first of the next.
-      if (!pts.empty() && glm::length(pts.back() - xy) < 1e-9)
-        continue;
-      pts.push_back(xy);
-    }
-  }
-  if (pts.size() > 2 && glm::length(pts.front() - pts.back()) < 1e-9)
-    pts.pop_back();
-  return pts;
-}
-
 // A millimetre figure for a message. std::to_string on a double gives
 // "3.000000", which reads as machine noise in a sentence meant for a person.
 std::string Round2(double mm) {
@@ -601,36 +574,6 @@ double Toolpath::MinZ() const {
     }
   }
   return any ? lowest : 0.0;
-}
-
-std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
-                               double deflection) {
-  std::vector<Loop> loops;
-  // The section machinery the Section TOOL already uses (I3): one plane, the
-  // filled cut face per body. Reusing it means a toolpath cannot disagree
-  // with what the section view shows.
-  const std::vector<CADShape> caps =
-      Measure::SectionCaps(bodies, glm::vec3(0.0f, 0.0f, static_cast<float>(z)),
-                           glm::vec3(0.0f, 0.0f, 1.0f));
-  for (const CADShape& cap : caps) {
-    if (!cap.IsValid())
-      continue;
-    for (TopExp_Explorer fx(cap.GetShape(), TopAbs_FACE); fx.More();
-         fx.Next()) {
-      const TopoDS_Face face = TopoDS::Face(fx.Current());
-      const TopoDS_Wire outer = BRepTools::OuterWire(face);
-      for (TopExp_Explorer wx(face, TopAbs_WIRE); wx.More(); wx.Next()) {
-        const TopoDS_Wire wire = TopoDS::Wire(wx.Current());
-        Loop loop;
-        loop.pts = WireToLoop(wire, deflection);
-        if (loop.pts.size() < 3)
-          continue;
-        loop.hole = !wire.IsSame(outer);
-        loops.push_back(std::move(loop));
-      }
-    }
-  }
-  return loops;
 }
 
 std::vector<std::vector<Loop>>

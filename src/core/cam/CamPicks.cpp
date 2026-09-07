@@ -3,9 +3,6 @@
 #include "core/cam/CamToolpathInternal.h"
 
 #include "core/Measure.h"
-#include "core/cam/CamAdaptive.h"
-
-#include <clipper2/clipper.h>
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -78,6 +75,37 @@ bool FindFace(const std::vector<Body>& bodies, const ElementRef& ref,
 } // namespace
 
 namespace detail {
+
+// Lives here rather than with the rest of the loop geometry because this
+// file is built whether or not CAM is enabled and CamGeometry.cpp is not:
+// flattening a wire needs OpenCASCADE, not Clipper2, and a pick has to
+// resolve to a contour in either build (CMakeLists.txt).
+// Walks one wire into an ordered polyline, honouring edge orientation so the
+// points come out in sequence rather than in map order.
+std::vector<glm::dvec2> WireToLoop(const TopoDS_Wire& wire, double deflection) {
+  std::vector<glm::dvec2> pts;
+  BRepTools_WireExplorer ex(wire);
+  for (; ex.More(); ex.Next()) {
+    const TopoDS_Edge& edge = ex.Current();
+    BRepAdaptor_Curve curve(edge);
+    GCPnts_QuasiUniformDeflection sampler(curve, deflection);
+    if (!sampler.IsDone())
+      continue;
+    const int n = sampler.NbPoints();
+    const bool reversed = edge.Orientation() == TopAbs_REVERSED;
+    for (int k = 0; k < n; k++) {
+      const gp_Pnt p = sampler.Value(reversed ? n - k : k + 1);
+      const glm::dvec2 xy(p.X(), p.Y());
+      // The last point of one edge is the first of the next.
+      if (!pts.empty() && glm::length(pts.back() - xy) < 1e-9)
+        continue;
+      pts.push_back(xy);
+    }
+  }
+  if (pts.size() > 2 && glm::length(pts.front() - pts.back()) < 1e-9)
+    pts.pop_back();
+  return pts;
+}
 
 // The shortest distance from `p` to a loop's boundary. Which loop a wall
 // belongs to is decided by this rather than by containment: a wall lies ON

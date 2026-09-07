@@ -3,9 +3,6 @@
 #include "core/cam/CamToolpathInternal.h"
 
 #include "core/Measure.h"
-#include "core/cam/CamAdaptive.h"
-
-#include <clipper2/clipper.h>
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -44,6 +41,20 @@
 namespace cam {
 
 using namespace detail;
+
+namespace {
+
+// Where this body's part sits in the stock, or null when nobody has said.
+const Placement* PlacementForBody(const Setup& setup, const Body& b) {
+  if (b.jobPartId == 0)
+    return nullptr;
+  for (const Placement& p : setup.placements)
+    if (p.jobPartId == b.jobPartId)
+      return &p;
+  return nullptr;
+}
+
+} // namespace
 
 namespace detail {
 
@@ -276,6 +287,91 @@ glm::dquat SolveFaceUp(const glm::dvec3& normal, const glm::dquat& current) {
   const glm::dquat c = glm::inverse(q0) * current;
   const double half = std::atan2(c.z, c.w);
   return q0 * glm::dquat(std::cos(half), 0.0, 0.0, std::sin(half));
+}
+
+// Sections live here rather than with the toolpath geometry because they need
+// OpenCASCADE, not Clipper2, and this file is built whether or not CAM is
+// enabled: a job document's setup has a section and depths whether or not the
+// build can turn them into moves (CMakeLists.txt).
+std::vector<Loop> SectionLoops(const std::vector<Body>& bodies, double z,
+                               double deflection) {
+  std::vector<Loop> loops;
+  // The section machinery the Section TOOL already uses (I3): one plane, the
+  // filled cut face per body. Reusing it means a toolpath cannot disagree
+  // with what the section view shows.
+  const std::vector<CADShape> caps =
+      Measure::SectionCaps(bodies, glm::vec3(0.0f, 0.0f, static_cast<float>(z)),
+                           glm::vec3(0.0f, 0.0f, 1.0f));
+  for (const CADShape& cap : caps) {
+    if (!cap.IsValid())
+      continue;
+    for (TopExp_Explorer fx(cap.GetShape(), TopAbs_FACE); fx.More();
+         fx.Next()) {
+      const TopoDS_Face face = TopoDS::Face(fx.Current());
+      const TopoDS_Wire outer = BRepTools::OuterWire(face);
+      for (TopExp_Explorer wx(face, TopAbs_WIRE); wx.More(); wx.Next()) {
+        const TopoDS_Wire wire = TopoDS::Wire(wx.Current());
+        Loop loop;
+        loop.pts = WireToLoop(wire, deflection);
+        if (loop.pts.size() < 3)
+          continue;
+        loop.hole = !wire.IsSame(outer);
+        loops.push_back(std::move(loop));
+      }
+    }
+  }
+  return loops;
+}
+
+// Same reason as SectionLoops above: placing bodies in the setup's frame is
+// OCC transforms, and the job tab draws them in a build with no toolpath
+// generator at all.
+std::vector<Body> BodiesInSetupFrame(const Setup& setup,
+                                     const std::vector<Body>& in) {
+  if (SetupIsSquare(setup) && setup.placements.empty())
+    return in;
+
+  std::vector<Body> out;
+  out.reserve(in.size());
+  for (const Body& b : in) {
+    // Where the part sits in the stock composes HERE and nowhere else, after
+    // the fixture frame and in setup space -- which is what makes "where on
+    // the sheet" an in-plane statement rather than a fourth way to tilt a
+    // part (docs/cam/job-document.md). setup-frame.md learned what a second
+    // copy of this transform costs.
+    const Placement* place = PlacementForBody(setup, b);
+    if (place != nullptr && !place->enabled)
+      continue; // on the sheet, not cut this run
+    // Undo the fixture frame THIS part is clamped in -- which may not be the
+    // setup's (v76): a sheet can hold a baffle laid on its face beside a rail
+    // laid on its edge. The part turns under a spindle that always points
+    // down, which is what both a clamp and an indexed trunnion amount to, and
+    // a rotation's inverse is its transpose.
+    const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup, b.jobPartId));
+    glm::mat4 m(1.0f);
+    for (int col = 0; col < 3; col++)
+      for (int row = 0; row < 3; row++)
+        m[col][row] = static_cast<float>(toSetup[col][row]);
+    if (place != nullptr) {
+      const float c =
+          static_cast<float>(std::cos(glm::radians(place->rotZdeg)));
+      const float sn =
+          static_cast<float>(std::sin(glm::radians(place->rotZdeg)));
+      glm::mat4 t(1.0f);
+      t[0][0] = c;
+      t[0][1] = sn;
+      t[1][0] = -sn;
+      t[1][1] = c;
+      t[3][0] = static_cast<float>(place->pos.x);
+      t[3][1] = static_cast<float>(place->pos.y);
+      m = t * m;
+    }
+    Body copy = b; // keeps createdBy and the element map: names must survive
+    if (b.shape.IsValid())
+      copy.shape = b.shape.Transformed(m);
+    out.push_back(std::move(copy));
+  }
+  return out;
 }
 
 } // namespace cam

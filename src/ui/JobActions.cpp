@@ -222,4 +222,23 @@ size_t CreateJobForPart(AppState& state, uint64_t sourcePartId,
   return index;
 }
 
+// The active setup of the active job.
+//
+// It lived in CamPanel.cpp, inside that file's `#ifdef HAVE_CAM`, which
+// made a job tab's placement gizmo unbuildable without a toolpath
+// generator. It reads the job document and nothing else, and a job
+// document is a DocKind in every build.
+cam::Setup* ActiveCamSetup(AppState& state) {
+  if (!state.job)
+    return nullptr;
+  std::vector<cam::Setup>& setups = state.job->GetSetups();
+  if (setups.empty())
+    return nullptr;
+  for (cam::Setup& s : setups)
+    if (s.id == state.camActiveSetup)
+      return &s;
+  state.camActiveSetup = setups.front().id;
+  return &setups.front();
+}
+
 } // namespace ui

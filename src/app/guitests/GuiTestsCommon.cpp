@@ -95,7 +95,9 @@ void ResetAppForTest() {
   s_App->camDeferAdaptive = false;
   s_App->backgroundJobs.clear(); // joins whatever a previous test left
   s_App->camAdaptiveQueue.clear();
+#ifdef HAVE_CAM
   s_App->camAdaptiveCache.Clear();
+#endif
   s_App->camAdaptiveInFlight = 0;
   s_App->camAdaptiveBatchDone = 0;
   s_App->camAdaptiveBatchTotal = 0;

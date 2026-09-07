@@ -1522,6 +1522,41 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // report. It is also what lets a pixel baseline be keyed to the
             // device that produced it (tests/render_pixel_smoke.py).
             {"gpu", state.gpuName},
+            // What this BUILD contains. Optional subsystems are compile-time
+            // (`cmake -DENABLE_CAM=OFF`), so a method can be absent for a
+            // reason that has nothing to do with the document or the tab, and
+            // "unknown method: list_machines" gives a caller no way to tell
+            // the two apart. A test or an agent gates on this rather than
+            // guessing from a failure.
+            {"features",
+             {{"cam",
+#ifdef HAVE_CAM
+               true
+#else
+               false
+#endif
+              },
+              {"cam_adaptive",
+#ifdef HAVE_CAM_ADAPTIVE
+               true
+#else
+               false
+#endif
+              },
+              {"fem",
+#ifdef HAVE_FEM_SOLVER
+               true
+#else
+               false
+#endif
+              },
+              {"mesher",
+#ifdef HAVE_NETGEN
+               true
+#else
+               false
+#endif
+              }}},
             // Whether this instance is still running the binary that is on
             // disk. A rebuild REPLACES the file; a process already running
             // keeps the old inode, serves happily, and answers questions

@@ -54,19 +54,6 @@ const char* kOpTypes[] = {"Profile", "Pocket",   "Face",
 
 } // namespace
 
-cam::Setup* ActiveCamSetup(AppState& state) {
-  if (!state.job)
-    return nullptr;
-  std::vector<cam::Setup>& setups = state.job->GetSetups();
-  if (setups.empty())
-    return nullptr;
-  for (cam::Setup& s : setups)
-    if (s.id == state.camActiveSetup)
-      return &s;
-  state.camActiveSetup = setups.front().id;
-  return &setups.front();
-}
-
 namespace {
 // A toolpath that came back pending has no moves of its own yet. Blanking it
 // would read as "this operation produces nothing", which is a real state

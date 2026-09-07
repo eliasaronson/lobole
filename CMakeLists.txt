@@ -272,6 +272,18 @@ set(core_sources
     src/core/drawing/DrawingDocument.cpp
     src/core/cam/JobDocument.cpp
     src/core/cam/CamMachine.cpp
+    # Clipper2 is what CAM is optional ON, and these five need none of it: the
+    # job document's names, its frames and bounds, what a pick resolves to, the
+    # post's dialect list, and where parts sit in the sheet. They are the
+    # document model and its file format, which exist whether or not this build
+    # can generate a toolpath -- a job tab is a DocKind either way. Only
+    # CamGeometry / CamDerive / CamStrategies (and CamAdaptive) actually offset
+    # polygons, and those stay behind ENABLE_CAM below.
+    src/core/cam/CamNames.cpp
+    src/core/cam/CamSetup.cpp
+    src/core/cam/CamPicks.cpp
+    src/core/cam/CamTravel.cpp
+    src/core/cam/CamPost.cpp
     src/core/drawing/DrawingExport.cpp
     src/core/drawing/DrawingDimension.cpp
     src/core/drawing/DrawingValidate.cpp
@@ -421,14 +433,9 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     # struct they both pass around.
     target_compile_definitions(clipper2 PUBLIC USINGZ)
     set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    list(APPEND core_sources src/core/cam/CamNames.cpp
-                             src/core/cam/CamGeometry.cpp
-                             src/core/cam/CamSetup.cpp
-                             src/core/cam/CamPicks.cpp
+    list(APPEND core_sources src/core/cam/CamGeometry.cpp
                              src/core/cam/CamDerive.cpp
                              src/core/cam/CamStrategies.cpp
-                             src/core/cam/CamTravel.cpp
-                             src/core/cam/CamPost.cpp
                              src/core/cam/CamVerify.cpp
                              src/core/cam/CamFeeds.cpp
                              src/core/cam/CamSim.cpp

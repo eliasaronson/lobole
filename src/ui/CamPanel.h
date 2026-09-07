@@ -41,9 +41,8 @@ void DropCamToolpath(AppState& state, uint64_t opId);
   return opts;
 }
 
-// The setup the panel, the tool session and the overlays all act on (the one
-// selected in the combo, else the first). Null when there is none.
-cam::Setup* ActiveCamSetup(AppState& state);
+// ActiveCamSetup moved to ui/JobActions.h -- it reads the job document, not
+// the CAM panel, and a job tab exists in a build with no toolpath generator.
 
 // Removes operations by id from whichever setup holds them. The toolpath
 // cache, the ghost, the verb session and the selection let go of them, and

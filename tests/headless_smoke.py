@@ -114,6 +114,10 @@ def main():
         d = Designer.wait_for(app.port)
         expect(d.call("ping")["ok"], "ping")
 
+        # What this BUILD contains: optional subsystems are compile-time, so a
+        # missing method can mean "not in this build" rather than "broken".
+        has_cam = d.call("ping").get("features", {}).get("cam", True)
+
         phase("Strict params")
         # Strict params: a key no handler reads is a typo, rejected loudly
         # instead of silently ignored (the `named` vs `name` trap). A near
@@ -1375,210 +1379,240 @@ def main():
                "the restore is itself a version")
 
         phase("Machines over the RPC")
-        # The store is global (a scratch XDG_CONFIG_HOME here) and a setup
-        # EMBEDS a copy of the machine it names; the RPC says how the two
-        # stand (docs/cam/job-document.md, round two).
-        for stale in ("Smoke router",):
-            try:
-                d.call("delete_machine", name=stale)
-            except RuntimeError:
-                pass
-        before = len(d.call("list_machines")["machines"])
-        saved = d.call("save_machine", machine={
-            "name": "Smoke router", "post": "mach3",
-            "travel": {"min": [0, 0, -90], "max": [600, 400, 0]},
-            "rapid_feed": 2500})
-        expect(saved["name"] == "Smoke router", f"save_machine echoes: {saved}")
-        machines = d.call("list_machines")["machines"]
-        expect(len(machines) == before + 1, "the store grew by one")
-        expect_error(d, "save_machine", "name",
-                     machine={"name": "", "post": "mach3"})
-        expect_error(d, "save_machine", "haas",
-                     machine={"name": "Haas", "post": "haas"})
-        d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 40, "height": 30, "depth": 20})
-        d.call("machine_part")
-        on = d.call("add_cam_setup", name="On the router", machine="Smoke router")
-        expect(on["machine"]["name"] == "Smoke router" and
-               on["machine_match"] == "global",
-               f"a setup on a named machine is `global`: {on}")
-        n_before = len(d.call("list_cam_setups")["setups"])
-        expect_error(d, "add_cam_setup", "Nobody's", name="x",
-                     machine="Nobody's")
-        expect(len(d.call("list_cam_setups")["setups"]) == n_before,
-               "a refused add_cam_setup adds nothing")
-        # Editing the copy makes it differ; the store did not change.
-        d.call("set_cam_setup", id=on["id"], fit_arcs=False)
-        st = [s_ for s_ in d.call("list_cam_setups")["setups"]
-              if s_["id"] == on["id"]][0]
-        expect(st["machine_match"] == "differs" and not st["fit_arcs"],
-               f"an edited copy reports `differs`: {st['machine_match']}")
-        d.call("set_cam_setup", id=on["id"], machine="Smoke router")
-        st = [s_ for s_ in d.call("list_cam_setups")["setups"]
-              if s_["id"] == on["id"]][0]
-        expect(st["machine_match"] == "global" and st["fit_arcs"],
-               "re-picking the machine restores the copy")
-        d.call("delete_machine", name="Smoke router")
-        st = [s_ for s_ in d.call("list_cam_setups")["setups"]
-              if s_["id"] == on["id"]][0]
-        expect(st["machine_match"] == "missing" and
-               st["machine"]["name"] == "Smoke router",
-               f"a deleted machine leaves the job its copy: {st['machine_match']}")
-        d.call("new_project")
+        # Skipped in a build without CAM (`cmake -DENABLE_CAM=OFF`), where these
+        # methods do not exist at all. Gated on what `ping` says this BUILD
+        # contains rather than on catching "unknown method", which would equally
+        # swallow a genuine typo or a method dropped by accident.
+        if not has_cam:
+            expect_error(d, "list_machines", "unknown method")
+            # The phase below opens with a reset, and what follows it counts
+            # tabs; leave the same state either way.
+            d.call("new_project")
+        else:
+            # The store is global (a scratch XDG_CONFIG_HOME here) and a setup
+            # EMBEDS a copy of the machine it names; the RPC says how the two
+            # stand (docs/cam/job-document.md, round two).
+            for stale in ("Smoke router",):
+                try:
+                    d.call("delete_machine", name=stale)
+                except RuntimeError:
+                    pass
+            before = len(d.call("list_machines")["machines"])
+            saved = d.call("save_machine", machine={
+                "name": "Smoke router", "post": "mach3",
+                "travel": {"min": [0, 0, -90], "max": [600, 400, 0]},
+                "rapid_feed": 2500})
+            expect(saved["name"] == "Smoke router", f"save_machine echoes: {saved}")
+            machines = d.call("list_machines")["machines"]
+            expect(len(machines) == before + 1, "the store grew by one")
+            expect_error(d, "save_machine", "name",
+                         machine={"name": "", "post": "mach3"})
+            expect_error(d, "save_machine", "haas",
+                         machine={"name": "Haas", "post": "haas"})
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Plate", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            d.call("machine_part")
+            on = d.call("add_cam_setup", name="On the router", machine="Smoke router")
+            expect(on["machine"]["name"] == "Smoke router" and
+                   on["machine_match"] == "global",
+                   f"a setup on a named machine is `global`: {on}")
+            n_before = len(d.call("list_cam_setups")["setups"])
+            expect_error(d, "add_cam_setup", "Nobody's", name="x",
+                         machine="Nobody's")
+            expect(len(d.call("list_cam_setups")["setups"]) == n_before,
+                   "a refused add_cam_setup adds nothing")
+            # Editing the copy makes it differ; the store did not change.
+            d.call("set_cam_setup", id=on["id"], fit_arcs=False)
+            st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+                  if s_["id"] == on["id"]][0]
+            expect(st["machine_match"] == "differs" and not st["fit_arcs"],
+                   f"an edited copy reports `differs`: {st['machine_match']}")
+            d.call("set_cam_setup", id=on["id"], machine="Smoke router")
+            st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+                  if s_["id"] == on["id"]][0]
+            expect(st["machine_match"] == "global" and st["fit_arcs"],
+                   "re-picking the machine restores the copy")
+            d.call("delete_machine", name="Smoke router")
+            st = [s_ for s_ in d.call("list_cam_setups")["setups"]
+                  if s_["id"] == on["id"]][0]
+            expect(st["machine_match"] == "missing" and
+                   st["machine"]["name"] == "Smoke router",
+                   f"a deleted machine leaves the job its copy: {st['machine_match']}")
+            d.call("new_project")
 
         phase("Job undo over the RPC")
-        # One undo step per RPC that changes the job (router-round.md R7).
-        d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 40, "height": 30, "depth": 20})
-        d.call("machine_part")
-        undo_setup = d.call("add_cam_setup", name="Undo")["id"]
-        d.call("add_cam_op", setup=undo_setup, type="profile",
-               top_z=21.0, bottom_z=0.0, stepdown=8.0)
-        expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 1,
-               "the op is there")
-        d.call("undo")
-        expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 0,
-               "undo took the op back out")
-        d.call("redo")
-        expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 1,
-               "redo put it back")
-        d.call("undo")
-        d.call("undo")
-        expect(len(d.call("list_cam_setups")["setups"]) == 0,
-               "and the setup before it")
-        d.call("new_project")
+        # Skipped in a build without CAM (`cmake -DENABLE_CAM=OFF`), where these
+        # methods do not exist at all. Gated on what `ping` says this BUILD
+        # contains rather than on catching "unknown method", which would equally
+        # swallow a genuine typo or a method dropped by accident.
+        if not has_cam:
+            expect_error(d, "machine_part", "unknown method")
+            # The phase below opens with a reset, and what follows it counts
+            # tabs; leave the same state either way.
+            d.call("new_project")
+        else:
+            # One undo step per RPC that changes the job (router-round.md R7).
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Plate", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            d.call("machine_part")
+            undo_setup = d.call("add_cam_setup", name="Undo")["id"]
+            d.call("add_cam_op", setup=undo_setup, type="profile",
+                   top_z=21.0, bottom_z=0.0, stepdown=8.0)
+            expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 1,
+                   "the op is there")
+            d.call("undo")
+            expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 0,
+                   "undo took the op back out")
+            d.call("redo")
+            expect(len(d.call("list_cam_setups")["setups"][0]["operations"]) == 1,
+                   "redo put it back")
+            d.call("undo")
+            d.call("undo")
+            expect(len(d.call("list_cam_setups")["setups"]) == 0,
+                   "and the setup before it")
+            d.call("new_project")
 
         phase("CAM over the RPC")
-        # Every operation type must survive the round trip through the RPC.
-        # OpType::Adaptive was REPORTED as "profile" for a while — the way in
-        # rejected an unknown name loudly, but the way out had a `default:`,
-        # so a script that wrote an adaptive op read back a profile and had no
-        # way to know.
-        d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 40, "height": 30, "depth": 20})
-        # A setup lives in a JOB document since v73, so machining a part is
-        # two steps: make the job, then add setups on it.
-        d.call("machine_part")
-        cam_setup = d.call("add_cam_setup", name="Job")["id"]
-        for kind in ("profile", "pocket", "face", "drill", "adaptive"):
-            op = d.call("add_cam_op", setup=cam_setup, type=kind,
-                        top_z=20.0, bottom_z=10.0)["id"]
-            back = [o for s_ in d.call("list_cam_setups")["setups"]
-                    for o in s_["operations"] if o["id"] == op]
-            expect(len(back) == 1, f"{kind} op came back")
-            expect(back[0]["type"] == kind,
-                   f"{kind} op read back as {back[0]['type']}")
-            d.call("remove_cam_op", id=op)
-        # An ELLIPTICAL pocket. The vendored Adaptive2d throws on particular
-        # vertex layouts — not particular shapes — and every ellipse OCC
-        # discretises at the 0.02 mm chord tolerance lands in the failing set,
-        # so from the GUI it looked ellipse-specific: three clicks on "Clear a
-        # pocket" and the face never changed. The pocket still has to be
-        # cleared, so adaptive falls back to the concentric strategy and SAYS
-        # which one cut it (docs/cam/dogfood-round.md).
-        d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [-100, -60, 0],
-            "width": 200, "height": 120, "depth": 20})
-        d.call("add_feature", feature={
-            "type": "Sketch", "name": "Pocket sketch",
-            "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],
-                      "uAxis": [1, 0, 0]},
-            "entities": [{"type": "ellipse", "center": [0, 0],
-                          "r_major": 61.224365234375,
-                          "r_minor": 29.614774703979492,
-                          "rotation": -0.3941636085510254}]})
-        sk = [f for f in d.call("get_state")["features"]
-              if f["type"] == "Sketch"][-1]["id"]
-        d.call("add_feature", feature={
-            "type": "Extrude", "name": "Pocket", "sketch_id": sk,
-            "distance": 11.0, "mode": "cut", "reversed": True})
-        # Faces are picked on the PART, before the job tab takes over.
-        floor = None
-        for body in d.call("list_elements")["bodies"]:
-            for f in body["faces"]:
-                n = f.get("normal") or [0, 0, 0]
-                c = f.get("centroid") or [0, 0, 0]
-                if f.get("kind") == "plane" and n[2] > 0.99 and abs(c[2] - 9.0) < 0.5:
-                    floor = {"feature_id": body["created_by"],
-                             "element": f["name"]}
-        expect(floor is not None, "the elliptical pocket has a floor to click")
-        d.call("machine_part")
-        ell_setup = d.call("add_cam_setup", name="Ellipse")["id"]
-        op = d.call("add_cam_op", setup=ell_setup, type="pocket", tool=1,
-                    target=floor)
-        expect(op["side"] == "inside", f"a pocket clears inside: {op}")
-        got = d.call("cam_toolpath", setup=ell_setup)["operations"][0]
-        expect(got["moves"] > 0,
-               f"an elliptical pocket is cleared, not skipped: {got}")
-        expect("concentric" in got.get("strategy", ""),
-               f"and it says which strategy cut it: {got}")
-        # Whatever cut it, it must cut the right thing.
-        v = d.call("cam_verify", setup=ell_setup, resolution=0.8)
-        expect(v["ok"], f"the fallback cuts cleanly: {v}")
+        # Skipped in a build without CAM (`cmake -DENABLE_CAM=OFF`), where these
+        # methods do not exist at all. Gated on what `ping` says this BUILD
+        # contains rather than on catching "unknown method", which would equally
+        # swallow a genuine typo or a method dropped by accident.
+        if not has_cam:
+            expect_error(d, "add_cam_setup", "unknown method")
+            # The phase below opens with a reset, and what follows it counts
+            # tabs; leave the same state either way.
+            d.call("new_project")
+        else:
+            # Every operation type must survive the round trip through the RPC.
+            # OpType::Adaptive was REPORTED as "profile" for a while — the way in
+            # rejected an unknown name loudly, but the way out had a `default:`,
+            # so a script that wrote an adaptive op read back a profile and had no
+            # way to know.
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Plate", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            # A setup lives in a JOB document since v73, so machining a part is
+            # two steps: make the job, then add setups on it.
+            d.call("machine_part")
+            cam_setup = d.call("add_cam_setup", name="Job")["id"]
+            for kind in ("profile", "pocket", "face", "drill", "adaptive"):
+                op = d.call("add_cam_op", setup=cam_setup, type=kind,
+                            top_z=20.0, bottom_z=10.0)["id"]
+                back = [o for s_ in d.call("list_cam_setups")["setups"]
+                        for o in s_["operations"] if o["id"] == op]
+                expect(len(back) == 1, f"{kind} op came back")
+                expect(back[0]["type"] == kind,
+                       f"{kind} op read back as {back[0]['type']}")
+                d.call("remove_cam_op", id=op)
+            # An ELLIPTICAL pocket. The vendored Adaptive2d throws on particular
+            # vertex layouts — not particular shapes — and every ellipse OCC
+            # discretises at the 0.02 mm chord tolerance lands in the failing set,
+            # so from the GUI it looked ellipse-specific: three clicks on "Clear a
+            # pocket" and the face never changed. The pocket still has to be
+            # cleared, so adaptive falls back to the concentric strategy and SAYS
+            # which one cut it (docs/cam/dogfood-round.md).
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Plate", "position": [-100, -60, 0],
+                "width": 200, "height": 120, "depth": 20})
+            d.call("add_feature", feature={
+                "type": "Sketch", "name": "Pocket sketch",
+                "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [{"type": "ellipse", "center": [0, 0],
+                              "r_major": 61.224365234375,
+                              "r_minor": 29.614774703979492,
+                              "rotation": -0.3941636085510254}]})
+            sk = [f for f in d.call("get_state")["features"]
+                  if f["type"] == "Sketch"][-1]["id"]
+            d.call("add_feature", feature={
+                "type": "Extrude", "name": "Pocket", "sketch_id": sk,
+                "distance": 11.0, "mode": "cut", "reversed": True})
+            # Faces are picked on the PART, before the job tab takes over.
+            floor = None
+            for body in d.call("list_elements")["bodies"]:
+                for f in body["faces"]:
+                    n = f.get("normal") or [0, 0, 0]
+                    c = f.get("centroid") or [0, 0, 0]
+                    if f.get("kind") == "plane" and n[2] > 0.99 and abs(c[2] - 9.0) < 0.5:
+                        floor = {"feature_id": body["created_by"],
+                                 "element": f["name"]}
+            expect(floor is not None, "the elliptical pocket has a floor to click")
+            d.call("machine_part")
+            ell_setup = d.call("add_cam_setup", name="Ellipse")["id"]
+            op = d.call("add_cam_op", setup=ell_setup, type="pocket", tool=1,
+                        target=floor)
+            expect(op["side"] == "inside", f"a pocket clears inside: {op}")
+            got = d.call("cam_toolpath", setup=ell_setup)["operations"][0]
+            expect(got["moves"] > 0,
+                   f"an elliptical pocket is cleared, not skipped: {got}")
+            expect("concentric" in got.get("strategy", ""),
+                   f"and it says which strategy cut it: {got}")
+            # Whatever cut it, it must cut the right thing.
+            v = d.call("cam_verify", setup=ell_setup, resolution=0.8)
+            expect(v["ok"], f"the fallback cuts cleanly: {v}")
 
-        d.call("new_project")
-        d.call("add_feature", feature={
-            "type": "Box", "name": "Plate", "position": [0, 0, 0],
-            "width": 40, "height": 30, "depth": 20})
-        d.call("machine_part")
-        cam_setup = d.call("add_cam_setup", name="Job")["id"]
-        # Arc fitting is a property of the machine, so it persists and the
-        # posted file honours it (C7).
-        d.call("add_cam_op", setup=cam_setup, type="profile",
-               top_z=21.0, bottom_z=0.0, stepdown=8.0)
-        d.call("set_cam_setup", id=cam_setup, fit_arcs=False)
-        expect(d.call("list_cam_setups")["setups"][0]["fit_arcs"] is False,
-               "fit_arcs round-trips")
-        nc = os.path.join(tmp, "arcs.nc")
-        d.call("cam_post", setup=cam_setup, path=nc)
-        plain = open(nc).read()
-        expect("G2 " not in plain, "arcs off means no arcs in the file")
-        d.call("set_cam_setup", id=cam_setup, fit_arcs=True)
-        d.call("cam_post", setup=cam_setup, path=nc)
-        curved = open(nc).read()
-        expect("G2 " in curved, "arcs on means arcs in the file")
-        expect(len(curved) < len(plain), "and a smaller file")
-        # One file per tool (router-round.md R2): `path` is the base and the
-        # answer names every file written, each a complete program.
-        d.call("set_cam_setup", id=cam_setup, split_output=True)
-        expect(d.call("list_cam_setups")["setups"][0]["split_output"] is True,
-               "split_output round-trips")
-        split = d.call("cam_post", setup=cam_setup, path=nc)
-        expect(len(split["files"]) == 1 and
-               split["files"][0]["path"].endswith("arcs - T1.nc"),
-               f"a one-tool job splits into one named file: {split['files']}")
-        part = open(split["files"][0]["path"]).read()
-        expect("G2 " in part and "M30" in part, "the tool's file is complete")
-        d.call("set_cam_setup", id=cam_setup, split_output=False)
+            d.call("new_project")
+            d.call("add_feature", feature={
+                "type": "Box", "name": "Plate", "position": [0, 0, 0],
+                "width": 40, "height": 30, "depth": 20})
+            d.call("machine_part")
+            cam_setup = d.call("add_cam_setup", name="Job")["id"]
+            # Arc fitting is a property of the machine, so it persists and the
+            # posted file honours it (C7).
+            d.call("add_cam_op", setup=cam_setup, type="profile",
+                   top_z=21.0, bottom_z=0.0, stepdown=8.0)
+            d.call("set_cam_setup", id=cam_setup, fit_arcs=False)
+            expect(d.call("list_cam_setups")["setups"][0]["fit_arcs"] is False,
+                   "fit_arcs round-trips")
+            nc = os.path.join(tmp, "arcs.nc")
+            d.call("cam_post", setup=cam_setup, path=nc)
+            plain = open(nc).read()
+            expect("G2 " not in plain, "arcs off means no arcs in the file")
+            d.call("set_cam_setup", id=cam_setup, fit_arcs=True)
+            d.call("cam_post", setup=cam_setup, path=nc)
+            curved = open(nc).read()
+            expect("G2 " in curved, "arcs on means arcs in the file")
+            expect(len(curved) < len(plain), "and a smaller file")
+            # One file per tool (router-round.md R2): `path` is the base and the
+            # answer names every file written, each a complete program.
+            d.call("set_cam_setup", id=cam_setup, split_output=True)
+            expect(d.call("list_cam_setups")["setups"][0]["split_output"] is True,
+                   "split_output round-trips")
+            split = d.call("cam_post", setup=cam_setup, path=nc)
+            expect(len(split["files"]) == 1 and
+                   split["files"][0]["path"].endswith("arcs - T1.nc"),
+                   f"a one-tool job splits into one named file: {split['files']}")
+            part = open(split["files"][0]["path"]).read()
+            expect("G2 " in part and "M30" in part, "the tool's file is complete")
+            d.call("set_cam_setup", id=cam_setup, split_output=False)
 
-        # R9 (2026-08-26): a typed top_z below the stock top warns at
-        # toolpath time, naming the op and both heights — the verifier's
-        # later "rapid through material at line N" names neither.
-        cam_ops = d.call("list_cam_setups")["setups"][0]["operations"]
-        d.call("set_cam_op", id=cam_ops[0]["id"], top_z=0.5)
-        warned = d.call("cam_toolpath", setup=cam_setup)
-        expect(any("stock top" in w for w in warned.get("warnings", [])),
-               f"low top_z warns: {warned.get('warnings')}")
-        d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
-        expect("warnings" not in d.call("cam_toolpath", setup=cam_setup),
-               "restored top_z clears the warning")
-        # R7: a targetless drill derive teaches, instead of "not a verb".
-        try:
-            d.call("cam_derive_op", setup=cam_setup, type="drill")
-            raise AssertionError("targetless drill derive must refuse")
-        except RuntimeError as e:
-            expect("pass targets" in str(e), f"drill refusal teaches: {e}")
-        # A job is a second document in the project, so the phases below --
-        # which count tabs and lean on the single-document .json form -- start
-        # from a clean one rather than inheriting this one.
-        d.call("new_project")
+            # R9 (2026-08-26): a typed top_z below the stock top warns at
+            # toolpath time, naming the op and both heights — the verifier's
+            # later "rapid through material at line N" names neither.
+            cam_ops = d.call("list_cam_setups")["setups"][0]["operations"]
+            d.call("set_cam_op", id=cam_ops[0]["id"], top_z=0.5)
+            warned = d.call("cam_toolpath", setup=cam_setup)
+            expect(any("stock top" in w for w in warned.get("warnings", [])),
+                   f"low top_z warns: {warned.get('warnings')}")
+            d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
+            expect("warnings" not in d.call("cam_toolpath", setup=cam_setup),
+                   "restored top_z clears the warning")
+            # R7: a targetless drill derive teaches, instead of "not a verb".
+            try:
+                d.call("cam_derive_op", setup=cam_setup, type="drill")
+                raise AssertionError("targetless drill derive must refuse")
+            except RuntimeError as e:
+                expect("pass targets" in str(e), f"drill refusal teaches: {e}")
+            # A job is a second document in the project, so the phases below --
+            # which count tabs and lean on the single-document .json form -- start
+            # from a clean one rather than inheriting this one.
+            d.call("new_project")
 
         phase("Tab addressing, duplicate names, the .json refusal")
         # R4/R5/R16 (2026-08-26). Names address tabs, so duplicates refuse;

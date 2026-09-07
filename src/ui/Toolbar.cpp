@@ -1,5 +1,6 @@
 #include "ui/Toolbar.h"
 #include "ui/AssemblyActions.h"
+#include "ui/JobActions.h" // ActiveCamSetup
 #include "ui/SimulationActions.h"
 
 #include "common/Logger.h"

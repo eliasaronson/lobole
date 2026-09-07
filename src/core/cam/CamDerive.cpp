@@ -45,19 +45,7 @@ namespace cam {
 
 using namespace detail;
 
-namespace {
-
-// Where this body's part sits in the stock, or null when nobody has said.
-const Placement* PlacementForBody(const Setup& setup, const Body& b) {
-  if (b.jobPartId == 0)
-    return nullptr;
-  for (const Placement& p : setup.placements)
-    if (p.jobPartId == b.jobPartId)
-      return &p;
-  return nullptr;
-}
-
-} // namespace
+namespace {} // namespace
 
 namespace detail {
 
@@ -467,54 +455,6 @@ bool MoveOperation(Setup& setup, uint64_t opId, size_t toIndex) {
   ops.erase(ops.begin() + static_cast<ptrdiff_t>(from));
   ops.insert(ops.begin() + static_cast<ptrdiff_t>(toIndex), moved);
   return true;
-}
-
-std::vector<Body> BodiesInSetupFrame(const Setup& setup,
-                                     const std::vector<Body>& in) {
-  if (SetupIsSquare(setup) && setup.placements.empty())
-    return in;
-
-  std::vector<Body> out;
-  out.reserve(in.size());
-  for (const Body& b : in) {
-    // Where the part sits in the stock composes HERE and nowhere else, after
-    // the fixture frame and in setup space -- which is what makes "where on
-    // the sheet" an in-plane statement rather than a fourth way to tilt a
-    // part (docs/cam/job-document.md). setup-frame.md learned what a second
-    // copy of this transform costs.
-    const Placement* place = PlacementForBody(setup, b);
-    if (place != nullptr && !place->enabled)
-      continue; // on the sheet, not cut this run
-    // Undo the fixture frame THIS part is clamped in -- which may not be the
-    // setup's (v76): a sheet can hold a baffle laid on its face beside a rail
-    // laid on its edge. The part turns under a spindle that always points
-    // down, which is what both a clamp and an indexed trunnion amount to, and
-    // a rotation's inverse is its transpose.
-    const glm::dmat3 toSetup = glm::transpose(SetupToModel(setup, b.jobPartId));
-    glm::mat4 m(1.0f);
-    for (int col = 0; col < 3; col++)
-      for (int row = 0; row < 3; row++)
-        m[col][row] = static_cast<float>(toSetup[col][row]);
-    if (place != nullptr) {
-      const float c =
-          static_cast<float>(std::cos(glm::radians(place->rotZdeg)));
-      const float sn =
-          static_cast<float>(std::sin(glm::radians(place->rotZdeg)));
-      glm::mat4 t(1.0f);
-      t[0][0] = c;
-      t[0][1] = sn;
-      t[1][0] = -sn;
-      t[1][1] = c;
-      t[3][0] = static_cast<float>(place->pos.x);
-      t[3][1] = static_cast<float>(place->pos.y);
-      m = t * m;
-    }
-    Body copy = b; // keeps createdBy and the element map: names must survive
-    if (b.shape.IsValid())
-      copy.shape = b.shape.Transformed(m);
-    out.push_back(std::move(copy));
-  }
-  return out;
 }
 
 bool SolveIndexA(const glm::dvec3& normal, double& degrees) {

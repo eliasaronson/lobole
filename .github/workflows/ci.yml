@@ -216,6 +216,26 @@ jobs:
           python3 tests/headless_smoke.py build-no-te/designer
           ! build-no-te/designer --gui-tests --hidden 2>/dev/null
 
+      # The build without CAM, for exactly the reason stated above and with
+      # the receipts to prove it: -DENABLE_CAM=OFF was accepted by CMake,
+      # printed its own status line, and had not linked since CAM shipped on
+      # 2026-08-21 -- 36 compile errors and nine undefined symbols, unnoticed
+      # for two and a half weeks because nothing built it.
+      #
+      # The suite runs too, not just a smoke. The link was only half of what
+      # was broken; headless_smoke called three CAM-only RPCs unguarded, which
+      # no amount of compiling would have caught.
+      - name: Build without CAM
+        run: |
+          cmake -S . -B build-nocam -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DENABLE_CAM=OFF
+          cmake --build build-nocam -j"$(nproc)"
+
+      - name: Test the CAM-free build
+        run: |
+          ctest --test-dir build-nocam -LE gui -j "$(nproc)" --output-on-failure \
+            -E "Assembly import plan|Shell that removes no material"
+
   # The job above runs on GitHub's runner image, which carries hundreds of
   # preinstalled packages — so it cannot tell whether the README's apt list is
   # COMPLETE. A stock container can, and when this was first tried

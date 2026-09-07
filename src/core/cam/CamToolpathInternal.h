@@ -13,7 +13,13 @@
 
 #include "core/cam/CamJob.h"
 
+// Only the polygon helpers need Clipper2, and only a CAM build compiles them.
+// CamSetup / CamPicks / CamTravel include this header for the clipper-free
+// half and are built either way -- they are the job document's frames, picks
+// and bounds, not toolpath generation (see CMakeLists.txt).
+#ifdef HAVE_CAM
 #include <clipper2/clipper.h>
+#endif
 
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
@@ -36,6 +42,7 @@ constexpr double kScale = 1.0e4;
 // SectionLoops' default).
 constexpr double kDeflection = 0.02;
 
+#ifdef HAVE_CAM
 Clipper2Lib::Path64 ToClipper(const std::vector<glm::dvec2>& pts);
 
 std::vector<glm::dvec2> FromClipper(const Clipper2Lib::Path64& path);
@@ -52,6 +59,7 @@ Clipper2Lib::Paths64 Offset(const Clipper2Lib::Paths64& paths, double deltaMm);
 // the material, climb milling runs clockwise seen from +Z; inside a pocket it
 // runs counter-clockwise. Clipper hands back outers CCW and holes CW.
 void Orient(Clipper2Lib::Path64& path, bool climb, bool insideMaterial);
+#endif // HAVE_CAM
 
 // Offsetting is signed against the winding: a positive delta grows a
 // positively wound path and shrinks a negatively wound one. Callers say what
@@ -70,6 +78,7 @@ std::vector<glm::dvec2> WireToLoop(const TopoDS_Wire& wire, double deflection);
 // "3.000000", which reads as machine noise in a sentence meant for a person.
 std::string Round2(double mm);
 
+#ifdef HAVE_CAM
 // Why the cutter could not get into `region`, in the words a person can act
 // on: how wide the place actually is, how wide this tool is, and what would
 // fit. Empty when the tool DOES fit, so the caller keeps looking for the real
@@ -82,6 +91,7 @@ std::string Round2(double mm);
 std::string TooTightForTool(const Clipper2Lib::Paths64& region,
                             const Tool& tool, double stockToLeave,
                             const char* what);
+#endif // HAVE_CAM
 
 void Emit(Toolpath& tp, Move::Kind kind, const glm::dvec3& to, double feed);
 

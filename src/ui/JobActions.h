@@ -94,4 +94,8 @@ size_t OpenJobForPart(AppState& state, uint64_t sourcePartId);
 // The tab index of a job that already cuts this part, or -1.
 int FindJobForPart(AppState& state, uint64_t sourcePartId);
 
+// The setup the panel, the tool session and the overlays all act on (the one
+// selected in the combo, else the first). Null when there is none.
+cam::Setup* ActiveCamSetup(AppState& state);
+
 } // namespace ui
