@@ -97,7 +97,7 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"remove_drawing_dim", "Remove a dimension by id.", "id"},
     {"list_drawing_dims", "List dimensions with values.", ""},
     {"export_drawing", "Export the drawing to SVG or PDF by extension {path}.",
-     "path"},
+     "path", remote::NotInBatch},
     {"add_drawing_note",
      "Add a text note {text, position: [x,y] sheet mm, view?, ref?: "
      "{feature_id, element}} — ref draws a leader from that geometry (needs "

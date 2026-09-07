@@ -40,45 +40,49 @@ namespace remote {
 // be null on an assembly tab, matching the original un-guarded behavior).
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc ProjectMethods[] = {
-    {"new_project", "Reset to an empty project (one empty part).", ""},
+    {"new_project", "Reset to an empty project (one empty part).", "",
+     remote::NotInBatch},
     {"open_project", "Open a project {path} (.json file or .dsgn directory).",
-     "path"},
+     "path", remote::NotInBatch},
     {"save_project",
      "Save the project to {path, message?, force?}. Refuses when the project "
      "changed on disk since it was opened; {force:true} saves over it.",
-     "force, message, path"},
+     "force, message, path", remote::NotInBatch},
     {"import_step",
      "Import a STEP file into the current project (XCAF: names, "
      "colors, real assemblies).",
-     "as_assembly, path"},
+     "as_assembly, path", remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}), or — on an "
      "assembly tab — every occurrence at its SOLVED placement.",
-     "body, deflection, path"},
+     "body, deflection, path", remote::NotInBatch},
     {"export_stl", "Export to STL {path, deflection?}.",
-     "body, deflection, path"},
-    {"export_brep", "Export to BREP {path}.", "body, deflection, path"},
+     "body, deflection, path", remote::NeedsPart | remote::NotInBatch},
+    {"export_brep", "Export to BREP {path}.", "body, deflection, path",
+     remote::NeedsPart},
     {"export_visual",
      "Export a visual-quality mesh (glTF/OBJ by extension) of "
      "the part or whole assembly.",
-     "deflection, path"},
+     "deflection, path", remote::NotInBatch},
     {"checkpoint_create",
-     "Name the current state of the whole project a version {name}.", "name"},
+     "Name the current state of the whole project a version {name}.", "name",
+     remote::NotInBatch},
     {"checkpoint_list", "List named versions.", ""},
     {"checkpoint_restore", "Put the project back to a named version {name}.",
-     "name"},
+     "name", remote::NotInBatch},
     {"history_log", "List the project's versions (every save).", "limit"},
-    {"history_restore", "Put the project back to a version {commit}.",
-     "commit"},
+    {"history_restore", "Put the project back to a version {commit}.", "commit",
+     remote::NotInBatch},
     {"branch_list", "List separate lines of work, and which one is current.",
      ""},
     {"branch_create", "Start a separate line of work {name, switch?:true}.",
-     "name, switch"},
-    {"branch_switch", "Move to a separate line of work {name}.", "name"},
+     "name, switch", remote::NotInBatch},
+    {"branch_switch", "Move to a separate line of work {name}.", "name",
+     remote::NotInBatch},
     {"branch_merge",
      "Bring {name} into the current line of work. A "
      "'conflicted' status is an outcome, not an error.",
-     "name"},
+     "name", remote::NotInBatch},
     {"conflict_list",
      "What two merged versions disagree about, in document "
      "terms — including the duplicate ids git merges "
@@ -88,16 +92,16 @@ static constexpr MethodDoc ProjectMethods[] = {
      "Resolve one conflict {path, take: mine|theirs|auto, field?}. 'auto' is "
      "the union merge for an order, a rebuild for derived geometry, and a "
      "renumber for a duplicate id.",
-     "field, path, take"},
+     "field, path, take", remote::NotInBatch},
     {"merge_finish",
      "Verify the merged project LOADS AND REGENERATES, then "
      "keep it. Refuses with {broken} when it does not.",
-     ""},
-    {"merge_abort", "Throw an in-progress merge away.", ""},
+     "", remote::NotInBatch},
+    {"merge_abort", "Throw an in-progress merge away.", "", remote::NotInBatch},
     {"set_variable",
      "Add or redefine a variable {name, expression, comment?, "
      "scope: project|part}; returns value + regen.",
-     "comment, expression, name, scope"},
+     "comment, expression, name, scope", remote::Deferrable},
     {"list_variables", "Project variables and the active part's local ones.",
      ""},
     {"set_units",
@@ -110,11 +114,11 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"rename_variable",
      "Rename a variable {name, new_name, scope?}, rewriting "
      "every referencing expression.",
-     "name, new_name, scope"},
+     "name, new_name, scope", remote::Deferrable},
     {"delete_variable",
      "Delete a variable {name, scope?}; refused while "
      "referenced.",
-     "name, scope"},
+     "name, scope", remote::Deferrable},
     {"remote_list",
      "The project's remotes, and how far ahead/behind this "
      "branch is.",
@@ -127,20 +131,21 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"fetch",
      "Bring down refs from {remote?:origin} without touching the "
      "working tree.",
-     "remote"},
+     "remote", remote::NotInBatch},
     {"pull",
      "Fetch {remote?:origin} and merge it in. A 'conflicted' status "
      "is an outcome — see conflict_list.",
-     "remote"},
+     "remote", remote::NotInBatch},
     {"push",
      "Send this branch to {remote?:origin}. 'rejected' means someone "
      "else pushed first; pull, then push again.",
-     "remote"},
-    {"clone_project", "Clone {url} into {path} and open it.", "path, url"},
+     "remote", remote::NotInBatch},
+    {"clone_project", "Clone {url} into {path} and open it.", "path, url",
+     remote::NotInBatch},
     {"autosave_now",
      "Autosave every dirty document immediately, ignoring "
      "the interval; returns how many were written.",
-     ""},
+     "", remote::NotInBatch},
     {"autosave_status",
      "Which documents have autosaved work waiting to be "
      "recovered.",

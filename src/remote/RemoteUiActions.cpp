@@ -415,16 +415,11 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
   return out;
 }
 
+// Whether this method goes on the ImGui queue instead of running inline. It
+// was a hand-written list of sixteen names; it is the UiAction column now, so
+// a new ui_action cannot be added without the dispatcher learning about it.
 bool RemoteServer::IsUiAction(const std::string& method) {
-  static const char* kActions[] = {
-      "menu_click", "item_click",     "item_double_click", "item_input",
-      "item_hover", "item_combo",     "popup_click",       "popup_items",
-      "ui_items",   "viewport_click", "viewport_drag",     "key_press",
-      "menu_items", "scroll",         "focus_panel",       "scroll_panel"};
-  for (const char* a : kActions)
-    if (method == a)
-      return true;
-  return false;
+  return (remote::MethodFlagsOf(method) & remote::UiAction) != 0;
 }
 
 bool RemoteServer::QueueUiAction(const Request& request) {

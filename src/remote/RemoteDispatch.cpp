@@ -162,132 +162,6 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit,
   return true;
 }
 
-// Methods that act on the project container or the active assembly tab, not
-// on an active part document. Everything else needs a live part: when an
-// assembly tab is active, `doc` is null, so fail with a clear message rather
-// than dereferencing null. File scope so the describe endpoint can derive
-// each method's requires_part_doc from it.
-static const std::set<std::string> kNoPartDoc = {
-    // A batch is whatever its calls are: each one meets the part gate on its
-    // own, so gating the wrapper would refuse an assembly batch for a part
-    // that is not open and has nothing to do with it.
-    "batch", "describe", "ping", "background_jobs", "cancel_background_job",
-    "list_parts", "add_part", "add_assembly", "set_active_part", "delete_part",
-    "rename_part",
-    // Tab-bar folders group tabs of every kind, so they must work from an
-    // assembly or drawing tab as readily as from a part.
-    "create_folder", "move_to_folder", "rename_folder", "dissolve_folder",
-    // Configuration RPCs target the active tab: part-doc handling above,
-    // assembly handling below. Listed here so they are allowed on an
-    // assembly tab (where doc is null).
-    "add_configuration", "remove_configuration", "list_configurations",
-    "set_configuration", "set_active_configuration", "create_drawing",
-    "list_drawings", "add_drawing_view", "remove_drawing_view",
-    "set_drawing_view", "set_drawing_sheet", "check_drawing", "update_drawing",
-    "list_drawing_views", "export_drawing", "list_drawing_geometry",
-    "add_drawing_dim", "remove_drawing_dim", "list_drawing_dims",
-    "add_drawing_note", "remove_drawing_note", "list_drawing_notes",
-    // CAM works on a JOB tab since v73 (docs/cam/job-document.md): a setup
-    // stopped being part of the part, so `doc` is null by definition wherever
-    // a CAM handler runs. It refuses for itself, naming how to make a job.
-    "machine_part", "add_job_part", "remove_job_part", "list_job_parts",
-    "list_machines", "save_machine", "delete_machine", "set_job_placement",
-    "check_layout", "add_cam_setup", "list_cam_setups", "set_cam_setup",
-    "remove_cam_setup", "add_cam_op", "cam_derive_op", "set_cam_op",
-    "move_cam_op", "remove_cam_op", "cam_verify", "cam_simulate",
-    "cam_toolpath", "cam_post", "new_project", "save_project", "open_project",
-    "add_occurrence",
-    // A fastener is placed in an assembly, where `doc` is null by definition.
-    "add_fastener", "fit_fastener", "check_fasteners", "remove_occurrence",
-    "list_occurrences", "set_occurrence_transform", "set_occurrence_visible",
-    "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
-    "remove_mate", "list_mates", "add_relation", "set_relation",
-    "remove_relation", "list_relations", "select_mate", "select_occurrence",
-    "set_occurrence_configuration", "solve_assembly", "bom", "export_bom",
-    "edit_in_context", "add_exploded_view", "remove_exploded_view",
-    "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
-    // Motion studies (G2) live on the assembly.
-    "add_motion_study", "set_motion_study", "remove_motion_study",
-    "list_motion_studies", "run_motion_study", "motion_status",
-    "set_motion_pose", "export_motion",
-    // export_visual and export_step both work on a part OR an assembly
-    // (the same occurrence walk, at solved placements).
-    "export_visual", "export_step",
-    // Clearing the compare_geometry overlay must work from any tab — the
-    // overlay is part-scoped, but switching tabs is how you leave it behind.
-    "clear_geometry_delta",
-    // Aims the camera at the selected face. Faces are selectable on an
-    // assembly tab too (viewport click), and the handler touches only the
-    // selection, faceSelector and camera — none of which are part-scoped.
-    // With nothing selected it refuses "no face selected", which is the
-    // honest answer the part gate used to mask with "switch to a part tab".
-    // Sat in rpc_gate_smoke's GATED_ON_PURPOSE until --offscreen provided a
-    // render surface to verify on.
-    "orient_to_face",
-    // Nothing below is about the open document, and each was reachable only
-    // from a part tab until a drawing-tab dogfooding round tripped over it.
-    // The gate is a list kept apart from the handlers, so when a handler is
-    // widened nothing makes the gate follow: checkpoint_create,
-    // checkpoint_restore and history_restore all say in their own comments
-    // that they were fixed to cover the WHOLE project, and all three stayed
-    // part-gated afterwards.
-    "get_settings", "set_settings", // user preferences, not the document
-    "get_keymap", "set_keybinding", // and the keyboard bindings inside them
-    "reset_layout",                 // the dock layout — and the recovery for
-                                    // a wedged one, so gating it is backwards
-    "checkpoint_create", "checkpoint_restore", "history_restore",
-    "rt_build", // SyncRayTracingScene renders a part OR an assembly
-    // interference runs on occurrence pairs on an assembly tab;
-    // contact_report IS assembly-only (V1 connectivity gate);
-    // list_elements/measure work there when given an explicit `part`;
-    // mass_properties aggregates occurrence masses in world space.
-    "interference", "contact_report", "compare_geometry", "query_geometry",
-    "list_elements", "measure", "frame", "mass_properties", "render_sheet",
-    // get_state reads ANOTHER part when given `part`, and refuses for itself
-    // (naming the tab kind) when it has neither that nor an active part —
-    // the same shape as its neighbours above (W2).
-    "get_state",
-    // set_section writes the global viewport clip plane (per-frame UBO,
-    // world space); `section` sums the cut area over a part's bodies or,
-    // on an assembly tab, over every visible occurrence in place.
-    "set_section", "section", "add_section", "list_sections", "update_section",
-    "remove_section",
-    // undo/redo route to the assembly's snapshot history on an assembly tab.
-    "undo", "redo",
-    // Project-level reads (git vault / checkpoint list act on projectPath,
-    // not the active document). checkpoint_create/restore snapshot the
-    // ACTIVE PART document and stay part-gated.
-    "history_log", "checkpoint_list",
-    // Sharing and conflicts (F7/F9) act on the project's REPOSITORY and the
-    // disk check on the project DIRECTORY — none of them read the active
-    // document. Gating them on a part meant every one of them failed with
-    // "the active document is an assembly, not a part" on an assembly or
-    // drawing tab: a 48-part project could not be pushed from its own
-    // assembly tab, which is where anyone assembling it is standing.
-    "branch_list", "branch_create", "branch_switch", "branch_merge",
-    "conflict_list", "conflict_resolve", "merge_finish", "merge_abort",
-    "remote_list", "remote_add", "remote_remove", "fetch", "pull", "push",
-    "clone_project", "project_changed_on_disk",
-    // Autosave acts on the project directory, and gating it on a part is the
-    // shape of the bug F10 fixes.
-    "autosave_now", "autosave_status",
-    // Variables default to PROJECT scope — they are not a property of the tab
-    // you happen to be on, and being gated here refused them on an assembly
-    // or drawing tab. The handlers already ask for a part only when the
-    // scope is "part", and refuse with that reason.
-    "set_variable", "list_variables", "rename_variable", "delete_variable",
-    // Units belong to the document, and an ASSEMBLY has its own (the BOM's
-    // masses are shown there) — so these must not be gated on a part either.
-    "set_units", "get_units",
-    // Camera / rendering act on the viewport, not the part document, so they
-    // work on an assembly tab too. render_still's RT scene sync does the
-    // occurrence walk itself.
-    "view", "fit_view", "screenshot", "set_render_options", "set_camera",
-    "render_still",
-    // frame_stats measures the LOOP, which has no opinion about which tab is
-    // open — and the frames worth measuring are usually an assembly's.
-    "frame_stats"};
-
 // The methods RemoteServer dispatches itself (viewport, camera, selection,
 // project tabs, UI events). describe: one row per `m ==` branch — extend
 // together. `screenshot` and the UI actions are dispatched outside
@@ -349,8 +223,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "somebody's running instance is their work.",
      "part"},
     {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
-     ""},
-    {"redo", "Redo one step.", ""},
+     "", remote::NotInBatch},
+    {"redo", "Redo one step.", "", remote::NotInBatch},
     {"view",
      "Orient the camera to a named view {name: front|back|left|right|top|"
      "bottom|iso}.",
@@ -365,25 +239,26 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"select_face",
      "Select a face by {mesh, face} or stable {element}/{feature_id, "
      "element}; returns normal/center.",
-     "element, face, mesh"},
+     "element, face, mesh", remote::NeedsPart},
     {"screenshot",
      "Write the rendered viewport to {path} (needs a renderer "
      "— not available under --headless).",
-     "fit, path, view"},
+     "fit, path, view", remote::NotInBatch},
     {"render_sheet",
      "One PNG: tiled named views (default iso/front/right/top, up to 6 via "
      "{views}) with a numeric footer — bbox, mass, volume, and on an "
      "assembly the contact_report summary. {focus: occurrence name|id} "
      "frames that one occurrence large in every view (close-ups without "
      "camera math). Needs a renderer.",
-     "focus, path, views"},
+     "focus, path, views", remote::NotInBatch},
     {"render_still",
      "Path-traced still to {path} (ray tracing; needs GPU support). Defaults "
      "to 1920x1080 at 512 samples, the same as the GUI's Render dialog. "
      "`backdrop`: studio (a neutral sweep, the default) or environment (the "
      "HDRI itself). `outlines`: edges over the image, as the viewport draws "
      "them (default true).",
-     "backdrop, ground, height, outlines, path, samples, seed, width"},
+     "backdrop, ground, height, outlines, path, samples, seed, width",
+     remote::NotInBatch},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
      "shadow_map, shadows, ssao"},
@@ -397,7 +272,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "hud, window"},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", ""},
     {"set_settings", "Change user preferences {key: value, ...}; persists.",
-     "*"},
+     "*", remote::NotInBatch},
     {"get_keymap",
      "The keyboard bindings (docs/ui/u12-keybindings.md): every command with "
      "its context, label, current chord and default, plus any conflicts. "
@@ -410,7 +285,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "An empty chord unbinds it; {reset: true} restores the default. "
      "Persists. Escape/Enter/Delete/arrows are fixed and have no command.",
      "chord, command, reset"},
-    {"reset_layout", "Reset the dock layout.", ""},
+    {"reset_layout", "Reset the dock layout.", "", remote::NotInBatch},
     {"add_part", "Add a new empty part tab.", "name"},
     {"add_assembly", "Add an assembly tab.", "name"},
     {"list_parts",
@@ -421,46 +296,48 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "`type` unless you mean all three.",
      ""},
     {"rename_part", "Rename a part.", "new_name, part"},
-    {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path"},
+    {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path",
+     remote::UiAction},
     {"menu_items",
      "List the menu bar's contents: no {path} = the top-level "
      "menus, {path: \"File\"} = that menu's items (submenu: "
      "true = walk deeper). The menu closes again.",
-     "path"},
-    {"key_press", "Send a key chord, e.g. \"Ctrl+Z\".", "chord"},
+     "path", remote::UiAction},
+    {"key_press", "Send a key chord, e.g. \"Ctrl+Z\".", "chord",
+     remote::UiAction},
     {"item_click",
      "UI test tier: click a widget by {ref} or by the {id} ui_items reports "
      "(the only handle on hidden-label widgets like a combo). Ref example: "
      "\"//##DockHost/**/###tb_box\" (//window, ** = any depth, ### = the "
      "widget's stable id); {button: 1} right-clicks.",
-     "button, id, ref"},
+     "button, id, ref", remote::UiAction},
     {"item_double_click",
      "UI test tier: double-click a widget (same ref "
      "grammar as item_click).",
-     "id, ref"},
+     "id, ref", remote::UiAction},
     {"item_input", "UI test tier: type into a widget {ref, value}.",
-     "id, ref, value"},
+     "id, ref, value", remote::UiAction},
     {"item_hover",
      "UI test tier: hover a widget {ref|id} — shows its "
      "tooltip and hover state without clicking.",
-     "id, ref"},
+     "id, ref", remote::UiAction},
     {"popup_click",
      "UI test tier: open the popup of {ref|id} ({button}: 1 "
      "= context menu) and click {item} in it — the only way "
      "to reach a menu that is not the main menu bar (the tab "
      "bar's '+', context menus). {item} may be a submenu path, "
      "\"Part 1/Front\".",
-     "button, id, item, ref, value"},
+     "button, id, item, ref, value", remote::UiAction},
     {"popup_items",
      "UI test tier: list what the popup of {ref|id} holds "
      "(submenu: true = address its children as "
      "\"Parent/Child\"), then close it.",
-     "button, id, ref"},
+     "button, id, ref", remote::UiAction},
     {"item_combo",
      "UI test tier: choose {value} in the combo {ref|id} "
      "(opens and picks in one action — the popup does not "
      "survive between RPCs).",
-     "button, id, item, ref, value"},
+     "button, id, item, ref, value", remote::UiAction},
     {"ui_items",
      "UI test tier: list the widgets under {ref} (default the "
      "focused window, {depth}): label, id, window, disabled, "
@@ -468,7 +345,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "32-byte buffer, so a long one is CUT — `label_truncated` "
      "says so, and the numeric `id` is the handle item_click "
      "always accepts.",
-     "depth, ref"},
+     "depth, ref", remote::UiAction},
     {"scroll_panel",
      "UI test tier: scroll a docked panel {window, to: top|bottom|<y>}; "
      "returns the widget list afterwards. This is for SEEING — a screenshot "
@@ -477,21 +354,63 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "panel here uses a list clipper, so ui_items lists items below the fold "
      "and item_click scrolls them into view by itself. (`scroll` is a "
      "different thing: it zooms the 3D viewport.)",
-     "to, window"},
+     "to, window", remote::UiAction},
     {"focus_panel",
      "UI test tier: bring a docked panel's TAB forward {name}, e.g. \"CAM\", "
      "\"Model\", \"History\". A panel tabbed behind another is invisible to "
      "item_click, so without this the only panels a script could drive were "
      "whichever the saved layout happened to leave in front.",
-     "name"},
+     "name", remote::UiAction},
     {"viewport_click",
      "Click the 3D viewport at (x, y) as 0-1 fractions OF THE VIEWPORT "
      "rect (0.5,0.5 = its centre, whatever is docked around it).",
-     "button, ctrl"},
+     "button, ctrl", remote::UiAction},
     {"viewport_drag", "Drag in the viewport (button 0/1/2) — orbit/pan.",
-     "button, ctrl, shift"},
-    {"scroll", "Scroll (zoom) the viewport.", "amount, dy, window"},
+     "button, ctrl, shift", remote::UiAction},
+    {"scroll", "Scroll (zoom) the viewport.", "amount, dy, window",
+     remote::UiAction},
 };
+
+// Every method's row, by name.
+//
+// This replaced four separate std::set<std::string> -- kNoPartDoc (166 names),
+// kNotInBatch (31), kDeferrable (10) and IsUiAction -- none of which sat next
+// to a handler, so adding a method meant remembering four places and no test
+// compared them. Building it found three names that were in those lists for
+// methods that DO NOT EXIST (export_mesh, move_feature, rename_feature): dead
+// entries a list apart from its handlers accumulates in silence.
+// docs/architecture-review-2026-09-06.md, section 4.
+const remote::MethodDoc* FindMethod(const std::string& m) {
+  static const std::map<std::string, const remote::MethodDoc*> byName = [] {
+    std::map<std::string, const remote::MethodDoc*> out;
+    const auto add = [&out](std::span<const remote::MethodDoc> docs) {
+      for (const remote::MethodDoc& d : docs)
+        out.emplace(d.name, &d);
+    };
+    add(kServerMethods);
+    add(remote::ModelingMethodDocs());
+    add(remote::ProjectMethodDocs());
+    add(remote::AssemblyMethodDocs());
+    add(remote::MotionMethodDocs());
+    add(remote::InspectionMethodDocs());
+    add(remote::CamMethodDocs());
+    add(remote::DrawingMethodDocs());
+    add(remote::ConfigurationMethodDocs());
+    add(remote::SimulationMethodDocs());
+    return out;
+  }();
+  const auto it = byName.find(m);
+  return it == byName.end() ? nullptr : it->second;
+}
+
+// The flags of `m`, or 0 for a method we do not know. An unknown method having
+// no flags is what keeps the part gate below quiet about it -- a typo must
+// fall through to "unknown method", not be answered with "switch to a part
+// tab", which sends the caller hunting a problem that does not exist.
+uint8_t MethodFlags(const std::string& m) {
+  const remote::MethodDoc* d = FindMethod(m);
+  return d == nullptr ? uint8_t{0} : d->flags;
+}
 
 // Every method any module documents. The describe tables are the registry
 // (a branch without a row is caught by its own test), so this needs no
@@ -531,7 +450,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // "switch to a part tab" and sends the caller hunting a tab problem that
   // does not exist. Whether a method needs a part is only a sensible thing
   // to say about a method that exists.
-  if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m) && IsKnownMethod(m)) {
+  if (!doc && (MethodFlags(m) & remote::NeedsPart)) {
     const char* kind = state.assembly  ? "an assembly"
                        : state.drawing ? "a drawing"
                                        : "not a part";
@@ -557,50 +476,6 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (calls.empty())
       throw std::runtime_error("batch 'calls' is empty — nothing to run");
 
-    // What a rollback could not take back. Each of these reaches outside the
-    // document (a file, a git tree, the window, the tab), so undoing the
-    // document would leave the world half-changed and the response would be
-    // a lie about it.
-    static const std::set<std::string> kNotInBatch = {"screenshot",
-                                                      "render_sheet",
-                                                      "render_still",
-                                                      "export_step",
-                                                      "export_stl",
-                                                      "export_mesh",
-                                                      "export_visual",
-                                                      "export_drawing",
-                                                      "save_project",
-                                                      "open_project",
-                                                      "new_project",
-                                                      "clone_project",
-                                                      "import_step",
-                                                      "autosave_now",
-                                                      "checkpoint_create",
-                                                      "checkpoint_restore",
-                                                      "history_restore",
-                                                      "branch_create",
-                                                      "branch_switch",
-                                                      "branch_merge",
-                                                      "merge_finish",
-                                                      "merge_abort",
-                                                      "conflict_resolve",
-                                                      "fetch",
-                                                      "pull",
-                                                      "push",
-                                                      "undo",
-                                                      "redo",
-                                                      "set_settings",
-                                                      "reset_layout",
-                                                      "set_active_part"};
-    // Methods whose RESULT does not depend on freshly built geometry, so the
-    // regeneration can be deferred past them. Everything else flushes first,
-    // which is what keeps a measure or a list_elements inside a batch honest
-    // instead of answering from the geometry as it was before the batch.
-    static const std::set<std::string> kDeferrable = {
-        "add_feature",     "modify_feature", "delete_feature",   "move_feature",
-        "rename_feature",  "set_material",   "suppress_feature", "set_variable",
-        "rename_variable", "delete_variable"};
-
     for (size_t i = 0; i < calls.size(); i++) {
       if (!calls[i].is_object() || !calls[i].contains("method"))
         throw std::runtime_error("batch call " + std::to_string(i + 1) +
@@ -610,7 +485,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         throw std::runtime_error(
             "batch does not nest — put the inner calls in the outer list. "
             "The document is unchanged.");
-      if (kNotInBatch.count(sub))
+      if (MethodFlags(sub) & remote::NotInBatch)
         throw std::runtime_error(
             "'" + sub +
             "' cannot run inside a batch: a batch rolls the DOCUMENT back on "
@@ -714,7 +589,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           out[it.key()] = resolveRefs(it.value());
         return out;
       };
-      if (kDeferrable.count(sub) && state.document) {
+      if ((MethodFlags(sub) & remote::Deferrable) && state.document) {
         if (bulkDoc != state.document.get()) {
           flush();
           bulk.emplace(*state.document);
@@ -823,10 +698,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       for (const auto& d : docs) {
         if (!only.empty() && only != d.name)
           continue;
-        json entry = {{"name", d.name},
-                      {"doc", d.doc},
-                      {"requires_part_doc",
-                       !kNoPartDoc.count(d.name) && !IsUiAction(d.name)}};
+        json entry = {
+            {"name", d.name},
+            {"doc", d.doc},
+            {"requires_part_doc", (d.flags & remote::NeedsPart) != 0}};
         // "" = takes nothing; "*" = a free-form spec read opaquely, where
         // the strict unknown-key check is off and prose is the only guide.
         const std::string ps = d.params ? d.params : "";
@@ -1680,3 +1555,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   handled = false;
   return json();
 }
+
+namespace remote {
+uint8_t MethodFlagsOf(const std::string& method) { return MethodFlags(method); }
+} // namespace remote

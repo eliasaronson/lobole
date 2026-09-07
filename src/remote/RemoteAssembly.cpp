@@ -34,7 +34,7 @@ namespace remote {
 static constexpr MethodDoc AssemblyMethods[] = {
     {"set_active_part",
      "Switch the active tab {part: name|id|index} (legacy: name, index).",
-     "index, name, part"},
+     "index, name, part", remote::NotInBatch},
     {"delete_part",
      "Delete a part/assembly/drawing tab {part: name|id|index} (legacy: "
      "index); refused while any assembly places it.",

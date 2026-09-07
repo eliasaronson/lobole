@@ -27,27 +27,32 @@ namespace remote {
 // try/catch turns it into an error response).
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc SimulationMethods[] = {
-    {"enter_simulation", "Enter simulation mode for the active part.", "study"},
-    {"exit_simulation", "Leave simulation mode.", ""},
+    {"enter_simulation", "Enter simulation mode for the active part.", "study",
+     remote::NeedsPart},
+    {"exit_simulation", "Leave simulation mode.", "", remote::NeedsPart},
     {"add_study", "Add a study {kind: static|modal|topology, name?}.",
-     "kind, name"},
-    {"remove_study", "Remove a study by id.", "study"},
-    {"list_studies", "List studies with status.", ""},
+     "kind, name", remote::NeedsPart},
+    {"remove_study", "Remove a study by id.", "study", remote::NeedsPart},
+    {"list_studies", "List studies with status.", "", remote::NeedsPart},
     {"set_study", "Edit study settings (mesh size, materials, solver options).",
      "filter_radius, gravity, max_iterations, mesh_size, name, num_modes, "
-     "study, type, volume_fraction"},
+     "study, type, volume_fraction",
+     remote::NeedsPart},
     {"add_load",
      "Add a load/fixture to a study {study, type, face, magnitude, "
      "direction?}. An omitted force `direction` pushes into the picked face "
      "(the same default a GUI placement takes).",
-     "direction, face, magnitude, study, type"},
-    {"remove_load", "Remove a load by index.", "load, study"},
+     "direction, face, magnitude, study, type", remote::NeedsPart},
+    {"remove_load", "Remove a load by index.", "load, study",
+     remote::NeedsPart},
     {"add_refinement", "Add a local mesh refinement on an element.",
-     "face, size, study"},
-    {"remove_refinement", "Remove a refinement.", "face, study"},
+     "face, size, study", remote::NeedsPart},
+    {"remove_refinement", "Remove a refinement.", "face, study",
+     remote::NeedsPart},
     {"add_keep_face", "Topology optimization: mark a face to keep.",
-     "face, study"},
-    {"remove_keep_face", "Unmark a kept face.", "face, study"},
+     "face, study", remote::NeedsPart},
+    {"remove_keep_face", "Unmark a kept face.", "face, study",
+     remote::NeedsPart},
     {"mesh_study",
      "Mesh the study (Netgen tets); returns element counts/quality. "
      "Synchronous by default — a fine mesh takes minutes, so either give the "
@@ -55,27 +60,27 @@ static constexpr MethodDoc SimulationMethods[] = {
      "up) or pass `async: true`: the mesh then runs on a background job and "
      "study_status answers {running, meshing: true} until it lands, after "
      "which its `mesh` carries the same bodies/nodes/elements/worst_quality.",
-     "async, study"},
+     "async, study", remote::NeedsPart},
     {"run_study",
      "Solve the study (blocking, or `async` and poll study_status). Async "
      "meshes AND solves off the frame; the result is stored into the part "
      "the study belongs to even if another tab is active when it lands.",
-     "async, study"},
-    {"cancel_study", "Cancel a running study.", "study"},
+     "async, study", remote::NeedsPart},
+    {"cancel_study", "Cancel a running study.", "study", remote::NeedsPart},
     {"study_status",
      "Status/progress of a study: {running, meshing?, iteration…} while a "
      "job runs, else the cached result's state plus `mesh` from the last "
      "mesh_study {async}.",
-     "study"},
+     "study", remote::NeedsPart},
     {"study_results",
      "Result summary (max displacement, von Mises, frequencies, compliance).",
-     "study"},
+     "study", remote::NeedsPart},
     {"set_result_display", "Choose the displayed result field/deform scale.",
-     "deform_scale, field, mode, study, threshold"},
+     "deform_scale, field, mode, study, threshold", remote::NeedsPart},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
-     "on, study"},
+     "on, study", remote::NeedsPart},
     {"export_topo_stl", "Export the optimized topology as STL.",
-     "path, smooth, study, threshold"},
+     "path, smooth, study, threshold", remote::NeedsPart},
 };
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
 

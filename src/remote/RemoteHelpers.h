@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "core/Document.h"
 
 #include <glm/glm.hpp>
@@ -56,6 +58,39 @@ struct MethodDoc {
   // either direction — so a new key without a row, or a row naming a key
   // nobody reads, is a failing test rather than a stale line.
   const char* params;
+
+  // What the DISPATCHER needs to know about this method, in the same row as
+  // the method itself.
+  //
+  // Before this, a name was a key into four separate sets -- kNoPartDoc (166
+  // entries), kNotInBatch (31), kDeferrable (10) and IsUiAction -- none of them
+  // next to a handler, so adding a method meant remembering four places that
+  // no test compared. That is the shape of every gate-list bug this project
+  // has already paid for (docs/architecture-review-2026-09-06.md, section 4).
+  //
+  // A flag is stated only where it is NOT the default, so most rows are
+  // unchanged: needing a part tab is the minority (41 of 230), and reaching
+  // outside the document rarer still.
+  uint8_t flags = 0;
+};
+
+// The columns above, as a bitmask.
+enum MethodFlag : uint8_t {
+  // Refuses unless the active tab is a PART. Most methods do not care -- they
+  // act on the project, an assembly, a drawing or a job -- so this is stated
+  // rather than assumed.
+  NeedsPart = 1u << 0,
+  // Reaches outside the document (a file, a git tree, the window, the tab), so
+  // a batch cannot roll it back: undoing the document would leave the world
+  // half-changed and the response would be a lie about it.
+  NotInBatch = 1u << 1,
+  // Its RESULT does not depend on freshly built geometry, so a batch can defer
+  // the regeneration past it. Everything else flushes first, which is what
+  // keeps a measure or a list_elements inside a batch honest.
+  Deferrable = 1u << 2,
+  // Goes on the ImGui queue instead of running here: ImGui state is only
+  // coherent inside the frame.
+  UiAction = 1u << 3,
 };
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
@@ -201,5 +236,10 @@ inline void AttachRegen(nlohmann::json& out, const Document* doc) {
   if (doc != nullptr)
     out["regen"] = RegenSummaryJson(*doc);
 }
+
+// The flags of a method, or 0 for one we do not know. Defined in
+// RemoteDispatch.cpp, which owns the tables; RemoteUiActions.cpp asks it
+// whether a method belongs on the ImGui queue.
+uint8_t MethodFlagsOf(const std::string& method);
 
 } // namespace remote

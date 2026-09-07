@@ -292,7 +292,7 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"check_geometry",
      "Did the model build? {ok, valid, body_count, "
      "feature_errors, bodies:[...B-Rep checks]}.",
-     "body"},
+     "body", remote::NeedsPart},
     {"mass_properties",
      "Mass/volume/center-of-mass/bbox per body and total (density from "
      "materials). The bbox here is MEASURED off the surfaces; get_state's is "

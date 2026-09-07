@@ -152,14 +152,16 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"select_feature",
      "Select a feature by index or feature_id (-1/0 clears); "
      "drives the same selection the tree uses.",
-     "feature_id, index"},
+     "feature_id, index", remote::NeedsPart},
     {"accept_pending",
-     "Commit the pending (preview) feature, like clicking the checkmark.", ""},
-    {"cancel_pending", "Discard the pending (preview) feature.", ""},
+     "Commit the pending (preview) feature, like clicking the checkmark.", "",
+     remote::NeedsPart},
+    {"cancel_pending", "Discard the pending (preview) feature.", "",
+     remote::NeedsPart},
     {"add_feature",
      "Append a feature (see feature_types for the JSON dialect) "
      "and regenerate; returns {index, id, entity_ids?, regen}.",
-     "feature"},
+     "feature", remote::NeedsPart | remote::Deferrable},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
      "step): {feature_id} or {index}, or {all: true} for every Derived of "
@@ -167,7 +169,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "in the project or a broken link. Returns {updated: [ids], regen, "
      "digest}. Never automatic: get_state's `stale` says when to call it "
      "(docs/modeling/derived-plan.md).",
-     "all, feature_id, index"},
+     "all, feature_id, index", remote::NeedsPart},
     {"derive_occurrence",
      "In an in-context edit (edit_in_context): add a Derived copy of a "
      "neighbour occurrence's part, placed where the ghost is "
@@ -175,7 +177,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "reference?: true, bodies?: [created_by ids], body_names?: [names]}. "
      "Returns {index, id, "
      "regen, digest}.",
-     "bodies, body_names, name, occurrence, reference"},
+     "bodies, body_names, name, occurrence, reference", remote::NeedsPart},
     {"modify_feature",
      "Change a feature to `feature` JSON; one undo step; returns {regen}. "
      "Name it by `feature_id` (what every other call hands you) or by "
@@ -186,74 +188,77 @@ static constexpr MethodDoc ModelingMethods[] = {
      "one it has, so references to it (sketch_id, mates, drawing dimensions) "
      "keep resolving. Pass a different \"id\" there only to mean 'this is a "
      "different feature now', which deliberately dangles those references.",
-     "feature, feature_id, index"},
+     "feature, feature_id, index", remote::NeedsPart | remote::Deferrable},
     {"set_material",
      "Assign a material slug (see material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
      "default.",
-     "body, feature_id, material"},
+     "body, feature_id, material", remote::NeedsPart | remote::Deferrable},
     {"set_appearance",
      "Visual override SEPARATE from the physical material (v54): "
      "{feature_id|body, color?: [r,g,b] sRGB 0..1, roughness?: 0..1, "
      "metallic?: 0..1}. Unset fields inherit from the material; passing NO "
      "optional fields clears the override. Never affects mass/FEM/BOM, and "
      "recoloring rebuilds no geometry.",
-     "body, color, feature_id, metallic, roughness"},
+     "body, color, feature_id, metallic, roughness", remote::NeedsPart},
     {"set_rollback",
      "Move the rollback bar: only features [0, index) regenerate; -1 = end.",
-     "index"},
+     "index", remote::NeedsPart},
     {"suppress_feature",
      "Toggle suppression by feature_id; suppressed "
      "features are skipped but keep parameters.",
-     "feature_id, suppressed"},
+     "feature_id, suppressed", remote::NeedsPart | remote::Deferrable},
     {"delete_feature",
      "Delete a feature by `id` or `index`; one undo step; returns {regen}.",
-     "id, index"},
+     "id, index", remote::NeedsPart | remote::Deferrable},
     {"project_geometry",
      "Project a body face/edge (feature_id + element) into "
      "a sketch as live locked construction geometry.",
-     "element, feature_id, kind, sketch_id"},
+     "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",
      "Attach an image underlay to a sketch (path or "
      "base64 bytes); returns image_id.",
-     "at, opacity, path, sketch_id, units_per_pixel"},
+     "at, opacity, path, sketch_id, units_per_pixel", remote::NeedsPart},
     {"set_reference_image",
      "Update an underlay's placement/opacity/lock by {sketch_id, image_id}.",
-     "hidden, image_id, opacity, origin, rotation, sketch_id, units_per_pixel"},
+     "hidden, image_id, opacity, origin, rotation, sketch_id, units_per_pixel",
+     remote::NeedsPart},
     {"calibrate_reference_image",
      "Scale an underlay so two picked image points span a given distance.",
-     "align, distance, image_id, p1, p2, sketch_id"},
+     "align, distance, image_id, p1, p2, sketch_id", remote::NeedsPart},
     {"delete_reference_image", "Remove an underlay by {sketch_id, image_id}.",
-     "image_id, sketch_id"},
+     "image_id, sketch_id", remote::NeedsPart},
     {"add_constraint",
      "Append one sketch constraint {sketch_id, kind, refs, value?/expr?}; "
      "kinds in constraint_kinds; solves once.",
-     "*"},
+     "*", remote::NeedsPart},
     {"add_constraints",
      "Append MANY constraints in one solve+regen+undo step: "
      "{sketch_id, constraints: [...]}.",
-     "*"},
+     "*", remote::NeedsPart},
     {"delete_entity",
      "Delete a sketch entity by {sketch_id, entity_id}, "
      "dropping constraints that reference it.",
-     "entity_id, sketch_id"},
+     "entity_id, sketch_id", remote::NeedsPart},
     {"fillet",
      "Sketch fillet: round the corner between two lines {sketch_id, "
      "line1, line2, radius}; errors explain a failed corner.",
-     "line1, line2, radius, sketch_id"},
+     "line1, line2, radius, sketch_id", remote::NeedsPart},
     {"offset",
      "Offset a closed sketch chain by a distance {sketch_id, "
      "chain: [entity ids], distance, join_arc?}.",
-     "chain, distance, join_arc, line1, line2, radius, sketch_id"},
+     "chain, distance, join_arc, line1, line2, radius, sketch_id",
+     remote::NeedsPart},
     {"mirror",
      "Mirror sketch entities across a line {sketch_id, "
      "sources: [entity ids], axis: <line entity id>, link?}.",
-     "axis, line1, line2, link, radius, sketch_id, sources"},
+     "axis, line1, line2, link, radius, sketch_id, sources", remote::NeedsPart},
     {"pattern",
      "Sketch pattern (linear/circular) of entities; "
      "expression-capable count/spacing.",
      "angle, center, circular, count, line1, line2, link, radius, sketch_id, "
-     "sources, step"},
+     "sources, step",
+     remote::NeedsPart},
     // NOTE: list_variables is documented and handled in RemoteProject.cpp,
     // where the handler is. A second row here made `describe` list the
     // method TWICE — the convention is one row per `m ==` branch, and this
