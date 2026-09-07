@@ -506,7 +506,9 @@ covers, so a baseline was recorded from the build *before* the split; the
 build after matches it at 86,763 bytes identical. The baseline is committed,
 so the gate now runs on this device instead of skipping.
 
-### Stage 4's premise is mostly gone, and stage 5 is why
+### Stage 4: the full-build number said skip it, the incremental number said do it
+
+**SHIPPED.** What follows is how the call nearly went the wrong way.
 
 The plan costed retiring the umbrella header at 4.6 s per translation unit
 across 65 includers. That was measured BEFORE the PCH existed. Re-measured
@@ -528,11 +530,25 @@ Adding `AppActions.h` to the PCH would capture the 6% for nothing, and should
 NOT be done: it would make every edit to that header rebuild all 211 app TUs
 instead of its 65 includers, which is the opposite of what this round is for.
 
-**What remains of stage 4 is an architectural argument, not a performance
-one:** a 170-declaration header that 65 files include is bad structure whether
-or not it is slow, and splitting it means a change to drawing actions stops
-touching a header that half the app reads. That is worth doing, and it is
-worth doing knowing it buys ~6% rather than the 30% the plan implied.
+On that number alone the stage was nearly dropped. The mistake was measuring
+a FULL build, which is not what anyone waits for. Touching a header and
+rebuilding is:
+
+| edit | before | after |
+|---|---|---|
+| a drawing declaration | 146 s / 73 targets | **25 s / 11** |
+| a measure declaration | 146 s / 73 targets | **19 s / 10** |
+| a tab-slot declaration | 146 s / 73 targets | **77 s / 36** |
+
+Adding or changing a UI function signature is the most common structural edit
+in this tree, and it cost two and a half minutes because 64 files included one
+header. That is the whole case for stage 4, and the 6% full-build figure
+obscured it completely.
+
+The lesson generalises past this round: **when a change is about iteration
+speed, the full-build number is the wrong instrument.** It was also the wrong
+instrument in section 2, where the split "raised total CPU" while cutting the
+critical path -- same measurement error, opposite direction.
 
 ### Still to do
 
