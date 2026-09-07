@@ -449,3 +449,84 @@ TEST_CASE("conventions: this binary is not older than the source",
           "\"cd build && ninja designer designer_tests\"");
   CHECK(newestAt <= built);
 }
+
+// Feature-to-feature references (the sketch-edit rollback, U-round): a feature
+// that names another one by stable id must report it from VisitFeatureRefs, or
+// the dependency graph has an edge missing. The compiler forces the OVERRIDE
+// to exist (pure virtual, like Clone) but cannot check that it mentions every
+// id-bearing field, and the failure is silent — a sketch edit simply leaves
+// the solid built from that sketch sitting in front of the sketch, looking
+// like the rollback does not work rather than like a reference was dropped.
+//
+// Narrow on purpose: only src/core/features/*.h, only members whose TYPE is
+// one of the three that carry a feature id. The four primitives in Feature.h
+// (Box/Sphere/Cylinder/Import) are built from numbers and a file path and
+// have no such member for this to check.
+TEST_CASE("every feature reference is reported by VisitFeatureRefs",
+          "[convention]") {
+  // Fields that hold an id naming something OUTSIDE this feature list, which
+  // VisitFeatureRefs must NOT report. Each needs a reason, not just a name.
+  const std::set<std::string> kNotThisHistory = {
+      "sourcePart",      // Derived: a part SLOT, not a feature
+      "bodies",          // Derived: created_by ids in the SOURCE document
+      "sourceCreatedBy", // Derived: ditto, per snapshot body
+  };
+
+  std::vector<std::string> problems;
+  for (const auto& f : SourcesUnder("src/core/features", ".h")) {
+    const size_t at = f.text.find("VisitFeatureRefs");
+    if (at == std::string::npos) {
+      problems.push_back(Relative(f.path) + ": no VisitFeatureRefs");
+      continue;
+    }
+    // The override's body, brace-matched from its opening '{'. An empty
+    // one-liner ("... override {}") is the common case here and is exactly
+    // what a line-based scan gets wrong: it runs on to the next '}' in the
+    // file and swallows the member declarations it is supposed to check.
+    const size_t open = f.text.find('{', at);
+    REQUIRE(open != std::string::npos);
+    size_t close = open;
+    for (int depth = 0; close < f.text.size(); close++) {
+      if (f.text[close] == '{')
+        depth++;
+      else if (f.text[close] == '}' && --depth == 0)
+        break;
+    }
+    std::string body = f.text.substr(open, close - open);
+    // Strip // comments: a field NAMED in the prose explaining why it is not
+    // reported must not read as reported (DerivedFeature says exactly that
+    // about sourcePart), and the reverse would let a comment satisfy the rule.
+    body = std::regex_replace(body, std::regex(R"(//[^\n]*)"), "");
+
+    // A MEMBER of one of the id-bearing types: the name is followed by '=',
+    // ';' or '[', which a constructor parameter (followed by ',' or ')')
+    // never is.
+    const std::regex member(
+        R"(^[ \t]+(?:std::vector<)?(?:uint64_t|ElementRef|AxisRef)>?[ \t]+)"
+        R"((\w+)[ \t]*(?:=|;|\[))",
+        std::regex::multiline);
+    for (auto it = std::sregex_iterator(f.text.begin(), f.text.end(), member);
+         it != std::sregex_iterator(); ++it) {
+      const std::string name = (*it)[1];
+      if (name.rfind("m_", 0) == 0)
+        continue; // private state, not a reference
+      if (kNotThisHistory.count(name) != 0) {
+        if (body.find(name) != std::string::npos)
+          problems.push_back(Relative(f.path) + ": VisitFeatureRefs reports '" +
+                             name + "', which names another document");
+        continue;
+      }
+      if (body.find(name) == std::string::npos)
+        problems.push_back(Relative(f.path) + ": '" + name +
+                           "' is not reported by VisitFeatureRefs");
+    }
+  }
+
+  INFO([&] {
+    std::string s;
+    for (const std::string& p : problems)
+      s += "\n  " + p;
+    return s;
+  }());
+  CHECK(problems.empty());
+}

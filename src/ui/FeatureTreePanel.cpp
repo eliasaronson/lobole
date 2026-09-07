@@ -229,6 +229,11 @@ void DrawFeatureTreePanel(AppState& state) {
       }
     }
     const int rollback = doc->Rollback();
+    // Where regeneration ACTUALLY stops — the user's bar, or the transient
+    // one a sketch edit put in front of it. Rows past it really are skipped,
+    // so they dim; the grabbable bar itself stays on `rollback`, since the
+    // view marker is not something the user can drag.
+    const int skipFrom = doc->EffectiveRollback();
     const size_t count = doc->FeatureCount();
     // Drag-reorder request captured this frame, applied after the list is
     // drawn (mutating the feature vector mid-loop invalidates iteration).
@@ -281,7 +286,7 @@ void DrawFeatureTreePanel(AppState& state) {
       // The rollback bar: features at/after the marker are skipped by
       // regeneration and render dimmed below the divider.
       const bool rolledPast =
-          rollback >= 0 && i >= static_cast<size_t>(rollback);
+          skipFrom >= 0 && i >= static_cast<size_t>(skipFrom);
       // Suffix keeps IDs unique and test paths stable even if names repeat
       const std::string label = feature->GetName() + "##" + std::to_string(i);
       // Datum planes double-click into a new sketch on them; sketches
@@ -420,8 +425,12 @@ void DrawFeatureTreePanel(AppState& state) {
       } else if (dimmed) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
-          ImGui::SetTooltip(suppressed ? "Suppressed"
-                                       : "After the rollback bar");
+          ImGui::SetTooltip(
+              suppressed ? "Suppressed"
+              : doc->ViewRollback() >= 0 && rollback < 0
+                  ? "Built from the sketch being edited \xe2\x80\x94 hidden "
+                    "until you finish"
+                  : "After the rollback bar");
       }
       if (ImGui::BeginPopupContextItem()) {
         // Inside a multi-selection the right-click keeps it (Delete below

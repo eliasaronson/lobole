@@ -28,6 +28,10 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(sketchId); // the hole-centre sketch
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(diameterExpr, diameter);
     visit(depthExpr, depth);

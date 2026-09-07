@@ -40,6 +40,9 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  // Names no other feature: the whole part is derived from the standard.
+  void VisitFeatureRefs(const RefVisitor&) const override {}
+
   // The length is expression-drivable like every other length in this
   // codebase, so a variable or a configuration can drive it. The size is NOT:
   // it is a key into a table, not a quantity, and an expression that evaluated

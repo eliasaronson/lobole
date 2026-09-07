@@ -451,6 +451,7 @@ void SyncDocumentRenderers(AppState& state) {
 }
 
 void SyncRenderersToDocument(AppState& state) {
+  SyncSketchViewRollback(state);
   SyncDocumentRenderers(state);
   SyncFieldRenderer(state);
   SyncCamPlayback(state);

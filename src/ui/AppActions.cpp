@@ -2441,6 +2441,36 @@ bool SectionSourceResolved(const AppState& state,
   return resolved;
 }
 
+std::optional<glm::vec4> SketchSlicePlane(const AppState& state) {
+  if (!state.sketchSlice || state.sketchEdit.activeSketchId == 0 ||
+      state.document == nullptr || state.camera == nullptr)
+    return std::nullopt;
+  const SketchFeature* sk = nullptr;
+  for (const auto& f : state.document->GetFeatures())
+    if (f->GetId() == state.sketchEdit.activeSketchId) {
+      sk = dynamic_cast<const SketchFeature*>(f.get());
+      break;
+    }
+  if (sk == nullptr)
+    return std::nullopt;
+
+  // Remove the half TOWARD the camera. The clip convention here is not the
+  // GL one: mesh.vert writes a plain varying and the fragment stage discards
+  // where dot(n, p) - w is POSITIVE (which is also why a disabled slot is
+  // -1e9), so the normal points at the half that goes away — it must oppose
+  // the view direction, not follow it.
+  //
+  // Camera-relative rather than fixed to the sketch normal because orbiting
+  // to the far side of the plane would otherwise cut away everything you can
+  // see instead of revealing it; Inventor's Slice Graphics and Fusion's Slice
+  // both follow the view for the same reason. Edge-on (facing ~ 0) there is
+  // no near half to speak of and either answer is as good.
+  const glm::vec3 n0 = glm::normalize(sk->plane.GetNormal());
+  const float facing = glm::dot(n0, state.camera->GetForward());
+  const glm::vec3 n = facing > 0.0f ? -n0 : n0;
+  return glm::vec4(n, glm::dot(sk->plane.GetOrigin(), n));
+}
+
 ClipPlaneArray SectionPlanes(const AppState& state) {
   ClipPlaneArray planes = NoClipPlanes();
   size_t slot = 0;
@@ -2454,14 +2484,33 @@ ClipPlaneArray SectionPlanes(const AppState& state) {
       continue;
     planes[slot++] = SectionPlaneOf(state, s);
   }
+  // The sketch slice rides in the last free slot rather than in the section
+  // list, so it cannot be edited or deleted as if it were a cut the user set
+  // up. Passing through here is what gives it filled cut faces for free —
+  // AppendSectionCaps reads this array, not state.sections. With all four
+  // slots spoken for it does not silently not slice; CanSketchSlice() is
+  // false and the toolbar says why.
+  if (slot < planes.size())
+    if (const auto slice = SketchSlicePlane(state))
+      planes[slot++] = *slice;
   return planes;
+}
+
+bool CanSketchSlice(const AppState& state) {
+  size_t used = 0;
+  for (const AppState::SectionView& s : state.sections)
+    if (s.visible && SectionSourceResolved(state, s))
+      used++;
+  return used < static_cast<size_t>(kMaxClipPlanes);
 }
 
 bool SectionActive(const AppState& state) {
   for (const AppState::SectionView& s : state.sections)
     if (s.visible)
       return true;
-  return false;
+  // The sketch slice is a cut like any other to everything downstream of
+  // here (cap fills, the "sectioned" state the exporters refuse on).
+  return SketchSlicePlane(state).has_value();
 }
 
 AppState::SectionView* FindSection(AppState& state, uint64_t id) {

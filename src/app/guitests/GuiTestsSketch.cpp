@@ -2091,4 +2091,130 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(sk != nullptr && sk->images.size() == 1);
     IM_CHECK(glm::length(sk->images[0].origin - origin0) < 1e-4f);
   };
+
+  // Editing a sketch after it has been extruded: the solid built FROM the
+  // sketch is the thing standing in front of the sketch, so opening the
+  // sketch rolls the model back past it (SolidWorks and Fusion both do this
+  // on Edit Sketch). The marker is a VIEW of the history, not an edit —
+  // hence the clean-document check, which is the part that regressed when
+  // this was first tried through the persisted rollback bar.
+  t = IM_REGISTER_TEST(engine, "sketch",
+                       "editing_a_sketch_rolls_past_its_solid");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    auto sk =
+        std::make_unique<SketchFeature>("Profile", SketchPlane(PlaneType::XY));
+    sk->AddRectangle({0, 0}, {4, 2});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>("Pad", skId, 2.0,
+                                                       ExtrudeMode::NewBody));
+    Doc()->Regenerate();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+
+    // Pretend the project was just saved, so the dirty check below means
+    // something: opening a sketch must not modify anything.
+    s_App->lastSavedVersion = Doc()->Version();
+    IM_CHECK(!ui::ProjectDirty(*s_App));
+
+    s_App->sketchEdit = ui::SketchEditState{};
+    s_App->sketchEdit.activeSketchId = skId;
+    ctx->Yield(2); // SyncSketchViewRollback runs in the frame loop
+
+    IM_CHECK_EQ(Doc()->ViewRollback(), 1);
+    IM_CHECK_EQ(Doc()->Rollback(), -1); // the user's own bar is untouched
+    IM_CHECK(Doc()->GetBodies().empty());
+    IM_CHECK(!ui::ProjectDirty(*s_App)); // a view, not an edit
+
+    // Leaving puts it back, and leaves the project clean either way.
+    s_App->sketchEdit = ui::SketchEditState{};
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->ViewRollback(), -1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(!ui::ProjectDirty(*s_App));
+  };
+
+  // A sketch nothing is built from has nothing in the way, so nothing is
+  // hidden. Rolling back to the sketch's own position instead would blank
+  // every unrelated feature after it — worse than the problem being fixed.
+  t = IM_REGISTER_TEST(engine, "sketch",
+                       "editing_an_unused_sketch_hides_nothing");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0), 2.0, 2.0, 2.0));
+    auto sk =
+        std::make_unique<SketchFeature>("Loose", SketchPlane(PlaneType::XY));
+    sk->AddRectangle({0, 0}, {4, 2});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(1)->GetId();
+    Doc()->AddFeature(std::make_unique<BoxFeature>("After", glm::vec3(9, 0, 0),
+                                                   1.0, 1.0, 1.0));
+    Doc()->Regenerate();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+
+    s_App->sketchEdit = ui::SketchEditState{};
+    s_App->sketchEdit.activeSketchId = skId;
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->ViewRollback(), -1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2); // both boxes stay
+  };
+
+  // The slice: what helps when the sketch is INSIDE existing material, where
+  // there is no consuming feature to roll back past. It follows the camera —
+  // the half kept is the one away from the viewer — so orbiting to the far
+  // side of the plane does not blank the model instead of revealing it.
+  t = IM_REGISTER_TEST(engine, "sketch", "slice_cuts_toward_the_camera");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0), 4.0, 4.0, 4.0));
+    auto sk =
+        std::make_unique<SketchFeature>("Inside", SketchPlane(PlaneType::XY));
+    sk->AddRectangle({0, 0}, {1, 1});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(1)->GetId();
+    Doc()->Regenerate();
+
+    s_App->sketchEdit = ui::SketchEditState{};
+    s_App->sketchEdit.activeSketchId = skId;
+    s_App->sketchSlice = false;
+    ctx->Yield(2);
+    IM_CHECK(!ui::SketchSlicePlane(*s_App).has_value());
+    IM_CHECK(!ui::SectionActive(*s_App));
+
+    // XY plane, normal +Z. Camera above, looking down: the half ABOVE the
+    // sketch is what goes. The normal names the half being REMOVED (the
+    // fragment stage discards where dot(n, p) - w > 0), so with the camera
+    // above it points up — asserting the opposite is exactly the mistake
+    // this test was written with, and it took a screenshot to catch.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 20.0f));
+    s_App->sketchSlice = true;
+    ctx->Yield(2);
+    auto plane = ui::SketchSlicePlane(*s_App);
+    IM_CHECK(plane.has_value());
+    IM_CHECK(ui::SectionActive(*s_App));
+    IM_CHECK(plane->z > 0.0f); // points at the near half, toward the camera
+    IM_CHECK(glm::dot(glm::vec3(*plane), s_App->camera->GetForward()) < 0.0f);
+    // ...and it rides in a clip slot, which is what gives it cap fills.
+    IM_CHECK(glm::length(glm::vec3(ui::SectionPlanes(*s_App)[0])) > 0.5f);
+
+    // Orbit under the part: the kept half flips, rather than the slice
+    // cutting away everything the camera can now see.
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, -20.0f));
+    ctx->Yield(2);
+    plane = ui::SketchSlicePlane(*s_App);
+    IM_CHECK(plane.has_value());
+    IM_CHECK(plane->z < 0.0f);
+    IM_CHECK(glm::dot(glm::vec3(*plane), s_App->camera->GetForward()) < 0.0f);
+
+    // Leaving the sketch takes the slice with it (the toggle itself is
+    // sticky for the session, the cut is not).
+    s_App->sketchEdit = ui::SketchEditState{};
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchSlice);
+    IM_CHECK(!ui::SketchSlicePlane(*s_App).has_value());
+  };
 }

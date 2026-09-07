@@ -32,6 +32,11 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(bodyId);
+    VisitRefs(openFaces, visit);
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(thicknessExpr, thickness);
   }

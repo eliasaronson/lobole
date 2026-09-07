@@ -149,8 +149,19 @@ double CamAt(const std::vector<std::pair<double, double>>& t, double deg,
   };
   deg = wrapDeg(deg);
   size_t i = 0;
-  while (i + 1 < n && t[i + 1].first <= deg)
-    i++;
+  if (deg < t[0].first) {
+    // BELOW the table's first angle, which is not "before the start" — the
+    // profile is periodic, so it is inside the span that wraps past the end
+    // of the turn. Leaving i at 0 here made u negative and the Hermite
+    // cubic extrapolate backwards out of the interval its endpoints define:
+    // a lobe whose table began at 74 degrees answered 60 mm of lift at 0,
+    // on a cam whose whole rise is 8.
+    i = n - 1;
+    deg += 360.0;
+  } else {
+    while (i + 1 < n && t[i + 1].first <= deg)
+      i++;
+  }
   // Span i runs from point i to point i+1, wrapping past the end of the turn.
   const auto span = [&](size_t k) {
     const double a0 = t[k].first;

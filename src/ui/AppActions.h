@@ -421,6 +421,15 @@ void ArmSectionFacePick(AppState& state, uint64_t sectionId);
 void SectionFacePicked(AppState& state, const SelectionItem& item);
 ClipPlaneArray SectionPlanes(const AppState& state); // enabled ones, padded
 bool SectionActive(const AppState& state);
+
+// The cut the sketch slice wants, or nullopt when it is off, no sketch is
+// open, or the sketch does not resolve. Oriented to keep the half AWAY from
+// the camera, so it follows the view rather than blanking the model when you
+// orbit past the plane.
+std::optional<glm::vec4> SketchSlicePlane(const AppState& state);
+// Is there a clip-plane slot left for the slice to use? The renderers carry
+// four (render/ClipPlanes.h) and the section list can claim all of them.
+bool CanSketchSlice(const AppState& state);
 AppState::SectionView* FindSection(AppState& state, uint64_t id);
 // Adds a section cutting through the middle of what the tab shows, and
 // returns its id; 0 when the list is full (kMaxClipPlanes).
@@ -452,6 +461,17 @@ void FitCameraToWorldBox(AppState& state, const glm::vec3& min,
 // bodies/features by their geometry; occurrences by their placed part).
 // Falls back to the whole document when nothing is selected/resolvable.
 void FitCameraToSelection(AppState& state);
+
+// Applies (and removes) the transient view rollback that "edit sketch" wants:
+// the model stops just before the first feature built FROM the open sketch,
+// so the solid the sketch produced is not sitting in front of the sketch —
+// the rollback SolidWorks and Fusion do on Edit Sketch. Reconciles against
+// sketchEdit.activeSketchId, so the seventeen places that enter or leave a
+// sketch session (including teardown paths like a tab switch or an undo that
+// removed the sketch) do not each have to remember to put the marker back.
+// Call once per frame, BEFORE SyncDocumentRenderers — it can regenerate, and
+// the projection that follows must see the bodies it settled on.
+void SyncSketchViewRollback(AppState& state);
 
 // Mirrors document bodies into the renderers when the document version
 // changed (edit, undo, redo). Call once per frame before drawing.

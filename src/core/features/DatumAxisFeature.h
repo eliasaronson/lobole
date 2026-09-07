@@ -27,6 +27,10 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(sketchId); // SketchLine kind; 0 for the base axes
+  }
+
   [[nodiscard]] bool IsDatum() const override { return true; }
 
   [[nodiscard]] const glm::vec3& Origin() const { return m_origin; }

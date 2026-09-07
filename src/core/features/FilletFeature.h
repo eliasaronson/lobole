@@ -35,6 +35,10 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    VisitRefs(edges, visit);
+  }
+
   [[nodiscard]] std::string WhyIncomplete() const override {
     return edges.empty()
                ? std::string("pick at least one edge to ") +

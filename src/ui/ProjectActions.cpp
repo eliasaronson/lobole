@@ -517,7 +517,97 @@ void StampAllSaved(AppState& state) {
     state.lastSavedVersion = state.document ? state.document->Version() : 0;
   state.projectMetaDirty = false;
 }
+
+// Merged from main (ea33ff82). It was written immediately after
+// StampAllSaved, and follows it here: the two helpers below are about the
+// saved-version counter this file owns. SyncSketchViewRollback rides along
+// with them because it is what needs SetViewRollbackKeepingDirt -- worth
+// revisiting when a later wave of the stage-3 split moves dirty tracking.
+// The saved-version counter for `doc`, or null when it is not a document this
+// app is tracking. The active slot's counter lives on AppState (its slot copy
+// is stale until StashActive writes it back), which is why this is not a
+// plain index.
+uint64_t* SavedVersionFor(AppState& state, const Document* doc) {
+  if (doc == nullptr)
+    return nullptr;
+  if (state.parts.empty())
+    return state.document.get() == doc ? &state.lastSavedVersion : nullptr;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (SlotDoc(state, i) != doc)
+      continue;
+    return static_cast<int>(i) == state.activePart
+               ? &state.lastSavedVersion
+               : &state.parts[i].lastSavedVersion;
+  }
+  return nullptr;
+}
+
+// Moves a document's VIEW rollback without changing whether it counts as
+// modified. Opening a sketch to look at it must not dirty the project: the
+// marker never reaches the file, but SetViewRollback regenerates, every
+// Regenerate bumps Version(), and dirty is measured as Version() != saved.
+// So a document that was clean is re-stamped at its new version; one that was
+// already dirty (the user has edited something) is left alone, in both
+// directions.
+void SetViewRollbackKeepingDirt(AppState& state, Document* doc, int index) {
+  uint64_t* saved = SavedVersionFor(state, doc);
+  const bool wasClean = saved != nullptr && doc->Version() == *saved;
+  doc->SetViewRollback(index);
+  if (wasClean)
+    *saved = doc->Version();
+}
+
+// Every document this app holds, active slot included.
+template <typename F> void ForEachDocument(AppState& state, F&& fn) {
+  if (state.parts.empty()) {
+    if (state.document != nullptr)
+      fn(state.document.get());
+    return;
+  }
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (Document* d = SlotDoc(state, i); d != nullptr)
+      fn(d);
+}
 } // namespace
+
+void SyncSketchViewRollback(AppState& state) {
+  SketchViewRollback& applied = state.sketchViewRollback;
+  Document* doc = state.document.get();
+  const uint64_t wantSketch =
+      doc != nullptr ? state.sketchEdit.activeSketchId : uint64_t{0};
+  const uint64_t wantDoc = wantSketch != 0 ? doc->InstanceId() : uint64_t{0};
+  const uint64_t version = doc != nullptr ? doc->Version() : uint64_t{0};
+  // The overwhelmingly common frame: same sketch, same tab, nothing edited.
+  if (wantSketch == applied.sketchId && wantDoc == applied.documentId &&
+      version == applied.documentVersion)
+    return;
+
+  // The old marker need not be on the tab that is open now — switching tabs
+  // is one of the ways a sketch session ends, and a marker left behind is a
+  // model with its features missing and no sketch open to explain why.
+  if (applied.documentId != 0 && applied.documentId != wantDoc) {
+    const uint64_t stale = applied.documentId;
+    ForEachDocument(state, [&](Document* d) {
+      if (d->InstanceId() == stale && d->ViewRollback() >= 0)
+        SetViewRollbackKeepingDirt(state, d, -1);
+    });
+  }
+
+  if (wantSketch == 0) {
+    if (doc != nullptr && doc->ViewRollback() >= 0)
+      SetViewRollbackKeepingDirt(state, doc, -1);
+    applied = {};
+    return;
+  }
+
+  // -1 (nothing consumes this sketch, or it is gone) clears the marker: a
+  // brand-new sketch, or the last feature in the tree, has nothing built from
+  // it to be in the way. Rolling back to the sketch's own position instead
+  // would blank every unrelated feature after it, which is worse than the
+  // problem being fixed.
+  SetViewRollbackKeepingDirt(state, doc, doc->FirstConsumerIndex(wantSketch));
+  applied = {wantSketch, wantDoc, doc->Version()};
+}
 
 bool ProjectDirty(AppState& state) {
   if (state.projectMetaDirty)

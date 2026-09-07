@@ -34,6 +34,12 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(sourceId); // the seed, by its producing feature
+    visit(planeId);  // Mirror kind
+    VisitRefs(axis, visit);
+  }
+
 private:
   // The cut-source path: replicate the source's cutter and subtract each
   // transformed copy (the original cut already made instance 0).

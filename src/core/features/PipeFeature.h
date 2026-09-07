@@ -28,6 +28,10 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(pathId); // a sketch or a Curve3D
+  }
+
   void VisitExprs(const ExprVisitor& visit) override;
 
   uint64_t pathId = 0; // a sketch OR a Curve3D

@@ -604,6 +604,16 @@ const std::vector<Command>& Table() {
     add("sketch.toggle_glyphs", Sketching, [](AppState& s) {
       s.sketchEdit.showConstraintGlyphs = !s.sketchEdit.showConstraintGlyphs;
     });
+    // Enabled while it is ON even with no slot free, so a slice can always be
+    // switched off; turning it ON needs a clip-plane slot, and the toolbar
+    // tooltip says which of the two reasons a greyed button has.
+    add(
+        "sketch.toggle_slice",
+        [](AppState& s) {
+          return s.sketchEdit.activeSketchId != 0 &&
+                 (s.sketchSlice || CanSketchSlice(s));
+        },
+        [](AppState& s) { s.sketchSlice = !s.sketchSlice; });
     add("sketch.extrude", Sketching,
         [](AppState& s) { BeginSketchExtrude(s); });
     add("sketch.revolve", Sketching,
