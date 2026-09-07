@@ -1,11 +1,11 @@
 #include "ui/SyncJob.h"
 
 #include "common/Logger.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/HistoryPanel.h"
+#include "ui/ProjectActions.h"
 
 #include <memory>
 #include <thread>

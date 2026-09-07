@@ -1,7 +1,9 @@
 #include "app/guitests/GuiTestsCommon.h"
 
-#include "ui/AppActions.h"
+#include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
+#include "ui/ProjectActions.h"
+#include "ui/ViewActions.h"
 
 // Tests run inside the live application and reach it through the AppState.
 ui::AppState* s_App = nullptr;

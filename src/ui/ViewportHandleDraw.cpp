@@ -1,7 +1,7 @@
 #include "ui/ViewportHandleDraw.h"
 
-#include "ui/AppActions.h" // AppendPrimLine
-#include "ui/RayMath.h"    // PerpTo
+#include "ui/RayMath.h"       // PerpTo
+#include "ui/SketchOverlay.h" // AppendPrimLine
 #include "ui/ViewportHandle.h"
 
 #include <glm/gtc/constants.hpp>

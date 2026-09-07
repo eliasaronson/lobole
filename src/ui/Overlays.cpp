@@ -5,9 +5,10 @@
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
-#include "ui/AppActions.h"         // EdgeElementRef
 #include "ui/AppActionsInternal.h" // DatumPlanesVisible
-#include "ui/SketchInteraction.h"  // WorldToScreen / SketchUVToScreen
+#include "ui/SceneOverlays.h"
+#include "ui/SketchInteraction.h" // WorldToScreen / SketchUVToScreen
+#include "ui/SketchOverlay.h"     // EdgeElementRef
 
 #include "imgui.h"
 

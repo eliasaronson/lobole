@@ -10,18 +10,24 @@
 #include "core/features/SketchFeature.h"
 #include "render/Camera.h"
 #include "render/RayTracingRenderer.h"
-#include "ui/AppActions.h"
+#include "ui/CreateActions.h"
 #include "ui/DerivedActions.h"
+#include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h"
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
 #include "ui/JobActions.h"
+#include "ui/MeasureActions.h"
 #include "ui/PreviewFeature.h"
+#include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 #include "ui/TerminalPanel.h"
+#include "ui/VariableActions.h"
+#include "ui/ViewActions.h"
 
 #include "imgui.h"
 

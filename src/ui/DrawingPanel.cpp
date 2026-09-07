@@ -1,8 +1,9 @@
 #include "ui/DrawingPanel.h"
 
-#include "ui/AppActions.h"
 #include "ui/DockLayout.h" // PanelHeading
-#include "ui/ExprInput.h"  // expression-capable numeric fields
+#include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h"
+#include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
 

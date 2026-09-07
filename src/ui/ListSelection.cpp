@@ -1,9 +1,9 @@
 #include "ui/ListSelection.h"
 
 #include "core/Command.h"
-#include "ui/AppActions.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPanel.h"
+#include "ui/SelectionPipeline.h"
 
 #include <imgui.h>
 

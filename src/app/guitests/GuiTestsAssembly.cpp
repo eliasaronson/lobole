@@ -1,7 +1,11 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
 #include "ui/AssemblyActions.h"
+#include "ui/CreateActions.h"
+#include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
+#include "ui/SelectionPipeline.h"
+#include "ui/ViewActions.h"
 
 #include "ui/ImportJob.h"
 #include <cmath>

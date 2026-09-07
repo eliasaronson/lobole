@@ -1,7 +1,7 @@
 #include "ui/BackgroundJobs.h"
 
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/RendererSync.h"
 
 #include <algorithm>
 #include <chrono>

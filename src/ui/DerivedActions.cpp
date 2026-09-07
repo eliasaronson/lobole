@@ -4,7 +4,6 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/io/Serialization.h"
-#include "ui/AppActions.h"
 #include "ui/AssemblyActions.h"
 #include "ui/PreviewFeature.h"
 

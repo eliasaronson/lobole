@@ -6,6 +6,7 @@
 // (docs/architecture-review-2026-09-06.md, stage 1).
 
 #include "cam_fixtures.h"
+#include "ui/DocumentSlots.h"
 
 TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
   // Setups are document objects (v58), and since v73 they are objects of a

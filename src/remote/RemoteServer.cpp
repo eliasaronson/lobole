@@ -40,17 +40,21 @@
 #include "render/MeshRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/RenderSheet.h"
-#include "ui/AppActions.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/CamJobs.h"
 #include "ui/Commands.h" // ActiveContext (get_keymap)
 #include "ui/DerivedActions.h"
+#include "ui/DocumentSlots.h"
 #include "ui/PreviewFeature.h"
+#include "ui/ProjectActions.h"
+#include "ui/RendererSync.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
 #include "ui/SettingsWindow.h"    // ApplySettings / the save debounce
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h" // FaceElementRef
+#include "ui/VariableActions.h"
+#include "ui/ViewActions.h"
 
 #include <algorithm>
 #include <filesystem>

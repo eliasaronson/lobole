@@ -4,7 +4,6 @@
 #include "core/Document.h"
 #include "core/MeshCollide.h"
 #include "core/io/GlbAnimation.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJob.h"

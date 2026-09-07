@@ -13,16 +13,17 @@
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
-#include "ui/AppActions.h"
 #include "ui/CamJobs.h" // adaptive passes off the frame
 #include "ui/CamPlayback.h"
 #include "ui/CamTool.h"
+#include "ui/DocumentSlots.h"
 #include "ui/ExprInput.h"
 #include "ui/FeatureEditor.h"
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
 #include "ui/MachineActions.h"
 #include "ui/SelectionPipeline.h"
+#include "ui/SketchOverlay.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"

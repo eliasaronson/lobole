@@ -2,10 +2,13 @@
 
 #include "core/cam/CamToolpath.h" // StockBounds (the placement snap)
 #include "imgui.h" // KeyCtrl: the placement drag snaps unless Ctrl says free
-#include "ui/AppActions.h"
 #include "ui/CamPanel.h" // ActiveCamSetup, RefreshCamToolpaths (the placement gizmo)
-#include "ui/CamTool.h"    // RunCamVerification
+#include "ui/CamTool.h"  // RunCamVerification
+#include "ui/DocumentSlots.h"
 #include "ui/JobActions.h" // JobPlacedBodies
+#include "ui/ProjectActions.h"
+#include "ui/SelectionPipeline.h"
+#include "ui/ViewActions.h"
 
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
 

@@ -1,6 +1,7 @@
 #include "ui/PreviewHandles.h"
 
-#include "ui/AppActions.h" // section helpers, VisibleSceneBounds
+#include "ui/SketchOverlay.h"
+#include "ui/ViewActions.h" // section helpers, VisibleSceneBounds
 
 #include "cad/FaceSelector.h"
 #include "core/AxisRef.h"

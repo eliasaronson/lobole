@@ -8,11 +8,11 @@
 #include "core/cam/CamToolpath.h"
 #include "render/MeshRenderer.h"
 #include "render/StockRenderer.h"
-#include "ui/AppActions.h"
 #include "ui/CamJobs.h"
-#include "ui/CamPanel.h" // ActiveCamSetup, PostOpts
+#include "ui/CamPanel.h"      // ActiveCamSetup, PostOpts
 #include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/JobActions.h"
+#include "ui/SketchOverlay.h"
 #include "ui/Theme.h" // ElevatedWindowBorder
 
 #include "IconsFontAwesome6.h"

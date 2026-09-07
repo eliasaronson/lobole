@@ -1,4 +1,8 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/DocumentSlots.h"
+#include "ui/MeasureActions.h"
+#include "ui/VariableActions.h"
+#include "ui/ViewActions.h"
 
 #include "cad/FaceSelector.h" // Ray
 #include "core/cam/CamMachine.h"

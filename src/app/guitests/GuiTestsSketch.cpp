@@ -1,4 +1,11 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/ImportActions.h"
+#include "ui/ProjectActions.h"
+#include "ui/SceneOverlays.h"
+#include "ui/SelectionPipeline.h"
+#include "ui/SketchOverlay.h"
+#include "ui/VariableActions.h"
+#include "ui/ViewActions.h"
 
 // Sketch GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //

@@ -13,11 +13,15 @@
 #include "core/io/ProjectMerge.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/ConflictsPanel.h"
+#include "ui/DocumentSlots.h"
 #include "ui/HistoryPanel.h"
+#include "ui/ImportActions.h"
+#include "ui/ProjectActions.h"
+#include "ui/VariableActions.h"
+#include "ui/ViewActions.h"
 
 #include <glm/glm.hpp>
 

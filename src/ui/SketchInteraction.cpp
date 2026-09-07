@@ -1,5 +1,6 @@
 #include "ui/SketchInteraction.h"
 #include "ui/Overlays.h"
+#include "ui/SelectionPipeline.h"
 
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
@@ -13,9 +14,11 @@
 #include "core/sketch/SketchSolver.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
-#include "ui/AppActions.h"       // SelectFeature
-#include "ui/ExprComplete.h"     // variable completion in the dim editors
-#include "ui/SketchToolbar.h"    // BeginSketchExtrude/Revolve (Shift+E/R)
+#include "ui/DocumentSlots.h"
+#include "ui/ExprComplete.h" // variable completion in the dim editors
+#include "ui/SceneOverlays.h"
+#include "ui/SketchOverlay.h" // SelectFeature
+#include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
 
 #include "imgui.h"
 #include "imgui_internal.h" // GetInputTextState (re-read after a completion)

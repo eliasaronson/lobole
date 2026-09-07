@@ -2,8 +2,8 @@
 
 #include "core/cam/CamToolpath.h"
 
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DocumentSlots.h"
 
 #include <algorithm>
 

@@ -8,11 +8,13 @@
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
-#include "ui/AppActions.h" // AppendPrimLine/Dot, WorldToScreen
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h"
+#include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/ListSelection.h"
+#include "ui/SketchOverlay.h"
+#include "ui/ViewActions.h" // AppendPrimLine/Dot, WorldToScreen
 
 #include "render/Camera.h"
 #include "ui/FeatureEditor.h"

@@ -5,11 +5,13 @@
 #include "cad/FaceSelector.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
-#include "ui/AppActions.h"         // EdgeElementRef, AppendPrimLine
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
-#include "ui/FeatureEditor.h"      // SlotPickClicked (U3)
-#include "ui/JobActions.h"         // JobPlacedBodies (a job tab's bodies)
-#include "ui/SketchInteraction.h"  // FaceElementRef
+#include "ui/DocumentSlots.h"
+#include "ui/FeatureEditor.h" // SlotPickClicked (U3)
+#include "ui/JobActions.h"    // JobPlacedBodies (a job tab's bodies)
+#include "ui/MeasureActions.h"
+#include "ui/SketchInteraction.h" // FaceElementRef
+#include "ui/SketchOverlay.h"     // EdgeElementRef, AppendPrimLine
 
 #include "core/Occurrence.h" // AssemblyDocument, Occurrence
 #include "core/features/ExtrudeFeature.h"

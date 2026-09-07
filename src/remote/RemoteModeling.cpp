@@ -1,4 +1,5 @@
 #include "remote/RemoteModeling.h"
+#include "ui/SelectionPipeline.h"
 
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
@@ -10,10 +11,10 @@
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/DerivedActions.h"
 #include "ui/PreviewFeature.h"
+#include "ui/RendererSync.h"
 
 #include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
 

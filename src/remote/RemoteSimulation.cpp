@@ -7,7 +7,6 @@
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/SimulationActions.h"

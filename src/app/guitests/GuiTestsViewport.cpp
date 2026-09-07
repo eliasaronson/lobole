@@ -4,10 +4,16 @@
 #include "core/features/RevolveFeature.h"
 #include "ui/AssemblyActions.h"
 #include "ui/Commands.h"
+#include "ui/DocumentSlots.h"
 #include "ui/ListSelection.h"
+#include "ui/MeasureActions.h"
 #include "ui/MeasureOverlay.h"
 #include "ui/PreviewHandles.h"
+#include "ui/ProjectActions.h"
+#include "ui/SceneOverlays.h"
+#include "ui/SelectionPipeline.h"
 #include "ui/SimulationActions.h"
+#include "ui/ViewActions.h"
 #include "ui/ViewportHandleDraw.h"
 
 // Viewport GUI tests, carved out of the single 8,036-line RegisterGuiTests.

@@ -36,7 +36,9 @@
 #include "core/io/Serialization.h"
 #include "core/parts/FastenerTable.h"
 #include "render/Camera.h"
-#include "ui/AppActions.h" // BodyProducers
+#include "ui/CreateActions.h"
+#include "ui/SketchOverlay.h"
+#include "ui/ViewActions.h" // BodyProducers
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"

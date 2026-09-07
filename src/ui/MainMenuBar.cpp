@@ -11,13 +11,14 @@
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "render/OutlineRenderer.h"
-#include "ui/AppActions.h"
 #include "ui/Commands.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
+#include "ui/ProjectActions.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
 #include "ui/TerminalPanel.h"
+#include "ui/VariableActions.h"
 
 #include "imgui.h"
 

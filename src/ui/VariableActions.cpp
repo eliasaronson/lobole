@@ -1,4 +1,6 @@
-#include "ui/AppActions.h"
+#include "ui/VariableActions.h"
+#include "ui/DocumentSlots.h"
+#include "ui/RendererSync.h"
 
 #include "core/Units.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore

@@ -1,4 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "ui/DocumentSlots.h"
+#include "ui/VariableActions.h"
 
 // Modeling GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //

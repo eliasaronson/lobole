@@ -8,8 +8,11 @@
 #include "core/io/Autosaver.h"
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DocumentSlots.h"
+#include "ui/ImportActions.h"
+#include "ui/ProjectActions.h"
+#include "ui/RendererSync.h"
 
 #include <atomic>
 #include <chrono>

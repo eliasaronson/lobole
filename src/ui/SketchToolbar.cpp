@@ -1,4 +1,5 @@
 #include "ui/SketchToolbar.h"
+#include "ui/SelectionPipeline.h"
 
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/HoleFeature.h"
@@ -7,9 +8,10 @@
 #include "core/io/Serialization.h" // DocumentIO (break-link commit)
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
-#include "ui/AppActions.h"
+#include "ui/CreateActions.h"
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/FileDialogs.h"
+#include "ui/ImportActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
 

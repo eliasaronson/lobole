@@ -1,8 +1,8 @@
 #include "ui/MeasureOverlay.h"
 
 #include "render/Camera.h"
-#include "ui/AppActions.h"        // AppendPrimLine / AppendPrimDot
 #include "ui/SketchInteraction.h" // WorldToScreen
+#include "ui/SketchOverlay.h"     // AppendPrimLine / AppendPrimDot
 
 #include "imgui.h"
 

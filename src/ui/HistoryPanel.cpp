@@ -5,9 +5,10 @@
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectStamp.h"
-#include "ui/AppActions.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/FileDialogs.h"
+#include "ui/ProjectActions.h"
+#include "ui/RendererSync.h"
 #include "ui/SyncJob.h"
 
 #include "imgui.h"

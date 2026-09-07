@@ -5,7 +5,7 @@
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
-#include "ui/AppActions.h"
+#include "ui/ProjectActions.h"
 
 #include "imgui.h"
 

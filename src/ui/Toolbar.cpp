@@ -7,17 +7,19 @@
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
-#include "ui/AppActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/CamPanel.h" // ActiveCamSetup (the job bar's rotary button)
 #include "ui/Commands.h"
+#include "ui/DrawingActions.h"
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
+#include "ui/RendererSync.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
+#include "ui/ViewActions.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"

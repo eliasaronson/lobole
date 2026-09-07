@@ -9,7 +9,6 @@
 #include "common/Logger.h"
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
-#include "ui/AppActions.h"
 #include "ui/DragMath.h"      // GizmoScale — the click's grab radius
 #include "ui/FeatureEditor.h" // kMateSessionSlot (U7c)
 #include "ui/PreviewFeature.h"

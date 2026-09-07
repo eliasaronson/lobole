@@ -1,0 +1,127 @@
+#pragma once
+
+#include "cad/MeshExport.h" // MeshExport::Item
+#include "core/AssemblySolve.h"
+#include "core/ElementMap.h"               // ElementRef
+#include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
+#include "core/io/Autosaver.h"
+#include "render/SketchRenderer.h" // Vertex3D, PrimVertex
+#include "ui/AppState.h"
+
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+class SketchPlane;
+class SketchFeature;
+class SplitFeature;
+class FilletFeature; // defined in core/features/FilletFeature.h
+struct RTStillDesc;  // defined in RayTracingRenderer.h
+struct Ray;          // defined in FaceSelector.h
+
+// Creating features: what each tool makes when the toolbar asks for one.
+//
+// Split out of ui/AppActions.h, which declared 170 functions across every
+// domain in the app and was included by 64 files -- so a change to any one
+// of them rebuilt 73 targets (146 s) instead of the handful that care.
+// docs/architecture-review-2026-09-06.md, stage 4.
+
+namespace ui {
+
+// Shared feature-creation actions (menu + toolbar call these). Each starts a
+// preview the user accepts/cancels (see PreviewFeature).
+void CreateBox(AppState& state);
+
+void CreateSphere(AppState& state);
+
+void CreateCylinder(AppState& state);
+
+// Starts a preview of an offset datum plane (from XY, or from the selected
+// datum if one is selected) — the first of the DatumPlane variants.
+void CreateDatumPlane(AppState& state);
+
+// Starts a preview of a two-point datum axis (along X by default).
+void CreateDatumAxis(AppState& state);
+
+// A named datum frame (v86, agent-scale plan G0), explicit at the part origin
+// until edited; a mate anchors to it by name.
+void CreateFrame(AppState& state);
+
+void CreateCurve3D(AppState& state); // 3D curve (helix / fit-spline / poly)
+void CreatePipe(AppState& state);    // pipe/tube along a path
+void CreateSweep(AppState& state);   // sweep a profile along a path
+void CreateLoft(AppState& state);    // loft through sections (optional guide)
+
+// Menu/palette gating queries for the curve-driven tools.
+size_t SketchFeatureCount(const Document& doc);
+
+bool HasCurveOrSketch(const Document& doc);
+
+// Starts a preview of a boolean combining the two most-recent body producers.
+void CreateBoolean(AppState& state);
+
+// Starts a preview of a mirror / linear pattern of the most-recent body.
+void CreateMirror(AppState& state);
+
+void CreatePattern(AppState& state);
+
+// Starts a fillet/chamfer preview and arms edge picking: viewport clicks
+// toggle B-Rep edges on the pending feature (M7).
+void CreateFillet(AppState& state);
+
+void CreateChamfer(AppState& state);
+
+void CreateRib(AppState& state);
+
+void CreateThread(AppState& state);
+
+// Body-modifying tools whose parameters/slots already existed but that had no
+// creation path outside the script API. Each opens the normal preview with
+// the most recent body pre-targeted (Draft takes its body from the first face
+// pick — it has no body slot); the required slots arm themselves.
+void CreateShell(AppState& state);
+
+void CreateDraft(AppState& state);
+
+void CreateSplit(AppState& state);
+
+// The plane a plane-referencing feature points at (a base plane, or an
+// earlier DatumPlane by id), as the UI sees it: the datum's last regenerated
+// output. nullopt when the id does not resolve. The regen path has
+// ResolveParentPlane for the same job; this is its caller-side twin, for
+// tools that must know where a plane IS while the user is picking it.
+std::optional<SketchPlane>
+ResolvePlaneForTool(AppState& state, uint64_t datumId, PlaneType basePlane);
+
+// Re-derives a split's offset so the knife lands mid-body on its CURRENT
+// plane. Called when the plane changes: an offset measured from the old
+// plane means something else on the new one. Leaves a user-typed expression
+// alone — that is theirs.
+void RecenterSplitOffset(AppState& state, SplitFeature& split);
+
+void CreateRefine(AppState& state);
+
+// Arms plane-picking for a new sketch.
+void StartNewSketch(AppState& state);
+
+// Arms the Hole tool: pick a FLAT face (or plane) to drill into, which opens
+// a point sketch on it with the Point tool ready; ✓/Enter then converts the
+// centres into a Hole preview. A single planar face already selected skips
+// the pick. No-op without a body (there would be nothing to cut).
+void StartHoleTool(AppState& state);
+
+// The features in [0, beforeIndex) that produce a body (primitives, imports,
+// extrude/revolve in NewBody mode, and earlier booleans), as {featureId,
+// name}. Backs the boolean operand combos and the "Boolean" menu gate.
+std::vector<std::pair<uint64_t, std::string>> BodyProducers(const Document& doc,
+                                                            size_t beforeIndex);
+
+// Cosmetic thread overlays (M8 thread): dashed thread-depth circles at both
+// ends of each threaded span + dashed crest lines — the drafting convention,
+// drawn from the session overlay each ThreadFeature computes at regen.
+void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines);
+
+} // namespace ui

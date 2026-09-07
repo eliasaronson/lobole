@@ -7,7 +7,6 @@
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/ExprInput.h"   // expression-capable numeric fields
@@ -15,6 +14,7 @@
 #include "ui/PanelTitles.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/SimulationActions.h"
+#include "ui/SketchOverlay.h"
 #include "ui/ViewportHandle.h"
 #include <utility>
 

@@ -2,6 +2,9 @@
 #include "core/MassProps.h"
 #include "core/features/DerivedFeature.h"
 #include "ui/DerivedActions.h"
+#include "ui/DocumentSlots.h"
+#include "ui/ProjectActions.h"
+#include "ui/SelectionPipeline.h"
 
 // Project GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //

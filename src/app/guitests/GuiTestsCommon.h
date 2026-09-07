@@ -40,7 +40,6 @@
 #include "render/FrameTimer.h"
 #include "render/OutlineRenderer.h" // instance/asset counts (outline gates)
 #include "render/RayTracingRenderer.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"

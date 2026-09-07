@@ -6,8 +6,12 @@
 #include "common/Logger.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
-#include "ui/AppActions.h"
+#include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h"
 #include "ui/HistoryPanel.h"
+#include "ui/ImportActions.h"
+#include "ui/ProjectActions.h"
+#include "ui/ViewActions.h"
 
 #include "imgui.h"
 

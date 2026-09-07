@@ -12,10 +12,13 @@
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "render/ClipPlanes.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h"
 #include "ui/DerivedActions.h"
+#include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
+#include "ui/RendererSync.h"
+#include "ui/ViewActions.h"
 
 #include <glm/glm.hpp>
 

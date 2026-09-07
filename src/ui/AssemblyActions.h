@@ -408,4 +408,44 @@ void MaterializeImportedAssembly(AppState& state,
                                  const std::string& asmName,
                                  const std::vector<uint64_t>& partIds);
 
+// Occurrence placement and part lookup.
+//
+// Split out of ui/AppActions.h, which declared 170 functions across every
+// domain in the app and was included by 64 files -- so a change to any one
+// of them rebuilt 73 targets (146 s) instead of the handful that care.
+// docs/architecture-review-2026-09-06.md, stage 4.
+
+// The part document an occurrence (or a cross-part query) references, by
+// stable id — active or stashed; never switches the active tab. Null when the
+// id names no part slot.
+Document* PartDocById(AppState& state, uint64_t partId);
+
+// An occurrence's solved placement as a model matrix (translate ∘ rotate) —
+// the transform assembly measure / interference place part bodies with.
+glm::mat4 OccurrenceMatrix(const Occurrence& o);
+
+// A5 resolution: an occurrence's stable id names a part OR an assembly slot,
+// per its refKind.
+AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId);
+
+assembly::PartResolver PartResolverFor(AppState& state);
+
+assembly::AssemblyResolver AssemblyResolverFor(AppState& state);
+
+// The active assembly's leaf parts, placed in world space — the one walk
+// every geometry consumer uses (render, BOM, mass, contact, export, drawings,
+// ray tracing, section caps). Empty when the tree cannot be walked, with the
+// reason logged.
+std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state);
+
+// The placement a mesh renders at (solved ∘ explode), exposed for tests and
+// for anything that has to reproduce the live-drag composition.
+glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
+
+// Drops every cached part tessellation and releases the GPU assets it holds
+// (AppState::partRenderCache). MUST run while the renderers are still alive —
+// the cache stores asset ids, and the release is what frees their buffers —
+// so main.cpp calls it immediately before ShutdownSceneRenderers().
+void ReleasePartRenderCache(AppState& state);
+
 } // namespace ui

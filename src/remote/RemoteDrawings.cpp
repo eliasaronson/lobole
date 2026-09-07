@@ -8,8 +8,9 @@
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h"
 
 #include <glm/glm.hpp>
 

@@ -2,10 +2,11 @@
 
 #include "common/Logger.h"
 #include "core/io/Autosaver.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/DocumentSlots.h"
+#include "ui/ImportActions.h"
 
 #include <OSD.hxx>
 #include <Standard_Failure.hxx>

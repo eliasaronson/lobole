@@ -12,11 +12,11 @@
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
-#include "ui/AppActions.h" // JobUndoGuard
 #include "ui/AppState.h"
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
+#include "ui/DocumentSlots.h" // JobUndoGuard
 #include "ui/JobActions.h"
 #include "ui/MachineActions.h"
 

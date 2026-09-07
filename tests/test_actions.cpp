@@ -29,6 +29,10 @@
 //
 // See docs/architecture-review-2026-08-24.md.
 
+#include "ui/CreateActions.h"
+#include "ui/DocumentSlots.h"
+#include "ui/ProjectActions.h"
+#include "ui/ViewActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -48,7 +52,6 @@
 #include "core/fem/FemStudy.h"
 #include "core/io/GitVault.h"
 #include "core/parts/FastenerTable.h"
-#include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"

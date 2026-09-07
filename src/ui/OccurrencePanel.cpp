@@ -1,9 +1,9 @@
 #include "ui/OccurrencePanel.h"
 #include "core/Measure.h"
-#include "ui/AppActions.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
-#include "ui/DockLayout.h"    // PanelHeading
+#include "ui/DockLayout.h" // PanelHeading
+#include "ui/DocumentSlots.h"
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
@@ -12,6 +12,7 @@
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
+#include "ui/SelectionPipeline.h"
 #include "ui/TextFit.h"
 
 #include "core/io/Serialization.h" // RelationKindToString

@@ -1,4 +1,5 @@
 #include "ui/PreviewFeature.h"
+#include "ui/SelectionPipeline.h"
 
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/OccurrencePanel.h"
@@ -13,12 +14,13 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h" // occurrence names (measure rows)
-#include "ui/AppActions.h"               // SelectFeature
 #include "ui/CamTool.h"                  // DrawCamToolWindow (CAM verbs)
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h"
+#include "ui/MeasureActions.h"
 #include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
 #include "ui/Theme.h"         // ElevatedWindowBorder, DrawWindowShadow
+#include "ui/ViewActions.h"   // SelectFeature
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
