@@ -252,8 +252,12 @@ Result Run(const AssemblyDocument& asmDocIn,
           // the one the named-pair `interference` RPC and contact_report
           // take, so the two checks now agree rather than differing by a
           // fuzz nobody could see.
+          // Volume only: a study asks whether the motion makes two parts
+          // collide, never how far apart they are when it does not. The
+          // separation pass is two thirds of a contact check, and this one
+          // ran 20,403 of them.
           const auto c = Measure::ContactBetween(ba, placed[cd.a].world, bb,
-                                                 placed[cd.b].world);
+                                                 placed[cd.b].world, false);
           if (c) {
             h.known = true;
             h.volume = c->volume;

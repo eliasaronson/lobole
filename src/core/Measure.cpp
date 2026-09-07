@@ -385,7 +385,8 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
-                                         const glm::mat4& xfB) {
+                                         const glm::mat4& xfB,
+                                         bool wantDistance) {
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
     struct Placed {
@@ -471,6 +472,15 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     // Distance pass: probe in ascending box-distance order and stop once a
     // pair's box bound (a lower bound on its exact distance) can no longer
     // beat the best exact distance found.
+    //
+    // Skipped outright when the caller did not ask, because it is the
+    // EXPENSIVE half — 299 ms a pair on an engine against the boolean's 165
+    // — and a caller that only wants "does this overlap" has its answer by
+    // here. It says so rather than reporting a 0 that would read as contact.
+    if (!wantDistance) {
+      out.distanceKnown = false;
+      return out;
+    }
     std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
       return a.boxDist < b.boxDist;
     });

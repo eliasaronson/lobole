@@ -90,13 +90,25 @@ struct SetContact {
   // each is a guessing game — it cost four build-and-look cycles on the
   // carburettor round alone. The intersection is already built to weigh it.
   bool overlaps = false;
+  // ...and whether `distance` was MEASURED. A caller that only asks "do
+  // these overlap" does not pay for the separation, and 0.0 is what an
+  // OVERLAP reports, so an unmeasured distance must not be readable as one.
+  bool distanceKnown = true;
   glm::dvec3 centroid{0.0};
   glm::dvec3 overlapMin{0.0}, overlapMax{0.0};
 };
+// `wantDistance` false answers only "do these overlap, by how much, and
+// where" and skips the separation pass entirely. That pass is not the cheap
+// half: measured on a 241-occurrence engine it is 299 ms a pair against the
+// boolean's 165 ms — 64% of a whole sweep — because
+// `BRepExtrema_DistShapeShape` on two complex solids is dearer than
+// intersecting them. A motion study reads only the volume, so for 20,403 checks
+// it was paying about two thirds of its time for a number it threw away.
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
-                                         const glm::mat4& xfB);
+                                         const glm::mat4& xfB,
+                                         bool wantDistance = true);
 
 // Axis-aligned world bounds of a placed body set — the cheap prefilter the
 // assembly contact_report sweep runs before paying for ContactBetween.
