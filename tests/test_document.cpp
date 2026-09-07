@@ -306,3 +306,89 @@ TEST_CASE("Build info names the version and the kernel", "[buildinfo]") {
   // that has it.
   CHECK(BuildInfo::KernelVersion() != "none");
 }
+
+TEST_CASE("FirstConsumerIndex finds what a sketch feeds",
+          "[document][rollback]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<BoxFeature>("Unrelated", glm::vec3(20, 0, 0),
+                                              1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", skId, 3.0, ExtrudeMode::NewBody));
+  REQUIRE(doc.GetBodies().size() == 2);
+
+  // The extrude, not the box that merely sits between them in the list.
+  CHECK(doc.FirstConsumerIndex(skId) == 2);
+  // A feature nothing consumes, and an id that is not a feature at all.
+  CHECK(doc.FirstConsumerIndex(doc.GetFeature(2)->GetId()) == -1);
+  CHECK(doc.FirstConsumerIndex(doc.GetFeature(1)->GetId()) == -1);
+  CHECK(doc.FirstConsumerIndex(0) == -1);
+  CHECK(doc.FirstConsumerIndex(99999) == -1);
+
+  // EARLIEST consumer: a second extrude on the same sketch does not move it.
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad2", skId, 1.0,
+                                                  ExtrudeMode::NewBody));
+  CHECK(doc.FirstConsumerIndex(skId) == 2);
+}
+
+TEST_CASE("The view rollback hides a consumer without touching the document",
+          "[document][rollback]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", skId, 3.0, ExtrudeMode::NewBody));
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  // What "edit this sketch" does: stop before the solid built from it.
+  doc.SetViewRollback(doc.FirstConsumerIndex(skId));
+  CHECK(doc.GetBodies().empty());
+  CHECK(doc.ViewRollback() == 1);
+  CHECK(doc.Rollback() == -1); // the user's own bar is untouched
+
+  // It is a VIEW, not an edit: the saved document still has its solid, and
+  // loading one never resurrects a view rollback.
+  const auto path =
+      std::filesystem::temp_directory_path() / "view_rollback.json";
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->ViewRollback() == -1);
+  CHECK(loaded->Rollback() == -1);
+  CHECK(loaded->GetBodies().size() == 1);
+  std::filesystem::remove(path);
+
+  doc.SetViewRollback(-1);
+  CHECK(doc.GetBodies().size() == 1);
+}
+
+TEST_CASE("The two rollback markers take the earlier of the two",
+          "[document][rollback]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0, 1.0, 1.0));
+
+  doc.SetRollback(2);     // the user parked the bar after B
+  doc.SetViewRollback(1); // a sketch edit wants to stop after A
+  CHECK(doc.EffectiveRollback() == 1);
+  CHECK(doc.GetBodies().size() == 1);
+
+  // Clearing the view marker falls back to the bar, not to the end.
+  doc.SetViewRollback(-1);
+  CHECK(doc.EffectiveRollback() == 2);
+  CHECK(doc.GetBodies().size() == 2);
+
+  // ...and a view marker LATER than the bar changes nothing.
+  doc.SetViewRollback(3);
+  CHECK(doc.EffectiveRollback() == 2);
+  CHECK(doc.GetBodies().size() == 2);
+}

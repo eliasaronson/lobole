@@ -33,6 +33,13 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    for (const uint64_t id : sketchIds)
+      visit(id);
+    visit(pathId); // optional spine
+    visit(guideId);
+  }
+
   std::vector<uint64_t> sketchIds; // >= 2 sections, in order
   uint64_t pathId =
       0; // optional spine (sketch/Curve3D); 0 = classic loft (v45)

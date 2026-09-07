@@ -39,6 +39,11 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(parentId); // Offset kind: the frame this one hangs off
+    VisitRefs(elements, visit);
+  }
+
   [[nodiscard]] bool IsDatum() const override { return true; }
 
   void VisitExprs(const ExprVisitor& visit) override {

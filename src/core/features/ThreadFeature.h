@@ -24,6 +24,10 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    VisitRefs(face, visit); // the cylindrical face being threaded
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(lengthExpr, length);
   }

@@ -27,6 +27,11 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(targetId); // both operands are named by their producing feature
+    visit(toolId);
+  }
+
   [[nodiscard]] std::string WhyIncomplete() const override {
     if (targetId == 0)
       return "pick the target body";

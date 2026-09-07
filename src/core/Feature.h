@@ -155,6 +155,30 @@ public:
   using ExprVisitor = std::function<void(std::string& text, double& value)>;
   virtual void VisitExprs(const ExprVisitor& visit) { (void)visit; }
 
+  // Every OTHER feature of THIS history that this one names by stable id —
+  // the edges of the dependency graph, which is how "what depends on this
+  // feature?" gets answered (sketch edit rolls the model back to the first
+  // consumer of the sketch, so the solid built FROM the sketch is not sitting
+  // in front of it while you edit).
+  //
+  // PURE virtual for the reason Clone() is. A reference a feature forgets to
+  // report is an edge the graph does not have, and the failure is silent: the
+  // rollback simply leaves the offending solid on screen, looking like the
+  // feature never worked. A runtime table could be forgotten; this cannot.
+  //
+  // Report ids unconditionally — 0, dangling and duplicate ids are all fine,
+  // callers filter, and over-reporting only moves a rollback earlier while
+  // UNDER-reporting is the silent failure above. The two exceptions:
+  //   - an id a mode switch left stale (an AxisRef moved back to X keeps its
+  //     sketchId) is not a dependency; VisitRefs(AxisRef) switches on kind.
+  //   - an id naming something in ANOTHER document (a Derived feature's
+  //     source part and the bodies it picks there) is not an edge of this
+  //     history at all.
+  // A body id IS an edge: Body::createdBy is the id of the feature that made
+  // it, so a Shell naming a body names the feature that produced it.
+  using RefVisitor = std::function<void(uint64_t)>;
+  virtual void VisitFeatureRefs(const RefVisitor& visit) const = 0;
+
   // Why this feature cannot be COMMITTED as it stands (empty = fine).
   // Distinct from GetError(), which reports a regeneration failure: a fillet
   // with no edges regenerates perfectly happily and does nothing, so only the
@@ -241,6 +265,15 @@ protected:
   bool m_suppressed = false;
 };
 
+struct AxisRef; // core/AxisRef.h
+
+// The feature ids the shared reference structs name, in ONE place so that a
+// new kind of reference cannot reach only two of an AxisRef's three holders.
+void VisitRefs(const AxisRef& ref, const Feature::RefVisitor& visit);
+void VisitRefs(const ElementRef& ref, const Feature::RefVisitor& visit);
+void VisitRefs(const std::vector<ElementRef>& refs,
+               const Feature::RefVisitor& visit);
+
 class BoxFeature : public Feature {
 public:
   BoxFeature(const std::string& name, const glm::vec3& position, double width,
@@ -253,6 +286,9 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+
+  // Names no other feature: a primitive is built from numbers alone.
+  void VisitFeatureRefs(const RefVisitor&) const override {}
 
   // Expression-driven dimensions, like every other feature that carries a
   // length. Without these a primitive could not be driven by a variable —
@@ -283,6 +319,9 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  // Names no other feature: a primitive is built from numbers alone.
+  void VisitFeatureRefs(const RefVisitor&) const override {}
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(radiusExpr, radius);
   }
@@ -304,6 +343,9 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+
+  // Names no other feature: a primitive is built from numbers alone.
+  void VisitFeatureRefs(const RefVisitor&) const override {}
 
   void VisitExprs(const ExprVisitor& visit) override {
     visit(radiusExpr, radius);
@@ -336,6 +378,9 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+
+  // Names no other feature: an import's input is a file on disk.
+  void VisitFeatureRefs(const RefVisitor&) const override {}
 
   // .step/.stp (structured), .brep (exact sidecar), or .stl (triangle mesh,
   // sewn to a shell/solid).

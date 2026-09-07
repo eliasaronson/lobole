@@ -7,6 +7,7 @@
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -399,14 +400,33 @@ public:
   // the rest are skipped (grayed in the tree, params untouched). -1 = end.
   // Persisted with the document, like the rollback marker in commercial CAD.
   int Rollback() const { return m_rollback; }
-  void SetRollback(int index) {
-    if (index < 0 || index >= static_cast<int>(m_features.size()))
-      index = -1; // at or past the end = no marker
-    if (index == m_rollback)
-      return;
-    m_rollback = index;
-    Regenerate();
+  void SetRollback(int index) { SetMarker(m_rollback, index); }
+
+  // A SECOND rollback marker, NOT persisted: where the VIEW is stopping, as
+  // opposed to where the user parked the bar. Sketch edit sets it to the
+  // sketch's first consumer, so the solid built FROM the sketch is not in
+  // front of the sketch while you edit it — the rollback every commercial CAD
+  // does on "edit sketch". Kept apart from m_rollback because the document
+  // you save must be the document you had: this one never reaches JSON, so no
+  // format version, no golden, and a save during sketch edit is unaffected.
+  int ViewRollback() const { return m_viewRollback; }
+  void SetViewRollback(int index) { SetMarker(m_viewRollback, index); }
+
+  // The marker regeneration actually stops at: the EARLIER of the two, since
+  // each independently says "do not execute past here". -1 = the end.
+  int EffectiveRollback() const {
+    if (m_rollback < 0)
+      return m_viewRollback;
+    if (m_viewRollback < 0)
+      return m_rollback;
+    return std::min(m_rollback, m_viewRollback);
   }
+
+  // The index of the earliest feature that NAMES `featureId` (Feature::
+  // VisitFeatureRefs), searching only after that feature's own position — a
+  // reference may only point backwards, so nothing at or before it consumes
+  // it. -1 when the id is unknown or nothing consumes it.
+  int FirstConsumerIndex(uint64_t featureId) const;
 
 private:
   // Topo-sorts m_parameters by expression dependency and evaluates them into
@@ -436,9 +456,22 @@ private:
   // Handed out once per instance by NextInstanceId(); see InstanceId().
   const uint64_t m_instanceId = NextInstanceId();
   uint64_t m_nextId = 1;
+  // Sets one of the two rollback markers, clamping "at or past the end" to
+  // -1, and regenerates when it actually moved. Shared so the transient
+  // marker cannot drift from the persisted one's rules.
+  void SetMarker(int& marker, int index) {
+    if (index < 0 || index >= static_cast<int>(m_features.size()))
+      index = -1;
+    if (index == marker)
+      return;
+    marker = index;
+    Regenerate();
+  }
+
   int m_rollback = -1;
-  int m_bulkDepth = 0;  // >0 = a BulkEdit guard is deferring regeneration
-  size_t m_tipHash = 0; // chain hash of the last regenerated feature list
+  int m_viewRollback = -1; // transient; see ViewRollback()
+  int m_bulkDepth = 0;     // >0 = a BulkEdit guard is deferring regeneration
+  size_t m_tipHash = 0;    // chain hash of the last regenerated feature list
   // Bodies loaded from the project's geometry blob, awaiting the hash check
   // in the next Regenerate. Cleared once used or rejected — this is a
   // hand-off, not a second source of truth.

@@ -63,6 +63,12 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(profileSketchId);
+    visit(pathSketchId); // a sketch or a Curve3D
+    visit(guideId);
+  }
+
   uint64_t profileSketchId = 0;
   uint64_t pathSketchId = 0; // a sketch OR a Curve3D (see ResolveSweepPathWire)
   uint64_t guideId = 0;      // optional guide sketch/Curve3D, 0 = none (v44)

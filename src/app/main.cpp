@@ -2298,6 +2298,9 @@ int main(int argc, char** argv) {
     // Sampled here, immediately before the sync that consumes it, so the
     // value is exactly what SyncDocumentRenderers used to read inline.
     g_App.anyWidgetActive = ImGui::IsAnyItemActive();
+    // Before the sync: it can regenerate, and the projection must see the
+    // bodies it settled on rather than last frame's.
+    ui::SyncSketchViewRollback(g_App);
     ui::SyncDocumentRenderers(g_App);
     // Rebuild the FEM field overlay (and hide/show bodies) when the study or
     // result changes; cheap no-op otherwise.

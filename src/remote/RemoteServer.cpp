@@ -1715,6 +1715,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"can_undo", ui::CanGlobalUndo(state)},
             {"can_redo", ui::CanGlobalRedo(state)},
             {"rollback", stateDoc->Rollback()},
+            // A GUI sketch edit hides everything built from the open sketch.
+            // Reported alongside the bar, and always (-1 = off, like
+            // `rollback`), because the alternative is an agent reading a body
+            // list that is short by a feature with no field saying why — the
+            // same honesty rule the regen summary answers to.
+            {"view_rollback", stateDoc->ViewRollback()},
             {"regen",
              [&] {
                json r = remote::RegenSummaryJson(*stateDoc);
