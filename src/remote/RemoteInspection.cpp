@@ -814,7 +814,17 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (mode != "exact" && mode != "mesh")
         throw std::runtime_error("interference mode '" + mode +
                                  "' is not one of: exact, mesh");
-      double meshDeflection = 0.0;
+      // Written from every worker of the parallel sweep below, so it cannot
+      // be a plain double: the pairs run on all cores and each wants to
+      // widen the same maximum. A CAS loop, because atomic<double> has no
+      // fetch_max.
+      std::atomic<double> meshDeflection{0.0};
+      const auto widenDeflection = [&meshDeflection](double d) {
+        double seen = meshDeflection.load(std::memory_order_relaxed);
+        while (d > seen && !meshDeflection.compare_exchange_weak(
+                               seen, d, std::memory_order_relaxed))
+          ;
+      };
       const auto pairMesh = [&](const Target& ta, const Target& tb) {
         for (const Body& a : ta.bodies) {
           if (!a.shape.IsValid())
@@ -824,7 +834,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               continue;
             const collide::Result r = collide::Overlap(
                 a.shape, glm::dmat4(1.0), b.shape, glm::dmat4(1.0));
-            meshDeflection = std::max(meshDeflection, r.deflection);
+            widenDeflection(r.deflection);
             if (r.intersects)
               return true;
           }
@@ -906,7 +916,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             });
         json out{{"clash", any}, {"pairs", pairs}, {"mode", mode}};
         if (mode == "mesh")
-          out["deflection_mm"] = meshDeflection;
+          out["deflection_mm"] = meshDeflection.load();
         AttachSweepCoverage(out, plan, keep.size(), maxPairs, deadline);
         return out;
       }
@@ -924,7 +934,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         // no distance, and the deflection it was decided to.
         const bool hit = pairMesh(ta, tb);
         return json{{"clash", hit},  {"state", hit ? "clash" : "clear"},
-                    {"mode", mode},  {"deflection_mm", meshDeflection},
+                    {"mode", mode},  {"deflection_mm", meshDeflection.load()},
                     {"a", ta.label}, {"b", tb.label}};
       }
       const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),

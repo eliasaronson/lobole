@@ -309,17 +309,32 @@ Result Overlap(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
                const glm::dmat4& xfB) {
   const auto get = [](const CADShape& s) {
     const uint64_t key = s.PlacementId();
-    if (key != 0) {
-      std::lock_guard<std::mutex> lock(g_mutex);
-      const auto it = g_cache.find(key);
-      if (it != g_cache.end())
-        return it->second;
-    }
+    // The BUILD happens under the lock, not just the map access.
+    //
+    // It used to be check, unlock, build, relock, store — so two workers
+    // that both missed on the same body both called Mesh::Build, and that
+    // ends in CADShape::GenerateMesh, which WRITES the triangulation into
+    // the shared TShape. Two OpenCASCADE meshers on one shape at once
+    // segfaults inside BRepMesh_EdgeDiscret. `interference mode=mesh` runs
+    // its pairs on every core and one body appears in many pairs, so it hit
+    // this whenever two of them raced — intermittently, which is how it read
+    // as a flaky test rather than as the crash it is.
+    //
+    // Serialising the builds is the point rather than a cost: the documented
+    // rule for this codebase is that shapes are warmed single-threaded
+    // before workers touch them (RemoteInspection's WorldBounds pass,
+    // MotionStudy's MeshFor pass), and those warm passes are serial anyway.
+    // This makes the cache hold that rule itself instead of trusting every
+    // future caller to remember it. A hit — which is every call after the
+    // first per body — takes the lock and returns.
+    if (key == 0)
+      return std::shared_ptr<const Mesh>(Mesh::Build(s));
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto it = g_cache.find(key);
+    if (it != g_cache.end())
+      return it->second;
     auto built = Mesh::Build(s);
-    if (key != 0) {
-      std::lock_guard<std::mutex> lock(g_mutex);
-      g_cache[key] = built;
-    }
+    g_cache[key] = built;
     return std::shared_ptr<const Mesh>(built);
   };
   const auto ma = get(a);
