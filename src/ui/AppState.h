@@ -596,13 +596,15 @@ struct RenderJob {
   bool cancel = false;  // set by the UI to abort
   uint32_t width = 1280;
   uint32_t height = 720;
-  uint32_t totalSamples = 128;
+  uint32_t totalSamples = 512;
   uint32_t done = 0; // samples traced so far
   uint32_t seed = 1;
   bool groundPlane = true; // shadow-catcher plane under the scene
   // A neutral sweep behind the model rather than the HDRI photograph. The
   // HDRI still lights the model and still fills its reflections.
   bool studioBackdrop = true;
+  // Edges over the traced image, as the viewport draws them.
+  bool outlines = true;
   std::string outPath;
   // Result (valid once !active after having been started)
   bool finished = false; // a render completed (success or failure)

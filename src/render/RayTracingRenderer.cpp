@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "core/Conventions.h"
+
 #include "render/MeshRenderer.h"
 #include "render/VulkanCommon.h"
 #include "thirdparty/stb_image_write.h" // declarations only; impl lives in Screenshot.cpp
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/packing.hpp>
 #include <iostream>
 #include <stdexcept>
 #include <unistd.h>
@@ -287,6 +289,9 @@ bool RayTracingRenderer::CreateRTPipeline() {
       //    the prefilter chain's base mip is too low-res for either)
       {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
+       nullptr},
+      // 9: rgba32ui outline G-buffer (raygen writes it on the aux launch)
+      {9, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR,
        nullptr}};
 
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -305,7 +310,8 @@ bool RayTracingRenderer::CreateRTPipeline() {
   VkPushConstantRange pushRange{};
   pushRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
   pushRange.offset = 0;
-  pushRange.size = 2 * sizeof(uint32_t); // {uint sampleIndex; uint frameSeed;}
+  // {uint sampleIndex; uint frameSeed; uint auxPass;}
+  pushRange.size = 3 * sizeof(uint32_t);
 
   VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
   pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -651,6 +657,12 @@ struct RTUniforms {
   glm::vec4 lightColor; // rgb = color, w unused
   glm::vec4 ambientColor;
   glm::vec4 params; // x = prefilter mips, y = ray far, z = AO radius
+  // The viewport's fill and rim (conv::kFillLight / kRimLight). Must stay
+  // byte-identical to the block in raygen.rgen / miss.rmiss / closesthit.rchit.
+  glm::vec4 fillDir; // xyz = travel direction, w = intensity
+  glm::vec4 fillColor;
+  glm::vec4 rimDir;
+  glm::vec4 rimColor;
 };
 
 glm::vec3 ACESFilm(const glm::vec3& x) {
@@ -735,6 +747,46 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   viewInfo.subresourceRange.layerCount = 1;
   vkCreateImageView(m_device, &viewInfo, nullptr, &m_stillImageView);
 
+  // --- Outline G-buffer ---
+  m_stillOutlines = desc.outlines;
+  m_stillOutlineColor = desc.outlineColor;
+  m_stillOutlineWidth = desc.outlineWidth;
+  // Supersample the G-buffer so the edge mask downsamples into coverage
+  // rather than a hard 1 px line. It is 16 bytes a pixel and the readback
+  // buffer matches it, so 2x is affordable up to 1080p and 1x above: at 4K a
+  // 2x buffer would be half a gigabyte twice over, on top of the still's own
+  // 132 MB pair.
+  constexpr uint64_t kAuxPixelBudget = 1920ull * 1080ull * 4ull;
+  const uint64_t stillPixels = static_cast<uint64_t>(desc.width) * desc.height;
+  m_auxScale = (stillPixels * 4ull <= kAuxPixelBudget) ? 2u : 1u;
+  // The image is created either way. Binding 9 must be written even with
+  // outlines off (an unwritten descriptor is undefined behaviour, not a
+  // no-op), and it has to be a uint view to match the shader's rgba32ui
+  // qualifier — the accumulation image's float view cannot stand in. With
+  // outlines off it is a 1x1 placeholder that no launch ever writes.
+  {
+    VkImageCreateInfo auxInfo = imgInfo;
+    auxInfo.format = VK_FORMAT_R32G32B32A32_UINT;
+    auxInfo.extent = m_stillOutlines ? VkExtent3D{desc.width * m_auxScale,
+                                                  desc.height * m_auxScale, 1}
+                                     : VkExtent3D{1, 1, 1};
+    if (vkCreateImage(m_device, &auxInfo, nullptr, &m_auxImage) != VK_SUCCESS ||
+        !vkutil::AllocateImageMemory(m_device, m_physicalDevice, m_auxImage,
+                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                     m_auxImageMemory)) {
+      LOG_ERROR("Ray Tracing: failed to create the outline G-buffer");
+      if (m_auxImage != VK_NULL_HANDLE)
+        vkDestroyImage(m_device, m_auxImage, nullptr);
+      m_auxImage = VK_NULL_HANDLE;
+      EndStill();
+      return false;
+    }
+    VkImageViewCreateInfo auxView = viewInfo;
+    auxView.image = m_auxImage;
+    auxView.format = VK_FORMAT_R32G32B32A32_UINT;
+    vkCreateImageView(m_device, &auxView, nullptr, &m_auxImageView);
+  }
+
   // --- Camera + light UBO ---
   RTUniforms u{};
   u.viewInverse = glm::inverse(desc.view);
@@ -747,8 +799,22 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
                           ? glm::normalize(desc.keyLightDir)
                           : conv::kKeyLightDir;
   u.lightDir = glm::vec4(-toLight, 1.8f);
-  u.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f);
+  u.lightColor = glm::vec4(glm::vec3(conv::kKeyLight), 1.0f);
   u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);
+  // Fill and rim carry the shared rig's COLOURS and intensities; their
+  // directions come from the caller, which swings the whole rig off the
+  // camera axis (MakeStillDesc). Travel direction is the negated toward-light
+  // vector, matching lightDir above.
+  const glm::vec3 toFill = glm::length(desc.fillLightDir) > 1e-6f
+                               ? glm::normalize(desc.fillLightDir)
+                               : conv::kFillLightDir;
+  const glm::vec3 toRim = glm::length(desc.rimLightDir) > 1e-6f
+                              ? glm::normalize(desc.rimLightDir)
+                              : conv::kRimLightDir;
+  u.fillDir = glm::vec4(-toFill, conv::kFillLight.a);
+  u.fillColor = glm::vec4(glm::vec3(conv::kFillLight), 1.0f);
+  u.rimDir = glm::vec4(-toRim, conv::kRimLight.a);
+  u.rimColor = glm::vec4(glm::vec3(conv::kRimLight), 1.0f);
   u.params = glm::vec4(static_cast<float>(desc.prefilterMips), desc.rayFar,
                        desc.aoRadius, desc.studioBackdrop ? 1.0f : 0.0f);
 
@@ -803,7 +869,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   // --- Descriptor pool + set ---
   std::vector<VkDescriptorPoolSize> poolSizes = {
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2}, // accumulation + outline G-buffer
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
@@ -854,8 +920,12 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   VkDescriptorImageInfo env{desc.envSampler, desc.environment,
                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
+  VkDescriptorImageInfo auxInfo{};
+  auxInfo.imageView = m_auxImageView;
+  auxInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
   std::vector<VkWriteDescriptorSet> writes(
-      9, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
+      10, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
   for (auto& w : writes)
     w.dstSet = m_rtDescriptorSet, w.descriptorCount = 1;
   writes[0].dstBinding = 0;
@@ -885,6 +955,9 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   writes[8].dstBinding = 8;
   writes[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   writes[8].pImageInfo = &env;
+  writes[9].dstBinding = 9;
+  writes[9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  writes[9].pImageInfo = &auxInfo;
   vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()),
                          writes.data(), 0, nullptr);
 
@@ -904,6 +977,12 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
                   VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
                   VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                   VK_ACCESS_TRANSFER_WRITE_BIT,
+                  VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+  // The G-buffer needs no clear (the launch writes every pixel), only the
+  // layout a storage image has to be in to be written at all.
+  TransitionImage(cb, m_auxImage, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0,
                   VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
   vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
 
@@ -925,7 +1004,7 @@ bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
                           nullptr);
 
   for (uint32_t s = 0; s < samplesInBatch; ++s) {
-    uint32_t push[2] = {firstSample + s, m_stillSeed};
+    uint32_t push[3] = {firstSample + s, m_stillSeed, 0u};
     vkCmdPushConstants(cb, m_rtPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR,
                        0, sizeof(push), push);
     m_rtFunctions.vkCmdTraceRaysKHR(cb, &m_raygenSBT, &m_missSBT, &m_hitSBT,
@@ -953,6 +1032,169 @@ bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
   return true;
 }
 
+// Traces the outline G-buffer and reduces it to per-output-pixel edge
+// coverage. The viewport gets its edges from mesh adjacency (feature edges by
+// dihedral angle, plus boundaries and silhouettes); the still cannot reuse
+// that without a second raster pass, so it detects the same three things as
+// discontinuities in a primary-ray G-buffer:
+//   - a different body id  -> a boundary / silhouette (this is what makes a
+//                             row of butted deck boards read as boards)
+//   - face normals apart by more than 60 degrees -> a feature edge. 60 is
+//                             outline::BuildEdgeAdjacency's featureCos = 0.5,
+//                             so both renderers call the same angle "sharp".
+//   - a large relative jump in hit distance -> a body occluding itself.
+// Returns an empty vector when outlines are off or the readback fails; the
+// caller then writes the picture without them rather than failing the render.
+std::vector<float> RayTracingRenderer::TraceOutlineCoverage() {
+  if (!m_stillOutlines || m_auxImage == VK_NULL_HANDLE)
+    return {};
+
+  const uint32_t aw = m_stillWidth * m_auxScale;
+  const uint32_t ah = m_stillHeight * m_auxScale;
+
+  const VkDeviceSize bufSize =
+      static_cast<VkDeviceSize>(aw) * ah * 16; // rgba32ui
+  VkDeviceMemory mem = VK_NULL_HANDLE;
+  VkBuffer buf = CreateBuffer(bufSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              mem);
+
+  // One extra primary-ray launch. Tracing is cheap next to this render's
+  // fixed costs -- 8x the samples buys only 1.7x the wall clock at 4K -- so
+  // the G-buffer, even supersampled, does not show up in the timings.
+  VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
+  vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
+  vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                          m_rtPipelineLayout, 0, 1, &m_rtDescriptorSet, 0,
+                          nullptr);
+  uint32_t push[3] = {0u, m_stillSeed, 1u};
+  vkCmdPushConstants(cb, m_rtPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR, 0,
+                     sizeof(push), push);
+  m_rtFunctions.vkCmdTraceRaysKHR(cb, &m_raygenSBT, &m_missSBT, &m_hitSBT,
+                                  &m_callableSBT, aw, ah, 1);
+
+  TransitionImage(cb, m_auxImage, VK_IMAGE_LAYOUT_GENERAL,
+                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                  VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                  VK_ACCESS_TRANSFER_READ_BIT);
+  VkBufferImageCopy copy{};
+  copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copy.imageSubresource.layerCount = 1;
+  copy.imageExtent = {aw, ah, 1};
+  vkCmdCopyImageToBuffer(cb, m_auxImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         buf, 1, &copy);
+  vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
+
+  void* mapped = nullptr;
+  vkMapMemory(m_device, mem, 0, bufSize, 0, &mapped);
+  const uint32_t* src = static_cast<const uint32_t*>(mapped);
+
+  const size_t auxCount = static_cast<size_t>(aw) * ah;
+  std::vector<glm::vec3> nrm(auxCount);
+  std::vector<float> dist(auxCount);
+  std::vector<uint32_t> ids(auxCount);
+  for (size_t i = 0; i < auxCount; ++i) {
+    const glm::vec2 nxy = glm::unpackHalf2x16(src[i * 4 + 0]);
+    const glm::vec2 nz = glm::unpackHalf2x16(src[i * 4 + 1]);
+    nrm[i] = glm::vec3(nxy.x, nxy.y, nz.x);
+    std::memcpy(&dist[i], &src[i * 4 + 2], sizeof(float));
+    ids[i] = src[i * 4 + 3];
+  }
+  vkUnmapMemory(m_device, mem);
+  vkDestroyBuffer(m_device, buf, nullptr);
+  vkFreeMemory(m_device, mem, nullptr);
+
+  // outline::BuildEdgeAdjacency's default featureCos.
+  constexpr float kFeatureCos = 0.5f;
+
+  std::vector<uint8_t> edge(auxCount, 0);
+  auto separated = [&](size_t a, size_t b) {
+    if (ids[a] != ids[b])
+      return true;
+    if (ids[a] == 0u) // both background: nothing to outline
+      return false;
+    // No depth test. A surface seen at a grazing angle changes distance fast
+    // between neighbouring pixels, so any threshold loose enough to ignore
+    // that is too loose to catch the self-occlusion it would be for -- it
+    // drew three times the lines the viewport does. Id and normal already
+    // cover boundaries, silhouettes and feature edges; a body occluding
+    // ITSELF along a smooth curve is the one case left out, and drawing it
+    // wrongly everywhere is the worse trade.
+    return glm::dot(nrm[a], nrm[b]) < kFeatureCos;
+  };
+  // Mark the NEARER pixel of a differing pair, not both: marking both doubles
+  // every line, and putting it on the front surface keeps a silhouette sitting
+  // on the body instead of bleeding into the sky behind it.
+  auto nearer = [&](size_t a, size_t b) {
+    if (ids[a] == 0u)
+      return b;
+    if (ids[b] == 0u)
+      return a;
+    return dist[a] <= dist[b] ? a : b;
+  };
+  for (uint32_t y = 0; y < ah; ++y) {
+    for (uint32_t x = 0; x < aw; ++x) {
+      const size_t i = static_cast<size_t>(y) * aw + x;
+      if (x + 1 < aw && separated(i, i + 1))
+        edge[nearer(i, i + 1)] = 1;
+      if (y + 1 < ah && separated(i, i + aw))
+        edge[nearer(i, i + aw)] = 1;
+    }
+  }
+
+  // Widen to the requested line width (separable box dilation), then average
+  // each block of aux pixels down to the output pixel's coverage.
+  // The base mask is already about one OUTPUT pixel wide: a corner is marked
+  // by the horizontal test and the vertical test at two different pixels, and
+  // the block average then spreads it. So dilate only for what is asked for
+  // ABOVE one pixel -- a radius-1 dilation here is a 3x3 element on top of
+  // that, which is how the first version drew 3.4 px lines against the
+  // viewport's 1.0. Truncating (not rounding) keeps 1.5 px at radius 0.
+  const int radius =
+      std::max(0, static_cast<int>((m_stillOutlineWidth - 1.0f) *
+                                   static_cast<float>(m_auxScale) * 0.5f));
+  if (radius > 0) {
+    std::vector<uint8_t> tmp(auxCount, 0);
+    for (uint32_t y = 0; y < ah; ++y)
+      for (uint32_t x = 0; x < aw; ++x) {
+        uint8_t v = 0;
+        for (int d = -radius; d <= radius && !v; ++d) {
+          const int xx = static_cast<int>(x) + d;
+          if (xx >= 0 && xx < static_cast<int>(aw))
+            v = edge[static_cast<size_t>(y) * aw + xx];
+        }
+        tmp[static_cast<size_t>(y) * aw + x] = v;
+      }
+    for (uint32_t y = 0; y < ah; ++y)
+      for (uint32_t x = 0; x < aw; ++x) {
+        uint8_t v = 0;
+        for (int d = -radius; d <= radius && !v; ++d) {
+          const int yy = static_cast<int>(y) + d;
+          if (yy >= 0 && yy < static_cast<int>(ah))
+            v = tmp[static_cast<size_t>(yy) * aw + x];
+        }
+        edge[static_cast<size_t>(y) * aw + x] = v;
+      }
+  }
+
+  std::vector<float> coverage(static_cast<size_t>(m_stillWidth) *
+                              m_stillHeight);
+  const float inv = 1.0f / static_cast<float>(m_auxScale * m_auxScale);
+  for (uint32_t y = 0; y < m_stillHeight; ++y)
+    for (uint32_t x = 0; x < m_stillWidth; ++x) {
+      uint32_t hits = 0;
+      for (uint32_t sy = 0; sy < m_auxScale; ++sy)
+        for (uint32_t sx = 0; sx < m_auxScale; ++sx)
+          hits += edge[static_cast<size_t>(y * m_auxScale + sy) * aw +
+                       (x * m_auxScale + sx)];
+      coverage[static_cast<size_t>(y) * m_stillWidth + x] =
+          static_cast<float>(hits) * inv;
+    }
+  return coverage;
+}
+
 bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
                                        const std::string& pngPath,
                                        std::string* error) {
@@ -963,6 +1205,10 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
   }
   if (totalSamples == 0)
     totalSamples = 1;
+
+  // Traced before the accumulation readback: both use one-shot submits, and
+  // the G-buffer launch must not land between them.
+  const std::vector<float> outline = TraceOutlineCoverage();
 
   const VkDeviceSize pixelBytes = 16; // rgba32f
   VkDeviceSize bufSize =
@@ -999,6 +1245,11 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
     c *= invN;                               // average the accumulated samples
     c = ACESFilm(c);                         // filmic tonemap
     c = glm::pow(c, glm::vec3(1.0f / 2.2f)); // gamma to sRGB
+    c *= 1.1f; // the same post-gamma lift mesh.frag applies
+    // Edges go on after tonemapping, so the line keeps the colour it was
+    // asked for instead of being filmically rolled toward it.
+    if (!outline.empty() && outline[i] > 0.0f)
+      c = glm::mix(c, m_stillOutlineColor, outline[i]);
     rgb[i * 3 + 0] =
         static_cast<uint8_t>(glm::clamp(c.r, 0.0f, 1.0f) * 255.0f + 0.5f);
     rgb[i * 3 + 1] =
@@ -1039,6 +1290,16 @@ void RayTracingRenderer::DestroyStillResources() {
     vkFreeMemory(m_device, m_stillImageMemory, nullptr);
     m_stillImage = VK_NULL_HANDLE;
     m_stillImageMemory = VK_NULL_HANDLE;
+  }
+  if (m_auxImageView != VK_NULL_HANDLE) {
+    vkDestroyImageView(m_device, m_auxImageView, nullptr);
+    m_auxImageView = VK_NULL_HANDLE;
+  }
+  if (m_auxImage != VK_NULL_HANDLE) {
+    vkDestroyImage(m_device, m_auxImage, nullptr);
+    vkFreeMemory(m_device, m_auxImageMemory, nullptr);
+    m_auxImage = VK_NULL_HANDLE;
+    m_auxImageMemory = VK_NULL_HANDLE;
   }
   auto freeBuf = [&](VkBuffer& b, VkDeviceMemory& m) {
     if (b != VK_NULL_HANDLE) {

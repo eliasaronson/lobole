@@ -515,8 +515,11 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 
 // Builds the offline-render descriptor from the current app state (camera +
 // shared IBL maps) for a `width`x`height` still with the given RNG seed.
+// `outlines` is ANDed with the viewport's own outline mode, so a still draws
+// edges exactly when the screen it came from does.
 ::RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
-                            uint32_t seed);
+                            uint32_t seed, bool studioBackdrop = true,
+                            bool outlines = true);
 
 // Full synchronous offline still: sync the scene, build ASes, trace `samples`
 // samples, tonemap and write a PNG to `path`. Blocks until done. Returns false
@@ -530,7 +533,7 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
                          std::string* warning = nullptr,
-                         bool studioBackdrop = true);
+                         bool studioBackdrop = true, bool outlines = true);
 
 // Advances an active AppState::renderJob by one sample batch per call (the
 // non-blocking counterpart of RenderStillBlocking). Call once per UI frame on
