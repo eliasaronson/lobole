@@ -1,5 +1,12 @@
 # A four-cylinder diesel, built complete
 
+Current reference corrections and accuracy limits are recorded in
+[om615-sources.md](om615-sources.md). The historical account below describes
+the earlier model and should not be read as a claim of factory accuracy.
+For iteration, `--build-only` saves an explicitly unchecked project, and
+`--no-export` skips GLB export while retaining the requested checks. The
+standing gate now uses `Asm.check_clashes()` to avoid computing distances.
+
 `generators/om615.py` builds an OM615-shaped engine — 1988 cc, 87 x 83.6,
 five main bearings, a single overhead camshaft on a duplex chain working the
 valves through rocker arms, and a pre-chamber per cylinder — down to the

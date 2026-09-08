@@ -788,13 +788,15 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
           return TopoDS_Wire();
         continue;
       }
+      // Parameter bounds stay on the analytic circle. Converting its ends
+      // through glm::vec2/vec3 first moves them beyond OCC's edge tolerance
+      // at engine scale, rejecting a perfectly valid arc as a sweep path.
       BRepBuilderAPI_MakeEdge mk =
           e.arc ? BRepBuilderAPI_MakeEdge(
                       gp_Circ(gp_Ax2(toPnt(e.center), normal,
                                      gp_Dir(uAxis.x, uAxis.y, uAxis.z)),
                               e.radius),
-                      toPnt(OnCircle(e.center, e.radius, e.angStart)),
-                      toPnt(OnCircle(e.center, e.radius, e.angEnd)))
+                      e.angStart, e.angEnd)
                 : BRepBuilderAPI_MakeEdge(toPnt(e.a), toPnt(e.b));
       if (!mk.IsDone())
         return TopoDS_Wire(); // degenerate edge → reject the path

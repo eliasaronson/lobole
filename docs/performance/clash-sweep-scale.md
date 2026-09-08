@@ -1,5 +1,69 @@
 # Making the clash sweep scale
 
+## Follow-up: standing validation and iteration modes
+
+`Asm.check_clashes()` now provides an explicit whole-assembly, exact-volume
+gate using the existing parallel `interference` RPC. It rejects partial
+sweeps and clashes, and refuses mesh mode or a named-pair restriction.
+`Asm.check()` retains its contact/connectivity/near-miss report and behavior.
+The OM615 generator now uses the cheaper gate because it only needs volume.
+
+Reproduction on a loaded engine's active `engine` tab in a scratch instance:
+
+```sh
+python3 tests/om615_sweep_benchmark.py PORT /tmp/om615-sweeps.json
+```
+
+On the unchanged 76-part / 241-occurrence baseline, after the motion study,
+the ABBA comparison measured these complete exact sweeps:
+
+| Pass | Seconds in sweep | Exact candidates | Clashes |
+|---|---:|---:|---:|
+| Contact report | 34.947 | 787 | 0 |
+| Volume only | 20.290 | 761 | 0 |
+| Volume only, repeat | 20.773 | 761 | 0 |
+| Contact report, repeat | 46.556 | 787 | 0 |
+
+The final pass overlapped the start of a separate revised-engine build, so
+do not use it to inflate the speedup. The uncontended first comparison is
+**1.72× (42% less time)** for standing validation, not an end-to-end speedup.
+The 26 extra contact candidates are the near-distance band. Candidate counts
+are from the post-study pose, not the initial standing pose's 821 candidates.
+All four reports were complete and their exact clash lists matched.
+
+The fresh baseline build took 207.8 s and its unchanged 49-sample motion
+study took 209.0 s on this run; earlier machine/run timings below should not
+be treated as a controlled comparison with these numbers.
+
+Iteration controls in `generators/om615.py`:
+
+- `--component exhaust` (also block, head, sump, timing-cover, cam-cover,
+  intake) builds and saves one unchecked part for rapid shape iteration.
+- `--build-only` writes `om615-unchecked.dsgn` and clearly reports that
+  standing and motion checks have not run.
+- Every completed build saves that draft before expensive checks, so a
+  validation failure leaves geometry available to inspect.
+- `--no-export` runs validation but skips animated GLB export.
+- `motion-report.json` preserves the motion verdict and per-pose results,
+  including a failing study, for inspection without rerunning it.
+- `timings.json` records build, standing, motion, export and total time for
+  a completed run (omitted phases have no timing entry).
+
+The SDK smoke test exercises a real collision, a seated touching joint and
+a zero-pair budget, and verifies the live response contract. Nothing here
+changes tessellation, exact-boolean tolerances, or motion sampling.
+
+The final revised 77-part / 249-occurrence engine measured 65.7 s to build,
+13.12 s for the complete standing sweep, 166.06 s for the 49-pose exact
+motion study, and 1.88 s for GLB export: **247.56 s total** including saving.
+The original baseline build measured 207.8 s. Geometry has changed between
+those builds, including replacing faulty spline manifolds with complete
+analytic elbows; this is an observed workflow improvement, not an isolated
+kernel benchmark. The unchanged-geometry ABBA comparison above isolates the
+standing gate's improvement.
+
+## Earlier profiling record
+
 Measured on the OM615 (76 parts, 241 occurrences) on 2026-09-07, an Intel
 Core Ultra 9 185H (16 cores / 22 threads, hybrid).
 

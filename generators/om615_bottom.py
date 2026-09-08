@@ -7,6 +7,7 @@ the assembly module can place them and nothing has to be built in an order
 this file knows about. The numbers all come from om615_spec.
 """
 import math
+import struct
 import os
 import sys
 
@@ -25,6 +26,52 @@ from om615_spec import *  # noqa: E402,F401,F403
 # actually described by, so changing a number re-draws it instead of moving a
 # literal. These two helpers are the whole vocabulary.
 
+def plane_span(z0, z1):
+    """Span between the API's float sketch planes, not unsnapped doubles.
+
+    Otherwise a slab ending at 242.9 passes about 0.000006 mm
+    through a gasket whose starting plane is stored at 242.899993896.
+    """
+    snap = lambda z: struct.unpack("f", struct.pack("f", z))[0]
+    return snap(z1) - snap(z0)
+
+
+def casting_finish(p, material="aluminum", color=(0.48, 0.49, 0.50)):
+    """A rough casting surface, separate from the physical material."""
+    p.material(material)
+    p.app.set_appearance(body=0, color=list(color), roughness=0.65, metallic=0.8)
+
+
+def rounded_polygon(sk, points, radius):
+    """Tangent circular corners, kept inside each corner's adjacent edges.
+
+    Scalar or per-corner radii; zero preserves a machined/flange corner.
+    The profiles remain analytic B-Reps rather than faceted approximations.
+    """
+    corners = []
+    for i, pt in enumerate(points):
+        v = V((*pt, 0))
+        a = V((*points[i - 1], 0)) - v
+        b = V((*points[(i + 1) % len(points)], 0)) - v
+        u, w = a.unit(), b.unit()
+        angle = math.acos(max(-1.0, min(1.0, sum(u[j]*w[j] for j in range(3)))))
+        r = radius[i] if isinstance(radius, (list, tuple)) else radius
+        t = min(r / math.tan(angle / 2), 0.45*a.length(), 0.45*b.length())
+        if t < 1e-8:
+            corners.append((pt, None, pt))
+            continue
+        r = t * math.tan(angle / 2)
+        centre = v + (u + w).unit() * (r / math.sin(angle / 2))
+        mid = centre + (v - centre).unit() * r
+        corners.append((tuple(v[j]+u[j]*t for j in range(2)),
+                        tuple(mid[j] for j in range(2)),
+                        tuple(v[j]+w[j]*t for j in range(2))))
+    for i, (a, mid, b) in enumerate(corners):
+        sk.line(corners[i-1][2], a)
+        if mid is not None:
+            sk.arc_through(a, mid, b)
+
+
 def slab(p, x0, y0, z0, x1, y1, z1, name, mode="new_body"):
     """A rectangular block, drawn on its BOTTOM face and extruded up. Drawn
     on the top and reversed instead, the plane's V axis flips with it and
@@ -32,14 +79,14 @@ def slab(p, x0, y0, z0, x1, y1, z1, name, mode="new_body"):
     part and wrong on every other."""
     sk = p.sketch(Plane.xy(z0), name=name)
     sk.rect((x0, y0), (x1, y1))
-    return p.extrude(sk.add(), z1 - z0, mode=mode, name=name)
+    return p.extrude(sk.add(), plane_span(z0, z1), mode=mode, name=name)
 
 
 def disc(p, centre, d, z0, z1, name, mode="add"):
     """A round column between two heights, on the bore's own axis."""
     sk = p.sketch(Plane.xy(z0), name=name)
     sk.circle(centre, d=d)
-    return p.extrude(sk.add(), z1 - z0, mode=mode, name=name)
+    return p.extrude(sk.add(), plane_span(z0, z1), mode=mode, name=name)
 
 
 def axis_solid(p, start, target, d, name, mode="add", over=0.0):
@@ -121,12 +168,18 @@ def block(app):
     # narrower than the skirt for the same reason a real one is.
     c = CASE_CHAMFER
     sec = p.sketch(Plane.xz(BLOCK_Y1), name="Crankcase")
-    sec.polyline([(-CASE_X + c, PAN_RAIL), (CASE_X - c, PAN_RAIL),
-                  (CASE_X, PAN_RAIL + c), (CASE_X, BLOCK_STEP),
-                  (-CASE_X, BLOCK_STEP), (-CASE_X, PAN_RAIL + c)])
+    rounded_polygon(sec,
+                    [(-CASE_X + c, PAN_RAIL), (CASE_X - c, PAN_RAIL),
+                     (CASE_X, PAN_RAIL + c), (CASE_X, BLOCK_STEP - 16.0),
+                     (DECK_X, BLOCK_STEP + 16.0),
+                     (-DECK_X, BLOCK_STEP + 16.0),
+                     (-CASE_X, BLOCK_STEP - 16.0), (-CASE_X, PAN_RAIL + c)],
+                    [0, 0, 0, 10, 10, 10, 10, 0])
     p.extrude(sec.add(), BLOCK_Y1 - BLOCK_Y0, mode="new_body", name="Crankcase")
-    slab(p, -DECK_X, BLOCK_Y0, BLOCK_STEP, DECK_X, BLOCK_Y1, DECK,
-         "Cylinder block", mode="add")
+    upper = p.sketch(Plane.xz(BLOCK_Y1), name="Cylinder casting draft")
+    upper.polyline([(-DECK_X-4, BLOCK_STEP), (DECK_X+4, BLOCK_STEP),
+                    (DECK_X, DECK), (-DECK_X, DECK)])
+    p.extrude(upper.add(), length, mode="add", name="Cylinder block")
     return _block_rest(p, length)
 
 
@@ -212,10 +265,14 @@ def _block_rest(p, length):
 
     # Head bolts: blind in the deck, ten of them, on the list the HEAD drills
     # through — one list, not two that agree until one is edited.
-    deck = p.sketch(Plane.xy(DECK, flip=True), name="Head bolt holes")
+    # Start outside the casting. Sketch planes store float coordinates while
+    # the slab's extrusion distance is double: at deck=242.9 an exactly
+    # coplanar cut started 0.000006 mm below the face, leaving a membrane
+    # that the fastener's axial probe correctly detected as a blocked hole.
+    deck = p.sketch(Plane.xy(DECK + 1.0, flip=True), name="Head bolt holes")
     for x, y in HEAD_BOLT:
         deck.circle((x, y), d=HEAD_BOLT_D + TAP_FIT)
-    p.extrude(deck.add(), 60.0, mode="cut", name="Head bolt holes")
+    p.extrude(deck.add(), 61.0, mode="cut", name="Head bolt holes")
 
     # The centre main carries the thrust: a recess each side of its web for
     # the washers that take the clutch's push.
@@ -295,7 +352,7 @@ def _block_rest(p, length):
     wp.circle((0, WATER_PUMP_Z), d=50.0)
     p.extrude(wp.add(), 20.0, mode="cut", name="Water pump inlet")
 
-    p.material("steel")
+    casting_finish(p, "steel", (0.32, 0.34, 0.35))
     # Faces the covers bolt to, and the frames the assembly mates by.
     p.frame("crank_axis", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("deck", origin=(0, 0, DECK), z=(0, 0, 1), x=(1, 0, 0))
@@ -565,9 +622,11 @@ def piston(app):
         plane=Plane.xz(), axis="z", name="Piston")
     for i, (t, dz) in enumerate(zip(RING_T, RING_Z)):
         z = PIN_H + dz
+        groove_width = t + 2 * RING_SIDE_CLEARANCE
         g = p.sketch(Plane.xz(), name=f"Ring groove {i + 1}")
         g.polyline([(r - RING_GROOVE_DEPTH, z), (r + 1.0, z),
-                    (r + 1.0, z - t), (r - RING_GROOVE_DEPTH, z - t)])
+                    (r + 1.0, z - groove_width),
+                    (r - RING_GROOVE_DEPTH, z - groove_width)])
         p.revolve(g.add(), axis="z", mode="cut", name=f"Ring groove {i + 1}")
     # Hollow underside, then the two pin bosses put back inside it.
     under = p.sketch(Plane.xz(), name="Underside")
@@ -601,10 +660,24 @@ def piston(app):
         pockets.circle((vx, dy), d=VALVE_HEAD_D[kind] + 3.0)
     p.extrude(pockets.add(), 3.5, mode="cut", name="Valve pockets")
 
+    # The catalog-height skirt needs clearance for the counterweights at
+    # BDC. Relieve its fore/aft edges where the webs run, retaining full
+    # skirt length on the thrust faces. This relief is a derived modeling
+    # shape, not a measured factory piston profile.
+    relief_top = WEB_R + FIT - (ROD_L - CRANK_R)
+    if relief_top > -SKIRT:
+        inner = ROD_JW / 2.0 - FIT
+        for side in (-1, 1):
+            y0, y1 = sorted((side * inner, side * BORE))
+            slab(p, -BORE, y0, -SKIRT - 1.0,
+                 BORE, y1, relief_top, f"Counterweight relief {side}",
+                 mode="cut")
+
     p.frame("wrist_pin", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("slide", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     for i, dz in enumerate(RING_Z):
-        p.frame(f"ring_{i}", origin=(0, 0, PIN_H + dz - RING_T[i] / 2.0),
+        p.frame(f"ring_{i}", origin=(0, 0, PIN_H + dz - RING_T[i] / 2.0
+                                    - RING_SIDE_CLEARANCE),
                 z=(0, 0, 1), x=(1, 0, 0))
     for sy, nm in ((1, "clip_r"), (-1, "clip_f")):
         p.frame(nm, origin=(0, sy * (GUDGEON_L / 2.0 - 3.0), 0), z=(0, 1, 0),
@@ -649,7 +722,7 @@ def rings(app):
                                              "oil ring"))):
         made.append(ring(app, nm, BORE - FIT,
                           BORE - 2 * (RING_GROOVE_DEPTH - 0.6),
-                          t - 0.6, angle=352.0, material="steel"))
+                          t, angle=352.0, material="steel"))
     return made
 
 
@@ -884,9 +957,12 @@ def sump(app):
     floor = bx - 26.0
 
     def section(sk, o):
-        sk.polyline([(-bx + o, PAN_RAIL), (bx - o, PAN_RAIL),
-                     (bx - o, SUMP_Z + 44.0), (floor - o, SUMP_Z + o),
-                     (-floor + o, SUMP_Z + o), (-bx + o, SUMP_Z + 44.0)])
+        rounded_polygon(sk,
+                        [(-bx + o, PAN_RAIL), (bx - o, PAN_RAIL),
+                         (bx - o, SUMP_Z + 44.0), (floor - o, SUMP_Z + o),
+                         (-floor + o, SUMP_Z + o),
+                         (-bx + o, SUMP_Z + 44.0)],
+                        [0, 0, 18-o, 18-o, 18-o, 18-o])
 
     outer = p.sketch(Plane.xz(SUMP_Y1), name="Pan")
     section(outer, 0.0)
@@ -917,7 +993,7 @@ def sump(app):
     drain = p.sketch(Plane.xy(SUMP_Z - 9.0), name="Drain")
     drain.circle((0, SUMP_Y1 - 40.0), d=DRAIN_D)
     p.extrude(drain.add(), 16.0, mode="cut", name="Drain")
-    p.material("steel")
+    casting_finish(p, "steel", (0.22, 0.23, 0.24))
     p.frame("rail", origin=(0, 0, PAN_RAIL), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("drain", origin=(0, SUMP_Y1 - 40.0, SUMP_Z - 8.0), z=(0, 0, -1),
             x=(1, 0, 0))
@@ -1246,11 +1322,15 @@ def _cover_outline(sk, inset=0.0, open_floor=False):
     """
     k = inset
     floor = PAN_RAIL - 1.0 if open_floor else PAN_RAIL + k
-    sk.polyline([(-100.0 + k, floor), (100.0 - k, floor),
-                 (100.0 - k, 110.0), (88.0 - k, 130.0),
-                 (88.0 - k, COVER_TOP - 30.0), (40.0, COVER_TOP - k),
-                 (-40.0, COVER_TOP - k), (-88.0 + k, COVER_TOP - 30.0),
-                 (-88.0 + k, 130.0), (-100.0 + k, 110.0)])
+    radius = COVER_TOP - CAM_Z - k
+    sk.polyline([(-100+k, floor), (100-k, floor), (100-k, 110),
+                 (88-k, 130), (88-k, CAM_Z-20), (radius, CAM_Z)],
+                close=False)
+    # A concentric crown clears the actual chain envelope and has a constant
+    # radial wall, instead of the old house-shaped polygon across the top.
+    sk.arc((0, CAM_Z), radius, 0, 180)
+    sk.polyline([(-radius, CAM_Z), (-88+k, CAM_Z-20), (-88+k, 130),
+                 (-100+k, 110), (-100+k, floor)], close=False)
 
 
 def timing_cover(app):
@@ -1275,7 +1355,7 @@ def timing_cover(app):
     for x, z in COVER_BOLTS + COVER_BOLTS_HEAD:
         holes.circle((x, z), d=9.0)
     p.extrude(holes.add(), back - COVER_Y0, mode="cut", name="Bolt holes")
-    p.material("aluminum")
+    casting_finish(p)
     p.frame("face", origin=(0, back, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("front_seal", origin=(0, FRONT_SEAL_Y, 0), z=(0, 1, 0),
             x=(1, 0, 0))

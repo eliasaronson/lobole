@@ -47,6 +47,23 @@ TEST_CASE("Hollow pipe volume is the annulus times length", "[pipe]") {
              WithinRel(annulus * 10.0, 2e-2));
 }
 
+TEST_CASE("Pipe accepts an arc at engine-scale fractional coordinates",
+          "[pipe][sweep]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>(
+      "Elbow", SketchPlane(glm::vec3(0, -135.5f, 0), glm::vec3(0, -1, 0),
+                           glm::vec3(1, 0, 0)));
+  const double radius = 194.9, start = 1.23, end = 2.75;
+  sk->AddEntity(sketch::Arc{{88.0f, 83.5f}, radius, start, end});
+  doc.AddFeature(std::move(sk));
+  const uint64_t path = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  doc.AddFeature(std::make_unique<PipeFeature>("Runner", path, 44.0));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 22.0 * 22.0 * radius * (end - start), 1e-5));
+}
+
 TEST_CASE("Pipe runs along a 3D helix (curves-3d P2)", "[pipe][curve3d]") {
   Document doc;
   auto cv = std::make_unique<CurveFeature>("Helix", Curve3DKind::Helix);

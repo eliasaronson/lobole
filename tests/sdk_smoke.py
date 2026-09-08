@@ -308,7 +308,13 @@ def main():
         rig2 = app.assembly("rig2")
         bo = rig2.place(block, fixed=True)
         lo = rig2.place(lid)
+        # Overlapping solids and budget-limited sweeps must both fail.
+        refused(rig2.check_clashes, "clash")
+        refused(lambda: rig2.check_clashes(max_pairs=0), "TRUNCATED")
+        refused(lambda: rig2.check_clashes(mode="mesh"), "exact")
         rig2.fasten((bo, "top"), lo, flipped=False)
+        expect(not rig2.check_clashes()["clash"],
+               "a lid seated on its block touches without interfering")
         expect(abs(lo.frame().origin.z - 10.0) < 0.01,
                f"the lid seats on the block: {lo.frame().origin}")
         block.activate()

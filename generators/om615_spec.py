@@ -17,10 +17,13 @@ rather than a petrol four with a diesel label on it.
 
 Everything with a unit is derived from the four numbers a person would
 actually quote for an engine (bore, stroke, rod, bore pitch) wherever the
-derivation is real, and written down as a measurement where it is not.
+derivation is real. Other values include design estimates; sourced dimensions
+are identified separately in docs/modeling/om615-sources.md.
 """
 import math
 
+# Reference target: early 200 D/8, OM615.913 (21:1), not the later 615.940.
+# Verified dimensions and remaining approximations: docs/modeling/om615-sources.md.
 # ---- the four numbers ------------------------------------------------------
 BORE = 87.0
 STROKE = 83.6
@@ -40,10 +43,11 @@ FIRING_TDC = [360.0 * FIRING_ORDER.index(k + 1) / 2.0 for k in range(N_CYL)]
 THROW_DEG = [0.0, 180.0, 180.0, 0.0]   # which throw each cylinder is on
 
 # ---- the reciprocating stack ----------------------------------------------
-PIN_H = 47.0              # gudgeon-pin centre to crown: a diesel's is tall
+PIN_H = 52.9              # Proxmann 71160800, OM615.913, catalog p.67
+PISTON_HEIGHT = 91.4      # same drawing: crown to skirt bottom
 SQUISH = 3.2              # crown to deck at TDC
-DECK = CRANK_R + ROD_L + PIN_H + SQUISH            # 237.0
-SKIRT = 30.0              # pin centre to the bottom of the skirt
+DECK = CRANK_R + ROD_L + PIN_H + SQUISH
+SKIRT = PISTON_HEIGHT - PIN_H
 # Running fits are drawn at 0.5 mm RADIAL, everywhere, and that is a
 # modelling number rather than an engineering one: a piston runs at 0.1 mm
 # and a bearing shell at 0.05, but the collision mesh deflects ~0.4 mm on
@@ -52,11 +56,12 @@ SKIRT = 30.0              # pin centre to the bottom of the skirt
 # written down.
 FIT = 1.0                 # diametral
 PISTON_CLEARANCE = FIT
-GUDGEON_D = 30.0
+GUDGEON_D = 26.0          # Proxmann 71160800: 26 x 72 mm pin
 GUDGEON_L = 72.0
 BUSH_OD = 36.0            # small-end bush outside diameter
 SMALL_END_D = 46.0
-RING_T = [2.5, 2.5, 4.0]  # top compression, second, oil control
+RING_T = [3.0, 2.0, 4.0]  # Proxmann 71160800 ring stack
+RING_SIDE_CLEARANCE = 0.05  # modeled axial clearance per groove flank
 RING_GROOVE_DEPTH = 4.5
 RING_Z = [-9.0, -16.0, -24.0]      # below the crown
 BOWL_D = 46.0             # the shallow dish a pre-chamber engine's piston has
@@ -184,9 +189,11 @@ COVER_LIP = 5.0           # how far the cam cover overhangs the head
 HEAD_CHAMFER = 10.0       # the head's lower outer edges
 
 # ---- the head --------------------------------------------------------------
-FIRE_FACE = DECK + GASKET_T          # 238.5, the head's underside
-HEAD_X = 86.0             # WIDER than the block's deck: the rocker shafts
-                          # sit outboard of both valves and have to be in it
+FIRE_FACE = DECK + GASKET_T          # the head's underside
+HEAD_X = 86.0             # Wider than the deck to enclose the rocker shafts.
+CAM_COVER_BOLT_X = HEAD_X - 1.0
+CAM_COVER_BOSS_D = 16.0
+CAM_COVER_BOSS_H = 40.0  # Through-roof bolt towers keep screw heads accessible.
 HEAD_H = 155.0            # up to the camshaft's own centreline, which is
                           # where an overhead cam's saddles are split.
                           # It is the VALVE's length that sets this: the
@@ -194,7 +201,7 @@ HEAD_H = 155.0            # up to the camshaft's own centreline, which is
                           # between the cam and the valve's tip, and at 134
                           # the spring retainer came down past the chamber
                           # floor and onto the stem seal.
-HEAD_TOP = FIRE_FACE + HEAD_H        # 372.5
+HEAD_TOP = FIRE_FACE + HEAD_H
 # The two valves are staggered ACROSS the bore, not side by side on its
 # centreline. Each is under its own cam lobe, and a lobe presses a rocker
 # that lies in ONE plane of constant y — so the valve, its lobe and its
@@ -205,12 +212,13 @@ HEAD_TOP = FIRE_FACE + HEAD_H        # 372.5
 VALVE_X = 18.0
 VALVE_DY = 10.0           # intake at (-X, -dy), exhaust at (+X, +dy)
 VALVE = {"intake": (-VALVE_X, -VALVE_DY), "exhaust": (VALVE_X, VALVE_DY)}
-STEM_D = 9.0
-VALVE_HEAD_D = {"intake": 36.0, "exhaust": 32.0}
+STEM_D = 9.92            # within both diesel stem ranges, manual p.24
+STEM_TIP_CHAMFER = 0.5   # Modeled edge break; not a factory dimension.
+VALVE_HEAD_D = {"intake": 38.8, "exhaust": 33.2}  # manual p.24 midpoints
 SEAT_ANGLE = 45.0
-# +6, not +8: staggered across the bore the two rings are 41.2 mm apart and
-# at +8 their rims are 42 — they overlapped each other by eight tenths.
-SEAT_OD = {k: d + 6.0 for k, d in VALVE_HEAD_D.items()}
+# Insert outside diameters are modeling dimensions. Leave 2 mm radial wall
+# around the corrected heads, bounded by the bore and the adjacent insert.
+SEAT_OD = {k: d + 4.0 for k, d in VALVE_HEAD_D.items()}
 SEAT_T = 6.0
 GUIDE_OD = 15.0
 GUIDE_LEN = 42.0          # ends BELOW where the retainer comes down to
@@ -234,46 +242,29 @@ MANIFOLD_STUD_DEPTH = 15.0           # shallow ON PURPOSE: 26 deep and the
                                      # stud runs into the head bolt's own
                                      # boss, which is 12.5 mm away in y and
                                      # the full height of the head in z
-MANIFOLD_CONVERGE = 0.75             # how far each runner draws in toward
-                                     # the log — at 0.34 the intake runner's
-                                     # bore swallowed its own outer stud
-INT_CONVERGE = 0.90                  # the intake barely converges: it is a
-                                     # plenum with four stubs, not a header
-# Both manifolds are LOGS with curved branches — swept along fitted splines,
-# not straight cylinders between two flanges. A runner leaves its port on the
-# port's own axis and arrives at the log on the log's, and everything between
-# is a curve; and the branches are built SOLID and bored afterwards, because
-# two hollow tubes unioned leave each one's wall across the other's throat.
-#
+# Both manifolds have analytic circular elbows into a longitudinal collector.
+# The bend radius is computed from each port and collector position, with a
+# horizontal start tangent so the gasket face remains planar.
 # (x, z, outer, bore) for each log, and the outer/bore of its branches.
 INT_LOG = (-140.0, FIRE_FACE + 130.0, 78.0, 62.0)   # high, like the real one
-INT_LOG_Y = (-172.0, 172.0)
 INT_RUNNER = (42.0, 32.0)
-EXH_LOG_Y = (-72.0, 162.0)
 EXH_RUNNER = (44.0, 34.0)
+MANIFOLD_END_ALLOWANCE = 8.0
 
 
-def land_y(kind, cy):
-    """Where a runner MEETS its log — drawn in toward the log's middle by
-    MANIFOLD_CONVERGE, which is what makes the exhaust side a four-into-one
-    instead of four stubs into a pipe."""
-    span = INT_LOG_Y if kind == "intake" else EXH_LOG_Y
-    mid = sum(span) / 2.0
-    c = INT_CONVERGE if kind == "intake" else MANIFOLD_CONVERGE
-    return mid + (cy + VALVE[kind][1] - mid) * c
+def collector_span(kind, runner):
+    # Enclose the whole outer tube, with an allowance beyond its envelope.
+    margin = runner[0] / 2.0 + MANIFOLD_END_ALLOWANCE
+    return (CYL_Y[0] + VALVE[kind][1] - margin,
+            CYL_Y[-1] + VALVE[kind][1] + margin)
 
 
-# How far the longest runner has to swing sideways to reach the collector...
-EXH_SWEEP = max(abs(land_y("exhaust", cy) - (cy + VALVE["exhaust"][1]))
-                for cy in CYL_Y)
-# ...and therefore how far OUT the collector stands. A tube swept round a
-# bend tighter than its own radius crosses itself; OCC cuts with such a pipe
-# without complaint and takes the rest of the manifold with it — 91% of this
-# one, leaving a lump that no longer touched anything and so no longer
-# clashed with anything either. So the standoff is DERIVED: about as much
-# length as the runner swings sideways, and never less than the tube itself.
-EXH_LOG = (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD
-           + max(1.4 * EXH_SWEEP, 1.5 * EXH_RUNNER[0]),
+INT_LOG_Y = collector_span("intake", INT_RUNNER)
+EXH_LOG_Y = collector_span("exhaust", EXH_RUNNER)
+
+
+# Collector standoff leaves room for the elbow and a core around its bore.
+EXH_LOG = (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD + 1.5*EXH_RUNNER[0],
            FIRE_FACE + 14.0, 62.0, 50.0)
 # The spring sits in a POCKET sunk below the rocker chamber's floor. On the
 # floor itself there are only 20 mm between the seat and the retainer, which
@@ -281,7 +272,7 @@ EXH_LOG = (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD
 SPRING_SEAT_Z = FIRE_FACE + 28.0
 SPRING_POCKET_D = 38.0
 SPRING_D = 30.0           # mean coil diameter
-SPRING_WIRE = 4.0
+SPRING_WIRE = 3.8         # diesel spring wire, manual p.24
 RETAINER_D = 34.0
 # How far below the stem's tip the collets grip. Not 16: the rocker's arm
 # carries on past its valve pad toward the cam, and at full lift that part
@@ -325,7 +316,7 @@ GLOW_FACE = (-HEAD_X, PRE_DY, FIRE_FACE + 20.0)
 GLOW_TARGET = (PRE_X - PRE_D / 2.0 - 2.0, PRE_DY, FIRE_FACE + 24.0)
 
 # ---- the valve gear --------------------------------------------------------
-CAM_Z = HEAD_TOP                     # 372.5: the saddles ARE the top face
+CAM_Z = HEAD_TOP                     # the saddles are the top face
 CAM_SHAFT_D = 32.0
 CAM_JOURNAL_D = 44.0
 CAM_BEARING_W = 20.0

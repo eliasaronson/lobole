@@ -3,7 +3,7 @@
 overhead camshaft on a duplex chain, rocker arms, and a pre-chamber per
 cylinder — built complete, down to the bearing shells and the seals.
 
-    python3 generators/om615.py --port <port> [--out DIR] [--stage bottom]
+    python3 generators/om615.py --port <port> [--out DIR] [--build-only]
 
 Three modules: `om615_spec` is every shared number, `om615_bottom` and
 `om615_top` build the parts, and this one puts them together, drives them and
@@ -14,6 +14,7 @@ relation for its lift and a rack relation that makes its rocker follow.
 Findings go in docs/modeling/om615-dogfood.md.
 """
 import argparse
+import json
 import math
 import os
 import sys
@@ -348,7 +349,8 @@ def top_end(app, rig, occ, main):
     rig.fasten((ho, "cover_rail"), (cvo, "rail"), flipped=False)
     rig.fasten((cvo, "filler"), (rig.place(filler), "seat"), flipped=False)
     _solved("top end", rig)
-    return {"head": ho, "camshaft": cam_occ, "valves": lifts}, cam_mate
+    return {"head": ho, "camshaft": cam_occ, "valves": lifts,
+            "cam cover": cvo}, cam_mate
 
 
 # Two dozen tabs in one strip is a list you scroll rather than read, so the
@@ -425,6 +427,45 @@ def pose(sample, occurrence, axis=2):
                 if p["occurrence"] == occurrence.id)
 
 
+def reference_dimensions(app):
+    """Measure finished B-Reps, so a changed constant is not its own proof."""
+    measured = {}
+    for name, axes in (
+            ("piston", {2: PISTON_HEIGHT}),
+            ("gudgeon pin", {0: GUDGEON_D, 2: GUDGEON_L}),
+            ("intake valve", {0: VALVE_HEAD_D["intake"]}),
+            ("exhaust valve", {0: VALVE_HEAD_D["exhaust"]}),
+            ("top ring", {2: RING_T[0]}),
+            ("second ring", {2: RING_T[1]}),
+            ("oil ring", {2: RING_T[2]})):
+        part = app.part(name)
+        lo, hi = part.bbox()
+        volume = part.volume()
+        if volume <= 0:
+            raise SdkError(f"{name} has no solid volume")
+        extents = [hi[i] - lo[i] for i in range(3)]
+        for axis, expected in axes.items():
+            if abs(extents[axis] - expected) > 0.01:
+                raise SdkError(f"{name} measured extent {extents[axis]:.3f} "
+                               f"differs from reference {expected:.3f} mm")
+        measured[name] = dict(extents_mm=extents, volume_mm3=volume)
+        if name == "piston":
+            # The part's pin axis is z=0; its crown is the highest face.
+            if abs(hi[2] - PIN_H) > 0.01:
+                raise SdkError("piston compression height differs from reference")
+            measured[name]["compression_height_mm"] = hi[2]
+        if name.endswith(" valve"):
+            rims = part.body().edges(circular=True, radius=STEM_D / 2.0,
+                                     tol=0.001)
+            if not rims:
+                raise SdkError(f"{name}: no stem edge at the reference diameter")
+            measured[name]["stem_diameter_mm"] = 2.0 * rims[0].radius
+
+    print("  measured piston height, pin size and valve head diameters match "
+          "the reference dimensions")
+    return measured
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
@@ -437,10 +478,31 @@ def main():
                          "mesh's deflection on an engine this size is 1.17 "
                          "mm, so every running fit in it reads as contact")
     ap.add_argument("--no-study", action="store_true")
+    ap.add_argument("--build-only", action="store_true",
+                    help="save an unchecked draft for geometry iteration")
+    ap.add_argument("--no-export", action="store_true",
+                    help="run all checks but skip animated GLB export")
+    ap.add_argument("--component", choices=("block", "head", "sump",
+                    "timing-cover", "cam-cover", "intake", "exhaust"),
+                    help="build one component for fast shape iteration")
     a = ap.parse_args()
     app = connect(a.port)
     app.new()
-    t0 = time.time()
+    t0 = time.perf_counter()
+    if a.component:
+        builders = {"block": B.block, "head": T.head, "sump": B.sump,
+                    "timing-cover": B.timing_cover, "cam-cover": T.cam_cover,
+                    "intake": T.intake_manifold, "exhaust": T.exhaust_manifold}
+        part = builders[a.component](app)
+        part.activate()
+        os.makedirs(a.out, exist_ok=True)
+        path = os.path.join(a.out, f"{a.component}-unchecked.dsgn")
+        app.save_project(path=path)
+        print(f"  component: {part.name}, {part.volume():.1f} mm3, "
+              f"{time.perf_counter() - t0:.1f}s -> {path}")
+        print("  component only: assembly and motion checks have NOT run")
+        return 0
+    timings = {}
     rig = app.assembly("engine")
     occ, main_mate = bottom_end(app, rig)
     front = front_and_rear(app, rig, occ, main_mate)
@@ -449,37 +511,45 @@ def main():
     for part in app.list_parts()["parts"]:
         if part["name"] == "Part 1":
             app.delete_part(part=part["name"])
+    timings["build_s"] = time.perf_counter() - t0
     print(f"  built {len(rig.occurrences())} occurrences from "
-          f"{len(app.parts())} parts in {time.time() - t0:.1f}s")
+          f"{len(app.parts())} parts in {timings['build_s']:.1f}s")
+    os.makedirs(a.out, exist_ok=True)
+    with open(os.path.join(a.out, "reference-dimensions.json"), "w") as f:
+        json.dump(reference_dimensions(app), f, indent=2)
+    rig.activate()
+    # Save before expensive validation: a failing gate must leave geometry
+    # available for inspection. The filename explicitly says it is a draft.
+    draft = os.path.join(a.out, "om615-unchecked.dsgn")
+    app.save_project(path=draft)
+    print(f"  unchecked build: {draft}")
+    if a.build_only:
+        print("  draft only: standing and motion checks have NOT run")
+        return 0
 
     # ---- the standing check: nothing is inside anything else -------------
-    # `connected=False` because the pistons, valves and rockers are held by
-    # mates rather than by touching, and `clearances=False` because every
-    # running fit in this engine is a deliberate half-millimetre.
+    # Running fits are intentional: ask only for interference, without the
+    # costly distances that contact_report needs for connectivity/near misses.
     #
-    # The BUDGET is the point. contact_report is bounded — closest pairs
+    # The BUDGET is the point. Both sweep APIs are bounded — closest pairs
     # first, then it stops and says so — and at its defaults it reached 145
     # of this engine's 790 candidate pairs, found nothing, and read as a
     # clean bill of health. It is also the only check that looks at parts
     # RIGID to each other, which a motion study skips by design: between
     # them, the two of them had never examined 72 real overlaps.
-    report = rig.check(connected=False, clearances=False,
-                       max_pairs=20000, deadline_s=900, _timeout=1800)
-    # `pairs` is the per-pair DETAIL, not a count — printing it dumps every
-    # pair in the engine.
+    report = rig.check_clashes(max_pairs=20000, deadline_s=900, _timeout=1800)
+    timings["standing_s"] = report["elapsed_s"]
+    # In interference, `pairs` contains only clashes, not every candidate.
     print(f"  assembled: no part is inside another — "
-          f"{report['pairs_checked']} of {len(report['pairs'])} pairs, "
-          f"exactly")
-    # Not a failure, and worth saying out loud rather than swallowing: a
-    # mate on a running fit is a mate that must NOT touch, and an engine is
-    # mostly those.
-    print(f"    ({len(report['unrealized_mates'])} mates hold a clearance "
-          f"rather than a contact; {len(report['unmated_contacts'])} pairs "
-          f"touch without a mate)")
+          f"{report['pairs_checked']} candidate pairs checked exactly, "
+          f"{report['pairs_box_cleared']} cleared by bounds, "
+          f"in {report['elapsed_s']:.1f}s")
 
     if not a.no_study:
         study, r = run_engine(app, rig, main_mate, top, a.samples,
                               mode="mesh" if a.mesh else "exact")
+        with open(os.path.join(a.out, "motion-report.json"), "w") as f:
+            json.dump(r, f, indent=2)
         print(r["table"])
         for k, o in enumerate(occ["pistons"]):
             # The occurrence's origin is the GUDGEON PIN, so the crown is
@@ -516,17 +586,24 @@ def main():
               f"in {r['seconds']:.1f}s")
         if not r["clean"]:
             raise SdkError("the mechanism collides — see the table above")
+        timings["motion_s"] = r["seconds"]
 
         os.makedirs(a.out, exist_ok=True)
         glb = os.path.join(a.out, "om615.glb")
-        ex = app.export_motion(study=study["id"], path=glb, _timeout=1800)
-        print(f"  animation: {ex['nodes']} nodes x {ex['frames']} keyframes "
-              f"-> {glb} ({os.path.getsize(glb) // 1024} kB)")
+        if not a.no_export:
+            started = time.perf_counter()
+            ex = app.export_motion(study=study["id"], path=glb, _timeout=1800)
+            timings["export_s"] = time.perf_counter() - started
+            print(f"  animation: {ex['nodes']} nodes x {ex['frames']} keyframes "
+                  f"-> {glb} ({os.path.getsize(glb) // 1024} kB)")
 
     organise(app)
     os.makedirs(a.out, exist_ok=True)
     project = os.path.join(a.out, "om615.dsgn")
     app.save_project(path=project)
+    timings["total_s"] = time.perf_counter() - t0
+    with open(os.path.join(a.out, "timings.json"), "w") as f:
+        json.dump(timings, f, indent=2)
     print(f"  project: {project}")
     return 0
 
@@ -640,6 +717,13 @@ def fasteners(app, rig, occ, top, front):
              "M10", FLYWHEEL_BOLTS, "flywheel bolts",
              rim_key=lambda e: (e.center.x, -e.center.y),
              far_key=lambda e: (e.center.x, e.center.z))
+    _bolt_up(rig, top["cam cover"], app.part("cam cover"), 3.3,
+             lambda e: e.center.z - (CAM_Z + CAM_COVER_BOSS_H),
+             top["head"], hd, (6.0 + TAP_FIT) / 2.0,
+             lambda e: e.center.z - (CAM_Z - 15.0), "M6",
+             2 * len(T._cover_bolt_y()), "cam cover bolts",
+             centres=[(sx * CAM_COVER_BOLT_X, y) for y in T._cover_bolt_y()
+                      for sx in (-1, 1)])
     # A cap is drawn about ITS OWN origin and placed at its main's y, so its
     # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
     # block's hole floors are measured in. Both have to be said.

@@ -1479,6 +1479,24 @@ class Asm(_Tab):
         self.activate()
         return self.app.solve_assembly()
 
+    def check_clashes(self, **kw):
+        """Exact standing interference gate, without contact distances.
+
+        Use `check` when connectivity, near misses or realized mates matter.
+        This checks rigid pairs too, unlike a motion study. A partial sweep
+        is an error; increase max_pairs/deadline_s to finish it.
+        """
+        if kw.get("mode", "exact") != "exact" or "a" in kw or "b" in kw:
+            raise SdkError("check_clashes requires a whole-assembly exact sweep")
+        self.activate()
+        r = self.app.interference(**dict(kw, mode="exact"))
+        if r.get("truncated"):
+            raise SdkError("the sweep was TRUNCATED: " +
+                           str(r.get("truncation", "")))
+        if r["clash"]:
+            raise SdkError(f"{len(r['pairs'])} clash(es): {r['pairs'][:4]}")
+        return r
+
     def check(self, connected=True, clearances=True, realized=False,
               allow=None, **kw):
         """The assembly's standing check: nothing clashing, nothing floating,
@@ -1566,6 +1584,19 @@ class Asm(_Tab):
 # against the live response, so the server growing a key fails the gate until
 # somebody decides what it means here.
 VERDICT_CONTRACTS = {
+    "Asm.check_clashes": {
+        "rpc": "interference",
+        "consumed": {"clash", "pairs", "truncated", "truncation"},
+        "ignored": {
+            "mode": "check_clashes explicitly selects exact mode",
+            "pairs_checked": "coverage detail; truncated is the verdict",
+            "pairs_unchecked": "quoted by truncation",
+            "pairs_box_cleared": "coverage detail",
+            "elapsed_s": "cost, not correctness",
+            "occurrences": "how many were swept",
+        },
+        "optional": {"truncated", "truncation", "pairs_unchecked"},
+    },
     "Asm.check": {
         "rpc": "contact_report",
         "consumed": {
