@@ -554,15 +554,30 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const double reach = 10000.0;
   std::vector<parts::StackSegment> stack = parts::TraverseAxis(
       placed, glm::dvec3(centre), glm::dvec3(-axis), radius, reach);
-  if (stack.empty()) {
+  const auto startsInPickedPart = [&](const auto& segments) {
+    return std::any_of(segments.begin(), segments.end(), [&](const auto& seg) {
+      return seg.partId == chosen->inst->partId &&
+             seg.occurrence == chosen->inst->rootOccurrenceId &&
+             seg.enter < 1e-3 && seg.thickness() > 1e-3;
+    });
+  };
+  if (!startsInPickedPart(stack)) {
     axis = -axis; // an axis has no sign; take the way with material in it
     stack = parts::TraverseAxis(placed, glm::dvec3(centre), glm::dvec3(-axis),
                                 radius, reach);
   }
-  if (stack.empty())
+  if (!startsInPickedPart(stack)) {
+    for (const double sign : {-1.0, 1.0}) {
+      const auto solid = parts::TraverseAxis(placed, glm::dvec3(centre),
+                                             glm::dvec3(axis) * sign, 0, 1.0);
+      if (startsInPickedPart(solid))
+        return fail("that circular edge is the end of a SOLID in " +
+                    chosen->inst->path + ", not a hole");
+    }
     return fail("nothing lies along that hole's axis — the rim was picked on "
                 "a surface feature rather than on a joint, so there is no "
                 "stack for a fastener to span");
+  }
 
   // The decomposition. Gaps are SPANNED and named rather than silently added:
   // a gap is either an unmodelled gasket or two parts that were meant to touch
