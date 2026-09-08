@@ -5,6 +5,10 @@ change. Derived from the OM615 iteration; applies equally to human and agent
 modeling. The target is a reviewable connection between requirements, model
 inputs, measured geometry and validation evidence.
 
+The next implementation order is refined in
+[SDK contracts and iteration](sdk-iteration-plan.md), including generated typing,
+bulk snapshots, incremental component updates and their acceptance gates.
+
 ## Existing foundations and actual gaps
 
 - `src/core/Document.h::Parameter` stores name, expression, comment, evaluated
