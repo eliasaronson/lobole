@@ -955,3 +955,38 @@ TEST_CASE("a drawing refuses an unknown sheet size or view orientation",
 
   fs::remove_all(dir);
 }
+
+TEST_CASE("drawing notes resolve expressions and report stale references",
+          "[drawing]") {
+  DrawingNote n;
+  n.text = "Hole {{bore}}; pitch {{pitch*2}}";
+  auto r = drawing::ResolveNote(n, nullptr, {{"bore", 6}, {"pitch", 30}});
+  REQUIRE(r.resolved);
+  REQUIRE(r.text == "Hole 6; pitch 60");
+  r = drawing::ResolveNote(n, nullptr, {{"bore", 8}, {"pitch", 32}});
+  REQUIRE(r.text == "Hole 8; pitch 64");
+  REQUIRE_FALSE(drawing::ResolveNote(n, nullptr).resolved);
+  n.text = "{{1/0}}";
+  REQUIRE_FALSE(drawing::ResolveNote(n, nullptr).resolved);
+  n.text = "{{bore";
+  REQUIRE_FALSE(drawing::ResolveNote(n, nullptr).resolved);
+}
+
+TEST_CASE("drawing validator checks note bounds and overlaps", "[drawing]") {
+  DrawingDocument doc;
+  const auto chrome = ChromeOf(doc.GetSheet());
+  DrawingNote n;
+  n.text = "Note";
+  n.pos = (chrome.titleBlockMin + chrome.titleBlockMax) / 2.0;
+  doc.AddNote(n);
+  n.pos = {-10, -10};
+  doc.AddNote(n);
+  doc.AddNote(n);
+  const auto issues = drawing::ValidateDrawing(doc, {}, {}, {});
+  for (const auto* kind :
+       {"note_over_title_block", "note_outside_border", "notes_overlap"}) {
+    REQUIRE(std::any_of(issues.begin(), issues.end(), [&](const auto& i) {
+      return i.kind == kind && i.noteId != 0;
+    }));
+  }
+}

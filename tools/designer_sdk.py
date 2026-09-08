@@ -401,6 +401,54 @@ class Plane:
         return f"Plane(origin={self.origin}, normal={self.normal})"
 
 
+class DatumPlane(Plane):
+    """Persistent sketch plane; offset is measured along its normal.
+
+    Use sketch UV coordinates or native projection. Unlike a numeric Plane,
+    this handle never pretends its fallback origin is an evaluated placement.
+    """
+
+    def __init__(self, part, id, basis):
+        super().__init__(basis.origin, basis.normal, basis.u)
+        self.part, self.id = part, id
+
+    def uv(self, point):
+        raise SdkError(
+            "a live datum needs native projection; use sketch UV coordinates"
+        )
+
+    def world(self, u, v=None):
+        raise SdkError("a live datum is a reference, not an evaluated world plane")
+
+    def offset(self, distance):
+        raise SdkError(
+            "create a persistent datum with part.datum_plane(parent=datum, offset=...)"
+        )
+
+
+class Thread:
+    """Persistent cosmetic thread feature, usable as a screw relation's source."""
+
+    def __init__(self, part, id):
+        self.part, self.id = part, id
+
+
+class ProjectedCurve:
+    """A projected edge/silhouette with validated native dimension picks."""
+
+    def __init__(self, row):
+        if row.get("kind") not in ("edge", "silhouette") or "ref" not in row:
+            raise SdkError("expected a list_drawing_geometry curve")
+        self.row = row
+
+    def pick(self, endpoint="middle"):
+        ends = {"middle": 0, "start": 1, "end": 2}
+        if endpoint not in ends:
+            raise SdkError("endpoint must be middle, start or end")
+        field = "edge" if self.row["kind"] == "edge" else "sil_face"
+        return {field: dict(self.row["ref"]), "end": ends[endpoint]}
+
+
 class Element:
     """A face or edge, by its STABLE name — never by index."""
 
@@ -860,6 +908,10 @@ class SketchBuilder:
             f["external"] = self.projections
         if self.face_ref:
             f["face_ref"] = self.face_ref
+        if isinstance(self.plane, DatumPlane):
+            if self.plane.part.id != self.part.id or self.plane.part.app is not self.part.app:
+                raise SdkError("datum plane belongs to a different part")
+            f["plane_ref"] = self.plane.id
         return f
 
     def add(self):
@@ -1014,6 +1066,42 @@ class Part(_Tab):
             f"needed here, and the document — not this SDK — evaluates "
             f"expressions; pass a number or a variable name")
 
+    def datum_plane(self, base="xy", offset=0, parent=None, name="Datum plane"):
+        """Live offset plane. XZ uses SDK axes (+X,+Z; normal -Y).
+
+        Numeric Plane/Frame arguments to sketch remain snapshots; this handle
+        retains the native dependency through plane_ref.
+        """
+        if base not in ("xy", "xz", "yz"):
+            raise SdkError("base must be xy, xz or yz")
+        basis = {"xy": Plane.xy, "xz": Plane.xz, "yz": Plane.yz}[base]()
+        fields = {"base_plane": base}
+        if parent is not None:
+            if (
+                not isinstance(parent, DatumPlane)
+                or parent.part.id != self.id
+                or parent.part.app is not self.app
+            ):
+                raise SdkError("parent must be a datum plane in this part")
+            fields = {"parent_id": parent.id}
+            basis = Plane(parent.origin, parent.normal, parent.u)
+        elif base == "xz":
+            fields = {
+                "parent_id": self._add(
+                    dict(
+                        type="DatumPlane",
+                        name=name + " basis",
+                        kind="angled",
+                        base_plane="xy",
+                        axis={"kind": "x"},
+                        angle_deg=90,
+                    )
+                )["id"]
+            }
+        feature = dict(type="DatumPlane", name=name, kind="offset", **fields)
+        _dim(feature, "offset", offset)
+        return DatumPlane(self, self._add(feature)["id"], basis)
+
     # --- sketches ----------------------------------------------------------
     def sketch(self, plane=None, name="Sketch", on=None):
         """A sketch builder. `on=<Face>` puts it ON that face (so it moves
@@ -1096,6 +1184,28 @@ class Part(_Tab):
             _dim(f, "depth", depth)
         f.update(kw)
         return self._add(f)
+
+    def thread(self, face, designation, allow_engagement=False, minimum_engagement=0):
+        """Annotate actual manufacturing geometry; engagement is explicit opt-in.
+
+        Matching coaxial threads relieve only their common axial span during
+        exact contact checks. No geometry or STEP machining diameter is changed.
+        """
+        if not isinstance(face, Face) or face.kind != "cylinder":
+            raise SdkError("thread needs a cylindrical Face")
+        if face._part.id != self.id or face._part.app is not self.app:
+            raise SdkError("thread face belongs to a different part or connection")
+        feature = self._add(
+            dict(
+                type="Thread",
+                name=designation,
+                face=face.ref,
+                designation=designation,
+                allow_engagement=allow_engagement,
+                minimum_engagement=minimum_engagement,
+            )
+        )
+        return Thread(self, feature["id"])
 
     def fillet(self, edges, r, name="Fillet"):
         return self._blend("Fillet", edges, r, name)
@@ -1500,6 +1610,34 @@ class Asm(_Tab):
         return self.app.add_relation(type="gear", a=_id(mate_a),
                                      b=_id(mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
+
+    def thread_engagement(self, a, b):
+        """Check that a declared thread joint exists, not merely that it is clash-free.
+
+        A separated pair fails this gate even though ordinary interference
+        correctly reports no collision. Uses each feature's minimum engagement.
+        """
+        if not all(isinstance(o, Occurrence) and o.asm is self for o in (a, b)):
+            raise SdkError("thread_engagement needs two occurrences in this assembly")
+        self.activate()
+        result = self.app.interference(a=a.id, b=b.id, mode="exact")
+        if result["clash"] or not result.get("engaged_thread_pairs", 0):
+            raise SdkError(f"thread engagement failed for {a.name} / {b.name}: {result}")
+        return result
+
+    def screw(self, mate, thread, **kw):
+        """Couple a cylindrical mate to a persistent thread feature's pitch."""
+        if not isinstance(thread, Thread) or thread.part.app is not self.app:
+            raise SdkError("screw requires a Thread handle from this connection")
+        self.activate()
+        return self.app.add_relation(
+            type="screw",
+            a=_id(mate),
+            b=_id(mate),
+            thread_part=thread.part.id,
+            thread_feature=thread.id,
+            **kw,
+        )
 
     def chain(self, mate_a, mate_b, teeth_a, teeth_b, **kw):
         """A chain or belt: like a gear, but both sprockets turn the SAME

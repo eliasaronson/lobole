@@ -412,10 +412,38 @@ glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
   }
 }
 
-ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view) {
+ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,
+                         const SymbolTable& symbols) {
   ResolvedNote rn;
   rn.id = note.id;
-  rn.text = note.text;
+  size_t cursor = 0;
+  while (cursor < note.text.size()) {
+    const auto begin = note.text.find("{{", cursor);
+    if (begin == std::string::npos) {
+      rn.text += note.text.substr(cursor);
+      break;
+    }
+    rn.text += note.text.substr(cursor, begin - cursor);
+    const auto end = note.text.find("}}", begin + 2);
+    if (end == std::string::npos) {
+      rn.resolved = false;
+      rn.error = "unterminated note expression";
+      break;
+    }
+    const auto value = ExpressionEngine::Default().EvaluateText(
+        note.text.substr(begin + 2, end - begin - 2), symbols);
+    if (!value) {
+      rn.resolved = false;
+      rn.error = value.error().message;
+      break;
+    }
+    char number[64];
+    std::snprintf(number, sizeof number, "%.10g", *value);
+    rn.text += number;
+    cursor = end + 2;
+  }
+  if (!rn.resolved)
+    rn.text = "[UNRESOLVED: " + rn.error + "]";
   rn.pos = note.pos;
   if (view != nullptr &&
       (note.leader.edge.IsSet() || note.leader.silFace.IsSet())) {
@@ -424,6 +452,11 @@ ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view) {
       rn.hasLeader = true;
       rn.anchor = a;
     }
+  }
+  if ((note.leader.edge.IsSet() || note.leader.silFace.IsSet()) &&
+      !rn.hasLeader) {
+    rn.resolved = false;
+    rn.error = "note leader no longer resolves";
   }
   return rn;
 }

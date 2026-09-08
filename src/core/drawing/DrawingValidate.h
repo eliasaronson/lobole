@@ -26,6 +26,7 @@ struct DrawingIssue {
   uint64_t otherViewId = 0; // the second view of an overlap pair
   uint64_t dimId = 0;       // 0 when not dim-scoped
   std::string detail;       // one human sentence with mm numbers
+  uint64_t noteId = 0;
 };
 
 // `renders`: the per-view projection cache (views absent from it are
@@ -35,6 +36,7 @@ std::vector<DrawingIssue>
 ValidateDrawing(const DrawingDocument& doc,
                 const std::map<uint64_t, SheetView>& renders,
                 const std::vector<ResolvedDim>& dims,
-                const std::map<uint64_t, bool>& staleViews);
+                const std::map<uint64_t, bool>& staleViews,
+                const std::vector<ResolvedNote>& notes = {});
 
 } // namespace drawing

@@ -313,9 +313,7 @@ void DrawDims(ImDrawList* dl, AppState& state) {
 
   // Notes (v66): text + optional leader, same resolution as the exporters.
   for (const DrawingNote& note : state.drawing->GetNotes()) {
-    const auto nit = state.drawingRenders.find(note.viewId);
-    const drawing::ResolvedNote rn = drawing::ResolveNote(
-        note, nit != state.drawingRenders.end() ? &nit->second : nullptr);
+    const drawing::ResolvedNote rn = ResolveDrawingNote(state, note);
     if (rn.hasLeader) {
       dl->AddLine(SheetToScreen(state, rn.anchor), SheetToScreen(state, rn.pos),
                   ink, 1.2f);
@@ -324,9 +322,11 @@ void DrawDims(ImDrawList* dl, AppState& state) {
         SheetArrow(dl, state, rn.anchor, glm::normalize(back), ink);
     }
     if (fontPx >= 4.0f) {
-      const ImVec2 org = SheetToScreen(state, rn.pos);
+      ImVec2 org = SheetToScreen(state, rn.pos);
       const ImVec2 tsz =
           font->CalcTextSizeA(fontPx, FLT_MAX, 0.0f, rn.text.c_str());
+      org.x -= tsz.x * 0.5f;
+      org.y -= tsz.y * 0.5f;
       dl->AddRectFilled(ImVec2(org.x - 2, org.y - 1),
                         ImVec2(org.x + tsz.x + 2, org.y + tsz.y + 1),
                         IM_COL32(250, 250, 250, 230), 2.0f);

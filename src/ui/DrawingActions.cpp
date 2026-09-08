@@ -23,6 +23,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/ThreadStandards.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
@@ -49,6 +50,7 @@
 #include "render/SketchRenderer.h"
 
 #include "core/features/DraftFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
@@ -420,7 +422,49 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
     drawing::LabelBox(rd.labelPos, rd.text, mn, mx);
     ctx.avoid.push_back({mn, mx});
   }
+  for (const auto& note : state.drawing->GetNotes()) {
+    const auto resolved = ResolveDrawingNote(state, note);
+    glm::dvec2 mn, mx;
+    drawing::LabelBox(resolved.pos, resolved.text, mn, mx);
+    ctx.avoid.push_back({mn, mx});
+  }
   return drawing::PlaceDimOffset(dim, it->second, ctx);
+}
+
+drawing::ResolvedNote ResolveDrawingNote(AppState& state,
+                                         const DrawingNote& note) {
+  SymbolTable symbols = state.projectSymbols;
+  const DrawingView* view = state.drawing->FindView(note.viewId);
+  if (view) {
+    if (const Document* doc = DrawingSourceDocument(state, view->sourceDocId)) {
+      for (const auto& [name, value] : doc->Symbols())
+        symbols[name] = value;
+      for (size_t i = 0; i < doc->GetFeatures().size(); ++i) {
+        if (doc->EffectiveRollback() >= 0 &&
+            i >= static_cast<size_t>(doc->EffectiveRollback()))
+          break;
+        const auto& f = doc->GetFeatures()[i];
+        if (doc->EffectiveSuppressed(i) || !f->GetError().empty())
+          continue;
+        const std::string prefix =
+            "feature_" + std::to_string(f->GetId()) + "_";
+        if (const auto* hole = dynamic_cast<const HoleFeature*>(f.get())) {
+          symbols[prefix + "diameter"] = hole->diameter;
+          symbols[prefix + "depth"] = hole->depth;
+        }
+        if (const auto* thread = dynamic_cast<const ThreadFeature*>(f.get())) {
+          if (const auto spec = threads::Lookup(thread->designation)) {
+            symbols[prefix + "pitch"] = spec->pitch;
+            symbols[prefix + "major"] = spec->majorDia;
+            symbols[prefix + "tap_drill"] = threads::TapDrill(*spec);
+          }
+        }
+      }
+    }
+  }
+  const auto it = state.drawingRenders.find(note.viewId);
+  return drawing::ResolveNote(
+      note, it == state.drawingRenders.end() ? nullptr : &it->second, symbols);
 }
 
 bool ExportActiveDrawing(AppState& state, const std::string& path,
@@ -442,9 +486,13 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
     dims.push_back(ResolveDrawingDim(state, dm));
   std::vector<drawing::ResolvedNote> notes;
   for (const DrawingNote& n : state.drawing->GetNotes()) {
-    const auto nit = state.drawingRenders.find(n.viewId);
-    notes.push_back(drawing::ResolveNote(
-        n, nit != state.drawingRenders.end() ? &nit->second : nullptr));
+    const auto resolved = ResolveDrawingNote(state, n);
+    if (!resolved.resolved) {
+      if (error)
+        *error = "note " + std::to_string(n.id) + ": " + resolved.error;
+      return false;
+    }
+    notes.push_back(resolved);
   }
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);

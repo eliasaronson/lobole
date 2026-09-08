@@ -99,7 +99,9 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"export_drawing", "Export the drawing to SVG or PDF by extension {path}.",
      "path", remote::NotInBatch},
     {"add_drawing_note",
-     "Add a text note {text, position: [x,y] sheet mm, view?, ref?: "
+     "Add a text note ({{expression}} resolves project variables, or "
+     "source-part variables with view) {text, position: [x,y] sheet mm, view?, "
+     "ref?: "
      "{feature_id, element}} — ref draws a leader from that geometry (needs "
      "view). The annotation class no dimension kind covers.",
      "position, ref, text, view"},
@@ -167,14 +169,19 @@ json DrawingIssuesJson(ui::AppState& state) {
                      ui::DrawingSourceVersion(state, view.sourceDocId) !=
                          it->second.solvedSourceVersion;
   }
+  std::vector<drawing::ResolvedNote> notes;
+  for (const auto& note : state.drawing->GetNotes())
+    notes.push_back(ui::ResolveDrawingNote(state, note));
   json arr = json::array();
   for (const drawing::DrawingIssue& i : drawing::ValidateDrawing(
-           *state.drawing, state.drawingRenders, dims, stale)) {
+           *state.drawing, state.drawingRenders, dims, stale, notes)) {
     json ij = {{"kind", i.kind}, {"detail", i.detail}};
     if (i.viewId)
       ij["view"] = i.viewId;
     if (i.otherViewId)
       ij["other_view"] = i.otherViewId;
+    if (i.noteId)
+      ij["note"] = i.noteId;
     if (i.dimId)
       ij["dim"] = i.dimId;
     arr.push_back(std::move(ij));
@@ -620,8 +627,12 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       n.leader.edge = ElementRef{rj.value("feature_id", uint64_t{0}),
                                  rj.value("element", std::string{})};
     }
+    const auto resolved = ui::ResolveDrawingNote(state, n);
+    if (!resolved.resolved)
+      throw std::runtime_error(resolved.error);
     ui::SnapshotDrawing(state);
-    return json{{"id", state.drawing->AddNote(std::move(n))}};
+    return json{{"id", state.drawing->AddNote(std::move(n))},
+                {"text", resolved.text}};
   }
   if (m == "remove_drawing_note") {
     if (!state.drawing)
@@ -636,11 +647,12 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("the active document is not a drawing");
     json arr = json::array();
     for (const DrawingNote& n : state.drawing->GetNotes()) {
-      const auto it = state.drawingRenders.find(n.viewId);
-      const drawing::ResolvedNote rn = drawing::ResolveNote(
-          n, it != state.drawingRenders.end() ? &it->second : nullptr);
+      const auto rn = ui::ResolveDrawingNote(state, n);
       arr.push_back({{"id", n.id},
                      {"text", n.text},
+                     {"resolved_text", rn.text},
+                     {"resolved", rn.resolved},
+                     {"error", rn.error},
                      {"pos", {n.pos.x, n.pos.y}},
                      {"view", n.viewId},
                      {"leader_resolved", rn.hasLeader}});

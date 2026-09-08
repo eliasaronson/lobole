@@ -39,7 +39,8 @@ std::vector<DrawingIssue>
 ValidateDrawing(const DrawingDocument& doc,
                 const std::map<uint64_t, SheetView>& renders,
                 const std::vector<ResolvedDim>& dims,
-                const std::map<uint64_t, bool>& staleViews) {
+                const std::map<uint64_t, bool>& staleViews,
+                const std::vector<ResolvedNote>& resolvedNotes) {
   std::vector<DrawingIssue> issues;
   const SheetChrome chrome = ChromeOf(doc.GetSheet());
 
@@ -168,6 +169,44 @@ ValidateDrawing(const DrawingDocument& doc,
                               labels[i].text + "') and " +
                               std::to_string(labels[j].id) + " ('" +
                               labels[j].text + "') overlap"});
+
+  std::vector<ResolvedNote> notes = resolvedNotes;
+  if (notes.empty())
+    for (const auto& note : doc.GetNotes()) {
+      const auto it = renders.find(note.viewId);
+      notes.push_back(
+          ResolveNote(note, it == renders.end() ? nullptr : &it->second));
+    }
+  std::vector<LabelRect> noteBoxes;
+  for (const auto& note : notes) {
+    const auto report = [&](const std::string& kind, const std::string& detail,
+                            uint64_t view = 0) {
+      issues.push_back({kind, view, 0, 0,
+                        "note " + std::to_string(note.id) + ": " + detail,
+                        note.id});
+    };
+    if (!note.resolved)
+      report("unresolved_note", note.error);
+    glm::dvec2 mn, mx;
+    LabelBox(note.pos, note.text, mn, mx);
+    if (!OutsideBy(mn, chrome.borderMin, chrome.borderMax).empty() ||
+        !OutsideBy(mx, chrome.borderMin, chrome.borderMax).empty())
+      report("note_outside_border", "text extends outside the sheet border");
+    if (RectsOverlap(mn, mx, chrome.titleBlockMin, chrome.titleBlockMax))
+      report("note_over_title_block", "text overlaps the title block");
+    for (const auto& [id, view] : renders)
+      if (view.hasGeometry && RectsOverlap(mn, mx, view.bboxMin, view.bboxMax))
+        report("note_over_view", "text overlaps " + viewName(id), id);
+    for (const auto& label : labels)
+      if (RectsOverlap(mn, mx, label.mn, label.mx))
+        report("note_over_dimension",
+               "text overlaps dimension " + std::to_string(label.id));
+    for (const auto& other : noteBoxes)
+      if (RectsOverlap(mn, mx, other.mn, other.mx))
+        report("notes_overlap",
+               "text overlaps note " + std::to_string(other.id));
+    noteBoxes.push_back({note.id, note.text, mn, mx});
+  }
 
   return issues;
 }

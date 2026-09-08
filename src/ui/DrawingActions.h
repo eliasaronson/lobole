@@ -31,6 +31,9 @@ struct Ray;          // defined in FaceSelector.h
 
 namespace ui {
 
+drawing::ResolvedNote ResolveDrawingNote(AppState& state,
+                                         const DrawingNote& note);
+
 // Re-projects every view of the active drawing into state.drawingRenders (the
 // HLR-per-view work). Explicit (D2): called on drawing-tab entry and by the
 // update_drawing RPC / panel button — never per frame, since HLR is expensive.
