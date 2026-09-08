@@ -13,7 +13,7 @@ rather than a petrol four with a diesel label on it.
          is z = DECK, so a piston's height IS its z.
     +Y   the crank axis. FRONT (the timing chain) is -Y, REAR (the flywheel)
          is +Y. Cylinder 1 is the front one.
-    +X   across the engine. The INTAKE side is -X, the EXHAUST side is +X.
+    +X   across the engine. Both manifolds are on +X; injection equipment is on -X.
 
 Everything with a unit is derived from the four numbers a person would
 actually quote for an engine (bore, stroke, rod, bore pitch) wherever the
@@ -191,27 +191,16 @@ HEAD_CHAMFER = 10.0       # the head's lower outer edges
 # ---- the head --------------------------------------------------------------
 FIRE_FACE = DECK + GASKET_T          # the head's underside
 HEAD_X = 86.0             # Wider than the deck to enclose the rocker shafts.
-CAM_COVER_BOLT_X = HEAD_X - 1.0
+CAM_COVER_BOLT_X = HEAD_X + 15.0
 CAM_COVER_BOSS_D = 16.0
-CAM_COVER_BOSS_H = 40.0  # Through-roof bolt towers keep screw heads accessible.
-HEAD_H = 155.0            # up to the camshaft's own centreline, which is
-                          # where an overhead cam's saddles are split.
-                          # It is the VALVE's length that sets this: the
-                          # rocker's own stack (lash, pad, arm) eats 60 mm
-                          # between the cam and the valve's tip, and at 134
-                          # the spring retainer came down past the chamber
-                          # floor and onto the stem seal.
+CAM_COVER_BOSS_H = 14.0   # Low mounting ears, accessible beside the cover.
+HEAD_H = 85.0             # Workshop 05.4-118/1: machined height 84.8–85.0.
 HEAD_TOP = FIRE_FACE + HEAD_H
-# The two valves are staggered ACROSS the bore, not side by side on its
-# centreline. Each is under its own cam lobe, and a lobe presses a rocker
-# that lies in ONE plane of constant y — so the valve, its lobe and its
-# rocker all share a y, and the two of them have to be different.
-# The stagger is as small as it can be while the two lobes still sit side by
-# side on the camshaft: the seat rings have to stay INSIDE the bore, and at
-# (20, 12) the intake ring's rim stood 2 mm out over the gasket.
-VALVE_X = 18.0
-VALVE_DY = 10.0           # intake at (-X, -dy), exhaust at (+X, +dy)
-VALVE = {"intake": (-VALVE_X, -VALVE_DY), "exhaust": (VALVE_X, VALVE_DY)}
+# Both valves are on the manifold side; their order alternates by cylinder.
+# Each valve, rocker and cam lobe shares one longitudinal station.
+VALVE_X = 8.0
+VALVE_DY = 20.0
+VALVE = {"intake": (VALVE_X, -VALVE_DY), "exhaust": (VALVE_X, VALVE_DY)}
 STEM_D = 9.92            # within both diesel stem ranges, manual p.24
 STEM_TIP_CHAMFER = 0.5   # Modeled edge break; not a factory dimension.
 VALVE_HEAD_D = {"intake": 38.8, "exhaust": 33.2}  # manual p.24 midpoints
@@ -221,33 +210,44 @@ SEAT_ANGLE = 45.0
 SEAT_OD = {k: d + 4.0 for k, d in VALVE_HEAD_D.items()}
 SEAT_T = 6.0
 GUIDE_OD = 15.0
-GUIDE_LEN = 42.0          # ends BELOW where the retainer comes down to
+GUIDE_LEN = 35.0          # ends BELOW where the retainer comes down to
 GUIDE_Z = FIRE_FACE + 16.0           # where the guide's bore starts
 VALVE_LIFT = 8.0
 PORT_D = {"intake": 30.0, "exhaust": 28.0}
-PORT_Z = FIRE_FACE + 34.0            # where a port leaves the side face
-# Two studs per port, ABOVE and BELOW it. Fore and aft was the obvious place
-# and it is the injector's: an injector comes out of this same face 38 mm
-# behind its port, and a flange wide enough to reach studs at 24 is a flange
-# through the injector. Above and below, the upper stud stops short of the
-# head's side coolant channel (x 48..70) and the lower one clears the seat
-# counterbore, because both are only 15 mm deep.
-MANIFOLD_BOLT_DZ = 26.0
+PORT_SIDE = 1
+PORT_Z = FIRE_FACE + 39.0            # where a port leaves the side face
+# Modeled studs above and below each external port. The pads stop below
+# the cover's mounting ears; none of these coordinates is a factory pattern.
+MANIFOLD_BOLT_DZ = 24.0
 MANIFOLD_BOLT_D = 9.0
-MANIFOLD_PAD = 20.0                  # how thick a manifold's flange is
-MANIFOLD_PAD_HY = 24.0               # ...and how far it reaches in y and z
-MANIFOLD_PAD_HZ = 34.0
+MANIFOLD_PAD = 12.0                  # how thick a manifold's flange is
+MANIFOLD_PAD_HY = 30.0               # ...and how far it reaches in y and z
+MANIFOLD_PAD_HZ = 30.0
 MANIFOLD_GASKET_T = 2.0
 MANIFOLD_STUD_DEPTH = 15.0           # shallow ON PURPOSE: 26 deep and the
                                      # stud runs into the head bolt's own
                                      # boss, which is 12.5 mm away in y and
                                      # the full height of the head in z
+def valve_dy(k, kind):
+    # E I | I E | E I | I E. Paired intake valves share two external ports.
+    return (1 if (k % 2 == 0) == (kind == "intake") else -1) * VALVE_DY
+
+
+def port_centers(kind):
+    return [-BORE_PITCH, BORE_PITCH] if kind == "intake" else [
+        cy + valve_dy(k,kind) for k,cy in enumerate(CYL_Y)]
+
+
+def port_y(k,kind):
+    return (-BORE_PITCH if k<2 else BORE_PITCH) if kind=="intake" else CYL_Y[k]+valve_dy(k,kind)
+
+
 # Both manifolds have analytic circular elbows into a longitudinal collector.
 # The bend radius is computed from each port and collector position, with a
 # horizontal start tangent so the gasket face remains planar.
 # (x, z, outer, bore) for each log, and the outer/bore of its branches.
-INT_LOG = (-140.0, FIRE_FACE + 130.0, 78.0, 62.0)   # high, like the real one
-INT_RUNNER = (42.0, 32.0)
+INT_LOG = (145.0, FIRE_FACE + 135.0, 70.0, 56.0)   # high, like the real one
+INT_RUNNER = (54.0, 44.0)
 EXH_RUNNER = (44.0, 34.0)
 MANIFOLD_END_ALLOWANCE = 8.0
 
@@ -255,8 +255,8 @@ MANIFOLD_END_ALLOWANCE = 8.0
 def collector_span(kind, runner):
     # Enclose the whole outer tube, with an allowance beyond its envelope.
     margin = runner[0] / 2.0 + MANIFOLD_END_ALLOWANCE
-    return (CYL_Y[0] + VALVE[kind][1] - margin,
-            CYL_Y[-1] + VALVE[kind][1] + margin)
+    return (port_centers(kind)[0] - margin,
+            port_centers(kind)[-1] + margin)
 
 
 INT_LOG_Y = collector_span("intake", INT_RUNNER)
@@ -265,7 +265,7 @@ EXH_LOG_Y = collector_span("exhaust", EXH_RUNNER)
 
 # Collector standoff leaves room for the elbow and a core around its bore.
 EXH_LOG = (HEAD_X + MANIFOLD_GASKET_T + MANIFOLD_PAD + 1.5*EXH_RUNNER[0],
-           FIRE_FACE + 14.0, 62.0, 50.0)
+           FIRE_FACE - 5.0, 52.0, 40.0)
 # The spring sits in a POCKET sunk below the rocker chamber's floor. On the
 # floor itself there are only 20 mm between the seat and the retainer, which
 # is a spring whose coils are closer together than its wire is thick.
@@ -295,35 +295,30 @@ def collet_r(z):
     return COLLET_R0 + (COLLET_R1 - COLLET_R0) * cz / COLLET_H
 STEM_SEAL_D = 18.0
 STEM_SEAL_H = 8.0
-# The pre-chamber: what makes it this engine and not a direct-injection four.
-# Offset toward the intake side and clear of both valve seats.
-PRE_X = -18.0
-PRE_DY = 28.0             # far enough off the intake port AND off the intake
-                          # valve's spring pocket not to break into either
-PRE_D = 32.0              # the chamber itself
-PRE_THROAT_D = 8.0        # the hole it fires through
-PRE_Z = (FIRE_FACE + 13.0, FIRE_FACE + 54.0)
-# Injector and glow plug both come in from the INTAKE side on the chamber's
-# own y, one above the other. Staggering them in y instead runs one of them
-# either into the intake port (16 mm of radius, 10 mm off the bore's centre)
-# or into a head bolt boss (13 mm of radius, 48.5 mm away) — there is no y
-# left between the two, and z is free.
-INJ_D = 12.0
+# Inclined prechambers and injectors are opposite the manifolds. The manual
+# establishes the architecture; angle and stepped envelopes remain estimates.
+PRE_X = -22.0
+PRE_DY = 0.0
+INJ_D = 24.0
+INJ_REACH = 25.0
+INJ_HEIGHT = 70.0
+INJ_BODY_D = 30.0
+INJ_HEX_AF = 27.0          # Workshop 07.1.4-230/1 specifies a 27 mm socket.
 GLOW_D = 10.0
-INJ_FACE = (-HEAD_X, PRE_DY, FIRE_FACE + 40.0)
-INJ_TARGET = (PRE_X - PRE_D / 2.0 - 2.0, PRE_DY, FIRE_FACE + 36.0)
+INJ_FACE = (-62.0, PRE_DY, HEAD_TOP)
+INJ_TARGET = (PRE_X, PRE_DY, FIRE_FACE + 13.0)
 GLOW_FACE = (-HEAD_X, PRE_DY, FIRE_FACE + 20.0)
-GLOW_TARGET = (PRE_X - PRE_D / 2.0 - 2.0, PRE_DY, FIRE_FACE + 24.0)
+GLOW_TARGET = (-31.0, PRE_DY, FIRE_FACE + 38.0)
 
 # ---- the valve gear --------------------------------------------------------
-CAM_Z = HEAD_TOP                     # the saddles are the top face
+CAM_Z = FIRE_FACE + 155.0   # Estimated cam datum, independent of machined head height.
 CAM_SHAFT_D = 32.0
 CAM_JOURNAL_D = 44.0
-CAM_BEARING_W = 20.0
+CAM_BEARING_W = 16.0
 # Over the webs like the mains, but the outer pair pulled IN: a saddle on
 # the outermost web puts its cap and its rocker post through the cam cover's
 # own end wall, and through its gasket's rim. Same bound as the head bolts.
-CAM_OUTER_Y = CHAMBER_Y - CAM_BEARING_W / 2.0 - 3.0
+CAM_OUTER_Y = min(-BLOCK_Y0, BLOCK_Y1) - CAM_BEARING_W / 2.0 - 2.0
 CAM_BEARING_Y = [-CAM_OUTER_Y, -97.0, 0.0, 97.0, CAM_OUTER_Y]
 CAM_BASE_R = 20.0
 CAM_LOBE_W = 16.0
@@ -344,8 +339,8 @@ LASH = 5.0                # drawn clearance at the lobe. A real cold lash is
 # is what an engine is specified by, and derive the lobe from it.
 ARM_CAM = ROCKER_PIVOT_X             # pivot to the pad under the cam
 ARM_VALVE = ROCKER_PIVOT_X - VALVE_X # pivot to the valve pad
-ROCKER_RATIO = ARM_VALVE / ARM_CAM   # 0.722
-CAM_LIFT = VALVE_LIFT / ROCKER_RATIO # 11.08 at the lobe
+ROCKER_RATIO = ARM_VALVE / ARM_CAM
+CAM_LIFT = VALVE_LIFT / ROCKER_RATIO
 # Where the rocker sits, and therefore how long a valve is.
 PAD_Z = CAM_Z - CAM_BASE_R - LASH    # the cam pad's face, when shut
 # The cam pad stands PROUD of the arm, and that is not styling. A rocker
@@ -548,3 +543,17 @@ def lobe_lift(cam_deg, start_deg, rise=CAM_LIFT, duration=DURATION_CAM):
 def cam_phase(cylinder):
     """How far this cylinder's lobes are round the camshaft from number 1's."""
     return FIRING_TDC[cylinder] / 2.0
+
+# Visual-reference mounting envelope. Not a sourced pump bolt pattern.
+PUMP_MOUNT = (-108.0, BLOCK_Y0 + 80.0, 174.0)
+PUMP_REGISTER_D = 60.0
+PUMP_BOLT_PCD = 78.0
+PUMP_MOUNT_D = 96.0
+
+COVER_BASE = HEAD_TOP
+COVER_LEFT = 42.0
+COVER_TRANSITION_Y = -175.0
+COVER_DOME_END_Y = DRIVE_Y + CHAIN_W/2 + 8.0
+
+def cover_bolt_x(side):
+    return -54.0 if side < 0 else CAM_COVER_BOLT_X

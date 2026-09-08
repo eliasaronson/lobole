@@ -184,6 +184,19 @@ def block(app):
 
 
 def _block_rest(p, length):
+    # A longitudinal pump register and three blind mounting holes. The pump
+    # is deliberately absent, but its machined interface is part of the block.
+    x,y,z=PUMP_MOUNT
+    sk=p.sketch(axis_plane((x,y-55,z),(0,1,0)),name="Pump mounting boss")
+    sk.circle((0,0),d=PUMP_MOUNT_D)
+    p.extrude(sk.add(),55,mode="add",name="Pump mounting boss")
+    bore(p,(x,y+1,z),(x,y-11,z),PUMP_REGISTER_D,"Pump register",over=0)
+    for angle in (90,210,330):
+        a=math.radians(angle)
+        bx,bz=x+PUMP_BOLT_PCD/2*math.cos(a),z+PUMP_BOLT_PCD/2*math.sin(a)
+        bore(p,(bx,y+1,bz),(bx,y-18,bz),8+TAP_FIT,"Pump mounting thread",over=0)
+    p.frame("injection_pump_mount",origin=PUMP_MOUNT,z=(0,1,0),x=(1,0,0))
+
     for i in range(len(MAIN_Y) - 1):
         y0 = MAIN_Y[i] + BULKHEAD_T / 2.0
         y1 = MAIN_Y[i + 1] - BULKHEAD_T / 2.0
@@ -1311,31 +1324,21 @@ def oil_pickup(app):
 
 
 # ------------------------------------------- the chain case and the cooling
-def _cover_outline(sk, inset=0.0, open_floor=False):
-    """The front cover's silhouette: crankcase width at the bottom, deck
-    width up the middle, and tapering in over the cam sprocket.
-
-    The CAVITY is open at the bottom — inset everywhere but there. A chain
-    case drains into the sump, which is directly under it; and a floor there
-    is 6 mm of aluminium exactly where the oil pump's driven sprocket has to
-    hang.
-    """
-    k = inset
-    floor = PAN_RAIL - 1.0 if open_floor else PAN_RAIL + k
-    radius = COVER_TOP - CAM_Z - k
-    sk.polyline([(-100+k, floor), (100-k, floor), (100-k, 110),
-                 (88-k, 130), (88-k, CAM_Z-20), (radius, CAM_Z)],
-                close=False)
-    # A concentric crown clears the actual chain envelope and has a constant
-    # radial wall, instead of the old house-shaped polygon across the top.
-    sk.arc((0, CAM_Z), radius, 0, 180)
-    sk.polyline([(-radius, CAM_Z), (-88+k, CAM_Z-20), (-88+k, 130),
-                 (-100+k, 110), (-100+k, floor)], close=False)
+def _cover_outline(sk,inset=0.0,open_floor=False):
+    """Lower chain housing, split at the head-cover gasket datum."""
+    k=inset
+    floor=PAN_RAIL-1 if open_floor else PAN_RAIL+k
+    top=COVER_BASE+1 if open_floor else COVER_BASE-k
+    rounded_polygon(sk,[(-100+k,floor),(100-k,floor),(100-k,110),
+                        (88-k,130),(88-k,top),(-88+k,top),
+                        (-88+k,130),(-100+k,110)], [0,0,8,8,0,0,8,8])
 
 
 def timing_cover(app):
-    """The chain case: a one-piece cover from the pan rail to above the cam
-    sprocket, carrying the front crank seal in its front wall."""
+    """Lower timing housing, from the pan rail to the head-cover datum.
+
+    The upper cam-chain enclosure belongs to the continuous valve cover.
+    """
     p = app.part("timing cover")
     back = BLOCK_Y0 - COVER_GASKET_T
     sk = p.sketch(Plane.xz(back), name="Cover")

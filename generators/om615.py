@@ -14,15 +14,17 @@ relation for its lift and a rack relation that makes its rocker follow.
 Findings go in docs/modeling/om615-dogfood.md.
 """
 import argparse
+import atexit
 import json
 import math
 import os
 import sys
 import time
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
-from designer_sdk import SdkError, connect  # noqa: E402
+from designer_sdk import SdkError, V, connect  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from om615_spec import *  # noqa: E402,F401,F403
 import om615_bottom as B  # noqa: E402
@@ -249,6 +251,7 @@ def top_end(app, rig, occ, main):
     spring, retainer, collet = (T.valve_spring(app), T.spring_retainer(app),
                                 T.collet(app))
     pre, glow, inj = T.prechamber(app), T.glow_plug(app), T.injector(app)
+    heat_shield = T.injector_heat_shield(app)
     cam, ccap = T.camshaft(app), T.cam_cap(app)
     rock, rshaft = T.rocker(app), T.rocker_shaft(app)
     cover, cgask, filler = (T.cam_cover(app), T.cam_cover_gasket(app),
@@ -289,7 +292,7 @@ def top_end(app, rig, occ, main):
     rig.chain(main, cam_mate, teeth_a=CRANK_TEETH, teeth_b=CAM_TEETH,
               name="timing chain")
 
-    for sx, nm in ((-1, "intake"), (1, "exhaust")):
+    for sx, nm in ((1, "exhaust"),):
         sh = rig.place(rshaft, at=(sx * ROCKER_PIVOT_X, 0, ROCKER_Z))
         rig.fasten((ho, f"rocker_shaft_{nm}"), (sh, "seat"), flipped=False)
 
@@ -297,6 +300,7 @@ def top_end(app, rig, occ, main):
     for k, cy in enumerate(CYL_Y):
         po = rig.place(pre)
         rig.fasten((ho, f"pre_{k}"), (po, "seat"), flipped=False)
+        rig.fasten((po, "nozzle_seat"), (rig.place(heat_shield), "seat"), flipped=False)
         for part, frame in ((glow, f"glow_plug_{k}"), (inj, f"injector_{k}")):
             o = rig.place(part)
             rig.fasten((ho, frame), (o, "face"), flipped=False)
@@ -374,7 +378,7 @@ FOLDERS = [
     ("Valve gear", ["camshaft", "cam bearing cap", "rocker arm",
                     "rocker shaft", "intake valve", "exhaust valve",
                     "valve spring", "spring retainer", "valve collet"]),
-    ("Combustion", ["pre-chamber", "glow plug", "injector"]),
+    ("Combustion", ["pre-chamber", "glow plug", "injector", "injector heat shield"]),
     ("Manifolds", ["intake manifold", "exhaust manifold",
                    "intake manifold gasket", "exhaust manifold gasket"]),
     ("Timing drive", ["crank sprocket", "cam sprocket", "timing chain",
@@ -461,9 +465,71 @@ def reference_dimensions(app):
                 raise SdkError(f"{name}: no stem edge at the reference diameter")
             measured[name]["stem_diameter_mm"] = 2.0 * rims[0].radius
 
+    head = app.part("cylinder head")
+    faces = head.body().faces(kind="plane")
+    lower = [f for f in faces if f.normal.z < -0.99
+             and abs(f.centroid.z-FIRE_FACE) < 0.01 and f.area > 100]
+    upper = [f for f in faces if f.normal.z > 0.99
+             and abs(f.centroid.z-HEAD_TOP) < 0.01 and f.area > 100]
+    if not lower or not upper:
+        raise SdkError("head has no measurable fire-face / cover-rail datums")
+    height = max(upper, key=lambda f:f.area).centroid.z - max(
+        lower, key=lambda f:f.area).centroid.z
+    if not 84.8-0.001 <= height <= 85.0+0.001:
+        raise SdkError(f"head machined height {height:.3f} is outside 84.8–85.0 mm")
+    measured["cylinder head"] = dict(machined_height_mm=height,
+        source="Workshop 05.4-118/1 (PDF page 220)", limits_mm=[84.8,85.0])
+    injector = app.part("injector")
+    flats = injector.body().faces(kind="plane", where=lambda f:
+        abs(f.normal.x)>0.99 and -35.01<f.centroid.z<-25.99)
+    flat_x = [f.centroid.x for f in flats]
+    if len(flat_x)<2 or abs(max(flat_x)-min(flat_x)-27)>0.01:
+        raise SdkError("injector has no 27 mm wrench flats")
+    measured["injector"] = dict(wrench_af_mm=max(flat_x)-min(flat_x),
+        source="Workshop 07.1.4-230/1 (PDF page 424)",
+        envelope_status="photo-derived; not manufacturing dimensions")
+    for kind in ("intake", "exhaust"):
+        part = app.part(f"{kind} manifold")
+        lo,hi = part.bbox()
+        if lo.x < HEAD_X+MANIFOLD_GASKET_T-0.01:
+            raise SdkError(f"{kind} crosses the shared manifold-side gasket face")
+        measured[f"{kind} manifold"] = dict(side="+X", external_ports=len(port_centers(kind)),
+                                             bounds_mm=[list(lo),list(hi)])
+    block = app.part("block")
+    registers = block.body().edges(circular=True, radius=PUMP_REGISTER_D/2,
+        where=lambda e: (e.center-V(PUMP_MOUNT)).length()<0.02)
+    if not registers:
+        raise SdkError("injection-pump mounting register is missing")
+    measured["pump mounting register"] = dict(diameter_mm=2*registers[0].radius,
+        status="estimated interface; pump and drive not fitted")
+
     print("  measured piston height, pin size and valve head diameters match "
-          "the reference dimensions")
+          "the reference dimensions; head height, injector flats and pump register checked")
     return measured
+
+
+def profile_calls(app, out):
+    """Measure the actual generator's RPCs, including failed operations."""
+    original = app.call
+    measurements = {}
+
+    def measured(method, *args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return original(method, *args, **kwargs)
+        finally:
+            row = measurements.setdefault(method, dict(calls=0, seconds=0.0))
+            row["calls"] += 1
+            row["seconds"] += time.perf_counter() - started
+
+    def save():
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "rpc-timings.json"), "w") as f:
+            json.dump(dict(sorted(measurements.items(),
+                                  key=lambda kv: -kv[1]["seconds"])), f, indent=2)
+
+    app.call = measured
+    atexit.register(save)
 
 
 def main():
@@ -483,16 +549,21 @@ def main():
     ap.add_argument("--no-export", action="store_true",
                     help="run all checks but skip animated GLB export")
     ap.add_argument("--component", choices=("block", "head", "sump",
-                    "timing-cover", "cam-cover", "intake", "exhaust"),
+                    "timing-cover", "cam-cover", "intake", "exhaust", "injector", "prechamber"),
                     help="build one component for fast shape iteration")
+    ap.add_argument("--profile", action="store_true",
+                    help="write RPC counts and elapsed time, including failed runs")
     a = ap.parse_args()
     app = connect(a.port)
+    if a.profile:
+        profile_calls(app, a.out)
     app.new()
     t0 = time.perf_counter()
     if a.component:
         builders = {"block": B.block, "head": T.head, "sump": B.sump,
                     "timing-cover": B.timing_cover, "cam-cover": T.cam_cover,
-                    "intake": T.intake_manifold, "exhaust": T.exhaust_manifold}
+                    "intake": T.intake_manifold, "exhaust": T.exhaust_manifold,
+                    "injector": T.injector, "prechamber": T.prechamber}
         part = builders[a.component](app)
         part.activate()
         os.makedirs(a.out, exist_ok=True)
@@ -504,10 +575,18 @@ def main():
         return 0
     timings = {}
     rig = app.assembly("engine")
+    stage = time.perf_counter()
     occ, main_mate = bottom_end(app, rig)
+    timings["bottom_end_s"] = time.perf_counter() - stage
+    stage = time.perf_counter()
     front = front_and_rear(app, rig, occ, main_mate)
+    timings["front_and_rear_s"] = time.perf_counter() - stage
+    stage = time.perf_counter()
     top, cam_mate = top_end(app, rig, occ, main_mate)
+    timings["top_end_s"] = time.perf_counter() - stage
+    stage = time.perf_counter()
     fasteners(app, rig, occ, top, front)
+    timings["fasteners_s"] = time.perf_counter() - stage
     for part in app.list_parts()["parts"]:
         if part["name"] == "Part 1":
             app.delete_part(part=part["name"])
@@ -523,6 +602,8 @@ def main():
     draft = os.path.join(a.out, "om615-unchecked.dsgn")
     app.save_project(path=draft)
     print(f"  unchecked build: {draft}")
+    with open(os.path.join(a.out, "timings.json"), "w") as f:
+        json.dump(timings, f, indent=2)
     if a.build_only:
         print("  draft only: standing and motion checks have NOT run")
         return 0
@@ -537,7 +618,12 @@ def main():
     # clean bill of health. It is also the only check that looks at parts
     # RIGID to each other, which a motion study skips by design: between
     # them, the two of them had never examined 72 real overlaps.
-    report = rig.check_clashes(max_pairs=20000, deadline_s=900, _timeout=1800)
+    report = app.interference(mode="exact", max_pairs=20000,
+                              deadline_s=900, _timeout=1800)
+    with open(os.path.join(a.out, "standing-report.json"), "w") as f:
+        json.dump(report, f, indent=2)
+    if report.get("truncated") or report["clash"]:
+        raise SdkError("standing sweep failed; see standing-report.json")
     timings["standing_s"] = report["elapsed_s"]
     # In interference, `pairs` contains only clashes, not every candidate.
     print(f"  assembled: no part is inside another — "
@@ -639,10 +725,16 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
     so every set here names the floor of the hole it threads into, matched
     to its own rim by position rather than by order.
     """
-    rims = part.body().edges(circular=True, radius=rim_r,
-                             where=lambda e: abs(rim_at(e)) < 0.6)
-    floors = far_part.body().edges(circular=True, radius=far_r,
-                                   where=lambda e: abs(far_at(e)) < 0.6)
+    # These parts are not regenerated while hardware is fitted. Measure each
+    # rim once for this operation: Edge.center performs an RPC, so asking it
+    # again inside the nearest-floor search made thousands of identical calls.
+    def measured_edges(body, radius):
+        return [SimpleNamespace(center=e.center, ref=e.ref)
+                for e in body.edges(circular=True, radius=radius)]
+
+    rims = [e for e in measured_edges(part.body(), rim_r) if abs(rim_at(e)) < 0.6]
+    floors = [e for e in measured_edges(far_part.body(), far_r)
+              if abs(far_at(e)) < 0.6]
     if len(rims) < n or len(floors) < n:
         raise SdkError(f"{what}: {len(rims)} rims and {len(floors)} hole "
                        f"floors, expected at least {n} of each")
@@ -718,11 +810,11 @@ def fasteners(app, rig, occ, top, front):
              rim_key=lambda e: (e.center.x, -e.center.y),
              far_key=lambda e: (e.center.x, e.center.z))
     _bolt_up(rig, top["cam cover"], app.part("cam cover"), 3.3,
-             lambda e: e.center.z - (CAM_Z + CAM_COVER_BOSS_H),
+             lambda e: e.center.z - (COVER_BASE + CAM_COVER_BOSS_H),
              top["head"], hd, (6.0 + TAP_FIT) / 2.0,
-             lambda e: e.center.z - (CAM_Z - 15.0), "M6",
+             lambda e: e.center.z - (COVER_BASE - 11.0), "M6",
              2 * len(T._cover_bolt_y()), "cam cover bolts",
-             centres=[(sx * CAM_COVER_BOLT_X, y) for y in T._cover_bolt_y()
+             centres=[(cover_bolt_x(sx), y) for y in T._cover_bolt_y()
                       for sx in (-1, 1)])
     # A cap is drawn about ITS OWN origin and placed at its main's y, so its
     # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
