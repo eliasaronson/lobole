@@ -44,3 +44,8 @@ owner photographs. Only the 80 mm spindle diameter is owner-confirmed; the
 remaining dimensions are editable project variables with recorded assumptions.
 See [the model notes](../docs/modeling/cncest6090.md) for scope, measurement
 priorities, JSON overrides and preview/local/full verification.
+
+`toolmakers_clamp.py` is the dimensioned counterpart: an eight-part clamp based
+on an author's published plan, with screw-driven closed assembly loops, exact
+checks, STEP round-trip coverage, BOM and eight part sheets. See
+[the source audit and workflow](../docs/modeling/toolmakers-clamp.md).
