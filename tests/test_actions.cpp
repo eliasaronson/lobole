@@ -31,6 +31,7 @@
 
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/ViewActions.h"
 #include <catch2/catch_test_macros.hpp>
@@ -2198,3 +2199,69 @@ TEST_CASE("an adaptive pocket is cleared off the frame and lands complete",
   CHECK(SameMoves(state.camToolpaths[0], ref[0]));
 }
 #endif // HAVE_CAM
+
+TEST_CASE(
+    "Drawing layout edits reuse model projection and keep geometry scaled",
+    "[actions][drawing][hlr-cache]") {
+  auto state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0), 40, 30, 20);
+  const auto part = state.parts[state.activePart].id;
+  ui::AddDrawing(state, "Sheet");
+  DrawingView view;
+  view.sourceDocId = part;
+  const auto id = state.drawing->AddView(view);
+  ui::UpdateDrawingRenders(state);
+  const auto before = state.drawingRenders.at(id);
+  REQUIRE(before.hasGeometry);
+  REQUIRE(before.projectionStats.selfCalls == 1);
+  auto* edited = state.drawing->FindView(id);
+  REQUIRE(edited);
+  edited->position = {100, 80};
+  edited->scale = 0.5;
+  state.drawing->BumpVersion();
+  ui::UpdateDrawingRenders(state);
+  const auto& after = state.drawingRenders.at(id);
+  REQUIRE(after.hasGeometry);
+  CHECK(after.projectionStats.projectionHit);
+  CHECK(after.projectionStats.selfCalls == 0);
+  CHECK(glm::length((after.bboxMax - after.bboxMin) -
+                    0.5 * (before.bboxMax - before.bboxMin)) < 1e-8);
+  DrawingNote note;
+  note.text = "Cached sheet";
+  state.drawing->AddNote(note);
+  ui::UpdateDrawingRenders(state);
+  CHECK(state.drawingRenders.at(id).projectionStats.projectionHit);
+}
+
+TEST_CASE(
+    "Drawing cache notices a nested part edit without a root version bump",
+    "[actions][drawing][hlr-cache]") {
+  auto state = MakeHeadlessState();
+  AddBox(*state.document, glm::vec3(0), 10, 10, 10);
+  const auto partId = state.parts[0].id;
+  const auto sub = ui::AddAssembly(state, "Sub");
+  Occurrence leaf;
+  leaf.partId = partId;
+  state.assembly->AddOccurrence(leaf);
+  const auto top = ui::AddAssembly(state, "Top");
+  Occurrence child;
+  child.partId = state.parts[sub].id;
+  child.refKind = OccurrenceRef::Assembly;
+  state.assembly->AddOccurrence(child);
+  const auto topId = state.parts[top].id;
+  ui::AddDrawing(state, "Sheet");
+  DrawingView view;
+  view.sourceDocId = topId;
+  const auto id = state.drawing->AddView(view);
+  ui::UpdateDrawingRenders(state);
+  REQUIRE(state.drawingRenders.at(id).hasGeometry);
+  const auto rootVersion = state.parts[top].assembly->Version();
+  REQUIRE(state.parts[0].doc);
+  AddBox(*state.parts[0].doc, {40, 0, 0}, 10, 10, 10);
+  CHECK(state.parts[top].assembly->Version() == rootVersion);
+  ui::UpdateDrawingRenders(state);
+  const auto& result = state.drawingRenders.at(id);
+  REQUIRE(result.hasGeometry);
+  CHECK_FALSE(result.projectionStats.projectionHit);
+  CHECK_THAT(result.bboxMax.x - result.bboxMin.x, WithinAbs(50, 1e-8));
+}

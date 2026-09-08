@@ -4,11 +4,14 @@
 
 #include "TestIO.h"
 #include "cad/CADKernel.h"
+#include "core/AssemblySolve.h"
 #include "core/Conventions.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingProjection.h"
+#include "core/features/CurveFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/io/Serialization.h"
 
 #include <BRepAdaptor_Surface.hxx>
@@ -24,7 +27,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <set>
@@ -539,4 +545,286 @@ TEST_CASE("A deep-copied shape projects identically, edge names included",
     ++matched;
   }
   CHECK(matched == 12);
+}
+
+namespace {
+void SameProjection(const drawing::ProjectionResult& a,
+                    const drawing::ProjectionResult& b) {
+  REQUIRE(a.curves.size() == b.curves.size());
+  for (size_t i = 0; i < a.curves.size(); ++i) {
+    const auto& x = a.curves[i];
+    const auto& y = b.curves[i];
+    INFO("curve " << i);
+    CHECK(x.kind == y.kind);
+    CHECK(x.visible == y.visible);
+    CHECK(x.source.sourceId == y.source.sourceId);
+    CHECK(x.source.edgeIndex == y.source.edgeIndex);
+    CHECK(x.source.faceIndex == y.source.faceIndex);
+    CHECK(x.curveType == y.curveType);
+    CHECK(x.closed == y.closed);
+    CHECK(glm::length(x.conicCenter - y.conicCenter) < 1e-8);
+    CHECK_THAT(x.conicRadius, WithinAbs(y.conicRadius, 1e-8));
+    REQUIRE(x.points.size() == y.points.size());
+    for (size_t p = 0; p < x.points.size(); ++p)
+      CHECK(glm::length(x.points[p] - y.points[p]) < 1e-8);
+  }
+}
+} // namespace
+
+TEST_CASE("HLR cache rebinds sources and filters hidden lines without HLR",
+          "[drawing][hlr][hlr-cache]") {
+  drawing::ProjectionCache cache;
+  ProjectionOptions opts;
+  opts.cache = &cache;
+  auto bodies = One(BlockWithHole());
+  std::string error;
+  auto cold = ProjectView(bodies, kIsoDir, kIsoUp, opts, &error);
+  REQUIRE(cold);
+  CHECK(cold->stats.selfCalls == 1);
+  bodies[0].sourceId = 918;
+  opts.hiddenLines = false;
+  auto hit = ProjectView(bodies, kIsoDir, kIsoUp, opts, &error);
+  REQUIRE(hit);
+  CHECK(hit->stats.projectionHit);
+  CHECK(hit->stats.selfCalls == 0);
+  CHECK(hit->stats.pairCalls == 0);
+  ProjectionOptions reference;
+  reference.hiddenLines = false;
+  auto expected = ProjectView(bodies, kIsoDir, kIsoUp, reference, &error);
+  REQUIRE(expected);
+  SameProjection(*hit, *expected);
+  bodies[0].geometryRevision++;
+  auto revised = ProjectView(bodies, kIsoDir, kIsoUp, opts, &error);
+  REQUIRE(revised);
+  CHECK_FALSE(revised->stats.projectionHit);
+  CHECK(revised->stats.selfCalls == 1);
+}
+
+TEST_CASE("HLR pair cache restores edges after movement removal and reordering",
+          "[drawing][hlr][hlr-cache]") {
+  drawing::ProjectionCache cache;
+  ProjectionOptions opts;
+  opts.cache = &cache;
+  auto part = BlockWithHole();
+  auto blocker = CADKernel::Instance().CreateBox(40, 50, 50);
+  std::vector<InputBody> bodies{
+      {part.GetShape(), glm::dmat4(1), 10},
+      {blocker.GetShape(),
+       glm::translate(glm::dmat4(1), glm::dvec3(30, -5, -5)), 20},
+      {blocker.GetShape(),
+       glm::translate(glm::dmat4(1), glm::dvec3(70, -5, -5)), 30}};
+  const auto check = [&] {
+    std::string error;
+    auto actual = ProjectView(bodies, kFrontDir, kFrontUp, opts, &error);
+    INFO(error);
+    REQUIRE(actual);
+    auto expected = ProjectView(bodies, kFrontDir, kFrontUp, {}, &error);
+    REQUIRE(expected);
+    SameProjection(*actual, *expected);
+    return actual->stats;
+  };
+  CHECK(check().pairCalls == 6);
+  bodies[2].transform = glm::translate(glm::dmat4(1), glm::dvec3(120, 0, 0));
+  auto changed = check();
+  CHECK(changed.pairHits == 2);
+  CHECK(changed.pairCalls == 4);
+  CHECK(changed.selfHits == 2);
+  bodies.erase(bodies.begin() + 1);
+  CHECK(check().pairHits == 2);
+  std::reverse(bodies.begin(), bodies.end());
+  bodies[0].sourceId = 99;
+  CHECK(check().pairHits == 2);
+  cache.Clear();
+  CHECK(check().pairCalls == 2);
+}
+
+TEST_CASE("HLR cache handles coincident instances and view changes",
+          "[drawing][hlr][hlr-cache]") {
+  drawing::ProjectionCache cache;
+  ProjectionOptions opts;
+  opts.cache = &cache;
+  auto shape = BlockWithHole();
+  auto bodies = One(shape);
+  bodies.push_back({shape.GetShape(), glm::dmat4(1), 2});
+  for (const auto& dir : {kFrontDir, kIsoDir, kSideDir}) {
+    std::string error;
+    auto actual = ProjectView(bodies, dir, kFrontUp, opts, &error);
+    REQUIRE(actual);
+    auto expected = ProjectView(bodies, dir, kFrontUp, {}, &error);
+    REQUIRE(expected);
+    SameProjection(*actual, *expected);
+  }
+}
+
+TEST_CASE("Cancelled HLR cache work never publishes a completed view",
+          "[drawing][hlr][hlr-cache]") {
+  drawing::ProjectionCache cache;
+  ProjectionOptions opts;
+  opts.cache = &cache;
+  opts.cancelled = [] { return true; };
+  auto bodies = One(BlockWithHole());
+  std::string error;
+  CHECK_FALSE(ProjectView(bodies, kIsoDir, kIsoUp, opts, &error));
+  CHECK(error == "cancelled");
+  opts.cancelled = {};
+  auto completed = ProjectView(bodies, kIsoDir, kIsoUp, opts, &error);
+  REQUIRE(completed);
+  CHECK_FALSE(completed->stats.projectionHit);
+}
+
+TEST_CASE(
+    "HLR spring cache benchmark compares cold and incremental exact output",
+    "[.][hlr-cache-benchmark]") {
+  Document doc;
+  auto path = std::make_unique<CurveFeature>("Helix", Curve3DKind::Helix);
+  path->radius = 11;
+  path->pitch = 7;
+  path->turns = 4;
+  doc.AddFeature(std::move(path));
+  const auto pathId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  doc.AddFeature(std::make_unique<PipeFeature>("Spring", pathId, 3.2));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  auto bolt =
+      CADKernel::Instance().CreateCylinder({0, 0, -5}, {0, 0, 1}, 2, 45);
+  auto box = CADKernel::Instance().CreateBox(10, 10, 10);
+  std::vector<InputBody> bodies{
+      {doc.GetBodies()[0].shape.GetShape(), glm::dmat4(1), 1},
+      {bolt.GetShape(), glm::dmat4(1), 2},
+      {box.GetShape(), glm::translate(glm::dmat4(1), glm::dvec3(30, 0, 0)), 3}};
+  drawing::ProjectionCache cache;
+  ProjectionOptions cached;
+  cached.cache = &cache;
+  const auto run = [&](const char* label, const ProjectionOptions& opts) {
+    std::string error;
+    const auto start = std::chrono::steady_clock::now();
+    auto result = ProjectView(bodies, kIsoDir, kIsoUp, opts, &error);
+    INFO(error);
+    REQUIRE(result);
+    const auto& s = result->stats;
+    std::cout << "[hlr-cache] " << label << " total_ms="
+              << std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << " outline_ms=" << s.updateMs << " self_ms=" << s.selfMs
+              << " pair_ms=" << s.pairMs << " self_calls=" << s.selfCalls
+              << " pair_calls=" << s.pairCalls << " self_hits=" << s.selfHits
+              << " pair_hits=" << s.pairHits << " bytes=" << s.cacheBytes
+              << '\n';
+    return *result;
+  };
+  const auto reference = run("uncached", {});
+  SameProjection(run("cold", cached), reference);
+  SameProjection(run("warm", cached), reference);
+  bodies[2].transform = glm::translate(glm::dmat4(1), glm::dvec3(35, 0, 0));
+  SameProjection(run("move-box", cached), run("move-box-reference", {}));
+  bodies.erase(bodies.begin() + 1);
+  SameProjection(run("remove-bolt", cached), run("remove-bolt-reference", {}));
+}
+
+TEST_CASE("HLR project benchmark compares incremental assembly visibility",
+          "[.][hlr-project-benchmark]") {
+  const char* project = std::getenv("DESIGNER_HLR_PROJECT");
+  REQUIRE(project != nullptr);
+  nlohmann::json index;
+  std::ifstream(std::filesystem::path(project) / "project.json") >> index;
+  std::map<uint64_t, std::unique_ptr<Document>> parts;
+  std::map<uint64_t, std::unique_ptr<AssemblyDocument>> assemblies;
+  for (const auto& entry : index.at("documents")) {
+    const auto path =
+        (std::filesystem::path(project) / entry.at("dir").get<std::string>())
+            .string();
+    const uint64_t id = entry.at("id");
+    if (entry.at("type") == "part") {
+      auto doc = DocumentIO::Load(path);
+      REQUIRE(doc);
+      parts[id] = std::move(*doc);
+    } else if (entry.at("type") == "assembly") {
+      auto doc = DocumentIO::LoadAssembly(path);
+      REQUIRE(doc);
+      assemblies[id] = std::move(*doc);
+    }
+  }
+  REQUIRE_FALSE(assemblies.empty());
+  auto flat = assembly::Flatten(
+      *assemblies.begin()->second,
+      [&](uint64_t id) -> const Document* {
+        const auto it = parts.find(id);
+        return it == parts.end() ? nullptr : it->second.get();
+      },
+      [&](uint64_t id) -> const AssemblyDocument* {
+        const auto it = assemblies.find(id);
+        return it == assemblies.end() ? nullptr : it->second.get();
+      });
+  REQUIRE(flat);
+  std::vector<InputBody> bodies;
+  for (const auto& inst : *flat)
+    if (inst.visible)
+      for (const auto& body : inst.part->GetBodies())
+        if (!body.reference && !body.shape.GetShape().IsNull())
+          bodies.push_back({body.shape.GetShape(), glm::dmat4(inst.world),
+                            bodies.size(), inst.part->Version()});
+  REQUIRE(bodies.size() > 2);
+  drawing::ProjectionCache cache;
+  ProjectionOptions options;
+  options.cache = &cache;
+  const auto run = [&](const char* label, const ProjectionOptions& opts) {
+    const auto start = std::chrono::steady_clock::now();
+    std::string error;
+    auto result = ProjectView(bodies, kFrontDir, kFrontUp, opts, &error);
+    INFO(error);
+    REQUIRE(result);
+    const auto& s = result->stats;
+    std::cout << "[hlr-project] " << label << " bodies=" << bodies.size()
+              << " total_ms="
+              << std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - start)
+                     .count()
+              << " outline_ms=" << s.updateMs << " self_ms=" << s.selfMs
+              << " pair_ms=" << s.pairMs << " self_calls=" << s.selfCalls
+              << " pair_calls=" << s.pairCalls << " self_hits=" << s.selfHits
+              << " pair_hits=" << s.pairHits << " bytes=" << s.cacheBytes
+              << std::endl;
+    return *result;
+  };
+  const auto baseline = run("uncached", {});
+  SameProjection(run("cold", options), baseline);
+  SameProjection(run("warm", options), baseline);
+  bodies.back().transform[3].x += 5;
+  const auto moved = run("move-one", options);
+  // The engine's 32 bodies fit the bounded cache. Guard against an entry
+  // limit that silently thrashes before an incremental update can reuse it.
+  if (bodies.size() <= 32) {
+    CHECK(moved.stats.selfCalls == 1);
+    CHECK(moved.stats.pairCalls == 2 * (bodies.size() - 1));
+    CHECK(moved.stats.pairHits == (bodies.size() - 1) * (bodies.size() - 2));
+  }
+  SameProjection(moved, run("move-one-reference", {}));
+  bodies.erase(bodies.begin() + bodies.size() / 2);
+  const auto removed = run("remove-one", options);
+  SameProjection(removed, run("remove-one-reference", {}));
+}
+
+TEST_CASE("HLR cache handles poles and rotated occluders",
+          "[drawing][hlr][hlr-cache]") {
+  drawing::ProjectionCache cache;
+  ProjectionOptions options;
+  options.cache = &cache;
+  auto sphere = CADKernel::Instance().CreateSphere({0, 0, 0}, 10);
+  auto box = CADKernel::Instance().CreateBox(15, 15, 15);
+  std::vector<InputBody> bodies{{sphere.GetShape(), glm::dmat4(1), 1},
+                                {box.GetShape(), glm::dmat4(1), 2}};
+  for (int step = 0; step < 3; ++step) {
+    bodies[1].transform =
+        glm::rotate(glm::dmat4(1), step * 0.2, glm::dvec3(0, 0, 1));
+    std::string error;
+    auto actual = ProjectView(bodies, kIsoDir, kIsoUp, options, &error);
+    INFO(error);
+    REQUIRE(actual);
+    auto expected = ProjectView(bodies, kIsoDir, kIsoUp, {}, &error);
+    REQUIRE(expected);
+    SameProjection(*actual, *expected);
+    if (step)
+      CHECK(actual->stats.selfHits == 1);
+  }
 }

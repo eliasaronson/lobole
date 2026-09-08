@@ -565,11 +565,20 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         // What the projection COST, so "this sheet is slow" is a number
         // rather than a stopwatch. A view holds no geometry until something
         // projects it, and the bill is all HLR (W3).
-        if (it->second.updateMs > 0.0 || it->second.hideMs > 0.0) {
+        {
+          const auto& stats = it->second.projectionStats;
           vj["cost"] = {{"outline_ms", it->second.updateMs},
                         {"hide_ms", it->second.hideMs},
                         {"hlr_edges", it->second.dsEdges},
-                        {"bodies", it->second.bodies}};
+                        {"bodies", it->second.bodies},
+                        {"self_ms", stats.selfMs},
+                        {"pair_ms", stats.pairMs},
+                        {"self_calls", stats.selfCalls},
+                        {"pair_calls", stats.pairCalls},
+                        {"self_hits", stats.selfHits},
+                        {"pair_hits", stats.pairHits},
+                        {"projection_hit", stats.projectionHit},
+                        {"cache_bytes", stats.cacheBytes}};
         }
         if (!it->second.error.empty())
           vj["error"] = it->second.error;

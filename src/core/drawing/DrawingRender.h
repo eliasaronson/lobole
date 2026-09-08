@@ -54,6 +54,7 @@ struct SheetView {
   // until it is exported, so nothing else can tell a caller what it just
   // spent: an assembly view is 66-86 s and looked like a hang
   // (docs/agent-scale-followup-plan.md, W3).
+  ProjectionResult::Stats projectionStats;
   double updateMs = 0.0; // HLR outline building
   double hideMs = 0.0;   // HLR visibility classification
   int dsEdges = 0;       // edges in the HLR data structure
