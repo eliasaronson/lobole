@@ -90,6 +90,21 @@ public:
   // the document unchanged) if index is out of range or feature is null.
   bool ReplaceFeature(size_t index, std::unique_ptr<Feature> feature);
 
+  const catalog::Json& Generator() const { return m_generator; }
+  void SetGeneratorRaw(catalog::Json stamp) {
+    if (!stamp.is_null()) {
+      if (!stamp.is_object() || stamp.size() != 4)
+        throw std::runtime_error("invalid generated component stamp");
+      for (const char* field :
+           {"namespace", "key", "fingerprint", "recipe_hash"})
+        if (!stamp.contains(field) || !stamp[field].is_string() ||
+            stamp[field].get<std::string>().empty())
+          throw std::runtime_error("invalid generated component stamp field: " +
+                                   std::string(field));
+    }
+    m_generator = std::move(stamp);
+  }
+
   const catalog::Json& GetCatalogs() const { return m_catalogs; }
   void SetCatalogsRaw(const catalog::Json& entries) {
     m_catalogs = catalog::Deserialize(entries);
@@ -448,6 +463,7 @@ private:
   std::map<std::string, std::vector<unsigned char>>
       m_assets; // v49 image pixels
   std::vector<Body> m_bodies;
+  catalog::Json m_generator = nullptr;
   catalog::Json m_catalogs = catalog::Json::array();
   std::vector<Parameter> m_parameters;
   std::vector<fem::Study> m_studies;

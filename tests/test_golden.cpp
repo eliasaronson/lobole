@@ -463,6 +463,8 @@ void AssertUnits(const Document& doc, const nlohmann::json& expect) {
 }
 
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
+  if (expect.contains("generator"))
+    CHECK(doc.Generator() == expect.at("generator"));
   if (expect.contains("catalogs"))
     CHECK(doc.GetCatalogs() == expect.at("catalogs"));
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());

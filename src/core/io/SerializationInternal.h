@@ -17,7 +17,8 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    93; // v93: versioned engineering catalog references and embedded records.
+    94; // v94: generated component ownership and source fingerprints.
+        // v93: versioned engineering catalog references and embedded records.
         // v92: a CAM tool's `chipload_min`/`chipload_max` -- what THIS cutter
         //      wants per tooth, when somebody has a vendor's chart for it.
         //      Absent (the default) falls back to a scaling rule off the

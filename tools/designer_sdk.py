@@ -204,7 +204,7 @@ class App:
     _MOVES_TAB = frozenset((
         "add_part", "add_assembly", "create_drawing", "add_drawing_view",
         "add_job", "new_project", "open_project", "delete_part",
-        "edit_in_context",
+        "edit_in_context", "set_active_part", "claim_component", "update_component",
     ))
 
     def _inspection_call(self, method, params):

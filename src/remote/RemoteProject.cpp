@@ -1,4 +1,9 @@
 #include "remote/RemoteProject.h"
+#include "core/GeneratedComponent.h"
+#include "core/Measure.h"
+#include "remote/InspectionContracts.h"
+#include "ui/AssemblyActions.h"
+#include <set>
 
 #include "cad/CADKernel.h"
 #include "cad/MeshExport.h"
@@ -48,6 +53,27 @@ static constexpr MethodDoc ProjectMethods[] = {
      "Save the project to {path, message?, force?}. Refuses when the project "
      "changed on disk since it was opened; {force:true} saves over it.",
      "force, message, path", remote::NotInBatch},
+    {"validation_revision",
+     "Session revision of all model tabs, plus unresolved occurrence "
+     "references. "
+     "Use before/after staged validation; any mismatch makes the report stale.",
+     ""},
+    {"component_status",
+     "Read generated component ownership and a guarded revision by stable "
+     "part_id, or find it by namespace/key. Modified means human edits "
+     "conflict.",
+     "part_id, namespace, key"},
+    {"claim_component",
+     "Explicitly assign generated ownership to an existing part. Requires its "
+     "current revision; never steals another component's ownership. Undoable.",
+     "part_id, namespace, key, fingerprint, expected_revision"},
+    {"update_component",
+     "Preview or apply a validated staging part to an owned component. "
+     "Preserves part/feature IDs, validates dependent assemblies, refuses "
+     "human "
+     "edits and stale revisions. apply defaults false. One undoable update.",
+     "part_id, source_part_id, fingerprint, expected_revision, "
+     "source_revision, apply"},
     {"import_step",
      "Import a STEP file into the current project (XCAF: names, "
      "colors, real assemblies).",
@@ -285,6 +311,245 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   Document* doc = state.document.get();
   AssemblyDocument* asmDoc = state.assembly.get();
+  const auto componentPart = [&](uint64_t id) -> Document& {
+    ui::EnsureParts(state);
+    auto* part = ui::PartDocById(state, id);
+    if (!part)
+      throw std::runtime_error("no part with stable id " + std::to_string(id));
+    return *part;
+  };
+  const auto componentInfo = [&](uint64_t id, const Document& part) {
+    return json{{"part_id", id},
+                {"generator", part.Generator()},
+                {"revision", generated::Revision(part)},
+                {"state", part.Generator().is_null()  ? "unowned"
+                          : generated::Modified(part) ? "modified"
+                                                      : "owned"}};
+  };
+  if (m == "validation_revision") {
+    ui::EnsureParts(state);
+    json rows = json::array(), missing = json::array();
+    for (const auto& slot : state.parts) {
+      if (const auto* part = ui::PartDocById(state, slot.id)) {
+        rows.push_back({{"id", slot.id},
+                        {"instance", part->InstanceId()},
+                        {"version", part->Version()}});
+      } else if (const auto* assembly = ui::AssemblyDocById(state, slot.id)) {
+        json recipe = json::array();
+        for (const auto& occurrence : assembly->GetOccurrences()) {
+          recipe.push_back(DocumentIO::OccurrenceToJson(occurrence));
+          if (!ui::PartDocById(state, occurrence.partId) &&
+              !ui::AssemblyDocById(state, occurrence.partId))
+            missing.push_back(
+                {{"assembly", slot.id}, {"occurrence", occurrence.id}});
+        }
+        recipe.push_back(
+            {{"active_configuration", assembly->ActiveConfiguration()}});
+        for (const auto& config : assembly->GetConfigurations())
+          recipe.push_back(DocumentIO::ConfigurationToJson(config));
+        for (const auto& mate : assembly->GetMates())
+          recipe.push_back(DocumentIO::MateToJson(mate));
+        for (const auto& relation : assembly->GetRelations())
+          recipe.push_back(DocumentIO::RelationToJson(relation));
+        for (const auto& study : assembly->GetMotionStudies())
+          recipe.push_back(DocumentIO::MotionStudyToJson(study));
+        rows.push_back({{"id", slot.id},
+                        {"instance", reinterpret_cast<uintptr_t>(assembly)},
+                        {"recipe", catalog::Sha256(recipe.dump())}});
+      }
+    }
+    return json{{"revision", rows}, {"missing_references", missing}};
+  }
+  if (m == "component_status") {
+    if (p.contains("part_id")) {
+      const auto id = p.at("part_id").get<uint64_t>();
+      return componentInfo(id, componentPart(id));
+    }
+    const auto space = p.at("namespace").get<std::string>();
+    const auto key = p.at("key").get<std::string>();
+    ui::EnsureParts(state);
+    json found;
+    for (const auto& slot : state.parts) {
+      auto* part = ui::PartDocById(state, slot.id);
+      if (!part || !part->Generator().is_object())
+        continue;
+      const auto& stamp = part->Generator();
+      if (stamp.value("namespace", std::string{}) == space &&
+          stamp.value("key", std::string{}) == key) {
+        if (!found.is_null())
+          throw std::runtime_error("duplicate component ownership");
+        found = componentInfo(slot.id, *part);
+      }
+    }
+    return found.is_null() ? json{{"state", "missing"}} : found;
+  }
+  if (m == "claim_component") {
+    const auto id = p.at("part_id").get<uint64_t>();
+    auto& part = componentPart(id);
+    const auto expected = p.at("expected_revision");
+    if (expected != generated::Revision(part))
+      throw ContractError(m, "stale_revision", "/params/expected_revision",
+                          generated::Revision(part), expected);
+    const auto space = p.at("namespace").get<std::string>();
+    const auto key = p.at("key").get<std::string>();
+    const auto fingerprint = p.at("fingerprint").get<std::string>();
+    if (space.empty() || key.empty() || fingerprint.empty())
+      throw std::runtime_error(
+          "component namespace, key and fingerprint must be nonempty");
+    for (const auto& slot : state.parts) {
+      auto* other = ui::PartDocById(state, slot.id);
+      if (slot.id != id && other && other->Generator().is_object() &&
+          other->Generator().value("namespace", std::string{}) == space &&
+          other->Generator().value("key", std::string{}) == key)
+        throw std::runtime_error(
+            "component key already belongs to another part");
+    }
+    if (!part.Generator().is_null()) {
+      if (part.Generator().value("namespace", std::string{}) != space ||
+          part.Generator().value("key", std::string{}) != key ||
+          generated::Modified(part))
+        throw std::runtime_error("component ownership conflict: cannot claim "
+                                 "edited or differently owned output");
+      if (part.Generator().value("fingerprint", std::string{}) == fingerprint)
+        return componentInfo(id, part);
+      throw std::runtime_error(
+          "use update_component to change an existing ownership fingerprint");
+    }
+    const json stamp{{"namespace", space},
+                     {"key", key},
+                     {"fingerprint", fingerprint},
+                     {"recipe_hash", generated::RecipeHash(part)}};
+    for (size_t i = 0; i < state.parts.size(); ++i)
+      if (state.parts[i].id == id) {
+        ui::SetActivePart(state, i);
+        break;
+      }
+    class Claim : public Command {
+      json before_, after_;
+
+    public:
+      Claim(json before, json after)
+          : before_(std::move(before)), after_(std::move(after)) {}
+      std::string Description() const override {
+        return "Claim generated component";
+      }
+      bool Execute(Document& d) override {
+        d.SetGeneratorRaw(after_);
+        d.Regenerate();
+        return true;
+      }
+      void Undo(Document& d) override {
+        d.SetGeneratorRaw(before_);
+        d.Regenerate();
+      }
+    };
+    state.commands->Execute(std::make_unique<Claim>(part.Generator(), stamp),
+                            part);
+    return componentInfo(id, part);
+  }
+  if (m == "update_component") {
+    const auto id = p.at("part_id").get<uint64_t>();
+    const auto sourceId = p.at("source_part_id").get<uint64_t>();
+    if (sourceId == id)
+      throw std::runtime_error("staging source must be a different part");
+    auto& part = componentPart(id);
+    auto& source = componentPart(sourceId);
+    const auto fingerprint = p.at("fingerprint").get<std::string>();
+    if (fingerprint.empty())
+      throw std::runtime_error("fingerprint must be nonempty");
+    if (p.at("expected_revision") != generated::Revision(part) ||
+        p.at("source_revision") != generated::Revision(source))
+      throw ContractError(m, "stale_revision", "/params",
+                          "unchanged source and target revisions", nullptr);
+    if (!part.Generator().is_object() || generated::Modified(part))
+      throw ContractError(m, "ownership_conflict", "/params/part_id",
+                          "unmodified owned output", id);
+    for (const Document* d : {&part, &source}) {
+      if (!d->GetAssets().empty() || !d->GetConfigurations().empty() ||
+          !d->GetStudies().empty() || d->Rollback() >= 0)
+        throw std::runtime_error(
+            "component update pilot does not replace assets, configurations, "
+            "studies or rollback states");
+    }
+    if (generated::Recipe(part)["units"] != generated::Recipe(source)["units"])
+      throw std::runtime_error(
+          "component update requires matching document units");
+    std::set<uint64_t> ids;
+    for (const auto& f : source.GetFeatures()) {
+      if (!ids.insert(f->GetId()).second)
+        throw std::runtime_error("staging component has duplicate feature IDs");
+      if (const auto* old = part.FindFeatureById(f->GetId());
+          old &&
+          (old->GetName() != f->GetName() || old->TypeName() != f->TypeName()))
+        throw std::runtime_error(
+            "feature identity conflict: stage with stable feature keys");
+    }
+    for (const auto& f : part.GetFeatures())
+      if (!ids.contains(f->GetId()))
+        throw std::runtime_error(
+            "component update pilot cannot retire existing features; keep or "
+            "suppress their stable keys");
+    if (source.GetBodies().empty())
+      throw std::runtime_error("staging component is empty");
+    for (const auto& f : source.GetFeatures())
+      if (!f->GetError().empty())
+        throw std::runtime_error("staging feature failed: " + f->GetError());
+    for (const auto& b : source.GetBodies())
+      if (!Measure::CheckGeometry(b.shape).valid || b.shape.Volume() <= 0)
+        throw std::runtime_error(
+            "staging component has invalid or empty geometry");
+    // Solve copies of every dependent assembly with the candidate resolver.
+    // Missing datums and broken mates fail before any target mutation.
+    json affected = json::array();
+    const auto parts = [&](uint64_t partId) -> const Document* {
+      return partId == id ? &source : ui::PartDocById(state, partId);
+    };
+    for (const auto& slot : state.parts) {
+      const auto* assembly = ui::AssemblyDocById(state, slot.id);
+      if (!assembly)
+        continue;
+      bool depends = false;
+      for (const auto& [child, version] :
+           assembly::SubtreeVersions(*assembly, ui::PartResolverFor(state),
+                                     ui::AssemblyResolverFor(state)))
+        depends |= child == id;
+      if (!depends)
+        continue;
+      AssemblyDocument candidate = *assembly;
+      const auto solved =
+          assembly::Solve(candidate, parts, ui::AssemblyResolverFor(state));
+      if (solved.erroredMates || !solved.loopsClosed)
+        throw std::runtime_error("staging component breaks mates in assembly " +
+                                 slot.name);
+      affected.push_back(slot.id);
+    }
+    json stamp = part.Generator();
+    stamp["fingerprint"] = fingerprint;
+    stamp["recipe_hash"] = generated::RecipeHash(source);
+    const bool same =
+        stamp == part.Generator() &&
+        generated::RecipeHash(part) == generated::RecipeHash(source);
+    json out{{"action", same ? "reuse" : "update"},
+             {"part_id", id},
+             {"affected_assemblies", affected},
+             {"applied", false}};
+    if (!p.value("apply", false) || same)
+      return out;
+    for (size_t i = 0; i < state.parts.size(); ++i)
+      if (state.parts[i].id == id) {
+        ui::SetActivePart(state, i);
+        break;
+      }
+    if (!state.commands->Execute(
+            std::make_unique<generated::UpdateCommand>(part, source, stamp),
+            part))
+      throw std::runtime_error("component update failed and was rolled back");
+    out["applied"] = true;
+    out["revision"] = generated::Revision(part);
+    out["regen"] = remote::RegenSummaryJson(part);
+    out["regen"]["executed"] = part.LastRegenStats().executed;
+    return out;
+  }
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
     state.parts.clear(); // reset to a single fresh part (A1)

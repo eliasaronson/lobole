@@ -695,3 +695,8 @@ set_tests_properties(inspection_contracts_smoke PROPERTIES TIMEOUT 120)
 add_test(NAME inspection_typing_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/inspection_typing_gate.py)
 set_tests_properties(inspection_typing_gate PROPERTIES TIMEOUT 120)
+
+add_test(NAME component_update_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/component_update_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(component_update_smoke PROPERTIES TIMEOUT 120)
