@@ -132,10 +132,12 @@ def main():
         expect(r2["started"] and r2["job"] == "motion", f"started: {r2}")
         for _ in range(300):
             st = d.call("motion_status", study=sid)
-            if st["has_result"]:
+            # The prior synchronous result remains available while rerunning.
+            # A result alone does not mean this background job has finished.
+            if st["has_result"] and not st["running"]:
                 break
             time.sleep(0.05)
-        expect(st["has_result"], "the job landed")
+        expect(st["has_result"] and not st["running"], "the job landed")
         expect(st["result"]["worst_sample"] == 6 and not st["result"]["clean"],
                f"the same table from the worker: {st['result']['worst_sample']}")
         jobs = d.call("background_jobs")["jobs"]

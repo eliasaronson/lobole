@@ -700,3 +700,9 @@ add_test(NAME component_update_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/component_update_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(component_update_smoke PROPERTIES TIMEOUT 120)
+
+# Exercise real generator geometry and cache reuse without a whole engine sweep.
+add_test(NAME om615_accessories_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/om615_accessories_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(om615_accessories_smoke PROPERTIES TIMEOUT 180)
