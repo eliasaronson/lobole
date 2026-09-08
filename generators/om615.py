@@ -638,6 +638,7 @@ def main():
                 write_report(a.out, 'component-update.json', change.report)
         rig = app.assembly('engine', create=False)
         write_report(a.out, 'reference-dimensions.json', reference_dimensions(app))
+        write_report(a.out, 'accessory-structure-report.json', A.check_mounting_structure(app, rig))
         if a.stage != 'preview':
             write_report(a.out, 'accessory-standing-report.json', A.check_subassemblies(app))
             write_report(a.out, 'accessory-mounting-report.json', A.check_mountings(app, rig))
@@ -701,6 +702,7 @@ def main():
     print(f"  unchecked build: {draft}")
     with open(os.path.join(a.out, "timings.json"), "w") as f:
         json.dump(timings, f, indent=2)
+    write_report(a.out, 'accessory-structure-report.json', A.check_mounting_structure(app, rig))
     initial = validate(app, stage='preview' if a.stage == 'full' else a.stage,
                        assembly=rig)
     validation = initial.current(app)

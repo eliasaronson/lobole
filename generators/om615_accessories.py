@@ -5,7 +5,7 @@ local Z and located by named mounting/shaft datums, not by bounding boxes.
 """
 
 import math
-from designer_sdk import Plane, V, SdkError
+from designer_sdk import Part, Plane, V, SdkError
 import om615_bottom as B
 from om615_spec import BELT_Y, PULLEY_D, WP_PULLEY_D, WATER_PUMP_Z
 
@@ -683,13 +683,16 @@ def alternator_bracket(app):
     sk = p.sketch(Plane.xz(-250), name="Alternator pivot eye")
     sk.circle((ALT_X, z), r=14)
     p.extrude(sk.add(), 8, mode="add", name="Alternator pivot eye")
+    # Trim only the lug envelope: extending this cut inboard severs the arm.
     B.slab(
-        p, 140, -250, z - 22, ALT_X + 30, -210, z + 23, "Lug seating face", mode="cut"
+        p, ALT_X - 14, -250, z - 22, ALT_X + 30, -210, z + 23,
+        "Lug seating face", mode="cut"
     )
     B.bore(p, (ALT_X, -260, z), (ALT_X, -249, z), 10.5, "Pivot bolt", over=0)
     p.frame("alternator", origin=(ALT_X, BELT_Y + 16, ALT_Z), z=(0, 1, 0), x=(1, 0, 0))
     pivot_stack_frames(p, z, -258, -233)
     p.material("steel")
+    p.check(solids=1)
     verify(p)
     return p
 
@@ -700,8 +703,9 @@ def alternator_upper_bracket(app):
     bracket_foot(p, z)
     B.axis_solid(p, (108, -165, z), (133, -229, 177), 14, "Upper support arm")
     sk = p.sketch(Plane.xz(-227), name="Adjustment strap")
+    # Material must surround both ends of the adjustment slot below.
     B.rounded_polygon(
-        sk, [(125, 165), (135, 184), (202, 180), (207, 145), (165, 143)], 5
+        sk, [(125, 140), (125, 177), (135, 184), (214, 180), (214, 140)], 5
     )
     p.extrude(sk.add(), 6, mode="add", name="Adjustment strap")
     sk = p.sketch(Plane.xz(-226), name="Pivot concentric adjustment slot")
@@ -733,6 +737,7 @@ def alternator_upper_bracket(app):
     p.extrude(sk.add(), 8, mode="cut", name="Adjustment slot")
     pivot_stack_frames(p, z, -250, -227)
     p.material("steel")
+    p.check(solids=1)
     verify(p)
     return p
 
@@ -879,8 +884,76 @@ def motion_dimensions(report, accessories):
     return result
 
 
+def check_mounting_structure(app, rig):
+    """Cheap preview gates: connected supports, sampled necks and bolt stacks.
+
+    Section thresholds are model design minima, not a strength certification.
+    The upper strap has two section regions around its enclosed adjustment slot.
+    """
+    sections, fasteners = [], []
+    parts = {row["id"]: Part(app, row) for row in app.parts()}
+    for name, samples, minimum in (
+        ("alternator mounting bracket", (115, 139, 145, 153, 160, 164), 80),
+        ("alternator adjustment bracket", (139, 145, 153, 176, 200, 211), 24),
+    ):
+        bracket = app.part(name, create=False)
+        bracket.check(solids=1)
+        for x in samples:
+            section = app.section(part=bracket.id, base_plane="yz", offset=x,
+                                  regions=True)
+            if not section["regions"] or any(
+                region["area"] < minimum for region in section["regions"]
+            ):
+                raise SdkError(f"{name}: insufficient support section at X={x}: {section}")
+            sections.append(dict(part=name, x=x, minimum_area=minimum, **section))
+        # Check the actual drilled foot axes against the mounting datums.
+        holes = bracket.faces(kind="cylinder", radius=4.4, radius_tol=0.001)
+        for i in range(2):
+            datum = bracket.get_frame(f"foot_bolt_{i}")
+            if not any(
+                abs(abs(h.axis.dot(datum.z)) - 1) < 1e-5
+                and (h.frame().origin - datum.origin).cross(datum.z).length() < 0.002
+                for h in holes
+            ):
+                raise SdkError(f"{name}: foot_bolt_{i} is not aligned with a drilled hole")
+        rig.activate()
+        mount = rig.occurrence(name)
+        for key in ("foot_bolt_0", "foot_bolt_1", "pivot_bolt"):
+            bolt = rig.occurrence(f"{name} {key}")
+            expected, actual = mount.frame(key), bolt.frame()
+            if (expected.origin - actual.origin).length() > 0.002 or (
+                expected.z.dot(actual.z) < 1 - 1e-5
+            ):
+                raise SdkError(f"{name}: {key} is not seated/aligned with its mounting datum")
+            # Catalog bolts grow along local +Z from their under-head plane.
+            _, tip = parts[bolt.part_id].bbox()
+            if key.startswith("foot"):
+                # Block mounting face is local X=100, bore ends at X=85.
+                entry = (mount.frame("block").origin - actual.origin).dot(actual.z)
+                engagement = tip.z - entry
+                if not 8 <= engagement <= 15:
+                    raise SdkError(f"{name}: {key} block engagement {engagement:.3f} mm")
+            else:
+                nut = rig.occurrence(f"{name} pivot_nut")
+                nf = nut.frame()
+                if (nf.origin - actual.origin).cross(actual.z).length() > 0.002 or (
+                    abs(nf.z.dot(actual.z)) < 1 - 1e-5
+                ):
+                    raise SdkError(f"{name}: pivot nut is not coaxial with its bolt")
+                lo, hi = parts[nut.part_id].bbox()
+                ends = [(nf.origin + nf.z * z - actual.origin).dot(actual.z)
+                        for z in (lo.z, hi.z)]
+                engagement = min(tip.z, max(ends)) - max(0, min(ends))
+                if engagement < hi.z - lo.z - 0.002:
+                    raise SdkError(f"{name}: pivot bolt does not engage the full nut")
+            fasteners.append(dict(bracket=name, bolt=key, engagement_mm=engagement))
+    rig.activate()
+    return dict(sections=sections, fasteners=fasteners)
+
+
 def check_mountings(app, rig):
     """Check load-path contact and a closed pump pocket, not just non-overlap."""
+    structure = check_mounting_structure(app, rig)
     cover = app.part("timing cover", create=False)
     section = app.section(part=cover.id, base_plane="yz", offset=VAC_X, regions=True)
     if section["area"] < 1500:
@@ -918,4 +991,4 @@ def check_mountings(app, rig):
         if r["distance"] > 0.002 or r.get("overlap_volume", 0) > 0.01:
             raise SdkError(f"Mounting contact failed: {a} / {b}: {r}")
         measured.append(dict(a=a, b=b, **r))
-    return dict(pocket_side_section=section, contacts=measured)
+    return dict(structure=structure, pocket_side_section=section, contacts=measured)

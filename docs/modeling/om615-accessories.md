@@ -203,3 +203,40 @@ saved exact motion poses: zero positional difference; quaternion agreement
 within floating-point rounding. The accepted project's study remains exact and
 collision-enabled. `animation-verification.json` records that comparison and
 the four measured piston strokes.
+
+## Connected mounting supports
+
+A later visual review exposed a false positive in the mounting checks: each
+alternator bracket was one valid CAD body containing **two solids**. The lower
+lug-seating cutter crossed the support arm; the upper slot crossed both strap
+edges. Separate islands could touch the block and alternator and pass both
+pairwise contact tests. Those tests did not establish a continuous load path.
+
+The lower seating cut now starts at the lug edge, preserving the arm. The upper
+strap encloses both ends of its adjustment slot. Both builders require
+`part.check(solids=1)`. This optional SDK check counts solids across non-reference
+bodies and reports body names and feature IDs on failure; it does not replace
+strict B-Rep validity checks or assume all CAD parts must contain one solid.
+
+`check_mounting_structure` runs during engine preview as well as local/full
+validation. It checks both brackets' solid count, sampled material sections,
+foot-hole axes against mounting datums, bolt seating/alignment, block screw
+engagement (8–15 mm), and full axial engagement of each pivot nut. The sampled
+section minima are 80 mm² for the lower support and 24 mm² per upper-strap
+section region. These are model design guards, not load-derived strength limits
+or a global minimum-wall measurement. Nut engagement uses geometric extents;
+thread preload, thread stripping and fatigue are not evaluated.
+
+The preview gates do not run the standing collision sweep or motion study.
+Local/full still add the existing 28 contact checks, enclosed-pump-pocket check,
+child-assembly sweeps and whole-engine clearance checks. The mounting regression
+also deliberately severs an arm, leaves a thin connected bridge, and shortens a
+block screw, requiring each defect to be rejected for its specific reason.
+
+On the corrected 104-part / 302-occurrence engine, the preview mounting checks
+measured 1.25 s (12 section samples and six bolt engagement checks). The model
+built in 107.9 s. At world Y=-240 the repaired lower arm has a 217.38 mm² section;
+the previously cut arm had no section there. Block screws engage 13.4 mm and
+both pivot bolts engage the full 8.4 mm nut thickness. A rendered rear/side view
+was inspected to confirm the lower arm reaches the eye and the upper slot is
+enclosed.
