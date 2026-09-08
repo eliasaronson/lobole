@@ -101,7 +101,9 @@ def main():
         if args.check:
             if not path.exists() or path.read_text() != text:
                 stale.append(str(path.relative_to(ROOT)))
-        else:
+        elif not path.exists() or path.read_text() != text:
+            # No-op generation must not trigger a C++ rebuild (or stale-binary
+            # warnings) by touching an identical embedded schema header.
             path.write_text(text)
     if stale:
         parser.exit(1, 'Regenerate inspection contracts: ' + ', '.join(stale) + '\n')
