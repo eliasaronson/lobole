@@ -258,3 +258,8 @@ inspection/modeling contracts, face/world snapshots, pagination, atomic revision
 guards on writes and semantic reference re-resolution are still pending. Component
 update sessions, persistent quantities/requirements and functional/review bundles
 remain subsequent phases; none is implied by the snapshot revision token.
+
+OM615's fastener stage now uses eight operation-local snapshots and explicit
+freshness checks. The measured build fell from 70.9 s to 66.2 s; the full exact
+standing and 49-pose motion checks passed. See the
+[benchmark and remaining costs](../performance/inspection-snapshots.md).

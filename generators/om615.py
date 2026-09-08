@@ -20,7 +20,6 @@ import math
 import os
 import sys
 import time
-from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
@@ -717,7 +716,8 @@ def _firing_order(r, valves):
 
 
 def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
-             size, n, what, centres=None, rim_key=None, far_key=None):
+             size, n, what, centres=None, rim_key=None, far_key=None,
+             *, snapshots):
     """Fit `n` real fasteners, each derived from the hole it goes in.
 
     A blind hole needs its FAR END said outright — the probe follows the
@@ -725,15 +725,18 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
     so every set here names the floor of the hole it threads into, matched
     to its own rim by position rather than by order.
     """
-    # These parts are not regenerated while hardware is fitted. Measure each
-    # rim once for this operation: Edge.center performs an RPC, so asking it
-    # again inside the nearest-floor search made thousands of identical calls.
-    def measured_edges(body, radius):
-        return [SimpleNamespace(center=e.center, ref=e.ref)
-                for e in body.edges(circular=True, radius=radius)]
+    # The fastener stage owns these explicit snapshots. It creates hardware,
+    # but does not regenerate the parts being measured. Reuse their frozen
+    # centers across bolt groups, and check their revisions before finishing.
+    def measured_edges(owner, radius):
+        if owner.id not in snapshots:
+            snapshots[owner.id] = owner.body().snapshot(
+                circular=True, max_elements=10000)
+        return [e for e in snapshots[owner.id].edges
+                if e.radius is not None and abs(e.radius - radius) < 0.05]
 
-    rims = [e for e in measured_edges(part.body(), rim_r) if abs(rim_at(e)) < 0.6]
-    floors = [e for e in measured_edges(far_part.body(), far_r)
+    rims = [e for e in measured_edges(part, rim_r) if abs(rim_at(e)) < 0.6]
+    floors = [e for e in measured_edges(far_part, far_r)
               if abs(far_at(e)) < 0.6]
     if len(rims) < n or len(floors) < n:
         raise SdkError(f"{what}: {len(rims)} rims and {len(floors)} hole "
@@ -786,30 +789,35 @@ def _bolt_up(rig, occ, part, rim_r, rim_at, far_occ, far_part, far_r, far_at,
 def fasteners(app, rig, occ, top, front):
     """The bolts that actually hold it together — head, mains, sump and
     flywheel. Each is DERIVED from its hole: nothing here says a length."""
+    snapshots = {}
+
+    def bolt_up(*args, **kwargs):
+        return _bolt_up(*args, **kwargs, snapshots=snapshots)
+
     blk, hd = app.part("block"), app.part("cylinder head")
     pan, fw = app.part("sump"), app.part("flywheel")
     crk, cap = app.part("crankshaft"), app.part("main cap")
     rig.activate()
-    _bolt_up(rig, top["head"], hd, (HEAD_BOLT_D + 1.0) / 2.0,
+    bolt_up(rig, top["head"], hd, (HEAD_BOLT_D + 1.0) / 2.0,
              lambda e: e.center.z - T.HEAD_BOLT_SEAT,
              occ["block"], blk, (HEAD_BOLT_D + TAP_FIT) / 2.0,
              lambda e: e.center.z - (DECK - 60.0), "M12", len(HEAD_BOLT),
              "head bolts", centres=HEAD_BOLT)
-    _bolt_up(rig, front["sump"], pan, 4.5,
+    bolt_up(rig, front["sump"], pan, 4.5,
              lambda e: e.center.z - (PAN_RAIL - 6.0),
              occ["block"], blk, (PAN_BOLT_D + TAP_FIT) / 2.0,
              lambda e: e.center.z - (PAN_RAIL + 20.0), "M8",
              2 * len(B._pan_bolt_y()), "sump bolts",
              centres=[(sx * PAN_BOLT_X, y) for y in B._pan_bolt_y()
                       for sx in (-1, 1)])
-    _bolt_up(rig, front["flywheel"], fw, 5.5,
+    bolt_up(rig, front["flywheel"], fw, 5.5,
              lambda e: e.center.z - B.FLYWHEEL_T,
              front["crank"], crk, (FLYWHEEL_BOLT_D + TAP_FIT) / 2.0,
              lambda e: e.center.y - (FLANGE_Y + FLANGE_T + 9.0 - 40.0),
              "M10", FLYWHEEL_BOLTS, "flywheel bolts",
              rim_key=lambda e: (e.center.x, -e.center.y),
              far_key=lambda e: (e.center.x, e.center.z))
-    _bolt_up(rig, top["cam cover"], app.part("cam cover"), 3.3,
+    bolt_up(rig, top["cam cover"], app.part("cam cover"), 3.3,
              lambda e: e.center.z - (COVER_BASE + CAM_COVER_BOSS_H),
              top["head"], hd, (6.0 + TAP_FIT) / 2.0,
              lambda e: e.center.z - (COVER_BASE - 11.0), "M6",
@@ -820,7 +828,7 @@ def fasteners(app, rig, occ, top, front):
     # rims are at y = 0 in part space and at MAIN_Y[i] in the world the
     # block's hole floors are measured in. Both have to be said.
     for i, c in enumerate(occ["caps"]):
-        _bolt_up(rig, c, app.part("centre main cap" if i == 2 else "main cap"),
+        bolt_up(rig, c, app.part("centre main cap" if i == 2 else "main cap"),
                  B.CAP_CLEARANCE_D / 2.0,
                  lambda e: e.center.z + CAP_DEPTH,
                  occ["block"], blk, (CAP_BOLT_D + TAP_FIT) / 2.0,
@@ -828,6 +836,9 @@ def fasteners(app, rig, occ, top, front):
                  f"main cap {i + 1} bolts",
                  centres=[(-CAP_BOLT_X, 0.0), (CAP_BOLT_X, 0.0)],
                  rim_key=lambda e, y=MAIN_Y[i]: (e.center.x, e.center.y + y))
+
+    for snapshot in snapshots.values():
+        snapshot.validate()
 
 
 if __name__ == "__main__":
