@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from designer_sdk import Plane, SdkError, connect
+from designer_sdk import Plane, ProjectedCurve, SdkError, connect
 
 SOURCE = "https://journeymans-workshop.uk/images/projects/toolmkrs/toolmkrs.pdf"
 PAGE = "https://journeymans-workshop.uk/toolclamps.php"
@@ -53,50 +53,17 @@ SPACER = dict(spacer_d=3.5, spacer_bore=3, spacer_h=1.2)
 
 
 def profile(p, name, offset, points, depth):
-    # A live XZ plane, whose extrusion normal is -Y.
-    basis = p._add(
-        dict(
-            type="DatumPlane",
-            name=name + " basis",
-            kind="angled",
-            base_plane="xy",
-            axis={"kind": "x"},
-            angle_deg=90,
-        )
-    )["id"]
-    datum = p._add(
-        dict(
-            type="DatumPlane",
-            name=name + " plane",
-            kind="offset",
-            parent_id=basis,
-            offset=0,
-            offset_expr=str(offset),
-        )
-    )["id"]
-    sk = p.sketch(Plane.xz(), name=name)
+    sk = p.sketch(
+        p.datum_plane(base="xz", offset=offset, name=name + " plane"), name=name
+    )
     sk.polyline(points)
-    raw = sk.json()
-    raw["plane_ref"] = datum
-    return p.extrude(p._add(raw)["id"], depth, name=name)
+    return p.extrude(sk.add(), depth, name=name)
 
 
 def cylinder(p, name, z, d, h, mode="new_body", x=0):
-    datum = p._add(
-        dict(
-            type="DatumPlane",
-            name=name + " plane",
-            kind="offset",
-            base_plane="xy",
-            offset=0,
-            offset_expr=str(z),
-        )
-    )["id"]
-    sk = p.sketch(Plane.xy(), name=name)
+    sk = p.sketch(p.datum_plane(offset=z, name=name + " plane"), name=name)
     sk.circle((x, 0), d=d)
-    raw = sk.json()
-    raw["plane_ref"] = datum
-    return p.extrude(p._add(raw)["id"], h, mode=mode, name=name)
+    return p.extrude(sk.add(), h, mode=mode, name=name)
 
 
 def drill_point(p, name, x, z, d, sign=1):
@@ -115,16 +82,14 @@ def drill_point(p, name, x, z, d, sign=1):
     )
 
 
-def thread(p, diameter, designation):
-    for face in p.faces(kind="cylinder", radius=diameter / 2, radius_tol=1e-5):
-        p._add(
-            dict(
-                type="Thread",
-                name=designation + " cosmetic",
-                designation=designation,
-                face=face.ref,
-            )
-        )
+def thread(p, diameter, designation, minimum=0):
+    handles = [
+        p.thread(face, designation, allow_engagement=True, minimum_engagement=minimum)
+        for face in p.faces(kind="cylinder", radius=diameter / 2, radius_tol=1e-5)
+    ]
+    if not handles:
+        raise SdkError("No threaded faces: " + p.name)
+    return handles
 
 
 def finish(p, material="steel"):
@@ -174,18 +139,18 @@ def build(app):
         profile(p, "Tapered square stock", "-jaw_w/2", points, "jaw_w")
         cylinder(
             p,
-            "M6 envelope" if moving else "Centre clearance",
+            "M6 tap drill" if moving else "Centre clearance",
             0,
-            "rod_d",
+            5 if moving else "rod_d",
             "jaw_h",
             "cut",
             "front_axis",
         )
         cylinder(
             p,
-            "Rear M6 envelope" if moving else "Thrust socket",
+            "Rear M6 tap drill" if moving else "Thrust socket",
             0,
-            "rod_d" if moving else "tip_d",
+            5 if moving else "tip_d",
             "jaw_h" if moving else "socket_depth",
             "cut",
             "heel_axis",
@@ -193,9 +158,9 @@ def build(app):
         if not moving:
             cylinder(
                 p,
-                "M3 retention envelope",
+                "M3 tap drill",
                 "jaw_h-retainer_depth",
-                "retainer_d",
+                2.5,
                 "retainer_depth",
                 "cut",
                 "retainer_axis",
@@ -206,13 +171,13 @@ def build(app):
             drill_point(
                 p, "Thrust socket drill point", "heel_axis", "socket_depth", "tip_d"
             )
-            thread(p, 3, "M3")
+            thread(p, 2.5, "M3", minimum=3)
             p.frame("centre", origin=("front_axis", 0, "jaw_h"))
             p.frame("rear", origin=("heel_axis", 0, "socket_depth-rod_l"))
             p.frame("slide", origin=(0, 0, "-gap-jaw_h"))
             p.frame("retainer", origin=("retainer_axis", 0, "jaw_h"))
         else:
-            thread(p, 6, "M6")
+            thread(p, 5, "M6", minimum=12)
             p.frame(
                 "centre", origin=("front_axis", 0, "jaw_h+gap+jaw_h+insertion-rod_l")
             )
@@ -223,7 +188,7 @@ def build(app):
         cylinder(p, "M6 studding", 0, "rod_d", "rod_l-tip_l" if rear else "rod_l")
         if rear:
             cylinder(p, "Turned thrust tip", "rod_l-tip_l", "tip_d", "tip_l", "add")
-        thread(p, 6, "M6")
+        p.thread_handle = thread(p, 6, "M6")[0]
         p.frame(
             "knob", origin=(0, 0, "insertion-knob_l" if rear else "rod_l-insertion")
         )
@@ -248,9 +213,9 @@ def build(app):
             )
         cylinder(
             p,
-            "Blind M6 envelope",
+            "Blind M6 tap drill",
             "knob_l-knob_bore_depth" if rear else 0,
-            "rod_d",
+            5,
             "knob_bore_depth",
             "cut",
         )
@@ -262,7 +227,7 @@ def build(app):
             5,
             -1 if rear else 1,
         )
-        thread(p, 6, "M6")
+        thread(p, 5, "M6", minimum=10)
         parts["rear_knob" if rear else "centre_knob"] = finish(p)
     p = app.part("Brass retaining spacer")
     cylinder(p, "Spacer stock", 0, "spacer_d", "spacer_h")
@@ -327,9 +292,7 @@ def build(app):
             flipped=False,
             name=key + " screw engagement",
         )
-        app.add_relation(
-            type="screw", a=drive["id"], b=drive["id"], pitch=D["thread_pitch"]
-        )
+        rig.screw(drive, parts[key + "_rod"].thread_handle)
         # Loop fixes the screw axially to the upper jaw but permits rotation.
         if not rear:
             parts["centre_rod"].frame("seat", origin=(0, 0, "rod_l-insertion"))
@@ -352,41 +315,43 @@ def build(app):
 
 NOTES = {
     "fixed": [
-        "75 x 12 x 12 stock; 30 long taper to 2.5 tip.",
-        "Axes from heel: thrust 8; retainer 30; centre 38. All on width centreline.",
-        "Centre: DIA 6 THRU. Thrust: DIA 5 depth 4 + 118 deg point.",
-        "Retainer: M3 x 0.5 depth 5; tap drill DIA 2.5 + 118 deg point.",
+        "{{jaw_l}} x {{jaw_w}} x {{jaw_h}} stock; {{taper_l}} long taper to {{tip_h}} tip.",
+        "Axes from heel: thrust {{heel_axis}}; retainer {{retainer_axis}}; centre {{front_axis}}. All on width centreline.",
+        "Centre: DIA {{rod_d}} THRU. Thrust: DIA {{tip_d}} depth {{socket_depth}} + 118 deg point.",
+        "Retainer: M3 x 0.5 depth {{retainer_depth}}; tap drill DIA 2.5 + 118 deg point.",
     ],
     "moving": [
-        "75 x 12 x 12 stock; 30 long taper to 2.5 tip.",
-        "2 x M6 x 1 THRU; axes 8 and 38 from heel, centred across width.",
-        "Tap drill DIA 5. CAD bore uses major-diameter thread envelope.",
+        "{{jaw_l}} x {{jaw_w}} x {{jaw_h}} stock; {{taper_l}} long taper to {{tip_h}} tip.",
+        "2 x M6 x 1 THRU; axes {{heel_axis}} and {{front_axis}} from heel, centred across width.",
+        "Tap drill DIA 5; cosmetic M6 thread. Exact checks recognise bounded thread engagement.",
     ],
     "centre_rod": [
-        "M6 x 1 studding, cut length 75. Finish and deburr ends.",
-        "Insert 11 into captive knob, from flange end; retain as bonded assembly.",
+        "M6 x 1 studding, cut length {{rod_l}}. Finish and deburr ends.",
+        "Insert {{insertion}} into captive knob, from flange end; retain as bonded assembly.",
     ],
     "rear_rod": [
-        "M6 x 1 studding, total length 75. Turn last 6 to DIA 5.",
-        "Flat thrust tip follows plan; shoulder seats at depth 4.",
-        "Insert 11 into rear knob; retain as bonded assembly.",
+        "M6 x 1 studding, total length {{rod_l}}. Turn last {{tip_l}} to DIA {{tip_d}}.",
+        "Flat thrust tip follows plan; shoulder seats at depth {{socket_depth}}.",
+        "Insert {{insertion}} into rear knob; retain as bonded assembly.",
     ],
     "centre_knob": [
-        "DIA 11 x 15. Groove DIA 8.2 x 1.2; flange 1; body 12.8.",
-        "M6 x 1 blind depth 12 FROM FLANGE END; DIA 5 tap drill + 118 deg point.",
+        "DIA {{knob_d}} x {{knob_l}}. Groove DIA {{groove_d}} x {{groove_w}}; flange {{flange_h}}; body {{knob_l-groove_w-flange_h}}.",
+        "M6 x 1 blind depth {{knob_bore_depth}} FROM FLANGE END; DIA 5 tap drill + 118 deg point.",
         "Bore entry corrected to suit assembly; see source audit.",
         "Knurl and chamfer: finish callouts only; pitch/chamfer not specified.",
     ],
     "rear_knob": [
-        "DIA 11 x 15. M6 x 1 blind depth 12 from rod end.",
+        "DIA {{knob_d}} x {{knob_l}}. M6 x 1 blind depth {{knob_bore_depth}} from rod end.",
         "DIA 5 tap drill + 118 deg point. Knurl and chamfer per source finish note.",
     ],
-    "spacer": ["Brass tube: DIA 3.5 OD, DIA 3 ID, length 1.2."],
+    "spacer": [
+        "Brass tube: DIA {{spacer_d}} OD, DIA {{spacer_bore}} ID, length {{spacer_h}}."
+    ],
     "retainer": [
         "DESIGN DETAIL: replacement for source washer-head M3 screw.",
-        "M3 x 0.5; shank 5 below rim. Rim DIA 7 x 0.5.",
-        "Boss DIA 4.8 x 2 above rim. Drive slot 0.8 wide x 1 deep.",
-        "Dimensions chosen for source groove and 8 mm axis offset.",
+        "M3 x 0.5; shank {{retaining_shank_l}} below rim. Rim DIA {{retaining_rim_d}} x {{retaining_rim_h}}.",
+        "Boss DIA {{retaining_boss_d}} x {{retaining_boss_h}} above rim. Drive slot {{drive_w}} wide x {{drive_depth}} deep.",
+        "Dimensions chosen for source groove and {{front_axis-retainer_axis}} mm axis offset.",
     ],
 }
 
@@ -404,9 +369,15 @@ def drawings(app, parts, out):
         )
         views = {}
         for orient, pos in [
-            ("front", [100, 110]),
+            (
+                "front",
+                [
+                    100,
+                    95 if key in ("fixed", "moving", "centre_rod", "rear_rod") else 110,
+                ],
+            ),
             ("top", [100, 75]),
-            ("iso", [290, 110]),
+            ("iso", [290, 95]),
         ]:
             views[orient] = app.add_drawing_view(
                 source=p.name,
@@ -419,7 +390,7 @@ def drawings(app, parts, out):
         for i, note in enumerate(NOTES[key]):
             app.add_drawing_note(text=note, position=[210, 270 - i * 9])
         app.add_drawing_note(
-            text="mm. Cosmetic threads: use thread callouts, not CAD bore diameters, for manufacture.",
+            text="mm. Tap-drill geometry; cosmetic thread callouts. Engagement checks do not certify thread strength.",
             position=[210, 215],
         )
         app.add_drawing_note(
@@ -443,10 +414,7 @@ def drawings(app, parts, out):
                 view=view,
                 kind=kind,
                 refs=[
-                    {
-                        ("edge" if e[0]["kind"] == "edge" else "sil_face"): e[0]["ref"],
-                        "end": e[1] + 1,
-                    }
+                    ProjectedCurve(e[0]).pick("start" if e[1] == 0 else "end")
                     for e in (lo, hi)
                 ],
             )
@@ -456,7 +424,7 @@ def drawings(app, parts, out):
                 )
         check = app.check_drawing()
         if not check["ok"]:
-            raise SdkError(str(check))
+            raise SdkError(p.name + ": " + str(check))
         checks[key] = check
         app.export_drawing(path=str(out / (key + ".svg")))
     return checks
@@ -476,11 +444,11 @@ def verify(app, parts, rig, drives, moving):
     blank = 75 * 12 * 12 - 30 * (12 - 2.5) * 12 / 2
     cone = lambda d: math.pi * (d / 2) ** 3 * math.tan(math.radians(31)) / 3
     expected = {
-        "moving": blank - 2 * math.pi * 3**2 * 12,
+        "moving": blank - 2 * math.pi * 2.5**2 * 12,
         "fixed": blank
         - math.pi * 3**2 * 12
         - math.pi * 2.5**2 * 4
-        - math.pi * 1.5**2 * 5
+        - math.pi * 1.25**2 * 5
         - cone(5)
         - cone(2.5),
     }
@@ -489,6 +457,16 @@ def verify(app, parts, rig, drives, moving):
     rig.activate()
     standing = app.interference(mode="exact", max_pairs=1000, deadline_s=120)
     assert not standing["clash"] and not standing.get("truncated"), standing
+    engagements = [
+        rig.thread_engagement(rig.occurrence(a), rig.occurrence(b))
+        for a, b in (
+            ("Moving jaw", "Centre screw"),
+            ("Moving jaw", "Rear thrust screw"),
+            ("Captive knob", "Centre screw"),
+            ("Rear knob", "Rear thrust screw"),
+            ("Fixed jaw", "M3 retaining screw - specified replacement"),
+        )
+    ]
     study = rig.motion(
         drives[0],
         dof="rotation",
@@ -530,6 +508,7 @@ def verify(app, parts, rig, drives, moving):
     assert min(radial, overlap, lower, upper) > 0
     return dict(
         solve=solved,
+        engagements=engagements,
         volumes_mm3=volumes,
         standing=standing,
         motion=motion,
@@ -549,7 +528,7 @@ def run(app, out, full=True):
     parts, rig, drives, moving = build(app)
     result = dict(
         build_s=time.perf_counter() - start,
-        thread_representation="cosmetic major-diameter envelopes",
+        thread_representation="cosmetic threads on manufacturing tap-drill geometry",
     )
     if full:
         result.update(verify(app, parts, rig, drives, moving))

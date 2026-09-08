@@ -33,10 +33,11 @@ author-prose dimensions and our explicit design choices. Null tolerances mean
   is not modelled here.
 - Blind depths are interpreted as cylindrical depths plus the 118° drill point.
   M6 and M3 tap-drill points use diameters 5 and 2.5 respectively.
-- Threads are native **cosmetic Thread features**. Their B-Reps use major-diameter
-  envelopes, including tapped bores, to support assembly checks without false
-  thread penetration. Use the M6/M3 and tap-drill callouts for machining;
-  **do not machine the exported tapped-hole envelope diameters**.
+- Threads are native **cosmetic Thread features on manufacturing tap-drill
+  geometry**: M6 bores are 5 mm and M3 bores are 2.5 mm. Explicit bounded
+  engagement annotations let exact contact checks accept the threaded overlap
+  while retaining other collisions. Five named engagement gates also verify
+  that the intended connections actually exist. STEP retains the tap-drill bores.
 - Knurl and chamfer remain finish callouts: the source gives no sizes. Steel is
   the chosen generic display/BOM material; brass is used for the spacer.
   No strength, heat-treatment, surface-finish or tolerance certification is implied.
@@ -76,30 +77,17 @@ moving pairs. Nominal retention margins are 0.4 mm radial clearance, 1.0 mm
 flange overlap and 0.2/0.5 mm axial clearances. These are nominal geometry
 checks, not worst-case tolerance stacks or load checks.
 
-## Friction discovered
+## Workflow improvements
 
-1. Drawing geometry distinguishes edges from face silhouettes, but callers must
-   manually map `kind` to `edge`/`sil_face` and remember endpoint indices 1/2
-   (0 means midpoint). An SDK projected-reference object would remove this trap.
-2. Datum offsets need explicit persistent datum features. Convenience sketch
-   planes can capture a value rather than retain its expression.
-3. Cosmetic tapped-hole manufacturing geometry and assembly envelopes need a
-   first-class distinction. Today the generator must document the choice.
-4. Drawing notes are not checked for overlap with the title block. Visual review
-   caught that even though `check_drawing` passed. Notes here are baseline
-   manufacturing/source callouts; unlike the driven overall dimensions, they
-   do not update after interactive parameter edits. Refresh/review the sheets
-   before releasing a modified design.
-5. Source discrepancies belong in a dimension/source register. A dimensioned
-   drawing is better evidence than a photograph but still needs consistency
-   checking, particularly bore entry direction and unspecified fastener heads.
+The issues found in the first version are addressed in
+[the workflow-fixes implementation](clamp-workflow-fixes.md): native unknown-contact
+reporting, live datum and projected-curve handles, associative notes and annotation
+layout validation, manufacturing thread geometry and thread-derived screw motion.
+Machining note expressions now follow live variable edits and persist on save.
+The model still needs selected functional tolerances, stock grades and finishes
+before a manufacturing release; the geometry checks do not qualify clamp loads.
 
-A follow-up manufacturing release would assign functional fits and tolerances,
-select stock grades and finish requirements, and review the replacement retaining
-screw. This project exercises the digital workflow end to end; it is not a
-load-qualified production release.
-
-## Measured validation (2026-09-08)
+## Original baseline validation (2026-09-08)
 
 Final standalone run: **0.70 s build, 1.71 s including full checks, drawings,
 STEP, BOM and project save**. The dedicated regression passed in 2.05 s.
@@ -109,6 +97,15 @@ parallel load and passed its isolated rerun in 2.41 s. That intermittent result
 remains worth investigating; no clamp check was skipped or weakened.
 The assembly render and all eight sheet layouts were visually inspected.
 
-`thread_pitch` is recorded as source data, not exposed as an independent live
-variable: M6 coarse cosmetic thread designations and screw relations both use
-1 mm pitch. Changing the thread standard requires updating both together.
+`thread_pitch` is source-register data rather than a second editable pitch.
+Screw relations now reference their native Thread feature; its standard
+specification is authoritative on every solve.
+
+## Updated workflow validation (2026-09-08)
+
+The migrated generator builds in **0.844 s** and completes in **2.790 s**, including
+five explicit thread-engagement checks, the 41-pose study and all exports.
+All **1154 headless tests**, the focused drawing GUI test and the full **284-test
+GUI suite** passed. The assembly
+and all eight exported sheets were visually inspected. The extra contact checks
+increase total time from the original baseline; no collision gate was weakened.
