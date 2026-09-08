@@ -255,11 +255,28 @@ wire parity and stale-document integration tests accompany it. See
 
 This is the first delivery slice, not completion of phases 1–2 in full. Legacy
 inspection/modeling contracts, face/world snapshots, pagination, atomic revision
-guards on writes and semantic reference re-resolution are still pending. Component
-update sessions, persistent quantities/requirements and functional/review bundles
-remain subsequent phases; none is implied by the snapshot revision token.
+guards on writes and semantic reference re-resolution are still pending. Persistent quantities/requirements and functional/review bundles remain
+subsequent phases; none is implied by the snapshot revision token.
 
 OM615's fastener stage now uses eight operation-local snapshots and explicit
 freshness checks. The measured build fell from 70.9 s to 66.2 s; the full exact
 standing and 49-pose motion checks passed. See the
 [benchmark and remaining costs](../performance/inspection-snapshots.md).
+
+
+### Iteration slice (2026-09-08)
+
+Shipped explicit SDK preview/local/full stages, guarded component ownership and
+staging, and a bounded session cache for exact motion contacts. OM615 defaults
+to preview and supports updating one existing owned component. Apply/undo reuse
+staged geometry; source and target revision guards prevent stale writes. The
+motion GUI distinguishes kinematics preview from exact sampled validation and
+labels stale/unchecked results. See [workflow](../scripting/iteration-workflow.md)
+and [measurements](../performance/iteration-cache.md).
+
+Remaining scope is explicit: local uses the whole standing sweep, a unified GUI
+panel for all validation stages is not yet built, and background motion document
+copies limit geometry-identity cache hits. Standing-contact caching, persistent
+content-addressed collision entries, component retirement/reference migration,
+and a generated-component dependency graph remain follow-ups. Measure these
+against the reduced iteration loop before adding more scheduling complexity.

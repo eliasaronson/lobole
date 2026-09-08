@@ -14,6 +14,8 @@ relation for its lift and a rack relation that makes its rocker follow.
 Findings go in docs/modeling/om615-dogfood.md.
 """
 import argparse
+import hashlib
+from pathlib import Path
 import atexit
 import json
 import math
@@ -23,6 +25,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
+from designer_components import claim, plan
+from designer_validation import validate
 from designer_sdk import SdkError, V, connect  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from om615_spec import *  # noqa: E402,F401,F403
@@ -417,7 +421,8 @@ def run_engine(app, rig, main, top, samples, mode="exact"):
     the slider-crank exactly, each valve lifts on its own lobe, and nothing
     touches anything it should not."""
     rig.activate()
-    study = rig.motion(main, dof="rotation", **{"from": 0}, to=720,
+    existing = app.list_motion_studies()["studies"]
+    study = existing[0] if existing else rig.motion(main, dof="rotation", **{"from": 0}, to=720,
                        samples=samples, clash_mode=mode,
                        name="two revolutions")
     r = app.run_motion_study(study=study["id"], include_poses=True,
@@ -531,12 +536,47 @@ def profile_calls(app, out):
     atexit.register(save)
 
 
+COMPONENTS = {
+    "block": ("block", B.block), "head": ("cylinder head", T.head),
+    "sump": ("sump", B.sump), "timing-cover": ("timing cover", B.timing_cover),
+    "cam-cover": ("cam cover", T.cam_cover),
+    "intake": ("intake manifold", T.intake_manifold),
+    "exhaust": ("exhaust manifold", T.exhaust_manifold),
+    "injector": ("injector", T.injector), "prechamber": ("pre-chamber", T.prechamber),
+}
+
+
+def component_fingerprint(key):
+    # Whole builder modules are conservative dependencies. Shared specification
+    # changes require a complete rebuild: they also affect unowned mechanisms.
+    root = Path(__file__).resolve().parent
+    spec = hashlib.sha256((root / 'om615_spec.py').read_bytes()).hexdigest()
+    inputs = [root / 'om615_top.py', root / 'om615_bottom.py',
+              root.parent / 'tools/designer_sdk.py',
+              root.parent / 'tools/designer_components.py']
+    digest = hashlib.sha256(key.encode())
+    for path in inputs:
+        digest.update(path.read_bytes())
+    return spec + ':' + digest.hexdigest()
+
+
+def write_report(out, name, report):
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, name), 'w') as f:
+        json.dump(report, f, indent=2)
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--stage", choices=("preview", "local", "full"),
+                    help="default preview; local adds standing checks, full adds motion")
+    ap.add_argument("--project", help="open an existing project for update/validation")
+    ap.add_argument("--update-component", choices=tuple(COMPONENTS))
+    ap.add_argument("--validate-only", action="store_true")
     ap.add_argument("--port", type=int)
     ap.add_argument("--out", default="/tmp/om615")
     ap.add_argument("--samples", type=int, default=49,
-                    help="motion study samples over two crank revolutions")
+                    help="motion study samples for a fresh build over two crank revolutions")
     ap.add_argument("--mesh", action="store_true",
                     help="check clashes with the collision mesh instead of "
                          "exact booleans. Much faster and NOT the gate: the "
@@ -553,17 +593,57 @@ def main():
     ap.add_argument("--profile", action="store_true",
                     help="write RPC counts and elapsed time, including failed runs")
     a = ap.parse_args()
+    if a.build_only and a.no_study:
+        ap.error('--build-only and --no-study are alternative legacy stages')
+    legacy = 'preview' if a.build_only else 'local' if a.no_study else None
+    if a.stage and legacy and a.stage != legacy:
+        ap.error('legacy validation flag conflicts with --stage')
+    a.stage = a.stage or legacy or 'preview'
+    if a.mesh:
+        ap.error('staged validation uses exact checks; use preview to skip collision work')
+    if a.component and (a.update_component or a.validate_only or a.project):
+        ap.error('--component creates an isolated component; use --update-component for an existing one')
+    if a.project and not (a.update_component or a.validate_only):
+        ap.error('--project requires --update-component or --validate-only')
     app = connect(a.port)
     if a.profile:
         profile_calls(app, a.out)
-    app.new()
     t0 = time.perf_counter()
+    if a.update_component or a.validate_only:
+        if a.project:
+            app.open_project(path=os.path.abspath(a.project))
+        if a.update_component:
+            key = a.update_component
+            fp = component_fingerprint(key)
+            owned = app.component_status(namespace='om615', key=key)
+            old = owned.get('generator', {}).get('fingerprint', '')
+            if old and old.split(':')[0] != fp.split(':')[0]:
+                raise SdkError('shared engine specification changed; rebuild the complete engine')
+            with plan(app, namespace='om615', key=key, fingerprint=fp,
+                      builder=COMPONENTS[key][1]) as change:
+                print('  component plan:', change.report)
+                change.apply()
+                write_report(a.out, 'component-update.json', change.report)
+        rig = app.assembly('engine', create=False)
+        write_report(a.out, 'reference-dimensions.json', reference_dimensions(app))
+        result = validate(app, stage=a.stage, assembly=rig)
+        report = result.current(app)
+        write_report(a.out, 'validation-report.json', report)
+        path = os.path.join(a.out, 'om615.dsgn' if report['accepted'] else 'om615-unchecked.dsgn')
+        rig.activate()
+        app.save_project(path=path)
+        write_report(a.out, 'timings.json', dict(total_s=time.perf_counter()-t0))
+        print(f"  {a.stage}: {report['status']}; accepted={report['accepted']} -> {path}")
+        return 0 if report['status'] == 'passed' else 1
+    app.new()
     if a.component:
         builders = {"block": B.block, "head": T.head, "sump": B.sump,
                     "timing-cover": B.timing_cover, "cam-cover": T.cam_cover,
                     "intake": T.intake_manifold, "exhaust": T.exhaust_manifold,
                     "injector": T.injector, "prechamber": T.prechamber}
         part = builders[a.component](app)
+        claim(part, namespace="om615", key=a.component,
+              fingerprint=component_fingerprint(a.component))
         part.activate()
         os.makedirs(a.out, exist_ok=True)
         path = os.path.join(a.out, f"{a.component}-unchecked.dsgn")
@@ -589,6 +669,13 @@ def main():
     for part in app.list_parts()["parts"]:
         if part["name"] == "Part 1":
             app.delete_part(part=part["name"])
+    for key, (name, _) in COMPONENTS.items():
+        claim(app.part(name, create=False), namespace='om615', key=key,
+              fingerprint=component_fingerprint(key))
+    rig.activate()
+    rig.motion(main_mate, dof='rotation', **{'from': 0}, to=720,
+               samples=a.samples, clash_mode='exact', name='two revolutions')
+    organise(app)
     timings["build_s"] = time.perf_counter() - t0
     print(f"  built {len(rig.occurrences())} occurrences from "
           f"{len(app.parts())} parts in {timings['build_s']:.1f}s")
@@ -603,9 +690,18 @@ def main():
     print(f"  unchecked build: {draft}")
     with open(os.path.join(a.out, "timings.json"), "w") as f:
         json.dump(timings, f, indent=2)
-    if a.build_only:
-        print("  draft only: standing and motion checks have NOT run")
+    initial = validate(app, stage='preview' if a.stage == 'full' else a.stage,
+                       assembly=rig)
+    validation = initial.current(app)
+    write_report(a.out, 'validation-report.json', validation)
+    if validation['status'] != 'passed':
+        raise SdkError('validation failed; see validation-report.json')
+    if a.stage != 'full':
+        print(f"  {a.stage} passed; motion NOT checked; draft: {draft}")
+        timings['total_s'] = time.perf_counter() - t0
+        write_report(a.out, 'timings.json', timings)
         return 0
+    rig.activate()
 
     # ---- the standing check: nothing is inside anything else -------------
     # Running fits are intentional: ask only for interference, without the
@@ -630,7 +726,7 @@ def main():
           f"{report['pairs_box_cleared']} cleared by bounds, "
           f"in {report['elapsed_s']:.1f}s")
 
-    if not a.no_study:
+    if a.stage == "full":
         study, r = run_engine(app, rig, main_mate, top, a.samples,
                               mode="mesh" if a.mesh else "exact")
         with open(os.path.join(a.out, "motion-report.json"), "w") as f:
@@ -682,7 +778,11 @@ def main():
             print(f"  animation: {ex['nodes']} nodes x {ex['frames']} keyframes "
                   f"-> {glb} ({os.path.getsize(glb) // 1024} kB)")
 
-    organise(app)
+    validation.update(stage='full', status='passed', accepted=True,
+                      revision=app.validation_revision(),
+                      standing=dict(status='passed', report=report),
+                      motion=dict(status='passed', report=r, scope='defined_samples'))
+    write_report(a.out, 'validation-report.json', validation)
     os.makedirs(a.out, exist_ok=True)
     project = os.path.join(a.out, "om615.dsgn")
     app.save_project(path=project)
