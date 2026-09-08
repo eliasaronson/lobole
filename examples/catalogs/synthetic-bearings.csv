@@ -1,0 +1,3 @@
+designation,bore_diameter,outer_diameter,width,shaft_min,shaft_max,housing_min,housing_max,shoulder_min,shoulder_max,fillet_radius_max
+DEMO-25,25,52,15,24.99,25.01,51.99,52.01,30,35,1
+DEMO-30,30,62,16,,,,,,,

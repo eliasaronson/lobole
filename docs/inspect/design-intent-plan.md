@@ -264,3 +264,25 @@ milestone a conventional commit. Seed fixtures are synthetic and carry explicit
 provenance, never copied vendor data. Include malformed CSV, unit conversion,
 duplicate IDs, invalid dimensions, changed-content refusal, reference-only
 round trips, missing requirements, and no-regeneration-on-import checks.
+
+### First-slice delivery status
+
+Implemented local bearing CSV/JSON import, column mapping, explicit units and
+provenance, immutable content-pinned revisions, project persistence, cross-tab
+undo/redo, reference/embedded exports, RPC/SDK handles and a Variables-panel
+preview/install/browser. Exported catalog packages can be imported again.
+See [the import guide](../parts/catalog-imports.md) and
+[synthetic example](../../examples/catalogs/synthetic-bearings.csv).
+
+Seat checks currently consume caller-supplied measurements and explicitly supplied
+limits. They do not persist geometry bindings or requirements. The broader phases
+above remain planned: typed quantities/tolerances, persistent requirements,
+geometry-bound evidence, manufacturing/access checks and variation studies.
+Connected SKF/Sandvik adapters and tool/holder schemas remain future work; no
+vendor dataset or redistribution permission is assumed by this implementation.
+
+Validation for this slice: all 1,131 headless tests pass; the rendered GUI suite
+passes 284/284; the live remote GUI smoke passes with a new panel-focus regression.
+A manual rendered walkthrough covers form entry, preview, install, browsing and
+seat observations. That walkthrough exposed and fixed test-engine focus restoration
+between RPCs and clipped labels in the default narrow sidebar.
