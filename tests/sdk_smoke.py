@@ -394,6 +394,11 @@ def main():
         ], 10.0, name="Two bosses")
         expect(len(f.islands(z=5)) == 2,
                f"and separated ones are TWO: {f.islands(z=5)}")
+        e.check(solids=1)
+        f.check(solids=2)
+        refused(lambda: f.check(solids=1), "apart", "expected 1", "got 2")
+        for invalid in (-1, True, 1.5, "1"):
+            refused(lambda: f.check(solids=invalid), "non-negative integer")
 
         # material(): a part made of one thing, in one call.
         f.material("aluminum")

@@ -1352,15 +1352,31 @@ class Part(_Tab):
         return lo, hi
 
     # --- the standing check ------------------------------------------------
-    def check(self, warn=True):
+    def check(self, warn=True, *, solids=None):
         """Raise if any feature is broken; print advisories. The scripted
         equivalent of looking at the tree — every generator used to hand-roll
-        this and most scratch scripts forgot to."""
+        this and most scratch scripts forgot to. ``solids=1`` additionally
+        requires one solid across the part's non-reference bodies. A valid
+        body may contain disconnected solids; body count is not this check.
+        This is a topology requirement, not a strength/manufacturing check.
+        """
+        if solids is not None and (type(solids) is not int or solids < 0):
+            raise SdkError("solids must be a non-negative integer")
         st = self.state()
         bad = [f for f in st["features"] if f.get("error")]
         if bad:
             raise SdkError("; ".join(f"{f['name']}: {f['error']}"
                                      for f in bad))
+        if solids is not None:
+            bodies = [b for b in st["bodies"] if not b.get("reference")]
+            measured = [dict(name=b["name"], feature_id=b["created_by"],
+                             solids=self.app.measure(a={"part": self.id,
+                                 "feature_id": b["created_by"]})["solids"])
+                        for b in bodies]
+            actual = sum(b["solids"] for b in measured)
+            if actual != solids:
+                raise SdkError(f"{self.name}: expected {solids} solid(s), got "
+                               f"{actual}; bodies: {measured}")
         if warn:
             for f in st["features"]:
                 if f.get("warning"):
