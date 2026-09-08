@@ -240,3 +240,12 @@ the previously cut arm had no section there. Block screws engage 13.4 mm and
 both pivot bolts engage the full 8.4 mm nut thickness. A rendered rear/side view
 was inspected to confirm the lower arm reaches the eye and the upper slot is
 enclosed.
+
+Full-engine verification after the support repair passed: 947 standing pairs,
+zero clashes, 17.52 s; 49 poses over 720° with 21,910 motion checks, zero clashes,
+238.88 s. The cold motion run reused 5,513 pairs and executed 16,397; the warm
+repeat reused all 21,910 and executed none. All four piston strokes measured
+83.600006 mm; alternator/fan/timer ratios and 2.399994 mm diaphragm travel passed.
+The accepted project and 302-node / 49-frame GLB were saved under
+`/tmp/om615-connected-mounts/`. An earlier validation attempt was interrupted;
+verification resumed from the saved build instead of rebuilding geometry.
