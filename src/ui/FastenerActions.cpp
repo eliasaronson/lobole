@@ -778,6 +778,11 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
                   Mm(engagement) + " of thread an " + fit.size +
                   " needs to hold. Drill deeper, or use a smaller size.");
     length = parts::SnapLengthDown(request.standard, fit.size, fit.grip, &why);
+    if (length && *length < underHead + blocking->enter + engagement - 1e-3)
+      return fail("no stocked " + fit.size + " length reaches " +
+                  blocking->part + " with " + Mm(engagement) +
+                  " of thread engagement; the longest fitting screw is " +
+                  Mm(*length));
   }
   if (!length)
     return fail(why + " (the stack is " + summary.str() + ")");

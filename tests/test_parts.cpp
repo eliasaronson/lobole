@@ -6,7 +6,10 @@
 #include "core/Document.h"
 #include "core/features/FastenerFeature.h"
 #include "core/io/Serialization.h"
+#include "core/parts/AxisStack.h"
 #include "core/parts/FastenerTable.h"
+
+#include <BRepPrimAPI_MakeBox.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +21,27 @@
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
+
+TEST_CASE("Axis traversal keeps material when the ray has one crossing",
+          "[parts][axis]") {
+  Body body;
+  body.shape = CADShape(BRepPrimAPI_MakeBox(gp_Pnt(-5, -5, 20), 10, 10, 20));
+  const std::vector<parts::PlacedBody> placed{{&body, glm::mat4(1), "plate"}};
+  SECTION("The search limit is inside material") {
+    const auto spans = parts::TraverseAxis(placed, {0, 0, 0}, {0, 0, 1}, 0, 30);
+    REQUIRE(spans.size() == 1);
+    CHECK_THAT(spans[0].enter, WithinAbs(20, 1e-6));
+    CHECK_THAT(spans[0].exit, WithinAbs(30, 1e-6));
+    CHECK(parts::JointEnd(spans, spans, 0).blind);
+  }
+  SECTION("The ray starts inside material") {
+    const auto spans =
+        parts::TraverseAxis(placed, {0, 0, 25}, {0, 0, 1}, 0, 50);
+    REQUIRE(spans.size() == 1);
+    CHECK_THAT(spans[0].enter, WithinAbs(0, 1e-6));
+    CHECK_THAT(spans[0].exit, WithinAbs(15, 1e-6));
+  }
+}
 
 // The vendored standard-parts tables (docs/parts/plan.md, phase 1).
 //

@@ -1546,6 +1546,7 @@ TEST_CASE(
   const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
   MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
   const DrilledPlate blind = MakePlate(state, "Blind", 20.0, 6.6, 8.0, 0.0);
+  const DrilledPlate tall = MakePlate(state, "Tall", 110.0, 6.6, -1.0, 0.0);
 
   // Returns the occurrence id: an element name is unique within a PART, so
   // two plates built the same way carry the same one and the id is what tells
@@ -1646,6 +1647,13 @@ TEST_CASE(
   // A nut on a blind hole has nothing to thread onto. Refused by name: the
   // alternative is a nut floating inside the plate, which is invisible from
   // outside and exactly the class of error this whole verb exists to stop.
+  ui::SetActivePart(state, ui::AddAssembly(state, "Tall blind joint"));
+  const uint64_t tallOcc = place("Tall", glm::vec3(0, 0, 20));
+  place("Blind", glm::vec3(0));
+  fit = ui::FitFastenerToHole(state, ui::RimPick{tallOcc, tall.topRim}, bare);
+  REQUIRE_FALSE(fit.ok);
+  CHECK(fit.why.find("thread engagement") != std::string::npos);
+
   ui::SetActivePart(state, ui::AddAssembly(state, "Tapped"));
   const uint64_t blindOcc = place("Blind", glm::vec3(0.0f));
   ui::FastenerRequest tapped;

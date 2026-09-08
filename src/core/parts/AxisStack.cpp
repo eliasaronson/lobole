@@ -2,6 +2,7 @@
 
 #include "cad/CADKernel.h"
 
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepIntCurveSurface_Inter.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Dir.hxx>
@@ -92,14 +93,27 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
           Crossings(p.body->shape.GetShape(),
                     gp_Pnt(localOrigin.x, localOrigin.y, localOrigin.z),
                     gp_Dir(localDir.x, localDir.y, localDir.z), maxDist);
-      // Pairs: in, out, in, out. An odd count means this ray started INSIDE
-      // the body, which a rim on a real hole cannot do; skip it rather than
-      // invent an entry at zero.
-      if (hits.size() < 2 || hits.size() % 2 != 0)
+      if (hits.empty())
         continue;
-      enter = hit ? std::min(enter, hits.front()) : hits.front();
-      exit = hit ? std::max(exit, hits.back()) : hits.back();
-      hit = true;
+      // Tangencies and coincident face boundaries need not alternate in/out.
+      // Classify the intervals instead of discarding an odd crossing count:
+      // discarding one hid blind floors and selected screws through them.
+      BRepClass3d_SolidClassifier classifier(p.body->shape.GetShape());
+      double previous = 0.0;
+      for (size_t i = 0; i <= hits.size(); ++i) {
+        const double next = i < hits.size() ? hits[i] : maxDist;
+        if (next - previous > 1e-6) {
+          const glm::dvec3 mid =
+              localOrigin + localDir * ((previous + next) / 2);
+          classifier.Perform(gp_Pnt(mid.x, mid.y, mid.z), 1e-6);
+          if (classifier.State() == TopAbs_IN) {
+            enter = hit ? std::min(enter, previous) : previous;
+            exit = hit ? std::max(exit, next) : next;
+            hit = true;
+          }
+        }
+        previous = next;
+      }
     }
     if (!hit || exit - enter <= 1.0e-6)
       continue;
