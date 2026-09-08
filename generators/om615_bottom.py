@@ -387,6 +387,10 @@ def _block_rest(p, length):
     p.frame("timing_chain", origin=(0, DRIVE_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
     p.frame("oil_chain", origin=(0, OIL_DRIVE_Y, OIL_PUMP_Z), z=(0, 1, 0),
             x=(1, 0, 0))
+    from om615_accessories import BRACKET_Z
+
+    p.frame("alternator_bracket", origin=(100, -175, BRACKET_Z),
+            z=(1, 0, 0), x=(0, 1, 0))
     p.frame("belt", origin=(0, BELT_Y, 0), z=(0, 1, 0), x=(1, 0, 0))
     for sx, nm in ((-1, "mount_left"), (1, "mount_right")):
         p.frame(nm, origin=(sx * CASE_X, MOUNT_Y, 0), z=(0, 0, 1),
@@ -1358,6 +1362,9 @@ def timing_cover(app):
     for x, z in COVER_BOLTS + COVER_BOLTS_HEAD:
         holes.circle((x, z), d=9.0)
     p.extrude(holes.add(), back - COVER_Y0, mode="cut", name="Bolt holes")
+    from om615_accessories import prepare_cover
+
+    prepare_cover(p)
     casting_finish(p)
     p.frame("face", origin=(0, back, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("front_seal", origin=(0, FRONT_SEAL_Y, 0), z=(0, 1, 0),
@@ -1424,6 +1431,10 @@ def water_pump_shaft(app):
     p.frame("impeller", origin=(0, 0, IMPELLER_Y - mid), z=(0, 0, 1),
             x=(1, 0, 0))
     p.frame("pulley", origin=(0, 0, BELT_Y - mid), z=(0, 0, 1), x=(1, 0, 0))
+    from om615_accessories import FAN_BACK_OFFSET
+
+    p.frame("fan_drive", origin=(0, 0, BELT_Y-mid-FAN_BACK_OFFSET),
+            z=(0, 0, -1), x=(1, 0, 0))
     return p
 
 
@@ -1470,6 +1481,12 @@ def vee_pulley(app, name, d, bore_d, width=16.0):
                 (d / 2.0 - BELT_GROOVE_D, width / 2.0),
                 (d / 2.0 + 1.0, width / 2.0 + BELT_GROOVE_H)])
     p.revolve(g.add(), axis="z", mode="cut", name="V groove")
+    if name == "water pump pulley":
+        sk = p.sketch(Plane.xy(-.1), name="Fan drive bolts")
+        for k in range(4):
+            a = k * math.pi / 2 + math.pi / 4
+            sk.circle((18 * math.cos(a), 18 * math.sin(a)), d=6.5)
+        p.extrude(sk.add(), 7, mode="cut", name="Fan drive bolts")
     p.material("steel")
     p.frame("hub", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("belt", origin=(0, 0, width / 2.0), z=(0, 0, 1), x=(1, 0, 0))

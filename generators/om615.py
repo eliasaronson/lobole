@@ -5,9 +5,9 @@ cylinder — built complete, down to the bearing shells and the seals.
 
     python3 generators/om615.py --port <port> [--out DIR] [--build-only]
 
-Three modules: `om615_spec` is every shared number, `om615_bottom` and
-`om615_top` build the parts, and this one puts them together, drives them and
-checks them. The mechanism is four slider-crank loops off one crankshaft, a
+`om615_spec` holds the engine specification; `om615_bottom`, `om615_top`
+and `om615_accessories` build its parts. This module assembles and checks them.
+The mechanism is four slider-crank loops off one crankshaft, a
 chain relation halving crank speed to the camshaft, and per valve a cam
 relation for its lift and a rack relation that makes its rocker follow.
 
@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from om615_spec import *  # noqa: E402,F401,F403
 import om615_bottom as B  # noqa: E402
 import om615_top as T  # noqa: E402
+import om615_accessories as A
 
 
 def _solved(what, rig):
@@ -147,10 +148,7 @@ def front_and_rear(app, rig, occ, main):
     wp, wps = B.water_pump(app), B.water_pump_shaft(app)
     imp = B.impeller(app)
     wpp = B.vee_pulley(app, "water pump pulley", WP_PULLEY_D, B.WP_SHAFT_D)
-    belt = B.chain(app, "fan belt", WATER_PUMP_Z,
-                   PULLEY_D / 2.0 - B.BELT_GROOVE_D + 4.0,
-                   WP_PULLEY_D / 2.0 - B.BELT_GROOVE_D + 4.0, B.BELT_W,
-                   thickness=5.0)
+    belt = A.belt(app)
 
     rig.activate()
     fo = rig.place(fw, at=(0, FLANGE_Y + FLANGE_T, 0))
@@ -226,8 +224,10 @@ def front_and_rear(app, rig, occ, main):
     # groove radii, said outright rather than through invented tooth counts.
     rig.activate()
     app.add_relation(type="chain", a=main["id"], b=wp_mate["id"],
-                     ratio=(PULLEY_D - 16.0) / (WP_PULLEY_D - 16.0),
+                     ratio=A.PULLEYS[0][2] / A.PULLEYS[2][2],
                      name="fan belt")
+    accessories = A.install(app, rig, bo, sho, wp_mate, main)
+    accessories["vacuum"] = A.install_vacuum(app, rig, cv, main)
     # The mounts it hangs on.
     for side, nm in (("left", "mount_left"), ("right", "mount_right")):
         mb = B.engine_mount(app, side)
@@ -236,7 +236,7 @@ def front_and_rear(app, rig, occ, main):
         rig.fasten((bo, nm), (mo, "pad"), flipped=False)
     _solved("front and rear", rig)
     return {"crank_sprocket": cso, "cover": cv, "flywheel": fo,
-            "sump": pn, "crank": co}
+            "sump": pn, "crank": co, "accessories": accessories}
 
 
 def top_end(app, rig, occ, main):
@@ -390,7 +390,15 @@ FOLDERS = [
                   "oil pump idler gear", "oil pickup", "oil drive sprocket",
                   "oil pump sprocket", "oil pump chain"]),
     ("Cooling", ["water pump", "water pump shaft", "impeller",
-                 "water pump pulley", "fan belt"]),
+                 "water pump pulley", "fan belt", "cooling fan", "fan hub spacer"]),
+    ("Alternator", ["alternator front casting", "alternator rear casting",
+                    "alternator stator", "alternator rotor and shaft",
+                    "alternator pulley", "alternator cooling fan",
+                    "alternator mounting bracket"]),
+    ("Vacuum pump", ["vacuum pump casting", "vacuum pump valve cover",
+                     "vacuum pump diaphragm rim", "vacuum pump diaphragm centre",
+                     "vacuum pump rocker yoke", "vacuum pump follower roller",
+                     "vacuum pump face cam"]),
     ("Mounts", ["engine mount left", "engine mount right"]),
 ]
 
@@ -537,6 +545,8 @@ def profile_calls(app, out):
 
 
 COMPONENTS = {
+    "belt": ("fan belt", A.belt), "fan": ("cooling fan", A.fan),
+    "vacuum-pump": ("vacuum pump casting", A.pump_housing),
     "block": ("block", B.block), "head": ("cylinder head", T.head),
     "sump": ("sump", B.sump), "timing-cover": ("timing cover", B.timing_cover),
     "cam-cover": ("cam cover", T.cam_cover),
@@ -550,8 +560,10 @@ def component_fingerprint(key):
     # Whole builder modules are conservative dependencies. Shared specification
     # changes require a complete rebuild: they also affect unowned mechanisms.
     root = Path(__file__).resolve().parent
-    spec = hashlib.sha256((root / 'om615_spec.py').read_bytes()).hexdigest()
+    spec = hashlib.sha256((root / 'om615_spec.py').read_bytes() +
+                          json.dumps(A.assembly_inputs(), sort_keys=True).encode()).hexdigest()
     inputs = [root / 'om615_top.py', root / 'om615_bottom.py',
+              root / 'om615_accessories.py',
               root.parent / 'tools/designer_sdk.py',
               root.parent / 'tools/designer_components.py']
     digest = hashlib.sha256(key.encode())
@@ -587,8 +599,7 @@ def main():
                     help="save an unchecked draft for geometry iteration")
     ap.add_argument("--no-export", action="store_true",
                     help="run all checks but skip animated GLB export")
-    ap.add_argument("--component", choices=("block", "head", "sump",
-                    "timing-cover", "cam-cover", "intake", "exhaust", "injector", "prechamber"),
+    ap.add_argument("--component", choices=tuple(COMPONENTS),
                     help="build one component for fast shape iteration")
     ap.add_argument("--profile", action="store_true",
                     help="write RPC counts and elapsed time, including failed runs")
@@ -626,6 +637,8 @@ def main():
                 write_report(a.out, 'component-update.json', change.report)
         rig = app.assembly('engine', create=False)
         write_report(a.out, 'reference-dimensions.json', reference_dimensions(app))
+        if a.stage != 'preview':
+            write_report(a.out, 'accessory-standing-report.json', A.check_subassemblies(app))
         result = validate(app, stage=a.stage, assembly=rig)
         report = result.current(app)
         write_report(a.out, 'validation-report.json', report)
@@ -637,11 +650,7 @@ def main():
         return 0 if report['status'] == 'passed' else 1
     app.new()
     if a.component:
-        builders = {"block": B.block, "head": T.head, "sump": B.sump,
-                    "timing-cover": B.timing_cover, "cam-cover": T.cam_cover,
-                    "intake": T.intake_manifold, "exhaust": T.exhaust_manifold,
-                    "injector": T.injector, "prechamber": T.prechamber}
-        part = builders[a.component](app)
+        part = COMPONENTS[a.component][1](app)
         claim(part, namespace="om615", key=a.component,
               fingerprint=component_fingerprint(a.component))
         part.activate()
@@ -696,6 +705,8 @@ def main():
     write_report(a.out, 'validation-report.json', validation)
     if validation['status'] != 'passed':
         raise SdkError('validation failed; see validation-report.json')
+    if a.stage != 'preview':
+        write_report(a.out, 'accessory-standing-report.json', A.check_subassemblies(app))
     if a.stage != 'full':
         print(f"  {a.stage} passed; motion NOT checked; draft: {draft}")
         timings['total_s'] = time.perf_counter() - t0
@@ -732,6 +743,8 @@ def main():
         with open(os.path.join(a.out, "motion-report.json"), "w") as f:
             json.dump(r, f, indent=2)
         print(r["table"])
+        write_report(a.out, "accessory-motion-report.json",
+                     A.motion_dimensions(r, front["accessories"]))
         for k, o in enumerate(occ["pistons"]):
             # The occurrence's origin is the GUDGEON PIN, so the crown is
             # PIN_H above it — reporting the pin as the crown made the squish
