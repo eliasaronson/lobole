@@ -58,11 +58,21 @@ def main():
             full = validate(app, stage='full', assembly=rig)
             assert full.data['status'] == 'incomplete', full.data
             assert not full.data['accepted']
+            overlap = rig.place(part, fixed=True)
+            partial = validate(app, stage='local', assembly=rig, max_pairs=0)
+            assert partial.data['status'] == 'incomplete', partial.data
+            assert not partial.data['accepted']
+            clash = validate(app, stage='local', assembly=rig)
+            assert clash.data['status'] == 'failed', clash.data
+            assert not clash.data['accepted']
+            rig.activate()
+            app.remove_occurrence(id=overlap.id)
             with update('v2', builder(5)) as staged:
                 assert abs(part.volume()-24) < 1e-6
                 assert staged.report['action'] == 'update'
                 staged.apply()
                 assert staged.report['regen']['executed'] == 0, staged.report
+                assert staged.report['geometry_reused'], staged.report
             assert preview.current(app)['status'] == 'stale'
             assert abs(part.volume()-60) < 1e-6
             assert [f['id'] for f in part.state()['features']] == ids

@@ -393,7 +393,8 @@ void DrawMotionSection(AppState& state) {
   WrapRow row;
   const bool running = BackgroundJobRunning(state, "motion");
   for (bool preview : {true, false}) {
-    const char* label = preview ? "Preview motion" : "Validate motion";
+    const char* label = preview ? "Preview motion###motion_preview"
+                                : "Validate motion###motion_run";
     row.Next(ButtonWidth(label));
     ImGui::BeginDisabled(running);
     if (ImGui::SmallButton(label)) {

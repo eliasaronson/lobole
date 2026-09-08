@@ -414,13 +414,24 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(s_App->assembly->FindMateById(axle)->rotation -
                       3.14159265f) < 1e-3f);
 
+    ctx->ItemClick("//###Model/###motion_preview");
+    for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, study.id) == nullptr;
+         i++)
+      ctx->Yield();
+    IM_CHECK(ui::MotionResultFor(*s_App, study.id) != nullptr);
+    IM_CHECK(!ui::MotionResultFor(*s_App, study.id)->checkedClashes);
+
     // Run: a job; wait for it to land (a two-body turn is milliseconds).
     ctx->ItemClick("//###Model/###motion_run");
-    for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, study.id) == nullptr;
+    for (int i = 0;
+         i < 600 && (!ui::MotionResultFor(*s_App, study.id)->checkedClashes ||
+                     ui::MotionResultStale(*s_App, study.id));
          i++)
       ctx->Yield();
     const motion::Result* r = ui::MotionResultFor(*s_App, study.id);
     IM_CHECK(r != nullptr);
+    IM_CHECK(r->checkedClashes);
+    IM_CHECK(!ui::MotionResultStale(*s_App, study.id));
     IM_CHECK_EQ(r->samples.size(), (size_t)48);
     IM_CHECK(r->clean); // nothing is in the arm's way
 

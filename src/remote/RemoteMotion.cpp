@@ -129,7 +129,7 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
     }
     samples.push_back(sj);
   }
-  json out{{"clean", r.clean},
+  json out{{"clean", r.clean && r.checkedClashes},
            {"samples", samples},
            {"worst_sample", r.worstSample},
            {"pairs_checked", r.pairsChecked},
@@ -291,7 +291,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       j["has_result"] = r != nullptr;
       if (r) {
         j["stale"] = ui::MotionResultStale(state, s.id);
-        j["clean"] = r->clean && !j["stale"].get<bool>();
+        j["clean"] = r->clean && r->checkedClashes && !j["stale"].get<bool>();
         j["collision_checked"] = r->checkedClashes;
       }
       j["running"] = running;

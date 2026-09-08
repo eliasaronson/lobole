@@ -226,6 +226,12 @@ def main():
                f"the study reloads: {studies}")
         r = d.call("run_motion_study", study=studies[0]["id"])
         expect(not r["clean"], "and still finds the stop after a reopen")
+        d.call("set_motion_study", study=studies[0]["id"], check_clash=False)
+        preview = d.call("run_motion_study", study=studies[0]["id"])
+        expect(preview["collision_status"] == "not_checked" and not preview["clean"],
+               "kinematics preview must not claim collision clearance")
+        expect(not d.call("list_motion_studies")["studies"][0]["clean"],
+               "study list must not turn unchecked motion green")
         print("motion_smoke: ok")
     finally:
         app.terminate()

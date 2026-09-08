@@ -548,6 +548,12 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     out["revision"] = generated::Revision(part);
     out["regen"] = remote::RegenSummaryJson(part);
     out["regen"]["executed"] = part.LastRegenStats().executed;
+    out["regen"]["cached"] = part.LastRegenStats().cached;
+    bool reused = part.GetBodies().size() == source.GetBodies().size();
+    for (size_t i = 0; reused && i < part.GetBodies().size(); ++i)
+      reused =
+          part.GetBodies()[i].shape.SameGeometryAs(source.GetBodies()[i].shape);
+    out["geometry_reused"] = reused;
     return out;
   }
   if (m == "new_project") {
