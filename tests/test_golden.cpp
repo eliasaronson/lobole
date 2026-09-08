@@ -463,6 +463,8 @@ void AssertUnits(const Document& doc, const nlohmann::json& expect) {
 }
 
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
+  if (expect.contains("catalogs"))
+    CHECK(doc.GetCatalogs() == expect.at("catalogs"));
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
   std::vector<double> volumes;

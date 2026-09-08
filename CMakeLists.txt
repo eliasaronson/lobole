@@ -291,6 +291,7 @@ set(core_sources
     src/core/io/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
+    src/core/catalog/Catalog.cpp
     src/core/io/GeometryCache.cpp
     src/core/parts/AxisStack.cpp
     src/core/parts/FastenerProfile.cpp
@@ -648,6 +649,8 @@ set(app_sources
     src/ui/DrawingActions.cpp
     src/ui/SceneOverlays.cpp
     src/ui/VariableActions.cpp
+    src/ui/CatalogActions.cpp
+    src/ui/CatalogPanel.cpp
     src/ui/SketchOverlay.cpp
     src/ui/ImportActions.cpp
     src/ui/AssemblyActions.cpp
@@ -692,6 +695,7 @@ set(app_sources
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
     src/remote/RemoteInspection.cpp
+    src/remote/RemoteCatalog.cpp
     src/remote/RemoteModeling.cpp
     src/remote/RemoteDrawings.cpp
     src/remote/RemoteAssembly.cpp

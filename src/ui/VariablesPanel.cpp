@@ -1,4 +1,5 @@
 #include "ui/VariablesPanel.h"
+#include "ui/CatalogActions.h"
 
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/ExprComplete.h"
@@ -119,6 +120,7 @@ void DrawVariablesPanel(AppState& state) {
   // first appearance (fresh layout builds select the last-appearing tab).
   ImGui::Begin(kPanelVariables, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   PanelHeading(kPanelVariables);
+  DrawCatalogSection(state);
   // NOT `if (!state.document) return`, which is what this did until
   // 2026-09-01 — the same defect that made File > Save a silent no-op
   // everywhere but a part tab. `state.document` is NULL on an assembly or a

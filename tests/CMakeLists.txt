@@ -54,6 +54,7 @@ add_executable(designer_tests
     test_sweep.cpp
     test_curve3d.cpp
     test_pipe.cpp
+    test_catalog.cpp
     test_hole.cpp
     test_draft.cpp
     test_autosaver.cpp
@@ -679,3 +680,8 @@ add_test(NAME mcp_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(mcp_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 600
                      SKIP_RETURN_CODE 77)
+
+add_test(NAME catalog_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/catalog_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(catalog_smoke PROPERTIES TIMEOUT 120)

@@ -174,9 +174,12 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     // Fold the project scope into the doc for the write (they reload as project
     // scope), then restore the (empty) local table.
     std::vector<Parameter> localBackup = state.document->TakeParameters();
+    auto catalogBackup = state.document->TakeCatalogs();
+    state.document->SetCatalogsRaw(state.catalogs);
     state.document->SetParametersRaw(state.projectParameters);
     auto r = DocumentIO::Save(*state.document, path);
     state.document->SetParametersRaw(std::move(localBackup));
+    state.document->SetCatalogsRaw(catalogBackup);
     if (!r && error)
       *error = r.error();
     if (r)
@@ -208,6 +211,8 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     // only invalidate every project file for nothing.
     index["version"] = 2;
     index["active"] = state.activePart;
+    if (!state.catalogs.empty())
+      index["catalogs"] = catalog::Serialize(state.catalogs);
     // Phase V: project-scope variables live in the project envelope, beside
     // active/documents. Per-part index.json `parameters` are that part's LOCAL
     // scope (usually empty now that set_variable defaults to project).
@@ -336,6 +341,8 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
   try {
     nlohmann::json index;
     std::ifstream(projFile) >> index;
+    const auto loadedCatalogs =
+        catalog::Deserialize(index.value("catalogs", nlohmann::json::array()));
     // v2 has a typed `documents` list; v1 had a flat `parts` list (all parts,
     // no ids/types). Normalize v1 into the same shape with defaulted reads.
     nlohmann::json docs;
@@ -454,6 +461,8 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     // part's Document to them, and regenerate all (Load regenerated each part
     // WITHOUT the project scope, so a feature referencing a project var errored
     // — SyncProjectScope re-evaluates it correctly).
+    state.catalogs = loadedCatalogs;
+    state.catalogHistory = {};
     state.projectParameters.clear();
     state.projectVarHistory = {};
     for (const auto& pj : index.value("parameters", nlohmann::json::array()))

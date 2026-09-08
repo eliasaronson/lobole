@@ -1,3 +1,4 @@
+#include "remote/RemoteCatalog.h"
 #include "remote/RemoteServer.h"
 
 #include "remote/InstanceRegistry.h"
@@ -393,6 +394,7 @@ const remote::MethodDoc* FindMethod(const std::string& m) {
     add(remote::AssemblyMethodDocs());
     add(remote::MotionMethodDocs());
     add(remote::InspectionMethodDocs());
+    add(remote::CatalogMethodDocs());
     add(remote::CamMethodDocs());
     add(remote::DrawingMethodDocs());
     add(remote::ConfigurationMethodDocs());
@@ -428,6 +430,7 @@ static bool IsKnownMethod(const std::string& m) {
     add(remote::AssemblyMethodDocs());
     add(remote::MotionMethodDocs());
     add(remote::InspectionMethodDocs());
+    add(remote::CatalogMethodDocs());
     add(remote::CamMethodDocs());
     add(remote::DrawingMethodDocs());
     add(remote::ConfigurationMethodDocs());
@@ -730,6 +733,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::AssemblyMethodDocs());
     addDocs(remote::MotionMethodDocs());
     addDocs(remote::InspectionMethodDocs());
+    addDocs(remote::CatalogMethodDocs());
     addDocs(remote::CamMethodDocs());
     addDocs(remote::DrawingMethodDocs());
     addDocs(remote::ConfigurationMethodDocs());
@@ -1126,6 +1130,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // Inspection takes a nullable doc: interference works on assembly
   // occurrence pairs, list_elements/measure on any part via `part`.
   if (auto r = remote::HandleCamRpc(state, doc, m, p))
+    return *r;
+  if (auto r = remote::HandleCatalogRpc(state, m, p))
     return *r;
   if (auto r = remote::HandleInspectionRpc(state, doc, m, p))
     return *r;

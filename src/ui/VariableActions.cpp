@@ -1,4 +1,5 @@
 #include "ui/VariableActions.h"
+#include "ui/CatalogActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/RendererSync.h"
 
@@ -336,17 +337,26 @@ void ActiveTabRedo(AppState& state) {
 } // namespace
 
 bool CanGlobalUndo(const AppState& state) {
-  return !state.projectVarHistory.undo.empty() ||
+  return !state.catalogHistory.undo.empty() ||
+         !state.projectVarHistory.undo.empty() ||
          ActiveTabTopUndoStamp(state) != 0;
 }
 bool CanGlobalRedo(const AppState& state) {
-  return !state.projectVarHistory.redo.empty() ||
+  return !state.catalogHistory.redo.empty() ||
+         !state.projectVarHistory.redo.empty() ||
          ActiveTabTopRedoStamp(state) != 0;
 }
 void GlobalUndo(AppState& state) {
   const uint64_t proj = state.projectVarHistory.undo.empty()
                             ? 0
                             : state.projectVarHistory.undo.back().stamp;
+  const uint64_t catalogStamp = state.catalogHistory.undo.empty()
+                                    ? 0
+                                    : state.catalogHistory.undo.back().stamp;
+  if (catalogStamp > proj && catalogStamp > ActiveTabTopUndoStamp(state)) {
+    UndoCatalog(state);
+    return;
+  }
   // Undo the most recent action: the larger stamp wins (stamps are unique).
   if (proj != 0 && proj > ActiveTabTopUndoStamp(state))
     UndoProjectVars(state);
@@ -360,6 +370,13 @@ void GlobalRedo(AppState& state) {
   uint64_t tab = ActiveTabTopRedoStamp(state);
   if (tab == 0)
     tab = UINT64_MAX;
+  const uint64_t catalogStamp = state.catalogHistory.redo.empty()
+                                    ? UINT64_MAX
+                                    : state.catalogHistory.redo.back().stamp;
+  if (catalogStamp < proj && catalogStamp < tab) {
+    RedoCatalog(state);
+    return;
+  }
   if (proj == UINT64_MAX && tab == UINT64_MAX)
     return;
   // Redo the action undone most recently: the SMALLER redo-top stamp wins.

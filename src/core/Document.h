@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/catalog/Catalog.h"
+
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
@@ -87,6 +89,14 @@ public:
   // Swaps the feature at index and regenerates. Returns false (and leaves
   // the document unchanged) if index is out of range or feature is null.
   bool ReplaceFeature(size_t index, std::unique_ptr<Feature> feature);
+
+  const catalog::Json& GetCatalogs() const { return m_catalogs; }
+  void SetCatalogsRaw(const catalog::Json& entries) {
+    m_catalogs = catalog::Deserialize(entries);
+  }
+  catalog::Json TakeCatalogs() {
+    return std::exchange(m_catalogs, catalog::Json::array());
+  }
 
   // ---- Parameters (variables) -------------------------------------------
   // The ordered parameter table expressions evaluate against. All mutators
@@ -438,6 +448,7 @@ private:
   std::map<std::string, std::vector<unsigned char>>
       m_assets; // v49 image pixels
   std::vector<Body> m_bodies;
+  catalog::Json m_catalogs = catalog::Json::array();
   std::vector<Parameter> m_parameters;
   std::vector<fem::Study> m_studies;
   // Transient per-study mesh+results (never serialized); keyed by study id.

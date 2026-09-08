@@ -226,6 +226,11 @@ class App:
     def close(self):
         self._remote.close()
 
+    @property
+    def catalogs(self):
+        """Project engineering catalogs; handles pin immutable content."""
+        return Catalogs(self)
+
     # --- tabs --------------------------------------------------------------
     def parts(self):
         return self.call("list_parts")["parts"]
@@ -1768,3 +1773,90 @@ def _dim3(feature, key, value):
 def _num(value, part):
     """A dimension as a number: a number, or a variable the document holds."""
     return part.value_of(value)
+
+
+class Catalogs:
+    """Import plans compose preview and install; ordinary RPCs stay generated."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def preview_file(self, path, *, id, revision, source, license, units,
+                     storage="reference", mapping=None):
+        options = dict(id=id, revision=revision, source=source, license=license,
+                       units=units, storage=storage)
+        if mapping is not None:
+            options["mapping"] = mapping
+        result = self.app.preview_catalog(path=os.fspath(path), options=options)
+        return CatalogImport(self.app, os.fspath(path), options, result)
+
+    def import_file(self, path, **options):
+        return self.preview_file(path, **options).install()
+
+    def import_package(self, path, *, storage="reference"):
+        options = dict(storage=storage)
+        result = self.app.preview_catalog(path=os.fspath(path), options=options)
+        return CatalogImport(self.app, os.fspath(path), options, result).install()
+
+    def open(self, id, revision):
+        for entry in self.app.list_catalogs()["catalogs"]:
+            if entry["id"] == id and entry["revision"] == revision:
+                return CatalogVersion(self.app, entry)
+        raise SdkError(f"catalog not found: {id} @ {revision}")
+
+
+class CatalogImport:
+    def __init__(self, app, path, options, summary):
+        import copy
+        self.app, self.path = app, path
+        self._options = copy.deepcopy(options)
+        self.summary = summary
+        self._hash = summary["hash"]
+
+    def install(self):
+        result = self.app.import_catalog(path=self.path, options=self._options,
+                                         expected_hash=self._hash)
+        return CatalogVersion(self.app, result["catalog"])
+
+
+class CatalogVersion:
+    def __init__(self, app, metadata):
+        self.app = app
+        self.metadata = dict(metadata)
+        self._ref = dict(catalog=metadata["id"], revision=metadata["revision"],
+                         hash=metadata["hash"])
+
+    def find(self, designation):
+        result = self.app.query_catalog(**self._ref, designation=designation)
+        return CatalogRecord(self, result["record"])
+
+    def records(self, page_size=50):
+        offset = 0
+        while offset is not None:
+            result = self.app.query_catalog(**self._ref, offset=offset,
+                                            limit=page_size)
+            for record in result["records"]:
+                yield CatalogRecord(self, record)
+            offset = result["next_offset"]
+
+    def export(self, path, *, mode):
+        return self.app.export_catalog(**self._ref, path=os.fspath(path), mode=mode)
+
+
+class CatalogRecord:
+    """A pinned record; dimensional fields and check observations are in mm."""
+
+    def __init__(self, version, fields):
+        self.catalog = version
+        self.fields = dict(fields)
+        self.designation = fields["designation"]
+
+    def check_seat(self, **measurements_mm):
+        """Explicit observations, never an automatic fit choice or geometry edit.
+
+        Returns pass/fail/unverified with individual requirements. Missing
+        limits stay unverified; reading a nominal diameter cannot supply them.
+        """
+        return self.catalog.app.catalog_requirements(
+            **self.catalog._ref, designation=self.designation,
+            measurements=measurements_mm)

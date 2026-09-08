@@ -139,6 +139,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // become the project scope (one part = the whole project). The project-var
   // undo history belonged to the old model — discard it, then regenerate the
   // document against the (now project) scope.
+  state.catalogs = state.document->TakeCatalogs();
+  state.catalogHistory = {};
   state.projectParameters = state.document->TakeParameters();
   state.projectVarHistory = {};
   state.document->SetProjectSymbols(&state.projectSymbols);

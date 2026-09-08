@@ -690,6 +690,14 @@ struct DrawingHistory {
 // also rewrote expressions inside every part — the reference rewrite to replay
 // across all documents. Stamped from the shared action clock so the global
 // Undo picks the most recent mutation. See AppActions project-var helpers.
+struct CatalogSnapshot {
+  nlohmann::json entries;
+  uint64_t stamp = 0;
+};
+struct CatalogHistory {
+  std::vector<CatalogSnapshot> undo, redo;
+};
+
 struct ProjectVarSnapshot {
   std::vector<Parameter> params; // the project table to restore when applied
   uint64_t stamp = 0;
@@ -908,6 +916,8 @@ struct AppState {
   // set_variable defaults to this scope. Persisted in project.json (multi-part)
   // or the lone part file (single-part = the whole project). projectSymbols is
   // derived — re-evaluated by ui::SyncProjectScope on every project-var edit.
+  nlohmann::json catalogs = nlohmann::json::array();
+  CatalogHistory catalogHistory;
   std::vector<Parameter> projectParameters;
   SymbolTable projectSymbols;
   ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits

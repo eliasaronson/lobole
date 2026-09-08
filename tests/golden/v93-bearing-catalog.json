@@ -1,0 +1,29 @@
+{
+  "format": "designer-document",
+  "version": 93,
+  "features": [],
+  "catalogs": [
+    {
+      "id": "synthetic",
+      "revision": "1",
+      "source": "synthetic golden fixture",
+      "license": "CC0-1.0",
+      "schema": "bearing-v1",
+      "units": "mm",
+      "storage": "embedded",
+      "record_count": 1,
+      "records": [
+        {
+          "designation": "B-25",
+          "bore_diameter": 25.0,
+          "outer_diameter": 52.0,
+          "width": 15.0,
+          "shaft_min": 24.99,
+          "shaft_max": 25.01,
+          "unsupported_fields": []
+        }
+      ],
+      "hash": "3ed23ae5be319ca231898534ad8101f42de6c603cedf090e6381420b98b67742"
+    }
+  ]
+}

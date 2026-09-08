@@ -116,6 +116,8 @@ void UnitsToEnvelope(const units::System& u, json& j) {
 json DocumentEnvelope(const Document& doc) {
   json j;
   j["format"] = kFormat;
+  if (!doc.GetCatalogs().empty())
+    j["catalogs"] = catalog::Serialize(doc.GetCatalogs());
   j["version"] = kVersion;
   if (doc.Rollback() >= 0) {
     j["rollback"] = doc.Rollback();
@@ -636,6 +638,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
 
     auto doc = std::make_unique<Document>();
     doc->SetCommitGeometry(index.value("commit_geometry", true));
+    doc->SetCatalogsRaw(index.value("catalogs", json::array()));
     for (const auto& pj : index.value("parameters", json::array())) {
       doc->SetParameter(pj.at("name").get<std::string>(),
                         pj.at("expression").get<std::string>(),
@@ -1208,6 +1211,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
 
     auto doc = std::make_unique<Document>();
     doc->SetCommitGeometry(j.value("commit_geometry", true));
+    doc->SetCatalogsRaw(j.value("catalogs", json::array()));
     // Parameters first: features' expressions evaluate against them on the
     // regeneration each AddFeature triggers.
     for (const auto& pj : j.value("parameters", json::array())) {

@@ -17,7 +17,8 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    92; // v92: a CAM tool's `chipload_min`/`chipload_max` -- what THIS cutter
+    93; // v93: versioned engineering catalog references and embedded records.
+        // v92: a CAM tool's `chipload_min`/`chipload_max` -- what THIS cutter
         //      wants per tooth, when somebody has a vendor's chart for it.
         //      Absent (the default) falls back to a scaling rule off the
         //      diameter, and every finding CITES which of the two it used:
