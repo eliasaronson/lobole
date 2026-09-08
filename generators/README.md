@@ -38,3 +38,9 @@ Not drawn: root fillets; undercut correction (below ~17 teeth at 20° the
 flank runs radially from the base circle to the root, as an uncorrected
 cutter would); helical, bevel, internal and rack forms. Each is a few
 lines of the same arithmetic when a part needs it.
+
+`cncest6090.py` starts a provisional CNC router layout and Z-axis fixture from
+owner photographs. Only the 80 mm spindle diameter is owner-confirmed; the
+remaining dimensions are editable project variables with recorded assumptions.
+See [the model notes](../docs/modeling/cncest6090.md) for scope, measurement
+priorities, JSON overrides and preview/local/full verification.
