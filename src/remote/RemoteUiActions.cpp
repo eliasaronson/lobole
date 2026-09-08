@@ -106,6 +106,10 @@ void RemoteServer::SetTestEngine(ImGuiTestEngine* engine) {
   m_engine = engine;
   if (engine == nullptr)
     return;
+  // Each RPC is a separate test-engine run. Restoring the pre-run focus
+  // would undo focus_panel (and dock-tab clicks) before the next RPC could
+  // inspect or use that panel. Remote actions must retain their UI effects.
+  ImGuiTestEngine_GetIO(engine).ConfigRestoreFocusAfterTests = false;
   // One reusable test carries every queued UI action (ProcessPending queues
   // it; the engine runs it between frames, where clicks are legal).
   s_UiActionTest = IM_REGISTER_TEST(engine, "remote", "action");

@@ -436,6 +436,17 @@ def main():
         d.call("cancel_pending")
         expect(len(d.call("get_state")["features"]) == 1, "cancel discards")
 
+        phase("Panel focus persists across independent RPCs")
+        d.call("focus_panel", name="Variables")
+        items = d.call("ui_items", ref="//###Variables")["items"]
+        expect(any(i["label"] == "Engineering catalogs" for i in items),
+               "focus_panel must remain selected after its action finishes")
+        d.call("item_click", ref="//###Variables/Engineering catalogs")
+        items = d.call("ui_items", ref="//###Variables", depth=5)["items"]
+        expect(any(i["label"] == "Import bearing data" for i in items),
+               "a subsequent RPC can open and inspect the catalog controls")
+        d.call("focus_panel", name="Model")
+
         phase("Driving the GUI as a scripted human")
         # Driving the GUI as a scripted human (U9): the failure says WHY, the
         # widgets can be enumerated instead of grepped for, and hover works.
