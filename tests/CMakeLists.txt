@@ -716,3 +716,8 @@ add_test(NAME cncest6090_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/cncest6090_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(cncest6090_smoke PROPERTIES TIMEOUT 120)
+
+add_test(NAME toolmakers_clamp_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/toolmakers_clamp_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(toolmakers_clamp_smoke PROPERTIES TIMEOUT 120)
