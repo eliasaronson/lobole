@@ -2,6 +2,11 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "core/Measure.h"
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/ThreadStandards.h"
@@ -131,6 +136,8 @@ TEST_CASE("Thread round-trips through serialization",
     auto th = std::make_unique<ThreadFeature>(
         "Thread", ElementRef{body.createdBy, CylFaceName(body)}, "M8", 1.25);
     th->threadClass = "6g";
+    th->allowEngagement = true;
+    th->minimumEngagement = 3;
     th->length = 8.0;
     doc.AddFeature(std::move(th));
     REQUIRE(testio::Save(doc, path.string()));
@@ -142,9 +149,62 @@ TEST_CASE("Thread round-trips through serialization",
   CHECK(th->designation == "M8");
   CHECK(th->pitch == 1.25);
   CHECK(th->threadClass == "6g");
+  CHECK(th->allowEngagement);
+  CHECK(th->minimumEngagement == 3);
   CHECK(th->length == 8.0);
   CHECK_FALSE(th->modeled);
   CHECK(th->GetError().empty());
   CHECK(th->overlay.valid); // recomputed on load's regeneration
   fs::remove(path);
+}
+
+TEST_CASE("thread engagement relieves only matching bounded coaxial spans",
+          "[thread][measure]") {
+  Body screw, nut;
+  screw.shape = CADShape(BRepPrimAPI_MakeCylinder(3, 12).Shape());
+  nut.shape =
+      CADShape(BRepAlgoAPI_Cut(BRepPrimAPI_MakeCylinder(6, 12).Shape(),
+                               BRepPrimAPI_MakeCylinder(2.5, 12).Shape())
+                   .Shape());
+  const auto annotate = [](Body& b, double radius, bool external) {
+    int i = 0;
+    for (TopExp_Explorer ex(b.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), ++i) {
+      BRepAdaptor_Surface surface(TopoDS::Face(ex.Current()));
+      if (surface.GetType() == GeomAbs_Cylinder &&
+          std::abs(surface.Cylinder().Radius() - radius) < 1e-6) {
+        b.elementMap.names[i] = "thread";
+        b.threadRegions.push_back({{1, "thread"}, "M6", 0, 3, external});
+      }
+    }
+  };
+  annotate(screw, 3, true);
+  annotate(nut, 2.5, false);
+  REQUIRE(screw.threadRegions.size() == 1);
+  REQUIRE(nut.threadRegions.size() == 1);
+  const auto check = [&](glm::mat4 xf = glm::mat4(1)) {
+    auto c = Measure::ContactBetween({screw}, xf, {nut}, glm::mat4(1), false);
+    REQUIRE(c.has_value());
+    return c->volume;
+  };
+  CHECK(check() < 1e-6);
+  const auto joined = Measure::ContactBetween({screw}, glm::mat4(1), {nut},
+                                              glm::mat4(1), false);
+  CHECK(joined->engagedThreadPairs == 1);
+  CHECK(joined->threadEngagementVolume > 1);
+  const auto separated = Measure::ContactBetween(
+      {screw}, glm::translate(glm::mat4(1), glm::vec3(0, 0, 20)), {nut},
+      glm::mat4(1), false);
+  REQUIRE(separated);
+  CHECK(separated->engagedThreadPairs == 0);
+  CHECK(check(glm::translate(glm::mat4(1), glm::vec3(0.1, 0, 0))) > 1);
+  CHECK(check(glm::translate(glm::mat4(1), glm::vec3(0, 0, 10))) >
+        1); // only 2 mm engaged
+  nut.threadRegions[0].designation = "M6x0.75";
+  CHECK(check() > 1); // a mismatched thread never becomes a contact exclusion
+  nut.threadRegions[0].designation = "M6";
+  screw.threadRegions[0].length = 4;
+  CHECK(check() > 1); // the unthreaded remainder still collides
+  screw.threadRegions.clear();
+  CHECK(check() > 1); // no unilateral declaration of engagement
 }

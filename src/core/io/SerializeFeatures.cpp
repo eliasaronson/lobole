@@ -950,6 +950,8 @@ json FeatureToJson(const Feature& feature) {
                  {"element", th->face.name}};
     j["designation"] = th->designation;
     j["pitch"] = th->pitch;
+    j["allow_engagement"] = th->allowEngagement;
+    j["minimum_engagement"] = th->minimumEngagement;
     if (!th->threadClass.empty())
       j["thread_class"] = th->threadClass;
     if (th->length > 0.0)
@@ -1119,7 +1121,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Rib", 36, "sketch_id (open profile), thickness (+_expr), flip?"},
     {"Thread", 36,
      "face {feature_id, element} (cylindrical), designation (e.g. \"M8\"), "
-     "pitch?, thread_class?, length (+_expr), modeled?"},
+     "pitch?, thread_class?, length (+_expr), modeled?, allow_engagement?, "
+     "minimum_engagement?"},
     {"Hole", 21,
      "hole_kind: simple|counterbore|countersink, sketch_id (centres: its "
      "points and its circles' centres, so a projected hole edge places a hole; "
@@ -1745,6 +1748,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     th->length = j.value("length", 0.0);
     th->lengthExpr = j.value("length_expr", std::string{});
     th->modeled = j.value("modeled", false);
+    th->allowEngagement = j.value("allow_engagement", false);
+    th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);
   } else if (type == "Hole") { // v21
     const std::string k = j.value("hole_kind", "simple");

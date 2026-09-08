@@ -219,6 +219,7 @@ struct Relation {
   // same lift, so propagation runs forward only and the reverse direction is
   // refused rather than picking a branch.
   std::vector<std::pair<double, double>> lift;
+  uint64_t threadPart = 0, threadFeature = 0; // authoritative screw thread
   std::string error; // set by the solve: a mate gone, a DOF missing
 };
 

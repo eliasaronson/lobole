@@ -376,3 +376,24 @@ TEST_CASE("Exact contact cache distinguishes internal and world placements",
   cache.Clear();
   CHECK(cache.Size() == 0);
 }
+
+TEST_CASE("motion table explains unknown contacts and interrupted runs",
+          "[motion]") {
+  motion::Result r;
+  MotionStudy study;
+  r.checkedClashes = true;
+  r.clean = false;
+  r.pairsUnknown = 1;
+  motion::Sample sample;
+  sample.unknownContacts.push_back({10, 20, "screw", "jaw"});
+  r.samples.push_back(sample);
+  const auto table = motion::Table(r, study);
+  REQUIRE(table.find("UNVERIFIED") != std::string::npos);
+  REQUIRE(table.find("UNKNOWN screw x jaw") != std::string::npos);
+  REQUIRE(table.find("exact contact calculation failed") != std::string::npos);
+  r.cancelled = true;
+  REQUIRE(motion::Table(r, study).find("INCOMPLETE") != std::string::npos);
+  r.error = "driver missing";
+  REQUIRE(motion::Table(r, study).find("Error: driver missing") !=
+          std::string::npos);
+}

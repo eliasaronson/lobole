@@ -255,7 +255,9 @@ bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,
   for (int k = 1; k <= walk; k++) {
     const double v = current + (target - current) * (double(k) / walk);
     assembly::SetMateDof(*driver, s->driverDof, v);
-    assembly::PropagateRelations(*state.assembly, driver->id);
+    assembly::PropagateRelations(*state.assembly, driver->id, [&](uint64_t id) {
+      return ui::PartDocById(state, id);
+    });
     SolveActiveAssemblyDriven(state, driver->id, s->driverDof);
   }
   state.syncedDocumentVersion = UINT64_MAX; // the placements changed

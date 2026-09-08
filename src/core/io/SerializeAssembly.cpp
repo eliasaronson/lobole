@@ -312,6 +312,10 @@ json RelationToJson(const Relation& r) {
   j["dof_a"] = MateDofToString(r.dofA);
   j["dof_b"] = MateDofToString(r.dofB);
   j["ratio"] = r.ratio;
+  if (r.threadPart || r.threadFeature) {
+    j["thread_part"] = r.threadPart;
+    j["thread_feature"] = r.threadFeature;
+  }
   j["phase"] = r.phase;
   if (!r.lift.empty()) { // v88, cam only; absent for every other kind
     json lift = json::array();
@@ -366,6 +370,8 @@ Relation RelationFromJson(const json& j) {
   r.dofA = MateDofFromString(j.at("dof_a").get<std::string>());
   r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
   r.ratio = j.at("ratio").get<double>();
+  r.threadPart = j.value("thread_part", uint64_t{0});
+  r.threadFeature = j.value("thread_feature", uint64_t{0});
   r.phase = j.value("phase", 0.0);
   for (const json& pt : j.value("lift", json::array())) { // v88
     if (!pt.is_array() || pt.size() != 2)

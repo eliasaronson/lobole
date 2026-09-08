@@ -117,6 +117,13 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
             {"errored_mates", sm.erroredMates},
             {"residual_mm", sm.residualMm},
             {"clashes", clashes}};
+    sj["unknown_contacts"] = json::array();
+    for (const auto& c : sm.unknownContacts)
+      sj["unknown_contacts"].push_back({{"a", c.a},
+                                        {"b", c.b},
+                                        {"a_name", c.aName},
+                                        {"b_name", c.bName},
+                                        {"reason", c.reason}});
     if (includePoses) {
       json poses = json::array();
       for (const auto& [occId, m] : sm.worlds) {
@@ -129,22 +136,24 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
     }
     samples.push_back(sj);
   }
-  json out{{"clean", r.clean && r.checkedClashes},
-           {"samples", samples},
-           {"worst_sample", r.worstSample},
-           {"pairs_checked", r.pairsChecked},
-           {"pairs_cached", r.pairsCached},
-           {"pairs_executed", r.pairsChecked - r.pairsCached},
-           {"pairs_unknown", r.pairsUnknown},
-           {"collision_status", !r.checkedClashes ? "not_checked"
-                                : r.cancelled     ? "incomplete"
-                                : r.pairsUnknown  ? "unverified"
-                                : r.clean         ? "passed"
-                                                  : "failed"},
-           {"pairs_rigid", r.pairsRigid},
-           {"seconds", r.seconds},
-           {"unit", rot ? "deg" : "mm"},
-           {"table", motion::Table(r, s)}};
+  json out{
+      {"clean", r.clean && r.checkedClashes && !r.cancelled && r.error.empty()},
+      {"samples", samples},
+      {"worst_sample", r.worstSample},
+      {"pairs_checked", r.pairsChecked},
+      {"pairs_cached", r.pairsCached},
+      {"pairs_executed", r.pairsChecked - r.pairsCached},
+      {"pairs_unknown", r.pairsUnknown},
+      {"collision_status", !r.error.empty()    ? "error"
+                           : !r.checkedClashes ? "not_checked"
+                           : r.cancelled       ? "incomplete"
+                           : r.pairsUnknown    ? "unverified"
+                           : r.clean           ? "passed"
+                                               : "failed"},
+      {"pairs_rigid", r.pairsRigid},
+      {"seconds", r.seconds},
+      {"unit", rot ? "deg" : "mm"},
+      {"table", motion::Table(r, s)}};
   if (s.clashMode == "mesh" && s.checkClash)
     out["deflection_mm"] = r.deflectionMm;
   if (r.cancelled)

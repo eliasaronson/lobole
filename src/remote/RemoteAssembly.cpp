@@ -99,7 +99,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam, a: mate id, b: mate id}: "
      "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
-     "own numbers when given — gear: {teeth_a, teeth_b} (ratio = "
+     "own numbers when given (screw may instead reference thread_part and "
+     "thread_feature) — gear: {teeth_a, teeth_b} (ratio = "
      "-teeth_a/teeth_b, so meshing gears counter-rotate); CHAIN: the same "
      "but the ratio KEEPS its sign, because a chain or belt turns both "
      "sprockets the same way; rack: {pitch_radius} mm (a's rotation drives "
@@ -117,7 +118,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotation), and for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
      "degrees off parallel (docs/assemblies/relations-plan.md).",
-     "a, b, duration_deg, lift, name, phase, pitch, pitch_radius, ratio, "
+     "thread_part, thread_feature, a, b, duration_deg, lift, name, phase, "
+     "pitch, pitch_radius, ratio, "
      "rise, start_deg, teeth_a, teeth_b, type"},
     {"set_relation", "Edit a relation's {ratio?, phase?, name?} by {id}.",
      "id, name, phase, ratio"},
@@ -853,7 +855,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     }
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
-    (void)assembly::PropagateRelations(*state.assembly, mate->id);
+    (void)assembly::PropagateRelations(
+        *state.assembly, mate->id,
+        [&](uint64_t id) { return ui::PartDocById(state, id); });
     // Hold what was just set: in a closed loop the solver would otherwise
     // treat this DOF as one more unknown and move it.
     ui::SolveActiveAssemblyDriven(state, mate->id,
@@ -903,6 +907,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     r.mateB = p.at("b").get<uint64_t>();
     r.name = p.value("name", std::string{});
     r.phase = p.value("phase", 0.0);
+    r.threadPart = p.value("thread_part", uint64_t{0});
+    r.threadFeature = p.value("thread_feature", uint64_t{0});
+    if ((r.threadPart || r.threadFeature) && r.kind != RelationKind::Screw)
+      throw std::runtime_error(
+          "thread references are only valid on screw relations");
     const Mate* a = state.assembly->FindMateById(r.mateA);
     const Mate* b = state.assembly->FindMateById(r.mateB);
     if (a == nullptr || b == nullptr)
@@ -939,7 +948,13 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(
             "a screw relation is one CYLINDRICAL mate's rotation driving its "
             "own offset: pass the same mate id as a and b");
-      if (p.contains("pitch")) {
+      if (r.threadPart || r.threadFeature) {
+        if (!r.threadPart || !r.threadFeature || p.contains("pitch") ||
+            p.contains("ratio"))
+          throw std::runtime_error("thread-backed screw needs thread_part and "
+                                   "thread_feature, without pitch or ratio");
+        r.ratio = 1.0; // derived by the solve
+      } else if (p.contains("pitch")) {
         const double pitch = p.at("pitch").get<double>();
         if (pitch <= 0.0)
           throw std::runtime_error("pitch must be positive (mm per turn)");
@@ -1039,7 +1054,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r.ratio = p.at("ratio").get<double>();
     else if (r.kind != RelationKind::Cam &&
              !(p.contains("teeth_a") || p.contains("pitch_radius") ||
-               p.contains("pitch")))
+               p.contains("pitch") || r.threadPart))
       throw std::runtime_error(
           "give the ratio, or what it is derived from: teeth_a + teeth_b for "
           "a gear or a chain, pitch_radius for a rack, pitch for a screw, a "
@@ -1109,6 +1124,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     Relation* r = state.assembly->FindRelationById(p.at("id").get<uint64_t>());
     if (!r)
       throw std::runtime_error("no such relation; list_relations shows them");
+    if (p.contains("ratio") && r->threadPart)
+      throw std::runtime_error(
+          "edit the referenced thread; its pitch owns this ratio");
     ui::SnapshotAssembly(state);
     if (p.contains("ratio")) {
       r->ratio = p.at("ratio").get<double>();

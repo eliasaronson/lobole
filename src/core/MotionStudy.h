@@ -43,6 +43,12 @@ struct Clash {
   glm::dvec3 centroid{0.0};
 };
 
+struct UnknownContact {
+  uint64_t a = 0, b = 0;
+  std::string aName, bName;
+  std::string reason = "exact contact calculation failed";
+};
+
 struct Sample {
   double t = 0.0;     // 0..1 along the study
   double value = 0.0; // the driver DOF at this sample (radians or mm)
@@ -53,6 +59,7 @@ struct Sample {
   // export and the scrub read these; nothing else in the document does.
   std::vector<std::pair<uint64_t, glm::mat4>> worlds;
   std::vector<Clash> clashes;
+  std::vector<UnknownContact> unknownContacts;
 };
 
 struct Result {

@@ -1,6 +1,8 @@
 #include "core/Measure.h"
 
 #include "core/Conventions.h"
+#include "core/ThreadStandards.h"
+#include <BRepPrimAPI_MakeCylinder.hxx>
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -292,6 +294,14 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
                                          const glm::mat4& xfB) {
+  const auto threaded = [](const auto& bodies) {
+    return std::any_of(bodies.begin(), bodies.end(),
+                       [](const Body& b) { return !b.threadRegions.empty(); });
+  };
+  if (threaded(bodiesA) || threaded(bodiesB)) {
+    const auto c = ContactBetween(bodiesA, xfA, bodiesB, xfB, false);
+    return c ? std::optional<double>(c->volume) : std::nullopt;
+  }
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
     double total = 0.0;
@@ -382,6 +392,87 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
   }
 }
 
+// Only explicitly annotated, matching coaxial thread spans may be relieved.
+// Resolve against the CURRENT shape (including any occurrence transforms), so
+// copied/transformed bodies never carry stale world-space interface
+// coordinates.
+struct ThreadSpan {
+  threads::Standard spec;
+  glm::dvec3 start, axis;
+  double length, minimum;
+  bool external;
+};
+static std::vector<ThreadSpan> ThreadSpans(const Body& body,
+                                           const TopLoc_Location& loc) {
+  std::vector<ThreadSpan> out;
+  for (const auto& region : body.threadRegions) {
+    const auto spec = threads::Lookup(region.designation);
+    const auto index = body.elementMap.Resolve(region.face.name);
+    if (!spec || !index)
+      continue;
+    const auto face = FaceAt(body.shape.GetShape().Moved(loc), *index);
+    if (face.IsNull())
+      continue;
+    BRepAdaptor_Surface surface(TopoDS::Face(face));
+    if (surface.GetType() != GeomAbs_Cylinder)
+      continue;
+    const auto cylinder = surface.Cylinder();
+    const double expected =
+        region.external ? spec->majorDia : threads::TapDrill(*spec);
+    if (std::abs(2 * cylinder.Radius() - expected) > 1e-4)
+      continue;
+    const auto origin = cylinder.Location();
+    const auto dir = cylinder.Axis().Direction();
+    glm::dvec3 axis(dir.X(), dir.Y(), dir.Z());
+    double lo = surface.FirstVParameter(), hi = surface.LastVParameter();
+    if (lo > hi)
+      std::swap(lo, hi);
+    if (region.length > 0)
+      hi = std::min(hi, lo + region.length);
+    out.push_back(
+        {*spec, glm::dvec3(origin.X(), origin.Y(), origin.Z()) + lo * axis,
+         axis, hi - lo, std::max(region.minimumEngagement, spec->pitch),
+         region.external});
+  }
+  return out;
+}
+
+static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
+                                           const std::vector<ThreadSpan>& a,
+                                           const std::vector<ThreadSpan>& b,
+                                           size_t& engaged) {
+  for (const auto& x : a)
+    for (const auto& y : b) {
+      if (x.external == y.external || x.spec.majorDia != y.spec.majorDia ||
+          x.spec.pitch != y.spec.pitch)
+        continue;
+      const double dot = glm::dot(x.axis, y.axis);
+      if (std::abs(std::abs(dot) - 1) > 1e-7)
+        continue;
+      const auto delta = y.start - x.start;
+      const double at = glm::dot(delta, x.axis);
+      if (glm::length(delta - at * x.axis) > 1e-4)
+        continue;
+      const double end = at + dot * y.length;
+      const double lo = std::max(0.0, std::min(at, end));
+      const double hi = std::min(x.length, std::max(at, end));
+      if (hi - lo + 1e-5 < std::max(x.minimum, y.minimum))
+        continue;
+      const auto start = x.start + lo * x.axis;
+      const auto tool =
+          BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(start.x, start.y, start.z),
+                                          gp_Dir(x.axis.x, x.axis.y, x.axis.z)),
+                                   x.spec.majorDia / 2, hi - lo)
+              .Shape();
+      BRepAlgoAPI_Cut cut(overlap, tool);
+      if (!cut.IsDone())
+        throw Standard_Failure("thread engagement subtraction failed");
+      overlap = cut.Shape();
+      ++engaged;
+    }
+  return overlap;
+}
+
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
@@ -392,6 +483,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     struct Placed {
       TopoDS_Shape shape;
       Bnd_Box box;
+      std::vector<ThreadSpan> threads;
     };
     const auto place = [](const std::vector<Body>& bodies,
                           const TopLoc_Location& loc) {
@@ -401,6 +493,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
           continue;
         Placed p;
         p.shape = b.shape.GetShape().Moved(loc);
+        p.threads = ThreadSpans(b, loc);
         BRepBndLib::Add(p.shape, p.box);
         out.push_back(std::move(p));
       }
@@ -444,8 +537,17 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         common.Build();
         if (!common.IsDone() || common.Shape().IsNull())
           return std::nullopt;
+        const auto overlap =
+            RemoveThreadEngagement(common.Shape(), pa[i].threads, pb[j].threads,
+                                   out.engagedThreadPairs);
         GProp_GProps props;
-        BRepGProp::VolumeProperties(common.Shape(), props);
+        BRepGProp::VolumeProperties(overlap, props);
+        if (!pa[i].threads.empty() && !pb[j].threads.empty()) {
+          GProp_GProps raw;
+          BRepGProp::VolumeProperties(common.Shape(), raw);
+          out.threadEngagementVolume +=
+              std::max(0.0, raw.Mass() - props.Mass());
+        }
         const double v = std::max(0.0, props.Mass());
         out.volume += v;
         if (v > 0.0) {
@@ -454,7 +556,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
           // one found.
           const gp_Pnt c = props.CentreOfMass();
           weighted += v * glm::dvec3(c.X(), c.Y(), c.Z());
-          BRepBndLib::Add(common.Shape(), overlapBox);
+          BRepBndLib::Add(overlap, overlapBox);
           out.overlaps = true;
         }
       }

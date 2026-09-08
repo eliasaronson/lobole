@@ -1,4 +1,6 @@
 #include "core/AssemblySolve.h"
+#include "core/ThreadStandards.h"
+#include "core/features/ThreadFeature.h"
 
 #include "core/FrameMath.h"
 #include "core/features/FrameFeature.h"
@@ -543,7 +545,8 @@ double RelationValue(const Relation& r, double a) {
   return r.ratio * a + r.phase;
 }
 
-int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
+int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
+                       const PartResolver& partById) {
   int wrote = 0;
   std::vector<Relation>& rels = asmDoc.GetRelations();
   // Validate first: a relation with a problem is reported and skipped, and
@@ -552,6 +555,31 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId) {
   for (size_t i = 0; i < rels.size(); i++) {
     Relation& r = rels[i];
     r.error.clear();
+    if (r.threadPart || r.threadFeature) {
+      if (!partById) {
+        r.error = "thread-backed relation needs a part resolver";
+        continue;
+      }
+      const Document* doc = partById(r.threadPart);
+      const ThreadFeature* thread = nullptr;
+      if (doc)
+        for (size_t i = 0; i < doc->GetFeatures().size(); ++i) {
+          if (doc->EffectiveRollback() >= 0 &&
+              i >= static_cast<size_t>(doc->EffectiveRollback()))
+            break;
+          const auto& f = doc->GetFeatures()[i];
+          if (f->GetId() == r.threadFeature && !doc->EffectiveSuppressed(i))
+            thread = dynamic_cast<const ThreadFeature*>(f.get());
+        }
+      const auto spec =
+          thread ? threads::Lookup(thread->designation) : std::nullopt;
+      if (!thread || !spec || thread->IsSuppressed() ||
+          r.kind != RelationKind::Screw || !thread->GetError().empty()) {
+        r.error = "screw thread reference is missing, invalid or unsupported";
+        continue;
+      }
+      r.ratio = spec->pitch / (2.0 * 3.14159265358979323846);
+    }
     const Mate* a = asmDoc.FindMateById(r.mateA);
     const Mate* b = asmDoc.FindMateById(r.mateB);
     if (a == nullptr || b == nullptr) {
@@ -653,7 +681,10 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   // enforcement; in a loop they are rows below as well. A solve that KNOWS
   // what is being driven says so, so the driver's own chain settles before
   // anything else claims a mate on it.
-  (void)PropagateRelations(asmDoc, driven.mate);
+  (void)PropagateRelations(asmDoc, driven.mate, partById);
+  for (const auto& r : asmDoc.GetRelations())
+    if (!r.error.empty())
+      report.erroredMates++;
 
   // Pre-derive both connector frames for every mate; a mate whose connectors
   // don't resolve (dangling ref / missing part) is stamped errored and sits

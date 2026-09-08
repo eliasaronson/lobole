@@ -119,7 +119,7 @@ Result Run(const AssemblyDocument& asmDocIn,
       const double t =
           static_cast<double>(i) / static_cast<double>(study.samples - 1);
       assembly::SetMateDof(*probeDriver, study.driverDof, ValueAt(study, t));
-      assembly::PropagateRelations(probe, probeDriver->id);
+      assembly::PropagateRelations(probe, probeDriver->id, parts);
       assembly::Solve(probe, parts, assemblies,
                       {probeDriver->id, study.driverDof});
       for (const Occurrence& o : probe.GetOccurrences())
@@ -158,7 +158,7 @@ Result Run(const AssemblyDocument& asmDocIn,
     s.value = ValueAt(study, s.t);
 
     assembly::SetMateDof(*driver, study.driverDof, s.value);
-    assembly::PropagateRelations(asmDoc, driver->id);
+    assembly::PropagateRelations(asmDoc, driver->id, parts);
     const assembly::SolveReport rep = assembly::Solve(
         asmDoc, parts, assemblies, {driver->id, study.driverDof});
     s.erroredMates = rep.erroredMates;
@@ -249,8 +249,8 @@ Result Run(const AssemblyDocument& asmDocIn,
         Hit& h = hits[k];
         if (study.clashMode == "exact") {
           std::vector<Body> ba(1), bb(1);
-          ba[0].shape = placed[cd.a].body->shape;
-          bb[0].shape = placed[cd.b].body->shape;
+          ba[0] = *placed[cd.a].body;
+          bb[0] = *placed[cd.b].body;
           // ContactBetween, not InterferenceVolume: it is the same boolean
           // and it hands back WHERE the overlap is as well as how much,
           // which is what a caller needs to act on the answer. It is also
@@ -262,12 +262,14 @@ Result Run(const AssemblyDocument& asmDocIn,
           // separation pass is two thirds of a contact check, and this one
           // ran 20,403 of them.
           const auto answer =
-              contacts ? contacts->Check(ba[0].shape, placed[cd.a].world,
-                                         bb[0].shape, placed[cd.b].world)
-                       : collide::ExactContactCache::Answer{
-                             Measure::ContactBetween(ba, placed[cd.a].world, bb,
-                                                     placed[cd.b].world, false),
-                             false};
+              contacts && ba[0].threadRegions.empty() &&
+                      bb[0].threadRegions.empty()
+                  ? contacts->Check(ba[0].shape, placed[cd.a].world,
+                                    bb[0].shape, placed[cd.b].world)
+                  : collide::ExactContactCache::Answer{
+                        Measure::ContactBetween(ba, placed[cd.a].world, bb,
+                                                placed[cd.b].world, false),
+                        false};
           h.cached = answer.cached;
           const auto& c = answer.contact;
           if (c) {
@@ -292,6 +294,9 @@ Result Run(const AssemblyDocument& asmDocIn,
         out.pairsCached += h.cached ? 1 : 0;
         if (study.clashMode == "exact" && !h.known) {
           out.pairsUnknown++;
+          s.unknownContacts.push_back({placed[cd.a].root, placed[cd.b].root,
+                                       placed[cd.a].rootName,
+                                       placed[cd.b].rootName});
           out.clean = false;
         }
         out.deflectionMm = std::max(out.deflectionMm, h.deflection);
@@ -313,7 +318,8 @@ Result Run(const AssemblyDocument& asmDocIn,
         s.clashes.push_back(c);
     }
 
-    const bool bad = !s.solved || !s.clashes.empty();
+    const bool bad =
+        !s.solved || !s.clashes.empty() || !s.unknownContacts.empty();
     if (bad)
       out.clean = false;
     // The worst sample: the first unsolved one wins outright, else the one
@@ -322,10 +328,11 @@ Result Run(const AssemblyDocument& asmDocIn,
       out.worstSample = out.samples.size();
       worstSet = true;
       worstCount = SIZE_MAX;
-    } else if (s.solved && s.clashes.size() > worstCount &&
+    } else if (s.solved &&
+               s.clashes.size() + s.unknownContacts.size() > worstCount &&
                (!worstSet || out.samples[out.worstSample].solved)) {
       out.worstSample = out.samples.size();
-      worstCount = s.clashes.size();
+      worstCount = s.clashes.size() + s.unknownContacts.size();
       worstSet = true;
     }
     out.samples.push_back(std::move(s));
@@ -355,17 +362,32 @@ std::string Table(const Result& result, const MotionStudy& study) {
         clashes += ", ";
       clashes += c.aName + " x " + c.bName;
     }
+    for (const auto& c : s.unknownContacts) {
+      if (!clashes.empty())
+        clashes += ", ";
+      clashes += "UNKNOWN " + c.aName + " x " + c.bName + ": " + c.reason;
+    }
     std::snprintf(line, sizeof line, "%-6zu %-12.2f %-8s %-10.4f %s\n", i,
                   shown, s.solved ? "yes" : "NO", s.residualMm,
                   clashes.empty() ? "-" : clashes.c_str());
     out += line;
   }
   std::snprintf(line, sizeof line, "%s: %zu samples, %zu pair checks, %.2f s\n",
-                !result.checkedClashes ? "KINEMATICS ONLY"
-                : result.clean         ? "CLEAN"
-                                       : "NOT CLEAN",
+                !result.error.empty()    ? "ERROR"
+                : result.cancelled       ? "INCOMPLETE"
+                : !result.checkedClashes ? "KINEMATICS ONLY"
+                : result.pairsUnknown    ? "UNVERIFIED"
+                : result.clean           ? "CLEAN"
+                                         : "NOT CLEAN",
                 result.samples.size(), result.pairsChecked, result.seconds);
   out += line;
+  if (!result.error.empty())
+    out += "Error: " + result.error + "\n";
+  if (result.cancelled)
+    out += "Cancelled before all samples completed.\n";
+  if (result.pairsUnknown)
+    out += std::to_string(result.pairsUnknown) +
+           " exact pair checks could not be verified.\n";
   return out;
 }
 

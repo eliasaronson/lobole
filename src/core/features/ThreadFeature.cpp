@@ -126,7 +126,17 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
       SetError("modeled threads are not implemented yet (cosmetic only)");
       return false;
     }
-    return true; // cosmetic: geometry untouched
+    if (allowEngagement) {
+      if (!threads::Lookup(designation) || minimumEngagement < 0 ||
+          !std::isfinite(minimumEngagement)) {
+        SetError("engagement needs a known thread designation and nonnegative "
+                 "minimum length");
+        return false;
+      }
+      body->threadRegions.push_back(
+          {face, designation, length, minimumEngagement, external});
+    }
+    return true; // cosmetic: manufacturing geometry untouched
   } catch (const Standard_Failure& e) {
     SetError(std::string("thread failed: ") + e.GetMessageString());
     LOG_ERROR("ThreadFeature '{}': {}", m_name, GetError());

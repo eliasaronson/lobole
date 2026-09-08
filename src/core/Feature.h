@@ -30,6 +30,13 @@ struct Appearance {
 // into the render-layer material library (empty = default); it is transient
 // like the shape — the feature that creates the body stamps its own material
 // here on every regeneration.
+struct ThreadRegion {
+  ElementRef face;
+  std::string designation;
+  double length = 0.0, minimumEngagement = 0.0;
+  bool external = false;
+};
+
 struct Body {
   std::string name;
   CADShape shape;
@@ -73,6 +80,7 @@ struct Body {
   // the FEM mesh, Add/Cut and Boolean operands, the assembly's placed
   // bodies. Transient like the shape, stamped by the creating feature.
   bool reference = false;
+  std::vector<ThreadRegion> threadRegions; // derived opt-in contact semantics
 };
 
 class Feature;

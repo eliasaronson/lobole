@@ -275,6 +275,8 @@ void AttachSweepCoverage(nlohmann::json& out, const SweepPlan& plan,
 // carburettor round. Omitted entirely when the pair merely touches or is
 // clear, so its presence means "there is solid in solid, here".
 void AddOverlapSite(json& j, const Measure::SetContact& c) {
+  j["engaged_thread_pairs"] = c.engagedThreadPairs;
+  j["thread_engagement_volume"] = c.threadEngagementVolume;
   if (!c.overlaps)
     return;
   j["centroid"] = {c.centroid.x, c.centroid.y, c.centroid.z};
@@ -976,8 +978,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           "body", ia < 0 || ia >= static_cast<int>(bodies.size()) ? ia : ib,
           bodies.size(), "get_state lists bodies"));
     std::vector<Body> va(1), vb(1);
-    va[0].shape = bodies[ia].shape;
-    vb[0].shape = bodies[ib].shape;
+    va[0] = bodies[ia];
+    vb[0] = bodies[ib];
     const auto c =
         Measure::ContactBetween(va, glm::mat4(1.0f), vb, glm::mat4(1.0f));
     if (!c)

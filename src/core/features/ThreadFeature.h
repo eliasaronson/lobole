@@ -38,6 +38,8 @@ public:
   std::string threadClass; // display only ("6H", "6g"); no geometry meaning
   double length = 0.0;     // threaded length from the face's start; 0 = full
   std::string lengthExpr;
+  bool allowEngagement = false;
+  double minimumEngagement = 0.0;
   bool modeled = false; // reserved: real helical cut (not implemented)
 
   // Session-only, rebuilt by Execute (never serialized): what the UI draws.

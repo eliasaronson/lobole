@@ -81,6 +81,9 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
 // ~0. Boxes prune both the booleans and the extrema work. nullopt on an OCC
 // failure or when either set has no valid shapes.
 struct SetContact {
+  size_t engagedThreadPairs = 0;
+  double threadEngagementVolume = 0.0; // deliberately relieved from volume
+
   double volume = 0.0;   // total pairwise intersection volume
   double distance = 0.0; // min body-to-body separation, 0 when overlapping
   // WHERE the overlap is, when there is one: the volume-weighted centre of

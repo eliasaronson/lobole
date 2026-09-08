@@ -602,7 +602,9 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
         }
       }
       // The dragged mate drives its relations (a gear turns its partner).
-      (void)assembly::PropagateRelations(*state.assembly, mate->id);
+      (void)assembly::PropagateRelations(
+          *state.assembly, mate->id,
+          [&](uint64_t id) { return ui::PartDocById(state, id); });
       SolveActiveAssembly(state);
       return true; // solve already repositioned + resynced
     }

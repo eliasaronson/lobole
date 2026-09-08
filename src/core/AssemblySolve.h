@@ -98,7 +98,8 @@ int ApplyAttachments(AssemblyDocument& asmDoc);
 // for a mate that is gone or lacks the DOF, and returns how many DOFs it
 // wrote. Solve() calls it with 0; callers that changed a mate call it with
 // that mate before Solve().
-int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId = 0);
+int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId = 0,
+                       const PartResolver& partById = nullptr);
 
 // Read/write one DOF of a mate by name; false when the mate type lacks it.
 bool MateHasDof(MateType type, MateDof dof);

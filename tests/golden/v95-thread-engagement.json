@@ -1,0 +1,1 @@
+{"format":"designer-document","version":95,"features":[{"type":"Cylinder","name":"Screw","id":1,"center":[0,0,0],"direction":[0,0,1],"radius":3,"height":12},{"type":"Thread","name":"M6","id":2,"face":{"feature_id":1,"element":"1/face0"},"designation":"M6","pitch":1,"allow_engagement":true,"minimum_engagement":3}]}

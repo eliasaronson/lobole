@@ -17,7 +17,8 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    94; // v94: generated component ownership and source fingerprints.
+    95; // v95: opt-in bounded thread engagement and thread-driven screw pitch.
+        // v94: generated component ownership and source fingerprints.
         // v93: versioned engineering catalog references and embedded records.
         // v92: a CAM tool's `chipload_min`/`chipload_max` -- what THIS cutter
         //      wants per tooth, when somebody has a vendor's chart for it.
