@@ -76,7 +76,7 @@ def main():
 
         # ---- Define ------------------------------------------------------
         study = d.call("add_motion_study", driver=axle, **{"from": 0},
-                       to=360, samples=25, name="turn")
+                       to=360, samples=25, name="turn", clash_mode="exact")
         expect(study["driver_dof"] == "rotation", f"a revolute turns: {study}")
         expect(study["unit"] == "deg" and abs(study["to"] - 360) < 1e-9,
                f"the surface speaks degrees: {study}")
@@ -93,6 +93,21 @@ def main():
               f"{r['pairs_checked']} pair checks")
         expect(len(r["samples"]) == 25, f"25 samples: {len(r['samples'])}")
         expect(all(s["solved"] for s in r["samples"]), "every sample solved")
+        warm = d.call("run_motion_study", study=sid)
+        expect(warm["pairs_cached"] == warm["pairs_checked"], "repeat reuses exact checks")
+        expect(warm["pairs_executed"] == 0, "repeat executes no booleans")
+        expect(warm["samples"] == r["samples"], "cached results preserve collision locations")
+        expect(not d.call("motion_status", study=sid)["stale"], "fresh result")
+        # A geometry edit below the assembly must invalidate the verdict.
+        d.call("set_active_part", part="stop")
+        d.call("set_variable", name="unrelated", expression="1", scope="part")
+        d.call("set_active_part", part="rig")
+        status = d.call("motion_status", study=sid)
+        # Tab switching can discard results altogether; retained results must be stale.
+        if status["has_result"]:
+            expect(status["stale"] and not status["result"]["clean"], "stale cannot be green")
+        d.call("set_motion_study", study=sid, clash_mode="mesh")
+        r = d.call("run_motion_study", study=sid)
         hits = [s["index"] for s in r["samples"] if s["clashes"]]
         expect(6 in hits, f"the stop at 90 degrees is hit: {hits}")
         expect(all(4 <= i <= 8 for i in hits),
@@ -138,6 +153,8 @@ def main():
         fr = d.call("frame", occurrence=arm)
         expect(abs(fr["x"][1] - 1.0) < 1e-4,
                f"and the arm's X now points along +Y: {fr['x']}")
+        # First undo the explicit exact-to-mesh change above.
+        d.call("undo")
         # Undo takes back the ADD of the study (the snapshot before it), not
         # the scrub — a scrub is a look, not an edit. So after one undo the
         # study is gone and the pose stays.
@@ -145,6 +162,7 @@ def main():
         expect(d.call("list_motion_studies")["studies"] == [],
                "one undo removed the study, since the scrub was not a step")
         d.call("redo")
+        d.call("redo")  # restore the mesh setting
         expect(len(d.call("list_motion_studies")["studies"]) == 1, "redo")
         expect(len(d.call("list_mates")["mates"]) == before, "mates intact")
         d.call("set_motion_pose", study=sid, t=0.0)

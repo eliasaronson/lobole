@@ -133,6 +133,14 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
            {"samples", samples},
            {"worst_sample", r.worstSample},
            {"pairs_checked", r.pairsChecked},
+           {"pairs_cached", r.pairsCached},
+           {"pairs_executed", r.pairsChecked - r.pairsCached},
+           {"pairs_unknown", r.pairsUnknown},
+           {"collision_status", !r.checkedClashes ? "not_checked"
+                                : r.cancelled     ? "incomplete"
+                                : r.pairsUnknown  ? "unverified"
+                                : r.clean         ? "passed"
+                                                  : "failed"},
            {"pairs_rigid", r.pairsRigid},
            {"seconds", r.seconds},
            {"unit", rot ? "deg" : "mm"},
@@ -281,8 +289,11 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       json j = StudyJson(asmDoc, s);
       const motion::Result* r = ui::MotionResultFor(state, s.id);
       j["has_result"] = r != nullptr;
-      if (r)
-        j["clean"] = r->clean;
+      if (r) {
+        j["stale"] = ui::MotionResultStale(state, s.id);
+        j["clean"] = r->clean && !j["stale"].get<bool>();
+        j["collision_checked"] = r->checkedClashes;
+      }
       j["running"] = running;
       out.push_back(j);
     }
@@ -349,6 +360,12 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     json out{{"running", ui::BackgroundJobRunning(state, "motion")}};
     if (const motion::Result* r = ui::MotionResultFor(state, s.id)) {
       out["result"] = ResultJson(*r, s, includePoses);
+      out["stale"] = ui::MotionResultStale(state, s.id);
+      if (out["stale"].get<bool>()) {
+        out["result"]["last_clean"] = r->clean;
+        out["result"]["clean"] = false;
+        out["result"]["collision_status"] = "stale";
+      }
       out["has_result"] = true;
     } else {
       out["has_result"] = false;

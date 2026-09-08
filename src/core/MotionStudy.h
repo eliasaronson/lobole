@@ -14,7 +14,8 @@
 
 namespace collide {
 class Mesh;
-}
+class ExactContactCache;
+} // namespace collide
 
 // Running a MotionStudy (docs/agent-scale-plan.md, G2): the driver DOF set to
 // each sample value, the assembly solved there, every top-level occurrence's
@@ -64,7 +65,10 @@ struct Result {
   size_t worstSample = 0;    // the sample with the most clashes (or the
                              // first unsolved one)
   double deflectionMm = 0.0; // the mesh check's deflection, 0 for exact
-  size_t pairsChecked = 0;   // over all samples
+  size_t pairsCached = 0;
+  size_t pairsUnknown = 0;
+  bool checkedClashes = false;
+  size_t pairsChecked = 0; // over all samples
   double seconds = 0.0;
   bool cancelled = false;
   std::string error; // a refusal (driver gone, DOF missing); empty = ran
@@ -83,7 +87,8 @@ Result Run(const AssemblyDocument& asmDoc, const assembly::PartResolver& parts,
            const MotionStudy& study,
            const std::function<bool()>& cancelled = nullptr,
            const std::function<void(double)>& progress = nullptr,
-           MeshCache* meshes = nullptr);
+           MeshCache* meshes = nullptr,
+           collide::ExactContactCache* contacts = nullptr);
 
 // The driver value at parameter t (0..1): `from + t * (to - from)`.
 double ValueAt(const MotionStudy& study, double t);

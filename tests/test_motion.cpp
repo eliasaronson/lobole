@@ -11,6 +11,7 @@
 
 #include "TestIO.h"
 #include "core/AssemblySolve.h"
+#include "core/CollisionCache.h"
 #include "core/Document.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
@@ -317,4 +318,61 @@ TEST_CASE("The GLB writer emits a valid animated scene", "[motion][export]") {
   CHECK_FALSE(glb::Write(path.string(), {arm}, {0.0}, &err));
   CHECK_THAT(err, ContainsSubstring("two keyframes"));
   fs::remove(path);
+}
+
+TEST_CASE(
+    "Exact collision reuse preserves clashes and invalidates changed inputs",
+    "[motion][cache]") {
+  Rig rig = MakeRig(90.0);
+  auto study = FullTurn(rig.axle);
+  study.clashMode = "exact";
+  collide::ExactContactCache cache;
+  const auto cold = motion::Run(rig.asmDoc, rig.Parts(), nullptr, study,
+                                nullptr, nullptr, nullptr, &cache);
+  const auto warm = motion::Run(rig.asmDoc, rig.Parts(), nullptr, study,
+                                nullptr, nullptr, nullptr, &cache);
+  REQUIRE(cold.pairsChecked > 0);
+  CHECK(warm.pairsCached == warm.pairsChecked);
+  CHECK(warm.clean == cold.clean);
+  CHECK(warm.pairsUnknown == 0);
+  for (size_t i = 0; i < cold.samples.size(); ++i) {
+    REQUIRE(warm.samples[i].clashes.size() == cold.samples[i].clashes.size());
+    for (size_t j = 0; j < cold.samples[i].clashes.size(); ++j) {
+      CHECK(warm.samples[i].clashes[j].volume ==
+            cold.samples[i].clashes[j].volume);
+      CHECK(warm.samples[i].clashes[j].centroid ==
+            cold.samples[i].clashes[j].centroid);
+    }
+  }
+  rig.stop = BoxPart({-3, -3, -3}, {6, 6, 6});
+  const auto edited = motion::Run(rig.asmDoc, rig.Parts(), nullptr, study,
+                                  nullptr, nullptr, nullptr, &cache);
+  CHECK(edited.pairsCached < edited.pairsChecked);
+}
+
+TEST_CASE("Exact contact cache distinguishes internal and world placements",
+          "[motion][cache]") {
+  auto doc = BoxPart({0, 0, 0}, {4, 4, 4});
+  const auto a = doc->GetBodies()[0].shape;
+  const glm::mat4 identity(1.0f);
+  collide::ExactContactCache cache(2);
+  const auto first = cache.Check(a, identity, a, identity);
+  REQUIRE(first.contact);
+  CHECK(first.contact->volume > 63.9);
+  CHECK(cache.Check(a, identity, a, identity).cached);
+  glm::mat4 moved(1.0f);
+  moved[3][0] = 20.0f;
+  const auto b = a.Transformed(moved);
+  const auto internal = cache.Check(a, identity, b, identity);
+  REQUIRE(internal.contact);
+  CHECK_FALSE(internal.cached);
+  CHECK(internal.contact->volume == 0.0);
+  const auto external = cache.Check(a, identity, a, moved);
+  REQUIRE(external.contact);
+  CHECK_FALSE(external.cached);
+  CHECK(external.contact->volume == 0.0);
+  CHECK(cache.Size() == 2);
+  CHECK_FALSE(cache.Check(a, identity, a, identity).cached); // bounded eviction
+  cache.Clear();
+  CHECK(cache.Size() == 0);
 }

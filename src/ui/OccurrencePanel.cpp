@@ -391,14 +391,30 @@ void DrawMotionSection(AppState& state) {
   }
 
   WrapRow row;
-  row.Next(ButtonWidth("Run"));
   const bool running = BackgroundJobRunning(state, "motion");
-  if (ImGui::SmallButton(running ? "Running…###motion_run"
-                                 : "Run###motion_run") &&
-      !running) {
-    std::string err;
-    if (!StartMotionRun(state, sel->id, &err))
-      state.motionAddRefusal = err;
+  for (bool preview : {true, false}) {
+    const char* label = preview ? "Preview motion" : "Validate motion";
+    row.Next(ButtonWidth(label));
+    ImGui::BeginDisabled(running);
+    if (ImGui::SmallButton(label)) {
+      if (sel->checkClash == preview ||
+          (!preview && sel->clashMode != "exact")) {
+        SnapshotAssembly(state);
+        sel->checkClash = !preview;
+        if (!preview)
+          sel->clashMode = "exact";
+        asmDoc.BumpVersion();
+      }
+      std::string err;
+      if (!StartMotionRun(state, sel->id, &err))
+        state.motionAddRefusal = err;
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(preview
+                            ? "Solve sampled poses without collision checks."
+                            : "Exact collisions at every study sample. "
+                              "Standing assembly checks are separate.");
+    ImGui::EndDisabled();
   }
   row.Next(ButtonWidth("Delete"));
   if (ImGui::SmallButton("Delete###motion_delete")) {
@@ -410,7 +426,15 @@ void DrawMotionSection(AppState& state) {
     return;
   }
   if (const motion::Result* r = MotionResultFor(state, sel->id)) {
-    if (r->clean)
+    if (MotionResultStale(state, sel->id))
+      ImGui::TextWrapped("Motion validation stale: model or study changed. "
+                         "Run again to validate this revision.");
+    else if (!r->checkedClashes)
+      ImGui::TextWrapped("Kinematics only: collision checks not run.");
+    else if (r->cancelled || r->pairsUnknown)
+      ImGui::TextWrapped("Motion validation incomplete: %zu unknown pairs.",
+                         r->pairsUnknown);
+    else if (r->clean)
       ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f),
                          "Clean: %zu samples, %zu pair checks, %.1f s",
                          r->samples.size(), r->pairsChecked, r->seconds);
@@ -420,6 +444,10 @@ void DrawMotionSection(AppState& state) {
           "NOT clean: worst at sample %zu (%.1f %s)", r->worstSample,
           r->samples.empty() ? 0.0 : r->samples[r->worstSample].value * k,
           rot ? "deg" : "mm");
+    ImGui::TextDisabled("Reused %zu pair results; executed %zu", r->pairsCached,
+                        r->pairsChecked - r->pairsCached);
+  } else {
+    ImGui::TextWrapped("Motion validation not run for this study.");
   }
 }
 

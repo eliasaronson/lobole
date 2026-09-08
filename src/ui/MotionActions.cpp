@@ -1,9 +1,11 @@
 #include "ui/MotionActions.h"
 
 #include "core/AssemblySolve.h"
+#include "core/CollisionCache.h"
 #include "core/Document.h"
 #include "core/MeshCollide.h"
 #include "core/io/GlbAnimation.h"
+#include "core/io/Serialization.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJob.h"
@@ -19,6 +21,29 @@
 namespace ui {
 namespace {
 
+std::string Revision(AppState& state, uint64_t studyId) {
+  if (!state.assembly)
+    return {};
+  const auto* study = state.assembly->FindMotionStudyById(studyId);
+  if (!study)
+    return {};
+  nlohmann::json revision{
+      {"assembly", reinterpret_cast<uintptr_t>(state.assembly.get())},
+      {"version", state.assembly->Version()},
+      {"study", DocumentIO::MotionStudyToJson(*study)}};
+  auto children = nlohmann::json::array();
+  for (const auto& [id, version] :
+       assembly::SubtreeVersions(*state.assembly, PartResolverFor(state),
+                                 AssemblyResolverFor(state))) {
+    auto row = nlohmann::json{{"id", id}, {"version", version}};
+    if (auto* part = PartDocById(state, id))
+      row["instance"] = part->InstanceId();
+    children.push_back(std::move(row));
+  }
+  revision["children"] = std::move(children);
+  return revision.dump();
+}
+
 // Everything a run reads, copied so the worker shares nothing with the tab.
 struct MotionRun {
   uint64_t studyId = 0;
@@ -29,6 +54,8 @@ struct MotionRun {
   std::map<uint64_t, std::unique_ptr<AssemblyDocument>> assemblies;
   std::map<const void*, std::shared_ptr<const collide::Mesh>> meshes;
   motion::Result result;
+  std::shared_ptr<collide::ExactContactCache> contacts;
+  std::string revision;
   std::chrono::steady_clock::time_point started;
 };
 
@@ -94,6 +121,10 @@ bool Prepare(AppState& state, uint64_t studyId, MotionRun& run,
       *error = why;
     return false;
   }
+  if (!state.motionContacts)
+    state.motionContacts = std::make_shared<collide::ExactContactCache>();
+  run.contacts = state.motionContacts;
+  run.revision = Revision(state, studyId);
   run.studyId = studyId;
   run.ranAgainst = state.assembly.get();
   run.study = *s;
@@ -121,7 +152,7 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error) {
   auto run = std::make_shared<MotionRun>();
   if (!Prepare(state, studyId, *run, error, /*copyDocs=*/true))
     return false;
-  state.motionResults.erase(studyId);
+  // Keep the previous result visible, with its revision, while running.
 
   auto bg = std::make_unique<BackgroundJob>();
   bg->kind = "motion";
@@ -133,14 +164,17 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error) {
     run->result = motion::Run(
         run->asmCopy, PartsOf(*run), AssembliesOf(*run), run->study,
         [raw] { return raw->cancel.load(); },
-        [raw](double f) { raw->fraction.store(f); }, &run->meshes);
+        [raw](double f) { raw->fraction.store(f); }, &run->meshes,
+        run->contacts.get());
     raw->done.store(true); // last
   });
   bg->finish = [run](AppState& s) {
     // Only for the document it was run against: a tab switched underneath
     // a run does not receive somebody else's collision table.
-    if (s.assembly.get() == run->ranAgainst)
+    if (s.assembly.get() == run->ranAgainst) {
       s.motionResults[run->studyId] = std::move(run->result);
+      s.motionResultRevisions[run->studyId] = run->revision;
+    }
     return true;
   };
   StartBackgroundJob(state, std::move(bg));
@@ -157,14 +191,21 @@ motion::Result RunMotionNow(AppState& state, uint64_t studyId) {
   }
   motion::Result r = motion::Run(run.asmCopy, PartResolverFor(state),
                                  AssemblyResolverFor(state), run.study, nullptr,
-                                 nullptr, &run.meshes);
+                                 nullptr, &run.meshes, run.contacts.get());
   state.motionResults[studyId] = r;
+  state.motionResultRevisions[studyId] = run.revision;
   return r;
 }
 
 const motion::Result* MotionResultFor(const AppState& state, uint64_t studyId) {
   const auto it = state.motionResults.find(studyId);
   return it == state.motionResults.end() ? nullptr : &it->second;
+}
+
+bool MotionResultStale(AppState& state, uint64_t studyId) {
+  const auto it = state.motionResultRevisions.find(studyId);
+  return it == state.motionResultRevisions.end() ||
+         it->second != Revision(state, studyId);
 }
 
 bool ApplyMotionPose(AppState& state, uint64_t studyId, double t,

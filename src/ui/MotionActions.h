@@ -28,6 +28,8 @@ motion::Result RunMotionNow(AppState& state, uint64_t studyId);
 
 // The stored result for a study of the ACTIVE assembly, or null.
 const motion::Result* MotionResultFor(const AppState& state, uint64_t studyId);
+// Conservative revision check; retained results remain available as evidence.
+bool MotionResultStale(AppState& state, uint64_t studyId);
 
 // Drive the study's mate to parameter t (0..1) and re-solve: the scrub.
 // Deliberately NO undo snapshot, like the explode slider — a scrub is a look,

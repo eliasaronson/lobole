@@ -443,7 +443,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         common.SetFuzzyValue(kContactFuzz);
         common.Build();
         if (!common.IsDone() || common.Shape().IsNull())
-          continue;
+          return std::nullopt;
         GProp_GProps props;
         BRepGProp::VolumeProperties(common.Shape(), props);
         const double v = std::max(0.0, props.Mass());

@@ -1058,7 +1058,9 @@ struct AppState {
   uint64_t activeMotionStudy = 0;
   float motionT = 0.0f;
   std::string motionAddRefusal; // why Add/Run refused, shown in the panel
+  std::shared_ptr<collide::ExactContactCache> motionContacts;
   std::map<uint64_t, motion::Result> motionResults;
+  std::map<uint64_t, std::string> motionResultRevisions;
 
   // UI state
   Selection selection; // U1: the one selection set (see SelectionItem)

@@ -1,5 +1,6 @@
 #include "core/MotionStudy.h"
 
+#include "core/CollisionCache.h"
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
@@ -82,9 +83,11 @@ Result Run(const AssemblyDocument& asmDocIn,
            const assembly::PartResolver& parts,
            const assembly::AssemblyResolver& assemblies,
            const MotionStudy& study, const std::function<bool()>& cancelled,
-           const std::function<void(double)>& progress, MeshCache* meshesIn) {
+           const std::function<void(double)>& progress, MeshCache* meshesIn,
+           collide::ExactContactCache* contacts) {
   const auto t0 = std::chrono::steady_clock::now();
   Result out;
+  out.checkedClashes = study.checkClash;
   out.error = WhyNot(asmDocIn, study);
   if (!out.error.empty())
     return out;
@@ -147,6 +150,7 @@ Result Run(const AssemblyDocument& asmDocIn,
   for (int i = 0; i < study.samples; i++) {
     if (cancelled && cancelled()) {
       out.cancelled = true;
+      out.clean = false;
       break;
     }
     Sample s;
@@ -227,6 +231,7 @@ Result Run(const AssemblyDocument& asmDocIn,
       // the same one it kept before. `pairsChecked` therefore counts every
       // boolean actually run, which is what it always claimed to be.
       struct Hit {
+        bool cached = false;
         bool hit = false, known = false;
         double volume = 0.0, deflection = 0.0;
         glm::dvec3 centroid{0.0};
@@ -256,8 +261,15 @@ Result Run(const AssemblyDocument& asmDocIn,
           // collide, never how far apart they are when it does not. The
           // separation pass is two thirds of a contact check, and this one
           // ran 20,403 of them.
-          const auto c = Measure::ContactBetween(ba, placed[cd.a].world, bb,
-                                                 placed[cd.b].world, false);
+          const auto answer =
+              contacts ? contacts->Check(ba[0].shape, placed[cd.a].world,
+                                         bb[0].shape, placed[cd.b].world)
+                       : collide::ExactContactCache::Answer{
+                             Measure::ContactBetween(ba, placed[cd.a].world, bb,
+                                                     placed[cd.b].world, false),
+                             false};
+          h.cached = answer.cached;
+          const auto& c = answer.contact;
           if (c) {
             h.known = true;
             h.volume = c->volume;
@@ -277,6 +289,11 @@ Result Run(const AssemblyDocument& asmDocIn,
         const Cand& cd = cands[k];
         const Hit& h = hits[k];
         out.pairsChecked++;
+        out.pairsCached += h.cached ? 1 : 0;
+        if (study.clashMode == "exact" && !h.known) {
+          out.pairsUnknown++;
+          out.clean = false;
+        }
         out.deflectionMm = std::max(out.deflectionMm, h.deflection);
         if (!h.hit || found.count(cd.key))
           continue;
@@ -344,8 +361,10 @@ std::string Table(const Result& result, const MotionStudy& study) {
     out += line;
   }
   std::snprintf(line, sizeof line, "%s: %zu samples, %zu pair checks, %.2f s\n",
-                result.clean ? "CLEAN" : "NOT CLEAN", result.samples.size(),
-                result.pairsChecked, result.seconds);
+                !result.checkedClashes ? "KINEMATICS ONLY"
+                : result.clean         ? "CLEAN"
+                                       : "NOT CLEAN",
+                result.samples.size(), result.pairsChecked, result.seconds);
   out += line;
   return out;
 }
