@@ -205,3 +205,41 @@ riding `rayQuery` directly. Real work, but well-trodden rather than novel.
 What it cannot do is replace the boolean, for the nesting reason above: 37%
 of the pairs that reach a boolean are box-nested, and no distance query of
 any kind sees one solid sitting inside another.
+
+## OM615 workshop-layout follow-up
+
+The same-machine baseline for this round (`--no-export`, 49 exact samples)
+was 73.04 s build, 15.64 s standing sweep and 196.87 s motion, 287.22 s total.
+Those are the original 77-part / 249-occurrence model, not estimates copied
+from an older machine.
+
+The generator's optional `--profile` now writes `rpc-timings.json`, including
+failed runs. It records calls and elapsed time per RPC on the real engine.
+`timings.json` includes build phases and is saved even for `--build-only`.
+Standing failures preserve `standing-report.json` and an unchecked project.
+Use `--component injector`, `prechamber`, `head`, `cam-cover`, `intake` or
+`exhaust` for shape iteration; these explicitly do not claim assembly checks.
+
+One real overhead was repeated `Edge.center` calls in the fastener matching
+loop. That property asks the app for a frame; nearest-floor matching repeatedly
+queried unchanged edges. The generator now snapshots each edge once per joint
+operation. It does not introduce a persistent SDK cache that could go stale
+when a part regenerates.
+
+This revision also exposed correctness problems that a timing benchmark would
+miss: float world transforms broke an oblique rounded flange, odd-count ray
+crossings could hide a blind floor, and selecting the longest available screw
+could still leave it short of the threaded part. Each now has focused coverage.
+
+Final observed results: 85.21 s build, 14.60 s standing, 208.69 s motion,
+311.80 s total without GLB export. The revised model before edge-query cleanup
+was 99.64 s build / 327.26 s total. Fastener fitting as a generator phase went
+from 46.30 to 38.87 s; other phases also varied, so the whole wall-clock change
+must not be attributed to that one optimization. The revised geometry is still
+slower overall than the 287.22 s original baseline. Exact motion remains the
+largest full-run cost; component iteration deliberately skips it and says so.
+
+The direct counter is less ambiguous: frame RPCs fell from **4,073 to 773**
+(10.86 s to 2.03 s observed). The cache lives only within a joint operation,
+while its source parts remain unchanged. The standalone revised exhaust was
+measured at 5.1 s, and the continuous cover at 1.6 s during shape development.

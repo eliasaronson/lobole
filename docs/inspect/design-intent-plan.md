@@ -286,3 +286,21 @@ passes 284/284; the live remote GUI smoke passes with a new panel-focus regressi
 A manual rendered walkthrough covers form entry, preview, install, browsing and
 seat observations. That walkthrough exposed and fixed test-engine focus restoration
 between RPCs and clipped labels in the default narrow sidebar.
+
+## Follow-up evidence from the revised OM615
+
+The workshop revision in `generators/om615.py` now checks actual head datums,
+27 mm injector wrench flats and the presence/size of a modeled pump register.
+Its report distinguishes sourced limits from estimated interfaces. This is
+**generator-local evidence**, not completion of the persistent Requirement
+model above. The currently implemented `bearing-v1` catalog schema cannot
+represent these head/injector dimensions. A future generic dimensional schema
+should support a named characteristic, units, independent bounds and a source
+page, rather than treating an engine component as a bearing.
+
+Two further examples reinforce the fitted-joint requirement: a screw can have
+zero clashes while ending before its tapped part, and an odd ray-crossing count
+can hide a blind floor. The standard-parts fitter now checks selected screw
+engagement and classifies ambiguous ray intervals. Engine validation continues
+to require the standing sweep as well as motion; neither substitutes for
+joint engagement or fluid/machining requirements.

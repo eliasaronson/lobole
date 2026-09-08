@@ -118,3 +118,86 @@ motion result. These generated files are local artifacts, not tracked sources.
 
 The CAD arc-path fix and exact-standing SDK gate were checked with the
 1,119-test headless suite and the SDK smoke test, both passing.
+
+## Workshop-manual follow-up (September 2026)
+
+The later photographs include a 220 D. This generator retains the early
+OM615.913 **2.0 L** bore and stroke; those photographs guide the external
+arrangement, not a change to 2.2 L dimensions.
+
+The supplied *Mercedes-Benz Service Manual Engines 615, 616, 617.91.pdf*
+was inspected by bookmark and selected rendered pages, rather than sending
+its entire scan through context. PDF page numbers below are one-based:
+
+| Reference | Used for |
+|---|---|
+| 05.4-118/1, PDF 220 | Machined head height 84.8–85.0 mm (84.0 mm is the refacing limit, not the nominal height) |
+| 05-100, PDF 178; 05-235, PDF 257 | Valve arrangement and single-side rocker architecture |
+| 07-137, PDF 371 | Stepped nozzle holder, wrenching sections and leak-off connections |
+| 07.1.4-230/1, PDF 424 | 27 mm injector socket; inclined injector/prechamber installation and sealing plate |
+| 14-470, PDF 489 | Intake arches above the exhaust, on the same side of the head |
+| 07-200, PDF 387–389 | Injection-pump installation context, without a dimensioned mounting pattern |
+
+The earlier 155 mm head height confused the cam-axis datum with the machined
+head height. The head is now 85 mm tall, with raised cam and rocker supports.
+Both valve rows and both manifolds are on +X; the modeled order is
+E–I / I–E / E–I / I–E, feeding two paired intake mouths and four exhaust
+ports. One rocker shaft serves all eight rockers. The outer cam bearings
+were repositioned to clear the end retainers.
+
+The upper cover is one hollow B-Rep enclosing both the rocker gear and the
+cam-chain crown, with a lofted transition and a continuous gasket outline.
+The lower timing housing meets it at the head datum. Low outboard mounting
+ears provide vertical screw access; the previous tall bolt towers would
+have required screws longer than the current standard-parts table supplies.
+Head screw heads sit in counterbores below the cover gasket.
+
+The injectors now have turned shoulders, two wrenching sections, an axial
+fuel inlet and two small upward leak-off nipples. Inclined stepped
+prechambers extend through the head to the fire face. Four separate nozzle
+sealing plates are included. The injection-pump mounting boss has a 60 mm
+blind register, three mounting holes and an `injection_pump_mount` frame.
+The pump, timing-device connection and fuel pipes remain absent.
+
+Only the head height and 27 mm wrench size above are newly sourced numeric
+dimensions. Injector lengths, prechamber steps/angle, ports, cover attachment
+and the entire pump interface are **modeling estimates**. In particular, the
+pump register and bolt pattern must not be used to order or machine a mating
+pump. The manifold envelopes are closer to the photographs, but are not
+reconstructions of factory casting/core drawings. The valve caps/retainers,
+water/oil routing, casting process and manufacturing tolerances still need
+further work. A valid solid and a clean interference report cannot certify
+fluid separation or machinability.
+
+`reference-dimensions.json` now measures the machined head datums, injector
+wrench flats and pump register from the B-Rep and records their evidence
+status. It also checks the shared manifold-side boundary. Imported catalogs
+currently support `bearing-v1`; engine dimensions are not disguised as bearing
+records, and no manufacturer dataset or manual scan is bundled with this
+engine. The existing standard-parts fitter still supplies the actual screws.
+
+### Follow-up validation
+
+The final generator builds **78 parts / 250 occurrences** in 85.21 s.
+The standing sweep checks 806 exact candidates (30,319 cleared by bounds)
+in 14.60 s, with no clashes. The 49-pose, 720° exact motion study checks
+19,327 pairs in 208.69 s, with no clashes, 83.600 mm stroke, eight 8 mm
+valve lifts and firing order 1-3-4-2. All 78 parts passed B-Rep validity
+checks. This validates the nominal sampled mechanism, not production fits.
+
+The final project is `/tmp/om615-workshop/om615.dsgn`. The output directory contains
+`standing-report.json`, `motion-report.json`, `reference-dimensions.json`,
+`timings.json` and `rpc-timings.json`. Full generation, validation and saving
+with `--no-export` took 311.80 s (5 min 12 s). The first complete revised run
+before the edge-query cleanup took 327.26 s, with a 99.64 s build. The original
+model's same-session baseline was 287.22 s total / 73.04 s build. Thus the
+cleanup helps, but the more detailed model and corrected fitting are still
+slower overall than the original. These are individual runs, not a statistical
+benchmark; kernel warm-up and system load also affect wall time.
+
+The final headless regression suite passed **1,140 / 1,140 tests**. Focused
+coverage includes translated oblique rounded profiles, truncated/inside-start
+axis rays, insufficient stocked screw length, and fastener action behavior.
+The saved engine was also inspected from both manifold and injection sides,
+including an enlarged injector view. Review images and `geometry-report.json`
+are beside the final project.
