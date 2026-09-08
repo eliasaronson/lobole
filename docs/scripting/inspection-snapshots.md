@@ -68,7 +68,11 @@ and generated Python request/result records and facade. Run
 `python3 tools/generate_inspection_contracts.py` after editing it. The generated
 files are checked in; CI checks they match. `describe` publishes the schemas and
 an `inspection_contract` version, SHA-256 hash and dialect independently of the
-project file version. No document format changed.
+project file version. The typed facade checks version and hash before sending a
+request, so it cannot silently cast another server's result into local types.
+An incompatible server raises `unsupported_contract`; update the SDK/server
+pair or use explicit dynamic/raw calls with the live schema. No document format
+changed.
 
 Supported schema keywords are `type`, `properties`, `required`,
 `additionalProperties: false`, `enum`, `minimum`, `maximum`, `minLength`,

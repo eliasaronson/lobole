@@ -48,8 +48,9 @@ from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer as _Remote  # noqa: E402
-from designer_contracts import validate as _validate_contract  # noqa: E402
-from designer_inspection import InspectionClient  # noqa: E402
+from designer_contracts import ContractError, validate as _validate_contract  # noqa: E402
+from designer_inspection import (  # noqa: E402
+    CONTRACT_HASH, CONTRACT_VERSION, InspectionClient)
 
 if TYPE_CHECKING:
     from designer_snapshots import MeasurementSnapshot
@@ -161,8 +162,8 @@ class App:
         d = remote.call("describe")
         self._schemas = {m["name"]: m["request_schema"] for m in d["methods"]
                          if "request_schema" in m}
-        self.inspection: InspectionClient = InspectionClient(
-            lambda method, params: self.call(method, **params))
+        self._inspection_contract = d.get("inspection_contract", {})
+        self.inspection: InspectionClient = InspectionClient(self._inspection_call)
         self._methods = {}
         for m in d["methods"]:
             self._methods[m["name"]] = _Rpc(
@@ -205,6 +206,16 @@ class App:
         "add_job", "new_project", "open_project", "delete_part",
         "edit_in_context",
     ))
+
+    def _inspection_call(self, method, params):
+        """Do not cast a different server contract into generated local types."""
+        expected = dict(version=CONTRACT_VERSION, hash=CONTRACT_HASH)
+        observed = {k: self._inspection_contract.get(k) for k in expected}
+        if observed != expected:
+            raise ContractError(method, "unsupported_contract",
+                                "/capabilities/inspection_contract", expected,
+                                observed)
+        return self.call(method, **params)
 
     def call(self, method, _timeout=None, **params):
         if method in self._schemas:

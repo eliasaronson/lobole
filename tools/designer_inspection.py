@@ -2,6 +2,9 @@
 from collections.abc import Callable, Sequence
 from typing import Literal, NotRequired, TypedDict, cast
 
+CONTRACT_VERSION = 1
+CONTRACT_HASH = '0effee5acc447c286c7a16bacf8266eb9bbc104cb53c5f180820a93be6d223f9'
+
 class GeometrySnapshotRequest(TypedDict):
     part_id: int
     body: int

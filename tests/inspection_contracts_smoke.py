@@ -22,6 +22,18 @@ def refusal(fn, code):
     raise AssertionError(f'expected {code}')
 
 
+class ChangedContractRemote:
+    """An independently upgraded server, otherwise exposing the same API."""
+    def __init__(self, remote):
+        self.remote = remote
+
+    def call(self, method, **params):
+        result = self.remote.call(method, **params)
+        if method == 'describe':
+            result['inspection_contract']['hash'] = 'different contract'
+        return result
+
+
 class CountedRemote:
     def __init__(self, remote):
         self.remote, self.calls = remote, 0
@@ -81,6 +93,13 @@ def main():
                     methods[method]['request_schema']['properties'])
             assert len(docs['inspection_contract']['hash']) == 64
             good = dict(part_id=part.id, body=0)
+            upgraded = App(ChangedContractRemote(counted))
+            before = counted.calls
+            refusal(lambda: upgraded.inspection.geometry_snapshot(**good),
+                    'unsupported_contract')
+            assert counted.calls == before
+            # Explicit dynamic/raw access remains available across versions.
+            assert upgraded.call('geometry_snapshot', **good)['space'] == 'part'
             result = raw.call('geometry_snapshot', **good)
             validate(methods['geometry_snapshot']['result_schema'], result,
                      'geometry_snapshot', '/result')
