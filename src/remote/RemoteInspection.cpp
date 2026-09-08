@@ -1,4 +1,5 @@
 #include "remote/RemoteInspection.h"
+#include "remote/InspectionContracts.h"
 
 #include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
@@ -31,6 +32,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <string_view>
@@ -382,6 +384,16 @@ static constexpr MethodDoc InspectionMethods[] = {
      "mate connector with the same spec uses, so a script positions "
      "against it and never transcribes a coordinate.",
      "element, feature_id, frame, occurrence, part"},
+    {"geometry_snapshot",
+     "Immutable, bounded edge measurements in part coordinates. Requires a "
+     "stable part_id and body index; never switches tabs. fields defaults to "
+     "center,radius; circular filters circles and arcs. max_elements bounds "
+     "the edges scanned, before analysis. Revision is process/document scoped.",
+     "part_id, body, circular, fields, max_elements"},
+    {"validate_snapshot",
+     "Check a geometry snapshot revision. Stale snapshots raise a structured "
+     "error; this does not refresh or silently resolve old measurements.",
+     "revision"},
     {"list_elements",
      "Stable face/edge names per body (the toponaming handles "
      "measure/fillet/mates use). Bounded by max_faces (default 4000, the "
@@ -2152,6 +2164,91 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::string source;
     const glm::mat4 local = localFrame(part, source);
     return frameJson(local, "part", source);
+  }
+  const auto snapshotRevision = [](const Document& part, uint64_t partId) {
+    // A process nonce prevents a document ID from another server matching.
+    static const std::string session = [] {
+      std::random_device random;
+      return std::to_string(random()) + "-" + std::to_string(random()) + "-" +
+             std::to_string(
+                 std::chrono::steady_clock::now().time_since_epoch().count());
+    }();
+    return json{{"session", session},
+                {"part_id", partId},
+                {"instance", part.InstanceId()},
+                {"version", part.Version()}};
+  };
+  if (m == "validate_snapshot") {
+    const auto& previous = p.at("revision");
+    const auto partId = previous.at("part_id").get<uint64_t>();
+    ui::EnsureParts(state);
+    auto* part = ui::PartDocById(state, partId);
+    if (!part)
+      throw ContractError(m, "stale_snapshot", "/params/revision",
+                          "an existing stable part ID", previous);
+    const auto revision = snapshotRevision(*part, partId);
+    if (previous != revision)
+      throw ContractError(m, "stale_snapshot", "/params/revision", revision,
+                          previous);
+    return json{{"valid", true}, {"revision", revision}};
+  }
+  if (m == "geometry_snapshot") {
+    // Main-thread dispatch makes revision capture and measurement atomic.
+    const auto partId = p.at("part_id").get<uint64_t>();
+    ui::EnsureParts(state);
+    auto* part = ui::PartDocById(state, partId);
+    if (!part)
+      throw ContractError(m, "unknown_part", "/params/part_id",
+                          "an existing stable part ID", partId);
+    const auto revision = snapshotRevision(*part, partId);
+    const auto bodyIndex = p.at("body").get<size_t>();
+    const auto& bodies = part->GetBodies();
+    if (bodyIndex >= bodies.size())
+      throw ContractError(m, "unknown_body", "/params/body",
+                          {{"body_count", bodies.size()}}, bodyIndex);
+    const auto& body = bodies[bodyIndex];
+    const auto budget = p.value("max_elements", size_t{2000});
+    if (body.elementMap.edgeNames.size() > budget)
+      throw ContractError(m, "budget_exceeded", "/params/max_elements",
+                          {{"edges_to_scan", body.elementMap.edgeNames.size()}},
+                          budget);
+    const bool circular = p.value("circular", false);
+    const auto fields = p.value("fields", json::array({"center", "radius"}));
+    const auto wants = [&](const char* field) {
+      return std::find(fields.begin(), fields.end(), field) != fields.end();
+    };
+    json elements = json::array();
+    for (const auto& [index, name] : body.elementMap.edgeNames) {
+      const auto edge = Measure::DescribeEdgeAt(body, index);
+      if (!edge)
+        throw ContractError(m, "unresolved_element", "/params/body",
+                            "measurable edge", name);
+      if (circular && edge->kind != "circle" && edge->kind != "arc")
+        continue;
+      const ElementRef ref{body.createdBy, name};
+      json entry{{"index", index},
+                 {"kind", edge->kind},
+                 {"ref", {{"feature_id", body.createdBy}, {"element", name}}}};
+      if (wants("radius") && edge->hasRadius)
+        entry["radius"] = edge->radius;
+      if (wants("length"))
+        entry["length"] = edge->length;
+      if (wants("midpoint"))
+        entry["midpoint"] = {edge->midpoint.x, edge->midpoint.y,
+                             edge->midpoint.z};
+      if (wants("center")) {
+        const auto center = Measure::CentreOf(bodies, ref);
+        if (!center)
+          throw ContractError(m, "unresolved_element", "/params/body",
+                              "edge center", name);
+        entry["center"] = {center->x, center->y, center->z};
+      }
+      elements.push_back(std::move(entry));
+    }
+    return json{{"revision", revision},
+                {"body", bodyIndex},
+                {"space", "part"},
+                {"elements", std::move(elements)}};
   }
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and

@@ -685,3 +685,13 @@ add_test(NAME catalog_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/catalog_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(catalog_smoke PROPERTIES TIMEOUT 120)
+
+add_test(NAME inspection_contracts_generated
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/generate_inspection_contracts.py --check)
+add_test(NAME inspection_contracts_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/inspection_contracts_smoke.py
+                         $<TARGET_FILE:designer>)
+set_tests_properties(inspection_contracts_smoke PROPERTIES TIMEOUT 120)
+add_test(NAME inspection_typing_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/inspection_typing_gate.py)
+set_tests_properties(inspection_typing_gate PROPERTIES TIMEOUT 120)

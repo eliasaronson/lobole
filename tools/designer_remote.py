@@ -21,6 +21,13 @@ import sys
 import time
 
 
+class RemoteError(RuntimeError):
+    """A server refusal, preserving the full structured diagnostic when present."""
+    def __init__(self, message, diagnostic=None):
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
 class Designer:
     def __init__(self, port, host="127.0.0.1", timeout=60.0):
         self.sock = socket.create_connection((host, port), timeout=timeout)
@@ -43,12 +50,12 @@ class Designer:
         as a hang followed by a mystery. mesh_study/run_study want a long
         one (or run_study {async: true} + study_status polling)."""
         self._id += 1
-        request = {"id": self._id, "method": method, "params": params or {}}
+        request = {"id": self._id, "method": method, "params": {} if params is None else params}
         previous = self.sock.gettimeout()
         if timeout is not None:
             self.sock.settimeout(timeout)
         try:
-            self.file.write(json.dumps(request) + "\n")
+            self.file.write(json.dumps(request, allow_nan=False) + "\n")
             self.file.flush()
             while True:
                 line = self.file.readline()
@@ -57,7 +64,7 @@ class Designer:
                 msg = json.loads(line)
                 if msg.get("id") == self._id:
                     if "error" in msg:
-                        raise RuntimeError(msg["error"])
+                        raise RemoteError(msg["error"], msg.get("diagnostic"))
                     return msg.get("result")
         finally:
             if timeout is not None:

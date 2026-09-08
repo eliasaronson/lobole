@@ -2,7 +2,7 @@
 
 Two layers, and the split is the whole design:
 
-**The RPC surface is GENERATED, never typed.** `describe` already returns
+**The RPC surface is GENERATED, never hand-written.** `describe` already returns
 every method, the parameter keys each one accepts, and every enum, and
 `tests/rpc_params_gate.py` keeps that honest in both directions. So this
 module writes no wrapper per RPC: `app.list_parts()`, `app.add_feature(...)`,
@@ -44,9 +44,15 @@ Usage:
 import math
 import os
 import sys
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from designer_remote import Designer as _Remote  # noqa: E402
+from designer_contracts import validate as _validate_contract  # noqa: E402
+from designer_inspection import InspectionClient  # noqa: E402
+
+if TYPE_CHECKING:
+    from designer_snapshots import MeasurementSnapshot
 
 
 class SdkError(RuntimeError):
@@ -132,7 +138,7 @@ class _Rpc:
         """`_timeout` (seconds) for the calls that need one — a big STEP
         import runs for minutes. Underscored so it can never collide with a
         documented parameter."""
-        if not self.free_form:
+        if not self.free_form and self.name not in self._app._schemas:
             unknown = sorted(k for k in kw if k not in self.params)
             if unknown:
                 takes = ", ".join(sorted(self.params)) or "no parameters"
@@ -153,6 +159,10 @@ class App:
     def __init__(self, remote):
         self._remote = remote
         d = remote.call("describe")
+        self._schemas = {m["name"]: m["request_schema"] for m in d["methods"]
+                         if "request_schema" in m}
+        self.inspection: InspectionClient = InspectionClient(
+            lambda method, params: self.call(method, **params))
         self._methods = {}
         for m in d["methods"]:
             self._methods[m["name"]] = _Rpc(
@@ -197,6 +207,8 @@ class App:
     ))
 
     def call(self, method, _timeout=None, **params):
+        if method in self._schemas:
+            _validate_contract(self._schemas[method], params, method)
         if method in self._MOVES_TAB:
             self._active = None
         if _timeout is None:
@@ -486,6 +498,18 @@ class Body:
         self.bbox = (V(raw["bbox_min"]), V(raw["bbox_max"])) \
             if "bbox_min" in raw else None
         self._els = None
+
+    def snapshot(self, *, circular=False, fields=("center", "radius"),
+                 max_elements=2000) -> "MeasurementSnapshot":
+        """Explicit frozen edge measurements; reading them makes no RPCs.
+
+        Coordinates are part-local. validate() checks freshness; refresh()
+        returns a new snapshot. Existing Edge.center remains a live query.
+        """
+        from designer_snapshots import MeasurementSnapshot
+        return MeasurementSnapshot.capture(self._part.app, self._part.id,
+                                           self.index, circular, fields,
+                                           max_elements)
 
     def _load(self):
         if self._els is None:
@@ -950,11 +974,13 @@ class Part(_Tab):
         """A named parameter. Every dimension the spec names should be one:
         that is what makes the document parametric rather than a script's
         output."""
+        self.activate()
         self.app.set_variable(name=name, expression=str(expression),
                               comment=comment, scope="part")
         return self
 
     def vars(self):
+        self.activate()
         return {v["name"]: v for v in self.app.list_variables()["variables"]}
 
     def value_of(self, name):
@@ -968,6 +994,7 @@ class Part(_Tab):
         """
         if not isinstance(name, str):
             return float(name)
+        self.activate()
         for v in self.app.list_variables()["variables"]:
             if v["name"] == name:
                 return float(v["value"])

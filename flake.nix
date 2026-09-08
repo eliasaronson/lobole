@@ -206,7 +206,7 @@
           ccache
           git
           vulkan-validation-layers
-          (python3.withPackages (ps: [ ps.mcp ps.pillow ]))
+          (python3.withPackages (ps: [ ps.mcp ps.pillow ps.mypy ]))
         ];
         # Let the Vulkan loader find the validation layers from the dev shell.
         VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";

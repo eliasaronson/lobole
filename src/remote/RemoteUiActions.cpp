@@ -1,3 +1,4 @@
+#include "remote/InspectionContracts.h"
 #include "remote/RemoteServer.h"
 
 #include "remote/InstanceRegistry.h"
@@ -974,6 +975,10 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       }
       RespondError(request.client, request.id,
                    "unknown method: " + request.method);
+    } catch (const remote::ContractError& e) {
+      Send(request.client, {{"id", request.id},
+                            {"error", e.what()},
+                            {"diagnostic", e.diagnostic}});
     } catch (const std::exception& e) {
       RespondError(request.client, request.id, e.what());
     } catch (const Standard_Failure& e) {

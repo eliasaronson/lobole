@@ -1,0 +1,260 @@
+{
+  "version": 1,
+  "dialect": "https://json-schema.org/draft/2020-12/schema",
+  "methods": {
+    "geometry_snapshot": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "part_id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "body": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "circular": {
+            "type": "boolean",
+            "default": false
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "center",
+                "radius",
+                "length",
+                "midpoint"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "default": [
+              "center",
+              "radius"
+            ]
+          },
+          "max_elements": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 2000
+          }
+        },
+        "required": [
+          "part_id",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "object",
+            "properties": {
+              "session": {
+                "type": "string",
+                "minLength": 1
+              },
+              "part_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "instance": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "session",
+              "part_id",
+              "instance",
+              "version"
+            ],
+            "additionalProperties": false
+          },
+          "body": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "space": {
+            "type": "string",
+            "enum": [
+              "part"
+            ]
+          },
+          "elements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "ref": {
+                  "type": "object",
+                  "properties": {
+                    "feature_id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "element": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "feature_id",
+                    "element"
+                  ],
+                  "additionalProperties": false
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "center": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "midpoint": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "radius": {
+                  "type": "number"
+                },
+                "length": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "index",
+                "ref",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "revision",
+          "body",
+          "space",
+          "elements"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "validate_snapshot": {
+      "request": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "object",
+            "properties": {
+              "session": {
+                "type": "string",
+                "minLength": 1
+              },
+              "part_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "instance": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "session",
+              "part_id",
+              "instance",
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "object",
+            "properties": {
+              "session": {
+                "type": "string",
+                "minLength": 1
+              },
+              "part_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "instance": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "session",
+              "part_id",
+              "instance",
+              "version"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "valid",
+          "revision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

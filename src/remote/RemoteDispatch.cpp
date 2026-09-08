@@ -1,3 +1,4 @@
+#include "remote/InspectionContracts.h"
 #include "remote/RemoteCatalog.h"
 #include "remote/RemoteServer.h"
 
@@ -445,6 +446,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   const std::string& m = request.method;
   Document* doc = state.document.get();
   handled = true;
+  remote::ValidateInspectionRequest(m, request.params);
 
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
@@ -630,15 +632,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         byIndex[i] = r;
         results.push_back({{"call", i + 1}, {"method", sub}, {"result", r}});
       } catch (const std::exception& e) {
-        failures.push_back(
-            {{"call", i + 1}, {"method", sub}, {"error", e.what()}});
+        json failure{{"call", i + 1}, {"method", sub}, {"error", e.what()}};
+        if (const auto* contract =
+                dynamic_cast<const remote::ContractError*>(&e))
+          failure["diagnostic"] = contract->diagnostic;
+        failures.push_back(failure);
         if (stopOnError) {
           fatal = "batch call " + std::to_string(i + 1) + " (" + sub +
                   ") failed: " + e.what();
           break;
         }
-        results.push_back(
-            {{"call", i + 1}, {"method", sub}, {"error", e.what()}});
+        results.push_back(std::move(failure));
       }
     }
     flush();
@@ -658,13 +662,23 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         asmRestored = true;
         ui::SolveActiveAssembly(state);
       }
-      throw std::runtime_error(
+      const std::string message =
           fatal + ". The batch was rolled back: " + std::to_string(undone) +
           " edit(s) undone" +
           (asmRestored ? " and the assembly restored" : "") +
           ", so the document is as it was before the batch. " +
           std::to_string(calls.size() - results.size() - 1) +
-          " later call(s) did not run.");
+          " later call(s) did not run.";
+      if (std::any_of(failures.begin(), failures.end(),
+                      [](const json& failure) {
+                        return failure.contains("diagnostic");
+                      })) {
+        remote::ContractError error("batch", "batch_failed", "/params/calls",
+                                    "all calls valid", failures, message);
+        error.diagnostic["failures"] = failures;
+        throw error;
+      }
+      throw std::runtime_error(message);
     }
 
     // One undo step for the whole batch, and one assembly snapshot.
@@ -724,6 +738,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           }
           entry["params"] = std::move(keys);
         }
+        const auto& contracts = remote::InspectionContracts().at("methods");
+        if (contracts.contains(d.name)) {
+          entry["request_schema"] = contracts[d.name]["request"];
+          entry["result_schema"] = contracts[d.name]["result"];
+        }
         methods.push_back(std::move(entry));
       }
     };
@@ -749,6 +768,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                               {"params", ft.params}});
     return json{
         {"app", "designer"},
+        {"inspection_contract",
+         {{"version", remote::InspectionContracts()["version"]},
+          {"hash", std::string(remote::kInspectionContractHash)},
+          {"dialect", remote::InspectionContracts()["dialect"]}}},
         {"document_format_version", DocumentIO::DocumentFormatVersion()},
         {"methods", std::move(methods)},
         {"feature_types", std::move(featureTypes)},

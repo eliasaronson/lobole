@@ -243,3 +243,18 @@ positive/negative tests, updated examples/docs and reviewable conventional commi
   and [conditional validation](https://json-schema.org/understanding-json-schema/reference/conditionals):
   wire variants, alternatives and structural constraints. These do not establish
   reference validity, physical units or geometric correctness by themselves.
+
+## Implementation progress (2026-09-08)
+
+The first inspection pilot is implemented: canonical request/result schemas for
+`geometry_snapshot` and `validate_snapshot`, generated Python types and facade,
+client/server validation, structured errors (including nested batch failures),
+and immutable bounded part-local edge snapshots. Static positive/negative fixtures,
+wire parity and stale-document integration tests accompany it. See
+[usage and limits](../scripting/inspection-snapshots.md).
+
+This is the first delivery slice, not completion of phases 1–2 in full. Legacy
+inspection/modeling contracts, face/world snapshots, pagination, atomic revision
+guards on writes and semantic reference re-resolution are still pending. Component
+update sessions, persistent quantities/requirements and functional/review bundles
+remain subsequent phases; none is implied by the snapshot revision token.
