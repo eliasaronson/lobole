@@ -1,5 +1,8 @@
 #include "core/drawing/DrawingProjection.h"
 
+#include <algorithm>
+#include <list>
+
 #ifdef HAVE_OPENCASCADE
 
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -17,6 +20,7 @@
 #include <HLRBRep_FaceData.hxx>
 #include <HLRBRep_PolyAlgo.hxx>
 #include <HLRBRep_PolyHLRToShape.hxx>
+#include <HLRBRep_ShapeBounds.hxx>
 #include <OSD.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -41,9 +45,154 @@
 
 namespace drawing {
 
+// Keys deliberately exclude sourceId: it is rebound to the current caller on
+// a hit. Exact placement matching is conservative (no transform quantization).
+struct ProjectionCache::Impl {
+  struct Key {
+    std::vector<InputBody> bodies;
+    glm::dvec3 direction, up;
+    ProjectionMode mode;
+    double deflection;
+    bool Matches(const Key& b) const {
+      if (direction != b.direction || up != b.up || mode != b.mode ||
+          deflection != b.deflection || bodies.size() != b.bodies.size())
+        return false;
+      for (size_t i = 0; i < bodies.size(); ++i)
+        if (!bodies[i].shape.IsEqual(b.bodies[i].shape) ||
+            bodies[i].transform != b.bodies[i].transform ||
+            bodies[i].geometryRevision != b.bodies[i].geometryRevision)
+          return false;
+      return true;
+    }
+  };
+  struct Interval {
+    double start, end;
+    float startTolerance, endTolerance;
+  };
+  struct Edge {
+    // Validate the local DS ordering before replaying parameter intervals.
+    std::vector<double> signature;
+    std::vector<Interval> hidden;
+  };
+  struct Visibility {
+    Key key;
+    std::vector<Edge> edges;
+    size_t bytes = 0;
+  };
+  struct View {
+    Key key;
+    ProjectionResult result;
+    size_t bytes = 0;
+  };
+  std::list<Visibility> visibility;
+  std::list<View> views;
+  size_t bytes = 0;
+  static constexpr size_t maxBytes = 64 * 1024 * 1024;
+  void Trim() {
+    while (!visibility.empty() &&
+           (visibility.size() > 4096 || bytes > maxBytes)) {
+      bytes -= visibility.back().bytes;
+      visibility.pop_back();
+    }
+    while (!views.empty() && (views.size() > 16 || bytes > maxBytes)) {
+      bytes -= views.back().bytes;
+      views.pop_back();
+    }
+  }
+};
+
+ProjectionCache::ProjectionCache() : impl_(std::make_unique<Impl>()) {}
+ProjectionCache::~ProjectionCache() = default;
+ProjectionCache::ProjectionCache(ProjectionCache&&) noexcept = default;
+ProjectionCache&
+ProjectionCache::operator=(ProjectionCache&&) noexcept = default;
+void ProjectionCache::Clear() { impl_ = std::make_unique<Impl>(); }
+
 #ifdef HAVE_OPENCASCADE
 
 namespace {
+
+using Cache = ProjectionCache::Impl;
+
+std::vector<Cache::Edge> ReadVisibility(HLRBRep_Algo& algo, int body) {
+  int v1, v2, e1, e2, f1, f2;
+  algo.ShapeBounds(body).Bounds(v1, v2, e1, e2, f1, f2);
+  std::vector<Cache::Edge> result;
+  for (int e = e1; e <= e2; ++e) {
+    auto& ed = algo.DataStructure()->EDataArray().ChangeValue(e);
+    Cache::Edge item;
+    double start, end;
+    float ts, te;
+    ed.Status().Bounds(start, ts, end, te);
+    item.signature = {start, end, ts, te};
+    const auto edge = TopoDS::Edge(algo.DataStructure()->EdgeMap().FindKey(e));
+    // Pole edges of spheres/cones can have no curve. The extraction path
+    // skips them too; retain their slot without evaluating a null curve.
+    if (!BRep_Tool::Degenerated(edge)) {
+      item.signature.push_back(ed.ChangeGeometry().GetType());
+      for (double u : {start, (start + end) * 0.5, end}) {
+        const auto p = ed.ChangeGeometry().Value(u);
+        item.signature.push_back(p.X());
+        item.signature.push_back(p.Y());
+      }
+    }
+    HLRAlgo_EdgeIterator it;
+    for (it.InitHidden(ed.Status()); it.MoreHidden(); it.NextHidden()) {
+      it.Hidden(start, ts, end, te);
+      item.hidden.push_back({start, end, ts, te});
+    }
+    result.push_back(std::move(item));
+  }
+  return result;
+}
+
+bool SameEdges(const std::vector<Cache::Edge>& a,
+               const std::vector<Cache::Edge>& b) {
+  if (a.size() != b.size())
+    return false;
+  for (size_t e = 0; e < a.size(); ++e)
+    if (a[e].signature != b[e].signature)
+      return false;
+  return true;
+}
+
+void ApplyVisibility(HLRBRep_Algo& algo, int body,
+                     const std::vector<Cache::Edge>& edges, bool reset) {
+  int v1, v2, e1, e2, f1, f2;
+  algo.ShapeBounds(body).Bounds(v1, v2, e1, e2, f1, f2);
+  for (int e = e1; e <= e2; ++e) {
+    auto& status = algo.DataStructure()->EDataArray().ChangeValue(e).Status();
+    if (reset)
+      status.ShowAll();
+    for (const auto& interval : edges[e - e1].hidden)
+      status.Hide(interval.start, interval.startTolerance, interval.end,
+                  interval.endTolerance, false, false);
+  }
+}
+
+std::optional<std::vector<Cache::Edge>>
+FindVisibility(Cache& cache, const Cache::Key& key,
+               const std::vector<Cache::Edge>& signature) {
+  for (auto it = cache.visibility.begin(); it != cache.visibility.end(); ++it) {
+    if (it->key.Matches(key) && SameEdges(it->edges, signature)) {
+      cache.visibility.splice(cache.visibility.begin(), cache.visibility, it);
+      return cache.visibility.front().edges;
+    }
+  }
+  return std::nullopt;
+}
+
+void SaveVisibility(Cache& cache, Cache::Key key,
+                    std::vector<Cache::Edge> edges) {
+  size_t bytes =
+      sizeof(Cache::Visibility) + key.bodies.size() * sizeof(InputBody);
+  for (const auto& edge : edges)
+    bytes += sizeof(Cache::Edge) + edge.signature.size() * sizeof(double) +
+             edge.hidden.size() * sizeof(Cache::Interval);
+  cache.visibility.push_front({std::move(key), std::move(edges), bytes});
+  cache.bytes += bytes;
+  cache.Trim();
+}
 
 // A rigid glm placement as an OCC transform (the MeshExport::ToTrsf pattern).
 // glm is column-major; gp_Trsf::SetValues takes the 3x4 row-major affine
@@ -256,9 +405,9 @@ ProjectPoly(const std::vector<InputBody>& bodies, const gp_Ax2& viewCS,
 } // namespace
 
 std::optional<ProjectionResult>
-ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
-            const glm::dvec3& up, const ProjectionOptions& options,
-            std::string* error) {
+ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
+                const glm::dvec3& up, const ProjectionOptions& options,
+                std::string* error, Cache* cache) {
   if (bodies.empty()) {
     if (error)
       *error = "nothing to project";
@@ -337,17 +486,82 @@ ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
     // the result and makes the loop ours: it reports where it is and it can
     // be asked to stop (docs/agent-scale-followup-plan.md, W3).
     const int nbShapes = algo->NbShapes();
-    bool cancelled = false;
-    for (int i = 1; i <= nbShapes && !cancelled; ++i) {
-      algo->Hide(i);
-      for (int j = 1; j <= nbShapes && !cancelled; ++j) {
-        if (i != j)
+    const auto stopped = [&] {
+      return options.cancelled && options.cancelled();
+    };
+    std::vector<InputBody> loaded;
+    for (const auto& body : bodies)
+      if (!body.shape.IsNull())
+        loaded.push_back(body);
+    for (int i = 1; i <= nbShapes; ++i) {
+      if (stopped()) {
+        if (error)
+          *error = "cancelled";
+        return std::nullopt;
+      }
+      const auto selfStart = Clock::now();
+      Cache::Key selfKey{
+          {loaded[i - 1]}, viewDir, up, options.mode, options.deflection};
+      auto signature =
+          cache ? ReadVisibility(*algo, i) : std::vector<Cache::Edge>{};
+      auto self =
+          cache ? FindVisibility(*cache, selfKey, signature) : std::nullopt;
+      if (self) {
+        ApplyVisibility(*algo, i, *self, true);
+        ++result.stats.selfHits;
+      } else {
+        algo->Hide(i);
+        ++result.stats.selfCalls;
+        if (cache) {
+          self = ReadVisibility(*algo, i);
+          SaveVisibility(*cache, selfKey, *self);
+        }
+      }
+      result.stats.selfMs +=
+          std::chrono::duration<double, std::milli>(Clock::now() - selfStart)
+              .count();
+      auto combined = self;
+      for (int j = 1; j <= nbShapes; ++j) {
+        if (stopped()) {
+          if (error)
+            *error = "cancelled";
+          return std::nullopt;
+        }
+        if (i == j)
+          continue;
+        const auto pairStart = Clock::now();
+        Cache::Key pairKey{{loaded[i - 1], loaded[j - 1]},
+                           viewDir,
+                           up,
+                           options.mode,
+                           options.deflection};
+        auto pair =
+            cache ? FindVisibility(*cache, pairKey, signature) : std::nullopt;
+        if (pair) {
+          ++result.stats.pairHits;
+        } else {
+          // Each cached pair starts from SELF visibility, never the result of
+          // an earlier occluder. Removing an occluder can then reveal edges.
+          if (cache)
+            ApplyVisibility(*algo, i, *self, true);
           algo->Hide(i, j);
-        if (options.cancelled && options.cancelled())
-          cancelled = true;
+          ++result.stats.pairCalls;
+          if (cache) {
+            pair = ReadVisibility(*algo, i);
+            SaveVisibility(*cache, pairKey, *pair);
+          }
+        }
+        if (cache) {
+          ApplyVisibility(*algo, i, *combined, true);
+          ApplyVisibility(*algo, i, *pair, false);
+          combined = ReadVisibility(*algo, i);
+        }
+        result.stats.pairMs +=
+            std::chrono::duration<double, std::milli>(Clock::now() - pairStart)
+                .count();
       }
     }
-    if (cancelled) {
+    if (stopped()) {
       if (error)
         *error = "cancelled";
       return std::nullopt;
@@ -510,6 +724,56 @@ ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
       *error = std::string("HLR projection failed: ") + ex.what();
     return std::nullopt;
   }
+}
+
+std::optional<ProjectionResult>
+ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
+            const glm::dvec3& up, const ProjectionOptions& options,
+            std::string* error) {
+  if (error)
+    error->clear();
+  if (!options.cache)
+    return ProjectViewImpl(bodies, viewDir, up, options, error, nullptr);
+  auto& cache = *options.cache->impl_;
+  Cache::Key key{bodies, viewDir, up, options.mode, options.deflection};
+  // Cached attribution is local to the geometry list, never an old occurrence.
+  for (size_t i = 0; i < key.bodies.size(); ++i)
+    key.bodies[i].sourceId = i;
+  const auto finish = [&](ProjectionResult result) {
+    for (auto& curve : result.curves)
+      if (curve.source.IsResolved())
+        curve.source.sourceId = bodies.at(curve.source.sourceId).sourceId;
+    if (!options.hiddenLines)
+      std::erase_if(result.curves, [](const auto& c) { return !c.visible; });
+    result.stats.cacheBytes = cache.bytes;
+    return result;
+  };
+  for (auto it = cache.views.begin(); it != cache.views.end(); ++it) {
+    if (it->key.Matches(key)) {
+      cache.views.splice(cache.views.begin(), cache.views, it);
+      auto result = cache.views.front().result;
+      const int edges = result.stats.dsEdges;
+      const int unresolved = result.stats.unresolvedSources;
+      result.stats = {};
+      result.stats.dsEdges = edges;
+      result.stats.unresolvedSources = unresolved;
+      result.stats.projectionHit = true;
+      return finish(std::move(result));
+    }
+  }
+  auto allOptions = options;
+  allOptions.hiddenLines = true;
+  auto result =
+      ProjectViewImpl(key.bodies, viewDir, up, allOptions, error, &cache);
+  if (!result)
+    return std::nullopt;
+  size_t bytes = sizeof(Cache::View) + key.bodies.size() * sizeof(InputBody);
+  for (const auto& curve : result->curves)
+    bytes += sizeof(ProjectedCurve) + curve.points.size() * sizeof(glm::dvec2);
+  cache.views.push_front({std::move(key), *result, bytes});
+  cache.bytes += bytes;
+  cache.Trim();
+  return finish(std::move(*result));
 }
 
 #else // !HAVE_OPENCASCADE

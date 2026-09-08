@@ -111,6 +111,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // project's geometry. Drop it all here rather than at each of the four
   // parts.clear() sites, where a fifth would eventually be missed.
   ReleasePartRenderCache(state);
+  state.drawingProjectionCache.Clear();
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
   // The active tab may have been an assembly or drawing: this replacement

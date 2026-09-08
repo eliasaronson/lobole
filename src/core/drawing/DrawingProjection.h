@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -29,6 +30,9 @@ struct InputBody {
   // Caller-defined stable id carried through to SourceRef.sourceId — a body's
   // featureId for parts, an occurrence id for assemblies.
   uint64_t sourceId = 0;
+  // Invalidate even when a caller edits geometry in place. Shapes must remain
+  // immutable between revisions while retained by a cache.
+  uint64_t geometryRevision = 0;
 };
 
 // How a projected curve came to exist. Sharp/Smooth/Sewn curves are images of
@@ -108,11 +112,23 @@ struct ProjectionResult {
     double updateMs = 0.0;     // HLRBRep Update(): outline building
     double hideMs = 0.0;       // HLRBRep Hide(): visibility classification
     int dsEdges = 0;           // edges in the HLR data structure
+    double selfMs = 0.0;
+    double pairMs = 0.0;
+    int selfCalls = 0;
+    int pairCalls = 0;
+    int selfHits = 0;
+    int pairHits = 0;
+    bool projectionHit = false;
+    size_t cacheBytes = 0;     // payload only, excluding retained OCC geometry
     int unresolvedSources = 0; // curves whose SourceRef could not be traced
   } stats;
 };
 
+class ProjectionCache;
+
 struct ProjectionOptions {
+  // Optional, session-local and single-threaded. Null is the reference path.
+  ProjectionCache* cache = nullptr;
   ProjectionMode mode = ProjectionMode::Exact;
   bool hiddenLines = true;
   // Asked, as the hidden-line classification proceeds, whether to stop.
@@ -122,6 +138,26 @@ struct ProjectionOptions {
   // Max chord deviation for discretizing curved edges, in view-plane mm
   // (model scale — callers divide by view scale for sheet-mm control).
   double deflection = 0.05;
+};
+
+// Bounded runtime cache. No live documents or mutable OCC algorithms are kept.
+// Caller must serialize access. Shapes are retained to prevent identity reuse.
+class ProjectionCache {
+public:
+  struct Impl;
+  ProjectionCache();
+  ~ProjectionCache();
+  ProjectionCache(ProjectionCache&&) noexcept;
+  ProjectionCache& operator=(ProjectionCache&&) noexcept;
+  ProjectionCache(const ProjectionCache&) = delete;
+  ProjectionCache& operator=(const ProjectionCache&) = delete;
+  void Clear();
+
+private:
+  std::unique_ptr<Impl> impl_;
+  friend std::optional<ProjectionResult>
+  ProjectView(const std::vector<InputBody>&, const glm::dvec3&,
+              const glm::dvec3&, const ProjectionOptions&, std::string*);
 };
 
 // Projects `bodies` orthographically onto the plane normal to `viewDir`

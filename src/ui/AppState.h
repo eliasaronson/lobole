@@ -11,6 +11,7 @@
 #include "core/cam/CamVerify.h"   // cam::VerdictLine (the G4 verdict, in words)
 #include "core/cam/JobDocument.h" // the job tab: parts placed + setups
 #include "core/drawing/DrawingDocument.h"
+#include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GitVault.h"
@@ -1286,6 +1287,9 @@ struct AppState {
   // half a second per view, and export re-projected everything every time
   // (U11 scale round). Stashed with the renders, per tab.
   uint64_t drawingRendersVersion = 0;
+
+  // Session-local, bounded geometry cache, shared across drawing tabs.
+  drawing::ProjectionCache drawingProjectionCache;
 
   // Dimension-placement tool (D4): armed from the panel with a kind, then the
   // user clicks projected edges/circles on the sheet to pick refs; the dim is

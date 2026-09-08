@@ -129,6 +129,7 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
     SourceBody sb;
     sb.input.shape = body.shape.GetShape();
     sb.input.transform = xf;
+    sb.input.geometryRevision = doc.Version();
     sb.input.sourceId = out.size(); // slot index: picks this entry on join
     sb.featureId = body.createdBy;
     sb.refId = occId ? occId : body.createdBy; // occurrence, else body owner
@@ -249,6 +250,7 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view,
   OrientationAxes(view.orientation, viewDir, up);
   drawing::ProjectionOptions opts;
   opts.hiddenLines = view.showHidden;
+  opts.cache = &state.drawingProjectionCache;
   opts.mode = view.quality == "fast" ? drawing::ProjectionMode::Poly
                                      : drawing::ProjectionMode::Exact;
   opts.cancelled = cancelled;
@@ -279,6 +281,7 @@ AssembleSheetView(AppState& state, const DrawingView& view,
   result.updateMs = projection.stats.updateMs;
   result.hideMs = projection.stats.hideMs;
   result.dsEdges = projection.stats.dsEdges;
+  result.projectionStats = projection.stats;
   result.bodies = static_cast<int>(bodies.size());
   const drawing::ProjectionResult* projected = &projection;
 
@@ -703,27 +706,12 @@ void UpdateDrawingRenders(AppState& state, double budgetSeconds) {
                                          started)
                .count() > budgetSeconds;
   };
-  // Re-project only what can have gone stale. HLR is the expensive thing on a
-  // sheet (about half a second per view of a 50-occurrence assembly), and
-  // export calls this before writing so the file cannot be stale — which made
-  // exporting an unchanged 12-view sheet cost 6 s of pure recomputation. A
-  // view is still good when the drawing itself has not changed since the
-  // cache was built AND its source document is at the version it was
-  // projected from. (The drawing's version covers scale/orientation/position
-  // edits, which are properties of the view rather than of its source.)
+  // Always gather current leaf geometry and placements. The projection cache
+  // checks those actual dependencies, so nested edits cannot slip through an
+  // unchanged root assembly version. Sheet-only edits just reassemble curves.
   const uint64_t drawingVersion = state.drawing->Version();
-  const bool drawingChanged = drawingVersion != state.drawingRendersVersion;
   std::map<uint64_t, drawing::SheetView> fresh;
   for (const DrawingView& view : state.drawing->GetViews()) {
-    if (!drawingChanged) {
-      const auto prev = state.drawingRenders.find(view.id);
-      if (prev != state.drawingRenders.end() && prev->second.hasGeometry &&
-          prev->second.error.empty() &&
-          prev->second.solvedSourceVersion == SourceVersionOf(state, view)) {
-        fresh[view.id] = prev->second;
-        continue;
-      }
-    }
     // Before starting, as well as during. A single body's Hide() is ONE
     // uninterruptible OCC call — the pairwise drive only has somewhere to
     // stop when there are several shapes to classify against each other — so
