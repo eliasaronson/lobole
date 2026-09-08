@@ -394,11 +394,12 @@ FOLDERS = [
     ("Alternator", ["alternator front casting", "alternator rear casting",
                     "alternator stator", "alternator rotor and shaft",
                     "alternator pulley", "alternator cooling fan",
-                    "alternator mounting bracket"]),
+                    "alternator mounting bracket", "alternator adjustment bracket",
+                    "alternator winding pack"]),
     ("Vacuum pump", ["vacuum pump casting", "vacuum pump valve cover",
                      "vacuum pump diaphragm rim", "vacuum pump diaphragm centre",
                      "vacuum pump rocker yoke", "vacuum pump follower roller",
-                     "vacuum pump face cam"]),
+                     "vacuum pump face cam", "vacuum timer shaft bush"]),
     ("Mounts", ["engine mount left", "engine mount right"]),
 ]
 
@@ -639,6 +640,7 @@ def main():
         write_report(a.out, 'reference-dimensions.json', reference_dimensions(app))
         if a.stage != 'preview':
             write_report(a.out, 'accessory-standing-report.json', A.check_subassemblies(app))
+            write_report(a.out, 'accessory-mounting-report.json', A.check_mountings(app, rig))
         result = validate(app, stage=a.stage, assembly=rig)
         report = result.current(app)
         write_report(a.out, 'validation-report.json', report)
@@ -707,6 +709,7 @@ def main():
         raise SdkError('validation failed; see validation-report.json')
     if a.stage != 'preview':
         write_report(a.out, 'accessory-standing-report.json', A.check_subassemblies(app))
+        write_report(a.out, 'accessory-mounting-report.json', A.check_mountings(app, rig))
     if a.stage != 'full':
         print(f"  {a.stage} passed; motion NOT checked; draft: {draft}")
         timings['total_s'] = time.perf_counter() - t0

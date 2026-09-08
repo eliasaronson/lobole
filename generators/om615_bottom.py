@@ -365,6 +365,9 @@ def _block_rest(p, length):
     wp.circle((0, WATER_PUMP_Z), d=50.0)
     p.extrude(wp.add(), 20.0, mode="cut", name="Water pump inlet")
 
+    from om615_accessories import prepare_block
+
+    prepare_block(p)
     casting_finish(p, "steel", (0.32, 0.34, 0.35))
     # Faces the covers bolt to, and the frames the assembly mates by.
     p.frame("crank_axis", origin=(0, 0, 0), z=(0, 1, 0), x=(1, 0, 0))

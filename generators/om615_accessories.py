@@ -12,6 +12,9 @@ from om615_spec import BELT_Y, PULLEY_D, WP_PULLEY_D, WATER_PUMP_Z
 ALT_X, ALT_Z, ALT_D = 176.0, 75.0, 76.0
 ALT_LUG = 80.0
 BRACKET_Z = ALT_Z - ALT_LUG
+UPPER_BRACKET_Z = ALT_Z + ALT_LUG
+MOUNT_BOLT_Y = -168.0
+MOUNT_BOLT_OFFSETS = (-20.0, 20.0)
 PITCH_OFFSET = 4.0
 FAN_BACK_OFFSET = 14.0
 FAN_Y, FAN_R = BELT_Y - 65.0, 175.0
@@ -223,11 +226,39 @@ def alternator(app):
     verify(front)
     stator = app.part("alternator stator")
     annulus(stator, "Laminated stator", 54, 37, 36, 51)
+    slots = stator.sketch(Plane.xy(35), name="Winding slots")
+    for k in range(12):
+        a = k * math.tau / 12
+        c, t = math.cos(a), math.sin(a)
+        for lo, hi in ((-7.5, -3.5), (3.5, 7.5)):
+            slots.polyline(
+                [
+                    (r * c - y * t, r * t + y * c)
+                    for r, y in ((39.5, lo), (44.5, lo), (44.5, hi), (39.5, hi))
+                ]
+            )
+    stator.extrude(slots.add(), 53, mode="cut", name="Winding slots")
     stator.material("steel")
     verify(stator)
+    winding = app.part("alternator winding pack")
+    sk = winding.sketch(Plane.yz(40), name="Copper winding bundle")
+    B.rounded_polygon(sk, [(-7, 28), (7, 28), (7, 97), (-7, 97)], 7)
+    B.rounded_polygon(sk, [(-4, 31), (4, 31), (4, 94), (-4, 94)], 4)
+    winding.extrude(sk.add(), 4, name="Copper winding bundle")
+    winding.material("copper")
+    verify(winding)
     rear = app.part("alternator rear casting")
     rear.revolve_profile(
-        [(10, 92), (37, 92), (53, 88), (58, 88), (58, 104), (42, 117), (10, 117)],
+        [
+            (10, 106),
+            (42, 106),
+            (50, 100),
+            (53, 88),
+            (58, 88),
+            (58, 104),
+            (42, 117),
+            (10, 117),
+        ],
         name="Rear casting section",
     )
     rear.material("aluminum")
@@ -259,6 +290,13 @@ def alternator(app):
     fixed = app.assembly("alternator stator assembly")
     for p in (front, stator, rear):
         fixed.place(p, fixed=True, name=p.name)
+    for k in range(12):
+        o = fixed.place(winding, fixed=True, name=f"stator winding {k + 1}")
+        a = k * math.tau / 12
+        app.set_occurrence_transform(
+            id=o.id,
+            transform=dict(orientation=[0, 0, math.sin(a / 2), math.cos(a / 2)]),
+        )
     rotating = app.assembly("alternator rotor assembly")
     rotating.place(rotor, fixed=True, name=rotor.name)
     rotating.place(pulley, at=(0, 0, -24), fixed=True, name=pulley.name)
@@ -273,6 +311,22 @@ def install(app, rig, block, wp_shaft, wp_mate, crank_mate):
     bracket = alternator_bracket(app)
     bracket_occ = rig.place(bracket, name="alternator mounting bracket")
     rig.fasten((block, "alternator_bracket"), (bracket_occ, "block"), flipped=False)
+    upper = alternator_upper_bracket(app)
+    upper_occ = rig.place(upper, name="alternator adjustment bracket")
+    rig.fasten((block, "alternator_adjustment"), (upper_occ, "block"), flipped=False)
+    for part, o in ((bracket, bracket_occ), (upper, upper_occ)):
+        for i in range(2):
+            mount_fastener(app, rig, o, f"foot_washer_{i}", "iso7089", "M8")
+            mount_fastener(app, rig, o, f"foot_bolt_{i}", "iso4762", "M8", 25)
+        for frame, std in (
+            ("pivot_bolt", "iso4762"),
+            ("pivot_front_washer", "iso7089"),
+            ("pivot_back_washer", "iso7089"),
+            ("pivot_nut", "iso4032"),
+        ):
+            mount_fastener(
+                app, rig, o, frame, std, "M10", 40 if std == "iso4762" else 0
+            )
     fixed = rig.place(stator, at=mount, name="alternator stator")
     moving = rig.place(rotor, at=mount, name="alternator rotor")
     rig.activate()
@@ -464,7 +518,8 @@ def vacuum_parts(app):
     roller = B.ring(app, "vacuum pump follower roller", 14, 6.4, 17, material="steel")
     # Two-lobe axial track, derived from the moving roller's swept envelope.
     cam = app.part("vacuum pump face cam")
-    annulus(cam, "Timer face plate", 24, 4.5, -3, 3)
+    annulus(cam, "Timer face plate", 24, 0, -3, 3)
+    annulus(cam, "Timer shaft", 6, 0, -58, 56, mode="add")
     # Ruled triangular sectors avoid OCC's unorientable periodic pipe seam.
     # Adjacent triangles share exact vertices; finite base overlap joins them.
     n = 32
@@ -509,6 +564,9 @@ def install_vacuum(app, rig, cover_occ, crank_mate):
     rig.fasten((cover_occ, "vacuum_pump"), (ho, "mount"), flipped=False)
     for i in range(6):
         screw = app.add_fastener(standard="iso4762", size="M5", length=12)
+        app.rename_occurrence(
+            id=screw["occurrence"], name=f"vacuum mount screw {i + 1}"
+        )
         rig.fasten(
             (ho, f"base_screw_{i}"),
             dict(occurrence=screw["occurrence"], origin=True),
@@ -527,6 +585,14 @@ def install_vacuum(app, rig, cover_occ, crank_mate):
                     dict(occurrence=screw["occurrence"], origin=True),
                     flipped=False,
                 )
+    bearing = app.part("vacuum timer shaft bush")
+    annulus(bearing, "Shaft bearing", 9, 6.2, 0, 10)
+    annulus(bearing, "Bearing locating flange", 12, 6.2, -2, 2, mode="add")
+    bearing.material("brass")
+    bearing.frame("seat", origin=(0, 0, 0))
+    verify(bearing)
+    bearing_occ = rig.place(bearing, name=bearing.name)
+    rig.fasten((cover_occ, "vacuum_bearing"), (bearing_occ, "seat"), flipped=False)
     co = rig.place(cam, name="vacuum pump face cam")
     cm = rig.revolute((ho, "cam"), (co, "shaft"), flipped=False)
     rig.chain(
@@ -558,14 +624,61 @@ def install_vacuum(app, rig, cover_occ, crank_mate):
     return dict(cam=co, rocker=ro, diaphragm=do, cam_mate=cm, slide=dm)
 
 
+def mount_fastener(app, rig, occ, frame, standard, size, length=0):
+    rig.activate()
+    bolt = app.add_fastener(standard=standard, size=size, length=length)
+    app.rename_occurrence(id=bolt["occurrence"], name=f"{occ.name} {frame}")
+    rig.fasten(
+        (occ, frame), dict(occurrence=bolt["occurrence"], origin=True), flipped=False
+    )
+    return bolt
+
+
+def bracket_foot(p, z):
+    sk = p.sketch(Plane.yz(100), name="Block mounting foot")
+    B.rounded_polygon(
+        sk, [(-182, z - 28), (-155, z - 28), (-155, z + 28), (-182, z + 28)], 4
+    )
+    p.extrude(sk.add(), 10, name="Block mounting foot")
+    for i, dz in enumerate(MOUNT_BOLT_OFFSETS):
+        B.bore(
+            p,
+            (99, MOUNT_BOLT_Y, z + dz),
+            (111, MOUNT_BOLT_Y, z + dz),
+            8.8,
+            "Block attachment bore",
+            over=0,
+        )
+        p.frame(
+            f"foot_washer_{i}",
+            origin=(110, MOUNT_BOLT_Y, z + dz),
+            z=(-1, 0, 0),
+            x=(0, 1, 0),
+        )
+        p.frame(
+            f"foot_bolt_{i}",
+            origin=(111.6, MOUNT_BOLT_Y, z + dz),
+            z=(-1, 0, 0),
+            x=(0, 1, 0),
+        )
+    p.frame("block", origin=(100, -175, z), z=(1, 0, 0), x=(0, 1, 0))
+
+
+def pivot_stack_frames(p, z, head_seat, rear_seat):
+    p.frame("pivot_bolt", origin=(ALT_X, head_seat - 2, z), z=(0, 1, 0), x=(1, 0, 0))
+    p.frame(
+        "pivot_front_washer", origin=(ALT_X, head_seat, z), z=(0, 1, 0), x=(1, 0, 0)
+    )
+    p.frame(
+        "pivot_back_washer", origin=(ALT_X, rear_seat, z), z=(0, -1, 0), x=(1, 0, 0)
+    )
+    p.frame("pivot_nut", origin=(ALT_X, rear_seat + 2, z), z=(0, -1, 0), x=(1, 0, 0))
+
+
 def alternator_bracket(app):
     p = app.part("alternator mounting bracket")
     z = BRACKET_Z
-    sk = p.sketch(Plane.yz(100), name="Block mounting foot")
-    B.rounded_polygon(
-        sk, [(-182, z - 16), (-155, z - 16), (-155, z + 23), (-182, z + 23)], 4
-    )
-    p.extrude(sk.add(), 10, name="Block mounting foot")
+    bracket_foot(p, z)
     B.axis_solid(p, (108, -165, z), (ALT_X - 12, -254, z), 16, "Cast support arm")
     sk = p.sketch(Plane.xz(-250), name="Alternator pivot eye")
     sk.circle((ALT_X, z), r=14)
@@ -574,23 +687,127 @@ def alternator_bracket(app):
         p, 140, -250, z - 22, ALT_X + 30, -210, z + 23, "Lug seating face", mode="cut"
     )
     B.bore(p, (ALT_X, -260, z), (ALT_X, -249, z), 10.5, "Pivot bolt", over=0)
-    p.frame("block", origin=(100, -175, z), z=(1, 0, 0), x=(0, 1, 0))
     p.frame("alternator", origin=(ALT_X, BELT_Y + 16, ALT_Z), z=(0, 1, 0), x=(1, 0, 0))
+    pivot_stack_frames(p, z, -258, -233)
     p.material("steel")
     verify(p)
     return p
 
 
+def alternator_upper_bracket(app):
+    p = app.part("alternator adjustment bracket")
+    z = UPPER_BRACKET_Z
+    bracket_foot(p, z)
+    B.axis_solid(p, (108, -165, z), (133, -229, 177), 14, "Upper support arm")
+    sk = p.sketch(Plane.xz(-227), name="Adjustment strap")
+    B.rounded_polygon(
+        sk, [(125, 165), (135, 184), (202, 180), (207, 145), (165, 143)], 5
+    )
+    p.extrude(sk.add(), 6, mode="add", name="Adjustment strap")
+    sk = p.sketch(Plane.xz(-226), name="Pivot concentric adjustment slot")
+    radius = 2 * ALT_LUG
+    half = 5.25
+
+    def pt(r, a):
+        return (ALT_X + r * math.cos(a), BRACKET_Z + r * math.sin(a))
+
+    a, b = math.radians(100), math.radians(80)
+    sk.arc_through(
+        pt(radius + half, a), pt(radius + half, math.pi / 2), pt(radius + half, b)
+    )
+    x, y = pt(radius, b)
+    sk.arc_through(
+        pt(radius + half, b),
+        (x + half * math.sin(b), y - half * math.cos(b)),
+        pt(radius - half, b),
+    )
+    sk.arc_through(
+        pt(radius - half, b), pt(radius - half, math.pi / 2), pt(radius - half, a)
+    )
+    x, y = pt(radius, a)
+    sk.arc_through(
+        pt(radius - half, a),
+        (x - half * math.sin(a), y + half * math.cos(a)),
+        pt(radius + half, a),
+    )
+    p.extrude(sk.add(), 8, mode="cut", name="Adjustment slot")
+    pivot_stack_frames(p, z, -250, -227)
+    p.material("steel")
+    verify(p)
+    return p
+
+
+def prepare_block(block):
+    # The upper block narrows: a real cast boss reaches the bracket face.
+    B.axis_solid(
+        block,
+        (68, MOUNT_BOLT_Y, UPPER_BRACKET_Z),
+        (100, MOUNT_BOLT_Y, UPPER_BRACKET_Z),
+        64,
+        "Alternator upper mounting boss",
+    )
+    for z in (BRACKET_Z, UPPER_BRACKET_Z):
+        for dz in MOUNT_BOLT_OFFSETS:
+            B.bore(
+                block,
+                (85, MOUNT_BOLT_Y, z + dz),
+                (101, MOUNT_BOLT_Y, z + dz),
+                8.8,
+                "Alternator mounting bore",
+                over=0,
+            )
+    block.frame(
+        "alternator_adjustment",
+        origin=(100, -175, UPPER_BRACKET_Z),
+        z=(1, 0, 0),
+        x=(0, 1, 0),
+    )
+
+
 def prepare_cover(cover):
     from om615_spec import COVER_Y0
 
-    # A real flange and open register connect the new pump to the chain case.
-    sk = cover.sketch(Plane.xz(COVER_Y0 + 7), name="Vacuum pump mounting pad")
-    sk.circle((VAC_X, VAC_Z), r=59)
-    cover.extrude(sk.add(), 7, mode="add", name="Vacuum pump mounting pad")
-    sk = cover.sketch(Plane.xz(COVER_Y0 + 8), name="Vacuum pump register")
-    sk.circle((VAC_X, VAC_Z), r=48.5)
-    cover.extrude(sk.add(), 10, mode="cut", name="Vacuum pump register")
+    # A closed, cast side pocket bridges the whole flange into the chain case.
+    # The former 7 mm annulus left the back of the pump open to daylight.
+    sections = []
+    for y, r in ((COVER_Y0, 59), (-243, 58), (-217, 53), (-207, 48)):
+        sk = cover.sketch(Plane.xz(y), name="Vacuum pocket station")
+        sk.circle((VAC_X, VAC_Z), r=r)
+        sections.append(sk.add().id)
+    cover._add(
+        dict(type="Loft", name="Vacuum drive pocket", sketch_ids=sections, mode="add")
+    )
+    sections = []
+    for y, r in ((COVER_Y0 - 1, 49), (-243, 48), (-223, 43), (-217, 40)):
+        sk = cover.sketch(Plane.xz(y), name="Vacuum pocket core station")
+        sk.circle((VAC_X, VAC_Z), r=r)
+        sections.append(sk.add().id)
+    cover._add(
+        dict(
+            type="Loft",
+            name="Vacuum drive pocket core",
+            sketch_ids=sections,
+            mode="cut",
+        )
+    )
+    # The side pocket and main chain case share a core. Leaving the outer
+    # loft's inner wall here would put new metal across the chain guide rail.
+    from om615_spec import BLOCK_Y0, COVER_GASKET_T, COVER_WALL, COVER_FRONT_T
+
+    back = BLOCK_Y0 - COVER_GASKET_T
+    sk = cover.sketch(Plane.xz(back), name="Shared timing case core")
+    B._cover_outline(sk, inset=COVER_WALL, open_floor=True)
+    cover.extrude(
+        sk.add(),
+        back - COVER_Y0 - COVER_FRONT_T,
+        mode="cut",
+        name="Shared timing case core",
+    )
+    cx, cz = VAC_X + CAM_CENTER[0], VAC_Z + CAM_CENTER[1]
+    B.bore(
+        cover, (cx, -218, cz), (cx, -206, cz), 18.4, "Timer bearing register", over=0
+    )
+    cover.frame("vacuum_bearing", origin=(cx, -207, cz), z=(0, -1, 0), x=(1, 0, 0))
     sk = cover.sketch(Plane.xz(COVER_Y0 + 8), name="Vacuum pump mounting bolts")
     for i in range(6):
         a = math.tau * i / 6
@@ -603,7 +820,7 @@ def prepare_cover(cover):
 
 def assembly_inputs():
     return dict(
-        alternator=[ALT_X, ALT_Z, ALT_D, ALT_LUG],
+        alternator=[ALT_X, ALT_Z, ALT_D, ALT_LUG, MOUNT_BOLT_Y, *MOUNT_BOLT_OFFSETS],
         pitch_offset=PITCH_OFFSET,
         fan=[FAN_BACK_OFFSET, FAN_R],
         vacuum=[VAC_X, VAC_Z, VAC_DEPTH, *CAM_CENTER],
@@ -615,7 +832,7 @@ def check_subassemblies(app):
     reports = {}
     for name in ("alternator stator assembly", "alternator rotor assembly"):
         app.assembly(name, create=False).activate()
-        r = app.interference(mode="exact", max_pairs=100, deadline_s=60)
+        r = app.interference(mode="exact", max_pairs=1000, deadline_s=60)
         reports[name] = r
         if r.get("truncated") or r["clash"]:
             raise SdkError(f"{name}: incomplete or clashing internal assembly: {r}")
@@ -660,3 +877,45 @@ def motion_dimensions(report, accessories):
         raise SdkError(f"Vacuum diaphragm stroke {stroke:.4f} mm is incorrect")
     result["vacuum diaphragm"] = dict(stroke_mm=stroke)
     return result
+
+
+def check_mountings(app, rig):
+    """Check load-path contact and a closed pump pocket, not just non-overlap."""
+    cover = app.part("timing cover", create=False)
+    section = app.section(part=cover.id, base_plane="yz", offset=VAC_X, regions=True)
+    if section["area"] < 1500:
+        raise SdkError(f"Vacuum drive pocket has insufficient side section: {section}")
+    rig.activate()
+    pairs = [
+        ("timing cover", "vacuum pump casting"),
+        ("timing cover", "vacuum timer shaft bush"),
+    ]
+    for name in ("alternator mounting bracket", "alternator adjustment bracket"):
+        pairs.extend([("block", name), (name, "alternator stator")])
+        for i in range(2):
+            pairs.extend(
+                [
+                    (f"{name} foot_bolt_{i}", f"{name} foot_washer_{i}"),
+                    (f"{name} foot_washer_{i}", name),
+                ]
+            )
+        front = name if name == "alternator mounting bracket" else "alternator stator"
+        rear = "alternator stator" if name == "alternator mounting bracket" else name
+        pairs.extend(
+            [
+                (f"{name} pivot_bolt", f"{name} pivot_front_washer"),
+                (f"{name} pivot_front_washer", front),
+                (f"{name} pivot_back_washer", rear),
+                (f"{name} pivot_nut", f"{name} pivot_back_washer"),
+            ]
+        )
+    pairs.extend(
+        (f"vacuum mount screw {i + 1}", "vacuum pump casting") for i in range(6)
+    )
+    measured = []
+    for a, b in pairs:
+        r = app.measure(a=dict(occurrence=a), b=dict(occurrence=b))
+        if r["distance"] > 0.002 or r.get("overlap_volume", 0) > 0.01:
+            raise SdkError(f"Mounting contact failed: {a} / {b}: {r}")
+        measured.append(dict(a=a, b=b, **r))
+    return dict(pocket_side_section=section, contacts=measured)
