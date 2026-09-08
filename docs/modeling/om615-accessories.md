@@ -23,16 +23,19 @@ kinematic model, not OEM manufacturing geometry. In particular:
 
 - The belt occupies its running envelope; individual belt material points do not
   circulate in the animation. Its pulley ratios use pitch radii and assume no slip.
-- The intermediate timer drive is a half-speed kinematic relation. A physical
-  intermediate shaft, its bearings and a rerouted timing chain remain to be built.
+- The intermediate timer drive is a half-speed kinematic relation. The cam now
+  has an integral shaft supported by a flanged bush in the timing-cover pocket.
+  Its intermediate sprocket and the rerouted timing chain remain to be built.
 - The face cam is a faceted inverse roller envelope with 0.5 mm modeling
   allowance. It demonstrates the linkage motion; it is not a production cam
   grind, contact-force solution, or wear model.
 - The diaphragm rim is fixed and its centre translates. The flexible membrane,
   return spring, check valves and pneumatic action are not simulated. The roller
   moves with its yoke; its independent bearing rotation is not simulated.
-- The alternator has a bored mounting bracket and cast lugs. Its tension-adjusting
-  strap, pivot hardware, electrical terminals and detailed windings remain absent.
+- The alternator now has bolted lower and upper supports, an arcuate adjustment
+  slot, and twelve copper stator winding packs in matching slots. The packs
+  represent bundles rather than individual insulated wire turns. Electrical
+  terminals and detailed rotor field windings remain absent.
 - The original engine's broad casting shapes still need refinement. Adding these
   accessories does not establish the accuracy of the rest of the engine.
 
@@ -69,7 +72,7 @@ motion. It is not continuous collision detection. Keep the default 49 samples:
 in a diagnostic lower-engine fixture, 90-degree pose jumps selected a different
 slider-crank branch; 15-degree steps retained the intended branch and passed.
 
-## Measurements, 2026-09-08
+## Original front-drive measurements, 2026-09-08
 
 Final engine: **97 parts, 284 top-level occurrences, one driving DOF**. All strict
 part checks passed. The two alternator subassemblies passed internally.
@@ -144,3 +147,59 @@ synchronous result before the new job completed. The test now waits for both
 `has_result` and `not running`; the registry assertion remains in place.
 The corrected motion smoke test passed 20 consecutive runs; the accessory test
 also passed again with an explicit assertion that the new material landed.
+
+## Mounting correction after visual review, 2026-09-08
+
+The previous pump flange touched the timing cover, but only a 7 mm ring hung
+from its side. Its rear opening was exposed. The alternator bracket also touched
+its lower lug but had no pivot hardware or upper support. These were incomplete
+connections despite the passing interference reports.
+
+The correction adds:
+
+- A hollow lofted side pocket, fused into the timing cover, with a shared core
+  opening into the main chain chamber. A timer shaft and flanged bearing bush
+  now extend into this pocket. The six pump flange screws clamp to the pocket.
+- Lower and upper alternator brackets, four M8 block attachment screws and
+  washers, two M10 bolt/washer/nut stacks, a cast upper block boss and an
+  adjustment slot concentric with the lower pivot.
+- Twelve copper winding packs, corresponding stator slots, and rear-casting
+  clearance for the winding end turns. The stator subassembly has 15 leaves.
+
+The new gate checks 28 actual contacting pairs: flange/case, bush/case,
+block/brackets, brackets/casting, bolt heads/washers, washers/supports and
+nuts/washers. It also measures the timing-cover side section through the pump
+centre: **1,930.15 mm², one connected region**, rather than accepting a thin
+flange ring. This checks geometry and mounting continuity, not bolt preload,
+thread strength, bearing life or casting-process suitability.
+
+`om615_mounting_smoke` passes the real lower-engine fixture and proves that a
+missing pivot bolt and the former thin-ring design are refused. Both this test
+and `om615_accessories_smoke` passed. The complete engine remains the motion
+gate because the lower fixture omits the chain guide: the initial new pocket
+interfered with that guide, and extending the common chain-case core corrected
+it. No collision pair was excluded.
+
+Final assembly: **104 parts, 302 top-level occurrences**.
+
+| Gate | Result |
+| --- | --- |
+| Full build before the local cover correction | 115.1 s |
+| Exact standing sweep after correction | 947 candidate checks, zero clashes; 17.29 s |
+| Exact motion, 49 poses over 720° | 21,910 checks, zero clashes; 229.50 s |
+| Motion cache on that run | 5,513 reused, 16,397 executed |
+| Immediate repeat in the same headless session | 21,910 reused, zero executed; 6.38 s wall clock |
+| Explicit mounting contact measurements | All 28 passed; 7.32 s |
+| Staged cover apply | Native `geometry_reused: true`, 26 cached features, 5 datum executions |
+
+The cover correction used `--project ... --update-component timing-cover
+--stage full`; it did not rebuild the rest of the engine. Preview still skips
+standing and mounting contact work. Local/full perform both.
+
+Artifacts are in `/tmp/om615-mounted-drive/`: accepted `om615.dsgn`, updated
+`om615.glb`, mounting and validation JSON, and mounting/winding close-ups.
+The export was reproduced in a disposable renderer copy and compared with the
+saved exact motion poses: zero positional difference; quaternion agreement
+within floating-point rounding. The accepted project's study remains exact and
+collision-enabled. `animation-verification.json` records that comparison and
+the four measured piston strokes.

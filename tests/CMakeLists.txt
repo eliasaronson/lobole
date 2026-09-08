@@ -706,3 +706,8 @@ add_test(NAME om615_accessories_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/om615_accessories_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(om615_accessories_smoke PROPERTIES TIMEOUT 180)
+
+add_test(NAME om615_mounting_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/om615_mounting_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(om615_mounting_smoke PROPERTIES TIMEOUT 180)
