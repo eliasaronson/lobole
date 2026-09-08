@@ -159,6 +159,29 @@ TEST_CASE("A half-disk (diameter line + semicircle arc) extrudes",
   CHECK_THAT(prism.Volume(), WithinRel(0.5 * M_PI * 1.0 * 1.0 * 3.0, 1e-3));
 }
 
+TEST_CASE("Rounded flanges extrude on translated oblique planes",
+          "[extrude][arc]") {
+  std::vector<sketch::Entity> edges{
+      sketch::Line{{-24, -34}, {24, -34}},
+      sketch::Arc{{24, -22}, 12, -M_PI / 2, 0},
+      sketch::Line{{36, -22}, {36, 22}},
+      sketch::Arc{{24, 22}, 12, 0, M_PI / 2},
+      sketch::Line{{24, 34}, {-24, 34}},
+      sketch::Arc{{-24, 22}, 12, M_PI / 2, M_PI},
+      sketch::Line{{-36, 22}, {-36, -22}},
+      sketch::Arc{{-24, -22}, 12, M_PI, 3 * M_PI / 2}};
+  const auto loops = sketch::BuildLoops(edges);
+  REQUIRE(loops.size() == 1);
+  for (const glm::vec3 origin :
+       {glm::vec3(202, 0, 212.4f), glm::vec3(10202, 500, 1212.4f)}) {
+    const SketchPlane plane(origin, {0.8f, 0, -0.6f}, {0, 1, 0});
+    const CADShape prism = sketch::BuildPrism(plane, loops, 10, false);
+    REQUIRE(prism.IsValid());
+    const double area = 72 * 68 - (4 - M_PI) * 12 * 12;
+    CHECK_THAT(prism.Volume(), WithinRel(area * 10, 1e-6));
+  }
+}
+
 TEST_CASE("Offset expands a rectangle loop with rounded corners",
           "[extrude][offset]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));

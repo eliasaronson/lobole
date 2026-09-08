@@ -233,6 +233,18 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
 
 namespace {
 
+// Use the same double-precision orthonormal frame as OCC circles and faces.
+// PlaneToWorld is a rendering float transform: rounding a translated oblique
+// point there moves it off the curve's plane, even when its radial error is
+// negligible. MakeEdge then rejects an otherwise exact line/arc junction.
+gp_Pnt ProfilePoint(const SketchPlane& plane, const glm::vec2& uv) {
+  const auto o = plane.GetOrigin(), n = plane.GetNormal(), u = plane.GetUAxis();
+  const gp_Ax2 frame(gp_Pnt(o.x, o.y, o.z), gp_Dir(n.x, n.y, n.z),
+                     gp_Dir(u.x, u.y, u.z));
+  return frame.Location().Translated(gp_Vec(frame.XDirection()) * uv.x +
+                                     gp_Vec(frame.YDirection()) * uv.y);
+}
+
 // Builds an OCC clamped, uniform, non-rational B-spline curve on the plane
 // from UV control poles. The knot vector matches the header's BSplineKnots
 // (distinct knots 0..(n-p) with clamped end multiplicities), so the OCC edge
@@ -244,8 +256,7 @@ Handle(Geom_BSplineCurve)
   const int p = BSplineDegree(s);
   TColgp_Array1OfPnt poles(1, n);
   for (int i = 0; i < n; i++) {
-    const glm::vec3 w = plane.PlaneToWorld(s.poles[i]);
-    poles.SetValue(i + 1, gp_Pnt(w.x, w.y, w.z));
+    poles.SetValue(i + 1, ProfilePoint(plane, s.poles[i]));
   }
   const int nDistinct = n - p + 1;
   TColStd_Array1OfReal knots(1, nDistinct);
@@ -266,10 +277,7 @@ Handle(Geom_BSplineCurve)
 TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop) {
   const glm::vec3 n3 = plane.GetNormal();
   const gp_Dir normal(n3.x, n3.y, n3.z);
-  auto toPnt = [&](const glm::vec2& uv) {
-    glm::vec3 w = plane.PlaneToWorld(uv);
-    return gp_Pnt(w.x, w.y, w.z);
-  };
+  auto toPnt = [&](const glm::vec2& uv) { return ProfilePoint(plane, uv); };
 
   BRepBuilderAPI_MakeWire wire;
   if (loop.circle) {
@@ -763,10 +771,7 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
   const glm::vec3 n3 = plane.GetNormal();
   const gp_Dir normal(n3.x, n3.y, n3.z);
   const glm::vec3 uAxis = plane.GetUAxis();
-  auto toPnt = [&](const glm::vec2& uv) {
-    const glm::vec3 w = plane.PlaneToWorld(uv);
-    return gp_Pnt(w.x, w.y, w.z);
-  };
+  auto toPnt = [&](const glm::vec2& uv) { return ProfilePoint(plane, uv); };
   // A degenerate segment (coincident endpoints, zero-radius arc) makes
   // MakeEdge fail; calling .Edge() on a failed maker THROWS StdFail_NotDone,
   // which uncaught aborts the whole app. Check IsDone() before Edge(), and
