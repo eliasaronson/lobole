@@ -925,7 +925,7 @@ def main():
         app.open_project(path=project)
         if args.stage != "cam":
             with phase("fem"):
-                shop.fem(app)
+                shop.fem(app, args.out)
         if args.stage != "fem":
             with phase("cam"):
                 shop.cam(app, args.out)

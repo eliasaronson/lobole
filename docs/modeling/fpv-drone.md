@@ -253,8 +253,19 @@ arm is the conventional freestyle case and it is where the factor drops to
 3.2. Both peaks are at the OUTER arm bolt hole — which is where a real
 freestyle arm cracks, so the model is at least failing in the right place.
 
+The arm's peak STRESS and its peak MOVEMENT are not in the same place: the
+stress is at the bolt hole (54, 0, 0), the 0.70 mm of deflection is out at the
+motor (126, 0, 0), which is the end that is free to move.
+
+A solved result is derived and the project does not keep one — only a topology
+study's density is written — so the reopened studies carry their load cases,
+mesh size and fixings and report `has_results: false`, `stale: true`. That is
+the right call (a stress field that outlives the geometry it was computed from
+is a trap), and it is why the numbers are written to `fem.csv` beside the
+model as well as to the terminal. Re-running them is 25 s.
+
 **Read them as indicative, not qualifying,** and the run prints the same
-caveat beside the numbers: the solver is isotropic and a carbon laminate is
+caveat beside the numbers (it is the last row of the CSV too): the solver is isotropic and a carbon laminate is
 not. In-plane it is a fair proxy — quasi-isotropic 3K/epoxy, in-plane loads —
 but a real arm fails by DELAMINATION at the root, and no isotropic model can
 see that.
@@ -356,5 +367,6 @@ STEP for the assembly and for each carbon part, STL for the printed ones,
 `bom.csv`, `mass-budget.csv`, and renders. `BUILD.md` beside them is a copy of
 [the build guide](fpv-drone-build.md) — the build order and the buying list.
 
+`--stage fem` adds `fem.csv` — the load cases, what each did, and the caveat.
 `--stage cam` adds the G-code: `<sheet> - T<n>.nc`, one file per cutter, each
 complete and starting by loading its own tool.

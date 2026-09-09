@@ -11,6 +11,7 @@ a carbon laminate is not.
 `cam` makes one job per sheet thickness, nests what is cut from that sheet
 into it, drills and profiles it, and posts G-code for a 600 x 400 router.
 """
+import csv
 import math
 import os
 
@@ -41,6 +42,11 @@ FEM_CAVEAT = (
     "isotropic model can see that. Read these as indicative, not qualifying: "
     "they say whether the section is in the right order of magnitude, not "
     "whether the part passes.")
+
+
+def _at(p):
+    """A point, as one CSV cell."""
+    return f"{p[0]:.1f} {p[1]:.1f} {p[2]:.1f}"
 
 
 def bore(part, at, radius=M3_CLEAR / 2, tol=0.6):
@@ -79,8 +85,17 @@ def study(app, part, name, fixed, forces, mesh_size):
     return out
 
 
-def fem(app):
-    """The load cases worth asking about, and what they answer."""
+def fem(app, out=None):
+    """The load cases worth asking about, and what they answer.
+
+    The numbers go to `fem.csv` beside the model as well as to the terminal,
+    because a solved FEM result is DERIVED and the project does not keep one
+    (only a topology study's density is written): reopened, these studies
+    carry their load cases and report `has_results: false`. That is the right
+    call — a stress field that outlives the geometry it was computed from is
+    a trap — but it means the answers need somewhere to live. Re-running is
+    25 s.
+    """
     print("fem:")
     arm = app.part("Arm", create=False)
     top = app.part("Top plate", create=False)
@@ -124,6 +139,20 @@ def fem(app):
     if bad:
         raise SdkError("STRUCTURE FAILED:\n  " + "\n  ".join(bad))
     print(f"  {FEM_CAVEAT}")
+    if out is not None:
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "fem.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["study", "elements", "nodes", "max_displacement_mm",
+                        "displacement_at", "max_von_mises_mpa", "stress_at",
+                        "factor_of_safety"])
+            for r in results:
+                move, stress = r["max_displacement_mm"], r["max_von_mises_mpa"]
+                w.writerow([r["name"], r["elements"], r["nodes"],
+                            f"{move['value']:.3f}", _at(move["at"]),
+                            f"{stress['value']:.1f}", _at(stress["at"]),
+                            f"{r['factor_of_safety']:.1f}"])
+            w.writerow(["CAVEAT", FEM_CAVEAT])
     return results
 
 
