@@ -56,8 +56,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "base_view, hidden, id, name, position, quality, scale, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
-     "placement, dangling/stale {update?}.",
-     "update"},
+     "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
+     "THAT sheet rather than whichever one is active — a report about the "
+     "wrong sheet is worse than none.",
+     "drawing, update"},
     {"add_drawing_view",
      "Add an HLR view of a part/assembly {drawing, source, orientation, "
      "scale, position}. Omit BOTH scale and position and it is placed the "
@@ -82,14 +84,15 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views", "List views with placement and scale.", ""},
     {"update_drawing",
-     "Re-project all views from current geometry. `budget_s` bounds the WHOLE "
+     "Re-project all views from current geometry. {drawing?} names the sheet. "
+     "`budget_s` bounds the WHOLE "
      "update: a view still running when it is gone stops, keeps its previous "
      "curves and reports that it ran out, so a slow sheet costs what you said "
      "instead of blocking the server for as long as it takes. Exact HLR is "
      "priced by SURFACE complexity, not part count — 16 bored boxes are "
      "3.1 ms a view and one 4-turn helical spring is 6.4 s — so a view's "
      "`quality: \"fast\"` is the other lever. Omit for no budget.",
-     "budget_s"},
+     "budget_s, drawing"},
     {"list_drawing_geometry",
      "Projected 2D curves of a view (for picking/dimensioning).", "view"},
     {"add_drawing_dim", "Add a driven dimension between picked view geometry.",
@@ -256,6 +259,36 @@ std::string RequireQuality(const nlohmann::json& j) {
   return q;
 }
 
+namespace {
+
+// `drawing` (name or id) switches to that tab first. Every verb that acts on
+// A drawing takes it: without one, `check_drawing` judged whichever sheet
+// happened to be active, which is how a general arrangement shipped with its
+// side view inside its top view while its report said "ok".
+void SelectDrawing(ui::AppState& state, const RpcParams& p) {
+  if (!p.contains("drawing"))
+    return;
+  const nlohmann::json& which = p.at("drawing");
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const auto& slot = state.parts[i];
+    if (slot.kind != ui::DocKind::Drawing)
+      continue;
+    if (which.is_number() ? slot.id == which.get<uint64_t>()
+                          : slot.name == which.get<std::string>()) {
+      ui::SetActivePart(state, i);
+      return;
+    }
+  }
+  std::string have;
+  for (const auto& slot : state.parts)
+    if (slot.kind == ui::DocKind::Drawing)
+      have += (have.empty() ? "" : ", ") + slot.name;
+  throw std::runtime_error("no drawing named " + which.dump() +
+                           "; drawings: " + (have.empty() ? "(none)" : have));
+}
+
+} // namespace
+
 } // namespace
 
 std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
@@ -335,30 +368,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "add_drawing_view") {
     // `drawing` (name or id) switches to that drawing tab first — the doc
     // has always described it, and the handler used to refuse the key.
-    if (p.contains("drawing")) {
-      const json& which = p.at("drawing");
-      bool found = false;
-      for (size_t i = 0; i < state.parts.size(); i++) {
-        const auto& slot = state.parts[i];
-        if (slot.kind != ui::DocKind::Drawing)
-          continue;
-        if (which.is_number() ? slot.id == which.get<uint64_t>()
-                              : slot.name == which.get<std::string>()) {
-          ui::SetActivePart(state, i);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        std::string have;
-        for (const auto& slot : state.parts)
-          if (slot.kind == ui::DocKind::Drawing)
-            have += (have.empty() ? "" : ", ") + slot.name;
-        throw std::runtime_error(
-            "no drawing named " + which.dump() +
-            "; drawings: " + (have.empty() ? "(none)" : have));
-      }
-    }
+    if (p.contains("drawing"))
+      SelectDrawing(state, p);
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     // `source` = the source document's NAME (a part or an assembly), resolved
@@ -495,6 +506,9 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return out;
   }
   if (m == "check_drawing") {
+    if (p.contains("drawing"))
+      SelectDrawing(state,
+                    p); // {drawing}: check THAT sheet, not the active one
     // Report-only sheet-layout validation. update=true (default) re-projects
     // first so the verdict reflects current geometry (matching what
     // export_drawing would produce); update=false judges the cached renders
@@ -510,6 +524,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                 {"dims", state.drawing->DimCount()}};
   }
   if (m == "update_drawing") {
+    if (p.contains("drawing"))
+      SelectDrawing(state, p); // {drawing}: re-project THAT sheet
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     // `budget_s` bounds the whole update. Without one it runs to completion,
