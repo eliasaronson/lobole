@@ -139,6 +139,12 @@ class _Rpc:
         """`_timeout` (seconds) for the calls that need one — a big STEP
         import runs for minutes. Underscored so it can never collide with a
         documented parameter."""
+        # `from` and `class` are python keywords, so a caller cannot pass
+        # them as keyword arguments at all: add_motion_study(from=0) is a
+        # syntax error, and the only way through was app.call() with a dict.
+        # A trailing underscore is python's own convention for exactly this.
+        for name in [k for k in kw if k.endswith("_") and k[:-1] in self.params]:
+            kw[name[:-1]] = kw.pop(name)
         if not self.free_form and self.name not in self._app._schemas:
             unknown = sorted(k for k in kw if k not in self.params)
             if unknown:
