@@ -76,16 +76,17 @@ propeller and a 6S 1300 pack.
   catalogue masses, not read off the document — a battery and four motors
   are most of the mass and all five are envelopes.
 
-Mass is reported honestly rather than read off the document: carbon is
-modelled as `plastic_black` because the material table has no carbon
-(1040 kg/m3 against 1550), so `mass-budget.csv` corrects the five carbon
-rows by density and replaces every bought row with its catalogue mass.
-435 g dry, 654 g all-up, about 9:1 thrust to weight.
+Mass is reported honestly rather than read off the document: the carbon is
+carbon (the material table grew a 1550 kg/m3 entry for it), and
+`mass-budget.csv` replaces every BOUGHT row with its catalogue mass,
+because a battery and four motors are most of the weight and all five are
+envelopes. 435 g dry, 654 g all-up, about 9:1 thrust to weight.
 
-## Eight defects this found
+## What building it found
 
-Building it turned up eight app bugs, seven fixed here and one worked
-around:
+Eight defects, all fixed, and six things the app or its SDK simply did not
+do. Every defect fired on an ORDINARY joint or an ordinary sheet, which is
+why they had survived.
 
 1. **A through hole in a thin plate warned that it drilled air.** The
    check sampled the bore over its own length, and a through bore is a
@@ -131,12 +132,50 @@ Two more came out of a second pass over the sheets:
    lands, not its drawing's centre: a side view that runs from z 0 upward
    sits 18 mm above the point that places it.
 
-Not fixed, worked around in the generator: **a drawing note is neither
-measured nor rendered as multiple lines** — `LabelBox` boxes the whole
-string as one line, so any multi-line note reads as running off the sheet,
-and the SVG writes one `<text>` element, which ignores newlines. The
-generator emits one note per line (`note_block`). The fix is to split on
-newlines in both places.
+9. **A drawing note with newlines in it** was neither measured (`LabelBox`
+   boxed the whole string as one line, so a 200-character hole table came
+   out 440 mm wide and reported as running off the sheet) nor rendered (the
+   SVG wrote one `<text>` element, which ignores newlines; the PDF one text
+   object). All three per line now. (`DrawingDimension`, `DrawingExport`)
+
+And six gaps, now filled: **carbon fibre** in the material table;
+**`check_drawing`/`update_drawing` take a `drawing`** rather than judging
+whichever sheet is active; **interference pairs carry `a_id`/`b_id`**,
+because sixteen occurrences answer to "ISO 4762 M3x10"; **a motion study
+reports `seated_contacts` and `appeared`**, since a mesh check calls
+touching a clash and a working machine is never "clean"; a **trailing
+underscore** in the SDK reaches a parameter python reserves (`from_`); and
+two doc strings that cost real time — `add_mate`'s `flipped` DEFAULTS TO
+TRUE, and `mass_properties` returns `mass_g`.
+
+## Where the time goes
+
+`--stage all` reports it. 57 s, of which:
+
+| | s | |
+|---|---|---|
+| fasteners | 14.5 | 42 `fit_fastener` calls, each traversing an axis through 91 occurrences |
+| renders | 11.9 | a 256-sample path trace and a view sheet |
+| fastener check | 8.7 | all 42 re-derived against their stacks |
+| clearances | 5.9 | six exact distances |
+| parts | 3.5 | 25 parts, 300-odd features |
+| everything else | 12 | clash sweep 1.4, motion study 1.4, sheets 1.6, exports 1.9 |
+
+The motion study — 24 poses, every pair checked at each — is 1.4 s, and the
+whole-assembly exact clash sweep is 1.4 s: box pruning does its job.
+
+What cost 55 s until it was removed was ONE measurement, the diagonal
+propeller pair. An exact minimum distance prunes face pairs by their boxes
+against the best found so far, and between two lofted propellers 151 mm
+apart every facing pair sits in the same narrow band, so nothing prunes and
+900-odd spline-spline extrema get computed. Bounding it by the shapes'
+vertices does not help (measured: a 153.4 bound against a true 151.45 still
+leaves 30 of 53 faces live, because a twisted blade's box is enormous next
+to the gap). What would help is pruning at triangle granularity — a mesh
+distance with a stated deflection, which `interference` has and `measure`
+does not. The measurement itself was redundant: those two propellers cannot
+touch, the adjacent pair is measured, and the motion study checks every
+pair anyway.
 
 ## Files
 
