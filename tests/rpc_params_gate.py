@@ -13,6 +13,8 @@ This gate makes the written-down copy honest, in BOTH directions:
   - a key the handler reads with no row  -> an agent cannot discover it
   - a key in the row nobody reads        -> an agent sends it and the strict
                                             unknown-key check REJECTS the call
+  - a branch that hands its params to a HELPER with no annotation -> the row
+    describes a fraction of the method and the gate cannot tell
 
 The second direction is the one worth having. A `describe` that advertises a
 parameter the dispatcher then refuses is worse than saying nothing, and it is
@@ -123,6 +125,15 @@ def main():
         got = declared[name]
         if got is None:
             problems.append(f"{name}: MethodDoc row has no params initialiser")
+        elif info["handoff"] and not info["annotated"] and not info["opaque"]:
+            # The row may even MATCH here: it matches what the scanner can
+            # see, and the helper is what it cannot. Saying so is the point.
+            problems.append(
+                f"{name}: hands its params to "
+                f"{', '.join(info['handoff'])} — the scanner cannot follow "
+                f"that, so the row describes only the keys read in the "
+                f"branch. Declare what the helper reads with "
+                f"`// rpc-params: a, b, c` (or `// rpc-params: none`)")
         elif got != want:
             w = "*" if want == "*" else (", ".join(want) or "(none)")
             g = "*" if got == "*" else (", ".join(got) or "(none)")
@@ -150,7 +161,8 @@ def main():
         print("\nFix the row beside the branch, or — when the keys are read "
               "somewhere\nthe scanner cannot see (a lambda taking the key as "
               "an argument, a helper) —\nadd a `// rpc-params: a, b, c` "
-              "comment inside the branch. `// rpc-params: opaque`\nis for a "
+              "comment inside the branch. `// rpc-params: none` says the "
+              "helper reads none of\nthem; `// rpc-params: opaque` is for a "
               "genuinely free-form params object (p.raw()).")
         return 1
     print("every describe row matches the keys its handler reads")
