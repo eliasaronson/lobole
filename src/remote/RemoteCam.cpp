@@ -191,14 +191,20 @@ constexpr MethodDoc kCamMethods[] = {
      "to pick instead. A "
      "derived pocket deep enough to want adaptive clearing COMES BACK as "
      "type adaptive; set_cam_op forces either strategy.",
-     "bottom_z, setup, side, target, targets, tool, top_z, type"},
+     "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
+     "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, "
+     "use_outline"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields}. `tool` re-points it "
      "at another cutter: a stepdown still at the old tool's derived value "
      "follows the new one (every derived number is a fraction of the "
      "cutter), one you typed is kept, and a tool this setup does not have is "
      "refused.",
-     "id"},
+     "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
+     "finish_tool, id, lead_arcs, name, peck, side, stepdown, stepover, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, "
+     "use_outline"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
      "setup's new order. Operation order IS the cutting sequence — the "
@@ -211,7 +217,10 @@ constexpr MethodDoc kCamMethods[] = {
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
      "WITHOUT adding it: the derived operation, or why that pick cannot make "
      "one. The dry run behind add_cam_op's derivation.",
-     "bottom_z, setup, side, target, targets, tool, top_z, type"},
+     "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
+     "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
+     "stock_to_leave, tabs, target, targets, tool, top_z, type, "
+     "use_outline"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm), lowest Z, and the "
@@ -1043,6 +1052,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "add_cam_op" || m == "cam_derive_op") {
+    // Every field of an operation that is not depth or pick is read inside
+    // ApplyOpFields, which the scanner cannot follow -- and a key missing from
+    // the row is a key the generated SDK refuses to send, so `tabs` was
+    // documented in prose and unreachable through it.
+    // rpc-params: climb, corner_relief, edge_size, enabled, finish_stock
+    // rpc-params: finish_tool, lead_arcs, name, peck, stepdown, stepover
+    // rpc-params: stock_to_leave, tabs, use_outline
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
@@ -1103,6 +1119,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "set_cam_op") {
+    // The add_cam_op fields, all of them through ApplyOpFields (above).
+    // rpc-params: bottom_z, climb, corner_relief, edge_size, enabled
+    // rpc-params: finish_stock, finish_tool, lead_arcs, name, peck, side
+    // rpc-params: stepdown, stepover, stock_to_leave, tabs, target, targets
+    // rpc-params: tool, top_z, type, use_outline
     auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
       throw std::runtime_error("no CAM operation with that id");
