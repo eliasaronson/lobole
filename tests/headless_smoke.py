@@ -1476,6 +1476,42 @@ def main():
                    "and the setup before it")
             d.call("new_project")
 
+        phase("A job is addressed by name, not by whichever tab is in front")
+        if not has_cam:
+            expect_error(d, "list_cam_setups", "unknown method")
+            d.call("new_project")
+        else:
+            # Every job verb used to act on the ACTIVE job document. That is
+            # the defect `check_drawing` had — it judged whichever sheet was in
+            # front and reported "ok" — and here it is worse: a `cam_post`
+            # after an incidental tab switch writes ANOTHER job's G-code to the
+            # path you named.
+            d.call("new_project")
+            for name in ("Plate A", "Plate B"):
+                d.call("add_part", name=name)
+                d.call("add_feature", feature={
+                    "type": "Box", "name": name, "position": [0, 0, 0],
+                    "width": 40, "height": 30, "depth": 20})
+                d.call("machine_part", name=f"Job {name[-1]}")
+            # Job B is the tab in front; every call below names Job A.
+            a = d.call("add_cam_setup", job="Job A", name="A's setup")["id"]
+            d.call("add_cam_op", job="Job A", setup=a, type="profile",
+                   top_z=20.0, bottom_z=0.0, stepdown=8.0)
+            mine = d.call("list_cam_setups", job="Job A")["setups"]
+            expect(len(mine) == 1 and mine[0]["id"] == a and
+                   len(mine[0]["operations"]) == 1,
+                   f"the named job is the one that answers: {mine}")
+            expect(len(d.call("list_cam_setups", job="Job B")["setups"]) == 0,
+                   "and the other job is untouched")
+            paths = d.call("cam_toolpath", job="Job A", setup=a)
+            expect(len(paths["operations"]) == 1,
+                   f"a toolpath is generated for the job named: {paths}")
+            # An unknown name is refused naming the jobs that exist, not
+            # silently answered by the active one.
+            expect_error(d, "list_cam_setups", "Job C", job="Job C")
+            expect_error(d, "list_cam_setups", "Job A", job="Job C")
+            d.call("new_project")
+
         phase("CAM over the RPC")
         # Skipped in a build without CAM (`cmake -DENABLE_CAM=OFF`), where these
         # methods do not exist at all. Gated on what `ping` says this BUILD

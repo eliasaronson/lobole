@@ -53,25 +53,28 @@ constexpr MethodDoc kCamMethods[] = {
      "open part), name?}. A job is a document of its own since v73 -- it "
      "REFERENCES parts and says how they are cut -- so this is the one step "
      "from a part you have open to a tab you can add setups on. Returns the "
-     "job's tab id and the job part it holds.",
+     "job's tab id and the job part it holds. Every verb below then takes "
+     "`job` (name or id) to say WHICH job it acts on; without one they act on "
+     "whichever job tab is in front, which is fine interactively and is a "
+     "trap in a script that switches tabs between calls.",
      "part, name"},
     {"add_job_part",
      "Add a part to the open job {part: id or name} -- another thing this job "
      "cuts. Returns the job part's id, which is what an operation target and "
      "a placement name. A job is what makes four brackets out of one sheet "
      "expressible; before v73 a setup could only ever be about one part.",
-     "part"},
+     "job, part"},
     {"remove_job_part",
      "Drop a part from the job {id}. Every placement and every operation "
      "target that named it goes with it -- a target on a part the job no "
      "longer holds would resolve against whatever body answered to the same "
      "element name, which is the wrong part, cut for real.",
-     "id"},
+     "id, job"},
     {"list_job_parts",
      "The parts this job cuts: id, source document, name, whether the source "
      "has changed since the job last saw it (`stale`), and where each sits in "
      "each setup.",
-     ""},
+     "job"},
     {"check_layout",
      "How the parts are arranged in the stock {setup?}: per placement, "
      "whether it is `inside` the stock, `partly_outside` (hanging over an "
@@ -79,7 +82,7 @@ constexpr MethodDoc kCamMethods[] = {
      "it runs into. Computed when asked, not while you drag: a sheet is laid "
      "out THROUGH states like these. The refusal lands at cam_toolpath and "
      "cam_post, where the mistake becomes G-code.",
-     "setup"},
+     "job, setup"},
     {"set_job_placement",
      "Where a part sits in the stock {setup, part, pos?: [x,y], rot_z?, "
      "enabled?, lay_face_up?: {feature_id, element}}. Position and spin are "
@@ -89,7 +92,7 @@ constexpr MethodDoc kCamMethods[] = {
      "clamps THIS part with that face at the spindle -- so one sheet can hold "
      "a baffle on its face beside a rail on its edge. It says nothing about "
      "the machine: no A word is posted.",
-     "setup, part, pos, rot_z, enabled, lay_face_up"},
+     "enabled, job, lay_face_up, part, pos, rot_z, setup"},
     {"add_cam_setup",
      "Add a milling setup {name?, post?: mach3|linuxcnc|grbl, safe_z?}; "
      "returns "
@@ -99,7 +102,7 @@ constexpr MethodDoc kCamMethods[] = {
      "most of them. `machine` puts one of your machines (list_machines) on "
      "it -- post, arcs, rotary axis, work area, rapid -- and the setup "
      "EMBEDS a copy, so the job file opens anywhere.",
-     "machine, name, post, safe_z"},
+     "job, machine, name, post, safe_z"},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
      "face it was picked from), origin_at (the corner it is measured FROM), "
@@ -110,7 +113,7 @@ constexpr MethodDoc kCamMethods[] = {
      "store, by name), tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
      "so a setup that lays the part flat reports the box the machine sees.",
-     ""},
+     "job"},
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "
@@ -154,8 +157,8 @@ constexpr MethodDoc kCamMethods[] = {
      "refused, naming the axis and the shortfall.",
      "fit_arcs, flip, has_rotary_axis, id, lay_face_up, machine, name, "
      "order, origin_at, post, reach_offset, rotation_a, safe_z, split_output, "
-     "stock, tool"},
-    {"remove_cam_setup", "Delete a setup {id} and its operations.", "id"},
+     "job, stock, tool"},
+    {"remove_cam_setup", "Delete a setup {id} and its operations.", "id, job"},
     {"add_cam_op",
      "Add an operation {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round, "
@@ -193,7 +196,7 @@ constexpr MethodDoc kCamMethods[] = {
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
-     "stock_to_leave, tabs, target, targets, tool, top_z, type, "
+     "job, stock_to_leave, tabs, target, targets, tool, top_z, type, "
      "use_outline"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields}. `tool` re-points it "
@@ -203,7 +206,7 @@ constexpr MethodDoc kCamMethods[] = {
      "refused.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, id, lead_arcs, name, peck, side, stepdown, stepover, "
-     "stock_to_leave, tabs, target, targets, tool, top_z, type, "
+     "job, stock_to_leave, tabs, target, targets, tool, top_z, type, "
      "use_outline"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
@@ -211,15 +214,15 @@ constexpr MethodDoc kCamMethods[] = {
      "generator and the post both walk it — so it decides what is roughed "
      "before what is finished, and where the tool changes and their M0 "
      "pauses fall.",
-     "id, to"},
-    {"remove_cam_op", "Delete an operation {id}.", "id"},
+     "id, job, to"},
+    {"remove_cam_op", "Delete an operation {id}.", "id, job"},
     {"cam_derive_op",
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
      "WITHOUT adding it: the derived operation, or why that pick cannot make "
      "one. The dry run behind add_cam_op's derivation.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
-     "stock_to_leave, tabs, target, targets, tool, top_z, type, "
+     "job, stock_to_leave, tabs, target, targets, tool, top_z, type, "
      "use_outline"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
@@ -234,7 +237,7 @@ constexpr MethodDoc kCamMethods[] = {
      "job and answers {pending, queued_passes, job: \"cam\"} at once; "
      "watch `background_jobs` until none of kind cam remains, then call "
      "again without `async` for the list.",
-     "async, path, post, setup"},
+     "async, job, path, post, setup"},
     {"cam_verify",
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
@@ -253,7 +256,7 @@ constexpr MethodDoc kCamMethods[] = {
      "`leftover_biggest` lists where, largest first — a height map cannot "
      "watch a slug fall out or know a tab was asked for, so those show up "
      "here too and are for you to recognise.",
-     "resolution, setup"},
+     "job, resolution, setup"},
     {"cam_simulate",
      "Play the POSTED file through a block of stock and report what has come "
      "off at a point in it {setup?, at?: 0..1 along the path or \"end\", "
@@ -265,9 +268,12 @@ constexpr MethodDoc kCamMethods[] = {
      "counts what the file states and nothing else. Generates the toolpaths "
      "if they are not current, and leaves the app SHOWING the simulation "
      "(screenshot it, or `close` to put the model back).",
-     "at, close, play, resolution, setup"},
+     "at, close, job, play, resolution, setup"},
     {"cam_post",
-     "Write the G-code for a setup {setup, path, post?}. Reports the line "
+     "Write the G-code for a setup {job?, setup, path, post?}. Pass `job` "
+     "unless you are sure which tab is in front: this writes a FILE, and the "
+     "wrong job's program under the right name is scrap at the machine. "
+     "Reports the line "
      "count, the ops it skipped and why, the targets a multi-target op could "
      "not follow (`skipped`), how much cutting lay beyond the travel and is "
      "missing from the file (`clipped_mm`), and `warnings`. Writes a "
@@ -275,7 +281,7 @@ constexpr MethodDoc kCamMethods[] = {
      "to a machine. With split_output on the setup, `path` is the base and "
      "one file per tool is written beside it as `<base> - T<n>.<ext>`, each "
      "complete and starting by loading its tool; `files` names every one.",
-     "path, post, setup"},
+     "job, path, post, setup"},
 };
 
 cam::Side SideFrom(const std::string& s) {
@@ -549,6 +555,34 @@ const char* MatchName(cam::MachineMatch match) {
   }
   return "unnamed";
 }
+// `job` (name or id) switches to that job tab first. Every verb that acts on
+// a job takes it: without one they act on whichever job happens to be in
+// front, which is how `check_drawing` once judged the wrong sheet and
+// reported "ok" (RemoteDrawings.cpp, SelectDrawing). Here it is worse -- a
+// `cam_post` after an incidental tab switch writes ANOTHER job's G-code to
+// the path you named.
+void SelectJob(ui::AppState& state, const RpcParams& p) {
+  if (!p.contains("job"))
+    return;
+  const nlohmann::json& which = p.at("job");
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const auto& slot = state.parts[i];
+    if (slot.kind != ui::DocKind::Job)
+      continue;
+    if (which.is_number() ? slot.id == which.get<uint64_t>()
+                          : slot.name == which.get<std::string>()) {
+      ui::SetActivePart(state, i);
+      return;
+    }
+  }
+  std::string have;
+  for (const auto& slot : state.parts)
+    if (slot.kind == ui::DocKind::Job)
+      have += (have.empty() ? "" : ", ") + slot.name;
+  throw std::runtime_error("no job named " + which.dump() +
+                           "; jobs: " + (have.empty() ? "(none)" : have));
+}
+
 } // namespace
 
 std::span<const MethodDoc> CamMethodDocs() { return kCamMethods; }
@@ -624,6 +658,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     return json{{"deleted", p.at("name").get<std::string>()}};
   }
 
+  // Which job, before anything asks what the active one holds.
+  SelectJob(state, p);
   cam::JobDocument* job = ui::ActiveJob(state);
   // One undo step per RPC that changes the job (R7); a refused call moves
   // nothing and records nothing.
@@ -637,6 +673,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         "and switches to it");
 
   if (m == "add_job_part") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     if (!p.contains("part"))
       throw std::runtime_error("add_job_part needs {part: id or name}");
     const nlohmann::json& pj = p.at("part");
@@ -661,6 +700,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "remove_job_part") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     const uint64_t id = p.at("id").get<uint64_t>();
     if (!job->RemovePart(id))
       throw std::runtime_error("no job part with id " + std::to_string(id) +
@@ -671,6 +713,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "list_job_parts") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     json out = json::array();
     for (const cam::JobPart& part : job->GetParts()) {
       json pj = {
@@ -699,6 +744,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "check_layout") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     json out = json::array();
     for (cam::Setup& setup : job->GetSetups()) {
       if (p.contains("setup") && setup.id != p.at("setup").get<uint64_t>())
@@ -728,6 +776,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "set_job_placement") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     const uint64_t partId = p.at("part").get<uint64_t>();
     if (job->FindPart(partId) == nullptr)
@@ -783,6 +834,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "add_cam_setup") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     // The machine is resolved BEFORE the setup exists: a refused name used to
     // leave a half-made setup behind the error, which the panel then showed
     // as "no machine chosen" while the caller believed nothing had happened.
@@ -821,6 +875,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "list_cam_setups") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     json out = json::array();
     for (const cam::Setup& setup : job->GetSetups()) {
       json sj = {{"id", setup.id},
@@ -874,6 +931,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "set_cam_setup") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     cam::Setup& setup = RequireSetup(*job, p.at("id").get<uint64_t>());
     if (p.contains("name"))
       setup.name = p.at("name").get<std::string>();
@@ -1045,6 +1105,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "remove_cam_setup") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     const uint64_t id = p.at("id").get<uint64_t>();
     if (!job->RemoveSetup(id))
       throw std::runtime_error("no CAM setup with id " + std::to_string(id));
@@ -1052,6 +1115,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "add_cam_op" || m == "cam_derive_op") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     // Every field of an operation that is not depth or pick is read inside
     // ApplyOpFields, which the scanner cannot follow -- and a key missing from
     // the row is a key the generated SDK refuses to send, so `tabs` was
@@ -1119,6 +1185,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "set_cam_op") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     // The add_cam_op fields, all of them through ApplyOpFields (above).
     // rpc-params: bottom_z, climb, corner_relief, edge_size, enabled
     // rpc-params: finish_stock, finish_tool, lead_arcs, name, peck, side
@@ -1132,6 +1201,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "move_cam_op") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     const uint64_t id = p.at("id").get<uint64_t>();
     const size_t to = p.at("to").get<size_t>();
     for (cam::Setup& setup : job->GetSetups())
@@ -1151,6 +1223,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "remove_cam_op") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     const uint64_t id = p.at("id").get<uint64_t>();
     for (cam::Setup& setup : job->GetSetups()) {
       auto& ops = setup.operations;
@@ -1165,6 +1240,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "cam_verify") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     // Synchronous, like every reader here: the pass in flight is joined and
     // the rest is computed now, through the same cache the panel fills
@@ -1237,6 +1315,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"complete", v.Complete(tol)}};
   }
   if (m == "cam_simulate") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     if (p.value("close", false)) {
       ui::EndCamPlayback(state);
       return json{{"open", false}};
@@ -1334,6 +1415,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
   }
 
   if (m == "cam_toolpath" || m == "cam_post") {
+    // `job` is read in the preamble, before the active job is looked up --
+    // one place for every branch, and invisible to the scanner from here.
+    // rpc-params: job
     const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     // Synchronous, the default: a script that calls cam_toolpath then
     // cam_post gets the same file it always did. The pass in flight (if the
