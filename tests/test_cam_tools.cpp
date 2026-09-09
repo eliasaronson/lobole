@@ -733,4 +733,63 @@ TEST_CASE("cam finish: one operation roughs with one tool and finishes with "
   CHECK_THAT(back.operations[0].finishStock, WithinAbs(0.6, 1e-9));
 }
 
+TEST_CASE("cam drill: a through hole breaks out by the point, whatever shape "
+          "the point is",
+          "[cam][drill]") {
+  // The clearance a through hole needs is a fact about the CUTTER, so it is
+  // read off the same TipHeight the cut and the verifier use rather than
+  // typed here: zero for a flat mill (it cuts flat, so its lowest point IS
+  // its diameter), the cone for a drill or a V-bit, the radius for a ball.
+  auto doc = HoleDoc(8.0); // a 20 mm block, drilled through
+  const ElementRef wall = HoleWall(*doc);
+  struct Shape {
+    const char* what;
+    cam::ToolType type;
+    double diameter;
+    double angle;
+    double breakout; // how far past the far face the tool must go
+  };
+  const Shape shapes[] = {
+      {"flat", cam::ToolType::Flat, 6.0, 0.0, 0.0},
+      {"drill 118 deg", cam::ToolType::Drill, 6.0, 118.0,
+       3.0 / std::tan(glm::radians(59.0))},
+      {"v-bit 90 deg", cam::ToolType::VBit, 6.0, 90.0, 3.0},
+      {"ball", cam::ToolType::Ball, 6.0, 0.0, 3.0},
+  };
+  for (const Shape& shape : shapes) {
+    INFO(shape.what);
+    cam::Setup setup = BasicSetup();
+    setup.tools[0].type = shape.type;
+    setup.tools[0].diameter = shape.diameter;
+    setup.tools[0].tipAngleDeg = shape.angle;
+    const cam::DerivedOp d = cam::DeriveOperation(
+        setup, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, wall});
+    REQUIRE(d.ok);
+    // Top from the STOCK, not the part: entry rapids belong above the
+    // material. Bottom from the part's far face, plus the point.
+    CHECK_THAT(d.op.topZ, WithinAbs(21.0, 1e-6));
+    CHECK_THAT(d.op.bottomZ, WithinAbs(-shape.breakout, 1e-6));
+  }
+
+  // A BLIND hole keeps its floor: there the point's cone is the bottom of the
+  // hole, and going deeper would be cutting past what was asked for.
+  auto blind = std::make_unique<Document>();
+  blind->AddFeature(std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0),
+                                                 40.0, 30.0, 20.0));
+  const uint64_t block = blind->GetFeature(0)->GetId();
+  blind->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::vec3(20, 15, 12), glm::vec3(0, 0, 1), 4.0, 10.0));
+  const uint64_t hole = blind->GetFeature(1)->GetId();
+  blind->AddFeature(std::make_unique<BooleanFeature>("Drilled", block, hole,
+                                                     BooleanOp::Subtract));
+  cam::Setup setup = BasicSetup();
+  setup.tools[0].type = cam::ToolType::Drill;
+  setup.tools[0].tipAngleDeg = 118.0;
+  const cam::DerivedOp d =
+      cam::DeriveOperation(setup, blind->GetBodies(), cam::OpType::Drill,
+                           cam::Target{0, HoleWall(*blind)});
+  REQUIRE(d.ok);
+  CHECK_THAT(d.op.bottomZ, WithinAbs(12.0, 1e-6));
+}
+
 #endif // HAVE_CAM
