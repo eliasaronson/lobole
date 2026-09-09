@@ -91,6 +91,46 @@ def _c_inclined(f, c):
     return c.get("min", 0) <= got <= c.get("max", 1 << 30), got
 
 
+# Every name `oracle.cpp::SurfaceKind` can emit. A check naming anything else
+# is a typo, and a typo must not read as a measurement — see _c_surfaces.
+SURFACE_KINDS = ("plane", "cylinder", "cone", "sphere", "torus", "bezier",
+                 "bspline", "revolution", "extrusion", "other")
+
+
+def _c_surfaces(f, c):
+    """How many faces of a given surface type the solid carries.
+
+    This is the check that asks HOW the part was built. A revolve and a stack
+    of extruded discs approximating it have the same bbox, the same volume and
+    the same centre of mass; only one of them has a cone in it, and only one
+    keeps its planar face count in single figures. Every other check in this
+    file grades the shape, and the shape cannot tell those two apart.
+
+    `of` takes one name or a list of names summed together, because an
+    operation is usually reachable more than one way — a torus by revolve or by
+    sweep, a taper by revolve or by loft — and a check naming a single surface
+    kind would fail correct work. (BenchCAD's canonical_ops.yaml calls these
+    OR-tuples and needs them for the same reason.)
+    """
+    census = f.get("faces_by_kind") or {}
+    want = c["of"]
+    names = [want] if isinstance(want, str) else list(want)
+    unknown = [n for n in names if n not in SURFACE_KINDS]
+    if unknown:
+        # A misspelt kind counts zero faces, which silently PASSES a `max` and
+        # silently FAILS a `min`. Both look like a result. Refuse instead.
+        return False, {"unknown": unknown, "accepted": list(SURFACE_KINDS)}
+    got = sum(census.get(n, 0) for n in names)
+    if "eq" in c:
+        ok = got == c["eq"]
+    else:
+        ok = c.get("min", 0) <= got <= c.get("max", 1 << 30)
+    # Report the whole census, so a miss reads "it is 46 planes and 12
+    # cylinders" rather than "no cones" — the first names the wrong
+    # construction, the second only says the right one is absent.
+    return ok, {"count": got, "census": census}
+
+
 def _c_solid_com(f, c):
     """Where the i-th solid is, ranked by volume descending.
 
@@ -137,6 +177,7 @@ CHECKS = {
     "volume": _c_volume,
     "cyl_group": _c_cyl_group,
     "inclined_planes": _c_inclined,
+    "surfaces": _c_surfaces,
     "com": _c_com,
     "solid_com": _c_solid_com,
     "solid_volume": _c_solid_volume,

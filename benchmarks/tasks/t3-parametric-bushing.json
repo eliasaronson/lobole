@@ -2,7 +2,7 @@
   "id": "t3-parametric-bushing",
   "tier": 3,
   "title": "Parametric bushing",
-  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA bushing driven by document variables, so that changing a variable\nchanges the part:\n- create a variable `bore` = 12 and a variable `wall` = 6;\n- build a bushing 30 long with its axis on Z, from Z=0 to Z=30, centred on the\n  Z axis, whose bore diameter is driven by `bore` and whose outside diameter is\n  driven by the expression `bore + 2 * wall`;\n- then change `bore` to 20 and leave the model regenerated at that value.\nThe finished part must be a 20 bore, 32 outside diameter, 30 long bushing that\nwould follow another change to `bore`.",
+  "prompt": "All dimensions are millimetres. Build exactly what is described — no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA bushing driven by document variables, so that changing a variable\nchanges the part:\n- create a variable `bore` = 12 and a variable `wall` = 6;\n- build a bushing 30 long with its axis on Z, from Z=0 to Z=30, centred on the\n  Z axis, whose bore diameter is driven by `bore` and whose outside diameter is\n  driven by the expression `bore + 2 * wall`;\n- then change `bore` to 20 and leave the model regenerated at that value.\nThe finished part must be a 20 bore, 32 outside diameter, 30 long bushing that\nwould follow another change to `bore`.",
   "checks": [
     {
       "kind": "solids",
@@ -56,6 +56,11 @@
       "kind": "expr_references",
       "variable": "bore",
       "why": "geometry is DRIVEN by the variable, not retyped"
+    },
+    {
+      "kind": "expr_references",
+      "variable": "wall",
+      "why": "the OD is still the EXPRESSION bore + 2*wall, not the number 32 — checking only `bore` passes a part whose outside was retyped"
     }
   ]
 }

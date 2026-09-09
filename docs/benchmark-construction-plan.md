@@ -21,18 +21,22 @@ This plan closes that, plus two gaps the audit for it turned up.
 ## What the audit found (before any work)
 
 1. **`faces_by_kind` is emitted and nothing consumes it.** `oracle.cpp:299`
-   already reports a face census by surface type — `Plane`, `Cylinder`, `Cone`,
-   `Sphere`, `Torus`, `BezierSurface`, `BSplineSurface`, `SurfaceOfRevolution`,
-   `SurfaceOfExtrusion` (`SurfaceKind`, line 114). `grade.py` has no check kind
+   already reports a face census by surface type — `plane`, `cylinder`, `cone`,
+   `sphere`, `torus`, `bezier`, `bspline`, `revolution`, `extrusion`, `other`
+   (`SurfaceKind`, line 114). `grade.py` has no check kind
    that reads it. The instrument for BenchCAD's finding is already built; it is
    only unwired.
-2. **`doc_grade` is wired but no task uses it.** `run.py:190` implements the
-   app-reported checks (`variable`, `expr_references`) and `run.py:267` calls it
-   under `if task.get("doc_checks")`. **No task has a `doc_checks` key.**
-   `benchmarks/README.md` describes this as a live feature of
-   `t3-parametric-bushing` — so the task's central claim, that the geometry is
-   *driven by a variable*, is currently verified by nothing at all. An agent that
-   deletes the bushing and rebuilds it at bore=20 with no variables scores 5/5.
+2. **The app-reported checks are live, and one of the two expressions is
+   unchecked.** `run.py:190` implements them (`variable`, `expr_references`),
+   `run.py:267` calls them, and `t3-parametric-bushing.json` carries three:
+   `bore` == 20, `wall` == 6, and geometry referencing `bore` by name. What is
+   missing is the matching reference check on `wall`. The prompt asks for an OD
+   driven by `bore + 2 * wall`, so an agent that drives the bore from a variable
+   and retypes the outside diameter as the literal 32 passes every check the
+   task has — including the one the task exists to ask.
+   (A correction: an earlier draft of this plan claimed no task used
+   `doc_checks` at all. That was read off the runner's call sites without
+   grepping the task files. B4 is a one-line addition, not a wiring job.)
 3. Stale counts: `benchmarks/README.md` says "Eight parts, tiers T0–T3, 39
    oracle checks" above a table listing ten tasks. Current truth: 10 tasks, 48
    checks, tiers T0–T5. CLAUDE.md's "48/48" is correct and will move.
@@ -44,9 +48,9 @@ Findings 1 and 2 are why this plan is cheap: most of it is wiring, not building.
 `grade.py`: one check function over `facts["faces_by_kind"]`.
 
 ```json
-{"kind": "surfaces", "of": "Cone",  "min": 1, "why": "a real conical transition"}
-{"kind": "surfaces", "of": "Plane", "max": 4, "why": "not a faceted stack"}
-{"kind": "surfaces", "of": ["BSplineSurface", "SurfaceOfExtrusion"], "min": 1}
+{"kind": "surfaces", "of": "cone",  "min": 1, "why": "a real conical transition"}
+{"kind": "surfaces", "of": "plane", "max": 4, "why": "not a faceted stack"}
+{"kind": "surfaces", "of": ["bspline", "extrusion"], "min": 1}
 ```
 
 `of` takes a name or a list of alternatives summed together — BenchCAD's
@@ -74,36 +78,83 @@ kinds loudly; the same rule one level down.
 wrong expected numbers when written, and T4's were wrong twice. The surface type
 OCC reports after build → export → import is a *prediction* until measured:
 
-- A `Revolve` of a straight line should give `Cone` — but may give
-  `SurfaceOfRevolution`.
-- A `Loft` between two circles is probably `BSplineSurface`, **not** `Cone`,
-  which is precisely the OR-tuple case.
-- A `Sweep` along a `Curve3D` helix — `BSplineSurface` or `SurfaceOfExtrusion`,
-  unknown which.
-- A `Pipe` bend is `Torus` only if the path segment is a true arc.
+- A `Revolve` of a straight line should give `cone` — but may give
+  `revolution`.
+- A `Loft` between two circles is probably `bspline`, **not** `cone`, which is
+  precisely the OR-tuple case.
+- A `Sweep` along a `Curve3D` helix — `bspline` or `extrusion`, unknown which.
+- A `Pipe` bend is `torus` only if the path segment is a true arc.
 - `Refine` heals the B-Rep and may convert between these. STEP export may too.
 
 So: build one probe part per operation with `reference.py`'s helpers, export,
 run the oracle, and **write the observed census into the plan** before writing a
 single task check. Cost: zero dollars, one `nix-shell`, about twenty minutes.
 
-**Acceptance:** a table in this document, filled in from real output, mapping
-each Designer feature to the surface kinds it actually leaves in an exported
-STEP. If an operation turns out to be indistinguishable from an extrude at the
-B-rep level, that operation gets no task in B3 — and that fact is the finding.
+**Result — measured 2026-09-09** (`benchmarks/runners/surface_probe.py`, ten
+probes, build → `export_step` → oracle, so it is the whole round trip and not
+just what the kernel held in memory):
 
-| feature | expected | observed | usable as a check? |
+| probe | built | census |
+|---|---|---|
+| `extrude_cylinder` | circle extruded 30 | `cylinder:1 plane:2` |
+| **`stack_taper`** | **6 stacked discs r20→r12.5** | **`cylinder:6 plane:7`** |
+| `revolve_frustum` | trapezoid revolved 360° about Z | `cone:1 plane:2` |
+| `revolve_torus` | circle at R30 r8 revolved 360° | `torus:1` |
+| `loft_circles` | loft r20 → r12 over 30 | `cone:1 plane:2` |
+| `sweep_helix` | r2 wire swept along helix R20 p10 ×3 | `bspline:1 plane:2` |
+| `pipe_helix` | OD4 wall1 pipe along the same helix | `bspline:2 plane:2` |
+| `pipe_spline` | OD12 wall2 tube along a 4-point fit spline | `bspline:2 plane:2` |
+| `sweep_sketch_arc` | r6 profile swept along a 90° sketch arc R40 | `torus:1 plane:2` |
+| `shell_box` | 60×40×30 box shelled 3 through its top | `plane:11` |
+
+Four things this changed:
+
+1. **The discrimination is real and wide.** A frustum built the right way is
+   three faces (`cone:1 plane:2`); the same shape faked with stacked discs is
+   thirteen (`cylinder:6 plane:7`), with **zero** cones. Same bbox, same
+   envelope, same centre of mass — the census separates them outright.
+2. **A loft between two circles is a true `cone`, not a `bspline`.** The plan
+   predicted otherwise. This is better than expected: both legitimate ways to
+   build a taper (revolve and loft) land on the same surface kind, so
+   `t3-taper-adapter` can check `cone` tightly instead of accepting a vague
+   OR-tuple.
+3. **A bend has two legitimate spellings with DIFFERENT surface kinds.**
+   Sweeping along a sketch arc gives a real `torus`; a `Pipe` along a
+   `fit_spline` gives `bspline`. `Curve3D` has no arc kind at all — only
+   `fit_spline`, `control_poly` and `helix` — so a true torus bend is reachable
+   *only* through a sketch path. `t3-bent-tube` must therefore accept
+   `[torus, bspline]`, or it stops being a check on construction and becomes a
+   check on which of two correct methods the agent picked. This is the case the
+   OR-tuple exists for, found by measuring rather than by taste.
+4. **Shell is not census-checkable as a wall, but is as a count.** Shelling
+   changes no surface *kind* — a shelled box is `plane:11` against a solid
+   box's `plane:6`. So a hollow part is distinguishable from a solid one by
+   planar face count, but nothing about the census says "3 mm wall". Wall
+   thickness stays a volume check.
+
+| feature | predicted | observed | usable as a check? |
 |---|---|---|---|
-| Revolve (line profile) | `Cone` | _tbd_ | |
-| Revolve (arc profile) | `SurfaceOfRevolution` / `Torus` | _tbd_ | |
-| Loft (circle → circle) | `BSplineSurface` | _tbd_ | |
-| Sweep (along helix) | `BSpline` / `SurfaceOfExtrusion` | _tbd_ | |
-| Pipe (along arc) | `Torus` + `Cylinder` | _tbd_ | |
-| Shell | unchanged kinds, doubled counts | _tbd_ | |
-| stacked Extrudes (the wrong way) | `Plane` + `Cylinder` only | _tbd_ | |
+| Revolve (line profile) | `cone` | `cone` | **yes** — tight |
+| Revolve (circle offset from axis) | `revolution`/`torus` | `torus` | **yes** — tight |
+| Loft (circle → circle) | `bspline` | `cone` | **yes**, and same kind as revolve |
+| Sweep (along helix) | `bspline`/`extrusion` | `bspline` | **yes** |
+| Pipe (along helix) | — | `bspline` | **yes**, same kind as Sweep |
+| Pipe (along fit spline) | `torus`+`cylinder` | `bspline` | yes, but NOT `torus` |
+| Sweep (along sketch arc) | — | `torus` | yes — the only route to `torus` |
+| Shell | kinds unchanged, counts doubled | `plane:6` → `plane:11` | count only, not kind |
+| stacked Extrudes (the wrong way) | `plane`+`cylinder` only | `cylinder:6 plane:7` | **the control** |
 
-The last row is the one that matters. Every check in B3 is really a claim about
-the *gap* between it and the row above it.
+Two pieces of API friction turned up on the way, both from the probe getting
+refused (each refusal was honest and arrived in the mutating RPC's own
+response, which is the behaviour `regen_honesty_smoke.py` exists to protect):
+
+- `Shell.open_faces[].element` wants the **full** name `list_elements` reports
+  (`"2/cap1"`), feature-id prefix included, even though `feature_id` is passed
+  in the same object. The bare tag is refused.
+- That refusal reads `open face 'cap1' no longer exists` — but it never
+  existed under that name. "Refuse, don't substitute" asks a refusal to name
+  what IS accepted; this one names a history that did not happen. Worth a
+  message fix, not scheduled here.
 
 ## B3 — three tasks that cannot be done with sketch-and-extrude
 
@@ -111,11 +162,11 @@ Each maps to a real BenchCAD family, and each to a Designer feature with **zero
 agent-facing measurement today** (the 3D-curves workstream, v42–v45, has never
 been in a sweep).
 
-| id | feature under test | BenchCAD family | the check that bites |
+| id | feature under test | BenchCAD family | the check that bites (calibrated) |
 |---|---|---|---|
-| `t3-coil-spring` | `Curve3D` (helix) + `Sweep`/`Pipe` | `coil_spring` | free-length bbox, wire-diameter volume, and a `Plane` budget of 2 (the cut ends) — a stack of rings blows it |
-| `t3-taper-adapter` | `Revolve` or `Loft` | `taper_pin` | `Cone`/`BSpline` present, both bore diameters as `cyl_group`, volume — a stepped approximation has neither the cone nor the volume |
-| `t3-bent-tube` | `Pipe` along a `Curve3D` | `u_bolt` / `j_hook` | `Torus` at the bend, one solid, CoM off both axes — straight segments give zero torus faces |
+| `t3-coil-spring` | `Curve3D` (helix) + `Sweep`/`Pipe` | `coil_spring` | `bspline` ≥ 1 and `plane` ≤ 2 (the cut ends) — stacked rings give `cylinder:N plane:N+1` and no bspline |
+| `t3-taper-adapter` | `Revolve` or `Loft` | `taper_pin` | `cone` ≥ 1 — both right methods give exactly `cone:1`, the disc stack gives 0 |
+| `t3-bent-tube` | `Sweep` along a sketch arc, or `Pipe` along a spline | `u_bolt` / `j_hook` | `[torus, bspline]` ≥ 1 — straight segments give neither |
 
 All three are tier 3: single part, no assembly, non-prismatic construction
 required. Prompts follow the existing template exactly — millimetres, pinned
@@ -133,23 +184,20 @@ or a sibling) **fails** the surface check while passing bbox and volume. That
 second half is the whole experiment — an assertion that the new check
 discriminates. Without it we have only added checks that everything passes.
 
-## B4 — turn on the bushing's `doc_checks` (free)
+## B4 — the bushing's unchecked expression
 
-`t3-parametric-bushing` gets the key the machinery has been waiting for:
+`t3-parametric-bushing.json` gains the fourth app-reported check its prompt
+already implies:
 
 ```json
-"doc_checks": [
-  {"kind": "variable", "name": "bore", "value": 20},
-  {"kind": "variable", "name": "wall", "value": 6},
-  {"kind": "expr_references", "variable": "bore"},
-  {"kind": "expr_references", "variable": "wall"}
-]
+{"kind": "expr_references", "variable": "wall",
+ "why": "the OD is still the EXPRESSION bore + 2*wall, not the number 32"}
 ```
 
-These stay app-reported and out of the score, exactly as the README already
-says. The point is that the run record will finally *contain* the answer to the
-question the task was written to ask. Also fold `t3-taper-adapter` into it if
-its prompt names a variable.
+Still app-reported, still out of the oracle's score, exactly as
+`benchmarks/README.md` describes. It closes the case where a part with a
+variable-driven bore and a hand-typed outside diameter reads as parametric all
+the way through.
 
 ## B5 — a floor
 
