@@ -375,6 +375,18 @@ DerivedOp DeriveOperation(const Setup& setup,
       out.why = "that face is not on a body this job can machine";
       return out;
     }
+    // A THROUGH hole has to break out, and a drill is a cone: stopping its
+    // lowest point at the far face leaves a ring of material the shape of
+    // that cone -- the hole is not a hole. So a bore that reaches the bottom
+    // of the part goes on down by the point's own height, which is the
+    // clearance a person adds without thinking about it. A BLIND hole keeps
+    // its floor: there the cone is the bottom of the hole.
+    // (The verifier has always modelled the point -- TipHeight is one
+    // function -- so before this the two disagreed, and correct drilling read
+    // as 1.2 mm of material left standing in every hole.)
+    if (const Tool* drill = setup.FindTool(op.toolNumber);
+        drill != nullptr && op.bottomZ <= modelBottom + 1e-6)
+      op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
     op.targets = {target};
     // Pecking, derived from the cutter: a hole deeper than three diameters
     // packs its flutes, so retract every diameter and let the chips out.
