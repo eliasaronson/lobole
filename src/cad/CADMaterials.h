@@ -23,6 +23,11 @@ enum class MaterialType {
   // Non-metals
   PLASTIC_WHITE,
   PLASTIC_BLACK,
+  // 3K twill carbon plate: the material a frame, an arm or a drone's whole
+  // structure is cut from, and 1550 kg/m3 against black plastic's 1040 —
+  // modelling one as the other reads a third light, which is a third of an
+  // airframe's structural mass.
+  CARBON_FIBRE,
   RUBBER,
   GLASS,
   CONCRETE,

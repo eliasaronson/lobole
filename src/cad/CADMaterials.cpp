@@ -108,6 +108,14 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,                          // Plastic reflectance
       "Black Plastic"};
 
+  materials[MaterialType::CARBON_FIBRE] = {
+      glm::vec3(0.07f, 0.07f, 0.08f), // Near-black, faintly cool
+      0.0f,                           // Non-metallic
+      0.35f,                          // The resin surface is fairly glossy
+      0.6f,                           // ... and quite specular
+      0.05f,                          // Epoxy reflectance
+      "Carbon Fibre"};
+
   materials[MaterialType::RUBBER] = {glm::vec3(0.1f, 0.1f, 0.1f), // Dark rubber
                                      0.0f,  // Non-metallic
                                      0.9f,  // Very rough
@@ -199,6 +207,7 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::TITANIUM].density = 4506.0f;
   materials[MaterialType::PLASTIC_WHITE].density = 1040.0f;
   materials[MaterialType::PLASTIC_BLACK].density = 1040.0f;
+  materials[MaterialType::CARBON_FIBRE].density = 1550.0f;
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
   materials[MaterialType::CONCRETE].density = 2400.0f;
@@ -233,6 +242,9 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::TITANIUM, 116.0f, 0.32f, 880.0f);
   elastic(MaterialType::PLASTIC_WHITE, 2.5f, 0.35f, 50.0f);
   elastic(MaterialType::PLASTIC_BLACK, 2.5f, 0.35f, 50.0f);
+  // Quasi-isotropic 3K/epoxy laminate, in-plane: this is a plate material
+  // and the numbers are the plate's, not a unidirectional ply's.
+  elastic(MaterialType::CARBON_FIBRE, 55.0f, 0.30f, 550.0f);
   elastic(MaterialType::GLASS, 70.0f, 0.22f, 0.0f);
   elastic(MaterialType::CONCRETE, 30.0f, 0.20f, 0.0f);
   // Wood is strongly anisotropic (along-grain stiffness is ~15-20x the
@@ -347,6 +359,7 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::TITANIUM, "titanium"},
       {MaterialType::PLASTIC_WHITE, "plastic_white"},
       {MaterialType::PLASTIC_BLACK, "plastic_black"},
+      {MaterialType::CARBON_FIBRE, "carbon_fibre"},
       {MaterialType::RUBBER, "rubber"},
       {MaterialType::GLASS, "glass"},
       {MaterialType::CONCRETE, "concrete"},
