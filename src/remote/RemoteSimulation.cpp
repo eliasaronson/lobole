@@ -39,9 +39,14 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study, type, volume_fraction",
      remote::NeedsPart},
     {"add_load",
-     "Add a load/fixture to a study {study, type, face, magnitude, "
-     "direction?}. An omitted force `direction` pushes into the picked face "
-     "(the same default a GUI placement takes).",
+     "Add a load/fixture to a study {study, type: fixed|force|pressure, face, "
+     "magnitude, direction?}. `magnitude` is NEWTONS for a force -- the total "
+     "on that face, spread over its area -- and MPa for a pressure, which "
+     "pushes along the inward normal. `fixed` ignores it. Every result scales "
+     "linearly with this number and a wrong unit is invisible in the answer, "
+     "so it is stated here rather than left to be inferred from the solver. "
+     "An omitted force `direction` pushes into the picked face (the same "
+     "default a GUI placement takes).",
      "direction, face, magnitude, study, type", remote::NeedsPart},
     {"remove_load", "Remove a load by index.", "load, study",
      remote::NeedsPart},
@@ -73,7 +78,13 @@ static constexpr MethodDoc SimulationMethods[] = {
      "mesh_study {async}.",
      "study", remote::NeedsPart},
     {"study_results",
-     "Result summary (max displacement, von Mises, frequencies, compliance).",
+     "Result summary: {elements, nodes, max_displacement_mm: {value, at}, "
+     "max_von_mises_mpa: {value, at}, factor_of_safety} for a static study, "
+     "`frequencies_hz` for a modal one, and the optimization summary for a "
+     "topology one. Refused with \"study has not been run\" when there is "
+     "nothing to report -- a solved result is DERIVED and no project keeps "
+     "one, so a study reopened from disk carries its load cases and no "
+     "answers (`has_results`, `stale` in list_studies).",
      "study", remote::NeedsPart},
     {"set_result_display", "Choose the displayed result field/deform scale.",
      "deform_scale, field, mode, study, threshold", remote::NeedsPart},

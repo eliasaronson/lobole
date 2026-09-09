@@ -71,9 +71,11 @@ constexpr MethodDoc kCamMethods[] = {
      "element name, which is the wrong part, cut for real.",
      "id, job"},
     {"list_job_parts",
-     "The parts this job cuts: id, source document, name, whether the source "
-     "has changed since the job last saw it (`stale`), and where each sits in "
-     "each setup.",
+     "The parts this job cuts {job?}: per part `id`, `source` (the document "
+     "id), `name`, `missing` (its source document is gone -- reported, never "
+     "substituted) and `placements`, each {setup, id, pos, rot_z, enabled, "
+     "frame, clamped_per_part}. The id is what an operation target and a "
+     "placement name.",
      "job"},
     {"check_layout",
      "How the parts are arranged in the stock {job?, setup?}. Per placement: "
