@@ -211,6 +211,50 @@ def main():
         except RuntimeError as e:
             expect("element a" in str(e), f"the refusal names which one: {e}")
 
+        # mode=mesh: the same minimum distance, off the triangles, with the
+        # deflection it was decided to. It exists because the exact one is
+        # pathological when two solids' faces are all about equally far
+        # apart — two lofted propellers 151 mm apart took 55 s, and the same
+        # answer off the tessellations takes 40 ms.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        d.call("add_part", name="second")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "B", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        asm = d.call("add_assembly", name="pair")
+        first = d.call("add_occurrence", part="Part 1",
+                       transform={"position": [0, 0, 0],
+                                  "orientation": [0, 0, 0, 1]})
+        second = d.call("add_occurrence", part="second",
+                        transform={"position": [40, 0, 0],
+                                   "orientation": [0, 0, 0, 1]})
+        exact = d.call("measure", a={"occurrence": first["id"]},
+                       b={"occurrence": second["id"]},
+                       distance_kind="minimum")
+        mesh = d.call("measure", a={"occurrence": first["id"]},
+                      b={"occurrence": second["id"]},
+                      distance_kind="minimum", mode="mesh")
+        expect(abs(exact["distance"] - 30.0) < 1e-6,
+               f"the exact distance is the gap: {exact}")
+        expect(mesh["mode"] == "mesh" and mesh["deflection_mm"] > 0,
+               f"mesh mode says how coarsely it decided: {mesh}")
+        expect(abs(mesh["distance"] - exact["distance"])
+               <= mesh["deflection_mm"],
+               f"mesh agrees with exact to its deflection: {mesh} {exact}")
+        # It answers a DISTANCE between whole shapes, and refuses the rest
+        # rather than inventing a number off a tessellation.
+        for kw, want in ((dict(kind="angle"), "angle is exact"),
+                         (dict(distance_kind="maximum"), "MINIMUM")):
+            try:
+                d.call("measure", a={"occurrence": first["id"]},
+                       b={"occurrence": second["id"]}, mode="mesh", **kw)
+                raise AssertionError(f"mesh mode answered {kw}")
+            except RuntimeError as e:
+                expect(want in str(e), f"the refusal explains: {e}")
+
         print("measure_smoke: OK")
     finally:
         app.terminate()

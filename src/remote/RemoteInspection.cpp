@@ -373,8 +373,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "centres. kind:'angle' or 'both' adds the angle, taken between the "
      "outward normals when both are planar faces (adjacent box faces read 90, "
      "opposite ones 180) and unsigned in 0-90 when either direction's sign is "
-     "arbitrary, as a line edge's is; `basis` says which.",
-     "a, b, distance_kind, kind, part"},
+     "arbitrary, as a line edge's is; `basis` says which. "
+     "mode: exact (default) or mesh — a minimum distance off the "
+     "TRIANGLES, with the deflection it was decided to, for when an exact "
+     "one is pathological (two lofted propellers 151 mm apart take 55 s, "
+     "because every face pair is equally far and nothing prunes).",
+     "a, b, distance_kind, kind, mode, part"},
     {"frame",
      "The frame of a thing — origin, unit x/y/z, and a column-major 4x4 "
      "`matrix` — in PART space on a part tab, or in WORLD space with "
@@ -1938,6 +1942,44 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
       }
       json out;
+      // `mode: mesh` answers the minimum distance from the TRIANGLES, with
+      // the deflection it was decided to — the same bargain `interference`
+      // offers, for the same reason. An exact distance between two solids
+      // whose faces are all about equally far apart is pathological (two
+      // lofted propellers 151 mm apart: 55 s), and a clearance question does
+      // not need a micron: it needs to know there is 30 mm and not 2.
+      const std::string mode = p.value("mode", "exact");
+      if (mode != "exact" && mode != "mesh")
+        throw std::runtime_error("measure: mode is exact (the default) or "
+                                 "mesh, not '" +
+                                 mode + "'");
+      if (mode == "mesh") {
+        if (kind == "angle")
+          throw std::runtime_error(
+              "measure: an angle is exact or nothing — mesh mode answers a "
+              "DISTANCE, and an angle off a tessellation is a lie about a "
+              "surface's direction");
+        if (!ta.Whole() || !tb.Whole())
+          throw std::runtime_error(
+              "measure: mesh mode takes two WHOLE shapes (a body or an "
+              "occurrence). A face's distance is exact or it is nothing: a "
+              "triangle is not on the face it stands for");
+        if (dk != Measure::DistanceKind::Minimum)
+          throw std::runtime_error(
+              "measure: mesh mode answers the MINIMUM distance; " +
+              std::string(Measure::ToString(dk)) + " is exact only");
+        const collide::Gap gap = Measure::MeshGap(ta, tb);
+        if (!gap.known)
+          throw std::runtime_error(
+              "measure: one of these has no triangles to measure — an empty "
+              "body, or one whose tessellation failed");
+        out["distance"] = gap.distance;
+        out["distance_kind"] = Measure::ToString(dk);
+        out["mode"] = mode;
+        out["deflection_mm"] = gap.deflection;
+        out["clash"] = gap.distance <= 0.0;
+        return out;
+      }
       if (kind != "angle") {
         const auto d = Measure::DistanceBetween(ta, tb, dk);
         if (!d)

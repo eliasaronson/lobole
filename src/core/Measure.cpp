@@ -1,5 +1,7 @@
 #include "core/Measure.h"
 
+#include "core/MeshCollide.h"
+
 #include "core/Conventions.h"
 #include "core/ThreadStandards.h"
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -53,6 +55,7 @@
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -482,6 +485,74 @@ static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
   return overlap;
 }
 
+// The exact minimum distance between two placed shapes, asked of the FACES
+// that can hold it rather than of every face against every other.
+//
+// BRepExtrema prunes face pairs by their boxes against the best distance so
+// far, which works when one pair is obviously closest. A tessellation prunes
+// at triangle granularity — the granularity this problem has — so: ask the
+// meshes where the answer is, then ask the B-Rep what it is, over the faces
+// the meshes point at. The triangles never reach the answer; they only
+// choose the candidates, so this is the exact distance and not an
+// approximation of it. A tessellation lies within its deflection of its
+// surface, so the face pair holding the true minimum has triangles within
+// `mesh + 2 deflections` of each other, and collecting to that cannot miss
+// it.
+//
+// Measured on a quadcopter (propellers of 53 spline faces each, 2208
+// triangles): propeller to camera plate 3.3 s -> 0.6 s, propeller to
+// battery 0.8 s, camera to battery 7 ms.
+//
+// THE CAP is the other half, and it is there because the two methods fail on
+// opposite cases. Two propellers 151 mm apart give 32 candidate pairs and
+// BRepExtrema, asked about everything, takes 55 s — nothing prunes, because
+// every facing pair is at the same distance. The SAME two propellers 30 mm
+// apart give 177 candidates (the blades run nearly parallel, so half the
+// faces are equally close) and BRepExtrema takes 0.1 s — its bound lands on
+// the true minimum immediately and the rest falls away. A long candidate
+// list is exactly the shape of the second case, so it hands the question
+// back rather than refining 177 spline face pairs at 0.4 s each.
+constexpr size_t kMaxRefinedPairs = 24;
+
+double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
+                     const glm::dmat4& xfA, const CADShape& shapeB,
+                     const TopoDS_Shape& b, const glm::dmat4& xfB) {
+  const auto full = [&](const TopoDS_Shape& x, const TopoDS_Shape& y) {
+    // MIN, not the default MINMAX: every BRepExtrema here wants the
+    // minimum, and the maxima are work nobody reads.
+    BRepExtrema_DistShapeShape d(x, y, Extrema_ExtFlag_MIN,
+                                 Extrema_ExtAlgo_Grad);
+    return d.IsDone() && d.NbSolution() >= 1
+               ? d.Value()
+               : std::numeric_limits<double>::infinity();
+  };
+  const collide::Gap gap = collide::Nearest(shapeA, xfA, shapeB, xfB, 2.0);
+  if (!gap.known || gap.pairs.empty() || gap.pairs.size() > kMaxRefinedPairs)
+    return full(a, b);
+  if (gap.distance <= 0.0)
+    return 0.0; // touching or crossing: the overlap pass's question, not this
+
+  // The faces, once, in the walk order `triangleFaces` indexes.
+  std::vector<TopoDS_Shape> fa, fb;
+  for (TopExp_Explorer ex(a, TopAbs_FACE); ex.More(); ex.Next())
+    fa.push_back(ex.Current());
+  for (TopExp_Explorer ex(b, TopAbs_FACE); ex.More(); ex.Next())
+    fb.push_back(ex.Current());
+
+  double best = std::numeric_limits<double>::infinity();
+  for (const collide::Mesh::FacePair& pair : gap.pairs) {
+    if (pair.a >= fa.size() || pair.b >= fb.size())
+      return full(a, b); // the mesh and the face walk disagree: ask everything
+    // This pair's TRUE distance is at least its triangles' less the two
+    // deflections, so once that floor is past the best exact answer found,
+    // nothing later in the list (they are sorted) can beat it either.
+    if (pair.distance - 2.0 * gap.deflection >= best)
+      break;
+    best = std::min(best, full(fa[pair.a], fb[pair.b]));
+  }
+  return std::isfinite(best) ? best : full(a, b);
+}
+
 std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
@@ -491,6 +562,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
     struct Placed {
       TopoDS_Shape shape;
+      const CADShape* source = nullptr; // for the mesh cache, keyed on it
       Bnd_Box box;
       std::vector<ThreadSpan> threads;
     };
@@ -501,6 +573,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         if (b.shape.GetShape().IsNull())
           continue;
         Placed p;
+        p.source = &b.shape;
         p.shape = b.shape.GetShape().Moved(loc);
         p.threads = ThreadSpans(b, loc);
         BRepBndLib::Add(p.shape, p.box);
@@ -599,28 +672,8 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     for (const Cand& c : cands) {
       if (c.boxDist >= best)
         break;
-      // MIN, not the default MINMAX: every BRepExtrema in this file wants
-      // the minimum (the maximum has its own sampler), and computing the
-      // maxima too is work nobody reads.
-      //
-      // This is the expensive half and it stays expensive on spline-heavy
-      // solids: two lofted propellers 151 mm apart measure in 55 s, the
-      // same two 30 mm apart in 0.1 s. The difference is pruning power —
-      // BRepExtrema drops a face pair whose BOXES are further apart than
-      // the best distance so far, and when two blades are far apart every
-      // facing pair sits in the same narrow band, so nothing drops. Bounding
-      // it first with the shapes' vertices does not help either: measured
-      // on those propellers the vertex bound is 153.4 against a true 151.45
-      // and still leaves 30 of 53 faces live on each side, because a
-      // twisted blade's box is enormous next to the gap being measured.
-      // What would help is pruning at triangle granularity, i.e. a mesh
-      // distance with a stated deflection — which `interference` has and
-      // `measure` does not (docs/modeling/fpv-drone.md).
-      BRepExtrema_DistShapeShape dist(pa[c.i].shape, pb[c.j].shape,
-                                      Extrema_ExtFlag_MIN,
-                                      Extrema_ExtAlgo_Grad);
-      if (dist.IsDone() && dist.NbSolution() >= 1)
-        best = std::min(best, dist.Value());
+      best = std::min(best, ExactDistance(*pa[c.i].source, pa[c.i].shape, xfA,
+                                          *pb[c.j].source, pb[c.j].shape, xfB));
     }
     if (!std::isfinite(best))
       return std::nullopt;
@@ -1781,6 +1834,30 @@ std::optional<SetContact> OverlapBetween(const Target& a, const Target& b) {
   if (pa.empty() || pb.empty())
     return std::nullopt;
   return ContactBetween(pa, glm::mat4(1.0f), pb, glm::mat4(1.0f));
+}
+
+collide::Gap MeshGap(const Target& a, const Target& b) {
+  collide::Gap out;
+  if (!a.Whole() || !b.Whole())
+    return out;
+  const std::vector<Body> ba = TargetBodies(a), bb = TargetBodies(b);
+  if (ba.empty() || bb.empty())
+    return out;
+  // Body by body, keeping the nearest — a target can be a whole occurrence,
+  // and an occurrence can be several bodies.
+  for (const Body& x : ba)
+    for (const Body& y : bb) {
+      if (x.shape.GetShape().IsNull() || y.shape.GetShape().IsNull())
+        continue;
+      const collide::Gap gap = collide::Nearest(x.shape, glm::dmat4(1.0),
+                                                y.shape, glm::dmat4(1.0), 2.0);
+      if (!gap.known)
+        continue;
+      if (!out.known || gap.distance < out.distance)
+        out = gap;
+      out.known = true;
+    }
+  return out;
 }
 
 std::optional<double> Distance(const std::vector<Body>& bodies,

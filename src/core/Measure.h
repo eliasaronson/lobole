@@ -2,6 +2,7 @@
 
 #include "core/ElementMap.h"
 #include "core/Feature.h"
+#include "core/MeshCollide.h"
 #include "core/Units.h"
 
 #include <optional>
@@ -313,6 +314,12 @@ std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
 // is the least useful true thing available. nullopt when either side is an
 // element (a face has no volume to overlap with).
 std::optional<SetContact> OverlapBetween(const Target& a, const Target& b);
+
+// The minimum distance between two whole targets, off their TRIANGLES: the
+// same answer `interference mode=mesh` decides a clash with, and the same
+// caveat — it is the distance to the tessellation, +/- the deflection it
+// reports. For when the exact one is pathological.
+collide::Gap MeshGap(const Target& a, const Target& b);
 
 // Total length of a set of edges, or total area of a set of faces — what a
 // third and fourth pick should add up to instead of being refused. Mixing
