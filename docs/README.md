@@ -89,6 +89,12 @@ thing behind it invisible to the next person who looks.
   mesh-BVH interference for sweeps, cam and chain relations, a fan-out test,
   and benchmark tasks above T3 — with a single-cylinder engine as the
   acceptance test.
+- **[benchmark-construction-plan.md](benchmark-construction-plan.md)** — the
+  benchmark grades *what* was built and never *how*, so a revolve faked with a
+  stack of extrudes scores full marks. Prompted by BenchCAD
+  (arXiv:2605.10865), whose headline finding is exactly that substitution. Six
+  stages, most of them wiring: the oracle already reports a surface-type census
+  nothing reads, and the app-reported check machinery is called by no task.
 - **[capability-review-2026-08-31.md](capability-review-2026-08-31.md)** — the
   outward-facing counterpart: capability walls, absent feature families, and
   what we do worse (and better) than FreeCAD and Onshape. The three that were
