@@ -749,6 +749,33 @@ EXPORTED = {"stl": ("Antenna mount", "Battery pad"),
                      "Camera plate")}
 
 
+def centre_of_mass(app, budget):
+    """Where the aircraft balances, with the corrected masses.
+
+    The document's own centre of mass is the wrong answer here for the same
+    reason its total is: the two heaviest things on a quadcopter are a
+    battery and four motors, and both are envelopes. This re-weights each
+    occurrence by its catalogue mass, placed at its own world box centre —
+    an approximation, and a good one for a pack, a motor or a plate.
+
+    It matters as much as the clearances do: a quad whose mass is not over
+    the centre of its four propellers trims out crooked and eats its
+    battery on hard landings.
+    """
+    per_part = {row[0]: row[2] for row in budget}
+    by_id = {p["id"]: p["name"] for p in app.list_parts()["parts"]}
+    total = 0.0
+    moment = [0.0, 0.0, 0.0]
+    for occ in app.list_occurrences(bounds=True)["occurrences"]:
+        mass = per_part.get(by_id.get(occ.get("part_id")), 0.0)
+        if not mass or "bbox_min" not in occ:
+            continue
+        total += mass
+        for i in range(3):
+            moment[i] += mass * (occ["bbox_min"][i] + occ["bbox_max"][i]) / 2
+    return [m / total for m in moment], total
+
+
 def outputs(app, out, name="Quadcopter"):
     """The files somebody builds from.
 
@@ -778,6 +805,13 @@ def outputs(app, out, name="Quadcopter"):
     print(f"bom: {len(rows)} rows; model {mass['mass_g']:.0f} g, "
           f"corrected dry {auw - battery:.0f} g, all-up {auw:.0f} g, "
           f"thrust/weight {4 * THRUST_PER_MOTOR_G / auw:.1f}:1")
+
+    cg, weighed = centre_of_mass(app, budget)
+    print(f"  centre of mass {cg[0]:+.1f}, {cg[1]:+.1f}, {cg[2]:+.1f} mm "
+          f"({weighed:.0f} g accounted)")
+    if abs(cg[0]) > 15.0 or abs(cg[1]) > 5.0:
+        raise SdkError(f"the centre of mass is {cg[0]:+.1f}, {cg[1]:+.1f} mm "
+                       "from the middle of the propeller square")
 
     app.export_step(path=os.path.join(out, "fpv-drone.step"))
     for kind, names in EXPORTED.items():

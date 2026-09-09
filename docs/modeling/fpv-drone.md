@@ -69,7 +69,12 @@ propeller and a 6S 1300 pack.
 - a motion study turns all four propellers through a blade pitch (the four
   revolute mates are coupled by chain and gear relations, so one driver
   turns the lot) and no pair comes into contact that was not touching at
-  rest.
+  rest;
+- and the aircraft balances where it should: -7.6 mm of the middle of the
+  propeller square fore-and-aft (slightly tail-heavy, which is what a
+  freestyle quad wants) and +0.4 mm across. That is re-weighted from the
+  catalogue masses, not read off the document — a battery and four motors
+  are most of the mass and all five are envelopes.
 
 Mass is reported honestly rather than read off the document: carbon is
 modelled as `plastic_black` because the material table has no carbon
