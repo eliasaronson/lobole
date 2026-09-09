@@ -105,6 +105,22 @@ def main():
                    and again["elements"] == res["elements"],
                    "study_results matches run_study")
 
+            # The receipt (core/Receipt.h, peer-survey-plan W2). An FEM
+            # factor of safety is a PREDICTION, and the number is quoted
+            # downstream as though it were measured — so the basis travels
+            # with it and a passing study can never roll up better than
+            # provisional.
+            rec = again["receipt"]
+            expect(rec["standing"] == "provisional",
+                   f"a solved study is provisional, not verified: {rec}")
+            claim = rec["claims"][0]
+            expect(claim["basis"] == "predicted",
+                   f"FEM is a prediction: {claim}")
+            expect(claim["verdict"] in ("pass", "fail"),
+                   f"the solve ran, so it is not unverifiable: {claim}")
+            expect(claim["oracle"]["id"] == "designer/fem-static",
+                   f"the oracle names itself: {claim}")
+
             # The design loop: edit a driving variable, results go stale, and
             # re-running scales the answer with it. Doubling the load doubles
             # the stress in a linear static solve, so the RATIO is exact —
@@ -113,6 +129,12 @@ def main():
             d.call("set_variable", name="load_n", expression="20000")
             stale = d.call("study_results", study=study)
             expect(stale["stale"] is True, "results stale after a variable edit")
+            # And the receipt says so where a caller cannot miss it: numbers
+            # about a part that no longer exists are UNVERIFIED, not a pass.
+            expect(stale["receipt"]["standing"] == "unverified",
+                   f"stale results are unverified: {stale['receipt']}")
+            expect(stale["receipt"]["claims"][0]["verdict"] == "unverifiable",
+                   "the claim itself, not just a flag beside it")
             res2 = d.call("run_study", study=study)
             ratio = res2["max_von_mises_mpa"]["value"] / sigma
             expect(abs(ratio - 2.0) < 0.05,

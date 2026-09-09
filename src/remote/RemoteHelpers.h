@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "core/Document.h"
+#include "core/Receipt.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -92,6 +93,38 @@ enum MethodFlag : uint8_t {
   // coherent inside the frame.
   UiAction = 1u << 3,
 };
+
+// A receipt on the wire. Attached by every RPC that returns a VERDICT, so a
+// caller cannot mistake "could not check" for "clean" (core/Receipt.h).
+//
+// `standing` is the roll-up and `summary` says it in words, because a caller
+// who reads neither the claims nor the flags still sees UNVERIFIED in the one
+// field they do read.
+inline nlohmann::json ReceiptJson(const receipt::Receipt& r) {
+  nlohmann::json claims = nlohmann::json::array();
+  for (const receipt::Claim& c : r.Claims()) {
+    nlohmann::json j = {
+        {"claim", c.name},
+        {"verdict", receipt::ToString(c.verdict)},
+        {"basis", receipt::ToString(c.basis)},
+        {"oracle", {{"id", c.oracle.id}, {"version", c.oracle.version}}}};
+    if (c.value)
+      j["value"] = *c.value;
+    if (!c.unit.empty())
+      j["unit"] = c.unit;
+    if (!c.note.empty())
+      j["note"] = c.note;
+    claims.push_back(std::move(j));
+  }
+  return {{"schema", receipt::kSchema},
+          {"standing", receipt::ToString(r.Roll())},
+          {"summary", receipt::Summary(r)},
+          {"claims", std::move(claims)}};
+}
+
+inline void AttachReceipt(nlohmann::json& out, const receipt::Receipt& r) {
+  out["receipt"] = ReceiptJson(r);
+}
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

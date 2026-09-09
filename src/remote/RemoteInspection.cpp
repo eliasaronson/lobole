@@ -2,6 +2,7 @@
 #include "remote/InspectionContracts.h"
 
 #include "cad/CADKernel.h"
+#include "common/BuildInfo.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/FrameMath.h"
@@ -252,20 +253,49 @@ void AttachSweepCoverage(nlohmann::json& out, const SweepPlan& plan,
   out["pairs_checked"] = plan.exact.size();
   out["pairs_box_cleared"] = plan.boxCleared;
   out["elapsed_s"] = plan.elapsed;
-  if (plan.overBudget == 0)
-    return;
-  out["truncated"] = true;
-  out["pairs_unchecked"] = plan.overBudget;
-  out["truncation"] =
-      "checked the " + std::to_string(plan.exact.size()) +
-      " closest pairs, then stopped (max_pairs " + std::to_string(maxPairs) +
-      ", deadline_s " + std::to_string(deadlineSeconds) + "); " +
-      std::to_string(plan.overBudget) +
-      " more have overlapping or near boxes and were NOT checked exactly, "
-      "the closest of them " +
-      std::to_string(plan.overBudgetGap) +
-      " mm apart. Raise the limits, name a pair {a, b}, or sweep a smaller "
-      "assembly.";
+  std::string truncation;
+  if (plan.overBudget != 0) {
+    truncation =
+        "checked the " + std::to_string(plan.exact.size()) +
+        " closest pairs, then stopped (max_pairs " + std::to_string(maxPairs) +
+        ", deadline_s " + std::to_string(deadlineSeconds) + "); " +
+        std::to_string(plan.overBudget) +
+        " more have overlapping or near boxes and were NOT checked exactly, "
+        "the closest of them " +
+        std::to_string(plan.overBudgetGap) +
+        " mm apart. Raise the limits, name a pair {a, b}, or sweep a smaller "
+        "assembly.";
+    out["truncated"] = true;
+    out["pairs_unchecked"] = plan.overBudget;
+    out["truncation"] = truncation;
+  }
+
+  // The same facts as a RECEIPT (core/Receipt.h). The fields above have been
+  // honest for a long time, but a caller has to know to read `truncated`
+  // before believing `clash: false` — and the drone round's "EMPTY exact
+  // clash sweep" is what that costs. `standing` makes it unmissable: a
+  // truncated sweep is UNVERIFIED, not clean.
+  receipt::Receipt r;
+  const receipt::Oracle oracle{"designer/exact-clash", "1"};
+  const bool foundClash = out.value("clash", false);
+  if (plan.overBudget != 0) {
+    r.Unverifiable(foundClash ? "no pair interferes (a clash was already "
+                                "found, and the sweep did not finish)"
+                              : "no pair interferes",
+                   oracle, truncation);
+  } else {
+    receipt::Claim c("no pair interferes", oracle,
+                     foundClash ? receipt::Verdict::Fail
+                                : receipt::Verdict::Pass);
+    c.basis = receipt::Basis::Verified; // a real boolean on the real B-Rep
+    c.value = static_cast<double>(plan.exact.size());
+    c.unit = "pairs";
+    c.note = "every candidate pair was checked exactly; " +
+             std::to_string(plan.boxCleared) +
+             " more were cleared by bounding box";
+    r.Add(std::move(c));
+  }
+  AttachReceipt(out, r);
 }
 
 // WHERE an overlap is, for anything that reports one. A pair name and a
@@ -1768,11 +1798,40 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     json featureErrors = RegenSummaryJson(part)["failed"];
     const bool ok = allValid && featureErrors.empty();
+    const size_t errorCount = featureErrors.size();
     json out = {{"valid", allValid},
                 {"bodies", rows},
                 {"body_count", bodies.size()},
                 {"feature_errors", std::move(featureErrors)},
                 {"ok", ok}};
+    {
+      // `valid` is vacuously true over zero bodies, which the comment above
+      // has always said and the flag itself cannot. As a receipt it is a
+      // claim that COULD NOT BE CHECKED rather than one that holds.
+      receipt::Receipt r;
+      const receipt::Oracle brep{"occ/BRepCheck_Analyzer",
+                                 BuildInfo::KernelVersion()};
+      const size_t examined = rows.size();
+      if (examined == 0) {
+        r.Unverifiable("every body is a valid B-Rep", brep,
+                       "there are no bodies to check — `valid` is vacuously "
+                       "true here, which is not the same as a part that built");
+      } else {
+        receipt::Claim c("every body is a valid B-Rep", brep,
+                         allValid ? receipt::Verdict::Pass
+                                  : receipt::Verdict::Fail);
+        c.value = static_cast<double>(examined);
+        c.unit = "bodies";
+        r.Add(std::move(c));
+      }
+      receipt::Claim f("no feature errored", {"designer/regen", "1"},
+                       errorCount == 0 ? receipt::Verdict::Pass
+                                       : receipt::Verdict::Fail);
+      f.value = static_cast<double>(errorCount);
+      f.unit = "features";
+      r.Add(std::move(f));
+      AttachReceipt(out, r);
+    }
     // Derived copies behind their source (v84): built fine, so `ok` stands,
     // but the geometry is yesterday's — the caller decides whether to
     // update_derived. Present only when there is something to say.

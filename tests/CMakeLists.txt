@@ -46,6 +46,7 @@ add_executable(designer_tests
     test_assembly_relations.cpp
     test_derived.cpp
     test_measure.cpp
+    test_receipt.cpp
     test_materials.cpp
     test_shell.cpp
     test_loft.cpp

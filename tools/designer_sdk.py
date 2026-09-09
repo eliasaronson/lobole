@@ -1866,6 +1866,12 @@ class Asm(_Tab):
                            str(r.get("truncation", "")))
         if r["clash"]:
             raise SdkError(f"{len(r['pairs'])} clash(es): {r['pairs'][:4]}")
+        # The receipt is the general form of the two checks above: anything
+        # that is not `verified` is not a pass, including a reason this
+        # wrapper has not been taught to name yet.
+        standing = r.get("receipt", {}).get("standing", "verified")
+        if standing != "verified":
+            raise SdkError(r["receipt"].get("summary", standing))
         return r
 
     def check(self, connected=True, clearances=True, realized=False,
@@ -1957,7 +1963,7 @@ class Asm(_Tab):
 VERDICT_CONTRACTS = {
     "Asm.check_clashes": {
         "rpc": "interference",
-        "consumed": {"clash", "pairs", "truncated", "truncation"},
+        "consumed": {"clash", "pairs", "truncated", "truncation", "receipt"},
         "ignored": {
             "mode": "check_clashes explicitly selects exact mode",
             "pairs_checked": "coverage detail; truncated is the verdict",
@@ -1979,6 +1985,9 @@ VERDICT_CONTRACTS = {
             "unrealized_mates",   # a mate whose parts do not touch — read
                                   # under `realized=`, because a running fit
                                   # is a mate that must NOT touch
+            "receipt",            # the standing: anything but `verified` is
+                                  # not a pass, including a reason this
+                                  # wrapper cannot name yet
         },
         "ignored": {
             "pairs": "the per-pair detail behind clashes/near_misses",

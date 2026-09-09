@@ -569,3 +569,67 @@ TEST_CASE("CADShape replaces its shape only through SetShape", "[convention]") {
           }());
   CHECK(offenders.empty());
 }
+
+TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
+  // A verdict RPC is one that answers "is this all right?" — and there are
+  // twelve of them. Each used to report a clean result and a result it could
+  // not compute in the same shape, so a caller had to know which flag to read
+  // before believing the headline: `truncated` beside `clash: false`, `stale`
+  // beside a factor of safety, `valid` over zero bodies.
+  //
+  // A receipt makes the standing unmissable (core/Receipt.h). The list below
+  // is the surface, and it is deliberately explicit: the failure this catches
+  // is a THIRTEENTH verdict RPC arriving with no receipt and nobody noticing,
+  // which no amount of fixing the current twelve prevents. Add the row when
+  // you add the RPC — `pending` is a to-do the build reminds you of, not a
+  // way to opt out.
+  struct Verdict {
+    const char* method;
+    const char* file;
+    bool wired;
+  };
+  const std::vector<Verdict> kVerdictRpcs = {
+      {"interference", "src/remote/RemoteInspection.cpp", true},
+      {"clash", "src/remote/RemoteInspection.cpp", true},
+      {"check_geometry", "src/remote/RemoteInspection.cpp", true},
+      {"study_results", "src/remote/RemoteSimulation.cpp", true},
+      {"contact_report", "src/remote/RemoteInspection.cpp", true},
+      {"check_fasteners", "src/remote/RemoteAssembly.cpp", false},
+      {"check_drawing", "src/remote/RemoteDrawings.cpp", false},
+      {"check_layout", "src/remote/RemoteCam.cpp", false},
+      {"cam_verify", "src/remote/RemoteCam.cpp", false},
+      {"cam_simulate", "src/remote/RemoteCam.cpp", false},
+      {"compare_geometry", "src/remote/RemoteInspection.cpp", false},
+      {"run_motion_study", "src/remote/RemoteMotion.cpp", false},
+  };
+
+  std::set<std::string> attachesReceipt;
+  for (const SourceFile& f : SourcesUnder("src/remote", ".cpp"))
+    if (f.text.find("AttachReceipt") != std::string::npos)
+      attachesReceipt.insert(Relative(f.path));
+
+  std::vector<std::string> missing;
+  for (const Verdict& v : kVerdictRpcs) {
+    if (!v.wired)
+      continue;
+    if (!attachesReceipt.count(v.file))
+      missing.push_back(std::string(v.method) + " (" + v.file + ")");
+  }
+  INFO("these are marked wired but their module attaches no receipt:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& m : missing)
+              s += "  " + m + "\n";
+            return s;
+          }());
+  CHECK(missing.empty());
+
+  // The roll-up is only honest if `Unverifiable` is actually reachable. A
+  // receipt surface where nothing is ever unverifiable has re-invented a
+  // boolean with more words.
+  bool anyUnverifiable = false;
+  for (const SourceFile& f : SourcesUnder("src/remote", ".cpp"))
+    if (f.text.find(".Unverifiable(") != std::string::npos)
+      anyUnverifiable = true;
+  CHECK(anyUnverifiable);
+}
