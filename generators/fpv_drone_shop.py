@@ -69,8 +69,16 @@ def top_face(part):
 
 
 def study(app, part, name, fixed, forces, mesh_size):
-    """One static study: what is held, what pushes, how finely."""
+    """One static study: what is held, what pushes, how finely.
+
+    A study of this name is REPLACED, not added beside: the stage is saved
+    with the project now, so a second run would otherwise leave two of
+    everything and no way to tell which answer belonged to which run.
+    """
     part.activate()
+    for old in app.call("list_studies")["studies"]:
+        if old["name"] == name:
+            app.call("remove_study", study=old["id"])
     s = app.add_study(kind="static", name=name)
     app.set_study(study=s["id"], mesh_size=mesh_size)
     for face in fixed:
@@ -82,7 +90,28 @@ def study(app, part, name, fixed, forces, mesh_size):
     app.run_study(study=s["id"], _timeout=1800)
     out = app.study_results(study=s["id"])
     out["name"] = name
+    out["study"] = s["id"]
+    out["part"] = part
     return out
+
+
+def plot(app, result, out):
+    """A picture of the field, saved beside the numbers.
+
+    Worth more here than in most places, because the SOLVE is not persisted:
+    reopened, the study carries its load cases and no answers. A png and a
+    row in fem.csv are what survive the run.
+    """
+    result["part"].activate()
+    app.call("enter_simulation", study=result["study"])
+    app.call("set_result_display", study=result["study"], field="von_mises",
+             deform_scale=1.0)
+    app.call("view", name="iso")
+    path = os.path.join(out, "fem-" + result["name"].lower()
+                        .replace(" ", "-") + ".png")
+    app.call("screenshot", path=path, width=1200, height=900)
+    app.call("exit_simulation")
+    return path
 
 
 def fem(app, out=None):
@@ -141,6 +170,8 @@ def fem(app, out=None):
     print(f"  {FEM_CAVEAT}")
     if out is not None:
         os.makedirs(out, exist_ok=True)
+        for r in results:
+            plot(app, r, out)
         with open(os.path.join(out, "fem.csv"), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["study", "elements", "nodes", "max_displacement_mm",
@@ -339,6 +370,11 @@ def cam(app, out):
     made = []
     for sheet, thickness, wanted in SHEETS:
         copies = [name for name, qty in wanted for _ in range(qty)]
+        # Same reason as the studies: this is saved with the project, so a
+        # second run must replace the sheet rather than add another beside it.
+        for tab in app.call("list_parts")["parts"]:
+            if tab["name"] == sheet and tab["type"] == "job":
+                app.call("delete_part", part=tab["id"])
         job = app.machine_part(part=copies[0], name=sheet)
         placed = [(copies[0], job["part"]["id"])]
         placed += [(name, app.add_job_part(part=name)["id"])
@@ -384,7 +420,9 @@ def cam(app, out):
                                                or paths.get("skipped")))
         posted = app.cam_post(
             setup=setup, _timeout=1800,
-            path=os.path.join(out, sheet.replace(" ", "-") + ".nc"))
+            # No spaces: these go on an SD card and through a shell.
+            path=os.path.join(out, sheet.replace(" mm sheet", "mm")
+                              .replace(" ", "-") + ".nc"))
         verdict = app.cam_verify(setup=setup, _timeout=3600)
         # The clock the FILE states — every cutting feed is in it, and no
         # machine states its rapid rate, so this is time cutting and not an

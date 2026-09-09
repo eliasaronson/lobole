@@ -16,10 +16,12 @@ What the run asserts before it claims anything (see `verify`):
   - the props still clear everything through a full turn of the motors;
   - every fastener reaches the thread it is supposed to reach.
 
-`--stage shop` (and its halves `fem` and `cam`) reopens the saved project
-and asks what happens to the parts once they leave the model: what the arm
-and the top plate do under load, and the G-code that cuts the carbon.
-`fpv_drone_shop.py` holds both, and neither changes the model.
+`--stage shop` (and its halves `fem` and `cam`) asks what happens to the
+parts once they leave the model: what the arm and the top plate do under
+load, and the G-code that cuts the carbon. `fpv_drone_shop.py` holds both,
+they add studies and jobs and touch no part, and `--stage all` ends with
+them — so one command produces everything, and either half can be re-run
+against the saved project on its own.
 """
 import argparse
 import datetime
@@ -960,6 +962,14 @@ def main():
     app.save_project(path=project)
     if args.stage == "all":
         outputs(app, args.out)
+        # ...and what happens to the parts afterwards, on the project that has
+        # just been saved: one command for the model, the sheets, the exports,
+        # the load cases and the G-code.
+        import fpv_drone_shop as shop
+        with phase("fem"):
+            shop.fem(app, args.out)
+        with phase("cam"):
+            shop.cam(app, args.out)
         app.save_project(path=project, force=True)
     print("saved")
     report_phases()

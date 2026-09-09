@@ -296,7 +296,8 @@ constexpr MethodDoc kCamMethods[] = {
      "missing from the file (`clipped_mm`), and `warnings`. Writes a "
      "file; it does not send it "
      "to a machine. With split_output on the setup, `path` is the base and "
-     "one file per tool is written beside it as `<base> - T<n>.<ext>`, each "
+     "one file per tool is written beside it as `<base>-T<n>.<ext>` (no "
+     "spaces: these go on an SD card and through a shell), each "
      "complete and starting by loading its tool; `files` names every one.",
      "job, path, post, setup"},
 };
@@ -1355,6 +1356,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
     if (p.value("close", false)) {
+      // `setup` is read even here, and ignored: naming the setup you are
+      // closing is the natural thing to write, and refusing it with
+      // "unknown parameter 'setup'; accepted: close" reads as though the
+      // method has no such parameter at all.
+      (void)p.value("setup", uint64_t{0});
       ui::EndCamPlayback(state);
       return json{{"open", false}};
     }
@@ -1603,7 +1609,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       for (const cam::PostFile& f : split) {
         const std::string one =
             (base.parent_path() /
-             (base.stem().string() + " - T" + std::to_string(f.tool) +
+             (base.stem().string() + "-T" + std::to_string(f.tool) +
               base.extension().string()))
                 .string();
         if (!DocumentIO::WriteTextAtomic(one, f.gcode, &error))

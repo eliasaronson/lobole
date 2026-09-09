@@ -1090,8 +1090,7 @@ void DrawCamPanel(AppState& state) {
             if (!ok)
               break;
             const std::string path =
-                (dir / (stem + " - T" + std::to_string(f.tool) + ".nc"))
-                    .string();
+                (dir / (stem + "-T" + std::to_string(f.tool) + ".nc")).string();
             ok = DocumentIO::WriteTextAtomic(path, f.gcode, &error);
             if (ok) {
               wrote += (wrote.empty() ? "" : "\n") + path;
