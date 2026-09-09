@@ -503,28 +503,39 @@ static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
 // triangles): propeller to camera plate 3.3 s -> 0.6 s, propeller to
 // battery 0.8 s, camera to battery 7 ms.
 //
-// THE CAP is the other half, and it is there because the two methods fail on
-// opposite cases. Two propellers 151 mm apart give 32 candidate pairs and
-// BRepExtrema, asked about everything, takes 55 s — nothing prunes, because
-// every facing pair is at the same distance. The SAME two propellers 30 mm
-// apart give 177 candidates (the blades run nearly parallel, so half the
-// faces are equally close) and BRepExtrema takes 0.1 s — its bound lands on
-// the true minimum immediately and the rest falls away. A long candidate
-// list is exactly the shape of the second case, so it hands the question
-// back rather than refining 177 spline face pairs at 0.4 s each.
-constexpr size_t kMaxRefinedPairs = 24;
+// THE CAP is the other half, and it is a cost estimate rather than a limit.
+// Refining N candidate pairs costs about N single face-pair extrema, and on
+// spline faces one of those is 0.1-0.4 s; asking OpenCASCADE about the whole
+// shapes costs whatever its own pruning makes it. Measured on a quadcopter's
+// propellers (53 spline faces, 2208 triangles each):
+//
+//   151 mm apart:  32 candidates,  4.5 s refined,  51 s whole-shape
+//    30 mm apart: 177 candidates,   69 s refined,  17 s whole-shape
+//
+// The blades run nearly PARALLEL at 30 mm, so half the faces are equally
+// close and the candidate list stops narrowing anything. A long list is that
+// case, and this hands it back. 64 sits between the two: high enough to keep
+// the win where the list is short, low enough to refuse where it is not.
+constexpr size_t kMaxRefinedPairs = 64;
 
 double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
                      const glm::dmat4& xfA, const CADShape& shapeB,
-                     const TopoDS_Shape& b, const glm::dmat4& xfB) {
+                     const TopoDS_Shape& b, const glm::dmat4& xfB,
+                     gp_Pnt* pointA = nullptr, gp_Pnt* pointB = nullptr) {
+  double best_ = std::numeric_limits<double>::infinity();
   const auto full = [&](const TopoDS_Shape& x, const TopoDS_Shape& y) {
     // MIN, not the default MINMAX: every BRepExtrema here wants the
     // minimum, and the maxima are work nobody reads.
     BRepExtrema_DistShapeShape d(x, y, Extrema_ExtFlag_MIN,
                                  Extrema_ExtAlgo_Grad);
-    return d.IsDone() && d.NbSolution() >= 1
-               ? d.Value()
-               : std::numeric_limits<double>::infinity();
+    if (!d.IsDone() || d.NbSolution() < 1)
+      return std::numeric_limits<double>::infinity();
+    if (pointA != nullptr && d.Value() < best_) {
+      *pointA = d.PointOnShape1(1);
+      *pointB = d.PointOnShape2(1);
+    }
+    best_ = std::min(best_, d.Value());
+    return d.Value();
   };
   const collide::Gap gap = collide::Nearest(shapeA, xfA, shapeB, xfB, 2.0);
   if (!gap.known || gap.pairs.empty() || gap.pairs.size() > kMaxRefinedPairs)
@@ -1766,10 +1777,36 @@ std::optional<DistanceResult> DistanceBetween(const Target& a, const Target& b,
       out.distance = std::sqrt(best);
       return out;
     }
-    BRepExtrema_DistShapeShape dist(sa, sb);
+    // Body pair by body pair, through the mesh-guided refinement — the same
+    // exact answer, asked of the faces that can hold it. Asking the fused
+    // compounds instead was 26 s on two lofted propellers, and it is what
+    // `measure` between two whole occurrences actually calls (the sweep's
+    // path is ContactBetween, which was already going through it).
+    const std::vector<Body> ba = TargetBodies(a), bb = TargetBodies(b);
+    DistanceResult out;
+    double best = std::numeric_limits<double>::infinity();
+    for (const Body& x : ba)
+      for (const Body& y : bb) {
+        const TopoDS_Shape sx = x.shape.GetShape(), sy = y.shape.GetShape();
+        if (sx.IsNull() || sy.IsNull())
+          continue;
+        gp_Pnt pa, pb;
+        const double d = ExactDistance(x.shape, sx, glm::dmat4(1.0), y.shape,
+                                       sy, glm::dmat4(1.0), &pa, &pb);
+        if (d < best) {
+          best = d;
+          out.pointA = glm::vec3(pa.X(), pa.Y(), pa.Z());
+          out.pointB = glm::vec3(pb.X(), pb.Y(), pb.Z());
+        }
+      }
+    if (std::isfinite(best)) {
+      out.distance = best;
+      return out;
+    }
+    BRepExtrema_DistShapeShape dist(sa, sb, Extrema_ExtFlag_MIN,
+                                    Extrema_ExtAlgo_Grad);
     if (!dist.IsDone() || dist.NbSolution() < 1)
       return std::nullopt;
-    DistanceResult out;
     out.distance = dist.Value();
     const gp_Pnt pa = dist.PointOnShape1(1);
     const gp_Pnt pb = dist.PointOnShape2(1);
@@ -1833,7 +1870,11 @@ std::optional<SetContact> OverlapBetween(const Target& a, const Target& b) {
   const std::vector<Body> pa = TargetBodies(a), pb = TargetBodies(b);
   if (pa.empty() || pb.empty())
     return std::nullopt;
-  return ContactBetween(pa, glm::mat4(1.0f), pb, glm::mat4(1.0f));
+  // No distance: this verb exists for the overlap VOLUME, and its callers
+  // read `volume` alone. Asking for the distance as well doubled the cost of
+  // every `measure` between two whole shapes — the handler had already
+  // computed one through DistanceBetween.
+  return ContactBetween(pa, glm::mat4(1.0f), pb, glm::mat4(1.0f), false);
 }
 
 collide::Gap MeshGap(const Target& a, const Target& b) {

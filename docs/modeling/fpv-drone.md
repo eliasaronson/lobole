@@ -184,18 +184,37 @@ of its surface, so the true pair's triangles are within `mesh + 2
 deflections`) and much faster on ordinary parts: propeller to camera plate
 3.3 s to 0.6 s, camera to battery 7 ms. But two propeller blades run nearly
 PARALLEL, so 177 face pairs are equally close, and refining 177 spline pairs
-at 0.4 s each is worse than asking OpenCASCADE once. The two methods fail on
-opposite cases — BRepExtrema is 0.1 s when the shapes are close and 55 s when
-they are far; the refinement is the other way round — so `Measure` caps the
-refinement at 24 pairs and hands anything longer back.
+at 0.4 s each is worse than asking OpenCASCADE once — 69 s against 17. Where
+the list is short the refinement wins outright: those same propellers 151 mm
+apart give 32 candidates, 4.5 s refined against 51 s whole-shape. So
+`Measure` caps refinement at 64 pairs, which is a cost estimate (N candidates
+cost about N face-pair extrema) rather than a limit, and hands longer lists
+back.
 
-**Not asking for an exact number at all**: this is the one. A clearance
-question wants to know there are thirty millimetres, not thirty microns, so
-`measure` grew `mode: "mesh"` — the same bargain `interference` has always
-offered, with the deflection reported alongside. 40 ms, and the generator
-subtracts the deflection rather than trusting the figure flat, which is why
-the clearances above read as "at worst". The exact path is still the
-default, and still exact.
+**Not asking for an exact number at all**: `measure` grew `mode: "mesh"` —
+the same bargain `interference` has always offered, with the deflection
+reported alongside. 10 ms against 51 s for that propeller pair, agreeing to
+0.003 mm, and the generator subtracts the deflection rather than trusting
+the figure flat, which is why the clearances above read as "at worst".
+
+And the last of it was a plain mistake, found by measuring the default after
+claiming it was faster: `measure` never used the path that had been
+optimised. Its distance goes through `DistanceBetween`, which asked
+BRepExtrema about the fused compounds, while the refinement had gone into
+`ContactBetween` (which is what the interference sweep uses). Worse, the
+handler called BOTH — `OverlapBetween`, which exists for the overlap volume,
+was computing a distance nobody read. With the refinement in the right place
+and the second distance gone, the EXACT default is:
+
+| between | was | now |
+|---|---|---|
+| propellers, 151 mm apart | 51 s | 4.2 s |
+| propellers, 30 mm apart | 25 s | 13.5 s |
+| propeller to camera plate | 2.4 s | 0.6 s |
+| battery to camera | 0.02 s | 0.02 s |
+
+all still exact. Mesh mode is the further 100-400x on top of that, for when
+a clearance is what is wanted rather than a coordinate.
 
 ## Files
 
