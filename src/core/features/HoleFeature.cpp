@@ -2,6 +2,7 @@
 
 #include "core/parts/AxisStack.h"
 
+#include <cmath>
 #include <cstdio>
 
 #include "core/parts/FastenerTable.h"
@@ -32,6 +33,32 @@ std::string Join(const std::vector<std::string>& items, size_t show) {
     out += " and " + std::to_string(items.size() - show) + " more";
   return out;
 }
+// The span of a ray that lies inside an axis-aligned box, as [from, to]
+// along `dir`. False when the ray misses it altogether.
+bool ClipToBox(const glm::vec3& origin, const glm::vec3& dir,
+               const glm::vec3& lo, const glm::vec3& hi, double* from,
+               double* to) {
+  double t0 = *from, t1 = *to;
+  for (int i = 0; i < 3; i++) {
+    if (std::abs(dir[i]) < 1e-9) {
+      if (origin[i] < lo[i] - 1e-6 || origin[i] > hi[i] + 1e-6)
+        return false;
+      continue;
+    }
+    double a = (lo[i] - origin[i]) / dir[i];
+    double b = (hi[i] - origin[i]) / dir[i];
+    if (a > b)
+      std::swap(a, b);
+    t0 = std::max(t0, a);
+    t1 = std::min(t1, b);
+    if (t0 > t1)
+      return false;
+  }
+  *from = t0;
+  *to = t1;
+  return true;
+}
+
 } // namespace
 
 bool HoleFeature::Execute(RegenContext& ctx) {
@@ -100,17 +127,16 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 
   const glm::vec3 axis = -sk->plane.GetNormal(); // drill into the material
   // Through-all: drill well past any body (bbox diagonal of all bodies).
-  double boreDepth = depth;
-  if (through) {
-    glm::vec3 lo(1e30f), hi(-1e30f);
-    for (const auto& b : ctx.bodies) {
-      glm::vec3 bmin, bmax;
-      b.shape.GetBoundingBox(bmin, bmax);
-      lo = glm::min(lo, bmin);
-      hi = glm::max(hi, bmax);
-    }
-    boreDepth = ctx.bodies.empty() ? depth : glm::length(hi - lo) + 1.0f;
+  glm::vec3 lo(1e30f), hi(-1e30f);
+  for (const auto& b : ctx.bodies) {
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    lo = glm::min(lo, bmin);
+    hi = glm::max(hi, bmax);
   }
+  double boreDepth = depth;
+  if (through)
+    boreDepth = ctx.bodies.empty() ? depth : glm::length(hi - lo) + 1.0f;
 
   auto& kernel = CADKernel::Instance();
   const double r = diameter / 2.0;
@@ -194,10 +220,17 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     std::vector<std::string> empty;
     for (const glm::vec3& c : centers) {
       bool meets = false;
-      // Sampled over the bore's own length, so the spacing scales with the
-      // hole rather than being a fixed number of millimetres.
-      for (int i = 1; i <= 9 && !meets; i++) {
-        const glm::vec3 p = c + axis * float(boreDepth * (0.1 * i));
+      // Sampled over the span where material CAN be — the bore clipped to
+      // the bodies' box — not over the bore's own length. A through hole's
+      // bore is a bounding-box DIAGONAL long, so nine points spread over it
+      // all start past a thin plate and every one of them reports air: a
+      // carbon frame drilled twelve correct holes and warned about all
+      // twelve. The clip is what makes the spacing scale with the MATERIAL.
+      double from = 0.0, to = boreDepth;
+      if (!ctx.bodies.empty() && !ClipToBox(c, axis, lo, hi, &from, &to))
+        from = to = 0.0; // the bore misses the box entirely: no material
+      for (int i = 1; i <= 9 && !meets && to > from; i++) {
+        const glm::vec3 p = c + axis * float(from + (to - from) * (0.1 * i));
         for (const Body& b : ctx.bodies) {
           if (b.reference || !b.shape.IsValid())
             continue;

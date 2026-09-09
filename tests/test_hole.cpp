@@ -137,6 +137,39 @@ TEST_CASE("a hole centre over nothing is reported", "[hole]") {
   CHECK(doc.GetFeature(2)->GetWarning().empty());
 }
 
+TEST_CASE("a through hole in a thin plate is not reported as air", "[hole]") {
+  // A through bore is drilled a bounding-box DIAGONAL long, so sampling it
+  // over its own length starts well past a thin plate and reports air for a
+  // hole that plainly cut: a 108 x 88 x 3 carbon plate drilled twelve
+  // correct holes and warned about all twelve. The samples belong in the
+  // span where material can be, which is the bore clipped to the bodies.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>(
+      "Plate", glm::vec3(-54.0f, -44.0f, 0.0f), 108.0, 88.0, 3.0));
+  SketchPlane plane(glm::vec3(0, 0, 3), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
+  auto sk = std::make_unique<SketchFeature>("Centres", plane);
+  sk->AddEntity(sketch::Point{{36.77f, 36.77f}}); // on the plate
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  auto ho =
+      std::make_unique<HoleFeature>("Drill", skId, HoleKind::Simple, 3.2, 0.0);
+  ho->through = true;
+  doc.AddFeature(std::move(ho));
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.GetFeature(2)->GetError().empty());
+  CHECK(doc.GetFeature(2)->GetWarning().empty());
+
+  // A centre genuinely off the plate is still reported — the clip narrows
+  // where it looks, it does not stop it looking.
+  auto* centres = dynamic_cast<SketchFeature*>(doc.GetFeature(1));
+  REQUIRE(centres != nullptr);
+  centres->AddEntity(sketch::Point{{80.0f, 0.0f}});
+  doc.ClearRegenCache();
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(doc.GetFeature(2)->GetWarning(),
+             Catch::Matchers::ContainsSubstring("1 of 2 hole centres"));
+}
+
 TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));
