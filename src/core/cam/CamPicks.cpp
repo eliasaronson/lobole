@@ -186,6 +186,20 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
       loop.pts = WireToLoop(wire, deflection);
       if (loop.pts.size() < 3)
         continue;
+      // A wire of one circular edge is a BORE, and its diameter is the
+      // circle's -- asked of the geometry rather than measured off the
+      // flattened polygon.
+      int edges = 0;
+      double diameter = 0.0;
+      for (BRepTools_WireExplorer ex(wire); ex.More(); ex.Next()) {
+        edges++;
+        BRepAdaptor_Curve curve(ex.Current());
+        if (curve.GetType() == GeomAbs_Circle)
+          diameter = 2.0 * curve.Circle().Radius();
+        else
+          diameter = 0.0;
+      }
+      loop.boreDiameter = edges == 1 ? diameter : 0.0;
       // Inner wires are islands: material standing in the pocket, which the
       // clearing region has to go around rather than through.
       loop.hole = !wire.IsSame(outer);

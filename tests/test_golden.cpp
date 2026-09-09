@@ -246,6 +246,19 @@ void AssertCamFrames(const std::vector<cam::Setup>& setups,
       CHECK(got[i] == want[i]);
     }
   }
+  if (expect.contains("cam_op_drilled_bores")) {
+    const auto want =
+        expect.at("cam_op_drilled_bores").get<std::vector<double>>();
+    std::vector<double> got;
+    for (const cam::Setup& setup : setups)
+      for (const cam::Operation& op : setup.operations)
+        got.push_back(op.drilledBores);
+    REQUIRE(got.size() == want.size());
+    for (size_t i = 0; i < got.size(); i++) {
+      INFO("op " << i);
+      CHECK(std::abs(got[i] - want[i]) < 1e-9);
+    }
+  }
   if (expect.contains("cam_op_reliefs")) {
     const auto want =
         expect.at("cam_op_reliefs").get<std::vector<std::string>>();

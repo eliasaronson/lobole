@@ -209,6 +209,22 @@ struct Operation {
   // the stop is the dwell mark. The ramp is the entry, so there is no lead
   // in: the tool arrives at the wall descending, already moving along it.
   bool leadArcs = false;
+  // Profile, cutting INSIDE a level face: leave the BORES up to this
+  // diameter alone -- they are drilled. 0, the default, cuts every opening.
+  //
+  // It exists because "cut the openings in this face" and "drill the holes in
+  // this face" are both true of the same face: on a carbon frame the slots
+  // are milled and the M2/M3 fastener holes are DRILLED, and without a word
+  // for it one operation cuts what the other has already taken out -- minutes
+  // of a 2 mm cutter orbiting air in a hole that is already gone.
+  //
+  // A bore and not a width, because width cannot say it: this frame's
+  // narrowest MILLED opening is a 2.2 mm slot and its widest DRILLED hole is
+  // 3.2 mm across, so any threshold that keeps the slot keeps the holes too.
+  // What separates them is that one is a hole. It is the caller's statement
+  // of intent rather than a guess the app can make -- a hole drilled
+  // undersize and finished to size is the same pick and the opposite answer.
+  double drilledBores = 0.0;
   // Profile and pocket only (R4): what to do at the inside corners of the
   // material. Applied to the wall pass -- the loop one tool radius off the
   // wall -- at every sharp corner where the cutter cannot reach.
@@ -470,6 +486,13 @@ struct Move {
 struct Loop {
   std::vector<glm::dvec2> pts;
   bool hole = false;
+  // The diameter of the bore this loop IS, or 0 when it is not one: a wire of
+  // exactly one circular edge. Exact, and not a guess from the polygon --
+  // "is this opening a drilled hole?" is a question about the model, and a
+  // 2.2 mm slot is narrower than a 3.2 mm bolt hole, so no measurement of
+  // WIDTH can tell them apart. Filled by PickedFaceRegion; sectioned loops
+  // leave it 0.
+  double boreDiameter = 0.0;
 };
 
 struct Toolpath {

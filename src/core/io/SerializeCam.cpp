@@ -422,7 +422,9 @@ json CamSetupToJson(const cam::Setup& setup) {
     if (op.useOutline)
       oj["use_outline"] = true;
     if (op.leadArcs)
-      oj["lead_arcs"] = true; // v81; omitted when off
+      oj["lead_arcs"] = true;  // v81; omitted when off
+    if (op.drilledBores > 0.0) // v96; omitted when every opening is cut
+      oj["drilled_bores"] = op.drilledBores;
     if (op.finishTool != 0) { // v82; omitted when there is no finishing pass
       oj["finish_tool"] = op.finishTool;
       oj["finish_stock"] = op.finishStock;
@@ -578,6 +580,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.climb = oj.value("climb", true);
     op.useOutline = oj.value("use_outline", false);
     op.leadArcs = oj.value("lead_arcs", false);
+    op.drilledBores = oj.value("drilled_bores", 0.0);
     op.finishTool = oj.value("finish_tool", 0);
     op.finishStock = oj.value("finish_stock", 0.0);
     if (oj.contains("corner_relief")) {

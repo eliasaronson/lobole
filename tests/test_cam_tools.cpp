@@ -733,6 +733,110 @@ TEST_CASE("cam finish: one operation roughs with one tool and finishes with "
   CHECK_THAT(back.operations[0].finishStock, WithinAbs(0.6, 1e-9));
 }
 
+TEST_CASE("cam profile: cutting INSIDE a face cuts its openings", "[cam]") {
+  // "Cut inside this face" can only mean its openings. It used to mean the
+  // face's OUTER wire offset inward -- a trench a whisker inside the part,
+  // full depth, all the way round, which is the failure the strategy's own
+  // refusal describes and which this pick walked straight into, because the
+  // refusal fires only when the contour list is EMPTY and a face pick always
+  // handed back one contour.
+  auto plate = std::make_unique<Document>();
+  plate->AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 5));
+  uint64_t solid = plate->GetFeature(0)->GetId();
+  const glm::dvec2 slots[2] = {{15.0, 20.0}, {45.0, 20.0}};
+  for (const glm::dvec2& at : slots) {
+    plate->AddFeature(std::make_unique<BoxFeature>(
+        "Slot", glm::vec3(at.x - 4.0, at.y - 4.0, -1.0), 8.0, 8.0, 7.0));
+    const uint64_t voidId =
+        plate->GetFeature(plate->FeatureCount() - 1)->GetId();
+    plate->AddFeature(std::make_unique<BooleanFeature>("Cut", solid, voidId,
+                                                       BooleanOp::Subtract));
+    solid = plate->GetFeature(plate->FeatureCount() - 1)->GetId();
+  }
+  const auto topFace = [](const Document& doc, double z) {
+    ElementRef out;
+    for (const Body& b : doc.GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+            std::abs(o.z - z) < 1e-3)
+          out = ElementRef{b.createdBy, name};
+      }
+    return out;
+  };
+  const ElementRef top = topFace(*plate, 5.0);
+  REQUIRE(top.IsSet());
+
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.side = cam::Side::Inside;
+  op.topZ = 5.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 3.0;
+  op.targets = {cam::Target{0, top}};
+  setup.operations.push_back(op);
+  const auto paths = cam::GenerateAll(setup, plate->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+
+  // Every cutting move belongs to one of the two openings, and none of them
+  // goes near the part's own edge -- which is where the trench used to be.
+  int near[2] = {0, 0};
+  for (const cam::Move& m : paths[0].moves) {
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    const glm::dvec2 at(m.to.x, m.to.y);
+    const double d0 = glm::distance(at, slots[0]);
+    const double d1 = glm::distance(at, slots[1]);
+    INFO("cut at " << at.x << ", " << at.y);
+    CHECK(std::min(d0, d1) < 6.0);
+    near[d0 < d1 ? 0 : 1]++;
+  }
+  CHECK(near[0] > 0); // both openings, in ONE operation
+  CHECK(near[1] > 0);
+
+  // A face with nothing in it says what to pick instead of trenching.
+  auto blank = BlockDoc(40, 30, 10);
+  cam::Setup none = BasicSetup();
+  cam::Operation solidOp = op;
+  solidOp.topZ = 10.0;
+  solidOp.targets = {cam::Target{0, topFace(*blank, 10.0)}};
+  none.operations.push_back(solidOp);
+  const auto refused = cam::GenerateAll(none, blank->GetBodies());
+  REQUIRE(refused.size() == 1);
+  INFO(refused[0].error);
+  CHECK(refused[0].error.find("nothing to cut in that face") !=
+        std::string::npos);
+  CHECK(refused[0].moves.empty());
+
+  // A BOSS has an inner wire too, and it is not an opening: cutting round the
+  // inside of one removes the boss. The same test `useOutline` uses to tell
+  // them apart -- is anything standing in it? -- decides here.
+  auto flange = FlangeDoc(10.0, /*boss=*/true);
+  cam::Setup floorSetup = BasicSetup();
+  cam::Operation onFloor = op;
+  onFloor.topZ = 12.0;
+  onFloor.bottomZ = 10.0;
+  onFloor.targets = {cam::Target{0, topFace(*flange, 12.0)}};
+  floorSetup.operations.push_back(onFloor);
+  const auto floorPaths = cam::GenerateAll(floorSetup, flange->GetBodies());
+  REQUIRE(floorPaths.size() == 1);
+  INFO(floorPaths[0].error);
+  REQUIRE(floorPaths[0].error.empty());
+  for (const cam::Move& m : floorPaths[0].moves) {
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    // The bore at (60, 45) is an opening; the boss at (44, 34) is not.
+    INFO("cut at " << m.to.x << ", " << m.to.y);
+    CHECK(glm::distance(glm::dvec2(m.to.x, m.to.y), glm::dvec2(60.0, 45.0)) <
+          6.0);
+  }
+}
+
 TEST_CASE("cam drill: a through hole breaks out by the point, whatever shape "
           "the point is",
           "[cam][drill]") {

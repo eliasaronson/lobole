@@ -1,0 +1,150 @@
+{
+  "format": "designer-document",
+  "version": 96,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Baffle"
+    },
+    {
+      "id": 2,
+      "source": 3,
+      "name": "Rail"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Openings and holes",
+      "safe_z": 21.0,
+      "tools": [
+        {
+          "number": 1,
+          "name": "6 mm flat",
+          "diameter": 6.0,
+          "chipload_min": 0.12,
+          "chipload_max": 0.24
+        },
+        {
+          "number": 2,
+          "name": "3 mm flat",
+          "diameter": 3.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1,
+          "frame": [
+            -0.7071067811865475,
+            0.0,
+            0.0,
+            0.7071067811865476
+          ]
+        },
+        {
+          "id": 11,
+          "part": 2,
+          "pos": [
+            300.0,
+            0.0
+          ]
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Cut the baffle out",
+          "type": "profile",
+          "side": "outside",
+          "tool": 1,
+          "top_z": 16.0,
+          "bottom_z": -1.0,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 1,
+              "element": "1/face0"
+            }
+          ],
+          "corner_relief": "dogbone",
+          "finish_tool": 2,
+          "finish_stock": 0.6
+        },
+        {
+          "id": 5,
+          "name": "Cut the openings in the rail",
+          "type": "profile",
+          "side": "inside",
+          "tool": 1,
+          "top_z": 18.0,
+          "bottom_z": -1.0,
+          "targets": [
+            {
+              "part": 2,
+              "feature_id": 1,
+              "element": "1/face0"
+            }
+          ],
+          "lead_arcs": true,
+          "drilled_bores": 4.0
+        },
+        {
+          "id": 6,
+          "name": "Drill the mounting holes",
+          "type": "drill",
+          "tool": 1,
+          "top_z": 16.0,
+          "bottom_z": -1.0,
+          "peck": 6.0,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 1,
+              "element": "1/face3"
+            }
+          ]
+        }
+      ],
+      "machine": {
+        "name": "Shop router",
+        "post": "mach3",
+        "travel": {
+          "min": [
+            0.0,
+            0.0,
+            -100.0
+          ],
+          "max": [
+            1200.0,
+            800.0,
+            0.0
+          ]
+        },
+        "has_rotary_axis": false,
+        "rapid_feed": 3000.0,
+        "tools": [
+          {
+            "number": 1,
+            "name": "6 mm flat",
+            "diameter": 6.0
+          },
+          {
+            "number": 2,
+            "name": "3 mm flat",
+            "diameter": 3.0
+          }
+        ]
+      },
+      "split_output": true,
+      "order": "tool",
+      "origin_at": "stock_max",
+      "reach_offset": [
+        0.0,
+        180.0
+      ]
+    }
+  ]
+}

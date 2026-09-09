@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    95; // v95: opt-in bounded thread engagement and thread-driven screw pitch.
+    96; // v96: a CAM profile's `drilled_bores` -- cutting INSIDE a level face
+        //      cuts every opening in it, and this is the diameter up to which
+        //      a round one is left to the DRILL. Width could not say it: a
+        //      2.2 mm milled slot is narrower than a 3.2 mm drilled hole.
+        //      Absent (0) cuts every opening.
+        // v95: opt-in bounded thread engagement and thread-driven screw pitch.
         // v94: generated component ownership and source fingerprints.
         // v93: versioned engineering catalog references and embedded records.
         // v92: a CAM tool's `chipload_min`/`chipload_max` -- what THIS cutter
