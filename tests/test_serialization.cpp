@@ -613,6 +613,100 @@ TEST_CASE("describe's feature table covers every type a document can hold",
   }
 }
 
+namespace {
+// One entity wrapped in the smallest Sketch that will carry it. EntityFromJson
+// is file-local in SerializeFeatures.cpp, so the entity dialect is tested
+// through the same door an agent comes in by.
+nlohmann::json SketchWith(const nlohmann::json& entity) {
+  return {{"type", "Sketch"},
+          {"name", "probe"},
+          {"plane",
+           {{"origin", {0.0, 0.0, 0.0}},
+            {"normal", {0.0, 0.0, 1.0}},
+            {"uAxis", {1.0, 0.0, 0.0}}}},
+          {"entities", nlohmann::json::array({entity})}};
+}
+} // namespace
+
+// --- kSketchEntityTypes is the authority too -------------------------------
+//
+// One level below the feature table, and it had the same hole for longer: the
+// entity list was bare NAMES, so `describe` could tell an agent that "arc"
+// exists and not one field it takes. A sketch arc's angles are radians, in an
+// API whose other angles are all named `_deg`, and nothing anywhere said so —
+// `end_angle: 90` is a legal 90 RADIANS and silently sweeps 116.6 degrees.
+
+TEST_CASE("every documented sketch entity type reaches a branch",
+          "[serialization]") {
+  const auto types = DocumentIO::SketchEntityTypes();
+  REQUIRE(!types.empty());
+  for (const DocumentIO::SketchEntityInfo& info : types) {
+    try {
+      DocumentIO::FeatureFromJson(SketchWith({{"type", info.type}}));
+    } catch (const std::exception& e) {
+      const std::string msg = e.what();
+      INFO("entity " << info.type << " reported: " << msg);
+      // It may complain about a missing FIELD; it must never say the TYPE is
+      // unknown or undocumented.
+      CHECK(msg.find("Unknown sketch entity type") == std::string::npos);
+      CHECK(msg.find("no branch for it") == std::string::npos);
+    }
+    INFO("entity " << info.type << " documents no fields");
+    CHECK(std::strlen(info.params) > 0);
+  }
+}
+
+TEST_CASE("a sketch entity outside the table is refused by name",
+          "[serialization]") {
+  REQUIRE_THROWS_WITH(
+      DocumentIO::FeatureFromJson(SketchWith({{"type", "squircle"}})),
+      Catch::Matchers::ContainsSubstring("Unknown sketch entity type: "
+                                         "squircle") &&
+          Catch::Matchers::ContainsSubstring("Known types:") &&
+          Catch::Matchers::ContainsSubstring("arc"));
+}
+
+TEST_CASE("a sketch arc takes degrees or radians, never both",
+          "[serialization]") {
+  const auto arc = [](nlohmann::json extra) {
+    nlohmann::json e = {
+        {"type", "arc"}, {"center", {0.0, 0.0}}, {"radius", 40.0}};
+    e.update(extra);
+    return SketchWith(e);
+  };
+
+  // The mistake this whole change exists for: 90 in a radian field is a legal
+  // 90 radians, which folds to 116.6 degrees — a plausible arc and the wrong
+  // part. Refused on geometry (more than a full turn is a circle), and the
+  // message names the cause.
+  REQUIRE_THROWS_WITH(
+      DocumentIO::FeatureFromJson(
+          arc({{"start_angle", 0.0}, {"end_angle", 90.0}})),
+      Catch::Matchers::ContainsSubstring("more than one full turn") &&
+          Catch::Matchers::ContainsSubstring("RADIANS") &&
+          Catch::Matchers::ContainsSubstring("end_angle_deg"));
+
+  // The same number in the _deg field is exactly what was meant.
+  REQUIRE_NOTHROW(DocumentIO::FeatureFromJson(
+      arc({{"start_angle_deg", 0.0}, {"end_angle_deg", 90.0}})));
+
+  // Radians still work, and a quarter turn is not degenerate either way.
+  REQUIRE_NOTHROW(DocumentIO::FeatureFromJson(
+      arc({{"start_angle", 0.0}, {"end_angle", 1.5707963}})));
+
+  // Two spellings of one angle have no right answer, so neither is picked.
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(arc({{"start_angle", 0.0},
+                                                       {"start_angle_deg", 0.0},
+                                                       {"end_angle", 1.0}})),
+                      Catch::Matchers::ContainsSubstring("not both"));
+
+  // A missing angle names BOTH spellings, so the fix needs no round-trip.
+  REQUIRE_THROWS_WITH(
+      DocumentIO::FeatureFromJson(arc({{"end_angle", 1.0}})),
+      Catch::Matchers::ContainsSubstring("start_angle") &&
+          Catch::Matchers::ContainsSubstring("start_angle_deg"));
+}
+
 // --- The loader refuses an enum string it does not recognise ---------------
 //
 // It used to be split: eight parsers threw, six silently kept the default. The

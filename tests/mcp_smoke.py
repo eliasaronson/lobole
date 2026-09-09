@@ -111,8 +111,9 @@ async def run(port):
                        f"feature type {ft['type']} missing from "
                        "FEATURE_FORMATS")
             for ent in desc["sketch_entity_types"]:
-                expect(f'"{ent}"' in designer_mcp.FEATURE_FORMATS,
-                       f"entity type {ent} missing from FEATURE_FORMATS")
+                expect(f'"{ent["type"]}"' in designer_mcp.FEATURE_FORMATS,
+                       f"entity type {ent['type']} missing from "
+                       "FEATURE_FORMATS")
             # Same drift gate for the material-slug prose: the hand-written
             # MATERIAL_SLUGS literal must list exactly the app's slugs.
             prose = {s.strip() for s in

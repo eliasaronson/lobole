@@ -84,8 +84,8 @@ def main():
             problems.append(f"feature type {ft['type']} has no row in "
                             "FEATURE_FORMATS")
     for ent in desc["sketch_entity_types"]:
-        if f'"{ent}"' not in m.FEATURE_FORMATS:
-            problems.append(f"sketch entity type {ent} is not in "
+        if f'"{ent["type"]}"' not in m.FEATURE_FORMATS:
+            problems.append(f"sketch entity type {ent['type']} is not in "
                             "FEATURE_FORMATS")
     prose = {s.strip() for s in m.MATERIAL_SLUGS.split(",")}
     app_slugs = set(desc["material_slugs"])

@@ -141,8 +141,8 @@ def sweep_sketch_arc(d):
     """A sweep whose PATH is a sketch containing an arc — the other way to
     reach a bend, and the one that might give a true torus."""
     path = sketch(d, [{"type": "arc", "center": [0, 0], "radius": 40,
-                       "start_angle": 0, "end_angle": math.pi / 2}],
-                  XY, name="Path")   # RADIANS — there is no _deg spelling
+                       "start_angle_deg": 0, "end_angle_deg": 90}], XY,
+                  name="Path")
     prof = sketch(d, [circle(0, 0, 6)], plane((40, 0, 0), (0, 1, 0), (0, 0, 1)),
                   name="Prof")
     feat(d, type="Sweep", profile_id=prof, path_id=path, mode="new_body",

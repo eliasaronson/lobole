@@ -974,8 +974,17 @@ def main():
         expect(len(names) == len(set(names)), "describe lists each method once")
         expect(len(names) >= 136, f"method count ratchet: {len(names)}")
         expect(len(desc["feature_types"]) >= 24, "feature type ratchet")
-        expect({"ellipse_arc", "spline"} <= set(desc["sketch_entity_types"]),
+        ent_types = {e["type"] for e in desc["sketch_entity_types"]}
+        expect({"ellipse_arc", "spline"} <= ent_types,
                "newest sketch entity types are described")
+        # Every entity type says what its fields are — the gap that let a
+        # sketch arc's RADIAN angles go undocumented.
+        expect(all(e["params"] for e in desc["sketch_entity_types"]),
+               "every sketch entity type documents its fields")
+        arc = next(e for e in desc["sketch_entity_types"]
+                   if e["type"] == "arc")
+        expect("RADIANS" in arc["params"] and "start_angle_deg" in
+               arc["params"], "the arc names its angle unit and the _deg twin")
         expect(desc["document_format_version"] >= 52, "format version present")
         expect(len(desc["constraint_kinds"]) >= 20, "constraint kinds")
         expect("aluminum" in desc["material_slugs"], "material slugs")

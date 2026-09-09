@@ -766,6 +766,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       featureTypes.push_back({{"type", ft.type},
                               {"since_version", ft.sinceVersion},
                               {"params", ft.params}});
+    // Same shape as feature_types: an entity type that names no fields is a
+    // type an agent can see and cannot use.
+    json entityTypes = json::array();
+    for (const auto& et : DocumentIO::SketchEntityTypes())
+      entityTypes.push_back({{"type", et.type},
+                             {"since_version", et.sinceVersion},
+                             {"params", et.params}});
     return json{
         {"app", "designer"},
         {"inspection_contract",
@@ -775,7 +782,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"document_format_version", DocumentIO::DocumentFormatVersion()},
         {"methods", std::move(methods)},
         {"feature_types", std::move(featureTypes)},
-        {"sketch_entity_types", DocumentIO::SketchEntityTypes()},
+        {"sketch_entity_types", std::move(entityTypes)},
         {"constraint_kinds", remote::ConstraintKindNames()},
         {"extrude_modes", {"new_body", "add", "cut"}},
         {"extrude_end_modes",

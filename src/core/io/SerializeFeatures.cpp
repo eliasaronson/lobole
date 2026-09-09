@@ -29,7 +29,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <map>
+#include <sstream>
 #include <string>
 
 using nlohmann::json;
@@ -82,10 +84,55 @@ json EntityToJson(const sketch::Entity& entity) {
   return j;
 }
 
+// Radians from whichever spelling the caller used, refusing both at once.
+//
+// Mirrors RemoteAssembly's MateRotationRadians, and is here for the same
+// reason it is there: the bug is never the unit, it is a field that NAMES no
+// unit in an API whose other angles all do — Revolve.angle_deg,
+// Pattern.angle_deg, Frame.rotation_deg, a cam relation's duration_deg. A
+// mate's `rotation` read that way pinned a linkage to 60 radians and was
+// diagnosed as a loop-solver branch bug twice. A sketch arc read that way
+// builds a plausible arc of the wrong size and says nothing at all. These
+// were the last angles in the API still naming no unit.
+constexpr double kDegPerRad = 57.29577951308232;
+constexpr double kTwoPi = 6.283185307179586;
+
+double AngleRadians(const json& j, const char* radKey, const char* degKey) {
+  const bool hasRad = j.contains(radKey);
+  const bool hasDeg = j.contains(degKey);
+  if (hasRad && hasDeg)
+    throw std::runtime_error(std::string("pass ") + radKey + " (radians) or " +
+                             degKey + " (degrees), not both");
+  if (hasDeg)
+    return j.at(degKey).get<double>() / kDegPerRad;
+  if (!hasRad)
+    throw std::runtime_error(
+        std::string("missing ") + radKey + " (RADIANS) or " + degKey +
+        " (degrees) — describe sketch_entity_types[] lists every field");
+  return j.at(radKey).get<double>();
+}
+
 sketch::Entity EntityFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
   // Pre-v4 files have no "id"; leave it 0 so Load can detect and migrate.
   const uint32_t id = j.value("id", uint32_t{0});
+  // kSketchEntityTypes is the authority. Rejecting an untabled type BEFORE
+  // the chain is what makes a branch-without-a-row unreachable, so an entity
+  // cannot load, save and regenerate perfectly while being invisible to
+  // `describe` — the failure kFeatureTypes was given the same guard for.
+  // "rect" is expanded by FeatureFromJson before it reaches here.
+  if (type != "rect") {
+    std::string known;
+    bool listed = false;
+    for (const DocumentIO::SketchEntityInfo& info :
+         DocumentIO::SketchEntityTypes()) {
+      known += (known.empty() ? "" : ", ") + std::string(info.type);
+      listed = listed || type == info.type;
+    }
+    if (!listed)
+      throw std::runtime_error("Unknown sketch entity type: " + type +
+                               ". Known types: " + known);
+  }
   sketch::Entity e;
   if (type == "point") {
     e = sketch::Point{Vec2FromJson(j.at("p"))};
@@ -95,18 +142,38 @@ sketch::Entity EntityFromJson(const json& j) {
     e = sketch::Circle{Vec2FromJson(j.at("center")),
                        j.at("radius").get<double>()};
   } else if (type == "arc") {
+    const double start = AngleRadians(j, "start_angle", "start_angle_deg");
+    const double end = AngleRadians(j, "end_angle", "end_angle_deg");
+    // Refused on GEOMETRY, not on a guess about units: a sweep of more than a
+    // full turn is a circle, so it is not a drawable arc whatever the caller
+    // meant. But the overwhelmingly likely cause is degrees in a radian
+    // field, so the message says so rather than making them work it out.
+    const double sweep = std::abs(end - start);
+    if (sweep > kTwoPi + 1e-9) {
+      std::ostringstream why;
+      why << "arc sweeps " << sweep << " rad (" << (sweep * kDegPerRad)
+          << " degrees), which is more than one full turn — start_angle and "
+             "end_angle are RADIANS. Did you mean start_angle_deg / "
+             "end_angle_deg?";
+      throw std::runtime_error(why.str());
+    }
     e = sketch::Arc{Vec2FromJson(j.at("center")), j.at("radius").get<double>(),
-                    j.at("start_angle").get<double>(),
-                    j.at("end_angle").get<double>()};
+                    start, end};
   } else if (type == "ellipse") {
-    e = sketch::Ellipse{
-        Vec2FromJson(j.at("center")), j.at("r_major").get<double>(),
-        j.at("r_minor").get<double>(), j.at("rotation").get<double>()};
+    e = sketch::Ellipse{Vec2FromJson(j.at("center")),
+                        j.at("r_major").get<double>(),
+                        j.at("r_minor").get<double>(),
+                        AngleRadians(j, "rotation", "rotation_deg")};
   } else if (type == "ellipse_arc") { // v46
-    e = sketch::EllipseArc{
-        Vec2FromJson(j.at("center")),      j.at("r_major").get<double>(),
-        j.at("r_minor").get<double>(),     j.at("rotation").get<double>(),
-        j.at("start_param").get<double>(), j.at("end_param").get<double>()};
+    // start_param/end_param are the ellipse PARAMETER, not an angle from the
+    // centre, so they get no _deg twin — naming one would be a lie about what
+    // the number means. A full-turn sweep is legal here for the same reason.
+    e = sketch::EllipseArc{Vec2FromJson(j.at("center")),
+                           j.at("r_major").get<double>(),
+                           j.at("r_minor").get<double>(),
+                           AngleRadians(j, "rotation", "rotation_deg"),
+                           j.at("start_param").get<double>(),
+                           j.at("end_param").get<double>()};
   } else if (type == "spline") { // v40
     sketch::BSpline bs;
     for (const auto& pj : j.at("poles"))
@@ -115,8 +182,13 @@ sketch::Entity EntityFromJson(const json& j) {
     e = std::move(bs);
   } else {
     // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
-    // rectangles become four lines); anything else is unknown.
-    throw std::runtime_error("Unknown sketch entity type: " + type);
+    // rectangles become four lines); anything else is unknown. Decision-
+    // complete, like the feature-type refusal: name the vocabulary so the
+    // correction needs no second round-trip.
+    // A row with no branch lands here; the guard at the top of this function
+    // catches the other direction. test_serialization.cpp pins both.
+    throw std::runtime_error("Sketch entity type \"" + type +
+                             "\" is documented but has no branch for it");
   }
   sketch::SetEntityId(e, id);
   sketch::SetConstruction(e, j.value("construction", false));
@@ -1142,11 +1214,37 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
 };
 std::span<const FeatureTypeInfo> FeatureTypes() { return kFeatureTypes; }
 
-// Keep in lockstep with EntityFromJson above.
-static constexpr const char* kSketchEntityTypes[] = {
-    "point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline",
+// AUTHORITATIVE, like kFeatureTypes: EntityFromJson refuses a type with no
+// row here before it reaches the dispatch chain, so an entity cannot arrive
+// undocumented. It used to be a bare name list, which meant `describe` named
+// every type and described none of their fields.
+//
+// Angles say their unit. `arc` and `ellipse` take either spelling and refuse
+// both at once, the same bargain `set_mate` struck with rotation/rotation_deg
+// after 60-read-as-radians was diagnosed as a loop-solver branch bug twice.
+static constexpr SketchEntityInfo kSketchEntityTypes[] = {
+    {"point", 1, "p [x,y] (+_expr: x, y)"},
+    {"line", 1, "a [x,y], b [x,y] (+_expr: ax, ay, bx, by)"},
+    {"circle", 1, "center [x,y], radius (+_expr: cx, cy, r)"},
+    {"arc", 1,
+     "center [x,y], radius, and EITHER start_angle + end_angle in RADIANS OR "
+     "start_angle_deg + end_angle_deg in degrees — not both. Measured from "
+     "+U toward +V. A sweep of more than one full turn is refused (it is a "
+     "circle, not an arc), which is what catches degrees passed as radians. "
+     "get_state reports the radian pair (+_expr: cx, cy, r)"},
+    {"ellipse", 9,
+     "center [x,y], r_major, r_minor, and EITHER rotation in RADIANS OR "
+     "rotation_deg in degrees — not both"},
+    {"ellipse_arc", 46,
+     "center [x,y], r_major, r_minor, rotation (RADIANS) or rotation_deg; "
+     "start_param, end_param — the ellipse PARAMETER t in (r_major·cos t, "
+     "r_minor·sin t), which is not the angle from the centre unless the "
+     "ellipse is a circle, so it has no _deg twin"},
+    {"spline", 40, "poles [[x,y], ...], degree? (default 3)"},
 };
-std::span<const char* const> SketchEntityTypes() { return kSketchEntityTypes; }
+std::span<const SketchEntityInfo> SketchEntityTypes() {
+  return kSketchEntityTypes;
+}
 
 std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();

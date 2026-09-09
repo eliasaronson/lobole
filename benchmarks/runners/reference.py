@@ -143,12 +143,8 @@ def t3_bent_tube(d):
     """A 90 degree bent rod. Sweeping a circle along a SKETCH arc is the only
     route to a true torus face — Curve3D has no arc kind, so a Pipe along a
     fit_spline gives bspline instead (both are accepted by the task)."""
-    # start_angle/end_angle are RADIANS. There is no _deg spelling, and
-    # `describe` lists the entity types by name with no field docs at all, so
-    # nothing tells you: 90 is accepted and quietly sweeps 116.6 degrees
-    # (90 mod 2pi), which is a plausible arc and the wrong part.
     path = sketch(d, [{"type": "arc", "center": [0, 0], "radius": 40,
-                       "start_angle": 0, "end_angle": math.pi / 2}],
+                       "start_angle_deg": 0, "end_angle_deg": 90}],
                   XY, name="Path")
     # The profile plane's normal is the path TANGENT at the start: the arc
     # leaves (40,0,0) heading +Y, so a plane normal of +X is refused.

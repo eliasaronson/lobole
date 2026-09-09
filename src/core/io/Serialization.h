@@ -64,7 +64,17 @@ struct FeatureTypeInfo {
   const char* params;
 };
 std::span<const FeatureTypeInfo> FeatureTypes();
-std::span<const char* const> SketchEntityTypes();
+
+// A sketch entity's JSON dialect, same shape and same job as FeatureTypeInfo.
+// It used to be a bare list of NAMES, so `describe` could tell an agent that
+// "arc" exists and not one field it takes — which is how a sketch arc's
+// RADIAN angles went undocumented long enough to be built wrong.
+struct SketchEntityInfo {
+  const char* type;   // EntityFromJson dispatch string, e.g. "arc"
+  int sinceVersion;   // document format version it arrived in (1 = original)
+  const char* params; // field names, units, `?` optional, `(+_expr)` twins
+};
+std::span<const SketchEntityInfo> SketchEntityTypes();
 
 // Assembly (de)serialization (A2). Same on-disk form as a part —
 // directory (`.dsgn`, one file per occurrence) or single JSON file, dispatched
