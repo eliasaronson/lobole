@@ -496,6 +496,21 @@ struct Toolpath {
     double radius = 0.0;
   };
   std::vector<Relief> reliefs;
+  // Where the path deliberately did NOT cut: a tab, as the point on the
+  // contour it sits on, the radius of the pillar it leaves (half the tab
+  // width plus the tool's, because a round cutter passing either side is
+  // what shapes it) and the height its top stands at. The verifier is told,
+  // so a tab reads as "asked for" rather than as material left standing --
+  // and unlike a relief this needs the HEIGHT, because a relief excuses a
+  // cut that went too deep and a tab excuses one that did not happen: excuse
+  // it by position alone and a genuinely uncut slab above the tab is excused
+  // with it.
+  struct Tab {
+    glm::dvec2 at{0.0};
+    double radius = 0.0;
+    double topZ = 0.0;
+  };
+  std::vector<Tab> tabs;
   // The finishing half of a rough-then-finish operation (R6): the same
   // operationId as the roughing toolpath, the finishing tool's number.
   bool finish = false;

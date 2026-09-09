@@ -1139,10 +1139,13 @@ void RunCamVerification(AppState& state) {
   // enough that the check runs while the user is still looking at the button.
   constexpr double kRes = 0.4;
   std::vector<cam::Toolpath::Relief> reliefs;
-  for (const cam::Toolpath& tp : state.camToolpaths)
+  std::vector<cam::Toolpath::Tab> tabs;
+  for (const cam::Toolpath& tp : state.camToolpaths) {
     reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
+    tabs.insert(tabs.end(), tp.tabs.begin(), tp.tabs.end());
+  }
   const cam::Inspection insp =
-      cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes, reliefs);
+      cam::Inspect(gcode, *setup, ui::JobBodies(state), kRes, reliefs, tabs);
   if (!insp.ok)
     return;
   // The tolerance IS the grid: a "gouge" of half a cell is quantisation, and

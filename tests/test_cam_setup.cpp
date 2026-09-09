@@ -1103,7 +1103,14 @@ TEST_CASE("cam job: one sheet, two parts that share feature ids, two cutters",
   // And the whole sheet checks out: nothing cuts into a part, and nothing
   // rapids through material -- including the drill coming back up the hole it
   // has just made, which is a cone and not a cylinder.
-  const cam::Verdict v = cam::VerifyGcode(gcode, setup, bodies, 0.25);
+  std::vector<cam::Toolpath::Relief> reliefs;
+  std::vector<cam::Toolpath::Tab> tabs;
+  for (const cam::Toolpath& tp : paths) {
+    reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
+    tabs.insert(tabs.end(), tp.tabs.begin(), tp.tabs.end());
+  }
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, bodies, 0.25, reliefs, tabs);
   // Name the line, not just the count: "16 rapids through material" with no
   // line number is a fact nobody can chase.
   std::string badLine;
@@ -1119,6 +1126,15 @@ TEST_CASE("cam job: one sheet, two parts that share feature ids, two cutters",
                 << "; first bad line " << v.firstBadLine << ": " << badLine);
   CHECK(v.maxGouge < 0.4);
   CHECK(v.rapidsThroughStock == 0);
+
+  // The tabs the outline was asked for -- four per part -- and the toolpath
+  // says where it left them. Told that, the verifier stops reading them as
+  // material left standing: before this EVERY job that used a tab reported
+  // `complete: false`, which made the flag say nothing at all.
+  CHECK(v.tabs == 8);
+  CHECK(v.Complete(0.25 * 1.5));
+  const cam::Verdict blind = cam::VerifyGcode(gcode, setup, bodies, 0.25);
+  CHECK_FALSE(blind.Complete(0.25 * 1.5)); // the same job, not told
 }
 
 TEST_CASE("cam job: the layout says where each part is, and when they are too "

@@ -250,12 +250,15 @@ constexpr MethodDoc kCamMethods[] = {
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
      "leftover_area_mm2, leftover_regions, rapids_through_stock, "
-     "below_stock_mm, ok, complete, says}. `below_stock_mm` is depth cut past "
+     "below_stock_mm, tabs, reliefs, ok, complete, says}. `below_stock_mm` is "
+     "depth cut past "
      "the WORKPIECE — the spoilboard, which is what a through cut is for; it "
      "is reported, never counted as gouge. "
      "`ok` = nothing scraps the part or breaks the tool (no "
      "gouge, no rapid through material) and is the one to gate on; `complete` "
-     "= nothing left standing, which a correct job with tabs or a dropping "
+     "= nothing left standing. A TAB is not left standing by accident -- the "
+     "toolpath says where it put each one and they are excused, up to their "
+     "own height, so a tabbed job can now be complete. A dropping "
      "slug will NOT satisfy. "
      "Runs on the file, not the toolpath, so it catches post and modal-state "
      "bugs too. `says` is the verdict in the same sentences the panel shows. "
@@ -1266,15 +1269,18 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const std::vector<cam::Toolpath> paths =
         ui::GenerateCamToolpathsNow(state, setup);
     std::vector<cam::Toolpath::Relief> reliefs; // corner relief: not gouge
-    for (const cam::Toolpath& tp : paths)
+    std::vector<cam::Toolpath::Tab> tabs;       // tabs: not leftover
+    for (const cam::Toolpath& tp : paths) {
       reliefs.insert(reliefs.end(), tp.reliefs.begin(), tp.reliefs.end());
+      tabs.insert(tabs.end(), tp.tabs.begin(), tp.tabs.end());
+    }
     std::string gcode, error;
     if (!cam::PostProcess(setup.machine.post, setup, paths, PostOptsOf(setup),
                           gcode, &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
-    const cam::Verdict v =
-        cam::VerifyGcode(gcode, setup, ui::JobBodies(state), res, reliefs);
+    const cam::Verdict v = cam::VerifyGcode(gcode, setup, ui::JobBodies(state),
+                                            res, reliefs, tabs);
     const double tol = res * 1.5; // one cell of quantisation, plus slack
     // The same sentences the panel shows. A verdict that reads as a row of
     // numbers over the RPC and as English in the GUI is two verdicts, and the
@@ -1322,11 +1328,16 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"resolution_mm", res},
                 {"cells", v.cells},
                 {"says", says},
+                // Tabs the program left ON PURPOSE. Reported rather than
+                // silently subtracted: four is a job to sign off, none where
+                // four were asked for is a job to look at.
+                {"tabs", v.tabs},
+                {"reliefs", v.reliefs},
                 // Two questions. `ok` is the one that is never in doubt:
                 // nothing here scraps the part or breaks the tool. `complete`
                 // is softer — a height map cannot watch a slug fall out of a
-                // through cut or know that tabs were asked for, so a correct
-                // job routinely reports material left over.
+                // through cut, so a correct job can still report material
+                // left over. Tabs no longer count against it.
                 {"ok", v.Safe(tol)},
                 {"complete", v.Complete(tol)}};
   }

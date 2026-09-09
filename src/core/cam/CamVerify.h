@@ -160,7 +160,12 @@ struct Verdict {
   // Corners the program relieved on purpose (R4): cells inside a relief's
   // bite are not gouge, and the verdict says how many there were.
   int reliefs = 0;
-  int firstBadLine = 0;       // the G-code line of the first such rapid
+  // Tabs the program left on purpose: material inside one, at or below its
+  // top, is not leftover. Said out loud rather than silently subtracted --
+  // "left 4 tabs standing" is a job to sign off, and a job that reports none
+  // where four were asked for is a job to look at.
+  int tabs = 0;
+  int firstBadLine = 0; // the G-code line of the first such rapid
   size_t cells = 0;
   // How much of the stock the program never passed over. A pocket-only job
   // leaves most of the block untouched and that is CORRECT, so leftover is
@@ -198,12 +203,15 @@ struct Verdict {
            outsideTravel == 0;
   }
   // Complete: nothing is left standing that the model says should be gone.
-  // This one is SOFTER, because a height map cannot watch a slug fall out of a
-  // through cut or know that four tabs were asked for — so a correct job
-  // routinely reports material left over, and the two used to be one flag that
-  // no real job could ever set (docs/cam/dogfood-round.md). Read it with
-  // leftoverArea and `biggest`: several small places are the corners a round
-  // cutter cannot reach, one large one is an operation nobody added.
+  // This one is SOFTER, because a height map cannot watch a slug fall out of
+  // a through cut — so a correct job can still report material left over, and
+  // the two used to be one flag that no real job could ever set
+  // (docs/cam/dogfood-round.md). Tabs no longer count against it: they are
+  // asked for, and the toolpath now says where it left them, so every job
+  // that used one reported `complete: false` for a reason the flag could not
+  // express. Read it with leftoverArea and `biggest`: several small places
+  // are the corners a round cutter cannot reach, one large one is an
+  // operation nobody added.
   [[nodiscard]] bool Complete(double tolerance) const {
     return maxLeftover <= tolerance;
   }
@@ -235,10 +243,13 @@ struct Inspection {
 
 // `reliefs`: where the toolpaths deliberately cut into the model (corner
 // relief, R4) -- cells within a relief's radius are not counted as gouge.
+// `tabs`: where they deliberately did NOT cut -- material at or below a tab's
+// top, within its radius, is not counted as leftover.
 [[nodiscard]] Inspection
 Inspect(const std::string& gcode, const Setup& setup,
         const std::vector<Body>& bodies, double res = 0.25,
-        const std::vector<Toolpath::Relief>& reliefs = {});
+        const std::vector<Toolpath::Relief>& reliefs = {},
+        const std::vector<Toolpath::Tab>& tabs = {});
 
 // Where the tool could not reach: cell centres whose machined height is more
 // than `tolerance` above the designed surface, as 3D points sitting on the
@@ -253,7 +264,8 @@ Inspect(const std::string& gcode, const Setup& setup,
 [[nodiscard]] Verdict
 VerifyGcode(const std::string& gcode, const Setup& setup,
             const std::vector<Body>& bodies, double res = 0.25,
-            const std::vector<Toolpath::Relief>& reliefs = {});
+            const std::vector<Toolpath::Relief>& reliefs = {},
+            const std::vector<Toolpath::Tab>& tabs = {});
 
 // The verdict in the words a person needs, one line each, most severe first
 // (docs/cam/gui.md). Empty only when there is nothing to say.

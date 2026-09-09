@@ -66,6 +66,7 @@ void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
     return;
   fresh.moves = previous.moves;
   fresh.reliefs = previous.reliefs;
+  fresh.tabs = previous.tabs;
   fresh.strategy = previous.strategy;
 }
 
@@ -1129,8 +1130,8 @@ void DrawCamPanel(AppState& state) {
   // Both deferred past the loop, which walks the vector they would shrink.
   std::vector<uint64_t> removeOps; // the row's own x button
   bool deleteSelected = false;     // the row menu's Delete (the selection)
-  uint64_t moveOp = 0; // dragged operation …
-  size_t moveTo = 0;   // … and where it was dropped
+  uint64_t moveOp = 0;             // dragged operation …
+  size_t moveTo = 0;               // … and where it was dropped
   std::vector<uint64_t> opOrder;
   for (const cam::Operation& op : setup->operations)
     opOrder.push_back(op.id);

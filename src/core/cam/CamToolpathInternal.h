@@ -156,12 +156,17 @@ enum class Entry { Ramp, AtDepth };
 // retracting, curving AWAY from the material -- `materialInside` says which
 // side of the loop that is. A tool that stops against the wall and lifts
 // leaves a mark where it dwelt; one that arcs off does not.
+// `tabsOut`: where the tabs of THIS lap ended up, appended. Only the caller
+// knows which pass leaves them standing, and only this function knows where
+// along the contour they fall, so the answer is handed back rather than
+// worked out twice.
 double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                 const std::vector<glm::dvec2>& pts, double z, double safeZ,
                 double stockTop, int tabCount, double tabWidth, double tabZ,
                 double entryZ, Entry entry = Entry::Ramp, double startS = 0.0,
                 bool retract = true, double leadOut = 0.0,
-                bool materialInside = true);
+                bool materialInside = true,
+                std::vector<Toolpath::Tab>* tabsOut = nullptr);
 
 // Nothing to do: the part is clamped as modelled and the table is square. The
 // common case, and worth not building a matrix for — this is on the per-point

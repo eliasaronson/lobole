@@ -416,7 +416,8 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
 Verdict Compare(const HeightMap& machined, const HeightMap& designed,
                 double floorZ, const std::vector<uint8_t>* touched,
                 double leftoverTolerance = 0.0,
-                const std::vector<Toolpath::Relief>& reliefs = {}) {
+                const std::vector<Toolpath::Relief>& reliefs = {},
+                const std::vector<Toolpath::Tab>& tabs = {}) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
@@ -482,11 +483,23 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         v.maxGouge = wantLo - got;
         v.gougeAt = {machined.CellX(i), machined.CellY(j)};
       }
-      if (got - wantHi > v.maxLeftover) {
+      // A tab is material left standing ON PURPOSE, so it is not leftover --
+      // but only up to its own top. Excusing it by position alone, the way a
+      // relief is excused, would excuse a genuinely uncut slab sitting above
+      // it: the whole point of a tab is that it is SHORT.
+      bool tabbed = false;
+      for (const Toolpath::Tab& t : tabs)
+        if (got <= t.topZ + leftTol &&
+            glm::distance(t.at, glm::dvec2(machined.CellX(i),
+                                           machined.CellY(j))) <= t.radius) {
+          tabbed = true;
+          break;
+        }
+      if (!tabbed && got - wantHi > v.maxLeftover) {
         v.maxLeftover = got - wantHi;
         v.leftoverAt = {machined.CellX(i), machined.CellY(j)};
       }
-      if (got - wantHi > leftTol)
+      if (!tabbed && got - wantHi > leftTol)
         over[k] = 1;
     }
   }
@@ -559,7 +572,8 @@ constexpr double kGrazeTolerance = 1e-3;
 
 Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<Body>& rawBodies, double res,
-                   const std::vector<Toolpath::Relief>& reliefs) {
+                   const std::vector<Toolpath::Relief>& reliefs,
+                   const std::vector<Toolpath::Tab>& tabs) {
   Inspection out;
   // The G-code is in SETUP space, so the model it is compared against has to
   // be too (C9). Verifying an indexed job against the unrotated part
@@ -653,8 +667,9 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
 
   out.designed = SampleModel(bodies, machined, lo.z);
   out.verdict = Compare(machined, out.designed, lo.z, &touched,
-                        /*leftoverTolerance=*/0.0, reliefs);
+                        /*leftoverTolerance=*/0.0, reliefs, tabs);
   out.verdict.reliefs = static_cast<int>(reliefs.size());
+  out.verdict.tabs = static_cast<int>(tabs.size());
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
 
@@ -735,8 +750,9 @@ std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp, double tolerance,
 
 Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                     const std::vector<Body>& bodies, double res,
-                    const std::vector<Toolpath::Relief>& reliefs) {
-  return Inspect(gcode, setup, bodies, res, reliefs).verdict;
+                    const std::vector<Toolpath::Relief>& reliefs,
+                    const std::vector<Toolpath::Tab>& tabs) {
+  return Inspect(gcode, setup, bodies, res, reliefs, tabs).verdict;
 }
 
 std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
@@ -756,6 +772,15 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
     std::snprintf(buf, sizeof(buf),
                   "%d inside corner%s relieved for a square fit.", v.reliefs,
                   v.reliefs == 1 ? "" : "s");
+    out.push_back({VerdictLine::Level::Good, buf});
+  }
+  if (v.tabs > 0) {
+    // Said out loud rather than silently subtracted: four tabs is a job to
+    // sign off, and none where four were asked for is a job to look at.
+    std::snprintf(buf, sizeof(buf),
+                  "%d tab%s left holding the part%s in the sheet — part them "
+                  "off after the job.",
+                  v.tabs, v.tabs == 1 ? "" : "s", v.tabs == 1 ? "" : "s");
     out.push_back({VerdictLine::Level::Good, buf});
   }
   // Gouging first: it is the one that scraps the part, and the only one a

@@ -346,7 +346,8 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                 const std::vector<glm::dvec2>& pts, double z, double safeZ,
                 double stockTop, int tabCount, double tabWidth, double tabZ,
                 double entryZ, Entry entry, double startS, bool retract,
-                double leadOut, bool materialInside) {
+                double leadOut, bool materialInside,
+                std::vector<Toolpath::Tab>* tabsOut) {
   if (pts.size() < 2)
     return startS;
   const double perimeter = Perimeter(pts);
@@ -430,6 +431,10 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   const auto wrap = [&](double s) {
     return std::fmod(std::fmod(s, perimeter) + perimeter, perimeter);
   };
+  if (tabsOut != nullptr)
+    for (const auto& [lo, hi] : tabs)
+      tabsOut->push_back({at(pts, (lo + hi) * 0.5),
+                          tabWidth * 0.5 + tool.diameter * 0.5, tabZ});
   const auto tabTop = [&](double s) {
     const double m = wrap(startS + s);
     for (const auto& [lo, hi] : tabs)

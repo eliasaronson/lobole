@@ -322,11 +322,17 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
           for (const glm::dvec2& c : corners)
             tp.reliefs.push_back({c, radius * 2.0});
       }
-      resume[loop] = EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop,
-                              op.tabCount, op.tabWidth, bottom + op.tabHeight,
-                              pass == 0 ? op.topZ : passes[pass - 1],
-                              Entry::Ramp, resume[loop], /*retract=*/true, lead,
-                              op.side == Side::Outside);
+      // The tabs are recorded from the LAST pass only. Every pass lifts over
+      // them, but it is the bottom one that leaves them standing, and a wall
+      // pick re-resolves its contour at each depth -- so the bottom pass is
+      // the one whose polygon says where the pillars actually are.
+      const bool lastPass = pass + 1 == passes.size();
+      resume[loop] =
+          EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop, op.tabCount,
+                   op.tabWidth, bottom + op.tabHeight,
+                   pass == 0 ? op.topZ : passes[pass - 1], Entry::Ramp,
+                   resume[loop], /*retract=*/true, lead,
+                   op.side == Side::Outside, lastPass ? &tp.tabs : nullptr);
     }
   }
   if (tp.moves.empty() && tp.error.empty())
@@ -625,6 +631,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     tp.error.clear();
     tp.strategy.clear();
     tp.reliefs.clear();
+    tp.tabs.clear();
     tp.pending = true;
     return;
   }
@@ -1019,6 +1026,7 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
       tp.moves.insert(tp.moves.end(), sub.moves.begin(), sub.moves.end());
       tp.reliefs.insert(tp.reliefs.end(), sub.reliefs.begin(),
                         sub.reliefs.end());
+      tp.tabs.insert(tp.tabs.end(), sub.tabs.begin(), sub.tabs.end());
     }
     // Every target refused: there is no operation left, so it fails as one.
     if (tp.moves.empty() && !tp.pending && !tp.skipped.empty())

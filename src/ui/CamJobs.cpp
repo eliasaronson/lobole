@@ -169,6 +169,7 @@ void CancelAdaptivePasses(AppState& state) {
       tp.pending = false;
       tp.moves.clear();
       tp.reliefs.clear();
+      tp.tabs.clear();
       tp.strategy.clear();
       tp.error = "adaptive clearing was cancelled before this pass was cut "
                  "-- press Generate to queue it again";
