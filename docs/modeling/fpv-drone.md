@@ -220,6 +220,125 @@ and the second distance gone, the EXACT default is:
 all still exact. Mesh mode is the further 100-400x on top of that, for when
 a clearance is what is wanted rather than a coordinate.
 
+## What happens to the parts
+
+`generators/fpv_drone_shop.py`, `--stage fem|cam|shop`, against the project as
+saved. Neither half changes the model: a shop run is a question asked of it.
+
+### What the parts carry
+
+Three static studies, 41 s between them, on the two parts that carry a load —
+the arm, twice, and the top plate.
+
+| | elements | movement | peak | factor | where |
+|---|---|---|---|---|---|
+| arm at full thrust | 13903 | 0.11 mm | 26.2 MPa | 21.0 | outer arm bolt |
+| arm on a 15 g landing | 13903 | 0.70 mm | 171.6 MPa | 3.2 | outer arm bolt |
+| top plate under the pack at 15 g | 8968 | 0.02 mm | 15.3 MPa | 35.8 | strap slot |
+
+The load worth asking about is not thrust. One 2207 on 6S pulls about 1.5 kgf
+and the arm barely notices — a factor of 21. What designs a 5 mm arm is
+ARRIVING: a quadcopter lands on one corner and the deceleration is set by how
+far the structure gives, which is millimetres, so tens of g. 15 g through one
+arm is the conventional freestyle case and it is where the factor drops to
+3.2. Both peaks are at the OUTER arm bolt hole — which is where a real
+freestyle arm cracks, so the model is at least failing in the right place.
+
+**Read them as indicative, not qualifying,** and the run prints the same
+caveat beside the numbers: the solver is isotropic and a carbon laminate is
+not. In-plane it is a fair proxy — quasi-isotropic 3K/epoxy, in-plane loads —
+but a real arm fails by DELAMINATION at the root, and no isotropic model can
+see that.
+
+### The G-code that cuts them
+
+One job per sheet thickness, because that is what a sheet is: 320 x 320 mm of
+plate, a 600 x 400 hobby router, four cutters.
+
+| sheet | parts | ops | cutting | time | lines |
+|---|---|---|---|---|---|
+| 3 mm | bottom plate | 7 | 1.5 m | 5 min | 319 |
+| 2 mm | mid, top, 2 x camera plate | 12 | 3.9 m | 13 min | 1810 |
+| 5 mm | 4 x arm | 6 | 5.1 m | 11 min | 1376 |
+
+Every sheet: **no gouge, and no rapid through material**, checked by
+simulating the POSTED file back against the model (`cam_verify`) rather than
+the toolpath that produced it. The time is the file's own feeds; no machine
+states its rapid rate, so it is time CUTTING and not an estimate of the job.
+
+What decided the shape of it:
+
+- **Four cutters, and the parts chose them.** Carbon is drilled, not
+  interpolated, at these sizes — a 2 mm cutter would be in a 3.2 mm hole for
+  minutes and blunt before it is out — so the M3 and M2 holes are a 3.2 and a
+  2.2 mm drill. The narrowest cut on the aircraft is the 2.2 mm slot a camera
+  plate drops through, so nothing wider than 2 mm can cut the slots, and the
+  outline and the big openings take the 3.175 mm diamond-cut.
+- **Order is not cosmetic.** Drill, then open up, then cut free: a part cut
+  free first moves. And with one program per tool (`split_output`, which a
+  manual tool change wants) the tools run in the order they are first WANTED,
+  so the outline has to be the last thing asked of the big cutter — otherwise
+  the parts are free before their slots are cut, in a different file.
+- **The camera plates are cut lying down.** They are modelled upright, where
+  they live in the aircraft; `lay_face_up` clamps each one with its own face
+  at the spindle. That is a statement about the fixture, not the machine — no
+  A word is posted — and it is what lets one sheet hold three plates on their
+  faces beside a part modelled standing up.
+- **Nesting is read back, not re-derived.** Where each part sits comes from
+  its box in SETUP space, asked of the app after it is laid flat, off a
+  zero-margin shrink-wrap stock. Working the same rotation out again in the
+  generator is how two copies of a transform come to disagree.
+- **What is left standing is not a fault.** A height map cannot watch a slug
+  fall out or know a tab was asked for: the 5 mm sheet's 38 regions are 16
+  tabs (0.6 mm), 4 shaft-bore slugs and the offcut the outline cut through.
+  `ok` is the verdict to gate on — nothing scraps the part or breaks the
+  tool; `complete` is false for any correct job with tabs.
+
+### What this half found
+
+Five more defects, all fixed, and every one of them a case that only shows up
+when a job holds more than one part or more than one tool:
+
+1. **A grbl file never said which tool it was running.** GRBL takes no M6, so
+   the tool change is a message and a pause — and the message was the only
+   thing naming the cutter. Nothing that reads the file back could tell, so
+   everything after the first change was read as tool 1: the verifier
+   simulated a 2 mm cutter's slots with the 3.175 mm one and called a correct
+   job scrap, at exactly the depth of the plate. The T word costs nothing at
+   the machine (GRBL parses it and moves nothing) and is what makes the file
+   self-describing. (`CamPost`)
+2. **A drilled through hole did not break through.** The derived depth was the
+   part's bottom face, and a drill is a cone: its point reached the far side
+   while the full diameter stopped short, leaving a ring of material the shape
+   of the point. The verifier has always modelled the point — `TipHeight` is
+   one function — so the two disagreed, and correct drilling read as 1.2 mm of
+   material left standing in every hole. A through bore now goes on down by
+   the point's own height; a blind one keeps its floor, because there the cone
+   IS the bottom of the hole. (`CamDerive`)
+3. **A drill retracting up its own hole was a "rapid through material".** The
+   rapid check treated every tool as a cylinder while the cut used the tool's
+   shape, so the cone the drill had just made read as material in the way.
+   Every through hole in a job reported one — the kind of false alarm that
+   teaches an operator to ignore the real one. Both sides use `TipHeight`
+   now. (`CamVerify`)
+4. **A pick could not name which part of the job it was on.** Feature ids are
+   per document, so a mid plate and a top plate on one sheet share them
+   freely; every geometry pick took an element ref alone and answered for the
+   first body with that id. `lay_face_up` on the second camera plate was
+   refused outright ("needs a FLAT face on this part"), and an inside profile
+   on the top plate's strap slot came back "that face is gone from the model".
+   The qualifier an operation target has carried since v76 now reaches the
+   pickers themselves. Silent-wrong was the other half of this: where the name
+   HAD resolved on the wrong part, the cut would have been made on it.
+   (`CamPicks`, `CamSetup`)
+5. **`add_cam_op` documented fourteen parameters it would not accept.** The
+   handler reads them all — through a helper the params gate's scanner cannot
+   follow — so the row beside it listed only the eight read in the branch
+   itself, and the generated SDK refuses anything not in the row. `tabs` was
+   documented in prose and unreachable: no script could ask for a tab. The
+   gate has an escape hatch for exactly this (`// rpc-params:`), and it now
+   carries the full list. (`RemoteCam`)
+
 ## Files
 
 `scratch/fpv-drone/` after a run: the project, five dimensioned part sheets
@@ -227,3 +346,6 @@ a clearance is what is wanted rather than a coordinate.
 STEP for the assembly and for each carbon part, STL for the printed ones,
 `bom.csv`, `mass-budget.csv`, and renders. `BUILD.md` beside them is a copy of
 [the build guide](fpv-drone-build.md) — the build order and the buying list.
+
+`--stage cam` adds the G-code: `<sheet> - T<n>.nc`, one file per cutter, each
+complete and starting by loading its own tool.

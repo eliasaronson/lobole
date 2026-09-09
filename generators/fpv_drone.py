@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A 5-inch FPV freestyle quadcopter, modelled to be built.
 
-    python3 generators/fpv_drone.py [--port N] [--stage parts|assembly|all]
-                                    [--out scratch/fpv-drone]
+    python3 generators/fpv_drone.py [--port N] [--out scratch/fpv-drone]
+                        [--stage parts|assembly|all|drawings|shop|fem|cam]
 
 Five carbon plates and an arm are the parts you have cut; everything else
 is either hardware from a standard (the fasteners come from the vendored
@@ -15,6 +15,11 @@ What the run asserts before it claims anything (see `verify`):
   - nothing in the assembly interferes, exactly, not by mesh;
   - the props still clear everything through a full turn of the motors;
   - every fastener reaches the thread it is supposed to reach.
+
+`--stage shop` (and its halves `fem` and `cam`) reopens the saved project
+and asks what happens to the parts once they leave the model: what the arm
+and the top plate do under load, and the G-code that cuts the carbon.
+`fpv_drone_shop.py` holds both, and neither changes the model.
 """
 import argparse
 import datetime
@@ -902,12 +907,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
     ap.add_argument("--stage", default="all",
-                    choices=("parts", "assembly", "all", "drawings"))
+                    choices=("parts", "assembly", "all", "drawings",
+                             "shop", "fem", "cam"))
     ap.add_argument("--out", default="scratch/fpv-drone")
     args = ap.parse_args()
 
     app = connect(args.port)
     project = os.path.join(args.out, "fpv-drone.dsgn")
+    if args.stage in ("shop", "fem", "cam"):
+        # What happens to the parts after the model: loads and G-code, both
+        # against the project as SAVED. They add studies and job documents,
+        # so the project is NOT saved back over the model afterwards — a
+        # shop run is a question asked of it, not an edit to it.
+        import fpv_drone_shop as shop
+        app.open_project(path=project)
+        if args.stage != "cam":
+            with phase("fem"):
+                shop.fem(app)
+        if args.stage != "fem":
+            with phase("cam"):
+                shop.cam(app, args.out)
+        report_phases()
+        return
     if args.stage == "drawings":
         # The sheets and exports against the project as SAVED. The model is
         # not rebuilt and nothing is re-checked, which is the point: it is
