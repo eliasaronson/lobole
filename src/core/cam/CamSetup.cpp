@@ -252,13 +252,20 @@ glm::dmat3 SetupToModel(const Setup& setup, uint64_t jobPartId) {
 }
 
 bool FaceNormalOf(const std::vector<Body>& bodies, const ElementRef& ref,
-                  glm::vec3& normal) {
+                  glm::vec3& normal, uint64_t jobPartId) {
   glm::vec3 centre(0.0f), uAxis(0.0f);
   for (const Body& body : bodies) {
     if (body.createdBy != ref.featureId)
       continue;
+    // Another part of the job, sharing the feature id: not this pick. A body
+    // with no job part (a plain part document) has nothing to disambiguate.
+    if (jobPartId != 0 && body.jobPartId != 0 && body.jobPartId != jobPartId)
+      continue;
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
-    return idx && body.shape.FacePlane(*idx, centre, normal, uAxis);
+    // Keep looking rather than answering for the first body that shares the
+    // id: a part is often several bodies, and only one of them owns the name.
+    if (idx && body.shape.FacePlane(*idx, centre, normal, uAxis))
+      return true;
   }
   return false;
 }

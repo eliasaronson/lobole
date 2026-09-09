@@ -48,15 +48,22 @@ namespace {
 // same walk, and doing it twice was how the two disagreed about which face a
 // name meant.
 bool FindFace(const std::vector<Body>& bodies, const ElementRef& ref,
-              TopoDS_Face& face, glm::vec3& centre, glm::vec3& normal) {
+              TopoDS_Face& face, glm::vec3& centre, glm::vec3& normal,
+              uint64_t jobPartId) {
   if (!ref.IsSet())
     return false;
   for (const Body& body : bodies) {
     if (body.createdBy != ref.featureId || !body.shape.IsValid())
       continue;
+    // A body that belongs to a DIFFERENT part of the job is not this pick.
+    // One with no job part at all (a plain part document, which is what every
+    // caller outside a job passes) has nothing to disambiguate, so it stays:
+    // the qualifier narrows a job's parts, it does not require one.
+    if (jobPartId != 0 && body.jobPartId != 0 && body.jobPartId != jobPartId)
+      continue;
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
     if (!idx)
-      return false;
+      continue;
     glm::vec3 uAxis(0.0f);
     if (!body.shape.FacePlane(*idx, centre, normal, uAxis))
       return false;
@@ -126,20 +133,27 @@ double DistanceToLoop(const std::vector<glm::dvec2>& pts, const glm::dvec2& p) {
 } // namespace detail
 
 FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
-                            const ElementRef& ref, double deflection) {
+                            const ElementRef& ref, double deflection,
+                            uint64_t jobPartId) {
   FaceRegion out;
   if (!ref.IsSet()) {
     out.why = "nothing picked";
     return out;
   }
+  bool sawTheFeature = false;
   for (const Body& body : bodies) {
     if (body.createdBy != ref.featureId || !body.shape.IsValid())
       continue;
+    // A body that belongs to a DIFFERENT part of the job is not this pick.
+    // One with no job part at all (a plain part document, which is what every
+    // caller outside a job passes) has nothing to disambiguate, so it stays:
+    // the qualifier narrows a job's parts, it does not require one.
+    if (jobPartId != 0 && body.jobPartId != 0 && body.jobPartId != jobPartId)
+      continue;
+    sawTheFeature = true;
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
-    if (!idx) {
-      out.why = "that face is gone from the model";
-      return out;
-    }
+    if (!idx)
+      continue; // a part is several bodies; only one owns the name
     glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
     if (!body.shape.FacePlane(*idx, centre, normal, uAxis)) {
       out.why = "pick a flat face — that one is curved";
@@ -188,7 +202,8 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
     out.ok = true;
     return out;
   }
-  out.why = "that face is not on a body this job can machine";
+  out.why = sawTheFeature ? "that face is gone from the model"
+                          : "that face is not on a body this job can machine";
   return out;
 }
 
@@ -214,15 +229,21 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
 // and lose to the 0.5 mm tolerance.
 bool FindVerticalWallFace(const std::vector<Body>& bodies,
                           const ElementRef& ref, TopoDS_Face& face,
-                          glm::dvec2& onWall) {
+                          glm::dvec2& onWall, uint64_t jobPartId) {
   if (!ref.IsSet())
     return false;
   for (const Body& body : bodies) {
     if (body.createdBy != ref.featureId || !body.shape.IsValid())
       continue;
+    // A body that belongs to a DIFFERENT part of the job is not this pick.
+    // One with no job part at all (a plain part document, which is what every
+    // caller outside a job passes) has nothing to disambiguate, so it stays:
+    // the qualifier narrows a job's parts, it does not require one.
+    if (jobPartId != 0 && body.jobPartId != 0 && body.jobPartId != jobPartId)
+      continue;
     const std::optional<int> idx = body.elementMap.Resolve(ref.name);
     if (!idx)
-      return false;
+      continue;
     int i = 0;
     for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
          ex.Next(), i++) {
@@ -264,29 +285,31 @@ bool FindVerticalWallFace(const std::vector<Body>& bodies,
   return false;
 }
 
-bool IsWallFace(const std::vector<Body>& bodies, const ElementRef& ref) {
+bool IsWallFace(const std::vector<Body>& bodies, const ElementRef& ref,
+                uint64_t jobPartId) {
   TopoDS_Face face;
   glm::vec3 centre(0.0f), normal(0.0f);
-  if (FindFace(bodies, ref, face, centre, normal))
+  if (FindFace(bodies, ref, face, centre, normal, jobPartId))
     return std::abs(normal.z) < 0.01f;
   glm::dvec2 onWall(0.0);
-  return FindVerticalWallFace(bodies, ref, face, onWall);
+  return FindVerticalWallFace(bodies, ref, face, onWall, jobPartId);
 }
 
 WallContour PickedWallContour(const std::vector<Body>& bodies,
-                              const ElementRef& ref, double deflection) {
+                              const ElementRef& ref, double deflection,
+                              uint64_t jobPartId) {
   WallContour out;
   TopoDS_Face face;
   glm::vec3 centre(0.0f), normal(0.0f);
   glm::dvec2 at(0.0);
-  if (FindFace(bodies, ref, face, centre, normal)) {
+  if (FindFace(bodies, ref, face, centre, normal, jobPartId)) {
     if (std::abs(normal.z) >= 0.01f) {
       out.why = "pick a wall — that face is level, so it is a floor to clear "
                 "rather than a contour to follow";
       return out;
     }
     at = {centre.x, centre.y};
-  } else if (FindVerticalWallFace(bodies, ref, face, at)) {
+  } else if (FindVerticalWallFace(bodies, ref, face, at, jobPartId)) {
     // A curved wall — a bore, a boss, an elliptical or splined opening. The
     // section-loop machinery below is shape-agnostic, so these need nothing
     // more than being let in.

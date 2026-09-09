@@ -504,7 +504,8 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     glm::vec3 normal(0.0f);
     const cam::Target picked =
         ui::TargetFor(state, item.element, item.jobPartId);
-    if (cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
+    if (cam::FaceNormalOf(ui::JobBodies(state), item.element, normal,
+                          picked.jobPartId)) {
       const glm::dquat had = cam::FixtureFrame(*setup, picked.jobPartId);
       reclamped = SetFixtureFrame(state, *setup, picked.jobPartId,
                                   cam::SolveFaceUp(glm::dvec3(normal), had));
@@ -564,13 +565,13 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     cam::Setup* setup = EnsureCamSetup(state);
     if (setup == nullptr)
       return;
+    const uint64_t part =
+        ui::TargetFor(state, item.element, item.jobPartId).jobPartId;
     glm::vec3 normal(0.0f);
-    if (!cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
+    if (!cam::FaceNormalOf(ui::JobBodies(state), item.element, normal, part)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }
-    const uint64_t part =
-        ui::TargetFor(state, item.element, item.jobPartId).jobPartId;
     const glm::dquat had = cam::FixtureFrame(*setup, part);
     (void)SetFixtureFrame(state, *setup, part,
                           cam::SolveFaceUp(glm::dvec3(normal), had));
@@ -589,7 +590,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     if (setup == nullptr)
       return;
     glm::vec3 normal(0.0f);
-    if (!cam::FaceNormalOf(ui::JobBodies(state), item.element, normal)) {
+    if (!cam::FaceNormalOf(
+            ui::JobBodies(state), item.element, normal,
+            ui::TargetFor(state, item.element, item.jobPartId).jobPartId)) {
       state.slotPick.miss = "pick a flat face — that one is curved";
       return;
     }

@@ -224,7 +224,7 @@ bool StockBoundsFramed(const Setup& setup, const std::vector<Body>& bodies,
 
 bool FindVerticalWallFace(const std::vector<Body>& bodies,
                           const ElementRef& ref, TopoDS_Face& face,
-                          glm::dvec2& onWall);
+                          glm::dvec2& onWall, uint64_t jobPartId = 0);
 
 Toolpath GenerateFramed(const Setup& setup, const Operation& op,
                         const std::vector<Body>& bodies, GenerateContext* ctx);

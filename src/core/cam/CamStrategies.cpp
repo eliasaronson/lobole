@@ -75,15 +75,18 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
     return {};
   // A wall names one contour at every depth — the case an opening that goes
   // all the way through has, because it has no floor to name.
-  if (IsWallFace(bodies, op.targets.front().ref)) {
-    const WallContour wall = PickedWallContour(bodies, op.targets.front().ref);
+  if (IsWallFace(bodies, op.targets.front().ref,
+                 op.targets.front().jobPartId)) {
+    const WallContour wall = PickedWallContour(
+        bodies, op.targets.front().ref, 0.02, op.targets.front().jobPartId);
     if (!wall.ok) {
       error = wall.why;
       return {};
     }
     return Clipper2Lib::Paths64{ToClipper(wall.loop.pts)};
   }
-  const FaceRegion region = PickedFaceRegion(bodies, op.targets.front().ref);
+  const FaceRegion region = PickedFaceRegion(
+      bodies, op.targets.front().ref, 0.02, op.targets.front().jobPartId);
   if (!region.ok) {
     error = region.why;
     return {};
@@ -171,10 +174,12 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // wrong at the rest — the pick is re-resolved per pass below, against the
   // projection. A floor region and a targetless cut keep their own shapes.
   const bool wallPick =
-      !op.targets.empty() && IsWallFace(bodies, op.targets.front().ref);
+      !op.targets.empty() &&
+      IsWallFace(bodies, op.targets.front().ref, op.targets.front().jobPartId);
   WallContour wall;
   if (wallPick) {
-    wall = PickedWallContour(bodies, op.targets.front().ref);
+    wall = PickedWallContour(bodies, op.targets.front().ref, 0.02,
+                             op.targets.front().jobPartId);
     if (!wall.ok) {
       tp.error = wall.why;
       return;
@@ -881,7 +886,8 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
                "top edge to round or chamfer";
     return;
   }
-  const WallContour wall = PickedWallContour(bodies, op.targets.front().ref);
+  const WallContour wall = PickedWallContour(
+      bodies, op.targets.front().ref, 0.02, op.targets.front().jobPartId);
   if (!wall.ok) {
     tp.error = wall.why;
     return;

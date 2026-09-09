@@ -160,12 +160,13 @@ DerivedOp DeriveOperation(const Setup& setup,
   switch (type) {
   case OpType::Adaptive: // the strategy, derived exactly like the verb it is
   case OpType::Pocket: {
-    if (IsWallFace(bodies, target.ref)) {
+    if (IsWallFace(bodies, target.ref, target.jobPartId)) {
       out.why = "click the pocket's FLOOR — a wall says where to go round, "
                 "not how deep to go. Cut it out follows a wall.";
       return out;
     }
-    const FaceRegion region = PickedFaceRegion(bodies, target.ref);
+    const FaceRegion region =
+        PickedFaceRegion(bodies, target.ref, 0.02, target.jobPartId);
     if (!region.ok) {
       out.why = region.why;
       return out;
@@ -198,9 +199,10 @@ DerivedOp DeriveOperation(const Setup& setup,
     // "cut it out" means — a profile that stops on the last skin leaves the
     // part welded to the stock.
     op.bottomZ = lo.z;
-    if (IsWallFace(bodies, target.ref)) {
+    if (IsWallFace(bodies, target.ref, target.jobPartId)) {
       // A wall names the contour to follow AND how far down to follow it.
-      const WallContour wall = PickedWallContour(bodies, target.ref);
+      const WallContour wall =
+          PickedWallContour(bodies, target.ref, 0.02, target.jobPartId);
       if (!wall.ok) {
         out.why = wall.why;
         return out;
@@ -214,7 +216,8 @@ DerivedOp DeriveOperation(const Setup& setup,
       if (wall.bottomZ > modelBottom + 1e-6)
         op.bottomZ = wall.bottomZ;
     } else if (target.IsSet()) {
-      const FaceRegion region = PickedFaceRegion(bodies, target.ref);
+      const FaceRegion region =
+          PickedFaceRegion(bodies, target.ref, 0.02, target.jobPartId);
       if (!region.ok) {
         out.why = region.why;
         return out;
@@ -297,7 +300,8 @@ DerivedOp DeriveOperation(const Setup& setup,
                 "top edge to round or chamfer";
       return out;
     }
-    const WallContour wall = PickedWallContour(bodies, target.ref);
+    const WallContour wall =
+        PickedWallContour(bodies, target.ref, 0.02, target.jobPartId);
     if (!wall.ok) {
       out.why = wall.why;
       return out;

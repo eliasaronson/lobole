@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/Feature.h" // Body
+#include "core/Feature.h"         // Body
 #include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
 #include "core/cam/CamJob.h"      // Loop, Toolpath
 
@@ -84,9 +84,16 @@ struct FaceRegion {
 // NOTE: this one takes no Setup, so it cannot frame anything — the loops and
 // the z come back in whatever space `bodies` are in. Callers working on an
 // indexed setup pass BodiesInSetupFrame's output (C9).
+// `jobPartId` names WHICH part of the job the pick is on, and 0 means any.
+// Feature ids are per document, so two parts on one sheet share them freely:
+// without the qualifier the first body with that id answers, and the pick
+// lands on the wrong part (or, when the name does not resolve there, reads as
+// "that face is gone from the model"). It is the same qualifier a Target
+// carries -- pass `target.jobPartId`.
 [[nodiscard]] FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
                                           const ElementRef& ref,
-                                          double deflection = 0.02);
+                                          double deflection = 0.02,
+                                          uint64_t jobPartId = 0);
 
 // What a click on a WALL means. An opening that goes all the way through has
 // no floor to click — a through slot's only faces are vertical — so a job
@@ -112,7 +119,8 @@ struct WallContour {
 
 [[nodiscard]] WallContour PickedWallContour(const std::vector<Body>& bodies,
                                             const ElementRef& ref,
-                                            double deflection = 0.02);
+                                            double deflection = 0.02,
+                                            uint64_t jobPartId = 0);
 
 // The outline a cutter may FOLLOW at each of `passes`, which is not the
 // part's cross-section there.
@@ -142,7 +150,7 @@ ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
 // Whether `ref` names a vertical face — the question every caller asks before
 // deciding which of the two picks above applies.
 [[nodiscard]] bool IsWallFace(const std::vector<Body>& bodies,
-                              const ElementRef& ref);
+                              const ElementRef& ref, uint64_t jobPartId = 0);
 
 // The operation a verb produces from a picked face. Every depth here is
 // derived — from the face, the stock and the tool — which is the whole point:
@@ -405,8 +413,16 @@ GenerateOpFramed(const Setup& setup, const Operation& op,
 // resolvable or something curved. Engine-side because both doors need it --
 // the pick in the panel and `lay_face_up` over the RPC -- and a geometry
 // question answered twice is a geometry question answered two ways.
+//
+// `jobPartId` says WHICH part of the job the ref belongs to, and 0 means any.
+// Two parts in one job easily share a feature id -- each document numbers its
+// own features from 1 -- so without it the first body with that id answers,
+// and a sheet holding a mid plate and two camera plates could not lay the
+// second plate up at all (the name resolved on the wrong part). It is the
+// same qualifier an operation target carries, for the same reason.
 [[nodiscard]] bool FaceNormalOf(const std::vector<Body>& bodies,
-                                const ElementRef& ref, glm::vec3& normal);
+                                const ElementRef& ref, glm::vec3& normal,
+                                uint64_t jobPartId = 0);
 
 // The FIXTURING frame that lays `normal` under the spindle — the quaternion
 // taking +Z to it. Any planar face has one; there is nothing to refuse.
