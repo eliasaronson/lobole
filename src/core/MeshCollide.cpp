@@ -72,6 +72,100 @@ bool BoxesOverlap(const glm::dvec3& aLo, const glm::dvec3& aHi,
 // A box transformed into another frame, kept axis-aligned there (the usual
 // conservative 8-corner hull — cheap, and only ever too big, which costs a
 // descent and never a wrong answer).
+// --- triangle/triangle DISTANCE ---------------------------------------------
+// For two triangles that do not intersect the minimum is attained either
+// between two edges or between a vertex and the opposite face, so nine
+// segment pairs and six point-face tests decide it. Squared throughout; one
+// square root at the end of the whole query, not per triangle.
+
+double SegmentDistance2(const glm::dvec3& p1, const glm::dvec3& q1,
+                        const glm::dvec3& p2, const glm::dvec3& q2) {
+  const glm::dvec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+  const double a = glm::dot(d1, d1), e = glm::dot(d2, d2), f = glm::dot(d2, r);
+  constexpr double eps = 1e-18;
+  double s = 0.0, t = 0.0;
+  if (a <= eps && e <= eps)
+    return glm::dot(r, r);
+  if (a <= eps) {
+    t = std::clamp(f / e, 0.0, 1.0);
+  } else {
+    const double c = glm::dot(d1, r);
+    if (e <= eps) {
+      s = std::clamp(-c / a, 0.0, 1.0);
+    } else {
+      const double b = glm::dot(d1, d2), denom = a * e - b * b;
+      s = denom > eps ? std::clamp((b * f - c * e) / denom, 0.0, 1.0) : 0.0;
+      t = (b * s + f) / e;
+      if (t < 0.0) {
+        t = 0.0;
+        s = std::clamp(-c / a, 0.0, 1.0);
+      } else if (t > 1.0) {
+        t = 1.0;
+        s = std::clamp((b - c) / a, 0.0, 1.0);
+      }
+    }
+  }
+  const glm::dvec3 gap = (p1 + d1 * s) - (p2 + d2 * t);
+  return glm::dot(gap, gap);
+}
+
+glm::dvec3 ClosestOnTriangle(const glm::dvec3& p, const glm::dvec3& a,
+                             const glm::dvec3& b, const glm::dvec3& c) {
+  const glm::dvec3 ab = b - a, ac = c - a, ap = p - a;
+  const double d1 = glm::dot(ab, ap), d2 = glm::dot(ac, ap);
+  if (d1 <= 0.0 && d2 <= 0.0)
+    return a;
+  const glm::dvec3 bp = p - b;
+  const double d3 = glm::dot(ab, bp), d4 = glm::dot(ac, bp);
+  if (d3 >= 0.0 && d4 <= d3)
+    return b;
+  const double vc = d1 * d4 - d3 * d2;
+  if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
+    return a + ab * (d1 / (d1 - d3));
+  const glm::dvec3 cp = p - c;
+  const double d5 = glm::dot(ab, cp), d6 = glm::dot(ac, cp);
+  if (d6 >= 0.0 && d5 <= d6)
+    return c;
+  const double vb = d5 * d2 - d1 * d6;
+  if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
+    return a + ac * (d2 / (d2 - d6));
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0)
+    return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+  const double denom = 1.0 / (va + vb + vc);
+  return a + ab * (vb * denom) + ac * (vc * denom);
+}
+
+double TriangleDistance2(const glm::dvec3* A, const glm::dvec3* B) {
+  if (TrianglesIntersect(A, B))
+    return 0.0;
+  double best = 1e300;
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++)
+      best = std::min(
+          best, SegmentDistance2(A[i], A[(i + 1) % 3], B[j], B[(j + 1) % 3]));
+  for (int i = 0; i < 3; i++) {
+    const glm::dvec3 q = ClosestOnTriangle(A[i], B[0], B[1], B[2]);
+    best = std::min(best, glm::dot(A[i] - q, A[i] - q));
+    const glm::dvec3 r = ClosestOnTriangle(B[i], A[0], A[1], A[2]);
+    best = std::min(best, glm::dot(B[i] - r, B[i] - r));
+  }
+  return best;
+}
+
+// Squared distance between two axis-aligned boxes; 0 when they overlap. A
+// lower bound on every triangle pair inside them, which is what prunes.
+double BoxDistance2(const glm::dvec3& aLo, const glm::dvec3& aHi,
+                    const glm::dvec3& bLo, const glm::dvec3& bHi) {
+  double total = 0.0;
+  for (int i = 0; i < 3; i++) {
+    const double gap =
+        std::max(0.0, std::max(aLo[i] - bHi[i], bLo[i] - aHi[i]));
+    total += gap * gap;
+  }
+  return total;
+}
+
 void TransformBox(const glm::dmat4& m, const glm::dvec3& lo,
                   const glm::dvec3& hi, glm::dvec3& outLo, glm::dvec3& outHi) {
   outLo = glm::dvec3(1e300);
@@ -94,6 +188,37 @@ std::mutex g_mutex;
 // a body sitting somewhere else.
 std::map<uint64_t, std::shared_ptr<const Mesh>> g_cache;
 
+std::shared_ptr<const Mesh> CachedMesh(const CADShape& s) {
+  const uint64_t key = s.PlacementId();
+  // The BUILD happens under the lock, not just the map access.
+  //
+  // It used to be check, unlock, build, relock, store — so two workers
+  // that both missed on the same body both called Mesh::Build, and that
+  // ends in CADShape::GenerateMesh, which WRITES the triangulation into
+  // the shared TShape. Two OpenCASCADE meshers on one shape at once
+  // segfaults inside BRepMesh_EdgeDiscret. `interference mode=mesh` runs
+  // its pairs on every core and one body appears in many pairs, so it hit
+  // this whenever two of them raced — intermittently, which is how it read
+  // as a flaky test rather than as the crash it is.
+  //
+  // Serialising the builds is the point rather than a cost: the documented
+  // rule for this codebase is that shapes are warmed single-threaded
+  // before workers touch them (RemoteInspection's WorldBounds pass,
+  // MotionStudy's MeshFor pass), and those warm passes are serial anyway.
+  // This makes the cache hold that rule itself instead of trusting every
+  // future caller to remember it. A hit — which is every call after the
+  // first per body — takes the lock and returns.
+  if (key == 0)
+    return std::shared_ptr<const Mesh>(Mesh::Build(s));
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto it = g_cache.find(key);
+  if (it != g_cache.end())
+    return it->second;
+  auto built = Mesh::Build(s);
+  g_cache[key] = built;
+  return std::shared_ptr<const Mesh>(built);
+}
+
 } // namespace
 
 std::shared_ptr<const Mesh> Mesh::Build(const CADShape& shape,
@@ -113,6 +238,7 @@ std::shared_ptr<const Mesh> Mesh::Build(const CADShape& shape,
   mesh->m_tris.reserve(tess.indices.size() / 3);
   for (size_t i = 0; i + 2 < tess.indices.size(); i += 3) {
     Tri t;
+    t.face = i / 3 < tess.triangleFaces.size() ? tess.triangleFaces[i / 3] : 0;
     t.a = glm::dvec3(tess.vertices[tess.indices[i]].position);
     t.b = glm::dvec3(tess.vertices[tess.indices[i + 1]].position);
     t.c = glm::dvec3(tess.vertices[tess.indices[i + 2]].position);
@@ -212,6 +338,94 @@ void Mesh::Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
   }
 }
 
+void Mesh::Walk(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
+                const glm::dmat4& bToA, double limit2, double& best2,
+                std::map<std::pair<uint32_t, uint32_t>, double>* pairs) const {
+  const Node& a = m_nodes[nodeA];
+  const Node& b = other.m_nodes[nodeB];
+  glm::dvec3 bLo, bHi;
+  TransformBox(bToA, b.lo, b.hi, bLo, bHi);
+  // A box pair's distance is a LOWER bound on every triangle pair below it,
+  // so one no closer than the cut-off cannot improve on it. Minimising, the
+  // cut-off is the best found so far and shrinks; collecting, it is fixed.
+  const double cut = pairs ? limit2 : best2;
+  if (BoxDistance2(a.lo, a.hi, bLo, bHi) > cut)
+    return;
+  const bool aLeaf = a.count > 0, bLeaf = b.count > 0;
+  if (aLeaf && bLeaf) {
+    for (uint32_t i = 0; i < a.count; i++) {
+      const Tri& ta = m_tris[m_order[a.start + i]];
+      const glm::dvec3 A[3] = {ta.a, ta.b, ta.c};
+      if (BoxDistance2(ta.lo, ta.hi, bLo, bHi) > (pairs ? limit2 : best2))
+        continue;
+      for (uint32_t j = 0; j < b.count; j++) {
+        const Tri& tb = other.m_tris[other.m_order[b.start + j]];
+        const glm::dvec3 B[3] = {glm::dvec3(bToA * glm::dvec4(tb.a, 1.0)),
+                                 glm::dvec3(bToA * glm::dvec4(tb.b, 1.0)),
+                                 glm::dvec3(bToA * glm::dvec4(tb.c, 1.0))};
+        const double d2 = TriangleDistance2(A, B);
+        if (pairs != nullptr) {
+          if (d2 <= limit2) {
+            // The NEAREST triangle pair per face pair: that is the bound the
+            // caller prunes with.
+            const std::pair<uint32_t, uint32_t> key{ta.face, tb.face};
+            const auto it = pairs->find(key);
+            if (it == pairs->end() || d2 < it->second)
+              (*pairs)[key] = d2;
+          }
+        } else if (d2 < best2) {
+          best2 = d2;
+          if (best2 <= 0.0)
+            return; // touching or crossing; nothing can beat it
+        }
+      }
+    }
+    return;
+  }
+  // Descend the one that is not a leaf, NEARER CHILD FIRST: a tight bound
+  // found early is what lets the far side prune at all.
+  const double aSize = glm::length(a.hi - a.lo);
+  const double bSize = glm::length(bHi - bLo);
+  if (bLeaf || (!aLeaf && aSize >= bSize)) {
+    const Node& l = m_nodes[a.left];
+    const Node& r = m_nodes[a.right];
+    const bool leftFirst = BoxDistance2(l.lo, l.hi, bLo, bHi) <=
+                           BoxDistance2(r.lo, r.hi, bLo, bHi);
+    Walk(leftFirst ? a.left : a.right, other, nodeB, bToA, limit2, best2,
+         pairs);
+    Walk(leftFirst ? a.right : a.left, other, nodeB, bToA, limit2, best2,
+         pairs);
+  } else {
+    Walk(nodeA, other, b.left, bToA, limit2, best2, pairs);
+    Walk(nodeA, other, b.right, bToA, limit2, best2, pairs);
+  }
+}
+
+Mesh::Near Mesh::Nearest(const glm::dmat4& xfA, const Mesh& other,
+                         const glm::dmat4& xfB, double slack) const {
+  Near out;
+  if (m_tris.empty() || other.m_tris.empty())
+    return out;
+  const glm::dmat4 bToA = glm::inverse(xfA) * xfB;
+  double best2 = 1e300;
+  Walk(0, other, 0, bToA, 0.0, best2, nullptr);
+  out.distance = std::sqrt(std::max(0.0, best2));
+  // Second pass at a FIXED cut-off, for the face pairs. Cheap next to the
+  // first: the bound is tight now, so nearly everything prunes at the top.
+  const double limit = out.distance + std::max(slack, 0.0);
+  double ignored = 1e300;
+  std::map<std::pair<uint32_t, uint32_t>, double> pairs;
+  Walk(0, other, 0, bToA, limit * limit, ignored, &pairs);
+  out.pairs.reserve(pairs.size());
+  for (const auto& [key, d2] : pairs)
+    out.pairs.push_back({key.first, key.second, std::sqrt(d2)});
+  std::sort(out.pairs.begin(), out.pairs.end(),
+            [](const FacePair& l, const FacePair& r) {
+              return l.distance < r.distance;
+            });
+  return out;
+}
+
 bool Mesh::Contains(const glm::dvec3& point) const {
   if (m_tris.empty())
     return false;
@@ -307,41 +521,27 @@ bool Mesh::Overlaps(const glm::dmat4& xfA, const Mesh& other,
 
 Result Overlap(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
                const glm::dmat4& xfB) {
-  const auto get = [](const CADShape& s) {
-    const uint64_t key = s.PlacementId();
-    // The BUILD happens under the lock, not just the map access.
-    //
-    // It used to be check, unlock, build, relock, store — so two workers
-    // that both missed on the same body both called Mesh::Build, and that
-    // ends in CADShape::GenerateMesh, which WRITES the triangulation into
-    // the shared TShape. Two OpenCASCADE meshers on one shape at once
-    // segfaults inside BRepMesh_EdgeDiscret. `interference mode=mesh` runs
-    // its pairs on every core and one body appears in many pairs, so it hit
-    // this whenever two of them raced — intermittently, which is how it read
-    // as a flaky test rather than as the crash it is.
-    //
-    // Serialising the builds is the point rather than a cost: the documented
-    // rule for this codebase is that shapes are warmed single-threaded
-    // before workers touch them (RemoteInspection's WorldBounds pass,
-    // MotionStudy's MeshFor pass), and those warm passes are serial anyway.
-    // This makes the cache hold that rule itself instead of trusting every
-    // future caller to remember it. A hit — which is every call after the
-    // first per body — takes the lock and returns.
-    if (key == 0)
-      return std::shared_ptr<const Mesh>(Mesh::Build(s));
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const auto it = g_cache.find(key);
-    if (it != g_cache.end())
-      return it->second;
-    auto built = Mesh::Build(s);
-    g_cache[key] = built;
-    return std::shared_ptr<const Mesh>(built);
-  };
-  const auto ma = get(a);
-  const auto mb = get(b);
+  const auto ma = CachedMesh(a);
+  const auto mb = CachedMesh(b);
   Result out;
   out.deflection = std::max(ma->Deflection(), mb->Deflection());
   out.intersects = ma->Overlaps(xfA, *mb, xfB);
+  return out;
+}
+
+Gap Nearest(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
+            const glm::dmat4& xfB, double slackDeflections) {
+  Gap out;
+  const auto ma = CachedMesh(a);
+  const auto mb = CachedMesh(b);
+  if (!ma || !mb || ma->Empty() || mb->Empty())
+    return out;
+  out.deflection = std::max(ma->Deflection(), mb->Deflection());
+  const Mesh::Near near =
+      ma->Nearest(xfA, *mb, xfB, slackDeflections * out.deflection);
+  out.known = true;
+  out.distance = near.distance;
+  out.pairs = near.pairs;
   return out;
 }
 

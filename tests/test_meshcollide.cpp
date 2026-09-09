@@ -223,3 +223,72 @@ TEST_CASE("A cap that STRADDLES a shaft is clear, not buried in it",
       collide::Overlap(block, glm::dmat4(1.0), buried, glm::dmat4(1.0));
   CHECK(swallowed.intersects);
 }
+
+TEST_CASE("Mesh distance answers what the exact query answers", "[collide]") {
+  // The mesh distance is to the TESSELLATIONS, so it is right to within the
+  // deflection and no better — that is the whole contract. What makes it
+  // worth having is the second half: which FACES could hold the answer, so
+  // an exact query can be asked of two of them instead of all of them.
+  collide::ClearCache();
+  const CADShape a = Box({0, 0, 0}, {10, 10, 10});
+  const CADShape b = Box({0, 0, 0}, {10, 10, 10});
+
+  SECTION("a known gap, on flat faces") {
+    const collide::Gap gap =
+        collide::Nearest(a, glm::dmat4(1.0), b, At(30), 2.0);
+    REQUIRE(gap.known);
+    CHECK_THAT(gap.distance, WithinAbs(20.0, 1e-9)); // 30 - 10
+    // Planar faces are meshed exactly, so this one is not approximate at
+    // all; the tolerance is the deflection only where a surface curves.
+    CHECK(gap.deflection > 0.0);
+    // Several pairs qualify, not one: the +X face holds the answer and the
+    // four faces around it share its edges, whose points are the same 20 mm
+    // away. That is the selection doing its job — it must not MISS the pair
+    // that holds the answer, and a tie is not a miss. They come back
+    // NEAREST FIRST, which is what lets a caller stop early.
+    REQUIRE_FALSE(gap.pairs.empty());
+    CHECK(gap.pairs.size() < 36); // not the whole 6x6 cross product
+    CHECK_THAT(gap.pairs.front().distance, WithinAbs(20.0, 1e-9));
+    for (size_t i = 1; i < gap.pairs.size(); i++)
+      CHECK(gap.pairs[i].distance >= gap.pairs[i - 1].distance);
+  }
+
+  SECTION("diagonal, so the answer is a corner") {
+    const collide::Gap gap =
+        collide::Nearest(a, glm::dmat4(1.0), b, At(20, 20, 20), 2.0);
+    REQUIRE(gap.known);
+    CHECK_THAT(gap.distance, WithinAbs(std::sqrt(3.0) * 10.0, 1e-9));
+  }
+
+  SECTION("touching reads zero, overlapping reads zero") {
+    CHECK_THAT(collide::Nearest(a, glm::dmat4(1.0), b, At(10), 2.0).distance,
+               WithinAbs(0.0, 1e-9));
+    CHECK_THAT(collide::Nearest(a, glm::dmat4(1.0), b, At(5), 2.0).distance,
+               WithinAbs(0.0, 1e-9));
+  }
+
+  SECTION("curved: within the deflection of the exact answer, and far faster") {
+    // Two cylinders side by side. The closest points are in the middle of
+    // curved faces, where a tessellation is inscribed — so the mesh reads
+    // slightly FAR, by less than the deflection.
+    const CADShape c1 =
+        CADKernel::Instance().CreateCylinder({0, 0, 0}, {0, 0, 1}, 5, 20);
+    const CADShape c2 =
+        CADKernel::Instance().CreateCylinder({0, 0, 0}, {0, 0, 1}, 5, 20);
+    const collide::Gap gap =
+        collide::Nearest(c1, glm::dmat4(1.0), c2, At(60), 2.0);
+    REQUIRE(gap.known);
+    const double exact = 50.0; // 60 between axes, 5 of radius each
+    INFO("mesh " << gap.distance << " exact " << exact << " deflection "
+                 << gap.deflection);
+    CHECK(gap.distance >= exact - 1e-9);
+    CHECK(gap.distance <= exact + 2.0 * gap.deflection);
+    CHECK_FALSE(gap.pairs.empty());
+  }
+
+  SECTION("a shape with no triangles says so rather than guessing") {
+    const collide::Gap gap =
+        collide::Nearest(CADShape(), glm::dmat4(1.0), b, At(30), 2.0);
+    CHECK_FALSE(gap.known);
+  }
+}

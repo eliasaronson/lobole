@@ -5,7 +5,9 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 
 // Do two placed solids overlap? Asked of TRIANGLES, not of the B-Rep
@@ -61,6 +63,28 @@ public:
   [[nodiscard]] bool Overlaps(const glm::dmat4& xfA, const Mesh& other,
                               const glm::dmat4& xfB) const;
 
+  // How far apart they are, and WHICH B-Rep faces are within `slack` of that.
+  //
+  // The distance is to the tessellations, so it is the part's distance to
+  // within the deflection and this module still refuses to hand it out as a
+  // measurement (see the header note). The faces are what it is for: they
+  // narrow an exact B-Rep query from every face against every other one to
+  // the two or three that can hold the answer, which is the difference
+  // between 55 s and a few milliseconds on two lofted propellers.
+  struct FacePair {
+    uint32_t a = 0, b = 0;
+    double distance = 0.0; // between their TRIANGLES
+  };
+  struct Near {
+    double distance = 0.0; // 0 when they intersect
+    // The face pairs within `slack` of it, NEAREST FIRST. Pairs, not two
+    // sets of faces: fifteen faces a side is 225 combinations to ask an
+    // exact query about, and only about twenty of them were ever close.
+    std::vector<FacePair> pairs;
+  };
+  [[nodiscard]] Near Nearest(const glm::dmat4& xfA, const Mesh& other,
+                             const glm::dmat4& xfB, double slack) const;
+
   // Is `point` (in this mesh's local frame) inside the closed surface? A ray
   // parity count, so a body wholly inside another still counts as a clash
   // even though no triangle of theirs crosses.
@@ -70,6 +94,7 @@ private:
   struct Tri {
     glm::dvec3 a, b, c;
     glm::dvec3 lo, hi;
+    uint32_t face = 0; // the B-Rep face it was tessellated from
   };
   struct Node {
     glm::dvec3 lo{0.0}, hi{0.0};
@@ -80,6 +105,12 @@ private:
   uint32_t BuildNode(uint32_t start, uint32_t count, int depth);
   void Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
                const glm::dmat4& bToA, bool& hit) const;
+  // One recursion, two jobs: with `faces` null it MINIMISES (pruning against
+  // the best found so far, which shrinks); with `faces` it COLLECTS every
+  // face pair within the fixed `limit`.
+  void Walk(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
+            const glm::dmat4& bToA, double limit2, double& best2,
+            std::map<std::pair<uint32_t, uint32_t>, double>* pairs) const;
 
   std::vector<Tri> m_tris;
   std::vector<uint32_t> m_order;
@@ -93,6 +124,21 @@ struct Result {
   bool intersects = false;
   double deflection = 0.0; // the coarser of the two meshes', mm
 };
+
+// What a pair's mesh distance says, and how coarsely.
+struct Gap {
+  bool known = false;      // false when either shape has no triangles
+  double distance = 0.0;   // to the TESSELLATIONS, +/- `deflection`
+  double deflection = 0.0; // the coarser of the two meshes', mm
+  std::vector<Mesh::FacePair> pairs;
+};
+
+// The same, from shapes, through the same cache. `slackDeflections` widens
+// the face-pair net in multiples of the deflection: a caller refining the
+// answer exactly needs at least TWO, since the tessellation can be that
+// much nearer or further than the surface it stands for.
+Gap Nearest(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
+            const glm::dmat4& xfB, double slackDeflections);
 
 // Convenience: build (or reuse) meshes for two shapes and test them.
 // Cached by CADShape::PlacementId — geometry AND placement, because a rigid
