@@ -114,7 +114,13 @@ void LabelBox(const glm::dvec2& labelPos, const std::string& text,
 // the resulting LABEL clears everything in `ctx` (five sheets in one
 // session needed 2–4 manual passes each because every below-the-view dim
 // landed on the same line, and the pile ran into the title block).
+// `resolved` is the dim resolved with a ZERO offset by a caller that has the
+// context to do it. Without one this re-resolves with no DimContext, and a
+// callout needs the source document to resolve at all — so every hole
+// callout fell straight through to the fallback offset and landed on the
+// part it points at.
 glm::dvec2 PlaceDimOffset(const DrawingDim& dim, const SheetView& view,
-                          const DimPlaceContext& ctx);
+                          const DimPlaceContext& ctx,
+                          const ResolvedDim* resolved = nullptr);
 
 } // namespace drawing

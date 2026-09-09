@@ -428,7 +428,14 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
     drawing::LabelBox(resolved.pos, resolved.text, mn, mx);
     ctx.avoid.push_back({mn, mx});
   }
-  return drawing::PlaceDimOffset(dim, it->second, ctx);
+  // Resolved HERE, where the source document is reachable: a hole callout
+  // that cannot be resolved cannot be placed, and it would fall back onto
+  // the hole it names.
+  DrawingDim probe = dim;
+  probe.labelOffset = {0.0, 0.0};
+  const drawing::ResolvedDim rd = ResolveDrawingDim(state, probe);
+  return drawing::PlaceDimOffset(dim, it->second, ctx,
+                                 rd.resolved ? &rd : nullptr);
 }
 
 drawing::ResolvedNote ResolveDrawingNote(AppState& state,

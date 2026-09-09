@@ -487,7 +487,14 @@ glm::dvec2 LabelPosFor(DrawingDimKind kind, const ResolvedDim& rd,
     return {std::min(rd.ext1.x, rd.ext2.x) + off.x,
             0.5 * (rd.ext1.y + rd.ext2.y)};
   case DrawingDimKind::Radius:
-  case DrawingDimKind::Diameter: {
+  case DrawingDimKind::Diameter:
+  // Callouts resolve their label the same way — rim + offset — and their
+  // ext1/ext2 are never set, so the linear formula below placed the probe
+  // box at the sheet origin and the search "found" a lane that was nowhere
+  // near where the label would actually land.
+  case DrawingDimKind::HoleCallout:
+  case DrawingDimKind::PatternCallout:
+  case DrawingDimKind::FastenerCallout: {
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
                                                    : glm::dvec2(0.7071, 0.7071);
     return rd.center + dir * rd.radius + off;
@@ -513,11 +520,12 @@ bool BoxClear(const glm::dvec2& mn, const glm::dvec2& mx,
 } // namespace
 
 glm::dvec2 PlaceDimOffset(const DrawingDim& dim, const SheetView& view,
-                          const DimPlaceContext& ctx) {
+                          const DimPlaceContext& ctx,
+                          const ResolvedDim* resolved) {
   const glm::dvec2 base = DefaultDimOffset(dim, view);
   DrawingDim probe = dim;
   probe.labelOffset = {0.0, 0.0};
-  const ResolvedDim rd = ResolveDim(probe, view);
+  const ResolvedDim rd = resolved ? *resolved : ResolveDim(probe, view);
   if (!rd.resolved)
     return base;
   const std::string text =
@@ -530,12 +538,26 @@ glm::dvec2 PlaceDimOffset(const DrawingDim& dim, const SheetView& view,
   constexpr double kLane = 7.0;
   switch (dim.kind) {
   case DrawingDimKind::Radius:
-  case DrawingDimKind::Diameter: {
+  case DrawingDimKind::Diameter:
+  // A callout is a leader too — its offset is a free vector from the thing
+  // it points at, exactly like a radius'. Placing it as a LINEAR dimension
+  // gave it two lanes to try, and on a crowded sheet both were taken: the
+  // fallback then dropped the label 12 mm below its own hole, which is on
+  // the part. Found on a quad's mid plate, where a hole table's notes had
+  // taken the lanes.
+  case DrawingDimKind::HoleCallout:
+  case DrawingDimKind::PatternCallout:
+  case DrawingDimKind::FastenerCallout: {
     // Try eight leader directions at growing lengths, preferring the base's
     // away-from-centre direction.
     const glm::dvec2 first =
         glm::length(base) > 1e-9 ? glm::normalize(base) : glm::dvec2(1.0, 0.0);
-    for (int ring = 0; ring < 4; ring++) {
+    // Far enough to leave the view. Four rings is 33 mm, which does not get
+    // a leader off a 108 mm plate when the hole it points at is in the
+    // middle of it — the search then fell back onto the part.
+    const double reach =
+        glm::length(view.bboxMax - view.bboxMin) + 3 * kDimOffsetGapMM;
+    for (int ring = 0; kDimOffsetGapMM + ring * kLane <= reach; ring++) {
       const double len = kDimOffsetGapMM + ring * kLane;
       for (int k = 0; k < 8; k++) {
         const double a = k * 0.7853981633974483; // pi/4

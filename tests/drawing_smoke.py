@@ -448,6 +448,43 @@ def main():
         expect(not after[dim_id]["resolved"],
                f"dim dangles after its edges are removed: {after[dim_id]}")
 
+        # A hole callout with NO offset is auto-placed CLEAR of the view.
+        # Auto-placement re-resolved the dim itself, without the source
+        # document a callout needs, so it fell through to the fallback
+        # offset and landed 12 mm from its own hole — on the part. Every
+        # sheet with a hole callout on it was wrong.
+        d.call("add_part", name="callout-plate")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "plate", "position": [-50, -40, 0],
+            "width": 100, "height": 80, "depth": 3})
+        centres = d.call("add_feature", feature={
+            "type": "Sketch", "name": "centres",
+            "plane": {"origin": [0, 0, 3], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "point", "p": [10, 8]}]})
+        d.call("add_feature", feature={
+            "type": "Hole", "name": "bore", "sketch_id": centres["id"],
+            "hole_kind": "simple", "diameter": 3.2, "through": True,
+            "fit": {"thread": "M3", "kind": "close"}})
+        d.call("create_drawing", name="callout-dwg", sheet={"size": "a3"})
+        cv = d.call("add_drawing_view", source="callout-plate",
+                    orientation="top", scale=1.0)
+        d.call("update_drawing")
+        bore = [e for e in d.call("list_drawing_geometry",
+                                  view=cv["id"])["geometry"]
+                if e["type"] == "circle" and e.get("visible")
+                and e.get("closed") and abs(e["radius"] - 1.6) < 0.05]
+        expect(len(bore) == 1, f"one bore on the sheet: {len(bore)}")
+        callout = d.call("add_drawing_dim", view=cv["id"],
+                         kind="hole_callout",
+                         refs=[{"edge": bore[0]["ref"]}])
+        expect(callout["resolved"], f"callout resolves: {callout}")
+        expect(callout["text"].endswith("THRU"), f"reads the fit: {callout}")
+        report = d.call("check_drawing", update=True)
+        over = [i for i in report["issues"]
+                if i["kind"] == "dim_label_over_view"]
+        expect(not over, f"auto-placed callout is clear of the view: {over}")
+
         print("drawing_smoke: OK")
     finally:
         app.terminate()

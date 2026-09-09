@@ -791,6 +791,50 @@ TEST_CASE("Hole rim element names carry the hole feature id",
                                 3.14159) == nullptr);
 }
 
+TEST_CASE("a callout is auto-placed clear of the view",
+          "[drawing][callout][dimension]") {
+  // Auto-placement re-resolved the dimension itself, with no DimContext —
+  // and a callout needs one to resolve at all. Every hole callout therefore
+  // fell through to the fallback offset and landed 12 mm from its own hole,
+  // which is on the part. A quad's mid plate is where it showed: two bores,
+  // one label on the plate. Now the caller resolves it and passes it in.
+  drawing::SheetView view = DimTestView();
+  view.bboxMin = {0.0, 0.0};
+  view.bboxMax = {30.0, 20.0};
+  for (int i = 1; i < 3; ++i) {
+    drawing::SheetCurve c;
+    c.edge = ElementRef{2, "hole" + std::to_string(i)};
+    c.sourceId = 1;
+    c.curveType = 1;
+    c.conicCenter = {10.0 + 4.0 * i, 10.0};
+    c.conicRadius = 4.0;
+    c.closed = true;
+    c.points = {{14.0 + 4.0 * i, 10}, {6.0 + 4.0 * i, 10}};
+    view.curves.push_back(c);
+  }
+  DrawingDim dim =
+      MakeDim(DrawingDimKind::PatternCallout,
+              {EdgeRef(2, "hole"), EdgeRef(2, "hole1"), EdgeRef(2, "hole2")});
+  drawing::DimPlaceContext ctx;
+  ctx.borderMin = {-100.0, -100.0};
+  ctx.borderMax = {200.0, 200.0};
+  ctx.avoid.push_back({view.bboxMin, view.bboxMax});
+
+  DrawingDim probe = dim;
+  probe.labelOffset = {0.0, 0.0};
+  const drawing::ResolvedDim rd = drawing::ResolveDim(probe, view);
+  REQUIRE(rd.resolved);
+  dim.labelOffset = drawing::PlaceDimOffset(dim, view, ctx, &rd);
+
+  const drawing::ResolvedDim placed = drawing::ResolveDim(dim, view);
+  REQUIRE(placed.resolved);
+  glm::dvec2 mn, mx;
+  drawing::LabelBox(placed.labelPos, placed.text, mn, mx);
+  INFO("label at " << placed.labelPos.x << ", " << placed.labelPos.y);
+  CHECK((mx.x < view.bboxMin.x || mn.x > view.bboxMax.x ||
+         mx.y < view.bboxMin.y || mn.y > view.bboxMax.y));
+}
+
 TEST_CASE("ResolveDim callout kinds", "[drawing][callout][dimension]") {
   drawing::SheetView view = DimTestView();
   // Three equal circles in a row for the pattern (r=4, pitch 12).
