@@ -3,6 +3,7 @@
 G90 G91.1 G21 G17 G40 G49 G80
 G54
 G0 Z20
+T1
 M5
 (change to T1: 6mm flat D6 - set Z zero, then cycle start)
 (tool 1: 6mm flat D6)

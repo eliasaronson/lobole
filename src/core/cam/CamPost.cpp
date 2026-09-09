@@ -482,9 +482,21 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         t << "T" << tp.toolNumber << " M6";
         e.Raw(t.str());
       } else {
+        // The T word WITHOUT M6: GRBL parses it, stores it and moves nothing,
+        // which is the whole point -- M6 is what it ignores unless built for
+        // a changer, and an inline "M6 T2" runs straight on into the next cut
+        // with the wrong tool. Stating it costs nothing at the machine and is
+        // what makes the FILE say which cutter each move belongs to: without
+        // it every reader of a grbl program -- this project's own verifier
+        // included -- has to assume tool 1, and a job whose second tool is
+        // fatter than its first verifies clean while gouging (found on a
+        // 2 mm cutter's slots simulated with a 3.175 one).
+        std::ostringstream sel;
+        sel << "T" << tp.toolNumber;
+        e.Raw(sel.str());
         // The spindle off before the hold, and the change spelled out where
-        // the operator will read it: GRBL never sees the T word, so the
-        // message is the only thing that says which tool.
+        // the operator will read it: the T word is for the file's readers,
+        // the message is for the person at the machine.
         e.Raw("M5");
         std::ostringstream t;
         // Parenthesised, so the tool's NAME has to be safe here too -- this

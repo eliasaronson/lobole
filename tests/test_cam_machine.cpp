@@ -131,6 +131,10 @@ TEST_CASE("cam: the post emits a program that starts and ends safely",
   CHECK_THAT(a.maxGouge, WithinAbs(b.maxGouge, 1e-9));
   CHECK_THAT(a.maxLeftover, WithinAbs(b.maxLeftover, 1e-9));
 
+  // ...and the grbl file SAYS which cutter it is running, T word and all.
+  // Without it a reader has to assume tool 1: see the two-tool case below.
+  CHECK(grbl.find("\nT1\n") != std::string::npos);
+
   // An unknown post names the ones that exist rather than failing blankly.
   std::string none;
   CHECK_FALSE(cam::PostProcess("haas", setup, paths, {}, none, &error));
@@ -992,3 +996,47 @@ TEST_CASE("cam machine: an operation wholly beyond the travel FAILS, it does "
 }
 
 #endif // HAVE_CAM
+
+TEST_CASE("cam: a grbl file states its own tool numbers", "[cam][post]") {
+  // GRBL takes no M6, so the change is a pause with a message -- and for a
+  // year that message was the ONLY thing naming the tool. Nothing that reads
+  // the file back could tell which cutter a move belonged to, so everything
+  // after the first change was read as tool 1: this project's own verifier
+  // simulated a 2 mm cutter's slots with a 3.175 mm one and called a correct
+  // job scrap. (It fails the other way just as easily -- a fat second tool
+  // gouging, simulated thin, verifies clean.)
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Tool small;
+  small.number = 4;
+  small.name = "2 mm flat";
+  small.diameter = 2.0;
+  small.feedCut = 500.0;
+  small.feedPlunge = 150.0;
+  small.spindleRpm = 20000.0;
+  setup.tools.push_back(small);
+  for (int k = 0; k < 2; k++) {
+    cam::Operation op;
+    op.id = static_cast<uint64_t>(k + 1);
+    op.type = cam::OpType::Profile;
+    op.toolNumber = k == 0 ? 1 : 4;
+    op.topZ = 20.0;
+    op.bottomZ = 18.0;
+    op.side = cam::Side::Outside;
+    setup.operations.push_back(op);
+  }
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string grbl, error;
+  REQUIRE(cam::PostProcess("grbl", setup, paths, {}, grbl, &error));
+  CHECK(grbl.find("M6") == std::string::npos); // still no M6, still a pause
+  CHECK(grbl.find("\nT4\n") != std::string::npos);
+
+  // What the file says is what a reader gets: the second operation's moves
+  // carry tool 4, not tool 1.
+  const cam::GProgram program = cam::ParseGcode(grbl);
+  bool cutWithFour = false;
+  for (const cam::GMove& m : program.moves)
+    cutWithFour |= m.tool == 4;
+  CHECK(cutWithFour);
+}
