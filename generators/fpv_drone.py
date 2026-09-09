@@ -417,8 +417,12 @@ def verify(app, asm, parts, occ, props):
 
     # The clearances that decide whether it flies or eats itself.
     def gap(a, b):
+        # A minute is not enough: the exact minimum distance between two
+        # LOFTED propellers is a spline-to-spline extrema, and it runs for
+        # tens of seconds (occasionally past the client's default timeout)
+        # where the same call between two plates is instant.
         return app.measure(a={"occurrence": a}, b={"occurrence": b},
-                           distance_kind="minimum")["distance"]
+                           distance_kind="minimum", _timeout=600)["distance"]
 
     clear = {
         "prop to prop (adjacent)": gap("Propeller FL", "Propeller FR"),
@@ -482,26 +486,10 @@ SHEETS = [
 
 
 SHEET_MM = {"a4": (297.0, 210.0), "a3": (420.0, 297.0), "a2": (594.0, 420.0)}
-
-
-def _view_extent(geometry):
-    xs, ys = [], []
-    for g in geometry:
-        for point in ((g["p1"], g["p2"]) if g["type"] == "line"
-                      else ([[g["center"][0] - g["radius"],
-                              g["center"][1] - g["radius"]],
-                             [g["center"][0] + g["radius"],
-                              g["center"][1] + g["radius"]]])):
-            xs.append(point[0]), ys.append(point[1])
-    return (min(xs), min(ys)), (max(xs), max(ys))
-
-
-def _point(g):
-    """Where a projected curve is, for anchoring: a line's midpoint, a
-    circle's centre."""
-    if g["type"] == "line":
-        return [(g["p1"][0] + g["p2"][0]) / 2, (g["p1"][1] + g["p2"][1]) / 2]
-    return list(g["center"])
+GA_SCALE = 0.5    # a PREFERRED scale (1:2). A drawing scale is one of a
+                  # short list; "1:1.33" is not on it, whatever fits best.
+GA_GAP = 18.0     # between the top view and the front view under it
+GA_SHEET = "a3"   # ... on the smallest sheet that holds it at that scale
 
 
 def _extremes(geometry, axis):
@@ -600,20 +588,15 @@ def part_sheets(app, out):
         # The label goes OUTSIDE the view, so the offset is measured from
         # the view's own extent rather than picked: at 1:1 a 108 mm plate
         # needs 66, and a guessed 16 puts the number on top of the part.
-        span = _view_extent(geometry)
         for axis in (0, 1):
             a, b = _extremes(geometry, axis)
-            # The offset is from the dimension's own ANCHOR — the midpoint
-            # of what it measures — not from the view's centre, and on an
-            # arm those are 30 mm apart: its only pair of parallel edges is
-            # the motor's bolt square, out at the far end.
-            anchor = [(_point(a)[i] + _point(b)[i]) / 2 for i in (0, 1)]
-            target = ([span[0][0] - 20.0, anchor[1]] if axis == 0
-                      else [anchor[0], span[0][1] - 20.0])
+            # No `offset`: the app places a dimension clear of the views,
+            # the title block AND the labels already on the sheet. Working
+            # one out by hand — anchor, extent, which side — was thirty
+            # lines that did the same job worse.
             app.add_drawing_dim(
                 view=view["id"], kind="distance_x" if axis else "distance_y",
-                refs=[{"edge": a["ref"]}, {"edge": b["ref"]}],
-                offset=[target[0] - anchor[0], target[1] - anchor[1]])
+                refs=[{"edge": a["ref"]}, {"edge": b["ref"]}])
 
         # One callout per distinct bore, which is where the recorded fit
         # earns its keep: the note says what the hole is FOR.
@@ -624,17 +607,9 @@ def part_sheets(app, out):
             if (g["type"] == "circle" and g.get("visible") and g.get("closed")
                     and 0 < (g.get("radius") or 0) <= 5.0):
                 holes.setdefault(round(g["radius"], 2), g)
-        # Callouts stack up the right-hand side on their leaders, where the
-        # two size dimensions (left and below) are not.
-        ordered = sorted(holes.items())
-        for i, (radius, circle) in enumerate(ordered):
-            middle = (i - (len(ordered) - 1) / 2) * 11.0
-            app.add_drawing_dim(
-                view=view["id"], kind="hole_callout",
-                refs=[{"edge": circle["ref"]}],
-                offset=[span[1][0] + 26.0 - circle["center"][0],
-                        (span[0][1] + span[1][1]) / 2 + middle
-                        - circle["center"][1]])
+        for radius, circle in sorted(holes.items()):
+            app.add_drawing_dim(view=view["id"], kind="hole_callout",
+                                refs=[{"edge": circle["ref"]}])
 
         note_block(app, (0.72 * sheet_w, 0.46 * sheet_h), [
             f"MATERIAL {material}",
@@ -665,24 +640,66 @@ def part_sheets(app, out):
 
 
 def assembly_sheet(app, out, name="Quadcopter"):
+    """Top over front over on the left, iso on the right.
+
+    Laid out from the views' MEASURED extents, not from three positions
+    that looked about right: at 1:1 this quad's plan is 263 x 273 mm, which
+    is most of an A2, and the front view ended up inside the top one. The
+    scale comes from the sheet too, so a bigger or smaller aircraft still
+    lands on it.
+    """
+    sheet_w, sheet_h = SHEET_MM[GA_SHEET]
     drawing = app.create_drawing(name="General arrangement", sheet={
-        "size": "a2", "landscape": True,
+        "size": GA_SHEET, "landscape": True,
         "title_block": {"project": "5-inch FPV freestyle quadcopter",
                         "document": "General arrangement",
                         "author": "generators/fpv_drone.py", "date": TODAY}})
-    for orientation, position in (("top", [150.0, 240.0]),
-                                  ("front", [150.0, 90.0]),
-                                  ("iso", [420.0, 160.0])):
-        # `fast` on purpose: eight lofted propeller blades are what exact HLR
-        # costs most on, and this sheet is a LOOK — the dimensioned sheets
-        # above are the ones anything is made from.
-        app.add_drawing_view(drawing=drawing["id"], source=name,
-                             orientation=orientation, scale=1.0,
-                             position=position, quality="fast")
-    app.update_drawing(budget_s=120)
+    views = {}
+    for orientation in ("top", "front", "iso"):
+        # `fast` on purpose: twelve lofted propeller blades are what exact
+        # HLR costs most on, and this sheet is a LOOK — the dimensioned
+        # sheets are the ones anything is made from.
+        views[orientation] = app.add_drawing_view(
+            drawing=drawing["id"], source=name, orientation=orientation,
+            scale=GA_SCALE, position=[0.25 * sheet_w, 0.5 * sheet_h],
+            quality="fast")
+    app.update_drawing(budget_s=180, _timeout=300)
+
+    # A view's `position` is where its model ORIGIN lands, not where its
+    # drawing sits: this quad's side view runs from z 0 upward, so its box
+    # is 18 mm above the point that positions it. Move each view by the
+    # difference between where its box IS and where it should be, and the
+    # distinction stops mattering.
+    box = {}
+    for row in app.list_drawing_views()["views"]:
+        (x0, y0), (x1, y1) = row["bbox"]
+        box[row["id"]] = {"w": x1 - x0, "h": y1 - y0,
+                          "centre": ((x0 + x1) / 2, (y0 + y1) / 2),
+                          "position": row["position"]}
+
+    top, front, iso = (box[views[o]["id"]] for o in ("top", "front", "iso"))
+    stack = top["h"] + GA_GAP + front["h"]
+    middle = sheet_h / 2
+    targets = {
+        views["top"]["id"]: (0.28 * sheet_w,
+                             middle + stack / 2 - top["h"] / 2),
+        views["front"]["id"]: (0.28 * sheet_w,
+                               middle - stack / 2 + front["h"] / 2),
+        views["iso"]["id"]: (0.72 * sheet_w, middle + 0.08 * sheet_h),
+    }
+    for view_id, (want_x, want_y) in targets.items():
+        at, centre = box[view_id]["position"], box[view_id]["centre"]
+        app.set_drawing_view(id=view_id,
+                             position=[at[0] + want_x - centre[0],
+                                       at[1] + want_y - centre[1]])
+    issues = app.check_drawing(update=True, _timeout=300)
+    if not issues.get("ok"):
+        raise SdkError(f"General arrangement: {issues['issues']}")
     path = os.path.join(out, "general-arrangement.svg")
     app.export_drawing(path=path)
     app.export_drawing(path=path.replace(".svg", ".pdf"))
+    print(f"  General arrangement {GA_SHEET.upper()} 1:{1 / GA_SCALE:g}, "
+          f"3 views, no issues")
     return path
 
 
@@ -726,9 +743,23 @@ def mass_budget(rows):
     return out
 
 
-def outputs(app, asm, parts, occ, clearances, out):
-    """The files somebody builds from."""
+# Which parts leave the document as a file, and how.
+EXPORTED = {"stl": ("Antenna mount", "Battery pad"),
+            "step": ("Bottom plate", "Mid plate", "Top plate", "Arm",
+                     "Camera plate")}
+
+
+def outputs(app, out, name="Quadcopter"):
+    """The files somebody builds from.
+
+    By NAME, not by the handles the build happened to leave lying about, so
+    this stage can run against a project that was opened rather than built
+    — which is what makes `--stage drawings` possible, and it is worth
+    having: this generator was run 90 times while it was being written and
+    40 of those were a full rebuild-and-verify to look at a drawing.
+    """
     os.makedirs(out, exist_ok=True)
+    asm = app.assembly(name, create=False)
     asm.activate()
 
     mass = app.mass_properties()["total"]
@@ -749,20 +780,28 @@ def outputs(app, asm, parts, occ, clearances, out):
           f"thrust/weight {4 * THRUST_PER_MOTOR_G / auw:.1f}:1")
 
     app.export_step(path=os.path.join(out, "fpv-drone.step"))
-    for key in ("antmount", "battpad"):
-        parts[key].activate()
-        app.export_stl(path=os.path.join(
-            out, parts[key].name.lower().replace(" ", "-") + ".stl"),
-            deflection=0.02)
-    for key in ("bottom", "mid", "top", "arm", "camplate"):
-        parts[key].activate()
-        app.export_step(path=os.path.join(
-            out, parts[key].name.lower().replace(" ", "-") + ".step"))
+    for kind, names in EXPORTED.items():
+        for part in names:
+            app.part(part, create=False).activate()
+            path = os.path.join(out, part.lower().replace(" ", "-")
+                                + "." + kind)
+            if kind == "stl":
+                app.export_stl(path=path, deflection=0.02)
+            else:
+                app.export_step(path=path)
 
     # The build guide travels with the files somebody builds from.
     guide = HERE.parent / "docs" / "modeling" / "fpv-drone-build.md"
     if guide.exists():
         shutil.copy(guide, os.path.join(out, "BUILD.md"))
+
+    # Re-running the sheets against a project that already has them would
+    # collide on the tab name, so clear ours first. (A drawing IS a tab:
+    # `delete_part` takes one by name.)
+    wanted = {f"{name} sheet" for name, *_ in SHEETS} | {"General arrangement"}
+    for existing in app.list_drawings()["drawings"]:
+        if existing["name"] in wanted:
+            app.delete_part(part=existing["name"])
 
     sheets = part_sheets(app, out)
     asm.activate()
@@ -780,11 +819,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int)
     ap.add_argument("--stage", default="all",
-                    choices=("parts", "assembly", "all"))
+                    choices=("parts", "assembly", "all", "drawings"))
     ap.add_argument("--out", default="scratch/fpv-drone")
     args = ap.parse_args()
 
     app = connect(args.port)
+    project = os.path.join(args.out, "fpv-drone.dsgn")
+    if args.stage == "drawings":
+        # The sheets and exports against the project as SAVED. The model is
+        # not rebuilt and nothing is re-checked, which is the point: it is
+        # the loop for laying a sheet out, and it is four times faster.
+        app.open_project(path=project)
+        outputs(app, args.out)
+        app.save_project(path=project, force=True)
+        print("saved")
+        return
+
     app.new()
     parts = build_parts(app)
     if args.stage == "parts":
@@ -792,13 +842,12 @@ def main():
     asm, occ = build_assembly(app, parts)
     add_fasteners(asm, parts, occ)
     props = add_mates(asm, occ)
-    clearances = verify(app, asm, parts, occ, props)
+    verify(app, asm, parts, occ, props)
     os.makedirs(args.out, exist_ok=True)
-    app.save_project(path=os.path.join(args.out, "fpv-drone.dsgn"))
+    app.save_project(path=project)
     if args.stage == "all":
-        outputs(app, asm, parts, occ, clearances, args.out)
-        app.save_project(path=os.path.join(args.out, "fpv-drone.dsgn"),
-                         force=True)
+        outputs(app, args.out)
+        app.save_project(path=project, force=True)
     print("saved")
 
 

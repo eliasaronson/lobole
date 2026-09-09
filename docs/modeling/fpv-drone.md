@@ -7,8 +7,11 @@ dimensions so that the clearances mean something.
 
     python3 generators/fpv_drone.py --port <n> --stage all --out scratch/fpv-drone
 
-Roughly 12 s end to end for the model and its checks; the drawings, the
-exports and a 256-sample render take it to about a minute.
+Roughly 12 s for the model, 40 s more for the checks, and about a minute
+for the sheets, the exports and a 256-sample render. `--stage drawings`
+reopens the saved project and does the sheets alone in 21 s, which is the
+loop worth having: this generator was run 90 times while it was written,
+and 40 of those were a full rebuild-and-verify to look at one sheet.
 
 ## What is real and what is an envelope
 
@@ -74,9 +77,10 @@ modelled as `plastic_black` because the material table has no carbon
 rows by density and replaces every bought row with its catalogue mass.
 435 g dry, 654 g all-up, about 9:1 thrust to weight.
 
-## Six defects this found
+## Eight defects this found
 
-Building it turned up six app bugs, five fixed here and one worked around:
+Building it turned up eight app bugs, seven fixed here and one worked
+around:
 
 1. **A through hole in a thin plate warned that it drilled air.** The
    check sampled the bore over its own length, and a through bore is a
@@ -102,6 +106,25 @@ Building it turned up six app bugs, five fixed here and one worked around:
    spacer came back clean as (screw, spacer) and 6.8 mm3 of clash as
    (spacer, screw), and a whole-assembly sweep picks the order. Now
    measured in the external thread's frame. (`Measure`)
+
+Two more came out of a second pass over the sheets:
+
+7. **A hole callout could never be auto-placed.** `add_drawing_dim` says
+   "omit it to auto-place clear of the view", and it does that for linear
+   dimensions — but the placement search re-resolved the dimension without
+   a source document, which a callout needs to resolve at all, so every
+   callout fell through to a fixed offset 12 mm from its own hole. On the
+   part. The workaround was to compute every label position by hand, which
+   is what this generator did for a day. (`DrawingDimension`,
+   `DrawingActions`)
+8. **The general arrangement's own views overlapped**, which was this
+   generator's fault twice over: three hard-coded positions at 1:1 on a
+   sheet the aircraft does not fit on, and no `check_drawing` on that
+   sheet — the gate that every part sheet ran, and that reports view
+   overlap by name. Laid out from measured extents now, on A3 at 1:2, and
+   gated like the rest. A view's `position` is where its model ORIGIN
+   lands, not its drawing's centre: a side view that runs from z 0 upward
+   sits 18 mm above the point that places it.
 
 Not fixed, worked around in the generator: **a drawing note is neither
 measured nor rendered as multiple lines** — `LabelBox` boxes the whole
