@@ -978,6 +978,149 @@ TEST_CASE("cam job: two parts, clamped differently, one sheet", "[cam][job]") {
   CHECK(hi.z - lo.z < 40.0);
 }
 
+TEST_CASE("cam job: one sheet, two parts that share feature ids, two cutters",
+          "[cam][job]") {
+  // The job a real sheet is, and the shape of job the corpus did not have.
+  // Every other CAM case cuts ONE part with ONE tool, and the multi-part ones
+  // use two DIFFERENT documents -- so no feature id collides, and the picks
+  // stop at TargetFor's refusal. Five defects lived behind that gap: a grbl
+  // file that never named its second tool (so everything after the change was
+  // read back as tool 1), a drill retracting up its own hole reported as a
+  // rapid through material, and three geometry pickers that answered for the
+  // first body carrying a matching feature id -- which is a coin toss here,
+  // because every document numbers its own features from 1.
+  auto left = HoleDoc(10.0, 12.0);  // 40 x 30 x 12, a 10 mm hole at (20, 15)
+  auto right = HoleDoc(10.0, 12.0); // ...and its identical twin
+  const ElementRef wallL = HoleWall(*left);
+  const ElementRef wallR = HoleWall(*right);
+  // The premise, asserted rather than assumed: these two really do collide.
+  // If a future change makes ids unique across documents, this test stops
+  // testing what it is for and should say so here rather than pass quietly.
+  REQUIRE(wallL.featureId == wallR.featureId);
+  REQUIRE(wallL.name == wallR.name);
+
+  cam::JobDocument job;
+  const uint64_t pl = job.AddPart(1, "Left");
+  const uint64_t pr = job.AddPart(2, "Right");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  cam::Tool drill;
+  drill.number = 2;
+  drill.name = "10 mm drill";
+  drill.diameter = 10.0;
+  drill.type = cam::ToolType::Drill;
+  drill.tipAngleDeg = 118.0;
+  setup.tools.push_back(drill);
+  setup.stock.mode = cam::StockMode::Fixed;
+  setup.stock.size = {120.0, 42.0, 12.0};
+  // Clear of the sheet: a bare AddSetup starts at 5 mm, which is INSIDE a
+  // 12 mm board -- add_cam_setup derives this from the stock, a hand-built
+  // setup does not.
+  setup.safeZ = 20.0;
+
+  std::vector<Body> bodies;
+  for (const Body& b : left->GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = pl;
+  }
+  for (const Body& b : right->GetBodies()) {
+    bodies.push_back(b);
+    bodies.back().jobPartId = pr;
+  }
+  REQUIRE(bodies.size() == 2);
+
+  // Apart on the sheet: the left part where it was modelled, the right one
+  // 60 mm along. That gap is what makes a wrong pick VISIBLE -- the same
+  // element name resolves to the same local coordinates on both parts, so
+  // only WHERE the cut lands says which part answered.
+  for (const auto& [id, x] : {std::pair{pl, 0.0}, std::pair{pr, 60.0}}) {
+    cam::Placement place;
+    place.id = job.AllocateId();
+    place.jobPartId = id;
+    place.pos = {x, 0.0};
+    setup.placements.push_back(place);
+  }
+  REQUIRE(cam::PlacementRefusal(setup, bodies).empty());
+
+  // Drill the LEFT part's hole, profile the RIGHT one's, then cut both free.
+  const auto add = [&](cam::OpType type, cam::Target target, int tool,
+                       cam::Side side, bool tabs) {
+    const cam::DerivedOp d =
+        cam::DeriveOperation(setup, bodies, type, target, tool);
+    REQUIRE(d.ok);
+    cam::Operation op = d.op;
+    op.id = job.AllocateId();
+    op.toolNumber = tool;
+    op.side = side;
+    if (!tabs)
+      op.tabCount = 0;
+    setup.operations.push_back(op);
+  };
+  add(cam::OpType::Drill, cam::Target{pl, wallL}, 2, cam::Side::Inside, false);
+  add(cam::OpType::Profile, cam::Target{pr, wallR}, 1, cam::Side::Inside,
+      false);
+  add(cam::OpType::Profile, cam::Target{}, 1, cam::Side::Outside, true);
+
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+  REQUIRE(paths.size() == 3);
+  for (const cam::Toolpath& tp : paths) {
+    INFO(tp.error);
+    CHECK(tp.error.empty());
+    CHECK(!tp.moves.empty());
+  }
+
+  // Which part each operation actually cut. The hole is at (20, 15) in both
+  // parts' own coordinates, so the LEFT one's is at x 20 on the sheet and the
+  // RIGHT one's at x 80: a picker that answers for whichever body carries the
+  // feature id first puts the second cut 60 mm from where it belongs.
+  const auto cutCentreX = [](const cam::Toolpath& tp) {
+    double lo = 1e300, hi = -1e300;
+    for (const cam::Move& m : tp.moves)
+      if (m.kind != cam::Move::Kind::Rapid) { // a drill only ever plunges
+        lo = std::min(lo, m.to.x);
+        hi = std::max(hi, m.to.x);
+      }
+    return (lo + hi) * 0.5;
+  };
+  CHECK_THAT(cutCentreX(paths[0]), WithinAbs(20.0, 1.0)); // left, drilled
+  CHECK_THAT(cutCentreX(paths[1]), WithinAbs(80.0, 1.0)); // right, profiled
+
+  // The file names BOTH cutters. Without the T word a reader has to assume
+  // tool 1, and the verifier below would simulate a 10 mm drill's holes with
+  // a 6 mm end mill -- or, the other way round, miss a gouge.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("grbl", setup, paths, {}, gcode, &error));
+  CHECK(gcode.find("\nT1\n") != std::string::npos);
+  CHECK(gcode.find("\nT2\n") != std::string::npos);
+  const cam::GProgram program = cam::ParseGcode(gcode);
+  bool sawOne = false, sawTwo = false;
+  for (const cam::GMove& m : program.moves) {
+    sawOne |= m.tool == 1;
+    sawTwo |= m.tool == 2;
+  }
+  CHECK(sawOne);
+  CHECK(sawTwo);
+
+  // And the whole sheet checks out: nothing cuts into a part, and nothing
+  // rapids through material -- including the drill coming back up the hole it
+  // has just made, which is a cone and not a cylinder.
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, bodies, 0.25);
+  // Name the line, not just the count: "16 rapids through material" with no
+  // line number is a fact nobody can chase.
+  std::string badLine;
+  for (int at = 1, from = 0; from <= static_cast<int>(gcode.size()); at++) {
+    const size_t end = std::min(gcode.find('\n', from), gcode.size());
+    if (at == v.firstBadLine)
+      badLine = gcode.substr(from, end - from);
+    from = static_cast<int>(end) + 1;
+    if (end == gcode.size())
+      break;
+  }
+  INFO("gouge " << v.maxGouge << " at " << v.gougeAt.x << "," << v.gougeAt.y
+                << "; first bad line " << v.firstBadLine << ": " << badLine);
+  CHECK(v.maxGouge < 0.4);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
 TEST_CASE("cam job: a per-part frame survives a save and reload",
           "[cam][job]") {
   // v76. A frame that reloads as "as modelled" is a part cut in an
