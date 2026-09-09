@@ -208,6 +208,15 @@ class Param(float):
     def __repr__(self):
         return f"Param({float(self)!r}, {self.expr!r})"
 
+    # A Param prints as its NUMBER. The repr above is for debugging; a
+    # generator that interpolates a dimension into a name or a log line wants
+    # the value, and got "Param(6.0, 'cells')S 1300mAh" until this existed.
+    def __str__(self):
+        return float.__repr__(self)
+
+    def __format__(self, spec):
+        return float.__format__(self, spec)
+
 
 class _Rpc:
     """One documented RPC, bound to a connection.
@@ -333,6 +342,30 @@ class App:
             app._active = app.active()
         """
         return self.list_parts()["active_id"]
+
+    def param(self, name, value, comment=""):
+        """A PROJECT variable, and a Param that knows it.
+
+        The project-scope twin of `Part.param`. A dimension several parts must
+        agree about — a bolt circle two plates share, a plate thickness the
+        standoff length is measured from — is one variable here, not one per
+        part that happens to hold the same number.
+        """
+        self.set_variable(name=name, expression=str(value), comment=comment,
+                          scope="project")
+        for v in self.list_variables()["variables"]:
+            if v["name"] == name:
+                return Param(float(v["value"]), name)
+        raise SdkError(f"the app accepted variable '{name}' and then did not "
+                       f"list it")
+
+    def params(self, table, comment=""):
+        """Declare a whole dimension table at project scope; {name: Param}.
+
+        Insertion order matters: a derived entry may name any entry declared
+        before it.
+        """
+        return {k: self.param(k, v, comment=comment) for k, v in table.items()}
 
     def methods(self, contains=""):
         """The documented method names, optionally filtered."""

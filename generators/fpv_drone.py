@@ -64,6 +64,8 @@ sys.path.insert(0, str(HERE.parent / "tools"))
 from designer_sdk import SdkError, connect  # noqa: E402
 
 import fpv_drone_parts as P  # noqa: E402
+import fpv_drone_parts as parts_module  # noqa: E402 — rebound by declare()
+import fpv_drone_spec as spec  # noqa: E402
 from fpv_drone_spec import *  # noqa: F401,F403,E402
 
 
@@ -944,6 +946,14 @@ def main():
         return
 
     app.new()
+    # Declare the spec's dimension table as project variables and rebind the
+    # names — here and in the parts module, whose `import *` took its own copy.
+    # After this, every dimension the builders use is a Param, so the document
+    # receives the FORMULA rather than the arithmetic's answer
+    # (docs/peer-survey-plan.md, W1).
+    _dims = spec.declare(app)
+    globals().update(_dims)
+    parts_module.__dict__.update(_dims)
     with phase("parts"):
         parts = build_parts(app)
     if args.stage == "parts":
