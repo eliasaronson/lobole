@@ -11,6 +11,11 @@ double TapDrill(const Standard& s) { return s.majorDia - s.pitch; }
 const std::vector<Standard>& All() {
   // ISO 262 preferred sizes: coarse series, then the common fine pitches.
   static const std::vector<Standard> kSeries = {
+      // The small end matters: an FPV stack, a camera and a 20x20 video
+      // transmitter are all M2, and a table that started at M3 could not
+      // declare the thread those parts are held together with — while the
+      // clearance-hole table beside it has had M2 all along.
+      {"M1.6", 1.6, 0.35},      {"M2", 2.0, 0.4},       {"M2.5", 2.5, 0.45},
       {"M3", 3.0, 0.5},         {"M4", 4.0, 0.7},       {"M5", 5.0, 0.8},
       {"M6", 6.0, 1.0},         {"M8", 8.0, 1.25},      {"M10", 10.0, 1.5},
       {"M12", 12.0, 1.75},      {"M16", 16.0, 2.0},     {"M20", 20.0, 2.5},

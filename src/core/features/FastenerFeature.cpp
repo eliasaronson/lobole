@@ -7,6 +7,12 @@
 #include "core/parts/FastenerProfile.h"
 #include "core/parts/FastenerTable.h"
 
+#include "core/ThreadStandards.h"
+
+#include <BRepAdaptor_Surface.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+
 #include <cmath>
 #include <numbers>
 #include <sstream>
@@ -146,6 +152,18 @@ std::string FastenerFeature::Designation() const {
   return out.str();
 }
 
+namespace {
+// The face at a MappedName's index, in the same order NamePrimitiveElements
+// walked (Measure::FaceAt's order).
+TopoDS_Shape FaceAtIndex(const TopoDS_Shape& shape, int index) {
+  int i = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), i++)
+    if (i == index)
+      return ex.Current();
+  return {};
+}
+} // namespace
+
 bool FastenerFeature::Execute(RegenContext& ctx) {
   const parts::Profile* profile = parts::ProfileFor(standard);
   if (profile == nullptr) {
@@ -237,6 +255,7 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   // three it is holding (docs/parts/plan.md, phase 4).
   CADShape solid;
   double headHeight = 0.0;
+  ElementRef threadOn; // the shank face, once it exists and is named
 
   if (profile->kind == parts::Kind::Washer) {
     const std::optional<double> outer = First(*dims, {"d2_max", "d2"});
@@ -433,6 +452,32 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
 
   ElementMap map;
   topo::NamePrimitiveElements(solid, std::to_string(GetId()), map);
+
+  // A screw declares the thread it IS, the way a tapped hole declares the
+  // thread it takes. Without this, every screw in a tapped hole read as a
+  // clash of exactly the engagement volume — a quad frame's twenty-four
+  // motor and standoff screws, each 13 mm3 "interfering" by doing their
+  // job — and the only way past it was an allowance list that would hide a
+  // real collision just as well.
+  //
+  // The span is the whole shank: relief is the INTERSECTION with a matching
+  // internal thread, so naming more of the screw than is cut threads
+  // nothing else loose.
+  if (profile->kind == parts::Kind::Screw && threads::Lookup(size)) {
+    const double shankRadius = *nominal / 2.0;
+    for (const auto& [index, name] : map.names) {
+      const TopoDS_Shape face = FaceAtIndex(solid.GetShape(), index);
+      if (face.IsNull())
+        continue;
+      BRepAdaptor_Surface surface(TopoDS::Face(face));
+      if (surface.GetType() != GeomAbs_Cylinder)
+        continue;
+      if (std::abs(surface.Cylinder().Radius() - shankRadius) > 1e-4)
+        continue;
+      threadOn = {GetId(), name};
+      break;
+    }
+  }
   // Steel unless told otherwise. An unmarked fastener IS steel, and half the
   // reason to generate these at all is that `bom` and `mass_properties` are
   // currently blind to the hardware — a screw with no material would leave
@@ -447,5 +492,8 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   ctx.bodies.push_back({m_name.empty() ? Designation() : m_name,
                         std::move(solid), material, GetId()});
   ctx.bodies.back().elementMap = std::move(map);
+  if (threadOn.IsSet())
+    ctx.bodies.back().threadRegions.push_back(
+        {threadOn, size, 0.0, 0.0, /*external=*/true});
   return true;
 }

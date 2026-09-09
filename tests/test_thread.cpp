@@ -61,6 +61,16 @@ TEST_CASE("ISO thread table lookups", "[thread]") {
 
   CHECK_FALSE(threads::Lookup("M7.3").has_value());
   CHECK(threads::All().size() >= 15);
+  // The small coarse sizes are in the series, not just the big ones: M2 is
+  // what a flight controller stack, a 19 mm camera and a 20x20 video
+  // transmitter are all screwed together with.
+  for (const char* small : {"M1.6", "M2", "M2.5"}) {
+    const auto s = threads::Lookup(small);
+    INFO(small);
+    REQUIRE(s.has_value());
+    CHECK(s->pitch > 0.3);
+    CHECK(s->pitch < 0.5);
+  }
 }
 
 TEST_CASE("Cosmetic thread leaves geometry untouched and fills the overlay",
@@ -192,6 +202,15 @@ TEST_CASE("thread engagement relieves only matching bounded coaxial spans",
                                               glm::mat4(1), false);
   CHECK(joined->engagedThreadPairs == 1);
   CHECK(joined->threadEngagementVolume > 1);
+  // The same two solids the other way round. The relief is measured in the
+  // EXTERNAL thread's frame for exactly this reason: a whole-assembly sweep
+  // picks the order, so an order-dependent answer means a screw that is
+  // engaged when checked one way and clashing when checked the other.
+  const auto reversed = Measure::ContactBetween({nut}, glm::mat4(1), {screw},
+                                                glm::mat4(1), false);
+  REQUIRE(reversed);
+  CHECK(reversed->engagedThreadPairs == 1);
+  CHECK(reversed->volume < 1e-6);
   const auto separated = Measure::ContactBetween(
       {screw}, glm::translate(glm::mat4(1), glm::vec3(0, 0, 20)), {nut},
       glm::mat4(1), false);
