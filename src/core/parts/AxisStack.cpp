@@ -147,8 +147,16 @@ JointExtent JointEnd(const std::vector<StackSegment>& stack,
   // A caller's own bound never reaches PAST where the axis stops: a far-end
   // pick or a nut says where the joint ends, and if the axis ended sooner
   // then the axis wins.
-  if (truncate > 0.0 && truncate < e.end)
+  //
+  // And a joint that ends BEFORE whatever the axis runs into is not blind:
+  // the far end is out in the open, so a nut can sit on it. Reading `blind`
+  // off the axis alone refused the nut on every through-bolt whose line
+  // happened to carry on into another part — an arm bolt with its nyloc on
+  // the mid plate, refused because the top plate is 15 mm further up.
+  if (truncate > 0.0 && truncate < e.end) {
     e.end = truncate;
+    e.blind = false;
+  }
   return e;
 }
 

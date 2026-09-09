@@ -780,9 +780,34 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // A blind hole a screw can bite in is a TAPPED one. A clearance hole of
     // the same depth looks identical and holds nothing — the plan promised
     // this refusal and could not make it until a hole could say which it is.
-    if (drilled != nullptr && !drilled->fitThread.empty() && !tapped)
+    //
+    // Ask the part the axis STOPS in, which is not the part whose rim was
+    // picked once the screw passes through anything on its way. Reading the
+    // picked hole's own fit refused the most ordinary joint there is — a
+    // screw through two clearance holes into a tapped standoff — because
+    // the hole it enters is, quite correctly, a clearance hole.
+    const HoleFeature* biteIn = drilled;
+    if (blocking->partId != chosen->inst->partId) {
+      biteIn = nullptr;
+      for (const assembly::FlatInstance& inst : flat) {
+        if (inst.part == nullptr || inst.partId != blocking->partId)
+          continue;
+        for (const auto& feature : inst.part->GetFeatures()) {
+          const auto* h = dynamic_cast<const HoleFeature*>(feature.get());
+          if (h == nullptr || h->fitThread != fit.size)
+            continue;
+          biteIn = h;
+          if (h->fitKind == "tapped")
+            break; // a tapped one settles it; a clearance one keeps looking
+        }
+        if (biteIn != nullptr && biteIn->fitKind == "tapped")
+          break;
+      }
+    }
+    if (biteIn != nullptr && !biteIn->fitThread.empty() &&
+        biteIn->fitKind != "tapped")
       return fail("the blind hole in " + blocking->part + " is a " +
-                  fit.clearance + " CLEARANCE hole for " + fit.size +
+                  biteIn->fitKind + " CLEARANCE hole for " + biteIn->fitThread +
                   ", not a tapped one — a machine screw has nothing to bite "
                   "in it. Tap it, or put a nut on the far side.");
     const double engagement = *parts::NominalDiameter(fit.size); // ~1x d

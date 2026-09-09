@@ -34,6 +34,21 @@ TEST_CASE("Axis traversal keeps material when the ray has one crossing",
     CHECK_THAT(spans[0].exit, WithinAbs(30, 1e-6));
     CHECK(parts::JointEnd(spans, spans, 0).blind);
   }
+  SECTION("A joint that ends before the obstruction is not blind") {
+    // The far-end pick says where the joint stops. Reading `blind` off the
+    // axis alone refused a nut on every through-bolt whose line happened to
+    // carry on into another part — a quad's arm bolt with its nyloc on the
+    // mid plate, refused because the top plate is 15 mm further up.
+    const auto spans = parts::TraverseAxis(placed, {0, 0, 0}, {0, 0, 1}, 0, 30);
+    REQUIRE(spans.size() == 1);
+    const parts::JointExtent stops = parts::JointEnd(spans, spans, 12.0);
+    CHECK_FALSE(stops.blind);
+    CHECK_THAT(stops.end, WithinAbs(12.0, 1e-6));
+    // ... but a bound PAST it does not reach past the material either.
+    const parts::JointExtent past = parts::JointEnd(spans, spans, 40.0);
+    CHECK(past.blind);
+    CHECK_THAT(past.end, WithinAbs(20.0, 1e-6));
+  }
   SECTION("The ray starts inside material") {
     const auto spans =
         parts::TraverseAxis(placed, {0, 0, 25}, {0, 0, 1}, 0, 50);
