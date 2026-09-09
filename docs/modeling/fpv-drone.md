@@ -192,10 +192,14 @@ cost about N face-pair extrema) rather than a limit, and hands longer lists
 back.
 
 **Not asking for an exact number at all**: `measure` grew `mode: "mesh"` —
-the same bargain `interference` has always offered, with the deflection
-reported alongside. 10 ms against 51 s for that propeller pair, agreeing to
-0.003 mm, and the generator subtracts the deflection rather than trusting
-the figure flat, which is why the clearances above read as "at worst".
+the same bargain `interference` has always offered. 10 ms against 51 s for
+that propeller pair. It reports `tolerance_mm`, the bound on how far it can
+be from the exact answer, and the generator SUBTRACTS that rather than
+trusting the figure flat, which is why the clearances above read as "at
+worst". The bound is the two meshes' deflections SUMMED, not the coarser of
+them: each tessellation can err its own way. Measured across this assembly
+the real error is 0.000 to 0.054 mm against bounds of 0.29 to 0.62 — and
+zero wherever a flat face is involved, because a plane tessellates exactly.
 
 And the last of it was a plain mistake, found by measuring the default after
 claiming it was faster: `measure` never used the path that had been

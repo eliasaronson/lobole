@@ -241,9 +241,11 @@ def main():
                f"the exact distance is the gap: {exact}")
         expect(mesh["mode"] == "mesh" and mesh["deflection_mm"] > 0,
                f"mesh mode says how coarsely it decided: {mesh}")
+        expect(mesh["tolerance_mm"] >= mesh["deflection_mm"],
+               f"the bound is the SUM of both deflections: {mesh}")
         expect(abs(mesh["distance"] - exact["distance"])
-               <= mesh["deflection_mm"],
-               f"mesh agrees with exact to its deflection: {mesh} {exact}")
+               <= mesh["tolerance_mm"],
+               f"mesh agrees with exact to its tolerance: {mesh} {exact}")
         # It answers a DISTANCE between whole shapes, and refuses the rest
         # rather than inventing a number off a tessellation.
         for kw, want in ((dict(kind="angle"), "angle is exact"),

@@ -128,8 +128,13 @@ struct Result {
 // What a pair's mesh distance says, and how coarsely.
 struct Gap {
   bool known = false;      // false when either shape has no triangles
-  double distance = 0.0;   // to the TESSELLATIONS, +/- `deflection`
+  double distance = 0.0;   // to the TESSELLATIONS, +/- `tolerance`
   double deflection = 0.0; // the coarser of the two meshes', mm
+  // What |mesh - exact| is actually bounded by: the SUM, not the coarser.
+  // Each tessellation lies within its own deflection of its surface and the
+  // two errors can point opposite ways, so a caller deciding "is there
+  // 2 mm of clearance" has to subtract both.
+  double tolerance = 0.0;
   std::vector<Mesh::FacePair> pairs;
 };
 

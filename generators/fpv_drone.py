@@ -471,14 +471,16 @@ def verify(app, asm, parts, occ, props):
         are millimetres, not microns. An exact distance between two lofted
         propellers 151 mm apart takes 55 s — every face pair is equally far,
         so nothing prunes — and the same answer off the tessellations takes
-        40 ms and is right to the deflection it reports. The gate below
-        subtracts that deflection rather than trusting the number flat.
+        10 ms and is right to the tolerance it reports. The gate below
+        subtracts that tolerance — the SUM of the two meshes' deflections,
+        not the coarser one, because each can err its own way — rather than
+        trusting the number flat.
         """
         started = time.perf_counter()
         r = app.measure(a={"occurrence": a}, b={"occurrence": b},
                         distance_kind="minimum", mode="mesh", _timeout=600)
         PHASES.append((f"  gap {a[:9]}/{b[:9]}", time.perf_counter() - started))
-        return r["distance"] - r["deflection_mm"]
+        return r["distance"] - r["tolerance_mm"]
 
     with phase("clearances"):
         clear = _clearances(gap)

@@ -375,7 +375,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "opposite ones 180) and unsigned in 0-90 when either direction's sign is "
      "arbitrary, as a line edge's is; `basis` says which. "
      "mode: exact (default) or mesh — a minimum distance off the "
-     "TRIANGLES, with the deflection it was decided to, for when an exact "
+     "TRIANGLES, +/- the `tolerance_mm` it reports (the two meshes' "
+     "deflections summed, since each can err its own way), for when an "
+     "exact "
      "one is pathological (two lofted propellers 151 mm apart take 55 s, "
      "because every face pair is equally far and nothing prunes).",
      "a, b, distance_kind, kind, mode, part"},
@@ -1977,6 +1979,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         out["distance_kind"] = Measure::ToString(dk);
         out["mode"] = mode;
         out["deflection_mm"] = gap.deflection;
+        // What the answer is bounded by, which is the SUM of the two
+        // meshes' deflections and not the coarser one: each tessellation
+        // can be off by its own, in opposite directions. A caller asking
+        // whether there is 2 mm of clearance subtracts THIS.
+        out["tolerance_mm"] = gap.tolerance;
         out["clash"] = gap.distance <= 0.0;
         return out;
       }

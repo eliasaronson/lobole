@@ -537,6 +537,7 @@ Gap Nearest(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
   if (!ma || !mb || ma->Empty() || mb->Empty())
     return out;
   out.deflection = std::max(ma->Deflection(), mb->Deflection());
+  out.tolerance = ma->Deflection() + mb->Deflection();
   const Mesh::Near near =
       ma->Nearest(xfA, *mb, xfB, slackDeflections * out.deflection);
   out.known = true;
