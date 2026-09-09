@@ -1,0 +1,6 @@
+{
+  "name": "no-inspect",
+  "description": "The floor. Every tool that lets the agent ASK an independent question about the part is unregistered: get_state, check_geometry, measure, mass_properties, list_elements, list_variables, the screenshot/render/view family — and rpc and execute_script with them, since either one reaches every RPC there is and would put the whole inspection surface back. describe and help stay, so this measures blindness and not undiscoverability. Unlike rpc-only this arm DOES lose capability, on purpose: BenchCAD publishes a blank-image baseline (0.375 against a 0.587 best) and it is the most useful row on their board, because it converts a score into the headroom actually earned. This benchmark has a ceiling (reference.py) and had no floor, so nothing told us how much of 117/117 was free. NOTE the deprivation is partial by construction: every mutating call returns its own digest (bodies, bbox, volume) and regen summary, and an agent cannot be denied the result of the edit it just made. What it loses is the ability to ask about anything it did not just cause.",
+  "only_tools": ["describe", "help", "new_project", "add_feature", "modify_feature", "delete_feature", "set_variable", "undo"],
+  "append_system_prompt": ""
+}

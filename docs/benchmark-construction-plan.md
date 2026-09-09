@@ -236,28 +236,31 @@ Still app-reported, still out of the oracle's score, exactly as
 variable-driven bore and a hand-typed outside diameter reads as parametric all
 the way through.
 
-## B5 — a floor
+## B5 — a floor (built, not yet run)
 
-BenchCAD publishes a blank-image baseline (0.375) against a best Vision-QA of
-0.587 — two thirds of the score is available **without seeing the part**. It is
-the single most useful row on their board, because it converts "0.587" into
-"0.212 of headroom actually earned".
+`arms/no-inspect.json`: every tool that lets the agent ask an INDEPENDENT
+question is unregistered — `get_state`, `check_geometry`, `measure`,
+`mass_properties`, `list_elements`, `list_variables`, and the
+screenshot/render/view family — and `rpc` and `execute_script` go with them,
+because either one reaches every RPC there is and would put the whole
+inspection surface back. `describe` and `help` stay, so the arm measures
+blindness rather than undiscoverability. Eight tools remain. The names
+validate against `designer_mcp.py --only-tools`, which refuses an unknown one
+loudly and lists all 27.
 
-We have a ceiling (`reference.py`, by-hand, 48/48) and **no floor**. Nothing
-tells us how much of 117/117 is task difficulty versus free. Add one arm:
+**The deprivation is partial by construction, and that is itself a finding.**
+Every mutating call returns its own digest — bodies, bbox, volume — and its
+regen summary. An agent cannot be blinded to the result of the edit it just
+made, because this API answers with the consequence. What `no-inspect` removes
+is the ability to ask about anything it did not just cause. So it is a floor on
+*deliberate inspection*, not on feedback, and the write-up has to say so or the
+number will be over-read.
 
-- `no-inspect` — every build tool, but `get_state`, `measure`, `check_geometry`
-  and `screenshot` unregistered. The agent can act and cannot look.
+Unlike `rpc-only`, this arm **does** lose capability, on purpose.
 
-That is a floor on the *feedback loop* rather than on the input, which is the
-right analogue for an agentic benchmark: it asks how much of our score comes
-from the inspection surface we keep investing in. A clear prediction either way
-is a result. If `no-inspect` also scores 117/117, either the checks are loose or
-the tasks are too easy, and we learn it for about $5.
-
-`arms/*.json` + `designer_mcp.py --only-tools` already support this; the arm
-narrows the surface for real and refuses loudly if it cannot, so it cannot
-silently be a duplicate of `full`.
+It has not been run: a fourth arm takes the default sweep from 117 runs to 156
+($312 ceiling), and spending that is the user's call. `--arms full,rpc-only,
+script-first` keeps the old three.
 
 ## B6 — deferred: an edit tier scored on headroom
 
@@ -284,9 +287,13 @@ B1 → B2 → B3 → B4 are one sequence; B5 is independent and can land alongsi
 
 | after | runs (tasks × arms × reps) | ceiling | expected real |
 |---|---|---|---|
-| today | 90 = 10 × 3 × 3 | $180 | ~$25 (last 8-task sweep: $13.35 / 72 runs; T4/T5 never swept) |
-| B3 | 117 = 13 × 3 × 3 | $234 | ~$30 |
-| B3 + B5 | 156 = 13 × 4 × 3 | $312 | ~$40 |
+| before this round | 90 = 10 × 3 × 3 | $180 | ~$25 (last 8-task sweep: $13.35 / 72 runs; T4/T5 never swept) |
+| **B3 (landed)** | **117 = 13 × 3 × 3** | **$234** | ~$30 |
+| **B5 too (landed, unrun)** | **156 = 13 × 4 × 3** | **$312** | ~$40 |
+
+Both numbers are confirmed by `run.py --dry-run`. Note the second row is now
+what a bare `run.py --reps 3` costs, because the runner takes every arm in the
+directory: `--arms full,rpc-only,script-first` is the old three.
 
 Validation along the way is nearly free: `reference.py` costs nothing, and
 `run.py --tasks t3-coil-spring --arms full --reps 1` is about $0.20. **Ask

@@ -161,12 +161,23 @@ customer asks for could not be exported to the interchange format at all.
 | `full` | every MCP tool, no extra prompting — what an agent gets today |
 | `rpc-only` | six tools (`describe`, `help`, `rpc`, `execute_script`, `get_state`, `check_geometry`) |
 | `script-first` | every tool, told to build the part by writing a script |
+| `no-inspect` | the floor: eight tools, none of which can ask an independent question about the part |
 
 `script-first` exists to break a confound. An agent left with `rpc` and
 `execute_script` scripts whether or not it wanted to, so `rpc-only` differs from
 `full` in **two** ways at once. Holding the surface constant and changing only
 the strategy separates "fewer schemas helped" from "scripting helped" — and in
 the first sweep it was decisively the schemas (see `REPORT.md`).
+
+`no-inspect` is the only arm that deliberately loses capability. It exists
+because this benchmark had a ceiling (`reference.py`, 67/67) and no floor, so
+nothing said how much of a perfect score was free — BenchCAD's equivalent, a
+blank-image baseline, scores 0.375 against a 0.587 best, and it is the most
+useful row on their board. The deprivation is partial on purpose: a mutating
+call still answers with its own digest and regen summary, so what the arm
+removes is asking about anything the agent did not just cause. It also takes a
+default sweep from 117 runs to 156 — `--arms full,rpc-only,script-first` is
+the old three.
 
 `rpc-only` loses **no capability** — `rpc` reaches every RPC there is. It loses
 only schema bulk in the context window. Chamfer credited most of its efficiency
