@@ -39,6 +39,16 @@ flank runs radially from the base circle to the root, as an uncorrected
 cutter would); helical, bevel, internal and rack forms. Each is a few
 lines of the same arithmetic when a part needs it.
 
+`fpv_drone.py` is a complete 5-inch FPV freestyle quadcopter: five carbon
+parts to have cut, two to print, forty-two fasteners derived from the holes
+they go in, and every bought component at its catalogue dimensions. The run
+refuses to save what it has not checked — an empty exact interference sweep,
+`check_fasteners` clean, seven measured clearances, and a motion study that
+turns all four propellers through a blade pitch. It writes dimensioned
+sheets with hole tables, STEP, STL, a BOM and a mass budget. Building it
+found six app defects (five fixed, one worked around); see
+[the model notes](../docs/modeling/fpv-drone.md) and `scratch/fpv-drone/BUILD.md`.
+
 `cncest6090.py` starts a provisional CNC router layout and Z-axis fixture from
 owner photographs. Only the 80 mm spindle diameter is owner-confirmed; the
 remaining dimensions are editable project variables with recorded assumptions.
