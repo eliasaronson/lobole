@@ -77,7 +77,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "snap_edge?} (a face's centroid + normal, or a snapped hole centre), or "
      "{occurrence, origin: true}; inner_path? reaches into a sub-assembly. "
      "The mate's starting position along whatever it leaves free is "
-     "`rotation` (RADIANS) or `rotation_deg`, and `offset` in mm.",
+     "`rotation` (RADIANS) or `rotation_deg`, and `offset` in mm. `flipped` "
+     "DEFAULTS TO TRUE: the two connectors meet face to face with their "
+     "normals opposed, which is what two touching FACES do and the opposite "
+     "of what two seat FRAMES want — frame to frame, pass flipped:false, or "
+     "the part lands turned over and sunk into whatever it was to sit on.",
      "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, "
      "rotation_deg, type"},
     {"set_mate",

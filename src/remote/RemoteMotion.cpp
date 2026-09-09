@@ -12,6 +12,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
+#include <set>
 #include <span>
 
 using json = nlohmann::json;
@@ -50,7 +51,11 @@ constexpr MethodDoc MotionMethods[] = {
      "`volume` and `centroid` under an EXACT check, which is how a pair of "
      "names becomes something to act on; a mesh check knows only THAT, and "
      "says nothing rather than a zero that reads like a measurement) — plus "
-     "`clean`, `worst_sample`, `table` (the same as text, for a report), "
+     "`clean`, `seated_contacts` and `appeared` (what TURNING changed: a "
+     "mesh check calls touching a clash, and at rest a propeller touches "
+     "its motor and its screws, so the pairs already in contact at the "
+     "first sample are counted and the rest are listed), `worst_sample`, "
+     "`table` (the same as text, for a report), "
      "`deflection_mm` for a mesh check, and `pairs_checked`. "
      "include_poses adds every occurrence's placement per sample. "
      "{async: true} runs it as a background job ('motion' in "
@@ -136,8 +141,30 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
     }
     samples.push_back(sj);
   }
+  // What TURNING changed. A mesh sweep calls touching a clash, and at rest a
+  // propeller touches its motor, its nut and four screws — so a study of a
+  // working machine is never "clean" and the caller has to work out which
+  // contacts are news. That is this: the pairs in contact at the FIRST
+  // sample are seated, and anything else that shows up appeared.
+  std::set<std::pair<uint64_t, uint64_t>> seated;
+  if (!r.samples.empty())
+    for (const motion::Clash& c : r.samples.front().clashes)
+      seated.insert({std::min(c.a, c.b), std::max(c.a, c.b)});
+  std::set<std::pair<uint64_t, uint64_t>> appeared;
+  json appearedJson = json::array();
+  for (const motion::Sample& sm : r.samples)
+    for (const motion::Clash& c : sm.clashes) {
+      const std::pair<uint64_t, uint64_t> key{std::min(c.a, c.b),
+                                              std::max(c.a, c.b)};
+      if (seated.count(key) || !appeared.insert(key).second)
+        continue;
+      appearedJson.push_back(
+          {{"a", c.a}, {"b", c.b}, {"a_name", c.aName}, {"b_name", c.bName}});
+    }
   json out{
       {"clean", r.clean && r.checkedClashes && !r.cancelled && r.error.empty()},
+      {"seated_contacts", seated.size()},
+      {"appeared", appearedJson},
       {"samples", samples},
       {"worst_sample", r.worstSample},
       {"pairs_checked", r.pairsChecked},

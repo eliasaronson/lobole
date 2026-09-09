@@ -348,7 +348,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "feature_errors, bodies:[...B-Rep checks]}.",
      "body", remote::NeedsPart},
     {"mass_properties",
-     "Mass/volume/center-of-mass/bbox per body and total (density from "
+     "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
+     "from "
      "materials). The bbox here is MEASURED off the surfaces; get_state's is "
      "a cheap conservative bound that can read ~60% over on a swept surface. "
      "`part` reads another part without switching to it; from an assembly tab "
@@ -1543,8 +1544,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (!c)
             return;
           const char* st = ContactState(*c, touchTol);
+          // The ids as well as the names: sixteen occurrences answer to
+          // "ISO 4762 M3x10", and a reported pair that cannot say WHICH
+          // one sends a caller hunting through list_occurrences.
           pairs.push_back({{"a", ents[i].occ->name},
                            {"b", ents[j].occ->name},
+                           {"a_id", ents[i].occ->id},
+                           {"b_id", ents[j].occ->id},
                            {"state", st},
                            {"distance", c->distance},
                            {"volume", c->volume}});
@@ -1556,12 +1562,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (std::string_view(st) == "clash") {
             json clash{{"a", ents[i].occ->name},
                        {"b", ents[j].occ->name},
+                       {"a_id", ents[i].occ->id},
+                       {"b_id", ents[j].occ->id},
                        {"volume", c->volume}};
             AddOverlapSite(clash, *c);
             clashes.push_back(std::move(clash));
           } else if (c->distance > touchTol && c->distance <= nearTol)
             nearMisses.push_back({{"a", ents[i].occ->name},
                                   {"b", ents[j].occ->name},
+                                  {"a_id", ents[i].occ->id},
+                                  {"b_id", ents[j].occ->id},
                                   {"distance", c->distance}});
         });
     std::map<size_t, std::vector<std::string>> comps;

@@ -29,6 +29,8 @@
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <ElCLib.hxx>
+#include <Extrema_ExtAlgo.hxx>
+#include <Extrema_ExtFlag.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAbs_CurveType.hxx>
@@ -597,7 +599,26 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     for (const Cand& c : cands) {
       if (c.boxDist >= best)
         break;
-      BRepExtrema_DistShapeShape dist(pa[c.i].shape, pb[c.j].shape);
+      // MIN, not the default MINMAX: every BRepExtrema in this file wants
+      // the minimum (the maximum has its own sampler), and computing the
+      // maxima too is work nobody reads.
+      //
+      // This is the expensive half and it stays expensive on spline-heavy
+      // solids: two lofted propellers 151 mm apart measure in 55 s, the
+      // same two 30 mm apart in 0.1 s. The difference is pruning power —
+      // BRepExtrema drops a face pair whose BOXES are further apart than
+      // the best distance so far, and when two blades are far apart every
+      // facing pair sits in the same narrow band, so nothing drops. Bounding
+      // it first with the shapes' vertices does not help either: measured
+      // on those propellers the vertex bound is 153.4 against a true 151.45
+      // and still leaves 30 of 53 faces live on each side, because a
+      // twisted blade's box is enormous next to the gap being measured.
+      // What would help is pruning at triangle granularity, i.e. a mesh
+      // distance with a stated deflection — which `interference` has and
+      // `measure` does not (docs/modeling/fpv-drone.md).
+      BRepExtrema_DistShapeShape dist(pa[c.i].shape, pb[c.j].shape,
+                                      Extrema_ExtFlag_MIN,
+                                      Extrema_ExtAlgo_Grad);
       if (dist.IsDone() && dist.NbSolution() >= 1)
         best = std::min(best, dist.Value());
     }
