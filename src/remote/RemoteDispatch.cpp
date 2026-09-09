@@ -292,10 +292,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"add_assembly", "Add an assembly tab.", "name"},
     {"list_parts",
      "List project TABS — every one, with `type`: part | assembly | "
-     "drawing. Not parts alone, whatever the name says: a sweep that filed "
-     "'everything list_parts returned and nothing else claimed' into a "
+     "drawing | job. Not parts alone, whatever the name says: a sweep that "
+     "filed 'everything list_parts returned and nothing else claimed' into a "
      "Fasteners folder put the engine and the carburettor there. Filter on "
-     "`type` unless you mean all three.",
+     "`type` unless you mean all four.",
      ""},
     {"rename_part", "Rename a part.", "new_name, part"},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path",
@@ -1183,9 +1183,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::EnsureParts(state);
     json arr = json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
+      // A CAM job is its own kind of document and says so. It used to fall
+      // through to "part", so a client filtering for parts was handed a job
+      // and every part call against it was then refused ("the active
+      // document is a CAM job") -- with nothing in the listing to explain
+      // why.
       const char* type =
           state.parts[i].kind == ui::DocKind::Assembly  ? "assembly"
           : state.parts[i].kind == ui::DocKind::Drawing ? "drawing"
+          : state.parts[i].kind == ui::DocKind::Job     ? "job"
                                                         : "part";
       json entry = {{"name", state.parts[i].name},
                     {"index", i},
