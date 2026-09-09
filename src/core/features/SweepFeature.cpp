@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
+#include "core/Measure.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
@@ -127,7 +128,28 @@ bool SweepFeature::Execute(RegenContext& ctx) {
   }
 
   CADShape result = SweepProfileAlongSpine(profileWire, spine, frame, guide);
-  if (!result.IsValid() || result.Volume() < 1e-9) {
+  // A sweep can also come back as something OCC calls a solid, with a
+  // plausible volume, whose faces are NOT CONNECTED to one another — one
+  // loose piece per path edge. A profile 7 degrees off perpendicular to the
+  // spine start is enough to produce it, and the kernel says nothing:
+  // MakePipeShell reports done, MakeSolid returns true, the body's digest
+  // counts one solid, and the STEP writes a solid that no reader can read
+  // back as one. Only BRepCheck sees it. Refusing here is what stops a part
+  // that looks right in the viewport from being exported as loose surfaces.
+  const bool disconnected =
+      result.IsValid() && !Measure::CheckGeometry(result).valid;
+  if (!result.IsValid() || result.Volume() < 1e-9 || disconnected) {
+    if (disconnected) {
+      const Measure::GeometryReport rep = Measure::CheckGeometry(result);
+      std::string why;
+      for (const std::string& r : rep.reasons)
+        why += (why.empty() ? "" : ", ") + r;
+      SetError("sweep produced an unusable solid (" +
+               (why.empty() ? std::string("failed B-Rep validity") : why) +
+               ") — the profile must be perpendicular to the path where the "
+               "path STARTS; a few degrees off is enough");
+      return false;
+    }
     SetError("sweep failed (profile not perpendicular to the path start?)");
     return false;
   }

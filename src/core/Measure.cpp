@@ -926,6 +926,16 @@ GeometryReport CheckGeometry(const CADShape& shape) {
   scan(TopAbs_FACE, out.badFaces);
   scan(TopAbs_WIRE, out.badWires);
   scan(TopAbs_EDGE, out.badEdges);
+  // The SHELL and SOLID levels have no counter of their own, but they must
+  // still be able to SPEAK. A shape whose faces, wires and edges are each
+  // fine while the shell they form is not — an unclosed or badly oriented
+  // shell, which is what a sweep with an off-perpendicular profile produces —
+  // used to report `valid: false` with every counter zero and `reasons: []`.
+  // A verdict that names nothing is not a diagnosis, and it is the shape this
+  // codebase refuses everywhere else.
+  int ignored = 0;
+  scan(TopAbs_SHELL, ignored);
+  scan(TopAbs_SOLID, ignored);
   out.reasons.assign(reasons.begin(), reasons.end());
   return out;
 }

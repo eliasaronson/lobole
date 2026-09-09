@@ -217,9 +217,58 @@ Two things fell out of building them:
   bug. Not fixed here — changing the tool surface mid-plan changes what the
   sweep measures — but it is the strongest candidate for the next round, and
   the benchmark now has a task (`t3-bent-tube`) that an agent will hit it on.
-- The bent-tube negative control exports **zero solids** while still reporting
-  a bbox and a volume: sweeping along a polyline of six chords produces
-  something that is not a closed solid. Worth a look on its own.
+- The bent-tube negative control exported **zero solids** while still
+  reporting a bbox and a volume. Investigated and fixed — see below.
+
+## The polyline sweep, investigated
+
+The negative control that swept a circle along six straight chords produced a
+body the app was happy with and a STEP with no solids in it. It is not what it
+looked like, and the chase is worth recording because two guesses were wrong.
+
+**Not** the chord count: one chord works, and so do two collinear lines and two
+lines meeting at 170 degrees. **Not** the profile size or the corner angle
+either — every combination of six/three/two chords against a 10, 2 or 0.5 mm
+profile failed identically.
+
+**It is the profile being 7.5 degrees off perpendicular to the path start.**
+The chord path leaves (40,0,0) heading 7.5 degrees away from +Y, and the
+control's profile plane was squared to +Y. Aligned to the chord's own
+direction, the same six-chord sweep is a clean single solid.
+
+What made it a silent wrong answer rather than an error is a chain of four:
+
+1. OCC's `MakePipeShell` reports `IsDone()`, and `MakeSolid()` **returns
+   true**, while handing back a solid whose faces are not connected to one
+   another — one loose piece per path edge.
+2. `SweepFeature` checked `IsValid()` and a non-zero volume. The shape passes
+   both: it is not null and it has a plausible volume.
+3. `regen` therefore reported `ok: true`, and the body's digest counted one
+   solid.
+4. `check_geometry` DID say `valid: false` — and named nothing. `bad_faces`,
+   `bad_wires` and `bad_edges` were all 0 and `reasons` was empty, because
+   `CheckGeometry` scanned only the FACE, WIRE and EDGE levels. Every face,
+   wire and edge here is individually fine; the fault is the SHELL they form.
+
+So the one component that detected the problem could not say what it was, and
+everything else said it was fine. The STEP then wrote a solid that no reader
+can read back as one.
+
+**Two fixes.** `CheckGeometry` now scans the shell and solid levels too, so
+the verdict names its reason — this shape reports `not connected`. And
+`SweepFeature` runs that check on its result and refuses, in the mutating
+RPC's own response, naming both the reason and the cause: *the profile must be
+perpendicular to the path where the path STARTS; a few degrees off is enough.*
+A grossly misaligned profile was already refused; only the near miss lied.
+
+The lesson is one this repo has written down twice already — the GPU topology
+solver that returned zero displacement and called it converged, and the OCC
+fuse that came back valid, smaller and empty. **A boolean from the kernel is a
+claim, not a result.** `MakeSolid() == true` is the third instance.
+
+The negative control now squares its profile to the first chord, so it builds
+a valid solid of the wrong shape and goes on testing the census (`extrusion:6
+plane:2 revolution:5`, no torus) rather than testing the new refusal.
 
 ## B4 — the bushing's unchecked expression
 

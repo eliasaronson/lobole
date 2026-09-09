@@ -61,15 +61,24 @@ def wrong_taper_adapter(d):
 
 
 def wrong_bent_tube(d):
-    """The arc replaced by six straight chords. Still a sweep — but along a
-    polyline, so every face is a plain cylinder and no torus survives."""
+    """The arc replaced by six straight chords: a valid solid, correctly made,
+    of the wrong shape. Every face is a surface of extrusion and no torus
+    survives.
+
+    The profile is squared to the FIRST CHORD, not to +Y. A profile even a few
+    degrees off perpendicular to the path start makes the sweep come back not
+    connected, and the app now refuses that outright — which would make this a
+    control that tests the refusal instead of the census."""
     pts = [(40 * math.cos(math.pi / 2 * k / 6),
             40 * math.sin(math.pi / 2 * k / 6)) for k in range(7)]
     segs = [{"type": "line", "a": [pts[k][0], pts[k][1]],
              "b": [pts[k + 1][0], pts[k + 1][1]]} for k in range(6)]
     path = sketch(d, segs, XY, name="Chords")
+    dx, dy = pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]
+    length = math.hypot(dx, dy)
     prof = sketch(d, [circle(0, 0, 10)],
-                  plane((40, 0, 0), (0, 1, 0), (0, 0, 1)), name="Section")
+                  plane((40, 0, 0), (dx / length, dy / length, 0), (0, 0, 1)),
+                  name="Section")
     feat(d, type="Sweep", profile_id=prof, path_id=path, mode="new_body",
          name="Bend")
 
