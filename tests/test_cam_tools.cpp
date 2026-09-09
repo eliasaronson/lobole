@@ -790,6 +790,27 @@ TEST_CASE("cam drill: a through hole breaks out by the point, whatever shape "
                            cam::Target{0, HoleWall(*blind)});
   REQUIRE(d.ok);
   CHECK_THAT(d.op.bottomZ, WithinAbs(12.0, 1e-6));
+
+  // And it does not depend on the WORKPIECE. "Reaches the bottom of the part"
+  // used to be measured from the stock's bottom plus its bottom margin, which
+  // recovers the part's bottom only for relative stock; on a fixed sheet it
+  // landed a millimetre high, and with a zero margin it landed exactly on the
+  // model's bottom -- where two OCC bounding boxes differ by a few microns and
+  // that decided it. A sheet job's holes stopped breaking out, silently.
+  for (const double bottomMargin : {0.0, 1.0, 3.0}) {
+    INFO("bottom margin " << bottomMargin);
+    cam::Setup sheet = BasicSetup();
+    sheet.tools[0].type = cam::ToolType::Drill;
+    sheet.tools[0].tipAngleDeg = 118.0;
+    sheet.stock.mode = cam::StockMode::Fixed;
+    sheet.stock.size = {300.0, 200.0, 20.0};
+    sheet.stock.bottomMargin = bottomMargin;
+    const cam::DerivedOp on = cam::DeriveOperation(
+        sheet, doc->GetBodies(), cam::OpType::Drill, cam::Target{0, wall});
+    REQUIRE(on.ok);
+    CHECK_THAT(on.op.bottomZ,
+               WithinAbs(-3.0 / std::tan(glm::radians(59.0)), 1e-3));
+  }
 }
 
 #endif // HAVE_CAM

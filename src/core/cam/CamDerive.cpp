@@ -153,9 +153,26 @@ DerivedOp DeriveOperation(const Setup& setup,
   op.stepdown = DerivedStepdown(tool);
   op.stepover = DerivedStepover(tool);
 
-  // The model's own box, as opposed to the stock's: "does this wall go all
-  // the way through" is a question about the part.
-  const double modelBottom = lo.z + setup.stock.bottomMargin;
+  // The model's own bottom, asked of the MODEL. "Does this wall go all the
+  // way through" is a question about the part, and the old expression --
+  // the stock's bottom plus its bottom margin -- only recovers the part's
+  // bottom for RELATIVE stock, where the stock IS the model plus that margin.
+  // On a fixed sheet the stock's bottom is wherever `place` puts the part in
+  // the board, so the same arithmetic landed a millimetre high by default and
+  // exactly ON the model's bottom when the margin happened to be zero -- and
+  // there an OCC bounding-box epsilon of a few microns decided whether a
+  // through hole broke out. It cost a drone's arms their break-through, in
+  // silence, on a job that had been correct the run before.
+  glm::dvec3 modelLo(0.0), modelHi(0.0);
+  const double modelBottom = ModelBoundsFramed(bodies, modelLo, modelHi)
+                                 ? modelLo.z
+                                 : lo.z + setup.stock.bottomMargin;
+  // Two OCC boxes are never equal to the micron, so "reaches the bottom"
+  // needs a real tolerance rather than a float epsilon. A thousandth of a
+  // millimetre is far below any blind depth anybody models and far above the
+  // gap a bounding box introduces (kStockFit is the same number, for the same
+  // reason).
+  constexpr double kThrough = kStockFit;
 
   switch (type) {
   case OpType::Adaptive: // the strategy, derived exactly like the verb it is
@@ -213,7 +230,7 @@ DerivedOp DeriveOperation(const Setup& setup,
       // A wall that stops short of the bottom of the part is a step, not a
       // through cut: follow it exactly that far. One that reaches the bottom
       // is through, so it carries on into the spoilboard like any cut-out.
-      if (wall.bottomZ > modelBottom + 1e-6)
+      if (wall.bottomZ > modelBottom + kThrough)
         op.bottomZ = wall.bottomZ;
     } else if (target.IsSet()) {
       const FaceRegion region =
@@ -385,7 +402,7 @@ DerivedOp DeriveOperation(const Setup& setup,
     // function -- so before this the two disagreed, and correct drilling read
     // as 1.2 mm of material left standing in every hole.)
     if (const Tool* drill = setup.FindTool(op.toolNumber);
-        drill != nullptr && op.bottomZ <= modelBottom + 1e-6)
+        drill != nullptr && op.bottomZ <= modelBottom + kThrough)
       op.bottomZ -= TipHeight(*drill, drill->diameter * 0.5);
     op.targets = {target};
     // Pecking, derived from the cutter: a hole deeper than three diameters
