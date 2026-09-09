@@ -164,18 +164,38 @@ TRUE, and `mass_properties` returns `mass_g`.
 The motion study — 24 poses, every pair checked at each — is 1.4 s, and the
 whole-assembly exact clash sweep is 1.4 s: box pruning does its job.
 
-What cost 55 s until it was removed was ONE measurement, the diagonal
-propeller pair. An exact minimum distance prunes face pairs by their boxes
-against the best found so far, and between two lofted propellers 151 mm
-apart every facing pair sits in the same narrow band, so nothing prunes and
-900-odd spline-spline extrema get computed. Bounding it by the shapes'
-vertices does not help (measured: a 153.4 bound against a true 151.45 still
-leaves 30 of 53 faces live, because a twisted blade's box is enormous next
-to the gap). What would help is pruning at triangle granularity — a mesh
-distance with a stated deflection, which `interference` has and `measure`
-does not. The measurement itself was redundant: those two propellers cannot
-touch, the adjacent pair is measured, and the motion study checks every
-pair anyway.
+One measurement used to cost 55 s of that: the diagonal propeller pair. An
+exact minimum distance prunes face pairs by their boxes against the best
+found so far, and between two lofted propellers 151 mm apart every facing
+pair sits in the same narrow band, so nothing prunes and 900-odd
+spline-spline extrema get computed. It is now 40 ms, and the story of how
+is worth keeping because two of the three obvious fixes did not work.
+
+**Bounding it by the shapes' vertices**: no. Measured, a 153.4 bound against
+a true 151.45 still left 30 of 53 faces live on each side — a twisted
+blade's bounding box is enormous next to the gap being measured.
+
+**Pruning at triangle granularity, then refining exactly**: yes, but not
+here. `collide::Mesh` grew a distance traversal — a dual-BVH walk with
+box-distance pruning and a triangle-triangle primitive — that reports the
+distance AND which B-Rep face pairs could hold it, nearest first. An exact
+query over those pairs is exact (a tessellation lies within its deflection
+of its surface, so the true pair's triangles are within `mesh + 2
+deflections`) and much faster on ordinary parts: propeller to camera plate
+3.3 s to 0.6 s, camera to battery 7 ms. But two propeller blades run nearly
+PARALLEL, so 177 face pairs are equally close, and refining 177 spline pairs
+at 0.4 s each is worse than asking OpenCASCADE once. The two methods fail on
+opposite cases — BRepExtrema is 0.1 s when the shapes are close and 55 s when
+they are far; the refinement is the other way round — so `Measure` caps the
+refinement at 24 pairs and hands anything longer back.
+
+**Not asking for an exact number at all**: this is the one. A clearance
+question wants to know there are thirty millimetres, not thirty microns, so
+`measure` grew `mode: "mesh"` — the same bargain `interference` has always
+offered, with the deflection reported alongside. 40 ms, and the generator
+subtracts the deflection rather than trusting the figure flat, which is why
+the clearances above read as "at worst". The exact path is still the
+default, and still exact.
 
 ## Files
 

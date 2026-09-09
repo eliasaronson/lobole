@@ -422,13 +422,13 @@ RESIDUE_MM3 = 0.01   # coincident thread surfaces: a cube 0.2 mm on a side
 
 def _clearances(gap):
     """The clearances that decide whether it flies or eats itself."""
-    # The DIAGONAL pair is not measured. It cannot touch — its motors are
-    # 220 mm apart against 155.6 for the adjacent pair, and the adjacent one
-    # is measured — and asking cost 55 s of a 100 s run: an exact distance
-    # between two lofted propellers that far apart prunes to nothing
-    # (docs/modeling/fpv-drone.md). The motion study still checks every pair.
     return {
         "prop to prop (adjacent)": gap("Propeller FL", "Propeller FR"),
+        # Measured again. It used to cost 55 s of a 100 s run — an exact
+        # distance between two lofted propellers that far apart prunes to
+        # nothing — until the exact query learned to ask the tessellations
+        # where to look first (docs/modeling/fpv-drone.md).
+        "prop to prop (across)": gap("Propeller FL", "Propeller RR"),
         "prop to top plate": gap("Propeller FL", "Top plate"),
         "prop to battery": gap("Propeller RL", "Battery"),
         "prop to antenna": gap("Propeller RL", "Antenna"),
@@ -465,20 +465,25 @@ def verify(app, asm, parts, occ, props):
 
     # The clearances that decide whether it flies or eats itself.
     def gap(a, b):
+        """A clearance, off the triangles.
+
+        `mode: mesh` because that is the question being asked: whether there
+        are millimetres, not microns. An exact distance between two lofted
+        propellers 151 mm apart takes 55 s — every face pair is equally far,
+        so nothing prunes — and the same answer off the tessellations takes
+        40 ms and is right to the deflection it reports. The gate below
+        subtracts that deflection rather than trusting the number flat.
+        """
         started = time.perf_counter()
-        # A minute is not enough: the exact minimum distance between two
-        # LOFTED propellers is a spline-to-spline extrema, and it runs for
-        # tens of seconds (occasionally past the client's default timeout)
-        # where the same call between two plates is instant.
-        d = app.measure(a={"occurrence": a}, b={"occurrence": b},
-                        distance_kind="minimum", _timeout=600)["distance"]
+        r = app.measure(a={"occurrence": a}, b={"occurrence": b},
+                        distance_kind="minimum", mode="mesh", _timeout=600)
         PHASES.append((f"  gap {a[:9]}/{b[:9]}", time.perf_counter() - started))
-        return d
+        return r["distance"] - r["deflection_mm"]
 
     with phase("clearances"):
         clear = _clearances(gap)
     for what, mm in clear.items():
-        print(f"  {what:<26} {mm:7.2f} mm")
+        print(f"  {what:<26} {mm:7.2f} mm (at worst)")
         if mm < 2.0:
             bad.append(f"{what} is only {mm:.2f} mm")
     # ... and the same question asked THROUGH a turn of the motors, which is
