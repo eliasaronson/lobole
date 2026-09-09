@@ -76,12 +76,18 @@ constexpr MethodDoc kCamMethods[] = {
      "each setup.",
      "job"},
     {"check_layout",
-     "How the parts are arranged in the stock {setup?}: per placement, "
-     "whether it is `inside` the stock, `partly_outside` (hanging over an "
-     "edge) or `fully_outside` (not on it at all), and which other placements "
-     "it runs into. Computed when asked, not while you drag: a sheet is laid "
-     "out THROUGH states like these. The refusal lands at cam_toolpath and "
-     "cam_post, where the mistake becomes G-code.",
+     "How the parts are arranged in the stock {job?, setup?}. Per placement: "
+     "`fit` -- `inside`, `partly_outside` (hanging over an edge) or "
+     "`fully_outside` (not on it at all) -- `overlaps` (the placements it runs "
+     "into) and `box` (min/max in SETUP space, which is where the material "
+     "is once the part is laid the way it is clamped: what a nesting caller "
+     "wants). Per setup: `refusal` when the arrangement cannot be cut at all, "
+     "and `warnings` for what is merely close -- two parts nearer than the "
+     "widest cutter is a gouge waiting to happen and is not a refusal, "
+     "because only the tools that go between them care. Computed when asked, "
+     "not while you drag: a sheet is laid out THROUGH states like these. The "
+     "refusal lands again at cam_toolpath and cam_post, where the mistake "
+     "becomes G-code.",
      "job, setup"},
     {"set_job_placement",
      "Where a part sits in the stock {setup, part, pos?: [x,y], rot_z?, "
@@ -762,6 +768,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                                : "fully_outside"}};
         if (!f.overlaps.empty())
           fj["overlaps"] = f.overlaps;
+        // Where the material is, in setup space -- the box this check had to
+        // measure to answer `fit` at all. A caller laying a sheet out wants
+        // exactly this and had to reconstruct it one part at a time.
+        fj["box"] = {{"min", {f.lo.x, f.lo.y, f.lo.z}},
+                     {"max", {f.hi.x, f.hi.y, f.hi.z}}};
         fits.push_back(std::move(fj));
       }
       json sj = {{"setup", setup.id},
@@ -770,6 +781,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       const std::string why = cam::PlacementRefusal(setup, bodies);
       if (!why.empty())
         sj["refusal"] = why;
+      const std::vector<std::string> warn = cam::LayoutWarnings(setup, bodies);
+      if (!warn.empty())
+        sj["warnings"] = warn;
       out.push_back(std::move(sj));
     }
     return json{{"setups", std::move(out)}};
@@ -1492,6 +1506,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     for (const cam::VerdictLine& line :
          cam::MachineLines(setup, ui::JobBodies(state), &paths))
       warnings.push_back(line.text);
+    // ...and the sheet's own: parts too close together for the cutter that
+    // goes between them. check_layout says the same thing, and this is where
+    // it is unavoidable.
+    for (const std::string& line :
+         cam::LayoutWarnings(setup, ui::JobBodies(state)))
+      warnings.push_back(line);
     // Does this cutter, at these numbers, actually cut? The app has the
     // diameter, the flutes, the feed, the spindle and the body's material,
     // and used to say nothing while a job posted at a third of the chip load

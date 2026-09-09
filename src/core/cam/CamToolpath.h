@@ -256,11 +256,27 @@ struct PlacementFit {
   uint64_t placementId = 0;
   uint64_t jobPartId = 0;
   Fit fit = Fit::Inside;
+  // Where this part's material actually IS, in setup space: the box the
+  // check already had to compute to answer the question above. Reported
+  // because "does it fit" and "where is it" are the same measurement, and a
+  // caller laying a sheet out had to reconstruct this one part at a time --
+  // shrink-wrap the stock, disable every other placement, read the stock box
+  // back, put it all back.
+  glm::dvec3 lo{0.0};
+  glm::dvec3 hi{0.0};
   // Placement ids whose footprint this one runs into. Two parts in one sheet
   // occupying the same rectangle is scrap, and it is invisible in a backplot
   // that draws both.
   std::vector<uint64_t> overlaps;
 };
+
+// What is arranged badly but not wrongly: the answers that must not stop a
+// job. A gap narrower than the cutter is the one this exists for -- it is a
+// gouge, but only for the tools that go there, and only cam_verify would
+// otherwise catch it, after the file is posted. One sentence each, empty when
+// the sheet is fine.
+[[nodiscard]] std::vector<std::string>
+LayoutWarnings(const Setup& setup, const std::vector<Body>& bodies);
 
 // Check the ARRANGEMENT, at the moment someone asks -- not while they drag.
 // A sheet is laid out THROUGH states like these; blocking the drag makes the

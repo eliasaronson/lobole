@@ -1121,6 +1121,70 @@ TEST_CASE("cam job: one sheet, two parts that share feature ids, two cutters",
   CHECK(v.rapidsThroughStock == 0);
 }
 
+TEST_CASE("cam job: the layout says where each part is, and when they are too "
+          "close to cut",
+          "[cam][job]") {
+  // Two answers the check already had to work out and threw away. "Does it
+  // fit" and "where is it" are the same measurement, and a caller nesting a
+  // sheet had to reconstruct the second one part at a time -- shrink-wrap the
+  // stock, disable every other placement, read the stock box back, restore.
+  auto a = HoleDoc(10.0, 12.0);
+  auto b = HoleDoc(10.0, 12.0);
+  cam::JobDocument job;
+  const uint64_t pa = job.AddPart(1, "A");
+  const uint64_t pb = job.AddPart(2, "B");
+  cam::Setup& setup = job.AddSetup("Sheet");
+  setup.stock.mode = cam::StockMode::Fixed;
+  setup.stock.size = {120.0, 42.0, 12.0};
+
+  std::vector<Body> bodies;
+  for (const Body& body : a->GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pa;
+  }
+  for (const Body& body : b->GetBodies()) {
+    bodies.push_back(body);
+    bodies.back().jobPartId = pb;
+  }
+  const auto place = [&](uint64_t part, double x) {
+    cam::Placement pl;
+    pl.id = job.AllocateId();
+    pl.jobPartId = part;
+    pl.pos = {x, 0.0};
+    setup.placements.push_back(pl);
+  };
+  place(pa, 0.0);
+  place(pb, 60.0); // 40 wide each, so a 20 mm gap
+
+  std::vector<cam::PlacementFit> fits = cam::CheckPlacements(setup, bodies);
+  REQUIRE(fits.size() == 2);
+  // The box is in SETUP space: where the material is once the part is laid
+  // the way it is clamped, which is what a nesting caller needs.
+  CHECK_THAT(fits[0].lo.x, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(fits[0].hi.x, WithinAbs(40.0, 1e-6));
+  CHECK_THAT(fits[1].lo.x, WithinAbs(60.0, 1e-6));
+  CHECK_THAT(fits[1].hi.x, WithinAbs(100.0, 1e-6));
+  CHECK_THAT(fits[1].hi.y - fits[1].lo.y, WithinAbs(30.0, 1e-6));
+
+  // 20 mm apart, 6 mm cutter: room. Nothing to say.
+  CHECK(cam::LayoutWarnings(setup, bodies).empty());
+
+  // 4 mm apart, same cutter: cutting one out cuts into the other. A WARNING,
+  // not a refusal -- the parts do not overlap, and a narrower tool between
+  // them would be fine, so this is the operator's call and not the app's.
+  setup.placements[1].pos = {44.0, 0.0};
+  const std::vector<std::string> warn = cam::LayoutWarnings(setup, bodies);
+  REQUIRE(warn.size() == 1);
+  INFO(warn[0]);
+  CHECK(warn[0].find("4 mm apart") != std::string::npos);
+  CHECK(warn[0].find("6 mm") != std::string::npos);
+  CHECK(cam::PlacementRefusal(setup, bodies).empty()); // still cuttable
+
+  // Diagonal neighbours are not "between" anything: nothing cuts there.
+  setup.placements[1].pos = {44.0, 34.0};
+  CHECK(cam::LayoutWarnings(setup, bodies).empty());
+}
+
 TEST_CASE("cam job: a per-part frame survives a save and reload",
           "[cam][job]") {
   // v76. A frame that reloads as "as modelled" is a part cut in an

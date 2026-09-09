@@ -128,7 +128,55 @@ std::vector<PlacementFit> CheckPlacements(const Setup& setup,
       if (OverlapsXY(feet[i], feet[k]))
         fit.overlaps.push_back(setup.placements[k].id);
     }
+    fit.lo = feet[i].lo;
+    fit.hi = feet[i].hi;
     out.push_back(std::move(fit));
+  }
+  return out;
+}
+
+std::vector<std::string> LayoutWarnings(const Setup& setup,
+                                        const std::vector<Body>& bodies) {
+  std::vector<std::string> out;
+  double widest = 0.0;
+  std::string widestName;
+  for (const Tool& t : setup.tools)
+    if (t.diameter > widest) {
+      widest = t.diameter;
+      widestName = t.name;
+    }
+  if (widest <= 0.0)
+    return out;
+  const std::vector<PlacementFit> fits = CheckPlacements(setup, bodies);
+  for (size_t i = 0; i < fits.size(); i++) {
+    for (size_t k = i + 1; k < fits.size(); k++) {
+      // Only the pairs that are beside each other: two parts that overlap in
+      // NEITHER axis are diagonal neighbours, and nothing cuts between them.
+      const bool sameRow =
+          fits[i].lo.y < fits[k].hi.y && fits[k].lo.y < fits[i].hi.y;
+      const bool sameColumn =
+          fits[i].lo.x < fits[k].hi.x && fits[k].lo.x < fits[i].hi.x;
+      double gap = 0.0;
+      if (sameRow && !sameColumn)
+        gap =
+            std::max(fits[i].lo.x - fits[k].hi.x, fits[k].lo.x - fits[i].hi.x);
+      else if (sameColumn && !sameRow)
+        gap =
+            std::max(fits[i].lo.y - fits[k].hi.y, fits[k].lo.y - fits[i].hi.y);
+      else
+        continue; // overlapping (already a refusal) or diagonal
+      if (gap >= widest - 1e-9)
+        continue;
+      const std::string which =
+          widestName.empty() ? std::string() : " (" + widestName + ")";
+      char buf[280];
+      std::snprintf(buf, sizeof(buf),
+                    "two parts are %.4g mm apart and the widest cutter here "
+                    "is %.4g mm%s: cutting one out will cut into the other. "
+                    "Move them apart, or cut them in separate setups",
+                    gap, widest, which.c_str());
+      out.push_back(buf);
+    }
   }
   return out;
 }

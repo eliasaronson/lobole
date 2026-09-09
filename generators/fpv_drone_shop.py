@@ -305,24 +305,19 @@ def footprints(app, setup, placed):
     """Each part's box IN SETUP SPACE: where the material is once the part is
     laid flat.
 
-    Read from the app one part at a time, off a stock that shrink-wraps what
-    is enabled with no margin — that box IS the framed model's bounds. The
-    rotation that lays a part flat is the app's (`lay_face_up`), and working
-    the same rotation out again here to nest against is how two copies of a
-    transform come to disagree (docs/cam/setup-frame.md).
+    One call, because `check_layout` measures exactly this to answer whether
+    a part is on the sheet. The rotation that lays a part flat is the app's
+    (`lay_face_up`), and working the same rotation out again here to nest
+    against is how two copies of a transform come to disagree
+    (docs/cam/setup-frame.md).
     """
-    app.set_cam_setup(id=setup, stock={"mode": "relative",
-                                       "margin": [0.0, 0.0, 0.0],
-                                       "bottom_margin": 0.0})
     boxes = {}
-    for _, job_part in placed:
-        for _, other in placed:
-            app.set_job_placement(setup=setup, part=other,
-                                  enabled=other == job_part)
-        s = next(s for s in app.list_cam_setups()["setups"] if s["id"] == setup)
-        boxes[job_part] = (s["stock"]["min"], s["stock"]["max"])
-    for _, job_part in placed:
-        app.set_job_placement(setup=setup, part=job_part, enabled=True)
+    for s in app.check_layout(setup=setup)["setups"]:
+        for pl in s["placements"]:
+            boxes[pl["part"]] = (pl["box"]["min"], pl["box"]["max"])
+    missing = [name for name, part in placed if part not in boxes]
+    if missing:
+        raise SdkError(f"no box for {missing} — has it been placed?")
     return boxes
 
 
@@ -415,8 +410,8 @@ def cam(app, out):
         app.set_cam_setup(id=setup, stock={"mode": "fixed",
                                            "size": [STOCK, STOCK, thickness]})
         for s in app.check_layout(setup=setup)["setups"]:
-            if s.get("refusal"):
-                raise SdkError(f"{sheet}: {s['refusal']}")
+            if s.get("refusal") or s.get("warnings"):
+                raise SdkError(f"{sheet}: {s.get('refusal') or s['warnings']}")
             for pl in s["placements"]:
                 if pl["fit"] != "inside" or pl.get("overlaps"):
                     raise SdkError(f"{sheet}: a part is {pl['fit']}"
