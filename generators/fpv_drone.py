@@ -23,9 +23,34 @@ import math
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 TODAY = datetime.date.today().isoformat()
+
+# Where a run's time goes, printed at the end. A generator that takes a
+# minute gets run a hundred times while it is being written, so WHICH minute
+# it is decides what is worth making faster.
+PHASES = []
+
+
+class phase:
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.at = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        PHASES.append((self.name, time.perf_counter() - self.at))
+
+
+def report_phases():
+    total = sum(d for _, d in PHASES) or 1.0
+    print(f"time: {total:.1f} s")
+    for name, seconds in PHASES:
+        print(f"  {name:<18} {seconds:6.1f} s {100 * seconds / total:4.0f}%")
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -395,13 +420,31 @@ def add_mates(asm, occ):
 RESIDUE_MM3 = 0.01   # coincident thread surfaces: a cube 0.2 mm on a side
 
 
+def _clearances(gap):
+    """The clearances that decide whether it flies or eats itself."""
+    # The DIAGONAL pair is not measured. It cannot touch — its motors are
+    # 220 mm apart against 155.6 for the adjacent pair, and the adjacent one
+    # is measured — and asking cost 55 s of a 100 s run: an exact distance
+    # between two lofted propellers that far apart prunes to nothing
+    # (docs/modeling/fpv-drone.md). The motion study still checks every pair.
+    return {
+        "prop to prop (adjacent)": gap("Propeller FL", "Propeller FR"),
+        "prop to top plate": gap("Propeller FL", "Top plate"),
+        "prop to battery": gap("Propeller RL", "Battery"),
+        "prop to antenna": gap("Propeller RL", "Antenna"),
+        "prop to camera plate": gap("Propeller FL", "Camera plate L"),
+        "battery to camera": gap("Battery", "FPV camera"),
+    }
+
+
 def verify(app, asm, parts, occ, props):
     """Every claim this model makes, asked of the model."""
     print("checks:")
     bad = []
 
-    r = app.interference(mode="exact", deadline_s=240, max_pairs=8000,
-                         _timeout=400)
+    with phase("clash sweep"):
+        r = app.interference(mode="exact", deadline_s=240, max_pairs=8000,
+                             _timeout=400)
     if r.get("truncated"):
         bad.append(f"the interference sweep was truncated: {r['truncation']}")
     over = [p for p in r.get("pairs", []) if p.get("volume", 0) > RESIDUE_MM3]
@@ -410,61 +453,51 @@ def verify(app, asm, parts, occ, props):
     for p in over:
         bad.append(f"clash {p['a']} <-> {p['b']} {p['volume']:.2f} mm3")
 
-    findings = app.check_fasteners().get("findings", [])
+    with phase("fastener check"):
+        findings = app.check_fasteners().get("findings", [])
     print(f"  fasteners: {len(findings)} findings")
     for f in findings:
         bad.append(f"fastener {f.get('part')}: {f.get('why')}")
 
     # The clearances that decide whether it flies or eats itself.
     def gap(a, b):
+        started = time.perf_counter()
         # A minute is not enough: the exact minimum distance between two
         # LOFTED propellers is a spline-to-spline extrema, and it runs for
         # tens of seconds (occasionally past the client's default timeout)
         # where the same call between two plates is instant.
-        return app.measure(a={"occurrence": a}, b={"occurrence": b},
-                           distance_kind="minimum", _timeout=600)["distance"]
+        d = app.measure(a={"occurrence": a}, b={"occurrence": b},
+                        distance_kind="minimum", _timeout=600)["distance"]
+        PHASES.append((f"  gap {a[:9]}/{b[:9]}", time.perf_counter() - started))
+        return d
 
-    clear = {
-        "prop to prop (adjacent)": gap("Propeller FL", "Propeller FR"),
-        "prop to prop (across)": gap("Propeller FL", "Propeller RR"),
-        "prop to top plate": gap("Propeller FL", "Top plate"),
-        "prop to battery": gap("Propeller RL", "Battery"),
-        "prop to antenna": gap("Propeller RL", "Antenna"),
-        "prop to camera plate": gap("Propeller FL", "Camera plate L"),
-        "battery to camera": gap("Battery", "FPV camera"),
-    }
+    with phase("clearances"):
+        clear = _clearances(gap)
     for what, mm in clear.items():
         print(f"  {what:<26} {mm:7.2f} mm")
         if mm < 2.0:
             bad.append(f"{what} is only {mm:.2f} mm")
-
     # ... and the same question asked THROUGH a turn of the motors, which is
     # the only way a three-blade propeller's clearance is actually decided.
-    # `from` is a python keyword, so this one goes through call().
-    study = app.call("add_motion_study", **{
-        "driver": props[0]["id"], "dof": "rotation", "from": 0.0,
-        "to": 360.0 / PROP_BLADES, "samples": 24, "check_clash": True,
-        "clash_mode": "mesh", "name": "Propellers turning"})
-    run = app.run_motion_study(study=study["id"], _timeout=900)
+    study = app.add_motion_study(
+        driver=props[0]["id"], dof="rotation", from_=0.0,
+        to=360.0 / PROP_BLADES, samples=24, check_clash=True,
+        clash_mode="mesh", name="Propellers turning")
+    with phase("motion study"):
+        run = app.run_motion_study(study=study["id"], _timeout=900)
     samples = run.get("samples") or []
-    # A mesh sweep calls TOUCHING a clash, and at rest a propeller touches
-    # its motor, its nut and four screws. The question this study asks is
-    # what turning them CHANGES, so the rest state is the baseline and only
-    # a pair that was not already in contact counts.
-    def pairs(sample):
-        return {(c["a_name"], c["b_name"]) for c in sample.get("clashes", [])}
-
-    seated = pairs(samples[0]) if samples else set()
-    appeared, unsolved = set(), 0
-    for sample in samples:
-        if not sample.get("solved"):
-            unsolved += 1
-        appeared |= pairs(sample) - seated
+    # `appeared` is what TURNING changed — the app subtracts the contacts
+    # that were already there at rest, which on a working machine is most of
+    # them (a propeller touches its motor, its nut and four screws).
+    unsolved = sum(1 for sample in samples if not sample.get("solved"))
+    appeared = run.get("appeared", [])
     print(f"  motion: {len(samples)} samples over "
-          f"{360.0 / PROP_BLADES:.0f} deg, {len(seated)} seated contacts, "
+          f"{360.0 / PROP_BLADES:.0f} deg, "
+          f"{run.get('seated_contacts', 0)} seated contacts, "
           f"{len(appeared)} new, {unsolved} unsolved")
-    for a, b in sorted(appeared):
-        bad.append(f"turning the propellers brings {a} into {b}")
+    for pair in appeared:
+        bad.append(f"turning the propellers brings {pair['a_name']} "
+                   f"into {pair['b_name']}")
     if unsolved:
         bad.append(f"{unsolved} motion samples did not solve")
     if bad:
@@ -516,18 +549,17 @@ def _extremes(geometry, axis):
     return at[0][1], at[-1][1]
 
 
-def note_block(app, at, lines, step=5.4):
-    """A block of text, one NOTE PER LINE.
+def note(app, at, lines):
+    """A block of text as ONE note.
 
-    `add_drawing_note` takes a string, but a newline in it is neither
-    measured (the validator boxes the whole note as one line, so any
-    multi-line note reads as running off the sheet) nor rendered (the SVG
-    writes one <text> element, and SVG ignores newlines). One note per line
-    is what actually draws.
+    It used to be one note per line: a newline was neither measured (the
+    validator boxed the whole string as a single line, so any multi-line
+    note read as running off the sheet) nor rendered (the SVG wrote one
+    <text> element, and SVG ignores newlines). Both fixed, so this is a
+    note again.
     """
-    for i, line in enumerate(lines):
-        if line:
-            app.add_drawing_note(position=[at[0], at[1] - i * step], text=line)
+    app.add_drawing_note(position=[at[0], at[1]],
+                         text="\n".join(line for line in lines if line))
 
 
 def hole_table(part, axes=(0, 1)):
@@ -558,6 +590,20 @@ def hole_table(part, axes=(0, 1)):
         for u, v in sorted(centres):
             lines.append(f"   {u:8.2f} {v:8.2f}")
     return lines
+
+
+def _exports(app, out):
+    """STEP for the assembly and each carbon part, STL for the printed."""
+    app.export_step(path=os.path.join(out, "fpv-drone.step"))
+    for kind, names in EXPORTED.items():
+        for part in names:
+            app.part(part, create=False).activate()
+            path = os.path.join(out, part.lower().replace(" ", "-")
+                                + "." + kind)
+            if kind == "stl":
+                app.export_stl(path=path, deflection=0.02)
+            else:
+                app.export_step(path=path)
 
 
 def part_sheets(app, out):
@@ -611,7 +657,7 @@ def part_sheets(app, out):
             app.add_drawing_dim(view=view["id"], kind="hole_callout",
                                 refs=[{"edge": circle["ref"]}])
 
-        note_block(app, (0.72 * sheet_w, 0.46 * sheet_h), [
+        note(app, (0.72 * sheet_w, 0.46 * sheet_h), [
             f"MATERIAL {material}",
             f"THICKNESS {thickness:g} mm",
             f"QUANTITY {qty}",
@@ -619,8 +665,8 @@ def part_sheets(app, out):
             "1 mm cutter, corners as drawn",
             "EDGES deburr, tab roots square",
             "FINISH none"])
-        note_block(app, (0.72 * sheet_w, 0.92 * sheet_h),
-                   ["HOLE CENTRES from the part origin"] + tables[name])
+        note(app, (0.72 * sheet_w, 0.92 * sheet_h),
+             ["HOLE CENTRES from the part origin"] + tables[name])
 
         dims = app.list_drawing_dims()["dims"]
         dangling = [d for d in dims if not d.get("resolved")]
@@ -630,7 +676,7 @@ def part_sheets(app, out):
         path = os.path.join(out, f"{name.lower().replace(' ', '-')}.svg")
         app.export_drawing(path=path)
         app.export_drawing(path=path.replace(".svg", ".pdf"))
-        issues = app.check_drawing(update=True)
+        issues = app.check_drawing(drawing=drawing["id"], update=True)
         if not issues.get("ok"):
             raise SdkError(f"{name} sheet: {issues['issues']}")
         print(f"  {name:<14} {size.upper()} 1:1, {len(dims)} dimensions, "
@@ -692,7 +738,8 @@ def assembly_sheet(app, out, name="Quadcopter"):
         app.set_drawing_view(id=view_id,
                              position=[at[0] + want_x - centre[0],
                                        at[1] + want_y - centre[1]])
-    issues = app.check_drawing(update=True, _timeout=300)
+    issues = app.check_drawing(drawing=drawing["id"], update=True,
+                               _timeout=300)
     if not issues.get("ok"):
         raise SdkError(f"General arrangement: {issues['issues']}")
     path = os.path.join(out, "general-arrangement.svg")
@@ -704,11 +751,10 @@ def assembly_sheet(app, out, name="Quadcopter"):
 
 
 # What each row of the BOM actually weighs. The model's own mass is right
-# for anything whose material is real (steel screws, aluminium standoffs)
-# and wrong for two kinds of row: carbon, which the material table has no
-# entry for (1040 kg/m3 against 1550), and a bought component modelled as
-# an envelope, whose mass is a catalogue figure and not a volume at all.
-CARBON_CORRECTION = CF_DENSITY / 1.040e-3
+# for everything made of a real material — the carbon plates included, now
+# that the table has carbon — and wrong for one kind of row: a bought
+# component modelled as an envelope, whose mass is a catalogue figure and
+# not a volume at all.
 CATALOGUE_G = {
     "Motor 2207 1750KV": MOTOR_MASS_G,
     "Propeller 5.1x4.3x3 CW": PROP_MASS_G,
@@ -723,7 +769,6 @@ CATALOGUE_G = {
     "Buzzer 5V": BUZZER_MASS_G,
     "Antenna RHCP SMA": ANT_MASS_G,
 }
-CARBON = {"Bottom plate", "Mid plate", "Top plate", "Arm", "Camera plate"}
 THRUST_PER_MOTOR_G = 1500.0   # 2207 1750KV on 6S, 5.1x4.3x3, manufacturer
 
 
@@ -736,8 +781,6 @@ def mass_budget(rows):
         why = "modelled"
         if row["part"] in CATALOGUE_G:
             each, why = CATALOGUE_G[row["part"]], "catalogue"
-        elif row["part"] in CARBON:
-            each, why = each * CARBON_CORRECTION, "carbon (1.55)"
         out.append((row["part"], row["quantity"], each,
                     each * row["quantity"], why))
     return out
@@ -813,16 +856,8 @@ def outputs(app, out, name="Quadcopter"):
         raise SdkError(f"the centre of mass is {cg[0]:+.1f}, {cg[1]:+.1f} mm "
                        "from the middle of the propeller square")
 
-    app.export_step(path=os.path.join(out, "fpv-drone.step"))
-    for kind, names in EXPORTED.items():
-        for part in names:
-            app.part(part, create=False).activate()
-            path = os.path.join(out, part.lower().replace(" ", "-")
-                                + "." + kind)
-            if kind == "stl":
-                app.export_stl(path=path, deflection=0.02)
-            else:
-                app.export_step(path=path)
+    with phase("exports"):
+        _exports(app, out)
 
     # The build guide travels with the files somebody builds from.
     guide = HERE.parent / "docs" / "modeling" / "fpv-drone-build.md"
@@ -837,15 +872,18 @@ def outputs(app, out, name="Quadcopter"):
         if existing["name"] in wanted:
             app.delete_part(part=existing["name"])
 
-    sheets = part_sheets(app, out)
+    with phase("part sheets"):
+        sheets = part_sheets(app, out)
     asm.activate()
-    assembly_sheet(app, out)
+    with phase("GA sheet"):
+        assembly_sheet(app, out)
 
     asm.activate()
-    app.render_sheet(path=os.path.join(out, "views.png"))
-    app.set_camera(eye=[330.0, -260.0, 210.0], target=[0.0, 0.0, 25.0])
-    app.render_still(path=os.path.join(out, "render.png"), width=1920,
-                     height=1080, samples=256, _timeout=600)
+    with phase("renders"):
+        app.render_sheet(path=os.path.join(out, "views.png"))
+        app.set_camera(eye=[330.0, -260.0, 210.0], target=[0.0, 0.0, 25.0])
+        app.render_still(path=os.path.join(out, "render.png"), width=1920,
+                         height=1080, samples=256, _timeout=600)
     return mass, rows, sheets
 
 
@@ -870,12 +908,17 @@ def main():
         return
 
     app.new()
-    parts = build_parts(app)
+    with phase("parts"):
+        parts = build_parts(app)
     if args.stage == "parts":
+        report_phases()
         return
-    asm, occ = build_assembly(app, parts)
-    add_fasteners(asm, parts, occ)
-    props = add_mates(asm, occ)
+    with phase("assembly"):
+        asm, occ = build_assembly(app, parts)
+    with phase("fasteners"):
+        add_fasteners(asm, parts, occ)
+    with phase("mates"):
+        props = add_mates(asm, occ)
     verify(app, asm, parts, occ, props)
     os.makedirs(args.out, exist_ok=True)
     app.save_project(path=project)
@@ -883,6 +926,7 @@ def main():
         outputs(app, args.out)
         app.save_project(path=project, force=True)
     print("saved")
+    report_phases()
 
 
 if __name__ == "__main__":

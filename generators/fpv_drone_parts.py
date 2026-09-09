@@ -4,10 +4,9 @@ Every builder takes the connected app and returns the Part. Nothing here
 places anything — the assembly (fpv_drone.py) does that, and mates through
 the named frames each builder leaves behind.
 
-Carbon fibre is modelled as `plastic_black` because the material table has
-no carbon (1040 kg/m3 against 1550), so a plate's mass in this document
-reads about a third light. fpv_drone.py corrects it from the volume and
-reports both, rather than letting a wrong number ride in the BOM unnoticed.
+Carbon is `carbon_fibre` (1550 kg/m3), which the material table grew for
+this: modelled as black plastic a plate read a third light, which is a
+third of an airframe's structural mass.
 """
 import math
 
@@ -15,7 +14,7 @@ from designer_sdk import Plane
 
 from fpv_drone_spec import *  # noqa: F401,F403  — the dimensions, by name
 
-CF = "plastic_black"
+CF = "carbon_fibre"
 
 
 # --- profile helpers --------------------------------------------------------
