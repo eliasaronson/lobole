@@ -446,24 +446,31 @@ static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
       if (x.external == y.external || x.spec.majorDia != y.spec.majorDia ||
           x.spec.pitch != y.spec.pitch)
         continue;
-      const double dot = glm::dot(x.axis, y.axis);
+      // Measured in the EXTERNAL thread's own frame, whichever body was
+      // passed first. Working in x's frame made the answer depend on the
+      // argument order: a quad's camera-cage screw in its spacer came back
+      // clean as (screw, spacer) and 6.8 mm3 of clash as (spacer, screw) —
+      // the same two solids, and the sweep picks the order.
+      const ThreadSpan& ext = x.external ? x : y;
+      const ThreadSpan& in = x.external ? y : x;
+      const double dot = glm::dot(ext.axis, in.axis);
       if (std::abs(std::abs(dot) - 1) > 1e-7)
         continue;
-      const auto delta = y.start - x.start;
-      const double at = glm::dot(delta, x.axis);
-      if (glm::length(delta - at * x.axis) > 1e-4)
+      const auto delta = in.start - ext.start;
+      const double at = glm::dot(delta, ext.axis);
+      if (glm::length(delta - at * ext.axis) > 1e-4)
         continue;
-      const double end = at + dot * y.length;
+      const double end = at + dot * in.length;
       const double lo = std::max(0.0, std::min(at, end));
-      const double hi = std::min(x.length, std::max(at, end));
-      if (hi - lo + 1e-5 < std::max(x.minimum, y.minimum))
+      const double hi = std::min(ext.length, std::max(at, end));
+      if (hi - lo + 1e-5 < std::max(ext.minimum, in.minimum))
         continue;
-      const auto start = x.start + lo * x.axis;
-      const auto tool =
-          BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(start.x, start.y, start.z),
-                                          gp_Dir(x.axis.x, x.axis.y, x.axis.z)),
-                                   x.spec.majorDia / 2, hi - lo)
-              .Shape();
+      const auto start = ext.start + lo * ext.axis;
+      const auto tool = BRepPrimAPI_MakeCylinder(
+                            gp_Ax2(gp_Pnt(start.x, start.y, start.z),
+                                   gp_Dir(ext.axis.x, ext.axis.y, ext.axis.z)),
+                            ext.spec.majorDia / 2, hi - lo)
+                            .Shape();
       BRepAlgoAPI_Cut cut(overlap, tool);
       if (!cut.IsDone())
         throw Standard_Failure("thread engagement subtraction failed");
