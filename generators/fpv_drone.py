@@ -451,7 +451,11 @@ def verify(app, asm, parts, occ, props):
     print(f"  interference: {len(r.get('pairs', []))} contacts, "
           f"{len(over)} above {RESIDUE_MM3} mm3 of thread-surface residue")
     for p in over:
-        bad.append(f"clash {p['a']} <-> {p['b']} {p['volume']:.2f} mm3")
+        # With the ids: sixteen occurrences here are called "ISO 4762
+        # M3x10", so a failure that names only the part sends whoever reads
+        # it hunting through list_occurrences for which screw.
+        bad.append(f"clash {p['a']} (#{p.get('a_id')}) <-> "
+                   f"{p['b']} (#{p.get('b_id')}) {p['volume']:.2f} mm3")
 
     with phase("fastener check"):
         findings = app.check_fasteners().get("findings", [])
