@@ -417,6 +417,16 @@ add_test(NAME sdk_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(sdk_smoke PROPERTIES TIMEOUT 180)
 
+# A parameter survives the script boundary (peer-survey-plan W1): a part
+# built with Param arithmetic is DRIVEN by its variables afterwards, and the
+# perturbation half — nudge one variable, diff the saved document, assert
+# exactly the fields it drives moved — fails on a dimension that is quietly a
+# literal.
+add_test(NAME param_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/param_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(param_smoke PROPERTIES TIMEOUT 180)
+
 # batch (agent-scale plan G1a): N calls, ONE regeneration, ONE undo step,
 # and a failed call rolls the whole thing back.
 add_test(NAME batch_smoke

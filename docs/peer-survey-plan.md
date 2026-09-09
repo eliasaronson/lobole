@@ -18,19 +18,32 @@ Ordered by what it costs to leave alone.
 
 ## W1 — a parameter must survive the script boundary
 
-**The problem, in our own repo.** Thirteen of sixteen `generators/*.py` call
-`set_variable` zero times:
+**The problem, in our own repo.** Counting only the raw `set_variable` RPC
+says thirteen of sixteen generators declare no variables at all; that count is
+wrong, because the SDK's `var()` is how most of them do it. The honest picture
+is worse in one place and fine in others:
 
-    aircooled_engine 0   fpv_drone 0     om615 0        single_cylinder 0
-    carburettor 0        fpv_drone_* 0   om615_* 0      slider_crank 0
-    gear_train 0         _lib 0          gear 1         cncest6090 1
-                                         toolmakers_clamp 2
+    generator              module constants   document variables
+    fpv_drone_spec.py            103                  0
+    fpv_drone_parts.py             0                  0
+    om615_top.py                  15                  2
+    single_cylinder.py             9                  7
+    slider_crank.py                0                  4
+    toolmakers_clamp.py            —                  2 + a full table
 
-Every dimension in them is a Python module constant — `THRUST_N`,
-`MOTOR_BOLT_SQ`, `ARM_BOLT_IN` — evaluated in the runner and pushed into the
-document as a literal. The drone is 91 occurrences and 42 derived fasteners
-with **not one adjustable knob in the document**. Open it in the GUI and there
-is nothing to turn. The om615 is 76 parts, same.
+`slider_crank.py` and `toolmakers_clamp.py` already do the right thing — the
+clamp declares its whole `D` / `CHOICES` / `SPACER` table as project variables
+by hand and passes expression strings like `"jaw_l-taper_l"` into sketches. So
+the parametric path is reachable today. It is just verbose enough that the
+flagship skipped it.
+
+And the flagship is the case that matters. `fpv_drone_spec.py` is a **103-entry
+dimension table**, deliberately classified into CLASS (what a 5" freestyle quad
+IS), CATALOGUE (bought-part dimensions that are not free) and DESIGN (this
+frame's own choices), with the derived layout computed as "arithmetic, never
+transcription". It is exactly what a document variable table is for, and not
+one entry of it reaches the document. The drone — 91 occurrences, 42 derived
+fasteners — opens in the GUI with nothing to turn.
 
 vcad names this exactly, in `crates/vcad-loon/src/params.rs`:
 
@@ -51,17 +64,23 @@ document model and `VisitExprs` makes it hash-visible. Nothing is missing from
 the kernel. What is missing is that the SDK makes a literal the path of least
 resistance and a variable a deliberate extra call, so no generator makes it.
 
-**The fix.** A declaration form in the SDK that returns a plain number for
-arithmetic *and* registers the variable:
+**The fix.** `Param`: a float subclass that carries the expression which
+produced it. Arithmetic between Params composes the expression, so the script
+does its arithmetic in ordinary Python and the document receives the formula:
 
-    L = d.param("arm_len", 110.0, unit="mm", min=60, max=160)
-    R = d.param("arm_bolt_out", "arm_len - 18")   # derived, stays a formula
+    L = part.param("arm_len", 110.0)     # Param(110.0, "arm_len")
+    part.box(w=L, h=L / 2, d=W * 2)      # height_expr "(arm_len / 2.0)"
 
-`d.param` returns a float subclass so existing arithmetic is untouched; the
-declaration is what changes. Derived params take a formula string and are never
-inlined. Then convert **one** generator end to end — `toolmakers_clamp.py` is
-the right size, the drone is the right proof — and the rest follow as they are
-next touched.
+Because a Param IS a float, every existing path keeps working untouched —
+face filtering by diameter, `V(...)`, comparisons, `math.*`. `_dim`/`_dim3`
+are the only places that need to know, and they are where every
+expression-capable field already funnels. A derived param names itself
+(`part.param("bolt_out", "arm_len - 18")` has expression `bolt_out`), so the
+formula lives once, in the document.
+
+`app.params(table)` declares a whole dict at once and hands back
+`{name: Param}` — which is the shape generators already keep their dimensions
+in, so converting one changes the table's binding and nothing else.
 
 **Gate.** Two tests. (1) Open the converted project, assert the expected
 variables exist, `set_variable` one of them, assert the bbox moved. (2) The
