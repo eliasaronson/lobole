@@ -619,9 +619,19 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
           for (int i = i0; i <= i1 && !hit; i++) {
             double t = 0.0;
             const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
-            if (DistToSegment(c, a, b, t) > radius)
+            const double d = DistToSegment(c, a, b, t);
+            if (d > radius)
               continue;
-            if (probe.At(i, j) > zLow + kGrazeTolerance)
+            // The tool's SHAPE, not a cylinder around it -- the same
+            // TipHeight the cut uses. A drill retracting straight up the hole
+            // it has just made is the case: its point left a cone, and a
+            // cylinder of the drill's diameter reads that cone's wall as
+            // material in the way. Every through hole in a job then reported
+            // a rapid through stock, which is the kind of false alarm that
+            // teaches an operator to ignore the real one.
+            const double surface =
+                zLow + (tool != nullptr ? TipHeight(*tool, d) : 0.0);
+            if (probe.At(i, j) > surface + kGrazeTolerance)
               hit = true;
           }
         }
