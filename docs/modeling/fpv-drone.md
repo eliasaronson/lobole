@@ -223,7 +223,16 @@ a clearance is what is wanted rather than a coordinate.
 ## What happens to the parts
 
 `generators/fpv_drone_shop.py`, `--stage fem|cam|shop`, against the project as
-saved. Neither half changes the model: a shop run is a question asked of it.
+saved. Neither half touches a part: they add STUDIES and JOB DOCUMENTS, and
+the project is saved with them. The G-code is not the answer on its own — the
+nesting, the tools, the depths and the load cases are what somebody opens to
+change one of them, and a `.nc` file cannot be edited back into a job. Saved
+and reopened, the three jobs post the same nine files byte for byte.
+
+The one thing either half writes outside the project is the machine: a setup
+names one from the store (`~/.config/designer/machines`) and then EMBEDS a
+copy, so the job opens anywhere and says `machine_match: missing` on a machine
+that has never heard of this router rather than pretending.
 
 ### What the parts carry
 

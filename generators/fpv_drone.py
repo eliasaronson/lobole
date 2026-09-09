@@ -916,9 +916,11 @@ def main():
     project = os.path.join(args.out, "fpv-drone.dsgn")
     if args.stage in ("shop", "fem", "cam"):
         # What happens to the parts after the model: loads and G-code, both
-        # against the project as SAVED. They add studies and job documents,
-        # so the project is NOT saved back over the model afterwards — a
-        # shop run is a question asked of it, not an edit to it.
+        # against the project as SAVED. They add STUDIES and JOB DOCUMENTS
+        # and touch no part, and the project is saved with them: the G-code
+        # is not the answer on its own — the nesting, the tools, the depths
+        # and the load cases are what somebody opens to change one of them,
+        # and a .nc file cannot be edited back into a job.
         import fpv_drone_shop as shop
         app.open_project(path=project)
         if args.stage != "cam":
@@ -927,6 +929,8 @@ def main():
         if args.stage != "fem":
             with phase("cam"):
                 shop.cam(app, args.out)
+        app.save_project(path=project, force=True)
+        print("saved")
         report_phases()
         return
     if args.stage == "drawings":
