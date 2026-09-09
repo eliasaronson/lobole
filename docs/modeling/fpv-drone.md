@@ -277,9 +277,9 @@ plate, a 600 x 400 hobby router, four cutters.
 
 | sheet | parts | ops | cutting | time | lines |
 |---|---|---|---|---|---|
-| 3 mm | bottom plate | 7 | 1.5 m | 5 min | 319 |
-| 2 mm | mid, top, 2 x camera plate | 12 | 3.9 m | 13 min | 1810 |
-| 5 mm | 4 x arm | 6 | 5.1 m | 11 min | 1376 |
+| 3 mm | bottom plate | 3 | 1.5 m | 5 min | 385 |
+| 2 mm | mid, top, 2 x camera plate | 5 | 4.1 m | 15 min | 2105 |
+| 5 mm | 4 x arm | 6 | 5.6 m | 14 min | 2035 |
 
 Every sheet: **no gouge, and no rapid through material**, checked by
 simulating the POSTED file back against the model (`cam_verify`) rather than
@@ -305,19 +305,31 @@ What decided the shape of it:
   A word is posted — and it is what lets one sheet hold three plates on their
   faces beside a part modelled standing up.
 - **Nesting is read back, not re-derived.** Where each part sits comes from
-  its box in SETUP space, asked of the app after it is laid flat, off a
-  zero-margin shrink-wrap stock. Working the same rotation out again in the
-  generator is how two copies of a transform come to disagree.
-- **What is left standing is not a fault.** A height map cannot watch a slug
-  fall out or know a tab was asked for: the 5 mm sheet's 38 regions are 16
-  tabs (0.6 mm), 4 shaft-bore slugs and the offcut the outline cut through.
-  `ok` is the verdict to gate on — nothing scraps the part or breaks the
-  tool; `complete` is false for any correct job with tabs.
+  its box in SETUP space, which `check_layout` reports because it had to
+  measure it to answer whether the part is on the sheet. Working the same
+  rotation out again in the generator is how two copies of a transform come
+  to disagree.
+- **The openings are the model's, not a list.** One operation per part cuts
+  every opening in that part's own face; `drilled_bores` leaves the round
+  ones the drills take. The generator used to carry a table of every
+  opening's position, restated from the spec — the one place where a spec
+  change could stop cutting a slot in silence.
+- **What is left standing is now small enough to read.** The toolpath tells
+  the verifier where it left each tab, so a tabbed job can be `complete`;
+  what remains is the offcut the outline cut through (1, 4 and 16 regions of
+  about 4 mm2). `ok` is still the verdict to gate on — nothing scraps the
+  part or breaks the tool — and a through cut's slug is still invisible to a
+  height map.
+
+`--stage fem` also saves a plot of each field beside `fem.csv`. It is worth
+more here than it would be elsewhere: the solve is not persisted, so the
+picture and the CSV row are what survive the run — and the arm's plot puts
+the red exactly where the number says it is, at the outer bolt hole.
 
 ### What this half found
 
-Five more defects, all fixed, and every one of them a case that only shows up
-when a job holds more than one part or more than one tool:
+Five defects on the first pass, all fixed, and every one of them a case that
+only shows up when a job holds more than one part or more than one tool:
 
 1. **A grbl file never said which tool it was running.** GRBL takes no M6, so
    the tool change is a message and a pause — and the message was the only
@@ -359,6 +371,49 @@ when a job holds more than one part or more than one tool:
    gate has an escape hatch for exactly this (`// rpc-params:`), and it now
    carries the full list. (`RemoteCam`)
 
+And five more from a second pass, whose first act was to write the test that
+would have caught the first five — one sheet, two parts sharing feature ids,
+two cutters, posted and verified:
+
+6. **Every job with a tab reported `complete: false`.** The flag is
+   `maxLeftover` against one cell of tolerance, and a tab is at least 0.5 mm
+   of full-height material asked for on purpose — so the flag said nothing
+   about any real job, and the docs explained it away instead. The toolpath
+   now records where it left each tab (position, the pillar's radius, and its
+   top) and cells at or below that top stop counting as leftover. Unlike a
+   corner relief this needs the HEIGHT: a relief excuses a cut that went too
+   deep, a tab excuses one that did not happen, and excusing it by position
+   alone would excuse an uncut slab above it. Reported as `tabs` rather than
+   silently subtracted. (`CamStrategies`, `CamVerify`)
+7. **An inside profile on a level face cut a trench round the part.** A face
+   pick handed the profile the face's OUTER wire, so `side: inside` offset
+   the part's own outline inward and cut it full depth, all the way round —
+   the exact failure the refusal three lines below describes, which never
+   fired because it only tests for an empty contour list. It now cuts the
+   face's OPENINGS, which is the only thing an inside cut on a face can mean,
+   with `drilled_bores` to leave the round ones the drill takes (v96). A
+   width could not say that: the narrowest MILLED opening on this frame is a
+   2.2 mm slot and the widest DRILLED hole is 3.2 mm across. (`CamStrategies`)
+8. **A through hole's bottom was the STOCK's, not the model's.** The
+   break-through from the first pass measured the part's bottom as the
+   stock's plus its bottom margin — true for relative stock, where the stock
+   IS the model plus that margin, and wrong on a fixed sheet, where a 4 µm
+   bounding-box difference then decided whether the hole broke out. The
+   drone's arms stopped breaking through when a margin changed elsewhere, in
+   silence. (`CamDerive`)
+9. **A job could only be addressed by whichever tab was in front.** All
+   seventeen job RPCs went through the active job; `cam_post` writes a FILE,
+   so a tab switch between calls puts another job's program under the name
+   you asked for. `job` names it, exactly as `drawing` does for a sheet.
+   (`RemoteCam`)
+10. **`viewport_click` and `viewport_drag` advertised their modifiers and not
+    their coordinates** — x/y go through a helper, and the params gate
+    compares a row against what its scanner can SEE. So the generated SDK
+    refused them: every click a script could ask for landed in the middle of
+    the viewport. The gate now refuses a branch that hands its params to a
+    helper without declaring what the helper reads, which is the shape of
+    mistake that hid fourteen `add_cam_op` parameters. (`rpc_params_scan`)
+
 ## Files
 
 `scratch/fpv-drone/` after a run: the project, five dimensioned part sheets
@@ -367,6 +422,8 @@ STEP for the assembly and for each carbon part, STL for the printed ones,
 `bom.csv`, `mass-budget.csv`, and renders. `BUILD.md` beside them is a copy of
 [the build guide](fpv-drone-build.md) — the build order and the buying list.
 
-`--stage fem` adds `fem.csv` — the load cases, what each did, and the caveat.
-`--stage cam` adds the G-code: `<sheet> - T<n>.nc`, one file per cutter, each
-complete and starting by loading its own tool.
+`--stage fem` adds `fem.csv` — the load cases, what each did, and the caveat
+— and a plot of each. `--stage cam` adds the G-code: `<sheet>-T<n>.nc`, one
+file per cutter, each complete and starting by loading its own tool. Both are
+part of `--stage all`, so one command produces everything; either runs on its
+own against the saved project.

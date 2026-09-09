@@ -27,14 +27,14 @@ wet or with extraction, and wear a mask.**
 Each sheet carries its own hole table (centres from the part origin), so a
 shop that would rather type coordinates than trace a profile can.
 
-**Or cut them yourself.** `<sheet> - T<n>.nc` is G-code for a 600 x 400 grbl
+**Or cut them yourself.** `<sheet>-T<n>.nc` is G-code for a 600 x 400 grbl
 router, one file per cutter, nested on a 320 x 320 sheet: 3 mm (bottom
 plate), 2 mm (mid, top and both camera plates) and 5 mm (all four arms). Set
 X0 Y0 at the near corner of the sheet and Z0 on its top face, and run each
 sheet's files in this order — **T2, T3, T4, T1**, which is the order the
 cutters are wanted in and not their numbers: the drills first, then the 2 mm
 for the slots, and the 3.175 mm last because its final pass is what cuts the
-parts free. About 5, 13 and 11 minutes of cutting.
+parts free. About 5, 15 and 14 minutes of cutting.
 
 The parts come out on four 4 x 0.6 mm tabs each; part them with a knife and
 sand the stub. The shaft bore in each arm drops a slug — catch it, or it
