@@ -131,6 +131,35 @@ def _c_com(f, c):
     return all(_within(x, y, tol) for x, y in zip(got, c["value"])), got
 
 
+def _c_faces(f, c):
+    """How many faces, optionally of one kind.
+
+    The cheapest check that separates a part from the block of its own bbox:
+    a block has six planes whatever its size, an L-bracket has fourteen. bbox
+    and volume together cannot see the difference between a shape and any
+    other shape of the same size and displacement; this can.
+    """
+    if "of" in c:
+        got = f.get("faces_by_kind", {}).get(c["of"], 0)
+    else:
+        got = f.get("faces", 0)
+    if "eq" in c:
+        return got == c["eq"], got
+    return c.get("min", 0) <= got <= c.get("max", 1 << 30), got
+
+
+def _c_area(f, c):
+    """Total surface area. Sensitive to every hole, step and pocket that
+    volume can be made to compensate for."""
+    got = f.get("area")
+    if got is None:
+        return False, None
+    if "min" in c or "max" in c:
+        return c.get("min", -math.inf) <= got <= c.get("max", math.inf), got
+    tol = c["value"] * c.get("tol_pct", 1.0) / 100.0
+    return _within(got, c["value"], tol), got
+
+
 CHECKS = {
     "solids": _c_solids,
     "bbox": _c_bbox,
@@ -140,6 +169,8 @@ CHECKS = {
     "com": _c_com,
     "solid_com": _c_solid_com,
     "solid_volume": _c_solid_volume,
+    "faces": _c_faces,
+    "area": _c_area,
 }
 
 

@@ -48,6 +48,7 @@ tasks/*.json     a part described in prose, plus the checks its geometry must pa
 arms/*.json      a Designer configuration under test (tool surface, extra prompting)
 oracle/          bench_oracle (C++/OCCT) reads a STEP back; grade.py applies the checks
 runners/         reference.py — the by-hand build of every task; the harness's self-test
+                 villain.py   — a block of each task's own bbox; the harness's floor
 run.py           the sweep: arm x task x rep, sequential, one fresh instance each
 results/         committed run records, one directory per sweep
 ```
@@ -120,13 +121,47 @@ failed dimension check is a failure to model, not a failure to guess.
 | `t4-slider-crank` | 4 | three PARTS and an ASSEMBLY: mates that have to place things where the geometry says, not where a number was typed |
 | `t5-crank-motion` | 5 | the same, plus **saying what it does** — the stroke over a full turn, and whether anything collides |
 
-`runners/reference.py` builds all ten by hand and must score 48/48. It costs
+`runners/reference.py` builds all ten by hand and must score 49/49. It costs
 nothing, it runs in about a minute, and it is the first thing to run when a
 sweep looks wrong: **if the reference arm fails, the harness or the app is
 broken, not the agent.** It is also where a task's expected numbers get checked
 — two of the first eight were wrong when written, and T4's were wrong twice
 (the largest solid is the piston, not the crank; and origin-to-origin mates
 stack all three parts on the crank axis, which the bbox check caught).
+
+### The other control: `runners/villain.py`
+
+`reference.py` is the ceiling. The villain is the floor, and it asks the
+opposite question: **does a task's check set actually distinguish the part
+from a block?** It reads each task's own `bbox` check and extrudes exactly
+that block — no holes, no steps, no bosses, prompt ignored entirely. Every
+check that survives is a check doing no work, and a task the villain passes
+outright is broken.
+
+It costs nothing and it earned its keep on the first run:
+
+    BROKEN t0-plate        4/4   bbox, inclined_planes, solids, volume
+    weak   t1-l-bracket    3/4   bbox, inclined_planes, solids
+
+`t0-plate` is degenerate rather than broken — the part described IS the block
+of its own bbox — so it now declares `villain_passable: true` with a reason.
+Declaring it rather than letting the runner infer it means a task that starts
+or stops passing the villain for any OTHER reason still fails loudly
+(`MOVED`). `t1-l-bracket` was the real finding: an L is not a block, yet
+three of its four checks survived one, so an agent that built the wrong
+bracket still scored 75%. Its discriminating check was `volume` alone. It now
+also asserts fourteen planar faces — a block has six.
+
+That gap existed because `bench_oracle` had emitted `faces_by_kind` and `area`
+all along and `grade.py` implemented neither as a check. Both are check kinds
+now:
+
+    {"kind": "faces", "of": "plane", "eq": 14}
+    {"kind": "area", "value": 17088.0, "tol_pct": 1.0}
+
+`faces` is the cheapest check that needs the actual shape; `area` is sensitive
+to every hole, step and pocket that a volume figure can be made to compensate
+for. Reach for one of them when a new task's checks are all size-and-mass.
 
 ### Why T4 and T5 exist
 
