@@ -104,8 +104,6 @@ T_MID = 2.0
 T_TOP = 2.0
 T_SIDE = 2.0
 CF_DENSITY = 1.55e-3       # g/mm^3, 3K twill carbon plate
-CF_YIELD_MPA = 550.0       # in-plane, quasi-isotropic laminate — the
-                           # same figure the material table carries
 
 PLATE_L = 108.0            # bottom and mid plate: X
 PLATE_W = 88.0             # ... and Y
