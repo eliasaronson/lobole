@@ -46,6 +46,7 @@ keeping the bad ones is being able to see the line move.
 ```
 tasks/*.json     a part described in prose, plus the checks its geometry must pass
 arms/*.json      a Designer configuration under test (tool surface, extra prompting)
+arms/document_mcp.py  the direct-emission arm's server: no RPCs, one document
 oracle/          bench_oracle (C++/OCCT) reads a STEP back; grade.py applies the checks
 runners/         reference.py — the by-hand build of every task; the harness's self-test
                  villain.py   — a block of each task's own bbox; the harness's floor
@@ -128,6 +129,38 @@ broken, not the agent.** It is also where a task's expected numbers get checked
 — two of the first eight were wrong when written, and T4's were wrong twice
 (the largest solid is the piston, not the crank; and origin-to-origin mates
 stack all three parts on the crank axis, which the bbox check caught).
+
+### The `document` arm: is the RPC surface a help or a tax?
+
+`full`, `rpc-only` and `script-first` all reach the app through the API, so no
+arm here could ever answer the question vcad's mecheval answers against
+themselves. Their runs, same model, same tiers (claude-opus-4-7):
+
+    tier   direct (emit the .vcad JSON)   through the MCP tool loop
+    a1              88%                            82%
+    a2             100%                            72%
+    a3              56%                            56%
+    a4              82%                            42%
+
+**Emitting the document format in one shot beat driving their own API.** The
+`document` arm asks the same of ours: `benchmarks/arms/document_mcp.py` serves
+exactly two tools — `document_format()`, which returns the format version and
+a worked example the app builds itself (so it cannot drift from what the
+loader accepts), and `write_document(json)`, which swallows a whole project
+and reports what the kernel made of it.
+
+It deliberately does NOT live in `tools/designer_mcp.py`. A product tool that
+takes a whole document would be a second way to author, and the benchmark
+would then be measuring a surface that exists because the benchmark wanted it.
+
+### pass^k
+
+`--reps 3` averaged, which reports a one-in-three failure as 67%. That is the
+wrong shape for "can an agent do this *reliably*", which is what the arms are
+being compared on. The summary now also carries **pass^k**: a task counts only
+if every rep of it was clean. On synthetic records with one task clean 3/3 and
+one clean 2/3, the old columns read 23/24 checks and 5/6 clean runs; pass^k
+reads 1/2. The harsher number is the honest one.
 
 ### The other control: `runners/villain.py`
 
