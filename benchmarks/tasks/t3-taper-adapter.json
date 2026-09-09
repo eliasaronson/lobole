@@ -1,0 +1,58 @@
+{
+  "id": "t3-taper-adapter",
+  "tier": 3,
+  "title": "Tapered bored adapter",
+  "prompt": "All dimensions are millimetres. Build exactly what is described — no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA tapered adapter on the Z axis, from Z=0 to Z=30:\n- the outside is a straight taper, 40 diameter at Z=0 falling to 24 diameter at Z=30 — one continuous conical surface from end to end, not a series of steps;\n- a 12 diameter bore runs all the way through, on the Z axis.\nThe part is one solid, centred on the Z axis.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected solid"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        40,
+        40,
+        30
+      ],
+      "tol": 0.2,
+      "why": "overall size"
+    },
+    {
+      "kind": "volume",
+      "value": 21237.166,
+      "tol_pct": 1.0,
+      "why": "a true frustum, not a staircase that averages the same envelope"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 12,
+      "internal": true,
+      "count": 1,
+      "why": "the bore, and it reads as a hole rather than a boss"
+    },
+    {
+      "kind": "com",
+      "value": [
+        0,
+        0,
+        12.16
+      ],
+      "tol": 0.5,
+      "why": "a taper is bottom-heavy; a straight tube would sit at 15"
+    },
+    {
+      "kind": "surfaces",
+      "of": "cone",
+      "min": 1,
+      "why": "the taper is a real cone — revolve and loft both give one, a stack of discs gives none"
+    },
+    {
+      "kind": "surfaces",
+      "of": "plane",
+      "max": 4,
+      "why": "two annular ends; a stepped approximation adds a plane per step"
+    }
+  ]
+}

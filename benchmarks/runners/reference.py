@@ -11,6 +11,7 @@ nothing here and costs an entire paid sweep if it is found later.
 """
 import argparse
 import json
+import math
 import os
 import sys
 import tempfile
@@ -23,6 +24,9 @@ from smoke_app import launch          # noqa: E402
 from grade import grade_file          # noqa: E402
 
 XY = {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}
+# U = X, V = +Z. The obvious normal (0,1,0) gives V = -Z (V = normal x uAxis)
+# and negates every height — the trap t3-gusset-bracket exists to catch.
+XZ = {"origin": [0, 0, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]}
 
 
 def plane(origin, normal=(0, 0, 1), u=(1, 0, 0)):
@@ -39,6 +43,10 @@ def extrude(d, sid, dist, mode="new_body", name="E", **kw):
     return d.call("add_feature", feature={"type": "Extrude", "name": name,
                                           "sketch_id": sid, "distance": dist,
                                           "mode": mode, **kw})
+
+
+def feat(d, **kw):
+    return d.call("add_feature", feature=kw)
 
 
 def circle(cx, cy, r, **kw):
@@ -106,6 +114,48 @@ def t3_parametric_bushing(d):
                      circle(0, 0, 6, r_expr="bore / 2")])
     extrude(d, sid, 30)
     d.call("set_variable", name="bore", expression="20")
+
+
+
+def t3_coil_spring(d):
+    """Helix + sweep. Stacked rings would have the same envelope and no
+    bspline face anywhere in them."""
+    path = feat(d, type="Curve3D", kind="helix", origin=[0, 0, 0],
+                axis=[0, 0, 1], radius=20, pitch=10, turns=5, name="Helix")["id"]
+    prof = sketch(d, [circle(20, 0, 2)], XZ, name="Wire")
+    feat(d, type="Sweep", profile_id=prof, path_id=path, mode="new_body",
+         name="Coil")
+
+
+def t3_taper_adapter(d):
+    """Revolved frustum with a through bore. The profile is (radius, Z), so
+    the bore is the pair of points at U=6 and the taper is 20 -> 12."""
+    prof = [{"type": "line", "a": [6, 0], "b": [20, 0]},
+            {"type": "line", "a": [20, 0], "b": [12, 30]},
+            {"type": "line", "a": [12, 30], "b": [6, 30]},
+            {"type": "line", "a": [6, 30], "b": [6, 0]}]
+    sid = sketch(d, prof, XZ, name="Section")
+    feat(d, type="Revolve", sketch_id=sid, axis={"kind": "z"}, angle_deg=360,
+         mode="new_body", name="Adapter")
+
+
+def t3_bent_tube(d):
+    """A 90 degree bent rod. Sweeping a circle along a SKETCH arc is the only
+    route to a true torus face — Curve3D has no arc kind, so a Pipe along a
+    fit_spline gives bspline instead (both are accepted by the task)."""
+    # start_angle/end_angle are RADIANS. There is no _deg spelling, and
+    # `describe` lists the entity types by name with no field docs at all, so
+    # nothing tells you: 90 is accepted and quietly sweeps 116.6 degrees
+    # (90 mod 2pi), which is a plausible arc and the wrong part.
+    path = sketch(d, [{"type": "arc", "center": [0, 0], "radius": 40,
+                       "start_angle": 0, "end_angle": math.pi / 2}],
+                  XY, name="Path")
+    # The profile plane's normal is the path TANGENT at the start: the arc
+    # leaves (40,0,0) heading +Y, so a plane normal of +X is refused.
+    prof = sketch(d, [circle(0, 0, 10)],
+                  plane((40, 0, 0), (0, 1, 0), (0, 0, 1)), name="Section")
+    feat(d, type="Sweep", profile_id=prof, path_id=path, mode="new_body",
+         name="Bend")
 
 
 def _frame(d, name, origin, z=(0, 0, 1), x=(1, 0, 0)):
@@ -184,6 +234,9 @@ BUILDERS = {
     "t2-flange": t2_flange, "t2-stepped-shaft": t2_stepped_shaft,
     "t3-gusset-bracket": t3_gusset_bracket,
     "t3-parametric-bushing": t3_parametric_bushing,
+    "t3-coil-spring": t3_coil_spring,
+    "t3-taper-adapter": t3_taper_adapter,
+    "t3-bent-tube": t3_bent_tube,
     "t4-slider-crank": t4_slider_crank,
     "t5-crank-motion": t5_crank_motion,
 }

@@ -141,18 +141,21 @@ buys back the coverage.
 ## Benchmark — is the API still usable by an agent?
 
 `benchmarks/` grades an agent that has ONLY the MCP surface (`--tools ""`, no
-shell, no repo) on ten described parts (eight static, plus T4/T5 mechanisms), with a C++/OCCT oracle that reads the
+shell, no repo) on thirteen described parts (eleven static, plus T4/T5 mechanisms), with a C++/OCCT oracle that reads the
 exported STEP back and links no designer_core. Changing a tool, a description,
 a refusal message or `help()` changes what this measures — **no benchmark, no
 claim**, and results are committed, never overwritten.
 
 - Free self-test, run it first: `python3 benchmarks/runners/reference.py`
-  builds all ten by hand and must score 48/48. If it fails, the app or a task
-  is broken — not the agent.
-- A sweep costs money: `python3 benchmarks/run.py --reps 3`. It is 90 runs
-  (10 tasks x 3 arms x 3 reps) with a **$180 ceiling** since T4/T5 landed
-  2026-09-04 — not the ~$5 this line used to quote for eight tasks. ASK
-  before spending it. `--dry-run` prints the plan and the ceiling for free.
+  builds all thirteen by hand and must score 67/67. If it fails, the app or a
+  task is broken — not the agent. Its counterpart `negative_controls.py` builds
+  the three construction-sensitive parts the WRONG way and must see every one
+  REJECTED — a check nothing fails is not a check.
+- A sweep costs money: `python3 benchmarks/run.py --reps 3`. It is 117 runs
+  (13 tasks x 3 arms x 3 reps) with a **$234 ceiling** since the three
+  construction tasks landed 2026-09-09 — not the ~$5 this line used to quote
+  for eight tasks. ASK before spending it. `--dry-run` prints the plan and the
+  ceiling for free.
 
 ## Driving / screenshotting the running app
 

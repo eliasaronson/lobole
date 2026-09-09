@@ -1,0 +1,55 @@
+{
+  "id": "t3-coil-spring",
+  "tier": 3,
+  "title": "Helical compression spring",
+  "prompt": "All dimensions are millimetres. Build exactly what is described — no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA helical compression spring whose axis is the Z axis:\n- round wire, 4 diameter;\n- mean coil diameter 40 — the wire's centre-line runs on a 20 radius;\n- pitch 10, 5 full turns, right-handed;\n- the wire's centre-line starts at (20, 0, 0) and rises in +Z.\nThe wire is one continuous helix, and the part is one solid.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one continuous wire, not five rings"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        44,
+        44,
+        54
+      ],
+      "tol": 0.5,
+      "why": "coil 40 across plus the wire, and 5 pitches plus the wire tall"
+    },
+    {
+      "kind": "volume",
+      "value": 7895.692,
+      "tol_pct": 2.0,
+      "why": "a real helix is longer than 5 flat rings of the same radius"
+    },
+    {
+      "kind": "com",
+      "value": [
+        0,
+        0,
+        25
+      ],
+      "tol": 0.5,
+      "why": "centred on the axis, half way up"
+    },
+    {
+      "kind": "surfaces",
+      "of": [
+        "bspline",
+        "extrusion",
+        "revolution"
+      ],
+      "min": 1,
+      "why": "the wire is a swept surface — stacked rings are cylinders only"
+    },
+    {
+      "kind": "surfaces",
+      "of": "plane",
+      "max": 2,
+      "why": "a helix has two flat ends; a stack of N rings has 2N"
+    }
+  ]
+}

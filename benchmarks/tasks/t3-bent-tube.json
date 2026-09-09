@@ -1,0 +1,54 @@
+{
+  "id": "t3-bent-tube",
+  "tier": 3,
+  "title": "Ninety-degree bent bar",
+  "prompt": "All dimensions are millimetres. Build exactly what is described — no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nA bent round bar, 20 diameter and solid (not hollow):\n- its centre-line is a 90 degree circular arc of radius 40, lying in the XY plane and centred on the origin;\n- the centre-line runs from (40, 0, 0) round to (0, 40, 0);\n- both flat ends are perpendicular to the centre-line.\nThe bend follows the arc for its whole length — not a set of straight segments joined together.",
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected bar"
+    },
+    {
+      "kind": "bbox",
+      "size": [
+        50,
+        50,
+        20
+      ],
+      "tol": 1.0,
+      "why": "the swept envelope of a R40 arc with a 10 radius section"
+    },
+    {
+      "kind": "volume",
+      "value": 19739.209,
+      "tol_pct": 3.0,
+      "why": "a quarter torus; mitred straight segments do not have this volume"
+    },
+    {
+      "kind": "com",
+      "value": [
+        25.863,
+        25.863,
+        0
+      ],
+      "tol": 1.5,
+      "why": "symmetric about the 45 degree line, and flat in Z"
+    },
+    {
+      "kind": "surfaces",
+      "of": [
+        "torus",
+        "bspline"
+      ],
+      "min": 1,
+      "why": "a swept bend, by either route it is reachable — sweeping a sketch arc gives a torus, a Pipe along a fit spline gives a bspline. Straight segments give neither"
+    },
+    {
+      "kind": "surfaces",
+      "of": "plane",
+      "max": 2,
+      "why": "the two cut ends only"
+    }
+  ]
+}

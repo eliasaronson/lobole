@@ -178,11 +178,48 @@ a beautiful cone and the wrong diameter must still fail.
 `runners/reference.py` gets a builder for each and must pass 48 + N of N.
 CLAUDE.md's "48/48" and `benchmarks/README.md`'s stale counts move here.
 
-**Acceptance:** `reference.py` green on all 13; and a deliberately-wrong build
-of each (the stacked-extrude version, ~10 lines each, kept in the reference file
-or a sibling) **fails** the surface check while passing bbox and volume. That
-second half is the whole experiment — an assertion that the new check
-discriminates. Without it we have only added checks that everything passes.
+**Result — built and measured 2026-09-09.** `reference.py` is green on all
+thirteen tasks, 67/67. The three new parts measured:
+
+| task | census | bbox | volume |
+|---|---|---|---|
+| `t3-coil-spring` | `bspline:1 plane:2` | 44 × 44 × 53.98 | 7895.69 |
+| `t3-taper-adapter` | `cone:1 cylinder:1 plane:2` | 40 × 40 × 30 | 21237.17 |
+| `t3-bent-tube` | `torus:1 plane:2` | 50 × 50 × 20 | 19739.21 |
+
+`runners/negative_controls.py` is the other half, and the half that proves
+anything: it builds each part the way an agent reaches for when it cannot do
+the real operation, and fails the run if a wrong build passes. All four are
+rejected. The one that matters is the fine staircase:
+
+| wrong build | passes | caught by |
+|---|---|---|
+| spring as 5 flat rings | 0/6 | everything |
+| bend as 6 straight chords | 2/6 | solids, bbox, volume, census (`extrusion:6`) |
+| taper as 6 discs | 4/7 | bbox **and** census |
+| **taper as 60 discs** | **5/7** | **the census, and nothing else** |
+
+Sixty discs at the step midpoints pass `solids`, `bbox`, `volume`, the `Ø12`
+bore and the centre of mass — every dimensional check this benchmark had
+before today — with a census of `cylinder:120 plane:61` and not one cone in
+it. That is the failure mode BenchCAD names, reproduced here on purpose and
+now detected. Six discs are caught by `bbox` as well, which is why the coarse
+version alone would have been a misleading demonstration.
+
+Two things fell out of building them:
+
+- **A sketch arc's `start_angle`/`end_angle` are RADIANS**, there is no `_deg`
+  spelling, and `describe` lists sketch entity types by NAME ONLY
+  (`kSketchEntityTypes`) with no field documentation at all — so nothing tells
+  an agent the unit. `end_angle: 90` is accepted and quietly sweeps 116.6°
+  (90 mod 2π): a plausible arc, the wrong part, no refusal. This is the same
+  trap as `set_mate`'s `rotation`, which was misdiagnosed twice as a solver
+  bug. Not fixed here — changing the tool surface mid-plan changes what the
+  sweep measures — but it is the strongest candidate for the next round, and
+  the benchmark now has a task (`t3-bent-tube`) that an agent will hit it on.
+- The bent-tube negative control exports **zero solids** while still reporting
+  a bbox and a volume: sweeping along a polyline of six chords produces
+  something that is not a closed solid. Worth a look on its own.
 
 ## B4 — the bushing's unchecked expression
 

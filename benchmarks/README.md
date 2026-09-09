@@ -103,7 +103,7 @@ no STEP file records. Those checks read the app's own `get_state` and carry
 
 ## Tasks
 
-Eight parts, tiers T0–T3, 39 oracle checks per repetition. Every prompt pins
+Thirteen parts, tiers T0–T5, 67 oracle checks per repetition. Every prompt pins
 its axes and origin, states millimetres, and forbids unrequested fillets — so a
 failed dimension check is a failure to model, not a failure to guess.
 
@@ -117,16 +117,27 @@ failed dimension check is a failure to model, not a failure to guess.
 | `t2-stepped-shaft` | 2 | coaxial steps, and the centre of mass proves their order |
 | `t3-gusset-bracket` | 3 | a genuinely inclined face (the sketch-plane V-axis trap) |
 | `t3-parametric-bushing` | 3 | variables that drive geometry through a later edit |
+| `t3-coil-spring` | 3 | a helix that must be SWEPT — stacked rings have no bspline |
+| `t3-taper-adapter` | 3 | a real cone; a fine enough disc stack passes every dimension |
+| `t3-bent-tube` | 3 | a swept bend, by either route that reaches one |
 | `t4-slider-crank` | 4 | three PARTS and an ASSEMBLY: mates that have to place things where the geometry says, not where a number was typed |
 | `t5-crank-motion` | 5 | the same, plus **saying what it does** — the stroke over a full turn, and whether anything collides |
 
-`runners/reference.py` builds all ten by hand and must score 48/48. It costs
+`runners/reference.py` builds all thirteen by hand and must score 67/67. It costs
 nothing, it runs in about a minute, and it is the first thing to run when a
 sweep looks wrong: **if the reference arm fails, the harness or the app is
 broken, not the agent.** It is also where a task's expected numbers get checked
 — two of the first eight were wrong when written, and T4's were wrong twice
 (the largest solid is the piston, not the crank; and origin-to-origin mates
 stack all three parts on the crank axis, which the bbox check caught).
+
+`runners/negative_controls.py` is its counterpart and answers the question
+`reference.py` cannot: is a task DISCRIMINATING? It builds each
+construction-sensitive part the wrong way — a spring as flat rings, a cone as
+a stack of discs — and fails if one of them passes. A check that nothing ever
+fails is not a check, and adding one without this only proves that everything
+passes. Sixty discs clear `solids`, `bbox`, `volume`, the bore and the centre
+of mass; only the surface census stops them.
 
 ### Why T4 and T5 exist
 
