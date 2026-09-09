@@ -463,14 +463,28 @@ ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,
 
 void LabelBox(const glm::dvec2& labelPos, const std::string& text,
               glm::dvec2& mn, glm::dvec2& mx) {
+  // Per LINE, and as many lines as there are: a note is one string with
+  // newlines in it, and boxing the whole thing as a single line made every
+  // multi-line note read as running off the sheet (a 200-character hole
+  // table came out 440 mm wide). Lines grow DOWNWARD from `labelPos`, which
+  // is where the exporter draws them.
+  //
   // Count glyphs, not bytes: Ø is two bytes of UTF-8 and one glyph wide.
-  size_t glyphs = 0;
-  for (const unsigned char c : text)
+  size_t widest = 0, glyphs = 0, lines = 1;
+  for (const unsigned char c : text) {
+    if (c == '\n') {
+      widest = std::max(widest, glyphs);
+      glyphs = 0;
+      lines++;
+      continue;
+    }
     glyphs += (c & 0xC0) != 0x80;
-  const double w = std::max<size_t>(glyphs, 1) * 2.2;
-  const double h = 5.0;
-  mn = labelPos - glm::dvec2(w * 0.5, h * 0.5);
-  mx = labelPos + glm::dvec2(w * 0.5, h * 0.5);
+  }
+  widest = std::max(widest, glyphs);
+  const double w = std::max<size_t>(widest, 1) * 2.2;
+  const double h = kLabelLineMM;
+  mn = {labelPos.x - w * 0.5, labelPos.y - h * (lines - 0.5)};
+  mx = {labelPos.x + w * 0.5, labelPos.y + h * 0.5};
 }
 
 namespace {

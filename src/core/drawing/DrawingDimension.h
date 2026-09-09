@@ -107,6 +107,10 @@ struct DimPlaceContext {
 // check_drawing's overlap validator, so what placement avoids is exactly
 // what the validator flags — two estimates would drift and one of them
 // would lie.
+// One line of label text, sheet mm. A note with newlines in it occupies
+// this much per line, growing downward from its position.
+inline constexpr double kLabelLineMM = 5.0;
+
 void LabelBox(const glm::dvec2& labelPos, const std::string& text,
               glm::dvec2& mn, glm::dvec2& mx);
 

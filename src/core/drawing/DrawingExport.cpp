@@ -178,10 +178,23 @@ bool SaveSVG(const DrawingDocument& doc,
           << ' ' << Num(p1.x) << ',' << Num(fy(p1.y)) << ' ' << Num(p2.x) << ','
           << Num(fy(p2.y)) << "\" fill=\"#141418\"/>\n";
     };
+    // A note is one string that may carry newlines, and SVG ignores them:
+    // one <text> per line, stepping down from the position, or a hole table
+    // renders as a single line off the edge of the sheet.
     const auto label = [&](glm::dvec2 at, const std::string& text) {
-      out << "    <text x=\"" << Num(at.x) << "\" y=\"" << Num(fy(at.y))
-          << "\" fill=\"#141418\" text-anchor=\"middle\">" << Esc(text)
-          << "</text>\n";
+      double y = at.y;
+      for (size_t start = 0; start <= text.size();) {
+        const size_t nl = text.find('\n', start);
+        const std::string line =
+            text.substr(start, nl == std::string::npos ? nl : nl - start);
+        out << "    <text x=\"" << Num(at.x) << "\" y=\"" << Num(fy(y))
+            << "\" fill=\"#141418\" text-anchor=\"middle\">" << Esc(line)
+            << "</text>\n";
+        if (nl == std::string::npos)
+          break;
+        start = nl + 1;
+        y -= drawing::kLabelLineMM;
+      }
     };
     if (!dims.empty()) {
       out << "  <g font-family=\"Helvetica, sans-serif\" font-size=\"3.5\">\n";
@@ -324,13 +337,25 @@ bool SavePDF(const DrawingDocument& doc,
     };
     const auto text = [&](glm::dvec2 at, double sizeMm, const std::string& s,
                           double gray, bool center) {
-      double x = at.x;
-      // Rough centring: Helvetica averages ~0.5em/char.
-      if (center)
-        x -= 0.25 * sizeMm * static_cast<double>(PdfText(s).size());
-      cs << gray << ' ' << gray << ' ' << gray << " rg BT /F1 " << P(sizeMm)
-         << " Tf " << P(x) << ' ' << P(at.y) << " Td (" << PdfText(s)
-         << ") Tj ET\n";
+      // One line at a time: a PDF text object does not break on newlines
+      // either, and a note is allowed to have them.
+      double y = at.y;
+      for (size_t start = 0; start <= s.size();) {
+        const size_t nl = s.find('\n', start);
+        const std::string line =
+            s.substr(start, nl == std::string::npos ? nl : nl - start);
+        double x = at.x;
+        // Rough centring: Helvetica averages ~0.5em/char.
+        if (center)
+          x -= 0.25 * sizeMm * static_cast<double>(PdfText(line).size());
+        cs << gray << ' ' << gray << ' ' << gray << " rg BT /F1 " << P(sizeMm)
+           << " Tf " << P(x) << ' ' << P(y) << " Td (" << PdfText(line)
+           << ") Tj ET\n";
+        if (nl == std::string::npos)
+          break;
+        start = nl + 1;
+        y -= drawing::kLabelLineMM;
+      }
       cs << "0 0 0 rg\n";
     };
 

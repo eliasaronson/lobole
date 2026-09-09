@@ -791,6 +791,21 @@ TEST_CASE("Hole rim element names carry the hole feature id",
                                 3.14159) == nullptr);
 }
 
+TEST_CASE("a note's box is measured per line", "[drawing][dimension]") {
+  // A note is one string that may carry newlines. Boxing the whole thing as
+  // one line made a 200-character hole table 440 mm wide, so every
+  // multi-line note on an A3 sheet reported as running off the border —
+  // which is why a quadcopter's sheets emit one note per line.
+  glm::dvec2 mn, mx, mn2, mx2;
+  drawing::LabelBox({100.0, 100.0}, "ABCDEFGHIJ", mn, mx);
+  drawing::LabelBox({100.0, 100.0}, "ABCD\nEFGH\nIJ", mn2, mx2);
+  CHECK(mx2.x - mn2.x < mx.x - mn.x); // as wide as its widest line
+  CHECK_THAT(mx2.x - mn2.x, Catch::Matchers::WithinAbs(4 * 2.2, 1e-9));
+  CHECK_THAT(mx2.y - mn2.y,
+             Catch::Matchers::WithinAbs(3 * drawing::kLabelLineMM, 1e-9));
+  CHECK_THAT(mx2.y, Catch::Matchers::WithinAbs(mx.y, 1e-9)); // grows DOWNWARD
+}
+
 TEST_CASE("a callout is auto-placed clear of the view",
           "[drawing][callout][dimension]") {
   // Auto-placement re-resolved the dimension itself, with no DimContext —
