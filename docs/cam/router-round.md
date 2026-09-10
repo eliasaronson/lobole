@@ -25,7 +25,7 @@ words; a job document with machine profiles, placement, per-part fixturing.
 
 | gap | who has it | what they do | what it decides here |
 |---|---|---|---|
-| **GRBL post** | FreeCAD `grbl_post.py` (deprecated for a generic `Generic_Grbl.fcm`); Kiri:Moto `Any.Generic.Grbl.json` | FreeCAD: *"Default to not outputting M6 tool changes (comment it) as grbl currently does not handle it"*, no `G43`, arcs as incremental IJ, `--translate_drill` because GRBL has **no canned cycles**. Kiri:Moto emits an inline `M6 T{tool}` and nothing else — which a stock GRBL ignores | **R1**: a `grbl` dialect: `G21 G90 G17 G94`, no `M6`, no `G43`, a tool change is `M5` · a message · `M0`, arcs IJ (we already write incremental IJ), and nothing to translate because our drill is already plain moves |
+| **GRBL post** | FreeCAD `grbl_post.py` (deprecated for a generic `Generic_Grbl.fcm`); Kiri:Moto `Any.Generic.Grbl.json` | FreeCAD: *"Default to not outputting M6 tool changes (comment it) as grbl currently does not handle it"*, no `G43`, arcs as incremental IJ, `--translate_drill` because GRBL has **no canned cycles**. Kiri:Moto emits an inline `M6 T{tool}` and nothing else — which a stock GRBL ignores | **R1**: a `grbl` dialect: `G21 G90 G17 G94`, no `M6`, no `G43`, a tool change is `T<n>` · `M5` · a message · `M0`, arcs IJ (we already write incremental IJ), and nothing to translate because our drill is already plain moves |
 | **File per tool** | FreeCAD `SplitOutput` with `OrderOutputBy` | one program per tool, named for it | **R2**: `Setup::splitOutput`; forces tool order; N files beside the project, each complete |
 | **Holes bigger than the tool** | FreeCAD `Path/Op/Helix.py`: turns = `ceil(height / min(2πr·tan(angle), pitch))` as two 180° arcs each, then a flat finish circle; annulus of radii from outer to inner by `StepOver`; a hole smaller than the tool is *"Skipped hole at position"*. Kiri:Moto: a separate `helical` op, the drill op never bores | the refusal the user hit ("an 8 mm hole with a 6 mm tool") is a bore, not a refusal | **R3**: the Drill verb derives a **helical bore** when the hole is wider than the tool, and a plunge when it is not |
 | **Peck drilling** | FreeCAD G83/G73 via `DrillCycleExpander.py` (G83 retracts fully to R each peck; G73 to `next + 5 % of peck`); Kiri:Moto expands pecks itself (`camDrillDown` 5 mm, dwell, lift) and emits **no G81/G83 anywhere** | pecks as plain moves, since neither GRBL nor our post speaks cycles | **R3**: `Operation::peck`, expanded moves, default derived from the tool |
@@ -95,17 +95,25 @@ drawing's snapshot stack is the pattern and it costs nothing at this size.
 ### R1 — the GRBL post (~½ session)
 
 A `grbl` row in `kDialects`: preamble `G21 G90 G17 G94`, no `G43`, no `M6`;
-tool change = retract, `M5`, `(change to T2: 3 mm flat — set Z zero, then
-cycle start)`, `M0`, then `S… M3`; end `M2`. Nothing to translate: the drill
-already posts plain moves. The machine profile's post combo lists it.
+tool change = retract, `T2`, `M5`, `(change to T2: 3 mm flat — set Z zero,
+then cycle start)`, `M0`, then `S… M3`; end `M2`. Nothing to translate: the
+drill already posts plain moves. The machine profile's post combo lists it.
 Test: a two-tool job posted for grbl has no `M6`/`G43`/`G8x`, one `M0` with
 the message, arcs as `G2/G3 … I J`; the verifier reads it back identically
 to the mach3 file (the same cut, in two dialects).
 
+**The bare `T<n>` came later** (2026-09-09), and the reason is worth keeping:
+M6 is the word GRBL ignores, but T alone it parses and acts on by moving
+nothing. Leaving it out made the operator's message the ONLY thing in the
+file that named the cutter — so every reader of a grbl program, this
+project's verifier included, had to assume tool 1 after the first change.
+It simulated a 2 mm cutter's slots with a 3.175 mm one and called a correct
+job scrap (docs/modeling/fpv-drone.md, finding 1).
+
 ### R2 — file per tool (~½ session, v78)
 
 `Setup::splitOutput`; when set, `order` is forced to `Tool` (the panel says
-so) and Save G-code writes `<project> - <setup> - T<n>.nc` per tool, each a
+so) and Save G-code writes `<project> - <setup>-T<n>.nc` per tool, each a
 complete program with its own preamble and end and no tool-change block;
 the panel and `cam_post` name every file. RPC: `split_output` on
 `set_cam_setup`; `cam_post` returns `files: [{tool, path, gcode}]`. Golden
@@ -125,6 +133,25 @@ other op (the bore must not gouge; leftover in the hole must be nil).
 G83 reading, the one that clears chips), default `tool.diameter` when the
 depth exceeds three diameters, else none. The 8 mm-hole-with-a-6 mm-tool
 refusal becomes a bore; a hole *smaller* than the tool stays a refusal.
+
+**The depth a drill derives** (2026-09-09). Top from the STOCK, so an entry
+rapid is above the material. Bottom from the bore's own extent — and a bore
+that reaches the bottom of the PART goes on down by the point's own height
+(`TipHeight`), because a drill is a cone: stopping its lowest point at the
+far face leaves a ring of material the shape of that cone and the hole is
+not a hole. Zero for a flat mill, the cone for a drill or V-bit, the radius
+for a ball; a BLIND hole keeps its floor, where the cone IS the bottom of
+the hole. "Reaches the bottom" is measured against the MODEL's bounds: the
+stock's bottom plus its bottom margin recovers that only for relative stock,
+and on a fixed sheet a few microns of bounding-box difference then decided
+whether a hole broke out at all (docs/modeling/fpv-drone.md, finding 8).
+
+**The rapid check knows the same shape.** A rapid is flagged when it passes
+through material, and it used to model every tool as a cylinder of its own
+diameter while the CUT used `TipHeight` — so a drill retracting straight up
+the hole it had just made found its own cone in the way, and every through
+hole in a job reported a rapid through stock. Both sides ask one function
+now (docs/modeling/fpv-drone.md, finding 3).
 
 ### R4 — dogbones (~1 session, v80)
 
