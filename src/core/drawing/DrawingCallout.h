@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Units.h"
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -39,8 +41,11 @@ const HoleFeature* FindHoleForRef(const Document& doc,
                                   const std::string& mappedName,
                                   double modelRadius);
 
-// "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°").
-std::string FormatHoleCallout(const HoleFeature& hole);
+// "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°"), with
+// every length in the document's unit and no suffix — the title block says
+// which, once, as it does for every other number on the sheet.
+std::string FormatHoleCallout(const HoleFeature& hole,
+                              const units::System& units = {});
 
 // The uniform centre-to-centre pitch of a collinear row, or nullopt when the
 // centres aren't collinear (within tol) or the gaps aren't uniform. Two

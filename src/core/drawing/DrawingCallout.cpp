@@ -92,18 +92,20 @@ const HoleFeature* FindHoleForRef(const Document& doc,
   return nullptr;
 }
 
-std::string FormatHoleCallout(const HoleFeature& hole) {
-  std::string out = "\xC3\x98" + core::FormatLength(hole.diameter);
-  out += hole.through ? " THRU" : " DEEP " + core::FormatLength(hole.depth);
+std::string FormatHoleCallout(const HoleFeature& hole,
+                              const units::System& units) {
+  const auto len = [&](double mm) { return core::FormatLength(mm, units); };
+  std::string out = "\xC3\x98" + len(hole.diameter);
+  out += hole.through ? " THRU" : " DEEP " + len(hole.depth);
   if (hole.kind == HoleKind::Counterbore) {
-    out += " CBORE \xC3\x98" + core::FormatLength(hole.cbDiameter) + " DEEP " +
-           core::FormatLength(hole.cbDepth);
+    out +=
+        " CBORE \xC3\x98" + len(hole.cbDiameter) + " DEEP " + len(hole.cbDepth);
   } else if (hole.kind == HoleKind::Countersink) {
     const double angle =
         2.0 * std::atan2((hole.csDiameter - hole.diameter) / 2.0,
                          std::max(hole.csDepth, 1e-9));
-    out += " CSK \xC3\x98" + core::FormatLength(hole.csDiameter) +
-           " \xC3\x97 " + core::FormatAngle(angle); // "× 90°"
+    out += " CSK \xC3\x98" + len(hole.csDiameter) + " \xC3\x97 " +
+           core::FormatAngle(angle, units); // "× 90°"
   }
   return out;
 }

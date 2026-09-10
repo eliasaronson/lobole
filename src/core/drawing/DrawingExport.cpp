@@ -39,6 +39,21 @@ std::string Esc(const std::string& s) {
   return out;
 }
 
+// What the numbers on this sheet are in, for the title block.
+//
+// Every dimension is a bare number because drafting practice states the unit
+// ONCE — so if the sheet never states it, the drawing is unreadable rather
+// than merely terse. It never did: the title block was PROJECT / DOCUMENT /
+// AUTHOR / DATE, and an inch part's sheet printed millimetres and said
+// nothing. The angle unit is appended only when it is not the degrees the
+// degree signs already declare.
+std::string UnitsRow(const units::System& sys) {
+  std::string out = units::ToString(sys.length);
+  if (sys.angle == units::Angle::Radian)
+    out += " / rad";
+  return out;
+}
+
 // Trim a double to a compact fixed form (0.001 mm precision is well under
 // plotter resolution and keeps the file small + diffable).
 std::string Num(double v) {
@@ -97,7 +112,8 @@ bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error,
-             const std::vector<drawing::ResolvedNote>& notes) {
+             const std::vector<drawing::ResolvedNote>& notes,
+             const units::System& units) {
   try {
     const Sheet& sheet = doc.GetSheet();
     const SheetChrome chrome = ChromeOf(sheet);
@@ -247,8 +263,9 @@ bool SaveSVG(const DrawingDocument& doc,
     const Row rows[] = {{"PROJECT", sheet.titleBlock.project},
                         {"DOCUMENT", sheet.titleBlock.document},
                         {"AUTHOR", sheet.titleBlock.author},
-                        {"DATE", sheet.titleBlock.date}};
-    const int nRows = 4;
+                        {"DATE", sheet.titleBlock.date},
+                        {"UNITS", UnitsRow(units)}};
+    const int nRows = 5;
     const double rowH = tbH / nRows;
     out << "  <g font-family=\"Helvetica, sans-serif\" font-size=\"3.5\">\n";
     out << "    <rect x=\"" << Num(x0) << "\" y=\"" << Num(fy(y0 + tbH))
@@ -290,7 +307,8 @@ bool SavePDF(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error,
-             const std::vector<drawing::ResolvedNote>& notes) {
+             const std::vector<drawing::ResolvedNote>& notes,
+             const units::System& units) {
   try {
     const Sheet& sheet = doc.GetSheet();
     const SheetChrome chrome = ChromeOf(sheet);
@@ -416,8 +434,9 @@ bool SavePDF(const DrawingDocument& doc,
     const Row rows[] = {{"PROJECT", sheet.titleBlock.project},
                         {"DOCUMENT", sheet.titleBlock.document},
                         {"AUTHOR", sheet.titleBlock.author},
-                        {"DATE", sheet.titleBlock.date}};
-    const int nRows = 4;
+                        {"DATE", sheet.titleBlock.date},
+                        {"UNITS", UnitsRow(units)}};
+    const int nRows = 5;
     const double rowH = tbH / nRows;
     cs << P(0.35) << " w " << P(x0) << ' ' << P(y0) << ' ' << P(tbW) << ' '
        << P(tbH) << " re S\n";

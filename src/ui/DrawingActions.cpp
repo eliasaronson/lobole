@@ -389,6 +389,16 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
       // drawing is its own tab, so the assembly it draws is never the active
       // one while the drawing is on screen.
       const uint64_t sourceId = view->sourceDocId;
+      // The units a sheet is written in are the SOURCE document's, not the
+      // reader's — a drawing of an inch part is an inch drawing wherever it
+      // is opened, exactly as the part is. Dimension text ignored this
+      // entirely and always printed millimetres.
+      if (ctx.sourceDoc != nullptr) {
+        ctx.units = ctx.sourceDoc->Units();
+      } else if (const AssemblyDocument* asmDoc =
+                     AssemblyDocById(state, sourceId)) {
+        ctx.units = asmDoc->Units();
+      }
       ctx.occurrenceDoc = [&state,
                            sourceId](uint64_t occId) -> const Document* {
         const AssemblyDocument* asmDoc = AssemblyDocById(state, sourceId);
@@ -501,14 +511,28 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
     }
     notes.push_back(resolved);
   }
+  // The sheet declares what its bare numbers are in, and it has to be the
+  // same system the dims were FORMATTED in — the first view's source
+  // document, which is what ResolveDrawingDim used for each of them.
+  units::System sheetUnits;
+  for (const DrawingView& v : state.drawing->GetViews()) {
+    if (const Document* src = DrawingSourceDocument(state, v.sourceDocId)) {
+      sheetUnits = src->Units();
+      break;
+    }
+    if (const AssemblyDocument* a = AssemblyDocById(state, v.sourceDocId)) {
+      sheetUnits = a->Units();
+      break;
+    }
+  }
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext == ".svg")
     return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error,
-                                  notes);
+                                  notes, sheetUnits);
   if (ext == ".pdf")
     return DrawingExport::SavePDF(*state.drawing, views, dims, path, error,
-                                  notes);
+                                  notes, sheetUnits);
   if (error)
     *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
   return false;
