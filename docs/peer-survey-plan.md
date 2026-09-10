@@ -15,7 +15,9 @@ knowing about.
 Ordered by what it costs to leave alone.
 
 **Standing, 2026-09-10.** W1, W2 (five of twelve handlers) and W4's villain
-arm, `document` arm and pass^k SHIPPED and merged (`723014c3`). W5 largely
+arm, `document` arm and pass^k SHIPPED and merged (`723014c3`). **W3 SHIPPED**
+on `wtpeer2` (v97): four verbs, five standings, a content-keyed staleness test
+and a golden. W5 largely
 fell out of W1 — the drone's derived layout composes its Z-stack as a formula
 without a new syntax. A second reading of vcad, done after working inside the
 app, added the findings in "Second pass" below and **demoted W6**: a
@@ -23,8 +25,9 @@ verdict-naming fix I had ranked first turned out to have been diagnosed and
 half-fixed here already, and the rest of the manufacturing material is
 contingent on W6, which is now the weakest item on this plan.
 
-Remaining, in order: **W3**, W2's other seven handlers, W4(c), then W6 if it
-earns it.
+Remaining, in order: W2's other seven handlers, W4(c), the drone's own
+`verify()` moved onto declared assertions (the dogfood proof W3 is still
+owed), then W6 if it earns it.
 
 ---
 
