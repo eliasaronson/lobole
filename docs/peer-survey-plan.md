@@ -14,6 +14,18 @@ knowing about.
 
 Ordered by what it costs to leave alone.
 
+**Standing, 2026-09-10.** W1, W2 (five of twelve handlers) and W4's villain
+arm, `document` arm and pass^k SHIPPED and merged (`723014c3`). W5 largely
+fell out of W1 — the drone's derived layout composes its Z-stack as a formula
+without a new syntax. A second reading of vcad, done after working inside the
+app, added the findings in "Second pass" below and **demoted W6**: a
+verdict-naming fix I had ranked first turned out to have been diagnosed and
+half-fixed here already, and the rest of the manufacturing material is
+contingent on W6, which is now the weakest item on this plan.
+
+Remaining, in order: **W3**, W2's other seven handlers, W4(c), then W6 if it
+earns it.
+
 ---
 
 ## W1 — a parameter must survive the script boundary
@@ -138,6 +150,24 @@ Size: medium. The schema is small; the twelve call sites are the work.
 
 ## W3 — assertions that live in the document
 
+**Declared, not detected.** The one design rule to take from vcad's second
+reading, and it belongs here rather than in W6. Their snap-fit rules ship with
+a scope boundary written into the pack:
+
+> *"Automatic detection of a snap beam from geometry alone is not attempted;
+> the designer declares the beam and the arithmetic is enforced."*
+
+A violated limit then REFUSES at export rather than handing a slicer a latch
+that cannot work — our own refusal doctrine, applied to manufacturability.
+
+That is the shape an assertion should take here. The alternative — infer what
+the designer meant from the geometry and check that — is a geometry-inference
+layer that is wrong at exactly the edges where it matters, and it is how a
+checker starts disagreeing with the person using it. An assertion is something
+someone SAID, in their own terms, that the document then holds and re-checks.
+It also makes the honest answer cheap: an assertion whose subject no longer
+resolves is `Stale`, not a silent pass, which is the W2 rule one level up.
+
 Every check we have is one-shot. vcad's `check_clearance` stores a **labelled**
 assertion on the document, and `verify_receipt` re-reports it later as
 `Holds` / `Stale` / `Violated`.
@@ -227,6 +257,13 @@ of it `d.param` already bought.
 
 ## W6 — a DFM check that returns fixable issues
 
+**Demoted after the second pass, and it should be decided on its own merits.**
+CAM already tells us whether a toolpath can cut the part, so DFM's distinct
+value is narrow: catching a thin wall BEFORE CAM, and covering processes we
+generate no toolpaths for. It ranks behind W3 and behind W2's remaining seven
+handlers. If it happens, it takes the rule-pack shape and the face naming from
+"Second pass" with it from the start.
+
 forgent3d's `print_check` runs on the **real BREP, never the tessellation**:
 wall thickness by inward ray casting (`IntCurvesFace_ShapeIntersector` — our
 kernel, same call), overhang by per-facet normal against the build axis, small
@@ -241,6 +278,88 @@ perimeters."* Independent of everything above.
 Size: medium.
 
 ---
+
+## Second pass — what a reading of vcad found after working in the app
+
+Five more findings, and a correction that matters more than any of them.
+
+### The correction: our checks already learned this lesson
+
+vcad's `DfmIssue` carries `face_indices` plus `origin_op` — the node that made
+the face — and a machine-applicable `DfmFix` (`SetParam{node, path, value}` /
+`WrapOp` / `ReplaceOp`), so an agent gets a patch rather than a complaint.
+Their provenance is a stub (`ProvenanceMap` "ships the data model only"),
+while ours has been real all along: `NamePrimitiveElements(shape,
+std::to_string(GetId()), map)` means **the element-name prefix IS the feature
+id**, so `1/face3` already says "face 3 of feature 1".
+
+The obvious conclusion — make `check_geometry` report offending element names
+instead of `int badFaces` — is weaker than it looks, and
+`benchmark-construction-plan.md` is why. The real incident that motivated
+naming had **`bad_faces`, `bad_wires` and `bad_edges` all zero**: the fault was
+at the SHELL level, which has no element name. That was fixed by naming the
+REASON, not the face. Face identity would have added nothing.
+
+So it stays worth doing, but only where something needs it — a DFM issue IS
+about a specific face, B-Rep validity apparently is not. Filed under W6, not
+ahead of it.
+
+One trap for whoever writes it: `CheckGeometry` counts with a
+`TopExp_Explorer` while element names index off a
+`TopTools_IndexedMapOfShape`. Those orders usually agree and are not
+guaranteed to — resolve with `FindIndex`, never by counting explorer steps.
+
+### Worth taking, inside W6 and only there
+
+**DFM is a versioned rule pack, not code.** Twelve TOML packs (`fdm`, `sla`,
+`cnc-3axis`, `hobby-3axis-mill`, `sheet-metal`, two castings, injection
+moulding, four PCB houses), each `schema = "vcad.dfm/1"` with a version, and
+every rule carrying `severity` plus a `fix` that names the repair
+(`thicken_wall`, `raise_fillet_radius`, `reorient_or_support`, `manual`). The
+same wall thickness is an error for CNC and a warning elsewhere, because the
+process is DATA. That is our defaults doctrine — a number carrying a unit
+derived from what it acts on — with the process as the thing it derives from,
+and it joins naturally to CAM machine profiles, which are the same kind of
+object. Cheap at design time, expensive to retrofit: if W6 happens, it starts
+here.
+
+**`floating_floor`**, which is a different check from overhang angle and
+sharper than the per-facet-normal test forgent3d uses: *"A flat downward face
+above first-layer height with no geometry below its footprint starts printing
+in mid-air. Distinct from steep_overhang: 45-degree walls self-support; flat
+shelves cannot."*
+
+### Not now
+
+**Print-then-measure** (`vcad-kernel-calibration`) is what would make
+`Basis::Measured` more than a reserved enumerator: `predict_print` snapshots
+the claim, calipers and a scale supply readings, `record_measurement` binds
+them, and the report yields per-feature deltas plus aggregates a profile can
+act on — axis scale factors, hole undersize, wall/flow offset, which then feed
+defaults. Their framing is the insight: *"the user's own printer is the one fab
+rail with zero vendor dependency, so every print can capture a (predicted,
+measured) pair for near-zero cost."*
+
+It is a real build, and its value depends on a physical loop there is no
+evidence of here — the dogfood rounds end at G-code and STEP, not at a printed
+part and a caliper. `Measured` sitting reserved is honest; a calibration engine
+with nothing measuring into it would not be.
+
+**A shared `CostEstimate` shape** across slicer / DFM / quote panel exists there
+because three surfaces were disagreeing. We have `cutting_minutes` and a BOM
+and no third consumer. Revisit when one appears.
+
+### One-line change, worth making
+
+CLAUDE.md quotes counts that drift: the benchmark line has already moved 8 to
+13 tasks, 48/48 to 68/68, $180 to $390. The file's own rule about ports covers
+it — *"a number repeated in a doc goes stale while the registry cannot"* — so
+point at `reference.py`, which prints the true count, rather than restating it.
+(vcad solves the same class differently: one JSON file per changelog entry with
+the rollup gitignored, "so concurrent PRs never collide on it". We have seven
+worktrees and hit exactly that this round — two plans written the same evening,
+both editing `docs/README.md`, both independently finding the unread
+`faces_by_kind`.)
 
 ## Known and deliberately not doing
 
