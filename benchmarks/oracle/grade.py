@@ -91,46 +91,6 @@ def _c_inclined(f, c):
     return c.get("min", 0) <= got <= c.get("max", 1 << 30), got
 
 
-# Every name `oracle.cpp::SurfaceKind` can emit. A check naming anything else
-# is a typo, and a typo must not read as a measurement — see _c_surfaces.
-SURFACE_KINDS = ("plane", "cylinder", "cone", "sphere", "torus", "bezier",
-                 "bspline", "revolution", "extrusion", "other")
-
-
-def _c_surfaces(f, c):
-    """How many faces of a given surface type the solid carries.
-
-    This is the check that asks HOW the part was built. A revolve and a stack
-    of extruded discs approximating it have the same bbox, the same volume and
-    the same centre of mass; only one of them has a cone in it, and only one
-    keeps its planar face count in single figures. Every other check in this
-    file grades the shape, and the shape cannot tell those two apart.
-
-    `of` takes one name or a list of names summed together, because an
-    operation is usually reachable more than one way — a torus by revolve or by
-    sweep, a taper by revolve or by loft — and a check naming a single surface
-    kind would fail correct work. (BenchCAD's canonical_ops.yaml calls these
-    OR-tuples and needs them for the same reason.)
-    """
-    census = f.get("faces_by_kind") or {}
-    want = c["of"]
-    names = [want] if isinstance(want, str) else list(want)
-    unknown = [n for n in names if n not in SURFACE_KINDS]
-    if unknown:
-        # A misspelt kind counts zero faces, which silently PASSES a `max` and
-        # silently FAILS a `min`. Both look like a result. Refuse instead.
-        return False, {"unknown": unknown, "accepted": list(SURFACE_KINDS)}
-    got = sum(census.get(n, 0) for n in names)
-    if "eq" in c:
-        ok = got == c["eq"]
-    else:
-        ok = c.get("min", 0) <= got <= c.get("max", 1 << 30)
-    # Report the whole census, so a miss reads "it is 46 planes and 12
-    # cylinders" rather than "no cones" — the first names the wrong
-    # construction, the second only says the right one is absent.
-    return ok, {"count": got, "census": census}
-
-
 def _c_solid_com(f, c):
     """Where the i-th solid is, ranked by volume descending.
 
@@ -171,16 +131,74 @@ def _c_com(f, c):
     return all(_within(x, y, tol) for x, y in zip(got, c["value"])), got
 
 
+# Every name `oracle.cpp::SurfaceKind` can emit. A check naming anything else
+# is a typo, and a typo must not read as a measurement — see _c_faces.
+SURFACE_KINDS = ("plane", "cylinder", "cone", "sphere", "torus", "bezier",
+                 "bspline", "revolution", "extrusion", "other")
+
+
+def _c_faces(f, c):
+    """How many faces, optionally of one surface kind.
+
+    The cheapest check that separates a part from the block of its own bbox:
+    a block has six planes whatever its size, an L-bracket has fourteen. bbox
+    and volume together cannot see the difference between a shape and any
+    other shape of the same size and displacement; this can.
+
+    With `of`, it is also the check that asks HOW the part was built. A revolve
+    and a stack of extruded discs approximating it have the same bbox, the same
+    volume and the same centre of mass; only one has a cone in it. `of` takes
+    one kind or a LIST summed together, because an operation is usually
+    reachable more than one way — a bend by sweeping a sketch arc (`torus`) or
+    by piping along a spline (`bspline`) — and naming a single kind would fail
+    correct work. BenchCAD calls these OR-tuples and needs them for the same
+    reason; its own version regexes the model's SOURCE, so a program that
+    writes `.sweep(` and produces a prism passes. A census of the exported
+    B-rep cannot be written past.
+    """
+    census = f.get("faces_by_kind") or {}
+    if "of" in c:
+        want = c["of"]
+        names = [want] if isinstance(want, str) else list(want)
+        unknown = [n for n in names if n not in SURFACE_KINDS]
+        if unknown:
+            # A misspelt kind counts zero faces, which silently PASSES a `max`
+            # and silently FAILS a `min`. Both look like a result.
+            return False, {"unknown": unknown, "accepted": list(SURFACE_KINDS)}
+        got = sum(census.get(n, 0) for n in names)
+    else:
+        got = f.get("faces", 0)
+    ok = (got == c["eq"] if "eq" in c
+          else c.get("min", 0) <= got <= c.get("max", 1 << 30))
+    # Report the whole census when a kind was named, so a miss reads "it is 46
+    # planes and 12 cylinders" rather than "no cones" — the first names the
+    # wrong construction, the second only says the right one is absent.
+    return (ok, {"count": got, "census": census}) if "of" in c else (ok, got)
+
+
+def _c_area(f, c):
+    """Total surface area. Sensitive to every hole, step and pocket that
+    volume can be made to compensate for."""
+    got = f.get("area")
+    if got is None:
+        return False, None
+    if "min" in c or "max" in c:
+        return c.get("min", -math.inf) <= got <= c.get("max", math.inf), got
+    tol = c["value"] * c.get("tol_pct", 1.0) / 100.0
+    return _within(got, c["value"], tol), got
+
+
 CHECKS = {
     "solids": _c_solids,
     "bbox": _c_bbox,
     "volume": _c_volume,
     "cyl_group": _c_cyl_group,
     "inclined_planes": _c_inclined,
-    "surfaces": _c_surfaces,
     "com": _c_com,
     "solid_com": _c_solid_com,
     "solid_volume": _c_solid_volume,
+    "faces": _c_faces,
+    "area": _c_area,
 }
 
 

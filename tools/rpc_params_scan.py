@@ -51,6 +51,22 @@ COND_RE = re.compile(r'\b(?:m|request\.method)\s*==\s*"([A-Za-z0-9_]+)"')
 OPT_OUT = "rpc-params: opaque"
 EXTRA_RE = re.compile(r'rpc-params:\s*([a-z0-9_]+(?:\s*,\s*[a-z0-9_]+)*)\s*$',
                       re.M)
+# A branch that hands its params to a function is a branch whose vocabulary
+# this scanner CANNOT read: everything the helper does with them is invisible
+# here, and the row beside the branch then describes a fraction of what the
+# method accepts. That is not hypothetical -- `add_cam_op` reads fourteen of
+# its twenty-two keys inside ApplyOpFields, the row listed the other eight,
+# and this gate was satisfied by the mismatch because it compares the row
+# against what it can SEE. The generated SDK builds from the row and refuses
+# the rest, so `tabs` was documented in prose and unreachable through it.
+#
+# So a hand-off must be ANNOTATED: `// rpc-params: a, b, c` for the keys the
+# helper reads, or `// rpc-params: none` when it reads none of them. The
+# annotation is a claim a human makes and a reader can check; silence is not.
+HANDOFF_RE = re.compile(r'\b([A-Za-z_][A-Za-z0-9_:]*)\s*\(([^;{}]*?)\)', re.S)
+HANDOFF_ARG_RE = re.compile(r'(?:^|,)\s*(?:const\s+)?(?:p|params)\s*(?:,|$)')
+# Not a hand-off: the readers themselves, and the scanner's own idioms.
+HANDOFF_SKIP = {"if", "while", "for", "switch", "return", "need", "sizeof"}
 
 
 def _strip(src):
@@ -92,13 +108,18 @@ def scan_source(src):
 
     out = {}
 
-    def note(names, key=None, opaque=False):
+    def note(names, key=None, opaque=False, handoff=None, annotated=False):
         for nm in names:
-            e = out.setdefault(nm, {"keys": set(), "opaque": False})
+            e = out.setdefault(nm, {"keys": set(), "opaque": False,
+                                    "handoff": set(), "annotated": False})
             if key:
                 e["keys"].add(key)
             if opaque:
                 e["opaque"] = True
+            if handoff:
+                e["handoff"].add(handoff)
+            if annotated:
+                e["annotated"] = True
 
     # Walk the file once, tracking brace depth and a stack of open method
     # scopes. A scope opens at the `{` following a condition that mentions
@@ -160,14 +181,28 @@ def scan_source(src):
         if mm.group(1).strip() == "opaque":
             continue
         owner = _innermost(scopes, mm.start())
+        if not owner:
+            continue
+        note(owner, annotated=True)
+        # `none` is an annotation with no keys: the helper reads none of them.
+        if mm.group(1).strip() == "none":
+            continue
+        for k in (x.strip() for x in mm.group(1).split(",")):
+            note(owner, key=k)
+    # Who hands the params to a helper, and to which one.
+    for mm in HANDOFF_RE.finditer(bare):
+        callee = mm.group(1)
+        if callee in HANDOFF_SKIP or not HANDOFF_ARG_RE.search(mm.group(2)):
+            continue
+        owner = _innermost(scopes, mm.start())
         if owner:
-            for k in (x.strip() for x in mm.group(1).split(",")):
-                note(owner, key=k)
+            note(owner, handoff=callee)
     # A branch with no keys at all is a real answer (a parameterless method),
     # so make sure every named method appears even when it read nothing.
     for names, _s, _e in scopes:
         note(names)
-    return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"]}
+    return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
+                "handoff": sorted(v["handoff"]), "annotated": v["annotated"]}
             for k, v in out.items()}
 
 
@@ -226,10 +261,15 @@ def scan_files(paths):
     for path in paths:
         with open(path) as f:
             for name, info in scan_source(f.read()).items():
-                e = merged.setdefault(name, {"keys": set(), "opaque": False})
+                e = merged.setdefault(name, {"keys": set(), "opaque": False,
+                                             "handoff": set(),
+                                             "annotated": False})
                 e["keys"].update(info["keys"])
                 e["opaque"] = e["opaque"] or info["opaque"]
-    return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"]}
+                e["handoff"].update(info["handoff"])
+                e["annotated"] = e["annotated"] or info["annotated"]
+    return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
+                "handoff": sorted(v["handoff"]), "annotated": v["annotated"]}
             for k, v in sorted(merged.items())}
 
 

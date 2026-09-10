@@ -29,5 +29,7 @@
       "eq": 0,
       "why": "every face is axis-aligned"
     }
-  ]
+  ],
+  "villain_passable": true,
+  "villain_why": "the part described IS the block of its own bbox \u2014 there is nothing for a villain to omit. Kept as the harness's own smoke test."
 }

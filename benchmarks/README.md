@@ -46,8 +46,10 @@ keeping the bad ones is being able to see the line move.
 ```
 tasks/*.json     a part described in prose, plus the checks its geometry must pass
 arms/*.json      a Designer configuration under test (tool surface, extra prompting)
+arms/document_mcp.py  the direct-emission arm's server: no RPCs, one document
 oracle/          bench_oracle (C++/OCCT) reads a STEP back; grade.py applies the checks
 runners/         reference.py — the by-hand build of every task; the harness's self-test
+                 villain.py   — a block of each task's own bbox; the harness's floor
 run.py           the sweep: arm x task x rep, sequential, one fresh instance each
 results/         committed run records, one directory per sweep
 ```
@@ -123,7 +125,7 @@ failed dimension check is a failure to model, not a failure to guess.
 | `t4-slider-crank` | 4 | three PARTS and an ASSEMBLY: mates that have to place things where the geometry says, not where a number was typed |
 | `t5-crank-motion` | 5 | the same, plus **saying what it does** — the stroke over a full turn, and whether anything collides |
 
-`runners/reference.py` builds all thirteen by hand and must score 67/67. It costs
+`runners/reference.py` builds all thirteen by hand and must score 68/68. It costs
 nothing, it runs in about a minute, and it is the first thing to run when a
 sweep looks wrong: **if the reference arm fails, the harness or the app is
 broken, not the agent.** It is also where a task's expected numbers get checked
@@ -138,6 +140,72 @@ a stack of discs — and fails if one of them passes. A check that nothing ever
 fails is not a check, and adding one without this only proves that everything
 passes. Sixty discs clear `solids`, `bbox`, `volume`, the bore and the centre
 of mass; only the surface census stops them.
+
+### The `document` arm: is the RPC surface a help or a tax?
+
+`full`, `rpc-only` and `script-first` all reach the app through the API, so no
+arm here could ever answer the question vcad's mecheval answers against
+themselves. Their runs, same model, same tiers (claude-opus-4-7):
+
+    tier   direct (emit the .vcad JSON)   through the MCP tool loop
+    a1              88%                            82%
+    a2             100%                            72%
+    a3              56%                            56%
+    a4              82%                            42%
+
+**Emitting the document format in one shot beat driving their own API.** The
+`document` arm asks the same of ours: `benchmarks/arms/document_mcp.py` serves
+exactly two tools — `document_format()`, which returns the format version and
+a worked example the app builds itself (so it cannot drift from what the
+loader accepts), and `write_document(json)`, which swallows a whole project
+and reports what the kernel made of it.
+
+It deliberately does NOT live in `tools/designer_mcp.py`. A product tool that
+takes a whole document would be a second way to author, and the benchmark
+would then be measuring a surface that exists because the benchmark wanted it.
+
+### pass^k
+
+`--reps 3` averaged, which reports a one-in-three failure as 67%. That is the
+wrong shape for "can an agent do this *reliably*", which is what the arms are
+being compared on. The summary now also carries **pass^k**: a task counts only
+if every rep of it was clean. On synthetic records with one task clean 3/3 and
+one clean 2/3, the old columns read 23/24 checks and 5/6 clean runs; pass^k
+reads 1/2. The harsher number is the honest one.
+
+### The other control: `runners/villain.py`
+
+`reference.py` is the ceiling. The villain is the floor, and it asks the
+opposite question: **does a task's check set actually distinguish the part
+from a block?** It reads each task's own `bbox` check and extrudes exactly
+that block — no holes, no steps, no bosses, prompt ignored entirely. Every
+check that survives is a check doing no work, and a task the villain passes
+outright is broken.
+
+It costs nothing and it earned its keep on the first run:
+
+    BROKEN t0-plate        4/4   bbox, inclined_planes, solids, volume
+    weak   t1-l-bracket    3/4   bbox, inclined_planes, solids
+
+`t0-plate` is degenerate rather than broken — the part described IS the block
+of its own bbox — so it now declares `villain_passable: true` with a reason.
+Declaring it rather than letting the runner infer it means a task that starts
+or stops passing the villain for any OTHER reason still fails loudly
+(`MOVED`). `t1-l-bracket` was the real finding: an L is not a block, yet
+three of its four checks survived one, so an agent that built the wrong
+bracket still scored 75%. Its discriminating check was `volume` alone. It now
+also asserts fourteen planar faces — a block has six.
+
+That gap existed because `bench_oracle` had emitted `faces_by_kind` and `area`
+all along and `grade.py` implemented neither as a check. Both are check kinds
+now:
+
+    {"kind": "faces", "of": "plane", "eq": 14}
+    {"kind": "area", "value": 17088.0, "tol_pct": 1.0}
+
+`faces` is the cheapest check that needs the actual shape; `area` is sensitive
+to every hole, step and pocket that a volume figure can be made to compensate
+for. Reach for one of them when a new task's checks are all size-and-mass.
 
 ### Why T4 and T5 exist
 

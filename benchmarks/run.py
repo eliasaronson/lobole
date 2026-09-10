@@ -78,6 +78,15 @@ def load_json_dir(path, wanted):
 
 def mcp_config(port, arm):
     """The agent's whole world: one server, pinned to this run's instance."""
+    if arm.get("server") == "document":
+        # The direct-emission arm gets a different server entirely — one tool
+        # that takes a whole document, and no RPC surface to drive. It lives
+        # in benchmarks/arms/ and not in tools/, because it is an instrument
+        # and not a capability we ship.
+        args = [os.path.join(ROOT, "benchmarks", "arms", "document_mcp.py"),
+                "--port", str(port)]
+        return {"mcpServers": {"designer":
+                               {"command": sys.executable, "args": args}}}
     args = [os.path.join(ROOT, "tools", "designer_mcp.py"), "--port", str(port),
             "--no-autostart"]
     if arm.get("only_tools"):
@@ -287,8 +296,9 @@ def summarize(records, outdir, meta):
     lines = [f"# Designer benchmark — {meta['stamp']}", "",
              f"model `{meta['model']}` · {meta['reps']} rep(s) · "
              f"{len(meta['tasks'])} tasks · sequential on one machine", "",
-             "| arm | checks passed | tasks clean | over-claims | tool calls | "
-             "cost USD | wall s |", "|---|---|---|---|---|---|---|"]
+             "| arm | checks passed | tasks clean | pass^k | over-claims | "
+             "tool calls | cost USD | wall s |",
+             "|---|---|---|---|---|---|---|---|"]
     if broken:
         lines[3:3] = [f"**{len(broken)} cell(s) excluded — the agent never "
                       f"started, so they score nothing rather than zero:** "
@@ -303,7 +313,17 @@ def summarize(records, outdir, meta):
         calls = sum(r["tool_calls"] for r in rs)
         cost = sum(r["cost_usd"] or 0 for r in rs)
         wall = sum(r["wall_s"] or 0 for r in rs)
-        lines.append(f"| {a} | {passed}/{total} | {clean}/{len(rs)} | {over} | "
+        # pass^k: a task counts only if EVERY rep of it was clean. Averaging
+        # reps reports a one-in-three failure as 67%, which is the wrong
+        # shape for "can an agent do this reliably" — the question the arms
+        # exist to compare. mecheval's rule, and the harsher reading is the
+        # honest one.
+        tasks = sorted({r["task"] for r in rs})
+        passk = sum(1 for t in tasks
+                    if all(x["passed"] == x["total"]
+                           for x in rs if x["task"] == t))
+        lines.append(f"| {a} | {passed}/{total} | {clean}/{len(rs)} | "
+                     f"{passk}/{len(tasks)} | {over} | "
                      f"{calls} | {cost:.2f} | {wall:.0f} |")
     lines += ["", "## Per task", "",
               "| task | tier | " + " | ".join(arms) + " |",

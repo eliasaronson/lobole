@@ -43,13 +43,13 @@
       "why": "a taper is bottom-heavy; a straight tube would sit at 15"
     },
     {
-      "kind": "surfaces",
+      "kind": "faces",
       "of": "cone",
       "min": 1,
       "why": "the taper is a real cone — revolve and loft both give one, a stack of discs gives none"
     },
     {
-      "kind": "surfaces",
+      "kind": "faces",
       "of": "plane",
       "max": 4,
       "why": "two annular ends; a stepped approximation adds a plane per step"

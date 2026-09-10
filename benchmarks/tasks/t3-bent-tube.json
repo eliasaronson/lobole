@@ -36,7 +36,7 @@
       "why": "symmetric about the 45 degree line, and flat in Z"
     },
     {
-      "kind": "surfaces",
+      "kind": "faces",
       "of": [
         "torus",
         "bspline"
@@ -45,7 +45,7 @@
       "why": "a swept bend, by either route it is reachable — sweeping a sketch arc gives a torus, a Pipe along a fit spline gives a bspline. Straight segments give neither"
     },
     {
-      "kind": "surfaces",
+      "kind": "faces",
       "of": "plane",
       "max": 2,
       "why": "the two cut ends only"

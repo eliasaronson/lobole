@@ -120,6 +120,104 @@ class V(tuple):
 # The generated RPC surface
 # --------------------------------------------------------------------------
 
+class Param(float):
+    """A number that remembers the expression that produced it.
+
+    The reason 13 of 16 generators declared no document variables at all: the
+    parametric path costs five lines where Python arithmetic costs one. A
+    module constant is evaluated in the runner and reaches the document as a
+    literal, so the drone — 91 occurrences, 42 derived fasteners — opens in
+    the GUI with nothing to turn. vcad names the same disease in its loon
+    bridge: "the emitted document keeps only the arithmetic result, so design
+    intent is unrecoverable."
+
+    A Param IS a float, so every existing path keeps working unchanged —
+    filtering faces by diameter, `list(V(...))`, comparisons, `math.*`. It
+    also carries `.expr`, and arithmetic between Params composes it:
+
+        L = part.param("arm_len", 110)      # Param(110.0, expr="arm_len")
+        x = L - 18                          # Param(92.0,  expr="(arm_len - 18)")
+        part.extrude(s, distance=x)         # distance 92.0, distance_expr "(arm_len - 18)"
+
+    So the script does its arithmetic in Python, as it always did, and the
+    document receives the formula rather than the answer. `_dim`/`_dim3` are
+    where that lands; anywhere the document cannot hold an expression a Param
+    simply behaves as its number, which is exactly today's behaviour.
+
+    Arithmetic with a plain float yields a Param whose expression carries the
+    literal — that is intended: `L / 2` is still driven by `arm_len`.
+    """
+
+    __slots__ = ("expr",)
+
+    def __new__(cls, value, expr):
+        self = float.__new__(cls, value)
+        self.expr = expr
+        return self
+
+    @staticmethod
+    def _e(other):
+        """The expression text for the other operand of a binary op."""
+        if isinstance(other, Param):
+            return other.expr
+        if isinstance(other, str):
+            return other
+        return repr(float(other))
+
+    def _op(self, other, symbol, value, reflected=False):
+        if value is NotImplemented:
+            return NotImplemented
+        a, b = self.expr, Param._e(other)
+        if reflected:
+            a, b = b, a
+        return Param(value, f"({a} {symbol} {b})")
+
+    def __add__(self, o):
+        return self._op(o, "+", float.__add__(self, o))
+
+    def __radd__(self, o):
+        return self._op(o, "+", float.__radd__(self, o), True)
+
+    def __sub__(self, o):
+        return self._op(o, "-", float.__sub__(self, o))
+
+    def __rsub__(self, o):
+        return self._op(o, "-", float.__rsub__(self, o), True)
+
+    def __mul__(self, o):
+        return self._op(o, "*", float.__mul__(self, o))
+
+    def __rmul__(self, o):
+        return self._op(o, "*", float.__rmul__(self, o), True)
+
+    def __truediv__(self, o):
+        return self._op(o, "/", float.__truediv__(self, o))
+
+    def __rtruediv__(self, o):
+        return self._op(o, "/", float.__rtruediv__(self, o), True)
+
+    def __neg__(self):
+        return Param(float.__neg__(self), f"(-{self.expr})")
+
+    def __pos__(self):
+        return self
+
+    def __abs__(self):
+        return Param(float.__abs__(self), f"abs({self.expr})")
+
+    def __repr__(self):
+        return f"Param({float(self)!r}, {self.expr!r})"
+
+    # A Param prints as its NUMBER. The repr above is for debugging; a
+    # generator that interpolates a dimension into a name or a log line wants
+    # the value, and got "Param(6.0, 'cells')S 1300mAh" until this existed.
+    def __str__(self):
+        return float.__repr__(self)
+
+    def __format__(self, spec):
+        return float.__format__(self, spec)
+
+
 class _Rpc:
     """One documented RPC, bound to a connection.
 
@@ -244,6 +342,30 @@ class App:
             app._active = app.active()
         """
         return self.list_parts()["active_id"]
+
+    def param(self, name, value, comment=""):
+        """A PROJECT variable, and a Param that knows it.
+
+        The project-scope twin of `Part.param`. A dimension several parts must
+        agree about — a bolt circle two plates share, a plate thickness the
+        standoff length is measured from — is one variable here, not one per
+        part that happens to hold the same number.
+        """
+        self.set_variable(name=name, expression=str(value), comment=comment,
+                          scope="project")
+        for v in self.list_variables()["variables"]:
+            if v["name"] == name:
+                return Param(float(v["value"]), name)
+        raise SdkError(f"the app accepted variable '{name}' and then did not "
+                       f"list it")
+
+    def params(self, table, comment=""):
+        """Declare a whole dimension table at project scope; {name: Param}.
+
+        Insertion order matters: a derived entry may name any entry declared
+        before it.
+        """
+        return {k: self.param(k, v, comment=comment) for k, v in table.items()}
 
     def methods(self, contains=""):
         """The documented method names, optionally filtered."""
@@ -1039,14 +1161,60 @@ class Part(_Tab):
         return self.app.add_feature(feature=feature)
 
     # --- parameters --------------------------------------------------------
-    def var(self, name, expression, comment=""):
+    def var(self, name, expression, comment="", scope="part"):
         """A named parameter. Every dimension the spec names should be one:
         that is what makes the document parametric rather than a script's
-        output."""
+        output.
+
+        `scope="project"` for a dimension several parts share — a bore that
+        two parts must agree about is one variable, not two that happen to
+        hold the same number.
+        """
         self.activate()
         self.app.set_variable(name=name, expression=str(expression),
-                              comment=comment, scope="part")
+                              comment=comment, scope=scope)
         return self
+
+    def param(self, name, value, comment="", scope="part"):
+        """Declare a document variable and hand back a number that knows it.
+
+        The half of `var()` that was missing. `var` declares; using the result
+        meant passing the NAME as a string everywhere, and the moment a script
+        needed `arm_len - 18` a literal was the only short path. A Param is a
+        float that carries its expression, so the arithmetic stays Python and
+        the document still receives the formula:
+
+            L = part.param("arm_len", 110)
+            part.extrude(s, distance=L / 2)   # distance_expr "(arm_len / 2)"
+
+        `value` may itself be an expression over parameters already declared,
+        in which case the document owns the formula and the Param refers to it
+        by NAME — one definition, not two:
+
+            part.param("femur_len", "arm_len - 40")   # expr is "femur_len"
+        """
+        self.var(name, value, comment=comment, scope=scope)
+        return Param(self.value_of(name), name)
+
+    def params(self, table, comment="", scope="part"):
+        """Declare a whole dimension table at once; returns {name: Param}.
+
+        Generators already keep their dimensions in exactly this shape — the
+        clamp's `D`, `CHOICES` and `SPACER` dicts are a parameter table that
+        never reached the document. Binding the dict through here makes every
+        existing `D["jaw_l"]` yield a Param instead of an int, so the call
+        sites do not change at all and the arithmetic between them starts
+        composing expressions.
+
+        Insertion order matters: a derived entry may name any entry declared
+        before it.
+        """
+        return {k: self.param(k, v, comment=comment, scope=scope)
+                for k, v in table.items()}
+
+    def param_of(self, name):
+        """An already-declared variable, as a Param."""
+        return Param(self.value_of(name), name)
 
     def vars(self):
         self.activate()
@@ -1698,6 +1866,12 @@ class Asm(_Tab):
                            str(r.get("truncation", "")))
         if r["clash"]:
             raise SdkError(f"{len(r['pairs'])} clash(es): {r['pairs'][:4]}")
+        # The receipt is the general form of the two checks above: anything
+        # that is not `verified` is not a pass, including a reason this
+        # wrapper has not been taught to name yet.
+        standing = r.get("receipt", {}).get("standing", "verified")
+        if standing != "verified":
+            raise SdkError(r["receipt"].get("summary", standing))
         return r
 
     def check(self, connected=True, clearances=True, realized=False,
@@ -1789,7 +1963,7 @@ class Asm(_Tab):
 VERDICT_CONTRACTS = {
     "Asm.check_clashes": {
         "rpc": "interference",
-        "consumed": {"clash", "pairs", "truncated", "truncation"},
+        "consumed": {"clash", "pairs", "truncated", "truncation", "receipt"},
         "ignored": {
             "mode": "check_clashes explicitly selects exact mode",
             "pairs_checked": "coverage detail; truncated is the verdict",
@@ -1811,6 +1985,9 @@ VERDICT_CONTRACTS = {
             "unrealized_mates",   # a mate whose parts do not touch — read
                                   # under `realized=`, because a running fit
                                   # is a mate that must NOT touch
+            "receipt",            # the standing: anything but `verified` is
+                                  # not a pass, including a reason this
+                                  # wrapper cannot name yet
         },
         "ignored": {
             "pairs": "the per-pair detail behind clashes/near_misses",
@@ -1945,10 +2122,16 @@ def _dim(feature, key, value):
     where the spec named a dimension is how a document stops being
     parametric.
     """
-    if isinstance(value, str):
+    ekey = (key.replace("_deg", "") if key.endswith("_deg") else key) + "_expr"
+    if isinstance(value, Param):
+        # Both halves: the number geometry reads, and the formula that keeps
+        # the field parametric. A Param is a float, so without this branch it
+        # would silently take the literal path below.
+        feature[key] = float(value)
+        feature[ekey] = value.expr
+    elif isinstance(value, str):
         feature[key] = 1.0
-        feature[key.replace("_deg", "") + "_expr"
-                if key.endswith("_deg") else key + "_expr"] = value
+        feature[ekey] = value
     elif value is not None:
         feature[key] = float(value)
 
@@ -1956,7 +2139,11 @@ def _dim(feature, key, value):
 def _dim3(feature, key, value):
     nums, exprs, any_expr = [], [], False
     for c in value:
-        if isinstance(c, str):
+        if isinstance(c, Param):
+            nums.append(float(c))
+            exprs.append(c.expr)
+            any_expr = True
+        elif isinstance(c, str):
             nums.append(0.0)
             exprs.append(c)
             any_expr = True

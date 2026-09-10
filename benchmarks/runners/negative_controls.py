@@ -141,16 +141,22 @@ def main():
             d.call("export_step", path=step)
         r = grade_file(task, step)
         failed = [c for c in r["checks"] if not c["pass"]]
-        caught = [c for c in failed if c["kind"] == "surfaces"]
+        # A `faces` check that names a surface KIND is the construction check;
+        # a bare face COUNT is a different question, so it does not count here.
+        caught = [c for c in failed if c["kind"] == "faces" and "of" in c]
         # The wrong build must NOT pass the task. Better still, it should be
         # the surface census that stops it — if only bbox caught it, the task
         # was already safe and the census is not what is doing the work.
+        # (`villain.py` is the other lower control and asks a different
+        # question: can the task be passed by a plain block of its own bbox?
+        # This one asks whether it can be passed by the right shape built the
+        # wrong way, which no generic villain can express.)
         ok = bool(failed)
         worst |= 0 if ok else 1
         mark = "ok  " if ok else "LEAK"
         print(f"{mark} {tid:22s} {what}")
         print(f"       passed {r['passed']}/{r['total']}; "
-              f"surfaces caught it: {'yes' if caught else 'NO'}")
+              f"the surface census caught it: {'yes' if caught else 'NO'}")
         for c in failed:
             got = c.get("got")
             if isinstance(got, dict) and "census" in got:

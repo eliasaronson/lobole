@@ -366,9 +366,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"viewport_click",
      "Click the 3D viewport at (x, y) as 0-1 fractions OF THE VIEWPORT "
      "rect (0.5,0.5 = its centre, whatever is docked around it).",
-     "button, ctrl", remote::UiAction},
-    {"viewport_drag", "Drag in the viewport (button 0/1/2) — orbit/pan.",
-     "button, ctrl, shift", remote::UiAction},
+     "button, ctrl, x, y", remote::UiAction},
+    {"viewport_drag",
+     "Drag in the viewport (button 0/1/2) — orbit/pan. From (x0, y0) to "
+     "(x1, y1), the same 0-1 fractions of the viewport rect; the defaults "
+     "drag from its centre a tenth of the way out.",
+     "button, ctrl, shift, x0, x1, y0, y1", remote::UiAction},
     {"scroll", "Scroll (zoom) the viewport.", "amount, dy, window",
      remote::UiAction},
 };

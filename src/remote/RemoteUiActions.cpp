@@ -621,6 +621,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       m_uiActionResult = json{{"items", ItemsToJson(items)}};
     };
   } else if (m == "viewport_click") {
+    // rpc-params: x, y
     m_uiAction = [p](ImGuiTestContext* ctx) {
       const bool ctrl = p.value("ctrl", false);
       ctx->MouseMoveToPos(FractionToPos(p));
@@ -631,6 +632,11 @@ bool RemoteServer::QueueUiAction(const Request& request) {
         ctx->KeyUp(ImGuiMod_Ctrl);
     };
   } else if (m == "viewport_drag") {
+    // FractionToPos reads these, and the scanner cannot follow it -- which is
+    // how both of these methods came to advertise their MODIFIERS and not the
+    // place to click. Every drag a script could ask for started at the centre
+    // of the viewport and ended a tenth of the way out.
+    // rpc-params: x0, y0, x1, y1
     m_uiAction = [p](ImGuiTestContext* ctx) {
       const ImVec2 from = FractionToPos(p, "x0", "y0", 0.5f, 0.5f);
       const ImVec2 to = FractionToPos(p, "x1", "y1", 0.6f, 0.6f);

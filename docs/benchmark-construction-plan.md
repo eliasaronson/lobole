@@ -43,14 +43,29 @@ This plan closes that, plus two gaps the audit for it turned up.
 
 Findings 1 and 2 are why this plan is cheap: most of it is wiring, not building.
 
-## B1 — a `surfaces` check kind
+## B1 — a construction check over the face census
+
+> **Landed, reconciled with the peer-survey round.** W4
+> (`peer-survey-plan.md`) independently found the same unread census and wired
+> a `faces` check kind for it. This round's parallel `surfaces` kind was folded
+> INTO that one on merge rather than shipped beside it — two check kinds over
+> one census is how they drift apart, and the note that said so was right.
+>
+> The corrections in that note were also right. `oracle.cpp` emits lowercase
+> short names (`plane`, `cone`, `bspline`, …), not the `GeomAbs_` spellings the
+> draft below used, and the JSON examples here are left as originally written
+> only so the correction is legible; the shipped tasks use the real names.
+>
+> What this round added to `faces`, and what B3 depends on: `of` taking a LIST
+> summed together (the OR-tuple), the whole census reported in `got`, and a
+> refusal for a surface name that is not a census key.
 
 `grade.py`: one check function over `facts["faces_by_kind"]`.
 
 ```json
-{"kind": "surfaces", "of": "cone",  "min": 1, "why": "a real conical transition"}
-{"kind": "surfaces", "of": "plane", "max": 4, "why": "not a faceted stack"}
-{"kind": "surfaces", "of": ["bspline", "extrusion"], "min": 1}
+{"kind": "faces", "of": "cone",  "min": 1, "why": "a real conical transition"}
+{"kind": "faces", "of": "plane", "max": 4, "why": "not a faceted stack"}
+{"kind": "faces", "of": ["bspline", "extrusion"], "min": 1}
 ```
 
 `of` takes a name or a list of alternatives summed together — BenchCAD's
@@ -179,7 +194,7 @@ a beautiful cone and the wrong diameter must still fail.
 CLAUDE.md's "48/48" and `benchmarks/README.md`'s stale counts move here.
 
 **Result — built and measured 2026-09-09.** `reference.py` is green on all
-thirteen tasks, 67/67. The three new parts measured:
+thirteen tasks, 68/68. The three new parts measured:
 
 | task | census | bbox | volume |
 |---|---|---|---|

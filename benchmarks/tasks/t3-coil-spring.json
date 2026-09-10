@@ -36,7 +36,7 @@
       "why": "centred on the axis, half way up"
     },
     {
-      "kind": "surfaces",
+      "kind": "faces",
       "of": [
         "bspline",
         "extrusion",
@@ -46,7 +46,7 @@
       "why": "the wire is a swept surface — stacked rings are cylinders only"
     },
     {
-      "kind": "surfaces",
+      "kind": "faces",
       "of": "plane",
       "max": 2,
       "why": "a helix has two flat ends; a stack of N rings has 2N"

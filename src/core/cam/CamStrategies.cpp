@@ -68,6 +68,37 @@ constexpr double kIslandProbe = 0.05;
 // the operation was made by clicking a face: the face's own wires, the same
 // at every depth. Empty when the operation has no target, which is the
 // caller's signal to fall back to sectioning the model.
+// The inner wires of a level face that are genuine OPENINGS: an inner wire
+// with nothing standing in it. It is the same question `useOutline` asks
+// about a pocket floor (below), asked for the opposite purpose -- there to
+// know what may be driven over, here to know what may be cut out -- so it is
+// one test and not two. A BOSS has an inner wire too, and cutting round the
+// inside of one removes the boss.
+std::vector<Loop> FaceOpenings(const std::vector<Body>& bodies,
+                               const FaceRegion& region) {
+  std::vector<Loop> holes;
+  for (const Loop& l : region.loops)
+    if (l.hole)
+      holes.push_back(l);
+  if (holes.empty())
+    return holes;
+  Clipper2Lib::Paths64 section;
+  for (const Loop& l : SectionLoops(bodies, region.z + kIslandProbe))
+    section.push_back(ToClipper(l.pts));
+  const Clipper2Lib::Paths64 standing =
+      Clipper2Lib::Union(section, Clipper2Lib::FillRule::EvenOdd);
+  std::vector<Loop> out;
+  for (const Loop& l : holes) {
+    const bool material =
+        !Clipper2Lib::Intersect(Clipper2Lib::Paths64{ToClipper(l.pts)},
+                                standing, Clipper2Lib::FillRule::NonZero)
+             .empty();
+    if (!material)
+      out.push_back(l);
+  }
+  return out;
+}
+
 Clipper2Lib::Paths64 TargetPaths(const Operation& op,
                                  const std::vector<Body>& bodies, bool holesToo,
                                  double toolRadius, std::string& error) {
@@ -185,10 +216,62 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       return;
     }
   }
+  // A point ON each contour this operation follows, which is how a pick
+  // survives depth: the loop it names can merge with a neighbour lower down,
+  // and proximity finds the merged boundary where an index or a shape would
+  // not. One seed for a wall; one per OPENING for a face cut inside.
+  std::vector<glm::dvec2> seeds;
+  if (wallPick)
+    seeds.push_back(wall.at);
+  // Cutting INSIDE a level face means cutting its openings. It cannot mean
+  // anything else -- offsetting the face's own outline inward carves a trench
+  // a whisker inside the part, full depth, all the way round, which is the
+  // failure the refusal below describes and which this pick used to walk
+  // straight into, since `TargetPaths` handed a profile the outer wire alone.
+  bool openingsPick = false;
+  if (!wallPick && !op.targets.empty() && op.side == Side::Inside) {
+    const FaceRegion region = PickedFaceRegion(
+        bodies, op.targets.front().ref, 0.02, op.targets.front().jobPartId);
+    if (!region.ok) {
+      tp.error = region.why;
+      return;
+    }
+    std::vector<Loop> openings = FaceOpenings(bodies, region);
+    // The bores the drill takes are not this cutter's business.
+    if (op.drilledBores > 0.0) {
+      std::vector<Loop> keep;
+      for (const Loop& l : openings)
+        if (l.boreDiameter <= 0.0 ||
+            l.boreDiameter > op.drilledBores + kStockFit)
+          keep.push_back(l);
+      openings = std::move(keep);
+    }
+    if (openings.empty()) {
+      // Both refusals open with the same words on purpose: "nothing to cut
+      // in that face" is the state a caller acts on -- a part with no
+      // openings is a part that needs no openings operation -- and the rest
+      // of the sentence says which kind of nothing it is.
+      tp.error =
+          op.drilledBores > 0.0
+              ? "nothing to cut in that face: every opening in it is a bore "
+                "of " +
+                    Round2(op.drilledBores) +
+                    " mm or less, which `drilled_bores` leaves to the drill"
+              : "nothing to cut in that face: it has no openings. Pick a face "
+                "that HAS one (every opening in it is cut), or the wall of "
+                "the opening you mean -- an inside cut on a face with none "
+                "would follow the part's own outline and trench round it.";
+      return;
+    }
+    for (const Loop& l : openings)
+      if (!l.pts.empty())
+        seeds.push_back(l.pts.front());
+    openingsPick = true;
+  }
   const Clipper2Lib::Paths64 picked =
-      wallPick ? Clipper2Lib::Paths64{}
-               : TargetPaths(op, bodies, /*holesToo=*/false,
-                             tool.diameter * 0.5, why);
+      wallPick || openingsPick ? Clipper2Lib::Paths64{}
+                               : TargetPaths(op, bodies, /*holesToo=*/false,
+                                             tool.diameter * 0.5, why);
   if (!why.empty()) {
     tp.error = why;
     return;
@@ -203,7 +286,7 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   // perimeter INWARD by a tool radius carves a trench a whisker inside the
   // part, the full depth, all the way round. The first dogfooding round asked
   // for a slot this way and got a 15 mm gouge round the whole outline.
-  if (!wallPick && picked.empty() && op.side == Side::Inside) {
+  if (seeds.empty() && picked.empty() && op.side == Side::Inside) {
     tp.error = "an inside profile needs the contour to cut inside of — pick "
                "the wall of the opening. Without one this would follow the "
                "part's own outline and cut a trench round it.";
@@ -224,22 +307,30 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     const double z = passes[pass];
     std::vector<Loop> solid;
     if (picked.empty()) {
-      if (wallPick) {
-        // The loop of THIS depth's projection that the pick lies on. It may
+      if (!seeds.empty()) {
+        // The loop of THIS depth's projection that each pick lies on. One may
         // have merged with a neighbour since the mid-height section named it;
         // a merged boundary is the right one to follow, and proximity finds
-        // it either way.
-        const Loop* nearest = nullptr;
-        double best = std::numeric_limits<double>::max();
-        for (const Loop& l : projected[pass]) {
-          const double d = DistanceToLoop(l.pts, wall.at);
-          if (d < best) {
-            best = d;
-            nearest = &l;
+        // it either way. Two seeds landing on the same merged loop cut it
+        // once.
+        for (const glm::dvec2& seed : seeds) {
+          const Loop* nearest = nullptr;
+          double best = std::numeric_limits<double>::max();
+          for (const Loop& l : projected[pass]) {
+            const double d = DistanceToLoop(l.pts, seed);
+            if (d < best) {
+              best = d;
+              nearest = &l;
+            }
           }
+          if (nearest == nullptr)
+            continue;
+          bool already = false;
+          for (const Loop& have : solid)
+            already = already || have.pts == nearest->pts;
+          if (!already)
+            solid.push_back(*nearest);
         }
-        if (nearest != nullptr)
-          solid.push_back(*nearest);
       } else {
         for (const Loop& l : projected[pass])
           if (!l.hole)
@@ -252,7 +343,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
                          : op.side == Side::On   ? 0.0
                                                  : radius + op.stockToLeave;
     Clipper2Lib::Paths64 contour = picked.empty() ? ToClipper(solid) : picked;
-    if (contour.empty() && lastFound.empty() && picked.empty() && !wallPick) {
+    if (contour.empty() && lastFound.empty() && picked.empty() &&
+        seeds.empty()) {
       // A pass below the model with no pass above it to inherit from -- a
       // ONE-pass through cut, which a finishing pass is (R6). The outline
       // to carry down is the model's own at its bottom.
@@ -281,21 +373,45 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       lastFound = contour;
     if (contour.empty())
       continue; // above the model, where there has never been anything
-    Clipper2Lib::Paths64 paths =
-        delta == 0.0 ? contour : Offset(contour, delta);
-    // An inside profile offsets INWARD, so an opening narrower than the
-    // cutter closes up and this pass emits nothing. Say which, and how narrow.
-    if (paths.empty() && op.side == Side::Inside && tooTight.empty())
-      tooTight = TooTightForTool(contour, tool, op.stockToLeave, "opening");
-    // A lead arc inside an opening needs a radius more of room than the
-    // cut itself: refused, saying so, rather than swept into the far wall.
     const double lead = op.leadArcs && op.side != Side::On ? radius : 0.0;
-    if (lead > 0.0 && op.side == Side::Inside && !paths.empty() &&
-        Offset(contour, delta - radius).empty()) {
-      tp.error = "the lead arc needs " + Round2(radius) +
-                 " mm of room beyond the cut and this opening has none: turn "
-                 "off lead arcs for it, or use a smaller tool";
-      return;
+    Clipper2Lib::Paths64 paths;
+    if (op.side != Side::Inside) {
+      // Outside or on: one offset over every contour at once, because two
+      // outlines close together must UNION rather than cross each other.
+      paths = delta == 0.0 ? contour : Offset(contour, delta);
+    } else {
+      // Inside: the contours are separate openings and cannot merge, so each
+      // is offset on its own -- which is what lets an opening that cannot be
+      // cut say so BY NAME instead of taking the whole operation down with
+      // it. One operation now follows every opening in a face, and one narrow
+      // slot among five is not a reason to cut none of them.
+      for (const Clipper2Lib::Path64& src : contour) {
+        const Clipper2Lib::Paths64 one =
+            Offset(Clipper2Lib::Paths64{src}, delta);
+        if (one.empty()) {
+          if (tooTight.empty())
+            tooTight = TooTightForTool(Clipper2Lib::Paths64{src}, tool,
+                                       op.stockToLeave, "opening");
+          if (pass == 0)
+            tp.skipped.push_back(TooTightForTool(
+                Clipper2Lib::Paths64{src}, tool, op.stockToLeave, "opening"));
+          continue;
+        }
+        // A lead arc inside an opening needs a radius more of room than the
+        // cut itself: that opening is left, saying so, rather than swept into
+        // the far wall.
+        if (lead > 0.0 &&
+            Offset(Clipper2Lib::Paths64{src}, delta - radius).empty()) {
+          if (pass == 0)
+            tp.skipped.push_back(
+                "an opening here has no room for a lead arc (it needs " +
+                Round2(radius) +
+                " mm beyond the cut): turn lead arcs off for this operation, "
+                "or use a smaller tool");
+          continue;
+        }
+        paths.insert(paths.end(), one.begin(), one.end());
+      }
     }
     for (size_t loop = 0; loop < paths.size(); loop++) {
       Clipper2Lib::Path64& path = paths[loop];
@@ -335,8 +451,12 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
                    op.side == Side::Outside, lastPass ? &tp.tabs : nullptr);
     }
   }
+  // Every opening skipped is an operation that cut nothing, so it fails as
+  // one -- in the words of the first thing it could not do, not in a generic
+  // "produced no toolpath". With SOME openings cut, the skipped ones stay a
+  // warning and the rest of the job goes ahead.
   if (tp.moves.empty() && tp.error.empty())
-    tp.error = tooTight;
+    tp.error = !tp.skipped.empty() ? tp.skipped.front() : tooTight;
 }
 
 // The pocket's wall ring with its corner relief (R4), the inner rings as

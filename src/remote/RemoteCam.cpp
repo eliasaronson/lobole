@@ -194,8 +194,14 @@ constexpr MethodDoc kCamMethods[] = {
      "operation acts on — the same derivation the GUI's verbs use, so a "
      "script does not type a depth the panel would not let a person type. "
      "Pocket: pick the floor. Profile: pick a wall (an opening cuts inside "
-     "it, the perimeter cuts outside) or nothing at all to cut the part "
-     "free. Face: pick nothing. Edge_round: pick the WALL whose top edge to "
+     "it, the perimeter cuts outside), a level FACE with side `inside` to cut "
+     "EVERY opening in that face in one operation (`drilled_bores` leaves the "
+     "round ones up to that diameter alone, because the drill takes them; a "
+     "boss is not an opening; "
+     "one narrow slot among five is skipped by name and the rest are cut; and "
+     "one operation has one depth, so openings of two depths want a wall pick "
+     "each), or nothing at all to cut the part free. Face: pick nothing. "
+     "Edge_round: pick the WALL whose top edge to "
      "break — a V-bit chamfers it, a ball rounds it, a flat mill is refused; "
      "edge_size? sets the bevel width / round radius, and left out it is the "
      "biggest break that tool can make within the wall. A refusal says what "
@@ -204,8 +210,8 @@ constexpr MethodDoc kCamMethods[] = {
      "type adaptive; set_cam_op forces either strategy.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
-     "job, stock_to_leave, tabs, target, targets, tool, top_z, type, "
-     "use_outline"},
+     "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
+     "type, use_outline"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields}. `tool` re-points it "
      "at another cutter: a stepdown still at the old tool's derived value "
@@ -214,8 +220,8 @@ constexpr MethodDoc kCamMethods[] = {
      "refused.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, id, lead_arcs, name, peck, side, stepdown, stepover, "
-     "job, stock_to_leave, tabs, target, targets, tool, top_z, type, "
-     "use_outline"},
+     "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
+     "type, use_outline"},
     {"move_cam_op",
      "Move an operation to a position {id, to} (0-based) and return the "
      "setup's new order. Operation order IS the cutting sequence — the "
@@ -230,8 +236,8 @@ constexpr MethodDoc kCamMethods[] = {
      "one. The dry run behind add_cam_op's derivation.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
-     "job, stock_to_leave, tabs, target, targets, tool, top_z, type, "
-     "use_outline"},
+     "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
+     "type, use_outline"},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup, async?} without writing a file: "
      "per operation, the move count, cut length (mm), lowest Z, and the "
@@ -290,7 +296,8 @@ constexpr MethodDoc kCamMethods[] = {
      "missing from the file (`clipped_mm`), and `warnings`. Writes a "
      "file; it does not send it "
      "to a machine. With split_output on the setup, `path` is the base and "
-     "one file per tool is written beside it as `<base> - T<n>.<ext>`, each "
+     "one file per tool is written beside it as `<base>-T<n>.<ext>` (no "
+     "spaces: these go on an SD card and through a shell), each "
      "complete and starting by loading its tool; `files` names every one.",
      "job, path, post, setup"},
 };
@@ -397,6 +404,8 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.stepdown = p.at("stepdown").get<double>();
   if (p.contains("peck"))
     op.peck = p.at("peck").get<double>();
+  if (p.contains("drilled_bores"))
+    op.drilledBores = p.at("drilled_bores").get<double>();
   if (p.contains("lead_arcs"))
     op.leadArcs = p.at("lead_arcs").get<bool>();
   if (p.contains("finish_tool")) {
@@ -1142,8 +1151,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // the row is a key the generated SDK refuses to send, so `tabs` was
     // documented in prose and unreachable through it.
     // rpc-params: climb, corner_relief, edge_size, enabled, finish_stock
-    // rpc-params: finish_tool, lead_arcs, name, peck, stepdown, stepover
-    // rpc-params: stock_to_leave, tabs, use_outline
+    // rpc-params: finish_tool, lead_arcs, drilled_bores, name, peck, stepdown
+    // rpc-params: stepover, stock_to_leave, tabs, use_outline
     cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
     cam::Operation op;
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
@@ -1209,8 +1218,9 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // rpc-params: job
     // The add_cam_op fields, all of them through ApplyOpFields (above).
     // rpc-params: bottom_z, climb, corner_relief, edge_size, enabled
-    // rpc-params: finish_stock, finish_tool, lead_arcs, name, peck, side
-    // rpc-params: stepdown, stepover, stock_to_leave, tabs, target, targets
+    // rpc-params: finish_stock, finish_tool, lead_arcs, drilled_bores, name
+    // rpc-params: peck, side, stepdown, stepover, stock_to_leave, tabs, target
+    // rpc-params: targets
     // rpc-params: tool, top_z, type, use_outline
     auto [setup, op] = FindOp(*job, p.at("id").get<uint64_t>());
     if (op == nullptr)
@@ -1346,6 +1356,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
     if (p.value("close", false)) {
+      // `setup` is read even here, and ignored: naming the setup you are
+      // closing is the natural thing to write, and refusing it with
+      // "unknown parameter 'setup'; accepted: close" reads as though the
+      // method has no such parameter at all.
+      (void)p.value("setup", uint64_t{0});
       ui::EndCamPlayback(state);
       return json{{"open", false}};
     }
@@ -1594,7 +1609,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       for (const cam::PostFile& f : split) {
         const std::string one =
             (base.parent_path() /
-             (base.stem().string() + " - T" + std::to_string(f.tool) +
+             (base.stem().string() + "-T" + std::to_string(f.tool) +
               base.extension().string()))
                 .string();
         if (!DocumentIO::WriteTextAtomic(one, f.gcode, &error))

@@ -1622,7 +1622,7 @@ def main():
                    "split_output round-trips")
             split = d.call("cam_post", setup=cam_setup, path=nc)
             expect(len(split["files"]) == 1 and
-                   split["files"][0]["path"].endswith("arcs - T1.nc"),
+                   split["files"][0]["path"].endswith("arcs-T1.nc"),
                    f"a one-tool job splits into one named file: {split['files']}")
             part = open(split["files"][0]["path"]).read()
             expect("G2 " in part and "M30" in part, "the tool's file is complete")

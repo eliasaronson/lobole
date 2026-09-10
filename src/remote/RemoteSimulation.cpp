@@ -7,6 +7,7 @@
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
+#include "remote/RemoteHelpers.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/SimulationActions.h"
@@ -532,6 +533,54 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
         {"stale", doc->StudyResultsStale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    {
+      // An FEM factor of safety is a PREDICTION (core/Receipt.h). It is a
+      // linear-elastic solver's estimate on a tetrahedral approximation of
+      // the part, against a library yield number — every one of which is a
+      // modelling choice. The figure is quoted downstream as though it were
+      // measured, so the basis travels with it and the receipt can never roll
+      // up better than Provisional.
+      receipt::Receipt r;
+      const receipt::Oracle solver{"designer/fem-static",
+                                   rt->solver.empty() ? "cpu" : rt->solver};
+      const bool stale = doc->StudyResultsStale(id);
+      if (stale) {
+        // The numbers are real; they are just answers about a part that no
+        // longer exists. Today that is a `stale: true` the caller has to know
+        // to read, beside a factor of safety they will quote.
+        r.Unverifiable("the results describe the current geometry", solver,
+                       "the part changed after this study was solved — these "
+                       "numbers are the previous geometry's. Re-run the study "
+                       "before believing them");
+      } else if (rt->topology && !rt->converged) {
+        // `converged` is a TOPOLOGY field — FemSolver.h says so ("empty/zero
+        // for static & modal runtimes"), and it is written only by
+        // MakeTopoRuntime. Reading it on a static study made every solved
+        // beam unverifiable, which is a false alarm and costs exactly what a
+        // false pass costs. A static solve reports no convergence signal at
+        // all, so the receipt does not claim one.
+        r.Unverifiable("the optimization converged", solver,
+                       "the run stopped at the iteration cap without reaching "
+                       "the change tolerance");
+      } else if (!haveFoS) {
+        r.Unverifiable("factor of safety against yield", solver,
+                       "no body in this study has a material with a yield "
+                       "strength, so there is nothing to divide by — a stress "
+                       "with no yield is not a margin");
+      } else {
+        receipt::Claim c("factor of safety against yield >= 1", solver,
+                         minFoS >= 1.0 ? receipt::Verdict::Pass
+                                       : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Predicted;
+        c.value = minFoS;
+        c.unit = "x";
+        c.note = "linear-elastic static solve on " + std::to_string(elements) +
+                 " elements, against the library yield strength. A prediction,"
+                 " not a measurement";
+        r.Add(std::move(c));
+      }
+      AttachReceipt(result, r);
+    }
     return result;
   }
   if (m == "set_topo_ghost") {

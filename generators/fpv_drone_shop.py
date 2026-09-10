@@ -69,8 +69,16 @@ def top_face(part):
 
 
 def study(app, part, name, fixed, forces, mesh_size):
-    """One static study: what is held, what pushes, how finely."""
+    """One static study: what is held, what pushes, how finely.
+
+    A study of this name is REPLACED, not added beside: the stage is saved
+    with the project now, so a second run would otherwise leave two of
+    everything and no way to tell which answer belonged to which run.
+    """
     part.activate()
+    for old in app.call("list_studies")["studies"]:
+        if old["name"] == name:
+            app.call("remove_study", study=old["id"])
     s = app.add_study(kind="static", name=name)
     app.set_study(study=s["id"], mesh_size=mesh_size)
     for face in fixed:
@@ -82,7 +90,28 @@ def study(app, part, name, fixed, forces, mesh_size):
     app.run_study(study=s["id"], _timeout=1800)
     out = app.study_results(study=s["id"])
     out["name"] = name
+    out["study"] = s["id"]
+    out["part"] = part
     return out
+
+
+def plot(app, result, out):
+    """A picture of the field, saved beside the numbers.
+
+    Worth more here than in most places, because the SOLVE is not persisted:
+    reopened, the study carries its load cases and no answers. A png and a
+    row in fem.csv are what survive the run.
+    """
+    result["part"].activate()
+    app.call("enter_simulation", study=result["study"])
+    app.call("set_result_display", study=result["study"], field="von_mises",
+             deform_scale=1.0)
+    app.call("view", name="iso")
+    path = os.path.join(out, "fem-" + result["name"].lower()
+                        .replace(" ", "-") + ".png")
+    app.call("screenshot", path=path, width=1200, height=900)
+    app.call("exit_simulation")
+    return path
 
 
 def fem(app, out=None):
@@ -141,6 +170,8 @@ def fem(app, out=None):
     print(f"  {FEM_CAVEAT}")
     if out is not None:
         os.makedirs(out, exist_ok=True)
+        for r in results:
+            plot(app, r, out)
         with open(os.path.join(out, "fem.csv"), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["study", "elements", "nodes", "max_displacement_mm",
@@ -205,69 +236,6 @@ GAP = 8.0                  # part to part: two cutter widths and the tabs
 TABS = {"count": 4, "width": 4.0, "height": 0.6}
 
 
-def slot_walls(rects, tool=SMALL):
-    """A point ON each slot's wall, which is what a profile is picked by —
-    the centre of an opening lies on none of them."""
-    return [((cx, cy + h / 2.0), tool) for cx, cy, w, h in rects]
-
-
-def openings(name):
-    """Every opening cut inside this part's outline: a point on one of its
-    walls, and the cutter it takes.
-
-    Restated from the same spec constants the geometry was built from, not
-    found by guessing which loops of a face are inside it. An opening a
-    profile misses is a part that has to be finished by hand — and one it
-    finds with too fat a cutter is a part cut somewhere it should not be, so
-    the tool is named here beside the size that decides it.
-    """
-    y = CAM_MOUNT_GAP / 2.0 + T_SIDE / 2.0
-    cx = (CAGE_TAB[0] + CAGE_TAB[1]) / 2.0
-    tab = CAGE_TAB[1] - CAGE_TAB[0] + 2 * CAGE_TAB_RELIEF
-    zip_tie = [(x, sy * 38.0, 2.5, 9.0) for x in (30.0, -30.0)
-               for sy in (1, -1)]
-    return {
-        # Zip-tie slots for the motor leads, and the battery lead's strain
-        # relief.
-        "Bottom plate": slot_walls(zip_tie + [(-49.0, 0.0, 4.0, 14.0)]),
-        # The stack stands up through the middle; the camera plates drop
-        # through the two 2.2 mm slots, which is the narrowest cut on the
-        # aircraft.
-        "Mid plate": [((MID_OPENING / 2.0, 0.0), BIG)]
-        + slot_walls([(cx, sy * y, tab, T_SIDE + 0.2) for sy in (1, -1)])
-        + slot_walls([r for r in zip_tie if r[0] < 0]),
-        # The camera notch is open to the front edge, so it is part of the
-        # outline and not an opening at all. The strap slots are.
-        "Top plate": slot_walls(
-            [(sx * STRAP_AT[0], sy * STRAP_AT[1], STRAP_SLOT_L, STRAP_SLOT_W)
-             for sx in (1, -1) for sy in (1, -1)]),
-        # Clears the motor's shaft end and its circlip.
-        "Arm": [((MOTOR_R, 0.0), BIG)],
-        "Camera plate": [],
-    }[name]
-
-
-def wall_at(part, at, tol=1.5):
-    """The wall of an opening at `at` — what a profile follows.
-
-    Any wall of the opening will do: the operation follows the whole loop the
-    pick lies on. A bore answers at its axis and a flat wall at its midpoint,
-    which is what `openings` gives, so the match is tight on purpose: a loose
-    one would find the part's own outline and cut a trench round it.
-    """
-    best, best_d = None, tol
-    for f in part.faces():
-        if f.centroid is None or (f.kind == "plane" and f.normal is not None
-                                  and abs(f.normal[2]) > 0.1):
-            continue
-        d = math.hypot(f.centroid[0] - at[0], f.centroid[1] - at[1])
-        if d < best_d:
-            best, best_d = f, d
-    if best is None:
-        raise SdkError(f"{part.name}: no opening wall within {tol} mm of {at}")
-    return best.ref
-
-
 def bores(part, radius):
     """Every bore of that radius, left to right — one drill operation takes
     them all and cuts them in the order given."""
@@ -280,8 +248,12 @@ def bores(part, radius):
 
 def flat_face(part):
     """The part's biggest flat face — a plate's own face, whichever way the
-    part was modelled. Laying THAT toward the spindle is what makes a sheet
-    part cuttable, and it is a no-op for one already modelled flat."""
+    part was modelled.
+
+    It is two answers at once: laying THAT toward the spindle is what makes a
+    sheet part cuttable (and is a no-op for one already modelled flat), and
+    its openings are the ones to cut out of the part.
+    """
     return max(part.faces(kind="plane"), key=lambda f: f.area).ref
 
 
@@ -296,7 +268,6 @@ def picks(app):
             "flat": flat_face(part),
             "drills": [(M3_DRILL, bores(part, M3_CLEAR / 2)),
                        (M2_DRILL, bores(part, M2_CLEAR / 2))],
-            "walls": [(wall_at(part, at), tool) for at, tool in openings(name)],
         }
     return out
 
@@ -364,13 +335,20 @@ def cut_ops(app, setup, sizes, placed):
         if targets:
             app.add_cam_op(setup=setup, type="drill", tool=tool,
                            targets=targets)
-    for want in (SMALL, BIG):
-        for name, job_part, _ in placed:
-            for ref, tool in sizes[name]["walls"]:
-                if tool == want:
-                    app.add_cam_op(setup=setup, type="profile", tool=tool,
-                                   side="inside",
-                                   targets=[dict(ref, part=job_part)])
+    # Every opening in the part's own face, in one operation each: the app
+    # follows all of them and names any it cannot cut, so the shapes and
+    # positions of the slots stay in the model instead of being restated here
+    # where a spec change could not reach them. The SMALL cutter, because one
+    # operation is one tool and the narrowest cut on the aircraft is the
+    # 2.2 mm slot a camera plate drops through. `drilled_bores` is where the
+    # drills stop and the cutter starts: every ROUND opening up to a clearance
+    # hole was drilled two operations ago, and orbiting a 2 mm cutter in a
+    # hole that is already gone is minutes of cutting air. It cannot be a
+    # width — the milled slots are NARROWER than the drilled holes.
+    for name, job_part, _ in placed:
+        app.add_cam_op(setup=setup, type="profile", tool=SMALL, side="inside",
+                       drilled_bores=max(M3_CLEAR, M2_CLEAR),
+                       targets=[dict(sizes[name]["flat"], part=job_part)])
     # No target at all: a profile then follows every part's own outline, which
     # is what cutting them out means. On tabs, so nothing moves when it is cut
     # free, and off a tangent arc so no dwell mark is left in the edge.
@@ -392,6 +370,11 @@ def cam(app, out):
     made = []
     for sheet, thickness, wanted in SHEETS:
         copies = [name for name, qty in wanted for _ in range(qty)]
+        # Same reason as the studies: this is saved with the project, so a
+        # second run must replace the sheet rather than add another beside it.
+        for tab in app.call("list_parts")["parts"]:
+            if tab["name"] == sheet and tab["type"] == "job":
+                app.call("delete_part", part=tab["id"])
         job = app.machine_part(part=copies[0], name=sheet)
         placed = [(copies[0], job["part"]["id"])]
         placed += [(name, app.add_job_part(part=name)["id"])
@@ -420,6 +403,16 @@ def cam(app, out):
 
         cut_ops(app, setup, sizes, laid)
         paths = app.cam_toolpath(setup=setup, _timeout=1800)
+        # A part with nothing to mill — the camera plates, whose only
+        # openings are the two drilled M2 holes — is told so by the app
+        # rather than known in advance here, and its openings operation goes.
+        # Every OTHER error is still an error.
+        empty = [op["operation"] for op in paths.get("operations", [])
+                 if "nothing to cut in that face" in (op.get("error") or "")]
+        for op_id in empty:
+            app.remove_cam_op(id=op_id)
+        if empty:
+            paths = app.cam_toolpath(setup=setup, _timeout=1800)
         bad = [f"{op.get('name')}: {op['error']}"
                for op in paths.get("operations", []) if op.get("error")]
         if bad or paths.get("warnings") or paths.get("skipped"):
@@ -427,7 +420,9 @@ def cam(app, out):
                                                or paths.get("skipped")))
         posted = app.cam_post(
             setup=setup, _timeout=1800,
-            path=os.path.join(out, sheet.replace(" ", "-") + ".nc"))
+            # No spaces: these go on an SD card and through a shell.
+            path=os.path.join(out, sheet.replace(" mm sheet", "mm")
+                              .replace(" ", "-") + ".nc"))
         verdict = app.cam_verify(setup=setup, _timeout=3600)
         # The clock the FILE states — every cutting feed is in it, and no
         # machine states its rapid rate, so this is time cutting and not an

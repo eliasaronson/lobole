@@ -95,6 +95,12 @@ thing behind it invisible to the next person who looks.
   (arXiv:2605.10865), whose headline finding is exactly that substitution. Six
   stages, most of them wiring: the oracle already reports a surface-type census
   nothing reads, and the app-reported check machinery is called by no task.
+- **[peer-survey-plan.md](peer-survey-plan.md)** — what four peer projects
+  (vcad, forgent3d, CADAM, NURBGen) are worth to us. Six workstreams; W1
+  (parameters surviving the script boundary), W2 (verdict receipts) and parts
+  of W4 (the villain arm, a direct-emission arm, pass^k) have shipped.
+  Overlaps `benchmark-construction-plan.md` on one finding — both rounds
+  independently spotted that `faces_by_kind` is emitted and unread.
 - **[capability-review-2026-08-31.md](capability-review-2026-08-31.md)** — the
   outward-facing counterpart: capability walls, absent feature families, and
   what we do worse (and better) than FreeCAD and Onshape. The three that were
