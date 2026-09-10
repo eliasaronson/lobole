@@ -41,6 +41,23 @@ Findings 1 and 2 are why this plan is cheap: most of it is wiring, not building.
 
 ## B1 — a `surfaces` check kind
 
+> **Partly landed, and two corrections.** The peer-survey round
+> (`peer-survey-plan.md`, W4) independently found the same unread census and
+> wired a `faces` check kind for it — `{"kind": "faces", "of": "plane",
+> "eq": 14}` — to kill a block that was passing three of `t1-l-bracket`'s four
+> checks. So **extend that kind rather than adding a second one over the same
+> facts**; two check kinds reading one census is how they drift apart.
+>
+> And the example JSON below will not match anything as written: `oracle.cpp`
+> emits **lowercase short names** (`plane`, `cylinder`, `cone`, `sphere`,
+> `torus`, `bezier`, `bspline`, `revolution`, `extrusion`), not the
+> `GeomAbs_`/`SurfaceKind` spellings. `"Cone"` is not a census key.
+>
+> What B1 still adds, and should: the OR-tuple (`of` taking a list summed
+> together), reporting the whole census in `got`, and failing loudly on a
+> surface name that is not a census key. All three are right and none of them
+> exists yet.
+
 `grade.py`: one check function over `facts["faces_by_kind"]`.
 
 ```json
