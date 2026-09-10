@@ -304,6 +304,10 @@ know the file, or the symbol, or are checking one fact.
   class). Add new RPCs to the domain module — and a row in its `MethodDoc`
   table, whose `flags` column is what gates it (NeedsPart / NotInBatch /
   Deferrable / UiAction). There is no separate gate list to remember.
+  A parameter naming a physical quantity must carry a unit suffix (`angle_deg`,
+  `tolerance_mm`) or have its unit named in the row — `tests/rpc_units_gate.py`
+  fails otherwise. Forty-two did not, and a wrong unit is invisible in the
+  answer (docs/units-plan.md).
 - Serialization: `src/core/io/Serialize{Features,Assembly,Studies,Configurations}.cpp`.
 - Core is split by domain: `src/core/{features,sketch,drawing,fem,io}/`; the
   document model (Document/Feature/Command/Expression) stays flat in `src/core/`.

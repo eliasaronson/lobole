@@ -1,6 +1,7 @@
 # Units — what we have, and what a unit engine would not buy
 
-> **Status: SHIPPED 2026-09-10** (2bf40d64, 136a9df9, 707c15de, 9b212e98).
+> **Status: SHIPPED 2026-09-10** (2bf40d64, 136a9df9, 707c15de, 9b212e98,
+> f0134d5d).
 > No format bump: every twin key is input-only.
 
 ## The problem
@@ -85,6 +86,12 @@ document — which `set_units` fully supports — produces a sheet of bare numbe
 that are actually mm and never says so. `DimContext` gains the unit system
 (one construction site); the title block gains a row. Export already takes
 pre-resolved text, so the fix flows through to SVG and PDF.
+
+The title block on SCREEN needs it too, and did not get it first time: a UNITS
+row in the exported PDF alone is the more dangerous half of the disagreement,
+because the sheet you check is then the one that does not say. `core::UnitsLabel`
+writes the row and `ui::ActiveDrawingUnits` answers which system the sheet is
+in, both used by the panel and the two exporters.
 
 ### 4. A `describe` unit gate
 

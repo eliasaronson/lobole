@@ -351,8 +351,11 @@ the invariant above ("display units never touch stored values") failed at a
 boundary in the other direction: `MeasuredValueForClipboard` emitted a
 DISPLAY-unit number into a dimension field that reads a bare number as
 STORAGE, so copying 25.4 mm on an inch document gave "1" and pasting it back
-meant 1 mm. Both fixed in docs/units-plan.md; the formatter now takes the
-system with no default, so a caller has to say.
+meant 1 mm. Both fixed in docs/units-plan.md; `core::FormatLength`/`FormatAngle`
+now take the system with no default, so a caller has to say. (The outer entry
+points — `DrawingExport::SaveSVG`/`SavePDF` and `FormatHoleCallout` — do still
+default it, for the tests that construct a sheet with no document behind it;
+the one production caller passes `ui::ActiveDrawingUnits`.)
 
 ## Follow-ups this round did not take
 
