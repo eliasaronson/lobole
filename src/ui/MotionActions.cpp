@@ -65,6 +65,12 @@ void CopySubtree(AppState& state, MotionRun& run) {
        assembly::SubtreeVersions(*state.assembly, PartResolverFor(state),
                                  AssemblyResolverFor(state))) {
     (void)version;
+    // One row per OCCURRENCE, not per document — a part placed four times is
+    // listed four times. Copying it four times built (and REGENERATED) a
+    // whole Document just to overwrite the previous one: 16 copies for 10
+    // parts on the SO-101 gripper, a third of a prep that blocks the frame.
+    if (run.parts.count(slotId) != 0 || run.assemblies.count(slotId) != 0)
+      continue;
     if (const Document* pd = PartDocById(state, slotId))
       run.parts[slotId] = std::make_unique<Document>(*pd);
     else if (const AssemblyDocument* ad = AssemblyDocById(state, slotId))
