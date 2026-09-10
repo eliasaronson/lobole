@@ -25,9 +25,41 @@ verdict-naming fix I had ranked first turned out to have been diagnosed and
 half-fixed here already, and the rest of the manufacturing material is
 contingent on W6, which is now the weakest item on this plan.
 
-Remaining, in order: W2's other seven handlers, W4(c), the drone's own
-`verify()` moved onto declared assertions (the dogfood proof W3 is still
-owed), then W6 if it earns it.
+The drone's `verify()` now reads its clearances from the document instead of
+measuring them, which is the proof W3 owed — and the conversion turned up the
+next thing W1 owes (below).
+
+Remaining, in order: **occurrence placements do not follow variables**, W2's
+other seven handlers, W4(c), then W6 if it earns it.
+
+### What the drone conversion found: parts are parametric, placements are not
+
+W1 made `fpv_drone_spec.py`'s 119 dimensions document variables, and they
+drive part GEOMETRY: `standoff_len` 15 → 9 takes the standoff part from
+577 mm3 to 352. It does not move the top plate that stands on them. After the
+edit and a `solve_assembly` reporting **dof 0, 0 errored mates, loops closed**,
+every occurrence is where it was, and all seven declared clearances still read
+`holds` — correctly, because nothing moved.
+
+The cause is visible in the generator: `place()` does `[float(v) for v in
+position]`, so a Param reaching an occurrence transform is flattened to a
+literal on the way in. `Occurrence`'s own header says the intended mechanism
+is mates ("A3 mates will re-solve over non-`fixed` occurrences on load — the
+literal-plus-`_expr` pattern applied to placement"), and the drone does have
+56 of them at dof 0. So one of two things is true and this has not yet
+established which:
+
+* the bolted mates constrain the axes but not the stack height, and the Z came
+  from the explicit transform all along — in which case the assembly is
+  under-constrained in a way `dof: 0` is not reporting; or
+* the solver is not re-solving on a geometry change, only on demand.
+
+Either is worth knowing, and the second would be the more serious. Note this
+is NOT an assertion bug: the clearances were right to stay `holds`. The same
+assertions do go stale, and selectively, when something actually moves —
+raising the top plate 20 mm marks exactly the three that involve it (prop to
+top plate, prop to battery, battery to camera) and leaves the other four
+alone, across 91 occurrences.
 
 ---
 

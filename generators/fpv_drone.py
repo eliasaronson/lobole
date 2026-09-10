@@ -230,6 +230,9 @@ def build_assembly(app, parts):
         (ANT_MOUNT_X + sma[0], sma[1], Z_MID_TOP + sma[2]),
         quat_y(-ANT_MOUNT_ANGLE), name="Antenna")
     print(f"  {len(occ)} occurrences placed")
+    # The clearances are part of the assembly, not part of the check that
+    # reads it — declared here, once, where the occurrences they name exist.
+    print(f"  {declare_clearances(app, occ)} clearances declared")
     return asm, occ
 
 
@@ -429,21 +432,43 @@ def add_mates(asm, occ):
 RESIDUE_MM3 = 0.01   # coincident thread surfaces: a cube 0.2 mm on a side
 
 
-def _clearances(gap):
-    """The clearances that decide whether it flies or eats itself."""
-    return {
-        "prop to prop (adjacent)": gap("Propeller FL", "Propeller FR"),
-        # Measured again. It used to cost 55 s of a 100 s run — an exact
-        # distance between two lofted propellers that far apart prunes to
-        # nothing — until the exact query learned to ask the tessellations
-        # where to look first (docs/modeling/fpv-drone.md).
-        "prop to prop (across)": gap("Propeller FL", "Propeller RR"),
-        "prop to top plate": gap("Propeller FL", "Top plate"),
-        "prop to battery": gap("Propeller RL", "Battery"),
-        "prop to antenna": gap("Propeller RL", "Antenna"),
-        "prop to camera plate": gap("Propeller FL", "Camera plate L"),
-        "battery to camera": gap("Battery", "FPV camera"),
-    }
+# The clearances that decide whether it flies or eats itself — DECLARED on
+# the assembly (v97) rather than measured by this script.
+#
+# They used to live in a python dict here: a reading somebody took, in a file
+# nobody opening the document would ever see. Now `declare_clearances` puts
+# them IN the assembly, so they survive the save, they show up in
+# list_assertions beside the model, and moving a plate marks them stale
+# without anyone re-running this file. This table is only their DECLARATION;
+# the answers come from the document.
+#
+# (occ key, occ key, minimum mm, why this number)
+CLEARANCES = [
+    ("prop to prop (adjacent)", "prop0", "prop3", 2.0,
+     "adjacent discs on a 220 mm wheelbase; below 2 mm they beat each other's "
+     "air and the quad oscillates"),
+    ("prop to prop (across)", "prop0", "prop2", 2.0,
+     "the diagonal pair, which is what a wheelbase error shows up in first"),
+    ("prop to top plate", "prop0", "top", 2.0,
+     "the standoff length is chosen to put the top plate under the disc; this "
+     "is the number that says it worked"),
+    ("prop to battery", "prop1", "battery", 2.0,
+     "a 6S pack sits proud of the top plate and the rear discs pass over it"),
+    ("prop to antenna", "prop1", "antenna", 2.0,
+     "the SMA leans back out of the disc — the lean angle is FOR this"),
+    ("prop to camera plate", "prop0", "camplate_l", 2.0,
+     "the front discs pass outboard of the camera cage"),
+    ("battery to camera", "battery", "camera", 2.0,
+     "the pack must not foul the camera's tilt"),
+]
+
+
+def declare_clearances(app, occ):
+    """Put the clearances in the document, once, at build time."""
+    for name, a, b, mm, why in CLEARANCES:
+        app.add_assertion(name=name, a=occ[a].id, b=occ[b].id, min_mm=mm,
+                          why=why)
+    return len(CLEARANCES)
 
 
 def verify(app, asm, parts, occ, props):
@@ -472,31 +497,37 @@ def verify(app, asm, parts, occ, props):
     for f in findings:
         bad.append(f"fastener {f.get('part')}: {f.get('why')}")
 
-    # The clearances that decide whether it flies or eats itself.
-    def gap(a, b):
-        """A clearance, off the triangles.
-
-        `mode: mesh` because that is the question being asked: whether there
-        are millimetres, not microns. An exact distance between two lofted
-        propellers 151 mm apart takes 55 s — every face pair is equally far,
-        so nothing prunes — and the same answer off the tessellations takes
-        10 ms and is right to the tolerance it reports. The gate below
-        subtracts that tolerance — the SUM of the two meshes' deflections,
-        not the coarser one, because each can err its own way — rather than
-        trusting the number flat.
-        """
-        started = time.perf_counter()
-        r = app.measure(a={"occurrence": a}, b={"occurrence": b},
-                        distance_kind="minimum", mode="mesh", _timeout=600)
-        PHASES.append((f"  gap {a[:9]}/{b[:9]}", time.perf_counter() - started))
-        return r["distance"] - r["tolerance_mm"]
-
+    # The clearances that decide whether it flies or eats itself — asked of
+    # the DOCUMENT, which is where they were declared (v97).
+    #
+    # This used to be a `gap()` helper and a dict of seven measurements taken
+    # by this file. Two things changed by moving them into the assembly.
+    # Anyone who opens the project sees them, and thickening a plate marks
+    # them stale without this script running at all. And the arithmetic that
+    # made a mesh answer safe to gate on — subtracting the SUM of the two
+    # tessellation deflections, because each can err its own way — is the
+    # app's now, done once, instead of being re-derived correctly here and
+    # nowhere else.
     with phase("clearances"):
-        clear = _clearances(gap)
-    for what, mm in clear.items():
-        print(f"  {what:<26} {mm:7.2f} mm (at worst)")
-        if mm < 2.0:
-            bad.append(f"{what} is only {mm:.2f} mm")
+        checked = app.verify_assertions(_timeout=900)
+    clear = {}
+    for row in checked["assertions"]:
+        clear[row["name"]] = row["measured_mm"]
+        print(f"  {row['name']:<26} {row['measured_mm']:7.2f} mm "
+              f"(min {row['min_mm']:.1f}) {row['standing']}")
+        if row["standing"] != "holds":
+            bad.append(f"{row['name']}: {row['standing']}"
+                       + (f" at {row['measured_mm']:.2f} mm"
+                          if row["standing"] == "violated" else "")
+                       + (f" — {row['note']}" if row.get("note") else ""))
+    # The receipt is the whole-set verdict, and it is the half a per-row loop
+    # cannot state: a set where one clearance could not be checked is not a
+    # clean set, however many of the others hold.
+    standing = checked["receipt"]["standing"]
+    print(f"  clearances: {standing.upper()} — {checked['receipt']['summary']}")
+    if standing not in ("verified",):
+        bad.append(f"the declared clearances are {standing}: "
+                   f"{checked['receipt']['summary']}")
     # ... and the same question asked THROUGH a turn of the motors, which is
     # the only way a three-blade propeller's clearance is actually decided.
     study = app.add_motion_study(

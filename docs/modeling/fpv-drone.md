@@ -63,9 +63,19 @@ propeller and a 6S 1300 pack.
   empty;
 - `check_fasteners` re-derives all 42 screws against the stacks they are in
   and reports nothing;
-- seven clearances, measured not calculated: prop to prop 30.7, prop to top
-  plate 37.1, prop to battery 33.8, prop to antenna 14.3, battery to camera
-  7.4 mm;
+- seven clearances, measured not calculated, and since v97 **declared on the
+  assembly** rather than computed by the build script — `list_assertions`
+  shows them beside the model and moving a plate marks them stale without
+  anyone re-running anything: prop to prop 30.0, prop to top plate 36.5, prop
+  to battery 33.3, prop to antenna 13.8, battery to camera 7.1 mm.
+
+  Those are each about half a millimetre under the figures this line used to
+  carry (30.7 / 37.1 / 33.8 / 14.3 / 7.4), and nothing moved. The old numbers
+  were the RAW mesh distances while the gate compared `distance - tolerance`,
+  so the doc quoted a gap half a millimetre more generous than the one the
+  check was using. One number now, and it is the conservative one: a mesh
+  answer is only safe to gate on with the SUM of the two tessellation
+  deflections subtracted, because each can err its own way;
 - a motion study turns all four propellers through a blade pitch (the four
   revolute mates are coupled by chain and gear relations, so one driver
   turns the lot) and no pair comes into contact that was not touching at
