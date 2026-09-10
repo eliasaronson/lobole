@@ -47,8 +47,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "linearly with this number and a wrong unit is invisible in the answer, "
      "so it is stated here rather than left to be inferred from the solver. "
      "An omitted force `direction` pushes into the picked face (the same "
-     "default a GUI placement takes). A `face` is {feature_id, element} or "
-     "just the element name — the name already carries the feature id.",
+     "default a GUI placement takes). A `face` is {feature_id, element}, or "
+     "just the element name — the body that has it is then found for you.",
      "direction, face, magnitude, study, type", remote::NeedsPart},
     {"remove_load", "Remove a load by index.", "load, study",
      remote::NeedsPart},
@@ -175,36 +175,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   // nlohmann's "key 'feature_id' not found". Take the name alone (as a bare
   // string, or as {element}) and read the id off its prefix; an explicit
   // feature_id still wins.
+  // A face is {feature_id, element} — or just the element name, as a bare
+  // string or {element}, in which case the body that HAS it is found. The
+  // name's own prefix is not the answer: it is the feature that created the
+  // element, which after a boolean is not the body's created_by.
   auto studyFaceOf = [](const json& r) {
-    const auto idFromName = [](const std::string& name) -> uint64_t {
-      const size_t slash = name.find('/');
-      if (slash == std::string::npos || slash == 0)
-        throw std::runtime_error(
-            "face '" + name +
-            "' does not name its feature: an element name starts with the id "
-            "of the feature that created the body (list_elements), e.g. "
-            "'12/face3'. Pass {feature_id, element} to say it explicitly");
-      try {
-        return static_cast<uint64_t>(std::stoull(name.substr(0, slash)));
-      } catch (const std::exception&) {
-        throw std::runtime_error(
-            "face '" + name +
-            "' does not start with a feature id; pass {feature_id, element}");
-      }
-    };
-    if (r.is_string()) {
-      const auto name = r.get<std::string>();
-      return ElementRef{idFromName(name), name};
-    }
+    if (r.is_string())
+      return ElementRef{0, r.get<std::string>()};
     if (!r.is_object() || !r.contains("element"))
       throw std::runtime_error(
-          "a face is {feature_id, element} or just the element name "
-          "(list_elements gives names like '12/face3')");
-    const auto name = r.at("element").get<std::string>();
+          "a face is {feature_id, element}, or just the element name "
+          "(list_elements names them) and the body that has it is found");
     return ElementRef{r.contains("feature_id")
                           ? r.at("feature_id").get<uint64_t>()
-                          : idFromName(name),
-                      name};
+                          : uint64_t{0},
+                      r.at("element").get<std::string>()};
   };
   // Runs one study mutation as a ModifyStudyCommand: snapshot before, apply
   // `mutate` to a copy, snapshot after, execute.
