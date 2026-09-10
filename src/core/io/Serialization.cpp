@@ -145,6 +145,10 @@ json DocumentEnvelope(const Document& doc) {
     j["tolerances"] = json::array();
     for (const Tolerance& t : doc.GetTolerances()) {
       json tj = {{"id", t.id}, {"ref", ElementRefJson(t.ref)}};
+      // Present only for a distance tolerance, so a size one is written
+      // exactly as v97 wrote it.
+      if (t.IsDistance())
+        tj["ref2"] = ElementRefJson(t.ref2);
       // The class is what is stored; a deviation pair is the fallback for a
       // drawing that states limits no class expresses. Writing both would
       // invite them to disagree.
@@ -676,6 +680,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       Tolerance t;
       t.id = tj.value("id", uint64_t{0});
       t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
+      t.ref2 = ElementRefFromJson(tj.value("ref2", nlohmann::json::object()));
       t.isoClass = tj.value("class", std::string{});
       t.lower = tj.value("lower", 0.0);
       t.upper = tj.value("upper", 0.0);
@@ -1266,6 +1271,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
       Tolerance t;
       t.id = tj.value("id", uint64_t{0});
       t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
+      t.ref2 = ElementRefFromJson(tj.value("ref2", nlohmann::json::object()));
       t.isoClass = tj.value("class", std::string{});
       t.lower = tj.value("lower", 0.0);
       t.upper = tj.value("upper", 0.0);

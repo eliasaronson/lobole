@@ -173,3 +173,69 @@ TEST_CASE("A copied document carries its tolerances", "[tolerances]") {
   CHECK(copy.GetTolerances()[0].isoClass == "g6");
   CHECK(copy.ToleranceFor(ElementRef{id, "1/face0"}) != nullptr);
 }
+
+// A distance tolerance is a different SUBJECT from a size on the same face,
+// so the two coexist — and the size lookup must not hand check_fits a
+// statement about a gap when it asked how big a bore is.
+TEST_CASE("A size and a distance from the same face coexist", "[tolerances]") {
+  auto doc = ShaftDoc();
+  const uint64_t id = doc->GetFeature(0)->GetId();
+
+  doc->SetTolerance(G6(id));
+  Tolerance span;
+  span.ref = ElementRef{id, "1/face0"};
+  span.ref2 = ElementRef{id, "1/cap0"};
+  span.lower = -0.05;
+  span.upper = 0.05;
+  doc->SetTolerance(span);
+  REQUIRE(doc->GetTolerances().size() == 2);
+
+  // The size lookup answers with the SIZE, not the distance that happens to
+  // start on the same face.
+  const Tolerance* size = doc->ToleranceFor(ElementRef{id, "1/face0"});
+  REQUIRE(size != nullptr);
+  CHECK(size->isoClass == "g6");
+  CHECK_FALSE(size->IsDistance());
+
+  // A second distance between the SAME ordered pair replaces; the reverse
+  // pair is a different subject and does not.
+  Tolerance again = span;
+  again.lower = -0.02;
+  again.upper = 0.02;
+  doc->SetTolerance(again);
+  CHECK(doc->GetTolerances().size() == 2);
+  Tolerance reversed;
+  reversed.ref = ElementRef{id, "1/cap0"};
+  reversed.ref2 = ElementRef{id, "1/face0"};
+  reversed.lower = -0.05;
+  reversed.upper = 0.05;
+  doc->SetTolerance(reversed);
+  CHECK(doc->GetTolerances().size() == 3);
+}
+
+TEST_CASE("A distance tolerance round-trips with both refs", "[tolerances]") {
+  auto doc = ShaftDoc();
+  const uint64_t id = doc->GetFeature(0)->GetId();
+  Tolerance span;
+  span.ref = ElementRef{id, "1/face0"};
+  span.ref2 = ElementRef{id, "1/cap0"};
+  span.lower = -0.05;
+  span.upper = 0.05;
+  doc->SetTolerance(span);
+
+  const std::filesystem::path path = std::filesystem::temp_directory_path() /
+                                     "designer_tolerance_distance.json";
+  REQUIRE(DocumentIO::Save(*doc, path.string()).has_value());
+  auto loaded = DocumentIO::Load(path.string());
+  REQUIRE(loaded.has_value());
+  Document& reloaded = **loaded;
+  REQUIRE(reloaded.GetTolerances().size() == 1);
+  const Tolerance& got = reloaded.GetTolerances()[0];
+  CHECK(got.IsDistance());
+  CHECK(got.ref.name == "1/face0");
+  CHECK(got.ref2.name == "1/cap0");
+  CHECK(got.lower == Approx(-0.05));
+  // A distance must NOT come back as a size tolerance on its first face.
+  CHECK(reloaded.ToleranceFor(ElementRef{id, "1/face0"}) == nullptr);
+  std::filesystem::remove(path);
+}

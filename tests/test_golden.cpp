@@ -491,6 +491,12 @@ void AssertTolerances(const Document& doc, const nlohmann::json& expect) {
     const Tolerance& got = doc.GetTolerances()[i];
     CHECK(got.ref.name == want[i].at("element").get<std::string>());
     CHECK(got.ref.featureId == want[i].at("feature_id").get<uint64_t>());
+    // The second ref is what makes it a DISTANCE rather than a size, so a
+    // golden that loses it reloads as a tolerance on the wrong thing
+    // entirely — with limits that still look plausible.
+    CHECK(got.ref2.name == want[i].value("b_element", std::string{}));
+    CHECK(got.ref2.featureId == want[i].value("b_feature_id", uint64_t{0}));
+    CHECK(got.IsDistance() == want[i].contains("b_element"));
     CHECK(got.isoClass == want[i].value("class", std::string{}));
     CHECK_THAT(got.lower,
                Catch::Matchers::WithinAbs(want[i].value("lower", 0.0), 1e-12));

@@ -174,17 +174,23 @@ three perfectly toleranced bores and forty untoleranced lengths passes
 
 Two steps, and the first is worth having on its own:
 
-**T5a — a tolerance on a measured distance.** `Tolerance` gains a second
-`ElementRef`: with one ref it means "this face's size", with two it means "the
-distance between these". The nominal is measured the same way — `Measure`
-already answers a distance between two elements, which is the whole reason
-this is small. It gives a shoulder-to-seat length, a slot width, a boss height
-a number nothing else can state.
+**T5a — a tolerance on a measured distance. BUILT (v98).** `Tolerance` gained a
+second `ElementRef`: with one ref it means "this face's size", with two it
+means "the distance between these". The nominal is measured the same way —
+`Measure::DistanceDetailed` already answers a distance between two elements,
+which is the whole reason this was small. It gives a shoulder-to-seat length,
+a slot width, a boss height a number nothing else could state.
 
 An ISO class does not apply to a length between two arbitrary faces, so a
-two-ref tolerance takes an explicit `lower`/`upper` pair. That asymmetry is
-real and should be visible in the API rather than papered over with a class
-that silently means something different.
+two-ref tolerance takes an explicit `lower`/`upper` pair and REFUSES a class.
+That asymmetry is real, and it is visible in the API rather than papered over
+with a class that would silently mean something different.
+
+The uniqueness key widened with it: one tolerance per **subject**, which is a
+face for a size and an ordered PAIR of faces for a distance. So a bore carries
+its own size and any number of distances measured from it, and the size lookup
+`check_fits` runs never hands back a statement about a gap when it asked how
+big a bore is.
 
 **T5b — worst case along a chain.** With lengths toleranced, the question
 that actually sinks assemblies becomes askable: a shaft carries a shoulder, a

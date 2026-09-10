@@ -215,6 +215,51 @@ def main():
         expect(abs(fit["min_clearance"] - 0.007) < 1e-9,
                f"same numbers as at the top level: {fit}")
 
+        # --- A tolerance on a LENGTH (T5a) --------------------------------
+        # Diameters are the easy half. A distance tolerance names a second
+        # face and the nominal is measured between them.
+        d.call("add_part", name="Plate")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Slab", "position": [0, 0, 0],
+            "width": 40, "height": 40, "depth": 10})
+        faces = [f["name"] for b in d.call("list_elements")["bodies"]
+                 for f in b.get("faces", []) if f.get("kind") == "plane"]
+        expect(len(faces) == 6, f"a box has six planar faces: {faces}")
+        pid = {f["name"]: f["id"]
+               for f in d.call("get_state")["features"]}["Slab"]
+
+        r = d.call("set_tolerance", feature_id=pid, element=faces[0],
+                   b={"feature_id": pid, "element": faces[1]},
+                   lower=-0.1, upper=0.1, comment="plate width")
+        expect(r["kind"] == "distance", f"tagged as a distance: {r}")
+        expect(abs(r["nominal"] - 40.0) < 1e-9, f"measured width: {r}")
+        expect(abs(r["min"] - 39.9) < 1e-9, f"lower limit: {r}")
+        expect(abs(r["max"] - 40.1) < 1e-9, f"upper limit: {r}")
+
+        listed = d.call("list_tolerances")["tolerances"]
+        expect(len(listed) == 1, f"one tolerance on Plate: {listed}")
+        expect(listed[0]["kind"] == "distance", f"kind survives: {listed}")
+        expect(listed[0]["b"]["element"] == faces[1], f"both refs: {listed}")
+
+        # A face's own size and a distance measured from it are different
+        # subjects, so they coexist rather than replacing one another.
+        d.call("set_tolerance", feature_id=pid, element=faces[0],
+               b={"feature_id": pid, "element": faces[2]},
+               lower=-0.2, upper=0.2)
+        expect(len(d.call("list_tolerances")["tolerances"]) == 2,
+               "a second distance from the same face is its own subject")
+
+        refused(d, "set_tolerance", "an ISO class is a SIZE", feature_id=pid,
+                element=faces[0], b={"feature_id": pid, "element": faces[1]},
+                **{"class": "H7"})
+        refused(d, "set_tolerance", "no distance from itself", feature_id=pid,
+                element=faces[0], b={"feature_id": pid, "element": faces[0]},
+                lower=-0.1, upper=0.1)
+        refused(d, "set_tolerance", "no size of its own", feature_id=pid,
+                element=faces[0], lower=-0.1, upper=0.1)
+        refused(d, "set_tolerance", "needs both", feature_id=pid,
+                element=faces[0], b={"feature_id": pid}, lower=0.0, upper=0.1)
+
         print("tolerances_smoke: all checks passed")
         return 0
     finally:

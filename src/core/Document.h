@@ -30,12 +30,24 @@
 // One per element: the same face cannot be two sizes at once, so setting a
 // tolerance on a face that has one REPLACES it.
 struct Tolerance {
-  uint64_t id = 0;      // document-unique, from the shared id counter
-  ElementRef ref;       // the cylindrical face this is a tolerance ON
+  uint64_t id = 0; // document-unique, from the shared id counter
+  ElementRef ref;  // the face this is a tolerance ON
+  // Set (v98) makes this a tolerance on the DISTANCE from `ref` to `ref2`
+  // rather than on `ref`'s own size — a shoulder-to-seat length, a slot
+  // width, a boss height. Diameters are the easy half: a part with three
+  // perfectly toleranced bores and forty untoleranced lengths is still not
+  // a drawing anybody can make from.
+  ElementRef ref2;
   std::string isoClass; // "H7"; empty means the pair below is authoritative
   double lower = 0.0;   // mm, signed deviation from nominal
   double upper = 0.0;   // mm, signed deviation from nominal
   std::string comment;
+
+  // A distance tolerance never carries an ISO class: a class states how a
+  // SHAFT or a BORE may vary, and says nothing about the gap between two
+  // arbitrary faces. The asymmetry is real, so it is visible here rather
+  // than papered over with a class that would quietly mean something else.
+  [[nodiscard]] bool IsDistance() const { return ref2.IsSet(); }
 };
 
 // A named document-level value, definable as an expression over other
@@ -276,12 +288,16 @@ public:
 
   const std::vector<Tolerance>& GetTolerances() const { return m_tolerances; }
   const Tolerance* FindTolerance(uint64_t id) const;
-  // The tolerance on `ref`, or nullptr. The lookup check_fits runs per mate.
+  // The SIZE tolerance on `ref`, or nullptr — never a distance tolerance that
+  // merely starts there, which is a statement about a gap and not about this
+  // face. The lookup check_fits runs per mate.
   const Tolerance* ToleranceFor(const ElementRef& ref) const;
 
-  // Adds or REPLACES the tolerance on `t.ref`, assigning a fresh id when
-  // `t.id` is 0 and keeping list position when it replaces. Returns the
-  // stored tolerance.
+  // Adds or REPLACES the tolerance on the same SUBJECT — `t.ref` for a size,
+  // the ordered pair (`t.ref`, `t.ref2`) for a distance, so a face can carry
+  // its own size and any number of distances measured from it. Assigns a
+  // fresh id when `t.id` is 0 and keeps list position when it replaces.
+  // Returns the stored tolerance.
   const Tolerance& SetTolerance(Tolerance t);
   // Removes the tolerance with `id`; false if absent.
   bool RemoveTolerance(uint64_t id);

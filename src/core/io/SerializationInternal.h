@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    97; // v97: `tolerances` -- a permitted variation recorded ON a measured
+    98; // v98: a tolerance's `ref2` -- with it the tolerance is on the
+        //      DISTANCE between two elements (a shoulder-to-seat length, a
+        //      slot width) rather than on one face's size. Explicit
+        //      lower/upper only: an ISO class states how a shaft or a bore
+        //      may vary and says nothing about a gap.
+        // v97: `tolerances` -- a permitted variation recorded ON a measured
         //      element ("this bore is H7"). Design intent only: it moves no
         //      surface, so it sits outside the regen chain hash and a
         //      tolerance-only edit rebuilds nothing.

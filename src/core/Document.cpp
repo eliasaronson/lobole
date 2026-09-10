@@ -453,7 +453,8 @@ const Tolerance* Document::ToleranceFor(const ElementRef& ref) const {
   if (!ref.IsSet())
     return nullptr;
   for (const Tolerance& t : m_tolerances)
-    if (t.ref.featureId == ref.featureId && t.ref.name == ref.name)
+    if (!t.IsDistance() && t.ref.featureId == ref.featureId &&
+        t.ref.name == ref.name)
       return &t;
   return nullptr;
 }
@@ -463,11 +464,16 @@ const Tolerance& Document::SetTolerance(Tolerance t) {
     t.id = m_nextId++;
   else
     EnsureNextIdAtLeast(t.id + 1);
-  // Upsert by ELEMENT, not by id: the same face cannot carry two sizes, and
-  // replacing in place keeps list order stable for a UI listing it.
+  // Upsert by SUBJECT, not by id: the same face cannot carry two sizes, and
+  // the same ordered pair of faces cannot be two distances apart. A face's own
+  // size and a distance measured from it are different subjects, so they
+  // coexist. Replacing in place keeps list order stable for a UI listing them.
+  const auto sameSubject = [&t](const Tolerance& e) {
+    return e.ref.featureId == t.ref.featureId && e.ref.name == t.ref.name &&
+           e.ref2.featureId == t.ref2.featureId && e.ref2.name == t.ref2.name;
+  };
   for (Tolerance& existing : m_tolerances) {
-    if (existing.ref.featureId == t.ref.featureId &&
-        existing.ref.name == t.ref.name) {
+    if (sameSubject(existing)) {
       existing = std::move(t);
       return existing;
     }

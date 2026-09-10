@@ -398,19 +398,25 @@ static constexpr MethodDoc InspectionMethods[] = {
      "without switching tab, so a bore and its shaft can live in two.",
      "hole, intent, part, shaft, size"},
     {"set_tolerance",
-     "Record what a face is allowed to vary by: {feature_id, element, "
+     "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
-     "expresses, never both. Design intent only: it moves no surface, so it "
-     "rebuilds nothing. One per element; setting a second REPLACES the "
-     "first. The class is validated against the face's measured size when "
-     "you set it, not when something later looks. Acts on the ACTIVE part, "
-     "like every other mutation; list_tolerances reads any part.",
-     "class, comment, element, feature_id, lower, upper", remote::NeedsPart},
+     "expresses, never both. Adding {b: {feature_id, element}} tolerances "
+     "the DISTANCE between the two faces instead (a shoulder-to-seat length, "
+     "a slot width), which takes lower/upper and REFUSES a class: a class "
+     "says how a shaft or a bore may vary, not how far apart two faces are. "
+     "Design intent only: it moves no surface, so it rebuilds nothing. One "
+     "per subject — a face's own size, and each ordered pair of faces — so "
+     "setting a second REPLACES the first. The class is validated against "
+     "the face's measured size when you set it, not when something later "
+     "looks. Acts on the ACTIVE part, like every other mutation; "
+     "list_tolerances reads any part.",
+     "b, class, comment, element, feature_id, lower, upper", remote::NeedsPart},
     {"list_tolerances",
-     "Every tolerance on this part, with the limits its class implies at the "
-     "face's measured size. A ref whose element no longer resolves is listed "
-     "`resolved: false` rather than dropped — the intent outlives the "
-     "topology that carried it.",
+     "Every tolerance on this part, each tagged `kind: size|distance`, with "
+     "the limits it implies at the measured nominal — the face's diameter, "
+     "or the distance between the two faces. A ref whose element no longer "
+     "resolves is listed `resolved: false` rather than dropped: the intent "
+     "outlives the topology that carried it.",
      "part", remote::NeedsPart},
     {"clear_tolerance", "Remove one tolerance by {id}.", "id",
      remote::NeedsPart},
@@ -2068,8 +2074,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return out;
   }
   if (m == "set_tolerance") {
-    // What a face is ALLOWED to vary by (docs/tolerances/plan.md, T2).
-    // params: {feature_id, element, class? | lower?+upper?, comment?, part?}
+    // What a face's SIZE is allowed to vary by, or — with `b` — what the
+    // DISTANCE between two faces is (docs/tolerances/plan.md, T2 and T5a).
+    // params: {feature_id, element, b?: {feature_id, element},
+    //          class? | lower?+upper?, comment?}
     Document& part = RequirePartDoc(doc, "set_tolerance");
     const ElementRef ref{p.at("feature_id").get<uint64_t>(),
                          p.at("element").get<std::string>()};
@@ -2077,16 +2085,53 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (!el)
       throw std::runtime_error("set_tolerance: element '" + ref.name +
                                "' does not resolve (list_elements)");
-    // Only round features are carried yet, and a tolerance nothing can check
-    // is a silent no-op — so it is refused rather than stored.
-    if (!el->hasRadius)
-      throw std::runtime_error(
-          "set_tolerance: " + ref.name + " is a " + el->shape +
-          ", and only round features carry a size tolerance so far — a "
-          "cylindrical face or a circular edge");
-    const double nominal = el->radius * 2.0;
 
+    ElementRef ref2;
+    double nominal = 0.0;
     const bool hasClass = p.contains("class");
+    if (p.contains("b")) {
+      const json& bj = p.at("b");
+      if (!bj.contains("feature_id") || !bj.contains("element"))
+        throw std::runtime_error(
+            "set_tolerance: `b` needs both feature_id and element to name the "
+            "face the distance is measured to");
+      ref2 = ElementRef{bj.at("feature_id").get<uint64_t>(),
+                        bj.at("element").get<std::string>()};
+      if (ref2.featureId == ref.featureId && ref2.name == ref.name)
+        throw std::runtime_error(
+            "set_tolerance: `b` is the same face as `a` — a face is no "
+            "distance from itself");
+      if (!Measure::Describe(part.GetBodies(), ref2))
+        throw std::runtime_error("set_tolerance: element '" + ref2.name +
+                                 "' does not resolve (list_elements)");
+      // An ISO class states how a shaft or a bore may vary. It says nothing
+      // about the gap between two faces, so accepting one here would store a
+      // band that means something else entirely.
+      if (hasClass)
+        throw std::runtime_error(
+            "set_tolerance: an ISO class is a SIZE — it says how a shaft or a "
+            "bore may vary, not how far apart two faces are. Give `lower` and "
+            "`upper` in mm for a distance.");
+      const auto dist = Measure::DistanceDetailed(part.GetBodies(), ref, ref2);
+      if (!dist)
+        throw std::runtime_error(
+            "set_tolerance: the distance between those two faces could not be "
+            "measured — an OpenCASCADE extrema failed");
+      nominal = dist->distance;
+    } else {
+      // Only round features carry a SIZE yet, and a tolerance nothing can
+      // check is a silent no-op — so it is refused rather than stored. A
+      // planar face is not sizeless, though: name a second face and it
+      // becomes a distance.
+      if (!el->hasRadius)
+        throw std::runtime_error(
+            "set_tolerance: " + ref.name + " is a " + el->shape +
+            ", which has no size of its own — only a cylindrical face or a "
+            "circular edge does. For a length, name the face it is measured "
+            "to as `b`.");
+      nominal = el->radius * 2.0;
+    }
+
     const bool hasLower = p.contains("lower"), hasUpper = p.contains("upper");
     if (hasClass && (hasLower || hasUpper))
       throw std::runtime_error(
@@ -2103,6 +2148,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
 
     Tolerance t;
     t.ref = ref;
+    t.ref2 = ref2;
     t.comment = p.value("comment", std::string{});
     if (hasClass) {
       t.isoClass = p.at("class").get<std::string>();
@@ -2128,7 +2174,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     json out{{"id", stored->id},
              {"element", stored->ref.name},
              {"feature_id", stored->ref.featureId},
+             {"kind", stored->IsDistance() ? "distance" : "size"},
              {"nominal", nominal}};
+    if (stored->IsDistance())
+      out["b"] = {{"feature_id", stored->ref2.featureId},
+                  {"element", stored->ref2.name}};
     if (!stored->isoClass.empty()) {
       out["class"] = stored->isoClass;
       std::string why;
@@ -2151,22 +2201,36 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     for (const Tolerance& t : part.GetTolerances()) {
       json e{{"id", t.id},
              {"feature_id", t.ref.featureId},
-             {"element", t.ref.name}};
+             {"element", t.ref.name},
+             {"kind", t.IsDistance() ? "distance" : "size"}};
       if (!t.comment.empty())
         e["comment"] = t.comment;
+      if (t.IsDistance())
+        e["b"] = {{"feature_id", t.ref2.featureId}, {"element", t.ref2.name}};
+      // A size resolves to a radius; a distance resolves to an extrema
+      // between two faces, and either can stop resolving on its own.
       const auto el = Measure::Describe(part.GetBodies(), t.ref);
+      std::optional<double> measured;
+      if (t.IsDistance()) {
+        if (el && Measure::Describe(part.GetBodies(), t.ref2))
+          if (const auto d =
+                  Measure::DistanceDetailed(part.GetBodies(), t.ref, t.ref2))
+            measured = d->distance;
+      } else if (el && el->hasRadius) {
+        measured = el->radius * 2.0;
+      }
       // Kept, not dropped: a tolerance whose face an upstream edit renamed is
       // still what somebody decided about this part, and saying so is more
       // use than quietly having fewer tolerances than yesterday.
-      e["resolved"] = el && el->hasRadius;
+      e["resolved"] = measured.has_value();
       if (t.isoClass.empty()) {
         e["lower"] = t.lower;
         e["upper"] = t.upper;
       } else {
         e["class"] = t.isoClass;
       }
-      if (el && el->hasRadius) {
-        const double nominal = el->radius * 2.0;
+      if (measured) {
+        const double nominal = *measured;
         e["nominal"] = nominal;
         if (t.isoClass.empty()) {
           e["min"] = nominal + t.lower;
