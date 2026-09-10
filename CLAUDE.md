@@ -19,6 +19,11 @@ instead of running the suite.
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
 
+**A .cpp costs 6-13 s to rebuild; a widely-included header costs ~90 s.** So
+edit headers in BATCHES — one rebuild for five header edits, not five — and
+keep iterating in the .cpp where you can. (Editing a header mid-`ninja` also
+fails with a bogus `redefinition of class`.)
+
 **Grep build output for `FAILED`, not just `error:`.** A nix GC can collect the
 ccache derivation the CMake cache points at; every compile then dies with
 `ccache: No such file or directory`, which an `error:`-only filter reads as
@@ -76,8 +81,13 @@ row above asks for a label instead of excluding `gui_smoke` by name. Full
 verification is ~5 min, not ~10.
 
 **Tags are ctest labels** (`ADD_TAGS_AS_LABELS`): `ctest -L cam`, `-L sketch`,
-`-L solver` all work. `[slow]` is the one with a rule attached — 18 tests,
-~310 s of CPU between them, and `test-fast.sh` is exactly `-LE 'gui|slow'`. Tag
+`-L solver` all work — and that is the ONLY way to run a tag. The same filter
+handed to the binary (`./tests/designer_tests '[cam]'`) runs those tests
+SERIALLY in one process: 144 s against ~50 s for `ctest -L cam -j$(nproc)`.
+The binary is for ONE case, by name, while you iterate on it.
+
+`[slow]` is the one tag with a rule attached — 18 tests, ~310 s of CPU
+between them, and `test-fast.sh` is exactly `-LE 'gui|slow'`. Tag
 a new heavy test `[slow]` where you write it; a by-name list in `tools/` used
 to do this and drifted until the "8 s" loop took 49 s.
 
@@ -169,11 +179,16 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   preferences (`set_settings` writes `~/.config/designer/settings.json`).
   `headless-preview.sh` gives its instance a scratch config dir for exactly
   that reason, seeded from the real one so it still looks like their app.
-- **Agents/CI get their OWN instance**: `./tools/headless-preview.sh <scratch-port>`
-  runs `--offscreen` — the real renderer (full materials/shadows/SSAO) with no
-  window, no Xvfb, no display server. **It has NO PANELS, so the 3D viewport is
-  the whole framebuffer** — anything that draws full-window looks perfect here
-  while being scaled and offset in the real app, so that class of bug is
+- **Agents/CI get their OWN instance**: `./tools/headless-preview.sh --start
+  <scratch-port>` backgrounds it, waits until it answers, and prints the pid;
+  `--stop <port>` kills it by the pid it announced. **Never sleep for it** — an
+  offscreen instance is drivable in about a SECOND, renderers and all, and a
+  guessed `sleep 16` after `nohup` cost one dogfooding round six minutes of
+  doing nothing. Without `--start` the plain form serves in the foreground.
+  It runs `--offscreen` — the real renderer (full materials/shadows/SSAO) with
+  no window, no Xvfb, no display server. **It has NO PANELS, so the 3D
+  viewport is the whole framebuffer** — anything that draws full-window looks
+  perfect here while being scaled and offset in the real app, so that bug is
   invisible offscreen and needs a windowed GUI test
   (`cam/simulation_plays_and_gives_it_back` asserts it). It projects the
   document into the renderers only when something LOOKS (a capture, or an RPC
@@ -240,6 +255,16 @@ layers, above) and "what did this frame actually draw" (a RenderDoc capture:
 `nix-shell -p renderdoc --run qrenderdoc`, launch `build/designer` from inside
 nix-shell). docs/rendering/gpu-debugging.md says which answers which and what
 to look at; neither reports device memory, which nothing does yet.
+
+## Reading the code
+
+For anything that spans more than about three files, **delegate the reading**
+to one Explore/general-purpose agent and act on its answer. Measured over one
+round: 200 small greps cost 4.7 minutes of tool time and **46 minutes of model
+time** — the largest single line in the round — while one agent answered two
+multi-file questions (where tabs live in a toolpath; what a face pick does to
+a profile) in 4.5 minutes and replaced a dozen of them. Grep directly when you
+know the file, or the symbol, or are checking one fact.
 
 ## Architecture pointers (edit the domain module, not the monolith)
 

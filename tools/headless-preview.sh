@@ -17,6 +17,8 @@
 #
 # Usage:
 #   tools/headless-preview.sh [port]            # serve until Ctrl-C (default 8798)
+#   tools/headless-preview.sh --start [port]    # background it, WAIT until it
+#                                               # answers, print its pid, exit
 #   tools/headless-preview.sh --gui [port]      # windowed under Xvfb: ui_action works
 #   tools/headless-preview.sh --stop [port]     # stop it, by the pid it announced
 #   tools/headless-preview.sh --render PROJECT OUT.png [port]
@@ -94,6 +96,31 @@ if [ "${1:-}" = "--stop" ]; then
     echo "headless-preview: $PID is already gone; clearing $PORT" >&2
   fi
   rm -f "$REG"
+  exit 0
+fi
+
+# --start <port>: the same offscreen instance, BACKGROUNDED, waited for, and
+# announced. Without it every caller writes `nohup ... &` followed by a sleep,
+# and the sleep is always a guess -- one dogfooding round spent six and a half
+# minutes sleeping 16 s at a time past an instance that is drivable in about
+# one. `wait_ready` below is the answer and was reachable only from --render.
+if [ "${1:-}" = "--start" ]; then
+  PORT="${2:-8798}"
+  LOG="${DESIGNER_PREVIEW_LOG:-${TMPDIR:-/tmp}/designer-preview-$PORT.log}"
+  # Its own session, so it survives the shell that started it and takes no
+  # SIGHUP when that shell goes away. `nohup` is the fallback where setsid is
+  # not installed; both leave the app parented to init, which is what --stop
+  # (and the instance registry it reads) already assumes.
+  if command -v setsid >/dev/null; then
+    setsid "$BIN" --offscreen --remote "$PORT" >"$LOG" 2>&1 </dev/null &
+  else
+    nohup "$BIN" --offscreen --remote "$PORT" >"$LOG" 2>&1 </dev/null &
+  fi
+  wait_ready "$PORT" || { echo "headless-preview: see $LOG" >&2; exit 1; }
+  REG="${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json"
+  PID="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$REG" 2>/dev/null)"
+  echo "headless-preview: ready on $PORT (pid ${PID:-unknown}, log $LOG)"
+  echo "headless-preview: stop it with $0 --stop $PORT"
   exit 0
 fi
 
