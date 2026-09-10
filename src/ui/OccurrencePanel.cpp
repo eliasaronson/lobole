@@ -14,6 +14,7 @@
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 #include "ui/SelectionPipeline.h"
 #include "ui/TextFit.h"
+#include "ui/ToleranceActions.h"
 
 #include "core/io/Serialization.h" // RelationKindToString
 
@@ -761,6 +762,51 @@ void DrawBomSection(AppState& state) {
     } else {
       for (const std::string& w : state.fastenerChecks)
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "%s", w.c_str());
+    }
+  }
+
+  // Fits, beside fasteners for the same reason fasteners are here: it is a
+  // question about what the assembly is MADE of, and it is answered by
+  // walking the whole thing, so it is asked for rather than run per frame.
+  //
+  // The assembly's own round mates ARE the pairing — nothing has to be set up
+  // first (docs/tolerances/plan.md T2).
+  if (ImGui::Button("Check fits###bom_check_fits")) {
+    state.fitChecks.clear();
+    int pass = 0, warn = 0, fail = 0, reported = 0, unverified = 0;
+    for (const FitCheck& c : CheckFits(state)) {
+      state.fitChecks.push_back(c.Sentence());
+      if (c.status == "pass")
+        pass++;
+      else if (c.status == "warn")
+        warn++;
+      else if (c.status == "fail")
+        fail++;
+      else if (c.status == "reported")
+        reported++;
+      else
+        unverified++;
+    }
+    // The summary counts each kind APART. An aggregate that hid unknowns
+    // behind a green badge would be the one thing this check exists not to do.
+    char buf[160];
+    std::snprintf(buf, sizeof(buf),
+                  "%d passed, %d warned, %d failed, %d reported, %d unverified",
+                  pass, warn, fail, reported, unverified);
+    state.fitSummary = buf;
+    state.fitsChecked = true;
+  }
+  ImGui::SetItemTooltip(
+      "Check every round joint whose two faces carry a tolerance. The mate "
+      "type is the intent: a joint that moves cannot be an interference fit.");
+  if (state.fitsChecked) {
+    if (state.fitChecks.empty()) {
+      ImGui::TextDisabled("No round mate here carries a tolerance on both "
+                          "sides yet.");
+    } else {
+      ImGui::TextDisabled("%s", state.fitSummary.c_str());
+      for (const std::string& w : state.fitChecks)
+        ImGui::TextWrapped("%s", w.c_str());
     }
   }
 }

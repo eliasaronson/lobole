@@ -781,6 +781,34 @@ TEST_CASE("Callout provenance: MappedName parsing, hole text, pitch",
                                               "3.4 THRU");
   }
 
+  // A dimension on a toleranced bore says so. This is provenance, not a new
+  // authored field: the model already recorded the band, and the sheet had
+  // gone on printing the nominal alone.
+  SECTION("FormatToleranceSuffix") {
+    Tolerance cls;
+    cls.isoClass = "H7";
+    CHECK(drawing::FormatToleranceSuffix(cls) == " H7");
+
+    Tolerance band;
+    band.lower = -0.02;
+    band.upper = 0.05;
+    // The leading + is not decoration: "0.05/-0.02" reads as a range.
+    CHECK(drawing::FormatToleranceSuffix(band) == " +0.05/-0.02");
+
+    Tolerance negBoth;
+    negBoth.lower = -0.041;
+    negBoth.upper = -0.02;
+    CHECK(drawing::FormatToleranceSuffix(negBoth) == " -0.02/-0.041");
+
+    // A distance is not a size, and never labels a circle.
+    Tolerance dist;
+    dist.ref = ElementRef{1, "a"};
+    dist.ref2 = ElementRef{1, "b"};
+    dist.lower = -0.1;
+    dist.upper = 0.1;
+    CHECK(drawing::FormatToleranceSuffix(dist).empty());
+  }
+
   SECTION("UniformCollinearPitch") {
     using drawing::UniformCollinearPitch;
     const glm::dvec2 row[] = {{0, 0}, {10, 0}, {20, 0}};

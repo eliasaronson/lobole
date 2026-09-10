@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/Measure.h"
 #include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
 #include "ui/AssemblyActions.h"
 #include "ui/CreateActions.h"
@@ -1643,4 +1644,80 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // The bar is the document state, not the code path: do it by clicking, do
   // it by RPC, and the two documents have to match. Add a pair here whenever
   // an action grows a second way to reach it.
+
+  // The assembly's own round mates ARE the pairing, so "Check fits" needs no
+  // setup beyond tolerancing the two faces. What is under test is the button
+  // and the summary — the walk itself is covered by tolerances_smoke.
+  t = IM_REGISTER_TEST(engine, "tolerance", "check_fits_from_the_panel");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    Document* part = ui::PartDocById(*s_App, partId);
+    IM_CHECK(part != nullptr);
+
+    // The cylindrical face, off the element map rather than a hard-coded name.
+    const Body& body = part->GetBodies()[0];
+    std::string round;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto face = Measure::DescribeFaceAt(body, index);
+      if (face && face->kind == "cylinder") {
+        round = name;
+        break;
+      }
+    }
+    IM_CHECK(!round.empty());
+    const ElementRef ref{body.createdBy, round};
+
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence bore;
+    bore.name = "Housing";
+    bore.partId = partId;
+    bore.fixed = true;
+    const uint64_t boreOcc = s_App->assembly->AddOccurrence(bore);
+    Occurrence shaft;
+    shaft.name = "Shaft";
+    shaft.partId = partId;
+    const uint64_t shaftOcc = s_App->assembly->AddOccurrence(shaft);
+    Mate m;
+    m.type = MateType::Revolute;
+    m.name = "journal";
+    m.a.occurrenceId = boreOcc;
+    m.a.anchor.face = ref;
+    m.b.occurrenceId = shaftOcc;
+    m.b.anchor.face = ref;
+    s_App->assembly->AddMate(m);
+    ctx->Yield(2);
+
+    const auto press = [&]() {
+      ctx->ItemOpen("//###Model/Bill of materials###bom_header");
+      ctx->Yield();
+      ctx->ItemClick("//###Model/###bom_check_fits");
+      ctx->Yield(2);
+    };
+
+    // Untoleranced, the joint is UNVERIFIED and says so — never a pass.
+    press();
+    IM_CHECK(s_App->fitsChecked);
+    IM_CHECK_EQ(s_App->fitChecks.size(), (size_t)1);
+    IM_CHECK(s_App->fitSummary.find("0 passed") != std::string::npos);
+    IM_CHECK(s_App->fitSummary.find("1 unverified") != std::string::npos);
+
+    // Both sides are the SAME part here, so one tolerance would make both
+    // sides a bore. H7 against g6 needs two parts; what this asserts is that
+    // the check moves off "unverified" once the faces carry intent, and that
+    // two hole classes are refused by name rather than guessed apart.
+    Tolerance tol;
+    tol.ref = ref;
+    tol.isoClass = "H7";
+    part->SetTolerance(tol);
+    ctx->Yield();
+    press();
+    IM_CHECK_EQ(s_App->fitChecks.size(), (size_t)1);
+    IM_CHECK(s_App->fitSummary.find("1 unverified") != std::string::npos);
+    IM_CHECK(s_App->fitChecks[0].find("has to be the bore") !=
+             std::string::npos);
+  };
 }

@@ -1,6 +1,7 @@
 #include "core/drawing/DrawingCallout.h"
 
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
 
@@ -90,6 +91,51 @@ const HoleFeature* FindHoleForRef(const Document& doc,
         return hole;
   }
   return nullptr;
+}
+
+const Tolerance* FindToleranceForRef(const Document& doc,
+                                     const std::string& mappedName,
+                                     double modelRadius) {
+  // Provenance is compared NAME to NAME, not against ElementRef::featureId:
+  // that field is the id of the feature whose BODY owns the name (the box a
+  // hole was cut into), while the name itself encodes the features that made
+  // the face (the hole). Matching on the former finds nothing on any bore
+  // that was cut rather than created — which is every interesting one.
+  const std::vector<uint64_t> ids = MappedNameFeatureIds(mappedName);
+  const auto sharesProvenance = [&](const std::string& other) {
+    for (const uint64_t id : MappedNameFeatureIds(other))
+      if (std::find(ids.begin(), ids.end(), id) != ids.end())
+        return true;
+    return false;
+  };
+  const Tolerance* found = nullptr;
+  for (const Tolerance& t : doc.GetTolerances()) {
+    if (t.IsDistance() || !sharesProvenance(t.ref.name))
+      continue;
+    const auto el = Measure::Describe(doc.GetBodies(), t.ref);
+    if (!el || !el->hasRadius)
+      continue;
+    if (std::abs(el->radius - modelRadius) > 1e-3 * std::max(el->radius, 1.0))
+      continue;
+    if (found != nullptr)
+      return nullptr; // ambiguous: two bands, and no way to say which
+    found = &t;
+  }
+  return found;
+}
+
+std::string FormatToleranceSuffix(const Tolerance& tol) {
+  if (tol.IsDistance())
+    return {};
+  if (!tol.isoClass.empty())
+    return " " + tol.isoClass;
+  const auto signed_ = [](double v) {
+    // A leading + is not decoration: "0.05/-0.02" reads as a range, while
+    // "+0.05/-0.02" reads as the two deviations it is.
+    const std::string n = core::FormatLength(v);
+    return v >= 0.0 ? "+" + n : n;
+  };
+  return " " + signed_(tol.upper) + "/" + signed_(tol.lower);
 }
 
 std::string FormatHoleCallout(const HoleFeature& hole) {

@@ -13,6 +13,7 @@
 #include "core/MeshCollide.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
+#include "core/ToleranceStack.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
@@ -23,6 +24,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/RendererSync.h"
+#include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
 
 #include <glm/glm.hpp>
@@ -420,6 +422,17 @@ static constexpr MethodDoc InspectionMethods[] = {
      "part", remote::NeedsPart},
     {"clear_tolerance", "Remove one tolerance by {id}.", "id",
      remote::NeedsPart},
+    {"stack_up",
+     "Worst case along a STATED chain: {terms: [{tolerance: id, subtract?}]} "
+     "gives the summed nominal and the min/max the bands allow. The chain is "
+     "stated and not inferred — a mate names the two faces that TOUCH, but a "
+     "stack alternates a contact and a length inside a part, and nothing says "
+     "which of a part's distances lies along the axis. What it does NOT "
+     "account for is correlation: two lengths driven by one variable cancel "
+     "rather than add, and a tolerance's nominal is measured, so there is no "
+     "path back to the variable that drove it. The terms must be independent, "
+     "and the answer says so. Fewer than two terms is refused.",
+     "part, terms", remote::NeedsPart},
     {"check_fits",
      "Every fit this assembly declares, checked. A round mate already names "
      "the two faces that mate, so nothing has to pair them up: where both "
@@ -2259,239 +2272,93 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     state.commands->Execute(std::make_unique<ClearToleranceCommand>(id), part);
     return json{{"ok", true}, {"id", id}};
   }
+  if (m == "stack_up") {
+    const Document& part = p.contains("part")
+                               ? *ResolvePartParam(state, p.at("part"))
+                               : RequirePartDoc(doc, "stack_up");
+    if (!p.contains("terms") || !p.at("terms").is_array())
+      throw std::runtime_error(
+          "stack_up: `terms` is an array of {tolerance: id, subtract?}");
+    std::vector<tolstack::Term> terms;
+    for (const json& tj : p.at("terms")) {
+      tolstack::Term t;
+      if (tj.is_number_unsigned() || tj.is_number_integer()) {
+        t.toleranceId = tj.get<uint64_t>();
+      } else {
+        if (!tj.contains("tolerance"))
+          throw std::runtime_error(
+              "stack_up: each term needs a `tolerance` id");
+        t.toleranceId = tj.at("tolerance").get<uint64_t>();
+        t.subtract = tj.value("subtract", false);
+      }
+      terms.push_back(t);
+    }
+    std::string why;
+    const auto sum = tolstack::Sum(part, terms, &why);
+    if (!sum)
+      throw std::runtime_error("stack_up: " + why);
+    json rows = json::array();
+    for (const tolstack::TermResult& r : sum->terms)
+      rows.push_back({{"tolerance", r.toleranceId},
+                      {"what", r.what},
+                      {"subtract", r.subtract},
+                      {"nominal", r.nominal},
+                      {"lower", r.lower},
+                      {"upper", r.upper}});
+    return json{
+        {"terms", std::move(rows)},
+        {"nominal", sum->nominal},
+        {"min", sum->min},
+        {"max", sum->max},
+        {"note",
+         "worst case over the stated terms, assumed INDEPENDENT. Two lengths "
+         "driven by one variable cancel rather than add, and this cannot "
+         "tell — a nominal is measured, so nothing links it back to what "
+         "drove it. No distribution, and no form or position error."}};
+  }
   if (m == "check_fits") {
-    // Every fit the assembly ALREADY declares. A Revolute or Cylindrical mate
-    // names the two faces that mate, so no pairing entity has to exist — and
-    // the mate type doubles as the intent, because a joint that turns cannot
-    // be an interference fit.
+    // The walk lives in ui::CheckFits so a person clicking "Check fits" and a
+    // script calling this get the same verdict from the same code — the
+    // arrangement check_fasteners already uses. This is only its wire form.
     if (!state.assembly)
       throw std::runtime_error(
           "check_fits needs an assembly tab — a fit is between two placed "
           "parts, and only an assembly says which faces meet");
-
-    // One side of one mate, resolved as far as it goes.
-    struct Side {
-      const Document* part = nullptr;
-      const Tolerance* tol = nullptr;
-      std::optional<double> diameter;
-      std::string occurrence;
-      std::string reason; // non-empty = this side stopped here
-    };
-    const auto resolveSide = [&](const Connector& c, const char* which) {
-      Side side;
-      const Occurrence* occ = state.assembly->FindById(c.occurrenceId);
-      if (!occ) {
-        side.reason = std::string(which) + " occurrence is missing";
-        return side;
-      }
-      side.occurrence = occ->name;
-      // A5: walk down to the part the anchor actually means. The same descent
-      // AssemblySolve's ConnectorFrame makes, minus the transform — a fit is
-      // between two SIZES, and a size does not care where the part was placed.
-      Document* pd = nullptr;
-      if (!c.innerPath.empty()) {
-        if (occ->refKind != OccurrenceRef::Assembly) {
-          side.reason = std::string(which) + " (" + occ->name +
-                        ") has a path into a sub-assembly but places a part";
-          return side;
-        }
-        const AssemblyDocument* sub = ui::AssemblyDocById(state, occ->partId);
-        const Occurrence* inner = nullptr;
-        for (const uint64_t step : c.innerPath) {
-          if (sub == nullptr) {
-            side.reason = std::string(which) + " (" + side.occurrence +
-                          ") has a path deeper than the assembly goes";
-            return side;
-          }
-          inner = sub->FindById(step);
-          if (inner == nullptr) {
-            side.reason = std::string(which) + " (" + side.occurrence +
-                          ") points at a part inside the sub-assembly that is "
-                          "gone";
-            return side;
-          }
-          // The path names the part, so it is also the label a person needs:
-          // two occurrences of the same bearing are told apart by where they
-          // sit, not by their part name.
-          side.occurrence += "/" + inner->name;
-          sub = inner->refKind == OccurrenceRef::Assembly
-                    ? ui::AssemblyDocById(state, inner->partId)
-                    : nullptr;
-        }
-        pd = ui::PartDocById(state, inner->partId);
-      }
-      if (c.anchor.frameId != 0 || c.anchor.origin || !c.anchor.face.IsSet()) {
-        side.reason = std::string(which) + " (" + side.occurrence +
-                      ") is mated on a " +
-                      (c.anchor.frameId != 0 ? "datum frame" : "part origin") +
-                      ", not a face — there is no surface to give a size";
-        return side;
-      }
-      if (pd == nullptr)
-        pd = ui::PartDocById(state, occ->partId);
-      if (!pd) {
-        side.reason =
-            std::string(which) + " (" + side.occurrence + ")" +
-            (occ->refKind == OccurrenceRef::Assembly && c.innerPath.empty()
-                 ? " is a sub-assembly, which has no faces of its own"
-                 : " has no part document loaded");
-        return side;
-      }
-      side.part = pd;
-      side.tol = pd->ToleranceFor(c.anchor.face);
-      if (!side.tol) {
-        side.reason = std::string(which) + " (" + occ->name + ") face " +
-                      c.anchor.face.name +
-                      " carries no tolerance (set_tolerance on that part)";
-        return side;
-      }
-      const auto el = Measure::Describe(pd->GetBodies(), c.anchor.face);
-      if (!el || !el->hasRadius) {
-        side.reason = std::string(which) + " (" + occ->name + ") face " +
-                      c.anchor.face.name +
-                      " no longer resolves to a round face";
-        return side;
-      }
-      side.diameter = el->radius * 2.0;
-      return side;
-    };
-
     json entries = json::array();
     int verified = 0, unverified = 0, failed = 0, warned = 0, reported = 0;
-    for (const Mate& mate : state.assembly->GetMates()) {
-      // Which mates are a fit at all, and which of those declare an intent
-      // strong enough to judge against. A joint that MOVES says so outright:
-      // revolute turns, slider slides, cylindrical does both. Fastened says
-      // only that nothing moves — not whether the parts are pressed together
-      // or bolted through a clearance hole — so its fit is reported and not
-      // judged. Planar and ball are not round joints and are not fits.
-      const char* mateKind = nullptr;
-      bool moves = false;
-      switch (mate.type) {
-      case MateType::Revolute:
-        mateKind = "revolute";
-        moves = true;
-        break;
-      case MateType::Cylindrical:
-        mateKind = "cylindrical";
-        moves = true;
-        break;
-      case MateType::Slider:
-        mateKind = "slider";
-        moves = true;
-        break;
-      case MateType::Fastened:
-        mateKind = "fastened";
-        break;
-      default:
-        break;
+    for (const ui::FitCheck& c : ui::CheckFits(state)) {
+      json e{{"mate", c.mateId},
+             {"mate_name", c.mateName},
+             {"mate_type", c.mateType},
+             {"status", c.status}};
+      if (!c.reason.empty())
+        e["reason"] = c.reason;
+      if (c.computed) {
+        e["size"] = c.size;
+        e["hole"] = {{"occurrence", c.holeOccurrence},
+                     {"class", c.holeClass},
+                     {"min", c.holeMin},
+                     {"max", c.holeMax}};
+        e["shaft"] = {{"occurrence", c.shaftOccurrence},
+                      {"class", c.shaftClass},
+                      {"min", c.shaftMin},
+                      {"max", c.shaftMax}};
+        e["kind"] = c.kind;
+        e["min_clearance"] = c.minClearance;
+        e["max_clearance"] = c.maxClearance;
+        e["note"] = "worst case over two independent bands; form, position "
+                    "and surface finish are not evaluated";
       }
-      if (mateKind == nullptr)
-        continue;
-      json e{
-          {"mate", mate.id}, {"mate_name", mate.name}, {"mate_type", mateKind}};
-      const Side a = resolveSide(mate.a, "a");
-      const Side b = resolveSide(mate.b, "b");
-      const auto stop = [&](const std::string& reason) {
-        e["status"] = "unverified";
-        e["reason"] = reason;
-        unverified++;
-        entries.push_back(std::move(e));
-      };
-      if (!a.reason.empty() || !b.reason.empty()) {
-        stop(!a.reason.empty() ? a.reason : b.reason);
-        continue;
-      }
-      // Which side is the bore is said by the CLASS, not guessed from the
-      // geometry: an uppercase class is a hole, lowercase a shaft. Two of the
-      // same is not a fit anyone can compute, and picking one to flip would
-      // be inventing the answer.
-      const bool aHole =
-          !a.tol->isoClass.empty() &&
-          std::isupper(static_cast<unsigned char>(a.tol->isoClass[0])) != 0;
-      const bool bHole =
-          !b.tol->isoClass.empty() &&
-          std::isupper(static_cast<unsigned char>(b.tol->isoClass[0])) != 0;
-      if (a.tol->isoClass.empty() || b.tol->isoClass.empty()) {
-        stop(
-            "a fit needs an ISO class on both sides; " +
-            std::string(a.tol->isoClass.empty() ? a.occurrence : b.occurrence) +
-            " states explicit deviations, which say nothing about which side "
-            "is the bore");
-        continue;
-      }
-      if (aHole == bHole) {
-        stop("both sides are " + std::string(aHole ? "hole" : "shaft") +
-             " classes (" + a.tol->isoClass + " and " + b.tol->isoClass +
-             ") — one of them has to be the bore");
-        continue;
-      }
-      const Side& hole = aHole ? a : b;
-      const Side& shaft = aHole ? b : a;
-      constexpr double kAgree = 1e-5;
-      if (std::abs(*hole.diameter - *shaft.diameter) > kAgree) {
-        char buf[128];
-        std::snprintf(buf, sizeof(buf),
-                      "the two faces are not the same basic size — the bore "
-                      "measures %.4f mm and the shaft %.4f mm",
-                      *hole.diameter, *shaft.diameter);
-        stop(buf);
-        continue;
-      }
-      std::string why;
-      const auto fit = fits::Fit(*hole.diameter, hole.tol->isoClass,
-                                 shaft.tol->isoClass, &why);
-      if (!fit) {
-        stop(why);
-        continue;
-      }
-      e["size"] = *hole.diameter;
-      e["hole"] = {{"occurrence", hole.occurrence},
-                   {"class", hole.tol->isoClass},
-                   {"min", fit->hole.Min(*hole.diameter)},
-                   {"max", fit->hole.Max(*hole.diameter)}};
-      e["shaft"] = {{"occurrence", shaft.occurrence},
-                    {"class", shaft.tol->isoClass},
-                    {"min", fit->shaft.Min(*hole.diameter)},
-                    {"max", fit->shaft.Max(*hole.diameter)}};
-      e["kind"] = fits::FitKindName(fit->kind);
-      e["min_clearance"] = fit->minClearance;
-      e["max_clearance"] = fit->maxClearance;
-      // The mate type IS the intent, and this is the whole reason pairing off
-      // mates is worth more than a pairing table: a Revolute joint says these
-      // two turn against each other, and an interference fit says they do not.
-      //
-      // A fastened joint is deliberately NOT judged. "Nothing moves here" is
-      // true of a shrunk-on gear and of a bracket bolted through a clearance
-      // hole, and the two want opposite fits — so a verdict either way would
-      // be invented. The fit is computed and reported, which is the useful
-      // half, and the summary counts it apart from the judged ones.
-      if (!moves) {
-        e["status"] = "reported";
-        e["reason"] =
-            "a fastened joint says these do not move, but not whether they "
-            "are pressed together or bolted through a clearance hole — so the "
-            "fit is reported, not judged";
-        reported++;
-      } else if (fit->kind == fits::FitKind::Interference) {
-        e["status"] = "fail";
-        e["reason"] = std::string("this joint ") +
-                      (mate.type == MateType::Slider ? "slides" : "turns") +
-                      ", but the fit is interference — the shaft is always "
-                      "larger than the bore, so it is pressed in, not "
-                      "journalled";
-        failed++;
-      } else if (fit->kind == fits::FitKind::Transition) {
-        e["status"] = "warn";
-        e["reason"] = std::string("a transition fit may come out tight or "
-                                  "loose on any given pair, so this joint is "
-                                  "not guaranteed to ") +
-                      (mate.type == MateType::Slider ? "slide" : "turn");
-        warned++;
-      } else {
-        e["status"] = "pass";
+      if (c.status == "pass")
         verified++;
-      }
+      else if (c.status == "warn")
+        warned++;
+      else if (c.status == "fail")
+        failed++;
+      else if (c.status == "reported")
+        reported++;
+      else
+        unverified++;
       entries.push_back(std::move(e));
     }
     // Never a green badge over unknowns: unverified outranks pass.

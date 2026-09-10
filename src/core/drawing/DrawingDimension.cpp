@@ -241,6 +241,16 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     rd.value = (dim.kind == DrawingDimKind::Diameter ? 2.0 * rad : rad) / vs;
     rd.text = (dim.kind == DrawingDimKind::Diameter ? "\xC3\x98" : "R") +
               core::FormatLength(rd.value);
+    // A toleranced bore says so on the sheet. Only a DIAMETER: an ISO class
+    // states how a diameter may vary, so "R10 H7" would be a band twice the
+    // size of the one written — the sort of plausible-looking wrong number
+    // this project spends its refusals on.
+    if (dim.kind == DrawingDimKind::Diameter && ctx.sourceDoc) {
+      if (const Tolerance* tol = FindToleranceForRef(
+              *ctx.sourceDoc, dim.refs[0].edge.name, rad / vs)) {
+        rd.text += FormatToleranceSuffix(*tol);
+      }
+    }
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
                                                    : glm::dvec2(0.7071, 0.7071);
     rd.rim = c + dir * rad;

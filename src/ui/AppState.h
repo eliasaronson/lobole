@@ -1372,6 +1372,11 @@ struct AppState {
   // SEEN is the wrong pair of properties.
   std::vector<std::string> fastenerChecks;
   bool fastenerChecked = false;
+  // The same on-demand shape for fits (docs/tolerances/plan.md T3): the walk
+  // resolves geometry per mate, so it is asked for rather than run per frame.
+  std::vector<std::string> fitChecks;
+  std::string fitSummary;
+  bool fitsChecked = false;
   uint64_t dimDrag = 0; // id of the dimension whose label is being dragged
 
   SketchEditState sketchEdit;

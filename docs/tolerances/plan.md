@@ -190,9 +190,14 @@ rather than elide, so a limits column reading "19.98 mm" when the value is
 than stored, and a ref that no longer resolves reads `unresolved` instead of
 vanishing.
 
-`check_fits` as a GUI action is NOT built: it needs an assembly tab, so it
-belongs beside the Occurrence panel's checks rather than here, and it is
-reachable over RPC meanwhile.
+**`check_fits` is a button beside "Check fasteners"** in the Occurrence panel,
+for the same reasons that one is there: it is a question about what the
+assembly is MADE of, and it walks the whole thing, so it is asked for rather
+than run every frame. The walk itself moved to `ui::CheckFits` so a person and
+a script get the same verdict from the same code — the arrangement
+`CheckFasteners` already uses — and the RPC is now only its wire form. The
+summary counts each kind apart; an aggregate that hid unknowns behind a green
+badge is the one thing this check exists not to do.
 
 ### T4 — drawings
 
@@ -209,9 +214,25 @@ Two halves, in this order:
    because "M3 clearance" conventionally IMPLIES normal and an implication is
    what recording the fit did away with. A hole with no fit formats exactly as
    before, so an old drawing reads as it always did. No format change.
-2. **A dimension carries limits.** This is the first *authored* field on a
-   deliberately *driven* object (`DrawingDocument.h:30`), so it is a decision,
-   not a field: the value stays measured, the tolerance is authored beside it.
+2. **A dimension carries limits. BUILT — and it needed no authored field.**
+   The decision the plan flagged (the first *authored* field on a deliberately
+   *driven* object) turned out not to arise: the model already records the
+   band, so a DIAMETER dim reads it the same way a hole callout reads its fit.
+   `Ø20 H7` for a class, `Ø20 +0.05/-0.02` for an explicit band. No format
+   change, nothing to keep in sync, and a tolerance edit shows on the sheet at
+   the next update because nothing was copied.
+
+   Two things it refuses. A RADIUS dim takes no class: an ISO class states how
+   a DIAMETER varies, so "R10 H7" would be a band twice the one written. And a
+   circle matching two tolerances is labelled with neither — one bore wearing
+   another bore's band is worse than an unlabelled one.
+
+   The provenance match is name-to-name, not against `ElementRef::featureId`:
+   that field is the id of the feature whose BODY owns the name (the box a
+   hole was cut into), while the name encodes the features that MADE the face.
+   Matching on the former finds nothing on any bore that was cut rather than
+   created — which is every interesting one, and it is what the first version
+   did.
 
 ### T5 — a tolerance on a LENGTH, and the stack that follows
 
@@ -267,11 +288,20 @@ check offers over arithmetic. Once T5a records the bands, `sum(lower)` and
 calling it a stack-up check would produce confident answers that are wrong in
 exactly the case people build stack-up tools for.
 
-So T5b, when it is built, is the small honest version: an **explicitly stated,
-ordered set** of tolerances with the summed band reported, labelled as what it
-is — the person chose the chain, the tool did the addition — and saying
-outright that shared inputs are not accounted for. Most of the value, a
-fraction of the work, and honest about who decided what.
+So T5b is the small honest version, and that is what shipped: `stack_up`
+takes an **explicitly stated, ordered set** of tolerances — each added or
+subtracted, because a gap is `A - B - C` and not a sum of everything — and
+reports the summed nominal with the worst case the bands allow. The person
+chose the chain, the tool did the addition, and the answer says outright that
+its terms are assumed independent.
+
+The signs are the whole of the arithmetic: a term that SUBTRACTS contributes
+its UPPER deviation to the minimum. Getting that backwards produces a stack
+wrong by twice the band and entirely reasonable-looking, so it is pinned by
+tests rather than trusted. Fewer than two terms is refused — one tolerance is
+a tolerance, and summing it would dress a lookup up as an analysis — and so is
+a term whose geometry no longer resolves, rather than counting it as zero and
+silently shortening the chain.
 
 The inferred chain waits on dependency tracking from geometry back to
 variables. It is not queued behind T5b; it is a different problem.

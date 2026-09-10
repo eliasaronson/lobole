@@ -9,6 +9,7 @@
 #include <vector>
 
 class Document;
+struct Tolerance;
 class HoleFeature;
 
 // Callout dimension support (drawings round 2): resolving a projected hole
@@ -38,6 +39,26 @@ std::vector<uint64_t> MappedNameFeatureIds(const std::string& mappedName);
 const HoleFeature* FindHoleForRef(const Document& doc,
                                   const std::string& mappedName,
                                   double modelRadius);
+
+// The SIZE tolerance on the cylindrical face that made this circle, or null.
+// Same provenance trick as FindHoleForRef — the feature ids in the MappedName
+// narrow the candidates and the radius cross-checks them — and the same
+// refusal: several matches is no match, because labelling a bore with another
+// bore's band is worse than labelling it with none.
+//
+// Distance tolerances are never returned: a gap between two faces is not the
+// size of this circle.
+const Tolerance* FindToleranceForRef(const Document& doc,
+                                     const std::string& mappedName,
+                                     double modelRadius);
+
+// What a toleranced dimension gains on the sheet: " H7" for a class, or
+// " +0.05/-0.02" for an explicit band — upper over lower, the order a drawing
+// writes them in. Empty for a distance tolerance, which is not a size.
+//
+// Here rather than at the call site because this file is where the sheet's
+// text vocabulary lives, Latin-1 and all.
+std::string FormatToleranceSuffix(const Tolerance& tol);
 
 // "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°").
 //
