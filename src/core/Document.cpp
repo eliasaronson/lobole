@@ -32,7 +32,7 @@ uint64_t Document::NextInstanceId() {
 // diff rather than as a duplicated tab quietly missing something.
 Document::Document(const Document& other)
     : m_assets(other.m_assets), m_parameters(other.m_parameters),
-      m_studies(other.m_studies),
+      m_tolerances(other.m_tolerances), m_studies(other.m_studies),
       // Solved results cost minutes and are not derivable from the feature
       // list, so they travel with the copy (re-stamped below).
       m_studyRuntime(other.m_studyRuntime),
@@ -440,6 +440,55 @@ fem::Study* Document::FindStudy(uint64_t id) {
       return &s;
   }
   return nullptr;
+}
+
+const Tolerance* Document::FindTolerance(uint64_t id) const {
+  for (const Tolerance& t : m_tolerances)
+    if (t.id == id)
+      return &t;
+  return nullptr;
+}
+
+const Tolerance* Document::ToleranceFor(const ElementRef& ref) const {
+  if (!ref.IsSet())
+    return nullptr;
+  for (const Tolerance& t : m_tolerances)
+    if (t.ref.featureId == ref.featureId && t.ref.name == ref.name)
+      return &t;
+  return nullptr;
+}
+
+const Tolerance& Document::SetTolerance(Tolerance t) {
+  if (t.id == 0)
+    t.id = m_nextId++;
+  else
+    EnsureNextIdAtLeast(t.id + 1);
+  // Upsert by ELEMENT, not by id: the same face cannot carry two sizes, and
+  // replacing in place keeps list order stable for a UI listing it.
+  for (Tolerance& existing : m_tolerances) {
+    if (existing.ref.featureId == t.ref.featureId &&
+        existing.ref.name == t.ref.name) {
+      existing = std::move(t);
+      return existing;
+    }
+  }
+  m_tolerances.push_back(std::move(t));
+  return m_tolerances.back();
+}
+
+bool Document::RemoveTolerance(uint64_t id) {
+  for (auto it = m_tolerances.begin(); it != m_tolerances.end(); ++it) {
+    if (it->id == id) {
+      m_tolerances.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+void Document::RestoreTolerance(Tolerance t) {
+  EnsureNextIdAtLeast(t.id + 1);
+  m_tolerances.push_back(std::move(t));
 }
 
 fem::Study& Document::AddStudy(const std::string& name) {

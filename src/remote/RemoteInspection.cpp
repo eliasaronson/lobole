@@ -4,6 +4,7 @@
 #include "cad/CADKernel.h"
 #include "common/BuildInfo.h"
 #include "core/AssemblySolve.h"
+#include "core/Command.h"
 #include "core/Document.h"
 #include "core/FitStandards.h"
 #include "core/FrameMath.h"
@@ -396,6 +397,33 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`part` (on a side, or shared) resolves faces against another part "
      "without switching tab, so a bore and its shaft can live in two.",
      "hole, intent, part, shaft, size"},
+    {"set_tolerance",
+     "Record what a face is allowed to vary by: {feature_id, element, "
+     "class: \"H7\"} — or {lower, upper} in mm for limits no class "
+     "expresses, never both. Design intent only: it moves no surface, so it "
+     "rebuilds nothing. One per element; setting a second REPLACES the "
+     "first. The class is validated against the face's measured size when "
+     "you set it, not when something later looks. Acts on the ACTIVE part, "
+     "like every other mutation; list_tolerances reads any part.",
+     "class, comment, element, feature_id, lower, upper", remote::NeedsPart},
+    {"list_tolerances",
+     "Every tolerance on this part, with the limits its class implies at the "
+     "face's measured size. A ref whose element no longer resolves is listed "
+     "`resolved: false` rather than dropped — the intent outlives the "
+     "topology that carried it.",
+     "part", remote::NeedsPart},
+    {"clear_tolerance", "Remove one tolerance by {id}.", "id",
+     remote::NeedsPart},
+    {"check_fits",
+     "Every fit this assembly declares, checked. A Revolute or Cylindrical "
+     "mate already names the two faces that mate, so nothing has to pair "
+     "them up: where both faces carry a tolerance, the fit is computed and "
+     "reported. The mate type is the intent — a joint that TURNS cannot have "
+     "an interference fit, so that combination FAILS and a transition fit "
+     "warns. Anything not fully answerable (an anchor that is a frame not a "
+     "face, one side untoleranced, two faces of different basic size) is "
+     "`unverified` with the reason, never a pass; the summary counts them.",
+     ""},
     {"mass_properties",
      "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
      "from "
@@ -2034,6 +2062,304 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       out["intent_ok"] = *want == pair->kind;
     }
     return out;
+  }
+  if (m == "set_tolerance") {
+    // What a face is ALLOWED to vary by (docs/tolerances/plan.md, T2).
+    // params: {feature_id, element, class? | lower?+upper?, comment?, part?}
+    Document& part = RequirePartDoc(doc, "set_tolerance");
+    const ElementRef ref{p.at("feature_id").get<uint64_t>(),
+                         p.at("element").get<std::string>()};
+    const auto el = Measure::Describe(part.GetBodies(), ref);
+    if (!el)
+      throw std::runtime_error("set_tolerance: element '" + ref.name +
+                               "' does not resolve (list_elements)");
+    // Only round features are carried yet, and a tolerance nothing can check
+    // is a silent no-op — so it is refused rather than stored.
+    if (!el->hasRadius)
+      throw std::runtime_error(
+          "set_tolerance: " + ref.name + " is a " + el->shape +
+          ", and only round features carry a size tolerance so far — a "
+          "cylindrical face or a circular edge");
+    const double nominal = el->radius * 2.0;
+
+    const bool hasClass = p.contains("class");
+    const bool hasLower = p.contains("lower"), hasUpper = p.contains("upper");
+    if (hasClass && (hasLower || hasUpper))
+      throw std::runtime_error(
+          "set_tolerance: give a `class` OR a `lower`/`upper` pair, not both "
+          "— two statements of the same band can disagree, and then which is "
+          "the part made to?");
+    if (!hasClass && !(hasLower && hasUpper))
+      throw std::runtime_error(
+          hasLower || hasUpper
+              ? "set_tolerance: `lower` and `upper` come as a pair — half a "
+                "band silently becomes an unbounded one"
+              : "set_tolerance: needs a `class` (\"H7\") or a "
+                "`lower`/`upper` pair in mm");
+
+    Tolerance t;
+    t.ref = ref;
+    t.comment = p.value("comment", std::string{});
+    if (hasClass) {
+      t.isoClass = p.at("class").get<std::string>();
+      // Validated HERE, against this face's own size, rather than when
+      // something later looks: a class that cannot apply to the face it is
+      // being put on is a typo, and the moment to say so is now.
+      std::string why;
+      if (!fits::Limits(nominal, t.isoClass, &why))
+        throw std::runtime_error("set_tolerance: " + why);
+    } else {
+      t.lower = p.at("lower").get<double>();
+      t.upper = p.at("upper").get<double>();
+      if (t.lower > t.upper)
+        throw std::runtime_error(
+            "set_tolerance: lower must not exceed upper — a reversed band "
+            "admits nothing and reads as a valid one");
+    }
+
+    auto cmd = std::make_unique<SetToleranceCommand>(std::move(t));
+    SetToleranceCommand* raw = cmd.get();
+    state.commands->Execute(std::move(cmd), part);
+    const Tolerance* stored = part.FindTolerance(raw->ToleranceId());
+    json out{{"id", stored->id},
+             {"element", stored->ref.name},
+             {"feature_id", stored->ref.featureId},
+             {"nominal", nominal}};
+    if (!stored->isoClass.empty()) {
+      out["class"] = stored->isoClass;
+      std::string why;
+      const auto b = fits::Limits(nominal, stored->isoClass, &why);
+      out["min"] = b->Min(nominal);
+      out["max"] = b->Max(nominal);
+    } else {
+      out["lower"] = stored->lower;
+      out["upper"] = stored->upper;
+      out["min"] = nominal + stored->lower;
+      out["max"] = nominal + stored->upper;
+    }
+    return out;
+  }
+  if (m == "list_tolerances") {
+    const Document& part = p.contains("part")
+                               ? *ResolvePartParam(state, p.at("part"))
+                               : RequirePartDoc(doc, "list_tolerances");
+    json list = json::array();
+    for (const Tolerance& t : part.GetTolerances()) {
+      json e{{"id", t.id},
+             {"feature_id", t.ref.featureId},
+             {"element", t.ref.name}};
+      if (!t.comment.empty())
+        e["comment"] = t.comment;
+      const auto el = Measure::Describe(part.GetBodies(), t.ref);
+      // Kept, not dropped: a tolerance whose face an upstream edit renamed is
+      // still what somebody decided about this part, and saying so is more
+      // use than quietly having fewer tolerances than yesterday.
+      e["resolved"] = el && el->hasRadius;
+      if (t.isoClass.empty()) {
+        e["lower"] = t.lower;
+        e["upper"] = t.upper;
+      } else {
+        e["class"] = t.isoClass;
+      }
+      if (el && el->hasRadius) {
+        const double nominal = el->radius * 2.0;
+        e["nominal"] = nominal;
+        if (t.isoClass.empty()) {
+          e["min"] = nominal + t.lower;
+          e["max"] = nominal + t.upper;
+        } else {
+          std::string why;
+          if (const auto b = fits::Limits(nominal, t.isoClass, &why)) {
+            e["min"] = b->Min(nominal);
+            e["max"] = b->Max(nominal);
+          } else {
+            e["error"] = why;
+          }
+        }
+      }
+      list.push_back(std::move(e));
+    }
+    return json{{"tolerances", std::move(list)}};
+  }
+  if (m == "clear_tolerance") {
+    Document& part = RequirePartDoc(doc, "clear_tolerance");
+    const uint64_t id = p.at("id").get<uint64_t>();
+    if (!part.FindTolerance(id))
+      throw std::runtime_error("clear_tolerance: no tolerance with id " +
+                               std::to_string(id) +
+                               " (list_tolerances shows them)");
+    state.commands->Execute(std::make_unique<ClearToleranceCommand>(id), part);
+    return json{{"ok", true}, {"id", id}};
+  }
+  if (m == "check_fits") {
+    // Every fit the assembly ALREADY declares. A Revolute or Cylindrical mate
+    // names the two faces that mate, so no pairing entity has to exist — and
+    // the mate type doubles as the intent, because a joint that turns cannot
+    // be an interference fit.
+    if (!state.assembly)
+      throw std::runtime_error(
+          "check_fits needs an assembly tab — a fit is between two placed "
+          "parts, and only an assembly says which faces meet");
+
+    // One side of one mate, resolved as far as it goes.
+    struct Side {
+      const Document* part = nullptr;
+      const Tolerance* tol = nullptr;
+      std::optional<double> diameter;
+      std::string occurrence;
+      std::string reason; // non-empty = this side stopped here
+    };
+    const auto resolveSide = [&](const Connector& c, const char* which) {
+      Side side;
+      const Occurrence* occ = state.assembly->FindById(c.occurrenceId);
+      if (!occ) {
+        side.reason = std::string(which) + " occurrence is missing";
+        return side;
+      }
+      side.occurrence = occ->name;
+      if (!c.innerPath.empty()) {
+        side.reason = std::string(which) + " (" + occ->name +
+                      ") is inside a sub-assembly, which check_fits does not "
+                      "reach into yet";
+        return side;
+      }
+      if (c.anchor.frameId != 0 || c.anchor.origin || !c.anchor.face.IsSet()) {
+        side.reason = std::string(which) + " (" + occ->name +
+                      ") is mated on a " +
+                      (c.anchor.frameId != 0 ? "datum frame" : "part origin") +
+                      ", not a face — there is no surface to give a size";
+        return side;
+      }
+      Document* pd = ui::PartDocById(state, occ->partId);
+      if (!pd) {
+        side.reason = std::string(which) + " (" + occ->name +
+                      ") has no part document loaded";
+        return side;
+      }
+      side.part = pd;
+      side.tol = pd->ToleranceFor(c.anchor.face);
+      if (!side.tol) {
+        side.reason = std::string(which) + " (" + occ->name + ") face " +
+                      c.anchor.face.name +
+                      " carries no tolerance (set_tolerance on that part)";
+        return side;
+      }
+      const auto el = Measure::Describe(pd->GetBodies(), c.anchor.face);
+      if (!el || !el->hasRadius) {
+        side.reason = std::string(which) + " (" + occ->name + ") face " +
+                      c.anchor.face.name +
+                      " no longer resolves to a round face";
+        return side;
+      }
+      side.diameter = el->radius * 2.0;
+      return side;
+    };
+
+    json entries = json::array();
+    int verified = 0, unverified = 0, failed = 0, warned = 0;
+    for (const Mate& mate : state.assembly->GetMates()) {
+      if (mate.type != MateType::Revolute && mate.type != MateType::Cylindrical)
+        continue; // only a round joint is a fit
+      json e{{"mate", mate.id},
+             {"mate_name", mate.name},
+             {"mate_type",
+              mate.type == MateType::Revolute ? "revolute" : "cylindrical"}};
+      const Side a = resolveSide(mate.a, "a");
+      const Side b = resolveSide(mate.b, "b");
+      const auto stop = [&](const std::string& reason) {
+        e["status"] = "unverified";
+        e["reason"] = reason;
+        unverified++;
+        entries.push_back(std::move(e));
+      };
+      if (!a.reason.empty() || !b.reason.empty()) {
+        stop(!a.reason.empty() ? a.reason : b.reason);
+        continue;
+      }
+      // Which side is the bore is said by the CLASS, not guessed from the
+      // geometry: an uppercase class is a hole, lowercase a shaft. Two of the
+      // same is not a fit anyone can compute, and picking one to flip would
+      // be inventing the answer.
+      const bool aHole =
+          !a.tol->isoClass.empty() &&
+          std::isupper(static_cast<unsigned char>(a.tol->isoClass[0])) != 0;
+      const bool bHole =
+          !b.tol->isoClass.empty() &&
+          std::isupper(static_cast<unsigned char>(b.tol->isoClass[0])) != 0;
+      if (a.tol->isoClass.empty() || b.tol->isoClass.empty()) {
+        stop(
+            "a fit needs an ISO class on both sides; " +
+            std::string(a.tol->isoClass.empty() ? a.occurrence : b.occurrence) +
+            " states explicit deviations, which say nothing about which side "
+            "is the bore");
+        continue;
+      }
+      if (aHole == bHole) {
+        stop("both sides are " + std::string(aHole ? "hole" : "shaft") +
+             " classes (" + a.tol->isoClass + " and " + b.tol->isoClass +
+             ") — one of them has to be the bore");
+        continue;
+      }
+      const Side& hole = aHole ? a : b;
+      const Side& shaft = aHole ? b : a;
+      constexpr double kAgree = 1e-5;
+      if (std::abs(*hole.diameter - *shaft.diameter) > kAgree) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf),
+                      "the two faces are not the same basic size — the bore "
+                      "measures %.4f mm and the shaft %.4f mm",
+                      *hole.diameter, *shaft.diameter);
+        stop(buf);
+        continue;
+      }
+      std::string why;
+      const auto fit = fits::Fit(*hole.diameter, hole.tol->isoClass,
+                                 shaft.tol->isoClass, &why);
+      if (!fit) {
+        stop(why);
+        continue;
+      }
+      e["size"] = *hole.diameter;
+      e["hole"] = {{"occurrence", hole.occurrence},
+                   {"class", hole.tol->isoClass},
+                   {"min", fit->hole.Min(*hole.diameter)},
+                   {"max", fit->hole.Max(*hole.diameter)}};
+      e["shaft"] = {{"occurrence", shaft.occurrence},
+                    {"class", shaft.tol->isoClass},
+                    {"min", fit->shaft.Min(*hole.diameter)},
+                    {"max", fit->shaft.Max(*hole.diameter)}};
+      e["kind"] = fits::FitKindName(fit->kind);
+      e["min_clearance"] = fit->minClearance;
+      e["max_clearance"] = fit->maxClearance;
+      // The mate type IS the intent, and this is the whole reason pairing off
+      // mates is worth more than a pairing table: a Revolute joint says these
+      // two turn against each other, and an interference fit says they do not.
+      if (fit->kind == fits::FitKind::Interference) {
+        e["status"] = "fail";
+        e["reason"] = "this joint turns, but the fit is interference — the "
+                      "shaft is always larger than the bore, so it is pressed "
+                      "in, not journalled";
+        failed++;
+      } else if (fit->kind == fits::FitKind::Transition) {
+        e["status"] = "warn";
+        e["reason"] = "a transition fit may come out tight or loose on any "
+                      "given pair, so this joint is not guaranteed to turn";
+        warned++;
+      } else {
+        e["status"] = "pass";
+        verified++;
+      }
+      entries.push_back(std::move(e));
+    }
+    // Never a green badge over unknowns: unverified outranks pass.
+    const std::string status = failed            ? "fail"
+                               : unverified      ? "unverified"
+                               : warned          ? "warn"
+                               : entries.empty() ? "none"
+                                                 : "pass";
+    return json{{"fits", std::move(entries)}, {"status", status},
+                {"passed", verified},         {"warned", warned},
+                {"failed", failed},           {"unverified", unverified}};
   }
   if (m == "measure") {
     // What ONE side of a measurement names. Each of `a` and `b` carries its

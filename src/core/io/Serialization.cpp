@@ -139,6 +139,27 @@ json DocumentEnvelope(const Document& doc) {
       j["parameters"].push_back(std::move(pj));
     }
   }
+  // Tolerances (v97). Omitted when empty so every existing document re-saves
+  // byte-identically and the goldens stay valid.
+  if (!doc.GetTolerances().empty()) {
+    j["tolerances"] = json::array();
+    for (const Tolerance& t : doc.GetTolerances()) {
+      json tj = {{"id", t.id}, {"ref", ElementRefJson(t.ref)}};
+      // The class is what is stored; a deviation pair is the fallback for a
+      // drawing that states limits no class expresses. Writing both would
+      // invite them to disagree.
+      if (!t.isoClass.empty()) {
+        tj["class"] = t.isoClass;
+      } else {
+        tj["lower"] = t.lower;
+        tj["upper"] = t.upper;
+      }
+      if (!t.comment.empty()) {
+        tj["comment"] = t.comment;
+      }
+      j["tolerances"].push_back(std::move(tj));
+    }
+  }
   // The active configuration (v31), omitted at base (0) so pre-v31 documents
   // re-save byte-identically. The configurations themselves are written per
   // save path (inline / configurations/ dir), like studies.
@@ -646,6 +667,20 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       doc->SetParameter(pj.at("name").get<std::string>(),
                         pj.at("expression").get<std::string>(),
                         pj.value("comment", std::string{}));
+    }
+    // Tolerances (v97). They reference elements of features, but nothing
+    // about them is evaluated at load: a tolerance is design intent about a
+    // face, so a ref that no longer resolves stays recorded and is reported
+    // as unresolved when something LOOKS, rather than being dropped here.
+    for (const auto& tj : index.value("tolerances", json::array())) {
+      Tolerance t;
+      t.id = tj.value("id", uint64_t{0});
+      t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
+      t.isoClass = tj.value("class", std::string{});
+      t.lower = tj.value("lower", 0.0);
+      t.upper = tj.value("upper", 0.0);
+      t.comment = tj.value("comment", std::string{});
+      doc->RestoreTolerance(std::move(t));
     }
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
@@ -1222,6 +1257,20 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
       doc->SetParameter(pj.at("name").get<std::string>(),
                         pj.at("expression").get<std::string>(),
                         pj.value("comment", std::string{}));
+    }
+    // Tolerances (v97). They reference elements of features, but nothing
+    // about them is evaluated at load: a tolerance is design intent about a
+    // face, so a ref that no longer resolves stays recorded and is reported
+    // as unresolved when something LOOKS, rather than being dropped here.
+    for (const auto& tj : j.value("tolerances", json::array())) {
+      Tolerance t;
+      t.id = tj.value("id", uint64_t{0});
+      t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
+      t.isoClass = tj.value("class", std::string{});
+      t.lower = tj.value("lower", 0.0);
+      t.upper = tj.value("upper", 0.0);
+      t.comment = tj.value("comment", std::string{});
+      doc->RestoreTolerance(std::move(t));
     }
     // Assets (v49 image bytes, v84 derived snapshots): decode the base64
     // "assets" map into the doc store BEFORE the features regenerate — a
