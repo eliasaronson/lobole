@@ -267,11 +267,18 @@ per convention):
 - `set_study {study, mesh_size?}` /
   `add_refinement {study, face:{feature_id, element}, size}`
 - `add_load {study, type, face:{feature_id, element}, magnitude?, direction?}`
-  / `remove_load`
+  / `remove_load` — `magnitude` is NEWTONS for a force (the total on that
+  face, spread over its area) and MPa for a pressure, which pushes along the
+  inward normal. Stated here as well as in the unit system above because
+  every result scales linearly with it and a wrong unit is invisible in the
+  answer.
 - `run_study {study}` → `{nodes, elements, max_von_mises_mpa: {value, at},
   max_displacement_mm: {value, at}, stale: false}` (runs mesh+solve; errors
   surface here)
-- `study_results {study}` → same summary + per-body breakdown + `stale`
+- `study_results {study}` → same summary + per-body breakdown + `stale`;
+  refused with "study has not been run" when there is nothing to report,
+  which is what a study reopened from a project always is (`has_results`
+  and `stale` in `list_studies` say so without the refusal)
 - `set_result_display {study?, field: von_mises|displacement|none,
   deform_scale}` — LLM screenshot of a stress plot = two calls, the
   `set_explode` pattern.

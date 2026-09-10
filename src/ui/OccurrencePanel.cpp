@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -285,6 +286,52 @@ void DrawMatesSection(AppState& state) {
     SolveActiveAssembly(state);
   }
 }
+
+// What the motion row shows while a run is in flight: how far in, how long
+// it has been, and a way out. `samples` is the study's, which is what the
+// worker's fraction is a fraction OF.
+//
+// The bar cannot cover the whole wait. StartMotionRun copies every document
+// under the assembly BEFORE the worker exists, and that copy is seconds of
+// blocked main thread on a real assembly — no frame is drawn, so nothing
+// drawn here can appear during it. This covers the run; the prep is its own
+// fix.
+void DrawMotionProgress(BackgroundJob& job, int samples) {
+  const double f = job.fraction.load();
+  const double elapsed = std::chrono::duration<double>(
+                             std::chrono::steady_clock::now() - job.started)
+                             .count();
+  char overlay[64];
+  if (f >= 0.0 && samples > 0) {
+    const int done =
+        std::clamp(static_cast<int>(f * samples + 0.5), 0, samples);
+    std::snprintf(overlay, sizeof(overlay), "sample %d / %d   %.0fs", done,
+                  samples, elapsed);
+    ImGui::ProgressBar(static_cast<float>(f), ImVec2(-FLT_MIN, 0), overlay);
+  } else {
+    // Before the first sample lands. Indeterminate rather than a bar at 0%,
+    // which reads as stuck (the import modal's rule).
+    std::snprintf(overlay, sizeof(overlay), "starting   %.0fs", elapsed);
+    ImGui::ProgressBar(-1.0f * static_cast<float>(ImGui::GetTime()),
+                       ImVec2(-FLT_MIN, 0), overlay);
+  }
+
+  const bool asked = job.cancel.load();
+  ImGui::BeginDisabled(asked);
+  if (ImGui::SmallButton("Cancel###motion_cancel"))
+    job.cancel.store(true);
+  ImGui::EndDisabled();
+  // The consequence goes in a tooltip, not on the row: a SameLine string is
+  // clipped by the dock edge at any normal panel width (U4's rule), and
+  // "keeps the samples alrea" is not a sentence.
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip(asked ? "Stopping after the sample in progress."
+                            : "Stops after the current sample and keeps the "
+                              "ones already checked — the result comes back "
+                              "marked incomplete.");
+  if (asked)
+    TextDisabledWrapped("finishing the current sample");
+}
 } // namespace
 
 // Motion studies (G2): the list, an Add that picks the first mate with a
@@ -391,13 +438,21 @@ void DrawMotionSection(AppState& state) {
     ApplyMotionPose(state, sel->id, state.motionT, &err);
   }
 
+  // A run is off the frame (ui/MotionActions.cpp) and reports a fraction per
+  // sample, so while one is going the button row becomes that bar and a
+  // Cancel. It used to be three greyed-out buttons and nothing else for the
+  // length of the run — ten seconds of a responsive app that looks hung,
+  // which is exactly what the STEP-import modal exists to avoid.
+  if (BackgroundJob* job = FindBackgroundJob(state, "motion")) {
+    DrawMotionProgress(*job, sel->samples);
+    return;
+  }
+
   WrapRow row;
-  const bool running = BackgroundJobRunning(state, "motion");
   for (bool preview : {true, false}) {
     const char* label = preview ? "Preview motion###motion_preview"
                                 : "Validate motion###motion_run";
     row.Next(ButtonWidth(label));
-    ImGui::BeginDisabled(running);
     if (ImGui::SmallButton(label)) {
       if (sel->checkClash == preview ||
           (!preview && sel->clashMode != "exact")) {
@@ -416,7 +471,6 @@ void DrawMotionSection(AppState& state) {
                             ? "Solve sampled poses without collision checks."
                             : "Exact collisions at every study sample. "
                               "Standing assembly checks are separate.");
-    ImGui::EndDisabled();
   }
   row.Next(ButtonWidth("Delete"));
   if (ImGui::SmallButton("Delete###motion_delete")) {
@@ -433,7 +487,14 @@ void DrawMotionSection(AppState& state) {
                          "Run again to validate this revision.");
     else if (!r->checkedClashes)
       ImGui::TextWrapped("Kinematics only: collision checks not run.");
-    else if (r->cancelled || r->pairsUnknown)
+    else if (r->cancelled)
+      // Split from the unknown-pairs case now that Cancel is a button rather
+      // than an RPC: a cancelled run reported "incomplete: 0 unknown pairs",
+      // which names the one thing that did NOT go wrong.
+      ImGui::TextWrapped("Cancelled: %zu of %d samples checked, the rest not "
+                         "looked at.",
+                         r->samples.size(), sel->samples);
+    else if (r->pairsUnknown)
       ImGui::TextWrapped("Motion validation incomplete: %zu unknown pairs.",
                          r->pairsUnknown);
     else if (r->clean)

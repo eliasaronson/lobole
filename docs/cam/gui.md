@@ -167,6 +167,17 @@ across them. FreeCAD spells the same idea `UseOutline` ("uses the outline of
 the base geometry", `Path/Op/PocketShape.py`) and implements it the same way —
 `Part.Face(element.OuterWire)`, keep the outer wire and drop the rest.
 
+**`Cut it out` on a level FACE, with `side: inside` (2026-09-09).** Cutting
+inside a face means cutting the OPENINGS in it — every one, in one operation.
+It is the only thing the words can mean: offsetting the face's own outline
+inward carves a trench a whisker inside the part, full depth, all the way
+round, which is what a face pick silently did until this landed. A boss is
+not an opening (the standing-material test `use_outline` already had decides
+it), an opening too narrow for the cutter is named in `skipped` while the
+others are cut, and `drilled_bores` leaves the round ones up to that
+diameter to the drill — which cannot be a width, since a milled slot is
+often narrower than a drilled hole (docs/modeling/fpv-drone.md, finding 7).
+
 **`Drill a hole` (2026-08-30).** `OpType::Drill` has been in the engine since
 C1, derived from a picked cylindrical face, and reachable only by script. It
 is a verb now — and since a verb stays armed, a bolt circle is one click per

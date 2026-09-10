@@ -312,8 +312,16 @@ document or it refuses visibly (docs/ui/u10-defaults-and-refusals.md).
 
 ### J7 — RPC and serialization (~1 session)
 
-`new_job`, `add_job_part`, `remove_job_part`, `set_job_part_placement`,
+`machine_part`, `add_job_part`, `remove_job_part`, `set_job_placement`,
 `list_job_parts`; every `*_cam_*` method takes its context from the job tab.
+
+**Since 2026-09-09 every one of them also takes `job`** (name or id), the way
+the drawing verbs take `drawing` — and for the same reason that one exists:
+a verb that acts on "whichever tab is in front" acts on the wrong one the
+moment a script switches tabs between calls. It is worse here than for a
+sheet, because `cam_post` writes a FILE: the wrong job's program lands under
+the name you asked for and nothing says so. Absent, the active tab still
+answers (docs/modeling/fpv-drone.md, finding 9).
 
 **The part gate is a list kept apart from the handlers**
 (RemoteServer.cpp:~777, which documents this exact trap: three handlers were
@@ -397,6 +405,7 @@ section and the notes in plan.md, stock-and-origin.md and setup-frame.md.
 | J1+J2 | `cam::JobDocument`, `DocKind::Job`, the tab, `jobs/<name>/index.json`, and `ui::JobBodies` standing where `document->GetBodies()` stood at 32 call sites | v73 |
 | J3 | N parts per job, `cam::Target{jobPartId, ref}`, `Placement{pos, rotZdeg, enabled}`, placement composed in `BodiesInSetupFrame` | v74 |
 | J4 | a laid-out fixed sheet anchored at the setup origin; `cam::Fit` in three states + overlap, `check_layout`, refusal at the post | — |
+| J4+ | `check_layout` also reports each placement's `box` (min/max in SETUP space — it measured that to answer `fit` at all, and a caller nesting a sheet had to reconstruct it one part at a time) and per-setup `warnings` when two parts sit closer than the widest cutter in the setup: a gouge waiting to happen, and a WARNING rather than a refusal, because only the tools that go between them care | — |
 | J5 | `OrderOutputBy{Authored, Tool, Part}`, applied in `GenerateAll` | v75 |
 | J6 | `machine_part` and the CAM button; the Parts panel section; a job tab that draws its parts laid out | — |
 | — | fixturing per PART: `Placement::frame`, `cam::FixtureFrame`, `set_job_placement lay_face_up` | v76 |
@@ -469,7 +478,8 @@ one axis. It has to be the box MATCHING — a profile runs around the part.
 
 ### Not built
 - **`split_output`**, one file per group. The ordering is what makes it
-  meaningful and the ordering is in.
+  meaningful and the ordering is in. (Built since, as R2 —
+  docs/cam/router-round.md, v78.)
 - **Dragging a placement in the viewport.** Numbers in the panel today; the
   assembly occurrence gizmo (A2.5) is the thing to reuse — now
   [M5](#m5--dragging-a-placement-in-the-viewport-1-session).
