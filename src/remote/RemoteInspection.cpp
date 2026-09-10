@@ -1350,6 +1350,27 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"faces", {{"reference", c->facesA}, {"candidate", c->facesB}}},
                 {"edges", {{"reference", c->edgesA}, {"candidate", c->edgesB}}},
                 {"verdicts", verdicts}};
+    {
+      // A boolean diff on the real B-Rep, so VERIFIED — but the claim it
+      // supports is "these are the same shape", and that is a judgement with
+      // a threshold in it. The threshold is named in the note rather than
+      // hidden in a verdict string, so a caller can disagree with it.
+      receipt::Receipt receipt;
+      const receipt::Oracle oracle{"designer/boolean-diff", "1"};
+      constexpr double kSame = 0.999; // IoU at which we call it the same shape
+      receipt::Claim same(
+          "the candidate is the same shape as the reference", oracle,
+          iou >= kSame ? receipt::Verdict::Pass : receipt::Verdict::Fail);
+      same.basis = receipt::Basis::Verified;
+      same.value = iou;
+      same.unit = "IoU";
+      same.note = "vol(A and B) / vol(A or B) on the exact solids, called the "
+                  "same at " +
+                  std::to_string(kSame) +
+                  "; the `verdicts` strings say which way it differs";
+      receipt.Add(std::move(same));
+      AttachReceipt(out, receipt);
+    }
     if (p.contains("missing_path")) {
       const std::string path = p.at("missing_path").get<std::string>();
       if (!CADKernel::Instance().SaveBREP(path, missingShape))

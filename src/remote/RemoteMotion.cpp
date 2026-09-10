@@ -1,5 +1,7 @@
 #include "remote/RemoteMotion.h"
 
+#include "remote/RemoteHelpers.h"
+
 #include "core/AssemblySolve.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
@@ -187,6 +189,61 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
     out["cancelled"] = true;
   if (!r.error.empty())
     out["error"] = r.error;
+
+  // The receipt (core/Receipt.h). This handler had the discipline first and
+  // alone — `collision_status` has told error / not_checked / incomplete /
+  // unverified / passed / failed apart since v87, and `unverified` there is
+  // neither a pass nor a failure. The receipt is that vocabulary made common,
+  // so a caller reads one field the same way across twelve RPCs instead of
+  // learning this one's.
+  //
+  // Mapping is deliberately total: every state of collision_status lands
+  // somewhere, and the four that are not verdicts land on Unverifiable with
+  // their reason, never on Pass.
+  {
+    receipt::Receipt receipt;
+    const receipt::Oracle oracle{s.clashMode == "mesh"
+                                     ? "designer/motion-mesh-clash"
+                                     : "designer/motion-exact-clash",
+                                 "1"};
+    const std::string claim =
+        "no pair comes into contact that was not touching at rest";
+    if (!r.error.empty()) {
+      receipt.Unverifiable(claim, oracle, "the study errored: " + r.error);
+    } else if (!s.checkClash) {
+      receipt.Unverifiable(
+          claim, oracle,
+          "this study was asked for kinematics only "
+          "(check_clash false), so nothing looked for contact");
+    } else if (r.cancelled) {
+      receipt.Unverifiable(claim, oracle,
+                           "cancelled after " + std::to_string(samples.size()) +
+                               " of " + std::to_string(s.samples) +
+                               " samples — the poses not reached were not "
+                               "checked");
+    } else if (r.pairsUnknown) {
+      receipt.Unverifiable(claim, oracle,
+                           std::to_string(r.pairsUnknown) +
+                               " exact pair checks could not be verified");
+    } else {
+      receipt::Claim c(claim, oracle,
+                       r.clean ? receipt::Verdict::Pass
+                               : receipt::Verdict::Fail);
+      // A mesh sweep answers off the tessellations. It is the right question
+      // for "are there millimetres" and it is not the B-Rep, so it says so.
+      c.basis = receipt::Basis::Verified;
+      c.value = static_cast<double>(appearedJson.size());
+      c.unit = "new contacts";
+      c.note = std::to_string(r.pairsChecked) + " pair checks over " +
+               std::to_string(samples.size()) + " samples" +
+               (s.clashMode == "mesh"
+                    ? ", off the tessellations at " +
+                          std::to_string(r.deflectionMm) + " mm deflection"
+                    : ", exact on the B-Rep");
+      receipt.Add(std::move(c));
+    }
+    AttachReceipt(out, receipt);
+  }
   return out;
 }
 

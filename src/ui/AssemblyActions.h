@@ -229,7 +229,19 @@ struct FastenerCheck {
   std::string part; // the designation
   std::string why;  // decision-complete
 };
-[[nodiscard]] std::vector<FastenerCheck> CheckFasteners(AppState& state);
+
+// Findings AND how many screws produced them. Empty findings over zero screws
+// and empty findings over forty-two are the same `ok: true` without the
+// counts, which is the "valid over nothing" trap one document over — an
+// assembly with no fasteners passes a fastener check vacuously. `skipped` is
+// the other half: a screw whose standard or size this build cannot resolve
+// was not judged, and must not read as one that passed.
+struct FastenerReport {
+  std::vector<FastenerCheck> findings;
+  size_t examined = 0;
+  size_t skipped = 0;
+};
+[[nodiscard]] FastenerReport CheckFasteners(AppState& state);
 
 // The table as CSV (quoted where needed); unknown masses are empty cells.
 std::string BomToCsv(const BomTable& bom);

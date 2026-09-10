@@ -594,13 +594,13 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
       {"check_geometry", "src/remote/RemoteInspection.cpp", true},
       {"study_results", "src/remote/RemoteSimulation.cpp", true},
       {"contact_report", "src/remote/RemoteInspection.cpp", true},
-      {"check_fasteners", "src/remote/RemoteAssembly.cpp", false},
+      {"check_fasteners", "src/remote/RemoteAssembly.cpp", true},
       {"check_drawing", "src/remote/RemoteDrawings.cpp", false},
       {"check_layout", "src/remote/RemoteCam.cpp", false},
-      {"cam_verify", "src/remote/RemoteCam.cpp", false},
+      {"cam_verify", "src/remote/RemoteCam.cpp", true},
       {"cam_simulate", "src/remote/RemoteCam.cpp", false},
-      {"compare_geometry", "src/remote/RemoteInspection.cpp", false},
-      {"run_motion_study", "src/remote/RemoteMotion.cpp", false},
+      {"compare_geometry", "src/remote/RemoteInspection.cpp", true},
+      {"run_motion_study", "src/remote/RemoteMotion.cpp", true},
   };
 
   std::set<std::string> attachesReceipt;

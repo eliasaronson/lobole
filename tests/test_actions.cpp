@@ -1619,7 +1619,7 @@ TEST_CASE(
   // proves it by RE-deriving rather than by trusting what placed it: the
   // washers and the nut are occurrences on the same axis, so re-traversing
   // finds exactly the 46.4 mm the length was snapped for.
-  CHECK(ui::CheckFasteners(state).empty());
+  CHECK(ui::CheckFasteners(state).findings.empty());
 
   // Then the stack changes under it: the bottom plate is moved 15 mm in a
   // redesign and the joint is left behind. Deriving a length from other
@@ -1637,7 +1637,8 @@ TEST_CASE(
     if (o.name == "Bottom")
       o.position.z -= 15.0f;
   state.assembly->BumpVersion(); // the solved poses are cached per version
-  const std::vector<ui::FastenerCheck> stale = ui::CheckFasteners(state);
+  const std::vector<ui::FastenerCheck> stale =
+      ui::CheckFasteners(state).findings;
   REQUIRE(stale.size() == 1);
   INFO(stale[0].why);
   CHECK(stale[0].part == "ISO 4762 M6x50");
@@ -1671,7 +1672,8 @@ TEST_CASE(
   ui::AddFastener(state, "iso4762", "M6", 20.0, "",
                   glm::vec3(0.0f, 0.0f, 20.0f),
                   glm::quat(0.0f, 1.0f, 0.0f, 0.0f), nullptr);
-  const std::vector<ui::FastenerCheck> bottomed = ui::CheckFasteners(state);
+  const std::vector<ui::FastenerCheck> bottomed =
+      ui::CheckFasteners(state).findings;
   REQUIRE(bottomed.size() == 1);
   INFO(bottomed[0].why);
   CHECK(bottomed[0].why.find("bottoms out") != std::string::npos);

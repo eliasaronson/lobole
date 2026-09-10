@@ -751,7 +751,7 @@ void DrawBomSection(AppState& state) {
   // be asked over the script API, which means in practice it was not.
   if (ImGui::Button("Check fasteners###bom_check_fasteners")) {
     state.fastenerChecks.clear();
-    for (const FastenerCheck& c : CheckFasteners(state))
+    for (const FastenerCheck& c : CheckFasteners(state).findings)
       state.fastenerChecks.push_back(c.part + " " + c.why);
     state.fastenerChecked = true;
   }

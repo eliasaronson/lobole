@@ -178,10 +178,11 @@ BomTable ComputeBom(AppState& state) {
   return table;
 }
 
-std::vector<FastenerCheck> CheckFasteners(AppState& state) {
-  std::vector<FastenerCheck> out;
+FastenerReport CheckFasteners(AppState& state) {
+  FastenerReport report;
+  std::vector<FastenerCheck>& out = report.findings;
   if (!state.assembly)
-    return out;
+    return report;
   const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
 
   // Every body once, tagged with the instance it came from, so a fastener can
@@ -213,8 +214,13 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
     if (profile == nullptr || profile->kind != parts::Kind::Screw)
       continue; // a nut or a washer spans nothing; the screw is the claim
     const std::optional<double> nominal = parts::NominalDiameter(screw->size);
-    if (!nominal)
+    if (!nominal) {
+      // A screw this build cannot size. Not a finding — nothing is known to
+      // be wrong — but not an examination either.
+      report.skipped++;
       continue;
+    }
+    report.examined++;
     // Probed past the LOOSEST hole this size is drilled to, not past the
     // thread: a placed fastener knows its size and its axis but not the bore
     // it went through, and a ray offset by the thread radius runs down the
@@ -362,7 +368,7 @@ std::vector<FastenerCheck> CheckFasteners(AppState& state) {
       }
     }
   }
-  return out;
+  return report;
 }
 
 std::string BomToCsv(const BomTable& bom) {

@@ -1597,11 +1597,57 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — a fastener is placed in "
           "one, so switch tabs with set_active_part (see list_parts)");
+    const ui::FastenerReport rep = ui::CheckFasteners(state);
     json findings = json::array();
-    for (const ui::FastenerCheck& c : ui::CheckFasteners(state))
+    for (const ui::FastenerCheck& c : rep.findings)
       findings.push_back(
           json{{"occurrence", c.occurrence}, {"part", c.part}, {"why", c.why}});
-    return json{{"ok", findings.empty()}, {"findings", findings}};
+    json out{{"ok", findings.empty()},
+             {"examined", rep.examined},
+             {"skipped", rep.skipped},
+             {"findings", std::move(findings)}};
+    {
+      // Empty findings over zero screws and empty findings over forty-two are
+      // the same `ok: true`. The receipt tells them apart: a fastener check
+      // that examined nothing has not passed, it has not run.
+      receipt::Receipt receipt;
+      const receipt::Oracle oracle{"designer/fastener-stack", "1"};
+      const std::string claim = "every fastener reaches the thread it is "
+                                "supposed to reach";
+      if (rep.examined == 0) {
+        receipt.Unverifiable(claim, oracle,
+                             rep.skipped > 0
+                                 ? std::to_string(rep.skipped) +
+                                       " screw(s) could not be sized, and no "
+                                       "other fastener was examined"
+                                 : "there are no fasteners in this assembly — "
+                                   "`ok` is vacuously true here");
+      } else {
+        receipt::Claim c(claim, oracle,
+                         rep.findings.empty() ? receipt::Verdict::Pass
+                                              : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Verified;
+        c.value = static_cast<double>(rep.examined);
+        c.unit = "fasteners";
+        c.note = "each re-derived against the stack it is in" +
+                 (rep.skipped > 0
+                      ? "; " + std::to_string(rep.skipped) +
+                            " more could not be sized and were NOT judged"
+                      : std::string{});
+        receipt.Add(std::move(c));
+        // A skipped screw is not covered by the pass above, so the receipt
+        // must not roll up verified while any remain unjudged.
+        if (rep.skipped > 0)
+          receipt.Unverifiable(
+              "every fastener was judged", oracle,
+              std::to_string(rep.skipped) +
+                  " screw(s) have a standard or size this build cannot "
+                  "resolve; nothing is known to be wrong with them, and "
+                  "nothing is known to be right");
+      }
+      AttachReceipt(out, receipt);
+    }
+    return out;
   }
   if (m == "bom") {
     // Bill of materials (A4): derived, one row per referenced part.

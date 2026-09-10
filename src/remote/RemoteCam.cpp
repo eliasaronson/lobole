@@ -1311,45 +1311,81 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       biggest.push_back(json{{"at", {r.at.x, r.at.y}},
                              {"area_mm2", r.area},
                              {"depth_mm", r.depth}});
-    return json{{"max_gouge_mm", v.maxGouge},
-                {"max_leftover_mm", v.maxLeftover},
-                // Past the bottom of the stock: the spoilboard, not the part.
-                // Separate from the gouge because every through cut does it
-                // on purpose, and conflating them called correct G-code scrap.
-                {"below_stock_mm", v.belowStock},
-                {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
-                {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
-                {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
-                // How MUCH is left over, and in how many places: corner radii
-                // a cutter cannot reach are several tiny regions, a forgotten
-                // operation is one big one, and the deepest-point number
-                // alone reads the same for both.
-                {"leftover_area_mm2", v.leftoverArea},
-                {"leftover_regions", v.leftoverRegions},
-                {"leftover_biggest", biggest},
-                {"rapids_through_stock", v.rapidsThroughStock},
-                // Moves the machine cannot reach. A verdict field nothing
-                // reports is the same silence this check exists to end.
-                {"outside_travel", v.outsideTravel},
-                {"outside_travel_axis", std::string(1, v.outsideAxis)},
-                {"outside_travel_overshoot_mm", v.worstOvershoot},
-                {"first_outside_line", v.firstOutsideLine},
-                {"first_bad_line", v.firstBadLine},
-                {"resolution_mm", res},
-                {"cells", v.cells},
-                {"says", says},
-                // Tabs the program left ON PURPOSE. Reported rather than
-                // silently subtracted: four is a job to sign off, none where
-                // four were asked for is a job to look at.
-                {"tabs", v.tabs},
-                {"reliefs", v.reliefs},
-                // Two questions. `ok` is the one that is never in doubt:
-                // nothing here scraps the part or breaks the tool. `complete`
-                // is softer — a height map cannot watch a slug fall out of a
-                // through cut, so a correct job can still report material
-                // left over. Tabs no longer count against it.
-                {"ok", v.Safe(tol)},
-                {"complete", v.Complete(tol)}};
+    json out =
+        json{{"max_gouge_mm", v.maxGouge},
+             {"max_leftover_mm", v.maxLeftover},
+             // Past the bottom of the stock: the spoilboard, not the part.
+             // Separate from the gouge because every through cut does it
+             // on purpose, and conflating them called correct G-code scrap.
+             {"below_stock_mm", v.belowStock},
+             {"below_stock_at", {v.belowStockAt.x, v.belowStockAt.y}},
+             {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
+             {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
+             // How MUCH is left over, and in how many places: corner radii
+             // a cutter cannot reach are several tiny regions, a forgotten
+             // operation is one big one, and the deepest-point number
+             // alone reads the same for both.
+             {"leftover_area_mm2", v.leftoverArea},
+             {"leftover_regions", v.leftoverRegions},
+             {"leftover_biggest", biggest},
+             {"rapids_through_stock", v.rapidsThroughStock},
+             // Moves the machine cannot reach. A verdict field nothing
+             // reports is the same silence this check exists to end.
+             {"outside_travel", v.outsideTravel},
+             {"outside_travel_axis", std::string(1, v.outsideAxis)},
+             {"outside_travel_overshoot_mm", v.worstOvershoot},
+             {"first_outside_line", v.firstOutsideLine},
+             {"first_bad_line", v.firstBadLine},
+             {"resolution_mm", res},
+             {"cells", v.cells},
+             {"says", says},
+             // Tabs the program left ON PURPOSE. Reported rather than
+             // silently subtracted: four is a job to sign off, none where
+             // four were asked for is a job to look at.
+             {"tabs", v.tabs},
+             {"reliefs", v.reliefs},
+             // Two questions. `ok` is the one that is never in doubt:
+             // nothing here scraps the part or breaks the tool. `complete`
+             // is softer — a height map cannot watch a slug fall out of a
+             // through cut, so a correct job can still report material
+             // left over. Tabs no longer count against it.
+             {"ok", v.Safe(tol)},
+             {"complete", v.Complete(tol)}};
+    {
+      // A simulated cut on a height map at `resolution_mm`, not the B-Rep —
+      // so PREDICTED (core/Receipt.h). Anything narrower than a cell is
+      // invisible to it, and `complete` is soft by construction because a
+      // height map cannot watch a slug fall out of a through cut. The receipt
+      // can therefore never read better than provisional, which is the honest
+      // standing for a number that comes from a discretisation.
+      receipt::Receipt receipt;
+      const receipt::Oracle oracle{"designer/cam-stocksim", "1"};
+      const std::string note = "height-map simulation at " +
+                               std::to_string(res) + " mm resolution over " +
+                               std::to_string(v.cells) +
+                               " cells; anything narrower than a cell is "
+                               "below what this can see";
+      receipt::Claim safe("the program does not cut into the part or the "
+                          "machine",
+                          oracle,
+                          v.Safe(tol) ? receipt::Verdict::Pass
+                                      : receipt::Verdict::Fail);
+      safe.basis = receipt::Basis::Predicted;
+      safe.value = v.maxGouge;
+      safe.unit = "mm";
+      safe.note = note;
+      receipt.Add(std::move(safe));
+      receipt::Claim done("the program cuts everything it was asked to", oracle,
+                          v.Complete(tol) ? receipt::Verdict::Pass
+                                          : receipt::Verdict::Fail);
+      done.basis = receipt::Basis::Predicted;
+      done.value = v.maxLeftover;
+      done.unit = "mm";
+      done.note = note;
+      receipt.Add(std::move(done));
+      AttachReceipt(out, receipt);
+    }
+    return out;
   }
   if (m == "cam_simulate") {
     // `job` is read in the preamble, before the active job is looked up --
