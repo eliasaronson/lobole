@@ -260,6 +260,39 @@ def main():
         refused(d, "set_tolerance", "needs both", feature_id=pid,
                 element=faces[0], b={"feature_id": pid}, lower=0.0, upper=0.1)
 
+        # --- A stated stack (T5b) -----------------------------------------
+        # Two bands on the Plate, summed. The chain is STATED: nothing infers
+        # which of a part's distances lies along an axis.
+        third = d.call("set_tolerance", feature_id=pid, element=faces[0],
+                       b={"feature_id": pid, "element": faces[4]},
+                       lower=-0.05, upper=0.05)
+        first = [t for t in d.call("list_tolerances")["tolerances"]
+                 if t["b"]["element"] == faces[1]][0]
+        r = d.call("stack_up", terms=[{"tolerance": first["id"]},
+                                      {"tolerance": third["id"]}])
+        expect(len(r["terms"]) == 2, f"two terms: {r}")
+        expect(abs(r["nominal"] - (40.0 + third["nominal"])) < 1e-9,
+               f"nominals add: {r}")
+        expect(abs(r["min"] - (r["nominal"] - 0.15)) < 1e-9, f"worst low: {r}")
+        expect(abs(r["max"] - (r["nominal"] + 0.15)) < 1e-9, f"worst high: {r}")
+        expect("INDEPENDENT" in r["note"],
+               f"and it says what it does not account for: {r}")
+
+        # Subtracting flips which deviation lands on which end.
+        sub = d.call("stack_up", terms=[{"tolerance": first["id"]},
+                                        {"tolerance": third["id"],
+                                         "subtract": True}])
+        expect(abs(sub["nominal"] - (40.0 - third["nominal"])) < 1e-9,
+               f"nominals subtract: {sub}")
+        expect(abs(sub["min"] - (sub["nominal"] - 0.15)) < 1e-9,
+               f"a subtracted term gives its UPPER to the minimum: {sub}")
+
+        # One term is a tolerance, not a stack.
+        refused(d, "stack_up", "at least two",
+                terms=[{"tolerance": first["id"]}])
+        refused(d, "stack_up", "list_tolerances",
+                terms=[{"tolerance": first["id"]}, {"tolerance": 99999}])
+
         print("tolerances_smoke: all checks passed")
         return 0
     finally:
