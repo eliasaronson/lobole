@@ -148,11 +148,51 @@ source of truth, and a table correction fixes every document.
   tolerance-only edit must rebuild **zero** features — that is the acceptance
   test, not a nicety.
 
-### T3 — the GUI
+### T3 — the GUI. BUILT.
 
-A tolerance row where a cylindrical face is selected, and a list of the
-document's tolerances. `check_fits` reachable as an action, reporting in the
-same shape as `check_fasteners`.
+**The editor lives in the Measure tool window**, not a panel of its own, and
+that is the point rather than a saving: measuring a face and saying what it
+may vary by are the same gesture on the same pick. One picked element is that
+face's SIZE, two are the DISTANCE between them — which is exactly a
+`Tolerance`'s `ref` and `ref2`, so the tool's existing pick list needed no
+parallel notion of a "tolerance selection".
+
+- The class is assembled from a letter picker and a grade picker built from
+  `fits::HoleLetters()`/`ShaftLetters()`, so what is offered IS what
+  `fits::Limits` accepts — except the letter/grade pairs the standard leaves
+  undefined, which refuse in the window rather than being hidden.
+- **Uppercase is a bore, lowercase a shaft, and it is stated rather than
+  inferred.** Nothing in the geometry says which a cylinder is — the
+  concavity that would tell us is not something `Measure` reports — and
+  guessing would put an H7 on a shaft.
+- The letter starts EMPTY. There is no honest default class for a face nobody
+  has called a bore or a shaft, so the editor refuses by name until one is
+  chosen: U10's `RefusesUntilPicked`, applied to something that is not a
+  feature. A distance's deviations are likewise not seeded — there is no
+  general-tolerance table vendored to derive one from, and a band nobody chose
+  is the plausible-and-wrong default this project refuses.
+- The band the pickers imply is previewed live at THIS size, so a class that
+  cannot apply says so before it is committed.
+- Every refusal the RPC makes is made here, in the same words. A GUI that
+  accepts what the script API refuses is the substitution this workstream
+  removed.
+- The distance line names **which** distance ("closest approach"): the Measure
+  tool can be showing the furthest separation or centre-to-centre while a
+  tolerance is always on the minimum, and a number that silently disagrees
+  with the readout two lines above it is worse than a longer label.
+
+**The list is a section of the Variables panel**, its neighbours there being
+the other authored numbers that sit outside the regen chain. It is wrapped
+ROWS, not a table: the panel is 218 px wide by design and ImGui cells clip
+rather than elide, so a limits column reading "19.98 mm" when the value is
+"19.98 .. 19.993 mm" looks like one number — the same defect that once made
+385169 g read as 385. Limits are recomputed against current geometry rather
+than stored, and a ref that no longer resolves reads `unresolved` instead of
+vanishing.
+
+`check_fits` as a GUI action is NOT built: it needs an assembly tab, so it
+belongs beside the Occurrence panel's checks rather than here, and it is
+reachable over RPC meanwhile.
 
 ### T4 — drawings
 

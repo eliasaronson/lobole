@@ -459,6 +459,15 @@ const Tolerance* Document::ToleranceFor(const ElementRef& ref) const {
   return nullptr;
 }
 
+const Tolerance* Document::ToleranceForSubject(const ElementRef& ref,
+                                               const ElementRef& ref2) const {
+  for (const Tolerance& t : m_tolerances)
+    if (t.ref.featureId == ref.featureId && t.ref.name == ref.name &&
+        t.ref2.featureId == ref2.featureId && t.ref2.name == ref2.name)
+      return &t;
+  return nullptr;
+}
+
 const Tolerance& Document::SetTolerance(Tolerance t) {
   if (t.id == 0)
     t.id = m_nextId++;
@@ -468,12 +477,8 @@ const Tolerance& Document::SetTolerance(Tolerance t) {
   // the same ordered pair of faces cannot be two distances apart. A face's own
   // size and a distance measured from it are different subjects, so they
   // coexist. Replacing in place keeps list order stable for a UI listing them.
-  const auto sameSubject = [&t](const Tolerance& e) {
-    return e.ref.featureId == t.ref.featureId && e.ref.name == t.ref.name &&
-           e.ref2.featureId == t.ref2.featureId && e.ref2.name == t.ref2.name;
-  };
   for (Tolerance& existing : m_tolerances) {
-    if (sameSubject(existing)) {
+    if (&existing == ToleranceForSubject(t.ref, t.ref2)) {
       existing = std::move(t);
       return existing;
     }

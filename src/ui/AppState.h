@@ -1063,6 +1063,22 @@ struct AppState {
   std::map<uint64_t, std::string> motionResultRevisions;
 
   // UI state
+  // The tolerance editor in the Measure tool window (docs/tolerances/plan.md
+  // T3). The class is assembled from two pickers rather than typed, so what
+  // is offered IS what fits::Limits accepts — except the handful of
+  // letter/grade pairs the standard leaves undefined, which refuse in the
+  // window rather than being hidden from the list.
+  //
+  // `toleranceLetter` starts EMPTY on purpose: there is no honest default
+  // class for a face nobody has said is a bore or a shaft, so the editor
+  // refuses by name until one is chosen (U10's RefusesUntilPicked, applied to
+  // something that is not a feature).
+  char toleranceLetter[8] = "";
+  int toleranceGrade = 7;
+  double toleranceLower = 0.0;
+  double toleranceUpper = 0.0;
+  std::string toleranceMsg; // the refusal or confirmation, shown in-window
+
   Selection selection; // U1: the one selection set (see SelectionItem)
   // U1b: transient pick-pipeline state (SelectionPipeline.cpp). The hover
   // fields cache render-side handles for this frame's preview; the click

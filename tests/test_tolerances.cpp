@@ -239,3 +239,67 @@ TEST_CASE("A distance tolerance round-trips with both refs", "[tolerances]") {
   CHECK(reloaded.ToleranceFor(ElementRef{id, "1/face0"}) == nullptr);
   std::filesystem::remove(path);
 }
+
+// Regression: SetToleranceCommand snapshotted its previous value with
+// ToleranceFor, which answers about a face's SIZE. Replacing a DISTANCE
+// tolerance then either found nothing (and undo deleted the band instead of
+// restoring it) or found the face's unrelated size tolerance (and undo
+// restored THAT, leaving the edit standing). Both look like a working undo
+// until you check what came back.
+TEST_CASE("Undo restores a replaced DISTANCE tolerance", "[tolerances]") {
+  auto doc = ShaftDoc();
+  const uint64_t id = doc->GetFeature(0)->GetId();
+  CommandStack stack;
+
+  Tolerance span;
+  span.ref = ElementRef{id, "1/face0"};
+  span.ref2 = ElementRef{id, "1/cap0"};
+  span.lower = -0.05;
+  span.upper = 0.05;
+  stack.Execute(std::make_unique<SetToleranceCommand>(span), *doc);
+  REQUIRE(doc->GetTolerances().size() == 1);
+
+  Tolerance tighter = span;
+  tighter.lower = -0.01;
+  tighter.upper = 0.01;
+  stack.Execute(std::make_unique<SetToleranceCommand>(tighter), *doc);
+  REQUIRE(doc->GetTolerances().size() == 1);
+  CHECK(doc->GetTolerances()[0].upper == Approx(0.01));
+
+  stack.Undo(*doc);
+  REQUIRE(doc->GetTolerances().size() == 1);
+  CHECK(doc->GetTolerances()[0].upper == Approx(0.05));
+  CHECK(doc->GetTolerances()[0].IsDistance());
+}
+
+// The nastier half of the same bug: a face carrying BOTH a size and a
+// distance. Replacing the distance must not snapshot the size.
+TEST_CASE("Undo of a distance edit leaves a coexisting size alone",
+          "[tolerances]") {
+  auto doc = ShaftDoc();
+  const uint64_t id = doc->GetFeature(0)->GetId();
+  CommandStack stack;
+  doc->SetTolerance(G6(id)); // a SIZE on 1/face0
+
+  Tolerance span;
+  span.ref = ElementRef{id, "1/face0"};
+  span.ref2 = ElementRef{id, "1/cap0"};
+  span.lower = -0.05;
+  span.upper = 0.05;
+  stack.Execute(std::make_unique<SetToleranceCommand>(span), *doc);
+  Tolerance tighter = span;
+  tighter.upper = 0.01;
+  stack.Execute(std::make_unique<SetToleranceCommand>(tighter), *doc);
+  REQUIRE(doc->GetTolerances().size() == 2);
+
+  stack.Undo(*doc);
+  REQUIRE(doc->GetTolerances().size() == 2);
+  // The distance came back to its old band...
+  const Tolerance* dist = doc->ToleranceForSubject(span.ref, span.ref2);
+  REQUIRE(dist != nullptr);
+  CHECK(dist->upper == Approx(0.05));
+  // ...and the size on the same face was never touched.
+  const Tolerance* size = doc->ToleranceFor(ElementRef{id, "1/face0"});
+  REQUIRE(size != nullptr);
+  CHECK(size->isoClass == "g6");
+}

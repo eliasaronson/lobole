@@ -222,7 +222,12 @@ std::string SetToleranceCommand::Description() const {
 }
 
 bool SetToleranceCommand::Execute(Document& doc) {
-  if (const Tolerance* prev = doc.ToleranceFor(m_after.ref)) {
+  // By SUBJECT, matching what SetTolerance replaces. ToleranceFor would
+  // answer about the face's SIZE, which for a distance edit is either nothing
+  // (so undo would delete rather than restore) or an unrelated size tolerance
+  // (so undo would restore that and leave the edit standing).
+  if (const Tolerance* prev =
+          doc.ToleranceForSubject(m_after.ref, m_after.ref2)) {
     m_before = *prev;
     m_hadBefore = true;
   }

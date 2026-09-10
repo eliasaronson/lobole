@@ -652,6 +652,7 @@ set(app_sources
     src/ui/VariableActions.cpp
     src/ui/CatalogActions.cpp
     src/ui/CatalogPanel.cpp
+    src/ui/TolerancePanel.cpp
     src/ui/SketchOverlay.cpp
     src/ui/ImportActions.cpp
     src/ui/AssemblyActions.cpp

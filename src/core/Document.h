@@ -292,6 +292,14 @@ public:
   // merely starts there, which is a statement about a gap and not about this
   // face. The lookup check_fits runs per mate.
   const Tolerance* ToleranceFor(const ElementRef& ref) const;
+  // The tolerance on the same SUBJECT — `ref` alone for a size, the ordered
+  // pair for a distance. This is the key SetTolerance upserts on, and so the
+  // one an undo has to snapshot: ToleranceFor answers a different question
+  // ("how big is this face"), and using it to snapshot a DISTANCE edit either
+  // finds nothing and undoes by deleting, or finds the face's unrelated size
+  // tolerance and undoes nothing at all.
+  const Tolerance* ToleranceForSubject(const ElementRef& ref,
+                                       const ElementRef& ref2) const;
 
   // Adds or REPLACES the tolerance on the same SUBJECT — `t.ref` for a size,
   // the ordered pair (`t.ref`, `t.ref2`) for a distance, so a face can carry
