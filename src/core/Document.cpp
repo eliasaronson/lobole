@@ -30,7 +30,13 @@ uint64_t Document::NextInstanceId() {
 // tests/test_document_copy.cpp is what says so: it saves an original and its
 // copy and diffs the two files, so a field that copying forgets shows up as a
 // diff rather than as a duplicated tab quietly missing something.
-Document::Document(const Document& other)
+std::unique_ptr<Document> Document::CopyWithGeometry(const Document& other) {
+  return std::unique_ptr<Document>(new Document(other, /*reuseGeometry=*/true));
+}
+
+Document::Document(const Document& other) : Document(other, false) {}
+
+Document::Document(const Document& other, bool reuseGeometry)
     : m_assets(other.m_assets), m_parameters(other.m_parameters),
       m_studies(other.m_studies),
       // Solved results cost minutes and are not derivable from the feature
@@ -48,6 +54,19 @@ Document::Document(const Document& other)
   m_features.reserve(other.m_features.size());
   for (const std::unique_ptr<Feature>& f : other.m_features)
     m_features.push_back(f->Clone());
+  // Hand the source's own bodies to Regenerate as baked geometry (see
+  // CopyWithGeometry). The features are clones of the ones those bodies were
+  // built from, so the chain hash matches and nothing executes; if it does
+  // not match, Regenerate ignores the blob and rebuilds. Warnings come along
+  // because nothing runs to raise them again — the same reason a baked open
+  // carries them.
+  if (reuseGeometry && other.m_tipHash != 0) {
+    m_bakedBodies = other.m_bodies;
+    m_bakedHash = other.m_tipHash;
+    for (const std::unique_ptr<Feature>& f : other.m_features)
+      if (!f->GetWarning().empty())
+        m_bakedWarnings[f->GetId()] = f->GetWarning();
+  }
   Regenerate();
   // Study results are stamped with the version they were solved at, and this
   // document's versions are its own — so the numbers have to be re-stamped or

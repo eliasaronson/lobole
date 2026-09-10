@@ -56,6 +56,13 @@ hand or by a merge. Each degrades in silence to exactly the behaviour the app
 had before this existed. A stale blob cannot make an open *wrong* — only
 faster.
 
+That rule is why the mechanism is not only for loading.
+`Document::CopyWithGeometry` offers a copy the *source document's* bodies,
+which is the same claim ("these bodies describe this feature list") reached a
+different way and checked by the same comparison. It took the motion study's
+snapshot of an assembly from 6.9 s of re-executed booleans to 11 ms
+(docs/performance/motion-prep-copy.md).
+
 Two consequences worth knowing:
 
 - **A model that failed to regenerate is not baked.** A blob is a promise that
