@@ -72,7 +72,7 @@ float grain_plyFigure(float coordAlongLayup, float scale) {
 
 // 2/2 twill weave. `figure` is the tow-gap darkening in [0,1]; `dNormalObj` is
 // an object-space normal perturbation, which is what actually makes a weave
-// read: carbon's albedo is ~0.07, so there is nothing to darken, and the whole
+// read: carbon's albedo is ~0.03, so there is nothing to darken, and the whole
 // look is the anisotropic sheen of light running ALONG each tow. Bending the
 // normal only ACROSS a tow produces exactly that out of an isotropic BRDF.
 //
