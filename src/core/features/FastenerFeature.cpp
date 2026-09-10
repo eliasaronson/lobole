@@ -484,10 +484,11 @@ bool FastenerFeature::Execute(RegenContext& ctx) {
   // them exactly as wrong as they are today, in a more convincing way. The
   // BOM says so out loud ("has no material — mass unknown"), which is how
   // this was caught.
-  // The SLUG, not the display name: MassProps resolves a body's material
-  // through MaterialLibrary::FromSlug, so "Steel" reads as unknown and the BOM
-  // says "has no density — mass unknown". Caught by looking at the BOM rather
-  // than at the field.
+  // The SLUG, not the display name: a body's material is resolved through
+  // the slug table, so "Steel" is not a material at all — it is refused at
+  // every ingress, and a body that somehow carried it would report "has no
+  // density — mass unknown". Caught by looking at the BOM rather than at the
+  // field.
   const std::string material = m_material.empty() ? "steel" : m_material;
   ctx.bodies.push_back({m_name.empty() ? Designation() : m_name,
                         std::move(solid), material, GetId()});

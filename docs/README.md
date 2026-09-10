@@ -40,12 +40,18 @@ thing behind it invisible to the next person who looks.
 | [topopt/](topopt/plan.md) | topology optimization | `guide.md`, `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md`, `gpu5-plan.md` (**designed, not built** — the fp32 slender-part limit) |
 | [parts/](parts/plan.md) | standard parts (fasteners) | `gui-plan.md` (placing one by clicking — **built**), `preview-plan.md` (seeing what you are about to place — **built**), `f1-loose-ends.md` (attachment, the countersunk case, the pick-slot registry — **built**). **complete v1 (2026-09-01)** — seven vendored ISO standards, a fastener as a PART placed as an occurrence, size and length derived from the hole you pick (washers and nut included), a BOM that tells bought from made, `check_fasteners` for a stack that changed under a screw |
 | [packaging/](packaging/plan.md) | shipping it to other machines | |
-| [cam/](cam/plan.md) | milling toolpaths + G-code (built) | `gui.md` (verbs, the picture of the cut, the verdict — built), `dogfood-round.md` (three rounds on one real coupon; ends with what to watch on the first actual cut) |
+| [cam/](cam/plan.md) | milling toolpaths + G-code (built) | `gui.md` (verbs, the picture of the cut, the verdict — built), `job-document.md` (a job holds N parts, each placed in the stock), `setup-frame.md` (how a part is CLAMPED vs a 4th axis), `stock-and-origin.md` (fixed sheets, and the corner a file's zero is), `router-round.md` (grbl, split output, helical bores, dogbones, lead arcs), `simulation.md` (the cutting simulation), `dogfood-round.md` (three rounds on one real coupon; ends with what to watch on the first actual cut). The findings from cutting a whole aircraft are in [modeling/fpv-drone.md](modeling/fpv-drone.md) |
 
 ## Cross-cutting
 
 - **[known-bugs.md](known-bugs.md)** — confirmed, unfixed defects (symptom +
   root cause + likely fix). Cleared as fixes land.
+- **[up-axis.md](up-axis.md)** and **[units-plan.md](units-plan.md)** — the two
+  conventions every subsystem had quietly assumed for itself, and the same
+  cure both times: one header of named constants (`core/Conventions.h`,
+  `core/Angles.h`) plus a gate that fails when a consumer drifts. units-plan
+  also argues why a full unit engine is the wrong answer here — the bugs are
+  all at the JSON boundary, where a quantity type has nothing to check.
 - **[dogfooding.md](dogfooding.md)** — every self-driven round that built a
   real object end-to-end, what each found, and what was done about it. The
   richest source of real bugs in this repo.
@@ -74,7 +80,10 @@ thing behind it invisible to the next person who looks.
   `LastTest.log` is overwritten by the next run, so re-running an intermittent
   failure used to destroy the only record of it.
 - `tests/rpc_params_gate.py` keeps `describe`'s parameter schema honest
-  against what each handler actually reads (`tools/rpc_params_scan.py`).
+  against what each handler actually reads (`tools/rpc_params_scan.py`), and
+  `tests/rpc_units_gate.py` asks the other question of the same rows: does a
+  dimensional parameter say what UNIT it is in. They share one MethodDoc
+  parser, `tools/method_doc_scan.py`.
 - `tests/test_actions.cpp` is where UI *logic* is pinned headlessly — read its
   header before adding to it. Anything about widgets belongs in the GUI suite.
 - **[architecture-review-2026-08-24.md](architecture-review-2026-08-24.md)** —

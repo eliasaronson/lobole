@@ -1,5 +1,6 @@
 #include "remote/RemoteMotion.h"
 
+#include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
@@ -20,7 +21,13 @@ using json = nlohmann::json;
 namespace remote {
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
+// A motion study's from/to speak the JOINT's unit: DEGREES on the wire for a
+// rotational dof, millimetres for a sliding one. The wire says degrees so the
+// caller never has to know which kind the joint is; storage is radians either
+// way, and MotionSample::value is documented "radians or mm" for that reason.
+double RotAwareAngle(double wire, bool rot) {
+  return rot ? angles::ToRadians(wire) : wire;
+}
 
 // describe: one row per `m ==` branch below — extend together.
 constexpr MethodDoc MotionMethods[] = {
@@ -98,8 +105,8 @@ json StudyJson(const AssemblyDocument& asmDoc, const MotionStudy& s) {
   // The document stores the DOF's own unit; the surface speaks degrees for
   // a rotation. Both are shown so nobody has to remember which this is.
   j["unit"] = rot ? "deg" : "mm";
-  j["from"] = rot ? s.from * 180.0 / kPi : s.from;
-  j["to"] = rot ? s.to * 180.0 / kPi : s.to;
+  j["from"] = rot ? angles::ToDegrees(s.from) : s.from;
+  j["to"] = rot ? angles::ToDegrees(s.to) : s.to;
   const std::string why = motion::WhyNot(asmDoc, s);
   if (!why.empty())
     j["why_not"] = why;
@@ -125,7 +132,7 @@ json ResultJson(const motion::Result& r, const MotionStudy& s,
     }
     json sj{{"index", i},
             {"t", sm.t},
-            {"value", rot ? sm.value * 180.0 / kPi : sm.value},
+            {"value", rot ? angles::ToDegrees(sm.value) : sm.value},
             {"solved", sm.solved},
             {"errored_mates", sm.erroredMates},
             {"residual_mm", sm.residualMm},
@@ -267,8 +274,8 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
                                " to drive");
     s.driverMate = driver;
     const bool rot = s.driverDof == MateDof::Rotation;
-    s.from = p.at("from").get<double>() * (rot ? kPi / 180.0 : 1.0);
-    s.to = p.at("to").get<double>() * (rot ? kPi / 180.0 : 1.0);
+    s.from = RotAwareAngle(p.at("from").get<double>(), rot);
+    s.to = RotAwareAngle(p.at("to").get<double>(), rot);
     if (std::abs(s.to - s.from) < 1e-12)
       throw std::runtime_error("from and to are equal — nothing would move");
     s.samples = p.value("samples", 48);
@@ -295,9 +302,9 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (p.contains("name"))
       s.name = p.at("name").get<std::string>();
     if (p.contains("from"))
-      s.from = p.at("from").get<double>() * (rot ? kPi / 180.0 : 1.0);
+      s.from = RotAwareAngle(p.at("from").get<double>(), rot);
     if (p.contains("to"))
-      s.to = p.at("to").get<double>() * (rot ? kPi / 180.0 : 1.0);
+      s.to = RotAwareAngle(p.at("to").get<double>(), rot);
     if (p.contains("samples")) {
       s.samples = p.at("samples").get<int>();
       if (s.samples < 2)
@@ -429,7 +436,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     const bool rot = s.driverDof == MateDof::Rotation;
     const double value = motion::ValueAt(s, t);
     json out{{"t", t},
-             {"value", rot ? value * 180.0 / kPi : value},
+             {"value", rot ? angles::ToDegrees(value) : value},
              {"unit", rot ? "deg" : "mm"}};
     int errored = 0;
     for (const Mate& mm : asmDoc.GetMates())

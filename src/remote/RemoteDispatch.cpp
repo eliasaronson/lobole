@@ -284,7 +284,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"set_camera",
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
-     "vector); passing eye [x,y,z] derives direction+distance instead.",
+     "vector); passing eye [x,y,z] derives direction+distance instead. "
+     "`distance` and every point here are model MILLIMETRES.",
      "direction, distance, eye, target, up"},
     {"orient_to_face", "Look straight at the selected face.", ""},
     {"select_face",
@@ -842,6 +843,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         // DOFs -- gears, rack and pinion, a screw -- are not supported.
         {"mate_types", DocumentIO::MateTypeNames()},
         {"relation_kinds", DocumentIO::RelationKindNames()},
+        {"constraint_value_units",
+         [] {
+           json u = json::object();
+           for (const auto& [kind, unit] : remote::ConstraintValueUnits())
+             u[kind] = unit;
+           return u;
+         }()},
         {"extrude_modes", {"new_body", "add", "cut"}},
         {"extrude_end_modes",
          {"blind", "symmetric", "two_sided", "up_to_face", "through_all"}},

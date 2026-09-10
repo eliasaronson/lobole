@@ -27,8 +27,7 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
       for (int c = 0; c < 3; c++)
         bm.inertia[r][c] = mp.inertia[r][c];
     const float density =
-        CADMaterials::MaterialLibrary::GetMaterial(
-            CADMaterials::MaterialLibrary::FromSlug(body.material))
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material)
             .density;
     if (!body.material.empty() && density > 0.0f) {
       bm.density = density;

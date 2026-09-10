@@ -221,6 +221,12 @@ Consolidating SolidWorks' Measure, Fusion 360's Measure, and Onshape's
 measure-in-the-status-bar. Not a wish list — the column on the right is what
 each is *for*.
 
+> **This table is the survey that opened the round (2026-08-25), kept as
+> written.** Several of its ✗ rows are M1-M7 deliverables now — "copy the
+> value / drive a variable from it" among them (`MeasuredValueForClipboard`,
+> `CreateVariableFromMeasurement`). Read the phase list below for what
+> shipped; do not read this table as current state.
+
 | Capability | Us | Why it matters |
 |---|---|---|
 | **Angle** between two planes / lines / axes | ✗ | The user's report. Two faces that touch have no distance and a very useful angle. |

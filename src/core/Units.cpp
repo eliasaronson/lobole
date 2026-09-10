@@ -1,4 +1,5 @@
 #include "core/Units.h"
+#include "core/Angles.h"
 
 #include <algorithm>
 #include <cmath>
@@ -209,7 +210,7 @@ std::string FormatMass(double grams, const System& sys) {
 
 std::string FormatAngle(double degrees, const System& sys) {
   if (sys.angle == Angle::Radian)
-    return FormatNumber(degrees * 3.14159265358979323846 / 180.0) + " rad";
+    return FormatNumber(angles::ToRadians(degrees)) + " rad";
   return FormatNumber(degrees) + "\xc2\xb0"; // U+00B0, in the UI font's range
 }
 

@@ -329,11 +329,12 @@ regen's input surface for.
 
    Three things the build corrected:
 
-   - **Mass needs the material SLUG, not its name.** `MassProps` resolves
-     through `MaterialLibrary::FromSlug`, so a body tagged "Steel" reads as
-     unknown density and the BOM says "mass unknown". Found by reading the BOM
-     rather than the field — which is the whole reason mass is one of the two
-     arguments for this feature.
+   - **Mass needs the material SLUG, not its name.** A body's material is
+     resolved through the slug table, so "Steel" is not a material at all — it
+     is refused at every ingress now, and a body that somehow carried it would
+     report "mass unknown". Found by reading the BOM rather than the field —
+     which is the whole reason mass is one of the two arguments for this
+     feature.
    - **`RuntimePaths::DataDir()` only looked beside the executable**, so
      `build/tests/designer_tests` could not find `build/assets`. A golden
      carrying a Fastener regenerated to zero bodies in the test binary and to a

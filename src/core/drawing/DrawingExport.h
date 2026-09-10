@@ -23,7 +23,8 @@ bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error = nullptr,
-             const std::vector<drawing::ResolvedNote>& notes = {});
+             const std::vector<drawing::ResolvedNote>& notes = {},
+             const units::System& units = {});
 
 // Writes the same sheet as a minimal single-page vector PDF (base-14 Helvetica,
 // no font embedding; millimetres scaled to points). Enough to send to a machine
@@ -33,6 +34,7 @@ bool SavePDF(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error = nullptr,
-             const std::vector<drawing::ResolvedNote>& notes = {});
+             const std::vector<drawing::ResolvedNote>& notes = {},
+             const units::System& units = {});
 
 } // namespace DrawingExport

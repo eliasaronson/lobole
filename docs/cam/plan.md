@@ -156,11 +156,18 @@ cam::Setup                     // a document object, like fem::Study
 
 cam::Operation
   type      // Profile | Pocket | Face | Drill | Adaptive | EdgeRound
-  targets[] // ElementRef — faces/edges/pockets, stable across edits
+  targets[] // cam::Target{jobPartId, ElementRef} since v74 — a job holds N
+            // parts and their feature ids COLLIDE (every document numbers
+            // its own from 1), so a bare element name stopped being an
+            // answer. Every pick helper takes the job part too
   toolIndex
   depths    // top, bottom, stepdown, stock-to-leave
   feeds     // plunge, cut; from the tool, overridable per op
   strategy  // climb/conventional, tabs, ramp/helix entry
+  // ...and, added by the rounds after this plan: peck (R3), cornerRelief
+  // (R4), leadArcs (R5), finishTool/finishStock (R6), useOutline, edgeSize
+  // (R15), drilledBores (v96). The RPC row on `add_cam_op` is the current
+  // list; this block is the shape, not the census.
 ```
 
 A toolpath is generated **in setup space** and posted through the setup's
@@ -237,7 +244,7 @@ with the file.
 
 Four operations: **profile** (outside/inside, tabs), **pocket** (voids inside
 the outline; islands fall out of the boolean), **face**, **drill** (targets
-by stable element name). Two posts, Mach3 and LinuxCNC, differing in exactly
+by element name AND the job part it is on). Two posts, Mach3 and LinuxCNC, differing in exactly
 three places: preamble, tool change, program end.
 
 Three bugs the tests and the first real run caught, all of the kind this

@@ -38,8 +38,8 @@ layout(push_constant) uniform PushConstants {
     vec4 material;
     // Per-instance albedo (rgb); instances of one asset can differ in color
     vec4 baseColor;
-    // Procedural grain (used in frag): x=pattern(0 flat/1 wood/2 plywood),
-    // y=grainScale, z=grainContrast, w=grain-axis index (0/1/2).
+    // Procedural surface pattern: x=GRAIN_PATTERN_* (see grain.glsl),
+    // y=patternScale, z=patternContrast, w=pattern-axis index (0/1/2).
     vec4 procMaterial;
 } pc;
 

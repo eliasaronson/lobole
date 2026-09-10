@@ -103,7 +103,11 @@ The rest, in one line each:
 - a through cut stopped at the bottom of the PART rather than the stock,
   leaving it welded to the sheet (the original finding 2);
 - an inside profile with no target silently offset the part's own outline
-  inward and cut a 15 mm trench round it (finding 4) — it refuses now;
+  inward and cut a 15 mm trench round it (finding 4) — it refuses now. A
+  target that is a level FACE did the same thing for another year, because
+  the refusal only fires on an EMPTY contour list and a face pick always
+  returned one; since 2026-09-09 that pick cuts the face's OPENINGS instead,
+  which is the only thing an inside cut on a face can mean;
 - a pocket built over the RPC kept `Side::Outside` invisibly, and adaptive is
   the only strategy that reads it, so it cleared outside a boundary with
   nothing beyond it and said "this operation produced no toolpath";
@@ -135,9 +139,19 @@ the same for a corner radius and a forgotten operation.
        15.8 mm2   3.80 deep at X 121.1 Y 42.7   a tab
         3.0 mm2   6.00 deep at X  26.9 Y 29.9   a pocket corner, 3 mm radius
 
-A height map cannot watch a slug fall out or know a tab was asked for, so those
-show up as leftover and always will. What matters is that the list is now
-readable: every entry is something you can name.
+A height map cannot watch a slug fall out, so THAT one shows up as leftover
+and always will. What matters is that the list is readable: every entry is
+something you can name.
+
+**The four tabs left this list on 2026-09-09.** A tab is asked for, so the
+toolpath now records where it left each one — the point on the contour, the
+radius of the pillar, and the height of its top — and cells at or below that
+top stop counting as leftover; the verdict reports `tabs` instead. Until
+then every job that used a tab reported `complete: false`, which made the
+flag say nothing about any real job. Unlike a corner relief this needs the
+HEIGHT: a relief excuses a cut that went too deep, a tab excuses one that did
+not happen, and excusing it by position alone would excuse a genuinely uncut
+slab sitting above the tab (docs/modeling/fpv-drone.md, finding 6).
 
 **The coupon changed twice, and both times because the app was right.** The
 bolt slot is closed at both ends — an open-ended notch is part of the outline
@@ -250,8 +264,9 @@ or would have.
   two questions, and only one of them is ever certain. `ok` now means nothing
   scraps the part or breaks the tool — no gouge, no rapid through material —
   and `complete` means nothing is left standing. The coupon reports
-  `ok: true, complete: false`, which is the honest answer for a job with four
-  tabs and a slug that drops out.
+  `ok: true, complete: false`, which is the honest answer for a job with a
+  slug that drops out. (The four tabs counted against it too until they were
+  told to the verifier — see "The coupon, as it verifies now" above.)
 - **File > New left every tool session open** on a document that no longer
   existed, including a feature-editor session naming a feature that had just
   been discarded. The one that bit was `camToolOpen`: it is a toggle, so a

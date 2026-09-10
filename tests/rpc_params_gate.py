@@ -24,7 +24,6 @@ year while the handler implemented distance alone.
 Needs no app, no GPU and no display — it reads the source.
 """
 import os
-import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,80 +31,9 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 from rpc_params_scan import scan_files  # noqa: E402
+from method_doc_scan import table_rows  # noqa: E402
 
 REMOTE = os.path.join(ROOT, "src", "remote")
-ROW_RE = re.compile(r'\{\s*"([a-z0-9_]+)"\s*,')
-
-
-def table_rows(paths):
-    """{method: [declared keys] | "*" | None} from the MethodDoc tables."""
-    out = {}
-    for path in paths:
-        with open(path) as f:
-            src = f.read()
-        for blk in re.finditer(r'MethodDoc\s+\w+\[\]\s*=\s*\{(.*?)\n\};',
-                               src, re.S):
-            body = blk.group(1)
-            depth, start, rows = 0, None, []
-            for i, c in enumerate(body):
-                if c == '{':
-                    if depth == 0:
-                        start = i
-                    depth += 1
-                elif c == '}':
-                    depth -= 1
-                    if depth == 0:
-                        rows.append(body[start:i + 1])
-            for row in rows:
-                nm = ROW_RE.match(row)
-                if not nm:
-                    continue
-                fields = _split_fields(row)
-                if len(fields) < 3:
-                    out[nm.group(1)] = None      # row has no params field
-                    continue
-                # A field is one or more ADJACENT string literals, which C++
-                # concatenates — and clang-format splits a long params list
-                # across lines exactly that way, so joining is required, not
-                # cosmetic. Reading only the last literal silently truncated
-                # four rows here (pattern, query_geometry, set_configuration,
-                # set_study) into a prefix that still looked like a valid list.
-                ps = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', fields[2]))
-                out[nm.group(1)] = "*" if ps == "*" else \
-                    sorted(k.strip() for k in ps.split(",") if k.strip())
-    return out
-
-
-def _split_fields(row):
-    """A MethodDoc row's top-level comma-separated initialisers.
-
-    Splitting on bare commas is wrong twice over: the doc strings are full of
-    them, and a nested brace initialiser would hide more. So walk the row
-    tracking string state and brace depth."""
-    inner = row[1:-1] if row.startswith("{") else row
-    fields, depth, buf, i, n = [], 0, [], 0, len(inner)
-    while i < n:
-        c = inner[i]
-        if c == '"':
-            j = i + 1
-            while j < n and inner[j] != '"':
-                j += 2 if inner[j] == '\\' else 1
-            buf.append(inner[i:j + 1])
-            i = j + 1
-            continue
-        if c in "{[(":
-            depth += 1
-        elif c in "}])":
-            depth -= 1
-        elif c == "," and depth == 0:
-            fields.append("".join(buf))
-            buf = []
-            i += 1
-            continue
-        buf.append(c)
-        i += 1
-    fields.append("".join(buf))
-    return fields
 
 
 def main():

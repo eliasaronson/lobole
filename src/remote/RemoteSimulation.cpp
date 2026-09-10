@@ -35,7 +35,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "kind, name", remote::NeedsPart},
     {"remove_study", "Remove a study by id.", "study", remote::NeedsPart},
     {"list_studies", "List studies with status.", "", remote::NeedsPart},
-    {"set_study", "Edit study settings (mesh size, materials, solver options).",
+    {"set_study",
+     "Edit study settings (mesh size, materials, solver options). mesh_size "
+     "and filter_radius are MILLIMETRES; `gravity` is metres per second "
+     "squared (m/s^2) as a [x, y, z] vector, so Earth down is [0, 0, -9.81] "
+     "with Z up. volume_fraction is a fraction of 1 and the iteration counts "
+     "are counts.",
      "filter_radius, gravity, max_iterations, mesh_size, name, num_modes, "
      "study, type, volume_fraction",
      remote::NeedsPart},
@@ -52,7 +57,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "direction, face, magnitude, study, type", remote::NeedsPart},
     {"remove_load", "Remove a load by index.", "load, study",
      remote::NeedsPart},
-    {"add_refinement", "Add a local mesh refinement on an element.",
+    {"add_refinement",
+     "Add a local mesh refinement on an element: `size` is the target element "
+     "edge length there, in MILLIMETRES.",
      "face, size, study", remote::NeedsPart},
     {"remove_refinement", "Remove a refinement.", "face, study",
      remote::NeedsPart},
@@ -523,7 +530,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       // Factor of safety against yield, when the body's material defines one.
       if (b.bodyIndex >= 0 && b.bodyIndex < (int)doc->GetBodies().size() &&
           b.results.maxVonMises > 0) {
-        const auto mt = CADMaterials::MaterialLibrary::FromSlug(
+        const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
             doc->GetBodies()[b.bodyIndex].material);
         const float yield =
             CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;

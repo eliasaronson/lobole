@@ -55,6 +55,13 @@ plausible enough to act on; one of them redesigned the linkage. The check
 that cost nothing was setting the input to a full turn and asking whether
 the output came back.
 
+Four days later the same shape turned up in three more parameters
+(`pattern.angle`, `set_reference_image.rotation`, `add_constraint.value`), so
+the answer stopped being per-parameter: `core/Angles.h` states the factor
+once, `tests/test_conventions.cpp` bans a new bare one, and
+`tests/rpc_units_gate.py` fails a dimensional RPC parameter that does not say
+what unit it is in. See docs/units-plan.md.
+
 
 ---
 

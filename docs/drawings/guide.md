@@ -42,7 +42,15 @@ dimension list).
    drawing panel; the viewport becomes a 2D sheet (scroll to zoom about the
    cursor, middle-drag to pan, **Fit** to recentre).
 2. **Sheet** — pick the paper size (A4–A0 / Letter), orientation, and fill the
-   **Title block** fields (project / document / author / date).
+   **Title block** fields (project / document / author / date). A fifth row,
+   UNITS, is filled in for you and cannot be typed: it states what the sheet's
+   dimensions are in.
+
+   Dimension text is in the SOURCE document's units, not the reader's — a
+   drawing of an inch part is an inch drawing wherever it is opened. Lengths
+   carry no suffix, as drafting practice wants, which is exactly why the UNITS
+   row exists; angles keep their `°` (or three decimals and `rad` on a
+   document that asked for radians).
 3. **Views** — choose a source (part or assembly) + orientation + scale, then
    **Add view**. Set a view's `base_view` to fold it from another. Click
    **Update views** to (re)project; the button turns amber and shows a count

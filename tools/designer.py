@@ -86,12 +86,21 @@ class Sketch:
         self.entity_ids = r.get("entity_ids", [])
         return self
 
-    def constrain(self, kind, refs, value=None, expr=None):
-        """Add a constraint. refs is [[entity_id, which], ...]."""
+    def constrain(self, kind, refs, value=None, expr=None, value_deg=None):
+        """Add a constraint. refs is [[entity_id, which], ...].
+
+        `value` is MILLIMETRES for the length kinds and RADIANS for `angle` —
+        pass `value_deg` for degrees, never both, and a bare `value` over a
+        full turn is refused as a degrees number in the radians field.
+        `expr` is different: an expression in the document's base units,
+        where angles are DEGREES ("45", "45deg" and "0.785rad" all agree).
+        """
         assert self.id is not None, "call .add() before constraining"
         self._doc._call("add_constraint", sketch_id=self.id, kind=kind,
                         refs=refs, **({"value": value} if value is not None
                                      else {}),
+                        **({"value_deg": value_deg} if value_deg is not None
+                           else {}),
                         **({"expr": expr} if expr is not None else {}))
         return self
 

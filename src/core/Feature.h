@@ -122,7 +122,14 @@ public:
   // that only modifies existing bodies (extrude add/cut) leaves their material
   // untouched.
   const std::string& GetMaterial() const { return m_material; }
-  void SetMaterial(const std::string& material) { m_material = material; }
+  // REFUSES an unrecognised slug, naming what is accepted (empty stays legal
+  // and means default). This is the one funnel every ingress runs through —
+  // the set_material RPC, and FeatureFromJson, which is what add_feature,
+  // modify_feature and document load all use. Before it validated,
+  // add_feature(feature={..., "material":"unobtanium"}) was accepted and the
+  // bad string sat on the feature until a renderer or a mass query tripped
+  // over it.
+  void SetMaterial(const std::string& material);
 
   // Does this feature work out its body's material itself, rather than just
   // stamping m_material? Derived inherits the SOURCE body's when its own is

@@ -33,7 +33,13 @@ preview gate expects geometry in every project part.
 The motion panel offers **Preview motion** (kinematics only) and **Validate
 motion** (exact sampled collisions). These are motion controls, not substitutes
 for the standing assembly check. Older results are labeled stale after a model
-or study edit. The SDK stages compose existing native checks; a unified GUI
+or study edit.
+
+While a run is in flight those buttons are replaced by a `sample N / M` bar
+and a **Cancel**; the previous run's verdict stays visible beneath it, and its
+stale line is what says which one you are reading. Cancelling keeps the samples
+already checked — the result comes back reading "Cancelled: N of M samples
+checked", not thrown away. The SDK stages compose existing native checks; a unified GUI
 panel for all three stages remains follow-up work.
 
 ## Update one owned component

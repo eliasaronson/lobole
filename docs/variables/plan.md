@@ -37,7 +37,12 @@ expression-driven from day one instead of retrofitted.
 `Document` gains an ordered list of parameters
 `{ name, expression, cachedValue, comment }`, serialized (format bump). Names
 are identifiers (`width`, `hole_r`); values are unitless doubles interpreted in
-the document's units (mm / degrees, as today — real unit algebra is deferred).
+the EXPRESSION language's base units — millimetres and DEGREES — and real unit
+algebra is deferred (docs/units-plan.md argues it should stay that way). Note
+that storage is not always the same base: a sketch angle constraint stores
+RADIANS, and the conversion happens where the expression is evaluated. Which
+is why the RPC field beside it is `value` (radians) with a `value_deg` twin,
+while `expr` stays degrees.
 
 ### Expressions everywhere a number lives
 Every numeric feature parameter becomes an `Expr { std::string text; double

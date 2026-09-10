@@ -586,6 +586,14 @@ add_test(NAME rpc_params_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_params_gate.py)
 set_tests_properties(rpc_params_gate PROPERTIES TIMEOUT 60)
 
+# ...and that a dimensional one says what UNIT it is in. Same source-only
+# scan, same MethodDoc rows, different question: every angle bug this project
+# has shipped was a number crossing the JSON boundary with nothing but its
+# name to say whether it was degrees or radians, millimetres or inches.
+add_test(NAME rpc_units_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_units_gate.py)
+set_tests_properties(rpc_units_gate PROPERTIES TIMEOUT 60)
+
 # Assemblies A4 exploded views: RPCs, pure-view-state contract, persistence.
 add_test(NAME exploded_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exploded_smoke.py
