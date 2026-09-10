@@ -57,7 +57,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // The pick landed on the body's creating feature, so the study can solve.
     IM_CHECK(!Doc()->GetBodies()[0].material.empty());
     IM_CHECK(CADMaterials::MaterialLibrary::GetMaterial(
-                 CADMaterials::MaterialLibrary::FromSlug(
+                 CADMaterials::MaterialLibrary::MaterialTypeFromString(
                      Doc()->GetBodies()[0].material))
                  .youngGPa > 0.0f);
 

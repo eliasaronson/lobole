@@ -1,6 +1,7 @@
 #include "core/io/Serialization.h"
 #include "core/io/SerializationInternal.h"
 
+#include "core/Angles.h"
 #include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
@@ -93,9 +94,10 @@ json EntityToJson(const sketch::Entity& entity) {
 // mate's `rotation` read that way pinned a linkage to 60 radians and was
 // diagnosed as a loop-solver branch bug twice. A sketch arc read that way
 // builds a plausible arc of the wrong size and says nothing at all. These
-// were the last angles in the API still naming no unit.
-constexpr double kDegPerRad = 57.29577951308232;
-constexpr double kTwoPi = 6.283185307179586;
+// looked like the last angles in the API still naming no unit. They were not:
+// `pattern`'s per-step angle, `set_reference_image.rotation` and
+// `add_constraint.value` followed on 2026-09-10 (docs/units-plan.md), and
+// tests/rpc_units_gate.py is what stops the next one.
 
 double AngleRadians(const json& j, const char* radKey, const char* degKey) {
   const bool hasRad = j.contains(radKey);
@@ -104,12 +106,29 @@ double AngleRadians(const json& j, const char* radKey, const char* degKey) {
     throw std::runtime_error(std::string("pass ") + radKey + " (radians) or " +
                              degKey + " (degrees), not both");
   if (hasDeg)
-    return j.at(degKey).get<double>() / kDegPerRad;
+    return angles::ToRadians(j.at(degKey).get<double>());
   if (!hasRad)
     throw std::runtime_error(
         std::string("missing ") + radKey + " (RADIANS) or " + degKey +
         " (degrees) — describe sketch_entity_types[] lists every field");
   return j.at(radKey).get<double>();
+}
+
+// The same, for an angle that may legitimately be absent (a constraint driven
+// by `expr` carries no literal), and which is a PINNED angle rather than a
+// sweep — so more than a full turn is not a wrapped arc to be measured, it is
+// a number that was meant as degrees. Refusing names the likely cause; the
+// alternative is a sketch that solves to a plausible wrong shape.
+double AngleRadians(const json& j, const char* radKey, const char* degKey,
+                    double absent) {
+  if (!j.contains(radKey) && !j.contains(degKey))
+    return absent;
+  const double rad = AngleRadians(j, radKey, degKey);
+  if (j.contains(radKey) && !angles::IsPlausibleSweep(rad))
+    throw std::runtime_error(
+        std::string(radKey) + " is RADIANS and " + std::to_string(rad) +
+        " is more than a full turn — pass " + degKey + " to say degrees");
+  return rad;
 }
 
 sketch::Entity EntityFromJson(const json& j) {
@@ -149,9 +168,9 @@ sketch::Entity EntityFromJson(const json& j) {
     // meant. But the overwhelmingly likely cause is degrees in a radian
     // field, so the message says so rather than making them work it out.
     const double sweep = std::abs(end - start);
-    if (sweep > kTwoPi + 1e-9) {
+    if (sweep > angles::kTwoPi + 1e-9) {
       std::ostringstream why;
-      why << "arc sweeps " << sweep << " rad (" << (sweep * kDegPerRad)
+      why << "arc sweeps " << sweep << " rad (" << angles::ToDegrees(sweep)
           << " degrees), which is more than one full turn — start_angle and "
              "end_angle are RADIANS. Did you mean start_angle_deg / "
              "end_angle_deg?";
@@ -307,7 +326,14 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   c.kind = ConstraintKindFromString(j.at("kind").get<std::string>());
   c.a = {j.at("a").at(0).get<uint32_t>(), j.at("a").at(1).get<uint8_t>()};
   c.b = {j.at("b").at(0).get<uint32_t>(), j.at("b").at(1).get<uint8_t>()};
-  c.value = j.value("value", 0.0);
+  // An angle takes `value` (RADIANS, what the file stores and the solver
+  // works in) or `value_deg`, matching add_constraint and the arc parser
+  // above. Input only — ConstraintToJson still writes `value` alone, so no
+  // format bump is owed. Every other dimension kind is millimetres, where
+  // there is nothing to confuse.
+  c.value = c.kind == sketch::ConstraintKind::Angle
+                ? AngleRadians(j, "value", "value_deg", 0.0)
+                : j.value("value", 0.0);
   c.valueExpr = j.value("expr", std::string{}); // absent (pre-v11) = literal
   if (j.contains("c"))
     c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
@@ -787,6 +813,8 @@ json FeatureToJson(const Feature& feature) {
       j["drive"] = fastener->drive;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
+    if (import->keepOrigin) // v97; absent = centred, as every older file was
+      j["keep_origin"] = true;
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
   } else if (auto* d = dynamic_cast<const DerivedFeature*>(&feature)) {
@@ -1106,6 +1134,11 @@ int DocumentFormatVersion() { return kVersion; }
 
 // Keep in lockstep with the FeatureFromJson chain below (one entry per
 // `type ==` branch; Fillet/Chamfer share a branch but are distinct types).
+//
+// Fields EVERY type accepts, so no row repeats them: `name?`, `id?`,
+// `material?` (a slug from describe.material_slugs — an unrecognised one is
+// REFUSED naming the accepted set, so it cannot arrive here through
+// add_feature or modify_feature the way it used to), `appearance?`.
 static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Sketch", 1,
      "plane {origin, normal, uAxis} (in-plane V = normal x uAxis!), entities "
@@ -1134,7 +1167,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/plan.md)"},
-    {"Import", 1, "path (STEP/STL/BREP file)"},
+    {"Import", 1,
+     "path (STEP/STL/BREP file); keep_origin?: the import is CENTRED on its "
+     "combined bounding box by default — pass true to keep the file's own "
+     "coordinates, which is what a neighbour part, a fixture in a shared "
+     "frame, or a re-import of your own export needs. The applied shift is "
+     "reported as `recentred_by`"},
     {"Derived", 84,
      "source_part (a part slot id), bodies?: [created_by ids] and/or "
      "body_names?: [names] (both absent = all of the source's bodies; the "
@@ -1576,6 +1614,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Import") {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());
+    imp->keepOrigin = j.value("keep_origin", false); // v97
     if (j.contains("color")) {
       imp->hasColor = true;
       imp->color = Vec3FromJson(j.at("color"));

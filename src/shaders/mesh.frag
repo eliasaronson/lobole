@@ -31,8 +31,9 @@ layout(push_constant) uniform PushConstants {
     uvec4 highlight;   // used in the vertex stage
     vec4 material;      // x=metallic, y=roughness, z=specular, w=reflectance
     vec4 baseColor;     // per-instance albedo (used in the vertex stage)
-    // Procedural grain: x=pattern (0 flat/1 wood/2 plywood), y=grainScale,
-    // z=grainContrast, w=grain-axis index (0/1/2). See the grain helpers below.
+    // Procedural surface pattern: x=GRAIN_PATTERN_* (see grain.glsl),
+    // y=patternScale, z=patternContrast, w=pattern-axis index (0/1/2).
+    // See the grain helpers below.
     vec4 procMaterial;
 } pc;
 
@@ -133,12 +134,18 @@ void main() {
     float specularScale = pc.material.z;
     float reflectance = pc.material.w;
 
-    // Procedural wood / plywood grain (object space so it tracks the part;
-    // shared with the ray tracer via grain.glsl). facing = how parallel the
-    // surface is to the plywood layup axis (unused for solid wood).
-    vec3 grainAxis = grain_axisUnit(int(pc.procMaterial.w + 0.5));
-    float grainFacing = abs(dot(normal, normalize(mat3(pc.model) * grainAxis)));
-    grain_apply(albedo, roughness, pc.procMaterial, fragLocalPos, grainFacing);
+    // Procedural surface pattern (object space so it tracks the part; shared
+    // with the ray tracer via grain.glsl). facing = how parallel the surface
+    // is to the pattern axis — the plywood layup, or a weave's sheet normal.
+    // Taken against the geometric normal, BEFORE the weave's relief bends it.
+    vec3 patternAxis = grain_axisUnit(int(pc.procMaterial.w + 0.5));
+    float patternFacing =
+        abs(dot(normal, normalize(mat3(pc.model) * patternAxis)));
+    vec3 dNormalObj;
+    grain_apply(albedo, roughness, dNormalObj, pc.procMaterial, fragLocalPos,
+                patternFacing);
+    if (dot(dNormalObj, dNormalObj) > 0.0)
+        normal = normalize(normal + mat3(pc.model) * dNormalObj);
 
     // Image-based ambient/environment lighting (split-sum). Replaces the flat
     // ambient term: diffuse from the irradiance map, specular from the

@@ -1,4 +1,5 @@
 #include "core/io/ProjectMerge.h"
+#include "core/Angles.h"
 
 #include "core/io/Serialization.h"
 
@@ -138,7 +139,7 @@ std::string RotText(const json& q) {
     x = -x, y = -y, z = -z, w = -w;
   }
   const double len = std::sqrt(x * x + y * y + z * z);
-  const double angle = 2.0 * std::atan2(len, w) * 180.0 / M_PI;
+  const double angle = angles::ToDegrees(2.0 * std::atan2(len, w));
   if (angle < 0.05 || len < 1e-9)
     return "";
   std::string axis;

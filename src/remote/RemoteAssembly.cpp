@@ -1,5 +1,6 @@
 #include "remote/RemoteAssembly.h"
 
+#include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
@@ -85,7 +86,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "DEFAULTS TO TRUE: the two connectors meet face to face with their "
      "normals opposed, which is what two touching FACES do and the opposite "
      "of what two seat FRAMES want — frame to frame, pass flipped:false, or "
-     "the part lands turned over and sunk into whatever it was to sit on.",
+     "the part lands turned over and sunk into whatever it was to sit on. "
+     "A mate is ONE joint between two occurrences. To COUPLE two mates' "
+     "degrees of freedom — a gear pair, a rack and pinion, a screw, a cam — "
+     "the thing to add is a RELATION over those two mates (add_relation); "
+     "that is also what drops a geared loop's DOF count. `describe` lists "
+     "both vocabularies as `mate_types` and `relation_kinds`.",
      "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, "
      "rotation_deg, type"},
     {"set_mate",
@@ -100,7 +106,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "rotation_deg"},
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates",
-     "List mates with status/errors. Each carries `rotation` in radians and "
+     "List mates with `status` (satisfied | redundant | error) and the "
+     "error text when there is one. Each carries `rotation` in radians and "
      "`rotation_deg` beside it.",
      ""},
     {"add_relation",
@@ -135,14 +142,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"list_relations", "List relations with status/errors.", ""},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
-     "Run the mate solver. Returns the per-mate status; how many occurrences "
-     "the mates DETERMINE (`placed_by_mates`) against how many hold the "
-     "transform they were given (`placed_by_transform` — legitimate for a "
-     "nut or a camera, and the number to read before trusting `dof`); and, "
-     "for an assembly with mate loops, `dof` = the freedom left IN THE LOOPED "
-     "COMPONENTS only, whether every loop closed and by how much it missed, "
-     "and which mates were redundant but consistent (three bolts through a "
-     "flange: satisfied, saying nothing new — not an error).",
+     "Run the mate solver. Returns every mate with a `status` (satisfied | "
+     "redundant | error) and its error text when there is one; how many "
+     "occurrences the mates DETERMINE (`placed_by_mates`) against how many "
+     "hold the transform they were given (`placed_by_transform` — legitimate "
+     "for a nut or a camera, and the number to read before trusting `dof`); "
+     "and, for an assembly with mate loops, `dof` = the freedom left IN THE "
+     "LOOPED COMPONENTS only, whether every loop closed and by how much it "
+     "missed, and which mates were redundant but consistent (three bolts "
+     "through a flange: satisfied, saying nothing new — not an error).",
      ""},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/plan.md). "
@@ -155,7 +163,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "mass. Optional {position, orientation} place it; `fit_fastener` derives "
      "all of that from a picked hole and is what you usually want. Standards: "
      "iso4762, iso14579, iso4017, iso7380 (screws — `length` required), "
-     "iso4032 (nut), iso7089 (washer — no `length`).",
+     "iso4032 (nut), iso7089 (washer — no `length`). `length` is the shank "
+     "length in MILLIMETRES (the 20 of \"M6x20\"), `size` is the thread "
+     "designation (\"M6\") rather than a measure, and `position` is model mm.",
      "drive, length, orientation, position, size, standard"},
     {"fit_fastener",
      "Derive a fastener from a picked hole RIM and place it "
@@ -221,7 +231,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"add_exploded_view", "Add an exploded view.", "name"},
     {"remove_exploded_view", "Remove an exploded view.", "id"},
     {"list_exploded_views", "List exploded views.", ""},
-    {"set_explode_step", "Add/edit an explode step (occurrence + offset).",
+    {"set_explode_step",
+     "Add/edit an explode step (occurrence + offset). `offset` is a [x, y, z] "
+     "displacement in MILLIMETRES, applied for display only — it never moves "
+     "the occurrence the mates solved.",
      "occurrence, offset, view"},
     {"auto_explode",
      "Generate explode steps automatically (creates and "
@@ -467,7 +480,6 @@ json NormalizeTransform(json t) {
 // response carries both. Converting `rotation` itself to degrees was tried
 // first and reverted: it left relations speaking radians and mates speaking
 // degrees, which is a worse trap than the one being fixed.
-constexpr double kDegPerRad = 57.29577951308232;
 
 // Radians from whichever the caller used, refusing both at once — a mate
 // pinned to two different angles has no right answer. Takes the values
@@ -481,7 +493,7 @@ float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
     throw std::runtime_error(
         "pass rotation (radians) or rotation_deg, not both");
   if (hasDeg)
-    return static_cast<float>(deg / kDegPerRad);
+    return static_cast<float>(angles::ToRadians(deg));
   if (hasRad)
     return static_cast<float>(rad);
   return current;
@@ -489,7 +501,7 @@ float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
 
 json MateJson(const Mate& m) {
   json j = DocumentIO::MateToJson(m);
-  j["rotation_deg"] = m.rotation * kDegPerRad;
+  j["rotation_deg"] = angles::ToDegrees(m.rotation);
   return j;
 }
 
@@ -976,7 +988,21 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(
             "connector needs 'frame: <Frame id|name>', 'origin:true' or "
             "'face:{feature_id,element}'");
-      json out{{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
+      // The RESOLVED id, not what the caller wrote. The lookup above
+      // already accepts a name — as the doc promises — but passing the raw
+      // value on meant a name reached the parser, which wants a number, and
+      // came back as "type must be number, but is string" from a call whose
+      // own documentation says id|name.
+      if (!c.contains("occurrence"))
+        throw std::runtime_error(
+            "connector needs 'occurrence' (id or name — see list_occurrences)");
+      if (o == nullptr)
+        throw std::runtime_error(
+            "connector 'occurrence' " + c.at("occurrence").dump() +
+            " names nothing in this assembly. Occurrences: " +
+            (state.assembly ? OccurrenceCandidates(*state.assembly)
+                            : std::string("none")));
+      json out{{"occurrence", o->id}, {"anchor", anchor}};
       if (c.contains("inner_path"))
         out["inner_path"] = c.at("inner_path");
       return out;
@@ -1091,6 +1117,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
       json mj = MateJson(mate);
+      // Same word as solve_assembly's. list_mates does not re-solve, so
+      // "redundant" is not knowable here: a mate is either carrying an
+      // error from the last solve, or it is satisfied.
+      mj["status"] = mate.error.empty() ? "satisfied" : "error";
       if (!mate.error.empty())
         mj["error"] = mate.error;
       arr.push_back(mj);
@@ -1404,8 +1434,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "set_active_part (see list_parts)");
     const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
     json arr = json::array();
+    const std::set<uint64_t> redundant(rep.redundantMates.begin(),
+                                       rep.redundantMates.end());
     for (const Mate& mate : state.assembly->GetMates()) {
-      json mj = {{"id", mate.id}, {"name", mate.name}};
+      // `status` in words, because the absence of an `error` key is not a
+      // statement: a caller filtering on a field that is only sometimes
+      // there reads "no news" as "not satisfied" (or the reverse) and
+      // reports every mate as broken.
+      const char* status = !mate.error.empty()        ? "error"
+                           : redundant.count(mate.id) ? "redundant"
+                                                      : "satisfied";
+      json mj = {{"id", mate.id}, {"name", mate.name}, {"status", status}};
       if (!mate.error.empty())
         mj["error"] = mate.error;
       arr.push_back(mj);

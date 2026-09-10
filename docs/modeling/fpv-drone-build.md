@@ -4,7 +4,7 @@ A 220 mm 5-inch freestyle quad, 6S, analog video. 435 g dry, 654 g with a
 6S 1300 pack, about 9:1 thrust to weight.
 
 Everything here comes out of the model in this directory
-(`generators/fpv_drone.py` built it; `docs/modeling/fpv-drone.md` says how
+(`generators/fpv_drone/fpv_drone.py` built it; `docs/modeling/fpv-drone.md` says how
 and what was checked). Dimensions on the sheets are the authority — the
 lists below are what to order and the order to put it together in.
 

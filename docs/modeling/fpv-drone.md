@@ -1,11 +1,11 @@
 # A 5-inch FPV freestyle quadcopter
 
-`generators/fpv_drone.py` builds a complete, buildable 5" freestyle quad:
+`generators/fpv_drone/fpv_drone.py` builds a complete, buildable 5" freestyle quad:
 five carbon parts to have cut, two to print, forty-two fasteners derived
 from the holes they go in, and every bought component at its catalogue
 dimensions so that the clearances mean something.
 
-    python3 generators/fpv_drone.py --port <n> --stage all --out scratch/fpv-drone
+    python3 generators/fpv_drone/fpv_drone.py --port <n> --stage all --out scratch/fpv-drone
 
 Roughly 12 s for the model, 40 s more for the checks, and about a minute
 for the sheets, the exports and a 256-sample render. `--stage drawings`
@@ -232,7 +232,7 @@ a clearance is what is wanted rather than a coordinate.
 
 ## What happens to the parts
 
-`generators/fpv_drone_shop.py`, `--stage fem|cam|shop`, against the project as
+`generators/fpv_drone/fpv_drone_shop.py`, `--stage fem|cam|shop`, against the project as
 saved. Neither half touches a part: they add STUDIES and JOB DOCUMENTS, and
 the project is saved with them. The G-code is not the answer on its own — the
 nesting, the tools, the depths and the load cases are what somebody opens to

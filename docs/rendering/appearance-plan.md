@@ -26,7 +26,9 @@
 A material slug currently welds together two unrelated things:
 
 1. **Physics** — density (mass properties, BOM), Young/Poisson/yield (FEM).
-2. **Look** — baseColor, metallic/roughness/specular, procedural grain.
+2. **Look** — baseColor, metallic/roughness/specular, and a procedural
+   surface pattern (wood, plywood, weave), which since the weave landed can
+   perturb the shading normal too. See rendering/surface-patterns.md.
 
 Real objects break the weld constantly: blue HDPE barrels, painted steel,
 stained pine. The physics side is right per slug; only the look needs a
@@ -59,12 +61,13 @@ material → **appearance fields on top**. The merge happens where materials
 are already resolved into per-mesh params — `AppActions.cpp` (~2665, part
 tab) and `AssemblyActions.cpp` (~987, assembly shared-body cache) — plus the
 offline ray tracer's material lookup. No shader change: the mesh push
-constant sits at the 128-byte Vulkan floor (wood-grain round), and
+constant sits at the 128-byte Vulkan floor with zero headroom, and
 `SetMeshMaterial`/`SetMeshColor` already take CPU-resolved values, so an
-override just edits what we upload. Grain interaction: overriding `color` on
-a wood material keeps the grain pattern (contrast darkens toward the grain
-lines from the overridden tone) — that is the *desired* behavior for stained
-wood; no special case.
+override just edits what we upload. Pattern interaction: overriding `color`
+on a PATTERNED material keeps its pattern — stained wood, and a painted carbon
+plate, both of which are the *desired* reading; no special case. (For a weave
+most of the figure is relief rather than tint, so an override changes it less
+than it changes a wood.)
 
 **Not touched.** MassProps, FEM, and BOM read `Body::material` only and stay
 that way — appearance must never leak into physics. Drawings are HLR line

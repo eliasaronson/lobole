@@ -249,8 +249,12 @@ Datum references (usable as entity_id): {DATUM_ORIGIN} = sketch origin,
 {{"kind": "coincident", "refs": [[<line id>, 0], [{DATUM_ORIGIN}, 0]]}}.
 
 Dimensional kinds (distance, radius, angle, distance_x, distance_y, diameter,
-distance_pl) take value (angle in degrees) or expr (expression over document
-variables — prefer it: "width" beats 40). distance_pl is the perpendicular
+distance_pl) take value or expr (expression over document variables — prefer
+it: "width" beats 40). `value` is MILLIMETRES, except for angle, where it is
+RADIANS — pass value_deg for degrees, never both, and more than a full turn
+is refused as a degrees value in the radians field. `expr` is different and
+always in the document's base units, where angles are DEGREES: "45", "45deg"
+and "0.785rad" all mean 45 degrees. distance_pl is the perpendicular
 point-to-line distance: refs = [[point entity, which], [line entity, 0]] —
 also the parallel-lines distance (use an endpoint of the first line)."""
 
@@ -644,11 +648,14 @@ _EXPOSED = {
 
 @mcp.tool(description="API introspection — call this FIRST to learn the "
           "surface. Top-level keys: methods (name + one-line doc + the "
-          "`params` keys it accepts + requires_part_doc), feature_types "
-          "(type + since_version), sketch_entity_types, constraint_kinds, "
+          "`params` keys it accepts + requires_part_doc), feature_types and "
+          "sketch_entity_types (each with a `params` string naming every "
+          "field AND its unit), constraint_kinds, constraint_value_units "
+          "(what the number beside each dimensional kind means), "
           "extrude_modes, extrude_end_modes, axis_kinds, material_slugs, "
+          "drawing_dim_kinds, inspection_contract, "
           "document_format_version. Pass `method` to get just that one "
-          "instead of all 195 — the params list is what to read before "
+          "instead of all 242 — the params list is what to read before "
           "guessing a key name, since an unrecognised key is REFUSED, not "
           "ignored. A method with params_free_form: true reads its params "
           "object opaquely, so the prose is the only guide there. The "
@@ -837,11 +844,13 @@ def delete_feature(index: int) -> dict:
     return _call("delete_feature", index=index)
 
 
-@_reference(description="Assign a render material. Target ONE of: feature_id "
+@_reference(description="Assign a material — it drives mass, BOM and FEM as "
+          "well as appearance. Target ONE of: feature_id "
           "(the body's created_by from get_state/list_elements) or body (an "
           "index into get_state's bodies — add/cut keep the original creator, "
           "so this recolors everything fused into that body). Slugs: "
-          + MATERIAL_SLUGS + ". Empty string restores the default.")
+          + MATERIAL_SLUGS + ". Empty string restores the default; any other "
+          "unrecognised slug is refused.")
 def set_material(material: str, feature_id: int = -1, body: int = -1) -> dict:
     args = {"feature_id": feature_id} if feature_id >= 0 else \
         ({"body": body} if body >= 0 else {})
@@ -856,9 +865,16 @@ def set_material(material: str, feature_id: int = -1, body: int = -1) -> dict:
           "and regenerate. The solve may move geometry — read positions back "
           "via get_state, never assume.\n\n" + CONSTRAINT_FORMATS)
 def add_constraint(sketch_id: int, kind: str, refs: list,
-                   value: float = 0.0, expr: str = "") -> dict:
-    params = {"sketch_id": sketch_id, "kind": kind, "refs": refs,
-              "value": value}
+                   value: float = 0.0, value_deg: float | None = None,
+                   expr: str = "") -> dict:
+    params = {"sketch_id": sketch_id, "kind": kind, "refs": refs}
+    # Only one of them reaches the app: passing both is refused there, and
+    # `value` has a default so it cannot simply be forwarded unconditionally
+    # alongside an explicit value_deg.
+    if value_deg is not None:
+        params["value_deg"] = value_deg
+    else:
+        params["value"] = value
     if expr:
         params["expr"] = expr
     return _call("add_constraint", **params)
@@ -889,18 +905,29 @@ def fillet(sketch_id: int, line1: int, line2: int, radius: float) -> dict:
 
 @_reference(description="Repeat sketch entities in a linear or circular "
           "pattern. sources: entity ids; count includes the originals. "
-          "Linear: step=[du,dv] spacing. Circular: circular=true, "
-          "center=[u,v], angle = total sweep in degrees. link=true keeps "
-          "copies following their sources. Returns generated entity ids.")
+          "Linear: step=[du,dv] spacing in mm. Circular: circular=true, "
+          "center=[u,v], and the PER-STEP angle about the centre — "
+          "angle_deg=45 for three instances 45 degrees apart, or angle= in "
+          "radians. Not the total sweep. link=true keeps copies following "
+          "their sources. Returns generated entity ids.")
 def pattern(sketch_id: int, sources: list, count: int,
             circular: bool = False, step: list | None = None,
-            center: list | None = None, angle: float = 0.0,
+            center: list | None = None, angle: float | None = None,
+            angle_deg: float | None = None,
             link: bool = True) -> dict:
     params = {"sketch_id": sketch_id, "sources": sources, "count": count,
               "circular": circular, "link": link}
     if circular:
         params["center"] = center or [0, 0]
-        params["angle"] = angle
+        # Pass through whichever the caller named. This said "total sweep in
+        # degrees" and forwarded the number unconverted into a handler that
+        # reads it as radians PER STEP: two errors in one parameter, and the
+        # sketch it builds looks deliberate. The app refuses `angle` over a
+        # full turn now, so the old spelling fails loudly instead.
+        if angle is not None:
+            params["angle"] = angle
+        if angle_deg is not None:
+            params["angle_deg"] = angle_deg
     else:
         params["step"] = step or [1, 0]
     return _call("pattern", **params)
@@ -951,13 +978,15 @@ def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
 
 
 @_reference(description="Edit a sketch reference image (by image_id): pass any "
-          "of opacity (0..1), hidden (bool), rotation (radians), "
-          "units_per_pixel, or origin [u,v] (plane-UV of the image's (0,0) "
+          "of opacity (0..1), hidden (bool), rotation (RADIANS) or "
+          "rotation_deg (degrees) but never both, units_per_pixel (sketch mm "
+          "per image pixel), or origin [u,v] (plane-UV of the image's (0,0) "
           "pixel corner). Only the fields you pass change.")
 def set_reference_image(sketch_id: int, image_id: int,
                         opacity: float | None = None,
                         hidden: bool | None = None,
                         rotation: float | None = None,
+                        rotation_deg: float | None = None,
                         units_per_pixel: float | None = None,
                         origin: list | None = None) -> dict:
     params = {"sketch_id": sketch_id, "image_id": image_id}
@@ -967,6 +996,8 @@ def set_reference_image(sketch_id: int, image_id: int,
         params["hidden"] = hidden
     if rotation is not None:
         params["rotation"] = rotation
+    if rotation_deg is not None:
+        params["rotation_deg"] = rotation_deg
     if units_per_pixel is not None:
         params["units_per_pixel"] = units_per_pixel
     if origin is not None:

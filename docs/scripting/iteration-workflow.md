@@ -33,7 +33,13 @@ preview gate expects geometry in every project part.
 The motion panel offers **Preview motion** (kinematics only) and **Validate
 motion** (exact sampled collisions). These are motion controls, not substitutes
 for the standing assembly check. Older results are labeled stale after a model
-or study edit. The SDK stages compose existing native checks; a unified GUI
+or study edit.
+
+While a run is in flight those buttons are replaced by a `sample N / M` bar
+and a **Cancel**; the previous run's verdict stays visible beneath it, and its
+stale line is what says which one you are reading. Cancelling keeps the samples
+already checked — the result comes back reading "Cancelled: N of M samples
+checked", not thrown away. The SDK stages compose existing native checks; a unified GUI
 panel for all three stages remains follow-up work.
 
 ## Update one owned component
@@ -74,10 +80,10 @@ The builder proxy is an ergonomic adapter, not a sandbox for untrusted code.
 ## OM615
 
 ```sh
-python3 generators/om615.py --port 8801 --out /tmp/engine --stage preview
-python3 generators/om615.py --port 8801 --out /tmp/engine-review --stage full --no-export
-python3 generators/om615.py --port 8801 --update-component intake --stage local --out /tmp/intake-review
-python3 generators/om615.py --port 8801 --validate-only --stage full --out /tmp/full-review
+python3 generators/om615/om615.py --port 8801 --out /tmp/engine --stage preview
+python3 generators/om615/om615.py --port 8801 --out /tmp/engine-review --stage full --no-export
+python3 generators/om615/om615.py --port 8801 --update-component intake --stage local --out /tmp/intake-review
+python3 generators/om615/om615.py --port 8801 --validate-only --stage full --out /tmp/full-review
 ```
 
 Use your own application instance. `--project PATH` optionally opens a saved

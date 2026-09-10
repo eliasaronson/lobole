@@ -168,7 +168,9 @@ constexpr MethodDoc kCamMethods[] = {
      "job, stock, tool"},
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id, job"},
     {"add_cam_op",
-     "Add an operation {setup, type: "
+     "Add an operation. Every length here is MILLIMETRES — top_z, bottom_z, "
+     "stepdown, stepover, peck, finish_stock, stock_to_leave and edge_size — "
+     "and feeds are mm/min on the TOOL, not here. {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round, "
      "tool?, top_z?, bottom_z?, stepdown?, peck? (drill: retract between "
      "pecks of this depth; derived as the tool's diameter once a hole is "
@@ -213,7 +215,9 @@ constexpr MethodDoc kCamMethods[] = {
      "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
      "type, use_outline"},
     {"set_cam_op",
-     "Change an operation {id, …the add_cam_op fields}. `tool` re-points it "
+     "Change an operation {id, …the add_cam_op fields, whose lengths — "
+     "stepdown, stepover, edge_size and the rest — are MILLIMETRES}. `tool` "
+     "re-points it "
      "at another cutter: a stepdown still at the old tool's derived value "
      "follows the new one (every derived number is a fraction of the "
      "cutter), one you typed is kept, and a tool this setup does not have is "
@@ -233,7 +237,8 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_derive_op",
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
      "WITHOUT adding it: the derived operation, or why that pick cannot make "
-     "one. The dry run behind add_cam_op's derivation.",
+     "one. The dry run behind add_cam_op's derivation, and its lengths are "
+     "the same MILLIMETRES — stepdown, stepover, edge_size and the rest.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
      "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
@@ -253,7 +258,8 @@ constexpr MethodDoc kCamMethods[] = {
      "again without `async` for the list.",
      "async, job, path, post, setup"},
     {"cam_verify",
-     "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
+     "Simulate the POSTED G-code for a setup {setup, resolution?: the height "
+     "map's cell size in mm, echoed as resolution_mm} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
      "leftover_area_mm2, leftover_regions, rapids_through_stock, "
      "below_stock_mm, tabs, reliefs, ok, complete, says}. `below_stock_mm` is "
@@ -277,7 +283,8 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_simulate",
      "Play the POSTED file through a block of stock and report what has come "
      "off at a point in it {setup?, at?: 0..1 along the path or \"end\", "
-     "play?, close?, resolution?}. Returns {open, at, distance_mm, total_mm, "
+     "play?, close?, resolution?: the height map's cell size in mm, echoed as "
+     "resolution_mm}. Returns {open, at, distance_mm, total_mm, "
      "cutting_minutes, removed_mm3, operation, tool, feed_mm_min, line, "
      "position}. The cursor is PATH DISTANCE, not a clock: every cutting "
      "feed is in the file but no machine states its rapid rate, so a time "

@@ -80,6 +80,27 @@ Occurrence OccurrenceFromJson(const json& j) {
 
 namespace {
 
+// The mate types, in one place: the string, and what the enum is. Both the
+// parser's refusal and `describe` read this, so a seventh type cannot be
+// added and left undocumented.
+constexpr std::pair<const char*, MateType> kMateTypes[] = {
+    {"fastened", MateType::Fastened}, {"revolute", MateType::Revolute},
+    {"slider", MateType::Slider},     {"cylindrical", MateType::Cylindrical},
+    {"planar", MateType::Planar},     {"ball", MateType::Ball}};
+
+constexpr std::pair<const char*, RelationKind> kRelationKinds[] = {
+    {"gear", RelationKind::Gear},   {"rack", RelationKind::Rack},
+    {"screw", RelationKind::Screw}, {"linear", RelationKind::Linear},
+    {"chain", RelationKind::Chain}, {"cam", RelationKind::Cam}};
+
+template <typename T, size_t N>
+std::string NameList(const std::pair<const char*, T> (&table)[N]) {
+  std::string out;
+  for (size_t i = 0; i < N; ++i)
+    out += (i ? ", " : "") + std::string(table[i].first);
+  return out;
+}
+
 const char* MateTypeToString(MateType t) {
   switch (t) {
   case MateType::Fastened:
@@ -117,10 +138,11 @@ MateType MateTypeFromString(const std::string& s) {
   // the wrong degrees of freedom, so nothing looked wrong until someone tried
   // to rotate it. Same on load, where a hand-edited or merged file silently
   // demoted every unrecognised mate to fastened.
-  throw std::runtime_error(
-      "unknown mate type '" + s +
-      "' (expected one of: fastened, revolute, slider, cylindrical, planar, "
-      "ball)");
+  throw std::runtime_error("unknown mate type '" + s +
+                           "' (expected one of: " + NameList(kMateTypes) +
+                           "). To COUPLE two mates' degrees of freedom -- "
+                           "gears, a rack and pinion, a screw -- the thing to "
+                           "add is a RELATION, not a mate: see add_relation");
 }
 
 json ConnectorToJson(const Connector& c) {
@@ -250,6 +272,20 @@ ExplodedView ExplodedViewFromJson(const json& j) {
   return v;
 }
 
+std::vector<std::string> MateTypeNames() {
+  std::vector<std::string> out;
+  for (const auto& [name, type] : kMateTypes)
+    out.emplace_back(name);
+  return out;
+}
+
+std::vector<std::string> RelationKindNames() {
+  std::vector<std::string> out;
+  for (const auto& [name, kind] : kRelationKinds)
+    out.emplace_back(name);
+  return out;
+}
+
 // ---- Relations (v83) ------------------------------------------------------
 
 const char* RelationKindToString(RelationKind kind) {
@@ -283,9 +319,9 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Chain;
   if (s == "cam")
     return RelationKind::Cam;
-  throw std::runtime_error(
-      "unknown relation type '" + s +
-      "' (expected one of: gear, rack, screw, linear, chain, cam)");
+  throw std::runtime_error("unknown relation type '" + s +
+                           "' (expected one of: " + NameList(kRelationKinds) +
+                           ")");
 }
 
 const char* MateDofToString(MateDof dof) {

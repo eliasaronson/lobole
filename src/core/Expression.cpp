@@ -1,5 +1,7 @@
 #include "core/Expression.h"
 
+#include "core/Angles.h"
+
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -7,10 +9,6 @@
 #include <vector>
 
 namespace {
-
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kDegToRad = kPi / 180.0;
-constexpr double kRadToDeg = 180.0 / kPi;
 
 // Unit suffixes (C2 units algebra): a factor that converts a unit-suffixed
 // literal to the document's base unit — millimetres for length, degrees for
@@ -20,8 +18,13 @@ constexpr double kRadToDeg = 180.0 / kPi;
 // nullopt = not a unit name.
 std::optional<double> UnitFactor(const std::string& name) {
   static const std::unordered_map<std::string, double> kUnits = {
-      {"mm", 1.0},   {"cm", 10.0}, {"m", 1000.0},      {"in", 25.4},
-      {"ft", 304.8}, {"deg", 1.0}, {"rad", kRadToDeg},
+      {"mm", 1.0},
+      {"cm", 10.0},
+      {"m", 1000.0},
+      {"in", 25.4},
+      {"ft", 304.8},
+      {"deg", 1.0},
+      {"rad", angles::kDegPerRad},
   };
   const auto it = kUnits.find(name);
   return it == kUnits.end() ? std::nullopt : std::optional<double>(it->second);
@@ -431,7 +434,7 @@ bool EvalNode(const Node& node, const SymbolTable& symbols, double& out,
     return true;
   case Node::Kind::Ident: {
     if (node.name == "pi") {
-      out = kPi;
+      out = angles::kPi;
       return true;
     }
     const auto it = symbols.find(node.name);
@@ -503,11 +506,11 @@ bool EvalCall(const Node& node, const std::vector<double>& args, double& out,
               ExprError* outError) {
   const std::string& f = node.name;
   if (f == "sin") {
-    out = std::sin(args[0] * kDegToRad);
+    out = std::sin(angles::ToRadians(args[0]));
   } else if (f == "cos") {
-    out = std::cos(args[0] * kDegToRad);
+    out = std::cos(angles::ToRadians(args[0]));
   } else if (f == "tan") {
-    out = std::tan(args[0] * kDegToRad);
+    out = std::tan(angles::ToRadians(args[0]));
   } else if (f == "sqrt") {
     if (args[0] < 0.0) {
       if (outError != nullptr) {

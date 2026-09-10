@@ -1,4 +1,5 @@
 #include "core/Occurrence.h"
+#include "core/Angles.h"
 
 #include <algorithm>
 #include <cmath>
@@ -206,8 +207,10 @@ double CamAt(const std::vector<std::pair<double, double>>& t, double deg,
   if (slope) {
     const double dvdu = (6 * u2 - 6 * u) * p0 + (3 * u2 - 4 * u + 1) * m0 +
                         (-6 * u2 + 6 * u) * p1 + (3 * u2 - 2 * u) * m1;
-    // mm per radian.
-    *slope = dvdu / h * (180.0 / 3.14159265358979323846);
+    // mm per radian. `dvdu / h` is mm per DEGREE (the table's angles are
+    // degrees), so this scales a RATE rather than converting an angle —
+    // hence the bare factor instead of angles::ToDegrees.
+    *slope = dvdu / h * angles::kDegPerRad;
   }
   return out;
 }
@@ -226,7 +229,7 @@ double CamLift(const std::vector<std::pair<double, double>>& table,
       *slopeOut = 0.0;
     return table[0].second;
   }
-  return CamAt(table, angleRad * 180.0 / 3.14159265358979323846, slopeOut);
+  return CamAt(table, angles::ToDegrees(angleRad), slopeOut);
 }
 
 uint64_t AssemblyDocument::AddAssertion(ClearanceAssertion a) {

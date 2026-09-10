@@ -299,8 +299,8 @@ namespace {
 void FillItemAppearance(const Body& body, size_t paletteIndex,
                         MeshExport::Item& item) {
   if (!body.material.empty()) {
-    const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
-        CADMaterials::MaterialLibrary::FromSlug(body.material));
+    const auto& mat =
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material);
     item.baseColor = mat.baseColor;
     item.metallic = mat.metallic;
     item.roughness = mat.roughness;

@@ -101,21 +101,56 @@ bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
   return ok;
 }
 
+// featureId 0 = "whichever body has this element". An element name looks
+// like it carries its feature ("3/face7"), but that prefix is the feature
+// that CREATED the element, not the body's `created_by` — after one boolean
+// the two differ, so a caller who reads the id off the name picks a body
+// that does not exist. Searching is the honest resolution, and ambiguity is
+// refused rather than guessed.
 bool ResolveFace(const Document& doc, const ElementRef& ref,
                  const std::string& what, ResolvedFace& out,
                  std::string* error) {
   const auto& bodies = doc.GetBodies();
+  std::vector<int> hits;
   for (int i = 0; i < static_cast<int>(bodies.size()); ++i) {
-    if (bodies[i].createdBy != ref.featureId)
+    if (ref.featureId != 0 && bodies[i].createdBy != ref.featureId)
       continue;
     if (const auto idx = bodies[i].elementMap.Resolve(ref.name)) {
+      if (ref.featureId != 0) {
+        out.bodyIndex = i;
+        out.faceIndex = *idx;
+        return true;
+      }
+      hits.push_back(i);
       out.bodyIndex = i;
       out.faceIndex = *idx;
-      return true;
     }
   }
-  if (error)
-    *error = what + ": face '" + ref.name + "' no longer exists";
+  if (hits.size() == 1)
+    return true;
+  if (error) {
+    if (hits.size() > 1) {
+      *error = what + ": '" + ref.name + "' is on " +
+               std::to_string(hits.size()) +
+               " bodies — say which with feature_id (its created_by):";
+      for (int i : hits)
+        *error += " " + std::to_string(bodies[i].createdBy) + " (" +
+                  bodies[i].name + ")";
+    } else {
+      *error = what + ": face '" + ref.name + "' no longer exists";
+      if (ref.featureId != 0) {
+        bool onAnother = false;
+        for (const auto& b : bodies)
+          if (b.elementMap.Resolve(ref.name))
+            onAnother = true;
+        if (onAnother)
+          *error += " on the body created by feature " +
+                    std::to_string(ref.featureId) +
+                    " — it is on another body (drop feature_id and it will be "
+                    "found, or read created_by from get_state)";
+      }
+    }
+  }
   return false;
 }
 
@@ -287,7 +322,8 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     const Body& body = bodies[bodyIndex];
 
     // Material must have stiffness data (0 = unknown, like density).
-    const auto matType = CADMaterials::MaterialLibrary::FromSlug(body.material);
+    const auto matType =
+        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
     if (mp.youngGPa <= 0.0f)
       return fail("body '" + body.name + "': material '" +
@@ -507,7 +543,8 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
       settings.faceSizes.push_back({rf.faceIndex, study.refinements[i].size});
   }
 
-  const auto matType = CADMaterials::MaterialLibrary::FromSlug(body.material);
+  const auto matType =
+      CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
   const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
   if (mp.youngGPa <= 0.0f)
     return fail("body '" + body.name + "': material '" +

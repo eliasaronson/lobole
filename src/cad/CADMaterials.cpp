@@ -1,6 +1,5 @@
 #include "cad/CADMaterials.h"
-#include <algorithm>
-#include <cctype>
+#include <stdexcept>
 
 namespace CADMaterials {
 
@@ -108,12 +107,17 @@ void MaterialLibrary::InitializeMaterials() {
       0.04f,                          // Plastic reflectance
       "Black Plastic"};
 
+  // Pre-darkened for the scene's bright rig, exactly as the woods below are:
+  // at the nominal 0.07 this rendered LIGHTER than black plastic, and blue,
+  // which is the one comparison the material exists to win. The weave's relief
+  // scatters normals, so it catches more environment than a flat surface of
+  // the same albedo — the tow highlights carry the read now, not the base.
   materials[MaterialType::CARBON_FIBRE] = {
-      glm::vec3(0.07f, 0.07f, 0.08f), // Near-black, faintly cool
-      0.0f,                           // Non-metallic
-      0.35f,                          // The resin surface is fairly glossy
-      0.6f,                           // ... and quite specular
-      0.05f,                          // Epoxy reflectance
+      glm::vec3(0.032f, 0.032f, 0.035f), // Near-black, barely cool
+      0.0f,                              // Non-metallic
+      0.30f,                             // Glossy epoxy surface
+      0.5f,                              // ... and quite specular
+      0.05f,                             // Epoxy reflectance
       "Carbon Fibre"};
 
   materials[MaterialType::RUBBER] = {glm::vec3(0.1f, 0.1f, 0.1f), // Dark rubber
@@ -142,7 +146,7 @@ void MaterialLibrary::InitializeMaterials() {
   // Wood & engineered wood. Base tone only here; the grain figure is applied
   // procedurally in the shader (see the "procedural grain" block below).
   // Colors are the light early-wood tone — the shader darkens toward the
-  // grain lines using grainContrast, so these read as the overall hue.
+  // grain lines using patternContrast, so these read as the overall hue.
   // NOTE: these are pre-darkened to survive the scene's bright lighting rig
   // (primary intensity 1.8 + IBL + 1.1 boost + ACES tonemap wash light
   // albedos out ~1.4x); tuned against a render, not raw perceptual targets.
@@ -260,20 +264,28 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::PLYWOOD_PINE, 8.0f, 0.30f, 45.0f);
   elastic(MaterialType::MDF, 3.6f, 0.25f, 18.0f);
 
-  // Procedural grain: pattern id, rings/plies per local unit, late-wood
-  // contrast (0..1). Shaded in mesh.frag from local object-space position;
-  // MDF stays flat (pattern 0). Scale is in per-mm; tune against a render.
-  auto grain = [&](MaterialType t, int pattern, float scale, float contrast) {
-    materials[t].procPattern = pattern;
-    materials[t].grainScale = scale;
-    materials[t].grainContrast = contrast;
+  // Procedural surface figure: which pattern, its scale per local unit, and
+  // its contrast (0..1). Shaded from local object-space position by
+  // src/shaders/grain.glsl; MDF stays Flat, and so does every material not
+  // listed. Scale is per-mm; tune against a render.
+  auto pattern = [&](MaterialType t, SurfacePattern p, float scale,
+                     float contrast) {
+    materials[t].pattern = p;
+    materials[t].patternScale = scale;
+    materials[t].patternContrast = contrast;
   };
-  grain(MaterialType::WOOD_OAK, 1, 0.15f, 0.35f);
-  grain(MaterialType::WOOD_PINE, 1, 0.09f, 0.5f);    // wide rings, strong lines
-  grain(MaterialType::WOOD_WALNUT, 1, 0.22f, 0.3f);  // finer, figure-rich
-  grain(MaterialType::PLYWOOD_BIRCH, 2, 0.7f, 0.3f); // plies per mm on edges
-  grain(MaterialType::PLYWOOD_PINE, 2, 0.5f, 0.35f);
-  // MDF: pattern 0 (flat) — no grain to apply.
+  using SP = SurfacePattern;
+  pattern(MaterialType::WOOD_OAK, SP::Wood, 0.15f, 0.35f);
+  pattern(MaterialType::WOOD_PINE, SP::Wood, 0.09f, 0.5f);   // wide, strong
+  pattern(MaterialType::WOOD_WALNUT, SP::Wood, 0.22f, 0.3f); // fine, figured
+  pattern(MaterialType::PLYWOOD_BIRCH, SP::Plywood, 0.7f, 0.3f); // plies/mm
+  pattern(MaterialType::PLYWOOD_PINE, SP::Plywood, 0.5f, 0.35f);
+  // 3K twill is roughly a 2 mm repeat, so 0.5 tows/mm. The contrast here is
+  // the tow-gap darkening only: on a 0.07 albedo there is almost nothing to
+  // darken, and what actually makes the weave read is the normal relief
+  // grain.glsl derives from the same params.
+  pattern(MaterialType::CARBON_FIBRE, SP::Weave, 0.5f, 0.45f);
+  // MDF: Flat — a wood product, but genuinely near-uniform.
 
   // RUBBER and DEFAULT intentionally left at 0 (near-incompressible /
   // unassigned): a linear-static study on them errors rather than guessing.
@@ -286,59 +298,6 @@ const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {
     return it->second;
   }
   return materials[MaterialType::DEFAULT];
-}
-
-MaterialType
-MaterialLibrary::GetMaterialFromFilename(const std::string& filename) {
-  // Convert filename to lowercase for case-insensitive matching
-  std::string lowerFilename = filename;
-  std::transform(lowerFilename.begin(), lowerFilename.end(),
-                 lowerFilename.begin(), ::tolower);
-
-  // Check for material keywords in filename
-  if (lowerFilename.find("aluminum") != std::string::npos ||
-      lowerFilename.find("aluminium") != std::string::npos) {
-    return MaterialType::ALUMINUM;
-  }
-  if (lowerFilename.find("steel") != std::string::npos) {
-    if (lowerFilename.find("stainless") != std::string::npos) {
-      return MaterialType::STAINLESS_STEEL;
-    }
-    return MaterialType::STEEL;
-  }
-  if (lowerFilename.find("brass") != std::string::npos) {
-    return MaterialType::BRASS;
-  }
-  if (lowerFilename.find("bronze") != std::string::npos) {
-    return MaterialType::BRONZE;
-  }
-  if (lowerFilename.find("copper") != std::string::npos) {
-    return MaterialType::COPPER;
-  }
-  if (lowerFilename.find("chrome") != std::string::npos) {
-    return MaterialType::CHROME;
-  }
-  if (lowerFilename.find("titanium") != std::string::npos) {
-    return MaterialType::TITANIUM;
-  }
-  if (lowerFilename.find("plastic") != std::string::npos) {
-    if (lowerFilename.find("white") != std::string::npos) {
-      return MaterialType::PLASTIC_WHITE;
-    }
-    if (lowerFilename.find("black") != std::string::npos) {
-      return MaterialType::PLASTIC_BLACK;
-    }
-    return MaterialType::PLASTIC_WHITE;
-  }
-  if (lowerFilename.find("rubber") != std::string::npos) {
-    return MaterialType::RUBBER;
-  }
-  if (lowerFilename.find("glass") != std::string::npos) {
-    return MaterialType::GLASS;
-  }
-
-  // Default to aluminum for CAD files (common in mechanical engineering)
-  return MaterialType::ALUMINUM;
 }
 
 namespace {
@@ -382,14 +341,63 @@ std::string MaterialLibrary::Slug(MaterialType type) {
   return ""; // DEFAULT (and anything unmapped) serializes as empty
 }
 
-MaterialType MaterialLibrary::FromSlug(const std::string& slug) {
-  if (slug.empty())
-    return MaterialType::DEFAULT;
-  for (const auto& [t, s] : SlugTable()) {
-    if (slug == s)
-      return t;
+bool MaterialLibrary::TryMaterialTypeFromString(const std::string& slug,
+                                                MaterialType& out) {
+  if (slug.empty()) {
+    out = MaterialType::DEFAULT;
+    return true;
   }
-  return MaterialType::DEFAULT;
+  for (const auto& [t, s] : SlugTable()) {
+    if (slug == s) {
+      out = t;
+      return true;
+    }
+  }
+  return false;
+}
+
+MaterialType MaterialLibrary::MaterialTypeFromString(const std::string& slug) {
+  MaterialType t{};
+  if (TryMaterialTypeFromString(slug, t))
+    return t;
+  // Refuse, don't substitute: this used to return DEFAULT, which is an
+  // aluminium appearance carrying density 0 — so a document naming a material
+  // this build does not have looked like machined aluminium and reported no
+  // mass, and every material added made one more slug for an older build to
+  // swallow.
+  throw std::runtime_error("unknown material slug '" + slug +
+                           "' (expected one of: " + SlugList() + ")");
+}
+
+const MaterialProperties&
+MaterialLibrary::GetMaterialOrDefault(const std::string& slug) {
+  MaterialType t = MaterialType::DEFAULT;
+  (void)TryMaterialTypeFromString(slug, t); // unresolved stays DEFAULT
+  return GetMaterial(t);
+}
+
+const std::string& MaterialLibrary::SlugList() {
+  static const std::string list = [] {
+    std::string s;
+    for (const auto& slug : AllSlugs())
+      s += (s.empty() ? "" : ", ") + slug;
+    return s;
+  }();
+  return list;
+}
+
+int PatternAxis(SurfacePattern pattern, const glm::vec3& localExtent) {
+  // Sheet patterns lie IN the sheet, so their axis is its normal — the
+  // thinnest extent. Solid wood runs along a board's length, the longest.
+  const bool sheet =
+      pattern == SurfacePattern::Plywood || pattern == SurfacePattern::Weave;
+  int axis = 0;
+  for (int a = 1; a < 3; ++a) {
+    if (sheet ? (localExtent[a] < localExtent[axis])
+              : (localExtent[a] > localExtent[axis]))
+      axis = a;
+  }
+  return axis;
 }
 
 const std::vector<std::string>& MaterialLibrary::AllSlugs() {
@@ -410,17 +418,6 @@ const std::vector<MaterialType>& MaterialLibrary::AllTypes() {
     return v;
   }();
   return types;
-}
-
-MaterialType MaterialLibrary::GetMaterialFromShapeIndex(int index) {
-  // Cycle through different metals for variety
-  const MaterialType metalMaterials[] = {
-      MaterialType::ALUMINUM,        MaterialType::STEEL,
-      MaterialType::BRASS,           MaterialType::COPPER,
-      MaterialType::STAINLESS_STEEL, MaterialType::TITANIUM};
-
-  int materialCount = sizeof(metalMaterials) / sizeof(metalMaterials[0]);
-  return metalMaterials[index % materialCount];
 }
 
 } // namespace CADMaterials

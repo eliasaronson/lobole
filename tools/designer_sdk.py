@@ -1055,10 +1055,20 @@ class Sketch:
         self.part, self.id, self.plane = part, id, builder.plane
         self.name = builder.name
 
-    def constrain(self, kind, refs, value=None, expr=None):
+    def constrain(self, kind, refs, value=None, expr=None, value_deg=None):
+        """One sketch constraint.
+
+        `value` is MILLIMETRES for the length kinds and RADIANS for `angle` —
+        pass `value_deg` for degrees, never both, and a bare `value` over a
+        full turn is refused as a degrees number in the radians field.
+        `expr` is different: it is an expression in the document's base units,
+        where angles are DEGREES ("45", "45deg" and "0.785rad" all agree).
+        """
         kw = {"sketch_id": self.id, "kind": kind, "refs": refs}
         if value is not None:
             kw["value"] = value
+        if value_deg is not None:
+            kw["value_deg"] = value_deg
         if expr is not None:
             kw["expr"] = expr
         self.part.app.add_constraint(**kw)
@@ -1441,7 +1451,13 @@ class Part(_Tab):
     def pattern(self, source, count, linear=None, circular=None, spacing=None,
                 angle=360.0, name="Pattern"):
         """A linear or circular pattern of a feature. `linear=` an axis and
-        `spacing=`; `circular=` an axis and `angle=`."""
+        `spacing=` (mm); `circular=` an axis and `angle=`.
+
+        `angle` is DEGREES and PER STEP — the angle between one instance and
+        the next, not the span they cover. Six holes evenly round a circle is
+        `angle=60`, not 360. The 360 default therefore rotates every copy a
+        full turn back onto the original; pass an angle.
+        """
         f = {"type": "Pattern", "name": name, "source_id": _id(source)}
         if linear is not None:
             f.update({"kind": "linear",

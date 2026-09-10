@@ -389,6 +389,16 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
       // drawing is its own tab, so the assembly it draws is never the active
       // one while the drawing is on screen.
       const uint64_t sourceId = view->sourceDocId;
+      // The units a sheet is written in are the SOURCE document's, not the
+      // reader's — a drawing of an inch part is an inch drawing wherever it
+      // is opened, exactly as the part is. Dimension text ignored this
+      // entirely and always printed millimetres.
+      if (ctx.sourceDoc != nullptr) {
+        ctx.units = ctx.sourceDoc->Units();
+      } else if (const AssemblyDocument* asmDoc =
+                     AssemblyDocById(state, sourceId)) {
+        ctx.units = asmDoc->Units();
+      }
       ctx.occurrenceDoc = [&state,
                            sourceId](uint64_t occId) -> const Document* {
         const AssemblyDocument* asmDoc = AssemblyDocById(state, sourceId);
@@ -474,6 +484,22 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
       note, it == state.drawingRenders.end() ? nullptr : &it->second, symbols);
 }
 
+units::System ActiveDrawingUnits(AppState& state) {
+  if (!state.drawing)
+    return {};
+  // The FIRST view's source, which is what ResolveDrawingDim used to format
+  // each dimension. A sheet mixing an inch part with a millimetre one would
+  // need a per-view answer; nothing produces that yet, and picking one system
+  // for the sheet is what the single UNITS row can honestly claim.
+  for (const DrawingView& v : state.drawing->GetViews()) {
+    if (const Document* src = DrawingSourceDocument(state, v.sourceDocId))
+      return src->Units();
+    if (const AssemblyDocument* a = AssemblyDocById(state, v.sourceDocId))
+      return a->Units();
+  }
+  return {};
+}
+
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error) {
   if (!state.drawing) {
@@ -501,14 +527,15 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
     }
     notes.push_back(resolved);
   }
+  const units::System sheetUnits = ActiveDrawingUnits(state);
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext == ".svg")
     return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error,
-                                  notes);
+                                  notes, sheetUnits);
   if (ext == ".pdf")
     return DrawingExport::SavePDF(*state.drawing, views, dims, path, error,
-                                  notes);
+                                  notes, sheetUnits);
   if (error)
     *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
   return false;

@@ -397,3 +397,35 @@ TEST_CASE("motion table explains unknown contacts and interrupted runs",
   REQUIRE(motion::Table(r, study).find("Error: driver missing") !=
           std::string::npos);
 }
+
+// Cancelling is a REQUEST honoured between samples, and what it leaves behind
+// is a PARTIAL result rather than nothing: the panel's Cancel button promises
+// "keeps the ones already checked", and the samples that landed are what
+// makes that true. Only Table()'s rendering of an interrupted run was covered
+// before — the predicate that produces one was not.
+TEST_CASE("A cancelled motion run keeps the samples it finished", "[motion]") {
+  Rig r = MakeRig(90.0);
+  const MotionStudy study = FullTurn(r.axle, 25);
+
+  int seen = 0;
+  const motion::Result res = motion::Run(
+      r.asmDoc, r.Parts(), nullptr, study, [&seen] { return ++seen > 7; },
+      nullptr);
+
+  REQUIRE(res.error.empty());
+  CHECK(res.cancelled);
+  // Seven asks returned false, the eighth stopped it — so seven samples.
+  CHECK(res.samples.size() == 7);
+  // `clean` is false on an interrupted run whatever the samples showed: it
+  // means "this mechanism is clear", and seven of twenty-five poses cannot
+  // say that.
+  CHECK_FALSE(res.clean);
+  CHECK(motion::Table(res, study).find("INCOMPLETE") != std::string::npos);
+
+  // The same study, uninterrupted, is the control: cancelling changes what
+  // was checked, not what checking finds.
+  const motion::Result full = motion::Run(r.asmDoc, r.Parts(), nullptr, study);
+  REQUIRE(full.samples.size() == 25);
+  for (size_t i = 0; i < res.samples.size(); i++)
+    CHECK(res.samples[i].value == full.samples[i].value);
+}

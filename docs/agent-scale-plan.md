@@ -375,7 +375,9 @@ sweeps every occurrence pair; the result is transient, like a FEM result.
 The surface is `add_motion_study` / `set_motion_study` /
 `remove_motion_study` / `list_motion_studies` / `run_motion_study` (sync or
 `async` on the A3 registry) / `motion_status` / `set_motion_pose` /
-`export_motion`, plus a panel section with a scrub slider and Run.
+`export_motion`, plus a panel section with a scrub slider and Run — which
+becomes a `sample N / M` progress bar and a Cancel while a run is in flight,
+the verdict from the previous run staying up beneath it.
 
 Decisions worth recording:
 
@@ -388,8 +390,12 @@ Decisions worth recording:
 - **The worker shares nothing.** An async run copies the assembly AND every
   document under it, and pre-builds the collision meshes on the main thread,
   because tessellating is the one step that mutates a shape. A synchronous
-  run skips the copies (it is blocking the caller anyway) — copying a
-  Document regenerates it, and an Import re-reads its STEP.
+  run skips the copies, because it is blocking the caller anyway. Those
+  copies go through `Document::CopyWithGeometry` and execute nothing when the
+  tip hash matches; a PLAIN Document copy regenerates, and re-deriving ten
+  parts' booleans to read geometry that already existed was seconds of frozen
+  frame before the run could start
+  (docs/performance/motion-prep-copy.md).
 - **A sample that does not solve is reported unsolved with its residual**,
   and `export_motion` REFUSES rather than writing an animation that holds a
   frame there. The GLB is the run's poses, not a guess at them.

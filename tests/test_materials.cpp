@@ -9,10 +9,12 @@
 using CADMaterials::MaterialLibrary;
 using CADMaterials::MaterialProperties;
 using CADMaterials::MaterialType;
+using CADMaterials::PatternAxis;
+using CADMaterials::SurfacePattern;
 
-// The set of procedural-textured materials. procPattern must be 1 (solid-wood
-// grain) or 2 (plywood); every other material stays flat (pattern 0). MDF is a
-// wood product but is deliberately flat (near-uniform in reality).
+// Which materials carry which procedural figure. Everything not named here is
+// Flat — every metal, plastic and ceramic, and MDF, which is a wood product
+// but genuinely near-uniform.
 static bool IsGrainWood(MaterialType t) {
   return t == MaterialType::WOOD_OAK || t == MaterialType::WOOD_PINE ||
          t == MaterialType::WOOD_WALNUT;
@@ -20,15 +22,20 @@ static bool IsGrainWood(MaterialType t) {
 static bool IsPlywood(MaterialType t) {
   return t == MaterialType::PLYWOOD_BIRCH || t == MaterialType::PLYWOOD_PINE;
 }
+// Woven composites. Carbon is the only one today; fibreglass and Kevlar would
+// join it as more parameter sets for the SAME pattern, which is the property
+// that keeps the pattern count from tracking the material count.
+static bool IsWeave(MaterialType t) { return t == MaterialType::CARBON_FIBRE; }
 
 TEST_CASE("Slug round-trips for every assignable material", "[materials]") {
-  // FromSlug(Slug(t)) == t for all UI-assignable types: a mismatch means a
+  // MaterialTypeFromString(Slug(t)) == t for all assignable types: a mismatch
+  // means a
   // saved file's material token would resolve to the wrong (or default)
   // material on load.
   for (MaterialType t : MaterialLibrary::AllTypes()) {
     const std::string slug = MaterialLibrary::Slug(t);
     CHECK(!slug.empty());
-    CHECK(MaterialLibrary::FromSlug(slug) == t);
+    CHECK(MaterialLibrary::MaterialTypeFromString(slug) == t);
   }
 }
 
@@ -43,22 +50,41 @@ TEST_CASE("Slugs are unique", "[materials]") {
 TEST_CASE("Wood serialization tokens are stable", "[materials]") {
   // These slugs live in saved project files; renaming one silently breaks every
   // file that referenced it. Pin them explicitly.
-  CHECK(MaterialLibrary::FromSlug("wood_oak") == MaterialType::WOOD_OAK);
-  CHECK(MaterialLibrary::FromSlug("wood_pine") == MaterialType::WOOD_PINE);
-  CHECK(MaterialLibrary::FromSlug("wood_walnut") == MaterialType::WOOD_WALNUT);
-  CHECK(MaterialLibrary::FromSlug("plywood_birch") ==
+  CHECK(MaterialLibrary::MaterialTypeFromString("wood_oak") ==
+        MaterialType::WOOD_OAK);
+  CHECK(MaterialLibrary::MaterialTypeFromString("wood_pine") ==
+        MaterialType::WOOD_PINE);
+  CHECK(MaterialLibrary::MaterialTypeFromString("wood_walnut") ==
+        MaterialType::WOOD_WALNUT);
+  CHECK(MaterialLibrary::MaterialTypeFromString("plywood_birch") ==
         MaterialType::PLYWOOD_BIRCH);
-  CHECK(MaterialLibrary::FromSlug("plywood_pine") ==
+  CHECK(MaterialLibrary::MaterialTypeFromString("plywood_pine") ==
         MaterialType::PLYWOOD_PINE);
-  CHECK(MaterialLibrary::FromSlug("mdf") == MaterialType::MDF);
+  CHECK(MaterialLibrary::MaterialTypeFromString("mdf") == MaterialType::MDF);
 }
 
-TEST_CASE("Unknown and empty slugs degrade to DEFAULT", "[materials]") {
-  // Back-compat: pre-wood files (and any future/unknown token) must load rather
-  // than crash or resolve arbitrarily.
-  CHECK(MaterialLibrary::FromSlug("") == MaterialType::DEFAULT);
-  CHECK(MaterialLibrary::FromSlug("not_a_material") == MaterialType::DEFAULT);
+TEST_CASE("The empty slug means default; an unknown one is refused",
+          "[materials]") {
+  // Empty is legal and is what set_material material="" writes.
+  CHECK(MaterialLibrary::MaterialTypeFromString("") == MaterialType::DEFAULT);
   CHECK(MaterialLibrary::Slug(MaterialType::DEFAULT).empty());
+
+  // Anything else unrecognised is REFUSED, not substituted. Returning DEFAULT
+  // here meant an aluminium appearance carrying density 0: a document naming a
+  // material this build lacks looked like machined aluminium while honestly
+  // reporting no mass, and every material added made one more slug for an
+  // older build to swallow.
+  CHECK_THROWS(MaterialLibrary::MaterialTypeFromString("not_a_material"));
+  // The refusal names what IS accepted (the describe/material_slugs set).
+  CHECK(MaterialLibrary::SlugList().find("carbon_fibre") != std::string::npos);
+
+  // ... and the non-throwing form reports it instead, for the draw-time
+  // consumers that must not take a frame down.
+  MaterialType out = MaterialType::STEEL;
+  CHECK_FALSE(
+      MaterialLibrary::TryMaterialTypeFromString("not_a_material", out));
+  CHECK(MaterialLibrary::GetMaterialOrDefault("not_a_material").density ==
+        0.0f);
 }
 
 TEST_CASE("New wood materials are enumerated for the UI", "[materials]") {
@@ -72,30 +98,72 @@ TEST_CASE("New wood materials are enumerated for the UI", "[materials]") {
   CHECK(has(MaterialType::MDF));
 }
 
-TEST_CASE("Procedural pattern is wired only on wood/plywood", "[materials]") {
-  // The shader keys the grain off procPattern; if a metal accidentally carried
-  // pattern > 0 it would render grain, and if a wood carried 0 it would render
-  // flat. Assert the exact partition, and that a pattern implies usable params.
+TEST_CASE("Every material carries exactly the pattern it should",
+          "[materials]") {
+  // The shader keys the figure off MaterialProperties::pattern; if a metal
+  // accidentally carried one it would render grain, and if a wood carried
+  // Flat it would render blank. Assert the exact partition, and that a
+  // pattern implies usable params.
   for (MaterialType t : MaterialLibrary::AllTypes()) {
     const MaterialProperties& m = MaterialLibrary::GetMaterial(t);
     if (IsGrainWood(t)) {
-      CHECK(m.procPattern == 1);
+      CHECK(m.pattern == SurfacePattern::Wood);
     } else if (IsPlywood(t)) {
-      CHECK(m.procPattern == 2);
+      CHECK(m.pattern == SurfacePattern::Plywood);
+    } else if (IsWeave(t)) {
+      CHECK(m.pattern == SurfacePattern::Weave);
     } else {
-      CHECK(m.procPattern == 0); // includes MDF and every non-wood material
+      CHECK(m.pattern == SurfacePattern::Flat); // MDF, and everything else
     }
 
-    if (m.procPattern > 0) {
-      // A pattern with no scale would collapse the grain to a constant.
-      CHECK(m.grainScale > 0.0f);
-      CHECK(m.grainContrast > 0.0f);
-      CHECK(m.grainContrast <= 1.0f);
+    if (m.pattern != SurfacePattern::Flat) {
+      // A pattern with no scale would collapse the figure to a constant.
+      CHECK(m.patternScale > 0.0f);
+      CHECK(m.patternContrast > 0.0f);
+      CHECK(m.patternContrast <= 1.0f);
     } else {
-      CHECK(m.grainScale == 0.0f);
-      CHECK(m.grainContrast == 0.0f);
+      CHECK(m.patternScale == 0.0f);
+      CHECK(m.patternContrast == 0.0f);
     }
   }
+}
+
+TEST_CASE("Carbon fibre is told from black plastic by more than gloss",
+          "[materials]") {
+  // The two are within 0.02 of each other on every albedo channel, so before
+  // the weave the only thing separating them on screen was roughness — and
+  // getting them confused costs a third of an airframe's structural mass.
+  const MaterialProperties& cf =
+      MaterialLibrary::GetMaterial(MaterialType::CARBON_FIBRE);
+  const MaterialProperties& pb =
+      MaterialLibrary::GetMaterial(MaterialType::PLASTIC_BLACK);
+  CHECK(glm::length(cf.baseColor - pb.baseColor) < 0.05f);
+  CHECK(cf.pattern == SurfacePattern::Weave);
+  CHECK(pb.pattern == SurfacePattern::Flat);
+  CHECK(cf.density > pb.density * 1.4f);
+}
+
+TEST_CASE("A pattern's axis comes from the part's local extent",
+          "[materials]") {
+  // The rule the raster and ray-traced paths BOTH call now. They used to keep
+  // a copy each, and the copies disagreed about which frame to measure in, so
+  // a rotated occurrence's grain ran one way in the viewport and another in a
+  // still. Nothing tested either copy.
+  const glm::vec3 board(400.0f, 80.0f, 18.0f); // long, wide, thin
+
+  // Solid wood runs along the board's length.
+  CHECK(PatternAxis(SurfacePattern::Wood, board) == 0);
+  CHECK(PatternAxis(SurfacePattern::Wood, glm::vec3(18, 400, 80)) == 1);
+  CHECK(PatternAxis(SurfacePattern::Wood, glm::vec3(80, 18, 400)) == 2);
+
+  // Sheet patterns run across the thickness — the sheet normal.
+  CHECK(PatternAxis(SurfacePattern::Plywood, board) == 2);
+  CHECK(PatternAxis(SurfacePattern::Weave, board) == 2);
+  CHECK(PatternAxis(SurfacePattern::Weave, glm::vec3(2, 300, 300)) == 0);
+
+  // A cube is degenerate but must still be deterministic, not uninitialised.
+  CHECK(PatternAxis(SurfacePattern::Wood, glm::vec3(10.0f)) == 0);
+  CHECK(PatternAxis(SurfacePattern::Weave, glm::vec3(10.0f)) == 0);
 }
 
 TEST_CASE("Wood materials are physically usable", "[materials]") {

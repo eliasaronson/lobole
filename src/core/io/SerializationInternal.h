@@ -17,10 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    97; // v97: an assembly holds the CLEARANCES its designer declared, and
+    98; // v98: an assembly holds the CLEARANCES its designer declared, and
         //      re-checks them. "prop tip to arm is at least 2 mm" lived in a
         //      python verify() where nobody who opened the document could see
         //      it and no edit could break it. Absent when none.
+        // v97: an Import may KEEP the file's own coordinates
+        //      (`keep_origin`). Absent = centred on the combined bounding
+        //      box, which is what every file before this did, silently.
         // v96: a CAM profile's `drilled_bores` -- cutting INSIDE a level face
         //      cuts every opening in it, and this is the diameter up to which
         //      a round one is left to the DRILL. Width could not say it: a

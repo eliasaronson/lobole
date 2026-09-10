@@ -3,6 +3,7 @@
 
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
+#include "core/Angles.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Expression.h"
@@ -34,6 +35,45 @@ using nlohmann::json;
 namespace remote {
 
 namespace {
+
+// Radians from whichever spelling the caller used, refusing both at once.
+//
+// The third copy of the shape set_mate settled on (RemoteAssembly.cpp's
+// MateRotationRadians) and the arc parser reuses (SerializeFeatures.cpp's
+// AngleRadians): bare name = RADIANS, `_deg` twin = degrees, never both. They
+// stay separate small readers rather than one shared helper because each
+// names what IS accepted in its own message, and the part that must not drift
+// — the factor — is core/Angles.h now.
+//
+// `absent` is what a caller who passed neither gets, so an optional angle and
+// a required one share one reader.
+//
+// Takes the VALUES rather than the params object, exactly as
+// MateRotationRadians does and for its reason: rpc_params_gate learns a
+// method's vocabulary by reading which keys the handler touches, and a helper
+// that reached into `p` itself would make the method look as though it had
+// quietly stopped accepting either spelling.
+double AngleParam(bool hasRad, double rad, bool hasDeg, double deg,
+                  const char* radKey, const char* degKey, double absent) {
+  if (hasRad && hasDeg)
+    throw std::runtime_error(std::string("pass ") + radKey + " (radians) or " +
+                             degKey + " (degrees), not both");
+  if (hasDeg)
+    return angles::ToRadians(deg);
+  if (!hasRad)
+    return absent;
+  // The one check that rests on GEOMETRY rather than on guessing what the
+  // caller meant: more than a full turn is a circle, not a sweep or a pinned
+  // angle. A number meant as degrees trips it from 7 upward, which is every
+  // realistic case, and the message names the likely cause instead of
+  // building a plausible wrong part. Same defence as the arc parser's.
+  if (!angles::IsPlausibleSweep(rad))
+    throw std::runtime_error(
+        std::string(radKey) + " is RADIANS and " + std::to_string(rad) +
+        " is more than a full turn — pass " + degKey + " to say degrees");
+  return rad;
+}
+
 // V2 strict inputs: the feature dialect used to IGNORE unknown fields — a
 // Box with mode:"add" was accepted and the mode silently dropped (the dock
 // dogfooding round's silent-failure class). Rather than maintain a per-type
@@ -147,6 +187,19 @@ std::vector<std::string> ConstraintKindNames() {
   return names;
 }
 
+std::vector<std::pair<std::string, std::string>> ConstraintValueUnits() {
+  std::vector<std::pair<std::string, std::string>> out;
+  for (const auto& [name, kind] : ConstraintKindTable()) {
+    if (!sketch::IsDimension(kind))
+      continue;
+    out.emplace_back(name, kind == sketch::ConstraintKind::Angle
+                               ? "radians (or value_deg for degrees; `expr` "
+                                 "is in DEGREES)"
+                               : "mm");
+  }
+  return out;
+}
+
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc ModelingMethods[] = {
     {"select_feature",
@@ -159,8 +212,10 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"cancel_pending", "Discard the pending (preview) feature.", "",
      remote::NeedsPart},
     {"add_feature",
-     "Append a feature (see feature_types for the JSON dialect) "
-     "and regenerate; returns {index, id, entity_ids?, regen}.",
+     "Append a feature (see feature_types for the JSON dialect, and for the "
+     "fields every type accepts — including `material`, whose slug is "
+     "refused if unrecognised) and regenerate; returns {index, id, "
+     "entity_ids?, regen}.",
      "feature", remote::NeedsPart | remote::Deferrable},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
@@ -192,7 +247,8 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"set_material",
      "Assign a material slug (see material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
-     "default.",
+     "default. An unrecognised slug is refused, naming the accepted set. "
+     "Drives mass, BOM and FEM as well as appearance.",
      "body, feature_id, material", remote::NeedsPart | remote::Deferrable},
     {"set_appearance",
      "Visual override SEPARATE from the physical material (v54): "
@@ -220,17 +276,26 @@ static constexpr MethodDoc ModelingMethods[] = {
      "base64 bytes); returns image_id.",
      "at, opacity, path, sketch_id, units_per_pixel", remote::NeedsPart},
     {"set_reference_image",
-     "Update an underlay's placement/opacity/lock by {sketch_id, image_id}.",
-     "hidden, image_id, opacity, origin, rotation, sketch_id, units_per_pixel",
+     "Update an underlay's placement/opacity/lock by {sketch_id, image_id}. "
+     "origin is [u, v] sketch mm, units_per_pixel is sketch mm per image "
+     "pixel, and the tilt is `rotation` (RADIANS, CCW about origin) or "
+     "`rotation_deg`, never both.",
+     "hidden, image_id, opacity, origin, rotation, rotation_deg, sketch_id, "
+     "units_per_pixel",
      remote::NeedsPart},
     {"calibrate_reference_image",
-     "Scale an underlay so two picked image points span a given distance.",
+     "Scale an underlay so two picked image points span a given distance, in "
+     "sketch MILLIMETRES — which is what sets its units_per_pixel.",
      "align, distance, image_id, p1, p2, sketch_id", remote::NeedsPart},
     {"delete_reference_image", "Remove an underlay by {sketch_id, image_id}.",
      "image_id, sketch_id", remote::NeedsPart},
     {"add_constraint",
      "Append one sketch constraint {sketch_id, kind, refs, value?/expr?}; "
-     "kinds in constraint_kinds; solves once.",
+     "kinds in constraint_kinds; solves once. `value` is MILLIMETRES for "
+     "distance/radius/diameter and RADIANS for angle (or pass value_deg, "
+     "never both — more than a full turn is refused as degrees). `expr` is "
+     "an expression in the document's base units, where angles are DEGREES: "
+     "\"45\", \"45deg\" and \"0.785rad\" all mean the same 45 degrees.",
      "*", remote::NeedsPart},
     {"add_constraints",
      "Append MANY constraints in one solve+regen+undo step: "
@@ -242,22 +307,28 @@ static constexpr MethodDoc ModelingMethods[] = {
      "entity_id, sketch_id", remote::NeedsPart},
     {"fillet",
      "Sketch fillet: round the corner between two lines {sketch_id, "
-     "line1, line2, radius}; errors explain a failed corner.",
+     "line1, line2, radius (mm)}; errors explain a failed corner.",
      "line1, line2, radius, sketch_id", remote::NeedsPart},
     {"offset",
-     "Offset a closed sketch chain by a distance {sketch_id, "
-     "chain: [entity ids], distance, join_arc?}.",
+     "Offset a closed sketch chain {sketch_id, chain: [entity ids], distance "
+     "(mm; the sign picks the side), join_arc?}. line1/line2/radius are "
+     "`fillet`'s, which shares this branch.",
      "chain, distance, join_arc, line1, line2, radius, sketch_id",
      remote::NeedsPart},
     {"mirror",
      "Mirror sketch entities across a line {sketch_id, "
-     "sources: [entity ids], axis: <line entity id>, link?}.",
+     "sources: [entity ids], axis: <line entity id>, link?}. line1/line2/"
+     "radius are `fillet`'s, which shares this branch.",
      "axis, line1, line2, link, radius, sketch_id, sources", remote::NeedsPart},
     {"pattern",
-     "Sketch pattern (linear/circular) of entities; "
-     "expression-capable count/spacing.",
-     "angle, center, circular, count, line1, line2, link, radius, sketch_id, "
-     "sources, step",
+     "Sketch pattern of entities: linear {step: [du, dv] mm} or circular "
+     "{circular: true, center: [u, v], angle (RADIANS) or angle_deg, never "
+     "both}. The circular angle is the PER-STEP angle about the centre, not "
+     "the total sweep — 3 instances 45 degrees apart is angle_deg: 45. More "
+     "than a full turn in `angle` is refused: it was meant as degrees. "
+     "line1/line2/radius are `fillet`'s, which shares this branch.",
+     "angle, angle_deg, center, circular, count, line1, line2, link, radius, "
+     "sketch_id, sources, step",
      remote::NeedsPart},
     // NOTE: list_variables is documented and handled in RemoteProject.cpp,
     // where the handler is. A second row here made `describe` list the
@@ -366,6 +437,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ids.push_back(sketch::EntityId(e));
       resp["entity_ids"] = ids;
     }
+    // An import is CENTRED unless it was told not to be. Say by how much, in
+    // the call that did it: a caller who baked file coordinates on purpose
+    // otherwise discovers the move by measuring, and reads the result as an
+    // interference rather than a placement.
+    if (auto* imp = dynamic_cast<const ImportFeature*>(doc->GetFeature(index));
+        imp != nullptr && imp->Shift() != glm::vec3(0.0f))
+      resp["recentred_by"] =
+          json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
     resp["regen"] = RegenSummaryJson(*doc);
     resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
@@ -553,13 +632,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (!f)
         throw std::runtime_error("body has no creating feature");
     }
+    // An unrecognised slug is refused by SetMaterial below, naming what IS
+    // accepted — the same funnel add_feature and document load go through.
+    // This used to sniff for `== DEFAULT` here, which caught it on this one
+    // path and named nothing.
     const std::string slug = p.value("material", std::string{});
-    // A non-empty slug that resolves to DEFAULT is unknown (DEFAULT is never in
-    // the slug table, so valid slugs always map to a specific material).
-    if (!slug.empty() && CADMaterials::MaterialLibrary::FromSlug(slug) ==
-                             CADMaterials::MaterialType::DEFAULT) {
-      throw std::runtime_error("unknown material slug: " + slug);
-    }
     json before = DocumentIO::FeatureToJson(*f);
     f->SetMaterial(slug);
     doc->Regenerate();
@@ -767,9 +844,25 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (it == kinds.end())
         throw std::runtime_error("unknown constraint kind");
       c.kind = it->second;
-      c.value = spec.value("value", 0.0);
-      if (c.kind == sketch::ConstraintKind::Angle)
-        c.value = glm::radians(c.value); // wire=degrees, model=radians
+      if (c.kind == sketch::ConstraintKind::Angle) {
+        // `value` was DEGREES here and RADIANS in the same field of the same
+        // sketch reached through add_feature (ConstraintFromJson), and
+        // get_state echoed the radians back: set 45, read 0.785, and both
+        // were "right". So the bare name means what it means everywhere else
+        // in this file since the arc fix — radians — and `value_deg` says
+        // degrees, refusing both at once.
+        //
+        // `expr` is NOT part of that swap and deliberately stays on the
+        // expression language's angle base, which is degrees ("45", "45deg",
+        // "0.785rad" all work) exactly as it is for angle_expr on Revolve and
+        // Pattern. The two live in different worlds and each says which.
+        c.value =
+            AngleParam(spec.contains("value"), spec.value("value", 0.0),
+                       spec.contains("value_deg"), spec.value("value_deg", 0.0),
+                       "value", "value_deg", 0.0);
+      } else {
+        c.value = spec.value("value", 0.0);
+      }
       c.valueExpr = spec.value("expr", std::string{});
       if (!c.valueExpr.empty()) {
         const auto v = ExpressionEngine::Default().EvaluateText(c.valueExpr,
@@ -846,9 +939,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const bool link = p.value("link", true);
       if (p.value("circular", false)) {
         const auto& c = p.at("center");
+        // PER-STEP, and radians. Both halves were wrong in the MCP layer,
+        // which called it "the total sweep in degrees" and passed it through
+        // unconverted: a 3-instance pattern asked for 90 came out as 90
+        // radians per step (folded, 335.6 degrees) instead of the 45-degree
+        // steps the caller drew in their head. Two errors in one number, and
+        // the sketch it builds looks deliberate.
         result["generated"] = sk->AddCircularPattern(
             sources, {c[0].get<float>(), c[1].get<float>()},
-            p.at("angle").get<double>(), count, link);
+            AngleParam(p.contains("angle"), p.value("angle", 0.0),
+                       p.contains("angle_deg"), p.value("angle_deg", 0.0),
+                       "angle", "angle_deg", 0.0),
+            count, link);
       } else {
         const auto& s = p.at("step");
         result["generated"] = sk->AddLinearPattern(
@@ -970,8 +1072,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ri.opacity = p.at("opacity").get<double>();
       if (p.contains("hidden"))
         ri.hidden = p.at("hidden").get<bool>();
-      if (p.contains("rotation"))
-        ri.rotation = p.at("rotation").get<double>();
+      if (p.contains("rotation") || p.contains("rotation_deg"))
+        ri.rotation =
+            AngleParam(p.contains("rotation"), p.value("rotation", 0.0),
+                       p.contains("rotation_deg"), p.value("rotation_deg", 0.0),
+                       "rotation", "rotation_deg", ri.rotation);
       if (p.contains("units_per_pixel"))
         ri.unitsPerPixel = p.at("units_per_pixel").get<double>();
       if (p.contains("origin")) {

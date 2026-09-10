@@ -265,13 +265,15 @@ void MeshRenderer::SetInstanceMaterial(uint32_t instanceId,
   }
 }
 
-void MeshRenderer::SetInstanceProcedural(uint32_t instanceId, int pattern,
-                                         float grainScale,
-                                         float grainContrast) {
+void MeshRenderer::SetInstanceProcedural(uint32_t instanceId,
+                                         CADMaterials::SurfacePattern pattern,
+                                         float patternScale,
+                                         float patternContrast) {
   if (MeshInstance* instance = GetInstance(instanceId)) {
-    // .w (grain axis) is filled per-draw from the asset bbox.
+    // .w (the pattern axis) is filled per-draw from the asset bbox.
     instance->procParams =
-        glm::vec4(static_cast<float>(pattern), grainScale, grainContrast, 0.0f);
+        glm::vec4(static_cast<float>(static_cast<int>(pattern)), patternScale,
+                  patternContrast, 0.0f);
   }
 }
 
@@ -416,8 +418,8 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
     glm::uvec4 highlight;
     glm::vec4 material;  // metallic, roughness, specular, reflectance
     glm::vec4 baseColor; // per-instance albedo (a = ghost opacity)
-    // Procedural grain: x = pattern (0 flat, 1 wood, 2 plywood),
-    // y = grainScale, z = grainContrast, w = grain-axis index (0/1/2).
+    // Procedural surface pattern: x = CADMaterials::SurfacePattern,
+    // y = patternScale, z = patternContrast, w = pattern-axis index (0/1/2).
     glm::vec4 procMaterial;
   } push;
 
@@ -445,18 +447,13 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
       push.baseColor = instance->baseColor;
       push.procMaterial = instance->procParams;
       if (instance->procParams.x > 0.5f) {
-        // Derive the grain axis from the asset's local bbox: solid wood
-        // (pattern 1) runs the grain along the LONGEST extent (a board's
-        // length); plywood (pattern 2) lays its plies across the
-        // THINNEST extent (the sheet thickness). Cheap enough per-draw.
-        const glm::vec3 ext = asset->bboxMax - asset->bboxMin;
-        const bool plywood = instance->procParams.x > 1.5f;
-        int axis = 0;
-        for (int a = 1; a < 3; ++a) {
-          if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
-            axis = a;
-        }
-        push.procMaterial.w = static_cast<float>(axis);
+        // The asset's bbox is genuinely object-local (the model matrix rides
+        // in the push constant), so this is the frame PatternAxis wants.
+        // Cheap enough per-draw.
+        push.procMaterial.w = static_cast<float>(CADMaterials::PatternAxis(
+            static_cast<CADMaterials::SurfacePattern>(
+                static_cast<int>(instance->procParams.x + 0.5f)),
+            asset->bboxMax - asset->bboxMin));
       }
       vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                          VK_SHADER_STAGE_VERTEX_BIT |
@@ -768,9 +765,10 @@ bool MeshRenderer::CreateGraphicsPipeline() {
 
   // Pipeline layout
   // Per-instance model matrix + highlight ranges (vertex) + PBR material +
-  // albedo + procedural-grain params (fragment) via push constants. The
+  // albedo + procedural-pattern params (fragment) via push constants. The
   // total is 128 bytes, exactly the Vulkan-guaranteed maxPushConstantsSize
-  // floor — adding the proc vec4 leaves no further headroom here.
+  // floor — the proc vec4 leaves no further headroom here, which is why a new
+  // SurfacePattern packs into it rather than adding a float.
   VkPushConstantRange pushConstantRange{};
   pushConstantRange.stageFlags =
       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;

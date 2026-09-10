@@ -104,6 +104,28 @@ size_t EditDistance(const std::string& a, const std::string& b) {
   return prev[b.size()];
 }
 
+// The JSON type name a caller would recognise in their own request.
+const char* JsonTypeName(const json& v) {
+  switch (v.type()) {
+  case json::value_t::null:
+    return "null";
+  case json::value_t::boolean:
+    return "a boolean";
+  case json::value_t::string:
+    return "a string";
+  case json::value_t::array:
+    return "an array";
+  case json::value_t::object:
+    return "an object";
+  case json::value_t::number_integer:
+  case json::value_t::number_unsigned:
+  case json::value_t::number_float:
+    return "a number";
+  default:
+    return "a value";
+  }
+}
+
 // Message for a request whose params carried keys the handler never read —
 // a silently-ignored typo under the old path. Names the offending key(s),
 // suggests the closest accepted key, and lists the method's vocabulary.
@@ -137,6 +159,33 @@ std::string UnknownParamError(const std::string& method,
     }
     msg += ".";
   }
+  return msg;
+}
+
+std::string TypeErrorMessage(const std::string& method, const json& params,
+                             const std::set<std::string>& seen,
+                             const std::string& what) {
+  std::string msg =
+      "'" + method + "': a parameter has the wrong type — " +
+      what.substr(what.find(']') == std::string::npos ? 0 : what.find(']') + 2);
+  if (params.is_object() && !params.empty()) {
+    msg += ". Given: ";
+    bool first = true;
+    for (auto it = params.begin(); it != params.end(); ++it) {
+      msg += (first ? "" : ", ") + it.key() + " = " + JsonTypeName(it.value());
+      first = false;
+    }
+  }
+  if (!seen.empty()) {
+    msg += ". This method reads: ";
+    bool first = true;
+    for (const std::string& k : seen) {
+      msg += (first ? "" : ", ") + k;
+      first = false;
+    }
+  }
+  msg += ". `describe {method: \"" + method +
+         "\"}` says what each parameter takes";
   return msg;
 }
 
@@ -235,7 +284,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"set_camera",
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
-     "vector); passing eye [x,y,z] derives direction+distance instead.",
+     "vector); passing eye [x,y,z] derives direction+distance instead. "
+     "`distance` and every point here are model MILLIMETRES.",
      "direction, distance, eye, target, up"},
     {"orient_to_face", "Look straight at the selected face.", ""},
     {"select_face",
@@ -787,6 +837,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"feature_types", std::move(featureTypes)},
         {"sketch_entity_types", std::move(entityTypes)},
         {"constraint_kinds", remote::ConstraintKindNames()},
+        // The assembly vocabulary, from the parser's own tables. Without
+        // `relation_kinds` here, a caller reading this endpoint to find out
+        // what the app can do sees six mate types and concludes that coupled
+        // DOFs -- gears, rack and pinion, a screw -- are not supported.
+        {"mate_types", DocumentIO::MateTypeNames()},
+        {"relation_kinds", DocumentIO::RelationKindNames()},
+        {"constraint_value_units",
+         [] {
+           json u = json::object();
+           for (const auto& [kind, unit] : remote::ConstraintValueUnits())
+             u[kind] = unit;
+           return u;
+         }()},
         {"extrude_modes", {"new_body", "add", "cut"}},
         {"extrude_end_modes",
          {"blind", "symmetric", "two_sided", "up_to_face", "through_all"}},

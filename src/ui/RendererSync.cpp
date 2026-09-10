@@ -309,8 +309,7 @@ void SyncDocumentRenderers(AppState& state) {
     // never grows (the appearance-plan constraint).
     if (!body.material.empty() || body.appearance.Any()) {
       CADMaterials::MaterialProperties mat =
-          CADMaterials::MaterialLibrary::GetMaterial(
-              CADMaterials::MaterialLibrary::FromSlug(body.material));
+          CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material);
       if (body.material.empty()) {
         // No physical material: a neutral dielectric carrying the palette
         // color, so a color-only override doesn't inherit DEFAULT's metal.
@@ -319,7 +318,7 @@ void SyncDocumentRenderers(AppState& state) {
         mat.roughness = 0.6f;
         mat.specular = 0.5f;
         mat.reflectance = 0.04f;
-        mat.procPattern = 0;
+        mat.pattern = CADMaterials::SurfacePattern::Flat;
       }
       if (body.appearance.color)
         mat.baseColor = *body.appearance.color;
@@ -331,11 +330,11 @@ void SyncDocumentRenderers(AppState& state) {
                                           glm::vec4(mat.metallic, mat.roughness,
                                                     mat.specular,
                                                     mat.reflectance));
-      // Procedural wood/plywood grain (pattern 0 = flat, so non-wood materials
-      // pass through unchanged). An overridden color KEEPS the grain — that
-      // is stained wood, the desired reading.
-      state.meshRenderer->SetMeshProcedural(meshId, mat.procPattern,
-                                            mat.grainScale, mat.grainContrast);
+      // Procedural surface pattern (Flat, so unpatterned materials pass
+      // through unchanged). An overridden color KEEPS the pattern — that is
+      // stained wood, and a painted carbon plate, the desired reading.
+      state.meshRenderer->SetMeshProcedural(
+          meshId, mat.pattern, mat.patternScale, mat.patternContrast);
       albedo = mat.baseColor;
     }
     bodyColors[bi] = albedo; // section caps reuse the body's color
@@ -557,19 +556,15 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     const std::vector<uint32_t>& indices =
         cached != nullptr ? cached->indices : cadMesh.indices;
 
-    CADMaterials::MaterialType mt =
-        body.material.empty()
-            ? CADMaterials::MaterialType::DEFAULT
-            : CADMaterials::MaterialLibrary::FromSlug(body.material);
     CADMaterials::MaterialProperties mat =
-        CADMaterials::MaterialLibrary::GetMaterial(mt);
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(body.material);
     // Appearance override, same merge as the raster paths.
     if (body.appearance.Any()) {
       if (body.material.empty()) {
         mat.metallic = 0.0f;
         mat.roughness = 0.6f;
         mat.specular = 0.5f;
-        mat.procPattern = 0;
+        mat.pattern = CADMaterials::SurfacePattern::Flat;
       }
       if (body.appearance.color)
         mat.baseColor = *body.appearance.color;
@@ -582,6 +577,18 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     std::vector<Vertex3D> vertices =
         cached != nullptr ? cached->vertices
                           : CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
+
+    // The PART-LOCAL extent, measured BEFORE the occurrence transform is baked
+    // in below — that is the frame PatternAxis wants, and the frame the raster
+    // path measures in (an asset bbox, with the model matrix still in a push
+    // constant). Measuring it after the bake gave a rotated occurrence a
+    // different axis in a still than in the viewport.
+    glm::vec3 localLo(FLT_MAX), localHi(-FLT_MAX);
+    for (const Vertex3D& v : vertices) {
+      localLo = glm::min(localLo, v.position);
+      localHi = glm::max(localHi, v.position);
+    }
+
     if (it.xf != glm::mat4(1.0f)) {
       // Occurrence placement is rigid: positions by the matrix, normals by
       // its rotation. RT geometry carries no per-instance transform, so the
@@ -593,8 +600,9 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
       }
     }
 
-    // Per-body local bbox: feeds the scene bbox (ground plane) and the grain
-    // axis. RT geometry goes in untransformed, so this is object/part-local.
+    // Per-body WORLD bbox: feeds the scene bbox (the ground plane), so it is
+    // taken after the bake above. The pattern axis uses localLo/localHi
+    // instead — see there.
     glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
     for (const Vertex3D& v : vertices) {
       lo = glm::min(lo, v.position);
@@ -610,21 +618,14 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     rtm.emissive = glm::vec3(0.0f);
     rtm.specular = glm::vec3(mat.specular);
     rtm.transmission = 0.0f;
-    if (mat.procPattern > 0) {
-      // Same rule as the raster path (MeshRenderer draw loop): solid wood runs
-      // the grain along the longest extent, plywood lays plies across the
-      // thinnest. Each body gets its own material here, so the axis rides in
-      // it.
-      const glm::vec3 ext = hi - lo;
-      const bool plywood = mat.procPattern == 2;
-      int axis = 0;
-      for (int a = 1; a < 3; ++a) {
-        if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
-          axis = a;
-      }
+    if (mat.pattern != CADMaterials::SurfacePattern::Flat) {
+      // One rule, shared with the raster path (MeshRenderer's draw loop).
+      // Each body gets its own material here, so the axis rides in it.
       rtm.procParams =
-          glm::vec4(static_cast<float>(mat.procPattern), mat.grainScale,
-                    mat.grainContrast, static_cast<float>(axis));
+          glm::vec4(static_cast<float>(static_cast<int>(mat.pattern)),
+                    mat.patternScale, mat.patternContrast,
+                    static_cast<float>(CADMaterials::PatternAxis(
+                        mat.pattern, localHi - localLo)));
     }
     uint32_t matId = state.rayTracer->AddMaterial(rtm);
 
@@ -692,10 +693,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
           }
           const Body& b = (*src.bodies)[bi];
           CADMaterials::MaterialProperties cmat =
-              CADMaterials::MaterialLibrary::GetMaterial(
-                  b.material.empty()
-                      ? CADMaterials::MaterialType::DEFAULT
-                      : CADMaterials::MaterialLibrary::FromSlug(b.material));
+              CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material);
           if (b.appearance.color)
             cmat.baseColor = *b.appearance.color;
           RTMaterial crm{};
@@ -704,7 +702,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
           crm.roughness = cmat.roughness;
           crm.emissive = glm::vec3(0.0f);
           crm.specular = glm::vec3(cmat.specular);
-          crm.transmission = 0.0f; // procParams left at 0: no grain on a cap
+          crm.transmission = 0.0f; // procParams left at 0: Flat, no cap figure
           state.rayTracer->AddGeometry(cv, cm.indices,
                                        state.rayTracer->AddMaterial(crm));
           capCount++;
@@ -1183,18 +1181,18 @@ void SyncAssemblyRenderers(AppState& state) {
         if (state.outlineRenderer)
           OutlineAssetFor(state, *sb.tess);
         // Resolve order: appearance > material > displayColor > palette
-        // (same merge as the part-tab draw loop in AppActions).
+        // (same merge as the part-tab draw loop, SyncDocumentRenderers above).
         if (!body.material.empty() || body.appearance.Any()) {
           CADMaterials::MaterialProperties mat =
-              CADMaterials::MaterialLibrary::GetMaterial(
-                  CADMaterials::MaterialLibrary::FromSlug(body.material));
+              CADMaterials::MaterialLibrary::GetMaterialOrDefault(
+                  body.material);
           if (body.material.empty()) {
             mat.baseColor = sb.palette;
             mat.metallic = 0.0f;
             mat.roughness = 0.6f;
             mat.specular = 0.5f;
             mat.reflectance = 0.04f;
-            mat.procPattern = 0;
+            mat.pattern = CADMaterials::SurfacePattern::Flat;
           }
           if (body.appearance.color)
             mat.baseColor = *body.appearance.color;
@@ -1206,9 +1204,9 @@ void SyncAssemblyRenderers(AppState& state) {
           sb.albedo = mat.baseColor;
           sb.pbr = glm::vec4(mat.metallic, mat.roughness, mat.specular,
                              mat.reflectance);
-          sb.procPattern = mat.procPattern;
-          sb.grainScale = mat.grainScale;
-          sb.grainContrast = mat.grainContrast;
+          sb.pattern = mat.pattern;
+          sb.patternScale = mat.patternScale;
+          sb.patternContrast = mat.patternContrast;
         }
         shared.push_back(std::move(sb));
       }
@@ -1240,7 +1238,7 @@ void SyncAssemblyRenderers(AppState& state) {
       if (sb.hasMaterial) {
         state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
         state.meshRenderer->SetInstanceProcedural(
-            meshId, sb.procPattern, sb.grainScale, sb.grainContrast);
+            meshId, sb.pattern, sb.patternScale, sb.patternContrast);
       } else {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }

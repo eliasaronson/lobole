@@ -72,8 +72,9 @@ struct Material {
     float roughness;
     vec3 specular;
     float transmission;
-    // Procedural grain: x = pattern (0 flat/1 wood/2 plywood), y = grainScale,
-    // z = grainContrast, w = grain-axis index (0/1/2). Matches RTMaterial.
+    // Procedural surface pattern: x = GRAIN_PATTERN_* (see grain.glsl),
+    // y = patternScale, z = patternContrast, w = pattern-axis index (0/1/2).
+    // Matches RTMaterial.
     vec4 procParams;
 };
 layout(binding = 4, set = 0, std430) readonly buffer Materials {
@@ -221,7 +222,10 @@ void main() {
     vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
     vec3 N = normalize(mat3(gl_ObjectToWorldEXT) * nrm);
     vec3 V = normalize(ubo.viewPos.xyz - worldPos);
-    if (dot(N, V) < 0.0) N = -N;
+    // Remembered so a pattern's normal relief (below) bends the same way the
+    // shading normal was flipped, instead of against it.
+    float nrmFlip = 1.0;
+    if (dot(N, V) < 0.0) { N = -N; nrmFlip = -1.0; }
 
     // G-buffer for the outline pass, written before the shadow-catcher branch
     // below returns. The FACE normal (from the triangle, not the interpolated
@@ -272,12 +276,17 @@ void main() {
     Material mat = materials[g.materialIndex];
     float roughness = clamp(mat.roughness, 0.03, 1.0);
 
-    // Procedural wood/plywood grain. The still render uses identity instance
-    // transforms, so `pos`/`nrm` are already part-local (object space) — exactly
-    // what the raster path feeds as fragLocalPos. Modifies mat.baseColor +
+    // Procedural surface pattern. RT geometry carries identity instance
+    // transforms because RendererSync bakes each occurrence's placement into
+    // the vertices CPU-side — so `pos`/`nrm` are in the same frame the raster
+    // path feeds as fragLocalPos, and the pattern axis is derived from an
+    // extent measured in that same (pre-bake) frame. Modifies mat.baseColor +
     // roughness in place so both the direct and IBL terms below pick it up.
-    grain_apply(mat.baseColor, roughness, mat.procParams, pos,
+    vec3 dNormalObj;
+    grain_apply(mat.baseColor, roughness, dNormalObj, mat.procParams, pos,
                 abs(dot(nrm, grain_axisUnit(int(mat.procParams.w + 0.5)))));
+    if (dot(dNormalObj, dNormalObj) > 0.0)
+        N = normalize(N + nrmFlip * mat3(gl_ObjectToWorldEXT) * dNormalObj);
 
     // ---- The three-light rig, exactly as the viewport draws it: only the
     // KEY is shadowed; fill and rim are the soft fill that keeps shadows from
