@@ -71,8 +71,11 @@ void CopySubtree(AppState& state, MotionRun& run) {
     // parts on the SO-101 gripper, a third of a prep that blocks the frame.
     if (run.parts.count(slotId) != 0 || run.assemblies.count(slotId) != 0)
       continue;
+    // CopyWithGeometry, not a plain copy: a plain one ends in a Regenerate
+    // that re-executes every boolean in the part. That was 54% of a profile
+    // of this exact call, and the run only ever READS the geometry.
     if (const Document* pd = PartDocById(state, slotId))
-      run.parts[slotId] = std::make_unique<Document>(*pd);
+      run.parts[slotId] = Document::CopyWithGeometry(*pd);
     else if (const AssemblyDocument* ad = AssemblyDocById(state, slotId))
       run.assemblies[slotId] = std::make_unique<AssemblyDocument>(*ad);
   }

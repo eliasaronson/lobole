@@ -155,3 +155,44 @@ TEST_CASE("A copy carries study results, and a stale one stays stale",
   REQUIRE(stale.StudyResults(studyId) != nullptr);
   CHECK(stale.StudyResultsStale(studyId));
 }
+
+// CopyWithGeometry: the same document, reached without re-deriving it. A copy
+// taken to READ geometry (the motion run's snapshot of every part under an
+// assembly) used to re-execute every boolean in every part — 54% of a profile
+// of that one call, and seconds of blocked main thread before the run could
+// even start.
+TEST_CASE("A geometry-reusing copy is the same document, built by executing "
+          "nothing",
+          "[document][copy]") {
+  std::unique_ptr<Document> original = BuildLoadedDocument();
+  original->SetRollback(-1); // to the tip, so there is geometry to compare
+  REQUIRE(original->GetBodies().size() == 1);
+
+  const std::unique_ptr<Document> reused =
+      Document::CopyWithGeometry(*original);
+  const Document plain(*original);
+
+  // Everything the plain copy is already gated on holds here too.
+  CHECK(SaveToString(*reused, "reuse-gate-copy.json") ==
+        SaveToString(*original, "reuse-gate-original.json"));
+  CHECK(reused->InstanceId() != original->InstanceId());
+  REQUIRE(reused->GetBodies().size() == plain.GetBodies().size());
+  for (size_t i = 0; i < reused->GetBodies().size(); i++)
+    CHECK(reused->GetBodies()[i].shape.Volume() ==
+          plain.GetBodies()[i].shape.Volume());
+
+  // ...and it got there without running the recipe, which the plain copy did.
+  // This is the assertion the whole thing exists for; without it the two
+  // copies are indistinguishable and a regression is silent.
+  CHECK(reused->LastRegenStats().executed == 0);
+  CHECK(plain.LastRegenStats().executed > 0);
+
+  // The reuse is a hand-off, not a lock-in: an edit rebuilds from the recipe
+  // like any other document. (The bake seeds the prefix cache with only the
+  // tip entry valid, which is what makes this true.)
+  const double before = reused->GetBodies()[0].shape.Volume();
+  reused->SetActiveConfiguration(0); // off "Tall", onto the parameter table
+  reused->SetParameter("height", "40");
+  CHECK(reused->GetBodies()[0].shape.Volume() != before);
+  CHECK(original->GetBodies()[0].shape.Volume() == before);
+}
