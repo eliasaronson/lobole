@@ -484,6 +484,22 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
       note, it == state.drawingRenders.end() ? nullptr : &it->second, symbols);
 }
 
+units::System ActiveDrawingUnits(AppState& state) {
+  if (!state.drawing)
+    return {};
+  // The FIRST view's source, which is what ResolveDrawingDim used to format
+  // each dimension. A sheet mixing an inch part with a millimetre one would
+  // need a per-view answer; nothing produces that yet, and picking one system
+  // for the sheet is what the single UNITS row can honestly claim.
+  for (const DrawingView& v : state.drawing->GetViews()) {
+    if (const Document* src = DrawingSourceDocument(state, v.sourceDocId))
+      return src->Units();
+    if (const AssemblyDocument* a = AssemblyDocById(state, v.sourceDocId))
+      return a->Units();
+  }
+  return {};
+}
+
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error) {
   if (!state.drawing) {
@@ -511,20 +527,7 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
     }
     notes.push_back(resolved);
   }
-  // The sheet declares what its bare numbers are in, and it has to be the
-  // same system the dims were FORMATTED in — the first view's source
-  // document, which is what ResolveDrawingDim used for each of them.
-  units::System sheetUnits;
-  for (const DrawingView& v : state.drawing->GetViews()) {
-    if (const Document* src = DrawingSourceDocument(state, v.sourceDocId)) {
-      sheetUnits = src->Units();
-      break;
-    }
-    if (const AssemblyDocument* a = AssemblyDocById(state, v.sourceDocId)) {
-      sheetUnits = a->Units();
-      break;
-    }
-  }
+  const units::System sheetUnits = ActiveDrawingUnits(state);
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext == ".svg")

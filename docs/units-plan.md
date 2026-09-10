@@ -1,5 +1,8 @@
 # Units — what we have, and what a unit engine would not buy
 
+> **Status: SHIPPED 2026-09-10** (2bf40d64, 136a9df9, 707c15de, 9b212e98).
+> No format bump: every twin key is input-only.
+
 ## The problem
 
 The app has a display layer (`core/Units.h`), unit-suffixed expression
@@ -85,11 +88,11 @@ pre-resolved text, so the fix flows through to SVG and PDF.
 
 ### 4. A `describe` unit gate
 
-Thirty `MethodDoc` rows carry a dimensional parameter and name no unit
-anywhere; twelve do. `tests/rpc_units_gate.py` requires a dimensional key to
-carry a unit suffix or have its unit named in the row, reusing the MethodDoc
-parsers already in `rpc_params_gate.py`. This is the part that generalizes:
-it catches the next row rather than the current thirty.
+Forty-two dimensional parameters name no unit anywhere in their row.
+`tests/rpc_units_gate.py` requires a dimensional key to carry a unit suffix or
+have its unit named in the row, reusing the MethodDoc parsers lifted out of
+`rpc_params_gate.py` into `tools/method_doc_scan.py`. This is the part that
+generalizes: it catches the next row rather than the current forty-two.
 
 ## Verification
 

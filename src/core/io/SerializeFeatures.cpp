@@ -94,7 +94,10 @@ json EntityToJson(const sketch::Entity& entity) {
 // mate's `rotation` read that way pinned a linkage to 60 radians and was
 // diagnosed as a loop-solver branch bug twice. A sketch arc read that way
 // builds a plausible arc of the wrong size and says nothing at all. These
-// were the last angles in the API still naming no unit.
+// looked like the last angles in the API still naming no unit. They were not:
+// `pattern`'s per-step angle, `set_reference_image.rotation` and
+// `add_constraint.value` followed on 2026-09-10 (docs/units-plan.md), and
+// tests/rpc_units_gate.py is what stops the next one.
 
 double AngleRadians(const json& j, const char* radKey, const char* degKey) {
   const bool hasRad = j.contains(radKey);

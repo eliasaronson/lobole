@@ -35,4 +35,10 @@ std::string FormatLength(double mm, const units::System& sys);
 // drafting practice rather than a redundant unit label.
 std::string FormatAngle(double radians, const units::System& sys);
 
+// What a sheet of bare numbers is IN, for a drawing's title block: "mm",
+// "in", and " / rad" appended when the angles are not the degrees their
+// degree signs already declare. One definition, because the sheet on screen
+// and the sheet exported to a shop must not disagree about it.
+std::string UnitsLabel(const units::System& sys);
+
 } // namespace core

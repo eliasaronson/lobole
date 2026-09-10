@@ -34,4 +34,11 @@ std::string FormatAngle(double radians, const units::System& sys) {
   return buf;
 }
 
+std::string UnitsLabel(const units::System& sys) {
+  std::string out = units::ToString(sys.length);
+  if (sys.angle == units::Angle::Radian)
+    out += " / rad";
+  return out;
+}
+
 } // namespace core

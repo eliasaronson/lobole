@@ -16,11 +16,11 @@
 //
 // So the conversion factor is not a literal anyone retypes. Before this header
 // there were four independent definitions of it (Expression.cpp,
-// SerializeFeatures.cpp, RemoteAssembly.cpp, RemoteMotion.cpp) and 77 sites
-// spelling `180.0 / M_PI` by hand — exactly the state the world up-axis was in
-// before core/Conventions.h, and tests/test_conventions.cpp now fails on a new
-// bare conversion literal the same way tests/test_world_up.cpp does for
-// (0,1,0).
+// SerializeFeatures.cpp, RemoteAssembly.cpp, RemoteMotion.cpp) and eleven more
+// sites spelling `180.0 / M_PI` by hand, among 77 conversion sites in all —
+// exactly the state the world up-axis was in before core/Conventions.h, and
+// tests/test_conventions.cpp now fails on a new bare conversion literal the
+// same way tests/test_world_up.cpp does for (0,1,0).
 //
 // A bare `180.0 / M_PI` elsewhere in the tree is a claim that the value is NOT
 // an angle conversion. If it converts an angle, it belongs routed through here.

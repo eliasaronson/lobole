@@ -1,5 +1,6 @@
 #include "ui/DrawingPanel.h"
 
+#include "core/io/Format.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
@@ -492,11 +493,16 @@ void DrawSheet(AppState& state) {
   const double tbW = chrome.titleBlockMax.x - chrome.titleBlockMin.x;
   const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
   const double x0 = chrome.titleBlockMin.x, y0 = chrome.titleBlockMin.y;
-  const std::array<std::pair<const char*, std::string>, 4> fields = {{
+  // The same five rows the exporters write (DrawingExport.cpp's UnitsRow) —
+  // the sheet on screen and the sheet sent to a shop have to agree about what
+  // its bare numbers are in, and a UNITS row in the PDF alone would be the
+  // more dangerous half of that disagreement.
+  const std::array<std::pair<const char*, std::string>, 5> fields = {{
       {"PROJECT", sheet.titleBlock.project},
       {"DOCUMENT", sheet.titleBlock.document},
       {"AUTHOR", sheet.titleBlock.author},
       {"DATE", sheet.titleBlock.date},
+      {"UNITS", core::UnitsLabel(ActiveDrawingUnits(state))},
   }};
   dl->AddRect(SheetToScreen(state, {x0, y0}),
               SheetToScreen(state, {x0 + tbW, y0 + tbH}), ink, 0.0f, 0, 1.5f);

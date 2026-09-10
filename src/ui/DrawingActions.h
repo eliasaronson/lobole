@@ -71,6 +71,13 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
 // list_drawing_geometry name the feature a projected curve came from.
 Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId);
 
+// The units the active sheet is written in: its first view's SOURCE document,
+// not the reader's preference — a drawing of an inch part is an inch drawing
+// wherever it is opened. One accessor, because the title block on screen, the
+// title block in the exported file and the dimension text itself all have to
+// agree about it; they did not, and the numbers were mm regardless.
+units::System ActiveDrawingUnits(AppState& state);
+
 // Where a view actually lands on the sheet: a folded child's shared axis is
 // locked to its base (design §2), so the stored position's x and/or y may be
 // overridden at projection time. The one fold computation — projection and

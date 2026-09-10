@@ -147,7 +147,10 @@ nothing (just emits copies).
 ### 2. `SketchFeature::RegenerateDerived()`
 Replay each op in order (later ops may consume earlier output):
 - Recompute each instance's geometry by transforming its source
-  (translate by `k*spacing*dir`, or rotate `k*angle/(count-1)` about `center`).
+  (translate by `k*spacing*dir`, or rotate `k*angle` about `center` — `angle`
+  is the PER-STEP angle, in radians, not a total sweep to be divided. The
+  `/(count-1)` this line used to carry is where the MCP layer's "total sweep
+  in degrees" came from, over a handler that never divided).
 - **Id-stable** (SolveSpace remap discipline, `group.cpp:863`): the k-th
   instance of source `s` keeps its stored `generatedId` — mutate the existing
   entity in place, don't recreate it, so constraints/refs survive. If `count`

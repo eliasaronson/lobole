@@ -37,8 +37,10 @@ title block, SVG/PDF export.**
 - **Dimensions are driven** — measured from projected geometry, read-only,
   re-measured on view update. The six sketch kinds carry over: distance /
   distance-X / distance-Y / radius / diameter / angle.
-- **Title block**: a simple field table (project, document, scale, date,
-  author) + border. Template customization deferred.
+- **Title block**: a simple field table (project, document, author, date,
+  units) + border. Template customization deferred. The UNITS row is not
+  decoration: dimension text carries no suffix, so the sheet has to state
+  once what its bare numbers are in (docs/units-plan.md).
 - **Export**: SVG and vector PDF, plus the sheet in `screenshot` when a
   drawing tab is active.
 

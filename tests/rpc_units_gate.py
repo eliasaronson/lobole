@@ -15,8 +15,8 @@ and the prose beside it:
 
 A type system does not reach any of these: the JSON number becomes a typed
 quantity by fiat. What reaches them is saying so, in the one place an agent
-looks — the MethodDoc row that `describe` serves. Thirty rows carried a
-dimensional key and named no unit anywhere when this was written; twelve did.
+looks — the MethodDoc row that `describe` serves. Forty-two parameters carried
+a dimensional name and no unit anywhere when this was written.
 
 So: a dimensional key must either
 
@@ -25,7 +25,7 @@ So: a dimensional key must either
 
 The second is the weaker half deliberately. It cannot prove the unit beside
 the key is the right one; it can prove the author thought about it and wrote
-it down, which is the difference between `add_load`'s row and the thirty. The
+it down, which is the difference between `add_load`'s row and the forty-two. The
 point of a scanning test is the NEXT row, not the current ones.
 
 Needs no app, no GPU and no display — it reads the source.
