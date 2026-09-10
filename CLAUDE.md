@@ -248,10 +248,14 @@ git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/work
 (`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
 instances, and never the human's), so you no longer hold one in your head. Integrate
 SERIALLY: merge one branch to main, run suites, then the next — and REMOVE the
-worktree as soon as its branch is in:
+worktree as soon as its branch is in. `git worktree remove` REFUSES here
+("working trees containing submodules cannot be moved or removed"), so it is:
 ```
-git worktree remove ../designer-wtX   &&   git branch -d wtX
+git merge-base --is-ancestor wtX main && [ -z "$(git -C ../designer-wtX status --porcelain)" ] \
+  && rm -rf ../designer-wtX && git worktree prune && git branch -d wtX
 ```
+Check both first — merged, and nothing uncommitted — because the `rm` takes
+the build directory with it. Five merged worktrees from one week held 16 GB.
 A merged worktree left lying about is a second checkout of the same project
 that no longer matches it, with its own build dir and its own scratch port.
 
