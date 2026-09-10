@@ -31,9 +31,16 @@ The drone's `verify()` now reads its clearances from the document instead of
 measuring them, which is the proof W3 owed — and the conversion turned up the
 next thing W1 owes (below).
 
-Remaining, in order: W4(c) — a task with parameters and a Fit task, the two
-that would make W1 and the assembly surface measurable — then W6 if it earns
-it.
+W4(c) is done: `f1-cap-tube` grades a candidate against a host part the agent
+never sees, and both its negative controls are dimensionally perfect parts
+that the surface census cannot catch. W6 was investigated and is **not being
+built** — the evidence and the condition that would reverse it are in its
+section.
+
+**Nothing on this plan is outstanding.** What is left is the open question the
+drone conversion raised, which belongs to a modelling round rather than to
+this one: whether the drone should mate its standoffs, now that
+`solve_assembly` reports 64 of 105 occurrences placed by a typed transform.
 
 ### What the drone conversion found: parts are parametric, placements are not
 
@@ -319,7 +326,53 @@ of it `d.param` already bought.
 
 ---
 
-## W6 — a DFM check that returns fixable issues
+## W6 — a DFM check that returns fixable issues — INVESTIGATED, NOT DOING
+
+**Verdict: not worth building now.** Four pieces of evidence, and a condition
+that would reverse it.
+
+**1. No defect any dogfood round has found was DFM-shaped.** The drone's eight
+(docs/modeling/fpv-drone.md) were a hole check sampling over a bounding-box
+diagonal, a joint reading blindness off the axis, a tapped-hole lookup asking
+the wrong part, a thread table that started at M3, a screw not declaring its
+own thread, thread relief depending on argument order, and two drawing bugs.
+Not one is "this part cannot be made".
+
+**2. For milling, the two rules that matter are already in CAM, and they are
+better there.** `internal_radius_too_small` is `cam_verify`'s
+`leftover_regions` — docs/cam/router-round.md says it exactly: "a corner
+radius is exactly where it did not [go]". `tool_inaccessibility` is the lead
+refusal: "refused, not shortened, where the opening is too small for it — a
+lead into the wall is a gouge". Both are computed with the ACTUAL tool in the
+ACTUAL job, which a rule pack guessing a 6 mm cutter at design time cannot
+match.
+
+**3. The families CAM does not cover are the PRINTING ones — and they would
+have no consumer.** `steep_overhang`, `floating_floor`, FDM `min_wall`: there
+is no printing pipeline here. `nozzle`, `filament` and `layer_height` do not
+appear anywhere in `src/`. `export_stl` is where the road ends. vcad has DFM
+packs because it has `vcad-slicer` and the rules feed something; ours would
+feed nothing.
+
+**4. Nothing here measures wall thickness — and nothing has needed it.** That
+is a real gap in the abstract. In practice the parts that exist are a 3 mm
+printed antenna mount, a 3 mm battery pad and 3–5 mm carbon plate. No rule
+pack fires on any of them.
+
+**What would reverse this**, stated so it can actually happen rather than
+being a hedge:
+
+* a printing pipeline lands (a slicer, or a printer profile that
+  `export_stl` answers to) — then the FDM rules have a consumer and W6 is
+  worth building the same week; or
+* a dogfood round produces a part that passes every check here and cannot be
+  made. Eight rounds have not.
+
+If it is ever built, it takes the rule-pack shape and the face naming from
+"Second pass" with it from the start — both are cheap then and expensive to
+retrofit.
+
+The original plan follows, for whoever revisits it.
 
 **Demoted after the second pass, and it should be decided on its own merits.**
 CAM already tells us whether a toolpath can cut the part, so DFM's distinct
