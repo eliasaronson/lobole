@@ -93,7 +93,30 @@ const HoleFeature* FindHoleForRef(const Document& doc,
 }
 
 std::string FormatHoleCallout(const HoleFeature& hole) {
-  std::string out = "\xC3\x98" + core::FormatLength(hole.diameter);
+  // A hole that recorded what it is FOR says so, instead of leaving a reader
+  // to recognise 6.6 as an M6 clearance. docs/modeling/hole-standards.md
+  // promised exactly this when the fit landed and it was the half that never
+  // got built, so a drawing went on calling every hole by its diameter while
+  // the model knew better.
+  //
+  // A TAPPED hole leads with its thread, because M6 is the designation a
+  // machinist reads and the tap drill is not what gets made — printing Ø5.0
+  // for an M6 tapped hole is worse than useless, it is the wrong instruction.
+  // A CLEARANCE hole keeps its diameter, because that IS what gets drilled,
+  // and states the intent after it.
+  const bool named = !hole.fitThread.empty() && !hole.fitKind.empty();
+  const bool tapped = named && hole.fitKind == "tapped";
+  std::string out;
+  if (tapped) {
+    out = hole.fitThread;
+    // Printed only when the document stated one: "M6" alone means the coarse
+    // pitch everywhere in engineering, and spelling it out invites the reader
+    // to wonder what was meant by the one that says nothing.
+    if (hole.fitPitch > 0.0)
+      out += "\xC3\x97" + core::FormatLength(hole.fitPitch);
+  } else {
+    out = "\xC3\x98" + core::FormatLength(hole.diameter);
+  }
   out += hole.through ? " THRU" : " DEEP " + core::FormatLength(hole.depth);
   if (hole.kind == HoleKind::Counterbore) {
     out += " CBORE \xC3\x98" + core::FormatLength(hole.cbDiameter) + " DEEP " +
@@ -104,6 +127,16 @@ std::string FormatHoleCallout(const HoleFeature& hole) {
                          std::max(hole.csDepth, 1e-9));
     out += " CSK \xC3\x98" + core::FormatLength(hole.csDiameter) +
            " \xC3\x97 " + core::FormatAngle(angle); // "× 90°"
+  }
+  // The fit clause comes last, after any recess, so the callout still reads
+  // as an instruction first and an explanation second. The fit is NAMED even
+  // when it is the normal one: "M6 clearance" conventionally implies normal,
+  // and an implication is exactly what this hole stopped relying on.
+  if (named && !tapped) {
+    std::string kind = hole.fitKind;
+    for (char& c : kind)
+      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    out += ", " + hole.fitThread + " " + kind + " CLEARANCE";
   }
   return out;
 }

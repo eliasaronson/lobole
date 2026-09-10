@@ -158,10 +158,17 @@ same shape as `check_fasteners`.
 
 Two halves, in this order:
 
-1. **The hole callout says the fit it already knows.** `DrawingCallout.cpp:95`
-   prints `Ø4.5 THRU` for a hole whose feature records "M5 normal clearance".
-   `docs/modeling/hole-standards.md:69` promised this and it was never built.
-   Costs no format change.
+1. **The hole callout says the fit it already knows. BUILT.**
+   `FormatHoleCallout` printed `Ø4.5 THRU` for a hole whose feature recorded
+   "M5 normal clearance"; `docs/modeling/hole-standards.md:69` promised
+   otherwise when the fit landed and this was the half that never got built.
+   A clearance hole now appends its intent (`Ø3.4 THRU, M3 NORMAL CLEARANCE`)
+   and a TAPPED one leads with the thread rather than the tap drill
+   (`M3 THRU`) — printing Ø2.5 for an M3 tapped hole is not unhelpful, it is
+   the wrong instruction. The fit is named even when it is the normal one,
+   because "M3 clearance" conventionally IMPLIES normal and an implication is
+   what recording the fit did away with. A hole with no fit formats exactly as
+   before, so an old drawing reads as it always did. No format change.
 2. **A dimension carries limits.** This is the first *authored* field on a
    deliberately *driven* object (`DrawingDocument.h:30`), so it is a decision,
    not a field: the value stays measured, the tolerance is authored beside it.
@@ -192,22 +199,42 @@ its own size and any number of distances measured from it, and the size lookup
 `check_fits` runs never hands back a statement about a gap when it asked how
 big a bore is.
 
-**T5b — worst case along a chain.** With lengths toleranced, the question
-that actually sinks assemblies becomes askable: a shaft carries a shoulder, a
-spacer, a bearing and a circlip, and every one of them has a band — does the
-last one still land in its groove? The arithmetic is the one
-`design-intent-plan.md:237-244` specifies, and its guardrails matter more than
-the sum:
+**T5b — a summed band over a stated set. NOT the inferred chain this plan
+first described.**
 
-- Bounds only. Worst case is `sum(lower)` and `sum(upper)`, and that is a
-  statement about the extremes, not a distribution. Statistical stackup needs
-  correlations we do not have and stays out.
-- **Shared inputs are not independent.** Two lengths driven by one variable
-  cancel rather than add, and treating them as independent invents variation
-  that cannot occur. A chain whose terms are not independent is REFUSED, not
-  approximated — the same rule as everything else here.
-- The chain is the mates', not a list somebody retypes: the assembly already
-  says what stacks against what.
+The first draft of this section said the chain could come off the mates, the
+way `check_fits`' pairing does, and that a chain whose terms were not
+independent would be refused. Neither survives inspection, and the second one
+is the load-bearing half:
+
+- **The mates do not give the chain.** T2's pairing worked because a revolute
+  mate *literally names both faces of the fit*. A stack alternates — a contact,
+  then a length INSIDE a part to its far face, then another contact. The
+  contacts come free; the internal contributions are T5a distances, and
+  nothing says which of a part's distances lies along this axis. Deriving it
+  works only when someone happened to tolerance exactly the pair of faces the
+  mates land on.
+- **The independence refusal is not implementable as written.** It would need
+  to know that two lengths are driven by one variable. But a tolerance's
+  nominal is MEASURED, and there is no path from a measured distance back to
+  the expression that produced it — `Parameter` carries no provenance to build
+  one from. Refusing correlated chains needs geometry-to-variable dependency
+  tracking, which is its own workstream.
+
+That matters because the independence handling is the ONLY thing a stack-up
+check offers over arithmetic. Once T5a records the bands, `sum(lower)` and
+`sum(upper)` is two minutes in a spreadsheet. Shipping the easy half and
+calling it a stack-up check would produce confident answers that are wrong in
+exactly the case people build stack-up tools for.
+
+So T5b, when it is built, is the small honest version: an **explicitly stated,
+ordered set** of tolerances with the summed band reported, labelled as what it
+is — the person chose the chain, the tool did the addition — and saying
+outright that shared inputs are not accounted for. Most of the value, a
+fraction of the work, and honest about who decided what.
+
+The inferred chain waits on dependency tracking from geometry back to
+variables. It is not queued behind T5b; it is a different problem.
 
 ## What to watch
 

@@ -479,7 +479,11 @@ def main():
                          kind="hole_callout",
                          refs=[{"edge": bore[0]["ref"]}])
         expect(callout["resolved"], f"callout resolves: {callout}")
-        expect(callout["text"].endswith("THRU"), f"reads the fit: {callout}")
+        # This asserted endswith("THRU") and called it "reads the fit", which
+        # it never did — the callout said Ø3.2 and the recorded M3 close
+        # clearance went unmentioned all the way to the sheet.
+        expect(callout["text"] == "\u00d83.2 THRU, M3 CLOSE CLEARANCE",
+               f"the callout names the fit the hole recorded: {callout}")
         report = d.call("check_drawing", update=True)
         over = [i for i in report["issues"]
                 if i["kind"] == "dim_label_over_view"]

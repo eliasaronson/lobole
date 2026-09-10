@@ -71,6 +71,15 @@ What it buys beyond saving a lookup: the drawing can call out "M6 clearance
 future check can ask whether the fastener through a hole matches the fit it was
 drilled for.
 
+> The drawing half of that shipped later than the rest, with
+> [the tolerances plan](../tolerances/plan.md) T4a: `FormatHoleCallout` now
+> appends the intent to a clearance hole (`Ø3.4 THRU, M3 NORMAL CLEARANCE`)
+> and leads a TAPPED one with its thread instead of the tap drill. It was
+> promised here when the fit landed and then sat unbuilt while every drawing
+> went on calling a hole by its diameter — which the drawing smoke test
+> covered up, asserting the callout ended in "THRU" and calling that "reads
+> the fit".
+
 ## Cost, and what to watch
 
 Small, and smaller since F1: the CSV parser and the clearance table exist

@@ -40,6 +40,12 @@ const HoleFeature* FindHoleForRef(const Document& doc,
                                   double modelRadius);
 
 // "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°").
+//
+// A hole that recorded a FIT says what it is for rather than only how wide it
+// is: a clearance hole appends its intent ("Ø3.4 THRU, M3 NORMAL CLEARANCE")
+// and a TAPPED one leads with the thread instead of the tap drill ("M3 THRU",
+// "M3×0.35 DEEP 8"), because the drill is not what gets made. A hole with no
+// fit is formatted exactly as it always was.
 std::string FormatHoleCallout(const HoleFeature& hole);
 
 // The uniform centre-to-centre pitch of a collinear row, or nullopt when the
