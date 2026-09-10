@@ -553,13 +553,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (!f)
         throw std::runtime_error("body has no creating feature");
     }
+    // An unrecognised slug is refused by SetMaterial below, naming what IS
+    // accepted — the same funnel add_feature and document load go through.
+    // This used to sniff for `== DEFAULT` here, which caught it on this one
+    // path and named nothing.
     const std::string slug = p.value("material", std::string{});
-    // A non-empty slug that resolves to DEFAULT is unknown (DEFAULT is never in
-    // the slug table, so valid slugs always map to a specific material).
-    if (!slug.empty() && CADMaterials::MaterialLibrary::FromSlug(slug) ==
-                             CADMaterials::MaterialType::DEFAULT) {
-      throw std::runtime_error("unknown material slug: " + slug);
-    }
     json before = DocumentIO::FeatureToJson(*f);
     f->SetMaterial(slug);
     doc->Regenerate();

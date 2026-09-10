@@ -99,8 +99,7 @@ void DrawMaterialCheck(AppState& state) {
     return;
   const auto& types = MaterialLibrary::AllTypes();
   for (const Body& body : doc->GetBodies()) {
-    const auto& mp =
-        MaterialLibrary::GetMaterial(MaterialLibrary::FromSlug(body.material));
+    const auto& mp = MaterialLibrary::GetMaterialOrDefault(body.material);
     if (mp.youngGPa > 0.0f)
       continue;
     size_t index = 0;

@@ -16,10 +16,18 @@
 //     exactly this reason years apart, which is what makes a scanning test
 //     worth its ugliness: the sweep stopped early and nothing noticed.
 //
+//   - A seventh, MaterialLibrary::FromSlug, went on substituting for another
+//     year after that sweep — it was named FromSlug, and the scan below keys
+//     off the name. An unknown material became DEFAULT, an ALUMINIUM
+//     appearance carrying density 0. It is MaterialTypeFromString now, and
+//     the patterns below accept a `Class::` qualifier and decl-specifiers so
+//     a member parser cannot hide from them the way it did.
+//
 // A source-scanning test is a blunt instrument, so it is deliberately narrow:
 // one clearly-named family (`*FromString`), two mechanical properties. It
 // catches the NEXT parser someone adds, which no amount of fixing the current
-// ones can do.
+// ones can do — provided it is NAMED into the family, which is the one way
+// FromSlug escaped. A new string-to-enum parser goes in as `*FromString`.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -72,7 +80,7 @@ TEST_CASE("every bool *FromString parser is [[nodiscard]]", "[convention]") {
   // StudyFromJson did. [[nodiscard]] moves that from "spot it in review" to
   // "the compiler says so".
   const std::regex decl(
-      R"((\[\[nodiscard\]\]\s*)?bool\s+(\w*FromString)\s*\()");
+      R"((\[\[nodiscard\]\]\s*)?(?:static\s+|inline\s+|virtual\s+)*bool\s+([\w:]*FromString)\s*\()");
   std::vector<std::string> unmarked;
   for (const SourceFile& f : SourcesUnder("src", ".h")) {
     for (std::sregex_iterator it(f.text.begin(), f.text.end(), decl), end;
@@ -103,7 +111,7 @@ TEST_CASE("an enum-returning *FromString parser has no silent fallback",
   // first version of this test silently matched nothing and passed against
   // the very bug it was written for. Sabotage said so.
   const std::regex def(
-      R"(^([A-Za-z_][\w:]*)\s+(\w*FromString)\s*\(([^)]*)\)\s*\{)",
+      R"(^([A-Za-z_][\w:]*)\s+([\w:]*FromString)\s*\(([^)]*)\)\s*\{)",
       std::regex_constants::ECMAScript | std::regex_constants::multiline);
   std::vector<std::string> silent;
   for (const SourceFile& f : SourcesUnder("src", ".cpp")) {
