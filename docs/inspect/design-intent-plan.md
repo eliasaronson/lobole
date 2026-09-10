@@ -89,7 +89,7 @@ Initial kinds:
 
 - Measured dimension or quantity within independently specified bounds.
 - Required component count, role or spatial relationship.
-- Required contact/clearance and fitted-joint conditions. **The fitted-joint CHECK shipped without this entity** (`check_fits` walks the assembly's round mates and reads the mate type as the intent); as a persisted requirement it is still planned.
+- Required contact/clearance and fitted-joint conditions. The CLEARANCE half SHIPPED as this entity at v100: `add_assertion` / `list_assertions` / `verify_assertions` / `remove_assertion` hold a named minimum clearance between two occurrences IN the document, re-check it on demand, and report never | holds | violated | stale | unverifiable — staleness keyed on a content hash of the two subtrees' placed geometry, so an unrelated edit does not disturb it. The FITTED-JOINT half still shipped without this entity (`check_fits` walks the assembly's round mates and reads the mate type as the intent); as a persisted requirement that half is still planned.
 - Motion quantity or clash condition with declared study and coverage.
 - Explicit human review item for evidence that cannot yet be automated.
 

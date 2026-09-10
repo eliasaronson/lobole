@@ -17,7 +17,7 @@ Ordered by what it costs to leave alone.
 **Standing, 2026-09-10.** W1 and W4's villain arm, `document` arm and pass^k
 SHIPPED and merged (`723014c3`). On `wtpeer2`: **W2 COMPLETE** — all eleven
 verdict RPCs carry a receipt (the twelfth, `cam_simulate`, was on the list by
-its name and is a scrubber, not a check) — and **W3 SHIPPED** at v97: four
+its name and is a scrubber, not a check) — and **W3 SHIPPED** at v100: four
 verbs, five standings, a content-keyed staleness test, a golden, and the
 drone's own `verify()` reading its clearances from the document. W5 largely
 fell out of W1 — the drone's derived layout composes its Z-stack as a formula

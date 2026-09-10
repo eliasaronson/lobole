@@ -223,7 +223,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "short, bottoming out in a blind hole, or spanning nothing at all. "
      "Nothing is stored to make it work: a placed fastener's position and "
      "orientation are its rim and its axis, so it also checks one nobody "
-     "derived. Empty findings mean every fastener still fits.",
+     "derived. Returns `examined` and `skipped` beside `ok`/`findings`: empty "
+     "findings over ZERO screws and over forty-two used to read alike, and a "
+     "screw whose standard this build cannot size is not judged rather than "
+     "passed. The receipt is unverifiable when nothing was examined and never "
+     "verified while any screw was skipped.",
      ""},
     {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",

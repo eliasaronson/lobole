@@ -91,8 +91,8 @@ worktrees running suites) and are an upper bound, not a clean baseline:
 
 | what | command | cost |
 |---|---|---|
-| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~110 s (1203) |
-| **inner loop** | `tools/test-fast.sh` | **~55 s** (1184 of 1203) |
+| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~110 s (1204) |
+| **inner loop** | `tools/test-fast.sh` | **~55 s** (1185 of 1204) |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
 | the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 
@@ -120,7 +120,7 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~110 s for 1203 tests, of which the SIMP gate alone is 77 s of CPU and four
+  — ~110 s for 1204 tests, of which the SIMP gate alone is 77 s of CPU and four
   CAM clearing cases 138 s between them. **Inner loop: `tools/test-fast.sh`
   (~55 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.

@@ -63,7 +63,7 @@ propeller and a 6S 1300 pack.
   empty;
 - `check_fasteners` re-derives all 42 screws against the stacks they are in
   and reports nothing;
-- seven clearances, measured not calculated, and since v97 **declared on the
+- seven clearances, measured not calculated, and since v100 **declared on the
   assembly** rather than computed by the build script — `list_assertions`
   shows them beside the model and moving a plate marks them stale without
   anyone re-running anything: prop to prop 30.0, prop to top plate 36.5, prop
@@ -167,7 +167,7 @@ TRUE, and `mass_properties` returns `mass_g`.
 | fasteners | 14.5 | 42 `fit_fastener` calls, each traversing an axis through 91 occurrences |
 | renders | 11.9 | a 256-sample path trace and a view sheet |
 | fastener check | 8.7 | all 42 re-derived against their stacks |
-| clearances | 5.9 | six exact distances |
+| clearances | 5.9 | seven declared clearances, verified off the tessellations |
 | parts | 3.5 | 25 parts, 300-odd features |
 | everything else | 12 | clash sweep 1.4, motion study 1.4, sheets 1.6, exports 1.9 |
 

@@ -420,7 +420,7 @@ add_test(NAME sdk_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(sdk_smoke PROPERTIES TIMEOUT 180)
 
-# Declared clearances (peer-survey-plan W3, v97): the four standings a boolean
+# Declared clearances (peer-survey-plan W3, v100): the five standings a boolean
 # cannot carry — never / holds / violated / stale / unverifiable — plus the
 # non-event that matters most, an unrelated edit NOT making one stale.
 add_test(NAME assertion_smoke

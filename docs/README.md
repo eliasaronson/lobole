@@ -106,9 +106,13 @@ thing behind it invisible to the next person who looks.
   stages, most of them wiring: the oracle already reports a surface-type census
   nothing reads, and the app-reported check machinery is called by no task.
 - **[peer-survey-plan.md](peer-survey-plan.md)** — what four peer projects
-  (vcad, forgent3d, CADAM, NURBGen) are worth to us. Six workstreams; W1
-  (parameters surviving the script boundary), W2 (verdict receipts) and parts
-  of W4 (the villain arm, a direct-emission arm, pass^k) have shipped.
+  (vcad, forgent3d, CADAM, NURBGen) are worth to us. Six workstreams, and
+  none outstanding: W1 (parameters surviving the script boundary), W2 (verdict
+  receipts on every verdict RPC), W3 (clearances declared IN the document,
+  v100), W4 (the villain arm, a direct-emission arm, pass^k, and a Fit task
+  graded against a host the agent never sees) and W5 all shipped; W6 (a DFM
+  check) was investigated and DECLINED, with the evidence and the two
+  conditions that would reverse it.
   Overlaps `benchmark-construction-plan.md` on one finding — both rounds
   independently spotted that `faces_by_kind` is emitted and unread.
 - **[capability-review-2026-08-31.md](capability-review-2026-08-31.md)** — the

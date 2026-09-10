@@ -105,9 +105,14 @@ no STEP file records. Those checks read the app's own `get_state` and carry
 
 ## Tasks
 
-Thirteen parts, tiers T0–T5, 67 oracle checks per repetition. Every prompt pins
-its axes and origin, states millimetres, and forbids unrequested fillets — so a
-failed dimension check is a failure to model, not a failure to guess.
+Static parts in tiers T0–T3, two mechanisms at T4/T5, and one Fit task graded
+against a host the agent never sees. Every prompt pins its axes and origin,
+states millimetres, and forbids unrequested fillets — so a failed dimension
+check is a failure to model, not a failure to guess.
+
+The count is deliberately not written down: `reference.py` prints the tasks and
+their checks, and this line has been wrong twice already (eight parts, then
+thirteen; 48/48, then 68/68).
 
 | id | tier | what it exercises |
 |---|---|---|
@@ -124,10 +129,11 @@ failed dimension check is a failure to model, not a failure to guess.
 | `t3-bent-tube` | 3 | a swept bend, by either route that reaches one |
 | `t4-slider-crank` | 4 | three PARTS and an ASSEMBLY: mates that have to place things where the geometry says, not where a number was typed |
 | `t5-crank-motion` | 5 | the same, plus **saying what it does** — the stroke over a full turn, and whether anything collides |
+| `f1-cap-tube` | fit | a part graded against ANOTHER part: an end cap mated to a tube the agent never sees. Clearance, interference volume and real contact area — the class of error that a dimensionally perfect part can still commit |
 
-`runners/reference.py` builds all thirteen by hand and must score 68/68. It costs
-nothing, it runs in about a minute, and it is the first thing to run when a
-sweep looks wrong: **if the reference arm fails, the harness or the app is
+`runners/reference.py` builds every task by hand and must score every check. It
+costs nothing, it runs in about a minute, and it is the first thing to run when
+a sweep looks wrong: **if the reference arm fails, the harness or the app is
 broken, not the agent.** It is also where a task's expected numbers get checked
 — two of the first eight were wrong when written, and T4's were wrong twice
 (the largest solid is the piston, not the crank; and origin-to-origin mates

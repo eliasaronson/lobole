@@ -441,7 +441,7 @@ RESIDUE_MM3 = 0.01   # coincident thread surfaces: a cube 0.2 mm on a side
 
 
 # The clearances that decide whether it flies or eats itself — DECLARED on
-# the assembly (v97) rather than measured by this script.
+# the assembly (v100) rather than measured by this script.
 #
 # They used to live in a python dict here: a reading somebody took, in a file
 # nobody opening the document would ever see. Now `declare_clearances` puts
@@ -506,7 +506,7 @@ def verify(app, asm, parts, occ, props):
         bad.append(f"fastener {f.get('part')}: {f.get('why')}")
 
     # The clearances that decide whether it flies or eats itself — asked of
-    # the DOCUMENT, which is where they were declared (v97).
+    # the DOCUMENT, which is where they were declared (v100).
     #
     # This used to be a `gap()` helper and a dict of seven measurements taken
     # by this file. Two things changed by moving them into the assembly.
