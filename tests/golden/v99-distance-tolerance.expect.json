@@ -1,0 +1,24 @@
+{
+  "features": 2,
+  "bodies": 2,
+  "volumes": [
+    12566.370614359,
+    16000.0
+  ],
+  "tolerances": [
+    {
+      "feature_id": 1,
+      "element": "1/face0",
+      "class": "g6"
+    },
+    {
+      "feature_id": 2,
+      "element": "2/face0",
+      "class": "",
+      "b_feature_id": 2,
+      "b_element": "2/face1",
+      "lower": -0.1,
+      "upper": 0.1
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Angles.h"
+#include "core/Measure.h"
 #include "ui/DocumentSlots.h"
+#include "ui/MeasureActions.h"
+#include "ui/PanelTitles.h"
 #include "ui/VariableActions.h"
 
 // Modeling GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -1698,4 +1701,153 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // U1a: feature selection is a stable id, not an index — deleting an
   // earlier sibling must not move it (the old int-index selection pointed at
   // whatever feature slid into the vacated slot).
+
+  // ---- Tolerances (docs/tolerances/plan.md T3) ----------------------------
+  //
+  // The editor lives in the Measure tool window, because measuring a face and
+  // saying what it may vary by are the same gesture on the same pick. These
+  // drive the picks through MeasureElementClicked rather than the viewport:
+  // the pick pipeline has its own tests, and what is under test here is that
+  // the tolerance UI turns a pick into document data.
+  t = IM_REGISTER_TEST(engine, "tolerance", "a_measured_bore_gets_a_class");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+
+    // The cylindrical face, taken off the body's own element map so the test
+    // never hard-codes a toponame.
+    const Body& body = Doc()->GetBodies()[0];
+    std::string round;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto face = Measure::DescribeFaceAt(body, index);
+      if (face && face->kind == "cylinder") {
+        round = name;
+        break;
+      }
+    }
+    IM_CHECK(!round.empty());
+
+    s_App->measure.active = true;
+    ctx->Yield(2);
+    ui::MeasureElementClicked(*s_App, ui::MeasureState::Element::OfFace(
+                                          ElementRef{body.createdBy, round}));
+    ctx->Yield(2);
+
+    // With no class chosen the editor refuses BY NAME rather than writing a
+    // plausible one: there is no honest default for a face nobody has said is
+    // a bore or a shaft.
+    ctx->ItemClick("//###ToolWindow/###tol_set");
+    ctx->Yield(2);
+    IM_CHECK(Doc()->GetTolerances().empty());
+    IM_CHECK(!s_App->toleranceMsg.empty());
+
+    // ComboClick resolves relative to the current ref, not from the root.
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###tol_letter/H  bore");
+    ctx->Yield();
+    ctx->ComboClick("###tol_grade/IT7");
+    ctx->Yield();
+    ctx->ItemClick("//###ToolWindow/###tol_set");
+    ctx->Yield(2);
+
+    IM_CHECK_EQ(Doc()->GetTolerances().size(), (size_t)1);
+    IM_CHECK_STR_EQ(Doc()->GetTolerances()[0].isoClass.c_str(), "H7");
+    IM_CHECK_STR_EQ(Doc()->GetTolerances()[0].ref.name.c_str(), round.c_str());
+    IM_CHECK(!Doc()->GetTolerances()[0].IsDistance());
+
+    // A tolerance moves no surface. This is the claim the whole design rests
+    // on, asserted where a person would actually break it.
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+
+    // ...and it undoes.
+    IM_CHECK(s_App->commands->CanUndo());
+    s_App->commands->Undo(*Doc());
+    ctx->Yield();
+    IM_CHECK(Doc()->GetTolerances().empty());
+
+    s_App->measure = ui::MeasureState{};
+  };
+
+  // A plane has no size of its own — and the refusal says what to do about
+  // it, because a second pick turns the same gesture into a length.
+  t = IM_REGISTER_TEST(engine, "tolerance", "a_plane_is_told_what_to_do");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ToolbarCreateAccept(ctx, "###tb_box");
+    const Body& body = Doc()->GetBodies()[0];
+    std::vector<std::string> planes;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto face = Measure::DescribeFaceAt(body, index);
+      if (face && face->kind == "plane")
+        planes.push_back(name);
+    }
+    IM_CHECK(planes.size() >= 2);
+
+    s_App->measure.active = true;
+    ctx->Yield(2);
+    ui::MeasureElementClicked(*s_App,
+                              ui::MeasureState::Element::OfFace(
+                                  ElementRef{body.createdBy, planes[0]}));
+    ctx->Yield(2);
+    // No Set button at all here: there is nothing to tolerance yet, and the
+    // window says so instead of offering a button that would refuse.
+    IM_CHECK(
+        ctx->ItemInfo("//###ToolWindow/###tol_set", ImGuiTestOpFlags_NoError)
+            .ID == 0);
+
+    // The second face makes it a length, and now it commits.
+    ui::MeasureElementClicked(*s_App,
+                              ui::MeasureState::Element::OfFace(
+                                  ElementRef{body.createdBy, planes[1]}));
+    ctx->Yield(2);
+    s_App->toleranceLower = -0.1;
+    s_App->toleranceUpper = 0.1;
+    ctx->ItemClick("//###ToolWindow/###tol_set");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetTolerances().size(), (size_t)1);
+    IM_CHECK(Doc()->GetTolerances()[0].IsDistance());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+
+    s_App->measure = ui::MeasureState{};
+  };
+
+  // The Variables panel lists what the part carries, and clears a row.
+  t = IM_REGISTER_TEST(engine, "tolerance", "the_panel_lists_and_clears");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    const Body& body = Doc()->GetBodies()[0];
+    std::string round;
+    for (const auto& [index, name] : body.elementMap.names) {
+      const auto face = Measure::DescribeFaceAt(body, index);
+      if (face && face->kind == "cylinder") {
+        round = name;
+        break;
+      }
+    }
+    IM_CHECK(!round.empty());
+    Tolerance tol;
+    tol.ref = ElementRef{body.createdBy, round};
+    tol.isoClass = "g6";
+    const uint64_t id = Doc()->SetTolerance(tol).id;
+    ctx->Yield(2);
+
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    // Toggle the section only if the row is not already reachable. A
+    // CollapsingHeader's open state lives in ImGui's ini and outlives
+    // ResetAppForTest, so ItemOpen here was order-dependent: it passed
+    // serially and failed under --shuffle in the shard where the section was
+    // already open, which is the whole reason the suite runs shuffled.
+    const std::string del = "//###Variables/###tol_del_" + std::to_string(id);
+    if (ctx->ItemInfo(del.c_str(), ImGuiTestOpFlags_NoError).ID == 0) {
+      ctx->ItemClick("//###Variables/Tolerances");
+      ctx->Yield(2);
+    }
+    ctx->ItemClick(del.c_str());
+    ctx->Yield(2);
+    IM_CHECK(Doc()->GetTolerances().empty());
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+  };
 }

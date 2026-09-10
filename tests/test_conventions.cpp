@@ -664,6 +664,12 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
       // nobody made.
       {"compare_geometry", "src/remote/RemoteInspection.cpp", true},
       {"run_motion_study", "src/remote/RemoteMotion.cpp", true},
+      // Arrived with the tolerances round, and this list is why it did not
+      // arrive unnoticed. Its own doc row had already reached the rule —
+      // "anything not fully answerable is `unverified` WITH the reason and
+      // never a pass" — in its own words; the receipt makes it the common
+      // ones.
+      {"check_fits", "src/remote/RemoteInspection.cpp", true},
   };
 
   std::set<std::string> attachesReceipt;

@@ -228,6 +228,43 @@ private:
   nlohmann::json m_before, m_after;
 };
 
+// ---- Tolerances (docs/tolerances/plan.md) ---------------------------------
+
+// Sets or replaces the tolerance on one element. Upsert, because a face
+// cannot be two sizes at once: Undo restores whatever was on that element
+// before, INCLUDING nothing.
+class SetToleranceCommand : public Command {
+public:
+  explicit SetToleranceCommand(Tolerance tolerance);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+  uint64_t ToleranceId() const { return m_after.id; }
+
+private:
+  Tolerance m_after;
+  Tolerance m_before;
+  bool m_hadBefore = false;
+};
+
+// Clears the tolerance on an element, snapshotting it for Undo (which
+// restores it with its original id, so references survive undo/redo).
+class ClearToleranceCommand : public Command {
+public:
+  explicit ClearToleranceCommand(uint64_t toleranceId);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  uint64_t m_id;
+  Tolerance m_removed;
+  bool m_had = false;
+};
+
 // ---- Configurations (the study command trio, verbatim) --------------------
 
 // Adds a new (empty) configuration; the created id is captured for redo.

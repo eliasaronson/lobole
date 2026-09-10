@@ -11,6 +11,7 @@
 #include <vector>
 
 class Document;
+struct Tolerance;
 class HoleFeature;
 
 // Callout dimension support (drawings round 2): resolving a projected hole
@@ -41,9 +42,37 @@ const HoleFeature* FindHoleForRef(const Document& doc,
                                   const std::string& mappedName,
                                   double modelRadius);
 
+// The SIZE tolerance on the cylindrical face that made this circle, or null.
+// Same provenance trick as FindHoleForRef — the feature ids in the MappedName
+// narrow the candidates and the radius cross-checks them — and the same
+// refusal: several matches is no match, because labelling a bore with another
+// bore's band is worse than labelling it with none.
+//
+// Distance tolerances are never returned: a gap between two faces is not the
+// size of this circle.
+const Tolerance* FindToleranceForRef(const Document& doc,
+                                     const std::string& mappedName,
+                                     double modelRadius);
+
+// What a toleranced dimension gains on the sheet: " H7" for a class, or
+// " +0.05/-0.02" for an explicit band — upper over lower, the order a drawing
+// writes them in. Empty for a distance tolerance, which is not a size.
+//
+// Here rather than at the call site because this file is where the sheet's
+// text vocabulary lives, Latin-1 and all. Deviations follow the sheet's own
+// rule: the document's unit, no suffix, the title block says which once.
+std::string FormatToleranceSuffix(const Tolerance& tol,
+                                  const units::System& units = {});
+
 // "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°"), with
 // every length in the document's unit and no suffix — the title block says
 // which, once, as it does for every other number on the sheet.
+//
+// A hole that recorded a FIT says what it is for rather than only how wide it
+// is: a clearance hole appends its intent ("Ø3.4 THRU, M3 NORMAL CLEARANCE")
+// and a TAPPED one leads with the thread instead of the tap drill ("M3 THRU",
+// "M3×0.35 DEEP 8"), because the drill is not what gets made. A hole with no
+// fit is formatted exactly as it always was.
 std::string FormatHoleCallout(const HoleFeature& hole,
                               const units::System& units = {});
 

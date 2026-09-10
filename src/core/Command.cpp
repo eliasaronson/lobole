@@ -213,6 +213,58 @@ void RenameVariableCommand::Undo(Document& doc) {
 
 // ---- FEM studies ----------------------------------------------------------
 
+SetToleranceCommand::SetToleranceCommand(Tolerance tolerance)
+    : m_after(std::move(tolerance)) {}
+
+std::string SetToleranceCommand::Description() const {
+  return m_after.isoClass.empty() ? "Set tolerance"
+                                  : "Set tolerance " + m_after.isoClass;
+}
+
+bool SetToleranceCommand::Execute(Document& doc) {
+  // By SUBJECT, matching what SetTolerance replaces. ToleranceFor would
+  // answer about the face's SIZE, which for a distance edit is either nothing
+  // (so undo would delete rather than restore) or an unrelated size tolerance
+  // (so undo would restore that and leave the edit standing).
+  if (const Tolerance* prev =
+          doc.ToleranceForSubject(m_after.ref, m_after.ref2)) {
+    m_before = *prev;
+    m_hadBefore = true;
+  }
+  // Redo must land the same id the first Execute assigned, or anything
+  // holding one is pointing at a tolerance that no longer exists.
+  const Tolerance& stored = doc.SetTolerance(m_after);
+  m_after.id = stored.id;
+  return true;
+}
+
+void SetToleranceCommand::Undo(Document& doc) {
+  if (m_hadBefore)
+    doc.SetTolerance(m_before);
+  else
+    doc.RemoveTolerance(m_after.id);
+}
+
+ClearToleranceCommand::ClearToleranceCommand(uint64_t toleranceId)
+    : m_id(toleranceId) {}
+
+std::string ClearToleranceCommand::Description() const {
+  return "Clear tolerance";
+}
+
+bool ClearToleranceCommand::Execute(Document& doc) {
+  if (const Tolerance* t = doc.FindTolerance(m_id)) {
+    m_removed = *t;
+    m_had = true;
+  }
+  return doc.RemoveTolerance(m_id);
+}
+
+void ClearToleranceCommand::Undo(Document& doc) {
+  if (m_had)
+    doc.SetTolerance(m_removed);
+}
+
 AddStudyCommand::AddStudyCommand(std::string name) : m_name(std::move(name)) {}
 
 std::string AddStudyCommand::Description() const {

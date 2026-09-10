@@ -144,7 +144,8 @@ The exposed set is what a person asks an assistant for:
 
 Everything else — assemblies (mates, and since v83 the gear/rack/screw
 relations between them), drawings, studies, configurations, sketch
-constraints and ops, checkpoints, topology, reference images, the raw GUI
+constraints and ops, checkpoints, topology, tolerances and fits, reference
+images, the raw GUI
 actions — is reached through **`rpc(method, params)`**, and documented through
 **`help(method)`**, which returns the same prose that used to sit in that
 tool's description plus the wrapper's signature. Nothing was removed: the

@@ -475,11 +475,42 @@ void AssertUnits(const Document& doc, const nlohmann::json& expect) {
         want.at("angle").get<std::string>());
 }
 
+// Tolerances (v98). Optional, like the CAM and units assertions. Worth
+// gating because the failure is silent in a particular way: a tolerance that
+// fails to reload does not break the document or move a surface — the part
+// looks exactly right and is simply no longer the size anybody decided on.
+// The ELEMENT ref is checked as well as the class, since a tolerance that
+// reloads pointing at the wrong face is worse than one that is missing.
+void AssertTolerances(const Document& doc, const nlohmann::json& expect) {
+  if (!expect.contains("tolerances"))
+    return;
+  const nlohmann::json& want = expect.at("tolerances");
+  REQUIRE(doc.GetTolerances().size() == want.size());
+  for (size_t i = 0; i < want.size(); i++) {
+    INFO("tolerance " << i);
+    const Tolerance& got = doc.GetTolerances()[i];
+    CHECK(got.ref.name == want[i].at("element").get<std::string>());
+    CHECK(got.ref.featureId == want[i].at("feature_id").get<uint64_t>());
+    // The second ref is what makes it a DISTANCE rather than a size, so a
+    // golden that loses it reloads as a tolerance on the wrong thing
+    // entirely — with limits that still look plausible.
+    CHECK(got.ref2.name == want[i].value("b_element", std::string{}));
+    CHECK(got.ref2.featureId == want[i].value("b_feature_id", uint64_t{0}));
+    CHECK(got.IsDistance() == want[i].contains("b_element"));
+    CHECK(got.isoClass == want[i].value("class", std::string{}));
+    CHECK_THAT(got.lower,
+               Catch::Matchers::WithinAbs(want[i].value("lower", 0.0), 1e-12));
+    CHECK_THAT(got.upper,
+               Catch::Matchers::WithinAbs(want[i].value("upper", 0.0), 1e-12));
+  }
+}
+
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   if (expect.contains("generator"))
     CHECK(doc.Generator() == expect.at("generator"));
   if (expect.contains("catalogs"))
     CHECK(doc.GetCatalogs() == expect.at("catalogs"));
+  AssertTolerances(doc, expect);
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
   std::vector<double> volumes;

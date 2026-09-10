@@ -42,7 +42,7 @@ Document::Document(const Document& other) : Document(other, false) {}
 // that same diff over BOTH copy forms.
 Document::Document(const Document& other, bool reuseGeometry)
     : m_assets(other.m_assets), m_parameters(other.m_parameters),
-      m_studies(other.m_studies),
+      m_tolerances(other.m_tolerances), m_studies(other.m_studies),
       // Solved results cost minutes and are not derivable from the feature
       // list, so they travel with the copy (re-stamped below).
       m_studyRuntime(other.m_studyRuntime),
@@ -463,6 +463,66 @@ fem::Study* Document::FindStudy(uint64_t id) {
       return &s;
   }
   return nullptr;
+}
+
+const Tolerance* Document::FindTolerance(uint64_t id) const {
+  for (const Tolerance& t : m_tolerances)
+    if (t.id == id)
+      return &t;
+  return nullptr;
+}
+
+const Tolerance* Document::ToleranceFor(const ElementRef& ref) const {
+  if (!ref.IsSet())
+    return nullptr;
+  for (const Tolerance& t : m_tolerances)
+    if (!t.IsDistance() && t.ref.featureId == ref.featureId &&
+        t.ref.name == ref.name)
+      return &t;
+  return nullptr;
+}
+
+const Tolerance* Document::ToleranceForSubject(const ElementRef& ref,
+                                               const ElementRef& ref2) const {
+  for (const Tolerance& t : m_tolerances)
+    if (t.ref.featureId == ref.featureId && t.ref.name == ref.name &&
+        t.ref2.featureId == ref2.featureId && t.ref2.name == ref2.name)
+      return &t;
+  return nullptr;
+}
+
+const Tolerance& Document::SetTolerance(Tolerance t) {
+  if (t.id == 0)
+    t.id = m_nextId++;
+  else
+    EnsureNextIdAtLeast(t.id + 1);
+  // Upsert by SUBJECT, not by id: the same face cannot carry two sizes, and
+  // the same ordered pair of faces cannot be two distances apart. A face's own
+  // size and a distance measured from it are different subjects, so they
+  // coexist. Replacing in place keeps list order stable for a UI listing them.
+  for (Tolerance& existing : m_tolerances) {
+    if (&existing == ToleranceForSubject(t.ref, t.ref2)) {
+      existing = std::move(t);
+      return existing;
+    }
+  }
+  m_tolerances.push_back(std::move(t));
+  return m_tolerances.back();
+}
+
+bool Document::RemoveTolerance(uint64_t id) {
+  for (auto it = m_tolerances.begin(); it != m_tolerances.end(); ++it) {
+    if (it->id == id) {
+      m_tolerances.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+void Document::RestoreTolerance(Tolerance t) {
+  EnsureNextIdAtLeast(t.id + 1);
+  m_tolerances.push_back(std::move(t));
 }
 
 fem::Study& Document::AddStudy(const std::string& name) {

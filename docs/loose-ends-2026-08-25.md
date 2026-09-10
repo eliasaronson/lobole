@@ -209,6 +209,9 @@ and joins each field's literals.
 **The payoff, concretely.** `describe` now answers
 `check_geometry → params: ["body"]`, and sending `tolerance` is refused with
 *"unknown parameter 'tolerance' for 'check_geometry'. Accepted: body."* Those
+  (The word means something else in the app now — `set_tolerance` and
+  `check_fit` are design intent, not a kernel epsilon. This example is a
+  record of the params gate and stands as written.)
 two agree because the gate forces them from one source of truth — previously
 the second existed and the first did not, so the only way to learn a key name
 was to send a wrong one.
