@@ -15,6 +15,7 @@
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include <map>
+#include <set>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -134,11 +135,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"list_relations", "List relations with status/errors.", ""},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
-     "Run the mate solver. Returns the per-mate status plus, for an assembly "
-     "with mate loops, how many degrees of freedom are left, whether every "
-     "loop closed and by how much it missed, and which mates were redundant "
-     "but consistent (three bolts through a flange: satisfied, saying nothing "
-     "new — not an error).",
+     "Run the mate solver. Returns the per-mate status; how many occurrences "
+     "the mates DETERMINE (`placed_by_mates`) against how many hold the "
+     "transform they were given (`placed_by_transform` — legitimate for a "
+     "nut or a camera, and the number to read before trusting `dof`); and, "
+     "for an assembly with mate loops, `dof` = the freedom left IN THE LOOPED "
+     "COMPONENTS only, whether every loop closed and by how much it missed, "
+     "and which mates were redundant but consistent (three bolts through a "
+     "flange: satisfied, saying nothing new — not an error).",
      ""},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/plan.md). "
@@ -1409,8 +1413,32 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // A6: report what the loop pass found HERE, in the mutating call's own
     // response, rather than leaving it for a get_state the caller has to know
     // to poll (the regen-honesty rule).
+    // How much of the assembly the mate system actually DETERMINES. Without
+    // this, `dof: 0` reads as a full bill of health and is not one: it is the
+    // freedom left in the LOOPED components (AssemblySolve.h says so), and it
+    // is silent about every occurrence no mate touches. The drone reports
+    // "56 mates, dof 0, loops True" over 105 occurrences of which 64 — all
+    // four standoffs, both camera plates, the camera, every nut — hold their
+    // position because someone typed it.
+    //
+    // That is not an error. Placing a nut by transform is a legitimate thing
+    // to do, and refusing it would be wrong. It is an unstated fact, and the
+    // fix for an unstated fact is to state it.
+    std::set<uint64_t> mated;
+    for (const Mate& mate : state.assembly->GetMates()) {
+      mated.insert(mate.a.occurrenceId);
+      mated.insert(mate.b.occurrenceId);
+    }
+    size_t byTransform = 0;
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      if (!mated.count(o.id))
+        byTransform++;
     json out{{"errored_mates", rep.erroredMates},
              {"placed", rep.placed},
+             {"occurrences", state.assembly->GetOccurrences().size()},
+             {"placed_by_mates",
+              state.assembly->GetOccurrences().size() - byTransform},
+             {"placed_by_transform", byTransform},
              {"mates", arr}};
     if (rep.loopMates > 0) {
       out["loop_mates"] = rep.loopMates;

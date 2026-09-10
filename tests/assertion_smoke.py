@@ -149,6 +149,24 @@ def main():
                    "reopening a verified assembly must not invent staleness "
                    f"— the geometry is what it was: {rows[0]}")
 
+    # solve_assembly says what its mates do NOT determine. `dof` is the
+    # freedom left in the LOOPED components (AssemblySolve.h), and on the
+    # drone it reads 0 over 105 occurrences of which 64 hold a typed
+    # transform. Not an error — placing a nut is legitimate — but an unstated
+    # fact, and the fix for an unstated fact is to state it.
+    with launch(binary) as app:
+        sdk = App(app.designer)
+        a, b = rig(sdk)                      # two occurrences, no mates at all
+        s = sdk.call("solve_assembly")
+        expect(s["occurrences"] == 2, s)
+        expect(s["placed_by_mates"] == 0,
+               f"nothing is mated here, so nothing is placed by one: {s}")
+        expect(s["placed_by_transform"] == 2,
+               f"both hold the transform they were given: {s}")
+        expect("dof" not in s,
+               "a loop-free assembly never enters the loop pass, so it must "
+               f"not report a dof at all: {s}")
+
     print("assertion_smoke: ok")
 
 

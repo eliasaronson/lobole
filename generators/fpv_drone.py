@@ -422,8 +422,15 @@ def add_mates(asm, occ):
         asm.fasten((occ[a[0]], a[1]), (occ[b[0]], b[1]), flipped=False)
 
     solved = asm.solve()
+    # `dof` is the freedom left in the LOOPED components, not a statement
+    # about the whole aircraft — so the split goes beside it. Most of this
+    # model holds the transform it was given, which is fine for a nut and
+    # worth knowing for a standoff.
     print(f"  {len(asm.app.list_mates()['mates'])} mates, "
-          f"dof {solved.get('dof')}, loops {solved.get('loops_closed')}")
+          f"dof {solved.get('dof')} (looped), loops {solved.get('loops_closed')}; "
+          f"{solved.get('placed_by_mates')} of {solved.get('occurrences')} "
+          f"occurrences placed by mates, "
+          f"{solved.get('placed_by_transform')} by transform")
     return props
 
 

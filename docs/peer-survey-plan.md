@@ -29,8 +29,7 @@ The drone's `verify()` now reads its clearances from the document instead of
 measuring them, which is the proof W3 owed — and the conversion turned up the
 next thing W1 owes (below).
 
-Remaining, in order: **occurrence placements do not follow variables**, W2's
-other seven handlers, W4(c), then W6 if it earns it.
+Remaining, in order: W2's other seven handlers, W4(c), then W6 if it earns it.
 
 ### What the drone conversion found: parts are parametric, placements are not
 
@@ -54,12 +53,38 @@ established which:
   under-constrained in a way `dof: 0` is not reporting; or
 * the solver is not re-solving on a geometry change, only on demand.
 
-Either is worth knowing, and the second would be the more serious. Note this
-is NOT an assertion bug: the clearances were right to stay `holds`. The same
-assertions do go stale, and selectively, when something actually moves —
-raising the top plate 20 mm marks exactly the three that involve it (prop to
-top plate, prop to battery, battery to camera) and leaves the other four
-alone, across 91 occurrences.
+**ANSWERED, and it was the first one.** Exactly one mate touches the top
+plate — a `fastened` to the battery pad that rides on it. The four bolts
+through it into the standoffs produced no mate at all, and neither did much
+else: **64 of the drone's 105 occurrences have no mate whatsoever**, including
+all four standoffs, both camera plates, the camera and every nut. They hold
+their position because someone typed it. Nothing says the top plate sits on
+the standoffs, so shortening one cannot move it.
+
+`dof: 0` was never wrong. `AssemblySolve.h` says what it is — "degrees of
+freedom left in the looped components", zero on a loop-free assembly because
+that pass never runs. It is silent about every occurrence no mate touches, and
+the drone's report line printed it as "56 mates, dof 0, loops True", which
+reads as a full bill of health. I read it that way twice.
+
+So this is the W2 shape once more, in the solver's own reporting rather than
+in a check: a number that reads clean while a large fact goes unstated.
+Placing a nut by transform is legitimate and refusing it would be wrong, so
+the fix is to STATE it. `solve_assembly` now returns `occurrences`,
+`placed_by_mates` and `placed_by_transform` beside `dof`, its `describe` row
+says `dof` is the looped components only, and the drone prints the split:
+
+    56 mates, dof 0 (looped), loops True; 41 of 105 occurrences placed by
+    mates, 64 by transform
+
+Whether the drone SHOULD mate its standoffs is a modelling question for a
+future round, and now it is one somebody can see to ask.
+
+Note none of this was an assertion bug: the clearances were right to stay
+`holds`. The same assertions do go stale, and selectively, when something
+really moves — raising the top plate 20 mm marks exactly the three that
+involve it (prop to top plate, prop to battery, battery to camera) and leaves
+the other four alone, across 91 occurrences.
 
 ---
 
