@@ -1,0 +1,7 @@
+{
+  "name": "document",
+  "description": "No RPC surface at all: the agent gets the document FORMAT and one tool that swallows a whole project. Exists because vcad's mecheval found that emitting their document format in one shot beat driving their MCP API on matched tiers (a2 100% vs 72%, a4 82% vs 42%) — and every arm we have goes through the API, so none of them can see whether ours is a help or a tax. If this arm wins, the finding is about our surface, not about this agent.",
+  "server": "document",
+  "only_tools": [],
+  "append_system_prompt": ""
+}

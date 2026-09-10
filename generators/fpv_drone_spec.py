@@ -172,31 +172,95 @@ STACK_SPACER_D = 6.0       # nylon spacers in the stack
 STACK_LOWER_SPACER = 4.0   # bottom plate -> ESC
 STACK_UPPER_SPACER = 8.0   # ESC -> FC: 4 mm of ESC caps under 2.5 of FC
 
-# --- DERIVED LAYOUT ---------------------------------------------------------
-MOTOR_R = WHEELBASE / 2.0
-PROP_R = PROP_DIAMETER / 2.0
-ARM_DIRS = (45.0, 135.0, 225.0, 315.0)      # front-left is +X+Y
-ARM_NAMES = ("Arm FL", "Arm RL", "Arm RR", "Arm FR")
-MOTOR_NAMES = ("Motor FL", "Motor RL", "Motor RR", "Motor FR")
-# Diagonal pairs spin the same way; front-left and rear-right are "props in".
-PROP_HAND = ("CW", "CCW", "CW", "CCW")
-
-Z_BOTTOM = 0.0
-Z_ARM = Z_BOTTOM + T_BOTTOM                     # 3
-Z_MID = Z_ARM + T_ARM                           # 8
-Z_MID_TOP = Z_MID + T_MID                       # 10
-Z_TOP = Z_MID_TOP + STANDOFF_LEN                # 25
-Z_TOP_TOP = Z_TOP + T_TOP                       # 27
-Z_MOTOR = Z_ARM + T_ARM                         # motors sit on the arm top
-Z_PROP = Z_MOTOR + MOTOR_PROP_SEAT_Z            # prop seat, world
-
-Z_ESC = Z_ARM + STACK_LOWER_SPACER              # ESC PCB underside
-Z_FC = Z_ESC + ESC_PCB_T + STACK_UPPER_SPACER   # FC PCB underside
+# These are choices, not consequences — they sit here because they describe
+# the layout, but nothing computes them, so they are declared like any other
+# design dimension.
 MID_OPENING = 42.0         # square hole the stack passes through
 MID_OPENING_R = 8.0
-BATT_X = -11.0              # pack centre: forward of the props, behind the cage
+BATT_X = -11.0             # pack centre: forward of the props, behind the cage
 TOP_NOTCH_BACK = 26.0      # the top plate's U-notch, so the camera sees over it
 TOP_NOTCH_HALF = 13.0
+
+# --- DERIVED LAYOUT ---------------------------------------------------------
+# Written once, evaluated twice. At import it runs over the plain floats above,
+# so this module stays importable with no app anywhere. `declare(app)` runs it
+# again over Params, so the SAME arithmetic reaches the document as formulas —
+# Z_TOP becomes an expression in the plate thicknesses, and thickening the arm
+# slides every level above it. vcad's loon bridge does the same thing in two
+# passes (crates/vcad-loon/src/params.rs: scan, resolve, rewrite); Python's
+# operator overloading lets the second pass BE the first one, run again.
+#
+# Trig and tuples deliberately fall back to plain numbers: the document's
+# expression language is not asked to hold a cosine, and a name that is a
+# choice of four (ARM_DIRS) is not a dimension.
+
+def _derive(g):
+    g["MOTOR_R"] = g["WHEELBASE"] / 2.0
+    g["PROP_R"] = g["PROP_DIAMETER"] / 2.0
+    g["ARM_DIRS"] = (45.0, 135.0, 225.0, 315.0)      # front-left is +X+Y
+    g["ARM_NAMES"] = ("Arm FL", "Arm RL", "Arm RR", "Arm FR")
+    g["MOTOR_NAMES"] = ("Motor FL", "Motor RL", "Motor RR", "Motor FR")
+    # Diagonal pairs spin the same way; front-left and rear-right are "props in".
+    g["PROP_HAND"] = ("CW", "CCW", "CW", "CCW")
+
+    g["Z_BOTTOM"] = 0.0
+    g["Z_ARM"] = g["Z_BOTTOM"] + g["T_BOTTOM"]                     # 3
+    g["Z_MID"] = g["Z_ARM"] + g["T_ARM"]                           # 8
+    g["Z_MID_TOP"] = g["Z_MID"] + g["T_MID"]                       # 10
+    g["Z_TOP"] = g["Z_MID_TOP"] + g["STANDOFF_LEN"]                # 25
+    g["Z_TOP_TOP"] = g["Z_TOP"] + g["T_TOP"]                       # 27
+    g["Z_MOTOR"] = g["Z_ARM"] + g["T_ARM"]                         # motors sit on the arm top
+    g["Z_PROP"] = g["Z_MOTOR"] + g["MOTOR_PROP_SEAT_Z"]            # prop seat, world
+
+    g["Z_ESC"] = g["Z_ARM"] + g["STACK_LOWER_SPACER"]              # ESC PCB underside
+    g["Z_FC"] = g["Z_ESC"] + g["ESC_PCB_T"] + g["STACK_UPPER_SPACER"]   # FC PCB underside
+
+
+    return g
+
+
+_DERIVED_NAMES = tuple(_derive({k: v for k, v in globals().items()
+                                if k.isupper()}).keys() - set(
+    k for k in list(globals()) if k.isupper()))
+_derive(globals())
+
+
+def _is_dimension(name, value):
+    """A base dimension: NAMED, a length or an angle, and not derived.
+
+    `float`, deliberately, not `(int, float)`. This module already draws the
+    line and every one of its 129 dimensions is written with a decimal point;
+    the only two integers in it are the two things that are NOT dimensions —
+    PROP_BLADES (a count, which `range()` needs as an int) and CELLS (a label,
+    which prints as "6S"). Declaring those as variables makes the document
+    claim you can have 3.5 blades, and breaks both call sites.
+    """
+    return (name.isupper() and not name.startswith("_")
+            and isinstance(value, float)
+            and name not in _DERIVED_NAMES)
+
+
+def declare(app):
+    """Declare every dimension here as a project variable; return the
+    namespace rebound to Params.
+
+    The 103 constants in this module are a dimension table — classified,
+    commented, and derived rather than transcribed — that reached the document
+    only as literals, so the drone opened with nothing to turn. This binds
+    them:
+
+        globals().update(spec.declare(app))     # at the top of a builder
+
+    Every use site is unchanged: MOTOR_BOLT_SQ is still a number, it just also
+    knows it is called `motor_bolt_sq`. Variable names are the lowercase of
+    the constant, which is what a reader of the GUI's variable table expects.
+    """
+    base = {k: v for k, v in globals().items() if _is_dimension(k, v)}
+    declared = app.params({k.lower(): v for k, v in sorted(base.items())},
+                          comment="fpv_drone_spec")
+    ns = {k: declared[k.lower()] for k in base}
+    _derive(ns)
+    return ns
 
 
 def diag(radius, k):

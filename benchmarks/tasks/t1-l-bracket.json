@@ -28,6 +28,12 @@
       "kind": "inclined_planes",
       "eq": 0,
       "why": "square corner, no draft"
+    },
+    {
+      "kind": "faces",
+      "of": "plane",
+      "eq": 14,
+      "why": "an L profile has fourteen planar faces; a block has six"
     }
   ]
 }
