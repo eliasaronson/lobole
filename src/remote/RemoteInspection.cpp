@@ -394,15 +394,21 @@ static constexpr MethodDoc InspectionMethods[] = {
      "an ISO fit is defined on one common basic size, so a clearance "
      "modelled into the geometry AND asked for as a class is counted twice. "
      "`intent` adds a verdict. Carried: sizes to 500 mm, IT4-IT13, shafts "
-     "d e f g h js k m n p and their uppercase holes. Worst case over "
-     "independent limits — no distribution, no form or position error. "
+     "d e f g h js k m n p and their uppercase holes — but shaft `k` only at "
+     "IT4-IT7 (it is `h` elsewhere), and holes K/M/N only to IT8 and P to "
+     "IT7, which is as far as the standard defines the delta correction they "
+     "need. Past that it REFUSES naming the limit, because dropping delta "
+     "anyway is wrong by exactly one grade step. Worst case over independent "
+     "limits — no distribution, no form or position error. "
      "`part` (on a side, or shared) resolves faces against another part "
      "without switching tab, so a bore and its shaft can live in two.",
      "hole, intent, part, shaft, size"},
     {"set_tolerance",
      "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
-     "expresses, never both. Adding {b: {feature_id, element}} tolerances "
+     "expresses, never both. Only a round face has a size of its own, and "
+     "anything else is refused saying so. Adding {b: {feature_id, element}} "
+     "tolerances "
      "the DISTANCE between the two faces instead (a shoulder-to-seat length, "
      "a slot width), which takes lower/upper and REFUSES a class: a class "
      "says how a shaft or a bore may vary, not how far apart two faces are. "
@@ -431,7 +437,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "account for is correlation: two lengths driven by one variable cancel "
      "rather than add, and a tolerance's nominal is measured, so there is no "
      "path back to the variable that drove it. The terms must be independent, "
-     "and the answer says so. Fewer than two terms is refused.",
+     "and the answer says so. A term may also be a bare tolerance id when it "
+     "adds. Refused: fewer than two terms (one tolerance is a tolerance, and "
+     "summing it would dress a lookup up as an analysis), an unknown id, and "
+     "a term whose geometry no longer resolves — rather than counting that "
+     "one as zero and silently shortening the chain.",
      "part, terms", remote::NeedsPart},
     {"check_fits",
      "Every fit this assembly declares, checked. A round mate already names "
@@ -443,9 +453,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "nothing-moves is equally true of a shrunk-on gear and of a bracket "
      "bolted through a clearance hole, and the two want opposite fits. "
      "Reaches into sub-assemblies, naming each side by its path. Anything "
-     "not fully answerable (an anchor that is a frame not a face, one side "
-     "untoleranced, two faces of different basic size) is `unverified` with "
-     "the reason, never a pass; the summary counts each kind apart.",
+     "not fully answerable is `unverified` WITH the reason and never a pass — "
+     "an anchor that is a frame rather than a face, one side untoleranced, "
+     "two faces of different basic size, a side stating explicit deviations "
+     "(which say nothing about which side is the bore), or both sides the "
+     "same case. The summary counts each kind apart.",
      ""},
     {"mass_properties",
      "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
@@ -2151,8 +2163,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                         bj.at("element").get<std::string>()};
       if (ref2.featureId == ref.featureId && ref2.name == ref.name)
         throw std::runtime_error(
-            "set_tolerance: `b` is the same face as `a` — a face is no "
-            "distance from itself");
+            "set_tolerance: `b` names the same face as `element` — a face is "
+            "no distance from itself");
       if (!Measure::Describe(part.GetBodies(), ref2))
         throw std::runtime_error("set_tolerance: element '" + ref2.name +
                                  "' does not resolve (list_elements)");

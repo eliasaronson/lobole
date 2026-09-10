@@ -66,8 +66,9 @@ A `Hole` gains an optional **fit** alongside its diameter, not instead of it:
   definition, and a plausible substitute here is a hole that looks right and
   is not (the house rule, `tests/test_conventions.cpp`).
 
-What it buys beyond saving a lookup: the drawing can call out "M6 clearance
-(normal)" instead of Ø6.6; changing the thread re-derives the diameter; and a
+What it buys beyond saving a lookup: the drawing can call out "M6 NORMAL
+CLEARANCE" beside Ø6.6 (a TAPPED hole leads with the thread INSTEAD of the tap
+drill — see the note below, which is what actually shipped); changing the thread re-derives the diameter; and a
 future check can ask whether the fastener through a hole matches the fit it was
 drilled for.
 

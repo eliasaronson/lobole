@@ -1,6 +1,6 @@
 # Tolerances and fits — plan
 
-> Status: **T1 in progress**, 2026-09-10. Branch `wttol`.
+> Status: **T1-T5b BUILT**, 2026-09-10. Branch `wttol`, format v98+v99.
 > Written after a survey of what the app carries today (below). The short
 > version: there is a *fit-class* system for clearance holes that drives real
 > geometry, a limits check for bearing seats that reads numbers a person types
@@ -22,8 +22,8 @@ That is the whole gap. It is not "we should display ±0.05 somewhere".
 |---|---|---|
 | clearance-hole fit class | `parts::Fit{Close,Normal,Loose,Tapped}`, `FastenerTable.h:182` | **real** — records intent, derives the diameter in `Execute`, GUI picker, backward lookup, refuses the unknown |
 | bearing-seat limits | `catalog::SeatRequirements`, `Catalog.cpp:446` | **real but detached** — measurements are typed by hand into a `static std::map` (`CatalogPanel.cpp:157`), never read from the model, never persisted |
-| `query_geometry` `radius_tol` | `RemoteInspection.cpp:1058` | a *search* band, transient, not design intent |
-| variables | `Parameter{name,expression,comment,value,error}`, `Document.h:26` | **nothing** — no tolerance, no unit, no provenance |
+| `query_geometry` `radius_tol` | `RemoteInspection.cpp` (`query_geometry`) | a *search* band, transient, not design intent |
+| variables | `Parameter{name,expression,comment,value,error}`, `Document.h` (`struct Parameter`) | **nothing** — no tolerance, no unit, no provenance |
 | drawing dimensions | `DrawingDim`, `DrawingDocument.h:113` | **nothing** — and dims are driven by design ("the text is computed from the model, never authored") |
 | threads | `threads::Standard{designation,majorDia,pitch}` | **nothing** — no 6g/6H |
 
@@ -60,7 +60,7 @@ Two consequences:
 
 ## Stages
 
-### T1 — the table and the arithmetic (no persistence, no format bump)
+### T1 — the table and the arithmetic. BUILT (no persistence, no format bump)
 
 `core/FitStandards.{h,cpp}`, mirroring `ThreadStandards` — pure static data,
 unit tested, no I/O.
@@ -89,8 +89,8 @@ deviation tables, and `tests/test_fits.cpp` pins them against textbook fits
 **RPC `check_fit`**, in `RemoteInspection.cpp` — one method that does both
 jobs, in `measure`'s own vocabulary:
 
-    check_fit {hole: {class: "H7", a?: {feature_id, element}, part?, occurrence?},
-               shaft: {class: "g6", a?: {...}},
+    check_fit {hole: {class: "H7", feature_id?, element?, part?},
+               shaft: {class: "g6", feature_id?, element?, part?},
                size?, intent?: clearance|transition|interference}
 
 - `hole` alone → that class's limits at `size`.
@@ -107,15 +107,16 @@ the substitution this codebase exists to refuse.
 
 T1 already delivers the headline check. Nothing is stored yet.
 
-### T2 — the document remembers (format bump + golden)
+### T2 — the document remembers. BUILT (v98, golden)
 
 `Document` gains `std::vector<Tolerance>`:
 
     struct Tolerance {
       uint64_t id;
-      ElementRef ref;      // the cylindrical face
-      std::string cls;     // "H7"; empty = explicit deviations below
-      double lower, upper; // mm, signed, from nominal
+      ElementRef ref;        // the face
+      ElementRef ref2;       // set (v99) = a DISTANCE, not a size
+      std::string isoClass;  // "H7"; empty = explicit deviations below
+      double lower, upper;   // mm, signed, from nominal
       std::string comment;
     };
 
@@ -127,7 +128,7 @@ source of truth, and a table correction fixes every document.
   every one whose two anchors are faces that both carry a tolerance, report the
   fit. A mate anchored on a `Frame` rather than a face, or one where only one
   side is toleranced, reports **`unverified` with the reason** — never a pass.
-  (`design-intent-plan.md:113`: "a truncated sweep is incomplete evidence,
+  (`design-intent-plan.md:110`: "a truncated sweep is incomplete evidence,
   never a pass.")
 
   **The mate type is the intent, and only some mates have one.** A joint that
@@ -317,7 +318,7 @@ variables. It is not queued behind T5b; it is a different problem.
   share a word; nothing in T1–T4 may touch `Precision::Confusion`.
 - **Worst case is not a distribution.** T1 reports the bounds of independent
   limits and nothing else. Statistical stackup needs correlations we do not
-  have (`design-intent-plan.md:245-252`) and is explicitly out of scope.
+  have (`design-intent-plan.md:206-222`) and is explicitly out of scope.
 - **The socket fudge.** `docs/parts/plan.md:323` models fastener socket sizes
   at the middle of the tolerance band as a hardcoded nudge. Once T2 exists that
   is expressible; until then, leave it alone and do not pretend it is a fit.

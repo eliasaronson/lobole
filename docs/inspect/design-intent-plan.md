@@ -57,6 +57,10 @@ Retain the existing nominal expression and evaluated value. Add optional:
 - Bilateral/asymmetric size tolerance as signed lower and upper deviations
   from nominal. Validate ordering, units and finite bounds. Untoleranced does
   not mean zero manufacturing variation.
+  **Shipped 2026-09-10, but on a measured ELEMENT rather than on `Parameter`**
+  — which is what the paragraph below argued for. Ordering is validated; units
+  are not, and the quantity-kind and provenance bullets did not ship. See
+  [tolerances/plan.md](../tolerances/plan.md).
 - Source reference, source location and provenance category: supplied,
   sourced, estimated, derived or unspecified. Preserve comments.
 
@@ -72,7 +76,7 @@ with a documented policy for existing bare literals and legacy parameters.
 Do not imply that adding a `unit` string makes the current evaluator unit-safe.
 Reject known incompatible quantities; report unresolved types explicitly.
 Dependency-aware dimensional inference and tolerance propagation are separate
-steps. Tolerance-only edits do not rebuild unchanged nominal B-Reps.
+steps. Tolerance-only edits do not rebuild unchanged nominal B-Reps. **This now holds and is asserted by test, not assumed.**
 
 ### Requirement
 
@@ -85,7 +89,7 @@ Initial kinds:
 
 - Measured dimension or quantity within independently specified bounds.
 - Required component count, role or spatial relationship.
-- Required contact/clearance and fitted-joint conditions.
+- Required contact/clearance and fitted-joint conditions. **The fitted-joint CHECK shipped without this entity** (`check_fits` walks the assembly's round mates and reads the mate type as the intent); as a persisted requirement it is still planned.
 - Motion quantity or clash condition with declared study and coverage.
 - Explicit human review item for evidence that cannot yet be automated.
 
@@ -162,6 +166,8 @@ verdicts against a clean full build. Test both warm reuse and cold restart.
 
 ### 3. Add toleranced quantities and executable dimensional requirements
 
+> **Half shipped 2026-09-10.** Toleranced quantities, their limits, and the > GUI/RPC surface exist ([tolerances/plan.md](../tolerances/plan.md)). The > requirement evaluator, unit semantics, source records and evidence > invalidation do NOT.
+
 Implement parameter/dimension metadata, source records and unit semantics, then
 a minimal requirement evaluator over existing measurement queries. Keep measured
 outputs read-only in the validation layer; feeding them back into design inputs
@@ -207,7 +213,8 @@ access test; unimplemented checks remain visibly unverified.
 
 Begin with explicitly supported analytical relationships and conservative bounds.
 For independent bilateral hole/shaft size limits, diametral clearance bounds are
-`hole_min - shaft_max` and `hole_max - shaft_min`. State whether clearance is
+`hole_min - shaft_max` and `hole_max - shaft_min`. **Implemented verbatim** in
+`fits::Fit` and reported by `check_fit`/`check_fits`. State whether clearance is
 radial or diametral. This does not by itself account for position/form errors.
 
 Preserve dependencies and shared-variable correlation; derived dimensions are not
@@ -280,8 +287,10 @@ See [the import guide](../parts/catalog-imports.md) and
 
 Seat checks currently consume caller-supplied measurements and explicitly supplied
 limits. They do not persist geometry bindings or requirements. The broader phases
-above remain planned: typed quantities/tolerances, persistent requirements,
-geometry-bound evidence, manufacturing/access checks and variation studies.
+above remain planned: persistent requirements, geometry-bound evidence,
+manufacturing/access checks and variation studies. Typed quantities came out
+of that list on 2026-09-10 — see [tolerances/plan.md](../tolerances/plan.md),
+which also records why the inferred stack chain did NOT ship.
 Connected SKF/Sandvik adapters and tool/holder schemas remain future work; no
 vendor dataset or redistribution permission is assumed by this implementation.
 
