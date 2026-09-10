@@ -27,6 +27,7 @@ add_executable(designer_tests
     test_document_copy.cpp
     test_determinism.cpp
     test_parts.cpp
+    test_fits.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
     test_instance_registry.cpp

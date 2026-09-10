@@ -5,6 +5,7 @@
 #include "common/BuildInfo.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
+#include "core/FitStandards.h"
 #include "core/FrameMath.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
@@ -28,6 +29,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -377,6 +380,22 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Did the model build? {ok, valid, body_count, "
      "feature_errors, bodies:[...B-Rep checks]}.",
      "body", remote::NeedsPart},
+    {"check_fit",
+     "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
+     "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
+     "them — `kind` (clearance|transition|interference) and the signed "
+     "`min_clearance`/`max_clearance`, where NEGATIVE is interference. The "
+     "nominal comes from `size`, or is MEASURED when a side also names a "
+     "face ({feature_id, element, part?}) — what the kernel built is what "
+     "gets made. Two measured faces that disagree are REFUSED naming both: "
+     "an ISO fit is defined on one common basic size, so a clearance "
+     "modelled into the geometry AND asked for as a class is counted twice. "
+     "`intent` adds a verdict. Carried: sizes to 500 mm, IT4-IT13, shafts "
+     "d e f g h js k m n p and their uppercase holes. Worst case over "
+     "independent limits — no distribution, no form or position error. "
+     "`part` (on a side, or shared) resolves faces against another part "
+     "without switching tab, so a bore and its shaft can live in two.",
+     "hole, intent, part, shaft, size"},
     {"mass_properties",
      "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
      "from "
@@ -1866,6 +1885,153 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         out["warnings"] = std::move(warnings);
       }
+    }
+    return out;
+  }
+  if (m == "check_fit") {
+    // ISO 286 limits and fits (docs/tolerances/plan.md, T1). Two jobs in one
+    // method because they are one question asked at two depths: `hole` alone
+    // is "what may this bore be", `hole` + `shaft` is "will they go
+    // together".
+    //
+    // Nothing here touches geometry. A size tolerance leaves nominal alone —
+    // that is what separates it from a clearance-hole fit, which picks a
+    // different diameter outright (parts::HoleDiameter).
+    //
+    // params: {hole: {class, feature_id?, element?, part?}, shaft?: {...},
+    //          size?, intent?}
+    const auto measureSide = [&](const json& s,
+                                 const char* which) -> std::optional<double> {
+      const bool hasFeature = s.contains("feature_id");
+      const bool hasElement = s.contains("element");
+      if (!hasFeature && !hasElement)
+        return std::nullopt;
+      if (!hasFeature || !hasElement)
+        throw std::runtime_error(
+            std::string("check_fit: ") + which +
+            " needs BOTH feature_id and element to name a face — "
+            "list_elements gives the pair");
+      const Document* d2 =
+          s.contains("part")   ? ResolvePartParam(state, s.at("part"))
+          : p.contains("part") ? ResolvePartParam(state, p.at("part"))
+                               : &RequirePartDoc(doc, "check_fit");
+      const ElementRef ref{s.at("feature_id").get<uint64_t>(),
+                           s.at("element").get<std::string>()};
+      const auto el = Measure::Describe(d2->GetBodies(), ref);
+      if (!el)
+        throw std::runtime_error(std::string("check_fit: ") + which +
+                                 " element '" + ref.name +
+                                 "' does not resolve (list_elements)");
+      if (!el->hasRadius)
+        throw std::runtime_error(
+            std::string("check_fit: ") + which + " is a " + el->shape +
+            ", which has no diameter. A fit is between round things — a "
+            "cylindrical face or a circular edge on each side");
+      return el->radius * 2.0;
+    };
+
+    if (!p.contains("hole"))
+      throw std::runtime_error(
+          "check_fit: `hole` is required, as {class: \"H7\"} at least");
+    const json& holeJson = p.at("hole");
+    if (!holeJson.contains("class"))
+      throw std::runtime_error(
+          "check_fit: hole.class is required, e.g. \"H7\"");
+    const std::string holeCls = holeJson.at("class").get<std::string>();
+    const std::optional<double> holeMeasured = measureSide(holeJson, "hole");
+
+    const bool hasShaft = p.contains("shaft");
+    std::string shaftCls;
+    std::optional<double> shaftMeasured;
+    if (hasShaft) {
+      const json& shaftJson = p.at("shaft");
+      if (!shaftJson.contains("class"))
+        throw std::runtime_error(
+            "check_fit: shaft.class is required, e.g. \"g6\"");
+      shaftCls = shaftJson.at("class").get<std::string>();
+      shaftMeasured = measureSide(shaftJson, "shaft");
+    }
+
+    // What nominal to work at. An explicit `size` wins; otherwise the model
+    // is asked, and two answers that disagree are refused rather than
+    // averaged or silently halved. See the describe row for why.
+    const auto mm = [](double v) {
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%.4f mm", v);
+      return std::string(buf);
+    };
+    double size = 0.0;
+    std::string sizeFrom;
+    if (p.contains("size")) {
+      size = p.at("size").get<double>();
+      sizeFrom = "given";
+    } else if (holeMeasured && shaftMeasured) {
+      constexpr double kAgree = 1e-5; // mm, far under the finest grade (3 um)
+      if (std::abs(*holeMeasured - *shaftMeasured) > kAgree)
+        throw std::runtime_error(
+            "check_fit: the two faces are not the same basic size — the hole "
+            "measures " +
+            mm(*holeMeasured) + " and the shaft " + mm(*shaftMeasured) +
+            ". An ISO fit is a band either side of ONE nominal, so a "
+            "clearance already modelled into the geometry would be counted "
+            "twice. Model both at the same size, or pass `size` to say which "
+            "nominal the classes are against.");
+      size = *holeMeasured;
+      sizeFrom = "measured";
+    } else if (holeMeasured || shaftMeasured) {
+      size = holeMeasured ? *holeMeasured : *shaftMeasured;
+      sizeFrom = "measured";
+    } else {
+      throw std::runtime_error(
+          "check_fit: no nominal size — pass `size`, or name a face on either "
+          "side with {feature_id, element} and it is measured");
+    }
+
+    const auto band = [&](const fits::Band& b, const std::string& cls) {
+      return json{{"class", cls},       {"lower", b.lower},
+                  {"upper", b.upper},   {"min", b.Min(size)},
+                  {"max", b.Max(size)}, {"it_grade", b.grade},
+                  {"it", b.it}};
+    };
+
+    json out{{"size", size}, {"size_from", sizeFrom}};
+    if (holeMeasured || shaftMeasured) {
+      json measured = json::object();
+      if (holeMeasured)
+        measured["hole"] = *holeMeasured;
+      if (shaftMeasured)
+        measured["shaft"] = *shaftMeasured;
+      out["measured"] = std::move(measured);
+    }
+
+    std::string why;
+    if (!hasShaft) {
+      const auto b = fits::Limits(size, holeCls, &why);
+      if (!b)
+        throw std::runtime_error("check_fit: " + why);
+      out["hole"] = band(*b, holeCls);
+      return out;
+    }
+
+    const auto pair = fits::Fit(size, holeCls, shaftCls, &why);
+    if (!pair)
+      throw std::runtime_error("check_fit: " + why);
+    out["hole"] = band(pair->hole, holeCls);
+    out["shaft"] = band(pair->shaft, shaftCls);
+    out["kind"] = fits::FitKindName(pair->kind);
+    out["min_clearance"] = pair->minClearance;
+    out["max_clearance"] = pair->maxClearance;
+    out["note"] = "worst case over two independent bands; form, position and "
+                  "surface finish are not evaluated";
+    if (p.contains("intent")) {
+      const std::string intent = p.at("intent").get<std::string>();
+      const auto want = fits::FitKindFromName(intent);
+      if (!want)
+        throw std::runtime_error(
+            "check_fit: unknown intent '" + intent +
+            "'. Accepted: clearance, transition, interference.");
+      out["intent"] = intent;
+      out["intent_ok"] = *want == pair->kind;
     }
     return out;
   }

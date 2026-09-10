@@ -261,6 +261,7 @@ set(core_sources
     src/core/io/ImportAssembly.cpp
     src/core/Measure.cpp
     src/core/ThreadStandards.cpp
+    src/core/FitStandards.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
