@@ -595,10 +595,15 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
       {"study_results", "src/remote/RemoteSimulation.cpp", true},
       {"contact_report", "src/remote/RemoteInspection.cpp", true},
       {"check_fasteners", "src/remote/RemoteAssembly.cpp", true},
-      {"check_drawing", "src/remote/RemoteDrawings.cpp", false},
-      {"check_layout", "src/remote/RemoteCam.cpp", false},
+      {"check_drawing", "src/remote/RemoteDrawings.cpp", true},
+      {"check_layout", "src/remote/RemoteCam.cpp", true},
       {"cam_verify", "src/remote/RemoteCam.cpp", true},
-      {"cam_simulate", "src/remote/RemoteCam.cpp", false},
+      // cam_simulate was on this list by its NAME. It is not a verdict RPC:
+      // it plays the posted file to a cursor and reports what has come off by
+      // that point — a scrubber, not a check, and its own doc row says so.
+      // The verdict over the same simulation is cam_verify's, and that one
+      // carries the receipt. A receipt manufactured here would be a claim
+      // nobody made.
       {"compare_geometry", "src/remote/RemoteInspection.cpp", true},
       {"run_motion_study", "src/remote/RemoteMotion.cpp", true},
   };

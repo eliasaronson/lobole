@@ -14,10 +14,12 @@ knowing about.
 
 Ordered by what it costs to leave alone.
 
-**Standing, 2026-09-10.** W1, W2 (five of twelve handlers) and W4's villain
-arm, `document` arm and pass^k SHIPPED and merged (`723014c3`). **W3 SHIPPED**
-on `wtpeer2` (v97): four verbs, five standings, a content-keyed staleness test
-and a golden. W5 largely
+**Standing, 2026-09-10.** W1 and W4's villain arm, `document` arm and pass^k
+SHIPPED and merged (`723014c3`). On `wtpeer2`: **W2 COMPLETE** — all eleven
+verdict RPCs carry a receipt (the twelfth, `cam_simulate`, was on the list by
+its name and is a scrubber, not a check) — and **W3 SHIPPED** at v97: four
+verbs, five standings, a content-keyed staleness test, a golden, and the
+drone's own `verify()` reading its clearances from the document. W5 largely
 fell out of W1 — the drone's derived layout composes its Z-stack as a formula
 without a new syntax. A second reading of vcad, done after working inside the
 app, added the findings in "Second pass" below and **demoted W6**: a
@@ -29,7 +31,9 @@ The drone's `verify()` now reads its clearances from the document instead of
 measuring them, which is the proof W3 owed — and the conversion turned up the
 next thing W1 owes (below).
 
-Remaining, in order: W2's other seven handlers, W4(c), then W6 if it earns it.
+Remaining, in order: W4(c) — a task with parameters and a Fit task, the two
+that would make W1 and the assembly surface measurable — then W6 if it earns
+it.
 
 ### What the drone conversion found: parts are parametric, placements are not
 

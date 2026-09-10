@@ -522,10 +522,42 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (p.value("update", true))
       ui::UpdateDrawingRenders(state);
     const json issues = DrawingIssuesJson(state);
-    return json{{"ok", issues.empty()},
-                {"issues", issues},
-                {"views", state.drawing->ViewCount()},
-                {"dims", state.drawing->DimCount()}};
+    json out{{"ok", issues.empty()},
+             {"issues", issues},
+             {"views", state.drawing->ViewCount()},
+             {"dims", state.drawing->DimCount()}};
+    {
+      // A sheet with no views passes every check there is. That is the
+      // "valid over nothing" shape again (core/Receipt.h): `ok: true` is
+      // true and it is not a drawing anyone can build from.
+      receipt::Receipt receipt;
+      const receipt::Oracle oracle{"designer/drawing-rules", "1"};
+      const std::string claim = "the drawing is complete and consistent";
+      if (state.drawing->ViewCount() == 0) {
+        receipt.Unverifiable(claim, oracle,
+                             "this sheet has no views — there is nothing for "
+                             "the drawing rules to check");
+      } else {
+        receipt::Claim c(claim, oracle,
+                         issues.empty() ? receipt::Verdict::Pass
+                                        : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Verified;
+        c.value = static_cast<double>(state.drawing->DimCount());
+        c.unit = "dimensions";
+        c.note = std::to_string(state.drawing->ViewCount()) +
+                 " view(s) checked against the drawing rules";
+        receipt.Add(std::move(c));
+        // A dimension-free drawing is not wrong, and it is not a drawing you
+        // can make a part from either. Said, not enforced.
+        if (state.drawing->DimCount() == 0)
+          receipt.Unverifiable(
+              "the drawing dimensions the part", oracle,
+              "no dimensions on this sheet, so nothing here says how big "
+              "anything is");
+      }
+      AttachReceipt(out, receipt);
+    }
+    return out;
   }
   if (m == "update_drawing") {
     // SelectDrawing reads it; the scanner cannot follow a helper.

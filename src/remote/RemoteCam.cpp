@@ -768,12 +768,18 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // one place for every branch, and invisible to the scanner from here.
     // rpc-params: job
     json out = json::array();
+    size_t placements = 0, outside = 0, refusals = 0;
     for (cam::Setup& setup : job->GetSetups()) {
       if (p.contains("setup") && setup.id != p.at("setup").get<uint64_t>())
         continue;
       const std::vector<Body>& bodies = ui::JobBodies(state);
       json fits = json::array();
-      for (const cam::PlacementFit& f : cam::CheckPlacements(setup, bodies)) {
+      const std::vector<cam::PlacementFit> checked =
+          cam::CheckPlacements(setup, bodies);
+      placements += checked.size();
+      for (const cam::PlacementFit& f : checked) {
+        if (f.fit != cam::Fit::Inside)
+          outside++;
         json fj = {{"placement", f.placementId},
                    {"part", f.jobPartId},
                    {"fit", f.fit == cam::Fit::Inside ? "inside"
@@ -799,8 +805,37 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       if (!warn.empty())
         sj["warnings"] = warn;
       out.push_back(std::move(sj));
+      if (!why.empty())
+        refusals++;
     }
-    return json{{"setups", std::move(out)}};
+    json result{{"setups", std::move(out)}};
+    {
+      // A job with no setups, or a setup with nothing placed in it, has
+      // nothing to lay out badly. Reporting that as a clean layout is the
+      // vacuous pass this receipt exists to name.
+      receipt::Receipt receipt;
+      const receipt::Oracle oracle{"designer/cam-layout", "1"};
+      const std::string claim = "every part is inside its stock and clear of "
+                                "the others";
+      if (placements == 0) {
+        receipt.Unverifiable(claim, oracle,
+                             "nothing is placed in any setup checked here, so "
+                             "there is no layout to be right or wrong");
+      } else {
+        receipt::Claim c(claim, oracle,
+                         (outside == 0 && refusals == 0)
+                             ? receipt::Verdict::Pass
+                             : receipt::Verdict::Fail);
+        c.basis = receipt::Basis::Verified;
+        c.value = static_cast<double>(placements);
+        c.unit = "placements";
+        c.note = std::to_string(outside) + " outside the stock, " +
+                 std::to_string(refusals) + " setup(s) refused";
+        receipt.Add(std::move(c));
+      }
+      AttachReceipt(result, receipt);
+    }
+    return result;
   }
 
   if (m == "set_job_placement") {
