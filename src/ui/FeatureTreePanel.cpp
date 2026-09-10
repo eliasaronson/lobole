@@ -656,9 +656,9 @@ void DrawFeatureTreePanel(AppState& state) {
             static nlohmann::json s_before;
             static uint64_t s_editing = 0;
             const Appearance ap = creator->GetAppearance();
-            const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
-                CADMaterials::MaterialLibrary::FromSlug(
-                    creator->GetMaterial()));
+            const auto& mat =
+                CADMaterials::MaterialLibrary::GetMaterialOrDefault(
+                    creator->GetMaterial());
             glm::vec3 color = ap.color.value_or(mat.baseColor);
             float rough = ap.roughness.value_or(mat.roughness);
             float metal = ap.metallic.value_or(mat.metallic);

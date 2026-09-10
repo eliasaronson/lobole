@@ -103,7 +103,7 @@ record of bumps and the corpus as a sample of them, not a mirror.
 | 7 | `5daade2` | Arcs + trim |
 | 8 | `9adb0bf` | Sketch derived ops (linear/circular pattern, `derived_ops`) |
 | 9 | `13a84d1` | Ellipses |
-| 10 | `d206a26` | Per-feature `material` slug |
+| 10 | `d206a26` | Per-feature `material` slug. An unrecognised non-empty slug is REFUSED on load, naming the accepted set — it used to resolve to DEFAULT, an aluminium appearance carrying density 0, so a file naming a material the build lacks looked machined while reporting no mass. Safe at a fixed version because a file newer than `kVersion` is already refused. |
 | 11 | `7723829` | Document `parameters` + `*_expr` expression twins |
 | 12 | `5b75a0f` | `DatumPlane` feature; sketch `plane_ref` |
 | 13 | `6feb6c0` | `Revolve` + `DatumAxis` (+ `AxisRef`) |

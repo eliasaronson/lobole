@@ -510,7 +510,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       // Factor of safety against yield, when the body's material defines one.
       if (b.bodyIndex >= 0 && b.bodyIndex < (int)doc->GetBodies().size() &&
           b.results.maxVonMises > 0) {
-        const auto mt = CADMaterials::MaterialLibrary::FromSlug(
+        const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
             doc->GetBodies()[b.bodyIndex].material);
         const float yield =
             CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;

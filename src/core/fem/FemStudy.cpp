@@ -287,7 +287,8 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     const Body& body = bodies[bodyIndex];
 
     // Material must have stiffness data (0 = unknown, like density).
-    const auto matType = CADMaterials::MaterialLibrary::FromSlug(body.material);
+    const auto matType =
+        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
     const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
     if (mp.youngGPa <= 0.0f)
       return fail("body '" + body.name + "': material '" +
@@ -507,7 +508,8 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
       settings.faceSizes.push_back({rf.faceIndex, study.refinements[i].size});
   }
 
-  const auto matType = CADMaterials::MaterialLibrary::FromSlug(body.material);
+  const auto matType =
+      CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
   const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
   if (mp.youngGPa <= 0.0f)
     return fail("body '" + body.name + "': material '" +
