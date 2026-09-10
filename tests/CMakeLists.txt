@@ -466,6 +466,15 @@ add_test(NAME measure_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(measure_smoke PROPERTIES TIMEOUT 120)
 
+# Tolerances and fits (docs/tolerances/plan.md): a tolerance as design intent
+# over RPC, and check_fits pairing faces off the assembly's own mates —
+# including a sub-assembly, where reaching the part behind an anchor is a walk
+# through three documents. Headless (no display).
+add_test(NAME tolerances_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tolerances_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(tolerances_smoke PROPERTIES TIMEOUT 120)
+
 # V1 contact & connectivity: interference distance/state + contact_report
 # components/near-misses/clashes. Headless (no display).
 add_test(NAME contact_smoke

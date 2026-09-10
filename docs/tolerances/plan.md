@@ -123,12 +123,27 @@ Stored as the class, not the derived numbers — same rule as the hole fit, one
 source of truth, and a table correction fixes every document.
 
 - RPCs `set_tolerance` / `list_tolerances` / `clear_tolerance`.
-- **`check_fits`** (plural, no args): walk the assembly's `Revolute` and
-  `Cylindrical` mates, and for every one whose two anchors are faces that both
-  carry a tolerance, report the fit. A mate anchored on a `Frame` rather than a
-  face, or one where only one side is toleranced, reports **`unverified` with
-  the reason** — never a pass. (`design-intent-plan.md:113`: "a truncated
-  sweep is incomplete evidence, never a pass.")
+- **`check_fits`** (plural, no args): walk the assembly's round mates, and for
+  every one whose two anchors are faces that both carry a tolerance, report the
+  fit. A mate anchored on a `Frame` rather than a face, or one where only one
+  side is toleranced, reports **`unverified` with the reason** — never a pass.
+  (`design-intent-plan.md:113`: "a truncated sweep is incomplete evidence,
+  never a pass.")
+
+  **The mate type is the intent, and only some mates have one.** A joint that
+  MOVES says so outright — revolute turns, slider slides, cylindrical does
+  both — so an interference fit contradicts it and fails, and a transition fit
+  warns. A `Fastened` round joint is **reported and not judged**: "nothing
+  moves here" is equally true of a shrunk-on gear and of a bracket bolted
+  through a clearance hole, and the two want opposite fits, so a verdict either
+  way would be invented. `Planar` and `Ball` are not round joints and are not
+  fits.
+
+  **It reaches into sub-assemblies**, by the same descent `AssemblySolve`'s
+  `ConnectorFrame` makes and minus the transform — a fit is between two SIZES,
+  and a size does not care where the unit was placed. Each side is named by its
+  path (`Rig/Housing`), because two occurrences of the same bearing are told
+  apart by where they sit, not by their part name.
 - Format bump, golden at that version, `docs/versioning/format.md` row. A
   tolerance-only edit must rebuild **zero** features — that is the acceptance
   test, not a nicety.
@@ -150,6 +165,43 @@ Two halves, in this order:
 2. **A dimension carries limits.** This is the first *authored* field on a
    deliberately *driven* object (`DrawingDocument.h:30`), so it is a decision,
    not a field: the value stays measured, the tolerance is authored beside it.
+
+### T5 — a tolerance on a LENGTH, and the stack that follows
+
+Everything above is diameters, and diameters are the easy half. A part with
+three perfectly toleranced bores and forty untoleranced lengths passes
+`check_fits` completely and is still not a drawing anybody can make from.
+
+Two steps, and the first is worth having on its own:
+
+**T5a — a tolerance on a measured distance.** `Tolerance` gains a second
+`ElementRef`: with one ref it means "this face's size", with two it means "the
+distance between these". The nominal is measured the same way — `Measure`
+already answers a distance between two elements, which is the whole reason
+this is small. It gives a shoulder-to-seat length, a slot width, a boss height
+a number nothing else can state.
+
+An ISO class does not apply to a length between two arbitrary faces, so a
+two-ref tolerance takes an explicit `lower`/`upper` pair. That asymmetry is
+real and should be visible in the API rather than papered over with a class
+that silently means something different.
+
+**T5b — worst case along a chain.** With lengths toleranced, the question
+that actually sinks assemblies becomes askable: a shaft carries a shoulder, a
+spacer, a bearing and a circlip, and every one of them has a band — does the
+last one still land in its groove? The arithmetic is the one
+`design-intent-plan.md:237-244` specifies, and its guardrails matter more than
+the sum:
+
+- Bounds only. Worst case is `sum(lower)` and `sum(upper)`, and that is a
+  statement about the extremes, not a distribution. Statistical stackup needs
+  correlations we do not have and stays out.
+- **Shared inputs are not independent.** Two lengths driven by one variable
+  cancel rather than add, and treating them as independent invents variation
+  that cannot occur. A chain whose terms are not independent is REFUSED, not
+  approximated — the same rule as everything else here.
+- The chain is the mates', not a list somebody retypes: the assembly already
+  says what stacks against what.
 
 ## What to watch
 
