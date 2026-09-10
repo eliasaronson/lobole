@@ -28,8 +28,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import arc_through, check, circle, connect, line, plane_at_z  # noqa
 
 
-def involute_profile(module, teeth, pressure_deg, samples=5):
-    """Closed CCW outline of the whole gear, as sketch entities."""
+def involute_profile(module, teeth, pressure_deg, samples=5, backlash=0.0,
+                     phase_deg=0.0):
+    """Closed CCW outline of the whole gear, as sketch entities.
+
+    `backlash` (mm, measured on the pitch circle) THINS every tooth by half
+    of it per flank. A nominal involute pair at nominal centres has none, so
+    two printed gears generated from this function used to be a press fit of
+    tooth into space; the number to want is about 0.1-0.2 mm at these sizes.
+
+    `phase_deg` turns the whole pattern. It is what makes a pair MESH: two
+    gears whose teeth both point at the line of centres jam tip to tip, and
+    the fix is a quarter pitch on each (or half a pitch on one).
+    """
     m, z = float(module), int(teeth)
     alpha = math.radians(pressure_deg)
     rp = m * z / 2.0          # pitch radius
@@ -43,14 +54,17 @@ def involute_profile(module, teeth, pressure_deg, samples=5):
     def inv(a):
         return math.tan(a) - a
 
-    half_pitch = math.pi / (2 * z)  # half the tooth's angular thickness at rp
+    # Half the tooth's angular thickness at rp, less half the backlash.
+    half_pitch = math.pi / (2 * z) - float(backlash) / (2.0 * rp)
 
     def psi(r):
         """Half-angle of the tooth at radius r (r >= rb)."""
         return half_pitch + inv(alpha) - inv(math.acos(rb / r))
 
+    phase = math.radians(float(phase_deg))
+
     def pt(r, theta):
-        return (r * math.cos(theta), r * math.sin(theta))
+        return (r * math.cos(theta + phase), r * math.sin(theta + phase))
 
     r_lo = max(rf, rb)
     radii = [r_lo + (ra - r_lo) * i / (samples - 1) for i in range(samples)]
@@ -83,9 +97,29 @@ def involute_profile(module, teeth, pressure_deg, samples=5):
     return ents, {"rp": rp, "rb": rb, "ra": ra, "rf": rf}
 
 
-def build(d, module, teeth, pressure_deg, thickness, bore, name):
+def wedge(d, radius, half_deg, thickness, name):
+    """A pie about +X, as a body — what a SECTOR gear keeps."""
+    n = 12
+    a = math.radians(half_deg)
+    r = radius / math.cos(a / n)  # circumscribe, so no tooth is clipped
+    pts = [(0.0, 0.0)] + [(r * math.cos(-a + 2 * a * i / n),
+                           r * math.sin(-a + 2 * a * i / n))
+                          for i in range(n + 1)]
+    ents = [line(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
+    ents.append(line(pts[-1], pts[0]))
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": f"{name} wedge", "plane": plane_at_z(0),
+        "entities": ents}), "wedge sketch")
+    return check(d.call("add_feature", feature={
+        "type": "Extrude", "name": f"{name} wedge", "sketch_id": sk["id"],
+        "distance": thickness, "mode": "new_body"}), "wedge")["id"]
+
+
+def build(d, module, teeth, pressure_deg, thickness, bore, name,
+          backlash=0.0, phase_deg=0.0, sector_deg=0.0):
     t0 = time.perf_counter()
-    ents, radii = involute_profile(module, teeth, pressure_deg)
+    ents, radii = involute_profile(module, teeth, pressure_deg,
+                                   backlash=backlash, phase_deg=phase_deg)
     # The live half: what a user adjusts after the fact drives expressions.
     for var, value, comment in (("gear_thickness", thickness, "face width, mm"),
                                 ("gear_bore", bore, "bore diameter, mm")):
@@ -99,6 +133,24 @@ def build(d, module, teeth, pressure_deg, thickness, bore, name):
         "distance": thickness, "distance_expr": "gear_thickness",
         "mode": "new_body"}), "extrude")
     t_extrude = time.perf_counter()
+    if sector_deg > 0:
+        # Teeth only where they are needed: keep the wedge, and a hub disc
+        # out to the root circle so the sector stays one body. A sector gear
+        # is what a lever, a quadrant or a gripper's drive plate carries --
+        # a full gear there is material in the way of the next part.
+        keep = wedge(d, radii["ra"] + 1.0, sector_deg, thickness, name)
+        hub_sk = check(d.call("add_feature", feature={
+            "type": "Sketch", "name": f"{name} hub", "plane": plane_at_z(0),
+            "entities": [circle((0, 0), radii["rf"])]}), "hub sketch")
+        hub = check(d.call("add_feature", feature={
+            "type": "Extrude", "name": f"{name} hub", "sketch_id": hub_sk["id"],
+            "distance": thickness, "mode": "new_body"}), "hub")["id"]
+        sector = check(d.call("add_feature", feature={
+            "type": "Boolean", "name": f"{name} sector", "target_id": body["id"],
+            "tool_id": keep, "op": "intersect"}), "sector")
+        body = check(d.call("add_feature", feature={
+            "type": "Boolean", "name": name, "target_id": sector["id"],
+            "tool_id": hub, "op": "union"}), "sector+hub")
     if bore > 0:
         skb = check(d.call("add_feature", feature={
             "type": "Sketch", "name": f"{name} bore",
@@ -129,6 +181,14 @@ def main():
     ap.add_argument("--pressure-angle", type=float, default=20.0, help="deg")
     ap.add_argument("--thickness", type=float, default=8.0, help="mm")
     ap.add_argument("--bore", type=float, default=6.0, help="mm, 0 = none")
+    ap.add_argument("--backlash", type=float, default=0.0,
+                    help="mm on the pitch circle; a printed pair wants ~0.15")
+    ap.add_argument("--phase", type=float, default=0.0,
+                    help="deg to turn the tooth pattern — a quarter pitch on "
+                         "each of two mirrored sectors is what makes them mesh")
+    ap.add_argument("--sector", type=float, default=0.0,
+                    help="deg half-angle about +X: teeth only there, hub "
+                         "elsewhere (0 = a whole gear)")
     ap.add_argument("--name", default="Gear")
     a = ap.parse_args()
     if a.teeth < 6:
@@ -136,7 +196,8 @@ def main():
     d = connect(a.port)
     try:
         r = build(d, a.module, a.teeth, a.pressure_angle, a.thickness, a.bore,
-                  a.name)
+                  a.name, backlash=a.backlash, phase_deg=a.phase,
+                  sector_deg=a.sector)
     finally:
         d.close()
     print(f"{a.name}: m={a.module} z={a.teeth} -> pitch dia {2 * r['rp']:.3f}, "

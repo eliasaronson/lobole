@@ -469,8 +469,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "part's BODIES — catches a bracket floating inside one part, which "
      "the occurrence-level sweep cannot see. Each CLASH also carries "
      "`centroid` and `bbox_min`/`bbox_max`: WHERE the solid-in-solid is, "
-     "so a pair of names and a volume is not the whole answer.",
-     "deadline_s, max_pairs, near_tol, touch_tol"},
+     "so a pair of names and a volume is not the whole answer. A pair whose "
+     "two shapes carry more than `exact_face_budget` faces between them "
+     "(default 20000 — an imported mesh is one face per TRIANGLE) is NOT "
+     "checked and is listed in `not_checked` with its face count: the "
+     "deadline stops new dispatches and cannot preempt a boolean already "
+     "running, so one such pair does not slow the sweep down, it hangs it.",
+     "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
@@ -1517,6 +1522,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       std::vector<Body> bodies; // already placed in world space
       glm::mat4 xf{1.0f};       // identity: `bodies` carry the placement
       glm::vec3 min, max;
+      size_t faces = 0; // how heavy an exact boolean against it would be
     };
     std::vector<Ent> ents;
     json skipped = json::array();
@@ -1549,6 +1555,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         skipped.push_back(o.name); // nothing resolvable under this occurrence
         continue;
       }
+      for (const Body& b : e.bodies)
+        e.faces += static_cast<size_t>(b.shape.FaceCount());
       ents.push_back(std::move(e));
     }
     std::vector<size_t> parent(ents.size());
@@ -1569,16 +1577,37 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     const size_t maxPairs = p.value("max_pairs", size_t{4000});
     const double deadline = p.value("deadline_s", 20.0);
+    // The deadline stops new DISPATCHES; a boolean already running cannot be
+    // preempted. That is fine between parts and useless against a mesh
+    // import, where one pair is not slow but effectively unbounded: an STL
+    // arrives as one planar face per triangle, and two 54k-face bodies took
+    // a documented sweep past ten minutes with a deadline_s of 20 set. So
+    // the heavy pairs are not started, and the report says which -- a sweep
+    // that quietly never returns is worse than one that says what it did not
+    // check.
+    const size_t faceBudget = p.value("exact_face_budget", size_t{20000});
+    json tooHeavy = json::array();
     SweepPlan plan = PlanSweep(mins, maxs, nearTol, maxPairs);
     RunSweep(
         plan, deadline,
-        [&](size_t i, size_t j) {
+        [&](size_t i, size_t j) -> std::optional<Measure::SetContact> {
+          if (faceBudget > 0 && ents[i].faces + ents[j].faces > faceBudget)
+            return std::nullopt;
           return Measure::ContactBetween(ents[i].bodies, ents[i].xf,
                                          ents[j].bodies, ents[j].xf);
         },
         [&](size_t i, size_t j, const std::optional<Measure::SetContact>& c) {
-          if (!c)
+          if (!c) {
+            if (faceBudget > 0 && ents[i].faces + ents[j].faces > faceBudget)
+              tooHeavy.push_back(
+                  {{"a", ents[i].occ->name},
+                   {"b", ents[j].occ->name},
+                   {"faces", ents[i].faces + ents[j].faces},
+                   {"why", "an exact boolean between these two would not "
+                           "finish inside any deadline; measure them with "
+                           "mode 'mesh', or raise exact_face_budget"}});
             return;
+          }
           const char* st = ContactState(*c, touchTol);
           // The ids as well as the names: sixteen occurrences answer to
           // "ISO 4762 M3x10", and a reported pair that cannot say WHICH
@@ -1628,6 +1657,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     AttachSweepCoverage(out, plan, ents.size(), maxPairs, deadline);
     if (!skipped.empty())
       out["skipped"] = skipped;
+    if (!tooHeavy.empty())
+      out["not_checked"] = tooHeavy;
     // Intended vs realized: only meaningful when the assembly HAS mates —
     // in a fixed-occurrence assembly every touching pair is "unmated".
     if (!state.assembly->GetMates().empty()) {

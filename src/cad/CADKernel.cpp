@@ -191,6 +191,15 @@ int CADShape::SolidCount() const {
   return count;
 }
 
+int CADShape::FaceCount() const {
+  if (m_shape.IsNull())
+    return 0;
+  int count = 0;
+  for (TopExp_Explorer ex(m_shape, TopAbs_FACE); ex.More(); ex.Next())
+    count++;
+  return count;
+}
+
 bool CADShape::ComputeMassProps(MassProps& out) const {
   if (!IsValid())
     return false;
