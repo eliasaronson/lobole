@@ -235,6 +235,17 @@ void LoadRelations(AssemblyDocument& asmDoc,
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
 
+// Clearance assertions (v97): the same again.
+void LoadAssertions(AssemblyDocument& asmDoc, const std::vector<json>& jsons) {
+  uint64_t maxId = 0;
+  for (const json& aj : jsons) {
+    ClearanceAssertion a = ClearanceAssertionFromJson(aj);
+    maxId = std::max(maxId, a.id);
+    asmDoc.GetAssertions().push_back(std::move(a));
+  }
+  asmDoc.EnsureNextIdAtLeast(maxId + 1);
+}
+
 // Motion studies (v87): the same again.
 void LoadMotionStudies(AssemblyDocument& asmDoc,
                        const std::vector<json>& jsons) {
@@ -876,6 +887,30 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    // Clearance assertions (v97) mirror relations: file-per-assertion under
+    // assertions/, the id list in the index; both absent when there are none.
+    const fs::path assertDir = dir / "assertions";
+    if (!asmDoc.GetAssertions().empty()) {
+      index["assertions"] = json::array();
+      fs::create_directories(assertDir);
+    }
+    std::set<std::string> wantedAssert;
+    for (const ClearanceAssertion& a : asmDoc.GetAssertions()) {
+      const std::string file =
+          std::to_string(IdForFile(a.id, "assertion", a.name)) + "-" +
+          LabelSlug(a.name) + ".json";
+      if (!WriteTextAtomic(assertDir / file,
+                           ClearanceAssertionToJson(a).dump(2) + "\n", error))
+        return false;
+      index["assertions"].push_back(a.id);
+      wantedAssert.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(assertDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedAssert.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     // Motion studies (v87) mirror relations: file-per-study under motion/.
     const fs::path motionDir = dir / "motion";
     if (!asmDoc.GetMotionStudies().empty()) {
@@ -1059,6 +1094,29 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         relJsons.push_back(ParseProjectFile(it->second));
       }
       LoadRelations(*asmDoc, relJsons);
+    }
+
+    // Clearance assertions (v97): id-prefix files under assertions/.
+    {
+      std::map<uint64_t, fs::path> byId;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "assertions", ec)) {
+        if (entry.path().extension() != ".json")
+          continue;
+        InsertIdFile(byId, entry.path(), "assertion");
+      }
+      std::vector<json> jsons;
+      for (const auto& idJson : index.value("assertions", json::array())) {
+        const uint64_t id = idJson.get<uint64_t>();
+        const auto it = byId.find(id);
+        if (it == byId.end()) {
+          if (error)
+            *error = "missing assertion file for id " + std::to_string(id);
+          return nullptr;
+        }
+        jsons.push_back(ParseProjectFile(it->second));
+      }
+      LoadAssertions(*asmDoc, jsons);
     }
 
     // Motion studies (v87): id-prefix files under motion/, index order.
@@ -1286,6 +1344,11 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       for (const MotionStudy& s : asmDoc.GetMotionStudies())
         j["motion"].push_back(MotionStudyToJson(s));
     }
+    if (!asmDoc.GetAssertions().empty()) { // absent when none (v97)
+      j["assertions"] = json::array();
+      for (const ClearanceAssertion& a : asmDoc.GetAssertions())
+        j["assertions"].push_back(ClearanceAssertionToJson(a));
+    }
     if (asmDoc.ActiveConfiguration() != 0) // v31
       j["active_configuration"] = asmDoc.ActiveConfiguration();
     if (!asmDoc.GetConfigurations().empty()) {
@@ -1352,6 +1415,8 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
                   j.value("relations", json::array()).get<std::vector<json>>());
     LoadMotionStudies(
         *asmDoc, j.value("motion", json::array()).get<std::vector<json>>());
+    LoadAssertions(
+        *asmDoc, j.value("assertions", json::array()).get<std::vector<json>>());
     for (const auto& cj : j.value("configurations", json::array())) // v31
       asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
     asmDoc->SetActiveConfiguration(

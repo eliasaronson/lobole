@@ -257,6 +257,62 @@ struct MotionStudy {
   std::string clashMode = "mesh";
 };
 
+// A CLEARANCE the designer declared, held by the document and re-checked on
+// demand (docs/peer-survey-plan.md, W3).
+//
+// The drone's `verify()` says "prop tip to arm is at least 2 mm" in a python
+// script, and so does the engine's, and the clamp's. That is design intent
+// living outside the design: nobody who opens the document can see it, the
+// GUI cannot break it, and editing a plate thickness re-checks nothing. A
+// number a script asserts once is not a constraint — it is a reading somebody
+// took.
+//
+// DECLARED, NOT DETECTED. The assertion names its two subjects and its floor
+// in the designer's own terms; nothing here infers what they meant from the
+// geometry. vcad's snap-fit pack draws the same line and says why — automatic
+// detection of the beam "is not attempted; the designer declares the beam and
+// the arithmetic is enforced" — because inferred intent is wrong at exactly
+// the edges that matter, which is where a checker starts disagreeing with the
+// person using it.
+struct ClearanceAssertion {
+  uint64_t id = 0;  // stable, shares the assembly's id counter
+  std::string name; // what this clearance IS ("prop tip to arm")
+  // The two subjects, as TOP-LEVEL OCCURRENCE IDS — the same key a mate
+  // stores, and for the same reason. A stored name would repoint silently
+  // when an occurrence is renamed and break when one is deleted; an id does
+  // neither. An id that no longer resolves is UNVERIFIABLE, which is the
+  // honest answer and the one a name cannot give.
+  uint64_t a = 0;
+  uint64_t b = 0;
+  double minMm = 0.0; // the floor that must hold
+  // "mesh" (triangles, and the question is usually millimetres not microns)
+  // or "exact". Mesh carries a tolerance, and verification SUBTRACTS it
+  // rather than trusting the distance flat — the drone's gap() already does
+  // this by hand, because each mesh can err its own way.
+  std::string mode = "mesh";
+  std::string why; // why this number, in the designer's words. Optional.
+
+  // The last verification, so listing is cheap and staleness is visible
+  // without re-running a sweep. `checkedVersion` is the assembly version the
+  // answer was taken at: not equal to the current one means STALE, which is
+  // neither a pass nor a failure — the W2 rule, one level up.
+  std::string verdict;     // "" (never), "holds", "violated", "unverifiable"
+  double measuredMm = 0.0; // what it was when last checked
+  // What the answer was an answer ABOUT: a hash of the two subtrees' placed
+  // geometry. Not equal to the current one means STALE, which is neither a
+  // pass nor a failure.
+  //
+  // Content, deliberately, and not the assembly's version counter. Fifteen
+  // mutators bump that counter and a post-load placement pass is one of them,
+  // so every assertion would read stale on open and after every unrelated
+  // edit — crying wolf, which costs what a false pass costs. A counter also
+  // means nothing across files, and this codebase has already paid once for
+  // treating a document version as an identity (ee247f9). A hash of the
+  // placement travels, and is silent when nothing that matters moved.
+  uint64_t checkedKey = 0;
+  std::string note; // why it could not be checked, when it could not
+};
+
 // An assembly document: an ordered list of occurrences that *place* the bodies
 // of other parts by explicit transform, plus the mates that constrain them
 // (A3 — re-solved over non-`fixed` occurrences by a placement pass). A
@@ -332,6 +388,14 @@ public:
   const Relation* FindRelationById(uint64_t id) const;
 
   // Motion studies (v87): the same id space and discipline.
+  const std::vector<ClearanceAssertion>& GetAssertions() const {
+    return m_assertions;
+  }
+  std::vector<ClearanceAssertion>& GetAssertions() { return m_assertions; }
+  uint64_t AddAssertion(ClearanceAssertion a);
+  bool RemoveAssertion(uint64_t id);
+  ClearanceAssertion* FindAssertionById(uint64_t id);
+
   const std::vector<MotionStudy>& GetMotionStudies() const {
     return m_motionStudies;
   }
@@ -395,6 +459,7 @@ private:
   std::vector<ExplodedView> m_explodedViews;
   std::vector<Relation> m_relations;
   std::vector<MotionStudy> m_motionStudies;
+  std::vector<ClearanceAssertion> m_assertions;
   std::vector<Configuration> m_configurations;
   uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id

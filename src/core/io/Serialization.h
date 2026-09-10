@@ -113,6 +113,8 @@ MateDof MateDofFromString(const std::string& s);
 // The definition only: driver mate + DOF, range in the DOF's own unit,
 // sample count, and the clash check's mode. An unknown DOF or mode is
 // refused naming the accepted ones.
+nlohmann::json ClearanceAssertionToJson(const ClearanceAssertion& a);
+ClearanceAssertion ClearanceAssertionFromJson(const nlohmann::json& j);
 nlohmann::json MotionStudyToJson(const MotionStudy& study);
 MotionStudy MotionStudyFromJson(const nlohmann::json& j);
 

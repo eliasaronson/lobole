@@ -525,6 +525,23 @@ assembly::AssemblyResolver AssemblyResolverFor(AppState& state) {
 // logged once) when the tree cannot be walked — a cycle, or nesting past the
 // depth cap. Callers render/aggregate what they get; refusing to draw
 // anything at all would hide the model AND the message.
+std::vector<Body> OccurrenceSubtreeBodies(AppState& state,
+                                          uint64_t rootOccurrenceId) {
+  std::vector<Body> out;
+  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+    if (!inst.visible || inst.rootOccurrenceId != rootOccurrenceId)
+      continue;
+    for (const Body& b : inst.part->GetBodies()) {
+      if (b.reference)
+        continue; // a derived ghost is not the occurrence's matter
+      Body nb = b;
+      nb.shape = b.shape.Transformed(inst.world);
+      out.push_back(std::move(nb));
+    }
+  }
+  return out;
+}
+
 std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state) {
   if (!state.assembly)
     return {};

@@ -326,6 +326,54 @@ json RelationToJson(const Relation& r) {
   return j;
 }
 
+json ClearanceAssertionToJson(const ClearanceAssertion& a) {
+  json j;
+  j["type"] = "ClearanceAssertion";
+  j["id"] = a.id;
+  j["name"] = a.name;
+  j["a"] = a.a;
+  j["b"] = a.b;
+  j["min_mm"] = a.minMm;
+  j["mode"] = a.mode;
+  if (!a.why.empty())
+    j["why"] = a.why;
+  // The last answer travels WITH the assertion: a document that has been
+  // verified and a document that never has are different documents, and the
+  // difference is exactly what a reader needs to know.
+  if (!a.verdict.empty()) {
+    j["verdict"] = a.verdict;
+    j["measured_mm"] = a.measuredMm;
+    j["checked_key"] = a.checkedKey;
+    if (!a.note.empty())
+      j["note"] = a.note;
+  }
+  return j;
+}
+
+ClearanceAssertion ClearanceAssertionFromJson(const json& j) {
+  ClearanceAssertion a;
+  a.id = j.at("id").get<uint64_t>();
+  a.name = j.value("name", std::string{});
+  a.a = j.at("a").get<uint64_t>();
+  a.b = j.at("b").get<uint64_t>();
+  a.minMm = j.at("min_mm").get<double>();
+  a.mode = j.value("mode", std::string("mesh"));
+  if (a.mode != "mesh" && a.mode != "exact")
+    throw std::runtime_error("unknown clearance assertion mode '" + a.mode +
+                             "' (expected mesh or exact)");
+  a.why = j.value("why", std::string{});
+  a.verdict = j.value("verdict", std::string{});
+  if (!a.verdict.empty() && a.verdict != "holds" && a.verdict != "violated" &&
+      a.verdict != "unverifiable")
+    throw std::runtime_error("unknown clearance assertion verdict '" +
+                             a.verdict +
+                             "' (expected holds, violated or unverifiable)");
+  a.measuredMm = j.value("measured_mm", 0.0);
+  a.checkedKey = j.value("checked_key", uint64_t{0});
+  a.note = j.value("note", std::string{});
+  return a;
+}
+
 json MotionStudyToJson(const MotionStudy& s) {
   json j;
   j["type"] = "MotionStudy";

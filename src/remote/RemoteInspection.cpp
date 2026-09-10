@@ -772,20 +772,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         std::string label;
       };
       const auto subtreeOf = [&](uint64_t rootId) {
-        std::vector<Body> out;
-        for (const assembly::FlatInstance& inst :
-             ui::FlattenActiveAssembly(state)) {
-          if (!inst.visible || inst.rootOccurrenceId != rootId)
-            continue;
-          for (const Body& b : inst.part->GetBodies()) {
-            if (b.reference)
-              continue; // a derived ghost is not the occurrence's matter
-            Body nb = b;
-            nb.shape = b.shape.Transformed(inst.world);
-            out.push_back(std::move(nb));
-          }
-        }
-        return out;
+        return ui::OccurrenceSubtreeBodies(state, rootId);
       };
       auto targetOf = [&](const json& v) -> Target {
         Target t;

@@ -461,6 +461,18 @@ assembly::AssemblyResolver AssemblyResolverFor(AppState& state);
 // reason logged.
 std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state);
 
+// The visible matter one TOP-LEVEL occurrence places, already in world space:
+// every leaf part under it, each body transformed by its composed world.
+// Derived ghosts are excluded — a reference copy is not the occurrence's
+// matter, and counting it makes a part clash with its own shadow.
+//
+// One definition, because there were two callers about to have two: the exact
+// clash sweep asks it of a pair the user named, and a clearance assertion
+// asks it of the pair the DOCUMENT names. Those must agree — the assertion
+// exists to be the same question, asked later.
+std::vector<Body> OccurrenceSubtreeBodies(AppState& state,
+                                          uint64_t rootOccurrenceId);
+
 // The placement a mesh renders at (solved ∘ explode), exposed for tests and
 // for anything that has to reproduce the live-drag composition.
 glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);

@@ -1,0 +1,107 @@
+{
+  "assertions": [
+    {
+      "a": 1,
+      "b": 2,
+      "checked_key": 12297829382473034410,
+      "id": 7,
+      "measured_mm": 3.416,
+      "min_mm": 2.0,
+      "mode": "mesh",
+      "name": "carrier to planet",
+      "type": "ClearanceAssertion",
+      "verdict": "holds",
+      "why": "room for the retaining clip"
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "checked_key": 0,
+      "id": 8,
+      "measured_mm": 0.0,
+      "min_mm": 1.0,
+      "mode": "exact",
+      "name": "planet to ring",
+      "note": "occurrence 3 is gone \u2014 this clearance is about something the assembly no longer contains",
+      "type": "ClearanceAssertion",
+      "verdict": "unverifiable"
+    }
+  ],
+  "format": "designer-document",
+  "kind": "assembly",
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Carrier",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Arm",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 3,
+      "name": "Stop",
+      "part_id": 3,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          1.2246467996456087e-15,
+          20.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "version": 97
+}

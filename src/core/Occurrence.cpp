@@ -229,6 +229,31 @@ double CamLift(const std::vector<std::pair<double, double>>& table,
   return CamAt(table, angleRad * 180.0 / 3.14159265358979323846, slopeOut);
 }
 
+uint64_t AssemblyDocument::AddAssertion(ClearanceAssertion a) {
+  a.id = m_nextId++;
+  m_assertions.push_back(std::move(a));
+  m_version++;
+  return m_assertions.back().id;
+}
+
+bool AssemblyDocument::RemoveAssertion(uint64_t id) {
+  const auto it =
+      std::find_if(m_assertions.begin(), m_assertions.end(),
+                   [id](const ClearanceAssertion& a) { return a.id == id; });
+  if (it == m_assertions.end())
+    return false;
+  m_assertions.erase(it);
+  m_version++;
+  return true;
+}
+
+ClearanceAssertion* AssemblyDocument::FindAssertionById(uint64_t id) {
+  for (ClearanceAssertion& a : m_assertions)
+    if (a.id == id)
+      return &a;
+  return nullptr;
+}
+
 uint64_t AssemblyDocument::AddMotionStudy(MotionStudy study) {
   study.id = m_nextId++;
   m_motionStudies.push_back(std::move(study));

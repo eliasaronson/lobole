@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    96; // v96: a CAM profile's `drilled_bores` -- cutting INSIDE a level face
+    97; // v97: an assembly holds the CLEARANCES its designer declared, and
+        //      re-checks them. "prop tip to arm is at least 2 mm" lived in a
+        //      python verify() where nobody who opened the document could see
+        //      it and no edit could break it. Absent when none.
+        // v96: a CAM profile's `drilled_bores` -- cutting INSIDE a level face
         //      cuts every opening in it, and this is the diameter up to which
         //      a round one is left to the DRILL. Width could not say it: a
         //      2.2 mm milled slot is narrower than a 3.2 mm drilled hole.

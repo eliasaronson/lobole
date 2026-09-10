@@ -418,6 +418,14 @@ add_test(NAME sdk_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(sdk_smoke PROPERTIES TIMEOUT 180)
 
+# Declared clearances (peer-survey-plan W3, v97): the four standings a boolean
+# cannot carry — never / holds / violated / stale / unverifiable — plus the
+# non-event that matters most, an unrelated edit NOT making one stale.
+add_test(NAME assertion_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assertion_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assertion_smoke PROPERTIES TIMEOUT 180)
+
 # A parameter survives the script boundary (peer-survey-plan W1): a part
 # built with Param arithmetic is DRIVEN by its variables afterwards, and the
 # perturbation half — nudge one variable, diff the saved document, assert
