@@ -707,6 +707,50 @@ TEST_CASE("a sketch arc takes degrees or radians, never both",
           Catch::Matchers::ContainsSubstring("start_angle_deg"));
 }
 
+TEST_CASE("an angle CONSTRAINT reads the same unit through either door",
+          "[serialization][sketch][units]") {
+  // The other half of the same bug, and the one that survived the arc fix:
+  // add_constraint read `value` as DEGREES while this path — add_feature with
+  // a sketch spec, and every file load — read the same field as RADIANS, with
+  // get_state echoing the radians back. Set 45, read 0.785, and both were
+  // "right".
+  const auto sketchWith = [](const nlohmann::json& constraint) {
+    nlohmann::json sk =
+        SketchWith({{"type", "line"}, {"a", {0.0, 0.0}}, {"b", {10.0, 0.0}}});
+    sk["entities"].push_back(
+        {{"type", "line"}, {"a", {0.0, 0.0}}, {"b", {10.0, 10.0}}});
+    sk["constraints"] = nlohmann::json::array({constraint});
+    return sk;
+  };
+  const auto angle = [&](const nlohmann::json& extra) {
+    nlohmann::json c = {{"kind", "angle"}, {"a", {1, 0}}, {"b", {2, 0}}};
+    c.update(extra);
+    return sketchWith(c);
+  };
+
+  // Radians is what the file stores and the solver works in, so the bare name
+  // means radians here exactly as it does for an arc.
+  REQUIRE_NOTHROW(
+      DocumentIO::FeatureFromJson(angle({{"value", 0.7853981634}})));
+  // ...and the _deg twin is the same angle said the other way.
+  REQUIRE_NOTHROW(DocumentIO::FeatureFromJson(angle({{"value_deg", 45.0}})));
+
+  // 45 in the radians field is what the old wire meant by 45 degrees.
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(angle({{"value", 45.0}})),
+                      Catch::Matchers::ContainsSubstring("RADIANS") &&
+                          Catch::Matchers::ContainsSubstring("value_deg"));
+
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(
+                          angle({{"value", 0.785}, {"value_deg", 45.0}})),
+                      Catch::Matchers::ContainsSubstring("not both"));
+
+  // A millimetre dimension is untouched: there is nothing to confuse, and 45
+  // is a perfectly ordinary distance.
+  const nlohmann::json dist = {
+      {"kind", "distance"}, {"a", {1, 0}}, {"b", {1, 1}}, {"value", 45.0}};
+  REQUIRE_NOTHROW(DocumentIO::FeatureFromJson(sketchWith(dist)));
+}
+
 // --- The loader refuses an enum string it does not recognise ---------------
 //
 // It used to be split: eight parsers threw, six silently kept the default. The

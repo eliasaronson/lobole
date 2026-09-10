@@ -787,6 +787,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"feature_types", std::move(featureTypes)},
         {"sketch_entity_types", std::move(entityTypes)},
         {"constraint_kinds", remote::ConstraintKindNames()},
+        {"constraint_value_units",
+         [] {
+           json u = json::object();
+           for (const auto& [kind, unit] : remote::ConstraintValueUnits())
+             u[kind] = unit;
+           return u;
+         }()},
         {"extrude_modes", {"new_body", "add", "cut"}},
         {"extrude_end_modes",
          {"blind", "symmetric", "two_sided", "up_to_face", "through_all"}},

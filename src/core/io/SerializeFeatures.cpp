@@ -111,6 +111,23 @@ double AngleRadians(const json& j, const char* radKey, const char* degKey) {
   return j.at(radKey).get<double>();
 }
 
+// The same, for an angle that may legitimately be absent (a constraint driven
+// by `expr` carries no literal), and which is a PINNED angle rather than a
+// sweep — so more than a full turn is not a wrapped arc to be measured, it is
+// a number that was meant as degrees. Refusing names the likely cause; the
+// alternative is a sketch that solves to a plausible wrong shape.
+double AngleRadians(const json& j, const char* radKey, const char* degKey,
+                    double absent) {
+  if (!j.contains(radKey) && !j.contains(degKey))
+    return absent;
+  const double rad = AngleRadians(j, radKey, degKey);
+  if (j.contains(radKey) && !angles::IsPlausibleSweep(rad))
+    throw std::runtime_error(
+        std::string(radKey) + " is RADIANS and " + std::to_string(rad) +
+        " is more than a full turn — pass " + degKey + " to say degrees");
+  return rad;
+}
+
 sketch::Entity EntityFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
   // Pre-v4 files have no "id"; leave it 0 so Load can detect and migrate.
@@ -306,7 +323,14 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   c.kind = ConstraintKindFromString(j.at("kind").get<std::string>());
   c.a = {j.at("a").at(0).get<uint32_t>(), j.at("a").at(1).get<uint8_t>()};
   c.b = {j.at("b").at(0).get<uint32_t>(), j.at("b").at(1).get<uint8_t>()};
-  c.value = j.value("value", 0.0);
+  // An angle takes `value` (RADIANS, what the file stores and the solver
+  // works in) or `value_deg`, matching add_constraint and the arc parser
+  // above. Input only — ConstraintToJson still writes `value` alone, so no
+  // format bump is owed. Every other dimension kind is millimetres, where
+  // there is nothing to confuse.
+  c.value = c.kind == sketch::ConstraintKind::Angle
+                ? AngleRadians(j, "value", "value_deg", 0.0)
+                : j.value("value", 0.0);
   c.valueExpr = j.value("expr", std::string{}); // absent (pre-v11) = literal
   if (j.contains("c"))
     c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
