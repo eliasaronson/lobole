@@ -366,6 +366,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ids.push_back(sketch::EntityId(e));
       resp["entity_ids"] = ids;
     }
+    // An import is CENTRED unless it was told not to be. Say by how much, in
+    // the call that did it: a caller who baked file coordinates on purpose
+    // otherwise discovers the move by measuring, and reads the result as an
+    // interference rather than a placement.
+    if (auto* imp = dynamic_cast<const ImportFeature*>(doc->GetFeature(index));
+        imp != nullptr && imp->Shift() != glm::vec3(0.0f))
+      resp["recentred_by"] =
+          json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
     resp["regen"] = RegenSummaryJson(*doc);
     resp["digest"] = DigestJson(preDigest, *doc);
     return resp;

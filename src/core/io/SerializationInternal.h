@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    96; // v96: a CAM profile's `drilled_bores` -- cutting INSIDE a level face
+    97; // v97: an Import may KEEP the file's own coordinates
+        //      (`keep_origin`). Absent = centred on the combined bounding
+        //      box, which is what every file before this did, silently.
+        // v96: a CAM profile's `drilled_bores` -- cutting INSIDE a level face
         //      cuts every opening in it, and this is the diameter up to which
         //      a round one is left to the DRILL. Width could not say it: a
         //      2.2 mm milled slot is narrower than a 3.2 mm drilled hole.

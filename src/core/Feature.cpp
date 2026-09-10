@@ -229,7 +229,13 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("ImportFeature '{}': no valid shapes in '{}'", m_name, path);
     return false;
   }
-  const glm::vec3 center = (combinedMin + combinedMax) * 0.5f;
+  // Centre on the combined box, unless the caller asked to keep the file's
+  // own coordinates. Recorded either way: an import that MOVED and did not
+  // say so is how a fit check against a neighbour part compares two things
+  // that are not where it thinks they are.
+  const glm::vec3 center =
+      keepOrigin ? glm::vec3(0.0f) : (combinedMin + combinedMax) * 0.5f;
+  m_shift = -center;
 
   // Real-world assembly STEPs run to hundreds of instances (the Waveshare
   // adapter test file has 143); the cap only guards against pathological

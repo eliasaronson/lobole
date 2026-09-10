@@ -787,6 +787,8 @@ json FeatureToJson(const Feature& feature) {
       j["drive"] = fastener->drive;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
+    if (import->keepOrigin) // v97; absent = centred, as every older file was
+      j["keep_origin"] = true;
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
   } else if (auto* d = dynamic_cast<const DerivedFeature*>(&feature)) {
@@ -1134,7 +1136,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/plan.md)"},
-    {"Import", 1, "path (STEP/STL/BREP file)"},
+    {"Import", 1,
+     "path (STEP/STL/BREP file); keep_origin?: the import is CENTRED on its "
+     "combined bounding box by default — pass true to keep the file's own "
+     "coordinates, which is what a neighbour part, a fixture in a shared "
+     "frame, or a re-import of your own export needs. The applied shift is "
+     "reported as `recentred_by`"},
     {"Derived", 84,
      "source_part (a part slot id), bodies?: [created_by ids] and/or "
      "body_names?: [names] (both absent = all of the source's bodies; the "
@@ -1576,6 +1583,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Import") {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());
+    imp->keepOrigin = j.value("keep_origin", false); // v97
     if (j.contains("color")) {
       imp->hasColor = true;
       imp->color = Vec3FromJson(j.at("color"));

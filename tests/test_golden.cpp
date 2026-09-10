@@ -491,6 +491,20 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   REQUIRE(volumes.size() == expected.size());
   for (size_t i = 0; i < volumes.size(); i++)
     CHECK_THAT(volumes[i], WithinRel(expected[i], 1e-3));
+  // v97: whether an Import keeps the file's own coordinates. A flag that
+  // round-trips as `false` is an import that silently moves — the whole
+  // reason the flag exists — so the golden states it and the round-trip has
+  // to preserve it.
+  if (expect.contains("import_keep_origin")) {
+    const auto* imp = [&]() -> const ImportFeature* {
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* i = dynamic_cast<const ImportFeature*>(f.get()))
+          return i;
+      return nullptr;
+    }();
+    REQUIRE(imp != nullptr);
+    CHECK(imp->keepOrigin == expect.at("import_keep_origin").get<bool>());
+  }
 }
 
 } // namespace

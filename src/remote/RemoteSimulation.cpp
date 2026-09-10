@@ -47,7 +47,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "linearly with this number and a wrong unit is invisible in the answer, "
      "so it is stated here rather than left to be inferred from the solver. "
      "An omitted force `direction` pushes into the picked face (the same "
-     "default a GUI placement takes).",
+     "default a GUI placement takes). A `face` is {feature_id, element} or "
+     "just the element name — the name already carries the feature id.",
      "direction, face, magnitude, study, type", remote::NeedsPart},
     {"remove_load", "Remove a load by index.", "load, study",
      remote::NeedsPart},
@@ -167,9 +168,43 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   }
 
   // Face-ref decode shared by the study mutation RPCs.
+  //
+  // An element name already CARRIES its feature id -- "30/face0", "1/b1/f2"
+  // -- so demanding `feature_id` beside it made the caller repeat what they
+  // had just been handed by list_elements, and getting it wrong read as
+  // nlohmann's "key 'feature_id' not found". Take the name alone (as a bare
+  // string, or as {element}) and read the id off its prefix; an explicit
+  // feature_id still wins.
   auto studyFaceOf = [](const json& r) {
-    return ElementRef{r.at("feature_id").get<uint64_t>(),
-                      r.at("element").get<std::string>()};
+    const auto idFromName = [](const std::string& name) -> uint64_t {
+      const size_t slash = name.find('/');
+      if (slash == std::string::npos || slash == 0)
+        throw std::runtime_error(
+            "face '" + name +
+            "' does not name its feature: an element name starts with the id "
+            "of the feature that created the body (list_elements), e.g. "
+            "'12/face3'. Pass {feature_id, element} to say it explicitly");
+      try {
+        return static_cast<uint64_t>(std::stoull(name.substr(0, slash)));
+      } catch (const std::exception&) {
+        throw std::runtime_error(
+            "face '" + name +
+            "' does not start with a feature id; pass {feature_id, element}");
+      }
+    };
+    if (r.is_string()) {
+      const auto name = r.get<std::string>();
+      return ElementRef{idFromName(name), name};
+    }
+    if (!r.is_object() || !r.contains("element"))
+      throw std::runtime_error(
+          "a face is {feature_id, element} or just the element name "
+          "(list_elements gives names like '12/face3')");
+    const auto name = r.at("element").get<std::string>();
+    return ElementRef{r.contains("feature_id")
+                          ? r.at("feature_id").get<uint64_t>()
+                          : idFromName(name),
+                      name};
   };
   // Runs one study mutation as a ModifyStudyCommand: snapshot before, apply
   // `mutate` to a copy, snapshot after, execute.

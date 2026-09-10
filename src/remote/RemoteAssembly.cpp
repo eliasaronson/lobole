@@ -787,7 +787,21 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(
             "connector needs 'frame: <Frame id|name>', 'origin:true' or "
             "'face:{feature_id,element}'");
-      json out{{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
+      // The RESOLVED id, not what the caller wrote. The lookup above
+      // already accepts a name — as the doc promises — but passing the raw
+      // value on meant a name reached the parser, which wants a number, and
+      // came back as "type must be number, but is string" from a call whose
+      // own documentation says id|name.
+      if (!c.contains("occurrence"))
+        throw std::runtime_error(
+            "connector needs 'occurrence' (id or name — see list_occurrences)");
+      if (o == nullptr)
+        throw std::runtime_error(
+            "connector 'occurrence' " + c.at("occurrence").dump() +
+            " names nothing in this assembly. Occurrences: " +
+            (state.assembly ? OccurrenceCandidates(*state.assembly)
+                            : std::string("none")));
+      json out{{"occurrence", o->id}, {"anchor", anchor}};
       if (c.contains("inner_path"))
         out["inner_path"] = c.at("inner_path");
       return out;
