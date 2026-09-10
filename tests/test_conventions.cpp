@@ -702,3 +702,62 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
       anyUnverifiable = true;
   CHECK(anyUnverifiable);
 }
+
+// Every boolean in core/Measure.cpp goes through BuildQuery.
+//
+// A measurement is a QUESTION, and OpenCASCADE's default answers it by
+// EDITING the thing being measured — a boolean writes the p-curves it
+// computes onto its arguments' edges. Two sweep threads asking about two
+// pairs that share a body then write to the same edge at once, which cost
+// about one run in five of tests/cncest6090_smoke.py as a heap corruption
+// with no visible connection to any of this (see Measure.cpp's note above
+// BuildQuery, and docs/performance/query-booleans.md).
+//
+// The check is deliberately shallow: it does not try to see whether
+// SetNonDestructive was called, only that no boolean is built the other way.
+// The two-shape constructor `BRepAlgoAPI_Cut cut(a, b)` builds IMMEDIATELY,
+// so it is exactly the form that cannot be corrected afterwards — and the
+// form someone reaches for, because it is the short one. Default-construct
+// and hand it to BuildQuery.
+TEST_CASE("every boolean in Measure.cpp is built through BuildQuery",
+          "[convention]") {
+  const fs::path path =
+      fs::path(DESIGNER_SOURCE_DIR) / "src" / "core" / "Measure.cpp";
+  REQUIRE(fs::exists(path));
+  std::ifstream f(path);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  const std::string text = ss.str();
+
+  // `BRepAlgoAPI_Something name(` — the constructor-with-arguments form.
+  // A bare `BRepAlgoAPI_Something name;` has no parenthesis and passes.
+  const std::regex ctor(
+      R"(BRepAlgoAPI_[A-Za-z]+\s+[A-Za-z_][A-Za-z0-9_]*\s*\()");
+  std::vector<std::string> offenders;
+  size_t line = 1;
+  for (size_t i = 0, start = 0; i <= text.size(); i++) {
+    if (i != text.size() && text[i] != '\n')
+      continue;
+    const std::string row = text.substr(start, i - start);
+    // Comment lines are not code, and this rule has to be explainable in a
+    // comment that names the form it forbids.
+    const size_t firstNonSpace = row.find_first_not_of(" \t");
+    const bool isComment = firstNonSpace != std::string::npos &&
+                           row.compare(firstNonSpace, 2, "//") == 0;
+    if (!isComment && std::regex_search(row, ctor))
+      offenders.push_back(std::to_string(line) + ": " + row);
+    start = i + 1;
+    line++;
+  }
+  INFO("src/core/Measure.cpp builds a boolean without BuildQuery:\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+
+  // ...and BuildQuery is still the thing that makes them safe. Without this
+  // the rule above could be satisfied by a helper that forgot the flag.
+  CHECK(text.find("op.SetNonDestructive(Standard_True);") != std::string::npos);
+}

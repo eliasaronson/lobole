@@ -15,6 +15,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -296,6 +297,49 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
 // could intend.
 constexpr double kContactFuzz = 1.0e-3;
 
+// Run a boolean that MEASURES rather than models.
+//
+// Two OpenCASCADE defaults are wrong for a question and right for an edit,
+// and both are silent:
+//
+//   - A boolean MODIFIES its arguments. It writes the p-curves it computes
+//     onto the input edges (BRep_Builder::UpdateEdge). A modelling feature
+//     can afford that, because it consumes its operands; a measurement
+//     cannot, because the operands are the document. Two sweep threads
+//     asking about two pairs that SHARE a body then write to the same TEdge
+//     at once — which is NOT the lazy-cache hazard core/Parallel.h describes
+//     and is not fixed by the warm-up the sweeps do, because what gets
+//     written is specific to the PAIR rather than an idempotent fill. It
+//     cost about one run in five of tests/cncest6090_smoke.py, surfacing as
+//     a heap corruption inside an unrelated malloc, several frames from
+//     anything of ours. ThreadSanitizer names it exactly: UpdateEdge racing
+//     ~BRep_CurveOnSurface.
+//   - The two-shape CONSTRUCTOR builds immediately, so anything set
+//     afterwards is set too late to matter. It silently was, on the first
+//     attempt at the contact fuzz below.
+//
+// Both disappear if no boolean in this file is built any other way, which is
+// what test_conventions.cpp checks — a `BRepAlgoAPI_X op(a, b)` here is a
+// build that skipped this function.
+void BuildQuery(BRepAlgoAPI_BooleanOperation& op,
+                const TopTools_ListOfShape& args,
+                const TopTools_ListOfShape& tools, double fuzz = 0.0) {
+  op.SetArguments(args);
+  op.SetTools(tools);
+  if (fuzz > 0.0)
+    op.SetFuzzyValue(fuzz);
+  op.SetNonDestructive(Standard_True);
+  op.Build();
+}
+
+void BuildQuery(BRepAlgoAPI_BooleanOperation& op, const TopoDS_Shape& a,
+                const TopoDS_Shape& b, double fuzz = 0.0) {
+  TopTools_ListOfShape args, tools;
+  args.Append(a);
+  tools.Append(b);
+  BuildQuery(op, args, tools, fuzz);
+}
+
 std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
@@ -342,17 +386,8 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
         // A micron of fuzz makes coincident faces cancel while leaving any
         // interference a designer meant — the smallest real one here is a
         // 15 mm standoff — untouched.
-        // The two-shape constructor builds immediately, so the fuzz has to
-        // go in through the arguments/tools form or it is set too late to
-        // matter (it silently was, on the first attempt at this fix).
         BRepAlgoAPI_Common common;
-        TopTools_ListOfShape args, tools;
-        args.Append(sa);
-        tools.Append(sb);
-        common.SetArguments(args);
-        common.SetTools(tools);
-        common.SetFuzzyValue(kContactFuzz);
-        common.Build();
+        BuildQuery(common, sa, sb, kContactFuzz);
         if (!common.IsDone() || common.Shape().IsNull())
           continue;
         GProp_GProps props;
@@ -477,7 +512,8 @@ static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
                                    gp_Dir(ext.axis.x, ext.axis.y, ext.axis.z)),
                             ext.spec.majorDia / 2, hi - lo)
                             .Shape();
-      BRepAlgoAPI_Cut cut(overlap, tool);
+      BRepAlgoAPI_Cut cut;
+      BuildQuery(cut, overlap, tool);
       if (!cut.IsDone())
         throw Standard_Failure("thread engagement subtraction failed");
       overlap = cut.Shape();
@@ -622,13 +658,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         // RPC and contact_report take — InterferenceVolume above is the
         // whole-assembly sweep, and both need the same answer.
         BRepAlgoAPI_Common common;
-        TopTools_ListOfShape args, tools;
-        args.Append(pa[i].shape);
-        tools.Append(pb[j].shape);
-        common.SetArguments(args);
-        common.SetTools(tools);
-        common.SetFuzzyValue(kContactFuzz);
-        common.Build();
+        BuildQuery(common, pa[i].shape, pb[j].shape, kContactFuzz);
         if (!common.IsDone() || common.Shape().IsNull())
           return std::nullopt;
         const auto overlap =
@@ -736,9 +766,7 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
         }
         tools.Append(s);
       }
-      op.SetArguments(args);
-      op.SetTools(tools);
-      op.Build();
+      BuildQuery(op, args, tools);
       if (!op.IsDone() || op.Shape().IsNull())
         return TopoDS_Shape();
       return op.Shape();
@@ -777,16 +805,19 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
       BRepGProp::VolumeProperties(s, props);
       return std::max(0.0, props.Mass());
     };
-    BRepAlgoAPI_Common common(a.GetShape(), b.GetShape());
+    BRepAlgoAPI_Common common;
+    BuildQuery(common, a.GetShape(), b.GetShape());
     if (common.IsDone())
       out.common = volumeOf(common.Shape());
-    BRepAlgoAPI_Cut missing(a.GetShape(), b.GetShape());
+    BRepAlgoAPI_Cut missing;
+    BuildQuery(missing, a.GetShape(), b.GetShape());
     if (missing.IsDone()) {
       out.missing = volumeOf(missing.Shape());
       if (missingOut != nullptr)
         *missingOut = CADShape(missing.Shape());
     }
-    BRepAlgoAPI_Cut extra(b.GetShape(), a.GetShape());
+    BRepAlgoAPI_Cut extra;
+    BuildQuery(extra, b.GetShape(), a.GetShape());
     if (extra.IsDone()) {
       out.extra = volumeOf(extra.Shape());
       if (extraOut != nullptr)
@@ -1036,7 +1067,8 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
     for (const auto& b : bodies) {
       if (b.shape.GetShape().IsNull())
         continue;
-      BRepAlgoAPI_Common common(b.shape.GetShape(), cutter);
+      BRepAlgoAPI_Common common;
+      BuildQuery(common, b.shape.GetShape(), cutter);
       if (!common.IsDone())
         continue;
       // One FACE per connected island. A face with inner wires is still one
@@ -1081,7 +1113,8 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
     for (const auto& b : bodies) {
       if (b.shape.GetShape().IsNull())
         continue;
-      BRepAlgoAPI_Common common(b.shape.GetShape(), cutter);
+      BRepAlgoAPI_Common common;
+      BuildQuery(common, b.shape.GetShape(), cutter);
       if (!common.IsDone())
         continue;
       GProp_GProps props;
@@ -1173,7 +1206,8 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
           cache->entries.emplace(key, SectionCapCache::Entry{b.shape, cap});
         caps.push_back(cap);
       };
-      BRepAlgoAPI_Common common(b.shape.GetShape(), cutter);
+      BRepAlgoAPI_Common common;
+      BuildQuery(common, b.shape.GetShape(), cutter);
       // A body that doesn't meet the plane yields an empty compound (not
       // null); keep a cap only when it has real area, so callers can test
       // IsValid() to mean "there is a cut face here".
@@ -1203,7 +1237,8 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
                                               gp_Pnt(ref.x, ref.y, ref.z));
           if (!halfSpace.IsDone())
             continue;
-          BRepAlgoAPI_Cut trimmed(capShape, halfSpace.Solid());
+          BRepAlgoAPI_Cut trimmed;
+          BuildQuery(trimmed, capShape, halfSpace.Solid());
           if (trimmed.IsDone() && !trimmed.Shape().IsNull())
             capShape = trimmed.Shape();
         }

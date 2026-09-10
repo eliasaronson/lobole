@@ -16,6 +16,16 @@
 // caches single-threaded first — and `tests/sweep_parallel_smoke.py` diffs a
 // one-thread report against an all-thread one, byte for byte, because a race
 // in a boolean corrupts an ANSWER rather than crashing.
+//
+// AND THE ONE WARMING CANNOT FIX: a boolean does not only READ its arguments,
+// it WRITES to them — the p-curves it computes go onto the input edges unless
+// SetNonDestructive says otherwise. There is nothing to pre-warm, because
+// what gets written is specific to the PAIR: no single-threaded pass can make
+// A-with-B and A-with-C agree about what belongs on A's edges. That one
+// corrupts the HEAP rather than an answer, so the byte-diff above does not
+// see it either; it cost three runs in ten of one smoke for a day
+// (docs/performance/query-booleans.md). Anything a worker here calls must
+// leave the shapes alone, not merely find them warm.
 
 #include <algorithm>
 #include <atomic>

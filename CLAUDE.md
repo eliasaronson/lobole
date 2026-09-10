@@ -147,17 +147,20 @@ buys back the coverage.
   `fem_smoke` failed twice under `-j$(nproc)` on 2026-08-25; the suspected
   `free_port()` race was FIXED the same day (L8: the app binds `--remote 0`
   itself; `tests/smoke_app.py` is the one launcher and keeps the app's log).
-  `cncest6090_smoke` fails about 4 runs in 10 on main, in isolation as well as
-  under load, and the mechanism is worth knowing rather than rerunning past:
-  its `assert result["clean"]` is over a motion study in **exact** clash mode,
-  and one sample comes back
-  `UNKNOWN … mount_bolt_0 x … clamp_nut_0: exact contact calculation failed`.
-  An exact boolean between a screw and its nut — interpenetrating helical
-  thread surfaces — is where OCCT is fragile, and `pairs_unknown` correctly
-  makes `clean` false. So the CHECK is right and the assertion is too strong:
-  a model with threaded fasteners cannot promise a clean EXACT sweep at every
-  pose. Either the study runs in `mesh` mode, or the test asserts no *clash*
-  rather than `clean`.
+  `cncest6090_smoke` failed about 3 runs in 10, in isolation as well as under
+  load — FIXED 2026-09-10, and it was neither a flaky check nor a too-strong
+  assertion. **An OpenCASCADE boolean MODIFIES its arguments** (it writes the
+  p-curves it computes onto their edges), so two sweep threads asking about
+  two pairs that share a body corrupted the heap. It surfaced as
+  `malloc(): unaligned tcache chunk` frames away from anything of ours, and
+  sometimes only as an UNKNOWN pair, which is what made it read as kernel
+  fragility on threaded fasteners. `SetNonDestructive` is the fix; every
+  boolean in `Measure.cpp` goes through `BuildQuery` and
+  `test_conventions.cpp` says so (docs/performance/query-booleans.md).
+  **The lesson generalises: warming caches single-threaded — the rule
+  core/Parallel.h states — does NOT make OCC safe to share, because a boolean
+  WRITES pair-specific data, not an idempotent cache fill.** `--tsan` named
+  it in one run after a day of it looking like a flake.
 - **Generating CPU load for a test: `tools/with-cpu-load.sh N -- cmd` — NEVER
   bare `while :; do :; done &` burners.** Backgrounded pids noted in one shell
   command are invisible to the next (each is a new shell), the burners orphan
