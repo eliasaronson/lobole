@@ -30,7 +30,11 @@ feature list, so a genuinely *parametric* import is feasible (I3).
 - `ImportFeature` (`src/core/Feature.h:155`) wraps
   `CADKernel::LoadSTEP` = plain `STEPControl_Reader`: shapes only — no
   names, colors, or product structure. Centers the combined bbox at the
-  origin for determinism; caps at 20 shapes; one body per shape in ONE part.
+  origin for determinism (v97: `keep_origin` keeps the file's own
+  coordinates instead, and `add_feature` reports the shift it applied as
+  `recentred_by` — an import whose coordinates MEAN something, a neighbour
+  part or a re-import of this app's own export, needs it); caps at 20
+  shapes; one body per shape in ONE part.
 - Entry points exist end-to-end: File > Import STEP (Ctrl+I), `import_step`
   RPC + MCP tool. Whatever we improve lands in all three for free.
 - The XCAF bridge patterns already exist on the EXPORT side
@@ -57,7 +61,8 @@ surface what STEP actually carries:
   a color is NOT a simulation material — FEM keeps requiring an explicit
   material assignment). Renderer sync prefers: material > display color >
   palette.
-- Same determinism rule (bbox centering), same free-solids-only behavior,
+- Same determinism rule (bbox centering, unless `keep_origin`), same
+  free-solids-only behavior,
   same 20-shape cap (raised only if a real file needs it — log when capped).
 - Serialization: display color rides in the Import feature's JSON (format
   bump only if Body serialization itself must change — expected: no bump,

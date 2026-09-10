@@ -267,6 +267,10 @@ per convention):
 - `set_study {study, mesh_size?}` /
   `add_refinement {study, face:{feature_id, element}, size}`
 - `add_load {study, type, face:{feature_id, element}, magnitude?, direction?}`
+  — a `face` may also be just the element name (as a bare string or
+  `{element}`), and the body that HAS it is found: the name's own prefix is
+  the feature that created the ELEMENT, which after a boolean is not the
+  body's `created_by`
   / `remove_load`
 - `run_study {study}` → `{nodes, elements, max_von_mises_mpa: {value, at},
   max_displacement_mm: {value, at}, stale: false}` (runs mesh+solve; errors

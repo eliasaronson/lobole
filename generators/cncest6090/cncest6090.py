@@ -12,7 +12,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # _lib
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from designer_sdk import Plane, SdkError, connect
 from cncest6090_spec import D, dimensions, manifest
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Place the gripper's parts in an assembly, at a given link angle.
 
-    python3 generators/so101_gripper_assembly.py --port 8800 [--theta 0] [--create]
+    python3 generators/so101_gripper/so101_gripper_assembly.py --port 8800 [--theta 0] [--create]
 
 theta is the link angle from +Z, positive = closing; params.THETA_CLOSED and
 THETA_OPEN are the ends of the stroke. Re-running with a new --theta moves
@@ -13,7 +13,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, HERE)                          # this generator's own files
+sys.path.insert(0, os.path.join(HERE, ".."))      # generators/: _lib, gear
 import so101_gripper_spec as P                         # noqa: E402
 from _lib import connect                               # noqa: E402
 

@@ -74,10 +74,10 @@ The builder proxy is an ergonomic adapter, not a sandbox for untrusted code.
 ## OM615
 
 ```sh
-python3 generators/om615.py --port 8801 --out /tmp/engine --stage preview
-python3 generators/om615.py --port 8801 --out /tmp/engine-review --stage full --no-export
-python3 generators/om615.py --port 8801 --update-component intake --stage local --out /tmp/intake-review
-python3 generators/om615.py --port 8801 --validate-only --stage full --out /tmp/full-review
+python3 generators/om615/om615.py --port 8801 --out /tmp/engine --stage preview
+python3 generators/om615/om615.py --port 8801 --out /tmp/engine-review --stage full --no-export
+python3 generators/om615/om615.py --port 8801 --update-component intake --stage local --out /tmp/intake-review
+python3 generators/om615/om615.py --port 8801 --validate-only --stage full --out /tmp/full-review
 ```
 
 Use your own application instance. `--project PATH` optionally opens a saved

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Give the assembly its joints, then drive them.
 
-    python3 generators/so101_gripper_motion.py --port 8800            # mate, solve, study, run, export
+    python3 generators/so101_gripper/so101_gripper_motion.py --port 8800            # mate, solve, study, run, export
 
 Every pivot becomes a real revolute between two named datum frames, so the
 mechanism is a kinematic model rather than sixteen parts posed by a script:
@@ -29,12 +29,13 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, HERE)                          # this generator's own files
+sys.path.insert(0, os.path.join(HERE, ".."))      # generators/: _lib, gear
 import so101_gripper_spec as P                         # noqa: E402
 from _lib import connect                               # noqa: E402
 from so101_gripper_assembly import ASM, placements     # noqa: E402
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                    "scratch", "so101-pg52-gripper")
 # The driver mate measures its rotation the other way round from the link
 # angle theta this design is parameterised in: mate_rotation = -theta.

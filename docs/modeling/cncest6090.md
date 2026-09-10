@@ -26,7 +26,7 @@ The accessory tab is a starting interface for a dust shoe, not a complete shoe.
 
 ## Dimensions and later measurements
 
-`generators/cncest6090_spec.py` is the parameter register. Each entry has a nominal
+`generators/cncest6090/cncest6090_spec.py` is the parameter register. Each entry has a nominal
 value in mm, a status and a note describing what to measure. The statuses are:
 
 - `user_supplied`: the 80 mm spindle diameter at the recorded baseline.
@@ -59,11 +59,11 @@ before selecting vendor components.
 Use a private instance and scratch port, never mutate the user's port 8799:
 
 ```sh
-python3 generators/cncest6090.py --port PORT --out /tmp/cncest6090 --stage preview
-python3 generators/cncest6090.py --port PORT --out /tmp/cncest6090 --stage full
+python3 generators/cncest6090/cncest6090.py --port PORT --out /tmp/cncest6090 --stage preview
+python3 generators/cncest6090/cncest6090.py --port PORT --out /tmp/cncest6090 --stage full
 # Overrides are a JSON object of names and numeric values in mm:
 # {"spindle_l": 230, "guide_pitch": 125}
-python3 generators/cncest6090.py --port PORT --dimensions measurements.json --stage full
+python3 generators/cncest6090/cncest6090.py --port PORT --dimensions measurements.json --stage full
 ```
 
 A fresh run creates a new project in the selected instance. Preview checks the

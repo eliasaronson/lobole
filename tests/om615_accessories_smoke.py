@@ -13,7 +13,7 @@ import time
 
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", directory)
-    for directory in ("tools", "generators")
+    for directory in ("tools", "generators", "generators/om615")
 ]
 from designer_sdk import App
 from designer_remote import Designer

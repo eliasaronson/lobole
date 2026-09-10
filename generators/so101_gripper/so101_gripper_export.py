@@ -6,12 +6,13 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, HERE)                          # this generator's own files
+sys.path.insert(0, os.path.join(HERE, ".."))      # generators/: _lib, gear
 import so101_gripper_spec as P                         # noqa: E402
 from _lib import connect                               # noqa: E402
 from so101_gripper_assembly import placements          # noqa: E402
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                    "scratch", "so101-pg52-gripper")
 
 # what gets printed, and how many

@@ -12,8 +12,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
+                                "..", "..", "tools"))
 from designer_sdk import Plane, SdkError, V  # noqa: E402
+# This generator's own directory, and generators/ above it for _lib.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from om615_spec import *  # noqa: E402,F401,F403
 

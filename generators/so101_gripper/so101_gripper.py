@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the SO-101 PG-52 wrist gripper: every part, then the assembly.
 
-    python3 generators/so101_gripper.py --port 8800
+    python3 generators/so101_gripper/so101_gripper.py --port 8800
 
 Everything is in the tool frame described in so101_gripper_spec.py. Parts
 are built in their own local frames and PLACED by the assembly at transforms
@@ -13,7 +13,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, HERE)                          # this generator's own files
+sys.path.insert(0, os.path.join(HERE, ".."))      # generators/: _lib, gear
 
 import so101_gripper_spec as P                        # noqa: E402
 from _lib import connect                              # noqa: E402
