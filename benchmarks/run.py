@@ -76,6 +76,30 @@ def load_json_dir(path, wanted):
     return out
 
 
+def prompt_for(task):
+    """The prompt the agent gets — and nothing the grader keeps back.
+
+    A Fit task carries the geometry it will be graded against, and the agent
+    must never see it: hand over the tube and the task stops being "design a
+    cap" and becomes "boolean these two". Today that holds because nothing
+    puts `inputs` in the prompt at all, which is luck rather than a rule. This
+    is the rule: an input reaches the prompt only if it says it may, and a
+    host that claims it may is a broken task rather than a leak nobody
+    noticed.
+    """
+    parts = [HARNESS_PREFIX + task["prompt"]]
+    for i in task.get("inputs", []):
+        if not isinstance(i, dict):
+            continue
+        if i.get("kind") == "host_geometry" and i.get("agent_visible"):
+            raise SystemExit(
+                f"{task['id']}: host_geometry is agent_visible — that is the "
+                f"answer to the task, and the grader keeps it")
+        if i.get("agent_visible") and i.get("text"):
+            parts.append(i["text"])
+    return "\n\n".join(parts)
+
+
 def mcp_config(port, arm):
     """The agent's whole world: one server, pinned to this run's instance."""
     if arm.get("server") == "document":
@@ -242,7 +266,7 @@ def one_run(task, arm, rep, model, outdir, args):
         cfg = os.path.join(rundir, "mcp.json")
         json.dump(mcp_config(app.port, arm), open(cfg, "w"), indent=2)
 
-        agent, raw = run_agent(HARNESS_PREFIX + task["prompt"], cfg, arm, model,
+        agent, raw = run_agent(prompt_for(task), cfg, arm, model,
                                cwd, args.budget, args.timeout)
         open(os.path.join(rundir, "stream.jsonl"), "w").write(raw)
         rec.update(agent)

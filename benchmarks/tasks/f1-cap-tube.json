@@ -1,0 +1,56 @@
+{
+  "id": "f1-cap-tube",
+  "tier": 1,
+  "suite": "fit",
+  "title": "Cap for a thin-walled tube",
+  "prompt": "All dimensions are millimetres. Build exactly what is described \u2014 no fillets, chamfers, draft or extra features unless the description asks for them. Leave the finished part in the document; do not export anything.\n\nAn end cap for a round tube. The tube stands with its axis on Z, centred on that axis: 30 outside diameter, 2 wall, its top face at Z = 40.\n\nMake the cap that closes that end. It slips OVER the outside of the tube: a skirt whose bore is 30.4 (so 0.2 of clearance all round), 12 deep, and above it a solid top 3 thick whose underside lands on the tube's end face. The cap's outside diameter is 36.\n\nBuild it where it sits on the tube \u2014 the skirt from Z = 28 to Z = 40 and the top from Z = 40 to Z = 43 \u2014 not at the origin.",
+  "inputs": [
+    {
+      "kind": "host_geometry",
+      "path": "assets/f1-cap-tube-host.step",
+      "agent_visible": false,
+      "why": "the tube the cap has to fit. The GRADER mates against it; the agent is told its dimensions in prose and never gets the file, because a task that hands over the geometry is asking for a boolean, not a design"
+    }
+  ],
+  "contact_epsilon_mm": 0.05,
+  "checks": [
+    {
+      "kind": "solids",
+      "eq": 1,
+      "why": "one connected cap"
+    },
+    {
+      "kind": "envelope",
+      "max_mm": [
+        36.2,
+        36.2,
+        15.2
+      ],
+      "why": "a cap big enough to clear anything would pass every clearance check ever written"
+    },
+    {
+      "kind": "mate_clearance",
+      "min_mm": 0.0,
+      "max_mm": 0.05,
+      "why": "the cap's top lands ON the tube end, so they touch \u2014 a cap floating above it is not a cap"
+    },
+    {
+      "kind": "interference_volume",
+      "max_mm3": 1.0,
+      "why": "a slip fit: 0.2 of clearance all round means the two solids do not share space"
+    },
+    {
+      "kind": "contact_area",
+      "min_mm2": 150.0,
+      "why": "the tube's end annulus is 176 mm2 and the cap has to be sitting on it"
+    },
+    {
+      "kind": "cyl_group",
+      "diameter": 30.4,
+      "count": 1,
+      "internal": true,
+      "tol": 0.05,
+      "why": "the skirt bore, at the size that makes the clearance"
+    }
+  ]
+}

@@ -29,7 +29,9 @@
 #include <vector>
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <BRepTools.hxx>
@@ -138,33 +140,144 @@ const char* SurfaceKind(GeomAbs_SurfaceType t) {
 
 } // namespace
 
+// Read one STEP, or nothing if it will not read. Shared by the candidate and
+// by a Fit task's HOST — the host is read by the grader and never by the
+// agent, so it has to come in the same way and be held to the same standard.
+bool ReadStep(const std::string& path, TopoDS_Shape& out) {
+  STEPControl_Reader reader;
+  Interface_Static::SetCVal("xstep.cascade.unit", "MM");
+  if (reader.ReadFile(path.c_str()) != IFSelect_RetDone)
+    return false;
+  reader.TransferRoots();
+  out = reader.OneShape();
+  return !out.IsNull();
+}
+
+// What an accessory does against the part it mates with (Fit tasks). Three
+// numbers, and they answer different questions that a single "does it clash"
+// cannot: how close it comes, how much solid is in solid, and how much of it
+// is actually touching — which is the difference between a cap that sits on a
+// tube and one that hovers a millimetre off it while clearing every check.
+json FitFacts(const TopoDS_Shape& candidate, const TopoDS_Shape& host,
+              double contactEpsilonMm) {
+  json fit;
+
+  BRepExtrema_DistShapeShape dist(candidate, host);
+  dist.Perform();
+  if (!dist.IsDone()) {
+    fit["ok"] = false;
+    fit["error"] = "the distance between candidate and host did not compute";
+    return fit;
+  }
+  fit["ok"] = true;
+  fit["distance_mm"] = dist.Value();
+
+  // Solid in solid. A boolean, not a proximity guess: a press fit is a real
+  // negative clearance and the volume of it is the interference.
+  BRepAlgoAPI_Common common(candidate, host);
+  common.Build();
+  double interference = 0.0;
+  if (common.IsDone()) {
+    GProp_GProps props;
+    BRepGProp::VolumeProperties(common.Shape(), props);
+    interference = std::abs(props.Mass());
+  } else {
+    fit["interference_ok"] = false;
+  }
+  fit["interference_mm3"] = interference;
+
+  // Contact area: how much of the candidate is actually touching the host.
+  //
+  // The obvious version — sum the area of every candidate face that comes
+  // within epsilon of the host — is wrong by a lot, and wrong in the
+  // permissive direction. A face counts in full if ANY part of it is close,
+  // so the reference cap read 725.8 mm2 where the tube's end annulus it
+  // rests on is 176: the whole underside disc counted, including the part
+  // spanning the tube's bore, which touches nothing. That number cannot tell
+  // a seated cap from one grazing at a single point, which is the only thing
+  // a contact check is for.
+  //
+  // So intersect the face PATCHES. For each near pair, the common of the two
+  // faces is the region they actually share, and its area is real contact —
+  // exact for the coincident planar and cylindrical patches that fits are
+  // made of.
+  double contact = 0.0;
+  for (TopExp_Explorer e(candidate, TopAbs_FACE); e.More(); e.Next()) {
+    const TopoDS_Face face = TopoDS::Face(e.Current());
+    BRepExtrema_DistShapeShape d(face, host);
+    d.Perform();
+    if (!d.IsDone() || d.Value() > contactEpsilonMm)
+      continue;
+    for (TopExp_Explorer h(host, TopAbs_FACE); h.More(); h.Next()) {
+      const TopoDS_Face other = TopoDS::Face(h.Current());
+      BRepExtrema_DistShapeShape pair(face, other);
+      pair.Perform();
+      if (!pair.IsDone() || pair.Value() > contactEpsilonMm)
+        continue;
+      BRepAlgoAPI_Common shared(face, other);
+      shared.Build();
+      if (!shared.IsDone())
+        continue;
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(shared.Shape(), props);
+      // Two faces meeting edge-on share a curve, not a patch: zero area, and
+      // it must not read as contact.
+      contact += std::abs(props.Mass());
+    }
+  }
+  fit["contact_area_mm2"] = contact;
+  fit["contact_epsilon_mm"] = contactEpsilonMm;
+  return fit;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::printf(
-        "{\"ok\": false, \"error\": \"usage: bench_oracle FILE.step\"}\n");
+    std::printf("{\"ok\": false, \"error\": \"usage: bench_oracle FILE.step "
+                "[--host HOST.step] [--contact-eps MM]\"}\n");
     return 1;
   }
   const std::string path = argv[1];
-
-  STEPControl_Reader reader;
-  // Read the file's own units instead of assuming mm: a benchmark that
-  // silently rescales grades the wrong part and calls it a pass.
-  Interface_Static::SetCVal("xstep.cascade.unit", "MM");
-  if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) {
-    std::printf("{\"ok\": false, \"error\": \"cannot read STEP: %s\"}\n",
-                path.c_str());
-    return 1;
+  std::string hostPath;
+  double contactEps = 0.2;
+  for (int i = 2; i < argc; i++) {
+    const std::string arg = argv[i];
+    if (arg == "--host" && i + 1 < argc)
+      hostPath = argv[++i];
+    else if (arg == "--contact-eps" && i + 1 < argc)
+      contactEps = std::atof(argv[++i]);
+    else {
+      std::printf("{\"ok\": false, \"error\": \"unknown argument '%s'\"}\n",
+                  arg.c_str());
+      return 1;
+    }
   }
-  reader.TransferRoots();
-  const TopoDS_Shape shape = reader.OneShape();
-  if (shape.IsNull()) {
-    std::printf("{\"ok\": false, \"error\": \"STEP holds no shape\"}\n");
+
+  TopoDS_Shape shape;
+  if (!ReadStep(path, shape)) {
+    std::printf("{\"ok\": false, \"error\": \"cannot read STEP (or it holds "
+                "no shape): %s\"}\n",
+                path.c_str());
     return 1;
   }
 
   json out;
   out["ok"] = true;
   out["file"] = path;
+
+  // A Fit task: the host is the grader's, never the agent's. If it will not
+  // read, that is a BROKEN TASK and it says so — the one thing it must not do
+  // is quietly grade the accessory on its own and report a clean fit.
+  if (!hostPath.empty()) {
+    TopoDS_Shape host;
+    if (!ReadStep(hostPath, host)) {
+      std::printf("{\"ok\": false, \"error\": \"cannot read host STEP: %s\"}"
+                  "\n",
+                  hostPath.c_str());
+      return 1;
+    }
+    out["host_file"] = hostPath;
+    out["fit"] = FitFacts(shape, host, contactEps);
+  }
 
   int solids = 0, shells = 0;
   for (TopExp_Explorer e(shape, TopAbs_SOLID); e.More(); e.Next())

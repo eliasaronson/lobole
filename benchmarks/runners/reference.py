@@ -224,7 +224,18 @@ def t5_crank_motion(d):
     _mechanism(d)
 
 
+def f1_cap_tube(d):
+    """The cap, where it sits on the tube: skirt Z 28..40, top Z 40..43."""
+    # Skirt: OD 36, bore 30.4, from Z=28 up to the tube's end face at Z=40.
+    extrude(d, sketch(d, [circle(0, 0, 18.0), circle(0, 0, 15.2)],
+                      pl=plane((0, 0, 28.0)), name="Skirt"), 12.0, name="Skirt")
+    # Top: solid Ø36, 3 thick, landing ON the tube end.
+    extrude(d, sketch(d, [circle(0, 0, 18.0)], pl=plane((0, 0, 40.0)),
+                      name="Top"), 3.0, mode="add", name="Top")
+
+
 BUILDERS = {
+    "f1-cap-tube": f1_cap_tube,
     "t0-plate": t0_plate, "t0-spacer": t0_spacer,
     "t1-mount-plate": t1_mount_plate, "t1-l-bracket": t1_l_bracket,
     "t2-flange": t2_flange, "t2-stepped-shaft": t2_stepped_shaft,

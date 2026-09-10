@@ -103,7 +103,41 @@ def wrong_taper_adapter_fine(d):
              mode="new_body" if i == 0 else "add", name=f"Step{i}")
 
 
+def wrong_cap_hovering(d):
+    """The cap, right in every dimension, sitting 0.5 mm too high.
+
+    This is the Fit suite's whole reason for existing. The part is correct:
+    one solid, the right envelope, the right bore, the right wall. Every check
+    the benchmark had before a host existed passes it. It is not a cap,
+    because it is not touching the tube — and only a check that mates it
+    against the tube can tell.
+    """
+    from reference import extrude
+    extrude(d, sketch(d, [circle(0, 0, 18.0), circle(0, 0, 15.2)],
+                      pl=plane((0, 0, 28.5)), name="Skirt"), 12.0, name="Skirt")
+    extrude(d, sketch(d, [circle(0, 0, 18.0)], pl=plane((0, 0, 40.5)),
+                      name="Top"), 3.0, mode="add", name="Top")
+
+
+def wrong_cap_press_fit(d):
+    """The cap with the clearance left out — a 30.0 bore on a 30.0 tube.
+
+    Reads as a cap and cannot be assembled: the skirt and the tube want the
+    same space. `interference_volume` is the only check that sees it, because
+    the part's own dimensions are all defensible.
+    """
+    from reference import extrude
+    extrude(d, sketch(d, [circle(0, 0, 18.0), circle(0, 0, 14.7)],
+                      pl=plane((0, 0, 28.0)), name="Skirt"), 12.0, name="Skirt")
+    extrude(d, sketch(d, [circle(0, 0, 18.0)], pl=plane((0, 0, 40.0)),
+                      name="Top"), 3.0, mode="add", name="Top")
+
+
 WRONG = {
+    "f1-cap-tube": [
+        ("the right cap, 0.5 mm off the tube", wrong_cap_hovering),
+        ("no clearance — a 29.4 bore on a 30 tube", wrong_cap_press_fit),
+    ],
     "t3-coil-spring": [("five separate flat rings", wrong_coil_spring)],
     "t3-taper-adapter": [
         ("six stacked discs at the step midpoints", wrong_taper_adapter),

@@ -141,21 +141,24 @@ buys back the coverage.
 ## Benchmark — is the API still usable by an agent?
 
 `benchmarks/` grades an agent that has ONLY the MCP surface (`--tools ""`, no
-shell, no repo) on thirteen described parts (eleven static, plus T4/T5 mechanisms), with a C++/OCCT oracle that reads the
-exported STEP back and links no designer_core. Changing a tool, a description,
+shell, no repo) on described parts — static ones, T4/T5 mechanisms, and a Fit
+task graded against a host part the agent never sees — with a C++/OCCT oracle
+that reads the exported STEP back and links no designer_core. Changing a tool, a description,
 a refusal message or `help()` changes what this measures — **no benchmark, no
 claim**, and results are committed, never overwritten.
 
 - Free self-test, run it first: `python3 benchmarks/runners/reference.py`
-  builds all thirteen by hand and must score 68/68. If it fails, the app or a
-  task is broken — not the agent. Its counterpart `negative_controls.py` builds
-  the three construction-sensitive parts the WRONG way and must see every one
-  REJECTED — a check nothing fails is not a check.
-- A sweep costs money: `python3 benchmarks/run.py --reps 3`. It is 195 runs
-  (13 tasks x 5 arms x 3 reps) with a **$390 ceiling** since the three
-  construction tasks landed 2026-09-09 — not the ~$5 this line used to quote
-  for eight tasks. ASK before spending it. `--dry-run` prints the plan and the
-  ceiling for free.
+  builds every task by hand and must score every check. It PRINTS the totals;
+  do not restate them here, because this line has already gone stale twice
+  (8 tasks then 13, 48/48 then 68/68) — the same rule as ports, one file up.
+  If it fails, the app or a task is broken — not the agent. Its counterpart
+  `negative_controls.py` builds the construction- and fit-sensitive parts the
+  WRONG way and must see every one REJECTED — a check nothing fails is not a
+  check. `villain.py` is the floor from the other side: a block of each task's
+  own bbox, which must not pass one.
+- A sweep costs money. **`--dry-run` prints the plan, the run count and the
+  ceiling for free — read it rather than a number written here.** ASK before
+  spending it.
 
 ## Driving / screenshotting the running app
 

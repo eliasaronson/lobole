@@ -43,10 +43,21 @@ WEAK_FRACTION = 2.0 / 3.0
 
 
 def bbox_of(task):
-    """The task's declared bbox size, or None if it does not declare one."""
+    """A block the villain can aim: the task's declared bbox, or the ceiling
+    an `envelope` check gives it.
+
+    A Fit task states an envelope rather than a size — there is no single
+    right bbox for an accessory — so without the fallback the villain has
+    nothing to build and the task has no floor. A block filling the envelope
+    is the strongest cheese available there: it is the biggest thing the task
+    permits.
+    """
     for c in task["checks"]:
         if c["kind"] == "bbox" and "size" in c:
             return c["size"]
+    for c in task["checks"]:
+        if c["kind"] == "envelope" and "max_mm" in c:
+            return c["max_mm"]
     return None
 
 

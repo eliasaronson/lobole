@@ -21,11 +21,27 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 DEFAULT_ORACLE = os.path.join(ROOT, "build", "bench_oracle")
 
 
-def read_facts(step_path, oracle=DEFAULT_ORACLE):
-    """Run the oracle. A missing/unreadable file is a fact too, not a crash."""
+def read_facts(step_path, oracle=DEFAULT_ORACLE, host=None, contact_eps=None):
+    """Run the oracle. A missing/unreadable file is a fact too, not a crash.
+
+    `host` is a Fit task's other half — the part the candidate has to mate
+    with, which the GRADER sees and the agent never does. Passing it makes the
+    oracle emit `fit`: how close the two come, how much solid is in solid, and
+    how much of the candidate is actually touching.
+    """
     if not os.path.exists(step_path):
         return {"ok": False, "error": "no STEP file was exported"}
-    proc = subprocess.run([oracle, step_path], capture_output=True, text=True)
+    cmd = [oracle, step_path]
+    if host:
+        if not os.path.exists(host):
+            # A missing host is a BROKEN TASK, and the one thing it must not
+            # do is grade the accessory alone and report a clean fit.
+            return {"ok": False,
+                    "error": f"the task's host geometry is missing: {host}"}
+        cmd += ["--host", host]
+        if contact_eps is not None:
+            cmd += ["--contact-eps", str(contact_eps)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:
@@ -188,6 +204,59 @@ def _c_area(f, c):
     return _within(got, c["value"], tol), got
 
 
+# --- Fit checks ------------------------------------------------------------
+# An accessory is graded against the HOST it mates with, which the agent never
+# saw. Each of these answers something the others cannot: how close it comes,
+# how much solid is in solid, how much of it is doing the holding, and whether
+# it stayed inside the envelope it was given. A single "does it clash" answers
+# none of them — a cap hovering a millimetre off the tube clears it perfectly.
+
+def _fit(f, c):
+    """The fit facts, or a reason there are none. Never silently absent: a Fit
+    check on a run with no host must FAIL, not pass by default."""
+    fit = f.get("fit")
+    if not fit:
+        return None, "this task declared no host geometry, so nothing was mated"
+    if not fit.get("ok"):
+        return None, fit.get("error", "the fit did not compute")
+    return fit, None
+
+
+def _c_mate_clearance(f, c):
+    fit, why = _fit(f, c)
+    if fit is None:
+        return False, why
+    got = fit["distance_mm"]
+    lo, hi = c.get("min_mm", 0.0), c.get("max_mm", math.inf)
+    return lo <= got <= hi, got
+
+
+def _c_interference_volume(f, c):
+    fit, why = _fit(f, c)
+    if fit is None:
+        return False, why
+    got = fit["interference_mm3"]
+    return got <= c.get("max_mm3", 0.0), got
+
+
+def _c_contact_area(f, c):
+    fit, why = _fit(f, c)
+    if fit is None:
+        return False, why
+    got = fit["contact_area_mm2"]
+    return got >= c.get("min_mm2", 0.0), got
+
+
+def _c_envelope(f, c):
+    """A bbox CEILING, not a target. Caps the "make it enormous and it will
+    certainly fit" move that every clearance check on its own rewards."""
+    got = f.get("bbox", {}).get("size")
+    if not got:
+        return False, None
+    want = c["max_mm"]
+    return all(g <= w + c.get("tol", 0.01) for g, w in zip(got, want)), got
+
+
 CHECKS = {
     "solids": _c_solids,
     "bbox": _c_bbox,
@@ -199,6 +268,10 @@ CHECKS = {
     "solid_volume": _c_solid_volume,
     "faces": _c_faces,
     "area": _c_area,
+    "mate_clearance": _c_mate_clearance,
+    "interference_volume": _c_interference_volume,
+    "contact_area": _c_contact_area,
+    "envelope": _c_envelope,
 }
 
 
@@ -224,8 +297,24 @@ def grade(facts, checks):
             "total": len(results), "checks": results}
 
 
+def host_of(task, root=None):
+    """A Fit task's host STEP, from its `inputs`. Only entries the agent must
+    NOT see are hosts; anything agent_visible is a reference the prompt hands
+    over, not a grading input."""
+    base = root or os.path.join(ROOT, "benchmarks")
+    for i in task.get("inputs", []):
+        if isinstance(i, dict) and i.get("kind") == "host_geometry":
+            if i.get("agent_visible"):
+                raise ValueError(
+                    f"{task['id']}: host_geometry must be agent_visible: false "
+                    f"— it is the answer to the task")
+            return os.path.join(base, i["path"])
+    return None
+
+
 def grade_file(task, step_path, oracle=DEFAULT_ORACLE):
-    facts = read_facts(step_path, oracle)
+    facts = read_facts(step_path, oracle, host=host_of(task),
+                       contact_eps=task.get("contact_epsilon_mm"))
     out = grade(facts, task["checks"])
     out["facts"] = facts
     return out

@@ -141,6 +141,44 @@ fails is not a check, and adding one without this only proves that everything
 passes. Sixty discs clear `solids`, `bbox`, `volume`, the bore and the centre
 of mass; only the surface census stops them.
 
+### The Fit suite: graded against a part the agent never saw
+
+Every other task grades a part against numbers. `f1-cap-tube` grades it
+against **another part** — a tube, supplied as an input marked
+`agent_visible: false`, which the grader mates the candidate to and the agent
+is never handed. The prompt says the tube is 30 across with a 2 wall and its
+end at Z = 40; the file that proves it stays with the grader, because a task
+that hands over the geometry is asking for a boolean, not a design.
+
+`bench_oracle --host HOST.step` then reports three things a single "does it
+clash" cannot:
+
+    distance_mm         how close the two come
+    interference_mm3    how much solid is in solid
+    contact_area_mm2    how much of the candidate is actually touching
+
+with `mate_clearance`, `interference_volume`, `contact_area` and `envelope` as
+the check kinds over them. `run.py` builds the prompt through `prompt_for`,
+which refuses to emit a host — the rule, rather than the accident that nothing
+put `inputs` in the prompt before.
+
+**Contact area is measured on the shared patch, not the near face.** The first
+cut summed every candidate face within epsilon of the host, and read 725.8 mm2
+for a cap resting on a 175.93 mm2 annulus: a face counts in full if any part
+of it is near, including the part spanning the tube's bore, which touches
+nothing. That number cannot tell a seated cap from one grazing at a point,
+which is the only thing a contact check is for. Intersecting the face patches
+gives 175.93 — the annulus, exactly.
+
+It earns its keep in `negative_controls.py`, where both wrong caps are
+dimensionally perfect and **the surface census catches neither**:
+
+    the right cap, 0.5 mm off the tube    4/6  mate_clearance 0.2, contact_area 0
+    no clearance — 29.4 bore on a 30 tube 3/6  interference_volume 335.9 mm3
+
+That is the class of error nothing here could see before: a part that is
+correct and does not fit.
+
 ### The `document` arm: is the RPC surface a help or a tax?
 
 `full`, `rpc-only` and `script-first` all reach the app through the API, so no
