@@ -12,6 +12,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 // Saves/loads the feature list as pretty-printed JSON. This is the on-disk
 // project format: human-readable and line-oriented so documents diff and
@@ -94,6 +95,13 @@ Occurrence OccurrenceFromJson(const nlohmann::json& j);
 // set_mate RPCs. Throws on malformed input.
 nlohmann::json MateToJson(const Mate& mate);
 Mate MateFromJson(const nlohmann::json& j);
+
+// The vocabulary itself, from the SAME table the parser refuses against, so
+// `describe` cannot drift from what add_mate/add_relation accept. An agent
+// that cannot see the mate types guesses them; one that cannot see the
+// relation kinds does not know coupled DOFs exist at all.
+std::vector<std::string> MateTypeNames();
+std::vector<std::string> RelationKindNames();
 
 // Single-exploded-view (de)serialization (v27, A4); same convention as mates.
 nlohmann::json ExplodedViewToJson(const ExplodedView& view);

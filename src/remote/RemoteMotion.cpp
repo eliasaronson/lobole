@@ -33,7 +33,15 @@ constexpr MethodDoc MotionMethods[] = {
      "offset — samples? (default 48), check_clash? (default true), "
      "clash_mode?: mesh (default, ~10x faster) | exact (the boolean), "
      "name?}. Returns the study and, if it cannot run, `why_not`. Nothing "
-     "runs until run_motion_study.",
+     "runs until run_motion_study. ONE driver moves the whole mechanism "
+     "when the rest follows through mates and RELATIONS (add_relation): a "
+     "geared pair turns because the relation propagates, not because two "
+     "DOFs were driven. Pick the driver with care where a mechanism has a "
+     "SINGULAR configuration — a symmetric linkage that can also move "
+     "antisymmetrically passes through one — because the solve continues "
+     "from the previous sample and can come out of it on the other branch. "
+     "The driver to choose is the DOF that cannot change on the branch you "
+     "do not want; the clash check is what makes the jump visible.",
      "check_clash, clash_mode, dof, driver, from, name, samples, to"},
     {"set_motion_study",
      "Edit a study {study, name?, from?, to?, samples?, check_clash?, "

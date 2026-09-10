@@ -13,6 +13,7 @@
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include <map>
+#include <set>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -81,7 +82,12 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "DEFAULTS TO TRUE: the two connectors meet face to face with their "
      "normals opposed, which is what two touching FACES do and the opposite "
      "of what two seat FRAMES want — frame to frame, pass flipped:false, or "
-     "the part lands turned over and sunk into whatever it was to sit on.",
+     "the part lands turned over and sunk into whatever it was to sit on. "
+     "A mate is ONE joint between two occurrences. To COUPLE two mates' "
+     "degrees of freedom — a gear pair, a rack and pinion, a screw, a cam — "
+     "the thing to add is a RELATION over those two mates (add_relation); "
+     "that is also what drops a geared loop's DOF count. `describe` lists "
+     "both vocabularies as `mate_types` and `relation_kinds`.",
      "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, "
      "rotation_deg, type"},
     {"set_mate",
@@ -96,7 +102,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "rotation_deg"},
     {"remove_mate", "Remove a mate by id.", "id"},
     {"list_mates",
-     "List mates with status/errors. Each carries `rotation` in radians and "
+     "List mates with `status` (satisfied | redundant | error) and the "
+     "error text when there is one. Each carries `rotation` in radians and "
      "`rotation_deg` beside it.",
      ""},
     {"add_relation",
@@ -131,7 +138,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"list_relations", "List relations with status/errors.", ""},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
-     "Run the mate solver. Returns the per-mate status plus, for an assembly "
+     "Run the mate solver. Returns every mate with a `status` (satisfied | "
+     "redundant | error) and its error text when there is one, plus, for an "
+     "assembly "
      "with mate loops, how many degrees of freedom are left, whether every "
      "loop closed and by how much it missed, and which mates were redundant "
      "but consistent (three bolts through a flange: satisfied, saying nothing "
@@ -893,6 +902,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
       json mj = MateJson(mate);
+      // Same word as solve_assembly's. list_mates does not re-solve, so
+      // "redundant" is not knowable here: a mate is either carrying an
+      // error from the last solve, or it is satisfied.
+      mj["status"] = mate.error.empty() ? "satisfied" : "error";
       if (!mate.error.empty())
         mj["error"] = mate.error;
       arr.push_back(mj);
@@ -1206,8 +1219,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "set_active_part (see list_parts)");
     const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
     json arr = json::array();
+    const std::set<uint64_t> redundant(rep.redundantMates.begin(),
+                                       rep.redundantMates.end());
     for (const Mate& mate : state.assembly->GetMates()) {
-      json mj = {{"id", mate.id}, {"name", mate.name}};
+      // `status` in words, because the absence of an `error` key is not a
+      // statement: a caller filtering on a field that is only sometimes
+      // there reads "no news" as "not satisfied" (or the reverse) and
+      // reports every mate as broken.
+      const char* status = !mate.error.empty()        ? "error"
+                           : redundant.count(mate.id) ? "redundant"
+                                                      : "satisfied";
+      json mj = {{"id", mate.id}, {"name", mate.name}, {"status", status}};
       if (!mate.error.empty())
         mj["error"] = mate.error;
       arr.push_back(mj);

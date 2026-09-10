@@ -696,6 +696,13 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     glm::mat4 fb{1.0f};
   };
   std::vector<MateFrames> frames(asmDoc.GetMates().size());
+  // How far each mate's connector Z axes are from aligned IN THE PLACEMENT
+  // THE CALLER LEFT. A mate aligns those axes, so one that starts far from
+  // aligned must turn its part to satisfy itself — which is the usual
+  // reason a loop that is right on paper cannot close. Only ever reported
+  // inside that failure, where it is the difference between "off by 50 mm"
+  // and knowing which frame is wrong.
+  std::vector<double> axesApartDeg(asmDoc.GetMates().size(), 0.0);
 
   for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
     Mate& mate = asmDoc.GetMates()[i];
@@ -727,6 +734,19 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       mate.error = err;
       report.erroredMates++;
       continue;
+    }
+    if (mate.type != MateType::Ball && mate.a.innerPath.empty() &&
+        mate.b.innerPath.empty()) {
+      const Occurrence* oa = asmDoc.FindById(mate.a.occurrenceId);
+      const Occurrence* ob = asmDoc.FindById(mate.b.occurrenceId);
+      if (oa && ob) {
+        const auto axis = [](const glm::mat4& occ, const glm::mat4& local) {
+          return glm::normalize(glm::vec3(occ * local * glm::vec4(0, 0, 1, 0)));
+        };
+        const float d = std::abs(
+            glm::dot(axis(OccMatrix(*oa), *fa), axis(OccMatrix(*ob), *fb)));
+        axesApartDeg[i] = glm::degrees(std::acos(std::clamp(d, 0.0f, 1.0f)));
+      }
     }
     frames[i] = {true, *fa, *fb};
   }
@@ -903,6 +923,19 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
         if (Mate* m = asmDoc.FindMateById(id)) {
           m->error = "loop does not close (off by " +
                      FormatMm(closed.residualMm) + " mm)";
+          // Name the likeliest cause when there is one: connectors that were
+          // nowhere near coaxial before the solve. A part's ORIGIN frame
+          // points along the PART's Z, which is rarely the pivot axis, and
+          // mating to it silently turns the part 90 degrees.
+          for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
+            if (asmDoc.GetMates()[i].id != id || axesApartDeg[i] < 20.0)
+              continue;
+            m->error +=
+                "; its two connector axes started " +
+                std::to_string(static_cast<int>(std::lround(axesApartDeg[i]))) +
+                " degrees apart, so this mate had to turn its part to align "
+                "them — check that both connectors name the axis you meant";
+          }
           report.erroredMates++;
         }
       }

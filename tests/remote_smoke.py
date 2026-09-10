@@ -987,6 +987,17 @@ def main():
                arc["params"], "the arc names its angle unit and the _deg twin")
         expect(desc["document_format_version"] >= 52, "format version present")
         expect(len(desc["constraint_kinds"]) >= 20, "constraint kinds")
+        # The assembly vocabulary is published too. A caller that cannot see
+        # `relation_kinds` here concludes gears are not supported and builds
+        # a workaround (a slider standing in for a gear pair, with the branch
+        # ambiguity that comes with it).
+        expect({"revolute", "slider", "cylindrical", "fastened", "planar",
+                "ball"} == set(desc["mate_types"]), "mate types described")
+        expect({"gear", "rack", "screw", "linear", "chain", "cam"} ==
+               set(desc["relation_kinds"]), "relation kinds described")
+        expect("add_relation" in " ".join(
+            m["doc"] for m in desc["methods"] if m["name"] == "add_mate"),
+            "add_mate points at relations for coupled DOFs")
         expect("aluminum" in desc["material_slugs"], "material slugs")
         expect("through_all" in desc["extrude_end_modes"],
                "extrude end modes are described")

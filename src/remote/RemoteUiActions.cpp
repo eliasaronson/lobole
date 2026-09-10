@@ -800,9 +800,11 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
     }
     activity++;
 
+    // Outside the try: the catch below reports which keys the handler read,
+    // which is half of what makes a type error fixable from the message.
+    remote::RpcParams params{request.params};
     try {
       bool handled = false;
-      remote::RpcParams params{request.params};
       json result = HandleSemantic(request, state, handled, params);
       if (handled) {
         // Strict params: a recognized method that ran without touching a key
@@ -985,6 +987,17 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       Send(request.client, {{"id", request.id},
                             {"error", e.what()},
                             {"diagnostic", e.diagnostic}});
+    } catch (const json::exception& e) {
+      // A parameter of the wrong TYPE used to come back as nlohmann's own
+      // words — "[json.exception.type_error.302] type must be string, but is
+      // boolean" — which name neither the method, nor the parameter, nor
+      // what would have been accepted. The refusal convention ("name what IS
+      // accepted") was honoured for enums and skipped for types. Say the
+      // same thing a caller needs: which call, what it was handed, and where
+      // the vocabulary is.
+      RespondError(request.client, request.id,
+                   TypeErrorMessage(request.method, request.params,
+                                    params.SeenKeys(), e.what()));
     } catch (const std::exception& e) {
       RespondError(request.client, request.id, e.what());
     } catch (const Standard_Failure& e) {
