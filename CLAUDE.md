@@ -147,6 +147,17 @@ buys back the coverage.
   `fem_smoke` failed twice under `-j$(nproc)` on 2026-08-25; the suspected
   `free_port()` race was FIXED the same day (L8: the app binds `--remote 0`
   itself; `tests/smoke_app.py` is the one launcher and keeps the app's log).
+  `cncest6090_smoke` fails about 4 runs in 10 on main, in isolation as well as
+  under load, and the mechanism is worth knowing rather than rerunning past:
+  its `assert result["clean"]` is over a motion study in **exact** clash mode,
+  and one sample comes back
+  `UNKNOWN … mount_bolt_0 x … clamp_nut_0: exact contact calculation failed`.
+  An exact boolean between a screw and its nut — interpenetrating helical
+  thread surfaces — is where OCCT is fragile, and `pairs_unknown` correctly
+  makes `clean` false. So the CHECK is right and the assertion is too strong:
+  a model with threaded fasteners cannot promise a clean EXACT sweep at every
+  pose. Either the study runs in `mesh` mode, or the test asserts no *clash*
+  rather than `clean`.
 - **Generating CPU load for a test: `tools/with-cpu-load.sh N -- cmd` — NEVER
   bare `while :; do :; done &` burners.** Backgrounded pids noted in one shell
   command are invisible to the next (each is a new shell), the burners orphan
