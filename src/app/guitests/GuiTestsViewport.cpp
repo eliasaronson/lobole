@@ -389,10 +389,12 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
 
-    // The NUMBER, with no unit suffix and no sentence around it — what gets
-    // pasted into a dimension field, which already knows its own unit.
+    // The NUMBER and its unit, with no sentence around it — what gets pasted
+    // into a dimension field, which parses it as an expression. The unit has
+    // to be there: the number is in the reader's DISPLAY unit and a bare one
+    // is read as storage, so on an inch document "1" meant 1 mm, not 25.4.
     const std::string copied = ui::MeasuredValueForClipboard(*s_App);
-    IM_CHECK_STR_EQ(copied.c_str(), "2");
+    IM_CHECK_STR_EQ(copied.c_str(), "2mm");
 
     // ...and the same number as a variable, in STORAGE units, so it does not
     // change meaning when the document's display units do.

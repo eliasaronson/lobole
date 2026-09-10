@@ -1,4 +1,5 @@
 #include "ui/OccurrencePanel.h"
+#include "core/Angles.h"
 #include "core/Measure.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
@@ -376,7 +377,7 @@ void DrawMotionSection(AppState& state) {
     ImGui::EndCombo();
   }
   const bool rot = sel->driverDof == MateDof::Rotation;
-  const double k = rot ? 180.0 / 3.14159265358979323846 : 1.0;
+  const double k = rot ? angles::kDegPerRad : 1.0;
   ImGui::Text("%.1f to %.1f %s in %d samples", sel->from * k, sel->to * k,
               rot ? "deg" : "mm", sel->samples);
   const std::string why = motion::WhyNot(asmDoc, *sel);

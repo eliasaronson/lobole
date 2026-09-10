@@ -1,5 +1,6 @@
 #include "remote/RemoteAssembly.h"
 
+#include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Command.h"
 #include "core/Document.h"
@@ -269,7 +270,6 @@ json NormalizeTransform(json t) {
 // response carries both. Converting `rotation` itself to degrees was tried
 // first and reverted: it left relations speaking radians and mates speaking
 // degrees, which is a worse trap than the one being fixed.
-constexpr double kDegPerRad = 57.29577951308232;
 
 // Radians from whichever the caller used, refusing both at once — a mate
 // pinned to two different angles has no right answer. Takes the values
@@ -283,7 +283,7 @@ float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
     throw std::runtime_error(
         "pass rotation (radians) or rotation_deg, not both");
   if (hasDeg)
-    return static_cast<float>(deg / kDegPerRad);
+    return static_cast<float>(angles::ToRadians(deg));
   if (hasRad)
     return static_cast<float>(rad);
   return current;
@@ -291,7 +291,7 @@ float MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
 
 json MateJson(const Mate& m) {
   json j = DocumentIO::MateToJson(m);
-  j["rotation_deg"] = m.rotation * kDegPerRad;
+  j["rotation_deg"] = angles::ToDegrees(m.rotation);
   return j;
 }
 

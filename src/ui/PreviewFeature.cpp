@@ -240,13 +240,15 @@ void DrawMeasureToolWindow(AppState& state) {
     ImGui::SetItemTooltip("Keep this measurement on screen and start another");
     ImGui::SameLine();
     if (ImGui::Button("Copy###measure_copy")) {
-      // The NUMBER, not the sentence: what gets pasted into a dimension
-      // field, which already knows what unit it is in.
+      // The NUMBER and its unit, not the sentence: what gets pasted into a
+      // dimension field, which parses it as an expression. The unit travels
+      // with it because the value is in the DISPLAY unit and a bare number
+      // is read as storage.
       const std::string v = MeasuredValueForClipboard(state);
       if (!v.empty())
         ImGui::SetClipboardText(v.c_str());
     }
-    ImGui::SetItemTooltip("Copy the value (no unit suffix)");
+    ImGui::SetItemTooltip("Copy the value with its unit (\"2mm\")");
 
     // ...and the same number as a VARIABLE. This is where measuring stops
     // being read-only: the point of measuring a gap is usually to make

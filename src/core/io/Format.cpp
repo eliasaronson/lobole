@@ -1,4 +1,5 @@
 #include "core/io/Format.h"
+#include "core/Angles.h"
 
 #include <cmath>
 #include <cstdio>
@@ -14,7 +15,7 @@ std::string FormatLength(double mm) {
 }
 
 std::string FormatAngle(double radians) {
-  double deg = radians * 180.0 / M_PI;
+  double deg = angles::ToDegrees(radians);
   if (std::abs(deg) < 5e-3)
     deg = 0.0;
   char buf[32];

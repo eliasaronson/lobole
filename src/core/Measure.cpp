@@ -1,4 +1,5 @@
 #include "core/Measure.h"
+#include "core/Angles.h"
 
 #include "core/MeshCollide.h"
 
@@ -1318,7 +1319,7 @@ std::optional<AngleResult> Angle(const std::vector<Body>& bodiesA,
 
   AngleResult out;
   const double dot = std::clamp(glm::dot(va, vb), -1.0, 1.0);
-  const double deg = std::acos(dot) * 180.0 / M_PI;
+  const double deg = angles::ToDegrees(std::acos(dot));
   // Fold to [0, 90] when either side's sign is arbitrary: an edge that OCC
   // happened to parameterise the other way must not turn 30° into 150°.
   const bool signed_ = da->oriented && db->oriented;

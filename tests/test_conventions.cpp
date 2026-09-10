@@ -176,6 +176,56 @@ TEST_CASE("no numeric field in src/ui bypasses ui::ExprInput", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("no bare degree/radian conversion outside core/Angles.h",
+          "[convention]") {
+  // The same shape as the world up-axis before core/Conventions.h: a constant
+  // every subsystem retyped, so no two agreed and nothing could tell. There
+  // were FOUR definitions of the deg/rad factor (Expression.cpp,
+  // SerializeFeatures.cpp, RemoteAssembly.cpp, RemoteMotion.cpp) and eleven
+  // more sites spelling `180.0 / M_PI` inline.
+  //
+  // That matters more here than tidiness, because the boundary those literals
+  // sit on is where every angle bug this project shipped actually lived —
+  // set_mate's 60 radians, the arc's `end_angle: 90`, pattern's per-step
+  // radians documented as a total sweep in degrees. A conversion routed
+  // through angles::ToRadians/ToDegrees says which direction it goes at the
+  // call site; `* 180.0 / M_PI` does not, and reads the same either way.
+  //
+  // glm::radians/glm::degrees are FINE and deliberately not matched: they
+  // name their direction too. This catches the hand-rolled spelling only.
+  const std::regex bare(R"((180(\.0)?f?\s*[*/]\s*(M_PI|3\.14[0-9]*))|)"
+                        R"(((M_PI|3\.14[0-9]*)\s*[*/]\s*180(\.0)?f?)|)"
+                        R"((57\.29577951)|(0\.01745329))");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"}) {
+    for (const SourceFile& f : SourcesUnder("src", ext)) {
+      // Where the factor is DEFINED; that is the point.
+      if (f.path.filename() == "Angles.h")
+        continue;
+      std::istringstream lines(f.text);
+      std::string line;
+      int n = 0;
+      while (std::getline(lines, line)) {
+        n++;
+        const size_t slashes = line.find("//");
+        if (slashes != std::string::npos && slashes < 4)
+          continue; // a comment quoting the old spelling
+        if (std::regex_search(line, bare))
+          offenders.push_back(Relative(f.path) + ":" + std::to_string(n));
+      }
+    }
+  }
+  INFO("use angles::ToRadians / angles::ToDegrees (core/Angles.h) — a bare "
+       "factor does not say which way it converts:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + "\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("the adaptive key covers every field the pass reads",
           "[convention]") {
   // docs/ui/long-operations.md, phase 1: an adaptive pass runs on a worker

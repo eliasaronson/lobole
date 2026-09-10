@@ -1,4 +1,5 @@
 #include "core/MotionStudy.h"
+#include "core/Angles.h"
 
 #include "core/CollisionCache.h"
 #include "core/Document.h"
@@ -355,7 +356,7 @@ std::string Table(const Result& result, const MotionStudy& study) {
   out += line;
   for (size_t i = 0; i < result.samples.size(); i++) {
     const Sample& s = result.samples[i];
-    const double shown = deg ? s.value * 180.0 / 3.14159265358979 : s.value;
+    const double shown = deg ? angles::ToDegrees(s.value) : s.value;
     std::string clashes;
     for (const Clash& c : s.clashes) {
       if (!clashes.empty())

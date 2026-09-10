@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/Angles.h"
 #include "ui/DocumentSlots.h"
 #include "ui/VariableActions.h"
 
@@ -1495,7 +1496,7 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     auto angDeg = [&](uint32_t id) {
       const auto& l =
           std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(id)]);
-      return std::atan2(l.b.y - l.a.y, l.b.x - l.a.x) * 180.0 / M_PI;
+      return angles::ToDegrees(std::atan2(l.b.y - l.a.y, l.b.x - l.a.x));
     };
     const double a1 = angDeg(L1), a2 = angDeg(L2), a3 = angDeg(L3),
                  a4 = angDeg(L4);

@@ -1,4 +1,5 @@
 #include "ui/MeasureActions.h"
+#include "core/Angles.h"
 #include "ui/RendererSync.h"
 #include "ui/VariableActions.h"
 
@@ -823,16 +824,27 @@ std::string MeasuredValueForClipboard(const AppState& state) {
   if (!v)
     return {};
   const units::System u = state.ActiveUnits();
-  const double shown = isAngle ? (u.angle == units::Angle::Radian
-                                      ? *v * 3.14159265358979323846 / 180.0
-                                      : *v)
-                               : *v / units::MmPerLength(u.length);
+  const double shown =
+      isAngle ? (u.angle == units::Angle::Radian ? angles::ToRadians(*v) : *v)
+              : *v / units::MmPerLength(u.length);
   // PLAIN, not units::FormatNumber: that groups thousands with a space for
   // readability ("10 080 000"), and this string is pasted into a dimension
   // field, which parses it as an EXPRESSION. A readable number that will not
   // parse is worse than an unreadable one that will.
+  //
+  // But WITH its unit. `shown` is in the reader's DISPLAY unit while a
+  // dimension field reads a bare number as STORAGE (mm, degrees), so on an
+  // inch document copying 25.4 mm produced "1" and pasting it back meant
+  // 1 mm — a 25.4x error that looks like a successful round trip, and the
+  // reason CreateVariableFromMeasurement right below deliberately writes
+  // storage units instead. Naming the unit is what lets these two agree:
+  // every string units::ToString emits ("in", "deg", "rad") is already a
+  // suffix the expression tokenizer accepts, so "1in" survives the paste
+  // whatever the units of the document it lands in.
+  const char* suffix =
+      isAngle ? units::ToString(u.angle) : units::ToString(u.length);
   char buf[64];
-  std::snprintf(buf, sizeof buf, "%.10g", shown);
+  std::snprintf(buf, sizeof buf, "%.10g%s", shown, suffix);
   return buf;
 }
 

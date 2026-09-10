@@ -1,6 +1,7 @@
 #include "core/io/Serialization.h"
 #include "core/io/SerializationInternal.h"
 
+#include "core/Angles.h"
 #include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
@@ -94,8 +95,6 @@ json EntityToJson(const sketch::Entity& entity) {
 // diagnosed as a loop-solver branch bug twice. A sketch arc read that way
 // builds a plausible arc of the wrong size and says nothing at all. These
 // were the last angles in the API still naming no unit.
-constexpr double kDegPerRad = 57.29577951308232;
-constexpr double kTwoPi = 6.283185307179586;
 
 double AngleRadians(const json& j, const char* radKey, const char* degKey) {
   const bool hasRad = j.contains(radKey);
@@ -104,7 +103,7 @@ double AngleRadians(const json& j, const char* radKey, const char* degKey) {
     throw std::runtime_error(std::string("pass ") + radKey + " (radians) or " +
                              degKey + " (degrees), not both");
   if (hasDeg)
-    return j.at(degKey).get<double>() / kDegPerRad;
+    return angles::ToRadians(j.at(degKey).get<double>());
   if (!hasRad)
     throw std::runtime_error(
         std::string("missing ") + radKey + " (RADIANS) or " + degKey +
@@ -149,9 +148,9 @@ sketch::Entity EntityFromJson(const json& j) {
     // meant. But the overwhelmingly likely cause is degrees in a radian
     // field, so the message says so rather than making them work it out.
     const double sweep = std::abs(end - start);
-    if (sweep > kTwoPi + 1e-9) {
+    if (sweep > angles::kTwoPi + 1e-9) {
       std::ostringstream why;
-      why << "arc sweeps " << sweep << " rad (" << (sweep * kDegPerRad)
+      why << "arc sweeps " << sweep << " rad (" << angles::ToDegrees(sweep)
           << " degrees), which is more than one full turn — start_angle and "
              "end_angle are RADIANS. Did you mean start_angle_deg / "
              "end_angle_deg?";
