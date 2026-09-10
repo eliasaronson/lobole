@@ -3,6 +3,8 @@
 > Status: **SHIPPED 2026-08-14** (`7c47886` bulk load, `5392888` the blob).
 > A 148-feature part: **open 259 s → 0.04 s**, save 0.12 s, project 2.9 MB of
 > which 1.4 MB is geometry. Benchmark: `scratch/scale_part.py`.
+> A second producer since 2026-09-10 (`7721ef46`): a Document COPY offers the
+> source's bodies the same way — see "It is not only for loading".
 
 ## Why
 
@@ -56,13 +58,6 @@ hand or by a merge. Each degrades in silence to exactly the behaviour the app
 had before this existed. A stale blob cannot make an open *wrong* — only
 faster.
 
-That rule is why the mechanism is not only for loading.
-`Document::CopyWithGeometry` offers a copy the *source document's* bodies,
-which is the same claim ("these bodies describe this feature list") reached a
-different way and checked by the same comparison. It took the motion study's
-snapshot of an assembly from 6.9 s of re-executed booleans to 11 ms
-(docs/performance/motion-prep-copy.md).
-
 Two consequences worth knowing:
 
 - **A model that failed to regenerate is not baked.** A blob is a promise that
@@ -71,6 +66,16 @@ Two consequences worth knowing:
   Rebuilding would be the riskier choice: face ordering can shift between
   kernel versions, which moves the element names that dimensions and mates
   reference. The geometry the author saw is the geometry you get.
+
+### It is not only for loading
+
+`Document::CopyWithGeometry` offers a copy the *source document's* bodies —
+the same claim ("these bodies describe this feature list") arrived at a
+different way, and checked by the same comparison, with the same degradation
+to a plain rebuild when it does not hold. It took the motion study's snapshot
+of an assembly from 6.9 s of re-executed booleans to 11 ms
+(docs/performance/motion-prep-copy.md). A second producer for a mechanism
+written for loading, and it needed no change to the mechanism.
 
 ## Only the tip
 

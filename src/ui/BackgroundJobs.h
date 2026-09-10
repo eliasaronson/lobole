@@ -2,11 +2,13 @@
 
 // Advancing every long-running operation, from ONE place per loop.
 //
-// The app runs five of these (docs/ui/long-operations.md): a STEP import, a
-// topology optimization, a static/modal solve, a git fetch/push/clone, and the
-// offline path tracer. Each has its own worker and its own `Poll…` that joins
-// it and applies the result on the main thread — which is right, and is not
-// what this file changes.
+// The app runs a STEP import, a topology optimization, a static/modal solve, a
+// FEM mesh, a git fetch/push/clone, a CAM adaptive pass, a motion study and
+// the offline path tracer (docs/ui/long-operations.md). This list used to say
+// "five of these" and name the five that existed when it was written; a count
+// in a comment is a count that goes stale, so it is a list now. Each has its
+// own worker and its own `Poll…` that joins it and applies the result on the
+// main thread — which is right, and is not what this file changes.
 //
 // What it changes is WHO calls them. They were reached from wherever seemed
 // natural at the time, and two of those places are conditional:

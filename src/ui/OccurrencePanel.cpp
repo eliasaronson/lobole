@@ -290,11 +290,12 @@ void DrawMatesSection(AppState& state) {
 // it has been, and a way out. `samples` is the study's, which is what the
 // worker's fraction is a fraction OF.
 //
-// The bar cannot cover the whole wait. StartMotionRun copies every document
-// under the assembly BEFORE the worker exists, and that copy is seconds of
-// blocked main thread on a real assembly — no frame is drawn, so nothing
-// drawn here can appear during it. This covers the run; the prep is its own
-// fix.
+// This used not to cover the whole wait: StartMotionRun copies every document
+// under the assembly before the worker exists, no frame is drawn while it
+// does, and on a real assembly that was seconds. It is ~11 ms since those
+// copies stopped re-deriving geometry they were handed
+// (docs/performance/motion-prep-copy.md), so the bar now starts about when
+// the button is pressed.
 void DrawMotionProgress(BackgroundJob& job, int samples) {
   const double f = job.fraction.load();
   const double elapsed = std::chrono::duration<double>(
@@ -438,47 +439,52 @@ void DrawMotionSection(AppState& state) {
   }
 
   // A run is off the frame (ui/MotionActions.cpp) and reports a fraction per
-  // sample, so while one is going the button row becomes that bar and a
+  // sample, so while one is going the BUTTON ROW becomes that bar and a
   // Cancel. It used to be three greyed-out buttons and nothing else for the
-  // length of the run — ten seconds of a responsive app that looks hung,
-  // which is exactly what the STEP-import modal exists to avoid.
+  // length of the run — a responsive app that looks hung, which is exactly
+  // what the STEP-import modal exists to avoid.
+  //
+  // The button row and nothing more. The verdict below stays up while a run
+  // is in flight, because StartMotionRun deliberately does NOT erase the
+  // previous result — and the first version of this drew the bar with an
+  // early `return`, which threw away the very thing that was being kept. The
+  // stale line is what says which run you are reading.
   if (BackgroundJob* job = FindBackgroundJob(state, "motion")) {
     DrawMotionProgress(*job, sel->samples);
-    return;
-  }
-
-  WrapRow row;
-  for (bool preview : {true, false}) {
-    const char* label = preview ? "Preview motion###motion_preview"
-                                : "Validate motion###motion_run";
-    row.Next(ButtonWidth(label));
-    if (ImGui::SmallButton(label)) {
-      if (sel->checkClash == preview ||
-          (!preview && sel->clashMode != "exact")) {
-        SnapshotAssembly(state);
-        sel->checkClash = !preview;
-        if (!preview)
-          sel->clashMode = "exact";
-        asmDoc.BumpVersion();
+  } else {
+    WrapRow row;
+    for (bool preview : {true, false}) {
+      const char* label = preview ? "Preview motion###motion_preview"
+                                  : "Validate motion###motion_run";
+      row.Next(ButtonWidth(label));
+      if (ImGui::SmallButton(label)) {
+        if (sel->checkClash == preview ||
+            (!preview && sel->clashMode != "exact")) {
+          SnapshotAssembly(state);
+          sel->checkClash = !preview;
+          if (!preview)
+            sel->clashMode = "exact";
+          asmDoc.BumpVersion();
+        }
+        std::string err;
+        if (!StartMotionRun(state, sel->id, &err))
+          state.motionAddRefusal = err;
       }
-      std::string err;
-      if (!StartMotionRun(state, sel->id, &err))
-        state.motionAddRefusal = err;
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip(preview
+                              ? "Solve sampled poses without collision checks."
+                              : "Exact collisions at every study sample. "
+                                "Standing assembly checks are separate.");
     }
-    if (ImGui::IsItemHovered())
-      ImGui::SetTooltip(preview
-                            ? "Solve sampled poses without collision checks."
-                            : "Exact collisions at every study sample. "
-                              "Standing assembly checks are separate.");
-  }
-  row.Next(ButtonWidth("Delete"));
-  if (ImGui::SmallButton("Delete###motion_delete")) {
-    SnapshotAssembly(state);
-    asmDoc.RemoveMotionStudy(sel->id);
-    state.motionResults.erase(sel->id);
-    state.activeMotionStudy = 0;
-    asmDoc.BumpVersion();
-    return;
+    row.Next(ButtonWidth("Delete"));
+    if (ImGui::SmallButton("Delete###motion_delete")) {
+      SnapshotAssembly(state);
+      asmDoc.RemoveMotionStudy(sel->id);
+      state.motionResults.erase(sel->id);
+      state.activeMotionStudy = 0;
+      asmDoc.BumpVersion();
+      return;
+    }
   }
   if (const motion::Result* r = MotionResultFor(state, sel->id)) {
     if (MotionResultStale(state, sel->id))

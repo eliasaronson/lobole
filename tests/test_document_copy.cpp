@@ -21,9 +21,13 @@ namespace fs = std::filesystem;
 // Document's copy constructor is a hand-written member list (it has to be —
 // features are owning pointers and the instance id must NOT come along), and a
 // hand-written list is a list that can fall behind the class. These tests are
-// what says so: the first one saves an original and its copy and diffs the two
-// files, so a persistent field the copy forgets shows up here rather than as a
-// duplicated tab quietly missing its configurations.
+// what says so: they save an original and a copy and diff the two files, so a
+// persistent field the copy forgets shows up here rather than as a duplicated
+// tab quietly missing its configurations.
+//
+// There are two public copy forms over that one implementation — the plain
+// constructor and Document::CopyWithGeometry — and the diff runs over both,
+// because "cheaper" must not mean "different".
 
 namespace {
 

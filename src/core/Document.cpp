@@ -17,25 +17,29 @@ uint64_t Document::NextInstanceId() {
   return next.fetch_add(1, std::memory_order_relaxed);
 }
 
-// The copy is a list of members, not a `= default`, for two reasons: the
-// features are owning pointers and must be CLONED, and m_instanceId must NOT
-// come along (it is left to its initializer, which mints a fresh one).
-//
-// Anything absent below is absent on purpose — it is cache, and the
-// Regenerate() at the end rebuilds it: m_bodies, the baked-geometry hand-off,
-// the prefix cache, m_tipHash, m_lastStats. m_version starts at 0 like any
-// other new document.
-//
-// A new PERSISTENT member added to this class must be added here too, and
-// tests/test_document_copy.cpp is what says so: it saves an original and its
-// copy and diffs the two files, so a field that copying forgets shows up as a
-// diff rather than as a duplicated tab quietly missing something.
 std::unique_ptr<Document> Document::CopyWithGeometry(const Document& other) {
   return std::unique_ptr<Document>(new Document(other, /*reuseGeometry=*/true));
 }
 
 Document::Document(const Document& other) : Document(other, false) {}
 
+// The one copy implementation, behind both public forms. A list of members,
+// not a `= default`, for two reasons: the features are owning pointers and
+// must be CLONED, and m_instanceId must NOT come along (it is left to its
+// initializer, which mints a fresh one).
+//
+// Anything absent below is absent on purpose — it is cache, and the
+// Regenerate() at the end rebuilds it: m_bodies, the prefix cache,
+// m_tipHash, m_lastStats. m_version starts at 0 like any other new document.
+// The baked-geometry hand-off is the one exception, and only under
+// `reuseGeometry`: it is set precisely so that Regenerate has something to
+// install instead of rebuilding (see CopyWithGeometry).
+//
+// A new PERSISTENT member added to this class must be added here too, and
+// tests/test_document_copy.cpp is what says so: it saves an original and its
+// copy and diffs the two files, so a field that copying forgets shows up as a
+// diff rather than as a duplicated tab quietly missing something. It runs
+// that same diff over BOTH copy forms.
 Document::Document(const Document& other, bool reuseGeometry)
     : m_assets(other.m_assets), m_parameters(other.m_parameters),
       m_studies(other.m_studies),

@@ -10,8 +10,8 @@ clash), RTX 4060 Laptop.
 
 It is a fair description and it is not what the code looks like. The run has
 been a background job since G2: `motion::Run` takes a cancel predicate and a
-progress callback, writes a fraction per sample, and the panel disables the
-button while it works. Nothing about that shape should freeze a frame.
+progress callback and writes a fraction per sample. Nothing about that shape
+should freeze a frame.
 
 ## Attribution
 
@@ -26,11 +26,14 @@ run to see whether the app answers.
 | the run itself | 8–11 s | responsive, worst round-trip 0.06 s |
 
 So half of it was a real freeze and half was a working app with nothing on
-screen to say so. The second half is a UI gap (a progress bar and a Cancel,
-`OccurrencePanel.cpp`). The first half is this document.
+screen to say so — the panel greyed the buttons out and said nothing else. The
+second half was a UI gap, closed separately by drawing the fraction the job
+was already publishing, plus a Cancel (83be3e3c, `OccurrencePanel.cpp`). The
+first half is this document.
 
 `tools/profile.sh --app`, driving twelve starts and cancelling each after one
-sample so the prep dominates:
+sample so the prep dominates. Measured on 83be3e3c, so the per-occurrence
+duplicate copies were already gone — this is what remained after that:
 
 ```
 54.55%  ui::CopySubtree
@@ -107,3 +110,7 @@ anything worth seeing, so moving it to the worker would buy 11 ms and cost the
 guarantee that the documents cannot be edited underneath it. The other
 consumers of `Document`'s copy constructor still pay the full rebuild; whether
 any of them also only wants to *read* geometry has not been looked at.
+
+`motion_status` still reports no fraction, though the job publishes one per
+sample — an RPC client polling a long run sees `running: true` and nothing
+else, which is the same gap the GUI had.

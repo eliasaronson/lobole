@@ -54,8 +54,10 @@ public:
   // Deep copy: every feature is cloned (Feature::Clone), and so is everything
   // else the document IS — parameters, studies, CAM setups, configurations,
   // assets, units, rollback. What it merely CACHED (bodies, baked geometry,
-  // the regen cache) is not copied; the copy regenerates itself, so the only
-  // cost of duplicating a heavy part is one rebuild.
+  // the regen cache) is not copied; this copy regenerates itself, so the cost
+  // of duplicating a heavy part is one full rebuild — which is exactly what
+  // CopyWithGeometry below exists to avoid for a caller that only wants to
+  // READ the geometry.
   //
   // The copy is a NEW document, not the same one twice: it gets a fresh
   // InstanceId() and starts at version 0. Sharing an instance id would put us

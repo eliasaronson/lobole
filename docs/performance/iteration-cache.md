@@ -45,10 +45,17 @@ floating-point representations differ. New geometry identities invalidate only
 the affected pair entries. Material-only regeneration can retain identities.
 
 The cache is not serialized. Reopening, rebuilding every part, or replacing the
-application loses useful geometry identity reuse. GUI background motion still
-clones and regenerates Documents, so this benchmark applies to the synchronous
-SDK runner. Immutable background geometry snapshots are the next prerequisite
-for comparable GUI reuse. The standing sweep is not cached by this change.
+application loses useful geometry identity reuse. The standing sweep is not
+cached by this change.
+
+GUI background motion used to clone and REGENERATE every Document under the
+assembly, minting fresh geometry identities on every run and confining this
+benchmark to the synchronous SDK runner. It no longer does: `CopySubtree` takes
+its snapshot through `Document::CopyWithGeometry`, which installs the source's
+own bodies rather than re-deriving them, so the identities this cache keys on
+survive the copy (docs/performance/motion-prep-copy.md). The "immutable
+background geometry snapshots" this section named as the next prerequisite are
+what that is; GUI reuse has not been measured against these numbers yet.
 
 ## Keep iteration cheap first
 

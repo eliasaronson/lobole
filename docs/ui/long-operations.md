@@ -450,6 +450,29 @@ row does.
   HUD does not list the registry; `RenderJob` stays a main-thread slicer
   (see "Two things this is NOT").
 
+### Adopters since (2026-09-10)
+
+The registry grew two entries this plan did not write. Recorded here because
+this document is where someone looks for "what are the app's long operations",
+and `ui/BackgroundJobs.h` is where someone looks for the list.
+
+- **`"mesh"`** — the FEM mesh, alongside `"study"` and `"topo"`.
+- **`"motion"`** (G2) — a motion study's sampled solve and exact clash sweep.
+  `cancellable = true`, a fraction per sample, and it is the only adopter
+  besides the import whose progress a person can see: an in-panel bar in the
+  assembly Model panel rather than a modal, because unlike an import you want
+  to keep looking at the part while it runs. Cancelling keeps the samples
+  already checked and the result says so.
+
+  Motion is also the case that showed what the registry does NOT cover. The
+  job was correct and off the frame from the day it landed, and pressing
+  Validate still froze the app for seconds — because `StartMotionRun`
+  snapshots every document under the assembly BEFORE the worker exists, and a
+  Document copy used to re-execute its whole feature list. A registry entry
+  makes the *work* asynchronous; the setup a job needs to be handed pure data
+  is main-thread by construction, and it is not free by construction
+  (docs/performance/motion-prep-copy.md).
+
 ## Out of scope
 
 **Regeneration itself.** `Document::Regenerate` is synchronous on the calling
