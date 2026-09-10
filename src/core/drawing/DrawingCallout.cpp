@@ -1,6 +1,7 @@
 #include "core/drawing/DrawingCallout.h"
 
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
 
@@ -92,10 +93,79 @@ const HoleFeature* FindHoleForRef(const Document& doc,
   return nullptr;
 }
 
+const Tolerance* FindToleranceForRef(const Document& doc,
+                                     const std::string& mappedName,
+                                     double modelRadius) {
+  // Provenance is compared NAME to NAME, not against ElementRef::featureId:
+  // that field is the id of the feature whose BODY owns the name (the box a
+  // hole was cut into), while the name itself encodes the features that made
+  // the face (the hole). Matching on the former finds nothing on any bore
+  // that was cut rather than created — which is every interesting one.
+  const std::vector<uint64_t> ids = MappedNameFeatureIds(mappedName);
+  const auto sharesProvenance = [&](const std::string& other) {
+    for (const uint64_t id : MappedNameFeatureIds(other))
+      if (std::find(ids.begin(), ids.end(), id) != ids.end())
+        return true;
+    return false;
+  };
+  const Tolerance* found = nullptr;
+  for (const Tolerance& t : doc.GetTolerances()) {
+    if (t.IsDistance() || !sharesProvenance(t.ref.name))
+      continue;
+    const auto el = Measure::Describe(doc.GetBodies(), t.ref);
+    if (!el || !el->hasRadius)
+      continue;
+    if (std::abs(el->radius - modelRadius) > 1e-3 * std::max(el->radius, 1.0))
+      continue;
+    if (found != nullptr)
+      return nullptr; // ambiguous: two bands, and no way to say which
+    found = &t;
+  }
+  return found;
+}
+
+std::string FormatToleranceSuffix(const Tolerance& tol,
+                                  const units::System& units) {
+  if (tol.IsDistance())
+    return {};
+  if (!tol.isoClass.empty())
+    return " " + tol.isoClass;
+  const auto signed_ = [&](double v) {
+    // A leading + is not decoration: "0.05/-0.02" reads as a range, while
+    // "+0.05/-0.02" reads as the two deviations it is.
+    const std::string n = core::FormatLength(v, units);
+    return v >= 0.0 ? "+" + n : n;
+  };
+  return " " + signed_(tol.upper) + "/" + signed_(tol.lower);
+}
+
 std::string FormatHoleCallout(const HoleFeature& hole,
                               const units::System& units) {
+  // A hole that recorded what it is FOR says so, instead of leaving a reader
+  // to recognise 6.6 as an M6 clearance. docs/modeling/hole-standards.md
+  // promised exactly this when the fit landed and it was the half that never
+  // got built, so a drawing went on calling every hole by its diameter while
+  // the model knew better.
+  //
+  // A TAPPED hole leads with its thread, because M6 is the designation a
+  // machinist reads and the tap drill is not what gets made — printing Ø5.0
+  // for an M6 tapped hole is worse than useless, it is the wrong instruction.
+  // A CLEARANCE hole keeps its diameter, because that IS what gets drilled,
+  // and states the intent after it.
   const auto len = [&](double mm) { return core::FormatLength(mm, units); };
-  std::string out = "\xC3\x98" + len(hole.diameter);
+  const bool named = !hole.fitThread.empty() && !hole.fitKind.empty();
+  const bool tapped = named && hole.fitKind == "tapped";
+  std::string out;
+  if (tapped) {
+    out = hole.fitThread;
+    // Printed only when the document stated one: "M6" alone means the coarse
+    // pitch everywhere in engineering, and spelling it out invites the reader
+    // to wonder what was meant by the one that says nothing.
+    if (hole.fitPitch > 0.0)
+      out += "\xC3\x97" + len(hole.fitPitch);
+  } else {
+    out = "\xC3\x98" + len(hole.diameter);
+  }
   out += hole.through ? " THRU" : " DEEP " + len(hole.depth);
   if (hole.kind == HoleKind::Counterbore) {
     out +=
@@ -106,6 +176,16 @@ std::string FormatHoleCallout(const HoleFeature& hole,
                          std::max(hole.csDepth, 1e-9));
     out += " CSK \xC3\x98" + len(hole.csDiameter) + " \xC3\x97 " +
            core::FormatAngle(angle, units); // "× 90°"
+  }
+  // The fit clause comes last, after any recess, so the callout still reads
+  // as an instruction first and an explanation second. The fit is NAMED even
+  // when it is the normal one: "M6 clearance" conventionally implies normal,
+  // and an implication is exactly what this hole stopped relying on.
+  if (named && !tapped) {
+    std::string kind = hole.fitKind;
+    for (char& c : kind)
+      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    out += ", " + hole.fitThread + " " + kind + " CLEARANCE";
   }
   return out;
 }

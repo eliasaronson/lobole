@@ -22,6 +22,11 @@ dimension list).
   geometry: `distance` / `distance_x` / `distance_y` between two edges,
   `radius` / `diameter` of a circle, or `angle` between two edges. Editing
   geometry happens in the part — a drawing measures, it does not drive.
+  A `diameter` dim also carries the band the MODEL records for that bore
+  (`Ø20 H7`, or `Ø20 +0.05/-0.02` for an explicit one), read from the part's
+  tolerance rather than authored on the sheet — so it follows an edit and
+  needs no field of its own. A `radius` dim does not: an ISO class states how
+  a DIAMETER may vary. See [../tolerances/plan.md](../tolerances/plan.md).
 - **Explicit update** — projection is hidden-line removal, which is expensive,
   so it never runs automatically. A view whose source changed reads **stale**
   until you update the drawing. (The first view of a drawing tab, and an

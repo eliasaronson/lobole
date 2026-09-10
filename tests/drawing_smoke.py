@@ -479,7 +479,36 @@ def main():
                          kind="hole_callout",
                          refs=[{"edge": bore[0]["ref"]}])
         expect(callout["resolved"], f"callout resolves: {callout}")
-        expect(callout["text"].endswith("THRU"), f"reads the fit: {callout}")
+        # This asserted endswith("THRU") and called it "reads the fit", which
+        # it never did — the callout said Ø3.2 and the recorded M3 close
+        # clearance went unmentioned all the way to the sheet.
+        expect(callout["text"] == "\u00d83.2 THRU, M3 CLOSE CLEARANCE",
+               f"the callout names the fit the hole recorded: {callout}")
+        # A DIAMETER dim on the same bore picks up the tolerance the model
+        # records (docs/tolerances/plan.md T4b) — provenance, not a new
+        # authored field: the feature ids in the projected circle's mapped
+        # name narrow the candidates and the radius cross-checks them.
+        d.call("set_active_part", name="callout-plate")
+        bore_face = [(b["created_by"], f["name"])
+                     for b in d.call("list_elements")["bodies"]
+                     for f in b.get("faces", [])
+                     if f.get("kind") == "cylinder"]
+        expect(len(bore_face) == 1, f"one bore face: {bore_face}")
+        d.call("set_tolerance", feature_id=bore_face[0][0],
+               element=bore_face[0][1], **{"class": "H8"})
+        d.call("set_active_part", name="callout-dwg")
+        d.call("update_drawing")
+        dia = d.call("add_drawing_dim", view=cv["id"], kind="diameter",
+                     refs=[{"edge": bore[0]["ref"]}])
+        expect(dia["text"] == "\u00d83.2 H8",
+               f"the dim reads the band the model records: {dia}")
+
+        # A RADIUS dim must NOT: an ISO class states how a DIAMETER varies,
+        # so "R1.6 H8" would be a band twice the one written.
+        rad = d.call("add_drawing_dim", view=cv["id"], kind="radius",
+                     refs=[{"edge": bore[0]["ref"]}])
+        expect(rad["text"] == "R1.6", f"a radius takes no class: {rad}")
+
         report = d.call("check_drawing", update=True)
         over = [i for i in report["issues"]
                 if i["kind"] == "dim_label_over_view"]

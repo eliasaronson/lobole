@@ -4,13 +4,16 @@
 #include "cad/CADKernel.h"
 #include "common/BuildInfo.h"
 #include "core/AssemblySolve.h"
+#include "core/Command.h"
 #include "core/Document.h"
+#include "core/FitStandards.h"
 #include "core/FrameMath.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
+#include "core/ToleranceStack.h"
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
@@ -21,6 +24,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/RendererSync.h"
+#include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
 
 #include <glm/glm.hpp>
@@ -28,6 +32,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -377,6 +383,82 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Did the model build? {ok, valid, body_count, "
      "feature_errors, bodies:[...B-Rep checks]}.",
      "body", remote::NeedsPart},
+    {"check_fit",
+     "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
+     "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
+     "them — `kind` (clearance|transition|interference) and the signed "
+     "`min_clearance`/`max_clearance`, where NEGATIVE is interference. The "
+     "nominal comes from `size`, or is MEASURED when a side also names a "
+     "face ({feature_id, element, part?}) — what the kernel built is what "
+     "gets made. Two measured faces that disagree are REFUSED naming both: "
+     "an ISO fit is defined on one common basic size, so a clearance "
+     "modelled into the geometry AND asked for as a class is counted twice. "
+     "`intent` adds a verdict. Carried: sizes to 500 mm, IT4-IT13, shafts "
+     "d e f g h js k m n p and their uppercase holes — but shaft `k` only at "
+     "IT4-IT7 (it is `h` elsewhere), and holes K/M/N only to IT8 and P to "
+     "IT7, which is as far as the standard defines the delta correction they "
+     "need. Past that it REFUSES naming the limit, because dropping delta "
+     "anyway is wrong by exactly one grade step. Worst case over independent "
+     "limits — no distribution, no form or position error. "
+     "`part` (on a side, or shared) resolves faces against another part "
+     "without switching tab, so a bore and its shaft can live in two.",
+     "hole, intent, part, shaft, size"},
+    {"set_tolerance",
+     "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
+     "class: \"H7\"} — or {lower, upper} in mm for limits no class "
+     "expresses, never both. Only a round face has a size of its own, and "
+     "anything else is refused saying so. Adding {b: {feature_id, element}} "
+     "tolerances "
+     "the DISTANCE between the two faces instead (a shoulder-to-seat length, "
+     "a slot width), which takes lower/upper and REFUSES a class: a class "
+     "says how a shaft or a bore may vary, not how far apart two faces are. "
+     "Design intent only: it moves no surface, so it rebuilds nothing. One "
+     "per subject — a face's own size, and each ordered pair of faces — so "
+     "setting a second REPLACES the first. The class is validated against "
+     "the face's measured size when you set it, not when something later "
+     "looks. Acts on the ACTIVE part, like every other mutation; "
+     "list_tolerances reads any part.",
+     "b, class, comment, element, feature_id, lower, upper", remote::NeedsPart},
+    {"list_tolerances",
+     "Every tolerance on this part, each tagged `kind: size|distance`, with "
+     "the limits it implies at the measured nominal — the face's diameter, "
+     "or the distance between the two faces. A ref whose element no longer "
+     "resolves is listed `resolved: false` rather than dropped: the intent "
+     "outlives the topology that carried it.",
+     "part", remote::NeedsPart},
+    {"clear_tolerance", "Remove one tolerance by {id}.", "id",
+     remote::NeedsPart},
+    {"stack_up",
+     "Worst case along a STATED chain: {terms: [{tolerance: id, subtract?}]} "
+     "gives the summed nominal and the min/max the bands allow. The chain is "
+     "stated and not inferred — a mate names the two faces that TOUCH, but a "
+     "stack alternates a contact and a length inside a part, and nothing says "
+     "which of a part's distances lies along the axis. What it does NOT "
+     "account for is correlation: two lengths driven by one variable cancel "
+     "rather than add, and a tolerance's nominal is measured, so there is no "
+     "path back to the variable that drove it. The terms must be independent, "
+     "and the answer says so. A term may also be a bare tolerance id when it "
+     "adds. Refused: fewer than two terms (one tolerance is a tolerance, and "
+     "summing it would dress a lookup up as an analysis), an unknown id, and "
+     "a term whose geometry no longer resolves — rather than counting that "
+     "one as zero and silently shortening the chain.",
+     "part, terms", remote::NeedsPart},
+    {"check_fits",
+     "Every fit this assembly declares, checked. A round mate already names "
+     "the two faces that mate, so nothing has to pair them up: where both "
+     "faces carry a tolerance, the fit is computed. The mate type is the "
+     "intent — a joint that MOVES (revolute, slider, cylindrical) cannot "
+     "have an interference fit, so that combination FAILS and a transition "
+     "fit warns. A FASTENED round joint is `reported` and not judged: "
+     "nothing-moves is equally true of a shrunk-on gear and of a bracket "
+     "bolted through a clearance hole, and the two want opposite fits. "
+     "Reaches into sub-assemblies, naming each side by its path. Anything "
+     "not fully answerable is `unverified` WITH the reason and never a pass — "
+     "an anchor that is a frame rather than a face, one side untoleranced, "
+     "two faces of different basic size, a side stating explicit deviations "
+     "(which say nothing about which side is the bore), or both sides the "
+     "same case. The summary counts each kind apart.",
+     ""},
     {"mass_properties",
      "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
      "from "
@@ -1907,6 +1989,440 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       }
     }
     return out;
+  }
+  if (m == "check_fit") {
+    // ISO 286 limits and fits (docs/tolerances/plan.md, T1). Two jobs in one
+    // method because they are one question asked at two depths: `hole` alone
+    // is "what may this bore be", `hole` + `shaft` is "will they go
+    // together".
+    //
+    // Nothing here touches geometry. A size tolerance leaves nominal alone —
+    // that is what separates it from a clearance-hole fit, which picks a
+    // different diameter outright (parts::HoleDiameter).
+    //
+    // params: {hole: {class, feature_id?, element?, part?}, shaft?: {...},
+    //          size?, intent?}
+    const auto measureSide = [&](const json& s,
+                                 const char* which) -> std::optional<double> {
+      const bool hasFeature = s.contains("feature_id");
+      const bool hasElement = s.contains("element");
+      if (!hasFeature && !hasElement)
+        return std::nullopt;
+      if (!hasFeature || !hasElement)
+        throw std::runtime_error(
+            std::string("check_fit: ") + which +
+            " needs BOTH feature_id and element to name a face — "
+            "list_elements gives the pair");
+      const Document* d2 =
+          s.contains("part")   ? ResolvePartParam(state, s.at("part"))
+          : p.contains("part") ? ResolvePartParam(state, p.at("part"))
+                               : &RequirePartDoc(doc, "check_fit");
+      const ElementRef ref{s.at("feature_id").get<uint64_t>(),
+                           s.at("element").get<std::string>()};
+      const auto el = Measure::Describe(d2->GetBodies(), ref);
+      if (!el)
+        throw std::runtime_error(std::string("check_fit: ") + which +
+                                 " element '" + ref.name +
+                                 "' does not resolve (list_elements)");
+      if (!el->hasRadius)
+        throw std::runtime_error(
+            std::string("check_fit: ") + which + " is a " + el->shape +
+            ", which has no diameter. A fit is between round things — a "
+            "cylindrical face or a circular edge on each side");
+      return el->radius * 2.0;
+    };
+
+    if (!p.contains("hole"))
+      throw std::runtime_error(
+          "check_fit: `hole` is required, as {class: \"H7\"} at least");
+    const json& holeJson = p.at("hole");
+    if (!holeJson.contains("class"))
+      throw std::runtime_error(
+          "check_fit: hole.class is required, e.g. \"H7\"");
+    const std::string holeCls = holeJson.at("class").get<std::string>();
+    const std::optional<double> holeMeasured = measureSide(holeJson, "hole");
+
+    const bool hasShaft = p.contains("shaft");
+    std::string shaftCls;
+    std::optional<double> shaftMeasured;
+    if (hasShaft) {
+      const json& shaftJson = p.at("shaft");
+      if (!shaftJson.contains("class"))
+        throw std::runtime_error(
+            "check_fit: shaft.class is required, e.g. \"g6\"");
+      shaftCls = shaftJson.at("class").get<std::string>();
+      shaftMeasured = measureSide(shaftJson, "shaft");
+    }
+
+    // What nominal to work at. An explicit `size` wins; otherwise the model
+    // is asked, and two answers that disagree are refused rather than
+    // averaged or silently halved. See the describe row for why.
+    const auto mm = [](double v) {
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%.4f mm", v);
+      return std::string(buf);
+    };
+    double size = 0.0;
+    std::string sizeFrom;
+    if (p.contains("size")) {
+      size = p.at("size").get<double>();
+      sizeFrom = "given";
+    } else if (holeMeasured && shaftMeasured) {
+      constexpr double kAgree = 1e-5; // mm, far under the finest grade (3 um)
+      if (std::abs(*holeMeasured - *shaftMeasured) > kAgree)
+        throw std::runtime_error(
+            "check_fit: the two faces are not the same basic size — the hole "
+            "measures " +
+            mm(*holeMeasured) + " and the shaft " + mm(*shaftMeasured) +
+            ". An ISO fit is a band either side of ONE nominal, so a "
+            "clearance already modelled into the geometry would be counted "
+            "twice. Model both at the same size, or pass `size` to say which "
+            "nominal the classes are against.");
+      size = *holeMeasured;
+      sizeFrom = "measured";
+    } else if (holeMeasured || shaftMeasured) {
+      size = holeMeasured ? *holeMeasured : *shaftMeasured;
+      sizeFrom = "measured";
+    } else {
+      throw std::runtime_error(
+          "check_fit: no nominal size — pass `size`, or name a face on either "
+          "side with {feature_id, element} and it is measured");
+    }
+
+    const auto band = [&](const fits::Band& b, const std::string& cls) {
+      return json{{"class", cls},       {"lower", b.lower},
+                  {"upper", b.upper},   {"min", b.Min(size)},
+                  {"max", b.Max(size)}, {"it_grade", b.grade},
+                  {"it", b.it}};
+    };
+
+    json out{{"size", size}, {"size_from", sizeFrom}};
+    if (holeMeasured || shaftMeasured) {
+      json measured = json::object();
+      if (holeMeasured)
+        measured["hole"] = *holeMeasured;
+      if (shaftMeasured)
+        measured["shaft"] = *shaftMeasured;
+      out["measured"] = std::move(measured);
+    }
+
+    std::string why;
+    if (!hasShaft) {
+      const auto b = fits::Limits(size, holeCls, &why);
+      if (!b)
+        throw std::runtime_error("check_fit: " + why);
+      out["hole"] = band(*b, holeCls);
+      return out;
+    }
+
+    const auto pair = fits::Fit(size, holeCls, shaftCls, &why);
+    if (!pair)
+      throw std::runtime_error("check_fit: " + why);
+    out["hole"] = band(pair->hole, holeCls);
+    out["shaft"] = band(pair->shaft, shaftCls);
+    out["kind"] = fits::FitKindName(pair->kind);
+    out["min_clearance"] = pair->minClearance;
+    out["max_clearance"] = pair->maxClearance;
+    out["note"] = "worst case over two independent bands; form, position and "
+                  "surface finish are not evaluated";
+    if (p.contains("intent")) {
+      const std::string intent = p.at("intent").get<std::string>();
+      const auto want = fits::FitKindFromName(intent);
+      if (!want)
+        throw std::runtime_error(
+            "check_fit: unknown intent '" + intent +
+            "'. Accepted: clearance, transition, interference.");
+      out["intent"] = intent;
+      out["intent_ok"] = *want == pair->kind;
+    }
+    return out;
+  }
+  if (m == "set_tolerance") {
+    // What a face's SIZE is allowed to vary by, or — with `b` — what the
+    // DISTANCE between two faces is (docs/tolerances/plan.md, T2 and T5a).
+    // params: {feature_id, element, b?: {feature_id, element},
+    //          class? | lower?+upper?, comment?}
+    Document& part = RequirePartDoc(doc, "set_tolerance");
+    const ElementRef ref{p.at("feature_id").get<uint64_t>(),
+                         p.at("element").get<std::string>()};
+    const auto el = Measure::Describe(part.GetBodies(), ref);
+    if (!el)
+      throw std::runtime_error("set_tolerance: element '" + ref.name +
+                               "' does not resolve (list_elements)");
+
+    ElementRef ref2;
+    double nominal = 0.0;
+    const bool hasClass = p.contains("class");
+    if (p.contains("b")) {
+      const json& bj = p.at("b");
+      if (!bj.contains("feature_id") || !bj.contains("element"))
+        throw std::runtime_error(
+            "set_tolerance: `b` needs both feature_id and element to name the "
+            "face the distance is measured to");
+      ref2 = ElementRef{bj.at("feature_id").get<uint64_t>(),
+                        bj.at("element").get<std::string>()};
+      if (ref2.featureId == ref.featureId && ref2.name == ref.name)
+        throw std::runtime_error(
+            "set_tolerance: `b` names the same face as `element` — a face is "
+            "no distance from itself");
+      if (!Measure::Describe(part.GetBodies(), ref2))
+        throw std::runtime_error("set_tolerance: element '" + ref2.name +
+                                 "' does not resolve (list_elements)");
+      // An ISO class states how a shaft or a bore may vary. It says nothing
+      // about the gap between two faces, so accepting one here would store a
+      // band that means something else entirely.
+      if (hasClass)
+        throw std::runtime_error(
+            "set_tolerance: an ISO class is a SIZE — it says how a shaft or a "
+            "bore may vary, not how far apart two faces are. Give `lower` and "
+            "`upper` in mm for a distance.");
+      const auto dist = Measure::DistanceDetailed(part.GetBodies(), ref, ref2);
+      if (!dist)
+        throw std::runtime_error(
+            "set_tolerance: the distance between those two faces could not be "
+            "measured — an OpenCASCADE extrema failed");
+      nominal = dist->distance;
+    } else {
+      // Only round features carry a SIZE yet, and a tolerance nothing can
+      // check is a silent no-op — so it is refused rather than stored. A
+      // planar face is not sizeless, though: name a second face and it
+      // becomes a distance.
+      if (!el->hasRadius)
+        throw std::runtime_error(
+            "set_tolerance: " + ref.name + " is a " + el->shape +
+            ", which has no size of its own — only a cylindrical face or a "
+            "circular edge does. For a length, name the face it is measured "
+            "to as `b`.");
+      nominal = el->radius * 2.0;
+    }
+
+    const bool hasLower = p.contains("lower"), hasUpper = p.contains("upper");
+    if (hasClass && (hasLower || hasUpper))
+      throw std::runtime_error(
+          "set_tolerance: give a `class` OR a `lower`/`upper` pair, not both "
+          "— two statements of the same band can disagree, and then which is "
+          "the part made to?");
+    if (!hasClass && !(hasLower && hasUpper))
+      throw std::runtime_error(
+          hasLower || hasUpper
+              ? "set_tolerance: `lower` and `upper` come as a pair — half a "
+                "band silently becomes an unbounded one"
+              : "set_tolerance: needs a `class` (\"H7\") or a "
+                "`lower`/`upper` pair in mm");
+
+    Tolerance t;
+    t.ref = ref;
+    t.ref2 = ref2;
+    t.comment = p.value("comment", std::string{});
+    if (hasClass) {
+      t.isoClass = p.at("class").get<std::string>();
+      // Validated HERE, against this face's own size, rather than when
+      // something later looks: a class that cannot apply to the face it is
+      // being put on is a typo, and the moment to say so is now.
+      std::string why;
+      if (!fits::Limits(nominal, t.isoClass, &why))
+        throw std::runtime_error("set_tolerance: " + why);
+    } else {
+      t.lower = p.at("lower").get<double>();
+      t.upper = p.at("upper").get<double>();
+      if (t.lower > t.upper)
+        throw std::runtime_error(
+            "set_tolerance: lower must not exceed upper — a reversed band "
+            "admits nothing and reads as a valid one");
+    }
+
+    auto cmd = std::make_unique<SetToleranceCommand>(std::move(t));
+    SetToleranceCommand* raw = cmd.get();
+    state.commands->Execute(std::move(cmd), part);
+    const Tolerance* stored = part.FindTolerance(raw->ToleranceId());
+    json out{{"id", stored->id},
+             {"element", stored->ref.name},
+             {"feature_id", stored->ref.featureId},
+             {"kind", stored->IsDistance() ? "distance" : "size"},
+             {"nominal", nominal}};
+    if (stored->IsDistance())
+      out["b"] = {{"feature_id", stored->ref2.featureId},
+                  {"element", stored->ref2.name}};
+    if (!stored->isoClass.empty()) {
+      out["class"] = stored->isoClass;
+      std::string why;
+      const auto b = fits::Limits(nominal, stored->isoClass, &why);
+      out["min"] = b->Min(nominal);
+      out["max"] = b->Max(nominal);
+    } else {
+      out["lower"] = stored->lower;
+      out["upper"] = stored->upper;
+      out["min"] = nominal + stored->lower;
+      out["max"] = nominal + stored->upper;
+    }
+    return out;
+  }
+  if (m == "list_tolerances") {
+    const Document& part = p.contains("part")
+                               ? *ResolvePartParam(state, p.at("part"))
+                               : RequirePartDoc(doc, "list_tolerances");
+    json list = json::array();
+    for (const Tolerance& t : part.GetTolerances()) {
+      json e{{"id", t.id},
+             {"feature_id", t.ref.featureId},
+             {"element", t.ref.name},
+             {"kind", t.IsDistance() ? "distance" : "size"}};
+      if (!t.comment.empty())
+        e["comment"] = t.comment;
+      if (t.IsDistance())
+        e["b"] = {{"feature_id", t.ref2.featureId}, {"element", t.ref2.name}};
+      // A size resolves to a radius; a distance resolves to an extrema
+      // between two faces, and either can stop resolving on its own.
+      const auto el = Measure::Describe(part.GetBodies(), t.ref);
+      std::optional<double> measured;
+      if (t.IsDistance()) {
+        if (el && Measure::Describe(part.GetBodies(), t.ref2))
+          if (const auto d =
+                  Measure::DistanceDetailed(part.GetBodies(), t.ref, t.ref2))
+            measured = d->distance;
+      } else if (el && el->hasRadius) {
+        measured = el->radius * 2.0;
+      }
+      // Kept, not dropped: a tolerance whose face an upstream edit renamed is
+      // still what somebody decided about this part, and saying so is more
+      // use than quietly having fewer tolerances than yesterday.
+      e["resolved"] = measured.has_value();
+      if (t.isoClass.empty()) {
+        e["lower"] = t.lower;
+        e["upper"] = t.upper;
+      } else {
+        e["class"] = t.isoClass;
+      }
+      if (measured) {
+        const double nominal = *measured;
+        e["nominal"] = nominal;
+        if (t.isoClass.empty()) {
+          e["min"] = nominal + t.lower;
+          e["max"] = nominal + t.upper;
+        } else {
+          std::string why;
+          if (const auto b = fits::Limits(nominal, t.isoClass, &why)) {
+            e["min"] = b->Min(nominal);
+            e["max"] = b->Max(nominal);
+          } else {
+            e["error"] = why;
+          }
+        }
+      }
+      list.push_back(std::move(e));
+    }
+    return json{{"tolerances", std::move(list)}};
+  }
+  if (m == "clear_tolerance") {
+    Document& part = RequirePartDoc(doc, "clear_tolerance");
+    const uint64_t id = p.at("id").get<uint64_t>();
+    if (!part.FindTolerance(id))
+      throw std::runtime_error("clear_tolerance: no tolerance with id " +
+                               std::to_string(id) +
+                               " (list_tolerances shows them)");
+    state.commands->Execute(std::make_unique<ClearToleranceCommand>(id), part);
+    return json{{"ok", true}, {"id", id}};
+  }
+  if (m == "stack_up") {
+    const Document& part = p.contains("part")
+                               ? *ResolvePartParam(state, p.at("part"))
+                               : RequirePartDoc(doc, "stack_up");
+    if (!p.contains("terms") || !p.at("terms").is_array())
+      throw std::runtime_error(
+          "stack_up: `terms` is an array of {tolerance: id, subtract?}");
+    std::vector<tolstack::Term> terms;
+    for (const json& tj : p.at("terms")) {
+      tolstack::Term t;
+      if (tj.is_number_unsigned() || tj.is_number_integer()) {
+        t.toleranceId = tj.get<uint64_t>();
+      } else {
+        if (!tj.contains("tolerance"))
+          throw std::runtime_error(
+              "stack_up: each term needs a `tolerance` id");
+        t.toleranceId = tj.at("tolerance").get<uint64_t>();
+        t.subtract = tj.value("subtract", false);
+      }
+      terms.push_back(t);
+    }
+    std::string why;
+    const auto sum = tolstack::Sum(part, terms, &why);
+    if (!sum)
+      throw std::runtime_error("stack_up: " + why);
+    json rows = json::array();
+    for (const tolstack::TermResult& r : sum->terms)
+      rows.push_back({{"tolerance", r.toleranceId},
+                      {"what", r.what},
+                      {"subtract", r.subtract},
+                      {"nominal", r.nominal},
+                      {"lower", r.lower},
+                      {"upper", r.upper}});
+    return json{
+        {"terms", std::move(rows)},
+        {"nominal", sum->nominal},
+        {"min", sum->min},
+        {"max", sum->max},
+        {"note",
+         "worst case over the stated terms, assumed INDEPENDENT. Two lengths "
+         "driven by one variable cancel rather than add, and this cannot "
+         "tell — a nominal is measured, so nothing links it back to what "
+         "drove it. No distribution, and no form or position error."}};
+  }
+  if (m == "check_fits") {
+    // The walk lives in ui::CheckFits so a person clicking "Check fits" and a
+    // script calling this get the same verdict from the same code — the
+    // arrangement check_fasteners already uses. This is only its wire form.
+    if (!state.assembly)
+      throw std::runtime_error(
+          "check_fits needs an assembly tab — a fit is between two placed "
+          "parts, and only an assembly says which faces meet");
+    json entries = json::array();
+    int verified = 0, unverified = 0, failed = 0, warned = 0, reported = 0;
+    for (const ui::FitCheck& c : ui::CheckFits(state)) {
+      json e{{"mate", c.mateId},
+             {"mate_name", c.mateName},
+             {"mate_type", c.mateType},
+             {"status", c.status}};
+      if (!c.reason.empty())
+        e["reason"] = c.reason;
+      if (c.computed) {
+        e["size"] = c.size;
+        e["hole"] = {{"occurrence", c.holeOccurrence},
+                     {"class", c.holeClass},
+                     {"min", c.holeMin},
+                     {"max", c.holeMax}};
+        e["shaft"] = {{"occurrence", c.shaftOccurrence},
+                      {"class", c.shaftClass},
+                      {"min", c.shaftMin},
+                      {"max", c.shaftMax}};
+        e["kind"] = c.kind;
+        e["min_clearance"] = c.minClearance;
+        e["max_clearance"] = c.maxClearance;
+        e["note"] = "worst case over two independent bands; form, position "
+                    "and surface finish are not evaluated";
+      }
+      if (c.status == "pass")
+        verified++;
+      else if (c.status == "warn")
+        warned++;
+      else if (c.status == "fail")
+        failed++;
+      else if (c.status == "reported")
+        reported++;
+      else
+        unverified++;
+      entries.push_back(std::move(e));
+    }
+    // Never a green badge over unknowns: unverified outranks pass.
+    const std::string status = failed            ? "fail"
+                               : unverified      ? "unverified"
+                               : warned          ? "warn"
+                               : verified        ? "pass"
+                               : entries.empty() ? "none"
+                                                 : "reported";
+    return json{{"fits", std::move(entries)}, {"status", status},
+                {"passed", verified},         {"warned", warned},
+                {"failed", failed},           {"reported", reported},
+                {"unverified", unverified}};
   }
   if (m == "measure") {
     // What ONE side of a measurement names. Each of `a` and `b` carries its

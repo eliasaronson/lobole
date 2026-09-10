@@ -36,6 +36,7 @@ thing behind it invisible to the next person who looks.
 | [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs, `a6` loop solver, `relations-plan.md` (gear/rack/screw couplings between mates, v83) |
 | [simulation/](simulation/plan.md) | FEM | see also `ui/u11-simulation-setup.md` |
 | [drawings/](drawings/plan.md) | 2D drafting | `guide.md` (the workflow) |
+| [tolerances/](tolerances/plan.md) | ISO 286 limits and fits, and what a face may vary by | the fit checks read the assembly's own mates |
 | [configurations/](configurations/plan.md) | part + assembly families | |
 | [topopt/](topopt/plan.md) | topology optimization | `guide.md`, `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md`, `gpu5-plan.md` (**designed, not built** — the fp32 slender-part limit) |
 | [parts/](parts/plan.md) | standard parts (fasteners) | `gui-plan.md` (placing one by clicking — **built**), `preview-plan.md` (seeing what you are about to place — **built**), `f1-loose-ends.md` (attachment, the countersunk case, the pick-slot registry — **built**). **complete v1 (2026-09-01)** — seven vendored ISO standards, a fastener as a PART placed as an occurrence, size and length derived from the hole you pick (washers and nut included), a BOM that tells bought from made, `check_fasteners` for a stack that changed under a screw |

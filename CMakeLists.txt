@@ -261,6 +261,8 @@ set(core_sources
     src/core/io/ImportAssembly.cpp
     src/core/Measure.cpp
     src/core/ThreadStandards.cpp
+    src/core/FitStandards.cpp
+    src/core/ToleranceStack.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
@@ -651,6 +653,8 @@ set(app_sources
     src/ui/VariableActions.cpp
     src/ui/CatalogActions.cpp
     src/ui/CatalogPanel.cpp
+    src/ui/TolerancePanel.cpp
+    src/ui/ToleranceActions.cpp
     src/ui/SketchOverlay.cpp
     src/ui/ImportActions.cpp
     src/ui/AssemblyActions.cpp

@@ -20,7 +20,8 @@
 #include "ui/MeasureActions.h"
 #include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
 #include "ui/Theme.h"         // ElevatedWindowBorder, DrawWindowShadow
-#include "ui/ViewActions.h"   // SelectFeature
+#include "ui/ToleranceActions.h"
+#include "ui/ViewActions.h" // SelectFeature
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -268,6 +269,13 @@ void DrawMeasureToolWindow(AppState& state) {
     ImGui::SetItemTooltip(
         "Create a project variable holding this measurement, in mm");
   }
+
+  // ...and what it is ALLOWED to be. Measuring a face and saying how much it
+  // may vary are the same gesture on the same pick, which is why the editor
+  // lives here rather than in a panel of its own: one pick is that face's
+  // size, two are the distance between them, and those are exactly a
+  // Tolerance's ref and ref2 (docs/tolerances/plan.md T3).
+  DrawTolerancePick(state);
 
   // The pinned list. Hovering a row brightens its dimension in the viewport
   // — with more than one on screen the rows have to point at the geometry.

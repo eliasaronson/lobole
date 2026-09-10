@@ -761,6 +761,89 @@ TEST_CASE("Callout provenance: MappedName parsing, hole text, pitch",
                                              "9.5 \xC3\x97 90.0\xC2\xB0");
   }
 
+  // A hole that knows what it is FOR says so. Everything above is a hole
+  // with no fit and must be untouched by this: a drawing of an old document
+  // reads exactly as it did.
+  SECTION("FormatHoleCallout states a recorded fit") {
+    HoleFeature clearance("h", 1, HoleKind::Simple, 3.4, 6.0);
+    clearance.through = true;
+    clearance.fitThread = "M3";
+    clearance.fitKind = "normal";
+    CHECK(drawing::FormatHoleCallout(clearance) == "\xC3\x98"
+                                                   "3.4 THRU, M3 NORMAL "
+                                                   "CLEARANCE");
+    // Named even when normal: "M3 clearance" conventionally IMPLIES normal,
+    // and an implication is what recording the fit did away with.
+    clearance.fitKind = "close";
+    CHECK(drawing::FormatHoleCallout(clearance) == "\xC3\x98"
+                                                   "3.4 THRU, M3 CLOSE "
+                                                   "CLEARANCE");
+
+    // The clause goes AFTER the recess, so the callout still reads as an
+    // instruction first.
+    HoleFeature cb("h", 1, HoleKind::Counterbore, 3.4, 6.0);
+    cb.through = true;
+    cb.cbDiameter = 6.5;
+    cb.cbDepth = 3.3;
+    cb.fitThread = "M3";
+    cb.fitKind = "normal";
+    CHECK(drawing::FormatHoleCallout(cb) == "\xC3\x98"
+                                            "3.4 THRU CBORE \xC3\x98"
+                                            "6.5 DEEP 3.3, M3 NORMAL "
+                                            "CLEARANCE");
+
+    // A TAPPED hole leads with its thread. Printing the tap drill would not
+    // merely be unhelpful, it is the wrong instruction: nobody makes an M3
+    // tapped hole by drilling 2.5 and stopping.
+    HoleFeature tapped("h", 1, HoleKind::Simple, 2.5, 8.0);
+    tapped.fitThread = "M3";
+    tapped.fitKind = "tapped";
+    CHECK(drawing::FormatHoleCallout(tapped) == "M3 DEEP 8");
+    tapped.through = true;
+    CHECK(drawing::FormatHoleCallout(tapped) == "M3 THRU");
+    // A stated pitch is printed; the coarse one (0) is not, because "M3"
+    // alone already means it and spelling it out invites the reader to ask
+    // what the silent one meant.
+    tapped.fitPitch = 0.35;
+    CHECK(drawing::FormatHoleCallout(tapped) == "M3\xC3\x97"
+                                                "0.35 THRU");
+
+    // Half a fit is no fit: a thread with no kind cannot say what it is for.
+    HoleFeature half("h", 1, HoleKind::Simple, 3.4, 6.0);
+    half.through = true;
+    half.fitThread = "M3";
+    CHECK(drawing::FormatHoleCallout(half) == "\xC3\x98"
+                                              "3.4 THRU");
+  }
+
+  // A dimension on a toleranced bore says so. This is provenance, not a new
+  // authored field: the model already recorded the band, and the sheet had
+  // gone on printing the nominal alone.
+  SECTION("FormatToleranceSuffix") {
+    Tolerance cls;
+    cls.isoClass = "H7";
+    CHECK(drawing::FormatToleranceSuffix(cls) == " H7");
+
+    Tolerance band;
+    band.lower = -0.02;
+    band.upper = 0.05;
+    // The leading + is not decoration: "0.05/-0.02" reads as a range.
+    CHECK(drawing::FormatToleranceSuffix(band) == " +0.05/-0.02");
+
+    Tolerance negBoth;
+    negBoth.lower = -0.041;
+    negBoth.upper = -0.02;
+    CHECK(drawing::FormatToleranceSuffix(negBoth) == " -0.02/-0.041");
+
+    // A distance is not a size, and never labels a circle.
+    Tolerance dist;
+    dist.ref = ElementRef{1, "a"};
+    dist.ref2 = ElementRef{1, "b"};
+    dist.lower = -0.1;
+    dist.upper = 0.1;
+    CHECK(drawing::FormatToleranceSuffix(dist).empty());
+  }
+
   SECTION("UniformCollinearPitch") {
     using drawing::UniformCollinearPitch;
     const glm::dvec2 row[] = {{0, 0}, {10, 0}, {20, 0}};

@@ -55,7 +55,7 @@ title block, SVG/PDF export.**
   view; additive later (a view flag + the explode transform at projection).
 - **Multi-sheet drawings** — the model below keeps sheet state on the
   drawing document so a `sheets[]` list is an additive change.
-- **GD&T, weld/surface symbols, tolerance fields** — the annotation deep
+- **GD&T and weld/surface symbols** — the annotation deep
   end; not v1.
 - **Driving dimensions from the sheet** — refused outright, not deferred:
   drawing dims are measurements. Editing geometry happens in the part.

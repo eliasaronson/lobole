@@ -85,12 +85,14 @@ ITS OWN response (`regen`), not in a `get_state` the caller has to know to poll
 ## Tests
 
 **Three suites, and they do NOT overlap — running all of ctest's `gui` label
-after the sharder re-runs the whole GUI suite serially for 6 minutes:**
+after the sharder re-runs the whole GUI suite serially for 6 minutes.** Counts
+re-measured 2026-09-10; the TIMES were taken on a busy machine (load ~8, other
+worktrees running suites) and are an upper bound, not a clean baseline:
 
 | what | command | cost |
 |---|---|---|
-| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~83 s (1113) |
-| **inner loop** | `tools/test-fast.sh` | **~19 s** (1094 of 1113) |
+| headless | `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"` | ~110 s (1203) |
+| **inner loop** | `tools/test-fast.sh` | **~55 s** (1184 of 1203) |
 | GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
 | the python `gui` ones | `ctest -L pygui -j1` | ~110 s |
 
@@ -118,11 +120,11 @@ stopped testing the windowed path it exists for. Restoring it costs 51 s and
 buys back the coverage.
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — ~83 s for 1113 tests, of which the SIMP gate alone is 77 s of CPU and four
+  — ~110 s for 1203 tests, of which the SIMP gate alone is 77 s of CPU and four
   CAM clearing cases 138 s between them. **Inner loop: `tools/test-fast.sh`
-  (~19 s)**; full suite before committing. Each `nix-shell` costs
+  (~55 s)**; full suite before committing. Each `nix-shell` costs
   ~3 s to enter, so batch commands into one invocation rather than one each.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 282 tests in **~130 s**
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 288 tests in **~140 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
   (11 s), `--serial` for debugging, `--in-order` to switch the shuffle off.
@@ -163,7 +165,7 @@ buys back the coverage.
   `.expect.json` for a document, or `tests/golden/assembly/v<N>-<name>.json`
   for assembly schema; **the gate counts both directories**, and forgetting
   the second is how an audit once reported a present golden as missing.
-  The corpus is NOT one-per-bump historically — 11 of 35 bumps have none,
+  The corpus is NOT one-per-bump historically — 11 of the 35 bumps recorded THEN have none,
   almost all v2-v16 — so do not read it as exhaustive. No back-compat/
   migration is required (no users yet); fix any test that assumed old
   behavior. (Check the header for the current version — it moves.)
