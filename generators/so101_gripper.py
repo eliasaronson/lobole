@@ -474,6 +474,11 @@ def main():
         fn(b)
         print(f"  built {name}")
     part(d, "STS3215")
+    # Centred, which is the Import default — and every servo dimension in
+    # so101_gripper_spec.py was measured off this import, so the two agree.
+    # `keep_origin: True` would move the whole body by its bbox centre and
+    # invalidate all of them (add_feature reports the shift as
+    # `recentred_by`).
     b.feat(type="Import", name="STS3215", path=SERVO_STEP)
 
     for name, mat in (("Chassis", "plastic_black"),

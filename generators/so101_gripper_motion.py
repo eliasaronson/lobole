@@ -36,29 +36,14 @@ from so101_gripper_assembly import ASM, placements     # noqa: E402
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                    "scratch", "so101-pg52-gripper")
-BRANCH_AT = 25.0   # mate here, not at 0 — see main()
 # The driver mate measures its rotation the other way round from the link
 # angle theta this design is parameterised in: mate_rotation = -theta.
 MATE_SIGN = -1.0
 
 
-def gap_for(theta_deg):
-    """The coupling slider's offset — the two fingers' spacing in X."""
-    return 2.0 * P.A - 2.0 * P.L * math.sin(math.radians(theta_deg))
-
-
-def theta_for_gap(gap):
-    return math.degrees(math.asin(max(-1.0, min(1.0,
-                                                (2.0 * P.A - gap)
-                                                / (2.0 * P.L)))))
-
-
-OCC = {}          # occurrence name -> id; add_mate wants the id, not the
-#                   name, though `frame` is happy with a name
-
-
 def occ(name, frame=None):
-    c = {"occurrence": OCC[name]}
+    """A mate connector, by occurrence NAME — which add_mate resolves."""
+    c = {"occurrence": name}
     if frame:
         c["frame"] = frame
     else:
@@ -117,9 +102,6 @@ def build_relations(d, ids):
 
 def build_mates(d):
     d.call("set_active_part", part=ASM)
-    OCC.clear()
-    OCC.update({o["name"]: o["id"]
-                for o in d.call("list_occurrences")["occurrences"]})
     for mt in d.call("list_mates").get("mates", []):
         d.call("remove_mate", id=mt["id"])
     ids = {}
@@ -137,21 +119,17 @@ def main():
     d = connect(a.port)
     d.sock.settimeout(1800)
 
-    # Start from a pose WELL AWAY from theta = 0, and mate there. A slider
-    # between the fingers has two branches — they close symmetrically, or
-    # they slide the same way together — and those two meet exactly at
-    # theta = 0. Mate at the meeting point and the solver is free to pick
-    # the wrong one, which it does: both plates then turn the same way and
-    # the gear teeth drive straight through each other (the exact clash
-    # check reported 51 mm3 of tooth-in-tooth). Mating at +25 deg puts the
-    # branch beyond doubt.
+    # Mid-stroke is fine to mate at. It was not when the coupling was a
+    # slider: that had a second branch meeting this one exactly here, and
+    # mating at the meeting point let the solver take it. A gear relation
+    # has no second branch.
     d.call("set_active_part", part=ASM)
     by = {o["name"]: o["id"] for o in d.call("list_occurrences")["occurrences"]}
     d.call("batch", calls=[
         {"method": "set_occurrence_transform",
          "params": {"id": by[n], "transform": {"position": list(p),
                                                "orientation": list(q)}}}
-        for n, (p, q) in placements(BRANCH_AT).items() if n in by])
+        for n, (p, q) in placements(0.0).items() if n in by])
 
     ids = build_mates(d)
     rels = build_relations(d, ids)
@@ -182,7 +160,8 @@ def main():
     run = d.request("run_motion_study", {"study": sid, "leave_at": "start",
                                         "include_poses": True}, timeout=1800)
     # Does the solved motion match the motion this design was computed for?
-    names = {v: k for k, v in OCC.items()}
+    names = {o["id"]: o["name"]
+             for o in d.call("list_occurrences")["occurrences"]}
     worst, where = 0.0, None
     for smp in run.get("samples", []):
         want = dict(placements(MATE_SIGN * smp["value"]))
