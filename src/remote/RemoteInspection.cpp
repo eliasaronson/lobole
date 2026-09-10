@@ -461,7 +461,9 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
-     "default 1.0 mm), clashes; bounded like the interference sweep "
+     "default 1.0 mm), clashes. near_tol and touch_tol are both MILLIMETRES "
+     "(touch_tol defaults to 0.001, and splits touching from clear). Bounded "
+     "like the interference sweep "
      "(closest-first up to max_pairs 4000 / deadline_s 20 s, with the coverage "
      "in the "
      "response). Assembly tab: over occurrences, plus "
@@ -476,7 +478,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
      "(+radius_tol), area/length bounds, near_point (+max_distance); "
      "expected_count makes the result carry ok true/false. Covers UNNAMED "
-     "elements too; matches carry stable names where they exist.",
+     "elements too; matches carry stable names where they exist. Every "
+     "measure here is MILLIMETRES — radius, radius_tol, max_distance, "
+     "min_length, max_length — with areas in mm2 (min_area, max_area) and "
+     "angle_tol_deg in degrees, as its name says.",
      "angle_tol_deg, axis, body, element_type, expected_count, geometry_type, "
      "max_area, max_distance, max_length, max_results, min_area, min_length, "
      "near_point, normal, part, radius, radius_tol"},
@@ -495,7 +500,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      ""},
     {"section",
      "Cross-section area where a plane cuts the bodies; on an assembly tab, "
-     "every visible occurrence in place. Omit `offset` to cut through the "
+     "every visible occurrence in place. `offset` is MILLIMETRES along the "
+     "plane's normal; omit it to cut through the "
      "middle of what is shown (the chosen offset comes back). "
      "{regions: true} also returns each connected ISLAND the cut crosses "
      "({area, centroid}, biggest first) and `region_count`. The total cannot "
@@ -508,7 +514,8 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
      "offset}. Works on part AND assembly tabs, with filled cut caps on "
-     "both; omit `offset` to cut through the middle of what is shown. "
+     "both; `offset` is MILLIMETRES along the normal, and omitting it cuts "
+     "through the middle of what is shown. "
      "Shorthand for one cut — add_section/update_section address several.",
      "add, base_plane, enabled, offset, reverse"},
     {"add_section",
@@ -523,8 +530,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "{normal, d}.",
      ""},
     {"update_section",
-     "Change one cut {id, base_plane?, plane_id?, offset?, tilt_u?, tilt_v?, "
-     "reverse?, visible?}. Only the fields present are touched.",
+     "Change one cut {id, base_plane?, plane_id?, offset? (mm along the "
+     "normal), tilt_u?, tilt_v? (degrees), reverse?, visible?}. Only the "
+     "fields present are touched.",
      "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
     {"remove_section", "Remove one cut {id}, or all of them with {all: true}.",
      "all, id"},

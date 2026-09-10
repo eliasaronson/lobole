@@ -235,7 +235,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"set_camera",
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
-     "vector); passing eye [x,y,z] derives direction+distance instead.",
+     "vector); passing eye [x,y,z] derives direction+distance instead. "
+     "`distance` and every point here are model MILLIMETRES.",
      "direction, distance, eye, target, up"},
     {"orient_to_face", "Look straight at the selected face.", ""},
     {"select_face",

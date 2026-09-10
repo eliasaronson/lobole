@@ -281,7 +281,8 @@ static constexpr MethodDoc ModelingMethods[] = {
      "units_per_pixel",
      remote::NeedsPart},
     {"calibrate_reference_image",
-     "Scale an underlay so two picked image points span a given distance.",
+     "Scale an underlay so two picked image points span a given distance, in "
+     "sketch MILLIMETRES — which is what sets its units_per_pixel.",
      "align, distance, image_id, p1, p2, sketch_id", remote::NeedsPart},
     {"delete_reference_image", "Remove an underlay by {sketch_id, image_id}.",
      "image_id, sketch_id", remote::NeedsPart},
@@ -303,23 +304,26 @@ static constexpr MethodDoc ModelingMethods[] = {
      "entity_id, sketch_id", remote::NeedsPart},
     {"fillet",
      "Sketch fillet: round the corner between two lines {sketch_id, "
-     "line1, line2, radius}; errors explain a failed corner.",
+     "line1, line2, radius (mm)}; errors explain a failed corner.",
      "line1, line2, radius, sketch_id", remote::NeedsPart},
     {"offset",
-     "Offset a closed sketch chain by a distance {sketch_id, "
-     "chain: [entity ids], distance, join_arc?}.",
+     "Offset a closed sketch chain {sketch_id, chain: [entity ids], distance "
+     "(mm; the sign picks the side), join_arc?}. line1/line2/radius are "
+     "`fillet`'s, which shares this branch.",
      "chain, distance, join_arc, line1, line2, radius, sketch_id",
      remote::NeedsPart},
     {"mirror",
      "Mirror sketch entities across a line {sketch_id, "
-     "sources: [entity ids], axis: <line entity id>, link?}.",
+     "sources: [entity ids], axis: <line entity id>, link?}. line1/line2/"
+     "radius are `fillet`'s, which shares this branch.",
      "axis, line1, line2, link, radius, sketch_id, sources", remote::NeedsPart},
     {"pattern",
      "Sketch pattern of entities: linear {step: [du, dv] mm} or circular "
      "{circular: true, center: [u, v], angle (RADIANS) or angle_deg, never "
      "both}. The circular angle is the PER-STEP angle about the centre, not "
      "the total sweep — 3 instances 45 degrees apart is angle_deg: 45. More "
-     "than a full turn in `angle` is refused: it was meant as degrees.",
+     "than a full turn in `angle` is refused: it was meant as degrees. "
+     "line1/line2/radius are `fillet`'s, which shares this branch.",
      "angle, angle_deg, center, circular, count, line1, line2, link, radius, "
      "sketch_id, sources, step",
      remote::NeedsPart},

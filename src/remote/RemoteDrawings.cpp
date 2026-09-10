@@ -95,7 +95,11 @@ static constexpr MethodDoc DrawingMethods[] = {
      "budget_s, drawing"},
     {"list_drawing_geometry",
      "Projected 2D curves of a view (for picking/dimensioning).", "view"},
-    {"add_drawing_dim", "Add a driven dimension between picked view geometry.",
+    {"add_drawing_dim",
+     "Add a driven dimension between picked view geometry. `offset` is the "
+     "label's placement in SHEET millimetres from the measured geometry (not "
+     "model mm — the view's scale sits between them); omit it and it is "
+     "auto-placed clear of the views and the title block.",
      "kind, offset, refs, view"},
     {"remove_drawing_dim", "Remove a dimension by id.", "id"},
     {"list_drawing_dims", "List dimensions with values.", ""},

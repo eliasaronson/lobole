@@ -149,7 +149,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "mass. Optional {position, orientation} place it; `fit_fastener` derives "
      "all of that from a picked hole and is what you usually want. Standards: "
      "iso4762, iso14579, iso4017, iso7380 (screws — `length` required), "
-     "iso4032 (nut), iso7089 (washer — no `length`).",
+     "iso4032 (nut), iso7089 (washer — no `length`). `length` is the shank "
+     "length in MILLIMETRES (the 20 of \"M6x20\"), `size` is the thread "
+     "designation (\"M6\") rather than a measure, and `position` is model mm.",
      "drive, length, orientation, position, size, standard"},
     {"fit_fastener",
      "Derive a fastener from a picked hole RIM and place it "
@@ -215,7 +217,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"add_exploded_view", "Add an exploded view.", "name"},
     {"remove_exploded_view", "Remove an exploded view.", "id"},
     {"list_exploded_views", "List exploded views.", ""},
-    {"set_explode_step", "Add/edit an explode step (occurrence + offset).",
+    {"set_explode_step",
+     "Add/edit an explode step (occurrence + offset). `offset` is a [x, y, z] "
+     "displacement in MILLIMETRES, applied for display only — it never moves "
+     "the occurrence the mates solved.",
      "occurrence, offset, view"},
     {"auto_explode",
      "Generate explode steps automatically (creates and "
