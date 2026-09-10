@@ -32,7 +32,7 @@
 struct Tolerance {
   uint64_t id = 0; // document-unique, from the shared id counter
   ElementRef ref;  // the face this is a tolerance ON
-  // Set (v98) makes this a tolerance on the DISTANCE from `ref` to `ref2`
+  // Set (v99) makes this a tolerance on the DISTANCE from `ref` to `ref2`
   // rather than on `ref`'s own size — a shoulder-to-seat length, a slot
   // width, a boss height. Diameters are the easy half: a part with three
   // perfectly toleranced bores and forty untoleranced lengths is still not
@@ -86,8 +86,10 @@ public:
   // Deep copy: every feature is cloned (Feature::Clone), and so is everything
   // else the document IS — parameters, studies, CAM setups, configurations,
   // assets, units, rollback. What it merely CACHED (bodies, baked geometry,
-  // the regen cache) is not copied; the copy regenerates itself, so the only
-  // cost of duplicating a heavy part is one rebuild.
+  // the regen cache) is not copied; this copy regenerates itself, so the cost
+  // of duplicating a heavy part is one full rebuild — which is exactly what
+  // CopyWithGeometry below exists to avoid for a caller that only wants to
+  // READ the geometry.
   //
   // The copy is a NEW document, not the same one twice: it gets a fresh
   // InstanceId() and starts at version 0. Sharing an instance id would put us
@@ -96,6 +98,32 @@ public:
   // is replaced by swapping the pointer to it, never overwritten in place.
   Document(const Document& other);
   Document& operator=(const Document&) = delete;
+
+  // A copy that REUSES `other`'s bodies instead of re-deriving them.
+  //
+  // The plain copy above ends in a Regenerate(), which executes the whole
+  // feature list — real OCCT booleans, lofts, fillets. For a copy taken to
+  // READ geometry (a motion run's snapshot of the assembly) that is pure
+  // waste: the bodies it rebuilds are the ones it was just handed. On the
+  // SO-101 gripper it was 54% of a profile, all of it BooleanFeature::Execute
+  // re-cutting cuts that were already cut.
+  //
+  // It works by handing the copy `other`'s bodies as baked geometry, so the
+  // same tip-hash comparison an opened project goes through decides whether
+  // they still describe the feature list — see AdoptBakedGeometry. That makes
+  // the failure mode SLOW, not WRONG: if `other` is mid-edit, or its hash
+  // does not match for any reason, the copy rebuilds exactly as the plain one
+  // does. Datums still execute (their output is not a body), which is the
+  // same rule a baked open follows.
+  //
+  // Returns a POINTER on purpose. Returned by value, the natural call site
+  // `make_unique<Document>(CopyWithGeometry(d))` binds the rvalue to the COPY
+  // constructor above — Document declares one, so it has no implicit move —
+  // and pays a second, plain copy: a full regeneration, exactly the cost this
+  // exists to avoid. That is not a small tax, it is a net loss; it took the
+  // gripper's motion prep from 3.4 s to 10.7 s, and it is invisible at the
+  // call site.
+  static std::unique_ptr<Document> CopyWithGeometry(const Document& other);
 
   size_t FeatureCount() const { return m_features.size(); }
   Feature* GetFeature(size_t index);
@@ -520,6 +548,9 @@ public:
   int FirstConsumerIndex(uint64_t featureId) const;
 
 private:
+  // The one copy implementation; both public forms delegate to it.
+  Document(const Document& other, bool reuseGeometry);
+
   // Topo-sorts m_parameters by expression dependency and evaluates them into
   // m_symbols. Failures (parse error, unknown name, cycle) set the affected
   // parameters' `error` and keep their last good values.

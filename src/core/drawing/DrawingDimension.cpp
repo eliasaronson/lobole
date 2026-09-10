@@ -222,7 +222,7 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
       rd.dim1 = a + off;
       rd.dim2 = b + off;
     }
-    rd.text = core::FormatLength(rd.value);
+    rd.text = core::FormatLength(rd.value, ctx.units);
     rd.labelPos = 0.5 * (rd.dim1 + rd.dim2);
     rd.resolved = true;
     break;
@@ -240,7 +240,7 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     rd.radius = rad;
     rd.value = (dim.kind == DrawingDimKind::Diameter ? 2.0 * rad : rad) / vs;
     rd.text = (dim.kind == DrawingDimKind::Diameter ? "\xC3\x98" : "R") +
-              core::FormatLength(rd.value);
+              core::FormatLength(rd.value, ctx.units);
     // A toleranced bore says so on the sheet. Only a DIAMETER: an ISO class
     // states how a diameter may vary, so "R10 H7" would be a band twice the
     // size of the one written — the sort of plausible-looking wrong number
@@ -248,7 +248,7 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     if (dim.kind == DrawingDimKind::Diameter && ctx.sourceDoc) {
       if (const Tolerance* tol = FindToleranceForRef(
               *ctx.sourceDoc, dim.refs[0].edge.name, rad / vs)) {
-        rd.text += FormatToleranceSuffix(*tol);
+        rd.text += FormatToleranceSuffix(*tol, ctx.units);
       }
     }
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
@@ -267,7 +267,7 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
       return rd;
     const double d = std::clamp(std::abs(glm::dot(da, db)), 0.0, 1.0);
     rd.value = std::acos(d); // acute angle between the two edges
-    rd.text = core::FormatAngle(rd.value);
+    rd.text = core::FormatAngle(rd.value, ctx.units);
     rd.ext1 = pa;
     rd.ext2 = pb;
     rd.labelPos = 0.5 * (pa + pb) + off;
@@ -293,7 +293,7 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     rd.center = c;
     rd.radius = rad;
     rd.value = hole->diameter; // model mm
-    rd.text = FormatHoleCallout(*hole);
+    rd.text = FormatHoleCallout(*hole, ctx.units);
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
                                                    : glm::dvec2(0.7071, 0.7071);
     rd.rim = c + dir * rad;
@@ -351,16 +351,17 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
         return rd; // mixed radii: not one pattern
       centers.push_back(c);
     }
-    std::string base = "\xC3\x98" + core::FormatLength(2.0 * rad / vs);
+    std::string base =
+        "\xC3\x98" + core::FormatLength(2.0 * rad / vs, ctx.units);
     if (ctx.sourceDoc)
       if (const HoleFeature* hole =
               FindHoleForRef(*ctx.sourceDoc, dim.refs[0].edge.name, rad / vs))
-        base = FormatHoleCallout(*hole);
+        base = FormatHoleCallout(*hole, ctx.units);
     rd.text = std::to_string(dim.refs.size()) + "\xC3\x97 " + base; // "N× "
     const auto pitch = UniformCollinearPitch(centers);
     if (pitch) {
       rd.value = *pitch / vs;
-      rd.text += " PITCH " + core::FormatLength(rd.value);
+      rd.text += " PITCH " + core::FormatLength(rd.value, ctx.units);
     } else {
       rd.value = 2.0 * rad / vs;
     }

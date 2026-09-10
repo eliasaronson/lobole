@@ -35,7 +35,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "kind, name", remote::NeedsPart},
     {"remove_study", "Remove a study by id.", "study", remote::NeedsPart},
     {"list_studies", "List studies with status.", "", remote::NeedsPart},
-    {"set_study", "Edit study settings (mesh size, materials, solver options).",
+    {"set_study",
+     "Edit study settings (mesh size, materials, solver options). mesh_size "
+     "and filter_radius are MILLIMETRES; `gravity` is metres per second "
+     "squared (m/s^2) as a [x, y, z] vector, so Earth down is [0, 0, -9.81] "
+     "with Z up. volume_fraction is a fraction of 1 and the iteration counts "
+     "are counts.",
      "filter_radius, gravity, max_iterations, mesh_size, name, num_modes, "
      "study, type, volume_fraction",
      remote::NeedsPart},
@@ -47,11 +52,14 @@ static constexpr MethodDoc SimulationMethods[] = {
      "linearly with this number and a wrong unit is invisible in the answer, "
      "so it is stated here rather than left to be inferred from the solver. "
      "An omitted force `direction` pushes into the picked face (the same "
-     "default a GUI placement takes).",
+     "default a GUI placement takes). A `face` is {feature_id, element}, or "
+     "just the element name — the body that has it is then found for you.",
      "direction, face, magnitude, study, type", remote::NeedsPart},
     {"remove_load", "Remove a load by index.", "load, study",
      remote::NeedsPart},
-    {"add_refinement", "Add a local mesh refinement on an element.",
+    {"add_refinement",
+     "Add a local mesh refinement on an element: `size` is the target element "
+     "edge length there, in MILLIMETRES.",
      "face, size, study", remote::NeedsPart},
     {"remove_refinement", "Remove a refinement.", "face, study",
      remote::NeedsPart},
@@ -167,8 +175,27 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   }
 
   // Face-ref decode shared by the study mutation RPCs.
+  //
+  // An element name already CARRIES its feature id -- "30/face0", "1/b1/f2"
+  // -- so demanding `feature_id` beside it made the caller repeat what they
+  // had just been handed by list_elements, and getting it wrong read as
+  // nlohmann's "key 'feature_id' not found". Take the name alone (as a bare
+  // string, or as {element}) and read the id off its prefix; an explicit
+  // feature_id still wins.
+  // A face is {feature_id, element} — or just the element name, as a bare
+  // string or {element}, in which case the body that HAS it is found. The
+  // name's own prefix is not the answer: it is the feature that created the
+  // element, which after a boolean is not the body's created_by.
   auto studyFaceOf = [](const json& r) {
-    return ElementRef{r.at("feature_id").get<uint64_t>(),
+    if (r.is_string())
+      return ElementRef{0, r.get<std::string>()};
+    if (!r.is_object() || !r.contains("element"))
+      throw std::runtime_error(
+          "a face is {feature_id, element}, or just the element name "
+          "(list_elements names them) and the body that has it is found");
+    return ElementRef{r.contains("feature_id")
+                          ? r.at("feature_id").get<uint64_t>()
+                          : uint64_t{0},
                       r.at("element").get<std::string>()};
   };
   // Runs one study mutation as a ModifyStudyCommand: snapshot before, apply
@@ -503,7 +530,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       // Factor of safety against yield, when the body's material defines one.
       if (b.bodyIndex >= 0 && b.bodyIndex < (int)doc->GetBodies().size() &&
           b.results.maxVonMises > 0) {
-        const auto mt = CADMaterials::MaterialLibrary::FromSlug(
+        const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
             doc->GetBodies()[b.bodyIndex].material);
         const float yield =
             CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;

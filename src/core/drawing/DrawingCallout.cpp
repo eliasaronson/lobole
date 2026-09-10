@@ -124,21 +124,23 @@ const Tolerance* FindToleranceForRef(const Document& doc,
   return found;
 }
 
-std::string FormatToleranceSuffix(const Tolerance& tol) {
+std::string FormatToleranceSuffix(const Tolerance& tol,
+                                  const units::System& units) {
   if (tol.IsDistance())
     return {};
   if (!tol.isoClass.empty())
     return " " + tol.isoClass;
-  const auto signed_ = [](double v) {
+  const auto signed_ = [&](double v) {
     // A leading + is not decoration: "0.05/-0.02" reads as a range, while
     // "+0.05/-0.02" reads as the two deviations it is.
-    const std::string n = core::FormatLength(v);
+    const std::string n = core::FormatLength(v, units);
     return v >= 0.0 ? "+" + n : n;
   };
   return " " + signed_(tol.upper) + "/" + signed_(tol.lower);
 }
 
-std::string FormatHoleCallout(const HoleFeature& hole) {
+std::string FormatHoleCallout(const HoleFeature& hole,
+                              const units::System& units) {
   // A hole that recorded what it is FOR says so, instead of leaving a reader
   // to recognise 6.6 as an M6 clearance. docs/modeling/hole-standards.md
   // promised exactly this when the fit landed and it was the half that never
@@ -150,6 +152,7 @@ std::string FormatHoleCallout(const HoleFeature& hole) {
   // for an M6 tapped hole is worse than useless, it is the wrong instruction.
   // A CLEARANCE hole keeps its diameter, because that IS what gets drilled,
   // and states the intent after it.
+  const auto len = [&](double mm) { return core::FormatLength(mm, units); };
   const bool named = !hole.fitThread.empty() && !hole.fitKind.empty();
   const bool tapped = named && hole.fitKind == "tapped";
   std::string out;
@@ -159,20 +162,20 @@ std::string FormatHoleCallout(const HoleFeature& hole) {
     // pitch everywhere in engineering, and spelling it out invites the reader
     // to wonder what was meant by the one that says nothing.
     if (hole.fitPitch > 0.0)
-      out += "\xC3\x97" + core::FormatLength(hole.fitPitch);
+      out += "\xC3\x97" + len(hole.fitPitch);
   } else {
-    out = "\xC3\x98" + core::FormatLength(hole.diameter);
+    out = "\xC3\x98" + len(hole.diameter);
   }
-  out += hole.through ? " THRU" : " DEEP " + core::FormatLength(hole.depth);
+  out += hole.through ? " THRU" : " DEEP " + len(hole.depth);
   if (hole.kind == HoleKind::Counterbore) {
-    out += " CBORE \xC3\x98" + core::FormatLength(hole.cbDiameter) + " DEEP " +
-           core::FormatLength(hole.cbDepth);
+    out +=
+        " CBORE \xC3\x98" + len(hole.cbDiameter) + " DEEP " + len(hole.cbDepth);
   } else if (hole.kind == HoleKind::Countersink) {
     const double angle =
         2.0 * std::atan2((hole.csDiameter - hole.diameter) / 2.0,
                          std::max(hole.csDepth, 1e-9));
-    out += " CSK \xC3\x98" + core::FormatLength(hole.csDiameter) +
-           " \xC3\x97 " + core::FormatAngle(angle); // "× 90°"
+    out += " CSK \xC3\x98" + len(hole.csDiameter) + " \xC3\x97 " +
+           core::FormatAngle(angle, units); // "× 90°"
   }
   // The fit clause comes last, after any recess, so the callout still reads
   // as an instruction first and an explanation second. The fit is NAMED even

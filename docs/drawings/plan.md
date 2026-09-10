@@ -37,8 +37,10 @@ title block, SVG/PDF export.**
 - **Dimensions are driven** — measured from projected geometry, read-only,
   re-measured on view update. The six sketch kinds carry over: distance /
   distance-X / distance-Y / radius / diameter / angle.
-- **Title block**: a simple field table (project, document, scale, date,
-  author) + border. Template customization deferred.
+- **Title block**: a simple field table (project, document, author, date,
+  units) + border. Template customization deferred. The UNITS row is not
+  decoration: dimension text carries no suffix, so the sheet has to state
+  once what its bare numbers are in (docs/units-plan.md).
 - **Export**: SVG and vector PDF, plus the sheet in `screenshot` when a
   drawing tab is active.
 
@@ -218,6 +220,10 @@ ProjRef { viewId,
   `core::FormatLength/FormatAngle`** — the survey found `%.3g`/`%.4g`
   scattered ad hoc across dimension text, editors, and readouts; drawings
   centralize it and the sketch/measure call sites migrate opportunistically.
+  Both take a `units::System` with **no default** since 2026-09-10, so a
+  caller has to say which; `core::UnitsLabel` writes the title block's UNITS
+  row from the same system, and `ui::ActiveDrawingUnits` is where the panel
+  and the exporters both get it (docs/units-plan.md).
 
 ## 4. The sheet viewport: 2D at last
 

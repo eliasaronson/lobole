@@ -194,15 +194,34 @@ TEST_CASE("Drawing golden loads and round-trips (v30)",
 }
 
 TEST_CASE("FormatLength/FormatAngle produce compact display text",
-          "[drawing][format]") {
-  CHECK(core::FormatLength(40.0) == "40");
-  CHECK(core::FormatLength(8.5) == "8.5");
-  CHECK(core::FormatLength(12.345) == "12.3");
-  CHECK(core::FormatLength(-0.0) == "0");
-  CHECK(core::FormatLength(0.0) == "0");
-  CHECK(core::FormatAngle(0.0) == "0.0\xC2\xB0");
-  CHECK(core::FormatAngle(M_PI / 2) == "90.0\xC2\xB0");
-  CHECK(core::FormatAngle(M_PI / 4) == "45.0\xC2\xB0");
+          "[drawing][format][units]") {
+  const units::System mm; // the default: millimetres, degrees
+  CHECK(core::FormatLength(40.0, mm) == "40");
+  CHECK(core::FormatLength(8.5, mm) == "8.5");
+  CHECK(core::FormatLength(12.345, mm) == "12.3");
+  CHECK(core::FormatLength(-0.0, mm) == "0");
+  CHECK(core::FormatLength(0.0, mm) == "0");
+  CHECK(core::FormatAngle(0.0, mm) == "0.0\xC2\xB0");
+  CHECK(core::FormatAngle(M_PI / 2, mm) == "90.0\xC2\xB0");
+  CHECK(core::FormatAngle(M_PI / 4, mm) == "45.0\xC2\xB0");
+
+  // The bug this signature exists for: these ignored the document entirely
+  // and printed millimetres, so an inch part's drawing was dimensioned in mm
+  // with nothing on the sheet to say so.
+  units::System in;
+  in.length = units::Length::Inch;
+  CHECK(core::FormatLength(25.4, in) == "1");
+  CHECK(core::FormatLength(50.8, in) == "2");
+  CHECK(core::FormatLength(12.7, in) == "0.5");
+  // Still no suffix — the title block states the unit once (see UnitsRow).
+  CHECK(core::FormatLength(25.4, in).find("in") == std::string::npos);
+
+  // A document that asked for radians gets radians, at a precision that
+  // matches: a tenth of a radian is 5.7 degrees.
+  units::System rad;
+  rad.angle = units::Angle::Radian;
+  CHECK(core::FormatAngle(M_PI / 2, rad) == "1.571 rad");
+  CHECK(core::FormatAngle(0.0, rad) == "0.000 rad");
 }
 
 namespace {
@@ -434,7 +453,23 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
   CHECK(svg.find("Widget &amp; Co &lt;v2&gt;") != std::string::npos);
   CHECK(svg.find("Widget & Co <v2>") == std::string::npos);
   CHECK(svg.rfind("</svg>") != std::string::npos);
+  // Every dimension on a sheet is a bare number, so the sheet has to say what
+  // they are in. It did not, and an inch part's drawing printed millimetres
+  // over a title block of PROJECT / DOCUMENT / AUTHOR / DATE.
+  CHECK(svg.find(">UNITS<") != std::string::npos);
+  CHECK(svg.find(">mm<") != std::string::npos);
   fs::remove(out);
+
+  units::System inches;
+  inches.length = units::Length::Inch;
+  const fs::path outIn = fs::temp_directory_path() / "drawing_export_in.svg";
+  REQUIRE(DrawingExport::SaveSVG(doc, {view}, {}, outIn.string(), &err, {},
+                                 inches));
+  std::ifstream inFile(outIn);
+  std::stringstream si;
+  si << inFile.rdbuf();
+  CHECK(si.str().find(">in<") != std::string::npos);
+  fs::remove(outIn);
 }
 
 TEST_CASE("PDF export writes a valid single-page document",

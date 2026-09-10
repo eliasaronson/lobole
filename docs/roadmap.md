@@ -418,8 +418,9 @@ process. One pair is known to fail when they meet and is invisible by default
   assemblies; revisit then". Assemblies shipped, revisited July 2026: now workstream 13,
   see [drawings/plan.md](drawings/plan.md).
 - ~~**CAM**~~ — **reversed and BUILT 2026-08-21** (C1–C5, then G1–G4): 2.5D milling
-  — profile with tabs, pocket, face, drill — on Clipper2, posting to Mach3 and
-  LinuxCNC, with a backplot, setups that persist with the part (format v58),
+  — profile with tabs, pocket, face, drill — on Clipper2, posting to Mach3,
+  LinuxCNC and grbl, with a backplot, setups that live in a JOB document
+  holding N parts laid out in stock (v73, not on the part as first built),
   and a dependency-free verifier that simulates the POSTED file and reports
   gouge/leftover. Reached by three verbs on a tool session rather than by a
   parameter editor: two clicks make a pocket, every depth is derived from the

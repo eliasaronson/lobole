@@ -7,6 +7,12 @@ the same defaults at render time, materialized into the file on first drag.
 Fixed alongside: ApplyDimensionEdit's ReplaceFeature dangling pointer
 (PushApplied), and the RPC add_constraint angle unit bug (wire speaks
 degrees, model stores radians — the literal path never converted).
+
+> **Reversed 2026-09-10** (docs/units-plan.md). Making the wire speak degrees
+> fixed one path and left the other: the same field reached through
+> `add_feature`/`ConstraintFromJson` stayed radians, and `get_state` echoed
+> radians back, so `value: 45` read back as `0.785` and both were "right".
+> `value` is RADIANS on both paths now, with `value_deg` for degrees.
 Scope: the two remaining items from the July request batch — CAD-style sketch
 dimension indicators (item 1) and measuring inside assemblies (item 11).
 

@@ -61,7 +61,8 @@ def report_phases():
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "tools"))
+sys.path.insert(0, str(HERE.parent))  # generators/, for _lib
+sys.path.insert(0, str(HERE.parent.parent / "tools"))
 
 from designer_sdk import SdkError, connect  # noqa: E402
 
@@ -880,7 +881,7 @@ def outputs(app, out, name="Quadcopter"):
         _exports(app, out)
 
     # The build guide travels with the files somebody builds from.
-    guide = HERE.parent / "docs" / "modeling" / "fpv-drone-build.md"
+    guide = HERE.parent.parent / "docs" / "modeling" / "fpv-drone-build.md"
     if guide.exists():
         shutil.copy(guide, os.path.join(out, "BUILD.md"))
 

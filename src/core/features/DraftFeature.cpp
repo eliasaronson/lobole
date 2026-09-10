@@ -1,4 +1,5 @@
 #include "core/features/DraftFeature.h"
+#include "core/Angles.h"
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
@@ -79,7 +80,7 @@ bool DraftFeature::Execute(RegenContext& ctx) {
   body->shape.GetBoundingBox(bmin, bmax);
   const glm::vec3 base = n * glm::dot(bmin, n); // point on the pull axis
   const gp_Pln neutral(gp_Pnt(base.x, base.y, base.z), pull);
-  const double angleRad = angleDeg * M_PI / 180.0;
+  const double angleRad = angles::ToRadians(angleDeg);
   const double volumeBefore = body->shape.Volume();
   // How far the taper actually travels: the face's extent along the pull axis
   // times tan(angle). This is the number that explains a surprising result —

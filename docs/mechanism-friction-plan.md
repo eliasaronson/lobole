@@ -148,7 +148,9 @@ this very round and cost another ten minutes.
 
 ## U7. `list_parts` returns assemblies too
 
-It carries `type: "part" | "assembly"`, but the name does not hint at it and
+It carries `type: "part" | "assembly" | "drawing" | "job"` (a job tab said
+`"part"` until 2026-09-09, so a filter written from this line was handed one
+and every part call against it was then refused), but the name does not hint at it and
 the description does not say. The round's folder sweep filed the engine and
 the carburettor — the two things in the project that are neither parts nor
 fasteners — under Fasteners.

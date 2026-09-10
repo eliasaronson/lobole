@@ -575,15 +575,51 @@ def main():
         aid = ska["entity_ids"]
         d.call("add_constraint", sketch_id=ska["id"], kind="coincident",
                refs=[[aid[1], 0], [aid[0], 0]])
-        # The wire speaks degrees for angles (the UI convention, 1ec93fe).
+        # `value` is RADIANS, matching the model, the file and the arc parser;
+        # `value_deg` says degrees. This read DEGREES from `value` while the
+        # same field of the same sketch reached through add_feature read
+        # radians, and get_state echoed the radians back — set 45, read 0.785,
+        # both "right".
         d.call("add_constraint", sketch_id=ska["id"], kind="angle",
-               refs=[[aid[0], 0], [aid[1], 0]], value=45.0)
+               refs=[[aid[0], 0], [aid[1], 0]], value_deg=45.0)
         ea = d.call("get_state")["features"][0]["entities"]
         d0 = [ea[0]["b"][0] - ea[0]["a"][0], ea[0]["b"][1] - ea[0]["a"][1]]
         d1 = [ea[1]["b"][0] - ea[1]["a"][0], ea[1]["b"][1] - ea[1]["a"][1]]
         ang = abs(math.atan2(d0[0] * d1[1] - d0[1] * d1[0],
                              d0[0] * d1[0] + d0[1] * d1[1]))
         expect(abs(ang - 0.7853981634) < 1e-3, "angle solved to 45 degrees")
+
+        # 45 in the RADIANS field is what the old wire meant by 45 degrees, so
+        # it is refused on geometry (more than a full turn) rather than
+        # solving to a plausible wrong shape — the arc parser's defence, which
+        # is also what keeps the swap from silently changing old callers.
+        try:
+            d.call("add_constraint", sketch_id=ska["id"], kind="angle",
+                   refs=[[aid[0], 0], [aid[1], 0]], value=45.0)
+            expect(False, "45 radians must be refused as an angle")
+        except RuntimeError as e:
+            expect("RADIANS" in str(e) and "value_deg" in str(e),
+                   "the refusal names the unit and the twin")
+        # Two spellings of one angle have no right answer, so neither is used.
+        try:
+            d.call("add_constraint", sketch_id=ska["id"], kind="angle",
+                   refs=[[aid[0], 0], [aid[1], 0]],
+                   value=0.785, value_deg=45.0)
+            expect(False, "value and value_deg together must be refused")
+        except RuntimeError as e:
+            expect("not both" in str(e), "the both-at-once refusal says so")
+
+        # The sketch pattern's angle is PER STEP and radians; its _deg twin
+        # was the whole bug (the MCP layer called it a total sweep in degrees
+        # and forwarded it unconverted).
+        try:
+            d.call("pattern", sketch_id=ska["id"], sources=[aid[0]], count=3,
+                   circular=True, center=[0, 0], angle=90.0)
+            expect(False, "90 radians per pattern step must be refused")
+        except RuntimeError as e:
+            expect("angle_deg" in str(e), "the pattern refusal names the twin")
+        d.call("pattern", sketch_id=ska["id"], sources=[aid[0]], count=3,
+               circular=True, center=[0, 0], angle_deg=45.0)
 
         phase("Arc entity round-trips over the wire and takes a radius constraint")
         # Arc entity round-trips over the wire and takes a radius constraint.
@@ -987,6 +1023,28 @@ def main():
                arc["params"], "the arc names its angle unit and the _deg twin")
         expect(desc["document_format_version"] >= 52, "format version present")
         expect(len(desc["constraint_kinds"]) >= 20, "constraint kinds")
+        # The assembly vocabulary is published too. A caller that cannot see
+        # `relation_kinds` here concludes gears are not supported and builds
+        # a workaround (a slider standing in for a gear pair, with the branch
+        # ambiguity that comes with it).
+        expect({"revolute", "slider", "cylindrical", "fastened", "planar",
+                "ball"} == set(desc["mate_types"]), "mate types described")
+        expect({"gear", "rack", "screw", "linear", "chain", "cam"} ==
+               set(desc["relation_kinds"]), "relation kinds described")
+        expect("add_relation" in " ".join(
+            m["doc"] for m in desc["methods"] if m["name"] == "add_mate"),
+            "add_mate points at relations for coupled DOFs")
+        # ...and what the number BESIDE the kind means. A bare name list said
+        # `angle` existed and nothing about its value, which is how the same
+        # field came to be degrees through add_constraint and radians through
+        # add_feature.
+        cvu = desc["constraint_value_units"]
+        expect("radians" in cvu["angle"] and "value_deg" in cvu["angle"],
+               "the angle constraint names its value unit and the _deg twin")
+        expect(cvu["distance"] == "mm", "a distance constraint is millimetres")
+        expect("angle_deg" in
+               next(m for m in desc["methods"] if m["name"] == "pattern")["doc"],
+               "the sketch pattern names its angle unit")
         expect("aluminum" in desc["material_slugs"], "material slugs")
         expect("through_all" in desc["extrude_end_modes"],
                "extrude end modes are described")

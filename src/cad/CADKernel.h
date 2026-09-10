@@ -82,6 +82,12 @@ public:
   // solids is invisible in a volume total but not in this.
   int SolidCount() const;
 
+  // How many faces the B-Rep has — the honest measure of what an exact
+  // boolean against this shape will cost. A modelled part is tens; an
+  // imported STL is one planar face per TRIANGLE, so tens of thousands, and
+  // the contact sweep needs to know the difference before it starts one.
+  int FaceCount() const;
+
   // Mass properties at unit density: volume, surface area, center of mass,
   // and the inertia matrix about the center of mass (multiply by density
   // for physical values). Inspection I2.
@@ -366,6 +372,7 @@ public:
   bool SameGeometryAs(const CADShape&) const { return false; }
   double Volume() const { return 0.0; }
   int SolidCount() const { return 0; }
+  int FaceCount() const { return 0; }
   void GetBoundingBox(glm::vec3& min, glm::vec3& max) const {
     min = max = glm::vec3(0);
   }

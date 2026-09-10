@@ -122,7 +122,14 @@ public:
   // that only modifies existing bodies (extrude add/cut) leaves their material
   // untouched.
   const std::string& GetMaterial() const { return m_material; }
-  void SetMaterial(const std::string& material) { m_material = material; }
+  // REFUSES an unrecognised slug, naming what is accepted (empty stays legal
+  // and means default). This is the one funnel every ingress runs through —
+  // the set_material RPC, and FeatureFromJson, which is what add_feature,
+  // modify_feature and document load all use. Before it validated,
+  // add_feature(feature={..., "material":"unobtanium"}) was accepted and the
+  // bad string sat on the feature until a renderer or a mass query tripped
+  // over it.
+  void SetMaterial(const std::string& material);
 
   // Does this feature work out its body's material itself, rather than just
   // stamping m_material? Derived inherits the SOURCE body's when its own is
@@ -374,9 +381,18 @@ public:
   std::string radiusExpr, heightExpr;
 };
 
-// References an external STEP file. Shapes are translated so their combined
-// bounding-box center sits at the origin, keeping regeneration deterministic
-// for a given file.
+// References an external STEP/STL/BREP file. By DEFAULT the shapes are
+// translated so their combined bounding-box centre sits at the origin, which
+// keeps regeneration deterministic for a given file and puts an import where
+// the camera is looking.
+//
+// That is the wrong answer whenever the file's own coordinates mean
+// something — an assembly's neighbour part, a fixture baked into the same
+// frame, a re-import of geometry this app exported. Nothing said it was
+// happening, so a check that placed such an import by its file coordinates
+// silently compared the wrong things (a 0.00 mm gap that read like an
+// interference). `keepOrigin` turns it off, and `Shift()` reports what the
+// last regeneration applied either way.
 class ImportFeature : public Feature {
 public:
   ImportFeature(const std::string& name, const std::string& path);
@@ -384,8 +400,8 @@ public:
   // Execute drops, so a copy re-reads `path` exactly as a reloaded document
   // does. The compiler cannot write this one — m_seed is an owning pointer.
   ImportFeature(const ImportFeature& other)
-      : Feature(other), path(other.path), hasColor(other.hasColor),
-        color(other.color) {}
+      : Feature(other), path(other.path), keepOrigin(other.keepOrigin),
+        hasColor(other.hasColor), color(other.color) {}
 
   std::string TypeName() const override { return "Import"; }
 
@@ -401,6 +417,12 @@ public:
   // .step/.stp (structured), .brep (exact sidecar), or .stl (triangle mesh,
   // sewn to a shell/solid).
   std::string path;
+  // Keep the file's own coordinates instead of centring the import (v97).
+  bool keepOrigin = false;
+  // What the last Execute translated the shapes by — zero when keepOrigin.
+  // Reported by the RPC so a caller never has to discover the move by
+  // measuring a bounding box.
+  glm::vec3 Shift() const { return m_shift; }
   // A hash of the file's BYTES, cached by path + size + mtime, so the chain
   // hash can key an import on what it imports rather than where the file
   // sits: saving a project adopts staged imports into the project directory
@@ -432,6 +454,8 @@ public:
   }
 
 private:
+  glm::vec3 m_shift{0.0f}; // what the last Execute centred by
+
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
 
   mutable std::string m_hashPath;

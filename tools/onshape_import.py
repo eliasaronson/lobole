@@ -1244,8 +1244,15 @@ def map_constraint(con, id_map, entities=None):
                 else:
                     import math
                     v = q.get("value", 0.0)
-                    payload["value"] = (v * 180.0 / math.pi if kind == "angle"
-                                        else v * MM)
+                    # Onshape angle values are RADIANS and so is Designer's
+                    # `value`, but they are not interchangeable by accident:
+                    # `value_deg` is the spelling that says which, and this
+                    # wrote degrees into `value` until 2026-09-10, when
+                    # add_constraint's bare `value` stopped meaning degrees.
+                    if kind == "angle":
+                        payload["value_deg"] = math.degrees(v)
+                    else:
+                        payload["value"] = v * MM
                 return
 
     # Gather present local refs in parameter order.
@@ -1351,7 +1358,7 @@ def map_constraint(con, id_map, entities=None):
                     cross = d1[0] * d2[1] - d1[1] * d2[0]
                     dot = d1[0] * d2[0] + d1[1] * d2[1]
                     out.pop("expr", None)
-                    out["value"] = math.degrees(math.atan2(cross, dot))
+                    out["value_deg"] = math.degrees(math.atan2(cross, dot))
             return out, note
         return None, "ANGLE (unsupported form) skipped"
     # parallel / perpendicular / equal / tangent / concentric: two curves.

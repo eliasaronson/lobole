@@ -1,5 +1,6 @@
 #include "core/Feature.h"
 
+#include "cad/CADMaterials.h"
 #include "core/AxisRef.h"
 
 #include <filesystem>
@@ -229,7 +230,13 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("ImportFeature '{}': no valid shapes in '{}'", m_name, path);
     return false;
   }
-  const glm::vec3 center = (combinedMin + combinedMax) * 0.5f;
+  // Centre on the combined box, unless the caller asked to keep the file's
+  // own coordinates. Recorded either way: an import that MOVED and did not
+  // say so is how a fit check against a neighbour part compares two things
+  // that are not where it thinks they are.
+  const glm::vec3 center =
+      keepOrigin ? glm::vec3(0.0f) : (combinedMin + combinedMax) * 0.5f;
+  m_shift = -center;
 
   // Real-world assembly STEPs run to hundreds of instances (the Waveshare
   // adapter test file has 143); the cap only guards against pathological
@@ -273,4 +280,19 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     }
   }
   return true;
+}
+
+void Feature::SetMaterial(const std::string& material) {
+  // The ONE funnel every material ingress runs through: the set_material RPC,
+  // and FeatureFromJson, which is what add_feature, modify_feature and
+  // document load all use. Refusing here is what closes the hole where
+  // add_feature(feature={..., "material":"unobtanium"}) was accepted and the
+  // bad string sat on the feature until a renderer or a mass query tripped
+  // over it — the add_mate(type:"revolut") shape, RPC-reachable.
+  //
+  // Throws, naming what IS accepted. The empty slug stays legal and means
+  // default. The GUI only ever passes MaterialLibrary::Slug() output, so it
+  // cannot reach this.
+  (void)CADMaterials::MaterialLibrary::MaterialTypeFromString(material);
+  m_material = material;
 }

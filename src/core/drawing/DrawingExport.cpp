@@ -1,5 +1,7 @@
 #include "core/drawing/DrawingExport.h"
 
+#include "core/io/Format.h"
+
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -97,7 +99,8 @@ bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error,
-             const std::vector<drawing::ResolvedNote>& notes) {
+             const std::vector<drawing::ResolvedNote>& notes,
+             const units::System& units) {
   try {
     const Sheet& sheet = doc.GetSheet();
     const SheetChrome chrome = ChromeOf(sheet);
@@ -247,8 +250,9 @@ bool SaveSVG(const DrawingDocument& doc,
     const Row rows[] = {{"PROJECT", sheet.titleBlock.project},
                         {"DOCUMENT", sheet.titleBlock.document},
                         {"AUTHOR", sheet.titleBlock.author},
-                        {"DATE", sheet.titleBlock.date}};
-    const int nRows = 4;
+                        {"DATE", sheet.titleBlock.date},
+                        {"UNITS", core::UnitsLabel(units)}};
+    const int nRows = 5;
     const double rowH = tbH / nRows;
     out << "  <g font-family=\"Helvetica, sans-serif\" font-size=\"3.5\">\n";
     out << "    <rect x=\"" << Num(x0) << "\" y=\"" << Num(fy(y0 + tbH))
@@ -290,7 +294,8 @@ bool SavePDF(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error,
-             const std::vector<drawing::ResolvedNote>& notes) {
+             const std::vector<drawing::ResolvedNote>& notes,
+             const units::System& units) {
   try {
     const Sheet& sheet = doc.GetSheet();
     const SheetChrome chrome = ChromeOf(sheet);
@@ -416,8 +421,9 @@ bool SavePDF(const DrawingDocument& doc,
     const Row rows[] = {{"PROJECT", sheet.titleBlock.project},
                         {"DOCUMENT", sheet.titleBlock.document},
                         {"AUTHOR", sheet.titleBlock.author},
-                        {"DATE", sheet.titleBlock.date}};
-    const int nRows = 4;
+                        {"DATE", sheet.titleBlock.date},
+                        {"UNITS", core::UnitsLabel(units)}};
+    const int nRows = 5;
     const double rowH = tbH / nRows;
     cs << P(0.35) << " w " << P(x0) << ' ' << P(y0) << ' ' << P(tbW) << ' '
        << P(tbH) << " re S\n";

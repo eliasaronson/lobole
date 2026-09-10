@@ -118,7 +118,10 @@ the tool descriptions. Single source of truth: a `FORMATS` reference in
   [[entity_id, which], …]` with the `which` semantics (line 0=a 1=b; circle
   0=center; arc 0=center 1=start 2=end; whole-entity kinds ignore it), datum
   refs (origin `0xFFFFFF00`, X axis `+1`, Y axis `+2` — exposed as named
-  constants in the docs), `value` vs `expr` (angles in degrees).
+  constants in the docs), `value` vs `expr`. `value` is millimetres, except
+  for `kind: "angle"` where it is RADIANS — pass `value_deg` for degrees,
+  never both. `expr` is the expression language's base units instead, where
+  angles are DEGREES: `"45"`, `"45deg"` and `"0.785rad"` all mean 45 degrees.
 
 ### Workflow prompt
 

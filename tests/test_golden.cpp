@@ -475,7 +475,7 @@ void AssertUnits(const Document& doc, const nlohmann::json& expect) {
         want.at("angle").get<std::string>());
 }
 
-// Tolerances (v97). Optional, like the CAM and units assertions. Worth
+// Tolerances (v98). Optional, like the CAM and units assertions. Worth
 // gating because the failure is silent in a particular way: a tolerance that
 // fails to reload does not break the document or move a surface — the part
 // looks exactly right and is simply no longer the size anybody decided on.
@@ -522,6 +522,20 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   REQUIRE(volumes.size() == expected.size());
   for (size_t i = 0; i < volumes.size(); i++)
     CHECK_THAT(volumes[i], WithinRel(expected[i], 1e-3));
+  // v97: whether an Import keeps the file's own coordinates. A flag that
+  // round-trips as `false` is an import that silently moves — the whole
+  // reason the flag exists — so the golden states it and the round-trip has
+  // to preserve it.
+  if (expect.contains("import_keep_origin")) {
+    const auto* imp = [&]() -> const ImportFeature* {
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* i = dynamic_cast<const ImportFeature*>(f.get()))
+          return i;
+      return nullptr;
+    }();
+    REQUIRE(imp != nullptr);
+    CHECK(imp->keepOrigin == expect.at("import_keep_origin").get<bool>());
+  }
 }
 
 } // namespace

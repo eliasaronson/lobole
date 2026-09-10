@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Units.h"
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -57,17 +59,22 @@ const Tolerance* FindToleranceForRef(const Document& doc,
 // writes them in. Empty for a distance tolerance, which is not a size.
 //
 // Here rather than at the call site because this file is where the sheet's
-// text vocabulary lives, Latin-1 and all.
-std::string FormatToleranceSuffix(const Tolerance& tol);
+// text vocabulary lives, Latin-1 and all. Deviations follow the sheet's own
+// rule: the document's unit, no suffix, the title block says which once.
+std::string FormatToleranceSuffix(const Tolerance& tol,
+                                  const units::System& units = {});
 
-// "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°").
+// "Ø4.5 THRU" / "Ø4.5 DEEP 6" (+" CBORE Ø9 DEEP 3" / " CSK Ø9.5 × 90°"), with
+// every length in the document's unit and no suffix — the title block says
+// which, once, as it does for every other number on the sheet.
 //
 // A hole that recorded a FIT says what it is for rather than only how wide it
 // is: a clearance hole appends its intent ("Ø3.4 THRU, M3 NORMAL CLEARANCE")
 // and a TAPPED one leads with the thread instead of the tap drill ("M3 THRU",
 // "M3×0.35 DEEP 8"), because the drill is not what gets made. A hole with no
 // fit is formatted exactly as it always was.
-std::string FormatHoleCallout(const HoleFeature& hole);
+std::string FormatHoleCallout(const HoleFeature& hole,
+                              const units::System& units = {});
 
 // The uniform centre-to-centre pitch of a collinear row, or nullopt when the
 // centres aren't collinear (within tol) or the gaps aren't uniform. Two

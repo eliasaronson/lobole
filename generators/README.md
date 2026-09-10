@@ -12,9 +12,15 @@ Why this and not a scripting engine inside the app:
 stays deterministic and free of interpreters, and a generator can loop and
 branch in a real language with no sandbox.
 
+**Layout.** A generator that is one file sits here; one that spans several
+sits in its own directory beside them — `om615/`, `fpv_drone/`,
+`cncest6090/`, `so101_gripper/` — with the same file names inside. Every
+file adds BOTH its own directory and this one to `sys.path`, so a group's
+modules import each other by bare name and still reach `_lib` and `gear`.
+
 | generator | what | live afterwards | frozen |
 |---|---|---|---|
-| `gear.py` | spur gear: involute flanks as arcs, tip and root arcs, bore | thickness, bore | module, teeth, pressure angle |
+| `gear.py` | spur gear: involute flanks as arcs, tip and root arcs, bore; `--backlash` thins the flanks (a nominal pair at nominal centres has none), `--phase` turns the pattern (what makes two mirrored sectors mesh instead of jamming tip to tip), `--sector` keeps teeth over a wedge and a hub elsewhere | thickness, bore | module, teeth, pressure angle, backlash, phase, sector |
 | `gear_train.py` | two of them on a carrier, mated by their bores, coupled by a gear relation (docs/assemblies/relations-plan.md), checked for tooth clash over a pitch | the relation's ratio and phase | the gears |
 
 Run one against the running app (it finds the one announced instance, or
@@ -54,6 +60,14 @@ owner photographs. Only the 80 mm spindle diameter is owner-confirmed; the
 remaining dimensions are editable project variables with recorded assumptions.
 See [the model notes](../docs/modeling/cncest6090.md) for scope, measurement
 priorities, JSON overrides and preview/local/full verification.
+
+`so101_gripper/` is a parallel-jaw wrist gripper with a wrist camera for the
+SO-ARM100/101 follower arm: eight printed parts, a 1:1 involute sector-gear
+pair coupling two parallelogram fingers, and a 32x32 UVC camera aimed at the
+grasp point. `so101_gripper.py` builds the parts, `_assembly.py` places them
+at any link angle, `_motion.py` mates them and drives the mechanism through a
+motion study, `_export.py` writes the deliverable. See
+[the friction it found](../docs/rpc-friction-plan.md).
 
 `toolmakers_clamp.py` is the dimensioned counterpart: an eight-part clamp based
 on an author's published plan, with screw-driven closed assembly loops, exact

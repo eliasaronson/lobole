@@ -80,15 +80,25 @@ static constexpr MethodDoc ProjectMethods[] = {
      "as_assembly, path", remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}), or — on an "
-     "assembly tab — every occurrence at its SOLVED placement.",
+     "assembly tab — every occurrence at its SOLVED placement. `deflection` is "
+     "the tessellation chord tolerance in MILLIMETRES (smaller = finer, more "
+     "triangles); STEP and BREP are exact solids and ignore it.",
      "body, deflection, path", remote::NotInBatch},
-    {"export_stl", "Export to STL {path, deflection?}.",
+    {"export_stl",
+     "Export to STL {path, deflection?}. `deflection` is the tessellation "
+     "chord tolerance in MILLIMETRES (smaller = finer, more triangles); STEP "
+     "and BREP are exact solids and ignore it.",
      "body, deflection, path", remote::NeedsPart | remote::NotInBatch},
-    {"export_brep", "Export to BREP {path}.", "body, deflection, path",
-     remote::NeedsPart},
+    {"export_brep",
+     "Export to BREP {path}. `deflection` is the tessellation chord tolerance "
+     "in MILLIMETRES (smaller = finer, more triangles); STEP and BREP are "
+     "exact solids and ignore it.",
+     "body, deflection, path", remote::NeedsPart},
     {"export_visual",
      "Export a visual-quality mesh (glTF/OBJ by extension) of "
-     "the part or whole assembly.",
+     "the part or whole assembly. `deflection` is the tessellation chord "
+     "tolerance in MILLIMETRES (smaller = finer, more triangles); STEP and "
+     "BREP are exact solids and ignore it.",
      "deflection, path", remote::NotInBatch},
     {"checkpoint_create",
      "Name the current state of the whole project a version {name}.", "name",

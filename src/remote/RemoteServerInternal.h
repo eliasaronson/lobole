@@ -33,6 +33,16 @@ std::string UnknownParamError(const std::string& method,
                               const std::vector<std::string>& unknown,
                               const std::set<std::string>& accepted);
 
+// A parameter of the wrong TYPE, said the way a refusal says things: which
+// method, what each key it was handed actually is, and where to read what
+// each one takes. nlohmann's own message ("type must be string, but is
+// boolean") names none of those, so a caller who guessed `ssao: true` for a
+// parameter that takes off|half|full learns nothing from it.
+std::string TypeErrorMessage(const std::string& method,
+                             const nlohmann::json& params,
+                             const std::set<std::string>& seen,
+                             const std::string& what);
+
 // Points the camera at a named standard view. The semantic `view` RPC and the
 // GUI-action path both need it, and a second copy would let the two disagree
 // about what "front" means.

@@ -177,7 +177,7 @@ TEST_CASE("Tolerances round-trip through a save", "[tolerances]") {
   std::filesystem::remove(path);
 }
 
-// A document without tolerances must serialize exactly as it did before v97,
+// A document without tolerances must serialize exactly as it did before v98,
 // which is what keeps every existing golden valid.
 TEST_CASE("No tolerances writes no key", "[tolerances]") {
   auto doc = ShaftDoc();

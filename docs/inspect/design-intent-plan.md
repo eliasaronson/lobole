@@ -293,7 +293,7 @@ between RPCs and clipped labels in the default narrow sidebar.
 
 ## Follow-up evidence from the revised OM615
 
-The workshop revision in `generators/om615.py` now checks actual head datums,
+The workshop revision in `generators/om615/om615.py` now checks actual head datums,
 27 mm injector wrench flats and the presence/size of a modeled pump register.
 Its report distinguishes sourced limits from estimated interfaces. This is
 **generator-local evidence**, not completion of the persistent Requirement

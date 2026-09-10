@@ -232,6 +232,17 @@ Two things fell out of building them:
   bug. Not fixed here — changing the tool surface mid-plan changes what the
   sweep measures — but it is the strongest candidate for the next round, and
   the benchmark now has a task (`t3-bent-tube`) that an agent will hit it on.
+
+  > **Fixed 2026-09-09/10.** The arc took `start_angle_deg`/`end_angle_deg`
+  > twins and a refusal on a sweep over a full turn, and `describe` now
+  > documents every sketch entity's fields. It was not the last of them: the
+  > same shape was found in `pattern`'s per-step angle (which the MCP layer
+  > documented as a total sweep in DEGREES over a handler reading RADIANS),
+  > `set_reference_image.rotation`, and `add_constraint.value` — degrees
+  > through the RPC and radians through `add_feature` for one field. All
+  > closed in docs/units-plan.md, with `tests/rpc_units_gate.py` to catch the
+  > next one. **The tool surface moved**: results in `benchmarks/results/`
+  > from before that date were measured against the old spellings.
 - The bent-tube negative control exported **zero solids** while still
   reporting a bbox and a volume. Investigated and fixed — see below.
 

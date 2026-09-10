@@ -30,4 +30,11 @@ std::span<const MethodDoc> ModelingMethodDocs();
 // Sketch constraint kind names accepted by add_constraint(s), for describe.
 std::vector<std::string> ConstraintKindNames();
 
+// What `value` MEANS for each dimensional kind, for describe. A bare name
+// list said `angle` existed and not one thing about the number beside it,
+// which is how the same field came to be degrees through add_constraint and
+// radians through add_feature. Kinds that take no value are omitted, so the
+// map doubles as "which kinds are dimensions".
+std::vector<std::pair<std::string, std::string>> ConstraintValueUnits();
+
 } // namespace remote

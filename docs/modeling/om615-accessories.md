@@ -60,10 +60,10 @@ Shared accessory mounting inputs participate in the assembly fingerprint.
 
 ```sh
 # Start a private instance; use its port, never the human's port 8799.
-python3 generators/om615.py --port PORT --component fan --out /tmp/fan
-python3 generators/om615.py --port PORT --project /tmp/engine/om615.dsgn \
+python3 generators/om615/om615.py --port PORT --component fan --out /tmp/fan
+python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn \
   --update-component fan --stage preview --out /tmp/fan-update
-python3 generators/om615.py --port PORT --stage full --out /tmp/engine
+python3 generators/om615/om615.py --port PORT --stage full --out /tmp/engine
 ```
 
 Preview checks strict solids and feature status, but does not run collisions.

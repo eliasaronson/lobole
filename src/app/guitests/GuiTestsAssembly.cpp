@@ -2,6 +2,7 @@
 #include "core/Measure.h"
 #include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
@@ -359,7 +360,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // G2: a motion study from the panel — Add picks the first mate with a
   // degree of freedom, the scrub slider drives that mate (no undo step,
   // the explode rule), Run is a background job whose result lands, and
-  // Delete takes it away.
+  // Delete takes it away. Then, on a study slow enough to catch mid-run,
+  // that the button row becomes a progress bar and a Cancel, and that
+  // cancelling keeps the samples it had already checked.
   t = IM_REGISTER_TEST(engine, "assembly", "a_motion_study_scrubs_and_runs");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -435,6 +438,54 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::MotionResultStale(*s_App, study.id));
     IM_CHECK_EQ(r->samples.size(), (size_t)48);
     IM_CHECK(r->clean); // nothing is in the arm's way
+
+    // While a run is in flight the panel says so. Driven by a SYNTHETIC
+    // registry entry, not by a real run: this two-body turn finishes 20000
+    // samples inside a couple of frames, so there is no study slow enough to
+    // catch mid-flight and any timing-based version of this would be a race
+    // that passes by accident. What the panel owes is a mapping from "a job
+    // of kind motion exists" to the widgets, and that is exactly what a
+    // registry entry with no thread exercises. motion::Run's own half — that
+    // cancelling keeps the samples it finished — is a unit test
+    // (test_motion.cpp).
+    {
+      auto fake = std::make_unique<ui::BackgroundJob>();
+      fake->kind = "motion";
+      fake->label = "Motion study (test)";
+      fake->cancellable = true;
+      fake->fraction.store(0.4);
+      ui::BackgroundJob& job = ui::StartBackgroundJob(*s_App, std::move(fake));
+      ctx->Yield(2);
+
+      // The three buttons are REPLACED, not disabled: a disabled item is
+      // invisible to this engine (the F8 round's main-menu trap), so "gone"
+      // is the only state a test can tell apart from "there".
+      IM_CHECK(ctx->ItemExists("//###Model/###motion_cancel"));
+      IM_CHECK(!ctx->ItemExists("//###Model/###motion_run"));
+      IM_CHECK(!ctx->ItemExists("//###Model/###motion_preview"));
+      IM_CHECK(!ctx->ItemExists("//###Model/###motion_delete"));
+      // The previous verdict stays up underneath — an early return here once
+      // hid the result StartMotionRun deliberately keeps.
+      IM_CHECK(ui::MotionResultFor(*s_App, study.id) != nullptr);
+
+      // Cancel is a request: the button sets the flag the worker reads.
+      IM_CHECK(!job.cancel.load());
+      ctx->ItemClick("//###Model/###motion_cancel");
+      ctx->Yield();
+      IM_CHECK(job.cancel.load());
+      // ...and having asked, it stops offering: the button stays in place
+      // (so the row does not jump) but goes disabled, because a second
+      // request means nothing and a button that keeps accepting clicks
+      // reads as one that did not work.
+      IM_CHECK((ctx->ItemInfo("//###Model/###motion_cancel").ItemFlags &
+                ImGuiItemFlags_Disabled) != 0);
+
+      job.done.store(true); // no thread to join; let the registry reap it
+      for (int i = 0; i < 60 && ui::BackgroundJobRunning(*s_App, "motion"); i++)
+        ctx->Yield();
+      IM_CHECK(!ui::BackgroundJobRunning(*s_App, "motion"));
+      IM_CHECK(ctx->ItemExists("//###Model/###motion_run")); // buttons back
+    }
 
     ctx->ItemClick("//###Model/###motion_delete");
     ctx->Yield(2);

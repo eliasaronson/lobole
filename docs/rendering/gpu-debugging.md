@@ -88,7 +88,7 @@ What to look at, in the order that has paid off here:
    renderers arrived with one of its two registrations absent.
 2. **The inputs to the failing draw** — descriptor sets, the actual bound
    image, the push constants. The push-constant block is at the 128-byte
-   Vulkan floor here (the wood-grain shader), so an added field silently
+   Vulkan floor here (the surface-pattern shader), so an added field silently
    displaces another.
 3. **The output attachment after each pass**, not just the final image. The
    SSAO bug was a correct AO buffer sampled with the wrong coordinates: the

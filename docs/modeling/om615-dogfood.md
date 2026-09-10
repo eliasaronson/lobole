@@ -7,12 +7,12 @@ For iteration, `--build-only` saves an explicitly unchecked project, and
 `--no-export` skips GLB export while retaining the requested checks. The
 standing gate now uses `Asm.check_clashes()` to avoid computing distances.
 
-`generators/om615.py` builds an OM615-shaped engine — 1988 cc, 87 x 83.6,
+`generators/om615/om615.py` builds an OM615-shaped engine — 1988 cc, 87 x 83.6,
 five main bearings, a single overhead camshaft on a duplex chain working the
 valves through rocker arms, and a pre-chamber per cylinder — down to the
 bearing shells, the seals, the oil galleries and the water jacket.
 
-    python3 generators/om615.py --port <port> [--samples N] [--mesh]
+    python3 generators/om615/om615.py --port <port> [--samples N] [--mesh]
 
 Three modules: `om615_spec.py` is every shared number, `om615_bottom.py` and
 `om615_top.py` build the parts, `om615.py` assembles, drives and checks them.

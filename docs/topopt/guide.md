@@ -66,6 +66,8 @@ set_study {study, type:"topology", mesh_size,
            volume_fraction, filter_radius, max_iterations}
 add_load  {study, type:"fixed",  face}
 add_load  {study, type:"force",  face, magnitude, direction}
+                                 # magnitude: newtons, the total on that face
+                                 # (a pressure load's is MPa)
 add_keep_face {study, face}                   (optional)
 run_study {study}                             -> {started:true}   # async
 study_status {study}                          -> {running, iteration, ...}  # poll

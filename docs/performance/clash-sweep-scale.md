@@ -35,7 +35,7 @@ The fresh baseline build took 207.8 s and its unchanged 49-sample motion
 study took 209.0 s on this run; earlier machine/run timings below should not
 be treated as a controlled comparison with these numbers.
 
-Iteration controls in `generators/om615.py`:
+Iteration controls in `generators/om615/om615.py`:
 
 - `--component exhaust` (also block, head, sump, timing-cover, cam-cover,
   intake) builds and saves one unchecked part for rapid shape iteration.

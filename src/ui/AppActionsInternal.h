@@ -124,10 +124,10 @@ struct SharedBody {
   bool hasMaterial = false;
   glm::vec3 albedo{0.7f};
   glm::vec4 pbr{0.0f};
-  // Procedural wood/plywood grain: pattern, grainScale, grainContrast.
-  int procPattern = 0;
-  float grainScale = 0.0f;
-  float grainContrast = 0.0f;
+  // Procedural surface pattern: which figure, and its two scale params.
+  CADMaterials::SurfacePattern pattern = CADMaterials::SurfacePattern::Flat;
+  float patternScale = 0.0f;
+  float patternContrast = 0.0f;
 };
 
 // What is cached for one part, the document version it was built from, and

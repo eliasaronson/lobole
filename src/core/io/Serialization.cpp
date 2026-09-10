@@ -139,14 +139,14 @@ json DocumentEnvelope(const Document& doc) {
       j["parameters"].push_back(std::move(pj));
     }
   }
-  // Tolerances (v97). Omitted when empty so every existing document re-saves
+  // Tolerances (v98). Omitted when empty so every existing document re-saves
   // byte-identically and the goldens stay valid.
   if (!doc.GetTolerances().empty()) {
     j["tolerances"] = json::array();
     for (const Tolerance& t : doc.GetTolerances()) {
       json tj = {{"id", t.id}, {"ref", ElementRefJson(t.ref)}};
       // Present only for a distance tolerance, so a size one is written
-      // exactly as v97 wrote it.
+      // exactly as v98 wrote it.
       if (t.IsDistance())
         tj["ref2"] = ElementRefJson(t.ref2);
       // The class is what is stored; a deviation pair is the fallback for a
@@ -672,7 +672,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
                         pj.at("expression").get<std::string>(),
                         pj.value("comment", std::string{}));
     }
-    // Tolerances (v97). They reference elements of features, but nothing
+    // Tolerances (v98). They reference elements of features, but nothing
     // about them is evaluated at load: a tolerance is design intent about a
     // face, so a ref that no longer resolves stays recorded and is reported
     // as unresolved when something LOOKS, rather than being dropped here.
@@ -1263,7 +1263,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
                         pj.at("expression").get<std::string>(),
                         pj.value("comment", std::string{}));
     }
-    // Tolerances (v97). They reference elements of features, but nothing
+    // Tolerances (v98). They reference elements of features, but nothing
     // about them is evaluated at load: a tolerance is design intent about a
     // face, so a ref that no longer resolves stays recorded and is reported
     // as unresolved when something LOOKS, rather than being dropped here.

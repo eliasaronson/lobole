@@ -280,7 +280,10 @@ headlessly.
 
 - `add_reference_image(sketch_id, path, [origin], [units_per_pixel])` → image id.
 - `calibrate_reference_image(sketch_id, image_id, p1, p2, distance, [align])`.
-- `set_reference_image(sketch_id, image_id, {opacity|hidden|origin|rotation})`.
+- `set_reference_image(sketch_id, image_id, {opacity|hidden|origin|
+  units_per_pixel|rotation})`. `origin` is [u, v] sketch mm, `units_per_pixel`
+  is sketch mm per image pixel, and the tilt is `rotation` (RADIANS) or
+  `rotation_deg`, never both.
 - `delete_reference_image(sketch_id, image_id)`.
 - `list` surfaced via existing `get_state`/element listing.
 

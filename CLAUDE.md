@@ -3,6 +3,26 @@
 Parametric B-Rep CAD (C++23, Vulkan, OpenCASCADE 7.9, PlaneGCS, ImGui). Built
 and run inside `nix-shell`. Keep this file short — it loads into every session.
 
+## How to work here
+
+- **Anything multi-step and not trivial starts with a PLAN, written before the
+  first edit** — `docs/<area>/plan.md` for a subsystem, `docs/<topic>-plan.md`
+  for a round of work. Agree it, then build it. Plan mode writes one; move it
+  into the repo when the work lands there.
+- **A plan is what to build and why. Nothing else.** The problem, the shape of
+  the fix, the files it touches, and how it is verified. No dates, no decision
+  log, no status chatter, no alternatives already rejected — a reader wants the
+  argument, not the meeting.
+- **When the work is done, check the docs against it** — every document that
+  describes the behaviour you changed, the RPC `describe` rows, and
+  `docs/versioning/format.md` if the format moved. For anything wider than a
+  file or two, delegate the audit (see "Reading the code"). One round that
+  thought it was documented as it went still had nine stale statements,
+  including a format-history row naming a field that had been renamed.
+- **A merged worktree is deleted the same day** — see "Parallel work in git
+  worktrees". A checkout that outlives its branch drifts, and the next session
+  cannot tell which tree is the real one.
+
 ## Build & run — always through nix
 
 Bare `ninja`/`cmake` fail outside the nix env (missing glm/vulkan/OCC headers).
@@ -227,7 +247,17 @@ git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/work
 (ccache-warm). It then **picks and prints a scratch port** for that worktree
 (`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
 instances, and never the human's), so you no longer hold one in your head. Integrate
-SERIALLY: merge one branch to main, run suites, then the next.
+SERIALLY: merge one branch to main, run suites, then the next — and REMOVE the
+worktree as soon as its branch is in. `git worktree remove` REFUSES here
+("working trees containing submodules cannot be moved or removed"), so it is:
+```
+git merge-base --is-ancestor wtX main && [ -z "$(git -C ../designer-wtX status --porcelain)" ] \
+  && rm -rf ../designer-wtX && git worktree prune && git branch -d wtX
+```
+Check both first — merged, and nothing uncommitted — because the `rm` takes
+the build directory with it. Five merged worktrees from one week held 16 GB.
+A merged worktree left lying about is a second checkout of the same project
+that no longer matches it, with its own build dir and its own scratch port.
 
 ## Profiling
 
@@ -274,6 +304,10 @@ know the file, or the symbol, or are checking one fact.
   class). Add new RPCs to the domain module — and a row in its `MethodDoc`
   table, whose `flags` column is what gates it (NeedsPart / NotInBatch /
   Deferrable / UiAction). There is no separate gate list to remember.
+  A parameter naming a physical quantity must carry a unit suffix (`angle_deg`,
+  `tolerance_mm`) or have its unit named in the row — `tests/rpc_units_gate.py`
+  fails otherwise. Forty-two did not, and a wrong unit is invisible in the
+  answer (docs/units-plan.md).
 - Serialization: `src/core/io/Serialize{Features,Assembly,Studies,Configurations}.cpp`.
 - Core is split by domain: `src/core/{features,sketch,drawing,fem,io}/`; the
   document model (Document/Feature/Command/Expression) stays flat in `src/core/`.

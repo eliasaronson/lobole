@@ -1,9 +1,13 @@
 #include "core/fem/FemMesher.h"
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>
+#include <GProp_GProps.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
 
 #include <cmath>
 
@@ -55,6 +59,53 @@ double TetQuality(const glm::dvec3& a, const glm::dvec3& b, const glm::dvec3& c,
     return 0.0;
   const double q = 72.0 * std::sqrt(3.0) * vol / std::pow(sumSq, 1.5);
   return q < 0 ? 0 : (q > 1 ? 1 : q);
+}
+
+// WHERE the face is, in the model, not just which slot it occupies in a
+// list the caller cannot see. "face 13 of 90" is unresolvable — the numbering
+// is OCC's explorer order, no RPC hands it out, and the body name in the
+// message is the last feature that touched the shape. Its kind, its area and
+// its middle are enough to find it by eye or by list_elements.
+std::string DescribeFace(const TopTools_IndexedMapOfShape& faceMap,
+                         int oneBased) {
+  if (oneBased < 1 || oneBased > faceMap.Extent())
+    return "face not in the map";
+  const TopoDS_Face face = TopoDS::Face(faceMap(oneBased));
+  const char* kind = "a face";
+  switch (BRepAdaptor_Surface(face).GetType()) {
+  case GeomAbs_Plane:
+    kind = "a plane";
+    break;
+  case GeomAbs_Cylinder:
+    kind = "a cylinder";
+    break;
+  case GeomAbs_Cone:
+    kind = "a cone";
+    break;
+  case GeomAbs_Sphere:
+    kind = "a sphere";
+    break;
+  case GeomAbs_Torus:
+    kind = "a torus";
+    break;
+  case GeomAbs_BSplineSurface:
+  case GeomAbs_BezierSurface:
+    kind = "a spline surface";
+    break;
+  default:
+    break;
+  }
+  GProp_GProps props;
+  BRepGProp::SurfaceProperties(face, props);
+  const gp_Pnt c = props.CentreOfMass();
+  const auto mm = [](double v) {
+    std::string s = std::to_string(v);
+    const size_t dot = s.find('.');
+    return dot == std::string::npos ? s : s.substr(0, dot + 3);
+  };
+  return std::string(kind) + ", area " + mm(props.Mass()) +
+         " mm2, centred at (" + mm(c.X()) + ", " + mm(c.Y()) + ", " +
+         mm(c.Z()) + ")";
 }
 
 } // namespace
@@ -114,9 +165,12 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
     for (int i = 0; i < geo.facemeshstatus.Size(); ++i)
       if (geo.facemeshstatus[i] <= 0)
         return fail("surface meshing failed on face " + std::to_string(i + 1) +
-                    " of " + std::to_string(geo.facemeshstatus.Size()) +
-                    " — the shape may have sliver/degenerate faces, or the "
-                    "mesh size may not suit its smallest features");
+                    " of " + std::to_string(geo.facemeshstatus.Size()) + " (" +
+                    DescribeFace(faceMap, i + 1) +
+                    ") — the shape may have sliver/degenerate faces, or the "
+                    "mesh size may not suit its smallest features. Refine "
+                    "the model there, or Refine the body to heal the seams "
+                    "a long boolean chain leaves");
     mp.perfstepsstart = netgen::MESHCONST_MESHVOLUME;
     mp.perfstepsend = netgen::MESHCONST_OPTVOLUME;
     rc = geo.GenerateMesh(ngmesh, mp);

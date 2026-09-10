@@ -901,6 +901,13 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       // much. The old check reported 0.02 mm and 3 mm with the same words.
       for (uint64_t id : closed.conflicting) {
         if (Mate* m = asmDoc.FindMateById(id)) {
+          // A hint naming the mate whose connector axes were nowhere near
+          // coaxial belongs here in spirit and cannot be measured here: by
+          // the time any solve runs, every add_mate has already solved once
+          // and turned the part to align them. The hook that would work is
+          // mate CREATION, where the caller's own placement is still what it
+          // was — the same place add_relation warns about gear axles more
+          // than 5 degrees off parallel.
           m->error = "loop does not close (off by " +
                      FormatMm(closed.residualMm) + " mm)";
           report.erroredMates++;

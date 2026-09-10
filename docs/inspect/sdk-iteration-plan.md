@@ -274,9 +274,11 @@ motion GUI distinguishes kinematics preview from exact sampled validation and
 labels stale/unchecked results. See [workflow](../scripting/iteration-workflow.md)
 and [measurements](../performance/iteration-cache.md).
 
-Remaining scope is explicit: local uses the whole standing sweep, a unified GUI
-panel for all validation stages is not yet built, and background motion document
-copies limit geometry-identity cache hits. Standing-contact caching, persistent
+Remaining scope is explicit: local uses the whole standing sweep, and a unified
+GUI panel for all validation stages is not yet built. (Background motion
+document copies no longer limit geometry-identity cache hits — they carry the
+source's geometry instead of re-deriving it, see
+[measurements](../performance/motion-prep-copy.md).) Standing-contact caching, persistent
 content-addressed collision entries, component retirement/reference migration,
 and a generated-component dependency graph remain follow-ups. Measure these
 against the reduced iteration loop before adding more scheduling complexity.

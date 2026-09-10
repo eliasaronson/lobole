@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Expression.h"
+#include "core/Units.h"
 
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
@@ -53,6 +54,11 @@ struct ResolvedDim {
 struct DimContext {
   const Document* sourceDoc = nullptr;
   double viewScale = 1.0;
+  // The units the numbers are WRITTEN in. Dimension text ignored the document
+  // entirely until 2026-09-10 and always printed millimetres, so an inch part
+  // drew as mm with nothing on the sheet to say so. Defaulted, so the auto-
+  // placement probes that only need a label WIDTH still construct one.
+  units::System units;
   // The part document an OCCURRENCE places, for an assembly view. A fastener
   // callout names the standard part it points at, and that name lives in the
   // occurrence's own document rather than in the assembly the view is of —

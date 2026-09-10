@@ -242,7 +242,7 @@ three perfectly toleranced bores and forty untoleranced lengths passes
 
 Two steps, and the first is worth having on its own:
 
-**T5a — a tolerance on a measured distance. BUILT (v98).** `Tolerance` gained a
+**T5a — a tolerance on a measured distance. BUILT (v99).** `Tolerance` gained a
 second `ElementRef`: with one ref it means "this face's size", with two it
 means "the distance between these". The nominal is measured the same way —
 `Measure::DistanceDetailed` already answers a distance between two elements,

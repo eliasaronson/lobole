@@ -341,6 +341,22 @@ the part-tabs scrollbar was invisible on arrival: `ImGuiCol_ScrollbarGrab`
 was kSurface, the same value as the buttons directly above it. Moving the
 grab one step up the ramp fixes every scrollbar beside a control.
 
+**"Everything displays in it" had two exceptions, found 2026-09-10.** The
+call-site sweep missed both, and both were invisible because every test used a
+millimetre document. Drawing dimension text went through `core::FormatLength`,
+a SECOND formatter that took no unit system and always printed millimetres —
+so an inch part's sheet, the one artifact that leaves the app for a machine
+shop, was dimensioned in mm over a title block that named no unit at all. And
+the invariant above ("display units never touch stored values") failed at a
+boundary in the other direction: `MeasuredValueForClipboard` emitted a
+DISPLAY-unit number into a dimension field that reads a bare number as
+STORAGE, so copying 25.4 mm on an inch document gave "1" and pasting it back
+meant 1 mm. Both fixed in docs/units-plan.md; `core::FormatLength`/`FormatAngle`
+now take the system with no default, so a caller has to say. (The outer entry
+points — `DrawingExport::SaveSVG`/`SavePDF` and `FormatHoleCallout` — do still
+default it, for the tests that construct a sheet with no document behind it;
+the one production caller passes `ui::ActiveDrawingUnits`.)
+
 ## Follow-ups this round did not take
 
 - **`free_port()` is racy, in ~15 test scripts.** It binds port 0, reads the

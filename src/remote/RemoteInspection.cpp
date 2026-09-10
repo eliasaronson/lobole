@@ -531,7 +531,9 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
-     "default 1.0 mm), clashes; bounded like the interference sweep "
+     "default 1.0 mm), clashes. near_tol and touch_tol are both MILLIMETRES "
+     "(touch_tol defaults to 0.001, and splits touching from clear). Bounded "
+     "like the interference sweep "
      "(closest-first up to max_pairs 4000 / deadline_s 20 s, with the coverage "
      "in the "
      "response). Assembly tab: over occurrences, plus "
@@ -539,14 +541,22 @@ static constexpr MethodDoc InspectionMethods[] = {
      "part's BODIES — catches a bracket floating inside one part, which "
      "the occurrence-level sweep cannot see. Each CLASH also carries "
      "`centroid` and `bbox_min`/`bbox_max`: WHERE the solid-in-solid is, "
-     "so a pair of names and a volume is not the whole answer.",
-     "deadline_s, max_pairs, near_tol, touch_tol"},
+     "so a pair of names and a volume is not the whole answer. A pair whose "
+     "two shapes carry more than `exact_face_budget` faces between them "
+     "(default 20000 — an imported mesh is one face per TRIANGLE) is NOT "
+     "checked and is listed in `not_checked` with its face count: the "
+     "deadline stops new dispatches and cannot preempt a boolean already "
+     "running, so one such pair does not slow the sweep down, it hangs it.",
+     "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
      "(+radius_tol), area/length bounds, near_point (+max_distance); "
      "expected_count makes the result carry ok true/false. Covers UNNAMED "
-     "elements too; matches carry stable names where they exist.",
+     "elements too; matches carry stable names where they exist. Every "
+     "measure here is MILLIMETRES — radius, radius_tol, max_distance, "
+     "min_length, max_length — with areas in mm2 (min_area, max_area) and "
+     "angle_tol_deg in degrees, as its name says.",
      "angle_tol_deg, axis, body, element_type, expected_count, geometry_type, "
      "max_area, max_distance, max_length, max_results, min_area, min_length, "
      "near_point, normal, part, radius, radius_tol"},
@@ -565,7 +575,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      ""},
     {"section",
      "Cross-section area where a plane cuts the bodies; on an assembly tab, "
-     "every visible occurrence in place. Omit `offset` to cut through the "
+     "every visible occurrence in place. `offset` is MILLIMETRES along the "
+     "plane's normal; omit it to cut through the "
      "middle of what is shown (the chosen offset comes back). "
      "{regions: true} also returns each connected ISLAND the cut crosses "
      "({area, centroid}, biggest first) and `region_count`. The total cannot "
@@ -578,7 +589,8 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
      "offset}. Works on part AND assembly tabs, with filled cut caps on "
-     "both; omit `offset` to cut through the middle of what is shown. "
+     "both; `offset` is MILLIMETRES along the normal, and omitting it cuts "
+     "through the middle of what is shown. "
      "Shorthand for one cut — add_section/update_section address several.",
      "add, base_plane, enabled, offset, reverse"},
     {"add_section",
@@ -593,8 +605,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "{normal, d}.",
      ""},
     {"update_section",
-     "Change one cut {id, base_plane?, plane_id?, offset?, tilt_u?, tilt_v?, "
-     "reverse?, visible?}. Only the fields present are touched.",
+     "Change one cut {id, base_plane?, plane_id?, offset? (mm along the "
+     "normal), tilt_u?, tilt_v? (degrees), reverse?, visible?}. Only the "
+     "fields present are touched.",
      "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
     {"remove_section", "Remove one cut {id}, or all of them with {all: true}.",
      "all, id"},
@@ -1587,6 +1600,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       std::vector<Body> bodies; // already placed in world space
       glm::mat4 xf{1.0f};       // identity: `bodies` carry the placement
       glm::vec3 min, max;
+      size_t faces = 0; // how heavy an exact boolean against it would be
     };
     std::vector<Ent> ents;
     json skipped = json::array();
@@ -1619,6 +1633,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         skipped.push_back(o.name); // nothing resolvable under this occurrence
         continue;
       }
+      for (const Body& b : e.bodies)
+        e.faces += static_cast<size_t>(b.shape.FaceCount());
       ents.push_back(std::move(e));
     }
     std::vector<size_t> parent(ents.size());
@@ -1639,16 +1655,37 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     const size_t maxPairs = p.value("max_pairs", size_t{4000});
     const double deadline = p.value("deadline_s", 20.0);
+    // The deadline stops new DISPATCHES; a boolean already running cannot be
+    // preempted. That is fine between parts and useless against a mesh
+    // import, where one pair is not slow but effectively unbounded: an STL
+    // arrives as one planar face per triangle, and two 54k-face bodies took
+    // a documented sweep past ten minutes with a deadline_s of 20 set. So
+    // the heavy pairs are not started, and the report says which -- a sweep
+    // that quietly never returns is worse than one that says what it did not
+    // check.
+    const size_t faceBudget = p.value("exact_face_budget", size_t{20000});
+    json tooHeavy = json::array();
     SweepPlan plan = PlanSweep(mins, maxs, nearTol, maxPairs);
     RunSweep(
         plan, deadline,
-        [&](size_t i, size_t j) {
+        [&](size_t i, size_t j) -> std::optional<Measure::SetContact> {
+          if (faceBudget > 0 && ents[i].faces + ents[j].faces > faceBudget)
+            return std::nullopt;
           return Measure::ContactBetween(ents[i].bodies, ents[i].xf,
                                          ents[j].bodies, ents[j].xf);
         },
         [&](size_t i, size_t j, const std::optional<Measure::SetContact>& c) {
-          if (!c)
+          if (!c) {
+            if (faceBudget > 0 && ents[i].faces + ents[j].faces > faceBudget)
+              tooHeavy.push_back(
+                  {{"a", ents[i].occ->name},
+                   {"b", ents[j].occ->name},
+                   {"faces", ents[i].faces + ents[j].faces},
+                   {"why", "an exact boolean between these two would not "
+                           "finish inside any deadline; measure them with "
+                           "mode 'mesh', or raise exact_face_budget"}});
             return;
+          }
           const char* st = ContactState(*c, touchTol);
           // The ids as well as the names: sixteen occurrences answer to
           // "ISO 4762 M3x10", and a reported pair that cannot say WHICH
@@ -1698,6 +1735,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     AttachSweepCoverage(out, plan, ents.size(), maxPairs, deadline);
     if (!skipped.empty())
       out["skipped"] = skipped;
+    if (!tooHeavy.empty())
+      out["not_checked"] = tooHeavy;
     // Intended vs realized: only meaningful when the assembly HAS mates —
     // in a fixed-occurrence assembly every touching pair is "unmated".
     if (!state.assembly->GetMates().empty()) {
