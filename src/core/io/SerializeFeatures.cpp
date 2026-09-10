@@ -1106,6 +1106,11 @@ int DocumentFormatVersion() { return kVersion; }
 
 // Keep in lockstep with the FeatureFromJson chain below (one entry per
 // `type ==` branch; Fillet/Chamfer share a branch but are distinct types).
+//
+// Fields EVERY type accepts, so no row repeats them: `name?`, `id?`,
+// `material?` (a slug from describe.material_slugs — an unrecognised one is
+// REFUSED naming the accepted set, so it cannot arrive here through
+// add_feature or modify_feature the way it used to), `appearance?`.
 static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Sketch", 1,
      "plane {origin, normal, uAxis} (in-plane V = normal x uAxis!), entities "

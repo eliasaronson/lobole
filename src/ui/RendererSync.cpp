@@ -1181,7 +1181,7 @@ void SyncAssemblyRenderers(AppState& state) {
         if (state.outlineRenderer)
           OutlineAssetFor(state, *sb.tess);
         // Resolve order: appearance > material > displayColor > palette
-        // (same merge as the part-tab draw loop in AppActions).
+        // (same merge as the part-tab draw loop, SyncDocumentRenderers above).
         if (!body.material.empty() || body.appearance.Any()) {
           CADMaterials::MaterialProperties mat =
               CADMaterials::MaterialLibrary::GetMaterialOrDefault(

@@ -108,8 +108,8 @@ private:
     glm::vec4 ambient;
   };
   // 80 bytes, inside the 128-byte floor every Vulkan implementation
-  // guarantees (the wood-grain push constant already sits at that ceiling —
-  // see MeshRenderer).
+  // guarantees (the surface-pattern push constant already sits at that
+  // ceiling — see MeshRenderer).
   struct Push {
     glm::mat4 model;
     glm::vec4 baseColor;

@@ -159,8 +159,10 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"cancel_pending", "Discard the pending (preview) feature.", "",
      remote::NeedsPart},
     {"add_feature",
-     "Append a feature (see feature_types for the JSON dialect) "
-     "and regenerate; returns {index, id, entity_ids?, regen}.",
+     "Append a feature (see feature_types for the JSON dialect, and for the "
+     "fields every type accepts — including `material`, whose slug is "
+     "refused if unrecognised) and regenerate; returns {index, id, "
+     "entity_ids?, regen}.",
      "feature", remote::NeedsPart | remote::Deferrable},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
@@ -192,7 +194,8 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"set_material",
      "Assign a material slug (see material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
-     "default.",
+     "default. An unrecognised slug is refused, naming the accepted set. "
+     "Drives mass, BOM and FEM as well as appearance.",
      "body, feature_id, material", remote::NeedsPart | remote::Deferrable},
     {"set_appearance",
      "Visual override SEPARATE from the physical material (v54): "

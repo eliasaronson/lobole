@@ -111,7 +111,7 @@ now with a number.
 Plywood has grain, and a nest that spins a part to save area can rotate it
 across the grain — a strength claim nobody made. Designer cannot currently
 even state the constraint: the only grain it has is a *rendering* derivation,
-a per-draw axis taken from the asset's own bbox (MeshRenderer.cpp:448), which
+an axis taken from the part's own extent (`CADMaterials::PatternAxis`), which
 for a part cut from a sheet is decorative and unrelated to the sheet's actual
 grain. So `rotZdeg` is authored, not solved; and an arrange, if it ever lands,
 needs a real grain direction on `Stock` first. That is a prerequisite this
