@@ -80,6 +80,7 @@ def build_parts(app):
     P["reduction_pinion"] = W.reduction_pinion(app)
     P["reverser"] = W.reverser_wheel(app)
     P["reverser_pinion"] = W.reverser_pinion(app)
+    P["click"] = W.click_pawl(app)
     P["crown_wheel"] = W.crown_wheel(app)
     P["stem"] = W.stem(app)
     P["clutch"] = W.clutch(app)
@@ -163,6 +164,7 @@ def build_assembly(app, P):
                        ("reduction_pinion", "pivot reduction"),
                        ("reverser", "pivot reverser"),
                        ("reverser_pinion", "pivot reverser"),
+                       ("click", "pivot click"),
                        ("crown_wheel", "pivot crown_wheel"),
                        ("rotor", "pivot center"),
                        # The cannon pinion turns on the centre arbor: its
@@ -290,6 +292,15 @@ def winding_relations(app, m, rel):
     # slips whichever way the rotor swings.
     relate(app, m, rel, "one-way wheel 2", "freewheel", "reverser",
            "reverser_pinion", ratio=1.0, drives="negative")
+    # The click: the ratchet may turn the winding way and is HELD the other,
+    # and the pawl rides over each of its 48 teeth as it goes.
+    relate(app, m, rel, "click", "click", "barrel_arbor", "barrel_arbor",
+           drives="positive")
+    # What the pawl DOES as the wheel turns under it is a cam, from the
+    # ratchet's own flank: it drops into each gap and rides out over each
+    # tooth, touching neither (watch_spec.click_table).
+    relate(app, m, rel, "click ride", "cam", "barrel_arbor", "click",
+           lift=spec.click_table())
 
 
 def check_rotor(app, m):
@@ -312,10 +323,11 @@ def check_rotor(app, m):
     after = _mates(app)
     got = {"forward": _turn(before, fwd, m["barrel_arbor"]),
            "back": _turn(fwd, back, m["barrel_arbor"]),
+           "crown": _turn(before, fwd, m["stem"]),
            "restored": max(abs(_turn(before, after, m[k]))
                            for k in ("rotor", "reduction", "reduction_pinion",
                                      "reverser", "reverser_pinion",
-                                     "barrel_arbor"))}
+                                     "barrel_arbor", "stem"))}
     bad = []
     if abs(got["forward"] - want) > 1e-3 * max(1.0, abs(want)):
         bad.append(f"the rotor turned 30 deg forward wound the ratchet "
@@ -324,10 +336,65 @@ def check_rotor(app, m):
         bad.append(f"the rotor turned 60 deg back wound the ratchet "
                    f"{got['back']:+.4f} deg, want {2 * want:+.4f} — the "
                    f"reverser winds both ways")
+    if abs(got["crown"]) > 1e-6:
+        bad.append(f"the rotor winding turned the crown {got['crown']:+.4f} "
+                   f"deg; the dogs should ride over it")
     if got["restored"] > 1e-6:
         bad.append(f"undo left the winding train {got['restored']:.6f} deg "
                    f"off where it was")
     return got, bad
+
+
+def check_dogs(app, m):
+    """The crown turned BACK rides over the dogs: the ratchet does not move,
+    the clutch lifts along the stem, and undo puts both back. Half a dog's
+    pitch is half the lift."""
+    before = _mates(app)
+    s0 = math.degrees(before[m["stem"]].get("rotation", 0.0))
+    app.call("set_mate", id=m["stem"], rotation_deg=s0 - 360.0 / DOG_N / 2)
+    app.solve_assembly()
+    after = _mates(app)
+    app.call("undo")
+    app.solve_assembly()
+    back = _mates(app)
+    # The lift is the WHOLE of it whenever the dogs are off a notch (solid
+    # dogs cannot stand part way over each other), so it is where the clutch
+    # STANDS that says it rode out, not how far it moved: the rotor's
+    # winding may have left it out already.
+    want = float(DOG_H) + 0.02
+    got = {"ratchet": _turn(before, after, m["barrel_arbor"]),
+           "lift": after[m["clutch"]].get("offset", 0.0),
+           "restored": max(abs(_turn(before, back, m[k]))
+                           for k in ("barrel_arbor", "stem", "clutch"))}
+    bad = []
+    if abs(got["ratchet"]) > 1e-4:
+        bad.append(f"the crown turned back moved the ratchet "
+                   f"{got['ratchet']:+.4f} deg; the dogs should slip")
+    if abs(got["lift"] + want) > 0.01:
+        bad.append(f"turned back, the clutch stands {got['lift']:+.4f} mm "
+                   f"along the stem, want {-want:+.4f} — riding the dogs")
+    if got["restored"] > 1e-6:
+        bad.append(f"undo left the keyless works {got['restored']:.6f} off")
+    return got, bad
+
+
+def seat_dogs(app, m, rel):
+    """Drop the dogs back into a notch, by turning the crown on to the next
+    one. The rotor's winding runs the winding pinion past the clutch and
+    leaves it riding out; a real one is pushed back in by its spring as soon
+    as the wheel stops, and the watch should not sit with its clutch held
+    out of mesh."""
+    r = next(x for x in app.call("list_relations")["relations"]
+             if x["name"] == "dogs")
+    pitch = 2 * math.pi / DOG_N
+    # Turning the crown FORWARD closes the gap: the lead is (pinion less
+    # clutch), so the clutch has to make up what it has already ridden.
+    ahead = r["lead"] - math.floor(r["lead"] / pitch) * pitch
+    if ahead > 1e-9:
+        now = math.degrees(_mates(app)[m["stem"]].get("rotation", 0.0))
+        app.call("set_mate", id=m["stem"],
+                 rotation_deg=now + math.degrees(ahead))
+        app.solve_assembly()
 
 
 def check_escapement(app, m):
@@ -369,8 +436,6 @@ def keyless_relations(app, m, rel):
     # The cannon pinion's friction fit on the centre arbor.
     relate(app, m, rel, "friction", "gear", "center", "cannon", ratio=1.0)
     relate(app, m, rel, "square", "gear", "stem", "clutch", ratio=1.0)
-    relate(app, m, rel, "dogs", "gear", "clutch", "winding_pinion",
-           ratio=1.0)
     # Winding pinion's contrate teeth under the stem (-90 deg about it) meet
     # the winding wheel on its -X side (180 deg about the crown wheel arbor).
     relate(app, m, rel, "winding", "gear", "winding_pinion", "crown_wheel",
@@ -386,6 +451,22 @@ def keyless_relations(app, m, rel):
            / (float(STEM_PULL) / float(SETTING_LEVER_ARM)))
     relate(app, m, rel, "yoke pin", "rack", "yoke", "clutch",
            pitch_radius=float(YOKE_ARM))
+    # The dogs LAST, and Breguet: sawteeth that drive one way and ride over
+    # the other, which they can only because the clutch LIFTS along the stem
+    # as they do (docs/click-and-breguet-plan.md). The crown turned back
+    # then slips here instead of unwinding the barrel, and the rotor winding
+    # runs the winding pinion on ahead of a still clutch.
+    #
+    # Last because its phase is where the two stand AS DRAWN — the clutch's
+    # dogs in the winding pinion's gaps, seated rather than half way up a
+    # ramp — and the winding relation above is what puts the pinion there.
+    now = _mates(app)
+    seated = (now[m["winding_pinion"]].get("rotation", 0.0)
+              - now[m["clutch"]].get("rotation", 0.0))
+    relate(app, m, rel, "dogs", "freewheel", "clutch", "winding_pinion",
+           ratio=1.0, drives="positive", teeth=DOG_N, phase=seated,
+           ride_mate=m["clutch"], ride_dof="offset",
+           ride_mm=-(float(DOG_H) + 0.02))
 
 
 # The crown's two positions, as CONFIGURATIONS of the assembly (v101).
@@ -455,16 +536,21 @@ def check_winding(app, m):
     """Crown in, a quarter turn of the crown winds the ratchet
     (10/16)*(70/48) of a quarter turn, and neither the going train nor the
     rotor moves."""
-    before = _mates(app)
-    # A quarter turn from where the stem STANDS: it is never turned back,
-    # which would drive the winding train backwards.
-    s0 = math.degrees(before[m["stem"]].get("rotation", 0.0))
+    # TWICE: the dogs have a dead band — the rotor's winding runs the
+    # winding pinion on ahead of the clutch, and the crown takes that up
+    # before it bites — so the first quarter turn is the take-up and the
+    # second is the one that must be exact.
+    s0 = math.degrees(_mates(app)[m["stem"]].get("rotation", 0.0))
     app.call("set_mate", id=m["stem"], rotation_deg=s0 + 90.0)
+    app.solve_assembly()
+    before = _mates(app)
+    app.call("set_mate", id=m["stem"], rotation_deg=s0 + 180.0)
     app.solve_assembly()
     after = _mates(app)
     # Undone, not turned back: turning the crown back would UNWIND the
     # ratchet (there are no Breguet teeth to slip), and the one-way wheel
     # locks that way, so it would drag the rotor round with it.
+    app.call("undo")
     app.call("undo")
     app.solve_assembly()
     got = {k: _turn(before, after, m[k])
@@ -622,6 +708,10 @@ MESHES = [
      Z_ROTOR_PIN / Z_REDUCTION_W),
     ("reverser_pinion", "barrel_arbor", "rotor", Z_REDUCTION_P,
      Z_ROTOR_PIN / Z_REDUCTION_W),
+    # The pawl over one ratchet tooth: it drops into the gap and rides out
+    # over the tooth, and must touch neither.
+    ("click", "barrel_arbor", "rotor", Z_RATCHET,
+     Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET),
     ("barrel_arbor", "crown_wheel", "rotor", Z_RATCHET,
      Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET),
     ("minute", "setting", "barrel", Z_SETTING_W,
@@ -745,13 +835,22 @@ def verify(app, occ, m, rel, cache=None):
         bad += why
         rot, why = check_rotor(app, m)
         bad += why
+        dog, why = check_dogs(app, m)
+        bad += why
         sett, why = check_setting(app, occ, m, rel)
         bad += why
+        # Last, so nothing above leaves the watch sitting with its clutch
+        # held out of mesh by the dogs it rode over.
+        seat_dogs(app, m, rel)
     print(f"  crown in, a quarter turn winds the ratchet "
           f"{wind['barrel_arbor']:+.3f} deg; centre {wind['center']:+.4f}, "
           f"rotor {wind['rotor']:+.4f}")
     print(f"  the rotor 30 deg forward winds the ratchet "
-          f"{rot['forward']:+.4f} deg, 60 deg back {rot['back']:+.4f}")
+          f"{rot['forward']:+.4f} deg, 60 deg back {rot['back']:+.4f}; "
+          f"the crown stays {rot['crown']:+.4f}")
+    print(f"  the crown turned back rides the dogs over: the ratchet moves "
+          f"{dog['ratchet']:+.4f} deg and the clutch lifts "
+          f"{dog['lift']:+.4f} mm")
     for pair, v in sett.get("meshes", {}).items():
         print(f"  mesh {pair:<36} worst {v:.7f} mm3 over a pitch (crown out)")
     print(f"  crown out, the clutch slid {sett.get('clutch offset', 0):+.3f}; "

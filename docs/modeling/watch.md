@@ -243,13 +243,31 @@ and a pinion. The cycloidal design handles it (its addendum and dedendum come
 out on one rolling circle, which is what wheel-to-wheel conjugacy wants) and
 the pair runs at a contact ratio of 1.62.
 
-**What is still missing:** the rotor turns the crown when it winds. A real
-watch's clutch and winding pinion have Breguet teeth that slip, and they slip
-because the clutch LIFTS along the stem against its spring as the teeth ride
-over each other — a motion driven by the slip, which nothing models. Without
-it a slipping pose would put the teeth through each other, so the keyless
-works stay geared. Nor is there a reverser (winding in both directions), or
-a click holding the ratchet against the mainspring.
+**The dogs slip, and a click holds the ratchet (v105).** The clutch and the
+winding pinion are a FREEWHEEL with four teeth now, and what lets dogs ride
+over each other — the clutch lifting along the stem — is the relation's
+`ride` ([click-and-breguet-plan.md](../click-and-breguet-plan.md)). So the
+rotor winding runs the winding pinion on ahead of a still clutch and no
+longer turns the crown, and the crown turned back rides the dogs over (the
+clutch stands 0.14 mm along the stem) instead of unwinding the barrel. Its
+groove is longer than the yoke's pin by that lift, because this yoke is
+driven rigidly where a real one is sprung and would give way with it.
+
+A CLICK relation holds the barrel arbor: it may turn the winding way and is
+held the other, and whatever pushes it back is left disagreeing. The pawl on
+the barrel bridge is real geometry, 60 degrees round the wheel where both
+reverser pinions and the crown wheel leave room, and a cam rocks it over
+each of the 48 teeth. Its table is computed from the ratchet's own flank and
+from the pawl's own outline, so its beak drops as deep into each gap as it
+can and touches nothing — the exact sweep found 0.0011 mm³ of tooth when the
+table was fitted to the beak's POINT and not to its sloping sides, and
+0.0003 more where the spline ran between two table points.
+
+**What is still approximate:** the dogs are drawn SQUARE, and the relation
+lifts the clutch clear the moment they are off a notch rather than part way
+up a ramp. A real Breguet tooth ramps; drawing one takes a swept helical
+tooth. There is still no reverser spring, and the mainspring pulls on
+nothing, so the click holds against a torque that is not modelled.
 
 ## What the app could and could not do
 

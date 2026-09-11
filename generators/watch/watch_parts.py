@@ -910,6 +910,31 @@ def reverser_pinion(app):
     return reduction_pinion(app, "Reverser pinion")
 
 
+def click_pawl(app):
+    """The click: a pawl on the barrel bridge, its tip in a gap between two
+    ratchet teeth. The `click` relation holds the ratchet through it, and
+    rides the pawl over each tooth as the wheel winds
+    (docs/click-and-breguet-plan.md). Drawn in its own frame — the pivot at
+    the origin, axes the world's — with the tip where it sits DROPPED IN, so
+    the relation's lift is what takes it out."""
+    part = app.part("Click")
+    d0, d1 = RATCHET_D, RATCHET_D + RATCHET_T
+    slab(app, [circ((0, 0), 0.34)], BRIDGE_D + BRIDGE_T, d1, "new_body",
+         "boss")
+    # The arm, from the boss out to a flat tip a gap wide, and a tail behind
+    # the pivot where a real one takes its spring.
+    # A POINTED beak and a tail, the shape click_table is fitted to — a flat
+    # tip lies almost radially here, and its corners reached deeper into the
+    # teeth than its point did (0.0011 mm3, found by the exact sweep).
+    slab(app, poly(S.click_outline()), d0, d1, "add", "arm")
+    slab(app, [circ((0, 0), 0.16)], BRIDGE_D + BRIDGE_T - 0.01, d1 + 0.01,
+         "cut", "bore")
+    part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
+    material(app, 0, "steel")
+    look(app, 0, "blued")
+    return part
+
+
 def crown_wheel(app):
     """The crown wheel meshing the ratchet on the barrel bridge, and on the
     same arbor, down in a pocket in the mainplate, the winding wheel the
@@ -961,12 +986,13 @@ def contrate(app, key, x_face, sign, name):
         "angle_deg": 360.0 / g["z"]})
 
 
-def dogs(app, x0, length, phase_deg, name, n=4, r0=0.36, r1=0.62,
+def dogs(app, x0, length, phase_deg, name, n=None, r0=0.36, r1=0.62,
          span_deg=40.0):
     """n dog teeth, annular sectors from x0 along +X: the clutch's square
     drive into the winding pinion. (A real one is Breguet — sawteeth that
     slip one way; square dogs are the same engagement without the slip.)"""
     ents = []
+    n = int(DOG_N) if n is None else n
     for k in range(n):
         c = math.radians(phase_deg + 360.0 * k / n)
         h = math.radians(span_deg) / 2
@@ -1049,8 +1075,12 @@ def clutch(app):
           + _square(float(STEM_SQUARE) / 2 + 0.02), 0, xo - xi, "new_body",
           "clutch", pl=plane_x(xi))
     xm = (xi + xo) / 2
-    prism(app, [circ((0, 0), KEYLESS_R + 0.01), circ((0, 0), 0.47)], 0, 0.16,
-          "cut", "yoke groove", pl=plane_x(xm - 0.08))
+    # The groove is longer than the yoke's pin by the dogs' LIFT: the clutch
+    # rides out along the stem as they slip, and this yoke is driven rigidly
+    # where a real one is sprung and would give way with it.
+    prism(app, [circ((0, 0), KEYLESS_R + 0.01), circ((0, 0), 0.47)], 0,
+          0.16 + float(DOG_H) + 0.02, "cut", "yoke groove",
+          pl=plane_x(xm - 0.08))
     dogs(app, xo - 0.02, DOG_H + 0.02, 45.0, "dogs")
     contrate(app, "clutch_rack", xi, -1, "contrate teeth")
     _stem_frame(part)

@@ -55,11 +55,10 @@ freewheel that lets the crown wind without turning the rotor
 ([freewheel-plan.md](freewheel-plan.md)), and the reverser that winds
 whichever way the rotor swings ([reverser-plan.md](reverser-plan.md)).
 
-- **Breguet teeth** on the clutch and winding pinion, so the rotor stops
-  turning the crown. The freewheel exists now; what is missing is the
-  clutch's LIFT along the stem as the sawtooth teeth ride over each other —
-  a motion driven by the slip, which no relation expresses. Without it a
-  slipping pose puts the teeth through each other.
+- **Sawtooth dogs, drawn.** The clutch rides out over its dogs and the
+  rotor no longer turns the crown, but the dogs are square and the lift is
+  the whole of it rather than part way up a ramp. A real Breguet tooth ramps,
+  and drawing one takes a swept helical tooth.
 - **A thinner movement** (~5 mm, not ~8): re-stack every depth. A day,
   mostly verification.
 - **A per-body transmission** override in `Appearance` (tinted glass that is

@@ -76,6 +76,33 @@ def addendum_height(module, z, rho_add, frac, cap):
     return min(cap * module, meet)
 
 
+def flank_points(r, rho_add, rho_ded, h_a, h_f, samples=7):
+    """One RIGHT flank as (dedendum root->pitch, addendum pitch->tip), with
+    the pitch point at angle 0 and the tooth's centre at +beta — the frame
+    profile() places its teeth from.
+
+    Exposed because a part may need the curve itself rather than the drawing:
+    the watch's click is fitted to the ratchet's real flank, so its pawl
+    drops as deep into a gap as its own width allows and never touches
+    (watch_spec.click_table).
+    """
+    ra, rf = r + h_a, r - h_f
+    t_a = _solve(lambda t: math.hypot(*_epi(r, rho_add, t)), ra, 1e-9,
+                 math.pi * rho_add / r * 0.999)
+    add = [_epi(r, rho_add, t_a * i / (samples - 1)) for i in range(samples)]
+    if abs(rho_ded - r / 2) < 1e-12:
+        return [(rf, 0.0), (r, 0.0)], add
+    # The hypocycloid leans AWAY from the tooth centre going down (the tooth
+    # thickens toward its root); pick the sign that does that.
+    t_lim = math.pi * rho_ded / (r - rho_ded) * 0.999 if rho_ded < r else 1
+    f = lambda t: math.hypot(*_hypo(r, rho_ded, t))  # noqa: E731
+    sign = -1.0 if math.atan2(*reversed(_hypo(r, rho_ded, 1e-3))) > 0 else 1.0
+    t_f = _solve(lambda t: f(sign * t), rf, 1e-9, t_lim)
+    ded = [_hypo(r, rho_ded, sign * t_f * (samples - 1 - i) / (samples - 1))
+           for i in range(samples)]
+    return ded, add
+
+
 def profile(module, z, rho_add, rho_ded, frac, h_a, h_f, samples=7):
     """Closed outline of a whole cycloidal gear, as sketch entities.
 
@@ -92,23 +119,7 @@ def profile(module, z, rho_add, rho_ded, frac, h_a, h_f, samples=7):
         raise ValueError(f"a {z}-tooth gear's root is not positive: "
                          f"dedendum {h_f:.3f} on a {r:.3f} pitch radius")
 
-    # One RIGHT flank, pitch point at angle 0, the tooth's centre at +beta.
-    t_a = _solve(lambda t: math.hypot(*_epi(r, rho_add, t)), ra, 1e-9,
-                 math.pi * rho_add / r * 0.999)
-    add = [_epi(r, rho_add, t_a * i / (samples - 1)) for i in range(samples)]
-    radial = abs(rho_ded - r / 2) < 1e-12
-    if radial:
-        ded = [(rf, 0.0), (r, 0.0)]
-    else:
-        # The hypocycloid leans AWAY from the tooth centre going down (the
-        # tooth thickens toward its root); pick the sign that does that.
-        t_lim = math.pi * rho_ded / (r - rho_ded) * 0.999 if rho_ded < r else 1
-        f = lambda t: math.hypot(*_hypo(r, rho_ded, t))  # noqa: E731
-        sign = -1.0 if math.atan2(*reversed(_hypo(r, rho_ded, 1e-3))) > 0 \
-            else 1.0
-        t_f = _solve(lambda t: f(sign * t), rf, 1e-9, t_lim)
-        ded = [_hypo(r, rho_ded, sign * t_f * (samples - 1 - i)
-                     / (samples - 1)) for i in range(samples)]
+    ded, add = flank_points(r, rho_add, rho_ded, h_a, h_f, samples)
 
     def place(pts, c, mirror):
         out = []

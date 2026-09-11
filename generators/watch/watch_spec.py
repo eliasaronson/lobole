@@ -106,6 +106,15 @@ PALLET_REACH = 2.20        # the pallet fork's swing, round its arbor
 RATCHET_D = 4.90           # on the barrel bridge (whose top is d 4.8)
 RATCHET_T = 0.40
 REDUCTION_BORE_CLEAR = 0.03  # the loose reduction wheel's bore over its staff
+# The click: a pawl on the barrel bridge dropping into the ratchet's teeth.
+# 60 degrees round the wheel is clear of both reverser pinions (125-150 and
+# 210-235) and of the crown wheel (277-353).
+CLICK_AT_DEG = 60          # an int: an angle, not a length to declare
+CLICK_ARM_DEG = 26         # the pivot, that far round from the tip
+CLICK_PIVOT_R = 3.40       # the pivot, from the barrel's axis
+CLICK_DIP = 0.05           # how far the tip sits inside the tips, in a gap
+CLICK_CLEAR = 0.05         # and how far it stands clear riding over a tooth
+CLICK_TIP_W = 0.030        # half the tip's width: it lives in a 4 deg gap
 REDUCTION_D = 5.35
 ROTOR_D = 5.70             # rotor plate's underside
 ROTOR_T = 0.50
@@ -152,6 +161,7 @@ KEYLESS_WHEEL_T = 0.10     # setting and winding wheels
 CONTRATE_W = 0.24          # contrate teeth's radial face width
 RACK_FRAC = 0.25           # a contrate tooth's share of the pitch
 DOG_H = 0.12               # clutch dogs' engagement, plus 0.02 end play
+DOG_N = 4                  # an int: how many dogs, and the freewheel's teeth
 WINDING_PIN_L = 0.50
 MIN_CLUTCH_L = 0.40
 STEM_GROOVE_X = 9.5        # where the setting lever's pin rides the stem
@@ -228,6 +238,9 @@ def _derive(g):
     # intersection is 3.0 from the crown wheel, which needs 4.26.
     P["reverser"] = _meet(P["reduction"], m * Z_REDUCTION_W + bl,
                           P["barrel"], float(g["CD_REDUCTION_RATCHET"]), +1)
+    a = math.radians(CLICK_AT_DEG + CLICK_ARM_DEG)
+    P["click"] = (P["barrel"][0] + float(g["CLICK_PIVOT_R"]) * math.cos(a),
+                  P["barrel"][1] + float(g["CLICK_PIVOT_R"]) * math.sin(a))
     # The crown wheel on the stem's line, its pitch distance from the ratchet.
     r, (bx, by) = float(g["CD_RATCHET_CROWN"]), P["barrel"]
     P["crown_wheel"] = (bx + math.sqrt(r * r - by * by), 0.0)
@@ -384,6 +397,170 @@ def check_meshes():
     if bad:
         raise ValueError("a mesh cannot run:\n  " + "\n  ".join(bad))
     return ratios
+
+
+def click_tip():
+    """Where the pawl meets the wheel: its tip's centre, CLICK_DIP inside the
+    ratchet's tips, in a gap between two teeth."""
+    a = math.radians(CLICK_AT_DEG)
+    r = tip_r("ratchet") - float(CLICK_DIP)
+    return (POS["barrel"][0] + r * math.cos(a),
+            POS["barrel"][1] + r * math.sin(a))
+
+
+def click_lift_deg():
+    """How far the pawl turns to ride over a tooth — derived from where its
+    pivot stands, not chosen: the turn that lifts its tip CLICK_DIP +
+    CLICK_CLEAR, clear of the tips."""
+    piv, tip, B = POS["click"], click_tip(), POS["barrel"]
+    want = float(CLICK_DIP) + float(CLICK_CLEAR)
+
+    def out(deg):
+        t = math.radians(deg)
+        x, y = tip[0] - piv[0], tip[1] - piv[1]
+        p = (piv[0] + x * math.cos(t) - y * math.sin(t),
+             piv[1] + x * math.sin(t) + y * math.cos(t))
+        return math.dist(p, B) - math.dist(tip, B)
+
+    lo, hi = 0.0, 20.0
+    for _ in range(60):                      # the tip rises monotonically
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if out(mid) < want else (lo, mid)
+    return (lo + hi) / 2
+
+
+def _ratchet_material():
+    """The ratchet's own outline as (radius, half-angle of material about a
+    tooth's centre), root to tip — read from the curves the teeth are drawn
+    from, so the pawl is fitted to the wheel it sits on and not to a guess."""
+    g = GEAR["ratchet"]
+    r = float(MODULE) * Z_RATCHET / 2.0
+    beta = g["frac"] * math.pi / Z_RATCHET
+    out = []
+    ded, add = _G.flank_points(r, g["rho_add"], g["rho_ded"], g["h_a"],
+                               g["h_f"], samples=17)
+    for x, y in ded + add:
+        rr = math.hypot(x, y)
+        out.append((rr, max(0.0, beta - math.atan2(y, x))))
+    out.sort()
+    return out
+
+
+def click_outline():
+    """The pawl's plan outline, in its own frame with the pivot at the
+    origin: a beak from a wide root to a point at click_tip(), and a tail
+    behind the pivot where a real one takes its spring. Here rather than in
+    watch_parts because click_table fits the table to THIS shape — the beak's
+    sloping sides come 0.011 nearer the wheel than its point does, which the
+    exact sweep caught."""
+    piv, tip = POS["click"], click_tip()
+    t = (tip[0] - piv[0], tip[1] - piv[1])
+    L = math.hypot(*t)
+    u = (t[0] / L, t[1] / L)
+    v = (-u[1], u[0])
+    w, tw = 0.22, float(CLICK_TIP_W)
+    return [(v[0] * w, v[1] * w),
+            (t[0] + u[0] * tw, t[1] + u[1] * tw),
+            (-v[0] * w, -v[1] * w),
+            (-u[0] * 0.55 - v[0] * 0.10, -u[1] * 0.55 - v[1] * 0.10),
+            (-u[0] * 0.55 + v[0] * 0.10, -u[1] * 0.55 + v[1] * 0.10)]
+
+
+def click_radius(deg):
+    """How near the pawl comes to the barrel's axis, turned that far from
+    where it is drawn — the whole outline, not just its point."""
+    piv, B = POS["click"], POS["barrel"]
+    t = math.radians(deg)
+    pts = [(piv[0] + x * math.cos(t) - y * math.sin(t),
+            piv[1] + x * math.sin(t) + y * math.cos(t))
+           for x, y in click_outline()]
+    best = float("inf")
+    for i, p in enumerate(pts):
+        q = pts[(i + 1) % len(pts)]
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        f = max(0.0, min(1.0, ((B[0] - p[0]) * dx + (B[1] - p[1]) * dy)
+                         / (dx * dx + dy * dy)))
+        best = min(best, math.hypot(B[0] - p[0] - f * dx,
+                                    B[1] - p[1] - f * dy))
+    return best
+
+
+def _ratchet_reach(bins=721):
+    """How far the ratchet's material reaches at each angle off a tooth's
+    centre: the tooth itself out to its tip, the root circle between them."""
+    g = GEAR["ratchet"]
+    r = float(MODULE) * Z_RATCHET / 2.0
+    rf = r - g["h_f"]
+    pitch = 2 * math.pi / Z_RATCHET
+    reach = [rf] * bins
+    for rr, half in _ratchet_material():
+        i = int(round(half / (pitch / 2) * (bins - 1)))
+        for k in range(0, min(i, bins - 1) + 1):
+            reach[k] = max(reach[k], rr)
+    return reach
+
+
+def click_table(per_tooth=48, clear=0.09, outline_points=96):
+    """The pawl's angle against the barrel arbor's, fitted to the ratchet's
+    own flank AND to the pawl's own outline: at every angle of the wheel it
+    sits as deep as it can with every point of its beak clear of the teeth,
+    and zero is where it is DRAWN, dropped in.
+
+    Tooth 0 points along +X (watch_gearing.profile), so a tooth's centre is
+    at the arbor's angle plus 2*pi*k/z.
+    """
+    pitch = 2 * math.pi / Z_RATCHET
+    reach = _ratchet_reach()
+    bins = len(reach)
+    B = POS["barrel"]
+    piv = POS["click"]
+
+    def material(off):
+        i = int(round(abs(off) / (pitch / 2) * (bins - 1)))
+        return reach[min(i, bins - 1)]
+
+    # The pawl's outline, walked finely, in its own frame.
+    pts = []
+    out = click_outline()
+    for i, a in enumerate(out):
+        b = out[(i + 1) % len(out)]
+        for k in range(outline_points // len(out) + 1):
+            f = k / (outline_points // len(out) + 1)
+            pts.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+
+    def clears(deg, v):
+        """Every point of the pawl, at that angle, clear of the wheel at v."""
+        t = math.radians(deg)
+        c, si = math.cos(t), math.sin(t)
+        for x, y in pts:
+            px = piv[0] + x * c - y * si - B[0]
+            py = piv[1] + x * si + y * c - B[1]
+            rr = math.hypot(px, py)
+            if rr > float(MODULE) * Z_RATCHET / 2 + GEAR["ratchet"]["h_a"] + 0.3:
+                continue
+            off = (math.atan2(py, px) - v + pitch / 2) % pitch - pitch / 2
+            if rr < material(off) + clear:
+                return False
+        return True
+
+    need = []
+    for i in range(Z_RATCHET * per_tooth):
+        v = 2 * math.pi * i / (Z_RATCHET * per_tooth)
+        lo, hi = 0.0, 12.0                   # 0 is as drawn, dropped in
+        if clears(lo, v):
+            need.append(0.0)
+            continue
+        for _ in range(24):                  # the pawl rises monotonically
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if not clears(mid, v) else (lo, mid)
+        need.append(hi)
+    # Each point carries its NEIGHBOURS' requirement too. The table is read
+    # through a spline, and between two points it runs between their values:
+    # without this the pawl sat 0.07 degrees up where that angle of the wheel
+    # wanted more, and took 0.0003 mm3 out of a tooth.
+    n = len(need)
+    return [[360.0 * i / n, max(need[i - 1], need[i], need[(i + 1) % n])]
+            for i in range(n)]
 
 
 def check_layout(P):
