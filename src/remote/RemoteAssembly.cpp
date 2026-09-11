@@ -142,12 +142,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "inside a mate loop is reported, not held (docs/freewheel-plan.md). "
      "With {teeth} it re-engages only where teeth meet, so the input travels "
      "up to a pitch before driving again, and {ride_mate, ride_dof, ride_mm "
-     "| ride_deg} is what riding over them LIFTS: zero at a notch, full just "
-     "before the next, ADDED to whatever else drives that DOF "
+     "| ride_deg} is what riding over them LIFTS: nothing seated in a "
+     "notch, the whole of it off one (solid dogs cannot stand part way over "
+     "each other), ADDED to whatever else drives that DOF "
      "(docs/click-and-breguet-plan.md). CLICK is a pawl — ONE mate's "
      "rotation (pass the same id as a and b) free the way it {drives} and "
      "held at its mark the other way, where the relation that pushed it "
-     "reports. A cam is the "
+     "reports; what rides over the teeth it holds is a cam, which follows "
+     "their shape. A cam is the "
      "one relation that is not invertible (many angles give one lift), so it "
      "drives forward only. `ratio` may be given directly for any other kind; "
      "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
@@ -1546,6 +1548,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               ? p.at("lead").get<double>()
               : assembly::MateDofValue(*b, r.dofB) -
                     (r.ratio * assembly::MateDofValue(*a, r.dofA) + r.phase);
+    } else if (r.kind == RelationKind::Click) {
+      // And a pawl is made where its wheel STANDS: its mark is that angle,
+      // not zero, which would hold a wheel that starts behind it.
+      r.lead = p.contains("lead") ? p.at("lead").get<double>()
+                                  : assembly::MateDofValue(*b, r.dofB);
     }
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddRelation(std::move(r));

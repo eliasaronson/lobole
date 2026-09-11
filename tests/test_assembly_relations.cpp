@@ -1109,8 +1109,8 @@ TEST_CASE("A toothed freewheel rides over its dogs and lifts what it names",
   };
   turn(0.0);
   CHECK_THAT(lift(), WithinAbs(0.0, 1e-5)); // engaged: sitting in a notch
-  turn(-M_PI / 4.0);                        // half a tooth of slip
-  CHECK_THAT(lift(), WithinAbs(0.5, 1e-4));
+  turn(-M_PI / 4.0); // half a tooth of slip: standing clear of the dogs
+  CHECK_THAT(lift(), WithinAbs(1.0, 1e-4));
   CHECK_THAT(double(t.asmDoc.FindMateById(t.axleB)->rotation),
              WithinAbs(0.0, 1e-5)); // the output stayed: it slipped
   turn(-M_PI / 2.0);                // a whole tooth: dropped into the next
@@ -1184,11 +1184,11 @@ TEST_CASE("A click and a toothed clutch round-trip, and the v105 golden "
   CHECK(rd.rideDof == MateDof::Offset);
   CHECK_THAT(rd.rideAmount, WithinAbs(0.3, 1e-12));
   CHECK((*g)->GetRelations()[1].kind == RelationKind::Click);
-  // And it still rides: half a tooth of slip stands the clutch half way up.
+  // And it still rides: off its notch, the clutch stands clear.
   assembly::SetMateDof(*(*g)->FindMateById(t.axleA), MateDof::Rotation,
                        -M_PI / 4.0);
   assembly::PropagateRelations(**g, t.axleA);
-  CHECK_THAT((*g)->FindMateById(t.axleB)->offset, WithinAbs(48.15f, 1e-3f));
+  CHECK_THAT((*g)->FindMateById(t.axleB)->offset, WithinAbs(48.3f, 1e-3f));
 }
 
 TEST_CASE("A freewheel inside a mate loop is reported, not held",

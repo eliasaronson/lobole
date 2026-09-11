@@ -907,10 +907,15 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     // where the walk did not recompute the base itself.
     if (r.teeth > 0 && r.rideMate != 0) {
       if (Mate* rm = asmDoc.FindMateById(r.rideMate)) {
-        const double pitch = 2.0 * M_PI / r.teeth;
-        const double f =
-            std::min(1.0, std::abs(r.lead - FreewheelNotch(r)) / pitch);
-        const double lift = r.rideAmount * f;
+        // OFF its notch the clutch stands CLEAR, and seated it stands
+        // where it was drawn: dogs are solid, so one part way over another
+        // would be inside it. (A real Breguet tooth ramps and its clutch
+        // rides part way out; drawing that takes a swept helical tooth,
+        // which docs/click-and-breguet-plan.md leaves for later.)
+        const double lift =
+            std::abs(r.lead - FreewheelNotch(r)) > FreewheelSlack(r.lead)
+                ? r.rideAmount
+                : 0.0;
         const bool fresh = isSettled({r.rideMate, r.rideDof});
         const double base =
             MateDofValue(*rm, r.rideDof) - (fresh ? 0.0 : r.rideApplied);
@@ -1261,6 +1266,23 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   // the second is never applied, in a loop the pass settles on a compromise
   // — and either way the document claims a coupling the model does not
   // have. Reported on the relation, never left silent.
+  // What a clutch or a pawl riding over its teeth has LIFTED, per DOF: the
+  // relation that drives that DOF gave it its base, and the ride was added
+  // on top, so the base is what this check must compare against. Without
+  // this, a watch's yoke reports a fault every time its clutch rides up a
+  // dog (docs/click-and-breguet-plan.md).
+  std::vector<std::pair<std::pair<uint64_t, MateDof>, double>> ridden;
+  for (const Relation& r : asmDoc.GetRelations())
+    if (r.rideMate != 0 && r.rideApplied != 0.0 &&
+        !asmDoc.RelationSuppressed(r.id))
+      ridden.push_back({{r.rideMate, r.rideDof}, r.rideApplied});
+  const auto rideOn = [&](uint64_t mate, MateDof dof) {
+    double sum = 0.0;
+    for (const auto& [key, amount] : ridden)
+      if (key.first == mate && key.second == dof)
+        sum += amount;
+    return sum;
+  };
   for (Relation& r : asmDoc.GetRelations()) {
     if (!r.error.empty() || asmDoc.RelationSuppressed(r.id))
       continue;
@@ -1273,7 +1295,8 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     const Mate* b = asmDoc.FindMateById(r.mateB);
     if (a == nullptr || b == nullptr)
       continue;
-    const double want = RelationValue(r, MateDofValue(*a, r.dofA));
+    const double want =
+        RelationValue(r, MateDofValue(*a, r.dofA)) + rideOn(r.mateB, r.dofB);
     const double got = MateDofValue(*b, r.dofB);
     // Mate DOFs are stored as float: allow its precision at the magnitude.
     if (std::abs(want - got) > 1e-4 * std::max(1.0, std::abs(want))) {

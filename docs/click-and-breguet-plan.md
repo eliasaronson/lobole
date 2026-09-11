@@ -72,6 +72,23 @@ construction additive, rather than a general superposition rule.
   keyless relations, the winding checks.
 - `docs/modeling/watch.md`, `docs/remaining-watch-items-plan.md`.
 
+## What it took
+
+Three things the plan did not foresee, all found by the exact sweep:
+
+- **Square dogs cannot ride up a ramp.** A lift proportional to how far the
+  clutch has slipped leaves solid dogs part way through each other (0.029
+  mm³). The lift is the WHOLE of it off a notch, and nothing while seated.
+- **A relation that ADDS to a DOF breaks the residual check.** The yoke
+  drives the clutch's slide and the ride adds to it, so the check reported a
+  fault every time the clutch rode out. It now compares against the base plus
+  what any ride has lifted.
+- **A cam's table must be fitted to the part, not to a point on it.** The
+  pawl's beak reaches nearer the wheel along its sloping sides than at its
+  tip, and the spline between two table points sits below both. The table
+  clears the whole outline, and every point carries its neighbours'
+  requirement.
+
 ## Verification
 
 - `tests/test_assembly_relations.cpp`: a click lets its DOF run one way and

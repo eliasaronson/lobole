@@ -326,10 +326,10 @@ def main():
         fw2 = d.call("add_relation", type="freewheel", a=a, b=cyl, ratio=1.0,
                      drives="positive", teeth=4, ride_mate=cyl,
                      ride_dof="offset", ride_mm=1.0, name="dogs")
-        # Half a tooth of slip stands it half way up the ramp...
+        # Off its notch it stands clear of the dogs...
         d.call("set_mate", id=a, rotation=-math.pi / 4)
-        expect(abs(mate(d, cyl)["offset"] - 0.5) < 1e-3,
-               f"half a tooth lifts half: {mate(d, cyl)['offset']}")
+        expect(abs(mate(d, cyl)["offset"] - 1.0) < 1e-3,
+               f"off a notch it lifts clear: {mate(d, cyl)['offset']}")
         # ...and a whole tooth drops it into the next notch.
         d.call("set_mate", id=a, rotation=-math.pi / 2)
         expect(abs(mate(d, cyl)["offset"]) < 1e-3,
