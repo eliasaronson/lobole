@@ -691,6 +691,14 @@ set_tests_properties(mcp_formats_gate PROPERTIES TIMEOUT 120)
 # runs one against a headless app and checks the part by numbers. It is the
 # standing answer to "do we need scripted features for X" — so it stays on
 # the default path.
+# The watch generator (docs/modeling/automatic-watch-plan.md): every part on
+# its receipt, every occurrence placed by a mate, the going train and motion
+# works keeping time EXACTLY, and the declared clearances holding.
+add_test(NAME watch_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/watch_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(watch_smoke PROPERTIES TIMEOUT 300)
+
 add_test(NAME generators_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generators_smoke.py
                  $<TARGET_FILE:designer>)

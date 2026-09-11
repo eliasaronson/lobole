@@ -55,6 +55,25 @@ sheets with hole tables, STEP, STL, a BOM and a mass budget. Building it
 found six app defects (five fixed, one worked around); see
 [the model notes](../docs/modeling/fpv-drone.md) and `scratch/fpv-drone/BUILD.md`.
 
+`watch/` is an automatic mechanical watch, time only with small seconds: a
+21,600 vph movement (barrel, centre, third, fourth and escape wheels, a Swiss
+lever escapement with a piped fit-spline hairspring, motion works under the
+dial, a rotor winding the barrel through a reduction wheel) in a 40 mm case
+with a dial, applied indices and blued hands. It is built on this round's
+machinery from the start: 64 dimensions are document variables
+(`watch_spec.declare`), every one of its 31 occurrences is placed by a mate,
+nine gear relations make one motion study turn every hand at its true rate,
+and the clearances that decide whether it runs are DECLARED on the assembly.
+The run gates on receipts and refuses to save what it has not checked.
+
+Its teeth are **cycloidal** (`watch/watch_gearing.py`), not `gear.py`'s
+involute, and the gates are why: at 6–12 pinion leaves an involute train
+interferes, a topped wheel loses continuous contact (the escape mesh fell to a
+contact ratio of 0.92), and a profile shift that clears the 6-leaf escape
+pinion leaves it pointed. `watch_spec.py` refuses at import any layout where a
+wheel crosses a foreign arbor and any mesh below a contact ratio of 1.1. See
+[the model notes](../docs/modeling/watch.md).
+
 `cncest6090.py` starts a provisional CNC router layout and Z-axis fixture from
 owner photographs. Only the 80 mm spindle diameter is owner-confirmed; the
 remaining dimensions are editable project variables with recorded assumptions.
