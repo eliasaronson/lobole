@@ -222,6 +222,46 @@ TEST_CASE("Pattern of a cut replicates the cutter", "[pattern]") {
   CHECK(suffixed >= 3); // the barrel of instances 1..3 (0 is the source cut)
 }
 
+TEST_CASE("Pattern of an adding extrude replicates the boss", "[pattern]") {
+  // A boss extruded ADD into a plate is fused into the plate's body, so it
+  // leaves no body of its own — and patterning it refused "source body not
+  // found". A watch's ring of contrate teeth went in as one extrude per
+  // tooth because of it. The pattern repeats the boss's TOOL now, fused like
+  // the original.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 20, 5));
+  auto sk =
+      std::make_unique<SketchFeature>("BossSk", SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::Circle{{10, 10}, 2.0});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Boss", skId, 10.0,
+                                                  ExtrudeMode::Add, false));
+  const uint64_t bossId = doc.GetFeature(2)->GetId();
+  REQUIRE(doc.GetFeature(2)->GetError().empty());
+
+  auto pat = std::make_unique<PatternFeature>("Bosses x4", PatternKind::Linear,
+                                              bossId);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 4;
+  pat->spacing = 12.0;
+  doc.AddFeature(std::move(pat));
+
+  INFO(doc.GetFeature(3)->GetError());
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Each boss stands 5 mm proud of the 5 mm plate it starts inside.
+  const double boss = 3.1415926535897932 * 4.0 * 5.0;
+  CHECK_THAT(TotalVolume(doc), WithinRel(6000.0 + 4.0 * boss, 1e-3));
+  const ElementMap& em = doc.GetBodies()[0].elementMap;
+  int suffixed = 0;
+  for (const auto& [index, name] : em.names)
+    if (name.find('#') != std::string::npos)
+      suffixed++;
+  CHECK(suffixed >= 3); // instances 1..3 carry suffixed names
+}
+
 TEST_CASE("Pattern of a cut through a MISSING source still says so",
           "[pattern]") {
   Document doc;

@@ -224,16 +224,21 @@ public:
   // must never return true: its geometry is what the bake carries.
   [[nodiscard]] virtual bool IsDatum() const { return false; }
 
-  // The tool solid a CUT feature swept on its last Execute, for a Pattern
-  // referencing it: a cut leaves no body behind to replicate, so the pattern
-  // replicates the CUTTER instead (R14). Null for everything else. Valid
-  // only within the same regeneration pass — features regen in order and a
-  // pattern may only reference an earlier feature, so it always reads the
-  // tool its source just built.
-  virtual const CADShape* CutToolShape() const { return nullptr; }
+  // The tool solid a feature that CUTS or ADDS swept on its last Execute, for
+  // a Pattern referencing it: neither leaves a body of its own behind to
+  // replicate (a cut removes, an add fuses into a body another feature made),
+  // so the pattern replicates the TOOL instead, in the source's own mode —
+  // R14 for cuts, and for adds since the watch's contrate teeth needed one.
+  // Null for everything else. Valid only within the same regeneration pass —
+  // features regen in order and a pattern may only reference an earlier
+  // feature, so it always reads the tool its source just built.
+  virtual const CADShape* ToolShape() const { return nullptr; }
   // The names of that tool's faces/edges, so each patterned instance can carry
   // suffixed copies of them (…#2) instead of arriving nameless.
-  virtual const ElementMap* CutToolMap() const { return nullptr; }
+  virtual const ElementMap* ToolMap() const { return nullptr; }
+  // Whether the tool is fused into the bodies (an add) rather than subtracted
+  // (a cut). Meaningful only with a ToolShape.
+  virtual bool ToolAdds() const { return false; }
 
   // Why this feature's last regeneration failed (empty = healthy). Transient
   // (never serialized), like Parameter::error: Document::Regenerate clears it

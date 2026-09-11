@@ -43,8 +43,8 @@ public:
 private:
   // The cut-source path: replicate the source's cutter and subtract each
   // transformed copy (the original cut already made instance 0).
-  bool ExecuteCutPattern(RegenContext& ctx, const CADShape& tool,
-                         const ElementMap& toolMap);
+  bool ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
+                          const ElementMap& toolMap, bool adds);
 
 public:
   [[nodiscard]] std::string WhyIncomplete() const override {

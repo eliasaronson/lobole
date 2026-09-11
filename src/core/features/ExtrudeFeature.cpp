@@ -120,9 +120,9 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     prism.Translate(n * (sign * static_cast<float>(backOffset)));
   }
 
-  if (mode == ExtrudeMode::Cut) {
-    m_cutTool = prism; // for a Pattern of this cut (CutToolShape)
-    m_cutToolMap = map;
+  if (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) {
+    m_tool = prism; // for a Pattern of this cut or add (ToolShape)
+    m_toolMap = map;
   }
   return ApplyBodyModeReporting(ctx.bodies, std::move(prism), std::move(map),
                                 mode, *this);

@@ -25,21 +25,23 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     }
   }
   if (instances.empty()) {
-    // A CUT source leaves no body behind to replicate — replicate its
-    // CUTTER instead (R14): transformed copies of the tool the source just
-    // swept, each subtracted like the original cut. Patterned holes used to
-    // refuse "source body not found", pushing every repeated hole into one
-    // multi-loop sketch and throwing the pattern's design intent away.
+    // A CUT or ADD source leaves no body of its own behind to replicate —
+    // replicate its TOOL instead: transformed copies of what the source just
+    // swept, each applied in the source's mode (R14 for cuts). Patterned
+    // holes used to refuse "source body not found", pushing every repeated
+    // hole into one multi-loop sketch; so did a ring of teeth added to a
+    // pinion face, which went in as one extrude per tooth.
     const Feature* src = ctx.FindById(sourceId);
-    const CADShape* tool = src != nullptr ? src->CutToolShape() : nullptr;
+    const CADShape* tool = src != nullptr ? src->ToolShape() : nullptr;
     if (tool != nullptr && tool->IsValid()) {
-      const ElementMap* toolMap = src->CutToolMap();
-      return ExecuteCutPattern(ctx, *tool,
-                               toolMap != nullptr ? *toolMap : ElementMap{});
+      const ElementMap* toolMap = src->ToolMap();
+      return ExecuteToolPattern(ctx, *tool,
+                                toolMap != nullptr ? *toolMap : ElementMap{},
+                                src->ToolAdds());
     }
     SetError("source body (feature " + std::to_string(sourceId) +
-             ") not found — did the source feature fail? (a cut Extrude "
-             "source patterns its cutter instead)");
+             ") not found — did the source feature fail? (an Extrude that "
+             "cuts or adds patterns its tool instead)");
     return false;
   }
   const size_t seedCount = instances.size();
@@ -98,8 +100,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
   return ok;
 }
 
-bool PatternFeature::ExecuteCutPattern(RegenContext& ctx, const CADShape& tool,
-                                       const ElementMap& toolMap) {
+bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
+                                        const ElementMap& toolMap, bool adds) {
   // Each instance's cutter carries the source cut's names with an instance
   // suffix ("4/g7" -> "4/g7#2"), so a face cut by the third hole is as
   // referenceable as the one cut by the first. Nothing parses a MappedName —
@@ -149,7 +151,8 @@ bool PatternFeature::ExecuteCutPattern(RegenContext& ctx, const CADShape& tool,
   }
   for (auto& [shape, map] : cutters) {
     if (!ApplyBodyModeReporting(ctx.bodies, std::move(shape), std::move(map),
-                                ExtrudeMode::Cut, *this))
+                                adds ? ExtrudeMode::Add : ExtrudeMode::Cut,
+                                *this))
       return false;
   }
   return true;
