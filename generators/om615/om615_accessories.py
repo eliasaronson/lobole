@@ -89,7 +89,7 @@ def belt(app):
             [(w["radius"] + r, y) for r, y in profile],
             plane=plane,
             axis=dict(kind="datum_axis", datum_axis_id=axis["id"]),
-            angle=math.degrees(w["angle"]),
+            angle_deg=math.degrees(w["angle"]),
             mode="new_body" if i == 0 else "add",
             name=f"Wrap {i + 1}",
         )

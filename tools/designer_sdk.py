@@ -41,6 +41,7 @@ Usage:
     seat = part.frame("wrist_pin", top.faces(kind="cylinder")[0])
     part.check()                                 # raises on any broken feature
 """
+import functools
 import math
 import os
 import sys
@@ -58,6 +59,27 @@ if TYPE_CHECKING:
 
 class SdkError(RuntimeError):
     """A refusal from the SDK itself (never from the app)."""
+
+
+def _renamed(**renames):
+    """Refuse a keyword this SDK used to spell without its unit.
+
+    Each value is (new name, what the new one takes). A bare angle meant
+    degrees in `revolve` and radians in `bolt_circle`; the new keyword names
+    its unit, and the old one is refused rather than guessed at, because
+    `bolt_circle(start_angle=0.5)` read as degrees is a plausible wrong part
+    (docs/sdk-units-plan.md).
+    """
+    def wrap(fn):
+        @functools.wraps(fn)
+        def refusing(*args, **kw):
+            for old, (new, takes) in renames.items():
+                if old in kw:
+                    raise SdkError(f"{fn.__name__}: `{old}=` is now "
+                                   f"`{new}=`, which takes {takes}")
+            return fn(*args, **kw)
+        return refusing
+    return wrap
 
 
 # Sketch datum references, usable wherever an entity id is (the app's own
@@ -950,16 +972,19 @@ class SketchBuilder:
                            "expression — extent() reads numbers")
         return (V((lo[0], lo[1], 0)), V((hi[0], hi[1], 0)))
 
-    def polygon(self, center, n, r=None, across_flats=None, rotate=0.0):
+    @_renamed(rotate=("rotate_deg", "DEGREES (the old name took radians)"))
+    def polygon(self, center, n, r=None, across_flats=None, rotate_deg=0.0):
         """A regular n-gon. `r` is the circumradius; `across_flats` is the
-        spanner size, converted rather than approximated."""
+        spanner size, converted rather than approximated. `rotate_deg` turns
+        the first vertex off the +U axis."""
         if (r is None) == (across_flats is None):
             raise SdkError("polygon takes one of r= or across_flats=")
         if across_flats is not None:
             r = (across_flats / 2.0) / math.cos(math.pi / n)
         cu, cv = _uv(self, center)
-        pts = [(cu + r * math.cos(rotate + 2 * math.pi * i / n),
-                cv + r * math.sin(rotate + 2 * math.pi * i / n))
+        rot = math.radians(rotate_deg)
+        pts = [(cu + r * math.cos(rot + 2 * math.pi * i / n),
+                cv + r * math.sin(rot + 2 * math.pi * i / n))
                for i in range(n)]
         return self.polyline(pts, close=True)
 
@@ -1063,7 +1088,21 @@ class Sketch:
         full turn is refused as a degrees number in the radians field.
         `expr` is different: it is an expression in the document's base units,
         where angles are DEGREES ("45", "45deg" and "0.785rad" all agree).
+
+        A `Param` sends its expression too, so the constraint follows the
+        variable. That needs the number and the expression to share a unit,
+        which they do as `value_deg` or as a length `value` — and do not as
+        an angle's `value`, radians against a degree expression, so that one
+        is refused.
         """
+        if kind == "angle" and isinstance(value, Param):
+            raise SdkError(
+                "constrain: an angle's `value` is RADIANS but a Param's "
+                f"expression ({value.expr!r}) evaluates in DEGREES — pass "
+                "the Param as value_deg=")
+        for p in (value, value_deg):
+            if isinstance(p, Param) and expr is None:
+                expr = p.expr
         kw = {"sketch_id": self.id, "kind": kind, "refs": refs}
         if value is not None:
             kw["value"] = value
@@ -1311,23 +1350,26 @@ class Part(_Tab):
     def cut(self, sketch, distance, **kw):
         return self.extrude(sketch, distance, mode="cut", **kw)
 
-    def revolve(self, sketch, axis="z", angle=360.0, mode="new_body",
+    @_renamed(angle=("angle_deg", "the same degrees"))
+    def revolve(self, sketch, axis="z", angle_deg=360.0, mode="new_body",
                 name=None, **kw):
         f = {"type": "Revolve", "name": name or f"Revolve {sketch.name}",
              "sketch_id": _id(sketch), "mode": mode,
              "axis": axis if isinstance(axis, dict) else {"kind": axis}}
-        _dim(f, "angle_deg", angle)
+        _dim(f, "angle_deg", angle_deg)
         f.update(kw)
         return self._body_from(self._add(f))
 
-    def revolve_profile(self, points, plane=None, axis="z", angle=360.0,
+    @_renamed(angle=("angle_deg", "the same degrees"))
+    def revolve_profile(self, points, plane=None, axis="z", angle_deg=360.0,
                         name="Revolved", **kw):
         """A closed profile and the revolve of it, in one call — the shape a
         turned part (a piston, a bushing, a pulley) is actually described
         in."""
         sk = self.sketch(plane or Plane.xz(), name=f"{name} profile")
         sk.polyline(points, close=True)
-        return self.revolve(sk.add(), axis=axis, angle=angle, name=name, **kw)
+        return self.revolve(sk.add(), axis=axis, angle_deg=angle_deg,
+                            name=name, **kw)
 
     def box(self, position=(0, 0, 0), w=1.0, h=1.0, d=1.0, name="Box"):
         f = {"type": "Box", "name": name, "position": list(V(position))}
@@ -1407,8 +1449,10 @@ class Part(_Tab):
         _dim(f, "radius", r)
         return self._add(f)
 
+    @_renamed(rotate=("rotate_deg", "the same degrees per axis"))
     def frame(self, name, of=None, origin=None, z=(0, 0, 1), x=(1, 0, 0),
-              parent=None, offset=(0, 0, 0), rotate=(0, 0, 0), flip=False):
+              parent=None, offset=(0, 0, 0), rotate_deg=(0, 0, 0),
+              flip=False):
         """A named datum frame (v86). `of=` one element, or several circular
         ones for a bolt circle; `parent=` another frame; otherwise explicit.
 
@@ -1429,10 +1473,10 @@ class Part(_Tab):
                  "elements": [e.ref for e in els]}
             if flip:
                 f["flip"] = True
-        elif parent is not None or any(offset) or any(rotate):
+        elif parent is not None or any(offset) or any(rotate_deg):
             f = {"type": "Frame", "name": name, "kind": "offset",
                  "parent_id": _id(parent) if parent is not None else 0,
-                 "rotation_deg": list(rotate)}
+                 "rotation_deg": list(rotate_deg)}
             _dim3(f, "offset", offset)
         else:
             f = {"type": "Frame", "name": name, "kind": "explicit",
@@ -1448,15 +1492,18 @@ class Part(_Tab):
     def get_frame(self, name):
         return Frame.from_query(self, self.app.frame(frame=name), name=name)
 
+    @_renamed(angle=("step_deg", "the same degrees PER STEP; leave it out "
+                               "to space the copies evenly round a full "
+                               "turn"))
     def pattern(self, source, count, linear=None, circular=None, spacing=None,
-                angle=360.0, name="Pattern"):
+                step_deg=None, name="Pattern"):
         """A linear or circular pattern of a feature. `linear=` an axis and
-        `spacing=` (mm); `circular=` an axis and `angle=`.
+        `spacing=` (mm); `circular=` an axis and `step_deg=`.
 
-        `angle` is DEGREES and PER STEP — the angle between one instance and
-        the next, not the span they cover. Six holes evenly round a circle is
-        `angle=60`, not 360. The 360 default therefore rotates every copy a
-        full turn back onto the original; pass an angle.
+        `step_deg` is the angle between one instance and the next, not the
+        span they cover. Left out, it is derived from `count`: 360/count, the
+        copies evenly round a full turn. (A fixed 360 default rotated every
+        copy a full turn back onto the original.)
         """
         f = {"type": "Pattern", "name": name, "source_id": _id(source)}
         if linear is not None:
@@ -1468,14 +1515,22 @@ class Part(_Tab):
             f.update({"kind": "circular",
                       "axis": circular if isinstance(circular, dict)
                       else {"kind": circular}, "count": int(count)})
-            _dim(f, "angle_deg", angle)
+            if step_deg is None:
+                if int(count) < 1:
+                    raise SdkError(f"pattern: count must be at least 1, "
+                                   f"got {count}")
+                step_deg = 360.0 / int(count)
+            _dim(f, "angle_deg", step_deg)
         else:
             raise SdkError("pattern takes linear= or circular= (an axis)")
         return self._add(f)
 
-    def bolt_circle(self, plane, n, pcd, d, start_angle=0.0, name="Bolt holes",
+    @_renamed(start_angle=("start_deg",
+                           "DEGREES (the old name took radians)"))
+    def bolt_circle(self, plane, n, pcd, d, start_deg=0.0, name="Bolt holes",
                     through=True, depth=None):
         """N holes on a pitch circle, and the frame that names the pattern.
+        The first hole sits `start_deg` off the plane's +U axis.
 
         Returns (hole_feature, frame): the frame is centred on the pattern
         with X toward the first hole, which is what an assembly mates to —
@@ -1483,7 +1538,7 @@ class Part(_Tab):
         """
         sk = self.sketch(plane, name=f"{name} centres")
         for i in range(n):
-            a = start_angle + 2 * math.pi * i / n
+            a = math.radians(start_deg) + 2 * math.pi * i / n
             sk.point((pcd / 2.0 * math.cos(a), pcd / 2.0 * math.sin(a)))
         s = sk.add()
         hole = self.hole(s, d=d, through=through, depth=depth, name=name)

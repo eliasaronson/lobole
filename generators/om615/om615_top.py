@@ -506,7 +506,7 @@ def collet(app):
     p.revolve_profile([(root, 0), (COLLET_R0, 0),
                        (COLLET_R1, COLLET_H), (STEM_D / 2.0 + 0.2, COLLET_H),
                        (STEM_D / 2.0 + 0.2, 3.5), (root, 3.5)],
-                      plane=Plane.xz(), axis="z", angle=170.0, name="Collet")
+                      plane=Plane.xz(), axis="z", angle_deg=170.0, name="Collet")
     p.material("steel")
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.check()

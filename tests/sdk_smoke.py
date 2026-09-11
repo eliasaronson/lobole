@@ -135,7 +135,44 @@ def build_piston(part):
     return part.body()
 
 
+# A word that names an angle. `pitch` is left out on purpose: a thread's
+# pitch is a length.
+ANGLE_WORDS = {"angle", "rotate", "rotation", "tilt", "twist", "sweep",
+               "phase", "theta", "spin", "yaw", "roll"}
+
+
+def angle_params_without_unit(fn):
+    return [p for p in inspect.signature(fn).parameters
+            if set(p.split("_")) & ANGLE_WORDS
+            and p.split("_")[-1] not in ("deg", "rad")]
+
+
+def check_angle_units():
+    """Every hand-written angle keyword names its unit, as every RPC one does
+    (tests/rpc_units_gate.py). A bare angle meant degrees in `revolve` and
+    radians in `bolt_circle`; this catches the next helper, not only those
+    (docs/sdk-units-plan.md)."""
+    def bare(angle=0.0, start_angle=0.0, rotate_deg=0.0, pitch=1.0):
+        pass
+    expect(angle_params_without_unit(bare) == ["angle", "start_angle"],
+           "the scan must flag a bare angle, or it passes by seeing nothing")
+    offenders, scanned = [], 0
+    for cname, cls in inspect.getmembers(sdk, inspect.isclass):
+        if cls.__module__ != sdk.__name__:
+            continue
+        for fname, fn in inspect.getmembers(cls, inspect.isfunction):
+            if fname.startswith("_"):
+                continue
+            scanned += 1
+            offenders += [f"{cname}.{fname}({p}=)"
+                          for p in angle_params_without_unit(fn)]
+    expect(scanned > 50, f"scanned only {scanned} SDK methods")
+    expect(not offenders, "angle keywords that name no unit — end them "
+           "_deg (or _rad): " + ", ".join(offenders))
+
+
 def main():
+    check_angle_units()
     binary = sys.argv[1]
     env = dict(os.environ)
     env.pop("DISPLAY", None)
@@ -225,6 +262,57 @@ def main():
                f"centred on the pattern: {frame.origin}")
         bores = plate.body().faces(kind="cylinder")
         expect(len(bores) == 6, f"six holes were drilled: {len(bores)}")
+
+        # ---- Angles name their unit (docs/sdk-units-plan.md) -------------
+        # An old spelling is refused naming the new one, before anything
+        # reaches the app: `start_angle` was RADIANS, and read as degrees it
+        # would be a plausible wrong part.
+        refused(lambda: plate.bolt_circle(top.plane(), n=6, pcd=60, d=6.6,
+                                          start_angle=0.5),
+                "start_deg", "radians")
+        refused(lambda: plate.pattern(hole, 4, circular="z", angle=90),
+                "step_deg")
+        refused(lambda: plate.revolve(None, angle=90), "angle_deg")
+        refused(lambda: plate.revolve_profile([], angle=90), "angle_deg")
+        refused(lambda: plate.frame("f", rotate=(0, 0, 30)), "rotate_deg")
+        refused(lambda: plate.sketch(top.plane(), name="p").polygon(
+            (0, 0), 6, r=5, rotate=0.5), "rotate_deg", "radians")
+
+        flange = app.part("flange")
+        flange.box(position=(-50, -50, 0), w=100, h=100, d=8, name="Flange")
+        ftop = flange.body().face(kind="plane", normal=(0, 0, 1))
+        flange.bolt_circle(ftop.plane(), n=4, pcd=60, d=6.6, start_deg=45)
+        flange.check()
+        want = (30 * math.cos(math.radians(45)), 30 * math.sin(math.radians(45)))
+        centres = [e.center for e in flange.body().edges(kind="circle")]
+        expect(any(abs(c.x - want[0]) < 0.01 and abs(c.y - want[1]) < 0.01
+                   for c in centres),
+               f"start_deg=45 puts a hole at 45 degrees: {centres}")
+
+        # No step: the copies go evenly round a full turn, not all back onto
+        # the original (the old 360 default).
+        spokes = app.part("spokes")
+        lug = spokes.cylinder(center=(30, 0, 0), d=6, h=5)
+        spokes.pattern(lug, 4, circular="z")
+        spokes.check()
+        lo, hi = spokes.bbox()
+        expect(abs(lo.x + 33) < 0.01 and abs(hi.y - 33) < 0.01,
+               f"four lugs spread round the axis: {lo} .. {hi}")
+
+        # A Param in `constrain` keeps its formula.
+        link = app.part("link")
+        link_len = link.param("link_len", 20)
+        ls = link.sketch(sdk.Plane.xy(), name="Link").line((0, 0),
+                                                           (15, 0)).add()
+        (eid,) = [e["id"] for e in ls.entities() if e.get("type") == "line"]
+        ls.constrain("distance", [[eid, 0], [eid, 1]], value=link_len)
+        link.var("link_len", 32)
+        line = next(e for e in ls.entities() if e["id"] == eid)
+        length = math.dist(line["a"], line["b"])
+        expect(abs(length - 32) < 1e-6,
+               f"the constraint follows its variable: {length}")
+        refused(lambda: ls.constrain("angle", [[eid, 0]], value=link_len),
+                "value_deg")
 
         # ---- Projection: a hole taken from another body's hole ----------
         # No coordinate is read off the first plate and typed into the

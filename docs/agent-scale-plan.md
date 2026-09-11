@@ -206,7 +206,7 @@ gripper's friction list, turned into methods, each issuing one `batch`:
 |---|---|---|
 | `Plane.at(origin, normal, u)` + `plane.uv(world_point)` / `plane.world(u, v)` | hand-computed UV | the flange 7.57 mm off its axis (UV measured from the origin, world = origin + u·U + v·V) |
 | `sketch.polyline(points, close=True)`, `sketch.slot`, `sketch.polygon(n, r)` | 4 `line` calls per rectangle | dropped/reversed edges |
-| `doc.revolve_profile(points, axis, angle)` | sketch + revolve, two dialects | a piston in one call |
+| `doc.revolve_profile(points, axis, angle_deg)` | sketch + revolve, two dialects | a piston in one call |
 | `doc.bolt_circle(face, n, pcd, standard="ISO 4762 M6", depth=...)` | Hole + N `fit_fastener` | random bolt placement |
 | `doc.fillet(body, r, edges="all" \| predicate)`, `doc.chamfer(...)` | `list_elements` + names by hand | the missing-fillets class |
 | `doc.pattern(feature, circular=(axis, n) \| linear=(dir, n, pitch))` | the two pattern dialects | |

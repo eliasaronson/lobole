@@ -716,7 +716,7 @@ def ring(app, name, od, id_, width, angle=360.0, material=None):
     p = app.part(name)
     p.revolve_profile([(id_ / 2.0, -width / 2.0), (od / 2.0, -width / 2.0),
                        (od / 2.0, width / 2.0), (id_ / 2.0, width / 2.0)],
-                      plane=Plane.xz(), axis="z", angle=angle, name=name)
+                      plane=Plane.xz(), axis="z", angle_deg=angle, name=name)
     if material:
         p.material(material)
     p.frame("seat", origin=(0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
