@@ -58,13 +58,17 @@ found six app defects (five fixed, one worked around); see
 `watch/` is an automatic mechanical watch, time only with small seconds: a
 21,600 vph movement (barrel, centre, third, fourth and escape wheels, a Swiss
 lever escapement with a piped fit-spline hairspring, motion works under the
-dial, a rotor winding the barrel through a reduction wheel) in a 40 mm case
-with a dial, applied indices and blued hands. It is built on this round's
-machinery from the start: 64 dimensions are document variables
-(`watch_spec.declare`), every one of its 31 occurrences is placed by a mate,
-nine gear relations make one motion study turn every hand at its true rate,
+dial, a rotor winding the barrel through a reduction wheel, and a keyless
+works — stem, clutch, winding pinion, setting wheel, setting lever and yoke —
+so the crown winds the mainspring and sets the hands) in a 40 mm case with a
+dial, applied indices and blued hands. It is built on this round's machinery
+from the start: 83 dimensions are document variables (`watch_spec.declare`),
+every one of its 37 occurrences is placed by a mate, 16 relations make one
+motion study turn every hand at its true rate and the crown drive the ratchet,
 and the clearances that decide whether it runs are DECLARED on the assembly.
-The run gates on receipts and refuses to save what it has not checked.
+The run gates on receipts, checks the crown-out setting position it cannot
+store (an assembly configuration cannot switch a relation), and refuses to
+save what it has not checked.
 
 Its teeth are **cycloidal** (`watch/watch_gearing.py`), not `gear.py`'s
 involute, and the gates are why: at 6–12 pinion leaves an involute train

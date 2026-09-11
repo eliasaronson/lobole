@@ -145,3 +145,73 @@ def profile(module, z, rho_add, rho_ded, frac, h_a, h_f, samples=7):
         ents.append(arc_through(ends[k], (rf * math.cos(cm), rf * math.sin(cm)),
                                 starts[(k + 1) % z]))
     return ents, {"rp": r, "ra": ra, "rf": rf}
+
+
+# --- racks: contrate teeth ------------------------------------------------------
+# A contrate tooth on the face of a stem pinion, seen along the axis of the
+# flat wheel it drives, passes the contact as a RACK tooth does — so its
+# profile is the cycloidal rack's. A circle rolling along a straight pitch line
+# traces a common cycloid; the wheel's dedendum circle rolled on the TIP side
+# traces the rack's addendum, and the rack's own dedendum circle, rolled on the
+# body side, traces its flank and (on the wheel) the wheel's epicycloidal
+# addendum. So a rack has a rho_ded of its own choosing and takes its
+# rho_add from the wheel, exactly as a wheel does.
+
+def _cycloid(rho, t):
+    """A point on a circle of radius rho rolling along the pitch line, from the
+    pitch point: (along the line, away from the line)."""
+    return (rho * (t - math.sin(t)), rho * (1.0 - math.cos(t)))
+
+
+def rack_addendum_height(module, rho_add, frac, cap):
+    """How far a rack tooth's addendum can rise: to `cap` modules, or to where
+    its two cycloidal flanks meet on the tooth's centre line."""
+    half = frac * math.pi * module / 2.0
+    t_meet = _solve(lambda t: _cycloid(rho_add, t)[0], half, 1e-9, math.pi)
+    return min(cap * module, _cycloid(rho_add, t_meet)[1])
+
+
+def rack_arc(rho_add, h_a):
+    """The pitch-line length the contact rolls while it climbs a rack tooth's
+    addendum of height h_a — the rack's share of the arc of action."""
+    t = _solve(lambda t: _cycloid(rho_add, t)[1], h_a, 1e-9, math.pi)
+    return rho_add * t
+
+
+def rack_profile(module, rho_add, rho_ded, frac, h_a, h_f, samples=7,
+                 sink=0.0):
+    """One rack tooth as sketch entities, in (u, v): u along the pitch line
+    with the tooth centred on u = 0, v away from the tooth's root, which is
+    the line v = 0; the pitch line is v = h_f and the tip v = h_f + h_a. The
+    flanks run on straight for `sink` below the root, so a tooth extruded
+    from a face is sunk INTO it rather than touching it on a shared plane."""
+    half = frac * math.pi * module / 2.0
+
+    def pts(rho, h, up):
+        t_end = _solve(lambda t: _cycloid(rho, t)[1], h, 1e-9, math.pi)
+        out = []
+        for i in range(samples):
+            x, y = _cycloid(rho, t_end * i / (samples - 1))
+            # The addendum leans in toward the centre going up; the flank
+            # leans out going down, so the tooth thickens toward its root.
+            out.append((-half + x, h_f + y) if up else (-half - x, h_f - y))
+        return out
+
+    add = pts(rho_add, h_a, True)          # pitch point -> tip, right to left
+    ded = pts(rho_ded, h_f, False)         # pitch point -> root
+    left = ded[::-1] + add[1:]             # root -> pitch -> tip, u < 0 side
+    right = [(-u, v) for u, v in left][::-1]
+
+    def curve(p):
+        return [arc_through(p[i], p[i + 1], p[i + 2])
+                for i in range(0, len(p) - 2, 2)]
+    ents = curve(left)
+    if math.dist(left[-1], right[0]) > 1e-6:
+        ents.append(line(left[-1], right[0]))           # the tip land
+    ents += curve(right)
+    if sink > 0.0:
+        a, b = (left[0][0], -sink), (right[-1][0], -sink)
+        ents = [line(a, left[0])] + ents + [line(right[-1], b), line(b, a)]
+    else:
+        ents.append(line(right[-1], left[0]))           # the root line
+    return ents

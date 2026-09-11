@@ -57,7 +57,15 @@ Z_CANNON, Z_MINUTE_W, Z_MINUTE_P, Z_HOUR = 10, 30, 8, 32
 # Winding: rotor pinion -> reduction wheel/pinion -> ratchet, and the crown
 # wheel beside the ratchet.
 Z_ROTOR_PIN, Z_REDUCTION_W, Z_REDUCTION_P, Z_RATCHET = 10, 40, 11, 48
-Z_CROWN_WHEEL, Z_WINDING_PIN = 24, 8  # 8: a 12-leaf pinion reaches the rotor
+# Keyless works. The crown wheel's arbor stands on the stem's line (y = 0) at
+# the first point there that clears the barrel: 70 teeth put it 5.90 from the
+# barrel's axis against the barrel's 4.93 tip. Below, at plate level, it
+# carries the winding wheel the stem drives; the setting wheel meshes the
+# minute wheel. Both stem pinions drive them through CONTRATE teeth — rack
+# teeth on an end face, at right angles to the wheel.
+Z_CROWN_WHEEL = 70
+Z_WINDING_W, Z_SETTING_W = 16, 16
+Z_CONTRATE = 10            # contrate teeth on the winding pinion and clutch
 
 # Where the small seconds is: the fourth arbor, straight down at 6 o'clock.
 FOURTH_Y = -7.5
@@ -66,7 +74,6 @@ BARREL_DIR_DEG = 50.0      # barrel's direction from the centre
 BALANCE_X, BALANCE_Y = 7.6, -4.6
 PALLET_FROM_ESCAPE = 3.3   # pallet arbor, along the escape->balance line;
                            # 1.35x the escape radius leaves room for the arms
-CROWN_WHEEL_DIR_DEG = -60.0  # crown wheel's direction from the ratchet
 
 # Thicknesses and depths (d below the mainplate's bridge face)
 MAINPLATE_T = 1.2
@@ -104,6 +111,7 @@ DIAL_D = 30.0
 DIAL_Z = 1.10              # dial underside, above the motion works
 DIAL_T = 0.40
 MW_Z = 0.15                # motion works' lowest face
+MINUTE_WHEEL_T = 0.20
 SUBDIAL_R = 3.2            # small-seconds register
 SUBDIAL_SINK = 0.15
 HOUR_HAND_Z = 1.75
@@ -115,10 +123,38 @@ CRYSTAL_T = 1.50
 CASE_Z0, CASE_Z1 = -9.0, 2.70
 BEZEL_W = 2.2
 LUG_W = 20.0               # between the lugs (strap width)
-CROWN_D = 5.5
+LUG_T = 2.4                # each lug's thickness
+LUG_ROOT = 0.8             # how far a lug's root runs into the wall
+CROWN_D = 5.0
 CROWN_L = 2.8
-STEM_Z = -3.0              # the crown's height on the case side
-STEM_R = 0.35
+
+# --- KEYLESS WORKS (dial side, in a slot and pockets in the mainplate) ------
+# The stem's height is DERIVED (STEM_Z): the clutch's contrate teeth must meet
+# the setting wheel, which runs at the minute wheel's level.
+STEM_R = 0.30
+STEM_SQUARE = 0.40         # the square the clutch slides on
+STEM_PULL = 1.0            # crown pulled out: the setting position
+CLUTCH_TRAVEL = 0.30       # how far the yoke moves the clutch inward
+KEYLESS_R = 0.65           # clutch and winding pinion, outside
+# A contrate ring meets its wheel at right angles, so only at ONE radius do
+# the two move at the same speed: across a wheel t thick the ring's teeth run
+# (t/2)/r_c fast or slow of it — the pitch surfaces of a right-angle pair are
+# cones, and a flat wheel is not one. Real keyless works run on backlash over
+# a narrow face; so do these: thin wheels (+-10%, not the +-20% a 0.20 wheel
+# gave, which interfered), and contrate teeth thinner than half the pitch.
+KEYLESS_WHEEL_T = 0.10     # setting and winding wheels
+CONTRATE_W = 0.24          # contrate teeth's radial face width
+RACK_FRAC = 0.25           # a contrate tooth's share of the pitch
+DOG_H = 0.12               # clutch dogs' engagement, plus 0.02 end play
+WINDING_PIN_L = 0.50
+MIN_CLUTCH_L = 0.40
+STEM_GROOVE_X = 9.5        # where the setting lever's pin rides the stem
+SETTING_LEVER_ARM = 3.5
+YOKE_ARM = 2.8
+LEVER_Z = 0.50             # levers, under the keyless bridge
+LEVER_T = 0.12
+KEYLESS_BRIDGE_Z = 0.80
+KEYLESS_BRIDGE_T = 0.15
 
 
 # --- DERIVED LAYOUT -----------------------------------------------------------
@@ -156,6 +192,11 @@ def _derive(g):
     g["CD_ROTOR_REDUCTION"] = _cd(m, Z_REDUCTION_W, Z_ROTOR_PIN, bl)
     g["CD_REDUCTION_RATCHET"] = _cd(m, Z_RATCHET, Z_REDUCTION_P, bl)
     g["CD_RATCHET_CROWN"] = _cd(m, Z_RATCHET, Z_CROWN_WHEEL, bl)
+    g["CD_SETTING"] = _cd(m, Z_MINUTE_W, Z_SETTING_W, bl)
+    # The stem's axis sits one contrate pitch radius below the setting
+    # wheel's mid-plane, which is the minute wheel's.
+    g["SETTING_MID_Z"] = g["MW_Z"] + g["MINUTE_WHEEL_T"] / 2
+    g["STEM_Z"] = g["SETTING_MID_Z"] - m * Z_CONTRATE / 2
 
     P = {"center": (0.0, 0.0), "fourth": (0.0, float(g["FOURTH_Y"]))}
     P["third"] = _meet(P["center"], float(g["CD_CENTER_THIRD"]),
@@ -175,10 +216,10 @@ def _derive(g):
     P["minute"] = (float(g["CD_MOTION"]), 0.0)          # motion works at 3
     P["reduction"] = _meet(P["center"], float(g["CD_ROTOR_REDUCTION"]),
                            P["barrel"], float(g["CD_REDUCTION_RATCHET"]), +1)
-    c = math.radians(float(g["CROWN_WHEEL_DIR_DEG"]))
-    r = float(g["CD_RATCHET_CROWN"])
-    P["crown_wheel"] = (P["barrel"][0] + r * math.cos(c),
-                        P["barrel"][1] + r * math.sin(c))
+    # The crown wheel on the stem's line, its pitch distance from the ratchet.
+    r, (bx, by) = float(g["CD_RATCHET_CROWN"]), P["barrel"]
+    P["crown_wheel"] = (bx + math.sqrt(r * r - by * by), 0.0)
+    P["setting"] = (P["minute"][0] + float(g["CD_SETTING"]), 0.0)
     g["POS"] = P
 
     # Depth (Z) of each level, from the stack above.
@@ -198,12 +239,17 @@ TOOTH_SETS = {
     "minute_w": Z_MINUTE_W, "minute_p": Z_MINUTE_P, "hour": Z_HOUR,
     "rotor_pin": Z_ROTOR_PIN, "reduction_w": Z_REDUCTION_W,
     "reduction_p": Z_REDUCTION_P, "ratchet": Z_RATCHET,
-    "crown_wheel": Z_CROWN_WHEEL}
+    "crown_wheel": Z_CROWN_WHEEL, "winding_w": Z_WINDING_W,
+    "setting_w": Z_SETTING_W,
+    # Contrate teeth: racks, their count on the face of a stem pinion.
+    "wp_rack": Z_CONTRATE, "clutch_rack": Z_CONTRATE}
+RACKS = {"wp_rack", "clutch_rack"}
 MESH_PAIRS = [("barrel", "center_pin"), ("center", "third_pin"),
               ("third", "fourth_pin"), ("fourth", "escape_pin"),
               ("minute_w", "cannon"), ("hour", "minute_p"),
               ("reduction_w", "rotor_pin"), ("ratchet", "reduction_p"),
-              ("ratchet", "crown_wheel")]
+              ("ratchet", "crown_wheel"), ("minute_w", "setting_w"),
+              ("setting_w", "clutch_rack"), ("winding_w", "wp_rack")]
 
 
 def gearing():
@@ -215,7 +261,14 @@ def gearing():
     two mates with one set of teeth, so its addendum can match only one of
     their dedenda: it takes the reduction pinion's, and the crown wheel's
     dedendum is traced by the same circle instead of its own (a hypocycloidal,
-    not radial, flank), which keeps both pairs conjugate.
+    not radial, flank), which keeps both pairs conjugate. The minute wheel and
+    the setting wheel are two more of those: the setting wheel's flank takes
+    the cannon pinion's circle, and the clutch's rack flank the minute
+    wheel's.
+
+    A rack (contrate teeth) has no pitch radius to halve; its own flank circle
+    defaults to half its wheel's pitch radius, and its `rp` is the radius of
+    the contrate ring on the pinion's face.
     """
     m = float(MODULE)
     mates = {k: [] for k in TOOTH_SETS}
@@ -223,7 +276,8 @@ def gearing():
         mates[a].append(b)
         mates[b].append(a)
     r = {k: m * z / 2 for k, z in TOOTH_SETS.items()}
-    rho_ded = {k: r[k] / 2 for k in TOOTH_SETS}
+    rho_ded = {k: (r[mates[k][0]] if k in RACKS else r[k]) / 2
+               for k in TOOTH_SETS}
     rho_add = {}
     for k in TOOTH_SETS:                       # multi-mate gears choose first
         if len(mates[k]) > 1:
@@ -234,10 +288,17 @@ def gearing():
         rho_add.setdefault(k, rho_ded[mates[k][0]])
     G = {}
     for k, z in TOOTH_SETS.items():
+        if k in RACKS:
+            frac, cap = float(RACK_FRAC), float(ADDENDUM_LEAF)
+            G[k] = dict(z=z, rho_add=rho_add[k], rho_ded=rho_ded[k],
+                        frac=frac, rack=True,
+                        h_a=_G.rack_addendum_height(m, rho_add[k], frac, cap))
+            continue
         leaf = z <= 12
         frac = float(TOOTH_FRAC_LEAF if leaf else TOOTH_FRAC_WHEEL)
         cap = float(ADDENDUM_LEAF if leaf else ADDENDUM_WHEEL)
         G[k] = dict(z=z, rho_add=rho_add[k], rho_ded=rho_ded[k], frac=frac,
+                    rack=False,
                     h_a=_G.addendum_height(m, z, rho_add[k], frac, cap))
     for k in TOOTH_SETS:
         G[k]["h_f"] = max(G[o]["h_a"] for o in mates[k]) \
@@ -282,6 +343,9 @@ def check_meshes():
         arc = 0.0
         for k in (a, b):
             g = GEAR[k]
+            if g["rack"]:
+                arc += _G.rack_arc(g["rho_add"], g["h_a"])
+                continue
             t_a = _G._solve(lambda t: math.hypot(*_G._epi(g["rp"], g["rho_add"],
                                                           t)),
                             g["rp"] + g["h_a"], 1e-9,
@@ -293,6 +357,8 @@ def check_meshes():
             bad.append(f"{a}/{b}: contact ratio {eps:.2f} < "
                        f"{float(MIN_CONTACT_RATIO)}")
         for k, o in ((a, b), (b, a)):
+            if GEAR[o]["rack"]:
+                continue        # a rack's root is its face; h_f clears it
             reach = GEAR[o]["rp"] - GEAR[k]["h_a"]
             core = CORE_R.get(o, ARBOR_R)
             if reach < core + 0.01:
@@ -317,6 +383,8 @@ def check_layout(P):
         ("escape wheel", "escape", ESCAPE_OUTER_R,
          (ESCAPE_WHEEL_D, ESCAPE_WHEEL_D + ESCAPE_T), "pallet"),
         ("balance", "balance", BALANCE_R, (BALANCE_D0, BALANCE_D1), None),
+        ("crown wheel", "crown_wheel", tip_r("crown_wheel"),
+         (RATCHET_D, RATCHET_D + RATCHET_T), "barrel"),
     ]
     # Each arbor's depth span. A wheel conflicts with an arbor only where
     # their depths overlap — which is how a balance rim can pass over the top
@@ -324,7 +392,11 @@ def check_layout(P):
     full = (0.0, BRIDGE_D)
     arbors = {"barrel": full, "center": full, "third": full, "fourth": full,
               "escape": full, "balance": full,
-              "pallet": (0.0, PALLET_BRIDGE_D + PALLET_BRIDGE_T)}
+              "pallet": (0.0, PALLET_BRIDGE_D + PALLET_BRIDGE_T),
+              # From the winding wheel in the plate to the crown wheel on
+              # the barrel bridge: through the barrel's level and the
+              # balance's, which is why it stands where it does.
+              "crown_wheel": (0.0, RATCHET_D + RATCHET_T)}
     bad = []
     for name, arb, rt, span, drives in wheels:
         if math.hypot(*P[arb]) + rt > MOVEMENT_D / 2:
@@ -353,6 +425,79 @@ _DERIVED_NAMES = tuple(
 _derive(globals())
 check_layout(POS)  # noqa: F821 — written by _derive
 CONTACT_RATIOS = check_meshes()
+
+
+def check_case():
+    """A lug's root runs LUG_ROOT into the wall at its outer face, where the
+    wall is nearest the axis; the root's innermost corner must still be in
+    solid wall, not in the dial or movement seat."""
+    R = CASE_D / 2
+    x_in, x_out = LUG_W / 2, LUG_W / 2 + LUG_T
+    if x_out >= R - LUG_ROOT:
+        raise ValueError(f"lugs {LUG_W} + 2x{LUG_T} apart leave the "
+                         f"{CASE_D} case: nothing to root in")
+    root = math.sqrt(R * R - x_out * x_out) - LUG_ROOT
+    seat = max(DIAL_D / 2 + 0.30, MOVEMENT_D / 2 + 0.05)
+    if math.hypot(x_in, root) <= seat + 0.3:
+        raise ValueError(f"a lug's root reaches r {math.hypot(x_in, root):.2f}"
+                         f", into the {seat:.2f} seat")
+
+
+check_case()
+
+
+def keyless():
+    """Where each keyless part stands along the stem (x), derived from the
+    two fixed ends: the setting wheel meshing the minute wheel, and the
+    winding wheel on the crown wheel's arbor. The clutch takes the slack
+    between them, and is refused if that leaves it too short.
+
+    A contrate ring's PITCH line stands h_f off the face it is cut on, so a
+    face meets its wheel at the wheel's pitch radius plus that."""
+    K = {}
+    wp, cr = GEAR["wp_rack"], GEAR["clutch_rack"]
+    x_c, x_s = POS["crown_wheel"][0], POS["setting"][0]
+    K["wp_face"] = x_c - GEAR["winding_w"]["rp"] - wp["h_f"]  # contrate face
+    K["wp_inner"] = K["wp_face"] - WINDING_PIN_L                # dog face
+    K["clutch_outer"] = K["wp_inner"] - DOG_H - 0.02  # dogs overlap DOG_H-.02
+    K["clutch_inner_set"] = x_s + GEAR["setting_w"]["rp"] + cr["h_f"]
+    K["clutch_inner"] = K["clutch_inner_set"] + CLUTCH_TRAVEL   # winding
+    K["clutch_l"] = K["clutch_outer"] - K["clutch_inner"]
+    # The stem's inner end stays inside the clutch when pulled out, and its
+    # square covers the clutch in both positions.
+    K["stem_end"] = K["clutch_inner_set"] - STEM_PULL - 0.02
+    K["square_to"] = K["clutch_outer"] + 0.05
+    K["wp_tip"] = K["wp_face"] + wp["h_f"] + wp["h_a"]
+    bad = []
+    if K["clutch_l"] < MIN_CLUTCH_L:
+        bad.append(f"the clutch is {K['clutch_l']:.3f} long between the "
+                   f"setting wheel and the winding pinion (< {MIN_CLUTCH_L})")
+    # Winding position: the clutch's contrate tips stand off the setting
+    # wheel's tips by the travel less both addenda.
+    off = CLUTCH_TRAVEL - cr["h_a"] - GEAR["setting_w"]["h_a"]
+    if off < 0.04:
+        bad.append(f"crown in, the clutch is only {off:.3f} off the setting "
+                   f"wheel")
+    # Crown out, its dogs clear the winding pinion's.
+    if CLUTCH_TRAVEL - DOG_H < 0.10:
+        bad.append("crown out, the clutch's dogs do not clear the winding "
+                   "pinion's")
+    # The stem clears the wheels either side of it: the setting wheel above,
+    # the winding wheel below.
+    above = SETTING_MID_Z - KEYLESS_WHEEL_T / 2 - (STEM_Z + STEM_R)
+    below = (STEM_Z - STEM_R) - (STEM_Z - wp["rp"] + KEYLESS_WHEEL_T / 2)
+    for what, gap in (("setting wheel", above), ("winding wheel", below)):
+        if gap < 0.05:
+            bad.append(f"the stem passes the {what} {gap:.3f} away")
+    if x_c + tip_r("crown_wheel") > MOVEMENT_D / 2 - 0.3:
+        bad.append("the crown wheel leaves the movement")
+    if bad:
+        raise ValueError("the keyless works cannot run:\n  "
+                         + "\n  ".join(bad))
+    return K
+
+
+KEYLESS = keyless()
 
 
 def _is_dimension(name, value):

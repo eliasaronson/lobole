@@ -96,7 +96,14 @@ and none of it touched a gate:
 
 - **Lugs drawn in side view.** A profile on a YZ plane — the top falling
   from under the bezel in an arc to a rounded tip — extruded to the lug's
-  width, with the spring-bar hole drilled through both lugs in one cut.
+  width, with the spring-bar hole drilled through both lugs in one cut, and a
+  half-millimetre taper in plan. The first version hung each lug on the case
+  by a CORNER: its root started at a literal R − 3, which is inside the wall
+  at the lug's inner face (x 10, wall at 17.3) and 1.3 mm outside it at the
+  outer face (x 12.4, wall at 15.7). The root is derived from the outer face
+  now, where the wall is nearest the axis, and `check_case()` refuses one
+  that would reach into the dial or movement seat. Nothing had caught it: a
+  lug fused along a 0.3 mm sliver is still one valid solid.
 - **A turned bezel.** Its section revolved: a rounded outer edge and a
   polished bevel down to the crystal.
 - **Jewels.** A ruby in every bridge pivot, each its own body so it can
@@ -112,15 +119,78 @@ and none of it touched a gate:
 - **Finishes that contrast.** A brushed case middle under a polished bezel,
   and a warmer dial.
 
-The stills are four, and each names what it hides: `dial` and `case` (glass
-hidden), `caseback` (through the window), and `movement` — case, caseback and
-rotor off, as a watchmaker would see it.
+The stills are five, and each names what it hides: `dial` and `case` (glass
+hidden), `caseback` (through the window), `movement` — case, caseback and
+rotor off, as a watchmaker would see it — and `keyless`, the dial side with
+the dial and hands off.
 
 The bridges have no pillars. They are placed by fastened mates to the
 mainplate's seat, which holds them exactly, but a real bridge stands on
 pillars or feet between the wheels; only the pallet bridge has them. Choosing
 pillar sites clear of every wheel's sweep is what the layout gate could
 check, and was not attempted.
+
+## The keyless works — the crown was connected to nothing
+
+The first build placed the stem and crown on a revolute of their own, 1.8 mm
+behind a 1.2 mm plate, with a toothless disc for a winding pinion. They are a
+real keyless works now (the plan's "Keyless works" has the layout): the crown
+winds the ratchet crown-in, and sets the hands crown-out without moving the
+train.
+
+**Everything is on the stem's line, and the crown wheel moved to get there.**
+A pinion on a stem meets a flat wheel at a right angle, and the wheel's axis
+must cross the stem's line — beyond the stem's end, or on the side its arbor
+does not run to. So the setting wheel (meshing the minute wheel) and the
+winding wheel both stand at y = 0, and the crown wheel went from 24 teeth
+beside the ratchet to 70 teeth at (7.678, 0): the nearest point on that line
+from which an arbor can pass the barrel (5.90 from its axis, against a 4.93
+tip) and still mesh the ratchet.
+
+**Contrate teeth are cycloidal racks — and a right-angle pair is only
+conjugate at one radius.** Past the contact a contrate tooth moves as a rack
+tooth, so it is drawn as the cycloidal rack conjugate to its wheel
+(`watch_gearing.rack_profile`). But it moves at ω·r, and r varies across the
+wheel's thickness, while the wheel moves at one speed: the true pitch
+surfaces of a right-angle pair are cones, and a flat wheel is not one. With
+0.20 mm wheels the mismatch was ±20% and the mesh interfered 0.00018 mm³.
+Real keyless works run on backlash over a narrow face, and so does this one:
+0.10 mm wheels (±10%) and contrate teeth at 0.25 of the pitch sweep clean at
+17 samples through a pitch, crown in and crown out.
+
+**The cannon pinion slips, because its friction fit is a relation.** Crown
+out, the setting wheel turns the minute wheel, and the cannon pinion must
+turn on the centre arbor without turning the train. It has its own revolute,
+and a 1:1 relation to the centre arbor IS the friction fit; the setting
+position removes it.
+
+**Three things about relations the keyless works found:**
+
+1. *A mate takes one relation.* The solver settles a mate when the first
+   relation reaches it and silently skips any later one. The clutch was a
+   cylindrical mate turned by the stem and slid by the yoke; the yoke's
+   relation was accepted by `add_relation` and never applied — the clutch
+   stayed put. That is a relation the document holds and the solve ignores,
+   which is what this codebase's refusal rule exists to prevent; not fixed
+   here. The clutch is a revolute whose axial seat the setting position
+   moves, and the levers are leaves of the stem.
+2. *A relation is applied only when something drives it.* Built, the stem's
+   side of the watch sat at the dofs its arbors were placed with — off their
+   relations' phases — until a mate on it was driven. The winding check read
+   its "before" from that state and got 53.378° where the chain gives
+   82.031°. `build_assembly` drives the stem once, after adding them.
+3. *A configuration cannot hold "crown out".* An assembly configuration
+   suppresses occurrences only — not a mate, not a relation, not a mate's
+   offset — and a relation touching a suppressed occurrence still drives it.
+   So the document holds the winding position, and the generator makes the
+   setting position (pull the stem, swap the clutch's relation, let the
+   cannon pinion slip), checks and sweeps it, and puts the winding position
+   back.
+
+**Winding by hand turns the rotor backwards**, 4 turns per quarter turn of
+the crown: the rotor's reduction train is related to the ratchet, and a
+relation has no one-way form. A real watch has a click and a reverser for
+exactly this. Left out, and said here.
 
 ## What the app could and could not do
 
@@ -143,23 +213,27 @@ stones sit on the escape wheel's tip circle, and the pallet is cut clear of
 the escape wheel by construction, so it is clash-free at any phase of the
 train.
 
-That refusal contradicts itself:
+That refusal contradicted itself:
 
     mate 5 (revolute) has no offset to couple — a cam needs revolute or
     cylindrical mates
 
-It names "revolute" as accepted in the same sentence that refuses one. The
-rule it means is "the DRIVER turns and the FOLLOWER slides", and a refusal that
-names the wrong vocabulary is the thing this codebase's refusal rule exists to
-prevent. Not fixed here.
+It named "revolute" as accepted in the same sentence that refused one,
+because it picked the word from the DRIVER's dof. It now names what the
+refused side needs — "b of a cam needs a slider or cylindrical mate — a cam's
+follower slides" — and `tests/assembly_relations_smoke.py` pins it.
 
 **Glass renders opaque.** The ray tracer hard-codes transmission to zero, so
 the crystal would hide the dial in every image and the caseback window would
 hide the movement. They are in the model and in its checks, and hidden for the
 renders.
 
-**There is no ruby, sapphire or blued steel.** Those are appearance
-overrides on real material slugs, so the mass is the slug's.
+**Ruby is a material now; blued steel is not, on purpose.** The jewels, the
+pallet stones and the impulse pin were a red appearance on NO material — and
+a body without one reports no mass at all. `ruby` (synthetic
+corundum, 3.98 g/cm³, 345 GPa) is its own row in the material library. Blued
+steel stays `steel` with a blue appearance: the blue is an oxide film a few
+hundred nanometres thick, so the steel's properties are the honest ones.
 
 **Meshing phases move the hands.** Every driven arbor sits up to a tooth pitch
 from zero once its relation puts a gap where the driver has a tooth — which

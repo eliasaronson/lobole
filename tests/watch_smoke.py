@@ -11,6 +11,8 @@ assembly against a headless app and checks the things that make it a watch:
 - the going train and the motion works keep time EXACTLY: one minute of the
   barrel turns the centre wheel 6 deg, the fourth wheel (small seconds) one
   turn, the escape wheel twelve, the hour wheel half a degree;
+- the crown winds the ratchet, crown in, and sets the hands without moving
+  the train, crown out;
 - the declared clearances hold, on their receipt.
 
 The generator's own run does the expensive half — the exact sweep, the motion
@@ -68,6 +70,13 @@ def main():
 
         turn, why = watch.check_ratios(app, m)
         expect(not why, "the train keeps time:\n  " + "\n  ".join(why))
+
+        # The crown winds (crown in) and sets the hands (crown out) — the
+        # kinematics only; the generator's run sweeps both positions.
+        _, why = watch.check_winding(app, m)
+        expect(not why, "the crown winds:\n  " + "\n  ".join(why))
+        _, why = watch.check_setting(app, occ, m, rel, sweep=False)
+        expect(not why, "the crown sets the hands:\n  " + "\n  ".join(why))
 
         watch.declare_clearances(app, occ)
         c = app.verify_assertions(_timeout=600)

@@ -131,9 +131,11 @@ def hull(points):
 
 
 def pads(centres, r, n=24):
-    """The hull of a disc of radius r around each centre — a bridge outline."""
-    return poly(hull([pol(r, 2 * math.pi * k / n, c)
-                      for c in centres for k in range(n)]))
+    """The hull of a disc of radius r around each centre — a bridge outline.
+    `r` is one radius for all of them, or one per centre."""
+    rs = list(r) if isinstance(r, (list, tuple)) else [r] * len(centres)
+    return poly(hull([pol(rr, 2 * math.pi * k / n, c)
+                      for c, rr in zip(centres, rs) for k in range(n)]))
 
 
 # --- gears ----------------------------------------------------------------------
@@ -349,6 +351,7 @@ def pallet_fork(app):
     material(app, 0, "steel")
     look(app, 0, "polished")
     for b in (1, 2):
+        material(app, b, "ruby")
         look(app, b, "ruby")
     return part
 
@@ -385,6 +388,7 @@ def balance(app):
     part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
     material(app, 0, "bronze")
     look(app, 0, "glucydur")
+    material(app, 1, "ruby")
     look(app, 1, "ruby")
     return part
 
@@ -427,7 +431,8 @@ def mainplate(app):
     prism(app, [circ((0, 0), R)], -MAINPLATE_T, MAINPLATE_T, "new_body",
           "plate")
     holes = [circ(POS[k], PIVOT_R) for k in
-             ("third", "escape", "pallet", "balance", "reduction")]
+             ("third", "escape", "pallet", "balance", "reduction",
+              "crown_wheel")]
     holes += [circ(POS["center"], 0.30), circ(POS["fourth"], 0.30),
               circ(POS["barrel"], 0.55)]
     prism(app, holes, -MAINPLATE_T - 0.01, MAINPLATE_T + 0.02, "cut",
@@ -440,7 +445,8 @@ def mainplate(app):
     # And a field of it across the plate inside that ring, where it shows
     # between the bridges once the rotor is off — no spot reaching a hole.
     keep = [(POS[k], PIVOT_R) for k in
-            ("third", "escape", "pallet", "balance", "reduction")]
+            ("third", "escape", "pallet", "balance", "reduction",
+             "crown_wheel")]
     keep += [(POS["center"], 0.30), (POS["fourth"], 0.30),
              (POS["barrel"], 0.55)]
     pitch, spot = 1.25, 0.50
@@ -457,6 +463,7 @@ def mainplate(app):
     prism(app, field, -MAINPLATE_T - 0.001, 0.03, "cut", "perlage field")
     prism(app, [circ(POS["minute"], 0.20)], 0.0, MW_Z + 0.65, "add",
           "minute stud")
+    keyless_seat(app, R)
     part.frame("seat", origin=(0.0, 0.0, 0.0))
     for k, (x, y) in POS.items():
         if k in ("minute",):
@@ -474,8 +481,12 @@ def mainplate(app):
     part.frame("pivot minute", origin=(POS["minute"][0], POS["minute"][1],
                                        -float(MAINPLATE_T)))
     part.frame("pivot hour", origin=(0.0, 0.0, -float(MAINPLATE_T)))
-    part.frame("pivot stem", origin=(11.2, 0.0, float(STEM_Z)),
-               z=(1.0, 0.0, 0.0), x=(0.0, 1.0, 0.0))
+    # The stem's axis, along +X at STEM_Z; everything on the stem is drawn
+    # in STEM coordinates (see keyless works) and mated to this frame.
+    part.frame("stem", origin=(0.0, 0.0, float(STEM_Z)), z=(1.0, 0.0, 0.0),
+               x=(0.0, 1.0, 0.0))
+    for k, c in lever_pivots().items():
+        part.frame(f"pivot {k}", origin=(c[0], c[1], -float(MAINPLATE_T)))
     material(app, 0, "brass")
     look(app, 0, "rhodium")
     return part
@@ -510,7 +521,7 @@ def bridge(app, name, centres, r, holes, d0=None, d1=None, stripes=True,
     part = app.part(name)
     d0 = BRIDGE_D if d0 is None else d0
     d1 = BRIDGE_D + BRIDGE_T if d1 is None else d1
-    outline = pads(centres, r)
+    outline = pads(centres, r)          # r: one radius, or one per centre
     slab(app, outline, d0, d1, "new_body", "bridge")
     if holes:
         slab(app, [circ(h, rr) for h, rr in holes], d0 - 0.01, d1 + 0.01,
@@ -549,6 +560,7 @@ def bridge(app, name, centres, r, holes, d0=None, d1=None, stripes=True,
     material(app, 0, "brass")
     look(app, 0, "rhodium")
     for b in range(1, len(jewels) + 1):
+        material(app, b, "ruby")
         look(app, b, "ruby")
     for b in range(len(jewels) + 1, len(jewels) + len(screws) + 1):
         material(app, b, "steel")
@@ -583,8 +595,11 @@ def bridges(app):
         screws=[(POS["center"][0], cy + (fy - cy) * f) for f in (0.3, 0.77)])
     barrel_holes = [(POS["barrel"], 0.55), (POS["crown_wheel"], PIVOT_R),
                     (POS["reduction"], PIVOT_R)]
+    # It carries the crown wheel's arbor too, on a pad reaching out to the
+    # stem's line.
     out["barrel"] = bridge(
-        app, "Barrel bridge", [POS["barrel"]], 4.10, barrel_holes,
+        app, "Barrel bridge", [POS["barrel"], POS["crown_wheel"]],
+        [4.10, 0.90], barrel_holes,
         screws=screw_sites(POS["barrel"], 3.2,
                            [(h, rr + 0.33) for h, rr in barrel_holes]))
     # The balance cock: a disc over the balance and an arm out to the rim.
@@ -635,8 +650,8 @@ def cannon_pinion(app):
 
 def minute_wheel(app):
     part = app.part("Minute wheel")
-    prism(app, teeth("minute_w"), MW_Z, 0.20, "new_body", "wheel")
-    prism(app, teeth("minute_p"), MW_Z + 0.20, 0.40, "add",
+    prism(app, teeth("minute_w"), MW_Z, MINUTE_WHEEL_T, "new_body", "wheel")
+    prism(app, teeth("minute_p"), MW_Z + MINUTE_WHEEL_T, 0.40, "add",
           "pinion")
     prism(app, [circ((0, 0), 0.23)], MW_Z - 0.01, 0.62, "cut", "bore")
     part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
@@ -802,24 +817,95 @@ def reduction_wheel(app):
 
 
 def crown_wheel(app):
-    return arbor(app, "Crown wheel", staff=(BRIDGE_D + BRIDGE_T - 0.4,
-                                            RATCHET_D + RATCHET_T + 0.15),
-                 wheel=("crown_wheel", RATCHET_D, RATCHET_T), spokes=0,
+    """The crown wheel meshing the ratchet on the barrel bridge, and on the
+    same arbor, down in a pocket in the mainplate, the winding wheel the
+    stem's winding pinion drives. The arbor stops at the winding wheel's top
+    face: it must never reach the level of the stem, which runs over it."""
+    zc = float(STEM_Z) - S.GEAR["wp_rack"]["rp"]     # winding wheel mid-plane
+    t = float(KEYLESS_WHEEL_T)
+    d0 = -(zc + t / 2) - float(MAINPLATE_T)          # its dial-side face
+    d1 = -(zc - t / 2) - float(MAINPLATE_T)
+    return arbor(app, "Crown wheel", staff=(d0, RATCHET_D + RATCHET_T + 0.15),
+                 wheel=("crown_wheel", RATCHET_D, RATCHET_T),
+                 pinion=("winding_w", d0, d1), spokes=5, hub=0.7,
                  look_as="rhodium")
 
 
 # --- keyless and case --------------------------------------------------------------------
 
+# The stem and everything riding on it are drawn in STEM coordinates: X along
+# the stem, its axis through the origin (world z = local z + STEM_Z), so a YZ
+# sketch plane at x has u = world Y and v = local Z. Each part's "axis" frame
+# sits on that axis and matches the mainplate's "stem" frame, so dof 0 leaves
+# it where it was drawn: the WINDING position. Angles about the stem are
+# measured from +Y towards +Z, and tooth 0 of every contrate ring is at +Y.
+
+def contrate(app, key, x_face, sign, name):
+    """A ring of contrate teeth on the end face at x_face, standing out
+    towards sign * X. Past the contact a contrate tooth moves as a rack tooth
+    does, so each is watch_gearing's cycloidal rack tooth, drawn in the plane
+    through its own radial line and extruded across the face width. (One
+    tooth and a circular Pattern would be two features, but a Pattern repeats
+    a BODY, and an extrude that adds to the pinion leaves none of its own.)"""
+    g = S.GEAR[key]
+    w = float(CONTRATE_W)
+    ents = watch_gearing.rack_profile(float(MODULE), g["rho_add"],
+                                      g["rho_ded"], g["frac"], g["h_a"],
+                                      g["h_f"], sink=0.02)
+    for k in range(g["z"]):
+        a = 2 * math.pi * k / g["z"]
+        er = (0.0, math.cos(a), math.sin(a))        # the tooth's radial line
+        et = (0.0, -math.sin(a), math.cos(a))       # the way it moves
+        # normal = er, u = sign * et, so v = er x u = sign * X, off the face.
+        r0 = g["rp"] - w / 2
+        sid = app.call("add_feature", feature={
+            "type": "Sketch", "name": f"{name} {k}", "entities": ents,
+            "plane": {"origin": [float(x_face), r0 * er[1], r0 * er[2]],
+                      "normal": list(er),
+                      "uAxis": [0.0, sign * et[1], sign * et[2]]}})["id"]
+        app.call("add_feature", feature={
+            "type": "Extrude", "name": f"{name} {k}", "sketch_id": sid,
+            "distance": w, "mode": "add"})
+
+
+def dogs(app, x0, length, phase_deg, name, n=4, r0=0.36, r1=0.62,
+         span_deg=40.0):
+    """n dog teeth, annular sectors from x0 along +X: the clutch's square
+    drive into the winding pinion. (A real one is Breguet — sawteeth that
+    slip one way; square dogs are the same engagement without the slip.)"""
+    ents = []
+    for k in range(n):
+        c = math.radians(phase_deg + 360.0 * k / n)
+        h = math.radians(span_deg) / 2
+        a0, a1 = (c - h) % (2 * math.pi), (c + h) % (2 * math.pi)
+        ents += [arc((0, 0), r1, a0, a1), seg(pol(r1, a1), pol(r0, a1)),
+                 arc((0, 0), r0, a0, a1), seg(pol(r0, a0), pol(r1, a0))]
+    prism(app, ents, 0, length, "add", name, pl=plane_x(x0))
+
+
+def _stem_frame(part):
+    part.frame("axis", origin=(0.0, 0.0, 0.0), z=(1.0, 0.0, 0.0),
+               x=(0.0, 1.0, 0.0))
+
+
+def _square(half):
+    return poly([(-half, -half), (half, -half), (half, half), (-half, half)])
+
+
 def stem(app):
-    """The winding stem and crown, on an axis along +X at STEM_Z."""
+    """The stem: a square where the clutch slides, round through the
+    winding pinion and out through the case, a groove the setting lever's
+    pin rides in, and the crown."""
+    K = S.KEYLESS
     part = app.part("Stem and crown")
     R = float(CASE_D) / 2
-    z = float(STEM_Z)
-
-    def along_x(ents, x0, length, mode, name):
-        return prism(app, ents, 0, length, mode, name, pl=plane_x(x0))
-    along_x([circ((0.0, z), STEM_R)], 11.2, R + 1.2 - 11.2, "new_body", "stem")
-    along_x([circ((0.0, z), 0.50)], 11.2, 0.5, "add", "winding pinion")
+    x_end, x_sq = K["stem_end"], K["square_to"]
+    prism(app, _square(float(STEM_SQUARE) / 2), 0, x_sq - x_end, "new_body",
+          "square", pl=plane_x(x_end))
+    prism(app, [circ((0, 0), STEM_R)], 0, R + 1.2 - x_sq + 0.01, "add",
+          "stem", pl=plane_x(x_sq - 0.01))
+    prism(app, [circ((0, 0), STEM_R + 0.01), circ((0, 0), 0.20)], 0, 0.16,
+          "cut", "lever groove", pl=plane_x(float(STEM_GROOVE_X) - 0.08))
     # The crown: fluted, with a polished cap.
     cr = float(CROWN_D) / 2
     flutes = []
@@ -827,19 +913,147 @@ def stem(app):
     for k in range(n):
         a0 = 2 * math.pi * k / n
         a1 = a0 + math.pi / n
-        flutes += [arc((0.0, z), cr, a0, a1),
-                   seg(pol(cr, a1, (0.0, z)), pol(cr - 0.18, a1, (0.0, z))),
-                   arc((0.0, z), cr - 0.18, a1, a0 + 2 * math.pi / n),
-                   seg(pol(cr - 0.18, a0 + 2 * math.pi / n, (0.0, z)),
-                       pol(cr, a0 + 2 * math.pi / n, (0.0, z)))]
-    along_x(flutes, R + 0.7, CROWN_L, "add", "crown")   # 0.1 clear of the tube
-    along_x([circ((0.0, z), cr - 0.30)], R + 0.7 + CROWN_L, 0.35, "add",
-            "cap")
-    part.frame("axis", origin=(11.2, 0.0, z), z=(1.0, 0.0, 0.0),
-               x=(0.0, 1.0, 0.0))
+        a2 = a0 + 2 * math.pi / n
+        flutes += [arc((0, 0), cr, a0, a1),
+                   seg(pol(cr, a1), pol(cr - 0.18, a1)),
+                   arc((0, 0), cr - 0.18, a1, a2 % (2 * math.pi)),
+                   seg(pol(cr - 0.18, a2), pol(cr, a2))]
+    prism(app, flutes, 0, CROWN_L, "add", "crown",
+          pl=plane_x(R + 0.7))                 # 0.1 clear of the tube
+    prism(app, [circ((0, 0), cr - 0.30)], 0, 0.35, "add", "cap",
+          pl=plane_x(R + 0.7 + CROWN_L))
+    _stem_frame(part)
     material(app, 0, "stainless_steel")
     look(app, 0, "polished")
     return part
+
+
+def winding_pinion(app):
+    """Free on the stem's round: dogs on its inner face, which the clutch
+    engages crown-in, and contrate teeth on its outer face driving the
+    winding wheel below the stem."""
+    K = S.KEYLESS
+    part = app.part("Winding pinion")
+    xa, xe = K["wp_inner"], K["wp_face"]
+    prism(app, [circ((0, 0), KEYLESS_R), circ((0, 0), STEM_R + 0.02)], 0,
+          xe - xa, "new_body", "pinion", pl=plane_x(xa))
+    dogs(app, xa - DOG_H, DOG_H + 0.02, 0.0, "dogs")
+    contrate(app, "wp_rack", xe, +1, "contrate teeth")
+    _stem_frame(part)
+    material(app, 0, "steel")
+    look(app, 0, "polished")
+    return part
+
+
+def clutch(app):
+    """The sliding pinion, on the stem's square: dogs on its outer face into
+    the winding pinion, contrate teeth on its inner face for the setting
+    wheel, and a groove the yoke's pin rides in. Drawn crown-in."""
+    K = S.KEYLESS
+    part = app.part("Clutch")
+    xi, xo = K["clutch_inner"], K["clutch_outer"]
+    prism(app, [circ((0, 0), KEYLESS_R)]
+          + _square(float(STEM_SQUARE) / 2 + 0.02), 0, xo - xi, "new_body",
+          "clutch", pl=plane_x(xi))
+    xm = (xi + xo) / 2
+    prism(app, [circ((0, 0), KEYLESS_R + 0.01), circ((0, 0), 0.47)], 0, 0.16,
+          "cut", "yoke groove", pl=plane_x(xm - 0.08))
+    dogs(app, xo - 0.02, DOG_H + 0.02, 45.0, "dogs")
+    contrate(app, "clutch_rack", xi, -1, "contrate teeth")
+    _stem_frame(part)
+    material(app, 0, "steel")
+    look(app, 0, "polished")
+    return part
+
+
+def setting_wheel(app):
+    """Always meshed with the minute wheel, at its level; the clutch's
+    contrate teeth reach it only crown-out. It turns on a stud hanging from
+    the keyless bridge, which stops short of the stem running under it."""
+    part = app.part("Setting wheel")
+    z0 = float(SETTING_MID_Z) - float(KEYLESS_WHEEL_T) / 2
+    prism(app, teeth("setting_w"), z0, KEYLESS_WHEEL_T, "new_body", "wheel")
+    prism(app, [circ((0, 0), 0.19)], z0 - 0.01, KEYLESS_WHEEL_T + 0.02,
+          "cut", "bore")
+    part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
+    material(app, 0, "steel")
+    look(app, 0, "polished")
+    return part
+
+
+def lever_pivots():
+    """Each lever turns on a stud ARM from where its pin meets its groove,
+    square to the stem, so its pin moves along the stem as it turns."""
+    K = S.KEYLESS
+    return {"setting_lever": (float(STEM_GROOVE_X), float(SETTING_LEVER_ARM)),
+            "yoke": ((K["clutch_inner"] + K["clutch_outer"]) / 2,
+                     float(YOKE_ARM))}
+
+
+def lever(app, name, arm, pin_tip_z):
+    """A keyless lever: a plate turning on its stud at the origin, with a pin
+    at (0, -arm) reaching down into the groove it drives."""
+    part = app.part(name)
+    z0, t = float(LEVER_Z), float(LEVER_T)
+    prism(app, pads([(0.0, 0.0), (0.0, -arm), (0.7, 0.9)],
+                    [0.45, 0.20, 0.25]), z0, t, "new_body", "lever")
+    prism(app, [circ((0, 0), 0.22)], z0 - 0.01, t + 0.02, "cut", "pivot hole")
+    prism(app, [circ((0.0, -arm), 0.06)], pin_tip_z, z0 - pin_tip_z + 0.01,
+          "add", "pin")
+    part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
+    material(app, 0, "steel")
+    look(app, 0, "polished")
+    return part
+
+
+def keyless_bridge(app):
+    """The plate over the keyless works, under the dial: it holds the
+    setting wheel's stud and caps the levers' studs, on two feet."""
+    part = app.part("Keyless bridge")
+    z0, t = float(KEYLESS_BRIDGE_Z), float(KEYLESS_BRIDGE_T)
+    sx = POS["setting"][0]
+    lp = lever_pivots()
+    feet = [(sx - 0.4, -1.5), (11.8, 1.6)]
+    prism(app, pads([(sx, 0.0), lp["yoke"], lp["setting_lever"], (11.8, 0.0)]
+                    + feet, [0.5, 0.45, 0.45, 0.7, 0.4, 0.4]), z0, t,
+          "new_body", "bridge")
+    prism(app, [circ(lp["yoke"], 0.19), circ(lp["setting_lever"], 0.19)],
+          z0 - 0.01, t + 0.02, "cut", "stud holes")
+    zs = float(SETTING_MID_Z) - float(KEYLESS_WHEEL_T) / 2 - 0.03
+    prism(app, [circ((sx, 0.0), 0.15)], zs, z0 - zs + 0.01, "add",
+          "setting wheel stud")
+    prism(app, [circ(f, 0.30) for f in feet], 0.0, z0 + 0.01, "add", "feet")
+    part.frame("seat", origin=(0.0, 0.0, 0.0))
+    material(app, 0, "brass")
+    look(app, 0, "rhodium")
+    return part
+
+
+def keyless_seat(app, R):
+    """What the mainplate gives the keyless works: a slot for the stem, open
+    to the dial face; pockets for the clutch and winding pinion (in both
+    positions) and for the winding wheel below the stem; and the levers'
+    studs."""
+    K = S.KEYLESS
+    zs = float(STEM_Z)
+    w = float(STEM_R) + 0.03
+    x0 = K["stem_end"] - 0.05
+    prism(app, poly([(-w, zs - w), (w, zs - w), (w, 0.01), (-w, 0.01)]), 0,
+          R + 0.1 - x0, "cut", "stem slot", pl=plane_x(x0))
+    kr = float(KEYLESS_R) + 0.08
+    # From the clutch's contrate TIPS crown-out (not its face: the tips stand
+    # h_f + h_a proud of it, and struck the pocket's end 0.029 mm3 deep) to
+    # the winding pinion's tips.
+    cr = S.GEAR["clutch_rack"]
+    xa = K["clutch_inner_set"] - cr["h_f"] - cr["h_a"] - 0.05
+    xb = K["wp_tip"] + 0.05
+    prism(app, poly([(xa, -kr), (xb, -kr), (xb, kr), (xa, kr)]), zs - kr,
+          0.01 - (zs - kr), "cut", "keyless pocket")
+    zw = zs - S.GEAR["wp_rack"]["rp"] - float(KEYLESS_WHEEL_T) / 2 - 0.08
+    prism(app, [circ(POS["crown_wheel"], S.tip_r("winding_w") + 0.10)], zw,
+          0.01 - zw, "cut", "winding wheel pocket")
+    prism(app, [circ(c, 0.18) for c in lever_pivots().values()], 0.0,
+          KEYLESS_BRIDGE_Z, "add", "lever studs")
 
 
 def case(app):
@@ -855,10 +1069,15 @@ def case(app):
     # Lugs at twelve and six, their inner faces LUG_W apart. Drawn in side
     # view — the top falls from under the bezel in an arc to a rounded tip
     # that carries the spring bar — and extruded to their width.
-    lug_t, tip_r = 2.4, 1.5
+    lug_t, tip_r = float(LUG_T), 1.5
+    x_out = float(LUG_W) / 2 + lug_t
+    # The root starts inside the wall where the wall is nearest the axis —
+    # at the lug's OUTER face. A literal R - 3 put it 1.3 mm outside the case
+    # there, and each lug hung on by a 0.3 mm sliver at its inner edge.
+    root = math.sqrt(R * R - x_out * x_out) - float(LUG_ROOT)
     zt, zl, zc = z1 - 0.4, z0 + 2.0, z0 + 5.0
     for sy in (1, -1):
-        yc, y_in = sy * (R + 3.0), sy * (R - 3.0)   # yc: the spring bar
+        yc, y_in = sy * (R + 3.0), sy * root   # yc: the spring bar
         side = [seg((y_in, zl), (y_in, zt)),
                 arc_through((y_in, zt), (sy * (R + 1.0), zt - 1.1),
                             (yc, zc + tip_r)),
@@ -871,6 +1090,15 @@ def case(app):
         prism(app, [circ((yc, zc), 0.45)], 0, float(LUG_W) + 2 * lug_t + 1.0,
               "cut", "spring bar hole",
               pl=plane_x(-(float(LUG_W) / 2 + lug_t + 0.5)))
+        # In plan each lug narrows by half a millimetre toward its tip, the
+        # taper starting where its outer face leaves the case.
+        y_leave = math.sqrt(R * R - x_out * x_out)
+        y_end = R + 3.0 + tip_r + 0.2
+        for sx in (1, -1):
+            prism(app, poly([(sx * (x_out + 0.1), sy * y_leave),
+                             (sx * (x_out + 0.1), sy * y_end),
+                             (sx * (x_out - 0.5), sy * y_end)]),
+                  z0 - 0.1, z1 - z0 + 0.2, "cut", "lug taper")
     # The stem's way through the wall at three o'clock.
     prism(app, [circ((0.0, float(STEM_Z)), STEM_R + 0.10)], 0,
           R - float(MOVEMENT_D) / 2 + 1.0, "cut", "stem hole",

@@ -99,8 +99,75 @@ at any phase of the train.
 and the crown wheel turns with the ratchet — one chain of relations rooted at
 the rotor. A real rotor winds both ways through a reverser, which is left out:
 unidirectional winding is the same visible train. The stem and crown are
-placed and turn freely; the winding pinion's link to the crown wheel is a
-contrate pair at right angles, which is not modelled.
+wound by the crown too, through the keyless works below.
+
+## Keyless works
+
+The crown winds the mainspring and sets the hands, as a real one does. The
+first build left it out — a stem on its own revolute, floating 1.8 mm behind
+a 1.2 mm plate with a toothless disc for a winding pinion — and a stem that
+touches nothing is exactly what a reader sees first.
+
+**Layout.** Everything that rides on the stem, and both wheels it drives, lie
+on the stem's line (y = 0), because a gear on a stem meets a flat wheel at a
+right angle: the wheel's axis must cross the stem's line, beyond where the
+stem ends or on the side of the stem its arbor does not run to. From the
+centre out:
+
+| part | where | drives |
+|---|---|---|
+| setting wheel, 16 | (4.3, 0), at the minute wheel's level | minute wheel 30, always meshed |
+| clutch (sliding pinion) | on the stem's square | 10 contrate teeth on its inner face → setting wheel; dogs on its outer face → winding pinion |
+| winding pinion | free on the stem's round | 10 contrate teeth on its outer face → winding wheel |
+| crown wheel arbor | (7.678, 0) | winding wheel 16 at plate level; crown wheel 70 at the ratchet's level → ratchet 48 |
+| stem and crown | in a slot in the mainplate's dial face, z −0.25 | — |
+
+The crown wheel moves: it now meshes the ratchet from (7.678, 0), which is the
+nearest point on the stem's line an arbor can pass the barrel from (70 teeth
+put it 5.90 from the barrel's axis against the barrel's 4.93 tip). Its arbor
+pivots in the mainplate and in the barrel bridge, which grows a pad to hold
+it.
+
+**Contrate teeth are cycloidal racks.** Seen along the wheel it drives, a
+contrate tooth passing the contact is a rack tooth, so its profile is the
+cycloidal rack's: the addendum a cycloid rolled by the wheel's dedendum
+circle, the flank a cycloid rolled by the circle that traces the wheel's
+addendum. The setting wheel meshes two mates — the minute wheel and the
+clutch — so, as with the ratchet, one rolling circle has to serve both: the
+clutch's rack flank takes the minute wheel's.
+
+**Two positions.** In the winding position (crown in) the clutch's dogs engage
+the winding pinion: stem → clutch → winding pinion → winding wheel → crown
+wheel → ratchet. Pulled out 1.0 mm, the setting lever turns, the yoke turns,
+and the yoke slides the clutch 0.30 inward: its dogs leave the winding
+pinion and its contrate teeth engage the setting wheel, which turns the minute
+wheel — and the cannon pinion SLIPS on the centre arbor, as its friction fit
+exists to, so the train does not turn. The cannon pinion therefore gets its
+own revolute and a 1:1 relation to the centre arbor: that relation IS the
+friction fit.
+
+The levers are coupled, not placed: stem offset → setting lever (a rack
+relation: its pin rides the stem's groove), setting lever → yoke, yoke →
+clutch offset (a rack relation: its pin rides the clutch's groove). A lever
+turning the wrong way puts its pin through a groove wall, which the exact
+sweep sees.
+
+**The document holds the winding position.** An assembly configuration can
+suppress occurrences, but not a relation or a mate, and it cannot override a
+mate's offset — so "crown pulled" cannot be stored as a configuration. The
+generator verifies the setting position instead: it pulls the stem, swaps the
+clutch's relation from the winding pinion to the setting wheel, lets the
+cannon pinion slip, turns the crown, checks the hands moved and the train did
+not, sweeps it, and puts the winding position back.
+
+## Lugs
+
+Each lug is drawn in side view and extruded to its width; its root runs
+`LUG_ROOT` into the case wall where the wall is nearest the axis — at the
+lug's OUTER face. The first draft started every root at a literal R − 3, which
+left the outer face 1.3 mm short of the wall and hung each lug on a 0.3 mm
+sliver at its inner edge. `watch_spec.check_case()` refuses a lug whose root
+would reach into the dial or movement seat.
 
 ## The watch
 
@@ -111,9 +178,10 @@ weight on a skeletonised rotor, a ruby jewel in every bridge pivot, blued
 screws let in flush, perlage on the plate and Côtes de Genève on the
 bridges.
 
-There is no ruby, sapphire or blued-steel material, so those are appearance
-overrides (`set_appearance`: colour, roughness, metallic) on real material
-slugs, and mass comes from the slug.
+The jewels are `ruby` — synthetic corundum at 3.98 g/cm³, half a steel's
+density, which is why it is its own material. Blued steel is `steel` with a
+blue appearance: the blue is an oxide film a few hundred nanometres thick, so
+the steel's properties are the honest ones.
 
 **Glass renders opaque** — the ray tracer hard-codes transmission to zero —
 so a crystal would hide the dial in every image and the caseback window would
@@ -145,6 +213,10 @@ hide the movement. They are modelled, and hidden for the renders.
   `clash: false`.
 - `solve_assembly`: dof 0 in the loops, and `placed_by_transform` covering
   only the case parts that are placed, not mated.
+- The keyless works in both positions: winding — the crown turns the ratchet
+  at (10/16)·(70/48) and every keyless mesh sweeps clean; setting — the crown
+  turns the hands, the centre wheel stays where it was, and the setting pose
+  sweeps clean.
 - One motion study turning the fourth wheel through 360°: read back the
   poses and require seconds hand +360°, minute hand +6°, hour hand +0.5°,
   escape wheel +12 turns, and no contact that was not there at rest.

@@ -75,6 +75,15 @@ def build_parts(app):
     P["reduction"] = W.reduction_wheel(app)
     P["crown_wheel"] = W.crown_wheel(app)
     P["stem"] = W.stem(app)
+    P["clutch"] = W.clutch(app)
+    P["winding_pinion"] = W.winding_pinion(app)
+    P["setting"] = W.setting_wheel(app)
+    P["setting_lever"] = W.lever(app, "Setting lever",
+                                 float(SETTING_LEVER_ARM),
+                                 float(STEM_Z) + 0.24)   # into the stem groove
+    P["yoke"] = W.lever(app, "Yoke", float(YOKE_ARM),
+                        float(STEM_Z) + 0.56)            # into the clutch's
+    P["keyless_bridge"] = W.keyless_bridge(app)
     P.update(W.case(app))
     return P
 
@@ -142,23 +151,41 @@ def build_assembly(app, P):
                        ("minute", "pivot minute"), ("hour", "pivot hour"),
                        ("reduction", "pivot reduction"),
                        ("crown_wheel", "pivot crown_wheel"),
-                       ("rotor", "pivot center"), ("stem", "pivot stem")):
+                       ("rotor", "pivot center"),
+                       # The cannon pinion turns on the centre arbor: its
+                       # friction fit is a RELATION (keyless_relations), so
+                       # setting the hands can make it slip.
+                       ("cannon", "pivot center"),
+                       ("setting", "pivot setting"),
+                       ("setting_lever", "pivot setting_lever"),
+                       ("yoke", "pivot yoke")):
         m[key] = rev(key, frame)
-    fasten("center", "axis", "cannon")
+    # On the stem's axis: the stem slides as well as turns. The clutch turns
+    # with it and slides only when the crown is pulled — a REVOLUTE whose
+    # axial seat the setting position moves (to_setting), because a mate is
+    # settled by the first relation that reaches it: a cylindrical clutch
+    # driven round by the stem ignored the yoke driving it along. The winding
+    # pinion only turns.
+    m["stem"] = asm.cylindrical((mp, "stem"), (occ["stem"], "axis"),
+                                flipped=False)["id"]
+    m["clutch"] = rev("clutch", "stem")
+    m["winding_pinion"] = rev("winding_pinion", "stem")
     fasten("balance", "axis", "hairspring")
     for key in ("train_bridge", "barrel_bridge", "cock_bridge",
                 "pallet_bridge", "dial", "indices", "case", "bezel",
-                "crystal", "caseback", "window"):
+                "crystal", "caseback", "window", "keyless_bridge"):
         fasten(mp, "seat", key, "seat")
 
     pos = POS
-    rel = []
+    rel = {}
     for a, b, za, zb, pa, pb in (
             ("barrel", "center", Z_BARREL, Z_CENTER_PIN, "barrel", "center"),
             ("center", "third", Z_CENTER, Z_THIRD_PIN, "center", "third"),
             ("third", "fourth", Z_THIRD, Z_FOURTH_PIN, "third", "fourth"),
             ("fourth", "escape", Z_FOURTH, Z_ESCAPE_PIN, "fourth", "escape"),
-            ("center", "minute", Z_CANNON, Z_MINUTE_W, "center", "minute"),
+            ("cannon", "minute", Z_CANNON, Z_MINUTE_W, "center", "minute"),
+            ("minute", "setting", Z_MINUTE_W, Z_SETTING_W, "minute",
+             "setting"),
             ("minute", "hour", Z_MINUTE_P, Z_HOUR, "minute", "center"),
             ("rotor", "reduction", Z_ROTOR_PIN, Z_REDUCTION_W, "center",
              "reduction"),
@@ -171,7 +198,13 @@ def build_assembly(app, P):
                      name=f"{a} {za} -> {b} {zb}")
         if r.get("error"):
             raise SdkError(f"relation {a}->{b}: {r['error']}")
-        rel.append(r)
+        rel[f"{a}->{b}"] = r
+    keyless_relations(app, m, rel)
+    # Relations are applied outward from a mate that is DRIVEN; until
+    # something drives the stem's side of the watch, its arbors sit at the
+    # dof they were placed with, off their relations' phases. Drive it once.
+    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    app.solve_assembly()
 
     # The hands. Meshing phases turn every driven arbor by up to a tooth
     # pitch — 22 minutes of hour hand, on a 32-tooth hour wheel — so each hand
@@ -182,13 +215,186 @@ def build_assembly(app, P):
     dof = {x["id"]: x.get("rotation", 0.0) for x in app.list_mates()["mates"]}
     for hand, arbor in (("hour_hand", "hour"), ("minute_hand", "cannon"),
                         ("seconds_hand", "fourth")):
-        base = m["center"] if arbor == "cannon" else m[arbor]
+        base = m[arbor]
         asm.app.add_mate(type="fastened",
                          a={"occurrence": occ[arbor].id, "frame": "axis"},
                          b={"occurrence": occ[hand].id, "frame": "axis"},
                          flipped=False, rotation=-dof.get(base, 0.0))
     solved = app.solve_assembly()
     return asm, occ, m, rel, solved
+
+
+# --- the keyless works -----------------------------------------------------------
+
+# A contrate ring meshing a flat wheel turns it the other way about the
+# wheel's own axis: at the contact, the ring's tooth and the wheel's rim move
+# the same way at r_ring * w = R_wheel * W.
+WIND_RATIO = -Z_CONTRATE / Z_WINDING_W
+SET_RATIO = -Z_CONTRATE / Z_SETTING_W
+
+
+def contrate_phase(ratio, z_wheel, tooth_at, gap_at):
+    """The relation phase that puts a GAP of the wheel where the contrate
+    ring has a tooth: the ring's tooth 0 at frame angle `tooth_at` (the
+    contact, about the stem) meets the wheel's gap centred at `gap_at`
+    (about the wheel) — mesh_phase for axes at right angles."""
+    return (gap_at - math.pi / z_wheel - ratio * tooth_at) \
+        % (2 * math.pi / z_wheel)
+
+
+def relate(app, m, rel, key, kind, a, b, **kw):
+    r = app.call("add_relation", type=kind, a=m[a], b=m[b], name=key, **kw)
+    if r.get("error"):
+        raise SdkError(f"relation {key}: {r['error']}")
+    rel[key] = r
+    return r
+
+
+def keyless_relations(app, m, rel):
+    """Crown in — the winding position, which the document holds."""
+    # The cannon pinion's friction fit on the centre arbor.
+    relate(app, m, rel, "friction", "gear", "center", "cannon", ratio=1.0)
+    relate(app, m, rel, "square", "gear", "stem", "clutch", ratio=1.0)
+    relate(app, m, rel, "dogs", "gear", "clutch", "winding_pinion",
+           ratio=1.0)
+    # Winding pinion's contrate teeth under the stem (-90 deg about it) meet
+    # the winding wheel on its -X side (180 deg about the crown wheel arbor).
+    relate(app, m, rel, "winding", "gear", "winding_pinion", "crown_wheel",
+           ratio=WIND_RATIO, phase=contrate_phase(WIND_RATIO, Z_WINDING_W,
+                                                  -math.pi / 2, math.pi))
+    # Pulling the stem turns the setting lever (its pin rides the stem's
+    # groove) and the lever turns the yoke, whose pin rides the clutch's
+    # groove. The yoke's last step — sliding the clutch — cannot be a relation
+    # (see the clutch's mate), so the setting position sets the clutch's seat
+    # to exactly where the yoke's turn puts its pin.
+    relate(app, m, rel, "setting lever", "rack", "setting_lever", "stem",
+           pitch_radius=float(SETTING_LEVER_ARM))
+    relate(app, m, rel, "lever -> yoke", "gear", "setting_lever", "yoke",
+           ratio=-(float(CLUTCH_TRAVEL) / float(YOKE_ARM))
+           / (float(STEM_PULL) / float(SETTING_LEVER_ARM)))
+
+
+def to_setting(app, m, rel):
+    """Crown out. An assembly configuration cannot switch a relation or hold
+    a mate's offset, so the setting position is made here and undone by
+    to_winding: the clutch leaves the winding pinion for the setting wheel,
+    and the cannon pinion's friction fit is let go."""
+    for k in ("dogs", "friction"):
+        app.call("remove_relation", id=rel.pop(k)["id"])
+    # The clutch engages the setting wheel where the setting wheel already
+    # is: of the phases that mesh (one per tooth), the nearest. The fixed one
+    # moved the setting wheel to an absolute angle, and the hands with it.
+    now = _mates(app)
+    pitch = 2 * math.pi / Z_SETTING_W
+    base = contrate_phase(SET_RATIO, Z_SETTING_W, math.pi / 2, 0.0)
+    want = (now[m["setting"]].get("rotation", 0.0)
+            - SET_RATIO * now[m["clutch"]].get("rotation", 0.0))
+    relate(app, m, rel, "setting", "gear", "clutch", "setting",
+           ratio=SET_RATIO,
+           phase=base + pitch * round((want - base) / pitch))
+    app.call("set_mate", id=m["stem"], offset=float(STEM_PULL))
+    app.call("set_mate", id=m["clutch"], offset=-float(CLUTCH_TRAVEL))
+    return app.solve_assembly()
+
+
+def to_winding(app, m, rel):
+    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    app.call("set_mate", id=m["stem"], offset=0.0)
+    app.call("set_mate", id=m["clutch"], offset=0.0)
+    app.solve_assembly()
+    app.call("remove_relation", id=rel.pop("setting")["id"])
+    relate(app, m, rel, "friction", "gear", "center", "cannon", ratio=1.0)
+    relate(app, m, rel, "dogs", "gear", "clutch", "winding_pinion",
+           ratio=1.0)
+    # A relation applies only when something drives it: drive the train (the
+    # hands go back onto the friction fit) and the stem, where they stand.
+    now = _mates(app)
+    app.call("set_mate", id=m["barrel"],
+             rotation=now[m["barrel"]].get("rotation", 0.0))
+    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    return app.solve_assembly()
+
+
+def _mates(app):
+    return {x["id"]: x for x in app.list_mates()["mates"]}
+
+
+def _turn(before, after, mate):
+    return math.degrees(after[mate].get("rotation", 0.0)
+                        - before[mate].get("rotation", 0.0))
+
+
+def check_winding(app, m):
+    """Crown in, a quarter turn of the crown winds the ratchet
+    (10/16)*(70/48) of a quarter turn, and the going train does not move."""
+    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    app.solve_assembly()
+    before = _mates(app)
+    app.call("set_mate", id=m["stem"], rotation_deg=90.0)
+    app.solve_assembly()
+    after = _mates(app)
+    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    app.solve_assembly()
+    got = {k: _turn(before, after, m[k])
+           for k in ("barrel_arbor", "center", "winding_pinion")}
+    want = {"barrel_arbor": 90.0 * Z_CONTRATE / Z_WINDING_W * Z_CROWN_WHEEL
+            / Z_RATCHET, "center": 0.0, "winding_pinion": 90.0}
+    bad = [f"crown in, a quarter turn of the crown turned the {k} "
+           f"{got[k]:+.4f} deg, want {want[k]:+.4f}"
+           for k in want if abs(got[k] - want[k]) > 1e-6 * max(1, want[k])]
+    return got, bad
+
+
+# The meshes that only exist crown-out, as MESHES has them.
+SETTING_MESHES = [
+    ("clutch", "setting", "stem", Z_CONTRATE, 1.0),
+    ("setting", "minute", "stem", Z_SETTING_W, Z_CONTRATE / Z_SETTING_W),
+]
+
+
+def check_setting(app, occ, m, rel, sweep=True):
+    """Crown out, a quarter turn of the crown turns the cannon pinion — the
+    minute hand — a quarter turn back, the centre wheel stays where it was,
+    the clutch has slid CLUTCH_TRAVEL in, and (sweep) the setting pose and
+    its meshes are clash-free. Leaves the watch crown-in."""
+    bad, info = [], {}
+    solved = to_setting(app, m, rel)
+    try:
+        if solved.get("errored_mates"):
+            bad.append(f"crown out, {solved['errored_mates']} mates errored")
+        before = _mates(app)
+        info["clutch offset"] = before[m["clutch"]].get("offset", 0.0)
+        if abs(info["clutch offset"] + float(CLUTCH_TRAVEL)) > 1e-6:
+            bad.append(f"crown out, the clutch moved "
+                       f"{info['clutch offset']:+.4f}, want "
+                       f"{-float(CLUTCH_TRAVEL):+.4f}")
+        app.call("set_mate", id=m["stem"], rotation_deg=90.0)
+        app.solve_assembly()
+        after = _mates(app)
+        app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+        app.solve_assembly()
+        for k in ("cannon", "center", "winding_pinion"):
+            info[k] = _turn(before, after, m[k])
+        want = {"cannon": -90.0, "center": 0.0, "winding_pinion": 0.0}
+        bad += [f"crown out, a quarter turn of the crown turned the {k} "
+                f"{info[k]:+.4f} deg, want {want[k]:+.4f}"
+                for k in want if abs(info[k] - want[k]) > 1e-6 * 90]
+        if sweep:
+            info["meshes"] = check_meshes(app, occ, m, meshes=SETTING_MESHES)
+            bad += [f"crown out, the {pair} mesh interferes: {v:.7f} mm3"
+                    for pair, v in info["meshes"].items() if v > 0.0]
+            r = app.interference(mode="exact", deadline_s=300,
+                                 max_pairs=20000, _timeout=600)
+            info["sweep"] = (len(r.get("pairs", [])),
+                             r["receipt"]["standing"])
+            if r.get("pairs") or r["receipt"]["standing"] != "verified":
+                bad.append(f"crown out, the exact sweep: {info['sweep']} "
+                           + "; ".join(f"{p.get('a')}/{p.get('b')} "
+                                       f"{p.get('volume', 0):.6f}"
+                                       for p in r.get("pairs", [])[:6]))
+    finally:
+        to_winding(app, m, rel)
+    return info, bad
 
 
 # --- declared clearances (v100) ------------------------------------------------------
@@ -217,6 +423,14 @@ CLEARANCES = [
      "a flexed caseback must not brake the rotor"),
     ("crown to case", "stem", "case", 0.05, "exact",
      "the crown turns against the case tube"),
+    ("clutch clear of the setting wheel", "clutch", "setting", 0.04, "exact",
+     "crown in, the clutch's contrate teeth stand off the setting wheel"),
+    ("setting wheel over the stem", "setting", "stem", 0.05, "exact",
+     "the setting wheel runs over the stem's inner end"),
+    ("winding wheel under the stem", "crown_wheel", "stem", 0.05, "exact",
+     "the winding wheel runs under the stem, which turns over it"),
+    ("keyless bridge to dial", "keyless_bridge", "dial", 0.10, "exact",
+     "the keyless works live under the dial"),
 ]
 
 
@@ -265,13 +479,18 @@ MESHES = [
     ("rotor", "reduction", "rotor", Z_ROTOR_PIN, 1.0),
     ("reduction", "barrel_arbor", "rotor", Z_REDUCTION_P,
      Z_ROTOR_PIN / Z_REDUCTION_W),
-    ("barrel_arbor", "crown_wheel", "rotor", Z_CROWN_WHEEL,
-     Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET * Z_RATCHET
-     / Z_CROWN_WHEEL),
+    ("barrel_arbor", "crown_wheel", "rotor", Z_RATCHET,
+     Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET),
+    ("minute", "setting", "barrel", Z_SETTING_W,
+     Z_BARREL / Z_CENTER_PIN * Z_CANNON / Z_SETTING_W),
+    # The keyless works, crown in: the stem drives them.
+    ("stem", "clutch", "stem", Z_CONTRATE, 1.0),
+    ("clutch", "winding_pinion", "stem", Z_CONTRATE, 1.0),
+    ("winding_pinion", "crown_wheel", "stem", Z_CONTRATE, 1.0),
 ]
 
 
-def check_meshes(app, occ, m, samples=9):
+def check_meshes(app, occ, m, samples=9, meshes=None):
     """Every mesh, EXACT, through one pitch of its smaller gear.
 
     The whole-assembly motion study cannot do this: in one pitch of the
@@ -282,7 +501,7 @@ def check_meshes(app, occ, m, samples=9):
     with a boolean — the worst volume over the pitch is the answer.
     """
     worst = {}
-    for a, b, driver, z_small, turns in MESHES:
+    for a, b, driver, z_small, turns in (meshes or MESHES):
         pitch_deg = 360.0 / z_small / turns
         v_max = 0.0
         for i in range(samples):
@@ -297,7 +516,7 @@ def check_meshes(app, occ, m, samples=9):
     return worst
 
 
-def verify(app, occ, m):
+def verify(app, occ, m, rel):
     print("checks:")
     bad = []
     with phase("ratios"):
@@ -322,6 +541,20 @@ def verify(app, occ, m):
         bad.append(f"the clash sweep is {standing}: {r['receipt']['summary']}")
     for p in r.get("pairs", [])[:12]:
         bad.append(f"clash {p['a']} <-> {p['b']} {p.get('volume', 0):.4f} mm3")
+
+    with phase("keyless"):
+        wind, why = check_winding(app, m)
+        bad += why
+        sett, why = check_setting(app, occ, m, rel)
+        bad += why
+    print(f"  crown in, a quarter turn winds the ratchet "
+          f"{wind['barrel_arbor']:+.3f} deg; centre {wind['center']:+.4f}")
+    for pair, v in sett.get("meshes", {}).items():
+        print(f"  mesh {pair:<36} worst {v:.7f} mm3 over a pitch (crown out)")
+    print(f"  crown out, the clutch slid {sett.get('clutch offset', 0):+.3f}; "
+          f"a quarter turn turns the minute hand {sett.get('cannon', 0):+.3f} "
+          f"deg and the centre wheel {sett.get('center', 0):+.4f}; sweep "
+          f"{sett.get('sweep')}")
 
     with phase("clearances"):
         c = app.verify_assertions(_timeout=900)
@@ -381,7 +614,11 @@ def renders(app, occ, out):
                                target=[0.0, 0.0, -6.0]), glass),
              ("movement", dict(eye=[-9.0, -23.0, -38.0],
                                target=[0.0, 0.0, -4.0]),
-              glass + ("caseback", "rotor", "case", "bezel")))
+              glass + ("caseback", "rotor", "case", "bezel")),
+             # Under the dial: motion works and keyless works, crown in.
+             ("keyless", dict(eye=[20.0, -24.0, 26.0], target=[6.0, 0.0, 0.0]),
+              glass + ("bezel", "case", "dial", "indices", "hour_hand",
+                       "minute_hand", "seconds_hand", "keyless_bridge")))
     for name, cam, hidden in shots:
         for k in hidden:
             app.call("set_occurrence_visible", id=occ[k].id, visible=False)
@@ -426,7 +663,7 @@ def main():
           f"{solved.get('placed_by_transform')} by transform, "
           f"errored mates {solved.get('errored_mates')}")
     print(f"  {declare_clearances(app, occ)} clearances declared")
-    verify(app, occ, m)
+    verify(app, occ, m, rel)
     set_time(app, m, 10, 8, 37)
     os.makedirs(args.out, exist_ok=True)
     app.save_project(path=os.path.join(args.out, "watch.dsgn"))
