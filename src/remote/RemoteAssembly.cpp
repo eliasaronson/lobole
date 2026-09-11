@@ -1143,6 +1143,23 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       mj["status"] = mate.error.empty() ? "satisfied" : "error";
       if (!mate.error.empty())
         mj["error"] = mate.error;
+      // The active configuration's overlay (v101). rotation/offset above
+      // are the AUTHORED values; the part is placed at the held ones, and a
+      // caller reading only the former saw a mate and a placement disagree.
+      if (state.assembly->MateSuppressed(mate.id)) {
+        mj["suppressed"] = true;
+        mj["status"] = "suppressed";
+      }
+      if (const MateOverride* hold = state.assembly->MateOverrideFor(mate.id)) {
+        json h = json::object();
+        if (hold->rotation) {
+          h["rotation"] = *hold->rotation;
+          h["rotation_deg"] = angles::ToDegrees(*hold->rotation);
+        }
+        if (hold->offset)
+          h["offset"] = *hold->offset;
+        mj["held"] = h;
+      }
       arr.push_back(mj);
     }
     return json{{"mates", arr}};

@@ -308,7 +308,9 @@ so leaving the configuration restores every mate. `set_mate` and the gizmo
 drag refuse to edit a held DOF, since they would edit the authored value
 underneath the hold; a motion study refuses to drive one. A mate or relation
 touching a suppressed occurrence sits out with it. Activating a configuration
-re-solves — it used to choose the variant and move nothing.
+re-solves — it used to choose the variant and move nothing. `list_mates`
+reports each mate's `held` values and `suppressed` state beside its authored
+`rotation`/`offset`, since those are no longer where the part is placed.
 `set_configuration` refuses the other kind's keys instead of ignoring them.
 [../watch-app-fixes-plan.md](../watch-app-fixes-plan.md).
 
