@@ -77,6 +77,7 @@ def build_parts(app):
         P[f"{k}_hand"] = v
     P["rotor"] = W.rotor(app)
     P["reduction"] = W.reduction_wheel(app)
+    P["reduction_pinion"] = W.reduction_pinion(app)
     P["crown_wheel"] = W.crown_wheel(app)
     P["stem"] = W.stem(app)
     P["clutch"] = W.clutch(app)
@@ -154,6 +155,10 @@ def build_assembly(app, P):
                        ("balance", "pivot balance"),
                        ("minute", "pivot minute"), ("hour", "pivot hour"),
                        ("reduction", "pivot reduction"),
+                       # The wheel rides loose on this staff (one pivot, two
+                       # mates): the one-way clutch between them is a
+                       # freewheel relation (winding_relations).
+                       ("reduction_pinion", "pivot reduction"),
                        ("crown_wheel", "pivot crown_wheel"),
                        ("rotor", "pivot center"),
                        # The cannon pinion turns on the centre arbor: its
@@ -190,7 +195,7 @@ def build_assembly(app, P):
             ("minute", "hour", Z_MINUTE_P, Z_HOUR, "minute", "center"),
             ("rotor", "reduction", Z_ROTOR_PIN, Z_REDUCTION_W, "center",
              "reduction"),
-            ("reduction", "barrel_arbor", Z_REDUCTION_P, Z_RATCHET,
+            ("reduction_pinion", "barrel_arbor", Z_REDUCTION_P, Z_RATCHET,
              "reduction", "barrel"),
             ("barrel_arbor", "crown_wheel", Z_RATCHET, Z_CROWN_WHEEL,
              "barrel", "crown_wheel")):
@@ -202,6 +207,7 @@ def build_assembly(app, P):
         rel[f"{a}->{b}"] = r
     keyless_relations(app, m, rel)
     escapement_relations(app, m, rel)
+    winding_relations(app, m, rel)
 
     # The hands. Meshing phases turn every driven arbor by up to a tooth
     # pitch — 22 minutes of hour hand, on a 32-tooth hour wheel — so each hand
@@ -258,6 +264,52 @@ def escapement_relations(app, m, rel):
     bal, fork = escapement_tables()
     relate(app, m, rel, "balance swing", "cam", "escape", "balance", lift=bal)
     relate(app, m, rel, "fork swing", "cam", "escape", "pallet", lift=fork)
+
+
+def winding_relations(app, m, rel):
+    """The one-way reduction wheel (docs/freewheel-plan.md): the wheel the
+    rotor drives turns the pinion only in the WINDING direction. Crown
+    winding turns the ratchet positive, which through its mesh turns the
+    pinion negative — so the freewheel drives negative, and the crown's
+    winding runs the pinion on ahead of a still rotor."""
+    relate(app, m, rel, "one-way wheel", "freewheel", "reduction",
+           "reduction_pinion", ratio=1.0, drives="negative")
+
+
+def check_rotor(app, m):
+    """The rotor turned in its winding direction winds the ratchet by the
+    train's ratio; turned back, it winds nothing. Undone afterwards, so the
+    watch is left as it was — and undo must bring the freewheel's history
+    back with the pose."""
+    want = 30.0 * Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET
+    before = _mates(app)
+    r0 = math.degrees(before[m["rotor"]]["rotation"])
+    app.call("set_mate", id=m["rotor"], rotation_deg=r0 + 30.0)
+    app.solve_assembly()
+    fwd = _mates(app)
+    app.call("set_mate", id=m["rotor"], rotation_deg=r0 - 30.0)
+    app.solve_assembly()
+    back = _mates(app)
+    app.call("undo")
+    app.call("undo")
+    app.solve_assembly()
+    after = _mates(app)
+    got = {"forward": _turn(before, fwd, m["barrel_arbor"]),
+           "back": _turn(fwd, back, m["barrel_arbor"]),
+           "restored": max(abs(_turn(before, after, m[k]))
+                           for k in ("rotor", "reduction",
+                                     "reduction_pinion", "barrel_arbor"))}
+    bad = []
+    if abs(got["forward"] - want) > 1e-3 * max(1.0, abs(want)):
+        bad.append(f"the rotor turned 30 deg forward wound the ratchet "
+                   f"{got['forward']:+.4f} deg, want {want:+.4f}")
+    if abs(got["back"]) > 1e-4:
+        bad.append(f"the rotor turned back moved the ratchet "
+                   f"{got['back']:+.4f} deg; a one-way wheel winds nothing")
+    if got["restored"] > 1e-6:
+        bad.append(f"undo left the winding train {got['restored']:.6f} deg "
+                   f"off where it was")
+    return got, bad
 
 
 def check_escapement(app, m):
@@ -383,19 +435,24 @@ def _turn(before, after, mate):
 
 def check_winding(app, m):
     """Crown in, a quarter turn of the crown winds the ratchet
-    (10/16)*(70/48) of a quarter turn, and the going train does not move."""
+    (10/16)*(70/48) of a quarter turn, and neither the going train nor the
+    rotor moves."""
     app.call("set_mate", id=m["stem"], rotation_deg=0.0)
     app.solve_assembly()
     before = _mates(app)
     app.call("set_mate", id=m["stem"], rotation_deg=90.0)
     app.solve_assembly()
     after = _mates(app)
-    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    # Undone, not turned back: turning the crown back would UNWIND the
+    # ratchet (there are no Breguet teeth to slip), and the one-way wheel
+    # locks that way, so it would drag the rotor round with it.
+    app.call("undo")
     app.solve_assembly()
     got = {k: _turn(before, after, m[k])
-           for k in ("barrel_arbor", "center", "winding_pinion")}
+           for k in ("barrel_arbor", "center", "winding_pinion", "rotor")}
+    # The rotor stays: the one-way reduction wheel lets the ratchet run on.
     want = {"barrel_arbor": 90.0 * Z_CONTRATE / Z_WINDING_W * Z_CROWN_WHEEL
-            / Z_RATCHET, "center": 0.0, "winding_pinion": 90.0}
+            / Z_RATCHET, "center": 0.0, "winding_pinion": 90.0, "rotor": 0.0}
     bad = [f"crown in, a quarter turn of the crown turned the {k} "
            f"{got[k]:+.4f} deg, want {want[k]:+.4f}"
            for k in want if abs(got[k] - want[k]) > 1e-6 * max(1, want[k])]
@@ -538,7 +595,7 @@ MESHES = [
     ("minute", "hour", "barrel", Z_MINUTE_P,
      Z_BARREL / Z_CENTER_PIN * Z_CANNON / Z_MINUTE_W),
     ("rotor", "reduction", "rotor", Z_ROTOR_PIN, 1.0),
-    ("reduction", "barrel_arbor", "rotor", Z_REDUCTION_P,
+    ("reduction_pinion", "barrel_arbor", "rotor", Z_REDUCTION_P,
      Z_ROTOR_PIN / Z_REDUCTION_W),
     ("barrel_arbor", "crown_wheel", "rotor", Z_RATCHET,
      Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET),
@@ -658,10 +715,15 @@ def verify(app, occ, m, rel, cache=None):
     with phase("keyless"):
         wind, why = check_winding(app, m)
         bad += why
+        rot, why = check_rotor(app, m)
+        bad += why
         sett, why = check_setting(app, occ, m, rel)
         bad += why
     print(f"  crown in, a quarter turn winds the ratchet "
-          f"{wind['barrel_arbor']:+.3f} deg; centre {wind['center']:+.4f}")
+          f"{wind['barrel_arbor']:+.3f} deg; centre {wind['center']:+.4f}, "
+          f"rotor {wind['rotor']:+.4f}")
+    print(f"  the rotor 30 deg forward winds the ratchet "
+          f"{rot['forward']:+.4f} deg, 30 deg back {rot['back']:+.4f}")
     for pair, v in sett.get("meshes", {}).items():
         print(f"  mesh {pair:<36} worst {v:.7f} mm3 over a pitch (crown out)")
     print(f"  crown out, the clutch slid {sett.get('clutch offset', 0):+.3f}; "

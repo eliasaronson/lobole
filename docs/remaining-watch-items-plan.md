@@ -49,18 +49,17 @@ the next.
 
 ## Larger — scoped for the next round
 
-The rotating cam follower that animates the escapement is built
-([rotating-cam-follower-plan.md](rotating-cam-follower-plan.md)).
+Built since: the rotating cam follower that animates the escapement
+([rotating-cam-follower-plan.md](rotating-cam-follower-plan.md)), and the
+freewheel that lets the crown wind without turning the rotor
+([freewheel-plan.md](freewheel-plan.md)).
 
-
-- **A one-way relation** (a freewheel): a relation that drives in one
-  direction and slips in the other. Hand-winding then leaves the rotor alone,
-  and the rotor's reverser can be modelled. About half a day in the solver
-  (it needs the previous value of the driving DOF).
-- **Breguet teeth** on the clutch and winding pinion — sawtooth dogs that
-  drive one way and slip the other, in place of square ones. They go with
-  the one-way relation: until the solver can slip, a sawtooth is a square
-  dog drawn differently, hidden under the bridge.
+- **Breguet teeth** on the clutch and winding pinion, so the rotor stops
+  turning the crown. The freewheel exists now; what is missing is the
+  clutch's LIFT along the stem as the sawtooth teeth ride over each other —
+  a motion driven by the slip, which no relation expresses. Without it a
+  slipping pose puts the teeth through each other.
+- **A reverser**, so the rotor winds in both directions.
 - **A thinner movement** (~5 mm, not ~8): re-stack every depth. A day,
   mostly verification.
 - **A per-body transmission** override in `Appearance` (tinted glass that is

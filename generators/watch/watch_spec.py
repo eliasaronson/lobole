@@ -105,6 +105,7 @@ PILLAR_CLEAR = 0.15        # from anything that turns
 PALLET_REACH = 2.20        # the pallet fork's swing, round its arbor
 RATCHET_D = 4.90           # on the barrel bridge (whose top is d 4.8)
 RATCHET_T = 0.40
+REDUCTION_BORE_CLEAR = 0.03  # the loose reduction wheel's bore over its staff
 REDUCTION_D = 5.35
 ROTOR_D = 5.70             # rotor plate's underside
 ROTOR_T = 0.50

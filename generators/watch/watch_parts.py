@@ -871,11 +871,31 @@ def rotor(app):
 
 
 def reduction_wheel(app):
-    return arbor(app, "Reduction wheel", staff=(BRIDGE_D + BRIDGE_T - 0.4,
-                                                REDUCTION_D + 0.22),
-                 wheel=("reduction_w", REDUCTION_D, 0.20),
+    """The wheel the rotor pinion drives, LOOSE on the reduction pinion's
+    staff — a one-way reduction wheel, as automatics have: a freewheel
+    relation between the two lets the crown wind the barrel while the rotor
+    stays put, and the rotor turned the wrong way winds nothing
+    (docs/freewheel-plan.md). Its bore clears the staff it turns on."""
+    part = app.part("Reduction wheel")
+    key, d, t = "reduction_w", REDUCTION_D, 0.20
+    slab(app, teeth(key), d, d + t, "new_body", "wheel")
+    slab(app, crossings(4, 0.5, root_r(key) - 0.30, 0.26), d, d + t, "cut",
+         "crossings")
+    slab(app, [circ((0, 0), ARBOR_R + REDUCTION_BORE_CLEAR)], d - 0.01,
+         d + t + 0.01, "cut", "bore")
+    part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
+    material(app, 0, "brass")
+    look(app, 0, "gilt")
+    return part
+
+
+def reduction_pinion(app):
+    """The staff the reduction wheel rides on, and its pinion driving the
+    ratchet."""
+    return arbor(app, "Reduction pinion", staff=(BRIDGE_D + BRIDGE_T - 0.4,
+                                                 REDUCTION_D + 0.22),
                  pinion=("reduction_p", RATCHET_D - 0.05,
-                         RATCHET_D + RATCHET_T + 0.05), spokes=4, hub=0.5)
+                         RATCHET_D + RATCHET_T + 0.05))
 
 
 def crown_wheel(app):
