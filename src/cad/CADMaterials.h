@@ -32,6 +32,12 @@ enum class MaterialType {
   CARBON_FIBRE,
   RUBBER,
   GLASS,
+  // Synthetic corundum (Al2O3): watch jewels, bearings, windows. Its own row
+  // because its density is half a steel's — a jewel modelled as steel with a
+  // red appearance weighs twice what it does. Blued steel is NOT a row: the
+  // blue is an oxide film a few hundred nanometres thick, so steel with a
+  // blue appearance is the honest model of it.
+  RUBY,
   CONCRETE,
 
   // Wood & engineered wood. Appearance is a procedural surface pattern shaded

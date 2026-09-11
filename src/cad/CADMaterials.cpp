@@ -135,6 +135,14 @@ void MaterialLibrary::InitializeMaterials() {
       0.08f,                         // Glass reflectance
       "Glass"};
 
+  materials[MaterialType::RUBY] = {
+      glm::vec3(0.62f, 0.02f, 0.07f), // Synthetic ruby red
+      0.0f,                           // Non-metallic
+      0.05f,                          // Polished
+      1.0f,                           // High specular
+      0.077f,                         // ((n-1)/(n+1))^2 at n = 1.77
+      "Ruby"};
+
   materials[MaterialType::CONCRETE] = {
       glm::vec3(0.7f, 0.7f, 0.65f), // Gray concrete
       0.0f,                         // Non-metallic
@@ -214,6 +222,7 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::CARBON_FIBRE].density = 1550.0f;
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
+  materials[MaterialType::RUBY].density = 3980.0f;
   materials[MaterialType::CONCRETE].density = 2400.0f;
   // Wood densities are moisture-dependent; these are typical air-dry (~12% MC)
   // values, well-defined enough for mass properties.
@@ -250,6 +259,7 @@ void MaterialLibrary::InitializeMaterials() {
   // and the numbers are the plate's, not a unidirectional ply's.
   elastic(MaterialType::CARBON_FIBRE, 55.0f, 0.30f, 550.0f);
   elastic(MaterialType::GLASS, 70.0f, 0.22f, 0.0f);
+  elastic(MaterialType::RUBY, 345.0f, 0.29f, 0.0f);
   elastic(MaterialType::CONCRETE, 30.0f, 0.20f, 0.0f);
   // Wood is strongly anisotropic (along-grain stiffness is ~15-20x the
   // transverse), but our FEM is linear-isotropic. These are representative
@@ -321,6 +331,7 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::CARBON_FIBRE, "carbon_fibre"},
       {MaterialType::RUBBER, "rubber"},
       {MaterialType::GLASS, "glass"},
+      {MaterialType::RUBY, "ruby"},
       {MaterialType::CONCRETE, "concrete"},
       {MaterialType::WOOD_OAK, "wood_oak"},
       {MaterialType::WOOD_PINE, "wood_pine"},
