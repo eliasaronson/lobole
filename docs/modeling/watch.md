@@ -226,10 +226,22 @@ an equation and none had a one-way form. The reduction wheel is now built the
 way a real one-way reduction wheel is: the wheel the rotor pinion drives rides
 loose on the staff of the pinion that drives the ratchet, and a FREEWHEEL
 relation joins them ([freewheel-plan.md](../freewheel-plan.md)). The crown
-winds the ratchet and runs the pinion on ahead of a still rotor; the rotor
-turned forward winds the ratchet by the train's ratio, and turned back winds
-nothing, as a Valjoux 7750 does. `verify()` checks all three, and that undo
-puts the freewheel's history back with the pose.
+winds the ratchet and runs the pinion on ahead of a still rotor.
+
+**And it winds whichever way the rotor swings**, through a REVERSER laid out
+as an ETA 2824's ([reverser-plan.md](../reverser-plan.md)): a second wheel
+meshes the first wheel to wheel, so it turns the other way, each rides loose
+on its own pinion behind a one-way clutch, and both pinions mesh the ratchet.
+One engages and the other slips, whichever way the rotor goes: 30 degrees
+forward winds the ratchet 1.72, and 60 degrees back winds it 3.44 the SAME
+way. `verify()` checks that, the crown winding with both wheels still, and
+that undo puts both clutches' history back with the pose.
+
+The two reverser wheels mesh each other, which made one tooth set meet
+another of its own kind for the first time here — every other pair is a wheel
+and a pinion. The cycloidal design handles it (its addendum and dedendum come
+out on one rolling circle, which is what wheel-to-wheel conjugacy wants) and
+the pair runs at a contact ratio of 1.62.
 
 **What is still missing:** the rotor turns the crown when it winds. A real
 watch's clutch and winding pinion have Breguet teeth that slip, and they slip

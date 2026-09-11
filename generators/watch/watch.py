@@ -78,6 +78,8 @@ def build_parts(app):
     P["rotor"] = W.rotor(app)
     P["reduction"] = W.reduction_wheel(app)
     P["reduction_pinion"] = W.reduction_pinion(app)
+    P["reverser"] = W.reverser_wheel(app)
+    P["reverser_pinion"] = W.reverser_pinion(app)
     P["crown_wheel"] = W.crown_wheel(app)
     P["stem"] = W.stem(app)
     P["clutch"] = W.clutch(app)
@@ -159,6 +161,8 @@ def build_assembly(app, P):
                        # mates): the one-way clutch between them is a
                        # freewheel relation (winding_relations).
                        ("reduction_pinion", "pivot reduction"),
+                       ("reverser", "pivot reverser"),
+                       ("reverser_pinion", "pivot reverser"),
                        ("crown_wheel", "pivot crown_wheel"),
                        ("rotor", "pivot center"),
                        # The cannon pinion turns on the centre arbor: its
@@ -197,6 +201,13 @@ def build_assembly(app, P):
              "reduction"),
             ("reduction_pinion", "barrel_arbor", Z_REDUCTION_P, Z_RATCHET,
              "reduction", "barrel"),
+            # The reverser: the second wheel takes its turn from the first,
+            # wheel to wheel, and its pinion drives the ratchet beside the
+            # first one's (docs/reverser-plan.md).
+            ("reduction", "reverser", Z_REDUCTION_W, Z_REDUCTION_W,
+             "reduction", "reverser"),
+            ("reverser_pinion", "barrel_arbor", Z_REDUCTION_P, Z_RATCHET,
+             "reverser", "barrel"),
             ("barrel_arbor", "crown_wheel", Z_RATCHET, Z_CROWN_WHEEL,
              "barrel", "crown_wheel")):
         r = asm.gear(m[a], m[b], za, zb,
@@ -274,12 +285,17 @@ def winding_relations(app, m, rel):
     winding runs the pinion on ahead of a still rotor."""
     relate(app, m, rel, "one-way wheel", "freewheel", "reduction",
            "reduction_pinion", ratio=1.0, drives="negative")
+    # The second wheel turns the other way, and its clutch drives the same
+    # sense — both pinions mesh the ratchet — so one engages and the other
+    # slips whichever way the rotor swings.
+    relate(app, m, rel, "one-way wheel 2", "freewheel", "reverser",
+           "reverser_pinion", ratio=1.0, drives="negative")
 
 
 def check_rotor(app, m):
-    """The rotor turned in its winding direction winds the ratchet by the
-    train's ratio; turned back, it winds nothing. Undone afterwards, so the
-    watch is left as it was — and undo must bring the freewheel's history
+    """The reverser: the rotor winds the ratchet the SAME way whichever way
+    it swings, by the train's ratio either time. Undone afterwards, so the
+    watch is left as it was — and undo must bring both freewheels' history
     back with the pose."""
     want = 30.0 * Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET
     before = _mates(app)
@@ -287,7 +303,7 @@ def check_rotor(app, m):
     app.call("set_mate", id=m["rotor"], rotation_deg=r0 + 30.0)
     app.solve_assembly()
     fwd = _mates(app)
-    app.call("set_mate", id=m["rotor"], rotation_deg=r0 - 30.0)
+    app.call("set_mate", id=m["rotor"], rotation_deg=r0 - 30.0)  # 60 back
     app.solve_assembly()
     back = _mates(app)
     app.call("undo")
@@ -297,15 +313,17 @@ def check_rotor(app, m):
     got = {"forward": _turn(before, fwd, m["barrel_arbor"]),
            "back": _turn(fwd, back, m["barrel_arbor"]),
            "restored": max(abs(_turn(before, after, m[k]))
-                           for k in ("rotor", "reduction",
-                                     "reduction_pinion", "barrel_arbor"))}
+                           for k in ("rotor", "reduction", "reduction_pinion",
+                                     "reverser", "reverser_pinion",
+                                     "barrel_arbor"))}
     bad = []
     if abs(got["forward"] - want) > 1e-3 * max(1.0, abs(want)):
         bad.append(f"the rotor turned 30 deg forward wound the ratchet "
                    f"{got['forward']:+.4f} deg, want {want:+.4f}")
-    if abs(got["back"]) > 1e-4:
-        bad.append(f"the rotor turned back moved the ratchet "
-                   f"{got['back']:+.4f} deg; a one-way wheel winds nothing")
+    if abs(got["back"] - 2 * want) > 1e-3 * max(1.0, abs(want)):
+        bad.append(f"the rotor turned 60 deg back wound the ratchet "
+                   f"{got['back']:+.4f} deg, want {2 * want:+.4f} — the "
+                   f"reverser winds both ways")
     if got["restored"] > 1e-6:
         bad.append(f"undo left the winding train {got['restored']:.6f} deg "
                    f"off where it was")
@@ -437,10 +455,11 @@ def check_winding(app, m):
     """Crown in, a quarter turn of the crown winds the ratchet
     (10/16)*(70/48) of a quarter turn, and neither the going train nor the
     rotor moves."""
-    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
-    app.solve_assembly()
     before = _mates(app)
-    app.call("set_mate", id=m["stem"], rotation_deg=90.0)
+    # A quarter turn from where the stem STANDS: it is never turned back,
+    # which would drive the winding train backwards.
+    s0 = math.degrees(before[m["stem"]].get("rotation", 0.0))
+    app.call("set_mate", id=m["stem"], rotation_deg=s0 + 90.0)
     app.solve_assembly()
     after = _mates(app)
     # Undone, not turned back: turning the crown back would UNWIND the
@@ -449,10 +468,12 @@ def check_winding(app, m):
     app.call("undo")
     app.solve_assembly()
     got = {k: _turn(before, after, m[k])
-           for k in ("barrel_arbor", "center", "winding_pinion", "rotor")}
+           for k in ("barrel_arbor", "center", "winding_pinion", "rotor",
+                     "reverser")}
     # The rotor stays: the one-way reduction wheel lets the ratchet run on.
     want = {"barrel_arbor": 90.0 * Z_CONTRATE / Z_WINDING_W * Z_CROWN_WHEEL
-            / Z_RATCHET, "center": 0.0, "winding_pinion": 90.0, "rotor": 0.0}
+            / Z_RATCHET, "center": 0.0, "winding_pinion": 90.0, "rotor": 0.0,
+            "reverser": 0.0}
     bad = [f"crown in, a quarter turn of the crown turned the {k} "
            f"{got[k]:+.4f} deg, want {want[k]:+.4f}"
            for k in want if abs(got[k] - want[k]) > 1e-6 * max(1, want[k])]
@@ -597,6 +618,10 @@ MESHES = [
     ("rotor", "reduction", "rotor", Z_ROTOR_PIN, 1.0),
     ("reduction_pinion", "barrel_arbor", "rotor", Z_REDUCTION_P,
      Z_ROTOR_PIN / Z_REDUCTION_W),
+    ("reduction", "reverser", "rotor", Z_REDUCTION_W,
+     Z_ROTOR_PIN / Z_REDUCTION_W),
+    ("reverser_pinion", "barrel_arbor", "rotor", Z_REDUCTION_P,
+     Z_ROTOR_PIN / Z_REDUCTION_W),
     ("barrel_arbor", "crown_wheel", "rotor", Z_RATCHET,
      Z_ROTOR_PIN / Z_REDUCTION_W * Z_REDUCTION_P / Z_RATCHET),
     ("minute", "setting", "barrel", Z_SETTING_W,
@@ -621,14 +646,17 @@ def check_meshes(app, occ, m, samples=9, meshes=None):
     worst = {}
     for a, b, driver, z_small, turns in (meshes or MESHES):
         pitch_deg = 360.0 / z_small / turns
+        # Forward from where the driver stands, and LEFT there: turning one
+        # back would drive the winding train backwards, which the reverser's
+        # clutches hold against rather than unwind (docs/reverser-plan.md).
+        start = math.degrees(_mates(app)[m[driver]].get("rotation", 0.0))
         v_max = 0.0
         for i in range(samples):
-            app.call("set_mate", id=m[driver], rotation_deg=pitch_deg * i
-                     / (samples - 1))
+            app.call("set_mate", id=m[driver],
+                     rotation_deg=start + pitch_deg * i / (samples - 1))
             app.solve_assembly()
             r = app.interference(a=occ[a].id, b=occ[b].id, mode="exact")
             v_max = max(v_max, r.get("volume", 0.0) or 0.0)
-        app.call("set_mate", id=m[driver], rotation_deg=0.0)
         worst[f"{occ[a].name} / {occ[b].name}"] = v_max
     app.solve_assembly()
     return worst
@@ -723,7 +751,7 @@ def verify(app, occ, m, rel, cache=None):
           f"{wind['barrel_arbor']:+.3f} deg; centre {wind['center']:+.4f}, "
           f"rotor {wind['rotor']:+.4f}")
     print(f"  the rotor 30 deg forward winds the ratchet "
-          f"{rot['forward']:+.4f} deg, 30 deg back {rot['back']:+.4f}")
+          f"{rot['forward']:+.4f} deg, 60 deg back {rot['back']:+.4f}")
     for pair, v in sett.get("meshes", {}).items():
         print(f"  mesh {pair:<36} worst {v:.7f} mm3 over a pitch (crown out)")
     print(f"  crown out, the clutch slid {sett.get('clutch offset', 0):+.3f}; "

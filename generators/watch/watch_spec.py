@@ -222,6 +222,12 @@ def _derive(g):
     P["minute"] = (float(g["CD_MOTION"]), 0.0)          # motion works at 3
     P["reduction"] = _meet(P["center"], float(g["CD_ROTOR_REDUCTION"]),
                            P["barrel"], float(g["CD_REDUCTION_RATCHET"]), +1)
+    # The second reverser wheel: a wheel's pitch distance from the first
+    # (wheel to wheel, so it turns the other way) and its pinion's from the
+    # ratchet, which both pinions drive (docs/reverser-plan.md). The other
+    # intersection is 3.0 from the crown wheel, which needs 4.26.
+    P["reverser"] = _meet(P["reduction"], m * Z_REDUCTION_W + bl,
+                          P["barrel"], float(g["CD_REDUCTION_RATCHET"]), +1)
     # The crown wheel on the stem's line, its pitch distance from the ratchet.
     r, (bx, by) = float(g["CD_RATCHET_CROWN"]), P["barrel"]
     P["crown_wheel"] = (bx + math.sqrt(r * r - by * by), 0.0)
@@ -253,7 +259,12 @@ RACKS = {"wp_rack", "clutch_rack"}
 MESH_PAIRS = [("barrel", "center_pin"), ("center", "third_pin"),
               ("third", "fourth_pin"), ("fourth", "escape_pin"),
               ("minute_w", "cannon"), ("hour", "minute_p"),
-              ("reduction_w", "rotor_pin"), ("ratchet", "reduction_p"),
+              ("reduction_w", "rotor_pin"),
+              # The two reverser wheels mesh each OTHER: one set meeting
+              # another of its own kind, which no other pair here does. Its
+              # addendum and dedendum come out on one rolling circle, which
+              # is what wheel-to-wheel conjugacy wants.
+              ("reduction_w", "reduction_w"), ("ratchet", "reduction_p"),
               ("ratchet", "crown_wheel"), ("minute_w", "setting_w"),
               ("setting_w", "clutch_rack"), ("winding_w", "wp_rack")]
 

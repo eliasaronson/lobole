@@ -655,7 +655,7 @@ def bridges(app):
         [(POS[k], PIVOT_R) for k in ("center", "third", "fourth", "escape")],
         pillars=S.PILLARS["train"])
     barrel_holes = [(POS["barrel"], 0.55), (POS["crown_wheel"], PIVOT_R),
-                    (POS["reduction"], PIVOT_R)]
+                    (POS["reduction"], PIVOT_R), (POS["reverser"], PIVOT_R)]
     # It carries the crown wheel's arbor too, on a pad reaching out to the
     # stem's line.
     out["barrel"] = bridge(
@@ -870,13 +870,13 @@ def rotor(app):
     return part
 
 
-def reduction_wheel(app):
+def reduction_wheel(app, name="Reduction wheel"):
     """The wheel the rotor pinion drives, LOOSE on the reduction pinion's
     staff — a one-way reduction wheel, as automatics have: a freewheel
     relation between the two lets the crown wind the barrel while the rotor
     stays put, and the rotor turned the wrong way winds nothing
     (docs/freewheel-plan.md). Its bore clears the staff it turns on."""
-    part = app.part("Reduction wheel")
+    part = app.part(name)
     key, d, t = "reduction_w", REDUCTION_D, 0.20
     slab(app, teeth(key), d, d + t, "new_body", "wheel")
     slab(app, crossings(4, 0.5, root_r(key) - 0.30, 0.26), d, d + t, "cut",
@@ -889,13 +889,25 @@ def reduction_wheel(app):
     return part
 
 
-def reduction_pinion(app):
+def reduction_pinion(app, name="Reduction pinion"):
     """The staff the reduction wheel rides on, and its pinion driving the
     ratchet."""
-    return arbor(app, "Reduction pinion", staff=(BRIDGE_D + BRIDGE_T - 0.4,
-                                                 REDUCTION_D + 0.22),
+    return arbor(app, name, staff=(BRIDGE_D + BRIDGE_T - 0.4,
+                                   REDUCTION_D + 0.22),
                  pinion=("reduction_p", RATCHET_D - 0.05,
                          RATCHET_D + RATCHET_T + 0.05))
+
+
+def reverser_wheel(app):
+    """The second reverser wheel: driven by the first, wheel to wheel, so it
+    turns the other way. Its own one-way clutch onto its own pinion is what
+    makes the rotor wind whichever way it swings (docs/reverser-plan.md)."""
+    return reduction_wheel(app, "Reverser wheel")
+
+
+def reverser_pinion(app):
+    """The second reverser pinion, meshing the ratchet beside the first."""
+    return reduction_pinion(app, "Reverser pinion")
 
 
 def crown_wheel(app):
