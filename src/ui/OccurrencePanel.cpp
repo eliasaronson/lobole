@@ -127,6 +127,11 @@ void DrawRelationsSection(AppState& state) {
           (a->name.empty() ? "mate " + std::to_string(a->id) : a->name).c_str(),
           (b->name.empty() ? "mate " + std::to_string(b->id) : b->name)
               .c_str());
+    // A freewheel's history, read-only: set_relation {lead} re-engages it.
+    if (r.kind == RelationKind::Freewheel)
+      ImGui::TextDisabled("  drives %s, lead %.4g deg",
+                          DocumentIO::FreewheelDrivesToString(r.drives),
+                          angles::ToDegrees(r.lead));
     double ratio = r.ratio, phase = r.phase;
     ImGui::SetNextItemWidth(110.0f);
     if (ExprInputDouble(state, "ratio###rel_ratio", &ratio, "%.5g") &&

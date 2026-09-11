@@ -238,6 +238,65 @@ def main():
         refused(d, "add_relation", "0 <= angle < 360", type="cam", a=a, b=cyl,
                 lift=[[0, 0], [400, 5]])
         refused(d, "add_relation", "rise > 0", type="cam", a=a, b=cyl, rise=0)
+
+        # ---- freewheel (v104, docs/freewheel-plan.md) ---------------------
+        for r in d.call("list_relations")["relations"]:
+            d.call("remove_relation", id=r["id"])
+        d.call("set_mate", id=a, rotation=0.0)
+        d.call("set_mate", id=cyl, rotation=0.0)
+        # Its direction is the whole of it: required, and only the two.
+        refused(d, "add_relation", "drives", type="freewheel", a=a, b=cyl,
+                ratio=1.0)
+        refused(d, "add_relation", "positive or negative", type="freewheel",
+                a=a, b=cyl, ratio=1.0, drives="forward")
+        refused(d, "add_relation", "freewheel's direction", type="gear", a=a,
+                b=cyl, ratio=1.0, drives="positive")
+        fw = d.call("add_relation", type="freewheel", a=a, b=cyl, ratio=1.0,
+                    drives="positive", name="one-way")
+        expect(fw["drives"] == "positive" and fw["lead"] == 0.0,
+               f"a freewheel starts engaged: {fw}")
+
+        def rot(mid):
+            return mate(d, mid)["rotation"]
+
+        def lead():
+            return next(r for r in d.call("list_relations")["relations"]
+                        if r["id"] == fw["id"])["lead"]
+
+        d.call("set_mate", id=a, rotation=0.5)
+        expect(abs(rot(cyl) - 0.5) < 1e-4, f"driven forward: {rot(cyl)}")
+        d.call("set_mate", id=a, rotation=0.2)
+        expect(abs(rot(cyl) - 0.5) < 1e-4 and abs(lead() - 0.3) < 1e-4,
+               f"back, it slips: b {rot(cyl)}, lead {lead()}")
+        d.call("set_mate", id=cyl, rotation=1.0)
+        expect(abs(rot(a) - 0.2) < 1e-4,
+               f"the output run on ahead leaves the input: {rot(a)}")
+        d.call("set_mate", id=cyl, rotation=0.8)
+        expect(abs(rot(a) - 0.0) < 1e-4,
+               f"the output pushed back drags the input: {rot(a)}")
+        # Undo restores the history with the pose.
+        kept = lead()
+        d.call("set_mate", id=a, rotation=-0.3)
+        expect(abs(lead() - (kept + 0.3)) < 1e-4, f"slipped again: {lead()}")
+        d.call("undo")
+        expect(abs(lead() - kept) < 1e-6 and abs(rot(a)) < 1e-6,
+               f"undo puts the lead back with the pose: {lead()} {rot(a)}")
+        # A motion study runs on a copy and leaves it as it was.
+        st = d.call("add_motion_study", driver=a, dof="rotation", **{
+            "from": 0.0, "to": -90.0}, samples=5, check_clash=False,
+            name="back")
+        d.call("run_motion_study", study=st["id"])
+        expect(abs(lead() - kept) < 1e-6,
+               f"a motion study leaves the lead alone: {lead()}")
+        # Re-engaged by hand: the output moves onto the drive line.
+        d.call("set_relation", id=fw["id"], lead=0.0)
+        expect(abs(lead()) < 1e-6 and abs(rot(cyl) - rot(a)) < 1e-4,
+               f"lead 0 puts b on a's line: {rot(cyl)} vs {rot(a)}")
+        # Only a freewheel has a history to set.
+        d.call("remove_relation", id=fw["id"])
+        g = d.call("add_relation", type="gear", a=a, b=cyl, ratio=1.0)
+        refused(d, "set_relation", "freewheel's history", id=g["id"],
+                lead=1.0)
         d.close()
     finally:
         app.terminate()

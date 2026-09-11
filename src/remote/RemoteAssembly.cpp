@@ -127,7 +127,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "(mm) | rise_deg, duration_deg?, start_deg?} for a cosine lobe built "
      "for you. The follower is the DOF mate b has: a slider slides, a "
      "revolute turns, and a cylindrical b takes {dof_b: offset|rotation} "
-     "(offset when omitted). It is the "
+     "(offset when omitted). FREEWHEEL is a one-way clutch, rotation to "
+     "rotation: {ratio, drives: positive|negative} — b follows a while a "
+     "drives it in that direction and slips when a goes back; b driven on "
+     "ahead leaves a still, and b pushed back drags a. Its history is "
+     "`lead` (b's unit, radians), how far b has run ahead of a's drive "
+     "line — saved with the document and undone with the pose; a freewheel "
+     "inside a mate loop is reported, not held (docs/freewheel-plan.md). A "
+     "cam is the "
      "one relation that is not invertible (many angles give one lift), so it "
      "drives forward only. `ratio` may be given directly for any other kind; "
      "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
@@ -137,11 +144,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotation), and for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
      "degrees off parallel (docs/assemblies/relations-plan.md).",
-     "thread_part, thread_feature, a, b, dof_b, duration_deg, lift, name, "
+     "thread_part, thread_feature, a, b, dof_b, drives, duration_deg, lift, "
+     "name, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, teeth_a, teeth_b, type"},
-    {"set_relation", "Edit a relation's {ratio?, phase?, name?} by {id}.",
-     "id, name, phase, ratio"},
+    {"set_relation",
+     "Edit a relation's {ratio?, phase?, name?} by {id}; a freewheel's "
+     "{lead?} too (b's unit, radians), which moves b onto a's drive line "
+     "at that lead — re-engaging it by hand.",
+     "id, lead, name, phase, ratio"},
     {"remove_relation", "Remove a relation by id.", "id"},
     {"list_relations", "List relations with status/errors.", ""},
     {"select_mate", "Select a mate in the UI.", "id"},
@@ -1180,6 +1191,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     r.mateB = p.at("b").get<uint64_t>();
     r.name = p.value("name", std::string{});
     r.phase = p.value("phase", 0.0);
+    if (p.contains("drives") && r.kind != RelationKind::Freewheel)
+      throw std::runtime_error(
+          "drives is a freewheel's direction; a " +
+          std::string(DocumentIO::RelationKindToString(r.kind)) +
+          " drives both ways");
     r.threadPart = p.value("thread_part", uint64_t{0});
     r.threadFeature = p.value("thread_feature", uint64_t{0});
     if ((r.threadPart || r.threadFeature) && r.kind != RelationKind::Screw)
@@ -1250,6 +1266,21 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               "a chain ratio needs both teeth_a and teeth_b (positive)");
         r.ratio = za / zb;
       }
+      break;
+    case RelationKind::Freewheel:
+      // A one-way clutch (docs/freewheel-plan.md). Its direction is the
+      // whole of it, so it is required: a default would be a plausible wrong
+      // answer, and it is exactly the one mistake a freewheel exists for.
+      r.dofA = r.dofB = MateDof::Rotation;
+      if (!p.contains("drives"))
+        throw std::runtime_error(
+            "a freewheel needs drives: positive or negative — the direction "
+            "b is driven in; it slips the other way");
+      r.drives = DocumentIO::FreewheelDrivesFromString(
+          p.at("drives").get<std::string>());
+      if (!p.contains("ratio"))
+        throw std::runtime_error("a freewheel needs its ratio (1 for a clutch "
+                                 "between two parts on one arbor)");
       break;
     case RelationKind::Cam: {
       // A lift table, not a ratio: the follower's position is a function of
@@ -1453,7 +1484,22 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (p.contains("ratio") && r->threadPart)
       throw std::runtime_error(
           "edit the referenced thread; its pitch owns this ratio");
+    if (p.contains("lead") && r->kind != RelationKind::Freewheel)
+      throw std::runtime_error(
+          "lead is a freewheel's history; a " +
+          std::string(DocumentIO::RelationKindToString(r->kind)) + " has none");
     ui::SnapshotAssembly(state);
+    if (p.contains("lead")) {
+      // Putting the history back moves the OUTPUT onto the input's drive
+      // line at that lead — otherwise the next solve reads the output as
+      // standing ahead of the line and grows `lead` straight back.
+      r->lead = p.at("lead").get<double>();
+      const Mate* a = state.assembly->FindMateById(r->mateA);
+      if (Mate* b = state.assembly->FindMateById(r->mateB); a && b)
+        assembly::SetMateDof(
+            *b, r->dofB,
+            assembly::RelationValue(*r, assembly::MateDofValue(*a, r->dofA)));
+    }
     if (p.contains("ratio")) {
       r->ratio = p.at("ratio").get<double>();
       if (r->ratio == 0.0)

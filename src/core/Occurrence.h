@@ -197,7 +197,9 @@ struct ExplodedView {
 // linear: offset -> offset
 // cam:   rotation -> offset OR rotation through a LIFT TABLE, not a ratio
 //        (v102: a follower may turn — a rocker, a pallet fork)
-enum class RelationKind { Gear, Rack, Screw, Linear, Chain, Cam };
+// freewheel: rotation -> rotation that drives ONE way and slips the other
+//        (v104, docs/freewheel-plan.md): b = ratio * a + phase + lead
+enum class RelationKind { Gear, Rack, Screw, Linear, Chain, Cam, Freewheel };
 enum class MateDof { Rotation, Offset };
 
 struct Relation {
@@ -223,6 +225,15 @@ struct Relation {
   // same lift, so propagation runs forward only and the reverse direction is
   // refused rather than picking a branch.
   std::vector<std::pair<double, double>> lift;
+  // Freewheel only (v104): the direction b is DRIVEN in (+1 or -1), and
+  // `lead`, how far b has run ahead of the input's drive line in b's unit.
+  // A freewheel's pose depends on history, and `lead` is all of it: it only
+  // ever grows in the `drives` direction, and propagation keeps
+  // b = ratio * a + phase + lead exact by updating it — so propagating
+  // again changes nothing, and the document (and its undo snapshots)
+  // carry the history with the mates.
+  int drives = 1;
+  double lead = 0.0;
   uint64_t threadPart = 0, threadFeature = 0; // authoritative screw thread
   std::string error; // set by the solve: a mate gone, a DOF missing
 };

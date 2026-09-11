@@ -837,6 +837,141 @@ TEST_CASE("A turning cam round-trips, and the v102 golden drives",
              WithinAbs(float(angles::ToRadians(10.0)), 1e-5f));
 }
 
+// A freewheel on the two-axle train (docs/freewheel-plan.md). Drives the
+// named axle and propagates from it, as set_mate does.
+struct Freewheel {
+  Train t = MakeTrain();
+  explicit Freewheel(int drives) {
+    Relation fw;
+    fw.kind = RelationKind::Freewheel;
+    fw.mateA = t.axleA;
+    fw.mateB = t.axleB;
+    fw.dofA = fw.dofB = MateDof::Rotation;
+    fw.ratio = 1.0;
+    fw.drives = drives;
+    t.asmDoc.AddRelation(fw);
+  }
+  float a() { return t.asmDoc.FindMateById(t.axleA)->rotation; }
+  float b() { return t.asmDoc.FindMateById(t.axleB)->rotation; }
+  double lead() { return t.asmDoc.GetRelations()[0].lead; }
+  void drive(uint64_t mate, double v) {
+    assembly::SetMateDof(*t.asmDoc.FindMateById(mate), MateDof::Rotation, v);
+    assembly::PropagateRelations(t.asmDoc, mate);
+  }
+};
+
+TEST_CASE("A freewheel drives one way and slips the other",
+          "[assembly][relations][freewheel]") {
+  Freewheel f(+1);
+  // The input forward: engaged, the output follows.
+  f.drive(f.t.axleA, 0.5);
+  CHECK_THAT(f.b(), WithinAbs(0.5f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(0.0, 1e-6));
+  // The input back: it slips. The output stays and the lead grows by
+  // exactly the slip.
+  f.drive(f.t.axleA, 0.2);
+  CHECK_THAT(f.b(), WithinAbs(0.5f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(0.3, 1e-5));
+  // Forward again: a roller clutch re-engages at once, from wherever it is.
+  f.drive(f.t.axleA, 0.3);
+  CHECK_THAT(f.b(), WithinAbs(0.6f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(0.3, 1e-5));
+  // Propagating again — from the driver, from nowhere, and a whole solve,
+  // which is what every action does after its own pass — changes nothing.
+  assembly::PropagateRelations(f.t.asmDoc, f.t.axleA);
+  assembly::PropagateRelations(f.t.asmDoc, 0);
+  assembly::Solve(f.t.asmDoc, NoParts());
+  CHECK_THAT(f.lead(), WithinAbs(0.3, 1e-5));
+  CHECK_THAT(f.b(), WithinAbs(0.6f, 1e-5f));
+  CHECK(f.t.asmDoc.GetRelations()[0].error.empty());
+  // The OUTPUT driven on ahead overruns: the input stays.
+  f.drive(f.t.axleB, 1.0);
+  CHECK_THAT(f.a(), WithinAbs(0.3f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(0.7, 1e-5));
+  // The output pushed BACK engages and drags the input with it.
+  f.drive(f.t.axleB, 0.8);
+  CHECK_THAT(f.a(), WithinAbs(0.1f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(0.7, 1e-5));
+}
+
+TEST_CASE("A freewheel that drives negative mirrors all four",
+          "[assembly][relations][freewheel]") {
+  Freewheel f(-1);
+  f.drive(f.t.axleA, -0.5); // drives b negative: engaged
+  CHECK_THAT(f.b(), WithinAbs(-0.5f, 1e-5f));
+  f.drive(f.t.axleA, -0.2); // back, which is positive here: slips
+  CHECK_THAT(f.b(), WithinAbs(-0.5f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(-0.3, 1e-5));
+  f.drive(f.t.axleB, -1.0); // the output on ahead: overruns
+  CHECK_THAT(f.a(), WithinAbs(-0.2f, 1e-5f));
+  CHECK_THAT(f.lead(), WithinAbs(-0.8, 1e-5));
+  f.drive(f.t.axleB, -0.9); // pushed back: drags the input
+  CHECK_THAT(f.a(), WithinAbs(-0.1f, 1e-5f));
+}
+
+TEST_CASE("A freewheel inside a mate loop is reported, not held",
+          "[assembly][relations][freewheel][loops]") {
+  // Two revolutes between the same pair close a loop: both must give the
+  // pinion one orientation. A freewheel at ratio 2 between them asks for
+  // another, so the loop solve moves one of its mates — and a freewheel is
+  // an inequality the loop solve cannot hold, so it was left out of the
+  // rows and says so rather than being quietly treated as engaged.
+  Train t = MakeTrain();
+  const uint64_t second = t.asmDoc.AddMate(Revolute(t.carrier, t.pinion));
+  Relation fw;
+  fw.kind = RelationKind::Freewheel;
+  fw.mateA = t.axleA;
+  fw.mateB = second;
+  fw.dofA = fw.dofB = MateDof::Rotation;
+  fw.ratio = 2.0;
+  fw.drives = 1;
+  t.asmDoc.AddRelation(fw);
+  assembly::SetMateDof(*t.asmDoc.FindMateById(t.axleA), MateDof::Rotation, 0.4);
+  const assembly::SolveReport rep = assembly::Solve(t.asmDoc, NoParts());
+  CHECK(rep.loopMates >= 1);
+  CHECK_THAT(t.asmDoc.GetRelations()[0].error,
+             Catch::Matchers::ContainsSubstring("inside a mate loop"));
+}
+
+TEST_CASE("A freewheel round-trips with its history, and the v104 golden "
+          "drives",
+          "[assembly][relations][freewheel][golden]") {
+  Freewheel f(-1);
+  f.t.asmDoc.GetRelations()[0].name = "one-way wheel";
+  f.t.asmDoc.GetRelations()[0].lead = -0.25;
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+    REQUIRE(DocumentIO::SaveAssembly(f.t.asmDoc, out).has_value());
+  // `drives` and `lead` are a freewheel's; no other kind writes them.
+  const nlohmann::json gj =
+      DocumentIO::RelationToJson(f.t.asmDoc.GetRelations()[0]);
+  CHECK(gj.at("drives") == "negative");
+  CHECK_THAT(gj.at("lead").get<double>(), WithinAbs(-0.25, 1e-12));
+  Relation gear;
+  CHECK_FALSE(DocumentIO::RelationToJson(gear).contains("lead"));
+  // The direction is required, and anything but the two is refused.
+  nlohmann::json nodir = gj;
+  nodir.erase("drives");
+  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(nodir),
+                    Catch::Matchers::ContainsSubstring("drives"));
+  CHECK_THROWS_WITH(DocumentIO::FreewheelDrivesFromString("forward"),
+                    Catch::Matchers::ContainsSubstring("positive or negative"));
+
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+                          "tests/golden/assembly/v104-freewheel.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  REQUIRE((*g)->RelationCount() == 1);
+  const Relation& r = (*g)->GetRelations()[0];
+  CHECK(r.kind == RelationKind::Freewheel);
+  CHECK(r.drives == -1);
+  CHECK_THAT(r.lead, WithinAbs(-0.25, 1e-12));
+  // It drives from the history it was saved with: the input at -0.5 puts
+  // the output at -0.75.
+  assembly::SetMateDof(*(*g)->FindMateById(f.t.axleA), MateDof::Rotation, -0.5);
+  assembly::PropagateRelations(**g, f.t.axleA);
+  CHECK_THAT((*g)->FindMateById(f.t.axleB)->rotation, WithinAbs(-0.75f, 1e-5f));
+}
+
 TEST_CASE("Chain and cam round-trip, and the v88 golden loads",
           "[assembly][relations][golden]") {
   Train t = MakeTrain();

@@ -1029,7 +1029,8 @@ def main():
         # ambiguity that comes with it).
         expect({"revolute", "slider", "cylindrical", "fastened", "planar",
                 "ball"} == set(desc["mate_types"]), "mate types described")
-        expect({"gear", "rack", "screw", "linear", "chain", "cam"} ==
+        expect({"gear", "rack", "screw", "linear", "chain", "cam",
+            "freewheel"} ==
                set(desc["relation_kinds"]), "relation kinds described")
         expect("add_relation" in " ".join(
             m["doc"] for m in desc["methods"] if m["name"] == "add_mate"),

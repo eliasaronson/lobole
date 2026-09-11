@@ -89,9 +89,10 @@ constexpr std::pair<const char*, MateType> kMateTypes[] = {
     {"planar", MateType::Planar},     {"ball", MateType::Ball}};
 
 constexpr std::pair<const char*, RelationKind> kRelationKinds[] = {
-    {"gear", RelationKind::Gear},   {"rack", RelationKind::Rack},
-    {"screw", RelationKind::Screw}, {"linear", RelationKind::Linear},
-    {"chain", RelationKind::Chain}, {"cam", RelationKind::Cam}};
+    {"gear", RelationKind::Gear},          {"rack", RelationKind::Rack},
+    {"screw", RelationKind::Screw},        {"linear", RelationKind::Linear},
+    {"chain", RelationKind::Chain},        {"cam", RelationKind::Cam},
+    {"freewheel", RelationKind::Freewheel}};
 
 template <typename T, size_t N>
 std::string NameList(const std::pair<const char*, T> (&table)[N]) {
@@ -302,6 +303,8 @@ const char* RelationKindToString(RelationKind kind) {
     return "chain";
   case RelationKind::Cam:
     return "cam";
+  case RelationKind::Freewheel:
+    return "freewheel";
   }
   return "gear";
 }
@@ -319,6 +322,8 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Chain;
   if (s == "cam")
     return RelationKind::Cam;
+  if (s == "freewheel")
+    return RelationKind::Freewheel;
   throw std::runtime_error("unknown relation type '" + s +
                            "' (expected one of: " + NameList(kRelationKinds) +
                            ")");
@@ -326,6 +331,20 @@ RelationKind RelationKindFromString(const std::string& s) {
 
 const char* MateDofToString(MateDof dof) {
   return dof == MateDof::Rotation ? "rotation" : "offset";
+}
+
+const char* FreewheelDrivesToString(int drives) {
+  return drives < 0 ? "negative" : "positive";
+}
+
+int FreewheelDrivesFromString(const std::string& s) {
+  if (s == "positive")
+    return 1;
+  if (s == "negative")
+    return -1;
+  throw std::runtime_error("unknown freewheel direction '" + s +
+                           "' (expected positive or negative — the "
+                           "direction b is driven in)");
 }
 
 MateDof MateDofFromString(const std::string& s) {
@@ -358,6 +377,10 @@ json RelationToJson(const Relation& r) {
     for (const auto& [angle, mm] : r.lift)
       lift.push_back({angle, mm});
     j["lift"] = std::move(lift);
+  }
+  if (r.kind == RelationKind::Freewheel) { // v104
+    j["drives"] = FreewheelDrivesToString(r.drives);
+    j["lead"] = r.lead;
   }
   return j;
 }
@@ -462,6 +485,13 @@ Relation RelationFromJson(const json& j) {
       throw std::runtime_error(
           "a cam's lift table is [[angle_deg, lift_mm], ...]");
     r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
+  }
+  if (r.kind == RelationKind::Freewheel) { // v104: the direction is required
+    if (!j.contains("drives"))
+      throw std::runtime_error(
+          "a freewheel relation needs `drives` (positive or negative)");
+    r.drives = FreewheelDrivesFromString(j.at("drives").get<std::string>());
+    r.lead = j.value("lead", 0.0);
   }
   return r;
 }

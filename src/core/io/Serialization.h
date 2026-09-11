@@ -116,6 +116,10 @@ const char* RelationKindToString(RelationKind kind);
 RelationKind RelationKindFromString(const std::string& s);
 const char* MateDofToString(MateDof dof);
 MateDof MateDofFromString(const std::string& s);
+// A freewheel's `drives` (v104): +1 "positive", -1 "negative"; anything else
+// is refused naming both.
+const char* FreewheelDrivesToString(int drives);
+int FreewheelDrivesFromString(const std::string& s);
 
 // Single-motion-study (de)serialization (v87, docs/agent-scale-plan.md G2).
 // The definition only: driver mate + DOF, range in the DOF's own unit,

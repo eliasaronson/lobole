@@ -23,7 +23,7 @@ are separate products most users never open.
 
 ## The design
 
-One relation type, four kinds that are labels and unit conventions on it:
+One relation type; its kinds are labels and unit conventions on it:
 
     dofB = ratio * dofA + phase
 
@@ -33,6 +33,9 @@ One relation type, four kinds that are labels and unit conventions on it:
 | `rack` | rotation (the pinion's) | offset (the rack's slider) | pitch radius, mm/rad |
 | `screw` | rotation | offset — the SAME cylindrical mate | pitch / 2π, mm/rad |
 | `linear` | offset | offset | dimensionless |
+| `chain` | rotation | rotation | `+teeth_a / teeth_b` — a chain or belt keeps the sign (v88) |
+| `cam` | rotation | offset or rotation | none: a LIFT TABLE, forward only (v88; a turning follower v102) |
+| `freewheel` | rotation | rotation | as given, plus `lead` — drives one way and slips the other (v104, [freewheel-plan.md](../freewheel-plan.md)) |
 
 `phase` is what makes teeth mesh (or where the rack sits at θ = 0). A
 relation names two mates by id and the DOF on each; a mate that lacks the

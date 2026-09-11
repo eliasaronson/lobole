@@ -548,8 +548,20 @@ double RelationValue(const Relation& r, double a) {
     return (r.dofB == MateDof::Rotation ? angles::ToRadians(lift) : lift) +
            r.phase;
   }
+  // A freewheel carries its history in `lead` (docs/freewheel-plan.md).
+  if (r.kind == RelationKind::Freewheel)
+    return r.ratio * a + r.phase + r.lead;
   return r.ratio * a + r.phase;
 }
+
+namespace {
+// How far a freewheel's output may stand behind its drive line and still
+// count as ON it. Mate DOFs are stored as float, so a value written as the
+// line reads back a few ulps off it; without this slack a second
+// propagation would read that as the input going backwards and grow `lead`
+// by rounding noise on every pass.
+double FreewheelSlack(double v) { return 1e-6 * std::max(1.0, std::abs(v)); }
+} // namespace
 
 int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
                        const PartResolver& partById) {
@@ -602,6 +614,11 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     }
     if (r.mateA == r.mateB && r.dofA == r.dofB) {
       r.error = "a relation cannot couple a degree of freedom to itself";
+      continue;
+    }
+    if (r.kind == RelationKind::Freewheel && r.drives != 1 && r.drives != -1) {
+      r.error = "a freewheel drives positive or negative; this one has no "
+                "direction";
       continue;
     }
     if (r.kind == RelationKind::Cam && r.lift.size() < 2) {
@@ -727,8 +744,34 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       Mate* a = asmDoc.FindMateById(r.mateA);
       Mate* b = asmDoc.FindMateById(r.mateB);
       if (an == from && !isSettled(bn)) {
-        SetMateDof(*b, r.dofB, RelationValue(r, valueOf(*a, r.dofA)));
+        if (r.kind == RelationKind::Freewheel) {
+          // The input moved. Where its drive line is at or ahead of b (in
+          // the drive direction) it drives b; behind, b stays and `lead`
+          // grows by the difference — the clutch slips. Either way b is ON
+          // the line afterwards, so a second pass finds nothing to do.
+          const double line = RelationValue(r, valueOf(*a, r.dofA));
+          const double now = valueOf(*b, r.dofB);
+          if ((line - now) * r.drives >= -FreewheelSlack(now))
+            SetMateDof(*b, r.dofB, line);
+          else
+            r.lead += now - line;
+        } else {
+          SetMateDof(*b, r.dofB, RelationValue(r, valueOf(*a, r.dofA)));
+        }
         settle(bn);
+        wrote++;
+      } else if (bn == from && !isSettled(an) &&
+                 r.kind == RelationKind::Freewheel && r.ratio != 0.0) {
+        // Something else moved the OUTPUT. Forward in the drive direction
+        // it overruns: the input stays and `lead` grows. Backward, the
+        // clutch engages and drags the input back with it.
+        const double line = RelationValue(r, valueOf(*a, r.dofA));
+        const double now = valueOf(*b, r.dofB);
+        if ((now - line) * r.drives > FreewheelSlack(now))
+          r.lead += now - line;
+        else
+          SetMateDof(*a, r.dofA, (now - r.phase - r.lead) / r.ratio);
+        settle(an);
         wrote++;
       } else if (bn == from && !isSettled(an) && r.kind != RelationKind::Cam &&
                  r.ratio != 0.0) {
@@ -865,6 +908,11 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     for (const Relation& r : asmDoc.GetRelations()) {
       if (!r.error.empty() || asmDoc.RelationSuppressed(r.id))
         continue;
+      // A freewheel is an inequality — it may slip — and the loop solve
+      // holds only equations. It is left out, and reported below if the loop
+      // moves one of its mates (docs/freewheel-plan.md).
+      if (r.kind == RelationKind::Freewheel)
+        continue;
       const auto ia = indexOfMate.find(r.mateA);
       const auto ib = indexOfMate.find(r.mateB);
       if (ia == indexOfMate.end() || ib == indexOfMate.end())
@@ -988,6 +1036,21 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       for (const auto& [id, m] : closed.world)
         world[id] = m;
 
+      // A freewheel's mates as propagation left them: if the loop moves one,
+      // the freewheel was inside the loop, which it cannot be (it was left
+      // out of the rows above) — said on the relation, never held silently.
+      struct FreewheelAt {
+        Relation* r;
+        double a, b;
+      };
+      std::vector<FreewheelAt> freewheels;
+      for (Relation& r : asmDoc.GetRelations())
+        if (r.kind == RelationKind::Freewheel && r.error.empty() &&
+            !asmDoc.RelationSuppressed(r.id))
+          if (const Mate* ma = asmDoc.FindMateById(r.mateA))
+            if (const Mate* mb = asmDoc.FindMateById(r.mateB))
+              freewheels.push_back(
+                  {&r, MateDofValue(*ma, r.dofA), MateDofValue(*mb, r.dofB)});
       // A mate inside a loop has OUTPUT DOF now: turn the crank and the
       // rocker follows. Written back so the file reopens where it converged
       // — and only for mates the loop pass actually saw, so a loop-free
@@ -1001,6 +1064,19 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
         m.dx = s.dx;
         m.dy = s.dy;
         m.ballRotation = s.ballRotation;
+      }
+      for (const FreewheelAt& f : freewheels) {
+        const Mate* ma = asmDoc.FindMateById(f.r->mateA);
+        const Mate* mb = asmDoc.FindMateById(f.r->mateB);
+        if (std::abs(MateDofValue(*ma, f.r->dofA) - f.a) >
+                FreewheelSlack(f.a) ||
+            std::abs(MateDofValue(*mb, f.r->dofB) - f.b) >
+                FreewheelSlack(f.b)) {
+          f.r->error = "a freewheel cannot be inside a mate loop: it may "
+                       "slip, and the loop solve holds only equations — it "
+                       "was left out of the loop";
+          report.erroredMates++;
+        }
       }
 
       // Only a loop that could NOT close is an error, and it says by how

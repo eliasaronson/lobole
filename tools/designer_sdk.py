@@ -1901,6 +1901,15 @@ class Asm(_Tab):
         return self.app.add_relation(type="cam", a=_id(mate_a),
                                      b=_id(mate_b), **kw)
 
+    def freewheel(self, mate_a, mate_b, drives, ratio=1.0, **kw):
+        """A one-way clutch, rotation to rotation (v104): b follows a while
+        a drives it in `drives` ("positive" or "negative") and slips when a
+        goes back. Its history is the relation's `lead`."""
+        self.activate()
+        return self.app.add_relation(type="freewheel", a=_id(mate_a),
+                                     b=_id(mate_b), drives=drives,
+                                     ratio=ratio, **kw)
+
     def bolt(self, rim, occurrence, standard="iso4762", **kw):
         """Fit a fastener to a hole rim, deriving its size and length.
 

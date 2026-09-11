@@ -17,7 +17,9 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    103; // v103: an Import's `units` -- the length unit an STL/BREP was drawn
+    104; // v104: a FREEWHEEL relation (one-way clutch): `kind` "freewheel",
+         //      `drives` positive|negative and `lead`, the history it keeps.
+         // v103: an Import's `units` -- the length unit an STL/BREP was drawn
          //      in (mm|cm|m|in; absent = mm). Refused on STEP, which declares
          //      its own. Bumped so a v102 build refuses the file rather than
          //      importing a metre mesh at 1:1.
