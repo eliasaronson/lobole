@@ -285,7 +285,11 @@ bool ExprDragDouble(AppState& state, const char* label, double* v, float speed,
     double expr = 0.0;
     if (!DrawExprField(state, label, &expr, exprOut))
       return false;
-    *v = std::clamp(expr, vmin, vmax);
+    // vmin == vmax means UNBOUNDED, as it does for ImGui::DragScalar: these
+    // are drop-ins, and clamping to [0, 0] turned every typed value in an
+    // unbounded field into 0 (a configuration's held turn, found by
+    // configs/an_assembly_configuration_by_clicking).
+    *v = vmin < vmax ? std::clamp(expr, vmin, vmax) : expr;
     return true;
   }
   const bool changed = ImGui::DragScalar(label, ImGuiDataType_Double, v, speed,
@@ -302,7 +306,8 @@ bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
     double expr = 0.0;
     if (!DrawExprField(state, label, &expr, nullptr))
       return false;
-    *v = std::clamp(static_cast<float>(expr), vmin, vmax);
+    const float f = static_cast<float>(expr);
+    *v = vmin < vmax ? std::clamp(f, vmin, vmax) : f; // equal: unbounded
     return true;
   }
   const bool changed = ImGui::DragScalar(label, ImGuiDataType_Float, v, speed,
@@ -319,7 +324,8 @@ bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
     double expr = 0.0;
     if (!DrawExprField(state, label, &expr, nullptr))
       return false;
-    *v = std::clamp(static_cast<int>(std::lround(expr)), vmin, vmax);
+    const int n = static_cast<int>(std::lround(expr));
+    *v = vmin < vmax ? std::clamp(n, vmin, vmax) : n; // equal: unbounded
     return true;
   }
   const bool changed = ImGui::DragScalar(label, ImGuiDataType_S32, v, speed,

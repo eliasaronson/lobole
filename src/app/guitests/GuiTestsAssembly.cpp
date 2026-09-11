@@ -363,6 +363,108 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // Delete takes it away. Then, on a study slow enough to catch mid-run,
   // that the button row becomes a progress bar and a Cancel, and that
   // cancelling keeps the samples it had already checked.
+  t = IM_REGISTER_TEST(engine, "configs",
+                       "an_assembly_configuration_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // An assembly configuration suppresses a relation and a mate and HOLDS
+    // a mate's turn (v101), all from the Model panel — and the solve follows
+    // each click, and the base comes back untouched.
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Held");
+    ui::SetActivePart(*s_App, asmIdx);
+    AssemblyDocument& a = *s_App->assembly;
+    Occurrence base;
+    base.name = "Base";
+    base.partId = partId;
+    base.fixed = true;
+    const uint64_t baseOcc = a.AddOccurrence(base);
+    float height = 0.0f;
+    {
+      glm::vec3 lo, hi;
+      ui::PartDocById(*s_App, partId)
+          ->GetBodies()[0]
+          .shape.GetBoundingBox(lo, hi);
+      height = hi.z - lo.z;
+    }
+    const auto armOn = [&](const char* name, float seat) {
+      Occurrence o;
+      o.name = name;
+      o.partId = partId;
+      const uint64_t occ = a.AddOccurrence(o);
+      Mate m;
+      m.type = MateType::Revolute;
+      m.name = name;
+      m.a.occurrenceId = baseOcc;
+      m.a.anchor.origin = true;
+      m.b.occurrenceId = occ;
+      m.b.anchor.origin = true;
+      m.flipped = false;
+      m.offset = seat; // stacked, so no two arms coincide
+      return std::make_pair(occ, a.AddMate(m));
+    };
+    const auto [armA, axleA] = armOn("ArmA", height + 1.0f);
+    const auto [armB, axleB] = armOn("ArmB", 2.0f * height + 2.0f);
+    Relation r;
+    r.kind = RelationKind::Gear;
+    r.mateA = axleA;
+    r.mateB = axleB;
+    r.dofA = r.dofB = MateDof::Rotation;
+    r.ratio = -2.0;
+    const uint64_t rel = a.AddRelation(r);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+    const auto zTurn = [&](uint64_t occ) {
+      const Occurrence* o = s_App->assembly->FindById(occ);
+      return glm::angle(o->orientation) * (o->orientation.z < 0 ? -1.0f : 1.0f);
+    };
+
+    ctx->ItemClick("//###Model/+ Add configuration");
+    ctx->Yield(2);
+    IM_CHECK_EQ(a.GetConfigurations().size(), (size_t)1);
+    const uint64_t cfg = a.GetConfigurations()[0].id;
+    IM_CHECK_EQ(a.ActiveConfiguration(), cfg);
+
+    // Suppress the relation, then hold ArmA's turn at 90 degrees.
+    ctx->ItemClick(
+        ("//###Model/###cfg_rel_sup_" + std::to_string(rel)).c_str());
+    ctx->Yield(2);
+    IM_CHECK(a.FindConfiguration(cfg)->SuppressesRelation(rel));
+    const std::string scope =
+        "//###Model/cfg_mate_" + std::to_string(axleA) + "/";
+    ctx->ItemClick((scope + "###cfg_hold_r_" + std::to_string(axleA)).c_str());
+    ctx->Yield(2);
+    IM_CHECK(a.FindConfiguration(cfg)->OverrideForMate(axleA) != nullptr);
+    ctx->ItemInputValue(
+        (scope + "###cfg_hold_vr_" + std::to_string(axleA)).c_str(), "90");
+    ctx->Yield(3);
+    const MateOverride* hold = a.FindConfiguration(cfg)->OverrideForMate(axleA);
+    IM_CHECK(hold != nullptr && hold->rotation.has_value());
+    IM_CHECK(std::abs(*hold->rotation - 1.5707963f) < 1e-3f);
+    // The solve placed ArmA at the hold; the mate itself is as authored,
+    // and the suppressed relation left ArmB alone.
+    IM_CHECK(std::abs(zTurn(armA) - 1.5707963f) < 1e-3f);
+    IM_CHECK(std::abs(a.FindMateById(axleA)->rotation) < 1e-6f);
+    IM_CHECK(std::abs(zTurn(armB)) < 1e-3f);
+
+    // Take ArmB's mate out of the solve.
+    const std::string scopeB =
+        "//###Model/cfg_mate_" + std::to_string(axleB) + "/";
+    ctx->ItemClick(
+        (scopeB + "###cfg_mate_sup_" + std::to_string(axleB)).c_str());
+    ctx->Yield(2);
+    IM_CHECK(a.MateSuppressed(axleB));
+
+    // Back to base: every authored value, nothing held.
+    ctx->ItemClick("//###Model/Base (all shown)");
+    ctx->Yield(3);
+    IM_CHECK_EQ(a.ActiveConfiguration(), (uint64_t)0);
+    IM_CHECK(std::abs(zTurn(armA)) < 1e-3f);
+    IM_CHECK(!a.MateSuppressed(axleB));
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "a_motion_study_scrubs_and_runs");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

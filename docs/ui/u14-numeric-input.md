@@ -374,3 +374,11 @@ expression after another into `##Width` and only checked the number that came
 out, which cannot tell "evaluated correctly" from "evaluated and forgot". They
 now start each case from a literal and assert the text.
 
+## Bounds (2026-09-11)
+
+An `ExprDrag*` wrapper clamps a typed expression to `[vmin, vmax]` only when
+`vmin < vmax`; equal bounds mean UNBOUNDED, exactly as they do for
+`ImGui::DragScalar`, which the wrappers stand in for. They used to clamp
+unconditionally, so a field passing `0, 0` for "no limit" turned every typed
+value into 0 — an assembly configuration's held-turn field did, and
+`configs/an_assembly_configuration_by_clicking` is the test that found it.
