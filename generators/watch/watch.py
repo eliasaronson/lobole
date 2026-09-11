@@ -3,6 +3,7 @@
 
     python3 generators/watch/watch.py [--port N] [--out DIR]
                                       [--stage parts|assembly|all]
+                                      [--recheck]
 
 A 21,600 vph self-winding movement in a 40 mm case: barrel, centre, third,
 fourth and escape wheels, a Swiss lever escapement with a hairspring, motion
@@ -16,6 +17,9 @@ DECLARED on the assembly and re-checked there. The run refuses to save what
 it has not checked, and it gates on each check's receipt, not on its `ok`.
 """
 import argparse
+import subprocess
+import json
+import hashlib
 import math
 import os
 import sys
@@ -526,14 +530,66 @@ def check_meshes(app, occ, m, samples=9, meshes=None):
     return worst
 
 
-def verify(app, occ, m, rel):
+def mesh_cache_key(app):
+    """What a mesh's result depends on: the tooth geometry and the phases
+    (this generator's four files) and the kernel that swept them (the app's
+    source, by git revision and uncommitted diff under src/). None when the
+    key cannot vouch for the app — its binary was rebuilt under the running
+    instance, or there is no git to ask."""
+    if app.call("ping").get("binary_replaced"):
+        return None
+    h = hashlib.sha256()
+    for f in ("watch_spec.py", "watch_gearing.py", "watch_parts.py",
+              "watch.py"):
+        with open(os.path.join(HERE, f), "rb") as fh:
+            h.update(fh.read())
+    root = os.path.join(HERE, "..", "..")
+    try:
+        for cmd in (["rev-parse", "HEAD"], ["diff", "HEAD", "--", "src"]):
+            h.update(subprocess.run(["git", "-C", root] + cmd,
+                                    capture_output=True, check=True).stdout)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return h.hexdigest()
+
+
+def cached_meshes(app, occ, m, path):
+    """check_meshes, unless nothing it depends on has changed since a CLEAN
+    result was kept (80% of a full run is these sweeps, and the interference
+    RPC cannot be narrowed to one body — its mesh mode reads the gears'
+    backlash as contact). Only an all-zero result is ever kept. Returns the
+    result and when it was checked, or None for a fresh sweep."""
+    key = mesh_cache_key(app) if path else None
+    if key and os.path.exists(path):
+        try:
+            with open(path) as fh:
+                kept = json.load(fh)
+        except (OSError, ValueError):
+            kept = {}
+        worst = kept.get("worst") or {}
+        if kept.get("key") == key and worst and \
+                all(v == 0.0 for v in worst.values()):
+            return worst, kept.get("checked")
+    worst = check_meshes(app, occ, m)
+    if key and worst and all(v == 0.0 for v in worst.values()):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            json.dump({"key": key, "checked": time.strftime("%Y-%m-%d %H:%M"),
+                       "worst": worst}, fh, indent=1)
+    return worst, None
+
+
+def verify(app, occ, m, rel, cache=None):
     print("checks:")
     bad = []
     with phase("ratios"):
         turn, why = check_ratios(app, m)
     bad += why
     with phase("meshes"):
-        worst = check_meshes(app, occ, m)
+        worst, since = cached_meshes(app, occ, m, cache)
+    if since:
+        print(f"  meshes: nothing they depend on changed since {since} — "
+              f"that clean sweep stands (--recheck to sweep again)")
     for pair, v in worst.items():
         print(f"  mesh {pair:<36} worst {v:.7f} mm3 over a pitch")
         if v > 0.0:
@@ -646,6 +702,8 @@ def main():
                                                   "watch"))
     ap.add_argument("--stage", choices=("parts", "assembly", "all"),
                     default="all")
+    ap.add_argument("--recheck", action="store_true",
+                    help="sweep every mesh even if a clean result is kept")
     args = ap.parse_args()
     app = connect(args.port)
     app.call("new_project")
@@ -673,7 +731,8 @@ def main():
           f"{solved.get('placed_by_transform')} by transform, "
           f"errored mates {solved.get('errored_mates')}")
     print(f"  {declare_clearances(app, occ)} clearances declared")
-    verify(app, occ, m, rel)
+    verify(app, occ, m, rel, cache=None if args.recheck else
+           os.path.join(args.out, "mesh-cache.json"))
     set_time(app, m, 10, 8, 37)
     os.makedirs(args.out, exist_ok=True)
     app.save_project(path=os.path.join(args.out, "watch.dsgn"))

@@ -114,6 +114,12 @@ and none of it touched a gate:
   rotor and from the reduction wheel that runs over the barrel bridge; a
   flush one needs nothing. The barrel bridge's two are placed by search — the
   points on a circle farthest from its three holes and from each other.
+- **A mainspring.** The barrel is hollow now — a 0.30 wall, a floor behind
+  the tooth ring and a 0.20 cover — and a steel strip coils inside it from
+  its hook clear of the arbor out to the drum wall, as it lies let down: two
+  B-spline spirals a strip's thickness apart, closed at both ends, extruded
+  to the chamber's height. No still shows it; a section view does, and a
+  section through a barrel is where "is there a spring in it?" is asked.
 - **Perlage across the plate**, not just around its rim — a field of spots
   that keeps clear of every hole by construction.
 - **Finishes that contrast.** A brushed case middle under a polished bezel,

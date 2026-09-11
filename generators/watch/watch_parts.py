@@ -200,17 +200,46 @@ def arbor(app, name, staff, wheel=None, pinion=None, spokes=5, hub=0.6,
 
 # --- the going train ---------------------------------------------------------------
 
+def spiral_strip(r0, r1, turns, t, samples_per_turn=12):
+    """A flat spiral strip t thick, from radius r0 to r1 over `turns`, as one
+    closed profile: two B-splines a strip's thickness apart, joined at both
+    ends. A spline's poles only guide it, so the curve runs a little inside
+    the polygon they draw — close enough for a spring nobody measures."""
+    n = int(turns * samples_per_turn) + 1
+    outer, inner = [], []
+    for i in range(n):
+        a = 2 * math.pi * turns * i / (n - 1)
+        r = r0 + (r1 - r0) * i / (n - 1)
+        outer.append(pol(r + t / 2, a))
+        inner.append(pol(r - t / 2, a))
+    spline = lambda pts: {"type": "spline",  # noqa: E731
+                          "poles": [[float(x), float(y)] for x, y in pts]}
+    return [spline(outer), seg(outer[-1], inner[-1]),
+            spline(inner[::-1]), seg(inner[0], outer[0])]
+
+
 def barrel(app):
     """The drum: a tooth ring at the mainplate end, the drum behind it, and
-    the arbor passing through. The mainspring is inside and not drawn."""
+    the arbor passing through; inside, the mainspring — a steel strip coiled
+    from the arbor out to the drum wall, as it lies let down. Only a section
+    view shows it, and a section view is where a barrel's first question
+    (is there a spring in it?) gets asked."""
     part = app.part("Barrel")
     ring = 0.30
     slab(app, teeth("barrel"), BARREL_D0, BARREL_D0 + ring, "new_body",
          "teeth")
     slab(app, [circ((0, 0), root_r("barrel") - 0.05)], BARREL_D0 + ring,
          BARREL_D1, "add", "drum")
+    # Hollow it: a 0.30 wall, a floor behind the tooth ring, a 0.20 cover.
+    wall_r = root_r("barrel") - 0.35
+    slab(app, [circ((0, 0), wall_r)], BARREL_D0 + ring + 0.10,
+         BARREL_D1 - 0.20, "cut", "spring chamber")
     slab(app, [circ((0, 0), 0.50)], BARREL_D0 - 0.01, BARREL_D1 + 0.01, "cut",
          "arbor hole")
+    # The mainspring, its own body: from its hook clear of the arbor (0.45)
+    # to its bridle against the wall, 0.02 clear of floor and cover.
+    slab(app, spiral_strip(0.70, wall_r - 0.12, 7.0, 0.09),
+         BARREL_D0 + ring + 0.12, BARREL_D1 - 0.22, "new_body", "mainspring")
     # The cover's snailing groove, the one detail of a barrel that shows.
     for r in (1.6, 2.4, 3.2):
         slab(app, [circ((0, 0), r + 0.06), circ((0, 0), r)],
@@ -218,6 +247,8 @@ def barrel(app):
     part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
     material(app, 0, "brass")
     look(app, 0, "gilt")
+    material(app, 1, "steel")
+    look(app, 1, "polished")
     return part
 
 

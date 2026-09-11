@@ -68,7 +68,10 @@ motion study turn every hand at its true rate and the crown drive the ratchet,
 and the clearances that decide whether it runs are DECLARED on the assembly.
 The crown's two positions are CONFIGURATIONS of the assembly ("Crown in",
 "Crown out"); the run gates on receipts, checks both, and refuses to save
-what it has not checked.
+what it has not checked. A clean mesh sweep — most of a full run —
+is kept in `--out`'s `mesh-cache.json`, keyed on the generator's own files
+and the app's source revision, so a run that changed neither does not sweep
+the meshes again; `--recheck` forces it.
 
 Its teeth are **cycloidal** (`watch/watch_gearing.py`), not `gear.py`'s
 involute, and the gates are why: at 6–12 pinion leaves an involute train

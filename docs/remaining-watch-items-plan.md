@@ -29,8 +29,13 @@ the next.
    a limit set on one GPU, and fix whichever it is.
 5. **The watch's run time.** 80% of a full run is the per-mesh exact sweep:
    nine samples through a pitch, each an exact interference of two WHOLE arbor
-   parts. Check the toothed bodies only where the parts allow it, and fewer
-   samples where the tooth count makes a pitch short.
+   parts, and the interference RPC cannot be narrowed to one body (its fast
+   mesh mode reads the gears' 3 µm backlash as contact). A mesh's result
+   depends only on the tooth geometry and phases — the generator's own files
+   — and the kernel that swept it — the app's source — so a CLEAN result is
+   kept, keyed on both, and a run where neither changed does not sweep the
+   meshes again. `--recheck` forces it; an instance whose binary was rebuilt
+   under it never uses the cache.
 6. **The watch uses the app fixes.** Crown out becomes a CONFIGURATION (the
    clutch's relations and the stem's pull held), the clutch slides by a
    relation from the yoke, the contrate teeth are one tooth and a Pattern, and
