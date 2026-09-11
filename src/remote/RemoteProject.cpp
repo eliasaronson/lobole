@@ -75,9 +75,11 @@ static constexpr MethodDoc ProjectMethods[] = {
      "part_id, source_part_id, fingerprint, expected_revision, "
      "source_revision, apply"},
     {"import_step",
-     "Import a STEP file into the current project (XCAF: names, "
-     "colors, real assemblies).",
-     "as_assembly, path", remote::NeedsPart | remote::NotInBatch},
+     "Import a STEP, STL or BREP file into the current project (STEP via "
+     "XCAF: names, colors, real assemblies). `units` is the length unit an "
+     "STL or BREP was drawn in — mm (default), cm, m, in — since neither "
+     "format carries one; refused for STEP, which declares its own.",
+     "as_assembly, path, units", remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}), or — on an "
      "assembly tab — every occurrence at its SOLVED placement. `deflection` is "
@@ -96,9 +98,10 @@ static constexpr MethodDoc ProjectMethods[] = {
      "body, deflection, path", remote::NeedsPart},
     {"export_visual",
      "Export a visual-quality mesh (glTF/OBJ by extension) of "
-     "the part or whole assembly. `deflection` is the tessellation chord "
-     "tolerance in MILLIMETRES (smaller = finer, more triangles); STEP and "
-     "BREP are exact solids and ignore it.",
+     "the part or whole assembly. glTF is written in METRES and Y-up, as "
+     "the format defines; OBJ/PLY stay in millimetres, Z-up. `deflection` "
+     "is the tessellation chord tolerance in MILLIMETRES (smaller = finer, "
+     "more triangles); STEP and BREP are exact solids and ignore it.",
      "deflection, path", remote::NotInBatch},
     {"checkpoint_create",
      "Name the current state of the whole project a version {name}.", "name",
@@ -1310,6 +1313,20 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                 {"folders", FolderList(state)}};
   }
   if (m == "import_step") {
+    units::Length unit = units::Length::Millimetre;
+    if (p.contains("units")) {
+      if (p.value("as_assembly", false))
+        throw std::runtime_error("units: an assembly import reads STEP, which "
+                                 "declares its own unit");
+      const std::string u = p.at("units").get<std::string>();
+      if (!units::LengthFromString(u, unit)) {
+        std::string accepted;
+        for (const char* n : units::LengthNames())
+          accepted += (accepted.empty() ? "" : ", ") + std::string(n);
+        throw std::runtime_error("unknown units '" + u +
+                                 "'. Accepted: " + accepted);
+      }
+    }
     if (p.value("as_assembly", false)) {
       // Product structure → part tabs + an assembly (interchange I2).
       const size_t tabsBefore = state.parts.size();
@@ -1351,7 +1368,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const size_t before = doc->GetBodies().size();
     const json preDigest = BodyDigestJson(*doc);
     std::string error;
-    if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), &error))
+    if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), nullptr,
+                             &error, unit))
       throw std::runtime_error(error);
     return json{{"bodies", doc->GetBodies().size() - before},
                 {"regen", RegenSummaryJson(*doc)},

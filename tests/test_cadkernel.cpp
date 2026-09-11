@@ -708,6 +708,70 @@ TEST_CASE("A rigid placement reaches the kernel unscaled",
   }
 }
 
+// An STL has no unit field, so the import is told what it was drawn in
+// (docs/mesh-units-plan.md). Storage stays mm: the shape is scaled as read.
+TEST_CASE("An STL import is read in the unit it was drawn in",
+          "[feature][import]") {
+  namespace fs = std::filesystem;
+  CADKernel& k = CADKernel::Instance();
+  const std::string pid = std::to_string(::getpid());
+  // Upper case on purpose: ".STL" is how many tools write it, and the
+  // extension check was case-sensitive.
+  const fs::path stl =
+      fs::temp_directory_path() / ("designer_units_" + pid + ".STL");
+  REQUIRE(k.SaveSTL(stl.string(), k.CreateBox(2.0, 3.0, 4.0), 0.1));
+  const auto import = [](const fs::path& path, units::Length unit) {
+    auto doc = std::make_unique<Document>();
+    auto imp = std::make_unique<ImportFeature>("part", path.string());
+    imp->lengthUnit = unit;
+    doc->AddFeature(std::move(imp));
+    return doc;
+  };
+  const auto span = [](const Document& doc) {
+    glm::vec3 lo, hi;
+    doc.GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    return hi - lo;
+  };
+
+  SECTION("read as inches, every side is 25.4x") {
+    const auto doc = import(stl, units::Length::Inch);
+    REQUIRE(doc->GetBodies().size() == 1);
+    const glm::vec3 s = span(*doc);
+    CHECK_THAT(s.x, WithinAbs(2.0 * 25.4, 1e-3));
+    CHECK_THAT(s.y, WithinAbs(3.0 * 25.4, 1e-3));
+    CHECK_THAT(s.z, WithinAbs(4.0 * 25.4, 1e-3));
+    CHECK_THAT(doc->GetBodies()[0].shape.Volume(),
+               WithinRel(24.0 * 25.4 * 25.4 * 25.4, 1e-6));
+    CHECK(doc->GetFeatures()[0]->GetWarning().empty());
+  }
+
+  SECTION("a mesh drawn in metres, read as mm, warns and names the fix") {
+    // A 20 x 30 x 40 mm part, exported by a tool that thinks in metres.
+    const fs::path m =
+        fs::temp_directory_path() / ("designer_units_m_" + pid + ".stl");
+    REQUIRE(k.SaveSTL(m.string(), k.CreateBox(0.02, 0.03, 0.04), 0.001));
+    const auto wrong = import(m, units::Length::Millimetre);
+    const std::string w = wrong->GetFeatures()[0]->GetWarning();
+    INFO(w);
+    CHECK(w.find("metres") != std::string::npos);
+    CHECK(w.find("units") != std::string::npos);
+    const auto right = import(m, units::Length::Metre);
+    REQUIRE(right->GetBodies().size() == 1);
+    CHECK_THAT(span(*right).z, WithinAbs(40.0, 1e-3));
+    CHECK(right->GetFeatures()[0]->GetWarning().empty());
+    fs::remove(m);
+  }
+
+  SECTION("a STEP declares its own unit, and refuses one") {
+    const auto doc = import(WriteRigStep(), units::Length::Inch);
+    CHECK(doc->GetBodies().empty());
+    const std::string e = doc->GetFeatures()[0]->GetError();
+    INFO(e);
+    CHECK(e.find("declares its own unit") != std::string::npos);
+  }
+  fs::remove(stl);
+}
+
 TEST_CASE("ImportFeature carries names and colors onto bodies",
           "[feature][import]") {
   const auto path = WriteRigStep();

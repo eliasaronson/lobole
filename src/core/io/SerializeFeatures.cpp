@@ -815,6 +815,8 @@ json FeatureToJson(const Feature& feature) {
     j["path"] = import->path;
     if (import->keepOrigin) // v97; absent = centred, as every older file was
       j["keep_origin"] = true;
+    if (import->lengthUnit != units::Length::Millimetre) // v103; absent = mm
+      j["units"] = units::ToString(import->lengthUnit);
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
   } else if (auto* d = dynamic_cast<const DerivedFeature*>(&feature)) {
@@ -1168,7 +1170,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/plan.md)"},
     {"Import", 1,
-     "path (STEP/STL/BREP file); keep_origin?: the import is CENTRED on its "
+     "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
+     "drawn in — mm (default), cm, m, in — since neither format carries one "
+     "(a metre mesh read as mm is 1000x too small); refused on STEP, which "
+     "declares its own; keep_origin?: the import is CENTRED on its "
      "combined bounding box by default — pass true to keep the file's own "
      "coordinates, which is what a neighbour part, a fixture in a shared "
      "frame, or a re-import of your own export needs. The applied shift is "
@@ -1615,6 +1620,16 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());
     imp->keepOrigin = j.value("keep_origin", false); // v97
+    if (j.contains("units")) { // v103; refused, never read as mm
+      const std::string u = j.at("units").get<std::string>();
+      if (!units::LengthFromString(u, imp->lengthUnit)) {
+        std::string accepted;
+        for (const char* n : units::LengthNames())
+          accepted += (accepted.empty() ? "" : ", ") + std::string(n);
+        throw std::runtime_error("Import: unknown units '" + u +
+                                 "'. Accepted: " + accepted);
+      }
+    }
     if (j.contains("color")) {
       imp->hasColor = true;
       imp->color = Vec3FromJson(j.at("color"));

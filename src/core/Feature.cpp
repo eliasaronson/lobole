@@ -123,6 +123,23 @@ ImportFeature::ImportFeature(const std::string& name, const std::string& path)
   m_name = name;
 }
 
+namespace {
+// Lower-cased, so ".STL" — how half the world's scanners and slicers write
+// it — imports like ".stl" instead of falling through to the STEP reader.
+std::string LowerExtension(const std::string& path) {
+  std::string ext = std::filesystem::path(path).extension().string();
+  for (char& c : ext)
+    if (c >= 'A' && c <= 'Z')
+      c = static_cast<char>(c - 'A' + 'a');
+  return ext;
+}
+} // namespace
+
+bool ImportFeature::TakesUnits(const std::string& path) {
+  const std::string ext = LowerExtension(path);
+  return ext == ".stl" || ext == ".brep";
+}
+
 size_t ImportFeature::ContentHash() const {
   std::error_code ec;
   const std::filesystem::path fp(path);
@@ -158,10 +175,17 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   // assembly file imported into a PART places every occurrence (the
   // assembly-document import is a separate app-level flow, I2).
   CADKernel::ImportedModel model;
-  const auto hasExt = [&](const char* ext) {
-    const size_t n = std::strlen(ext);
-    return path.size() > n && path.rfind(ext) == path.size() - n;
-  };
+  const std::string ext = LowerExtension(path);
+  const auto hasExt = [&](const char* e) { return ext == e; };
+  // A STEP says what unit it is in, and the reader converts; a unit given on
+  // top would be applied twice or contradict the file.
+  const bool takesUnits = TakesUnits(path);
+  if (!takesUnits && lengthUnit != units::Length::Millimetre) {
+    SetError("'" + path + "' is STEP, which declares its own unit — `units` " +
+             "is for STL and BREP, which carry none");
+    return false;
+  }
+  const double scale = units::MmPerLength(lengthUnit);
   // Consumed, not kept: one Execute uses what the importer already parsed,
   // every later one re-reads `path` as it always did (see SeedGeometry).
   std::unique_ptr<CADKernel::ImportedModel> seed = std::move(m_seed);
@@ -178,6 +202,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
       return false;
     }
+    if (scale != 1.0)
+      shape.Scale(scale);
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
     model.instances.push_back({0, glm::mat4(1.0f), ""});
   } else if (hasExt(".brep")) {
@@ -189,6 +215,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
       return false;
     }
+    if (scale != 1.0)
+      shape.Scale(scale);
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
     model.instances.push_back({0, glm::mat4(1.0f), ""});
   } else if (!CADKernel::Instance().LoadSTEPStructured(path, model)) {
@@ -229,6 +257,26 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   if (!haveBounds) {
     LOG_ERROR("ImportFeature '{}': no valid shapes in '{}'", m_name, path);
     return false;
+  }
+  // The commonest unit mistake an unitless file allows: a mesh drawn in
+  // metres read as millimetres, so a 20 cm part arrives 0.2 mm across. A
+  // warning and not a refusal — a genuinely tiny part is legitimate — but it
+  // names the fix, so the part is not quietly 1000x too small.
+  if (takesUnits) {
+    const glm::vec3 extent = combinedMax - combinedMin;
+    float largest = extent.x;
+    if (extent.y > largest)
+      largest = extent.y;
+    if (extent.z > largest)
+      largest = extent.z;
+    if (largest < 1.0f) {
+      char across[32];
+      std::snprintf(across, sizeof across, "%.3g", largest);
+      SetWarning(std::string("only ") + across + " mm across, read as " +
+                 units::ToString(lengthUnit) +
+                 " — an STL or BREP carries no unit; if it was drawn in "
+                 "metres or inches, set the import's units (m, in, cm)");
+    }
   }
   // Centre on the combined box, unless the caller asked to keep the file's
   // own coordinates. Recorded either way: an import that MOVED and did not

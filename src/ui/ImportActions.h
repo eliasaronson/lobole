@@ -29,6 +29,8 @@ struct Ray;          // defined in FaceSelector.h
 // of them rebuilt 73 targets (146 s) instead of the handful that care.
 // docs/architecture-review-2026-09-06.md, stage 4.
 
+#include "core/Units.h"
+
 namespace ui {
 
 // Imports a CAD file (.step/.stp, .brep, .stl) into the ACTIVE part as an
@@ -42,8 +44,11 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // single-product STEP is then read a SECOND time by the feature's first
 // regen — the whole file twice, ~12 s each at 48 MB. `parsed` is moved from,
 // and a later regen re-reads the path exactly as before.
+// `unit` is the length unit an STL/BREP was drawn in (ImportFeature::
+// lengthUnit); a STEP refuses anything but the default.
 bool ImportAsFeature(AppState& state, const std::string& filename,
-                     CADKernel::ImportedModel* parsed, std::string* error);
+                     CADKernel::ImportedModel* parsed, std::string* error,
+                     units::Length unit = units::Length::Millimetre);
 
 // Reference-image underlays (v49). Add reads/decodes the file and centres it on
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`

@@ -96,7 +96,8 @@ constexpr MethodDoc MotionMethods[] = {
     {"export_motion",
      "Write the run as a GLB with a glTF animation {study, path}: one node "
      "per occurrence, translation + rotation keyframes at every sample, "
-     "24 frames per second. Refuses without a run, and refuses when any "
+     "24 frames per second, in METRES and Y-up as glTF defines (one root "
+     "node carries both). Refuses without a run, and refuses when any "
      "sample is unsolved.",
      "path, study"},
 };

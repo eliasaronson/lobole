@@ -536,6 +536,17 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     REQUIRE(imp != nullptr);
     CHECK(imp->keepOrigin == expect.at("import_keep_origin").get<bool>());
   }
+  // v103: the unit an STL/BREP import was drawn in. Lost on a round trip,
+  // the part reloads 25.4x (or 1000x) off and looks fine.
+  if (expect.contains("import_units")) {
+    const ImportFeature* imp = nullptr;
+    for (const auto& f : doc.GetFeatures())
+      if (const auto* i = dynamic_cast<const ImportFeature*>(f.get()))
+        imp = i;
+    REQUIRE(imp != nullptr);
+    CHECK(std::string(units::ToString(imp->lengthUnit)) ==
+          expect.at("import_units").get<std::string>());
+  }
 }
 
 } // namespace

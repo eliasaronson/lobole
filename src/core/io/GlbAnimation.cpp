@@ -190,10 +190,13 @@ bool Write(const std::string& path, const std::vector<Node>& nodes,
   if (children.empty())
     return fail("nothing to export: every node is empty");
 
-  // The root: -90 degrees about X takes Z-up to Y-up.
+  // The root: -90 degrees about X takes Z-up to Y-up, and 0.001 takes our
+  // millimetres to glTF's metres. Everything under it — positions and every
+  // keyframe translation — stays in mm, so the scale is said once.
   const float s = 0.70710678f;
   json root{{"name", "Z-up scene"},
             {"rotation", {-s, 0.0, 0.0, s}},
+            {"scale", {0.001, 0.001, 0.001}},
             {"children", children}};
   gltfNodes.insert(gltfNodes.begin(), root);
 

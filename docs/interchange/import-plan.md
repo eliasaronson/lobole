@@ -34,7 +34,9 @@ feature list, so a genuinely *parametric* import is feasible (I3).
   coordinates instead, and `add_feature` reports the shift it applied as
   `recentred_by` — an import whose coordinates MEAN something, a neighbour
   part or a re-import of this app's own export, needs it); caps at 20
-  shapes; one body per shape in ONE part.
+  shapes; one body per shape in ONE part. (v103: `units` says what length
+  unit an STL or BREP was drawn in, since neither format carries one — a
+  STEP refuses it; docs/mesh-units-plan.md.)
 - Entry points exist end-to-end: File > Import STEP (Ctrl+I), `import_step`
   RPC + MCP tool. Whatever we improve lands in all three for free.
 - The XCAF bridge patterns already exist on the EXPORT side

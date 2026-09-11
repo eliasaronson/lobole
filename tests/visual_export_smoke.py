@@ -77,6 +77,19 @@ def main():
         # A triangle mesh must have a positions accessor.
         prim = gltf["meshes"][0]["primitives"][0]
         expect("POSITION" in prim["attributes"], "primitive has POSITION")
+        # glTF's unit is the metre: the 10 x 6 x 4 mm block spans 0.010 x
+        # 0.006 x 0.004, not 10 x 6 x 4 (a part 1000x too large in every
+        # viewer). Sorted, because the Z-up -> Y-up swap reorders the axes.
+        lo = [min(gltf["accessors"][p["attributes"]["POSITION"]]["min"][k]
+                  for m in gltf["meshes"] for p in m["primitives"])
+              for k in range(3)]
+        hi = [max(gltf["accessors"][p["attributes"]["POSITION"]]["max"][k]
+                  for m in gltf["meshes"] for p in m["primitives"])
+              for k in range(3)]
+        spans = sorted(h - l for l, h in zip(lo, hi))
+        expect(all(abs(s - w) < 1e-6
+                   for s, w in zip(spans, [0.004, 0.006, 0.010])),
+               f"glTF is in metres: spans {spans}")
         # Steel is metallic — the material carried through as PBR, not a flat
         # color guess.
         pbr = gltf["materials"][0].get("pbrMetallicRoughness", {})

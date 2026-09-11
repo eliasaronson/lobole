@@ -1,0 +1,26 @@
+{
+  "format": "designer-document",
+  "version": 103,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Datum block",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 10,
+      "height": 10,
+      "depth": 10
+    },
+    {
+      "type": "Import",
+      "name": "Scanned bracket",
+      "id": 2,
+      "path": "bracket_drawn_in_inches.stl",
+      "units": "in"
+    }
+  ]
+}

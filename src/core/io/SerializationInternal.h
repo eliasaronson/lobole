@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    102; // v102: a cam relation's follower may TURN: `dof_b` "rotation" and
+    103; // v103: an Import's `units` -- the length unit an STL/BREP was drawn
+         //      in (mm|cm|m|in; absent = mm). Refused on STEP, which declares
+         //      its own. Bumped so a v102 build refuses the file rather than
+         //      importing a metre mesh at 1:1.
+         // v102: a cam relation's follower may TURN: `dof_b` "rotation" and
          //      the lift table's second column in DEGREES (mm for a slide).
          //      No new field; bumped so a v101 build refuses the file rather
          //      than reading the degrees as radians.

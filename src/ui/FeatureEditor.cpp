@@ -1407,6 +1407,21 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
             cyl->height);
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
     ImGui::TextDisabled("File: %s", import->path.c_str());
+    // STL and BREP carry no unit (STEP declares its own), so which one the
+    // file was drawn in is the user's to say: a metre mesh read as mm is a
+    // part 1000x too small that otherwise looks fine.
+    if (ImportFeature::TakesUnits(import->path)) {
+      const std::vector<const char*> names = units::LengthNames();
+      int sel = 0;
+      for (size_t i = 0; i < names.size(); i++)
+        if (std::string(names[i]) == units::ToString(import->lengthUnit))
+          sel = static_cast<int>(i);
+      const nlohmann::json before = DocumentIO::FeatureToJson(*import);
+      if (LabeledCombo("File units", &sel, names.data(),
+                       static_cast<int>(names.size())) &&
+          units::LengthFromString(names[sel], import->lengthUnit))
+        CommitDiscrete(state, feature, before, index, commit);
+    }
   } else if (auto* d = dynamic_cast<DerivedFeature*>(&feature)) {
     DrawDerivedParams(state, *d, index, commit);
   } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {

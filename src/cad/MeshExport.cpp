@@ -140,9 +140,15 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
       // — the exact boundary Blender's exporter swizzles at. OBJ/PLY below
       // stay in world coordinates on purpose: they have no official up axis
       // and their consumers here are CAD-shaped.
+      //
+      // The same boundary crosses a UNIT: glTF's is the metre, ours the
+      // millimetre, and without the length pair a 10 mm part opens 10 m
+      // across in every viewer. The converter scales the vertices themselves.
       RWMesh_CoordinateSystemConverter csc;
       csc.SetInputCoordinateSystem(RWMesh_CoordinateSystem_Zup);
       csc.SetOutputCoordinateSystem(RWMesh_CoordinateSystem_glTF);
+      csc.SetInputLengthUnit(0.001);
+      csc.SetOutputLengthUnit(1.0);
       writer.SetCoordinateSystemConverter(csc);
       ok = writer.Perform(doc, fileInfo, progress);
     } else if (ext == ".obj") {

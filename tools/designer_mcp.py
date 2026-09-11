@@ -1448,9 +1448,14 @@ def export_bom(path: str) -> dict:
     return _call("export_bom", path=path)
 
 
-@_reference(description="Import a STEP file's bodies as an Import feature.")
-def import_step(path: str) -> dict:
-    return _call("import_step", path=path)
+@_reference(description="Import a STEP, STL or BREP file's bodies as an "
+          "Import feature. `units` is the length unit an STL/BREP was drawn "
+          "in (mm default, cm, m, in) — those formats carry none; a STEP "
+          "declares its own and refuses it.")
+def import_step(path: str, units: str | None = None) -> dict:
+    if units is None:
+        return _call("import_step", path=path)
+    return _call("import_step", path=path, units=units)
 
 
 @_reference(description="Save the WHOLE project and name this state a "

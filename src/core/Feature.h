@@ -3,6 +3,7 @@
 #include "cad/CADKernel.h"
 #include "core/ElementMap.h"
 #include "core/Expression.h"
+#include "core/Units.h"
 
 #include <functional>
 #include <glm/glm.hpp>
@@ -406,7 +407,8 @@ public:
   // does. The compiler cannot write this one — m_seed is an owning pointer.
   ImportFeature(const ImportFeature& other)
       : Feature(other), path(other.path), keepOrigin(other.keepOrigin),
-        hasColor(other.hasColor), color(other.color) {}
+        lengthUnit(other.lengthUnit), hasColor(other.hasColor),
+        color(other.color) {}
 
   std::string TypeName() const override { return "Import"; }
 
@@ -424,6 +426,15 @@ public:
   std::string path;
   // Keep the file's own coordinates instead of centring the import (v97).
   bool keepOrigin = false;
+  // The length unit the FILE was drawn in (v103, serialized as `units`), for
+  // STL and BREP only: an STL has no unit field and a BREP is OpenCASCADE's
+  // unitless native form, so a mesh exported in metres arrived 1000x too
+  // small. STEP declares its own unit and REFUSES this. Storage stays mm: the
+  // shape is scaled once, as it is read.
+  units::Length lengthUnit = units::Length::Millimetre;
+  // Whether `lengthUnit` means anything for this path: .stl or .brep, any
+  // case.
+  static bool TakesUnits(const std::string& path);
   // What the last Execute translated the shapes by — zero when keepOrigin.
   // Reported by the RPC so a caller never has to discover the move by
   // measuring a bounding box.

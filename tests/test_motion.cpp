@@ -304,6 +304,11 @@ TEST_CASE("The GLB writer emits a valid animated scene", "[motion][export]") {
   CHECK(doc.at("animations")[0].at("channels").size() == 2);
   CHECK(doc.at("nodes").size() == 2); // the Y-up root and the arm
   CHECK(doc.at("nodes")[1].at("name") == "Arm");
+  // glTF's unit is the metre: the root scales our millimetres, or the
+  // mechanism opens 1000x too large in every viewer.
+  const auto& rootScale = doc.at("nodes")[0].at("scale");
+  for (int k = 0; k < 3; k++)
+    CHECK_THAT(rootScale[k].get<double>(), WithinAbs(0.001, 1e-12));
   // The time accessor spans the study.
   const auto& sampler = doc.at("animations")[0].at("samplers")[0];
   const auto& timeAcc = doc.at("accessors")[sampler.at("input").get<int>()];

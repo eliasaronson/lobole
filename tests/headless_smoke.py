@@ -1228,6 +1228,22 @@ def main():
         d.call("import_step", path=stl)
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
                "re-imported STL is a solid with the original volume")
+        # An STL carries no unit, so the caller says what it was drawn in
+        # (docs/mesh-units-plan.md): read as cm, the 2x3x4 box is 10x per side.
+        d.call("new_project")
+        d.call("import_step", path=stl, units="cm")
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24000.0) < 0.1,
+               "an STL read in cm is 10x per side")
+        expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
+        expect_error(d, "import_step", "declares its own", path=step,
+                     units="in")
+        expect_error(d, "add_feature", "Accepted", feature={
+            "type": "Import", "name": "Bad", "path": stl, "units": "furlong"})
+        # The default said out loud is not an unknown field, though it does
+        # not serialize back (absent = mm).
+        d.call("add_feature", feature={
+            "type": "Import", "name": "Explicit", "path": stl, "units": "mm",
+            "keep_origin": False})
 
         phase("Assembly import")
         # Assembly import (I2) into an UNSAVED project: it ADDS to the

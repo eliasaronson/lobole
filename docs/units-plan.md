@@ -111,6 +111,7 @@ a degrees value in the radians field refused); the drawing units by
 
 ## Not in scope
 
-GLB export applies no scale, so parts land 1000x large in a glTF viewer whose
-unit is metres; STL import has no scale option. Both real, both unrelated to
-the degrees/radians work.
+GLB export applied no scale, so parts landed 1000x large in a glTF viewer
+whose unit is metres, and STL import had no unit option. Both real, both
+unrelated to the degrees/radians work — and both since fixed
+(docs/mesh-units-plan.md).

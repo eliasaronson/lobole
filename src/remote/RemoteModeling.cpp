@@ -122,10 +122,13 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   for (auto it = request.begin(); it != request.end(); ++it) {
     if (out.contains(it.key()) || kAllow.count(it.key()) != 0)
       continue;
-    // Documented for this type, just empty here.
-    if (dialect.count(it.key()) != 0 &&
-        ((it.value().is_array() || it.value().is_object()) &&
-         it.value().empty()))
+    // Documented for this type, and it did not serialize back: an empty
+    // value, or the DEFAULT, which the dialect omits so older files re-save
+    // byte-identically (`keep_origin: false`, an Import's `units: "mm"`).
+    // Either way it was consumed; refusing it named a vocabulary that did not
+    // include it. An UNdocumented key — a typo, a field of another type — is
+    // still refused below.
+    if (dialect.count(it.key()) != 0)
       continue;
     std::string accepted;
     for (auto o = out.begin(); o != out.end(); ++o)
