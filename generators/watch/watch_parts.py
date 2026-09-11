@@ -517,12 +517,21 @@ def cotes(app, outline_pts, d_top, pitch=1.1, width=0.30, depth=0.035,
 
 
 def bridge(app, name, centres, r, holes, d0=None, d1=None, stripes=True,
-           screws=()):
+           pillars=()):
+    """A bridge over `centres` (one radius, or one per centre), standing on
+    `pillars` down to the mainplate — each with a blued screw let in over it,
+    as a bridge screw runs down through its pillar into the plate."""
     part = app.part(name)
     d0 = BRIDGE_D if d0 is None else d0
     d1 = BRIDGE_D + BRIDGE_T if d1 is None else d1
-    outline = pads(centres, r)          # r: one radius, or one per centre
+    rs = list(r) if isinstance(r, (list, tuple)) else [r] * len(centres)
+    pad = float(PILLAR_R) + 0.35
+    outline = pads(list(centres) + list(pillars), rs + [pad] * len(pillars))
     slab(app, outline, d0, d1, "new_body", "bridge")
+    if pillars:
+        slab(app, [circ(c, PILLAR_R) for c in pillars], 0.0, d0 + 0.01, "add",
+             "pillars")
+    screws = list(pillars)
     if holes:
         slab(app, [circ(h, rr) for h, rr in holes], d0 - 0.01, d1 + 0.01,
              "cut", "pivot holes")
@@ -568,51 +577,27 @@ def bridge(app, name, centres, r, holes, d0=None, d1=None, stripes=True,
     return part
 
 
-def screw_sites(centre, r, avoid, n=2):
-    """n screw sites on a circle of radius r about `centre`, each as far as
-    it can be from every hole in `avoid` and from each other."""
-    cand = [pol(r, 2 * math.pi * k / 72, centre) for k in range(72)]
-    rim = float(MOVEMENT_D) / 2 - 0.6
-    cand = [c for c in cand if math.hypot(*c) < rim]
-    sites = []
-    for _ in range(n):
-        best = max(cand, key=lambda c: min(
-            [math.dist(c, h) - rr for h, rr in avoid]
-            + [math.dist(c, s) - 0.45 for s in sites]))
-        sites.append(best)
-    return sites
-
-
 def bridges(app):
     out = {}
-    # The train bridge's two screws sit on the line from the centre arbor to
-    # the fourth, inside the hull of its four pivots and clear of all four.
-    cy, fy = POS["center"][1], POS["fourth"][1]
     out["train"] = bridge(
         app, "Train bridge",
         [POS["center"], POS["third"], POS["fourth"], POS["escape"]], 1.10,
         [(POS[k], PIVOT_R) for k in ("center", "third", "fourth", "escape")],
-        screws=[(POS["center"][0], cy + (fy - cy) * f) for f in (0.3, 0.77)])
+        pillars=S.PILLARS["train"])
     barrel_holes = [(POS["barrel"], 0.55), (POS["crown_wheel"], PIVOT_R),
                     (POS["reduction"], PIVOT_R)]
     # It carries the crown wheel's arbor too, on a pad reaching out to the
     # stem's line.
     out["barrel"] = bridge(
         app, "Barrel bridge", [POS["barrel"], POS["crown_wheel"]],
-        [4.10, 0.90], barrel_holes,
-        screws=screw_sites(POS["barrel"], 3.2,
-                           [(h, rr + 0.33) for h, rr in barrel_holes]))
-    # The balance cock: a disc over the balance and an arm out to the rim.
+        [4.10, 0.90], barrel_holes, pillars=S.PILLARS["barrel"])
+    # The balance cock: a disc over the balance and an arm out to its one
+    # pillar, which pillars() sites at the rim beside the balance. (Its first
+    # foot stood at the rim straight out from the balance — over the balance
+    # rim's own sweep, which a pillar there would have gone through.)
     b = POS["balance"]
-    L = math.hypot(*b)
-    u = (b[0] / L, b[1] / L)
-    # The foot's pad must stay inside the movement, which the case bore is
-    # 0.05 outside of; a foot at r 12.0 with a 1.30 pad reached 13.3 and cut
-    # 0.31 mm3 into the case.
-    reach = float(MOVEMENT_D) / 2 - 1.30 - 0.15
-    foot = (u[0] * reach, u[1] * reach)
-    out["cock"] = bridge(app, "Balance cock", [b, foot], 1.30,
-                         [(b, PIVOT_R)], stripes=False, screws=[foot])
+    out["cock"] = bridge(app, "Balance cock", [b], 1.30, [(b, PIVOT_R)],
+                         stripes=False, pillars=S.PILLARS["cock"])
     # The pallet bridge sits UNDER the balance, on two feet.
     p = POS["pallet"]
     d = (POS["balance"][0] - p[0], POS["balance"][1] - p[1])

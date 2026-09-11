@@ -124,11 +124,18 @@ hidden), `caseback` (through the window), `movement` — case, caseback and
 rotor off, as a watchmaker would see it — and `keyless`, the dial side with
 the dial and hands off.
 
-The bridges have no pillars. They are placed by fastened mates to the
-mainplate's seat, which holds them exactly, but a real bridge stands on
-pillars or feet between the wheels; only the pallet bridge has them. Choosing
-pillar sites clear of every wheel's sweep is what the layout gate could
-check, and was not attempted.
+**The bridges stand on pillars.** They first floated 3.6 mm over the plate,
+held only by a mate — the same fault as the unconnected crown. A pillar runs
+the whole height every wheel turns in, so it must clear all of them whatever
+their depth; `watch_spec.pillars()` scans the rim for points clear of every
+wheel, the balance, the pallet fork's swing and every arbor, and gives each
+bridge the nearest (the cock one, the train and barrel bridges two, spread
+apart). Each bridge's outline grows to reach its pillars, and each blued
+screw sits on one, as a bridge screw runs down through its pillar into the
+plate. Two things it moved: the balance cock's foot, which had stood at the
+rim straight out from the balance — over the rim's own sweep, where a pillar
+would have gone through it — and the barrel bridge, whose disc sat wholly
+over the barrel and had nowhere to stand until it grew past it.
 
 ## The keyless works — the crown was connected to nothing
 

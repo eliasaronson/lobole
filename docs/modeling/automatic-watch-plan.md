@@ -69,6 +69,9 @@ barrel 0.30–2.30 below the mainplate's bridge face, centre wheel 2.70–2.95,
 third 1.40–1.65, fourth 2.00–2.25, escape 1.00–1.20, balance 2.60–3.20, each
 pinion spanning the level of the wheel it is driven by. Bridges above that,
 the ratchet and crown wheel on the barrel bridge, the rotor over everything.
+Every bridge stands on pillars down to the mainplate, sited by
+`watch_spec.pillars()` where nothing turns between plate and bridge — which
+is only near the rim — so the bridges' outlines grow out to them.
 
 **Why cycloidal.** The first build used involute teeth from `gear.py`, and
 the gates refused it three ways. Unshifted, eight of the nine meshes interfere:

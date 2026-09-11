@@ -98,6 +98,11 @@ BALANCE_R = 4.00
 # rim — the layout check refused exactly that.
 PALLET_BRIDGE_D = 2.10
 PALLET_BRIDGE_T = 0.35
+# Every bridge stands on PILLARS down to the mainplate, sited by pillars()
+# where nothing turns between the plate and the bridges.
+PILLAR_R = 0.45
+PILLAR_CLEAR = 0.15        # from anything that turns
+PALLET_REACH = 2.20        # the pallet fork's swing, round its arbor
 RATCHET_D = 4.90           # on the barrel bridge (whose top is d 4.8)
 RATCHET_T = 0.40
 REDUCTION_D = 5.35
@@ -498,6 +503,57 @@ def keyless():
 
 
 KEYLESS = keyless()
+
+
+def pillars():
+    """Where each bridge stands on the mainplate. A pillar runs from the
+    plate to the bridge, through the whole level every wheel turns in, so it
+    must clear every wheel, the balance, the pallet fork's swing and every
+    arbor there — whatever their depth. The candidates are the free points
+    near the rim; each bridge takes the nearest to itself (the balance cock
+    one, beside the balance; the train and barrel bridges two, spread apart),
+    and no two bridges' pillars crowd each other. The first model had none:
+    its bridges floated 3.6 mm over the plate on a mate."""
+    P = POS
+    sweep = [(P["barrel"], tip_r("barrel")), (P["center"], tip_r("center")),
+             (P["third"], tip_r("third")), (P["fourth"], tip_r("fourth")),
+             (P["escape"], ESCAPE_OUTER_R), (P["balance"], BALANCE_R),
+             (P["pallet"], PALLET_REACH), (P["crown_wheel"], ARBOR_R)]
+    need = PILLAR_R + PILLAR_CLEAR
+    rim = MOVEMENT_D / 2 - PILLAR_R - 0.4
+    free = []
+    for i in range(360):
+        a = math.radians(i)
+        for j in range(int((rim - 6.0) / 0.1) + 1):
+            c = ((6.0 + 0.1 * j) * math.cos(a), (6.0 + 0.1 * j) * math.sin(a))
+            if all(math.dist(c, s) - r >= need for s, r in sweep):
+                free.append(c)
+    train = tuple(sum(P[k][i] for k in ("center", "third", "fourth", "escape"))
+                  / 4 for i in (0, 1))
+    taken, out = [], {}
+
+    def pick(near, n, spread, rim_only=0.0):
+        got = []
+        for _ in range(n):
+            ok = [c for c in free if math.hypot(*c) >= rim_only
+                  and all(math.dist(c, t) >= 2.5 for t in taken)
+                  and all(math.dist(c, g) >= spread for g in got)]
+            if not ok:
+                return None
+            best = min(ok, key=lambda c: math.dist(c, near))
+            got.append(best)
+            taken.append(best)
+        return got
+    out["cock"] = pick(P["balance"], 1, 0.0, rim_only=10.0)
+    out["train"] = pick(train, 2, 5.5)
+    out["barrel"] = pick(P["barrel"], 2, 5.5)
+    missing = [k for k, v in out.items() if not v]
+    if missing:
+        raise ValueError(f"no room for a pillar under: {', '.join(missing)}")
+    return out
+
+
+PILLARS = pillars()
 
 
 def _is_dimension(name, value):

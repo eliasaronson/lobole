@@ -62,7 +62,7 @@ dial, a rotor winding the barrel through a reduction wheel, and a keyless
 works — stem, clutch, winding pinion, setting wheel, setting lever and yoke —
 so the crown winds the mainspring and sets the hands) in a 40 mm case with a
 dial, applied indices and blued hands. It is built on this round's machinery
-from the start: 83 dimensions are document variables (`watch_spec.declare`),
+from the start: 86 dimensions are document variables (`watch_spec.declare`),
 every one of its 37 occurrences is placed by a mate, 16 relations make one
 motion study turn every hand at its true rate and the crown drive the ratchet,
 and the clearances that decide whether it runs are DECLARED on the assembly.
