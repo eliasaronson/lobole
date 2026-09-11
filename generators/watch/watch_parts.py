@@ -332,16 +332,20 @@ def pallet_fork(app):
     """The lever. Built in its own frame: +X points at the balance, the
     escape wheel's centre is at (-PALLET_FROM_ESCAPE, 0).
 
-    The fork is cut clear of the escape wheel's tip circle by construction,
-    and the two stones sit just outside it rather than in lock — so the
-    placed escapement is clash-free at any phase of the train. Its action is
-    intermittent and is not simulated (docs/modeling/automatic-watch-plan.md).
+    It swings: a cam from the escape wheel points it at the impulse pin
+    while the pin is in the notch, and rests it at the banking angle once
+    the pin has left. The wheel turns continuously in this model rather than
+    in steps, so no stone can lock or impulse a tooth — the stones sit where
+    the deeper one is STONE_CLEAR off the tip circle at banking, and the
+    fork is cut clear of the wheel across its whole swing, so the
+    escapement is clash-free at any phase of the train.
     """
     part = app.part("Pallet fork")
     e = float(PALLET_FROM_ESCAPE)
     L = math.dist(POS["pallet"], POS["balance"])
-    pin_r = 0.55
+    pin_r = float(IMPULSE_PIN_R)
     xn = L - pin_r                       # the notch, where the impulse pin is
+    tip = xn + float(HORN_TIP)           # the horns' ends
     d0, d1 = ESCAPE_WHEEL_D, ESCAPE_WHEEL_D + ESCAPE_T
     slab(app, [circ((0, 0), ARBOR_R)], 0.10, PALLET_BRIDGE_D + 0.2,
          "new_body", "staff")
@@ -351,15 +355,38 @@ def pallet_fork(app):
     # and a notch bottom at xn - 0.05 (the first draft) put 0.01 of ruby into
     # the fork — the exact sweep's 0.0001 mm3.
     slab(app, poly([(0.2, w), (xn - 0.30, w), (xn - 0.30, 0.32),
-                    (xn + 0.15, 0.32), (xn + 0.15, 0.10), (xn - 0.10, 0.10),
-                    (xn - 0.10, -0.10), (xn + 0.15, -0.10), (xn + 0.15, -0.32),
+                    (tip, 0.32), (tip, 0.10), (xn - 0.10, 0.10),
+                    (xn - 0.10, -0.10), (tip, -0.10), (tip, -0.32),
                     (xn - 0.30, -0.32), (xn - 0.30, -w), (0.2, -w)]),
          d0, d1, "add", "fork")
     R = float(ESCAPE_OUTER_R)
+    bank = math.radians(fork_bank_deg())
+    t = 0.08                             # a stone's half-width
+
+    def deepest(c0, a):
+        """The nearest a stone's inner edge comes to the escape wheel's
+        centre anywhere in the fork's swing."""
+        u = (math.cos(a), math.sin(a))
+        v = (-u[1], u[0])
+        worst = float("inf")
+        for s in (-t, 0.0, t):
+            px, py = -e + u[0] * c0 + v[0] * s, u[1] * c0 + v[1] * s
+            for i in range(17):
+                ph = -bank + 2 * bank * i / 16
+                x = px * math.cos(ph) - py * math.sin(ph)
+                y = px * math.sin(ph) + py * math.cos(ph)
+                worst = min(worst, math.hypot(x + e, y))
+        return worst
+
+    # Where the stones' inner faces sit at rest: as close as the swing
+    # allows, so at banking the deeper one stands STONE_CLEAR off the tips.
+    c0 = R + float(STONE_CLEAR)
+    while deepest(c0, math.radians(30.0)) < R + float(STONE_CLEAR):
+        c0 += 0.005
     stones = []
     for sgn in (1, -1):
         a = math.radians(30.0) * sgn
-        sx, sy = -e + (R + 0.18) * math.cos(a), (R + 0.18) * math.sin(a)
+        sx, sy = -e + (c0 + 0.13) * math.cos(a), (c0 + 0.13) * math.sin(a)
         n = (-sy, sx)
         k = 0.13 / math.hypot(*n)
         n = (n[0] * k, n[1] * k)
@@ -367,12 +394,24 @@ def pallet_fork(app):
                         (sx - n[0], sy - n[1]), (-n[0], -n[1])]),
              d0, d1, "add", "arm")
         stones.append((a, sgn))
-    # Clear of the escape wheel by construction, not by luck.
-    slab(app, [circ((-e, 0), R + 0.04)], d0 - 0.01, d1 + 0.01, "cut",
-         "escape clearance")
+    # Clear of the escape wheel by construction, not by luck — at every angle
+    # of the swing: the tip circle's disc swept along the arc its centre
+    # makes about the pallet arbor as the fork turns, a little past banking.
+    rho = R + 0.04
+    b0, b1 = math.pi - 1.1 * bank, math.pi + 1.1 * bank
+    sweep = [pol(e + rho, b0 + (b1 - b0) * i / 24) for i in range(25)]
+    cx, cy = pol(e, b1)
+    sweep += [(cx + rho * math.cos(b1 + math.pi * i / 120),
+               cy + rho * math.sin(b1 + math.pi * i / 120))
+              for i in range(1, 120)]
+    sweep += [pol(e - rho, b1 - (b1 - b0) * i / 24) for i in range(25)]
+    cx, cy = pol(e, b0)
+    sweep += [(cx + rho * math.cos(b0 + math.pi + math.pi * i / 120),
+               cy + rho * math.sin(b0 + math.pi + math.pi * i / 120))
+              for i in range(1, 120)]
+    slab(app, poly(sweep), d0 - 0.01, d1 + 0.01, "cut", "escape clearance")
     for a, sgn in stones:
-        c0, c1 = R + 0.05, R + 0.32
-        t = 0.08
+        c1 = c0 + 0.27
         u = (math.cos(a), math.sin(a))
         v = (-u[1], u[0])
         pts = [(-e + u[0] * r + v[0] * s, u[1] * r + v[1] * s)
@@ -413,9 +452,9 @@ def balance(app):
     screws = [circ(pol(r_out - 0.20, 2 * math.pi * k / 12 + 0.26), 0.14)
               for k in range(12)]
     slab(app, screws, BALANCE_D1, BALANCE_D1 + 0.12, "add", "timing screws")
-    slab(app, [circ((0, 0), 0.70)], 1.25, 1.35, "add", "roller")
-    slab(app, [circ((0.55, 0.0), 0.06)], ESCAPE_WHEEL_D, 1.36, "new_body",
-         "impulse pin")
+    slab(app, [circ((0, 0), float(ROLLER_R))], 1.25, 1.35, "add", "roller")
+    slab(app, [circ((float(IMPULSE_PIN_R), 0.0), float(IMPULSE_PIN_W))],
+         ESCAPE_WHEEL_D, 1.36, "new_body", "impulse pin")
     part.frame("axis", origin=(0.0, 0.0, -float(MAINPLATE_T)))
     material(app, 0, "bronze")
     look(app, 0, "glucydur")
@@ -629,14 +668,21 @@ def bridges(app):
     b = POS["balance"]
     out["cock"] = bridge(app, "Balance cock", [b], 1.30, [(b, PIVOT_R)],
                          stripes=False, pillars=S.PILLARS["cock"])
-    # The pallet bridge sits UNDER the balance, on two feet.
+    # The pallet bridge sits UNDER the balance, on two feet that come down
+    # through the fork's level — so they stand in the gap between the fork's
+    # body and its arms, 70 degrees either side of the fork's line. Straight
+    # across the arbor, 1.0 out, they were 0.02 clear of the arms at rest and
+    # inside them once the fork swung.
     p = POS["pallet"]
     d = (POS["balance"][0] - p[0], POS["balance"][1] - p[1])
     L = math.hypot(*d)
-    n = (-d[1] / L, d[0] / L)
-    fa = (p[0] + n[0] * 1.0, p[1] + n[1] * 1.0)
-    fb = (p[0] - n[0] * 1.0, p[1] - n[1] * 1.0)
-    part = bridge(app, "Pallet bridge", [fa, fb], 0.40, [(p, PIVOT_R)],
+    x_, n = (d[0] / L, d[1] / L), (-d[1] / L, d[0] / L)
+    a = math.radians(PALLET_FOOT_DEG)
+    foot = [(p[0] + PALLET_FOOT_R * (x_[0] * math.cos(a) + n[0] * math.sin(a) * sg),
+             p[1] + PALLET_FOOT_R * (x_[1] * math.cos(a) + n[1] * math.sin(a) * sg))
+            for sg in (1, -1)]
+    fa, fb = foot
+    part = bridge(app, "Pallet bridge", [fa, p, fb], 0.40, [(p, PIVOT_R)],
                   d0=PALLET_BRIDGE_D, d1=PALLET_BRIDGE_D + PALLET_BRIDGE_T,
                   stripes=False)
     slab(app, [circ(fa, 0.30), circ(fb, 0.30)], 0.0, PALLET_BRIDGE_D, "add",

@@ -238,15 +238,38 @@ and a 6-leaf pinion 60; the pair builds and checks `verified`.
 Archimedean spiral, piped in round wire: twelve turns, 240 points, Ø0.05 mm,
 about a second, and a volume within 0.4% of wire area × spiral length.
 
-**An animated escapement: no.** Its motion is intermittent, so no
-constant-ratio relation expresses it, and a cam relation only drives a sliding
-follower — a revolute follower is refused. The escapement is placed rather
-than animated: the pallet and balance turn on revolute mates of their own, the
-stones sit on the escape wheel's tip circle, and the pallet is cut clear of
-the escape wheel by construction, so it is clash-free at any phase of the
-train.
+**An animated escapement: yes, since v102.** A cam relation's follower may
+turn now ([rotating-cam-follower-plan.md](../rotating-cam-follower-plan.md)),
+and two cams off the escape wheel drive it. One full oscillation of the
+balance lets one tooth pass, so the balance swings once per tooth pitch —
+the escape wheel turns 12 times a minute and has 15 teeth, which is 3 Hz or
+21,600 beats an hour, the standard rate. Its table is harmonic, 270 degrees
+either way, which is how a balance moves in time. The fork's table is the
+impulse pin's own geometry: while the pin is in the notch the fork points at
+it, and once the pin has left (47 degrees of balance either side) the fork
+rests at its banking angle, 6.7 degrees. The table is sampled twenty-one
+times across each passage, where the fork turns 13 degrees in 1.5 degrees of
+the wheel, so the spline keeps the pin inside the notch's 0.04 mm of play.
+An "Impulse" motion study drives the escape wheel through one passage a
+tenth of a degree at a time and checks every pose for clashes.
 
-That refusal contradicted itself:
+Getting the swing down to a real one moved the pin. At 0.55 mm from the
+balance staff the fork swung 13.5 degrees either way and its stones would
+have run 0.37 mm into the wheel; at 0.30, with the horns shortened to end
+just past the pin, it swings 6.7. The swing found one more thing the placed
+fork never met: the pallet bridge's feet come down through the fork's level,
+straight across its arbor 1.0 mm out, and stood 0.02 mm from the arms at rest.
+The exact sweep caught the swung fork in one (0.0007 mm³); they stand in the
+gap between the fork's body and its arms now, 70 degrees either side of its
+line, 0.40 mm clear at either banking.
+
+**What is still approximate:** the escape wheel turns continuously, not in
+steps, so no stone can lock or impulse a tooth. The stones sit where the
+deeper one is 0.05 mm off the tip circle at banking, and the fork is cut
+clear of the wheel across its whole swing.
+
+Before v102 the escapement was placed rather than animated, because a cam
+could only drive a sliding follower and refused a revolute one. That refusal contradicted itself:
 
     mate 5 (revolute) has no offset to couple — a cam needs revolute or
     cylindrical mates

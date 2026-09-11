@@ -49,6 +49,10 @@ the next.
 
 ## Larger — scoped for the next round
 
+The rotating cam follower that animates the escapement is built
+([rotating-cam-follower-plan.md](rotating-cam-follower-plan.md)).
+
+
 - **A one-way relation** (a freewheel): a relation that drives in one
   direction and slips in the other. Hand-winding then leaves the rotor alone,
   and the rotor's reverser can be modelled. About half a day in the solver
@@ -57,10 +61,6 @@ the next.
   drive one way and slip the other, in place of square ones. They go with
   the one-way relation: until the solver can slip, a sawtooth is a square
   dog drawn differently, hidden under the bridge.
-- **A rotating cam follower**, so the escapement animates: the lift table in
-  degrees driving a revolute. Half a day to a day, a format bump; an
-  approximation still, since in a real watch the balance drives the escape
-  wheel.
 - **A thinner movement** (~5 mm, not ~8): re-stack every depth. A day,
   mostly verification.
 - **A per-body transmission** override in `Appearance` (tinted glass that is

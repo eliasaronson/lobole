@@ -92,11 +92,13 @@ pinion pitch shows no interference, its flanks 13–17 µm apart.
 stones, balance with three arms, roller and impulse pin, and a hairspring made
 as a fit-spline Archimedean spiral piped in round wire (there is no spiral
 primitive). Its motion is intermittent, which a constant-ratio relation cannot
-express, and a cam relation only drives a SLIDING follower — so the escapement
-is placed, not animated: the pallet and balance turn on revolute mates of their
-own, the stones sit on the escape wheel's tip circle rather than in lock, and
-the pallet is cut clear of the escape wheel by construction, so it is clash-free
-at any phase of the train.
+express. Since v102 a cam's follower may turn, so two cams off the escape wheel
+swing the balance (harmonic, once per tooth pitch) and point the fork at the
+impulse pin while the pin is in its notch
+([rotating-cam-follower-plan.md](../rotating-cam-follower-plan.md)). The wheel
+still turns continuously, so the stones stand clear of its tip circle rather
+than in lock, and the fork is cut clear of it across its whole swing, so it is
+clash-free at any phase of the train.
 
 **Winding.** The rotor drives the ratchet wheel through one reduction wheel,
 and the crown wheel turns with the ratchet — one chain of relations rooted at

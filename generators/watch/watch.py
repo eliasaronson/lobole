@@ -201,6 +201,7 @@ def build_assembly(app, P):
             raise SdkError(f"relation {a}->{b}: {r['error']}")
         rel[f"{a}->{b}"] = r
     keyless_relations(app, m, rel)
+    escapement_relations(app, m, rel)
 
     # The hands. Meshing phases turn every driven arbor by up to a tooth
     # pitch — 22 minutes of hour hand, on a 32-tooth hour wheel — so each hand
@@ -245,6 +246,52 @@ def relate(app, m, rel, key, kind, a, b, **kw):
         raise SdkError(f"relation {key}: {r['error']}")
     rel[key] = r
     return r
+
+
+def escapement_relations(app, m, rel):
+    """The escapement animates from the train: a cam from the escape wheel
+    swings the balance, harmonically and once per tooth pitch, and another
+    points the pallet fork at the impulse pin while the pin is in its notch
+    (watch_spec.escapement_tables). Approximate in one way, said in
+    docs/modeling/watch.md: the wheel turns continuously, not in steps."""
+    from watch_spec import escapement_tables
+    bal, fork = escapement_tables()
+    relate(app, m, rel, "balance swing", "cam", "escape", "balance", lift=bal)
+    relate(app, m, rel, "fork swing", "cam", "escape", "pallet", lift=fork)
+
+
+def check_escapement(app, m):
+    """Drive the escape wheel through a passage of the pin and read the
+    balance and the fork back against their tables, then put it back."""
+    from watch_spec import balance_deg, fork_deg, fork_bank_deg, Z_ESCAPE
+
+    def rot(ms, key):
+        return math.degrees(ms[m[key]]["rotation"])
+
+    ms = {x["id"]: x for x in app.call("list_mates")["mates"]}
+    e_rest = rot(ms, "escape")
+    c = round(e_rest / (180.0 / Z_ESCAPE)) * (180.0 / Z_ESCAPE)
+    bad, worst, swing = [], 0.0, []
+    for de in (-3.0, -0.6, -0.3, 0.0, 0.3, 0.6, 3.0):
+        app.call("set_mate", id=m["escape"], rotation_deg=c + de)
+        app.solve_assembly()
+        ms = {x["id"]: x for x in app.call("list_mates")["mates"]}
+        e = rot(ms, "escape")
+        wb, wf = balance_deg(e), fork_deg(balance_deg(e))
+        gb, gf = rot(ms, "balance"), rot(ms, "pallet")
+        db = (gb - wb + 180.0) % 360.0 - 180.0
+        worst = max(worst, abs(db), abs(gf - wf))
+        swing.append(gf)
+    app.call("set_mate", id=m["escape"], rotation_deg=e_rest)
+    app.solve_assembly()
+    if worst > 0.5:
+        bad.append(f"the balance and fork are {worst:.3f} deg off their "
+                   f"tables")
+    if abs(max(swing) - min(swing) - 2 * fork_bank_deg()) > 0.2:
+        bad.append(f"the fork swings {max(swing) - min(swing):.2f} deg, not "
+                   f"{2 * fork_bank_deg():.2f}")
+    return {"worst": worst, "swing": max(swing) - min(swing),
+            "centre": c}, bad
 
 
 def keyless_relations(app, m, rel):
@@ -652,6 +699,28 @@ def verify(app, occ, m, rel, cache=None):
                    f"{pair['b_name']}")
     if unsolved:
         bad.append(f"{unsolved} motion samples did not solve")
+
+    with phase("escapement"):
+        esc, why = check_escapement(app, m)
+        bad += why
+        # The pin's passage through the notch, where the fork turns 13
+        # degrees in about 1.5 of the wheel: a tenth of a degree a sample.
+        c = esc["centre"]
+        study = app.add_motion_study(driver=m["escape"], dof="rotation",
+                                     from_=c - 1.0, to=c + 1.0, samples=21,
+                                     check_clash=True, clash_mode="mesh",
+                                     name="Impulse")
+        run = app.run_motion_study(study=study["id"], _timeout=1800)
+    print(f"  escapement: the fork swings +/-{esc['swing'] / 2:.2f} deg, balance "
+          f"and fork within {esc['worst']:.3f} deg of their tables; impulse "
+          f"{len(run.get('samples', []))} samples, "
+          f"{len(run.get('appeared', []))} new contacts, receipt "
+          f"{run['receipt']['standing']}")
+    for pair in run.get("appeared", []):
+        bad.append(f"the pin's passage brings {pair['a_name']} into "
+                   f"{pair['b_name']}")
+    if any(not smp.get("solved") for smp in run.get("samples", [])):
+        bad.append("impulse samples did not solve")
     if bad:
         raise SdkError("VERIFICATION FAILED:\n  " + "\n  ".join(bad))
 

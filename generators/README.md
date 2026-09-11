@@ -57,7 +57,8 @@ found six app defects (five fixed, one worked around); see
 
 `watch/` is an automatic mechanical watch, time only with small seconds: a
 21,600 vph movement (barrel, centre, third, fourth and escape wheels, a Swiss
-lever escapement with a piped fit-spline hairspring, motion works under the
+lever escapement that swings — balance and fork driven by cams off the
+escape wheel — with a piped fit-spline hairspring, motion works under the
 dial, a rotor winding the barrel through a reduction wheel, and a keyless
 works — stem, clutch, winding pinion, setting wheel, setting lever and yoke —
 so the crown winds the mainspring and sets the hands) in a 40 mm case with a

@@ -572,3 +572,80 @@ def declare(app):
     ns = {k: declared[k.lower()] for k in base}
     _derive(ns)
     return ns
+
+
+# --- the escapement's action -------------------------------------------------
+# Two cams from the escape wheel animate it (docs/rotating-cam-follower-plan.md).
+# One full oscillation of the balance lets one tooth pass, so it swings once
+# per tooth pitch: the escape wheel turns 12 times a minute, 15 teeth, 3 Hz —
+# 21,600 beats an hour. The fork points at the impulse pin while the pin is in
+# its notch and rests at its banking angle once it has left.
+IMPULSE_PIN_R = 0.30       # the pin's circle about the balance staff. At 0.55
+                           # the fork swung 13.5 deg either way and its
+                           # stones ran 0.37 mm into the wheel
+IMPULSE_PIN_W = 0.06       # the pin's own radius
+ROLLER_R = 0.45
+HORN_TIP = 0.03            # the fork's horns run this far past the pin at rest
+PIN_CLEAR = 0.02           # the pin is out of the notch this far past the tips
+STONE_CLEAR = 0.05         # a stone from the tip circle at its deepest
+PALLET_FOOT_R = 1.2        # the pallet bridge's feet, from the pallet arbor
+PALLET_FOOT_DEG = 70       # an int: either side of the fork's line
+BALANCE_AMPLITUDE_DEG = 270  # an int: an angle, not a length to declare
+
+
+def fork_follow_deg(theta_deg):
+    """The fork's angle while the impulse pin is in its notch: pointing at
+    the pin. The pallet's frame has +X at the balance, the balance's +X at
+    the pallet, and both turn positive about +Z, so the pin at balance angle
+    t is at (L - r cos t, -r sin t) in the pallet's frame."""
+    L = math.dist(POS["pallet"], POS["balance"])
+    r = float(IMPULSE_PIN_R)
+    t = math.radians(theta_deg)
+    return math.degrees(math.atan2(-r * math.sin(t), L - r * math.cos(t)))
+
+
+def fork_exit_deg():
+    """The balance angle where the pin has left the notch: its centre past
+    the horn tips by its own radius and PIN_CLEAR."""
+    L = math.dist(POS["pallet"], POS["balance"])
+    r = float(IMPULSE_PIN_R)
+    d = (L - r) + float(HORN_TIP) + float(IMPULSE_PIN_W) + float(PIN_CLEAR)
+    return math.degrees(math.acos((L * L + r * r - d * d) / (2 * L * r)))
+
+
+def fork_bank_deg():
+    """How far the fork swings either way: where the pin leaves it."""
+    return abs(fork_follow_deg(fork_exit_deg()))
+
+
+def fork_deg(theta_deg):
+    x = fork_exit_deg()
+    return fork_follow_deg(max(-x, min(x, theta_deg)))
+
+
+def balance_deg(escape_deg):
+    """Harmonic in time, as a balance is: one period per tooth pitch."""
+    return BALANCE_AMPLITUDE_DEG * math.sin(
+        2 * math.pi * escape_deg / (360.0 / Z_ESCAPE))
+
+
+def escapement_tables():
+    """The balance's and the fork's lift tables against the escape wheel's
+    angle, degrees in both columns. A degree apart through the swing, and
+    twenty-one points across each passage of the pin through the notch —
+    where the fork turns 13 degrees in about 1.5 degrees of the wheel, and
+    the spline must keep the pin inside the notch's 0.04 mm of play."""
+    P = 360.0 / Z_ESCAPE
+    x = fork_exit_deg() + 5.0
+    h = math.degrees(math.asin(min(1.0, x / BALANCE_AMPLITUDE_DEG))) / 360 * P
+    es = set()
+    for k in range(Z_ESCAPE):
+        e0 = k * P
+        for j in range(24):
+            es.add(round(e0 + j * P / 24, 6))
+        for c in (e0, e0 + P / 2):
+            for j in range(-10, 11):
+                es.add(round((c + h * j / 10) % 360.0, 6))
+    es = sorted(es)
+    return ([[e, balance_deg(e)] for e in es],
+            [[e, fork_deg(balance_deg(e))] for e in es])
