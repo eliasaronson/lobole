@@ -205,7 +205,40 @@ void main() {
     // shadows from going black.
     vec3 finalColor = ambient + 0.5 * (primaryShadow() * primaryLighting +
                                        fillLighting + rimLighting);
-    
+
+    // GLASS (MeshRenderer::SetInstanceGlass marks it with a NEGATIVE alpha;
+    // the push constant has no room for a flag). Clear glass scatters almost
+    // nothing: what a pane shows is what is BEHIND it (the blend supplies
+    // that), the environment REFLECTED — rising to a mirror at grazing
+    // angles (Schlick at glass's F0) — and the lights' highlights, the glare,
+    // which are not see-through at all. Shading it as a lit white surface
+    // at low alpha, as a plain ghost is, read every pane as a grey veil.
+    // bodyAlpha keeps only a faint, unlit tint of the glass's own colour.
+    float outAlpha = pc.baseColor.a;
+    if (pc.baseColor.a < 0.0) {
+        float tint = -pc.baseColor.a;
+        const float kGlassF0 = 0.04; // ((1.52 - 1) / (1.52 + 1))^2
+        float Fv = kGlassF0 + (1.0 - kGlassF0) * pow(1.0 - NdotV, 5.0);
+        vec3 mirror = textureLod(uPrefilter, dirToUV(R), 0.0).rgb;
+        // The glare: the KEY light's glint, as the still draws it — a mirror
+        // highlight sharp enough that a flat pane shows it only where it
+        // really reflects the light. Fill and rim at an ordinary shininess
+        // lit the whole face of a pane evenly and read as a grey sheen.
+        vec3 Lk = normalize(fragPrimaryLight.direction.xyz);
+        vec3 Hk = normalize(Lk + viewDir);
+        float FH = kGlassF0 +
+                   (1.0 - kGlassF0) * pow(1.0 - max(dot(viewDir, Hk), 0.0), 5.0);
+        vec3 glare = primaryShadow() * fragPrimaryLight.color.rgb *
+                     fragPrimaryLight.direction.w *
+                     pow(max(dot(normal, Hk), 0.0), 2048.0) * FH * 4.0;
+        float glareLuma = dot(glare, vec3(0.2126, 0.7152, 0.0722));
+        float tintAlpha = 0.35 * tint;
+        outAlpha = clamp(tintAlpha + Fv + glareLuma, 0.02, 1.0);
+        vec3 premultiplied =
+            albedo * 0.5 * tintAlpha + mirror * Fv + glare;
+        finalColor = premultiplied / outAlpha;
+    }
+
     // ACES filmic tone mapping, then gamma to sRGB.
     finalColor = ACESFilm(finalColor);
     finalColor = pow(finalColor, vec3(1.0/2.2));
@@ -224,8 +257,8 @@ void main() {
     if (pc.highlight.z == 0xFFFFFFFFu && fragHighlight < 0.75)
         discard;
 
-    // Per-instance alpha (ghosted in-context instances, A4). Opaque instances
-    // carry 1.0 and render through a blend-disabled pipeline, so this only
-    // takes effect on the ghost pass.
-    outColor = vec4(finalColor, pc.baseColor.a);
+    // Per-instance alpha (ghosted in-context instances, A4; glass, above).
+    // Opaque instances carry 1.0 and render through a blend-disabled
+    // pipeline, so this only takes effect on the ghost pass.
+    outColor = vec4(finalColor, outAlpha);
 }

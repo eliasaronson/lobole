@@ -44,15 +44,23 @@ loop, and its shadow and AO rays were opaque by flag. Four changes:
    reflected, and the backdrop otherwise — the backdrop is the picture's
    background, not what glass reflects.
 
-Section caps of a cut glass body stay opaque.
+A cut glass body's section cap is glass too — transmissive in the still,
+see-through in the viewport — not an opaque lid over the cut.
 
 ## The viewport (raster)
 
 A transmissive body is drawn in the existing ghost pass (alpha-blended, depth
 write off, excluded from shadow casters and the SSAO prepass) at
-`CADMaterials::ViewportAlpha` — see-through, not refractive. Known limits it
-inherits from that pass: it samples the AO of the surface behind it, and two
-overlapping panes blend unsorted.
+`CADMaterials::ViewportAlpha` — see-through, not refractive. It is shaded as
+GLASS there, not as a plain ghost (`MeshRenderer::SetInstanceGlass`, marked
+by a negative alpha because the push constant has no room for a flag): a
+plain ghost multiplies everything by its alpha, which read a pane as a flat
+grey veil, while `mesh.frag`'s glass branch composites three things at three
+opacities — the tinted body faintly, the environment reflected with a
+Fresnel weight that rises to a mirror at grazing angles, and the lights'
+highlights (the glare) at full strength. Known limits it inherits from the
+pass: it samples the AO of the surface behind it, and two overlapping panes
+blend unsorted.
 
 ## Files
 

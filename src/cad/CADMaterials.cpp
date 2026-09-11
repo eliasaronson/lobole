@@ -314,8 +314,11 @@ const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {
 }
 
 float ViewportAlpha(const MaterialProperties& m) {
+  // A tenth of a clear body's colour: in the viewport glass is shaded as
+  // glass (mesh.frag), and its reflection, its highlights and its outline
+  // are what give a pane presence — at a fifth it read as a grey veil.
   return m.transmission > 0.0f
-             ? glm::clamp(1.0f - 0.8f * m.transmission, 0.2f, 1.0f)
+             ? glm::clamp(1.0f - 0.9f * m.transmission, 0.1f, 1.0f)
              : 1.0f;
 }
 

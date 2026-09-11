@@ -338,7 +338,7 @@ void SyncDocumentRenderers(AppState& state) {
       // Glass is drawn see-through, in the ghost pass (after the material:
       // setting one resets the alpha).
       if (mat.transmission > 0.0f)
-        state.meshRenderer->SetInstanceGhost(meshId,
+        state.meshRenderer->SetInstanceGlass(meshId,
                                              CADMaterials::ViewportAlpha(mat));
       albedo = mat.baseColor;
     }
@@ -710,7 +710,9 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
           crm.roughness = cmat.roughness;
           crm.emissive = glm::vec3(0.0f);
           crm.specular = glm::vec3(cmat.specular);
-          crm.transmission = 0.0f; // procParams left at 0: Flat, no cap figure
+          // A cut glass body's cap is glass too, not an opaque lid over it.
+          crm.transmission = cmat.transmission; // procParams 0: no cap figure
+          crm.optics = glm::vec4(cmat.ior, 0.0f, 0.0f, 0.0f);
           state.rayTracer->AddGeometry(cv, cm.indices,
                                        state.rayTracer->AddMaterial(crm));
           capCount++;
@@ -1249,7 +1251,7 @@ void SyncAssemblyRenderers(AppState& state) {
         state.meshRenderer->SetInstanceProcedural(
             meshId, sb.pattern, sb.patternScale, sb.patternContrast);
         if (sb.alpha < 1.0f) // glass: see-through, after the material
-          state.meshRenderer->SetInstanceGhost(meshId, sb.alpha);
+          state.meshRenderer->SetInstanceGlass(meshId, sb.alpha);
       } else {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }
@@ -1287,14 +1289,17 @@ void SyncAssemblyRenderers(AppState& state) {
     // gets there through its composed world transform.
     const ClipPlaneArray planes = SectionPlanes(state);
     std::vector<glm::vec3> capColors;
+    std::vector<float> capAlphas;
     for (size_t i = 0; i < planes.size(); i++) {
       glm::vec3 localOrigin, localNormal;
       if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
         continue;
       if (capColors.empty()) {
         capColors.reserve(it->second.bodies.size());
-        for (const SharedBody& sb : it->second.bodies)
+        for (const SharedBody& sb : it->second.bodies) {
           capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
+          capAlphas.push_back(sb.alpha); // glass caps stay see-through
+        }
       }
       // The other sections, also in this part's space, trim this cap.
       std::vector<glm::vec4> trim;
@@ -1309,11 +1314,11 @@ void SyncAssemblyRenderers(AppState& state) {
       // plane. Scrubbing the air-cooled engine with one section on cost
       // 913 ms/step against 9.5 without — an OCC half-space boolean per
       // body, every step, for 27 parts of which four move.
-      AppendCapMeshes(state,
-                      Measure::SectionCaps(part->GetBodies(), localOrigin,
-                                           localNormal, trim,
-                                           &state.sectionCapCache),
-                      capColors, xf, glm::normalize(glm::vec3(planes[i])));
+      AppendCapMeshes(
+          state,
+          Measure::SectionCaps(part->GetBodies(), localOrigin, localNormal,
+                               trim, &state.sectionCapCache),
+          capColors, xf, glm::normalize(glm::vec3(planes[i])), capAlphas);
     }
   }
   // Land every upload this sync recorded before anything reads the assets.

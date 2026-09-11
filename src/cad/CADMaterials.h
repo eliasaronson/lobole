@@ -124,8 +124,9 @@ struct MaterialProperties {
 
 // How opaque the viewport draws a body (1 = opaque). A transmissive one goes
 // through the ghost pass — alpha-blended, no depth write, no shadow — which
-// is see-through but not refractive; a fully clear body keeps a fifth of its
-// colour so a pane still reads as a pane.
+// is see-through but not refractive; a fully clear body keeps a tenth of its
+// colour, and its reflection and highlights (mesh.frag's glass branch) give it
+// the rest of its presence.
 float ViewportAlpha(const MaterialProperties& m);
 
 class MaterialLibrary {

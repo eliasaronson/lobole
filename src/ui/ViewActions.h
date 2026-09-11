@@ -100,7 +100,8 @@ void ClearSections(AppState& state);
 // second copy would drift.
 void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
                      const std::vector<glm::vec3>& colors, const glm::mat4& xf,
-                     const glm::vec3& worldNormal);
+                     const glm::vec3& worldNormal,
+                     const std::vector<float>& alphas = {});
 
 // The offset that puts the cut through the MIDDLE of what the tab is showing,
 // along `basePlane`'s normal. A section defaults to the world origin

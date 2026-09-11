@@ -686,7 +686,8 @@ namespace {
 
 void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
                      const std::vector<glm::vec3>& colors, const glm::mat4& xf,
-                     const glm::vec3& worldNormal) {
+                     const glm::vec3& worldNormal,
+                     const std::vector<float>& alphas) {
   const glm::vec3 n = worldNormal;
   const float eps = 1e-3f; // nudge to the kept side; invisible at mm scale
   for (size_t bi = 0; bi < caps.size(); bi++) {
@@ -744,6 +745,11 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
     const uint32_t capId = state.meshRenderer->AddMesh(vs, idx);
     state.meshRenderer->SetMeshColor(
         capId, bi < colors.size() ? colors[bi] : glm::vec3(0.7f));
+    // A cut glass body's cap is glass too — see-through at the body's own
+    // alpha — not an opaque lid over the cut (after the colour, which
+    // resets the alpha).
+    if (bi < alphas.size() && alphas[bi] < 1.0f)
+      state.meshRenderer->SetInstanceGlass(capId, alphas[bi]);
     state.sectionCapMeshes.push_back(capId);
   }
 }
@@ -755,6 +761,11 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
 void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
                        const std::vector<glm::vec3>& bodyColors) {
   const ClipPlaneArray planes = SectionPlanes(state);
+  std::vector<float> alphas;
+  alphas.reserve(bodies.size());
+  for (const Body& b : bodies)
+    alphas.push_back(CADMaterials::ViewportAlpha(
+        CADMaterials::MaterialLibrary::GetMaterialOrDefault(b.material)));
   for (size_t i = 0; i < planes.size(); i++) {
     const glm::vec3 nRaw(planes[i]);
     if (glm::length(nRaw) < 1e-6f)
@@ -770,7 +781,7 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
     AppendCapMeshes(state,
                     Measure::SectionCaps(bodies, planeOrigin, n, trim,
                                          &state.sectionCapCache),
-                    bodyColors, glm::mat4(1.0f), n);
+                    bodyColors, glm::mat4(1.0f), n, alphas);
   }
 }
 

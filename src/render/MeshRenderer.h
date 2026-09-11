@@ -212,6 +212,12 @@ public:
   // (`alpha`), no depth write, drawn after all opaque instances. Unsorted
   // blending — acceptable at reference-visual alphas (~0.25).
   void SetInstanceGhost(uint32_t instanceId, float alpha = 0.25f);
+  // A ghost that is GLASS: the same see-through pass, shaded as glass in
+  // mesh.frag — Fresnel reflection rising to grazing and the lights'
+  // highlights at full strength over the see-through body, where a plain
+  // ghost dims everything by its alpha. Marked by a NEGATIVE baseColor.a
+  // (the push constant is at its 128-byte limit). Call after the material.
+  void SetInstanceGlass(uint32_t instanceId, float alpha);
 
   // Transitional one-body-one-mesh API (asset + instance in one shot);
   // call sites migrate to the split API with assemblies A2.

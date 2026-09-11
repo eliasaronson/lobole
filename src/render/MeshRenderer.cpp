@@ -6,6 +6,7 @@
 #include "common/RuntimePaths.h"
 #include "core/Conventions.h"
 #include "render/FramesInFlight.h"
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -280,6 +281,13 @@ void MeshRenderer::SetInstanceProcedural(uint32_t instanceId,
 void MeshRenderer::SetInstanceVisible(uint32_t instanceId, bool visible) {
   if (MeshInstance* instance = GetInstance(instanceId)) {
     instance->visible = visible;
+  }
+}
+
+void MeshRenderer::SetInstanceGlass(uint32_t instanceId, float alpha) {
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    instance->ghost = true;
+    instance->baseColor.a = -std::max(alpha, 0.01f); // the sign says glass
   }
 }
 
