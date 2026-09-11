@@ -195,7 +195,8 @@ struct ExplodedView {
 // rack:  rotation -> offset, ratio = pitch radius (mm per radian)
 // screw: one cylindrical mate's rotation -> its own offset, pitch/2pi
 // linear: offset -> offset
-// cam:   rotation -> offset through a LIFT TABLE, not a ratio
+// cam:   rotation -> offset OR rotation through a LIFT TABLE, not a ratio
+//        (v102: a follower may turn — a rocker, a pallet fork)
 enum class RelationKind { Gear, Rack, Screw, Linear, Chain, Cam };
 enum class MateDof { Rotation, Offset };
 
@@ -209,11 +210,14 @@ struct Relation {
   MateDof dofB = MateDof::Rotation;
   double ratio = -1.0;
   double phase = 0.0; // in dofB's unit (radians or mm)
-  // Cam only (v88): the lift profile, as (angle in DEGREES, lift in mm)
-  // rising by angle and spanning one full turn. Interpolated by a periodic
-  // Catmull-Rom spline, so the follower's motion has a continuous slope —
-  // the loop solver differentiates this numerically, and a table read as a
-  // polyline would hand it a Jacobian that jumps at every sample.
+  // Cam only (v88): the lift profile, as (angle in DEGREES, lift in the
+  // FOLLOWER's unit — mm for a slide, DEGREES for a turn, v102) rising by
+  // angle and spanning one full turn. Stored as authored; the solve converts
+  // a turn's degrees where it reads them (RelationValue, the loop row).
+  // Interpolated by a periodic Catmull-Rom spline, so the follower's motion has
+  // a continuous slope — the loop solver differentiates this numerically, and a
+  // table read as a polyline would hand it a Jacobian that jumps at every
+  // sample.
   //
   // A cam is the one relation that is NOT invertible: many angles give the
   // same lift, so propagation runs forward only and the reverse direction is

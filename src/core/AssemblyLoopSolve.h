@@ -77,7 +77,8 @@ struct LoopRelation {
   double phase = 0.0;
   // A cam's lift table (v88), empty for every other kind. When set, the row
   // is dofB - lift(dofA) - phase rather than dofB - ratio*dofA - phase, and
-  // the solver differentiates the spline rather than a constant.
+  // the solver differentiates the spline rather than a constant. A turning
+  // follower's (dofB rotation, v102) table is in DEGREES; the row converts.
   std::vector<std::pair<double, double>> lift;
 };
 

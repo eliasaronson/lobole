@@ -541,8 +541,13 @@ void SetMateDof(Mate& m, MateDof dof, double value) {
 }
 
 double RelationValue(const Relation& r, double a) {
-  if (r.kind == RelationKind::Cam)
-    return CamLift(r.lift, a) + r.phase;
+  // A cam's table is in the follower's unit, so a turning follower's lift is
+  // DEGREES and becomes the radians a rotation DOF holds here.
+  if (r.kind == RelationKind::Cam) {
+    const double lift = CamLift(r.lift, a);
+    return (r.dofB == MateDof::Rotation ? angles::ToRadians(lift) : lift) +
+           r.phase;
+  }
   return r.ratio * a + r.phase;
 }
 

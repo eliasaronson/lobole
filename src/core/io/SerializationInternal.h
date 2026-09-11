@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    101; // v101: an assembly configuration suppresses MATES and RELATIONS and
+    102; // v102: a cam relation's follower may TURN: `dof_b` "rotation" and
+         //      the lift table's second column in DEGREES (mm for a slide).
+         //      No new field; bumped so a v101 build refuses the file rather
+         //      than reading the degrees as radians.
+         // v101: an assembly configuration suppresses MATES and RELATIONS and
          //      holds mate DOFs (`suppressed_mates`, `suppressed_relations`,
          //      `mate_overrides`) -- an overlay the solve applies, so "crown
          //      pulled out" is a configuration. Absent when empty.

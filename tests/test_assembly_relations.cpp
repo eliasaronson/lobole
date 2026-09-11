@@ -5,6 +5,7 @@
 // placement; inside a loop it is one residual row beside the six per cut
 // mate. Both halves are pinned here, and so is the document round trip.
 
+#include "core/Angles.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -730,6 +731,110 @@ TEST_CASE("A cam drives its follower forward and refuses to be driven back",
   assembly::PropagateRelations(t.asmDoc, t.axleA);
   CHECK_THAT(t.asmDoc.GetRelations()[0].error,
              Catch::Matchers::ContainsSubstring("lift table"));
+}
+
+TEST_CASE("A cam turns a revolute follower by its table's DEGREES",
+          "[assembly][relations][cam]") {
+  // v102: a rocker, a pallet fork. The table's second column is in the
+  // follower's unit, so a turning follower's lift is degrees and the mate's
+  // rotation is the radians it converts to.
+  Train t = MakeTrain(); // both axles revolute
+  Relation rocker;
+  rocker.kind = RelationKind::Cam;
+  rocker.mateA = t.axleA;
+  rocker.mateB = t.axleB;
+  rocker.dofA = MateDof::Rotation;
+  rocker.dofB = MateDof::Rotation;
+  rocker.ratio = 1.0;
+  for (int i = 0; i <= 18; i++) {
+    const double f = i / 18.0;
+    rocker.lift.emplace_back(f * 180.0,
+                             30.0 * 0.5 * (1.0 - std::cos(2.0 * M_PI * f)));
+  }
+  rocker.lift.emplace_back(270.0, 0.0);
+  t.asmDoc.AddRelation(rocker);
+  assembly::SetMateDof(*t.asmDoc.FindMateById(t.axleA), MateDof::Rotation,
+                       M_PI / 2.0);
+  assembly::PropagateRelations(t.asmDoc, t.axleA);
+  CHECK(t.asmDoc.GetRelations()[0].error.empty());
+  CHECK_THAT(t.asmDoc.FindMateById(t.axleB)->rotation,
+             WithinAbs(float(angles::ToRadians(30.0)), 1e-5f));
+
+  // Inside a loop the relation is a row, and the row reads the table the
+  // same way. The parallelogram four-bar holds theta4 = theta1; a cam whose
+  // table is a flat 20 degrees pins theta4 there, so the linkage closes at
+  // theta1 = 20 degrees too — in radians, 0.349, and not at 20 rad.
+  const auto AtX = [](float x) {
+    return glm::translate(glm::mat4(1.0f), glm::vec3(x, 0.0f, 0.0f));
+  };
+  const auto Rev = [](uint64_t id, uint64_t a, const glm::mat4& fa, uint64_t b,
+                      const glm::mat4& fb, float seed) {
+    assembly::LoopMate m;
+    m.id = id;
+    m.type = MateType::Revolute;
+    m.aOcc = a;
+    m.bOcc = b;
+    m.fa = fa;
+    m.fb = fb;
+    m.flipped = false;
+    m.rotation = seed;
+    return m;
+  };
+  assembly::LoopProblem p;
+  p.mates.push_back(Rev(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f), 0.3f));
+  p.mates.push_back(Rev(2, 20, AtX(40.0f), 30, glm::mat4(1.0f), 0.0f));
+  p.mates.push_back(Rev(3, 30, AtX(100.0f), 40, AtX(40.0f), 0.0f));
+  p.mates.push_back(Rev(4, 10, AtX(100.0f), 40, glm::mat4(1.0f), 0.0f));
+  p.tree.push_back({0, 10, 20, false});
+  p.tree.push_back({1, 20, 30, false});
+  p.tree.push_back({2, 30, 40, false});
+  p.cut.push_back(3);
+  p.anchor.emplace_back(10, glm::mat4(1.0f));
+  p.relations.push_back({0,
+                         3,
+                         MateDof::Rotation,
+                         MateDof::Rotation,
+                         1.0,
+                         0.0,
+                         {{0.0, 20.0}, {180.0, 20.0}}});
+  const assembly::LoopSolution s = assembly::SolveLoops(p);
+  REQUIRE(s.unavailable.empty());
+  CHECK(s.converged);
+  CHECK_THAT(s.solved[3].rotation, WithinAbs(angles::ToRadians(20.0), 1e-4));
+  CHECK_THAT(s.solved[0].rotation, WithinAbs(angles::ToRadians(20.0), 1e-3));
+}
+
+TEST_CASE("A turning cam round-trips, and the v102 golden drives",
+          "[assembly][relations][cam][golden]") {
+  Train t = MakeTrain();
+  Relation rocker;
+  rocker.kind = RelationKind::Cam;
+  rocker.name = "pallet fork";
+  rocker.mateA = t.axleA;
+  rocker.mateB = t.axleB;
+  rocker.dofA = MateDof::Rotation;
+  rocker.dofB = MateDof::Rotation;
+  rocker.ratio = 1.0;
+  rocker.lift = {{0.0, -10.0}, {90.0, 10.0}, {180.0, 10.0}, {270.0, -10.0}};
+  t.asmDoc.AddRelation(rocker);
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+    REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
+
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+                          "tests/golden/assembly/v102-rotating-cam.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  REQUIRE((*g)->RelationCount() == 1);
+  const Relation& r = (*g)->GetRelations()[0];
+  CHECK(r.kind == RelationKind::Cam);
+  CHECK(r.dofB == MateDof::Rotation);
+  // The table is stored as authored — degrees — and not pre-converted.
+  CHECK_THAT(r.lift[1].second, WithinAbs(10.0, 1e-12));
+  assembly::SetMateDof(*(*g)->FindMateById(t.axleA), MateDof::Rotation,
+                       M_PI / 2.0);
+  assembly::PropagateRelations(**g, t.axleA);
+  CHECK_THAT((*g)->FindMateById(t.axleB)->rotation,
+             WithinAbs(float(angles::ToRadians(10.0)), 1e-5f));
 }
 
 TEST_CASE("Chain and cam round-trip, and the v88 golden loads",

@@ -121,9 +121,13 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "sprockets the same way; rack: {pitch_radius} mm (a's rotation drives "
      "b's slide); screw: {pitch} mm per turn on ONE cylindrical mate (pass "
      "the same id as a and b); linear: a bare {ratio}. CAM is the exception "
-     "— a's rotation drives b's offset through a LIFT TABLE, not a ratio: "
-     "{lift: [[angle_deg, lift_mm], ...]} spanning one turn, or {rise, "
-     "duration_deg?, start_deg?} for a cosine lobe built for you. It is the "
+     "— a's rotation drives b's slide OR turn through a LIFT TABLE, not a "
+     "ratio: {lift: [[angle_deg, lift], ...]} spanning one turn, the lift in "
+     "mm for a sliding follower and in DEGREES for a turning one, or {rise "
+     "(mm) | rise_deg, duration_deg?, start_deg?} for a cosine lobe built "
+     "for you. The follower is the DOF mate b has: a slider slides, a "
+     "revolute turns, and a cylindrical b takes {dof_b: offset|rotation} "
+     "(offset when omitted). It is the "
      "one relation that is not invertible (many angles give one lift), so it "
      "drives forward only. `ratio` may be given directly for any other kind; "
      "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
@@ -133,9 +137,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotation), and for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
      "degrees off parallel (docs/assemblies/relations-plan.md).",
-     "thread_part, thread_feature, a, b, duration_deg, lift, name, phase, "
-     "pitch, pitch_radius, ratio, "
-     "rise, start_deg, teeth_a, teeth_b, type"},
+     "thread_part, thread_feature, a, b, dof_b, duration_deg, lift, name, "
+     "phase, pitch, pitch_radius, ratio, "
+     "rise, rise_deg, start_deg, teeth_a, teeth_b, type"},
     {"set_relation", "Edit a relation's {ratio?, phase?, name?} by {id}.",
      "id, name, phase, ratio"},
     {"remove_relation", "Remove a relation by id.", "id"},
@@ -1248,24 +1252,58 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       }
       break;
     case RelationKind::Cam: {
-      // A lift table, not a ratio: the follower's offset is a function of
+      // A lift table, not a ratio: the follower's position is a function of
       // the cam's angle. Either the table itself, or the three numbers a
       // cosine lobe is described by.
+      //
+      // The follower is the DOF mate b HAS: a slider's offset, a revolute's
+      // rotation (a rocker, a pallet fork). A cylindrical mate has both, so
+      // `dof_b` names it, and omitted it is the offset — what every caller
+      // meant before a follower could turn. A mate with neither falls to the
+      // lacks-check below, which names both.
       r.dofA = MateDof::Rotation;
-      r.dofB = MateDof::Offset;
+      const bool bSlides = assembly::MateHasDof(b->type, MateDof::Offset);
+      const bool bTurns = assembly::MateHasDof(b->type, MateDof::Rotation);
+      if (p.contains("dof_b"))
+        r.dofB =
+            DocumentIO::MateDofFromString(p.at("dof_b").get<std::string>());
+      else
+        r.dofB = bTurns && !bSlides ? MateDof::Rotation : MateDof::Offset;
+      if (r.mateA == r.mateB && r.dofB == MateDof::Rotation)
+        throw std::runtime_error(
+            "a cam on one mate turns into its own slide, not its own turn: "
+            "dof_b rotation would couple the rotation to itself");
+      // The lift is in the FOLLOWER's unit — mm for a slide, degrees for a
+      // turn — and the solve converts a turn's degrees where it reads them.
+      const bool turns = r.dofB == MateDof::Rotation;
       if (p.contains("lift")) {
         for (const json& pt : p.at("lift")) {
           if (!pt.is_array() || pt.size() != 2)
             throw std::runtime_error(
-                "lift is [[angle_deg, lift_mm], ...] — a point is a pair");
+                "lift is [[angle_deg, lift], ...] — a point is a pair, the "
+                "lift in mm for a sliding follower and degrees for a turning "
+                "one");
           r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
         }
-      } else if (p.contains("rise") || p.contains("duration_deg")) {
-        const double rise = p.value("rise", 0.0);
+      } else if (p.contains("rise") || p.contains("rise_deg") ||
+                 p.contains("duration_deg")) {
+        // The wrong rise for the follower is refused, never converted: 8
+        // given as `rise` to a rocker is 8 mm to the caller and would be 8
+        // degrees to the solve.
+        if (turns && p.contains("rise"))
+          throw std::runtime_error(
+              "this cam's follower TURNS: its lobe is rise_deg, not rise "
+              "(mm)");
+        if (!turns && p.contains("rise_deg"))
+          throw std::runtime_error(
+              "this cam's follower SLIDES: its lobe is rise (mm), not "
+              "rise_deg");
+        const double rise = p.value(turns ? "rise_deg" : "rise", 0.0);
         const double duration = p.value("duration_deg", 180.0);
         const double start = p.value("start_deg", 0.0);
         if (rise <= 0.0)
-          throw std::runtime_error("a cosine lobe needs rise > 0 (mm)");
+          throw std::runtime_error(turns ? "a cosine lobe needs rise_deg > 0"
+                                         : "a cosine lobe needs rise > 0 (mm)");
         if (duration <= 0.0 || duration >= 360.0)
           throw std::runtime_error(
               "duration_deg is the lobe's width, 0 < duration < 360");
@@ -1299,8 +1337,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                             0.0);
       } else {
         throw std::runtime_error(
-            "a cam needs its profile: lift [[angle_deg, lift_mm], ...], or "
-            "rise + duration_deg (+ start_deg) for a cosine lobe");
+            "a cam needs its profile: lift [[angle_deg, lift], ...], or "
+            "rise (mm) or rise_deg + duration_deg (+ start_deg) for a cosine "
+            "lobe");
       }
       if (r.lift.size() < 2)
         throw std::runtime_error("a cam's lift table needs at least 2 points");
@@ -1341,11 +1380,19 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       // revolute or cylindrical mates" — the refused type offered as the
       // cure.
       const bool followerSide = !lacks(*a, r.dofA);
-      const std::string need = dof == MateDof::Rotation
+      // A cam's follower chosen from the mate (no dof_b) may slide OR turn,
+      // so a mate with neither is told both.
+      const bool camEither =
+          r.kind == RelationKind::Cam && followerSide && !p.contains("dof_b");
+      const std::string need = camEither ? "a slider, revolute or "
+                                           "cylindrical mate"
+                               : dof == MateDof::Rotation
                                    ? "a revolute or cylindrical mate"
                                    : "a slider or cylindrical mate";
       const std::string why = r.kind != RelationKind::Cam ? ""
-                              : followerSide ? " — a cam's follower slides"
+                              : camEither    ? " — a cam's follower slides or "
+                                               "turns"
+                              : followerSide ? ""
                                              : " — a cam's driver turns";
       throw std::runtime_error(
           "mate " + std::to_string(bad.id) + " (" +

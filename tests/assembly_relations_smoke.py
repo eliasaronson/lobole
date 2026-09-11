@@ -172,18 +172,33 @@ def main():
         cyl = origin_mate(d, "cylindrical", carrier, wheel,
                           name="follower", offset=48.0)
         refused(d, "add_relation", "lift", type="cam", a=a, b=cyl)
-        # A revolute FOLLOWER is refused naming what the follower needs. The
-        # message was once picked from the DRIVER's dof, so it refused a
-        # revolute follower by offering "revolute or cylindrical" as the cure.
-        try:
-            d.call("add_relation", type="cam", a=cyl, b=a, rise=8.0,
-                   duration_deg=180)
-            raise AssertionError("a cam with a revolute follower was accepted")
-        except RuntimeError as e:
-            expect("slider or cylindrical" in str(e)
-                   and "follower slides" in str(e)
-                   and "revolute or" not in str(e),
-                   f"the refusal names what the follower needs: {e}")
+        # A REVOLUTE follower turns (v102): a rocker, a pallet fork. Its
+        # table is in degrees, and the lobe's rise is rise_deg — `rise` in
+        # mm is refused for it rather than read as degrees.
+        refused(d, "add_relation", "rise_deg", type="cam", a=cyl, b=a,
+                rise=8.0, duration_deg=180)
+        rock = d.call("add_relation", type="cam", a=cyl, b=a, rise_deg=30.0,
+                      duration_deg=180, name="rocker")
+        expect(rock["dof_b"] == "rotation", f"a revolute follower turns: {rock}")
+        d.call("set_mate", id=cyl, rotation=math.pi / 2)
+        expect(abs(math.degrees(mate(d, a)["rotation"]) - 30.0) < 0.05,
+               f"the lobe's peak turns the rocker 30 deg: "
+               f"{math.degrees(mate(d, a)['rotation']):.3f}")
+        d.call("remove_relation", id=rock["id"])
+        d.call("set_mate", id=cyl, rotation=0.0)
+        # A cylindrical follower has both: dof_b names the turn, and the
+        # default stays the slide every earlier caller meant.
+        turn = d.call("add_relation", type="cam", a=a, b=cyl, dof_b="rotation",
+                      lift=[[0, 0], [90, 40], [180, 0], [270, 0]])
+        d.call("set_mate", id=a, rotation=math.pi / 2)
+        expect(abs(math.degrees(mate(d, cyl)["rotation"]) - 40.0) < 0.05,
+               f"dof_b rotation turns the cylindrical follower: "
+               f"{math.degrees(mate(d, cyl)['rotation']):.3f}")
+        d.call("remove_relation", id=turn["id"])
+        d.call("set_mate", id=a, rotation=0.0)
+        d.call("set_mate", id=cyl, rotation=0.0)
+        refused(d, "add_relation", "rise (mm)", type="cam", a=a, b=cyl,
+                rise_deg=8.0, duration_deg=180)
         cam = d.call("add_relation", type="cam", a=a, b=cyl, rise=8.0,
                      duration_deg=180, name="lobe")
         expect(len(cam["lift"]) >= 19, f"a cosine lobe was built: {cam}")

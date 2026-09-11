@@ -1893,8 +1893,10 @@ class Asm(_Tab):
                                      teeth_b=teeth_b, **kw)
 
     def cam(self, mate_a, mate_b, **kw):
-        """A cam: rotation to offset through a lift table, or {rise,
-        duration_deg, start_deg} for a cosine lobe (v88)."""
+        """A cam: rotation to the follower's slide or turn through a lift
+        table (lift in mm for a slide, degrees for a turn), or {rise (mm) |
+        rise_deg, duration_deg, start_deg} for a cosine lobe. A cylindrical
+        follower takes dof_b="rotation" to turn (v88, turning v102)."""
         self.activate()
         return self.app.add_relation(type="cam", a=_id(mate_a),
                                      b=_id(mate_b), **kw)

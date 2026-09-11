@@ -1,4 +1,5 @@
 #include "core/AssemblyLoopSolve.h"
+#include "core/Angles.h"
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -423,9 +424,12 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
       // The residual is still "what B is, less what A says it should be",
       // and the numeric Jacobian differentiates the spline — which is why
       // the profile is interpolated smoothly rather than as a polyline.
-      const double want = rr.lift.empty()
-                              ? rr.ratio * qq[rr.colA] + rr.phase
-                              : CamLift(rr.lift, qq[rr.colA]) + rr.phase;
+      // A turning follower's table is in degrees, as RelationValue reads it.
+      const double lift = rr.lift.empty() ? 0.0 : CamLift(rr.lift, qq[rr.colA]);
+      const double want =
+          rr.lift.empty()
+              ? rr.ratio * qq[rr.colA] + rr.phase
+              : (rr.rotationB ? angles::ToRadians(lift) : lift) + rr.phase;
       const double v = qq[rr.colB] - want;
       r[cutRows + static_cast<int>(k)] = rr.rotationB ? v * charLen : v;
     }
