@@ -24,9 +24,11 @@ the next.
    the environment that rises toward grazing angles, and the lights'
    highlights at full strength over the see-through body. The still already
    has both.
-4. **`render_ao_smoke`.** It fails at 1.004/255 against a 1.0 limit and did
-   before this work. Find whether that is a real change in the AO upsample or
-   a limit set on one GPU, and fix whichever it is.
+4. **`render_ao_smoke`.** It fails at 1.004/255 against a 1.0 limit, and
+   the change that broke it is the lens narrowing from 45 to 30 degrees: the
+   test's fixed camera kept its standoff, the walls filled the frame, and the
+   half-resolution upsample straddled far more depth edges than in any real
+   view. The camera stands off 804 mm, which frames the scene as before.
 5. **The watch's run time.** 80% of a full run is the per-mesh exact sweep:
    nine samples through a pitch, each an exact interference of two WHOLE arbor
    parts, and the interference RPC cannot be narrowed to one body (its fast
@@ -41,9 +43,7 @@ the next.
    relation from the yoke, the contrate teeth are one tooth and a Pattern, and
    the build no longer drives the stem to make its relations apply.
 7. **A mainspring**, drawn in the barrel (a cosmetic spiral, as the
-   hairspring is), and **Breguet teeth** on the clutch and winding pinion —
-   sawtooth dogs that drive one way and slip the other, in place of square
-   ones.
+   hairspring is), coiled let-down in a hollow drum.
 8. **A GUI test for the assembly configuration panel**: suppress a mate and
    hold a DOF by clicking, and see the solve follow.
 
@@ -53,6 +53,10 @@ the next.
   direction and slips in the other. Hand-winding then leaves the rotor alone,
   and the rotor's reverser can be modelled. About half a day in the solver
   (it needs the previous value of the driving DOF).
+- **Breguet teeth** on the clutch and winding pinion — sawtooth dogs that
+  drive one way and slip the other, in place of square ones. They go with
+  the one-way relation: until the solver can slip, a sawtooth is a square
+  dog drawn differently, hidden under the bridge.
 - **A rotating cam follower**, so the escapement animates: the lift table in
   degrees driving a revolute. Half a day to a day, a format bump; an
   approximation still, since in a real watch the balance drives the escape
