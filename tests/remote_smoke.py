@@ -1030,7 +1030,7 @@ def main():
         expect({"revolute", "slider", "cylindrical", "fastened", "planar",
                 "ball"} == set(desc["mate_types"]), "mate types described")
         expect({"gear", "rack", "screw", "linear", "chain", "cam",
-            "freewheel"} ==
+            "freewheel", "click"} ==
                set(desc["relation_kinds"]), "relation kinds described")
         expect("add_relation" in " ".join(
             m["doc"] for m in desc["methods"] if m["name"] == "add_mate"),

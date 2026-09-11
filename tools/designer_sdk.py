@@ -1909,6 +1909,15 @@ class Asm(_Tab):
         return self.app.add_relation(type="freewheel", a=_id(mate_a),
                                      b=_id(mate_b), drives=drives,
                                      ratio=ratio, **kw)
+        # teeth=N and ride_mate/ride_dof/ride_mm|ride_deg (v105) make it a
+        # toothed clutch that LIFTS what it names as it rides over them.
+
+    def click(self, mate, drives, **kw):
+        """A pawl (v105): one mate's rotation, free the way it `drives`
+        ("positive" or "negative") and held at its mark the other way."""
+        self.activate()
+        return self.app.add_relation(type="click", a=_id(mate), b=_id(mate),
+                                     drives=drives, **kw)
 
     def bolt(self, rim, occurrence, standard="iso4762", **kw):
         """Fit a fastener to a hole rim, deriving its size and length.

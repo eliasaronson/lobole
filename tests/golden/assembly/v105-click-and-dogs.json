@@ -1,0 +1,159 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 4,
+      "mate_type": "revolute",
+      "name": "",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 3
+      },
+      "flipped": false,
+      "id": 5,
+      "mate_type": "cylindrical",
+      "name": "",
+      "offset": 48.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Carrier",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Pinion",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 3,
+      "name": "Wheel",
+      "part_id": 3,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "relations": [
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "drives": "positive",
+      "id": 6,
+      "kind": "freewheel",
+      "lead": 0.0,
+      "mate_a": 4,
+      "mate_b": 5,
+      "name": "dogs",
+      "phase": 0.0,
+      "ratio": 1.0,
+      "ride": {
+        "amount": 0.3,
+        "dof": "offset",
+        "mate": 5
+      },
+      "teeth": 4,
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "drives": "positive",
+      "id": 7,
+      "kind": "click",
+      "lead": 0.0,
+      "mate_a": 5,
+      "mate_b": 5,
+      "name": "click",
+      "phase": 0.0,
+      "ratio": 1.0,
+      "type": "Relation"
+    }
+  ],
+  "version": 105
+}

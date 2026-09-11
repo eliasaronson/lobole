@@ -199,7 +199,17 @@ struct ExplodedView {
 //        (v102: a follower may turn — a rocker, a pallet fork)
 // freewheel: rotation -> rotation that drives ONE way and slips the other
 //        (v104, docs/freewheel-plan.md): b = ratio * a + phase + lead
-enum class RelationKind { Gear, Rack, Screw, Linear, Chain, Cam, Freewheel };
+// click: ONE mate's DOF that may only travel one way — a pawl (v105)
+enum class RelationKind {
+  Gear,
+  Rack,
+  Screw,
+  Linear,
+  Chain,
+  Cam,
+  Freewheel,
+  Click
+};
 enum class MateDof { Rotation, Offset };
 
 struct Relation {
@@ -234,6 +244,18 @@ struct Relation {
   // carry the history with the mates.
   int drives = 1;
   double lead = 0.0;
+  // A freewheel's TEETH (v105): with a count, it re-engages only where teeth
+  // meet, so the drive line stands at the notch at or behind `lead` and the
+  // input travels up to a pitch before it drives again — a ratchet's dead
+  // band. `ride` is what riding over them lifts: while slipping, the named
+  // DOF is raised by `rideAmount * frac(lead / pitch)`, zero at a notch and
+  // full just before the next. It is applied after the walk, so it ADDS to
+  // whatever drove that DOF (docs/click-and-breguet-plan.md).
+  int teeth = 0;
+  double rideAmount = 0.0;
+  uint64_t rideMate = 0;
+  MateDof rideDof = MateDof::Offset;
+  double rideApplied = 0.0; // what the last pass added, to take back
   uint64_t threadPart = 0, threadFeature = 0; // authoritative screw thread
   std::string error; // set by the solve: a mate gone, a DOF missing
 };

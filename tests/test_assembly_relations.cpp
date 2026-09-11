@@ -1040,6 +1040,157 @@ TEST_CASE("A freewheel whose output is driven BEHIND its line says so",
              Catch::Matchers::ContainsSubstring("behind the drive line"));
 }
 
+TEST_CASE("A click lets one DOF travel its way and holds it the other",
+          "[assembly][relations][click]") {
+  // A pawl on a watch's ratchet (docs/click-and-breguet-plan.md): ONE mate's
+  // rotation, free the way it drives and held at its mark the other way.
+  Train t = MakeTrain();
+  Relation click;
+  click.kind = RelationKind::Click;
+  click.mateA = click.mateB = t.axleA;
+  click.dofA = click.dofB = MateDof::Rotation;
+  click.ratio = 1.0;
+  click.drives = 1;
+  t.asmDoc.AddRelation(click);
+  const auto at = [&] {
+    return double(t.asmDoc.FindMateById(t.axleA)->rotation);
+  };
+  const auto put = [&](double v) {
+    assembly::SetMateDof(*t.asmDoc.FindMateById(t.axleA), MateDof::Rotation, v);
+    assembly::PropagateRelations(t.asmDoc, t.axleA);
+  };
+  put(1.0);
+  CHECK_THAT(at(), WithinAbs(1.0, 1e-5));
+  CHECK_THAT(t.asmDoc.GetRelations()[0].lead, WithinAbs(1.0, 1e-5));
+  put(0.4); // back: held at the mark, and the mark stands
+  CHECK_THAT(at(), WithinAbs(1.0, 1e-5));
+  CHECK_THAT(t.asmDoc.GetRelations()[0].lead, WithinAbs(1.0, 1e-5));
+  put(1.6); // on again: the mark follows
+  CHECK_THAT(at(), WithinAbs(1.6, 1e-5));
+  // Re-solving changes nothing, and the mark survives a round trip.
+  assembly::PropagateRelations(t.asmDoc, 0);
+  CHECK_THAT(at(), WithinAbs(1.6, 1e-5));
+  const fs::path tmp = fs::temp_directory_path() / "relations_click.json";
+  REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, tmp.string()).has_value());
+  auto back = DocumentIO::LoadAssembly(tmp.string());
+  REQUIRE(back.has_value());
+  CHECK((*back)->GetRelations()[0].kind == RelationKind::Click);
+  CHECK_THAT((*back)->GetRelations()[0].lead, WithinAbs(1.6, 1e-6));
+  fs::remove(tmp);
+}
+
+TEST_CASE("A toothed freewheel rides over its dogs and lifts what it names",
+          "[assembly][relations][freewheel]") {
+  // A watch's clutch: sawtooth dogs slip only because the clutch LIFTS along
+  // the stem as they ride over each other. The lift is applied after the
+  // walk, so it ADDS to the slide the yoke already gave it.
+  Train t = MakeTrain();
+  t.asmDoc.FindMateById(t.axleB)->type = MateType::Cylindrical;
+  Relation fw;
+  fw.kind = RelationKind::Freewheel;
+  fw.mateA = t.axleA;
+  fw.mateB = t.axleB;
+  fw.dofA = fw.dofB = MateDof::Rotation;
+  fw.ratio = 1.0;
+  fw.drives = 1;
+  fw.teeth = 4; // a quarter turn between dogs
+  fw.rideAmount = 1.0;
+  fw.rideMate = t.axleB;
+  fw.rideDof = MateDof::Offset;
+  t.asmDoc.AddRelation(fw);
+  // The fixture's cylindrical mate stands at 48: the lift ADDS to it.
+  const double base = double(t.asmDoc.FindMateById(t.axleB)->offset);
+  const auto lift = [&] {
+    return double(t.asmDoc.FindMateById(t.axleB)->offset) - base;
+  };
+  const auto turn = [&](double v) {
+    assembly::SetMateDof(*t.asmDoc.FindMateById(t.axleA), MateDof::Rotation, v);
+    assembly::PropagateRelations(t.asmDoc, t.axleA);
+  };
+  turn(0.0);
+  CHECK_THAT(lift(), WithinAbs(0.0, 1e-5)); // engaged: sitting in a notch
+  turn(-M_PI / 4.0);                        // half a tooth of slip
+  CHECK_THAT(lift(), WithinAbs(0.5, 1e-4));
+  CHECK_THAT(double(t.asmDoc.FindMateById(t.axleB)->rotation),
+             WithinAbs(0.0, 1e-5)); // the output stayed: it slipped
+  turn(-M_PI / 2.0);                // a whole tooth: dropped into the next
+  CHECK_THAT(lift(), WithinAbs(0.0, 1e-4));
+  // Re-solving does not stack another lift on top of the last one.
+  turn(-3.0 * M_PI / 8.0); // three quarters of a tooth: still riding
+  const double half = lift();
+  assembly::PropagateRelations(t.asmDoc, 0);
+  assembly::PropagateRelations(t.asmDoc, 0);
+  CHECK_THAT(lift(), WithinAbs(half, 1e-6));
+  // Seated in a notch, the input drives the output at once.
+  turn(-3.0 * M_PI / 8.0);
+  const double seated = double(t.asmDoc.FindMateById(t.axleB)->rotation);
+  CHECK_THAT(seated, WithinAbs(M_PI / 8.0, 1e-4));
+  // The dead band: slip a quarter of a tooth back, and coming forward again
+  // moves nothing until the input has made that quarter up.
+  turn(-M_PI / 2.0);
+  CHECK_THAT(double(t.asmDoc.FindMateById(t.axleB)->rotation),
+             WithinAbs(seated, 1e-5));
+  turn(-7.0 * M_PI / 16.0);
+  CHECK_THAT(double(t.asmDoc.FindMateById(t.axleB)->rotation),
+             WithinAbs(seated, 1e-5));
+  // ...and past it, it drives again.
+  turn(-3.0 * M_PI / 8.0);
+  CHECK_THAT(double(t.asmDoc.FindMateById(t.axleB)->rotation),
+             WithinAbs(M_PI / 8.0, 1e-4));
+}
+
+TEST_CASE("A click and a toothed clutch round-trip, and the v105 golden "
+          "drives",
+          "[assembly][relations][click][golden]") {
+  Train t = MakeTrain();
+  t.asmDoc.FindMateById(t.axleB)->type = MateType::Cylindrical;
+  Relation dogs;
+  dogs.kind = RelationKind::Freewheel;
+  dogs.name = "dogs";
+  dogs.mateA = t.axleA;
+  dogs.mateB = t.axleB;
+  dogs.dofA = dogs.dofB = MateDof::Rotation;
+  dogs.ratio = 1.0;
+  dogs.drives = 1;
+  dogs.teeth = 4;
+  dogs.rideAmount = 0.3;
+  dogs.rideMate = t.axleB;
+  dogs.rideDof = MateDof::Offset;
+  t.asmDoc.AddRelation(dogs);
+  Relation click;
+  click.kind = RelationKind::Click;
+  click.name = "click";
+  click.mateA = click.mateB = t.axleB;
+  click.dofA = click.dofB = MateDof::Rotation;
+  click.ratio = 1.0;
+  click.drives = 1;
+  t.asmDoc.AddRelation(click);
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+    REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
+  // `teeth` and `ride` are a freewheel's; a click writes neither.
+  const nlohmann::json dj = DocumentIO::RelationToJson(dogs);
+  CHECK(dj.at("teeth") == 4);
+  CHECK(dj.at("ride").at("dof") == "offset");
+  CHECK_FALSE(DocumentIO::RelationToJson(click).contains("teeth"));
+
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) /
+                          "tests/golden/assembly/v105-click-and-dogs.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  REQUIRE((*g)->RelationCount() == 2);
+  const Relation& rd = (*g)->GetRelations()[0];
+  CHECK(rd.teeth == 4);
+  CHECK(rd.rideMate == t.axleB);
+  CHECK(rd.rideDof == MateDof::Offset);
+  CHECK_THAT(rd.rideAmount, WithinAbs(0.3, 1e-12));
+  CHECK((*g)->GetRelations()[1].kind == RelationKind::Click);
+  // And it still rides: half a tooth of slip stands the clutch half way up.
+  assembly::SetMateDof(*(*g)->FindMateById(t.axleA), MateDof::Rotation,
+                       -M_PI / 4.0);
+  assembly::PropagateRelations(**g, t.axleA);
+  CHECK_THAT((*g)->FindMateById(t.axleB)->offset, WithinAbs(48.15f, 1e-3f));
+}
+
 TEST_CASE("A freewheel inside a mate loop is reported, not held",
           "[assembly][relations][freewheel][loops]") {
   // Two revolutes between the same pair close a loop: both must give the

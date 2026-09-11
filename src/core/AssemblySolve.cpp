@@ -540,6 +540,20 @@ void SetMateDof(Mate& m, MateDof dof, double value) {
     m.offset = static_cast<float>(value);
 }
 
+namespace {
+// Where a toothed freewheel DRIVES from: the notch at or behind its lead,
+// in the direction it drives. Between notches it is riding over a tooth, and
+// the input has to travel the rest of the pitch before it drives again —
+// a ratchet's dead band. Without teeth the lead is the whole of it.
+double FreewheelNotch(const Relation& r) {
+  if (r.teeth <= 0)
+    return r.lead;
+  const double pitch = 2.0 * M_PI / r.teeth;
+  const double k = r.lead / pitch;
+  return (r.drives > 0 ? std::floor(k + 1e-9) : std::ceil(k - 1e-9)) * pitch;
+}
+} // namespace
+
 double RelationValue(const Relation& r, double a) {
   // A cam's table is in the follower's unit, so a turning follower's lift is
   // DEGREES and becomes the radians a rotation DOF holds here.
@@ -548,9 +562,12 @@ double RelationValue(const Relation& r, double a) {
     return (r.dofB == MateDof::Rotation ? angles::ToRadians(lift) : lift) +
            r.phase;
   }
+  // A click stands at the mark it was last carried to or held at.
+  if (r.kind == RelationKind::Click)
+    return r.lead;
   // A freewheel carries its history in `lead` (docs/freewheel-plan.md).
   if (r.kind == RelationKind::Freewheel)
-    return r.ratio * a + r.phase + r.lead;
+    return r.ratio * a + r.phase + FreewheelNotch(r);
   return r.ratio * a + r.phase;
 }
 
@@ -612,11 +629,18 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
                 "freedom";
       continue;
     }
-    if (r.mateA == r.mateB && r.dofA == r.dofB) {
+    if (r.mateA == r.mateB && r.dofA == r.dofB &&
+        r.kind != RelationKind::Click) {
       r.error = "a relation cannot couple a degree of freedom to itself";
       continue;
     }
-    if (r.kind == RelationKind::Freewheel && r.drives != 1 && r.drives != -1) {
+    if (r.kind == RelationKind::Click && r.mateA != r.mateB) {
+      r.error = "a click holds ONE mate's degree of freedom: a and b are the "
+                "same mate";
+      continue;
+    }
+    if ((r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click) &&
+        r.drives != 1 && r.drives != -1) {
       r.error = "a freewheel drives positive or negative; this one has no "
                 "direction";
       continue;
@@ -841,21 +865,60 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
   // on the relation rather than absorbed.
   for (size_t i = 0; i < rels.size(); i++) {
     Relation& r = rels[i];
-    if (!usable[i] || r.kind != RelationKind::Freewheel)
+    if (!usable[i] ||
+        (r.kind != RelationKind::Freewheel && r.kind != RelationKind::Click))
       continue;
     const Mate* a = asmDoc.FindMateById(r.mateA);
-    const Mate* b = asmDoc.FindMateById(r.mateB);
+    Mate* b = asmDoc.FindMateById(r.mateB);
     if (a == nullptr || b == nullptr)
       continue;
+    if (r.kind == RelationKind::Click) {
+      // A pawl. Moved the way it lets go, the mark follows; moved against
+      // it, the click HOLDS — the DOF goes back to the mark, and whatever
+      // drove it is left disagreeing, which its own residual reports.
+      const double v = valueOf(*b, r.dofB);
+      if ((v - r.lead) * r.drives >= -FreewheelSlack(v)) {
+        r.lead = v;
+      } else {
+        SetMateDof(*b, r.dofB, r.lead);
+        wrote++;
+      }
+      continue;
+    }
     const double now = valueOf(*b, r.dofB);
-    const double gap = now - RelationValue(r, valueOf(*a, r.dofA));
+    // Where the output stands relative to the input, which is all `lead`
+    // is — SET, not accumulated: adding the gap to the drive line would
+    // count the part of a tooth already ridden over twice, and the lead
+    // would drift a fraction of a pitch every pass.
+    const double raw = now - (r.ratio * valueOf(*a, r.dofA) + r.phase);
+    const double gap = raw - FreewheelNotch(r);
     if (gap * r.drives > FreewheelSlack(now)) {
-      r.lead += gap;
+      r.lead = raw;
       wrote++;
     } else if (gap * r.drives < -FreewheelSlack(now)) {
       r.error = "not satisfied: this freewheel's output stands behind the "
                 "drive line it would be driven along — another relation "
                 "drives it too, and they disagree";
+    }
+    // Riding over the teeth lifts the DOF the relation names, by where it
+    // stands between notches. Applied HERE, after the walk, so it adds to
+    // whatever drove that DOF — the yoke's rack, for a watch's clutch — and
+    // nothing propagates from it. What the last pass added is taken back
+    // where the walk did not recompute the base itself.
+    if (r.teeth > 0 && r.rideMate != 0) {
+      if (Mate* rm = asmDoc.FindMateById(r.rideMate)) {
+        const double pitch = 2.0 * M_PI / r.teeth;
+        const double f =
+            std::min(1.0, std::abs(r.lead - FreewheelNotch(r)) / pitch);
+        const double lift = r.rideAmount * f;
+        const bool fresh = isSettled({r.rideMate, r.rideDof});
+        const double base =
+            MateDofValue(*rm, r.rideDof) - (fresh ? 0.0 : r.rideApplied);
+        if (std::abs(base + lift - MateDofValue(*rm, r.rideDof)) > 1e-12)
+          wrote++;
+        SetMateDof(*rm, r.rideDof, base + lift);
+        r.rideApplied = lift;
+      }
     }
   }
   return wrote;
@@ -985,7 +1048,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
       // A freewheel is an inequality — it may slip — and the loop solve
       // holds only equations. It is left out, and reported below if the loop
       // moves one of its mates (docs/freewheel-plan.md).
-      if (r.kind == RelationKind::Freewheel)
+      if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click)
         continue;
       const auto ia = indexOfMate.find(r.mateA);
       const auto ib = indexOfMate.find(r.mateB);
@@ -1200,6 +1263,11 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   // have. Reported on the relation, never left silent.
   for (Relation& r : asmDoc.GetRelations()) {
     if (!r.error.empty() || asmDoc.RelationSuppressed(r.id))
+      continue;
+    // A freewheel and a click are inequalities — one may slip, the other
+    // holds — and their own pass says when they disagree. An equality test
+    // here would read a clutch riding over a tooth as a fault.
+    if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click)
       continue;
     const Mate* a = asmDoc.FindMateById(r.mateA);
     const Mate* b = asmDoc.FindMateById(r.mateB);

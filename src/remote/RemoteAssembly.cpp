@@ -112,7 +112,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      ""},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
-     "gear|chain|rack|screw|linear|cam, a: mate id, b: mate id}: "
+     "gear|chain|rack|screw|linear|cam|freewheel|click, a: mate id, b: "
+     "mate id}: "
      "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
      "own numbers when given (screw may instead reference thread_part and "
      "thread_feature) — gear: {teeth_a, teeth_b} (ratio = "
@@ -130,14 +131,23 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "(offset when omitted). FREEWHEEL is a one-way clutch, rotation to "
      "rotation: {ratio, drives: positive|negative} — b follows a while a "
      "drives it in that direction and slips when a goes back; b driven on "
-     "ahead leaves a still, and b pushed back drags a. Its history is "
+     "ahead leaves a still, and b pushed back drags a — unless a can be "
+     "reached from b through the other relations, where dragging would feed "
+     "itself and the clutch HOLDS and reports instead. Its history is "
      "`lead` (b's unit, radians), how far b has run ahead of a's drive "
      "line: it starts as the gap between the two parts as they stand (a "
      "clutch engages where it is made, so adding one moves nothing) unless "
      "{lead} says otherwise, and is saved with the document and undone "
      "with the pose; a freewheel "
-     "inside a mate loop is reported, not held (docs/freewheel-plan.md). A "
-     "cam is the "
+     "inside a mate loop is reported, not held (docs/freewheel-plan.md). "
+     "With {teeth} it re-engages only where teeth meet, so the input travels "
+     "up to a pitch before driving again, and {ride_mate, ride_dof, ride_mm "
+     "| ride_deg} is what riding over them LIFTS: zero at a notch, full just "
+     "before the next, ADDED to whatever else drives that DOF "
+     "(docs/click-and-breguet-plan.md). CLICK is a pawl — ONE mate's "
+     "rotation (pass the same id as a and b) free the way it {drives} and "
+     "held at its mark the other way, where the relation that pushed it "
+     "reports. A cam is the "
      "one relation that is not invertible (many angles give one lift), so it "
      "drives forward only. `ratio` may be given directly for any other kind; "
      "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
@@ -148,7 +158,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "axis instead of across it; `warnings` names gear axles more than 5 "
      "degrees off parallel (docs/assemblies/relations-plan.md).",
      "thread_part, thread_feature, a, b, dof_b, drives, duration_deg, lead, "
-     "lift, name, "
+     "lift, name, ride_deg, ride_dof, ride_mate, ride_mm, teeth, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, teeth_a, teeth_b, type"},
     {"set_relation",
@@ -1194,9 +1204,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     r.mateB = p.at("b").get<uint64_t>();
     r.name = p.value("name", std::string{});
     r.phase = p.value("phase", 0.0);
-    if (p.contains("drives") && r.kind != RelationKind::Freewheel)
+    if (p.contains("drives") && r.kind != RelationKind::Freewheel &&
+        r.kind != RelationKind::Click)
       throw std::runtime_error(
-          "drives is a freewheel's direction; a " +
+          "drives is a freewheel's or a click's direction; a " +
           std::string(DocumentIO::RelationKindToString(r.kind)) +
           " drives both ways");
     r.threadPart = p.value("thread_part", uint64_t{0});
@@ -1284,6 +1295,65 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       if (!p.contains("ratio"))
         throw std::runtime_error("a freewheel needs its ratio (1 for a clutch "
                                  "between two parts on one arbor)");
+      if (p.contains("teeth")) {
+        r.teeth = p.at("teeth").get<int>();
+        if (r.teeth <= 0)
+          throw std::runtime_error(
+              "teeth is how many dogs a freewheel re-engages on (positive)");
+      }
+      if (p.contains("ride_mate") || p.contains("ride_mm") ||
+          p.contains("ride_deg") || p.contains("ride_dof")) {
+        // What riding over the teeth lifts — a watch's clutch, along its
+        // stem, which is the whole reason sawtooth dogs can slip.
+        if (r.teeth <= 0)
+          throw std::runtime_error("a ride needs teeth: the lift is where "
+                                   "the clutch stands between them");
+        if (!p.contains("ride_mate"))
+          throw std::runtime_error(
+              "a ride needs ride_mate: the mate whose degree of freedom "
+              "riding over the teeth lifts");
+        r.rideMate = p.at("ride_mate").get<uint64_t>();
+        r.rideDof = p.contains("ride_dof")
+                        ? DocumentIO::MateDofFromString(
+                              p.at("ride_dof").get<std::string>())
+                        : MateDof::Offset;
+        const Mate* rm = state.assembly->FindMateById(r.rideMate);
+        if (rm == nullptr)
+          throw std::runtime_error("no mate with id " +
+                                   std::to_string(r.rideMate) +
+                                   " to lift; list_mates shows them");
+        if (!assembly::MateHasDof(rm->type, r.rideDof))
+          throw std::runtime_error(
+              "mate " + std::to_string(r.rideMate) + " has no " +
+              DocumentIO::MateDofToString(r.rideDof) + " to lift");
+        const bool turns = r.rideDof == MateDof::Rotation;
+        if (turns && p.contains("ride_mm"))
+          throw std::runtime_error(
+              "this ride lifts a ROTATION: give ride_deg, not ride_mm");
+        if (!turns && p.contains("ride_deg"))
+          throw std::runtime_error(
+              "this ride lifts a SLIDE: give ride_mm, not ride_deg");
+        r.rideAmount = turns ? angles::ToRadians(p.value("ride_deg", 0.0))
+                             : p.value("ride_mm", 0.0);
+        if (r.rideAmount == 0.0)
+          throw std::runtime_error("a ride needs how far it lifts (ride_mm "
+                                   "for a slide, ride_deg for a turn)");
+      }
+      break;
+    case RelationKind::Click:
+      // A pawl: one mate's rotation, free one way and held the other.
+      r.dofA = r.dofB = MateDof::Rotation;
+      if (r.mateA != r.mateB)
+        throw std::runtime_error(
+            "a click holds ONE mate's rotation: pass the same mate id as a "
+            "and b");
+      if (!p.contains("drives"))
+        throw std::runtime_error(
+            "a click needs drives: positive or negative — the way it lets "
+            "the mate turn; it holds the other");
+      r.drives = DocumentIO::FreewheelDrivesFromString(
+          p.at("drives").get<std::string>());
+      r.ratio = 1.0;
       break;
     case RelationKind::Cam: {
       // A lift table, not a ratio: the follower's position is a function of
@@ -1394,13 +1464,14 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     }
     if (p.contains("ratio") && r.kind != RelationKind::Cam)
       r.ratio = p.at("ratio").get<double>();
-    else if (r.kind != RelationKind::Cam &&
+    else if (r.kind != RelationKind::Cam && r.kind != RelationKind::Click &&
              !(p.contains("teeth_a") || p.contains("pitch_radius") ||
                p.contains("pitch") || r.threadPart))
       throw std::runtime_error(
           "give the ratio, or what it is derived from: teeth_a + teeth_b for "
           "a gear or a chain, pitch_radius for a rack, pitch for a screw, a "
-          "lift table for a cam");
+          "lift table for a cam; a click needs none, holding one mate's own "
+          "rotation");
     if (r.ratio == 0.0)
       throw std::runtime_error("a relation's ratio cannot be zero");
     const auto lacks = [](const Mate& mm, MateDof dof) {
@@ -1499,9 +1570,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (p.contains("ratio") && r->threadPart)
       throw std::runtime_error(
           "edit the referenced thread; its pitch owns this ratio");
-    if (p.contains("lead") && r->kind != RelationKind::Freewheel)
+    if (p.contains("lead") && r->kind != RelationKind::Freewheel &&
+        r->kind != RelationKind::Click)
       throw std::runtime_error(
-          "lead is a freewheel's history; a " +
+          "lead is a freewheel's or a click's history; a " +
           std::string(DocumentIO::RelationKindToString(r->kind)) + " has none");
     ui::SnapshotAssembly(state);
     if (p.contains("lead")) {

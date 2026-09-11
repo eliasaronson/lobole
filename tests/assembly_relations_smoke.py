@@ -249,8 +249,8 @@ def main():
                 ratio=1.0)
         refused(d, "add_relation", "positive or negative", type="freewheel",
                 a=a, b=cyl, ratio=1.0, drives="forward")
-        refused(d, "add_relation", "freewheel's direction", type="gear", a=a,
-                b=cyl, ratio=1.0, drives="positive")
+        refused(d, "add_relation", "drives is a freewheel's", type="gear",
+                a=a, b=cyl, ratio=1.0, drives="positive")
         fw = d.call("add_relation", type="freewheel", a=a, b=cyl, ratio=1.0,
                     drives="positive", name="one-way")
         expect(fw["drives"] == "positive" and fw["lead"] == 0.0,
@@ -292,11 +292,49 @@ def main():
         d.call("set_relation", id=fw["id"], lead=0.0)
         expect(abs(lead()) < 1e-6 and abs(rot(cyl) - rot(a)) < 1e-4,
                f"lead 0 puts b on a's line: {rot(cyl)} vs {rot(a)}")
-        # Only a freewheel has a history to set.
+        # Only a freewheel or a click has a history to set.
         d.call("remove_relation", id=fw["id"])
         g = d.call("add_relation", type="gear", a=a, b=cyl, ratio=1.0)
-        refused(d, "set_relation", "freewheel's history", id=g["id"],
-                lead=1.0)
+        refused(d, "set_relation", "freewheel's or a click's history",
+                id=g["id"], lead=1.0)
+
+        # ---- a click, and riding over teeth (v105) -----------------------
+        refused(d, "add_relation", "same mate id", type="click", a=a, b=cyl,
+                drives="positive")
+        refused(d, "add_relation", "a click needs drives", type="click", a=a,
+                b=a)
+        d.call("set_mate", id=a, rotation=0.0)
+        ck = d.call("add_relation", type="click", a=a, b=a, drives="positive",
+                    name="pawl")
+        d.call("set_mate", id=a, rotation=1.0)
+        expect(abs(rot(a) - 1.0) < 1e-4,
+               f"the click lets it turn its own way: {rot(a)}")
+        d.call("set_mate", id=a, rotation=0.4)
+        expect(abs(rot(a) - 1.0) < 1e-4,
+               f"turned back, the click holds it at its mark: {rot(a)}")
+        d.call("remove_relation", id=ck["id"])
+        d.call("remove_relation", id=g["id"])
+        d.call("set_mate", id=a, rotation=0.0)
+        d.call("set_mate", id=cyl, rotation=0.0, offset=0.0)
+        # Riding over the dogs lifts the clutch: a ride needs its teeth.
+        refused(d, "add_relation", "a ride needs teeth", type="freewheel",
+                a=a, b=cyl, ratio=1.0, drives="positive", ride_mate=cyl,
+                ride_mm=1.0)
+        refused(d, "add_relation", "ride_mm, not ride_deg", type="freewheel",
+                a=a, b=cyl, ratio=1.0, drives="positive", teeth=4,
+                ride_mate=cyl, ride_dof="offset", ride_deg=10.0)
+        fw2 = d.call("add_relation", type="freewheel", a=a, b=cyl, ratio=1.0,
+                     drives="positive", teeth=4, ride_mate=cyl,
+                     ride_dof="offset", ride_mm=1.0, name="dogs")
+        # Half a tooth of slip stands it half way up the ramp...
+        d.call("set_mate", id=a, rotation=-math.pi / 4)
+        expect(abs(mate(d, cyl)["offset"] - 0.5) < 1e-3,
+               f"half a tooth lifts half: {mate(d, cyl)['offset']}")
+        # ...and a whole tooth drops it into the next notch.
+        d.call("set_mate", id=a, rotation=-math.pi / 2)
+        expect(abs(mate(d, cyl)["offset"]) < 1e-3,
+               f"a whole tooth drops it back: {mate(d, cyl)['offset']}")
+        d.call("remove_relation", id=fw2["id"])
         d.close()
     finally:
         app.terminate()

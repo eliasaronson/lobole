@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    104; // v104: a FREEWHEEL relation (one-way clutch): `kind` "freewheel",
+    105; // v105: a CLICK relation (a pawl: one DOF that may only travel one
+         //      way), and a freewheel's `teeth` and `ride` — riding over
+         //      them lifts a named DOF (docs/click-and-breguet-plan.md).
+         // v104: a FREEWHEEL relation (one-way clutch): `kind` "freewheel",
          //      `drives` positive|negative and `lead`, the history it keeps.
          // v103: an Import's `units` -- the length unit an STL/BREP was drawn
          //      in (mm|cm|m|in; absent = mm). Refused on STEP, which declares
