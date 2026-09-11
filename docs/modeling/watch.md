@@ -172,9 +172,9 @@ and a 1:1 relation to the centre arbor IS the friction fit; the setting
 position removes it.
 
 **Three things about relations the keyless works found** — all three fixed in
-the app since ([../watch-app-fixes-plan.md](../watch-app-fixes-plan.md)); the
-generator still carries the workarounds described here until it is moved onto
-the fixes:
+the app since ([../watch-app-fixes-plan.md](../watch-app-fixes-plan.md)), and
+the generator now uses the fixes; what it did before is kept here because it
+is what the defects cost:
 
 1. *A mate takes one relation.* The solver settles a mate when the first
    relation reaches it and silently skips any later one. The clutch was a
@@ -182,24 +182,37 @@ the fixes:
    relation was accepted by `add_relation` and never applied — the clutch
    stayed put. That is a relation the document holds and the solve ignores,
    which is what this codebase's refusal rule exists to prevent. The
-   generator makes the clutch a revolute whose axial seat the setting
-   position moves, and the levers leaves of the stem. *Fixed:* the solve
-   settles per (mate, DOF), and a relation it still cannot satisfy is
-   reported on the relation.
+   generator made the clutch a revolute whose axial seat a script moved.
+   *Fixed:* the solve settles per (mate, DOF), and a relation it still
+   cannot satisfy is reported on the relation — the clutch is cylindrical
+   again, slid by the yoke's relation.
 2. *A relation is applied only when something drives it.* Built, the stem's
    side of the watch sat at the dofs its arbors were placed with — off their
    relations' phases — until a mate on it was driven. The winding check read
    its "before" from that state and got 53.378° where the chain gives
-   82.031°. `build_assembly` drives the stem once, after adding them.
-   *Fixed:* a plain solve now applies every chain end to end.
+   82.031°. `build_assembly` drove the stem once, after adding them.
+   *Fixed:* a plain solve now applies every chain end to end, and the build
+   no longer drives anything to make its relations hold.
 3. *A configuration cannot hold "crown out".* An assembly configuration
    suppresses occurrences only — not a mate, not a relation, not a mate's
    offset — and a relation touching a suppressed occurrence still drives it.
-   So the document holds the winding position, and the generator makes the
-   setting position (pull the stem, swap the clutch's relation, let the
-   cannon pinion slip), checks and sweeps it, and puts the winding position
-   back. *Fixed:* a configuration can now suppress mates and relations and
-   hold mate DOFs (format v101), so "crown out" can be one.
+   So the generator made the setting position by script (pull the stem, swap
+   the clutch's relation, let the cannon pinion slip) and put the winding
+   position back. *Fixed:* a configuration can now suppress mates and
+   relations and hold mate DOFs (format v101). The watch has two: "Crown in"
+   takes out the clutch's relation to the setting wheel and holds the stem
+   pushed in; "Crown out" takes out the dogs and the friction fit and holds
+   the stem pulled, and the yoke's relations slide the clutch by themselves.
+   Both HOLD the stem, and that is what says which end of the lever chain is
+   the input: unheld, a plain solve roots a chain at its first relation's
+   driving side — the setting lever, since a rack runs from the turning part
+   to the sliding one — and crown in first came back with the lever at its
+   crown-out angle, the stem pulled and the clutch still on the setting
+   wheel (0.0027 mm³ in the sweep). The document is saved
+   crown in. The base — every relation in — over-constrains the keyless
+   works by construction (the setting wheel driven by the clutch AND the
+   minute wheel), and the solve says so if it is activated: an authoring
+   state, not a position of the crown.
 
 **Winding by hand turns the rotor backwards**, 4 turns per quarter turn of
 the crown: the rotor's reduction train is related to the ratchet, and a

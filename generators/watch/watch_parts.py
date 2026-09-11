@@ -829,28 +829,27 @@ def contrate(app, key, x_face, sign, name):
     """A ring of contrate teeth on the end face at x_face, standing out
     towards sign * X. Past the contact a contrate tooth moves as a rack tooth
     does, so each is watch_gearing's cycloidal rack tooth, drawn in the plane
-    through its own radial line and extruded across the face width. (One
-    tooth and a circular Pattern would be two features, but a Pattern repeats
-    a BODY, and an extrude that adds to the pinion leaves none of its own.)"""
+    through its radial line and extruded across the face width — one tooth,
+    then a circular Pattern round the stem. (A Pattern of an extrude that
+    ADDS used to fail, and this went in as one extrude per tooth.)"""
     g = S.GEAR[key]
     w = float(CONTRATE_W)
     ents = watch_gearing.rack_profile(float(MODULE), g["rho_add"],
                                       g["rho_ded"], g["frac"], g["h_a"],
                                       g["h_f"], sink=0.02)
-    for k in range(g["z"]):
-        a = 2 * math.pi * k / g["z"]
-        er = (0.0, math.cos(a), math.sin(a))        # the tooth's radial line
-        et = (0.0, -math.sin(a), math.cos(a))       # the way it moves
-        # normal = er, u = sign * et, so v = er x u = sign * X, off the face.
-        r0 = g["rp"] - w / 2
-        sid = app.call("add_feature", feature={
-            "type": "Sketch", "name": f"{name} {k}", "entities": ents,
-            "plane": {"origin": [float(x_face), r0 * er[1], r0 * er[2]],
-                      "normal": list(er),
-                      "uAxis": [0.0, sign * et[1], sign * et[2]]}})["id"]
-        app.call("add_feature", feature={
-            "type": "Extrude", "name": f"{name} {k}", "sketch_id": sid,
-            "distance": w, "mode": "add"})
+    # Tooth 0 on +Y: its plane faces along +Y (the radial line), u runs
+    # along +Z (the way the tooth moves), and v = normal x u = sign * X.
+    sid = app.call("add_feature", feature={
+        "type": "Sketch", "name": name, "entities": ents,
+        "plane": {"origin": [float(x_face), g["rp"] - w / 2, 0.0],
+                  "normal": [0, 1, 0], "uAxis": [0, 0, float(sign)]}})["id"]
+    fid = app.call("add_feature", feature={
+        "type": "Extrude", "name": name, "sketch_id": sid, "distance": w,
+        "mode": "add"})["id"]
+    app.call("add_feature", feature={
+        "type": "Pattern", "name": name + " ring", "kind": "circular",
+        "source_id": fid, "axis": {"kind": "x"}, "count": g["z"],
+        "angle_deg": 360.0 / g["z"]})
 
 
 def dogs(app, x0, length, phase_deg, name, n=4, r0=0.36, r1=0.62,

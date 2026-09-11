@@ -66,9 +66,9 @@ from the start: 86 dimensions are document variables (`watch_spec.declare`),
 every one of its 37 occurrences is placed by a mate, 16 relations make one
 motion study turn every hand at its true rate and the crown drive the ratchet,
 and the clearances that decide whether it runs are DECLARED on the assembly.
-The run gates on receipts, checks the crown-out setting position it cannot
-store (an assembly configuration cannot switch a relation), and refuses to
-save what it has not checked.
+The crown's two positions are CONFIGURATIONS of the assembly ("Crown in",
+"Crown out"); the run gates on receipts, checks both, and refuses to save
+what it has not checked.
 
 Its teeth are **cycloidal** (`watch/watch_gearing.py`), not `gear.py`'s
 involute, and the gates are why: at 6–12 pinion leaves an involute train

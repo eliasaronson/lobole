@@ -160,15 +160,12 @@ def build_assembly(app, P):
                        ("setting_lever", "pivot setting_lever"),
                        ("yoke", "pivot yoke")):
         m[key] = rev(key, frame)
-    # On the stem's axis: the stem slides as well as turns. The clutch turns
-    # with it and slides only when the crown is pulled — a REVOLUTE whose
-    # axial seat the setting position moves (to_setting), because a mate is
-    # settled by the first relation that reaches it: a cylindrical clutch
-    # driven round by the stem ignored the yoke driving it along. The winding
-    # pinion only turns.
-    m["stem"] = asm.cylindrical((mp, "stem"), (occ["stem"], "axis"),
-                                flipped=False)["id"]
-    m["clutch"] = rev("clutch", "stem")
+    # On the stem's axis: the stem and the clutch slide as well as turn —
+    # the clutch turned by the stem and slid by the yoke, two relations into
+    # one cylindrical mate. The winding pinion only turns.
+    for key in ("stem", "clutch"):
+        m[key] = asm.cylindrical((mp, "stem"), (occ[key], "axis"),
+                                 flipped=False)["id"]
     m["winding_pinion"] = rev("winding_pinion", "stem")
     fasten("balance", "axis", "hairspring")
     for key in ("train_bridge", "barrel_bridge", "cock_bridge",
@@ -200,11 +197,6 @@ def build_assembly(app, P):
             raise SdkError(f"relation {a}->{b}: {r['error']}")
         rel[f"{a}->{b}"] = r
     keyless_relations(app, m, rel)
-    # Relations are applied outward from a mate that is DRIVEN; until
-    # something drives the stem's side of the watch, its arbors sit at the
-    # dof they were placed with, off their relations' phases. Drive it once.
-    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
-    app.solve_assembly()
 
     # The hands. Meshing phases turn every driven arbor by up to a tooth
     # pitch — 22 minutes of hour hand, on a 32-tooth hour wheel — so each hand
@@ -220,6 +212,7 @@ def build_assembly(app, P):
                          a={"occurrence": occ[arbor].id, "frame": "axis"},
                          b={"occurrence": occ[hand].id, "frame": "axis"},
                          flipped=False, rotation=-dof.get(base, 0.0))
+    keyless_positions(app, m, rel)
     solved = app.solve_assembly()
     return asm, occ, m, rel, solved
 
@@ -263,55 +256,68 @@ def keyless_relations(app, m, rel):
            ratio=WIND_RATIO, phase=contrate_phase(WIND_RATIO, Z_WINDING_W,
                                                   -math.pi / 2, math.pi))
     # Pulling the stem turns the setting lever (its pin rides the stem's
-    # groove) and the lever turns the yoke, whose pin rides the clutch's
-    # groove. The yoke's last step — sliding the clutch — cannot be a relation
-    # (see the clutch's mate), so the setting position sets the clutch's seat
-    # to exactly where the yoke's turn puts its pin.
+    # groove), the lever turns the yoke, and the yoke — its pin in the
+    # clutch's groove — slides the clutch in.
     relate(app, m, rel, "setting lever", "rack", "setting_lever", "stem",
            pitch_radius=float(SETTING_LEVER_ARM))
     relate(app, m, rel, "lever -> yoke", "gear", "setting_lever", "yoke",
            ratio=-(float(CLUTCH_TRAVEL) / float(YOKE_ARM))
            / (float(STEM_PULL) / float(SETTING_LEVER_ARM)))
+    relate(app, m, rel, "yoke pin", "rack", "yoke", "clutch",
+           pitch_radius=float(YOKE_ARM))
 
 
-def to_setting(app, m, rel):
-    """Crown out. An assembly configuration cannot switch a relation or hold
-    a mate's offset, so the setting position is made here and undone by
-    to_winding: the clutch leaves the winding pinion for the setting wheel,
-    and the cannon pinion's friction fit is let go."""
-    for k in ("dogs", "friction"):
-        app.call("remove_relation", id=rel.pop(k)["id"])
-    # The clutch engages the setting wheel where the setting wheel already
-    # is: of the phases that mesh (one per tooth), the nearest. The fixed one
-    # moved the setting wheel to an absolute angle, and the hands with it.
+# The crown's two positions, as CONFIGURATIONS of the assembly (v101).
+CONFIGS = {}
+
+
+def keyless_positions(app, m, rel):
+    """"Crown in" and "Crown out" as configurations, and the relation only
+    crown-out uses. Crown in takes the clutch's relation to the setting wheel
+    out of the solve; crown out takes out the clutch's dogs and the cannon
+    pinion's friction fit and HOLDS the stem pulled — the yoke's relations
+    then slide the clutch onto the setting wheel by themselves. The base,
+    with every relation in, over-constrains the keyless works (the setting
+    wheel driven by the clutch AND the minute wheel) and says so if anyone
+    activates it; the document is saved crown in.
+
+    The setting relation's phase is the one of its sixteen that meshes where
+    the setting wheel stands now, so pulling the crown moves the hands by
+    less than half a setting-wheel tooth."""
     now = _mates(app)
     pitch = 2 * math.pi / Z_SETTING_W
     base = contrate_phase(SET_RATIO, Z_SETTING_W, math.pi / 2, 0.0)
     want = (now[m["setting"]].get("rotation", 0.0)
             - SET_RATIO * now[m["clutch"]].get("rotation", 0.0))
-    relate(app, m, rel, "setting", "gear", "clutch", "setting",
-           ratio=SET_RATIO,
-           phase=base + pitch * round((want - base) / pitch))
-    app.call("set_mate", id=m["stem"], offset=float(STEM_PULL))
-    app.call("set_mate", id=m["clutch"], offset=-float(CLUTCH_TRAVEL))
+    setting = relate(app, m, rel, "setting", "gear", "clutch", "setting",
+                     ratio=SET_RATIO,
+                     phase=base + pitch * round((want - base) / pitch))
+    # Each position HOLDS the stem where it is — pushed in, or pulled out.
+    # Held, the stem is where the lever chain starts; without a hold a plain
+    # solve roots that chain at its first relation's driving side, which is
+    # the setting LEVER (a rack runs from the turning part to the sliding
+    # one), and crown in kept the lever's last crown-out angle: the stem
+    # pulled back out and the clutch left on the setting wheel.
+    cin = app.call("add_configuration", name="Crown in")["id"]
+    app.call("set_configuration", id=cin,
+             suppressed_relations=[setting["id"]],
+             mate_overrides=[{"mate": m["stem"], "offset": 0.0}])
+    cout = app.call("add_configuration", name="Crown out")["id"]
+    app.call("set_configuration", id=cout,
+             suppressed_relations=[rel["dogs"]["id"], rel["friction"]["id"]],
+             mate_overrides=[{"mate": m["stem"], "offset": float(STEM_PULL)}])
+    app.call("set_active_configuration", id=cin)
+    CONFIGS.update({"in": cin, "out": cout})
+
+
+def to_setting(app, m, rel):
+    """Crown out: activate the configuration, which re-solves."""
+    app.call("set_active_configuration", id=CONFIGS["out"])
     return app.solve_assembly()
 
 
 def to_winding(app, m, rel):
-    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
-    app.call("set_mate", id=m["stem"], offset=0.0)
-    app.call("set_mate", id=m["clutch"], offset=0.0)
-    app.solve_assembly()
-    app.call("remove_relation", id=rel.pop("setting")["id"])
-    relate(app, m, rel, "friction", "gear", "center", "cannon", ratio=1.0)
-    relate(app, m, rel, "dogs", "gear", "clutch", "winding_pinion",
-           ratio=1.0)
-    # A relation applies only when something drives it: drive the train (the
-    # hands go back onto the friction fit) and the stem, where they stand.
-    now = _mates(app)
-    app.call("set_mate", id=m["barrel"],
-             rotation=now[m["barrel"]].get("rotation", 0.0))
-    app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+    app.call("set_active_configuration", id=CONFIGS["in"])
     return app.solve_assembly()
 
 
