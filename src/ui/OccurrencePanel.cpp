@@ -721,14 +721,15 @@ void DrawConfigsSection(AppState& state) {
       if (held) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.0f);
-        float v =
-            rotation ? static_cast<float>(angles::ToDegrees(**slot)) : **slot;
+        // An ExprInput field, not a raw DragFloat: a typed "90/4" must
+        // evaluate, not sscanf to 90 (test_conventions.cpp).
+        double v = rotation ? angles::ToDegrees(**slot) : **slot;
         const std::string vid =
             std::string("###cfg_hold_v") + (rotation ? "r_" : "o_") + sid;
-        if (ImGui::DragFloat(vid.c_str(), &v, rotation ? 1.0f : 0.05f, 0.0f,
-                             0.0f, rotation ? "%.2f deg" : "%.3f mm")) {
+        if (ExprDragDouble(state, vid.c_str(), &v, rotation ? 1.0f : 0.05f, 0.0,
+                           0.0, rotation ? "%.2f deg" : "%.3f mm")) {
           SnapshotAssembly(state);
-          *slot = rotation ? static_cast<float>(angles::ToRadians(v)) : v;
+          *slot = static_cast<float>(rotation ? angles::ToRadians(v) : v);
           changed = true;
         }
       }
