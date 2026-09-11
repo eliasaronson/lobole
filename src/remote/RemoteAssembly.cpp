@@ -1303,13 +1303,23 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (lacks(*a, r.dofA) || lacks(*b, r.dofB)) {
       const Mate& bad = lacks(*a, r.dofA) ? *a : *b;
       const MateDof dof = lacks(*a, r.dofA) ? r.dofA : r.dofB;
+      // Name what THIS side needs, from the dof it lacks. Naming it from the
+      // driver's dof refused a cam's revolute follower with "a cam needs
+      // revolute or cylindrical mates" — the refused type offered as the
+      // cure.
+      const bool followerSide = !lacks(*a, r.dofA);
+      const std::string need = dof == MateDof::Rotation
+                                   ? "a revolute or cylindrical mate"
+                                   : "a slider or cylindrical mate";
+      const std::string why = r.kind != RelationKind::Cam ? ""
+                              : followerSide ? " — a cam's follower slides"
+                                             : " — a cam's driver turns";
       throw std::runtime_error(
           "mate " + std::to_string(bad.id) + " (" +
           DocumentIO::MateToJson(bad).at("mate_type").get<std::string>() +
-          ") has no " + DocumentIO::MateDofToString(dof) + " to couple — a " +
-          DocumentIO::RelationKindToString(r.kind) + " needs " +
-          (r.dofA == MateDof::Rotation ? "revolute" : "slider") +
-          " or cylindrical mates");
+          ") has no " + DocumentIO::MateDofToString(dof) + " to couple — " +
+          (followerSide ? "b" : "a") + " of a " +
+          DocumentIO::RelationKindToString(r.kind) + " needs " + need + why);
     }
     // The geometry a kind implies, checked against the mates' own frames —
     // a mate's DOF axis is its A connector's Z. A rack that slides ALONG the

@@ -172,6 +172,18 @@ def main():
         cyl = origin_mate(d, "cylindrical", carrier, wheel,
                           name="follower", offset=48.0)
         refused(d, "add_relation", "lift", type="cam", a=a, b=cyl)
+        # A revolute FOLLOWER is refused naming what the follower needs. The
+        # message was once picked from the DRIVER's dof, so it refused a
+        # revolute follower by offering "revolute or cylindrical" as the cure.
+        try:
+            d.call("add_relation", type="cam", a=cyl, b=a, rise=8.0,
+                   duration_deg=180)
+            raise AssertionError("a cam with a revolute follower was accepted")
+        except RuntimeError as e:
+            expect("slider or cylindrical" in str(e)
+                   and "follower slides" in str(e)
+                   and "revolute or" not in str(e),
+                   f"the refusal names what the follower needs: {e}")
         cam = d.call("add_relation", type="cam", a=a, b=cyl, rise=8.0,
                      duration_deg=180, name="lobe")
         expect(len(cam["lift"]) >= 19, f"a cosine lobe was built: {cam}")
