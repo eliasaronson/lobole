@@ -762,6 +762,13 @@ def main():
         # headless), but the RPC must accept and clear it without error.
         d.call("set_section", enabled=True, base_plane="yz", offset=0.0)
         d.call("set_section", enabled=False)
+        # A plane nobody named is REFUSED, naming the three there are: every
+        # section handler used to read "zx" (or "XY", or "front") as xy and
+        # cut the model somewhere it was not asked to.
+        expect_error(d, "set_section", "not one of xy, xz, yz",
+                     enabled=True, base_plane="zx")
+        expect_error(d, "add_section", "not one of xy, xz, yz",
+                     base_plane="front")
         sec = d.call("section", base_plane="xy", offset=3.0)  # z=3 -> 4x5=20
         expect(abs(sec["area"] - 20.0) < 1e-3, "cross-section area 20")
         miss = d.call("section", base_plane="xy", offset=99.0)

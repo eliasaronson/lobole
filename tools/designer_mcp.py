@@ -691,18 +691,18 @@ def list_variables() -> dict:
 
 @mcp.tool(description="Toggle the viewport SECTION VIEW — a clipping plane "
           "that cuts the model open so you can see inside (screenshot to "
-          "view it). enabled=False clears it. Plane by base_plane+offset or "
-          "origin+normal. Works on part AND assembly tabs; on assemblies the "
-          "clip applies per occurrence in world space but there are no "
-          "filled cut caps, so the section reads hollow. (This is the "
-          "visual cut; use `section` for the cross-section AREA.)")
+          "view it). enabled=False clears it. Plane by base_plane "
+          "('xy'|'xz'|'yz' — anything else is refused) + offset in mm. Works "
+          "on part AND assembly tabs, with filled cut caps on both. For an "
+          "off-axis plane use rpc('add_section', {plane_id | tilt_u, "
+          "tilt_v}). (This is the visual cut; use `section` for the "
+          "cross-section AREA.)")
 def set_section(enabled: bool = True, base_plane: str = "xy",
-                offset: float = 0.0, origin: list | None = None,
-                normal: list | None = None) -> dict:
+                offset: float = 0.0) -> dict:
+    # origin/normal were forwarded here and refused by the RPC, which never
+    # had them: a datum plane (add_section plane_id) or a tilt cuts off-axis.
     if not enabled:
         return _call("set_section", enabled=False)
-    if origin is not None and normal is not None:
-        return _call("set_section", enabled=True, origin=origin, normal=normal)
     return _call("set_section", enabled=True, base_plane=base_plane,
                  offset=offset)
 

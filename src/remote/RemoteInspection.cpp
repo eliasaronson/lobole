@@ -608,11 +608,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "a question you can ask cheaply.",
      "base_plane, normal, offset, origin, part, regions"},
     {"set_section",
-     "Enable/disable the live section clip {base_plane|origin+normal, "
-     "offset}. Works on part AND assembly tabs, with filled cut caps on "
+     "Enable/disable the live section clip {base_plane: xy|xz|yz, offset?, "
+     "reverse?}. Works on part AND assembly tabs, with filled cut caps on "
      "both; `offset` is MILLIMETRES along the normal, and omitting it cuts "
-     "through the middle of what is shown. "
-     "Shorthand for one cut — add_section/update_section address several.",
+     "through the middle of what is shown; reverse keeps the other side. "
+     "Shorthand for one cut — add_section/update_section address several, "
+     "and cut on a datum plane (plane_id) or tilted (tilt_u/tilt_v) for a "
+     "plane that is not a base plane.",
      "add, base_plane, enabled, offset, reverse"},
     {"add_section",
      "Add a section cut and return its id {base_plane: xy|xz|yz, plane_id? "
@@ -635,22 +637,36 @@ static constexpr MethodDoc InspectionMethods[] = {
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 
+// "xy" | "xz" | "yz" -> 0 | 1 | 2. Anything else is REFUSED: every section
+// handler used to read an unknown plane — "zx", "XY", "front" — as xy, and
+// cut the model somewhere it was not asked to.
+static int BasePlaneFromString(const std::string& bp) {
+  if (bp == "xy")
+    return 0;
+  if (bp == "xz")
+    return 1;
+  if (bp == "yz")
+    return 2;
+  throw std::runtime_error("base_plane '" + bp + "' is not one of xy, xz, yz");
+}
+
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const std::string& m,
                                         const RpcParams& p) {
   Document* doc = docIn;
   if (m == "set_section") {
     // The viewport section cut. params: {enabled, base_plane: "xy"|"xz"|"yz",
-    // offset?, reverse?} or {enabled, origin, normal}. Disabled clears every
-    // section. This edits the SAME list the Section tool shows, so a script
-    // and the tool window are never two different truths.
+    // offset?, reverse?}. Disabled clears every section. This edits the SAME
+    // list the Section tool shows, so a script and the tool window are never
+    // two different truths. (It once also promised {origin, normal}, in its
+    // own description and here, and never had them.)
     if (!p.value("enabled", true)) {
       ui::ClearSections(state);
       return json::object();
     }
     if (p.contains("base_plane")) {
-      const std::string bp = p.at("base_plane").get<std::string>();
-      const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+      const int basePlane =
+          BasePlaneFromString(p.at("base_plane").get<std::string>());
       // One section unless asked otherwise: scripts that toggle a cut on and
       // off should not stack four of them up.
       const bool add = p.value("add", false);
@@ -679,8 +695,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const bool adding = m == "add_section";
     ui::AppState::SectionView* sec = nullptr;
     if (adding) {
-      const std::string bp = p.value("base_plane", std::string("xy"));
-      const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+      const int basePlane =
+          BasePlaneFromString(p.value("base_plane", std::string("xy")));
       const uint64_t id = ui::AddSection(state, basePlane);
       if (id == 0)
         throw std::runtime_error("at most " + std::to_string(kMaxClipPlanes) +
@@ -692,8 +708,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("no section with that id; list_sections "
                                  "shows the ones that exist");
       if (p.contains("base_plane")) {
-        const std::string bp = p.at("base_plane").get<std::string>();
-        sec->basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+        sec->basePlane =
+            BasePlaneFromString(p.at("base_plane").get<std::string>());
         sec->planeId = 0; // a base plane and a datum are alternatives
         sec->face = ElementRef{};
       }
