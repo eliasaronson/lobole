@@ -110,6 +110,14 @@ The `RayTracingRenderer` scaffold is ~40% real:
     catcher is simply not added when the camera is under it. (The alternative,
     an any-hit shader that ignores back-face intersections, is the general
     fix and costs an SBT hit group; this is the case that actually happens.)
+  - **Glass (2026-09-11)**: `transmission` had been declared on both sides
+    of the material upload and read by nothing, so `glass` rendered as an
+    opaque mirror and a watch crystal hid its dial. The still now traces a
+    PATH: raygen loops up to 8 segments, and closest-hit's dielectric branch
+    reflects or refracts (Schlick Fresnel, total internal reflection) and
+    hands the next ray back, so the recursion depth stays 2. Shadow and AO
+    rays pass through glass tinted (`section.rahit`) instead of being
+    blocked by it. [glass-plan.md](glass-plan.md).
   - **Resolutions to 4K (2026-09-01)**: the list stopped at 1920x1080 while
     the machine it was written on has a 3200x2000 panel, so the largest
     available still was upscaled 1.7x on opening and read as a

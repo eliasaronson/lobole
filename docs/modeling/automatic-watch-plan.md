@@ -186,9 +186,9 @@ density, which is why it is its own material. Blued steel is `steel` with a
 blue appearance: the blue is an oxide film a few hundred nanometres thick, so
 the steel's properties are the honest ones.
 
-**Glass renders opaque** — the ray tracer hard-codes transmission to zero —
-so a crystal would hide the dial in every image and the caseback window would
-hide the movement. They are modelled, and hidden for the renders.
+**Glass is see-through** in the still
+([glass-plan.md](../rendering/glass-plan.md)): the crystal and the caseback
+window stay in the renders.
 
 ## Files
 

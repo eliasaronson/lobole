@@ -223,6 +223,9 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
   materials[MaterialType::RUBY].density = 3980.0f;
+  // Glass transmits (docs/rendering/glass-plan.md); soda-lime's index.
+  materials[MaterialType::GLASS].transmission = 1.0f;
+  materials[MaterialType::GLASS].ior = 1.52f;
   materials[MaterialType::CONCRETE].density = 2400.0f;
   // Wood densities are moisture-dependent; these are typical air-dry (~12% MC)
   // values, well-defined enough for mass properties.
@@ -308,6 +311,12 @@ const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {
     return it->second;
   }
   return materials[MaterialType::DEFAULT];
+}
+
+float ViewportAlpha(const MaterialProperties& m) {
+  return m.transmission > 0.0f
+             ? glm::clamp(1.0f - 0.8f * m.transmission, 0.2f, 1.0f)
+             : 1.0f;
 }
 
 namespace {

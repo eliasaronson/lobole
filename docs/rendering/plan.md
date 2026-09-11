@@ -10,7 +10,8 @@
 > [instancing-design.md](instancing-design.md). Assemblies A4 additionally
 > gave the mesh renderer its **first transparency** (the ghost pipeline:
 > alpha blend, depth-write-off second pass, per-instance alpha) — the
-> pipeline glass materials would reuse.
+> pipeline glass now does reuse: a transmissive material is drawn there in
+> the viewport and refracted in the still ([glass-plan.md](glass-plan.md)).
 >
 > **2026-07-19: SSAO + key-light soft shadows — SHIPPED**, closing items 3 and
 > the soft-shadow half of 5 ([ssao-soft-shadows.md](ssao-soft-shadows.md)).

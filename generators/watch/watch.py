@@ -601,24 +601,24 @@ def set_time(app, m, h, mi, s):
 
 
 def renders(app, occ, out):
-    """Glass renders opaque, so the crystal and the caseback window are hidden
-    for every still; the movement shot takes the case, the caseback and the
-    rotor off, as a watchmaker would. Each shot names what it hides."""
+    """The stills, each naming what it hides. Glass is see-through in a still
+    (docs/rendering/glass-plan.md), so the crystal and the caseback window
+    stay in; the movement shot takes the case, the caseback and the rotor
+    off, as a watchmaker would, and the keyless shot the dial and hands."""
     os.makedirs(out, exist_ok=True)
-    glass = ("crystal", "window")
     shots = (("dial", dict(eye=[10.0, -44.0, 70.0], target=[0.0, -1.0, 0.0]),
-              glass),
+              ()),
              ("case", dict(eye=[62.0, -48.0, 24.0], target=[0.0, 0.0, -3.5]),
-              glass),
+              ()),
              ("caseback", dict(eye=[-16.0, -40.0, -66.0],
-                               target=[0.0, 0.0, -6.0]), glass),
+                               target=[0.0, 0.0, -6.0]), ()),
              ("movement", dict(eye=[-9.0, -23.0, -38.0],
                                target=[0.0, 0.0, -4.0]),
-              glass + ("caseback", "rotor", "case", "bezel")),
+              ("caseback", "window", "rotor", "case", "bezel")),
              # Under the dial: motion works and keyless works, crown in.
              ("keyless", dict(eye=[20.0, -24.0, 26.0], target=[6.0, 0.0, 0.0]),
-              glass + ("bezel", "case", "dial", "indices", "hour_hand",
-                       "minute_hand", "seconds_hand", "keyless_bridge")))
+              ("crystal", "bezel", "case", "dial", "indices", "hour_hand",
+               "minute_hand", "seconds_hand", "keyless_bridge")))
     for name, cam, hidden in shots:
         for k in hidden:
             app.call("set_occurrence_visible", id=occ[k].id, visible=False)

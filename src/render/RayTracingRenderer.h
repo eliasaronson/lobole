@@ -49,10 +49,16 @@ struct RTMaterial {
   float transmission;
   // Procedural surface pattern (matches the closest-hit `Material`):
   // x = CADMaterials::SurfacePattern, y = patternScale, z = patternContrast,
-  // w = the pattern axis. std430: lands at offset 48, keeping the struct
-  // 64 bytes so the SSBO upload stays a blind memcpy of sizeof(RTMaterial).
+  // w = the pattern axis. std430: lands at offset 48.
   glm::vec4 procParams{0.0f};
+  // Glass (transmission > 0): x = index of refraction; yzw unused. Offset 64,
+  // making the struct 80 bytes — the SSBO upload is still a blind memcpy of
+  // sizeof(RTMaterial), mirrored by `Material` in closesthit.rchit and
+  // section.rahit.
+  glm::vec4 optics{0.0f};
 };
+static_assert(sizeof(RTMaterial) == 80,
+              "RTMaterial must match the shaders' std430 Material");
 
 // Everything an offline still render needs from the app: output size, camera,
 // and the shared IBL maps (same environment as the raster viewport, so both

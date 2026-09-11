@@ -186,3 +186,21 @@ TEST_CASE("Wood materials are physically usable", "[materials]") {
     CHECK(m.poisson < 0.5f); // physically valid Poisson ratio
   }
 }
+
+TEST_CASE("Glass, and only glass, transmits light", "[materials]") {
+  // The still refracts through a transmissive body and the viewport draws it
+  // see-through (docs/rendering/glass-plan.md). A metal that picked up a
+  // transmission by accident would vanish from every render, so the
+  // partition is exact.
+  for (MaterialType t : MaterialLibrary::AllTypes()) {
+    const MaterialProperties& m = MaterialLibrary::GetMaterial(t);
+    if (t == MaterialType::GLASS) {
+      CHECK(m.transmission > 0.0f);
+      CHECK(m.ior > 1.0f);
+      CHECK(CADMaterials::ViewportAlpha(m) < 1.0f);
+    } else {
+      CHECK(m.transmission == 0.0f);
+      CHECK(CADMaterials::ViewportAlpha(m) == 1.0f);
+    }
+  }
+}

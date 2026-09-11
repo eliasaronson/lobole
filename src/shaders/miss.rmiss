@@ -12,7 +12,20 @@ struct RayPayload {
     vec3 gnormal;
     float hitT;   // < 0.0 on a miss
     uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
+    // A path through glass (docs/rendering/glass-plan.md): closest-hit sets
+    // kFlagContinue and the next ray, and raygen's loop traces it, weighting
+    // what it finds by `throughput`. SHADOW rays carry this payload too, so
+    // the one hit group's any-hit can read it: then radiance is the ray's
+    // transmittance and kFlagBlocked says something opaque was in the way.
+    // Identical in raygen, closesthit, miss, shadow.rmiss and section.rahit.
+    uint flags;
+    vec3 throughput;
+    vec3 nextOrigin;
+    vec3 nextDir;
 };
+const uint kFlagContinue = 1u;
+const uint kFlagReflected = 2u; // the path has reflected: miss shows the HDRI
+const uint kFlagBlocked = 4u;
 layout(location = 0) rayPayloadInEXT RayPayload payload;
 
 layout(binding = 2, set = 0) uniform UniformBufferObject {
@@ -78,7 +91,11 @@ void main() {
     payload.instId = 0u;
 
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
-    payload.radiance = ubo.params.w != 0.0
+    // A path that has REFLECTED (off glass) shows the lighting environment,
+    // as every other reflection in the still does through the IBL: the
+    // backdrop is the picture's background, not what a pane reflects.
+    bool reflected = (payload.flags & kFlagReflected) != 0u;
+    payload.radiance = ubo.params.w != 0.0 && !reflected
         ? studioBackdrop(dir)
         : textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
 }

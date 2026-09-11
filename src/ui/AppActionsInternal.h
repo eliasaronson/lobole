@@ -128,6 +128,9 @@ struct SharedBody {
   CADMaterials::SurfacePattern pattern = CADMaterials::SurfacePattern::Flat;
   float patternScale = 0.0f;
   float patternContrast = 0.0f;
+  // CADMaterials::ViewportAlpha: under 1 draws it see-through, in the ghost
+  // pass (glass).
+  float alpha = 1.0f;
 };
 
 // What is cached for one part, the document version it was built from, and

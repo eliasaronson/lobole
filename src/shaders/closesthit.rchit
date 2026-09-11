@@ -16,9 +16,22 @@ struct RayPayload {
     vec3 gnormal;
     float hitT;   // < 0.0 on a miss
     uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
+    // A path through glass (docs/rendering/glass-plan.md): closest-hit sets
+    // kFlagContinue and the next ray, and raygen's loop traces it, weighting
+    // what it finds by `throughput`. SHADOW rays carry this payload too, so
+    // the one hit group's any-hit can read it: then radiance is the ray's
+    // transmittance and kFlagBlocked says something opaque was in the way.
+    // Identical in raygen, closesthit, miss, shadow.rmiss and section.rahit.
+    uint flags;
+    vec3 throughput;
+    vec3 nextOrigin;
+    vec3 nextDir;
 };
+const uint kFlagContinue = 1u;
+const uint kFlagReflected = 2u; // the path has reflected: miss shows the HDRI
+const uint kFlagBlocked = 4u;
 layout(location = 0) rayPayloadInEXT RayPayload payload;
-layout(location = 1) rayPayloadEXT bool isShadowed;
+layout(location = 1) rayPayloadEXT RayPayload shadowRay;
 
 hitAttributeEXT vec3 attribs;
 
@@ -76,6 +89,8 @@ struct Material {
     // y = patternScale, z = patternContrast, w = pattern-axis index (0/1/2).
     // Matches RTMaterial.
     vec4 procParams;
+    // Glass (transmission > 0): x = index of refraction.
+    vec4 optics;
 };
 layout(binding = 4, set = 0, std430) readonly buffer Materials {
     Material materials[];
@@ -172,21 +187,76 @@ Vertex unpackVertex(GeometryInfo g, uint index) {
     return v;
 }
 
-// Whether a ray from `origin` along `dir` hits any geometry within `tMax`.
-bool traceOcclusion(vec3 origin, vec3 dir, float tMax) {
-    isShadowed = true;
-    // OpaqueEXT skips any-hit, and any-hit is what removes sectioned material.
-    // Left on with a section live, cut-away material keeps casting shadows and
-    // occluding AO -- a correctly cut model lit by geometry that is no longer
-    // there, which reads as a lighting bug rather than a section one. Dropped
-    // only when something IS cut, so the common path keeps the fast flag.
+// How much of the light arriving along `dir` reaches `origin` within `tMax`:
+// 0 where something opaque is in the way, and the product of every pane's
+// tint where only glass is — section.rahit multiplies it in and lets the ray
+// through. It was a bool, and a watch crystal blacked out the dial under it
+// twice over: in the key light's shadow and in every AO ray.
+vec3 traceVisibility(vec3 origin, vec3 dir, float tMax) {
+    shadowRay.radiance = vec3(1.0);
+    shadowRay.flags = kFlagBlocked; // shadow.rmiss clears it on a miss
+    // OpaqueEXT skips any-hit, and any-hit is what removes sectioned material
+    // and what lets a shadow ray through glass. Left on with a section live,
+    // cut-away material keeps casting shadows and occluding AO -- a correctly
+    // cut model lit by geometry that is no longer there, which reads as a
+    // lighting bug rather than a section one. Dropped only when something IS
+    // cut or something transmits (clipInfo.y), so the common path keeps the
+    // fast flag.
     uint flags = gl_RayFlagsTerminateOnFirstHitEXT |
                  gl_RayFlagsSkipClosestHitShaderEXT |
-                 (ubo.clipInfo.x > 0.5 ? 0u : gl_RayFlagsOpaqueEXT);
+                 (ubo.clipInfo.x > 0.5 || ubo.clipInfo.y > 0.5
+                      ? 0u : gl_RayFlagsOpaqueEXT);
     // sbtRecordOffset 0 keeps the ray in the single hit region; missIndex 1 is
-    // the shadow-miss shader, which clears isShadowed on a miss.
+    // the shadow-miss shader, which clears kFlagBlocked on a miss.
     traceRayEXT(topLevelAS, flags, 0xff, 0, 0, 1, origin, 0.001, dir, tMax, 1);
-    return isShadowed;
+    return (shadowRay.flags & kFlagBlocked) != 0u ? vec3(0.0)
+                                                  : shadowRay.radiance;
+}
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+// Offset of a continuation ray off a glass surface, in model units (mm).
+const float kGlassEps = 0.002;
+
+// A dielectric surface (Material.transmission > 0, optics.x = IOR). Reflect
+// or refract, chosen at random in proportion to Fresnel (Schlick; total
+// internal reflection where refraction has no answer), and hand the
+// continuation back to raygen's path loop. Entering glass tints the path by
+// the glass colour. Its own light is only the key light's glint: everything
+// else it shows is what the continuation finds. `Nsurf` is the shading
+// normal BEFORE the flip toward the viewer, which is what says whether the
+// ray is entering or leaving.
+vec3 glassSurface(vec3 worldPos, vec3 Nsurf, Material mat) {
+    vec3 D = normalize(gl_WorldRayDirectionEXT);
+    bool entering = dot(D, Nsurf) < 0.0;
+    vec3 n = entering ? Nsurf : -Nsurf; // faces the incoming ray
+    float ior = max(mat.optics.x, 1.0);
+    vec3 T = refract(D, n, entering ? 1.0 / ior : ior);
+    float f0 = (ior - 1.0) / (ior + 1.0);
+    f0 *= f0;
+    float F = 1.0;
+    if (dot(T, T) > 0.0) {
+        // The angle on the AIR side of the surface.
+        float c = entering ? -dot(D, n) : -dot(T, n);
+        F = f0 + (1.0 - f0) * pow(1.0 - clamp(c, 0.0, 1.0), 5.0);
+    }
+    payload.flags |= kFlagContinue;
+    if (nextFloat(payload.rngState) < F) {
+        payload.nextDir = reflect(D, n);
+        payload.nextOrigin = worldPos + n * kGlassEps;
+        payload.throughput = vec3(1.0);
+        payload.flags |= kFlagReflected;
+    } else {
+        payload.nextDir = T;
+        payload.nextOrigin = worldPos - n * kGlassEps;
+        payload.throughput =
+            entering ? mat.baseColor * mat.transmission : vec3(1.0);
+    }
+    if (!entering)
+        return vec3(0.0);
+    vec3 L = normalize(-ubo.lightDir.xyz);
+    float glint = pow(max(dot(n, normalize(L - D)), 0.0), 2048.0);
+    return ubo.lightColor.rgb * ubo.lightDir.w * glint * F * 4.0;
 }
 
 // Blinn-Phong direct term (mirrors mesh.frag's analytic key light).
@@ -221,7 +291,11 @@ void main() {
 
     vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
     vec3 N = normalize(mat3(gl_ObjectToWorldEXT) * nrm);
-    vec3 V = normalize(ubo.viewPos.xyz - worldPos);
+    const vec3 Nsurf = N; // unflipped: glass needs the side it is hit from
+    // Toward where the ray CAME from. It was the camera position, which is
+    // only right for camera rays; a ray continuing through glass comes from
+    // the pane.
+    vec3 V = -normalize(gl_WorldRayDirectionEXT);
     // Remembered so a pattern's normal relief (below) bends the same way the
     // shading normal was flipped, instead of against it.
     float nrmFlip = 1.0;
@@ -263,9 +337,9 @@ void main() {
             : textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
         vec3 Lc = normalize(-ubo.lightDir.xyz);
         vec3 Lcs = coneSample(Lc, kSunCos, payload.rngState);
-        float sun = traceOcclusion(worldPos + N * 0.001, Lcs, ubo.params.y) ? 0.0 : 1.0;
+        float sun = luma(traceVisibility(worldPos + N * 0.001, Lcs, ubo.params.y));
         vec3 aoDir = cosineSample(N, payload.rngState);
-        float ao = traceOcclusion(worldPos + N * 0.001, aoDir, ubo.params.z) ? 0.0 : 1.0;
+        float ao = luma(traceVisibility(worldPos + N * 0.001, aoDir, ubo.params.z));
         const float kShadowStrength = 0.55; // how dark the umbra gets
         const float kAOStrength = 0.35;     // extra contact darkening
         float shade = mix(1.0, sun, kShadowStrength) * mix(1.0, ao, kAOStrength);
@@ -274,6 +348,10 @@ void main() {
     }
 
     Material mat = materials[g.materialIndex];
+    if (mat.transmission > 0.0) {
+        payload.radiance = glassSurface(worldPos, Nsurf, mat);
+        return;
+    }
     float roughness = clamp(mat.roughness, 0.03, 1.0);
 
     // Procedural surface pattern. RT geometry carries identity instance
@@ -296,7 +374,7 @@ void main() {
     vec3 lightColor = ubo.lightColor.rgb * ubo.lightDir.w;
     // Jitter the shadow ray in a small cone -> penumbrae as samples accumulate.
     vec3 Ls = coneSample(L, kSunCos, payload.rngState);
-    float shadow = traceOcclusion(worldPos + N * 0.001, Ls, ubo.params.y) ? 0.0 : 1.0;
+    vec3 shadow = traceVisibility(worldPos + N * 0.001, Ls, ubo.params.y);
     vec3 direct = directLight(N, V, L, lightColor, mat, roughness) * shadow;
     direct += directLight(N, V, normalize(-ubo.fillDir.xyz),
                           ubo.fillColor.rgb * ubo.fillDir.w, mat, roughness);
@@ -326,7 +404,7 @@ void main() {
 
     // ---- Ambient occlusion: one cosine-hemisphere ray, local radius ----
     vec3 aoDir = cosineSample(N, payload.rngState);
-    float ao = traceOcclusion(worldPos + N * 0.001, aoDir, ubo.params.z) ? 0.0 : 1.0;
+    vec3 ao = traceVisibility(worldPos + N * 0.001, aoDir, ubo.params.z);
 
     vec3 ambient = (kD * diffuseIBL + specularIBL) * ao;
 

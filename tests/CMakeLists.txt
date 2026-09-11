@@ -585,6 +585,14 @@ add_test(NAME render_still_reach_smoke
 set_tests_properties(render_still_reach_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+# Glass is see-through in a still: a red block behind a pane shows red
+# through `glass` and not through `steel` (docs/rendering/glass-plan.md).
+add_test(NAME render_glass_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_glass_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_glass_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 add_test(NAME visual_export_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/visual_export_smoke.py
                  $<TARGET_FILE:designer>)

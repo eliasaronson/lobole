@@ -335,6 +335,11 @@ void SyncDocumentRenderers(AppState& state) {
       // stained wood, and a painted carbon plate, the desired reading.
       state.meshRenderer->SetMeshProcedural(
           meshId, mat.pattern, mat.patternScale, mat.patternContrast);
+      // Glass is drawn see-through, in the ghost pass (after the material:
+      // setting one resets the alpha).
+      if (mat.transmission > 0.0f)
+        state.meshRenderer->SetInstanceGhost(meshId,
+                                             CADMaterials::ViewportAlpha(mat));
       albedo = mat.baseColor;
     }
     bodyColors[bi] = albedo; // section caps reuse the body's color
@@ -617,7 +622,10 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     rtm.roughness = mat.roughness;
     rtm.emissive = glm::vec3(0.0f);
     rtm.specular = glm::vec3(mat.specular);
-    rtm.transmission = 0.0f;
+    // Glass: closesthit.rchit refracts through it, and section.rahit lets a
+    // shadow ray through it tinted (docs/rendering/glass-plan.md).
+    rtm.transmission = mat.transmission;
+    rtm.optics = glm::vec4(mat.ior, 0.0f, 0.0f, 0.0f);
     if (mat.pattern != CADMaterials::SurfacePattern::Flat) {
       // One rule, shared with the raster path (MeshRenderer's draw loop).
       // Each body gets its own material here, so the axis rides in it.
@@ -1207,6 +1215,7 @@ void SyncAssemblyRenderers(AppState& state) {
           sb.pattern = mat.pattern;
           sb.patternScale = mat.patternScale;
           sb.patternContrast = mat.patternContrast;
+          sb.alpha = CADMaterials::ViewportAlpha(mat);
         }
         shared.push_back(std::move(sb));
       }
@@ -1239,6 +1248,8 @@ void SyncAssemblyRenderers(AppState& state) {
         state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
         state.meshRenderer->SetInstanceProcedural(
             meshId, sb.pattern, sb.patternScale, sb.patternContrast);
+        if (sb.alpha < 1.0f) // glass: see-through, after the material
+          state.meshRenderer->SetInstanceGhost(meshId, sb.alpha);
       } else {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }

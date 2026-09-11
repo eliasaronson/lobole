@@ -119,8 +119,8 @@ and none of it touched a gate:
 - **Finishes that contrast.** A brushed case middle under a polished bezel,
   and a warmer dial.
 
-The stills are five, and each names what it hides: `dial` and `case` (glass
-hidden), `caseback` (through the window), `movement` — case, caseback and
+The stills are five, and each names what it hides: `dial` and `case` (through the
+crystal), `caseback` (through the window), `movement` — case, caseback and
 rotor off, as a watchmaker would see it — and `keyless`, the dial side with
 the dial and hands off.
 
@@ -230,10 +230,13 @@ because it picked the word from the DRIVER's dof. It now names what the
 refused side needs — "b of a cam needs a slider or cylindrical mate — a cam's
 follower slides" — and `tests/assembly_relations_smoke.py` pins it.
 
-**Glass renders opaque.** The ray tracer hard-codes transmission to zero, so
-the crystal would hide the dial in every image and the caseback window would
-hide the movement. They are in the model and in its checks, and hidden for the
-renders.
+**Glass is see-through now.** The ray tracer hard-coded transmission to
+zero, so the crystal hid the dial in every image and the caseback window hid
+the movement, and both were hidden for the renders. Glass refracts in the
+still now ([glass-plan.md](../rendering/glass-plan.md)) and the stills keep
+both. Like an uncoated crystal it veils the dial a little — the minute track
+fades under the reflection; a real one is anti-reflection coated, which is
+not modelled.
 
 **Ruby is a material now; blued steel is not, on purpose.** The jewels, the
 pallet stones and the impulse pin were a red appearance on NO material — and

@@ -114,7 +114,19 @@ struct MaterialProperties {
   SurfacePattern pattern = SurfacePattern::Flat;
   float patternScale = 0.0f;
   float patternContrast = 0.0f;
+
+  // Light passing THROUGH the body: 0 = opaque (every row but glass), 1 =
+  // clear. The still refracts through it at `ior`; the viewport draws it
+  // see-through at ViewportAlpha. docs/rendering/glass-plan.md.
+  float transmission = 0.0f;
+  float ior = 0.0f; // index of refraction; meaningful only with transmission
 };
+
+// How opaque the viewport draws a body (1 = opaque). A transmissive one goes
+// through the ghost pass — alpha-blended, no depth write, no shadow — which
+// is see-through but not refractive; a fully clear body keeps a fifth of its
+// colour so a pane still reads as a pane.
+float ViewportAlpha(const MaterialProperties& m);
 
 class MaterialLibrary {
 public:

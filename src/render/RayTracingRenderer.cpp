@@ -275,9 +275,10 @@ bool RayTracingRenderer::CreateRTPipeline() {
       {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
        nullptr},
-      // 4: RTMaterial[]
+      // 4: RTMaterial[]. Any-hit reads it too: a shadow ray passes glass.
       {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
+       VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+       nullptr},
       // 5/6/7: IBL irradiance / prefilter / BRDF LUT
       {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR,
@@ -678,6 +679,8 @@ struct RTUniforms {
   glm::vec4 clipPlanes[kMaxClipPlanes];
   // x = how many of them are live. Kept as a count so the hot path can skip
   // the whole test with one compare instead of four length checks per ray.
+  // y = 1 when some material transmits: shadow rays must then run any-hit,
+  // which is where they pass through glass.
   glm::vec4 clipInfo;
 };
 
@@ -838,7 +841,11 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
       u.clipPlanes[live++] = pl;
   for (int i = live; i < kMaxClipPlanes; ++i)
     u.clipPlanes[i] = glm::vec4(0.0f);
-  u.clipInfo = glm::vec4(static_cast<float>(live), 0.0f, 0.0f, 0.0f);
+  const bool glass =
+      std::any_of(m_materials.begin(), m_materials.end(),
+                  [](const RTMaterial& m) { return m.transmission > 0.0f; });
+  u.clipInfo =
+      glm::vec4(static_cast<float>(live), glass ? 1.0f : 0.0f, 0.0f, 0.0f);
   m_stillHasClip = live > 0;
   u.params = glm::vec4(static_cast<float>(desc.prefilterMips), desc.rayFar,
                        desc.aoRadius, desc.studioBackdrop ? 1.0f : 0.0f);
@@ -873,7 +880,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   memcpy(gmap, geomInfos.data(), static_cast<size_t>(geomSize));
   vkUnmapMemory(m_device, m_stillGeomInfoMemory);
 
-  // --- RTMaterial[] SSBO (std430 stride == sizeof(RTMaterial) == 48) ---
+  // --- RTMaterial[] SSBO (std430 stride == sizeof(RTMaterial) == 80) ---
   std::vector<RTMaterial> mats = m_materials;
   if (mats.empty()) {
     RTMaterial def{};
@@ -1373,6 +1380,10 @@ bool RayTracingRenderer::CreateBottomLevelAS() {
     VkAccelerationStructureGeometryKHR asGeom{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
     asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    // Any-hit may otherwise run twice for one intersection, and a shadow ray
+    // crossing glass multiplies its transmittance there — twice would darken
+    // the pane's shadow for no reason a reader could find.
+    asGeom.flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
     // NOT VK_GEOMETRY_OPAQUE_BIT_KHR. That flag is a property of the
     // acceleration structure and suppresses the any-hit stage outright, so
     // section.rahit never ran and a sectioned still came back uncut -- with

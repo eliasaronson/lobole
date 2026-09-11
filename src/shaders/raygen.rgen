@@ -46,8 +46,24 @@ struct RayPayload {
     vec3 gnormal;
     float hitT;   // < 0.0 on a miss
     uint instId;  // 0 = miss or shadow catcher, else geometry index + 1
+    // A path through glass (docs/rendering/glass-plan.md): closest-hit sets
+    // kFlagContinue and the next ray, and raygen's loop traces it, weighting
+    // what it finds by `throughput`. SHADOW rays carry this payload too, so
+    // the one hit group's any-hit can read it: then radiance is the ray's
+    // transmittance and kFlagBlocked says something opaque was in the way.
+    // Identical in raygen, closesthit, miss, shadow.rmiss and section.rahit.
+    uint flags;
+    vec3 throughput;
+    vec3 nextOrigin;
+    vec3 nextDir;
 };
+const uint kFlagContinue = 1u;
+const uint kFlagReflected = 2u; // the path has reflected: miss shows the HDRI
+const uint kFlagBlocked = 4u;
 layout(location = 0) rayPayloadEXT RayPayload payload;
+
+// Segments in one path: the camera ray plus glass continuations.
+const int kMaxBounces = 8;
 
 uint pcgHash(uint v) {
     uint state = v * 747796405u + 2891336453u;
@@ -79,7 +95,6 @@ void main() {
     vec4 target = ubo.projInverse * vec4(d.x, d.y, 1, 1);
     vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0);
 
-    payload.radiance = vec3(0.0);
     // params.y, not a literal: the old 10000 was a LENGTH, and the unit is
     // the model's. A 6 m dock has to be framed from ~11 m away, so every
     // primary ray missed and the still came back as pure environment.
@@ -89,23 +104,44 @@ void main() {
     // the traversal cost any-hit brings.
     uint rayFlags = ubo.clipInfo.x > 0.5 ? gl_RayFlagsNoneEXT
                                          : gl_RayFlagsOpaqueEXT;
-    traceRayEXT(topLevelAS, rayFlags, 0xff, 0, 0, 0, origin.xyz,
-                0.001, direction.xyz, ubo.params.y, 0);
 
-    if (pc.auxPass != 0u) {
-        // Face normal at half precision (ample for a 60-degree threshold),
-        // hit distance, and the id that separates one body from the next.
-        uvec4 aux;
-        aux.x = packHalf2x16(payload.gnormal.xy);
-        aux.y = packHalf2x16(vec2(payload.gnormal.z, 0.0));
-        aux.z = floatBitsToUint(payload.hitT);
-        aux.w = payload.instId;
-        imageStore(auxImage, ivec2(gl_LaunchIDEXT.xy), aux);
-        return;
+    // A path: the camera ray, then as many continuations as glass asks for
+    // (closesthit.rchit's dielectric branch reflects or refracts and hands the
+    // next ray back). An opaque hit or a miss ends it. Looping HERE, not
+    // recursing from closest-hit, keeps the pipeline's recursion depth at 2
+    // however many panes a ray crosses.
+    vec3 rayOrigin = origin.xyz;
+    vec3 rayDir = direction.xyz;
+    vec3 throughput = vec3(1.0);
+    vec3 radiance = vec3(0.0);
+    payload.flags = 0u;
+    for (int bounce = 0; bounce < kMaxBounces; ++bounce) {
+        payload.radiance = vec3(0.0);
+        payload.flags &= ~kFlagContinue;
+        traceRayEXT(topLevelAS, rayFlags, 0xff, 0, 0, 0, rayOrigin,
+                    0.001, rayDir, ubo.params.y, 0);
+
+        if (bounce == 0 && pc.auxPass != 0u) {
+            // Face normal at half precision (ample for a 60-degree
+            // threshold), hit distance, and the id that separates one body
+            // from the next -- of the FIRST hit, glass or not.
+            uvec4 aux;
+            aux.x = packHalf2x16(payload.gnormal.xy);
+            aux.y = packHalf2x16(vec2(payload.gnormal.z, 0.0));
+            aux.z = floatBitsToUint(payload.hitT);
+            aux.w = payload.instId;
+            imageStore(auxImage, ivec2(gl_LaunchIDEXT.xy), aux);
+            return;
+        }
+        radiance += throughput * payload.radiance;
+        if ((payload.flags & kFlagContinue) == 0u)
+            break;
+        throughput *= payload.throughput;
+        rayOrigin = payload.nextOrigin;
+        rayDir = payload.nextDir;
     }
 
     // Accumulate (sum); the CPU divides by the sample count on readback.
     vec3 prev = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;
-    imageStore(image, ivec2(gl_LaunchIDEXT.xy),
-               vec4(prev + payload.radiance, 1.0));
+    imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prev + radiance, 1.0));
 }
