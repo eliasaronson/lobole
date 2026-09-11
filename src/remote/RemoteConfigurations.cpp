@@ -1,4 +1,6 @@
 #include "remote/RemoteConfigurations.h"
+#include "core/Angles.h"
+#include "core/AssemblySolve.h"
 
 #include "core/Command.h"
 #include "core/Configuration.h"
@@ -23,10 +25,20 @@ static constexpr MethodDoc ConfigurationMethods[] = {
      "name"},
     {"remove_configuration", "Remove a configuration by name.", "id"},
     {"list_configurations", "List configurations and the active one.", ""},
-    {"set_configuration", "Edit a configuration's overrides/suppressions.",
+    {"set_configuration",
+     "Edit a configuration's overrides/suppressions. PART: "
+     "parameter_overrides [{name, expression}], suppressed_features [ids]. "
+     "ASSEMBLY: suppressed_occurrences, suppressed_mates, "
+     "suppressed_relations [ids], mate_overrides [{mate, rotation (radians) "
+     "| rotation_deg, offset (mm)}] — DOFs the configuration holds; an "
+     "overlay, so leaving it restores the mates. Each list replaces; the "
+     "other kind's keys are refused. Editing the active one re-solves.",
      "id, name, parameter_overrides, suppressed_features, "
-     "suppressed_occurrences"},
-    {"set_active_configuration", "Activate a configuration and regenerate.",
+     "suppressed_occurrences, suppressed_mates, suppressed_relations, "
+     "mate_overrides"},
+    {"set_active_configuration",
+     "Activate a configuration (0 = base) and regenerate (part) or re-solve "
+     "(assembly).",
      "id"},
 };
 std::span<const MethodDoc> ConfigurationMethodDocs() {
@@ -71,6 +83,15 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     return true;
   }
   if (m == "set_configuration") {
+    // An ASSEMBLY configuration's keys, sent to a part, used to be ignored in
+    // silence — a caller told it had hidden an occurrence had not.
+    for (const char* k : {"suppressed_occurrences", "suppressed_mates",
+                          "suppressed_relations", "mate_overrides"})
+      if (p.contains(k))
+        throw std::runtime_error(
+            std::string(k) +
+            " belongs to an ASSEMBLY configuration; a part configuration "
+            "takes parameter_overrides and suppressed_features");
     // Full-field edit: name / parameter_overrides / suppressed_features each
     // replace when present. The caller reads list_configurations, adjusts, and
     // sends the desired state back (one ModifyConfigurationCommand).
@@ -150,16 +171,34 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
     if (!asm_.FindConfiguration(id))
       throw std::runtime_error("no such configuration");
     ui::SnapshotAssembly(state);
+    const bool wasActive = asm_.ActiveConfiguration() == id;
     asm_.RemoveConfiguration(id);
+    if (wasActive) // back to base: its mates and relations are all in again
+      ui::SolveActiveAssembly(state);
     out = json::object();
     return true;
   }
   if (m == "list_configurations") {
     json arr = json::array();
-    for (const Configuration& c : asm_.GetConfigurations())
+    for (const Configuration& c : asm_.GetConfigurations()) {
+      json holds = json::array();
+      for (const MateOverride& o : c.mateOverrides) {
+        json oj = {{"mate", o.mate}};
+        if (o.rotation) {
+          oj["rotation"] = *o.rotation;
+          oj["rotation_deg"] = angles::ToDegrees(*o.rotation);
+        }
+        if (o.offset)
+          oj["offset"] = *o.offset;
+        holds.push_back(std::move(oj));
+      }
       arr.push_back({{"id", c.id},
                      {"name", c.name},
-                     {"suppressed_occurrences", c.suppressedFeatures}});
+                     {"suppressed_occurrences", c.suppressedFeatures},
+                     {"suppressed_mates", c.suppressedMates},
+                     {"suppressed_relations", c.suppressedRelations},
+                     {"mate_overrides", holds}});
+    }
     out = {{"configurations", arr}, {"active", asm_.ActiveConfiguration()}};
     return true;
   }
@@ -168,14 +207,81 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
     Configuration* c = asm_.FindConfiguration(id);
     if (!c)
       throw std::runtime_error("no such configuration");
-    ui::SnapshotAssembly(state);
+    // A PART configuration's keys used to be ignored here in silence.
+    for (const char* k : {"parameter_overrides", "suppressed_features"})
+      if (p.contains(k))
+        throw std::runtime_error(
+            std::string(k) +
+            " belongs to a PART configuration; an assembly configuration "
+            "takes suppressed_occurrences, suppressed_mates, "
+            "suppressed_relations and mate_overrides");
+    // Parse and check everything before touching the document, so a refusal
+    // leaves neither a half-edit nor a stray undo step.
+    Configuration next = *c;
     if (p.contains("name"))
-      c->name = p.at("name").get<std::string>();
+      next.name = p.at("name").get<std::string>();
     if (p.contains("suppressed_occurrences"))
-      c->suppressedFeatures =
+      next.suppressedFeatures =
           p.at("suppressed_occurrences").get<std::vector<uint64_t>>();
+    if (p.contains("suppressed_mates")) {
+      next.suppressedMates =
+          p.at("suppressed_mates").get<std::vector<uint64_t>>();
+      for (uint64_t mid : next.suppressedMates)
+        if (!asm_.FindMateById(mid))
+          throw std::runtime_error("suppressed_mates: no mate " +
+                                   std::to_string(mid) +
+                                   " (list_mates shows them)");
+    }
+    if (p.contains("suppressed_relations")) {
+      next.suppressedRelations =
+          p.at("suppressed_relations").get<std::vector<uint64_t>>();
+      for (uint64_t rid : next.suppressedRelations)
+        if (!asm_.FindRelationById(rid))
+          throw std::runtime_error("suppressed_relations: no relation " +
+                                   std::to_string(rid) +
+                                   " (list_relations shows them)");
+    }
+    if (p.contains("mate_overrides")) {
+      next.mateOverrides.clear();
+      for (const json& oj : p.at("mate_overrides")) {
+        MateOverride o;
+        o.mate = oj.at("mate").get<uint64_t>();
+        const Mate* mate = asm_.FindMateById(o.mate);
+        if (!mate)
+          throw std::runtime_error("mate_overrides: no mate " +
+                                   std::to_string(o.mate) +
+                                   " (list_mates shows them)");
+        if (oj.contains("rotation") && oj.contains("rotation_deg"))
+          throw std::runtime_error(
+              "mate_overrides: give rotation (radians) OR rotation_deg, not "
+              "both");
+        if (oj.contains("rotation"))
+          o.rotation = oj.at("rotation").get<float>();
+        if (oj.contains("rotation_deg"))
+          o.rotation = static_cast<float>(
+              angles::ToRadians(oj.at("rotation_deg").get<double>()));
+        if (oj.contains("offset"))
+          o.offset = oj.at("offset").get<float>();
+        if (!o.rotation && !o.offset)
+          throw std::runtime_error("mate_overrides: mate " +
+                                   std::to_string(o.mate) +
+                                   " holds nothing — give rotation, "
+                                   "rotation_deg or offset");
+        if (o.rotation && !assembly::MateHasDof(mate->type, MateDof::Rotation))
+          throw std::runtime_error(
+              "mate_overrides: mate " + std::to_string(o.mate) +
+              " has no rotation to hold — a revolute, cylindrical or planar "
+              "mate turns");
+        next.mateOverrides.push_back(o);
+      }
+    }
+    ui::SnapshotAssembly(state);
+    *c = std::move(next);
     asm_.BumpVersion();
     out = {{"id", id}};
+    // Editing the ACTIVE configuration re-applies it, as a part's regenerates.
+    if (asm_.ActiveConfiguration() == id)
+      ui::SolveActiveAssembly(state);
     return true;
   }
   if (m == "set_active_configuration") {
@@ -184,6 +290,9 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
       throw std::runtime_error("no such configuration");
     ui::SnapshotAssembly(state);
     asm_.SetActiveConfiguration(id);
+    // Its suppressions and holds are applied by the SOLVE: without one the
+    // variant was chosen and nothing moved.
+    ui::SolveActiveAssembly(state);
     int visible = 0;
     for (const Occurrence& o : asm_.GetOccurrences())
       if (o.visible && !asm_.OccurrenceSuppressed(o.id))

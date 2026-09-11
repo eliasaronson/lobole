@@ -353,6 +353,35 @@ bool AssemblyDocument::OccurrenceSuppressed(uint64_t occurrenceId) const {
   return c != nullptr && c->Suppresses(occurrenceId);
 }
 
+bool AssemblyDocument::MateSuppressed(uint64_t mateId) const {
+  const Configuration* c = ActiveConfig();
+  if (c == nullptr)
+    return false;
+  if (c->SuppressesMate(mateId))
+    return true;
+  for (const Mate& m : m_mates)
+    if (m.id == mateId)
+      return c->Suppresses(m.a.occurrenceId) || c->Suppresses(m.b.occurrenceId);
+  return false;
+}
+
+bool AssemblyDocument::RelationSuppressed(uint64_t relationId) const {
+  const Configuration* c = ActiveConfig();
+  if (c == nullptr)
+    return false;
+  if (c->SuppressesRelation(relationId))
+    return true;
+  for (const Relation& r : m_relations)
+    if (r.id == relationId)
+      return MateSuppressed(r.mateA) || MateSuppressed(r.mateB);
+  return false;
+}
+
+const MateOverride* AssemblyDocument::MateOverrideFor(uint64_t mateId) const {
+  const Configuration* c = ActiveConfig();
+  return c != nullptr ? c->OverrideForMate(mateId) : nullptr;
+}
+
 bool AssemblyDocument::OccurrenceSuppressedIn(uint64_t configurationId,
                                               uint64_t occurrenceId) const {
   if (configurationId == 0)

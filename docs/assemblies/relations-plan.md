@@ -139,3 +139,17 @@ the demo now says what it means.
 What is still missing, named: a creation tool in the panel (needs a
 two-mate pick), a drive (a DOF along time, the CAM transport's shape), and
 a phase derived from the two gears' geometry rather than typed.
+
+## Settling per degree of freedom (2026-09-11)
+
+Propagation walks (mate, DOF) PAIRS, not mates: a cylindrical mate's turn and
+slide are separate nodes, so each can take its own relation — a watch's
+clutch is turned by its stem and slid by its yoke. Settling a whole mate
+accepted the second relation and never applied it. It seeds the driven mate
+first, then ONE root at a time (the A of the first relation neither of whose
+ends is settled): seeding every remaining A at once settled every mate that
+is both a follower and a driver before anything reached it, so a plain solve
+applied a chain at its ends only. What is left — one DOF driven twice by
+relations that disagree — is REPORTED: after the solve and the loop pass
+every relation's residual is checked, and one left unsatisfied carries
+"not satisfied: …" (`test_assembly_relations.cpp`).

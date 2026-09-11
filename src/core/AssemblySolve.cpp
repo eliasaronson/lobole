@@ -1,4 +1,5 @@
 #include "core/AssemblySolve.h"
+#include "core/Angles.h"
 #include "core/ThreadStandards.h"
 #include "core/features/ThreadFeature.h"
 
@@ -555,6 +556,9 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
   for (size_t i = 0; i < rels.size(); i++) {
     Relation& r = rels[i];
     r.error.clear();
+    // Out of the active configuration: not applied, and not an error.
+    if (asmDoc.RelationSuppressed(r.id))
+      continue;
     if (r.threadPart || r.threadFeature) {
       if (!partById) {
         r.error = "thread-backed relation needs a part resolver";
@@ -602,10 +606,16 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     }
     usable[i] = true;
   }
-  // Walk the relation graph from the driven mate FIRST, and only then from
-  // whatever it did not reach. A mate reached once is settled; a later
-  // relation that would move it again is left to the loop solver's rows,
-  // which is where an inconsistent set belongs.
+  // The graph's nodes are (mate, degree of freedom) PAIRS, not mates. A
+  // cylindrical mate's turn and its slide are two nodes, so each takes its
+  // own relation: the watch's clutch is turned by its stem and slid by its
+  // yoke. Settling a whole MATE the first time any relation reached it
+  // accepted the second relation and never applied it.
+  //
+  // Walk from the driven mate FIRST, and only then from whatever it did not
+  // reach — ONE root at a time. A node reached once is settled; a later
+  // relation that would move it again is either a loop row (the loop pass
+  // balances it) or a conflict, which the residual check in Solve reports.
   //
   // The two-phase order is the point. Seeding every A at once and letting
   // the LIFO decide meant a relation whose A is a FREE mate could win the
@@ -615,58 +625,113 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
   // makes the rocker follow has the rocker as its A. Reached from the
   // rocker instead, the rack drove the VALVE from last sample's rocker
   // angle, and the pair ran away to 60 mm of lift on an 8 mm cam.
-  std::vector<uint64_t> frontier;
-  std::vector<uint64_t> settled;
-  const auto isSettled = [&](uint64_t id) {
-    return std::find(settled.begin(), settled.end(), id) != settled.end();
-  };
-  const auto seedRest = [&]() {
-    for (size_t i = 0; i < rels.size(); i++)
-      if (usable[i] && !isSettled(rels[i].mateA)) {
-        frontier.push_back(rels[i].mateA);
-        settled.push_back(rels[i].mateA);
-      }
-  };
-  bool seededRest = false;
-  if (drivenMateId != 0) {
-    frontier.push_back(drivenMateId);
-    settled.push_back(drivenMateId);
-  } else {
-    seedRest();
-    seededRest = true;
-  }
-  while (!frontier.empty() || !seededRest) {
-    if (frontier.empty()) {
-      seedRest();
-      seededRest = true;
-      continue;
+  //
+  // And one root at a time, not every remaining A at once: seeding them all
+  // settled every mate that is both a follower and a driver before anything
+  // reached it, so a chain was applied at its two ends only — a plain
+  // solve_assembly left a watch's keyless works off their phases until
+  // something drove the stem.
+  struct Node {
+    uint64_t mate;
+    MateDof dof;
+    bool operator==(const Node& o) const {
+      return mate == o.mate && dof == o.dof;
     }
-    const uint64_t from = frontier.back();
+  };
+  std::vector<Node> frontier;
+  std::vector<Node> settled;
+  const auto isSettled = [&](const Node& n) {
+    return std::find(settled.begin(), settled.end(), n) != settled.end();
+  };
+  const auto settle = [&](const Node& n) {
+    settled.push_back(n);
+    frontier.push_back(n);
+  };
+  if (drivenMateId != 0) {
+    if (const Mate* m = asmDoc.FindMateById(drivenMateId)) {
+      for (MateDof d : {MateDof::Rotation, MateDof::Offset}) {
+        if (!MateHasDof(m->type, d))
+          continue;
+        // A screw couples the driven mate's own two DOFs; its B follows
+        // its A (which the caller changed cannot be known), so it is not
+        // pre-settled.
+        const bool screwB =
+            std::any_of(rels.begin(), rels.end(), [&](const Relation& r) {
+              return r.mateA == drivenMateId && r.mateB == drivenMateId &&
+                     r.dofB == d && r.dofA != d;
+            });
+        if (!screwB)
+          settle({drivenMateId, d});
+      }
+    }
+  }
+  // A DOF the active configuration HOLDS (v101) is set, not solved: it
+  // stands like the driver's, and its relations drive FROM it.
+  if (const Configuration* cfg = asmDoc.ActiveConfig())
+    for (const MateOverride& o : cfg->mateOverrides) {
+      const Mate* m = asmDoc.FindMateById(o.mate);
+      if (m == nullptr)
+        continue;
+      if (o.rotation && MateHasDof(m->type, MateDof::Rotation) &&
+          !isSettled({o.mate, MateDof::Rotation}))
+        settle({o.mate, MateDof::Rotation});
+      if (o.offset && MateHasDof(m->type, MateDof::Offset) &&
+          !isSettled({o.mate, MateDof::Offset}))
+        settle({o.mate, MateDof::Offset});
+    }
+  // The value a node stands at: the configuration's hold when there is one.
+  const auto valueOf = [&](const Mate& m, MateDof d) -> double {
+    if (const MateOverride* o = asmDoc.MateOverrideFor(m.id)) {
+      if (d == MateDof::Rotation && o->rotation)
+        return *o->rotation;
+      if (d == MateDof::Offset && o->offset)
+        return *o->offset;
+    }
+    return MateDofValue(m, d);
+  };
+  const auto nextRoot = [&]() {
+    // A component nothing has reached: its first relation's A is the root.
+    for (size_t i = 0; i < rels.size(); i++) {
+      const Node a{rels[i].mateA, rels[i].dofA};
+      const Node b{rels[i].mateB, rels[i].dofB};
+      if (usable[i] && !isSettled(a) && !isSettled(b)) {
+        settle(a);
+        return true;
+      }
+    }
+    // An A that was reached only as far as its B (a cam, which is never
+    // driven backwards): it stands where it is.
+    for (size_t i = 0; i < rels.size(); i++) {
+      const Node a{rels[i].mateA, rels[i].dofA};
+      if (usable[i] && !isSettled(a)) {
+        settle(a);
+        return true;
+      }
+    }
+    return false;
+  };
+  while (!frontier.empty() || nextRoot()) {
+    const Node from = frontier.back();
     frontier.pop_back();
     for (size_t i = 0; i < rels.size(); i++) {
       if (!usable[i])
         continue;
       Relation& r = rels[i];
+      const Node an{r.mateA, r.dofA};
+      const Node bn{r.mateB, r.dofB};
       Mate* a = asmDoc.FindMateById(r.mateA);
       Mate* b = asmDoc.FindMateById(r.mateB);
-      if (r.mateA == from && !isSettled(r.mateB)) {
-        SetMateDof(*b, r.dofB, RelationValue(r, MateDofValue(*a, r.dofA)));
-        settled.push_back(r.mateB);
-        frontier.push_back(r.mateB);
+      if (an == from && !isSettled(bn)) {
+        SetMateDof(*b, r.dofB, RelationValue(r, valueOf(*a, r.dofA)));
+        settle(bn);
         wrote++;
-      } else if (r.mateB == from && !isSettled(r.mateA) &&
-                 r.kind != RelationKind::Cam && r.ratio != 0.0) {
+      } else if (bn == from && !isSettled(an) && r.kind != RelationKind::Cam &&
+                 r.ratio != 0.0) {
         // A cam is deliberately absent here: many angles give one lift, so
         // driving it backwards would have to pick a branch, and a plausible
         // branch is the substitution this project refuses.
-        SetMateDof(*a, r.dofA, (MateDofValue(*b, r.dofB) - r.phase) / r.ratio);
-        settled.push_back(r.mateA);
-        frontier.push_back(r.mateA);
-        wrote++;
-      } else if (r.mateA == from && r.mateB == from) {
-        // A screw: one mate, two DOFs — the driven DOF is whichever the
-        // caller changed, which this cannot know; A's DOF drives.
-        SetMateDof(*b, r.dofB, RelationValue(r, MateDofValue(*a, r.dofA)));
+        SetMateDof(*a, r.dofA, (valueOf(*b, r.dofB) - r.phase) / r.ratio);
+        settle(an);
         wrote++;
       }
     }
@@ -677,6 +742,32 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
                   const AssemblyResolver& asmById, const Driven& driven) {
   SolveReport report;
+  // The active configuration's held DOFs (v101) stand in for the mates' own
+  // values for the whole solve — placement, relations, the loop pass — and
+  // the authored values go back at the end. An overlay, never an edit: the
+  // configuration can be left, and the mate is where it was.
+  struct Held {
+    size_t index;
+    MateDof dof;
+    float authored;
+  };
+  std::vector<Held> held;
+  if (const Configuration* cfg = asmDoc.ActiveConfig())
+    for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
+      Mate& m = asmDoc.GetMates()[i];
+      const MateOverride* o = cfg->OverrideForMate(m.id);
+      if (o == nullptr)
+        continue;
+      if (o->rotation && MateHasDof(m.type, MateDof::Rotation)) {
+        held.push_back({i, MateDof::Rotation, m.rotation});
+        m.rotation = *o->rotation;
+      }
+      if (o->offset) { // a slide, or a revolute's axial seat
+        held.push_back({i, MateDof::Offset, m.offset});
+        m.offset = *o->offset;
+      }
+    }
+
   // Relations hold before anything is placed: in a mate tree this IS their
   // enforcement; in a loop they are rows below as well. A solve that KNOWS
   // what is being driven says so, so the driver's own chain settles before
@@ -700,6 +791,10 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
     Mate& mate = asmDoc.GetMates()[i];
     mate.error.clear();
+    // Out of the active configuration (v101): it sits out like an unusable
+    // mate, without an error — so does one touching a hidden occurrence.
+    if (asmDoc.MateSuppressed(mate.id))
+      continue;
     std::string whyA, whyB;
     const auto fa =
         ConnectorLocalFrame(mate.a, asmDoc, partById, &whyA, asmById);
@@ -763,7 +858,7 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     for (size_t i = 0; i < asmDoc.GetMates().size(); i++)
       indexOfMate[asmDoc.GetMates()[i].id] = i;
     for (const Relation& r : asmDoc.GetRelations()) {
-      if (!r.error.empty())
+      if (!r.error.empty() || asmDoc.RelationSuppressed(r.id))
         continue;
       const auto ia = indexOfMate.find(r.mateA);
       const auto ib = indexOfMate.find(r.mateB);
@@ -787,6 +882,11 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
           {it->second, driven.dof,
            MateDofValue(asmDoc.GetMates()[it->second], driven.dof)});
   }
+  // So is every DOF the configuration holds.
+  for (const Held& h : held)
+    if (MateHasDof(asmDoc.GetMates()[h.index].type, h.dof))
+      loop.pinned.push_back(
+          {h.index, h.dof, MateDofValue(asmDoc.GetMates()[h.index], h.dof)});
 
   std::vector<bool> classified(asmDoc.GetMates().size(), false);
   const auto pin = [&](uint64_t occId, const glm::mat4& at) {
@@ -794,9 +894,10 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
     loop.anchor.emplace_back(occId, at);
   };
 
-  // Anchors: every `fixed` occurrence starts at its stored transform.
+  // Anchors: every `fixed` occurrence starts at its stored transform — unless
+  // the active configuration hides it.
   for (const Occurrence& o : asmDoc.GetOccurrences())
-    if (o.fixed)
+    if (o.fixed && !asmDoc.OccurrenceSuppressed(o.id))
       pin(o.id, OccMatrix(o));
 
   // Propagate to a fixpoint, anchoring the lowest-id occurrence of each
@@ -936,6 +1037,40 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   // Riders last: their parents have just been placed, and an attachment is a
   // composition off the result rather than an input to it.
   report.placed += ApplyAttachments(asmDoc);
+
+  // Every relation the solve could apply must now HOLD. One that does not is
+  // a degree of freedom driven twice by relations that disagree — in a tree
+  // the second is never applied, in a loop the pass settles on a compromise
+  // — and either way the document claims a coupling the model does not
+  // have. Reported on the relation, never left silent.
+  for (Relation& r : asmDoc.GetRelations()) {
+    if (!r.error.empty() || asmDoc.RelationSuppressed(r.id))
+      continue;
+    const Mate* a = asmDoc.FindMateById(r.mateA);
+    const Mate* b = asmDoc.FindMateById(r.mateB);
+    if (a == nullptr || b == nullptr)
+      continue;
+    const double want = RelationValue(r, MateDofValue(*a, r.dofA));
+    const double got = MateDofValue(*b, r.dofB);
+    // Mate DOFs are stored as float: allow its precision at the magnitude.
+    if (std::abs(want - got) > 1e-4 * std::max(1.0, std::abs(want))) {
+      const bool rot = r.dofB == MateDof::Rotation;
+      const double k = rot ? angles::kDegPerRad : 1.0;
+      char buf[256];
+      std::snprintf(buf, sizeof(buf),
+                    "not satisfied: mate %llu's %s is %.4f %s where this "
+                    "relation wants %.4f — another relation drives it too, "
+                    "and they disagree",
+                    static_cast<unsigned long long>(r.mateB),
+                    rot ? "rotation" : "offset", got * k, rot ? "deg" : "mm",
+                    want * k);
+      r.error = buf;
+      report.erroredMates++;
+    }
+  }
+  // The held DOFs go back to their authored values (see the top).
+  for (const Held& h : held)
+    SetMateDof(asmDoc.GetMates()[h.index], h.dof, h.authored);
   return report;
 }
 

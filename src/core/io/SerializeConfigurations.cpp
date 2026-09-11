@@ -28,6 +28,23 @@ json ConfigurationToJson(const Configuration& c) {
   }
   if (!c.suppressedFeatures.empty())
     j["suppressed_features"] = c.suppressedFeatures;
+  // v101, assembly only; absent when empty, so older files re-save
+  // byte-identically.
+  if (!c.suppressedMates.empty())
+    j["suppressed_mates"] = c.suppressedMates;
+  if (!c.suppressedRelations.empty())
+    j["suppressed_relations"] = c.suppressedRelations;
+  if (!c.mateOverrides.empty()) {
+    j["mate_overrides"] = json::array();
+    for (const MateOverride& o : c.mateOverrides) {
+      json oj = {{"mate", o.mate}};
+      if (o.rotation)
+        oj["rotation"] = *o.rotation; // radians
+      if (o.offset)
+        oj["offset"] = *o.offset; // mm
+      j["mate_overrides"].push_back(std::move(oj));
+    }
+  }
   return j;
 }
 
@@ -40,6 +57,18 @@ Configuration ConfigurationFromJson(const json& j) {
                                       oj.value("expression", std::string{}));
   c.suppressedFeatures =
       j.value("suppressed_features", std::vector<uint64_t>{});
+  c.suppressedMates = j.value("suppressed_mates", std::vector<uint64_t>{});
+  c.suppressedRelations =
+      j.value("suppressed_relations", std::vector<uint64_t>{});
+  for (const json& oj : j.value("mate_overrides", json::array())) {
+    MateOverride o;
+    o.mate = oj.at("mate").get<uint64_t>();
+    if (oj.contains("rotation"))
+      o.rotation = oj.at("rotation").get<float>();
+    if (oj.contains("offset"))
+      o.offset = oj.at("offset").get<float>();
+    c.mateOverrides.push_back(o);
+  }
   return c;
 }
 

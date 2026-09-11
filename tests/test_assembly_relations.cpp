@@ -127,6 +127,210 @@ TEST_CASE("Two gears on a carrier turn together, from either side",
   CHECK_THAT(ZRotationOf(t.asmDoc, t.wheel), WithinAbs(0.4, 1e-5));
 }
 
+namespace {
+// A fixed carrier and three more occurrences, each on the mate kind asked
+// for, mated by origin.
+struct Rig {
+  AssemblyDocument d;
+  uint64_t carrier = 0;
+  uint64_t Add(const char* name, uint64_t partId, MateType type) {
+    Occurrence o;
+    o.name = name;
+    o.partId = partId;
+    const uint64_t occ = d.AddOccurrence(std::move(o));
+    Mate m;
+    m.type = type;
+    m.a = Origin(carrier);
+    m.b = Origin(occ);
+    m.flipped = false;
+    return d.AddMate(std::move(m));
+  }
+};
+Rig MakeRig() {
+  Rig r;
+  Occurrence c;
+  c.name = "Carrier";
+  c.partId = 1;
+  c.fixed = true;
+  r.carrier = r.d.AddOccurrence(std::move(c));
+  return r;
+}
+} // namespace
+
+TEST_CASE("A cylindrical mate takes its turn from one relation and its slide "
+          "from another",
+          "[assembly][relations]") {
+  // The watch's clutch: turned by its stem, slid by its yoke. The solve used
+  // to settle a whole MATE the first time a relation reached it, so the
+  // second relation was accepted by add_relation and never applied — the
+  // clutch never slid.
+  Rig r = MakeRig();
+  const uint64_t stem = r.Add("Stem", 2, MateType::Revolute);
+  const uint64_t yoke = r.Add("Yoke", 3, MateType::Slider);
+  const uint64_t clutch = r.Add("Clutch", 4, MateType::Cylindrical);
+  const uint64_t turn = r.d.AddRelation(Gear(stem, clutch, -2.0));
+  Relation slide;
+  slide.kind = RelationKind::Linear;
+  slide.mateA = yoke;
+  slide.mateB = clutch;
+  slide.dofA = slide.dofB = MateDof::Offset;
+  slide.ratio = 0.5;
+  const uint64_t push = r.d.AddRelation(slide);
+
+  r.d.FindMateById(stem)->rotation = 0.3f;
+  r.d.FindMateById(yoke)->offset = 4.0f;
+  assembly::Solve(r.d, NoParts());
+  CHECK(r.d.FindRelationById(turn)->error.empty());
+  CHECK(r.d.FindRelationById(push)->error.empty());
+  CHECK_THAT(r.d.FindMateById(clutch)->rotation, WithinAbs(-0.6, 1e-6));
+  CHECK_THAT(r.d.FindMateById(clutch)->offset, WithinAbs(2.0, 1e-6));
+}
+
+TEST_CASE("A plain solve applies a chain of relations end to end",
+          "[assembly][relations]") {
+  // With nothing driven, the solve seeded every relation's A at once and
+  // marked each settled — so a mate that is both a follower and a driver
+  // (the middle one here) was never written, and a chain held at its ends
+  // only. A watch's keyless works sat off their relations' phases after a
+  // solve until something drove the stem.
+  Rig r = MakeRig();
+  const uint64_t a = r.Add("A", 2, MateType::Revolute);
+  const uint64_t b = r.Add("B", 3, MateType::Revolute);
+  const uint64_t c = r.Add("C", 4, MateType::Revolute);
+  r.d.AddRelation(Gear(a, b, -2.0));
+  r.d.AddRelation(Gear(b, c, -3.0, 0.05));
+  r.d.FindMateById(a)->rotation = 0.1f;
+  assembly::Solve(r.d, NoParts());
+  CHECK_THAT(r.d.FindMateById(b)->rotation, WithinAbs(-0.2, 1e-6));
+  CHECK_THAT(r.d.FindMateById(c)->rotation, WithinAbs(0.65, 1e-6));
+  for (const Relation& rel : r.d.GetRelations())
+    CHECK(rel.error.empty());
+}
+
+TEST_CASE("Relations that disagree on one degree of freedom are reported, "
+          "not skipped",
+          "[assembly][relations]") {
+  // A drives B (x2) and C (x5), and B drives C (x3): C is asked to be 0.5
+  // and 0.6 at once. The walk reaches C first from A and then skips B's
+  // relation — which used to be the end of it, leaving the document claiming
+  // a coupling the model lacked. (Two relations INTO one free mate are not a
+  // conflict: the walk drives the free one backwards to satisfy both.)
+  Rig r = MakeRig();
+  const uint64_t a = r.Add("A", 2, MateType::Revolute);
+  const uint64_t b = r.Add("B", 3, MateType::Revolute);
+  const uint64_t c = r.Add("C", 4, MateType::Revolute);
+  r.d.AddRelation(Gear(a, b, 2.0));
+  r.d.AddRelation(Gear(b, c, 3.0));
+  r.d.AddRelation(Gear(a, c, 5.0));
+  r.d.FindMateById(a)->rotation = 0.1f;
+  const assembly::SolveReport rep = assembly::Solve(r.d, NoParts());
+  int unsatisfied = 0;
+  for (const Relation& rel : r.d.GetRelations())
+    if (rel.error.find("not satisfied") != std::string::npos)
+      unsatisfied++;
+  CHECK(unsatisfied == 1);
+  CHECK(rep.erroredMates >= 1);
+}
+
+TEST_CASE("A configuration suppresses mates, relations and occurrences and "
+          "holds a mate's DOF — as an overlay",
+          "[assembly][relations][configurations]") {
+  // A watch pulls its crown out: the clutch leaves one wheel for another and
+  // the stem stands a millimetre further out. As a configuration that is a
+  // relation out of the solve and a DOF held — and pushing the crown back in
+  // must restore every authored value, so the hold is applied by the solve,
+  // never written into the mate.
+  Rig r = MakeRig();
+  const uint64_t a = r.Add("A", 2, MateType::Revolute);
+  const uint64_t b = r.Add("B", 3, MateType::Revolute);
+  const uint64_t c = r.Add("C", 4, MateType::Cylindrical);
+  const uint64_t ab = r.d.AddRelation(Gear(a, b, -2.0));
+  const uint64_t ac = r.d.AddRelation(Gear(a, c, 1.0));
+  r.d.FindMateById(a)->rotation = 0.2f;
+  assembly::Solve(r.d, NoParts());
+  REQUIRE_THAT(r.d.FindMateById(b)->rotation, WithinAbs(-0.4, 1e-6));
+  REQUIRE_THAT(r.d.FindMateById(c)->rotation, WithinAbs(0.2, 1e-6));
+  const uint64_t occA = r.d.FindMateById(a)->b.occurrenceId;
+  const uint64_t occC = r.d.FindMateById(c)->b.occurrenceId;
+
+  Configuration& cfg = r.d.AddConfiguration("Held");
+  const uint64_t cfgId = cfg.id;
+  cfg.suppressedRelations = {ab};
+  cfg.mateOverrides = {{a, 0.5f, std::nullopt}, {c, std::nullopt, 3.0f}};
+  REQUIRE(r.d.SetActiveConfiguration(cfgId));
+  assembly::Solve(r.d, NoParts());
+  // The hold drives: A stands at 0.5 for the placement and for its relation
+  // to C, and C is held 3 mm out.
+  CHECK_THAT(ZRotationOf(r.d, occA), WithinAbs(0.5, 1e-5));
+  CHECK_THAT(r.d.FindMateById(c)->rotation, WithinAbs(0.5, 1e-6));
+  CHECK_THAT(r.d.FindById(occC)->position.z, WithinAbs(3.0, 1e-5));
+  // ...the suppressed relation is out, not broken...
+  CHECK(r.d.FindRelationById(ab)->error.empty());
+  CHECK_THAT(r.d.FindMateById(b)->rotation, WithinAbs(-0.4, 1e-6));
+  // ...and nothing was written into the mates.
+  CHECK_THAT(r.d.FindMateById(a)->rotation, WithinAbs(0.2, 1e-6));
+  CHECK_THAT(r.d.FindMateById(c)->offset, WithinAbs(0.0, 1e-6));
+
+  // Back to base: every authored value is where it was.
+  r.d.SetActiveConfiguration(0);
+  assembly::Solve(r.d, NoParts());
+  CHECK_THAT(ZRotationOf(r.d, occA), WithinAbs(0.2, 1e-5));
+  CHECK_THAT(r.d.FindMateById(c)->rotation, WithinAbs(0.2, 1e-6));
+  CHECK_THAT(r.d.FindById(occC)->position.z, WithinAbs(0.0, 1e-5));
+
+  // A hidden occurrence takes its mate and relations out with it: they used
+  // to go on driving it.
+  r.d.FindConfiguration(cfgId)->mateOverrides.clear();
+  r.d.FindConfiguration(cfgId)->suppressedRelations.clear();
+  r.d.FindConfiguration(cfgId)->suppressedFeatures = {occC};
+  r.d.SetActiveConfiguration(cfgId);
+  CHECK(r.d.MateSuppressed(c));
+  CHECK(r.d.RelationSuppressed(ac));
+  r.d.FindMateById(a)->rotation = 0.3f;
+  assembly::Solve(r.d, NoParts());
+  CHECK_THAT(r.d.FindMateById(c)->rotation, WithinAbs(0.2, 1e-6)); // untouched
+  CHECK(r.d.FindRelationById(ac)->error.empty());
+}
+
+TEST_CASE("Configuration overlays round-trip, and the v101 golden loads",
+          "[assembly][relations][configurations][golden]") {
+  const fs::path golden =
+      fs::path(DESIGNER_SOURCE_DIR) /
+      "tests/golden/assembly/v101-configuration-overlay.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  AssemblyDocument& d = **g;
+  REQUIRE(d.GetConfigurations().size() == 1);
+  const Configuration& c = d.GetConfigurations()[0];
+  CHECK(d.ActiveConfiguration() == c.id);
+  CHECK(c.suppressedMates == std::vector<uint64_t>{5});
+  CHECK(c.suppressedRelations == std::vector<uint64_t>{6});
+  REQUIRE(c.mateOverrides.size() == 2);
+  REQUIRE(c.mateOverrides[0].rotation.has_value());
+  CHECK_THAT(*c.mateOverrides[0].rotation, WithinAbs(0.5, 1e-6));
+  CHECK_FALSE(c.mateOverrides[0].offset.has_value());
+  REQUIRE(c.mateOverrides[1].offset.has_value());
+  CHECK_THAT(*c.mateOverrides[1].offset, WithinAbs(2.0, 1e-6));
+  CHECK(d.MateSuppressed(5));
+  CHECK(d.RelationSuppressed(6));
+  // Active on load: the held pinion axle drives the placement, and the
+  // suppressed relation is out rather than an error.
+  assembly::Solve(d, NoParts());
+  CHECK(d.GetRelations()[0].error.empty());
+  CHECK_THAT(ZRotationOf(d, 2), WithinAbs(0.5, 1e-5));
+
+  const fs::path out =
+      fs::temp_directory_path() / "designer_config_overlay_rt.json";
+  REQUIRE(DocumentIO::SaveAssembly(d, out.string()).has_value());
+  auto back = DocumentIO::LoadAssembly(out.string());
+  REQUIRE(back.has_value());
+  const Configuration& bc = (*back)->GetConfigurations()[0];
+  CHECK(bc.mateOverrides.size() == 2);
+  CHECK(bc.suppressedMates == std::vector<uint64_t>{5});
+  CHECK(bc.suppressedRelations == std::vector<uint64_t>{6});
+  fs::remove(out);
+}
+
 TEST_CASE("A rack follows its pinion, and a screw follows its own turn",
           "[assembly][relations]") {
   AssemblyDocument d;

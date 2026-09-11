@@ -293,6 +293,25 @@ In scope; built on the finished part machine so it lands last:
   side; the assembly panel gains a Configurations sub-list (the mates/exploded
   sub-list idiom, `OccurrencePanel.cpp`).
 
+### Mates, relations and held DOFs (v101)
+
+An assembly configuration that could only hide parts could not express a
+mechanism's other states: a watch's crown pulled out is the clutch's relation
+swapped from one wheel to another and the stem standing a millimetre further
+out — no occurrence appears or disappears. So a configuration also takes
+**mates** and **relations** out of the solve, and **holds** mate DOFs
+(`mate_overrides`: a rotation and/or an offset at the configuration's own
+value). All of it is an overlay applied inside `assembly::Solve`: a held DOF
+stands in for the mate's value for the whole solve (placement, relations, the
+loop pass, where it is pinned) and the authored value goes back afterwards,
+so leaving the configuration restores every mate. `set_mate` and the gizmo
+drag refuse to edit a held DOF, since they would edit the authored value
+underneath the hold; a motion study refuses to drive one. A mate or relation
+touching a suppressed occurrence sits out with it. Activating a configuration
+re-solves — it used to choose the variant and move nothing.
+`set_configuration` refuses the other kind's keys instead of ignoring them.
+[../watch-app-fixes-plan.md](../watch-app-fixes-plan.md).
+
 ## Decisions for sign-off
 
 1. **Scope: part configurations then assembly configurations, both committed.**

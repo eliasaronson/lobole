@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    100; // v100: an assembly holds the CLEARANCES its designer declared, and
+    101; // v101: an assembly configuration suppresses MATES and RELATIONS and
+         //      holds mate DOFs (`suppressed_mates`, `suppressed_relations`,
+         //      `mate_overrides`) -- an overlay the solve applies, so "crown
+         //      pulled out" is a configuration. Absent when empty.
+         // v100: an assembly holds the CLEARANCES its designer declared, and
          //      re-checks them. "prop tip to arm is at least 2 mm" lived in a
          //      python verify() where nobody who opened the document could see
          //      it and no edit could break it. Absent when none.

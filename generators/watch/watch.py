@@ -363,15 +363,19 @@ def check_setting(app, occ, m, rel, sweep=True):
         if solved.get("errored_mates"):
             bad.append(f"crown out, {solved['errored_mates']} mates errored")
         before = _mates(app)
+        # A quarter turn from where the stem STANDS: engaging the clutch
+        # applies the whole crown-out chain from its root, so the stem need
+        # not be at zero (it was, only while a solve left chains unapplied).
+        stem0 = before[m["stem"]].get("rotation", 0.0)
         info["clutch offset"] = before[m["clutch"]].get("offset", 0.0)
         if abs(info["clutch offset"] + float(CLUTCH_TRAVEL)) > 1e-6:
             bad.append(f"crown out, the clutch moved "
                        f"{info['clutch offset']:+.4f}, want "
                        f"{-float(CLUTCH_TRAVEL):+.4f}")
-        app.call("set_mate", id=m["stem"], rotation_deg=90.0)
+        app.call("set_mate", id=m["stem"], rotation=stem0 + math.pi / 2)
         app.solve_assembly()
         after = _mates(app)
-        app.call("set_mate", id=m["stem"], rotation_deg=0.0)
+        app.call("set_mate", id=m["stem"], rotation=stem0)
         app.solve_assembly()
         for k in ("cannon", "center", "winding_pinion"):
             info[k] = _turn(before, after, m[k])

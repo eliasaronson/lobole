@@ -1,5 +1,6 @@
 #include "ui/OccurrencePanel.h"
 #include "core/Angles.h"
+#include "core/AssemblySolve.h"
 #include "core/Measure.h"
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
@@ -599,9 +600,11 @@ void DrawExplodedSection(AppState& state) {
 
 // Bill of materials (A4): derived rows per referenced part. The mass math
 // (OCC volume properties per body) is not per-frame cheap, so the table is
-// Assembly configurations (C4): named variants that suppress occurrences.
-// The active selector switches the shown variant; the active config's editor
-// is a per-occurrence suppression checklist.
+// Assembly configurations (C4, v101): named variants that suppress
+// occurrences, mates and relations and hold mate DOFs. The active selector
+// switches the shown variant — and re-solves, which is what applies it; the
+// active config's editor is a suppression checklist per kind plus a "hold"
+// per mate DOF.
 void DrawConfigsSection(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
   ImGui::SeparatorText("Configurations");
@@ -610,12 +613,14 @@ void DrawConfigsSection(AppState& state) {
   if (ImGui::Selectable("Base (all shown)", active == 0)) {
     SnapshotAssembly(state);
     asmDoc.SetActiveConfiguration(0);
+    SolveActiveAssembly(state);
   }
   for (const Configuration& c : asmDoc.GetConfigurations()) {
     ImGui::PushID(1000 + static_cast<int>(c.id));
     if (ImGui::Selectable(c.name.c_str(), active == c.id)) {
       SnapshotAssembly(state);
       asmDoc.SetActiveConfiguration(c.id);
+      SolveActiveAssembly(state);
     }
     ImGui::PopID();
   }
@@ -623,6 +628,7 @@ void DrawConfigsSection(AppState& state) {
     SnapshotAssembly(state);
     const uint64_t id = asmDoc.AddConfiguration().id;
     asmDoc.SetActiveConfiguration(id);
+    SolveActiveAssembly(state);
   }
 
   Configuration* cfg = asmDoc.FindConfiguration(active);
@@ -641,6 +647,7 @@ void DrawConfigsSection(AppState& state) {
   if (ImGui::SmallButton("Delete##cfg")) {
     SnapshotAssembly(state);
     asmDoc.RemoveConfiguration(active);
+    SolveActiveAssembly(state);
     return;
   }
   ImGui::TextUnformatted("Suppressed occurrences");
@@ -654,8 +661,104 @@ void DrawConfigsSection(AppState& state) {
       if (sup)
         v.push_back(o.id);
       asmDoc.BumpVersion();
+      SolveActiveAssembly(state);
     }
     ImGui::PopID();
+  }
+
+  // Mates: out of the solve, or a DOF held at the configuration's own value
+  // (radians shown as degrees, offsets in mm). A hold starts at the mate's
+  // current value, so ticking it moves nothing until the value is edited.
+  bool changed = false;
+  if (!asmDoc.GetMates().empty())
+    ImGui::TextUnformatted("Mates");
+  for (const Mate& mt : asmDoc.GetMates()) {
+    const std::string sid = std::to_string(mt.id);
+    ImGui::PushID(("cfg_mate_" + sid).c_str());
+    Configuration& c = *asmDoc.FindConfiguration(active);
+    bool sup = c.SuppressesMate(mt.id);
+    const std::string label =
+        (mt.name.empty() ? std::string("Mate") : mt.name) + " " + sid +
+        "###cfg_mate_sup_" + sid;
+    if (ImGui::Checkbox(label.c_str(), &sup)) {
+      SnapshotAssembly(state);
+      auto& v = asmDoc.FindConfiguration(active)->suppressedMates;
+      v.erase(std::remove(v.begin(), v.end(), mt.id), v.end());
+      if (sup)
+        v.push_back(mt.id);
+      changed = true;
+    }
+    const auto holdRow = [&](bool rotation) {
+      Configuration& cc = *asmDoc.FindConfiguration(active);
+      auto it =
+          std::find_if(cc.mateOverrides.begin(), cc.mateOverrides.end(),
+                       [&](const MateOverride& o) { return o.mate == mt.id; });
+      std::optional<float>* slot =
+          it == cc.mateOverrides.end()
+              ? nullptr
+              : (rotation ? &it->rotation : &it->offset);
+      bool held = slot != nullptr && slot->has_value();
+      ImGui::SameLine();
+      const std::string hid = std::string(rotation ? "turn" : "slide") +
+                              "###cfg_hold_" + (rotation ? "r_" : "o_") + sid;
+      if (ImGui::Checkbox(hid.c_str(), &held)) {
+        SnapshotAssembly(state);
+        if (held) {
+          if (it == cc.mateOverrides.end()) {
+            cc.mateOverrides.push_back({mt.id, std::nullopt, std::nullopt});
+            it = cc.mateOverrides.end() - 1;
+          }
+          (rotation ? it->rotation : it->offset) =
+              rotation ? mt.rotation : mt.offset;
+        } else if (it != cc.mateOverrides.end()) {
+          (rotation ? it->rotation : it->offset).reset();
+          if (!it->rotation && !it->offset)
+            cc.mateOverrides.erase(it);
+        }
+        changed = true;
+        return;
+      }
+      if (held) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f);
+        float v =
+            rotation ? static_cast<float>(angles::ToDegrees(**slot)) : **slot;
+        const std::string vid =
+            std::string("###cfg_hold_v") + (rotation ? "r_" : "o_") + sid;
+        if (ImGui::DragFloat(vid.c_str(), &v, rotation ? 1.0f : 0.05f, 0.0f,
+                             0.0f, rotation ? "%.2f deg" : "%.3f mm")) {
+          SnapshotAssembly(state);
+          *slot = rotation ? static_cast<float>(angles::ToRadians(v)) : v;
+          changed = true;
+        }
+      }
+    };
+    if (assembly::MateHasDof(mt.type, MateDof::Rotation))
+      holdRow(true);
+    if (mt.type != MateType::Fastened && mt.type != MateType::Ball)
+      holdRow(false);
+    ImGui::PopID();
+  }
+  if (!asmDoc.GetRelations().empty())
+    ImGui::TextUnformatted("Relations");
+  for (const Relation& rel : asmDoc.GetRelations()) {
+    const std::string sid = std::to_string(rel.id);
+    bool sup = asmDoc.FindConfiguration(active)->SuppressesRelation(rel.id);
+    const std::string label =
+        (rel.name.empty() ? std::string("Relation") : rel.name) + " " + sid +
+        "###cfg_rel_sup_" + sid;
+    if (ImGui::Checkbox(label.c_str(), &sup)) {
+      SnapshotAssembly(state);
+      auto& v = asmDoc.FindConfiguration(active)->suppressedRelations;
+      v.erase(std::remove(v.begin(), v.end(), rel.id), v.end());
+      if (sup)
+        v.push_back(rel.id);
+      changed = true;
+    }
+  }
+  if (changed) {
+    asmDoc.BumpVersion();
+    SolveActiveAssembly(state);
   }
 }
 

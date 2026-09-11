@@ -580,7 +580,13 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       }
     } else {
       // Drag-within-mate: write the mate's DOF, then re-solve so the
-      // occurrence follows.
+      // occurrence follows. A DOF the active configuration holds is left
+      // alone: the drag would write the AUTHORED value underneath the hold,
+      // editing another configuration's mate from this one.
+      if (const MateOverride* hold = state.assembly->MateOverrideFor(mate->id);
+          hold != nullptr && (g.rotate ? hold->rotation.has_value()
+                                       : (g.axis == 2 && hold->offset)))
+        return true;
       if (!g.rotate) {
         const float t =
             RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);

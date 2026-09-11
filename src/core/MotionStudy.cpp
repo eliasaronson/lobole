@@ -42,6 +42,17 @@ std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study) {
            (study.driverDof == MateDof::Rotation ? "rotation" : "offset") +
            " to drive — a revolute or cylindrical mate turns, a slider or "
            "cylindrical mate slides";
+  if (asmDoc.MateSuppressed(m->id))
+    return "driver mate " + std::to_string(m->id) + " (" + m->name +
+           ") is out of the active configuration — activate one that keeps "
+           "it, or drive another mate";
+  if (const MateOverride* o = asmDoc.MateOverrideFor(m->id))
+    if ((study.driverDof == MateDof::Rotation && o->rotation) ||
+        (study.driverDof == MateDof::Offset && o->offset))
+      return "driver mate " + std::to_string(m->id) + " (" + m->name + ")'s " +
+             (study.driverDof == MateDof::Rotation ? "rotation" : "offset") +
+             " is held by the active configuration, so driving it would move "
+             "nothing";
   if (study.samples < 2)
     return "a motion study needs at least 2 samples";
   return {};

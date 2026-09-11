@@ -447,6 +447,15 @@ public:
   bool OccurrenceSuppressedIn(uint64_t configurationId,
                               uint64_t occurrenceId) const;
 
+  // Whether the active configuration takes a mate out of the solve: it
+  // suppresses the mate, or an occurrence the mate connects (v101). A mate
+  // touching a hidden occurrence used to go on driving it.
+  bool MateSuppressed(uint64_t mateId) const;
+  // ...a relation: suppressed itself, or coupling a mate that is out.
+  bool RelationSuppressed(uint64_t relationId) const;
+  // The active configuration's hold on a mate's DOFs, or nullptr.
+  const MateOverride* MateOverrideFor(uint64_t mateId) const;
+
   // Monotonic change counter — bumped on every add/remove/mutate — so the
   // renderer can skip resyncing an unchanged assembly (mirrors Document).
   uint64_t Version() const { return m_version; }

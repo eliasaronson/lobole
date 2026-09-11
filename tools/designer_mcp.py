@@ -1072,9 +1072,11 @@ def remove_configuration(id: int) -> dict:
     return _call("remove_configuration", id=id)
 
 
-@_reference(description="List the active part's configurations with each one's "
-          "parameter overrides and suppressed feature ids, and which is active "
-          "(0 = base, the model as authored).")
+@_reference(description="List the active part's or assembly's configurations "
+          "and which is active (0 = base, the model as authored). A part's "
+          "carry parameter overrides and suppressed feature ids; an "
+          "assembly's carry suppressed occurrence, mate and relation ids and "
+          "the mate DOFs they hold (mate_overrides).")
 def list_configurations() -> dict:
     return _call("list_configurations")
 
@@ -1083,29 +1085,39 @@ def list_configurations() -> dict:
           "parameter_overrides = a list of {name, expression} replacing the "
           "config's variable overrides (e.g. {'name':'depth','expression':"
           "'12'}); suppressed_features = feature ids to suppress. On an "
-          "ASSEMBLY: suppressed_occurrences = occurrence ids to hide. name "
-          "renames. Each list replaces. Read list_configurations, adjust, send "
-          "back. One undoable edit.")
+          "ASSEMBLY: suppressed_occurrences / suppressed_mates / "
+          "suppressed_relations = ids taken out of the solve; mate_overrides "
+          "= [{mate, rotation (radians) | rotation_deg, offset (mm)}], DOFs "
+          "the configuration HOLDS — an overlay, so leaving it restores the "
+          "mates. The other kind's keys are refused. name renames. Each list "
+          "replaces. Read list_configurations, adjust, send back. One "
+          "undoable edit; editing the active one re-solves.")
 def set_configuration(id: int, name: str = "",
                       parameter_overrides: list | None = None,
                       suppressed_features: list | None = None,
-                      suppressed_occurrences: list | None = None) -> dict:
+                      suppressed_occurrences: list | None = None,
+                      suppressed_mates: list | None = None,
+                      suppressed_relations: list | None = None,
+                      mate_overrides: list | None = None) -> dict:
     params = {"id": id}
     if name:
         params["name"] = name
-    if parameter_overrides is not None:
-        params["parameter_overrides"] = parameter_overrides
-    if suppressed_features is not None:
-        params["suppressed_features"] = suppressed_features
-    if suppressed_occurrences is not None:
-        params["suppressed_occurrences"] = suppressed_occurrences
+    for key, value in (("parameter_overrides", parameter_overrides),
+                       ("suppressed_features", suppressed_features),
+                       ("suppressed_occurrences", suppressed_occurrences),
+                       ("suppressed_mates", suppressed_mates),
+                       ("suppressed_relations", suppressed_relations),
+                       ("mate_overrides", mate_overrides)):
+        if value is not None:
+            params[key] = value
     return _call("set_configuration", **params)
 
 
-@_reference(description="Switch the active configuration of the part (0 = base). "
-          "Regenerates against it — subsequent geometry, export, drawings and "
-          "FEM all reflect the active configuration. Returns the resulting body "
-          "count and volumes.")
+@_reference(description="Switch the active configuration of the part or "
+          "assembly (0 = base). A part regenerates against it — subsequent "
+          "geometry, export, drawings and FEM all reflect it — and returns "
+          "the resulting body count and volumes; an assembly re-solves with "
+          "its suppressions and held DOFs.")
 def set_active_configuration(id: int) -> dict:
     return _call("set_active_configuration", id=id)
 

@@ -1063,6 +1063,22 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     Mate* mate = state.assembly->FindMateById(p.at("id").get<uint64_t>());
     if (!mate)
       throw std::runtime_error("no such mate");
+    // A DOF the active configuration holds is the configuration's to set:
+    // writing the mate here would edit the AUTHORED value under the hold —
+    // another configuration's mate — and move nothing on screen.
+    if (const MateOverride* hold = state.assembly->MateOverrideFor(mate->id)) {
+      const bool turn = p.contains("rotation") || p.contains("rotation_deg");
+      if ((turn && hold->rotation) || (p.contains("offset") && hold->offset)) {
+        const Configuration* c = state.assembly->ActiveConfig();
+        throw std::runtime_error(
+            "mate " + std::to_string(mate->id) + "'s " +
+            (turn && hold->rotation ? "rotation" : "offset") +
+            " is held by configuration '" + (c ? c->name : "") + "' (id " +
+            std::to_string(c ? c->id : 0) +
+            ") — change the hold with set_configuration(mate_overrides), or "
+            "set_active_configuration(0) to edit the mate itself");
+      }
+    }
     ui::SnapshotAssembly(state);
     if (p.contains("rotation") || p.contains("rotation_deg"))
       mate->rotation =
