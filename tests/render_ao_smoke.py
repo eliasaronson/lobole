@@ -103,9 +103,13 @@ def main():
         # A fixed camera: this test compares regions by screen fraction, so it
         # must not depend on fit heuristics that change with the model. The
         # scene above is staged with its slot rising along +Y, so the up is
-        # pinned explicitly rather than inheriting the world default.
+        # pinned explicitly rather than inheriting the world default. The
+        # distance frames the scene as 520 mm did through the old 45 deg
+        # lens: at 30 deg the walls filled the frame, and the half-res
+        # upsample then straddled far more depth edges than it does in any
+        # real view, and the diff crossed the 1.0 bound below.
         d.call("set_camera", target=[200, 40, 100],
-               direction=[-0.35, 0.55, 0.75], up=[0, 1, 0], distance=520)
+               direction=[-0.35, 0.55, 0.75], up=[0, 1, 0], distance=804)
         # Shadows OFF in both frames. With them on, the difference between
         # AO-on and AO-off is largest inside shadows — not because AO is wrong
         # there, but because ACES is steeper in dark regions. That artifact of
@@ -192,7 +196,7 @@ def main():
         total = float(sum(hist))
         mean_diff = sum(i * c for i, c in enumerate(hist)) / total
         print(f"  half-vs-full mean abs diff {mean_diff:.3f}/255", flush=True)
-        # Measured 0.104 on the RTX rig at landing; 1.0 is far above noise
+        # Measured 0.49-0.58 on the RTX rig at a 30 deg lens; 1.0 is above noise
         # and far below a visible divergence.
         expect(mean_diff < 1.0,
                f"upsampled half matches native full ({mean_diff:.3f}/255)")
