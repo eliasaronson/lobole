@@ -909,6 +909,137 @@ TEST_CASE("A freewheel that drives negative mirrors all four",
   CHECK_THAT(f.a(), WithinAbs(-0.1f, 1e-5f));
 }
 
+TEST_CASE("Two freewheels drive one output: a reverser winds both ways",
+          "[assembly][relations][freewheel]") {
+  // The watch's reverser (docs/reverser-plan.md): the rotor drives wheel A,
+  // wheel A drives wheel B the other way, each wheel reaches its pinion
+  // through a one-way clutch, and both pinions mesh the ratchet. Whichever
+  // way the rotor turns, one path drives and the other slips — and the
+  // slipping one is reached with BOTH its ends already settled.
+  AssemblyDocument d;
+  const uint64_t carrier = d.AddOccurrence([] {
+    Occurrence o;
+    o.name = "Carrier";
+    o.partId = 1;
+    o.fixed = true;
+    return o;
+  }());
+  const auto turning = [&](const char* name) {
+    Occurrence o;
+    o.name = name;
+    o.partId = 1;
+    return d.AddMate(Revolute(carrier, d.AddOccurrence(std::move(o))));
+  };
+  const uint64_t rotor = turning("Rotor");
+  const uint64_t wheelA = turning("Wheel A");
+  const uint64_t pinionA = turning("Pinion A");
+  const uint64_t wheelB = turning("Wheel B");
+  const uint64_t pinionB = turning("Pinion B");
+  const uint64_t ratchet = turning("Ratchet");
+  const auto gear = [&](uint64_t a, uint64_t b) {
+    Relation r;
+    r.kind = RelationKind::Gear;
+    r.mateA = a;
+    r.mateB = b;
+    r.dofA = r.dofB = MateDof::Rotation;
+    r.ratio = -1.0;
+    d.AddRelation(r);
+  };
+  const auto clutch = [&](uint64_t a, uint64_t b) {
+    Relation r;
+    r.kind = RelationKind::Freewheel;
+    r.mateA = a;
+    r.mateB = b;
+    r.dofA = r.dofB = MateDof::Rotation;
+    r.ratio = 1.0;
+    r.drives = 1;
+    d.AddRelation(r);
+  };
+  gear(rotor, wheelA);
+  gear(wheelA, wheelB); // wheel to wheel: B turns the other way
+  clutch(wheelA, pinionA);
+  clutch(wheelB, pinionB);
+  gear(pinionA, ratchet);
+  gear(pinionB, ratchet);
+
+  const auto rot = [&](uint64_t m) {
+    return double(d.FindMateById(m)->rotation);
+  };
+  const auto turn = [&](double v) {
+    assembly::SetMateDof(*d.FindMateById(rotor), MateDof::Rotation, v);
+    assembly::PropagateRelations(d, rotor);
+  };
+  // Every movement of the rotor winds the ratchet the SAME way, whichever
+  // way it turns: 1 forward, then 2 back, then 1 forward again is 4 of
+  // rotor travel and 4 of winding.
+  turn(1.0);
+  CHECK_THAT(rot(ratchet), WithinAbs(-1.0, 1e-4));
+  turn(-1.0);
+  CHECK_THAT(rot(ratchet), WithinAbs(-3.0, 1e-4));
+  turn(0.0);
+  CHECK_THAT(rot(ratchet), WithinAbs(-4.0, 1e-4));
+  // Both clutches are consistent throughout: the slipping one takes the
+  // difference up in its lead rather than reporting a disagreement.
+  for (const Relation& r : d.GetRelations())
+    CHECK(r.error.empty());
+  // And it is idempotent: nothing moves when nothing has.
+  const double before = rot(ratchet);
+  assembly::PropagateRelations(d, rotor);
+  assembly::PropagateRelations(d, 0);
+  CHECK_THAT(rot(ratchet), WithinAbs(before, 1e-6));
+  for (const Relation& r : d.GetRelations())
+    CHECK(r.error.empty());
+
+  // The output driven BACK against both clutches: they hold rather than
+  // drag their wheels, and say so. Dragging here is what ran away — one
+  // wheel dragged back turns the other forward, which drives the output
+  // further the way that caused the drag.
+  const double rotorAt = rot(rotor);
+  assembly::SetMateDof(*d.FindMateById(ratchet), MateDof::Rotation,
+                       before + 1.0);
+  assembly::PropagateRelations(d, ratchet);
+  CHECK_THAT(rot(rotor), WithinAbs(rotorAt, 1e-5));
+  CHECK_THAT(rot(ratchet), WithinAbs(before + 1.0, 1e-5));
+  int reported = 0;
+  for (const Relation& r : d.GetRelations())
+    if (r.kind == RelationKind::Freewheel && !r.error.empty())
+      reported++;
+  CHECK(reported > 0);
+}
+
+TEST_CASE("A freewheel whose output is driven BEHIND its line says so",
+          "[assembly][relations][freewheel]") {
+  // Both ends settled by other relations, with the output short of where
+  // this clutch would have driven it: two drivers that disagree, which is
+  // not slip and is not absorbed.
+  Train t = MakeTrain();
+  const uint64_t out = t.asmDoc.AddMate(Revolute(t.carrier, t.wheel));
+  Relation g1;
+  g1.kind = RelationKind::Gear;
+  g1.mateA = t.axleA;
+  g1.mateB = t.axleB;
+  g1.dofA = g1.dofB = MateDof::Rotation;
+  g1.ratio = 1.0;
+  t.asmDoc.AddRelation(g1);
+  Relation g2 = g1;
+  g2.mateB = out;
+  g2.ratio = 2.0;
+  t.asmDoc.AddRelation(g2);
+  Relation fw;
+  fw.kind = RelationKind::Freewheel;
+  fw.mateA = t.axleB;
+  fw.mateB = out;
+  fw.dofA = fw.dofB = MateDof::Rotation;
+  fw.ratio = 1.0;
+  fw.drives = 1;
+  t.asmDoc.AddRelation(fw);
+  assembly::SetMateDof(*t.asmDoc.FindMateById(t.axleA), MateDof::Rotation,
+                       -0.5);
+  assembly::PropagateRelations(t.asmDoc, t.axleA);
+  CHECK_THAT(t.asmDoc.GetRelations()[2].error,
+             Catch::Matchers::ContainsSubstring("behind the drive line"));
+}
+
 TEST_CASE("A freewheel inside a mate loop is reported, not held",
           "[assembly][relations][freewheel][loops]") {
   // Two revolutes between the same pair close a loop: both must give the

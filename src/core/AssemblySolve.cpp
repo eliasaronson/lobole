@@ -660,6 +660,49 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       return mate == o.mate && dof == o.dof;
     }
   };
+  // Whether each freewheel may DRAG its input when its output is pushed
+  // back against it. A lone clutch does: spin a bicycle's wheel backwards
+  // and the pedals turn with it. One inside a CYCLE must not — a reverser's
+  // two paths reach the same output, so dragging one input turns the other
+  // wheel forward, which drives the output further the way that caused the
+  // drag, and the pose runs away (a watch's ratchet reached 5e10 degrees).
+  // The real mechanism locks there, and a lock is a constraint, not a drive:
+  // the relation says its output stands behind its line instead.
+  std::vector<bool> mayDrag(rels.size(), false);
+  for (size_t i = 0; i < rels.size(); i++) {
+    if (!usable[i] || rels[i].kind != RelationKind::Freewheel)
+      continue;
+    // Is this freewheel's INPUT reachable from its output through the other
+    // relations? Walk them as undirected edges: which end a relation is
+    // driven from depends on what moves, and the question is only whether
+    // the two are tied together some other way.
+    const Node from{rels[i].mateB, rels[i].dofB};
+    const Node goal{rels[i].mateA, rels[i].dofA};
+    std::vector<Node> seen{from}, stack{from};
+    bool cycle = false;
+    while (!stack.empty() && !cycle) {
+      const Node at = stack.back();
+      stack.pop_back();
+      for (size_t k = 0; k < rels.size(); k++) {
+        if (k == i || !usable[k])
+          continue;
+        const Node ka{rels[k].mateA, rels[k].dofA};
+        const Node kb{rels[k].mateB, rels[k].dofB};
+        for (const auto& [here, there] : {std::pair{ka, kb}, {kb, ka}}) {
+          if (!(here == at) ||
+              std::find(seen.begin(), seen.end(), there) != seen.end())
+            continue;
+          if (there == goal) {
+            cycle = true;
+            break;
+          }
+          seen.push_back(there);
+          stack.push_back(there);
+        }
+      }
+    }
+    mayDrag[i] = !cycle;
+  }
   std::vector<Node> frontier;
   std::vector<Node> settled;
   const auto isSettled = [&](const Node& n) {
@@ -746,15 +789,16 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       if (an == from && !isSettled(bn)) {
         if (r.kind == RelationKind::Freewheel) {
           // The input moved. Where its drive line is at or ahead of b (in
-          // the drive direction) it drives b; behind, b stays and `lead`
-          // grows by the difference — the clutch slips. Either way b is ON
-          // the line afterwards, so a second pass finds nothing to do.
+          // the drive direction) it drives b. Behind, the clutch SLIPS: b
+          // is left where it is and, just as important, left UNSETTLED —
+          // another relation may be the one that moves it, which is how a
+          // reverser works (docs/reverser-plan.md). The history is
+          // reconciled once, after the walk.
           const double line = RelationValue(r, valueOf(*a, r.dofA));
           const double now = valueOf(*b, r.dofB);
-          if ((line - now) * r.drives >= -FreewheelSlack(now))
-            SetMateDof(*b, r.dofB, line);
-          else
-            r.lead += now - line;
+          if ((line - now) * r.drives < -FreewheelSlack(now))
+            continue; // slipping
+          SetMateDof(*b, r.dofB, line);
         } else {
           SetMateDof(*b, r.dofB, RelationValue(r, valueOf(*a, r.dofA)));
         }
@@ -763,14 +807,14 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       } else if (bn == from && !isSettled(an) &&
                  r.kind == RelationKind::Freewheel && r.ratio != 0.0) {
         // Something else moved the OUTPUT. Forward in the drive direction
-        // it overruns: the input stays and `lead` grows. Backward, the
-        // clutch engages and drags the input back with it.
+        // it OVERRUNS: the input is not dragged, and is left unsettled for
+        // whatever else may drive it. Backward, the clutch engages and
+        // drags the input back with it.
         const double line = RelationValue(r, valueOf(*a, r.dofA));
         const double now = valueOf(*b, r.dofB);
-        if ((now - line) * r.drives > FreewheelSlack(now))
-          r.lead += now - line;
-        else
-          SetMateDof(*a, r.dofA, (now - r.phase - r.lead) / r.ratio);
+        if ((now - line) * r.drives > FreewheelSlack(now) || !mayDrag[i])
+          continue; // overrunning, or holding rather than dragging
+        SetMateDof(*a, r.dofA, (now - r.phase - r.lead) / r.ratio);
         settle(an);
         wrote++;
       } else if (bn == from && !isSettled(an) && r.kind != RelationKind::Cam &&
@@ -782,6 +826,36 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         settle(an);
         wrote++;
       }
+    }
+  }
+  // The history, once the walk has finished moving things. Where the output
+  // ended up, less where this freewheel's drive line puts it, is how far it
+  // has slipped, and `lead` absorbs it — so the relation holds exactly and
+  // the next pass finds nothing to do. Reconciling HERE rather than in the
+  // walk is what lets two freewheels drive one output (a reverser): the
+  // slipping one is reached with both its ends already settled by the path
+  // that is driving, and it simply takes up the difference.
+  //
+  // The other way round — the output BEHIND the line, where this freewheel
+  // would have been driving it — is two drivers that disagree, and is said
+  // on the relation rather than absorbed.
+  for (size_t i = 0; i < rels.size(); i++) {
+    Relation& r = rels[i];
+    if (!usable[i] || r.kind != RelationKind::Freewheel)
+      continue;
+    const Mate* a = asmDoc.FindMateById(r.mateA);
+    const Mate* b = asmDoc.FindMateById(r.mateB);
+    if (a == nullptr || b == nullptr)
+      continue;
+    const double now = valueOf(*b, r.dofB);
+    const double gap = now - RelationValue(r, valueOf(*a, r.dofA));
+    if (gap * r.drives > FreewheelSlack(now)) {
+      r.lead += gap;
+      wrote++;
+    } else if (gap * r.drives < -FreewheelSlack(now)) {
+      r.error = "not satisfied: this freewheel's output stands behind the "
+                "drive line it would be driven along — another relation "
+                "drives it too, and they disagree";
     }
   }
   return wrote;

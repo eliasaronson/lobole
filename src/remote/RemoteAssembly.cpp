@@ -132,7 +132,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "drives it in that direction and slips when a goes back; b driven on "
      "ahead leaves a still, and b pushed back drags a. Its history is "
      "`lead` (b's unit, radians), how far b has run ahead of a's drive "
-     "line — saved with the document and undone with the pose; a freewheel "
+     "line: it starts as the gap between the two parts as they stand (a "
+     "clutch engages where it is made, so adding one moves nothing) unless "
+     "{lead} says otherwise, and is saved with the document and undone "
+     "with the pose; a freewheel "
      "inside a mate loop is reported, not held (docs/freewheel-plan.md). A "
      "cam is the "
      "one relation that is not invertible (many angles give one lift), so it "
@@ -144,8 +147,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "has no rotation), and for a rack whose slider runs ALONG the pinion's "
      "axis instead of across it; `warnings` names gear axles more than 5 "
      "degrees off parallel (docs/assemblies/relations-plan.md).",
-     "thread_part, thread_feature, a, b, dof_b, drives, duration_deg, lift, "
-     "name, "
+     "thread_part, thread_feature, a, b, dof_b, drives, duration_deg, lead, "
+     "lift, name, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, teeth_a, teeth_b, type"},
     {"set_relation",
@@ -1460,6 +1463,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               " degrees apart): fine for a bevel or crossed pair, wrong "
               "for spur gears");
       }
+    }
+    if (r.kind == RelationKind::Freewheel) {
+      // A clutch has no preferred angle. Made between two parts that already
+      // stand somewhere, it engages WHERE THEY ARE: `lead` starts as the gap
+      // between them, so adding one moves nothing and never reads as two
+      // drivers disagreeing — which is what a reverser's second clutch is,
+      // with both its ends already placed by the gears around it.
+      r.lead =
+          p.contains("lead")
+              ? p.at("lead").get<double>()
+              : assembly::MateDofValue(*b, r.dofB) -
+                    (r.ratio * assembly::MateDofValue(*a, r.dofA) + r.phase);
     }
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddRelation(std::move(r));

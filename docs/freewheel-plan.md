@@ -28,10 +28,20 @@ exact by updating it:
 
 - **From a** (the input moved): if the drive line puts b further along in the
   drive direction, b follows — engaged. If not, the input is going back: b
-  stays where it is and `lead` grows by the difference — slipping.
+  stays where it is — slipping.
 - **From b** (something else moved the output): forward in the drive
-  direction, b overruns and `lead` grows while a stays; backward, the clutch
-  engages and drags a back with it.
+  direction, b overruns and a stays; backward, the clutch engages and drags
+  a back with it — a lone clutch does exactly that (spin a bicycle's wheel
+  backwards and the pedals turn). It does NOT drag when a is reachable from
+  b through the other relations, because then dragging feeds itself: see
+  [reverser-plan.md](reverser-plan.md). Held, it reports instead.
+- **`lead` is reconciled once, after the walk**, from where the two ends
+  actually finished: the gap between the output and the drive line is slip
+  and `lead` takes it up. A gap the other way is two drivers disagreeing and
+  is reported. Doing it here rather than in the walk is what lets two
+  freewheels drive one output — a reverser ([reverser-plan.md](reverser-plan.md))
+  — and a slipping freewheel leaves its output UNSETTLED for the driving
+  path to move.
 
 This is a roller clutch: it re-engages the moment the input turns forward
 again, wherever that is. A ratchet's dead band (re-engaging only at the next
@@ -65,7 +75,8 @@ engaged.
 **The surface.** `add_relation(type: "freewheel", a, b, ratio, drives)` —
 rotation to rotation; `drives` is required (the direction is the whole point
 of the thing, and a default would be a plausible wrong answer). `lead` starts
-at 0, shows in `list_relations`, and `set_relation {lead}` can put it back
+as the gap between the two parts as they stand, so a clutch engages where it
+is made and adding one moves nothing; shows in `list_relations`, and `set_relation {lead}` can put it back
 (re-engaging a clutch by hand). The relations panel shows it read-only. The
 SDK gets `Asm.freewheel()`.
 
