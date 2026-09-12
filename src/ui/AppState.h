@@ -1100,6 +1100,11 @@ struct AppState {
     int cycle = 0;
   };
   PickState pick;
+  // The occurrence the Model panel's list last scrolled to. A part picked in
+  // the VIEWPORT is highlighted in a row that may be off the end of a long
+  // list, so the panel brings it into view — ONCE per change of selection,
+  // or it would drag the list back every frame the part stayed selected.
+  uint64_t occurrenceScrolledTo = 0;
   MateToolState mateTool;
   GizmoDrag gizmoDrag;
 

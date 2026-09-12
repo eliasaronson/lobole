@@ -1004,6 +1004,15 @@ void DrawOccurrencePanel(AppState& state) {
   if (asmDoc.OccurrenceCount() == 0)
     TextDisabledWrapped("Empty - use Insert part on the toolbar.");
 
+  // A part picked in the viewport highlights a row that may be scrolled out
+  // of sight. Bring it into view when the selection CHANGES — the last one
+  // picked, which is the one a Ctrl-click just added.
+  const std::vector<uint64_t> picked = SelectedOccurrenceIds(state);
+  const uint64_t primary = picked.empty() ? 0 : picked.back();
+  const uint64_t bringIntoView =
+      primary != state.occurrenceScrolledTo ? primary : 0;
+  state.occurrenceScrolledTo = primary;
+
   // The rows as listed — what a Shift-click range spans (ListSelection.h).
   std::vector<uint64_t> occOrder;
   for (const Occurrence& o : asmDoc.GetOccurrences())
@@ -1040,6 +1049,10 @@ void DrawOccurrencePanel(AppState& state) {
     if (SelectableEllipsis(label, IsOccurrenceSelected(state, o.id)))
       ListRowClicked(state, SelectionItem::Kind::Occurrence, o.id, occOrder,
                      /*ownKindOnly=*/true);
+    // Only when it is actually out of sight: clicking a row that is already
+    // visible must not re-centre the list under the cursor.
+    if (o.id == bringIntoView && !ImGui::IsItemVisible())
+      ImGui::SetScrollHereY(0.5f);
     if (!o.visible)
       ImGui::PopStyleColor();
 

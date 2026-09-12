@@ -891,6 +891,41 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(lit > 0); // the cursor found it at all
   };
 
+  // A part picked in the VIEWPORT is highlighted in a row that may be far
+  // off the end of the list, where nobody sees it. The panel scrolls to it.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "the_list_scrolls_to_a_part_picked_elsewhere");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Long");
+    ui::SetActivePart(*s_App, asmIdx);
+    uint64_t last = 0;
+    for (int i = 0; i < 60; i++) {
+      Occurrence o;
+      o.name = "Box " + std::to_string(i);
+      o.partId = s_App->parts[0].id;
+      o.fixed = true;
+      last = s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(3);
+    ImGuiWindow* panel = ctx->WindowInfo("//###Model").Window;
+    IM_CHECK(panel != nullptr);
+    IM_CHECK(panel->Scroll.y < 1.0f); // nothing picked: at the top
+
+    // As a viewport pick does it — the row is far below the fold.
+    ui::SelectOccurrence(*s_App, last);
+    ctx->Yield(3);
+    IM_CHECK(panel->Scroll.y > 1.0f);
+
+    // ONCE, though: scrolled away with the same part still selected, the
+    // list stays where it was put rather than dragging itself back.
+    panel->Scroll.y = 0.0f;
+    ctx->Yield(3);
+    IM_CHECK(panel->Scroll.y < 1.0f);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "isolation", "a_messy_test_leaks_nothing");
