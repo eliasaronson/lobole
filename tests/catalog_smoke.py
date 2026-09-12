@@ -60,6 +60,14 @@ def main(binary):
         # Flat single-part document persists references without private rows.
         flat = str(Path(temp) / "single.dsgn")
         app.save_project(path=flat)
+        # A suite run keeps its "recently opened" to ITSELF: the list lives in
+        # the state directory, and seven temp projects from one afternoon's
+        # runs turned up in the developer's File menu before smoke_app gave
+        # each run its own (the autosave recovery copy shares that directory).
+        recents = (Path(running.tmp) / "state" / "designer"
+                   / "recent-projects.json")
+        assert recents.exists(), f"the recents went somewhere else: {recents}"
+        assert "single.dsgn" in recents.read_text()
         app.new()
         app.open_project(path=flat)
         assert app.list_catalogs()["catalogs"][0]["resolved"] is False

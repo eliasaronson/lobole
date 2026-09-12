@@ -79,6 +79,12 @@ class LaunchedApp:
         except OSError:
             return ""
 
+    @property
+    def tmp(self):
+        """This run's own directory: its XDG_STATE_HOME and XDG_CONFIG_HOME
+        are under here unless the caller passed its own."""
+        return self._tmp
+
     def close(self):
         with contextlib.suppress(Exception):
             self.designer.close()
@@ -255,6 +261,14 @@ def _spawn(binary, extra_args, env, timeout, headless):
     # set_settings persists immediately headless (no GUI loop to debounce it),
     # so without this a suite run rewrites the developer's real preferences.
     e.setdefault("XDG_CONFIG_HOME", os.path.join(tmp, "config"))
+    # ...and its STATE dir, where the recently-opened list, the autosaves and
+    # the instance registry live. Without it a suite run pushed temp projects
+    # (rig.dsgn, p.dsgn, single.dsgn) into the developer's "recently opened"
+    # menu, and an unsaved document's recovery copy sits in that same
+    # directory. A test that wants the real one — the MCP pair, which reads
+    # the registry from the client side — sets it itself, and setdefault
+    # leaves that alone.
+    e.setdefault("XDG_STATE_HOME", os.path.join(tmp, "state"))
 
     log_path = os.path.join(tmp, "app.log")
     cmd = [binary]
