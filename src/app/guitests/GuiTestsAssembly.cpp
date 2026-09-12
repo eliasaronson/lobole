@@ -843,6 +843,54 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(pick.innerPath[0] == innerId);
   };
 
+  // Hovering an occurrence lights the WHOLE of it. It lit only the face
+  // under the cursor before — a patch on a part, and nothing at all on a
+  // glass pane, whose highlight tint the blend throws away at its own alpha.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "hovering_an_occurrence_lights_all_of_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Hover");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence box;
+    box.name = "Box";
+    box.partId = s_App->parts[0].id;
+    box.fixed = true;
+    const uint64_t occId = s_App->assembly->AddOccurrence(box);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+
+    glm::vec3 lo, hi;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, lo, hi));
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    // FIT, not a camera placed by hand: a 2 mm box 400 mm away is six
+    // pixels, and a hover that misses proves nothing.
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    ctx->Yield(3);
+    const ImVec2 at = WorldToWindow(mid);
+    ctx->LogDebug("meshes %d, bounds (%.1f %.1f %.1f)-(%.1f %.1f %.1f), "
+                  "viewport (%.0f %.0f)+(%.0f %.0f), at (%.0f %.0f)",
+                  (int)s_App->documentMeshes.size(), lo.x, lo.y, lo.z, hi.x,
+                  hi.y, hi.z, s_App->viewportPos.x, s_App->viewportPos.y,
+                  s_App->viewportSize.x, s_App->viewportSize.y, at.x, at.y);
+    ctx->MouseMoveToPos(at);
+    ctx->Yield(2);
+    size_t lit = 0;
+    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+      if (m.occurrenceId != occId)
+        continue;
+      const glm::uvec2 range =
+          s_App->meshRenderer->InstanceHoverRange(m.meshId);
+      IM_CHECK_EQ(range.x, 0u);
+      IM_CHECK(range.y > 12u); // a box FACE is 6 vertices; the box is 36
+      lit++;
+    }
+    IM_CHECK(lit > 0); // the cursor found it at all
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "isolation", "a_messy_test_leaks_nothing");

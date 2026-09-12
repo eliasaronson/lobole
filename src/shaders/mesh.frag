@@ -234,6 +234,11 @@ void main() {
         float glareLuma = dot(glare, vec3(0.2126, 0.7152, 0.0722));
         float tintAlpha = 0.35 * tint;
         outAlpha = clamp(tintAlpha + Fv + glareLuma, 0.02, 1.0);
+        // Hovered (0.5) or selected (1.0), a pane has to SHOW it. The tint
+        // below is mixed into the colour either way, but at glass's own
+        // alpha — 0.05 face-on — the blend threw it away and a picked
+        // crystal looked exactly like an unpicked one.
+        outAlpha = max(outAlpha, fragHighlight * 0.7);
         vec3 premultiplied =
             albedo * 0.5 * tintAlpha + mirror * Fv + glare;
         finalColor = premultiplied / outAlpha;

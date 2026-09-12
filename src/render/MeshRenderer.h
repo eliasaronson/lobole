@@ -256,6 +256,17 @@ public:
   // (assemblies A2). Pair with ClearFaceHighlight to deselect.
   void HighlightInstance(uint32_t instanceId);
 
+  // Hovers a whole instance, the hover counterpart of HighlightInstance and
+  // additive in the same way (ClearHoverPreviews clears every frame). An
+  // assembly hovers OCCURRENCES, and lighting only the face under the cursor
+  // showed a patch on a part and nothing at all on a glass pane, whose tint
+  // is blended away at its own alpha.
+  void HoverInstance(uint32_t instanceId);
+
+  // What is hovered on an instance, as a vertex range: [0, vertex count) is
+  // the whole of it. Read by the GUI tests.
+  glm::uvec2 InstanceHoverRange(uint32_t instanceId);
+
   // Rendering
   void UpdateCamera(const glm::mat4& view,
                     const glm::mat4& projection) override;

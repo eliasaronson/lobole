@@ -534,6 +534,25 @@ void MeshRenderer::HighlightInstance(uint32_t instanceId) {
       glm::uvec2(0, static_cast<uint32_t>(asset->vertices.size())));
 }
 
+void MeshRenderer::HoverInstance(uint32_t instanceId) {
+  MeshInstance* instance = GetInstance(instanceId);
+  if (!instance)
+    return;
+  MeshAsset* asset = GetAsset(instance->assetId);
+  if (!asset)
+    return;
+  // Full vertex range = the whole instance, which the vertex stage's range
+  // test already understands. Additive, so every mesh of one occurrence
+  // lights together.
+  instance->hoverRange =
+      glm::uvec2(0, static_cast<uint32_t>(asset->vertices.size()));
+}
+
+glm::uvec2 MeshRenderer::InstanceHoverRange(uint32_t instanceId) {
+  const MeshInstance* instance = GetInstance(instanceId);
+  return instance ? instance->hoverRange : glm::uvec2(0);
+}
+
 void MeshRenderer::ClearFaceHighlight() {
   for (auto& instance : m_instances) {
     if (instance) {

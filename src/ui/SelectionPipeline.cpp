@@ -538,14 +538,22 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       state.mateTool.hoverSnapIsCorner = top.snapCorner;
     } else if (top.item.kind == SelectionItem::Kind::Face ||
                top.item.kind == SelectionItem::Kind::Occurrence) {
-      // Occurrences hover via the hit face's range for now (a whole-instance
-      // hover channel is renderer work, U5).
       state.pick.hoverFace = top.item.element;
-      uint32_t first = 0, count = 0;
       state.faceSelector->SetHoveredFace(top.meshId, top.index);
-      if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,
-                                                 count))
-        state.meshRenderer->SetFaceHover(top.meshId, first, count);
+      if (top.item.kind == SelectionItem::Kind::Occurrence) {
+        // An assembly hovers OCCURRENCES, so light the whole thing — every
+        // mesh that belongs to it, the way selecting one does. The hit
+        // face's range alone was a patch on a part and nothing at all on a
+        // glass pane.
+        for (const DocumentRenderMesh& m : state.documentMeshes)
+          if (m.occurrenceId == top.item.id)
+            state.meshRenderer->HoverInstance(m.meshId);
+      } else {
+        uint32_t first = 0, count = 0;
+        if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,
+                                                   count))
+          state.meshRenderer->SetFaceHover(top.meshId, first, count);
+      }
     }
   }
 
