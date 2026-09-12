@@ -2,6 +2,7 @@
 #include "core/Angles.h"
 #include "core/Measure.h"
 #include "ui/DocumentSlots.h"
+#include "ui/FeatureTreePanel.h"
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
 #include "ui/VariableActions.h"
@@ -1709,6 +1710,37 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // drive the picks through MeasureElementClicked rather than the viewport:
   // the pick pipeline has its own tests, and what is under test here is that
   // the tolerance UI turns a pick into document data.
+  // A face picked in the viewport says which feature MADE it — the stable
+  // name it carries is minted by that feature — so the tree can mark the row
+  // instead of leaving you to hunt it in a fifty-feature list.
+  t = IM_REGISTER_TEST(engine, "tree",
+                       "a_picked_face_names_the_feature_that_made_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield(2);
+    IM_CHECK(ui::FeaturesThatMadeThePick(*s_App).empty()); // nothing picked
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+
+    // Straight down at the middle of the top face, off the bounding box: a
+    // guessed centre lands on a corner edge, which outranks the face.
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 top((lo.x + hi.x) * 0.5f, hi.y, (lo.z + hi.z) * 0.5f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(top);
+    s_App->camera->SetUp(glm::vec3(0, 0, -1));
+    s_App->camera->SetPosition(top + glm::vec3(0, 10, 0));
+    ctx->Yield(3);
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+
+    const std::vector<uint64_t> made = ui::FeaturesThatMadeThePick(*s_App);
+    IM_CHECK_EQ(made.size(), (size_t)1);
+    IM_CHECK_EQ(made[0], boxId);
+  };
+
   t = IM_REGISTER_TEST(engine, "tolerance", "a_measured_bore_gets_a_class");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ToolbarCreateAccept(ctx, "###tb_cylinder");

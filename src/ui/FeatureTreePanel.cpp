@@ -4,6 +4,7 @@
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 #include "ui/TextFit.h"
+#include <algorithm>
 
 #include "cad/CADMaterials.h"
 #include "cad/SketchPlane.h"
@@ -165,6 +166,20 @@ void RollbackBar(bool& dragging) {
 
 } // namespace
 
+std::vector<uint64_t> FeaturesThatMadeThePick(const AppState& state) {
+  std::vector<uint64_t> out;
+  for (const SelectionItem& it : state.selection.items) {
+    if (it.kind != SelectionItem::Kind::Face &&
+        it.kind != SelectionItem::Kind::Edge)
+      continue;
+    if (it.element.featureId == 0)
+      continue;
+    if (std::find(out.begin(), out.end(), it.element.featureId) == out.end())
+      out.push_back(it.element.featureId);
+  }
+  return out;
+}
+
 const char* FeatureRowBadge(const Feature& feature, bool rolledPast) {
   // Precedence matches the colour the row is already given, so the two
   // channels can never disagree: broken beats suppressed beats warned.
@@ -247,6 +262,8 @@ void DrawFeatureTreePanel(AppState& state) {
     static bool draggingBar = false;
     std::vector<float> gapY; // screen y of the gap above row i; [count] = end
     // The rows as listed — what a Shift-click range spans (ListSelection.h).
+    const std::vector<uint64_t> madeThePick = FeaturesThatMadeThePick(state);
+
     std::vector<uint64_t> featureOrder;
     featureOrder.reserve(count);
     for (size_t i = 0; i < count; i++)
@@ -400,6 +417,20 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::GetWindowDrawList()->AddText(ImVec2(hi.x - w - 4.0f, lo.y),
                                             ImGui::GetColorU32(ImGuiCol_Text),
                                             badge);
+      }
+      // ...and the mark for the row that made the picked face, in the
+      // viewport's own highlight colour, drawn the same way and one slot
+      // further in where the row already carries a state badge.
+      if (std::find(madeThePick.begin(), madeThePick.end(), feature->GetId()) !=
+          madeThePick.end()) {
+        const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+        const float away =
+            badge != nullptr ? ImGui::CalcTextSize(badge).x + 6.0f : 0.0f;
+        const float w = ImGui::CalcTextSize(ICON_FA_CIRCLE_DOT).x;
+        ImGui::GetWindowDrawList()->AddText(
+            ImVec2(hi.x - w - 4.0f - away, lo.y),
+            ImGui::GetColorU32(ImVec4(1.0f, 0.65f, 0.15f, 1.0f)),
+            ICON_FA_CIRCLE_DOT);
       }
       if (errored) {
         ImGui::PopStyleColor();

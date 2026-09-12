@@ -170,7 +170,20 @@ range test already understood), and the pick lights every mesh of the hovered
 occurrence rather than the one face under the cursor. Glass took one line
 more — the tint was mixed in and then blended away at the pane's own alpha,
 so a hovered or selected pane looked exactly like an untouched one
-(`hovering_an_occurrence_lights_all_of_it`). (Empty
+(`hovering_an_occurrence_lights_all_of_it`). The list also **scrolls to a
+part picked in the viewport** — once per change of selection, and only when
+the row is out of sight, so it never fights the scrollbar or re-centres
+under a click.
+
+**Relations are selectable (2026-09-12)**, the last row in an assembly's
+Model panel that was not: they take the same list gesture as occurrences and
+mates, kind-scoped so picking one keeps the part you had. Their ids moved
+into the row LABELS on the way — a `PushID(int)` scope is not addressable,
+which is why the list had no test before. And **a picked face marks the
+feature that made it** in the tree (`FeaturesThatMadeThePick`): a face's
+stable name is minted by its feature, so the row wears a dot in the
+viewport's highlight colour. Marked, not selected — the feature is not what
+was clicked, and Delete has to stay unambiguous. (Empty
 states were *shipped* here but still named affordances that had since been
 deleted; U9 made them honest.)
 Original scope:

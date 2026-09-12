@@ -22,4 +22,11 @@ void DrawFeatureTreePanel(AppState& state);
 // See tests/test_actions.cpp.
 const char* FeatureRowBadge(const Feature& feature, bool rolledPast);
 
+// The features that MADE what is picked: a face's stable name is minted by
+// the feature that created it (ElementMap — an extrude's side face is
+// "4/g7", a fillet's is the fillet's), so a picked face says which row to
+// look at. The tree MARKS those rows; it does not select them, because the
+// feature is not what was clicked.
+std::vector<uint64_t> FeaturesThatMadeThePick(const AppState& state);
+
 } // namespace ui
