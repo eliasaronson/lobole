@@ -433,7 +433,10 @@ void DrawMotionSection(AppState& state) {
   }
   const bool rot = sel->driverDof == MateDof::Rotation;
   const double k = rot ? angles::kDegPerRad : 1.0;
-  ImGui::Text("%.1f to %.1f %s in %d samples", sel->from * k, sel->to * k,
+  // %g, not a fixed decimal: a watch's escape pinion turns one tooth on
+  // 0.0104 degrees of its barrel, and "0.0 to 0.0 deg" reads as a study
+  // that does nothing.
+  ImGui::Text("%.4g to %.4g %s in %d samples", sel->from * k, sel->to * k,
               rot ? "deg" : "mm", sel->samples);
   const std::string why = motion::WhyNot(asmDoc, *sel);
   if (!why.empty())
