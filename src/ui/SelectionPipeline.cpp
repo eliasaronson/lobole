@@ -906,6 +906,12 @@ uint64_t SelectedMateId(const AppState& state) {
   return it != nullptr ? it->id : 0;
 }
 
+uint64_t SelectedRelationId(const AppState& state) {
+  const SelectionItem* it =
+      state.selection.First(SelectionItem::Kind::Relation);
+  return it != nullptr ? it->id : 0;
+}
+
 namespace {
 // Replace only the given kind's items (occurrence and mate selections are
 // independent, as their pre-U1 fields were); id 0 just removes the kind.
@@ -924,6 +930,10 @@ void SelectMate(AppState& state, uint64_t mateId) {
   ReplaceKind(state.selection, SelectionItem::Kind::Mate, mateId);
 }
 
+void SelectRelation(AppState& state, uint64_t relationId) {
+  ReplaceKind(state.selection, SelectionItem::Kind::Relation, relationId);
+}
+
 void PruneSelection(AppState& state) {
   auto& items = state.selection.items;
   items.erase(
@@ -940,6 +950,9 @@ void PruneSelection(AppState& state) {
             case SelectionItem::Kind::Mate:
               return !state.assembly ||
                      state.assembly->FindMateById(it.id) == nullptr;
+            case SelectionItem::Kind::Relation:
+              return !state.assembly ||
+                     state.assembly->FindRelationById(it.id) == nullptr;
             case SelectionItem::Kind::Operation: {
               if (!state.job)
                 return true;

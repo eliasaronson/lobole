@@ -785,6 +785,7 @@ struct SelectionItem {
     Feature,
     Occurrence,
     Mate,
+    Relation,     // a relation row in an assembly's Model panel
     SketchRegion, // U2
     Connector,    // U7c: mate connector — id = occurrence, element = face
     Operation     // a CAM operation row (job tabs); id = the operation's id

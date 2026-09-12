@@ -1112,6 +1112,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           : it.kind == ui::SelectionItem::Kind::Feature    ? "feature"
           : it.kind == ui::SelectionItem::Kind::Occurrence ? "occurrence"
           : it.kind == ui::SelectionItem::Kind::Mate       ? "mate"
+          : it.kind == ui::SelectionItem::Kind::Relation   ? "relation"
                                                            : "sketch_region";
       json entry = {{"kind", kind}};
       if (it.id != 0)

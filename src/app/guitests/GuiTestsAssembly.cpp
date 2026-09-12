@@ -926,6 +926,51 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(panel->Scroll.y < 1.0f);
   };
 
+  // A relation row can be PICKED, like an occurrence or a mate. It was the
+  // one row in this panel that could not be, so nothing could point at the
+  // relation it was talking about.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_relation_row_is_selectable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Related");
+    ui::SetActivePart(*s_App, asmIdx);
+    uint64_t occs[2] = {0, 0};
+    for (int i = 0; i < 2; i++) {
+      Occurrence o;
+      o.name = i == 0 ? "A" : "B";
+      o.partId = s_App->parts[0].id;
+      o.fixed = i == 0;
+      occs[i] = s_App->assembly->AddOccurrence(o);
+    }
+    Mate axle;
+    axle.type = MateType::Revolute;
+    axle.a.occurrenceId = occs[0];
+    axle.a.anchor.origin = true;
+    axle.b.occurrenceId = occs[1];
+    axle.b.anchor.origin = true;
+    axle.flipped = false;
+    const uint64_t mateId = s_App->assembly->AddMate(axle);
+    Relation gear;
+    gear.kind = RelationKind::Gear;
+    gear.name = "the pair";
+    gear.mateA = mateId;
+    gear.mateB = mateId;
+    gear.dofA = gear.dofB = MateDof::Rotation;
+    gear.ratio = -2.0;
+    const uint64_t relId = s_App->assembly->AddRelation(gear);
+    ui::SelectOccurrence(*s_App, occs[1]);
+    ctx->Yield(3);
+
+    ctx->ItemClick(("//###Model/###rel_row_" + std::to_string(relId)).c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::SelectedRelationId(*s_App), relId);
+    // Kind-scoped, as a mate's selection is: picking a relation does not
+    // drop the part you had selected with it.
+    IM_CHECK_EQ(ui::SelectedOccurrenceId(*s_App), occs[1]);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "isolation", "a_messy_test_leaks_nothing");

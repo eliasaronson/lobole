@@ -106,8 +106,17 @@ void DrawRelationsSection(AppState& state) {
     return;
   ImGui::SeparatorText("Relations");
   uint64_t remove = 0;
+  // The rows as listed, for a Shift-click range — the same gesture the
+  // occurrence and mate lists take (ListSelection.h).
+  std::vector<uint64_t> relOrder;
+  for (const Relation& r : asmDoc.GetRelations())
+    relOrder.push_back(r.id);
   for (Relation& r : asmDoc.GetRelations()) {
-    ImGui::PushID(static_cast<int>(r.id));
+    // The id goes in every LABEL, not a PushID(int) scope: an integer scope
+    // is not addressable as a path segment, so a row inside one cannot be
+    // clicked by name — which is why this list had no test until it became
+    // selectable.
+    const std::string rid = std::to_string(r.id);
     const Mate* a = asmDoc.FindMateById(r.mateA);
     const Mate* b = asmDoc.FindMateById(r.mateB);
     const std::string label =
@@ -120,7 +129,14 @@ void DrawRelationsSection(AppState& state) {
         ImGui::SetTooltip("%s", r.error.c_str());
       ImGui::SameLine();
     }
-    ImGui::TextUnformatted(label.c_str());
+    // Selectable, like an occurrence or a mate: a relation was the one row
+    // in this panel that could not be picked, so nothing could point at the
+    // one it was talking about.
+    if (ImGui::Selectable(
+            (label + "###rel_row_" + rid).c_str(),
+            IsSelected(state, SelectionItem::Kind::Relation, r.id)))
+      ListRowClicked(state, SelectionItem::Kind::Relation, r.id, relOrder,
+                     /*ownKindOnly=*/true);
     if (a != nullptr && b != nullptr)
       ImGui::TextDisabled(
           "  %s -> %s",
@@ -134,7 +150,8 @@ void DrawRelationsSection(AppState& state) {
                           angles::ToDegrees(r.lead));
     double ratio = r.ratio, phase = r.phase;
     ImGui::SetNextItemWidth(110.0f);
-    if (ExprInputDouble(state, "ratio###rel_ratio", &ratio, "%.5g") &&
+    if (ExprInputDouble(state, ("ratio###rel_ratio_" + rid).c_str(), &ratio,
+                        "%.5g") &&
         ratio != 0.0 && ratio != r.ratio) {
       SnapshotAssembly(state);
       r.ratio = ratio;
@@ -143,7 +160,8 @@ void DrawRelationsSection(AppState& state) {
     }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110.0f);
-    if (ExprInputDouble(state, "phase###rel_phase", &phase, "%.5g") &&
+    if (ExprInputDouble(state, ("phase###rel_phase_" + rid).c_str(), &phase,
+                        "%.5g") &&
         phase != r.phase) {
       SnapshotAssembly(state);
       r.phase = phase;
@@ -151,9 +169,8 @@ void DrawRelationsSection(AppState& state) {
       SolveActiveAssembly(state);
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("x###rel_remove"))
+    if (ImGui::SmallButton(("x###rel_remove_" + rid).c_str()))
       remove = r.id;
-    ImGui::PopID();
   }
   if (remove != 0) {
     SnapshotAssembly(state);

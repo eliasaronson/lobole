@@ -82,6 +82,12 @@ SelectedOccurrenceIds(const AppState& state);
 
 uint64_t SelectedMateId(const AppState& state);
 
+// The selected relation, 0 for none, and its setter. Kind-scoped like the
+// mate's: an assembly's occurrence, mate and relation selections are
+// independent of each other.
+uint64_t SelectedRelationId(const AppState& state);
+void SelectRelation(AppState& state, uint64_t relationId);
+
 void SelectMate(AppState& state, uint64_t mateId);
 
 // Drops items whose referent no longer exists (deleted feature, undone
