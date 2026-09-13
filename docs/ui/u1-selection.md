@@ -133,8 +133,9 @@ but stops owning selection state.
 
 ### Lists — one gesture, one Delete (2026-09-02)
 
-Three panels list things with ids — features in a part, occurrences in an
-assembly, operations in a job — and they had drifted: features selected one
+Five lists now: features in a part, occurrences, mates and relations in an
+assembly, operations in a job. The three the section was written for had
+drifted: features selected one
 at a time, occurrences Ctrl-clicked, operations had no selection at all and
 an `x` per row; two had a right-click Delete, one had the Delete key. What
 is shared now is the GESTURE and the VERB (`src/ui/ListSelection.h`), not
@@ -148,6 +149,16 @@ item ids the GUI tests address.
   toggles it (and moves the anchor, as a file manager does); Shift selects
   from the anchor to the row over `order` — the rows as the panel lists
   them — replacing that kind; Ctrl+Shift adds the range.
+- `clickClears` (opt-in, the MATE list takes it): a plain click on the row
+  that is the whole selection of its kind clears it. For a list whose
+  selected row opens an editor INSIDE the panel — the selected mate's name,
+  flip, DOF fields and connectors — because the row you just clicked is the
+  only affordance there and it used to do nothing, so the editor could be
+  changed but never put away. Off everywhere else on purpose: most lists
+  auto-select what they just created (`ToolbarCreateAccept` leaves the new
+  feature selected), and clicking that row to confirm what you are looking
+  at must not make it vanish. `selection/survives_sibling_delete` is the
+  test that says so.
 - `ListRowContext`: right-click inside the selection keeps it; outside, the
   row becomes the selection. The menu's Delete says how many
   (`DeleteLabel`: "Delete 3 features").
@@ -155,7 +166,12 @@ item ids the GUI tests address.
   `RemoveFeaturesCommand` (one undo step, one regenerate), occurrences
   through `DeleteSelectedOccurrences` (one snapshot, one solve), operations
   through `RemoveCamOperations` (both CAM windows had their own remove with
-  different side effects; now one). The Delete key calls it from the
+  different side effects; now one). On an assembly tab it takes MATES and
+  occurrences together in ONE snapshot (`DeleteSelectedOccurrences` grew a
+  `takeSnapshot` flag so the caller can own it): an occurrence click
+  deliberately keeps the selected mate, so the two selections coexist
+  routinely, and honouring one of them would mean Delete silently ignored
+  something the panel was showing as picked. The Delete key calls it from the
   modal-key chain in ViewportInput, yielding to armed slots, a mate or
   fastener session, a text field, a sketch being edited and an open editor.
 - Selection got an `Operation` kind for the job's operation rows (id = the

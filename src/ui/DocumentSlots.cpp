@@ -184,6 +184,12 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.camToolOpen = false;
   state.camVerb = AppState::CamVerb::None;
   state.camVerbOp = 0;
+  // The assembly's two viewport modes, for the same reason and with the same
+  // sharp edge: both are toggles, so a stale one turns OFF at the next click
+  // on the toolbar button meant to turn it on — and until then its window
+  // floats over the viewport of a document it knows nothing about.
+  state.explodeToolOpen = false;
+  state.motionToolOpen = false;
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
 }

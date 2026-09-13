@@ -883,6 +883,17 @@ void DrawAssemblyToolbar(AppState& state) {
                 "Fastener (pick a hole's rim; size and length derive)",
                 state.fastenerTool.open);
   Divider();
+  // The two viewport modes. They open the floating tool window rather than a
+  // panel section, so they belong on the bar with the other tools that do
+  // (docs/ui/u15-assembly-panel.md).
+  CommandButton(state, ICON_FA_EXPLOSION "###tb_asm_explode",
+                "assembly.explode", "Exploded view (slide the parts apart)",
+                state.explodeToolOpen);
+  CommandButton(state, ICON_FA_FILM "###tb_asm_motion", "assembly.motion",
+                "Motion study (drive a mate and scrub the mechanism)",
+                state.motionToolOpen);
+
+  Divider();
   CommandButton(state,
                 ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_asm_fit",
                 "view.fit", "Fit view");

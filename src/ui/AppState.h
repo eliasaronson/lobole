@@ -1051,6 +1051,10 @@ struct AppState {
   // front of each solved occurrence transform; the document is untouched.
   uint64_t activeExplodedView = 0; // 0 = none (normal display)
   float explodeFactor = 1.0f;
+  // The Exploded-views tool window is open. The view outlives it, the way the
+  // Section tool's cuts do: closing the window means done EDITING the
+  // explode, not done looking at it, so activeExplodedView is left alone.
+  bool explodeToolOpen = false;
 
   // Motion studies (G2): the panel's selection and scrub position, and the
   // results of runs, by study id. A result is a product of running, like a
@@ -1058,6 +1062,9 @@ struct AppState {
   // when the assembly tab changes underneath it (MotionActions).
   uint64_t activeMotionStudy = 0;
   float motionT = 0.0f;
+  // The Motion tool window is open. Like the explode window, closing it does
+  // not put the assembly back: the scrubbed pose is where you left it.
+  bool motionToolOpen = false;
   std::string motionAddRefusal; // why Add/Run refused, shown in the panel
   std::shared_ptr<collide::ExactContactCache> motionContacts;
   std::map<uint64_t, motion::Result> motionResults;

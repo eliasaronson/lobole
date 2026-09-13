@@ -56,7 +56,7 @@ they are sequenced, not one deferred.
   honored at `Document.cpp:133`, serialized at `Serialization.cpp:378`).
   Effective suppression during regen = the feature's authored `m_suppressed`
   **OR** the active config suppresses it.
-- **Surface**: a Configurations section in the Model dock (the StudyPanel
+- **Surface**: a Configurations panel, docked behind Model (the StudyPanel
   list+add+select shape), an active-config selector, and
   `add_configuration` / `remove_configuration` / `list_configurations` /
   `set_configuration` (overrides + suppression) / `set_active_configuration`
@@ -235,10 +235,14 @@ idempotent shape (`Command.cpp:131-184`, the Study command trio):
 The GUI edit helper mirrors `ModifyStudy` (`StudyPanel.cpp:26-37`): snapshot
 `ConfigurationToJson`, mutate a copy, execute the modify command.
 
-## 5. UI — a Configurations section in the Model dock
+## 5. UI — the Configurations panel
 
-Part-tab panel (`ImGui::Begin("Model")`, the StudyPanel shell), no new
-DocKind:
+Its own dock tab behind Model (`kPanelConfigurations`), no new DocKind. It is
+drawn on a part tab AND an assembly tab: a configuration is a named variant of
+the document either way, so both kinds browse and switch theirs in the same
+place (docs/ui/u15-assembly-panel.md). The assembly arm lists occurrence, mate
+and relation suppression plus the per-mate-DOF holds; the part arm is the
+parameter-override table below.
 
 - An **active-configuration selector** at the top (a combo: "Base" + each
   config), the `activeExplodedView`/`activeStudyId` transient-selection idiom

@@ -649,6 +649,24 @@ const std::vector<Command>& Table() {
         "assembly.fastener", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) { OpenFastenerTool(s); });
 
+    // The two viewport modes (docs/ui/u15-assembly-panel.md). Each replaces
+    // the other rather than stacking: they both place the occurrences, so the
+    // tool window's one-at-a-time slot is the behaviour, not a limitation.
+    add(
+        "assembly.explode", [](AppState& s) { return s.assembly != nullptr; },
+        [](AppState& s) {
+          s.explodeToolOpen = !s.explodeToolOpen;
+          if (s.explodeToolOpen)
+            s.motionToolOpen = false;
+        });
+    add(
+        "assembly.motion", [](AppState& s) { return s.assembly != nullptr; },
+        [](AppState& s) {
+          s.motionToolOpen = !s.motionToolOpen;
+          if (s.motionToolOpen)
+            s.explodeToolOpen = false;
+        });
+
     // Hide needs something picked — from the list or from the viewport, which
     // both land in the same selection. Show all is offered only when there is
     // something hidden to show, so the palette does not advertise a no-op.

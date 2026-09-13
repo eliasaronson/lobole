@@ -84,15 +84,6 @@ const char* MateTypeLabel(MateType t) {
   return "?";
 }
 
-// The name of the occurrence an id refers to (its label, else its part name).
-std::string OccLabel(const AppState& state, const AssemblyDocument& asmDoc,
-                     uint64_t occId) {
-  const Occurrence* o = asmDoc.FindById(occId);
-  if (!o)
-    return "(missing)";
-  return o->name.empty() ? PartNameById(state, o->partId) : o->name;
-}
-
 // The mate list and its selected-mate editor. The create/edit session's
 // controls (connector slot rows, flip, accept/cancel) live in the floating
 // Tool window (DrawMateToolWindow below, U7c).
@@ -191,21 +182,35 @@ void DrawMatesSection(AppState& state) {
     return;
   }
 
+  // The rows as listed, for a Shift range — the same gesture the occurrence
+  // and relation lists take (ListSelection.h), plus `clickClears`: the
+  // selected-mate editor below opens inside this panel and has nothing to
+  // close it with, so clicking the row again is what puts it away. Delete
+  // removes what is picked.
+  std::vector<uint64_t> mateOrder;
+  for (const Mate& mate : asmDoc.GetMates())
+    mateOrder.push_back(mate.id);
   for (const Mate& mate : asmDoc.GetMates()) {
-    ImGui::PushID(static_cast<int>(mate.id));
+    // The id goes in the LABEL, not a PushID(int) scope: an integer scope is
+    // not addressable as a path segment, so a row inside one cannot be
+    // clicked by name — the same fix the relation and exploded-view rows
+    // needed.
+    const std::string mid = std::to_string(mate.id);
     const std::string label =
         (mate.name.empty() ? std::string(MateTypeLabel(mate.type))
                            : mate.name) +
-        "  [" + MateTypeLabel(mate.type) + "]";
+        "  [" + MateTypeLabel(mate.type) + "]###mate_row_" + mid;
     if (!mate.error.empty()) {
       ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s", "(!)");
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", mate.error.c_str());
       ImGui::SameLine();
     }
-    if (ImGui::Selectable(label.c_str(), SelectedMateId(state) == mate.id))
-      SelectMate(state, mate.id);
-    ImGui::PopID();
+    if (ImGui::Selectable(
+            label.c_str(),
+            IsSelected(state, SelectionItem::Kind::Mate, mate.id)))
+      ListRowClicked(state, SelectionItem::Kind::Mate, mate.id, mateOrder,
+                     /*ownKindOnly=*/true, /*clickClears=*/true);
   }
 
   Mate* sel = SelectedMateId(state) ? asmDoc.FindMateById(SelectedMateId(state))
@@ -214,8 +219,9 @@ void DrawMatesSection(AppState& state) {
     return;
 
   ImGui::SeparatorText("Selected mate");
-  ImGui::Text("%s -> %s", OccLabel(state, asmDoc, sel->a.occurrenceId).c_str(),
-              OccLabel(state, asmDoc, sel->b.occurrenceId).c_str());
+  ImGui::Text("%s -> %s",
+              OccurrenceLabel(state, asmDoc, sel->a.occurrenceId).c_str(),
+              OccurrenceLabel(state, asmDoc, sel->b.occurrenceId).c_str());
 
   char name[128];
   std::snprintf(name, sizeof(name), "%s", sel->name.c_str());
@@ -302,13 +308,12 @@ void DrawMatesSection(AppState& state) {
   if (ImGui::Button("Edit connectors…"))
     StartMateEdit(state, sel->id);
 
-  if (ImGui::Button("Delete mate")) {
-    const uint64_t id = sel->id;
-    SnapshotAssembly(state);
-    asmDoc.RemoveMate(id);
-    SelectMate(state, 0);
-    SolveActiveAssembly(state);
-  }
+  // The same verb the Delete key runs, so a multi-mate selection removes as
+  // one step and the label says how many it will take (ListSelection.h).
+  const std::string del =
+      DeleteLabel(SelectedIds(state, SelectionItem::Kind::Mate).size(), "mate");
+  if (ImGui::Button((del + "###mate_delete").c_str()))
+    DeleteSelection(state);
 }
 
 // What the motion row shows while a run is in flight: how far in, how long
@@ -359,14 +364,26 @@ void DrawMotionProgress(BackgroundJob& job, int samples) {
 }
 } // namespace
 
+// The name of the occurrence an id refers to (its label, else its part name).
+// At ui:: scope, not in the anonymous namespace above: the Configurations
+// panel's assembly arm lists occurrences and has to name them the same way.
+std::string OccurrenceLabel(const AppState& state,
+                            const AssemblyDocument& asmDoc, uint64_t occId) {
+  const Occurrence* o = asmDoc.FindById(occId);
+  if (!o)
+    return "(missing)";
+  return o->name.empty() ? PartNameById(state, o->partId) : o->name;
+}
+
+namespace {
+
 // Motion studies (G2): the list, an Add that picks the first mate with a
 // degree of freedom, and for the active study a driver combo, a scrub
 // slider, Run (a background job) and the last result's verdict. The range
 // and sample count are edited over the RPC for now; a scrub is a look, not
 // an edit, and pushes no undo step (the explode slider's rule).
-void DrawMotionSection(AppState& state) {
+void DrawMotionBody(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
-  ImGui::SeparatorText("Motion");
   for (MotionStudy& s : asmDoc.GetMotionStudies()) {
     const bool active = state.activeMotionStudy == s.id;
     const std::string label = (s.name.empty() ? "(unnamed)" : s.name) +
@@ -547,15 +564,11 @@ void DrawMotionSection(AppState& state) {
   }
 }
 
-// The occurrence list + properties editor, drawn in the "Model" panel (where a
-// part tab shows its feature tree) when an assembly tab is active. Edits
-// snapshot for undo; a drag is one undo step (snapshot on IsItemActivated).
 // Exploded views (A4): persistent named views; the ACTIVE one + factor are
 // transient display state. Activating (or sliding the factor) never touches
 // the document — the offset composes into rendered transforms only.
-void DrawExplodedSection(AppState& state) {
+void DrawExplodeBody(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
-  ImGui::SeparatorText("Exploded views");
 
   // "None" + one selectable per view; the active one drives the display.
   if (ImGui::Selectable("None##explode", state.activeExplodedView == 0)) {
@@ -623,171 +636,38 @@ void DrawExplodedSection(AppState& state) {
   }
 }
 
-// Bill of materials (A4): derived rows per referenced part. The mass math
-// (OCC volume properties per body) is not per-frame cheap, so the table is
-// Assembly configurations (C4, v101): named variants that suppress
-// occurrences, mates and relations and hold mate DOFs. The active selector
-// switches the shown variant — and re-solves, which is what applies it; the
-// active config's editor is a suppression checklist per kind plus a "hold"
-// per mate DOF.
-void DrawConfigsSection(AppState& state) {
-  AssemblyDocument& asmDoc = *state.assembly;
-  ImGui::SeparatorText("Configurations");
-  const uint64_t active = asmDoc.ActiveConfiguration();
+} // namespace
 
-  if (ImGui::Selectable("Base (all shown)", active == 0)) {
-    SnapshotAssembly(state);
-    asmDoc.SetActiveConfiguration(0);
-    SolveActiveAssembly(state);
-  }
-  for (const Configuration& c : asmDoc.GetConfigurations()) {
-    ImGui::PushID(1000 + static_cast<int>(c.id));
-    if (ImGui::Selectable(c.name.c_str(), active == c.id)) {
-      SnapshotAssembly(state);
-      asmDoc.SetActiveConfiguration(c.id);
-      SolveActiveAssembly(state);
-    }
-    ImGui::PopID();
-  }
-  if (ImGui::Button("+ Add configuration")) {
-    SnapshotAssembly(state);
-    const uint64_t id = asmDoc.AddConfiguration().id;
-    asmDoc.SetActiveConfiguration(id);
-    SolveActiveAssembly(state);
-  }
-
-  Configuration* cfg = asmDoc.FindConfiguration(active);
-  if (!cfg)
-    return; // base
-
-  char nm[128];
-  std::snprintf(nm, sizeof(nm), "%s", cfg->name.c_str());
-  if (ImGui::InputText("Config name", nm, sizeof(nm),
-                       ImGuiInputTextFlags_EnterReturnsTrue)) {
-    SnapshotAssembly(state);
-    asmDoc.FindConfiguration(active)->name = nm;
-    asmDoc.BumpVersion();
-  }
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Delete##cfg")) {
-    SnapshotAssembly(state);
-    asmDoc.RemoveConfiguration(active);
-    SolveActiveAssembly(state);
-    return;
-  }
-  ImGui::TextUnformatted("Suppressed occurrences");
-  for (const Occurrence& o : asmDoc.GetOccurrences()) {
-    bool sup = cfg->Suppresses(o.id);
-    ImGui::PushID(2000 + static_cast<int>(o.id));
-    if (ImGui::Checkbox(OccLabel(state, asmDoc, o.id).c_str(), &sup)) {
-      SnapshotAssembly(state);
-      auto& v = asmDoc.FindConfiguration(active)->suppressedFeatures;
-      v.erase(std::remove(v.begin(), v.end(), o.id), v.end());
-      if (sup)
-        v.push_back(o.id);
-      asmDoc.BumpVersion();
-      SolveActiveAssembly(state);
-    }
-    ImGui::PopID();
-  }
-
-  // Mates: out of the solve, or a DOF held at the configuration's own value
-  // (radians shown as degrees, offsets in mm). A hold starts at the mate's
-  // current value, so ticking it moves nothing until the value is edited.
-  bool changed = false;
-  if (!asmDoc.GetMates().empty())
-    ImGui::TextUnformatted("Mates");
-  for (const Mate& mt : asmDoc.GetMates()) {
-    const std::string sid = std::to_string(mt.id);
-    ImGui::PushID(("cfg_mate_" + sid).c_str());
-    Configuration& c = *asmDoc.FindConfiguration(active);
-    bool sup = c.SuppressesMate(mt.id);
-    const std::string label =
-        (mt.name.empty() ? std::string("Mate") : mt.name) + " " + sid +
-        "###cfg_mate_sup_" + sid;
-    if (ImGui::Checkbox(label.c_str(), &sup)) {
-      SnapshotAssembly(state);
-      auto& v = asmDoc.FindConfiguration(active)->suppressedMates;
-      v.erase(std::remove(v.begin(), v.end(), mt.id), v.end());
-      if (sup)
-        v.push_back(mt.id);
-      changed = true;
-    }
-    const auto holdRow = [&](bool rotation) {
-      Configuration& cc = *asmDoc.FindConfiguration(active);
-      auto it =
-          std::find_if(cc.mateOverrides.begin(), cc.mateOverrides.end(),
-                       [&](const MateOverride& o) { return o.mate == mt.id; });
-      std::optional<float>* slot =
-          it == cc.mateOverrides.end()
-              ? nullptr
-              : (rotation ? &it->rotation : &it->offset);
-      bool held = slot != nullptr && slot->has_value();
-      ImGui::SameLine();
-      const std::string hid = std::string(rotation ? "turn" : "slide") +
-                              "###cfg_hold_" + (rotation ? "r_" : "o_") + sid;
-      if (ImGui::Checkbox(hid.c_str(), &held)) {
-        SnapshotAssembly(state);
-        if (held) {
-          if (it == cc.mateOverrides.end()) {
-            cc.mateOverrides.push_back({mt.id, std::nullopt, std::nullopt});
-            it = cc.mateOverrides.end() - 1;
-          }
-          (rotation ? it->rotation : it->offset) =
-              rotation ? mt.rotation : mt.offset;
-        } else if (it != cc.mateOverrides.end()) {
-          (rotation ? it->rotation : it->offset).reset();
-          if (!it->rotation && !it->offset)
-            cc.mateOverrides.erase(it);
-        }
-        changed = true;
-        return;
-      }
-      if (held) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80.0f);
-        // An ExprInput field, not a raw DragFloat: a typed "90/4" must
-        // evaluate, not sscanf to 90 (test_conventions.cpp).
-        double v = rotation ? angles::ToDegrees(**slot) : **slot;
-        const std::string vid =
-            std::string("###cfg_hold_v") + (rotation ? "r_" : "o_") + sid;
-        if (ExprDragDouble(state, vid.c_str(), &v, rotation ? 1.0f : 0.05f, 0.0,
-                           0.0, rotation ? "%.2f deg" : "%.3f mm")) {
-          SnapshotAssembly(state);
-          *slot = static_cast<float>(rotation ? angles::ToRadians(v) : v);
-          changed = true;
-        }
-      }
-    };
-    if (assembly::MateHasDof(mt.type, MateDof::Rotation))
-      holdRow(true);
-    if (mt.type != MateType::Fastened && mt.type != MateType::Ball)
-      holdRow(false);
-    ImGui::PopID();
-  }
-  if (!asmDoc.GetRelations().empty())
-    ImGui::TextUnformatted("Relations");
-  for (const Relation& rel : asmDoc.GetRelations()) {
-    const std::string sid = std::to_string(rel.id);
-    bool sup = asmDoc.FindConfiguration(active)->SuppressesRelation(rel.id);
-    const std::string label =
-        (rel.name.empty() ? std::string("Relation") : rel.name) + " " + sid +
-        "###cfg_rel_sup_" + sid;
-    if (ImGui::Checkbox(label.c_str(), &sup)) {
-      SnapshotAssembly(state);
-      auto& v = asmDoc.FindConfiguration(active)->suppressedRelations;
-      v.erase(std::remove(v.begin(), v.end(), rel.id), v.end());
-      if (sup)
-        v.push_back(rel.id);
-      changed = true;
-    }
-  }
-  if (changed) {
-    asmDoc.BumpVersion();
-    SolveActiveAssembly(state);
-  }
+// Exploded views and Motion are the assembly's two VIEWPORT MODES: each poses
+// the occurrences and is driven with a slider or a drag gizmo while you watch
+// the model. They used to be two more sections in the Model dock, scrolled
+// off under the occurrence tree that they were moving
+// (docs/ui/u15-assembly-panel.md). The one-at-a-time tool slot is the right
+// home twice over — it puts the controls over the thing they move, and it
+// makes the two mutually exclusive, which they have to be: both place the
+// same occurrences.
+void DrawExplodeToolWindow(AppState& state) {
+  BeginToolWindowFrame(state, "Exploded view");
+  DrawExplodeBody(state);
+  ImGui::Separator();
+  // Close, not Esc — the Section tool's rule, and for its reason: the window
+  // is a way in to a display state that outlives it.
+  if (ImGui::Button("Close###explode_close"))
+    state.explodeToolOpen = false;
+  ImGui::End();
 }
 
+void DrawMotionToolWindow(AppState& state) {
+  BeginToolWindowFrame(state, "Motion");
+  DrawMotionBody(state);
+  ImGui::Separator();
+  if (ImGui::Button("Close###motion_close"))
+    state.motionToolOpen = false;
+  ImGui::End();
+}
+
+// Bill of materials (A4): derived rows per referenced part. The mass math
+// (OCC volume properties per body) is not per-frame cheap, so the table is
 // cached and recomputed only when the assembly or a referenced part changed.
 // A mass a 40 px column can hold. The BOM printed raw grams — a 385 kg dock
 // totalled "385169.06" — and an ImGui table cell CLIPS rather than elides, so
@@ -1008,6 +888,9 @@ void DrawBomSection(AppState& state) {
   }
 }
 
+// The occurrence list + properties editor, drawn in the "Model" panel (where a
+// part tab shows its feature tree) when an assembly tab is active. Edits
+// snapshot for undo; a drag is one undo step (snapshot on IsItemActivated).
 void DrawOccurrencePanel(AppState& state) {
   ImGui::Begin(kPanelModel);
   PanelHeading(kPanelModel);
@@ -1210,9 +1093,6 @@ void DrawOccurrencePanel(AppState& state) {
 
   DrawMatesSection(state);
   DrawRelationsSection(state);
-  DrawConfigsSection(state);
-  DrawExplodedSection(state);
-  DrawMotionSection(state);
   DrawBomSection(state);
 
   ImGui::End();
@@ -1241,7 +1121,7 @@ void DrawMateToolWindow(AppState& state) {
   const auto connLabel = [&](const Connector& c, bool have) -> std::string {
     if (!have || c.occurrenceId == 0)
       return "";
-    std::string s = OccLabel(state, asmDoc, c.occurrenceId);
+    std::string s = OccurrenceLabel(state, asmDoc, c.occurrenceId);
     if (c.anchor.frameId != 0) { // v86: the mate as designed, by name
       std::string fname = "frame " + std::to_string(c.anchor.frameId);
       if (const Occurrence* o = asmDoc.FindById(c.occurrenceId))

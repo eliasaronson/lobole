@@ -296,6 +296,12 @@ const Binding kDefaults[] = {
     {"assembly.fastener", Context::Assembly, "Fastener (pick a hole's rim)",
      "Standard parts", "F"},
 
+    // The two viewport modes (docs/ui/u15-assembly-panel.md). "X" for the
+    // explode, "M" for motion; both open the floating tool window, and each
+    // closes the other because both place the occurrences.
+    {"assembly.explode", Context::Assembly, "Exploded view", "Tools", "X"},
+    {"assembly.motion", Context::Assembly, "Motion study", "Tools", "M"},
+
     // Display only — hiding a part does not suppress it, so nothing moves.
     // One key for both directions (it shows what it hid), and Shift+H for
     // the way back when the hidden row is off the bottom of the list.

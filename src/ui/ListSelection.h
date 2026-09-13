@@ -26,8 +26,15 @@ namespace ui {
 // `ownKindOnly`: a plain click clears only items of this kind (an
 // occurrence click keeps the selected mate, the assembly panel's rule) or
 // the whole selection (a feature click drops picked faces, the tree's rule).
+// `clickClears`: a plain click on the row that IS the whole selection of its
+// kind clears it. For a list whose selected row opens an editor INSIDE the
+// panel, with nothing to close: the row you just clicked is where a person
+// aims to put it away, and it is the only affordance there. Off by default,
+// because most lists auto-select what they just created — clicking the row
+// to confirm what you are looking at must not make it vanish.
 void ListRowClicked(AppState& state, SelectionItem::Kind kind, uint64_t id,
-                    const std::vector<uint64_t>& order, bool ownKindOnly);
+                    const std::vector<uint64_t>& order, bool ownKindOnly,
+                    bool clickClears = false);
 
 // A row was right-clicked for its context menu. Inside the selection it
 // stays — collapsing to the clicked row is how a five-part selection is lost

@@ -125,7 +125,7 @@ bool IsOccurrenceSelected(const AppState& state, uint64_t occId) {
   return state.selection.Has({SelectionItem::Kind::Occurrence, occId, {}});
 }
 
-int DeleteSelectedOccurrences(AppState& state) {
+int DeleteSelectedOccurrences(AppState& state, bool takeSnapshot) {
   // One snapshot and one solve for the whole batch: undoing a five-part
   // deletion should be one Ctrl+Z, not five, and re-solving between removals
   // would run the mate solver against half-deleted state.
@@ -134,7 +134,8 @@ int DeleteSelectedOccurrences(AppState& state) {
   const std::vector<uint64_t> doomed = SelectedOccurrenceIds(state);
   if (doomed.empty())
     return 0;
-  SnapshotAssembly(state);
+  if (takeSnapshot)
+    SnapshotAssembly(state);
   int removed = 0;
   for (const uint64_t id : doomed) {
     // Whatever rides on it goes with it. A screw whose plate is gone is not a

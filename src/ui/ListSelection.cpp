@@ -45,7 +45,8 @@ std::vector<uint64_t> SelectedIds(const AppState& state,
 }
 
 void ListRowClicked(AppState& state, SelectionItem::Kind kind, uint64_t id,
-                    const std::vector<uint64_t>& order, bool ownKindOnly) {
+                    const std::vector<uint64_t>& order, bool ownKindOnly,
+                    bool clickClears) {
   const ImGuiIO& io = ImGui::GetIO();
   Selection& sel = state.selection;
   uint64_t& anchor = Anchor(state, kind);
@@ -75,6 +76,15 @@ void ListRowClicked(AppState& state, SelectionItem::Kind kind, uint64_t id,
   if (io.KeyCtrl) {
     sel.Toggle(Item(kind, id));
     anchor = id;
+    return;
+  }
+  // Clicking the row that IS the whole selection clears it, where the list
+  // asked for that (see the header). Clicking ONE row of a multi-row
+  // selection still collapses to that row — the gesture people use to narrow
+  // a selection down — so only the single-row case toggles.
+  if (clickClears && SelectedIds(state, kind) == std::vector<uint64_t>{id}) {
+    EraseKind(sel, kind);
+    anchor = 0;
     return;
   }
   if (ownKindOnly)
@@ -130,8 +140,31 @@ int DeleteSelection(AppState& state) {
     EraseKind(state.selection, SelectionItem::Kind::Feature);
     return static_cast<int>(n);
   }
-  if (state.assembly)
-    return DeleteSelectedOccurrences(state);
+  if (state.assembly) {
+    // Mates are a list in this panel like any other, so Delete reaches them
+    // too — it used to reach only occurrences, which left the row's own
+    // "Delete mate" button as the single way to remove one.
+    //
+    // Both kinds go, in ONE undo step. An occurrence click deliberately keeps
+    // the selected mate (the assembly panel's rule), so the two selections
+    // coexist routinely, and picking one of them to honour would mean Delete
+    // silently ignored something the panel was showing as selected. What the
+    // two lists show picked is what Delete takes.
+    const std::vector<uint64_t> mates =
+        SelectedIds(state, SelectionItem::Kind::Mate);
+    if (mates.empty())
+      return DeleteSelectedOccurrences(state);
+    SnapshotAssembly(state);
+    int removed = 0;
+    for (const uint64_t id : mates)
+      if (state.assembly->RemoveMate(id))
+        removed++;
+    EraseKind(state.selection, SelectionItem::Kind::Mate);
+    removed += DeleteSelectedOccurrences(state, /*takeSnapshot=*/false);
+    if (removed > 0)
+      SolveActiveAssembly(state); // the parts a mate held are free again
+    return removed;
+  }
   if (state.job)
     return RemoveCamOperations(
         state, SelectedIds(state, SelectionItem::Kind::Operation));

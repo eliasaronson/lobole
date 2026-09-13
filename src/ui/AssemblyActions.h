@@ -148,7 +148,10 @@ void StartMateEdit(AppState& state, uint64_t mateId);
 // Remove every selected occurrence. Returns how many went. One undo snapshot
 // and one solve for the batch. The list's click gesture (Ctrl/Shift) and the
 // Delete key reach this through ListSelection.h.
-int DeleteSelectedOccurrences(AppState& state);
+// `takeSnapshot` false when the CALLER has already snapshotted: Delete on an
+// assembly tab can remove mates and occurrences together, and two snapshots
+// would make that two Ctrl+Z presses for one press of Delete.
+int DeleteSelectedOccurrences(AppState& state, bool takeSnapshot = true);
 
 // Show/hide occurrences — the display flag every renderer, the BOM and the
 // mass total already read (`Occurrence::visible`), NOT a suppression: a

@@ -375,7 +375,7 @@ sweeps every occurrence pair; the result is transient, like a FEM result.
 The surface is `add_motion_study` / `set_motion_study` /
 `remove_motion_study` / `list_motion_studies` / `run_motion_study` (sync or
 `async` on the A3 registry) / `motion_status` / `set_motion_pose` /
-`export_motion`, plus a panel section with a scrub slider and Run — which
+`export_motion`, plus a Motion tool window with a scrub slider and Run — which
 becomes a `sample N / M` progress bar and a Cancel while a run is in flight,
 the verdict from the previous run staying up beneath it.
 

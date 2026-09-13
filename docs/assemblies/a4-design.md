@@ -214,8 +214,11 @@ exploded view is active, the occurrence gizmo (translate arrows only) writes
 that *is* the explode step. Mated occurrences explode too (explode overrides
 the visual pose; the solve is untouched underneath). An **Auto-explode**
 button seeds offsets radially from the assembly centroid (distance scaled by
-bounding-box size) as a starting point. Panel: an Exploded Views section
-(list, add/rename/delete, factor slider, per-view activate).
+bounding-box size) as a starting point. Surface: an Exploded view tool window
+(list, add/rename/delete, factor slider, per-view activate), opened from the
+assembly toolbar — it poses the occurrences from a slider and a drag gizmo, so
+it floats over the model rather than scrolling under the occurrence tree it is
+moving (docs/ui/u15-assembly-panel.md).
 
 **Format v27** (the only A4 bump), additive per the F3 discipline:
 

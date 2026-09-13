@@ -2,8 +2,10 @@
 
 #include "ui/AppState.h"
 
-// The assembly panel (occurrences, mates, exploded views, BOM)
-// and the mate tool window.
+#include <string>
+
+// The assembly panel (occurrences, mates, relations, BOM), the mate tool
+// window, and the two assembly viewport modes that float over the model.
 //
 // Split out of ui/AppActions.h, which had grown to ~180 declarations spanning
 // every domain in the app and is included by 40 translation units — so every
@@ -19,5 +21,20 @@ void DrawMateToolWindow(AppState& state);
 // The occurrence list + properties editor for an active assembly tab (drawn
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);
+
+// The assembly's two viewport MODES, drawn in the floating tool window rather
+// than in the Model dock (docs/ui/u15-assembly-panel.md): both pose the
+// occurrences and are driven with a slider or a drag gizmo, so they belong
+// over the model they are moving. Called from DrawToolWindow, which gives
+// them the one-at-a-time slot — an exploded view and a motion study placing
+// the same occurrences at once has no meaning.
+void DrawExplodeToolWindow(AppState& state);
+void DrawMotionToolWindow(AppState& state);
+
+// The name of the occurrence an id refers to (its label, else its part name).
+// Shared with the Configurations panel, whose assembly arm lists occurrences
+// by the same name this panel does.
+std::string OccurrenceLabel(const AppState& state,
+                            const AssemblyDocument& asmDoc, uint64_t occId);
 
 } // namespace ui

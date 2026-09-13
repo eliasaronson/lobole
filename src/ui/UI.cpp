@@ -833,12 +833,18 @@ void DrawUI(AppState& state) {
     } else {
       DrawFeatureTreePanel(state);
     }
-    DrawConfigurationsPanel(state);
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
   }
+  // Outside the tab-kind branch, like Variables and the history: a
+  // configuration is a named variant of the document, and a part and an
+  // assembly browse and switch theirs the same way. This was part-only, and
+  // that is the whole reason an assembly's configurations were re-implemented
+  // as a section of the occurrence panel while this tab sat empty beside it
+  // (docs/ui/u15-assembly-panel.md). The panel itself picks the arm.
+  DrawConfigurationsPanel(state);
   // Variables spans the whole project, so it is drawn on every kind of tab.
   // It was inside the part-only branch above until 2026-09-01, and that is
   // the same defect that made File > Save a silent no-op outside a part tab:

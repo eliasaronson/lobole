@@ -319,7 +319,22 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     for (const Occurrence& o : s_App->assembly->GetOccurrences())
       before.push_back(o.position);
 
-    ctx->ItemClick("//###Model/###explode_add");
+    // The explode controls are a floating tool window now, opened from the
+    // assembly toolbar (docs/ui/u15-assembly-panel.md).
+    ToolbarClick(ctx, "###tb_asm_explode");
+    ctx->Yield(2);
+    IM_CHECK(s_App->explodeToolOpen);
+    // One slot, two modes: both place the occurrences, so opening Motion
+    // TAKES the window rather than stacking a second set of controls over
+    // the model.
+    ToolbarClick(ctx, "###tb_asm_motion");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->explodeToolOpen);
+    IM_CHECK(!ctx->ItemExists("//Exploded view###ToolWindow/###explode_add"));
+    ToolbarClick(ctx, "###tb_asm_explode");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->motionToolOpen);
+    ctx->ItemClick("//Exploded view###ToolWindow/###explode_add");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->assembly->GetExplodedViews().size(), (size_t)1);
     const uint64_t viewId = s_App->assembly->GetExplodedViews()[0].id;
@@ -327,9 +342,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // "Auto-explode" and "Delete view" shared a SameLine that ran past the
     // panel edge, so the second of them could not be clicked at all.
-    IM_CHECK(ctx->ItemExists("//###Model/###explode_auto"));
-    IM_CHECK(ctx->ItemExists("//###Model/###explode_delete"));
-    ctx->ItemClick("//###Model/###explode_auto");
+    IM_CHECK(ctx->ItemExists("//Exploded view###ToolWindow/###explode_auto"));
+    IM_CHECK(ctx->ItemExists("//Exploded view###ToolWindow/###explode_delete"));
+    ctx->ItemClick("//Exploded view###ToolWindow/###explode_auto");
     ctx->Yield(3);
 
     const ExplodedView* view = s_App->assembly->FindExplodedViewById(viewId);
@@ -346,15 +361,31 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // A view selectable used to sit in a PushID(int) scope, so no test could
     // pick one; naming it is what makes this reachable.
-    ctx->ItemClick(
-        ("//###Model/###explode_view_" + std::to_string(viewId)).c_str());
+    ctx->ItemClick(("//Exploded view###ToolWindow/###explode_view_" +
+                    std::to_string(viewId))
+                       .c_str());
     ctx->Yield();
     IM_CHECK_EQ(s_App->activeExplodedView, viewId);
 
-    ctx->ItemClick("//###Model/###explode_delete");
+    // Closing the window is not undoing the explode: the view outlives it,
+    // the way the Section tool's cuts do. Re-select it, close, and check it
+    // is still what the viewport is drawing.
+    ctx->ItemClick(("//Exploded view###ToolWindow/###explode_view_" +
+                    std::to_string(viewId))
+                       .c_str());
+    ctx->ItemClick("//Exploded view###ToolWindow/###explode_close");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->explodeToolOpen);
+    IM_CHECK_EQ(s_App->activeExplodedView, viewId);
+
+    ToolbarClick(ctx, "###tb_asm_explode");
+    ctx->Yield(2);
+    ctx->ItemClick("//Exploded view###ToolWindow/###explode_delete");
     ctx->Yield(2);
     IM_CHECK(s_App->assembly->GetExplodedViews().empty());
     IM_CHECK_EQ(s_App->activeExplodedView, (uint64_t)0);
+    ctx->ItemClick("//Exploded view###ToolWindow/###explode_close");
+    ctx->Yield(2);
   };
 
   // G2: a motion study from the panel — Add picks the first mate with a
@@ -367,8 +398,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
                        "an_assembly_configuration_by_clicking");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // An assembly configuration suppresses a relation and a mate and HOLDS
-    // a mate's turn (v101), all from the Model panel — and the solve follows
-    // each click, and the base comes back untouched.
+    // a mate's turn (v101), all from the Configurations tab — the same one a
+    // part's configurations use — and the solve follows each click, and the
+    // base comes back untouched.
     ctx->SetRef("//##MainMenuBar");
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
@@ -421,7 +453,16 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       return glm::angle(o->orientation) * (o->orientation.z < 0 ? -1.0f : 1.0f);
     };
 
-    ctx->ItemClick("//###Model/+ Add configuration");
+    // Assembly configurations share the Configurations tab with a part's,
+    // rather than being a section of the occurrence panel
+    // (docs/ui/u15-assembly-panel.md).
+    {
+      ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelConfigurations);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    }
+    ctx->ItemClick("//###Configurations/+ Add configuration");
     ctx->Yield(2);
     IM_CHECK_EQ(a.GetConfigurations().size(), (size_t)1);
     const uint64_t cfg = a.GetConfigurations()[0].id;
@@ -429,11 +470,11 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // Suppress the relation, then hold ArmA's turn at 90 degrees.
     ctx->ItemClick(
-        ("//###Model/###cfg_rel_sup_" + std::to_string(rel)).c_str());
+        ("//###Configurations/###cfg_rel_sup_" + std::to_string(rel)).c_str());
     ctx->Yield(2);
     IM_CHECK(a.FindConfiguration(cfg)->SuppressesRelation(rel));
     const std::string scope =
-        "//###Model/cfg_mate_" + std::to_string(axleA) + "/";
+        "//###Configurations/cfg_mate_" + std::to_string(axleA) + "/";
     ctx->ItemClick((scope + "###cfg_hold_r_" + std::to_string(axleA)).c_str());
     ctx->Yield(2);
     IM_CHECK(a.FindConfiguration(cfg)->OverrideForMate(axleA) != nullptr);
@@ -451,18 +492,25 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // Take ArmB's mate out of the solve.
     const std::string scopeB =
-        "//###Model/cfg_mate_" + std::to_string(axleB) + "/";
+        "//###Configurations/cfg_mate_" + std::to_string(axleB) + "/";
     ctx->ItemClick(
         (scopeB + "###cfg_mate_sup_" + std::to_string(axleB)).c_str());
     ctx->Yield(2);
     IM_CHECK(a.MateSuppressed(axleB));
 
     // Back to base: every authored value, nothing held.
-    ctx->ItemClick("//###Model/Base (all shown)");
+    ctx->ItemClick("//###Configurations/Base (all shown)");
     ctx->Yield(3);
     IM_CHECK_EQ(a.ActiveConfiguration(), (uint64_t)0);
     IM_CHECK(std::abs(zTurn(armA)) < 1e-3f);
     IM_CHECK(!a.MateSuppressed(axleB));
+    // Leave the dock as the next test expects to find it.
+    {
+      ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelModel);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    }
   };
 
   t = IM_REGISTER_TEST(engine, "assembly", "a_motion_study_scrubs_and_runs");
@@ -505,7 +553,12 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ui::SolveActiveAssembly(*s_App);
     ctx->Yield(3);
 
-    ctx->ItemClick("//###Model/###motion_add");
+    // Motion is a floating tool window now, opened from the assembly toolbar
+    // (docs/ui/u15-assembly-panel.md).
+    ToolbarClick(ctx, "###tb_asm_motion");
+    ctx->Yield(2);
+    IM_CHECK(s_App->motionToolOpen);
+    ctx->ItemClick("//Motion###ToolWindow/###motion_add");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->assembly->GetMotionStudies().size(), (size_t)1);
     const MotionStudy& study = s_App->assembly->GetMotionStudies()[0];
@@ -515,12 +568,12 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->activeMotionStudy, study.id);
 
     // The scrub drives the mate to the middle of its range.
-    ctx->ItemInputValue("//###Model/###motion_t", 0.5f);
+    ctx->ItemInputValue("//Motion###ToolWindow/###motion_t", 0.5f);
     ctx->Yield(2);
     IM_CHECK(std::abs(s_App->assembly->FindMateById(axle)->rotation -
                       3.14159265f) < 1e-3f);
 
-    ctx->ItemClick("//###Model/###motion_preview");
+    ctx->ItemClick("//Motion###ToolWindow/###motion_preview");
     for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, study.id) == nullptr;
          i++)
       ctx->Yield();
@@ -528,7 +581,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::MotionResultFor(*s_App, study.id)->checkedClashes);
 
     // Run: a job; wait for it to land (a two-body turn is milliseconds).
-    ctx->ItemClick("//###Model/###motion_run");
+    ctx->ItemClick("//Motion###ToolWindow/###motion_run");
     for (int i = 0;
          i < 600 && (!ui::MotionResultFor(*s_App, study.id)->checkedClashes ||
                      ui::MotionResultStale(*s_App, study.id));
@@ -562,37 +615,42 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       // The three buttons are REPLACED, not disabled: a disabled item is
       // invisible to this engine (the F8 round's main-menu trap), so "gone"
       // is the only state a test can tell apart from "there".
-      IM_CHECK(ctx->ItemExists("//###Model/###motion_cancel"));
-      IM_CHECK(!ctx->ItemExists("//###Model/###motion_run"));
-      IM_CHECK(!ctx->ItemExists("//###Model/###motion_preview"));
-      IM_CHECK(!ctx->ItemExists("//###Model/###motion_delete"));
+      IM_CHECK(ctx->ItemExists("//Motion###ToolWindow/###motion_cancel"));
+      IM_CHECK(!ctx->ItemExists("//Motion###ToolWindow/###motion_run"));
+      IM_CHECK(!ctx->ItemExists("//Motion###ToolWindow/###motion_preview"));
+      IM_CHECK(!ctx->ItemExists("//Motion###ToolWindow/###motion_delete"));
       // The previous verdict stays up underneath — an early return here once
       // hid the result StartMotionRun deliberately keeps.
       IM_CHECK(ui::MotionResultFor(*s_App, study.id) != nullptr);
 
       // Cancel is a request: the button sets the flag the worker reads.
       IM_CHECK(!job.cancel.load());
-      ctx->ItemClick("//###Model/###motion_cancel");
+      ctx->ItemClick("//Motion###ToolWindow/###motion_cancel");
       ctx->Yield();
       IM_CHECK(job.cancel.load());
       // ...and having asked, it stops offering: the button stays in place
       // (so the row does not jump) but goes disabled, because a second
       // request means nothing and a button that keeps accepting clicks
       // reads as one that did not work.
-      IM_CHECK((ctx->ItemInfo("//###Model/###motion_cancel").ItemFlags &
-                ImGuiItemFlags_Disabled) != 0);
+      IM_CHECK(
+          (ctx->ItemInfo("//Motion###ToolWindow/###motion_cancel").ItemFlags &
+           ImGuiItemFlags_Disabled) != 0);
 
       job.done.store(true); // no thread to join; let the registry reap it
       for (int i = 0; i < 60 && ui::BackgroundJobRunning(*s_App, "motion"); i++)
         ctx->Yield();
       IM_CHECK(!ui::BackgroundJobRunning(*s_App, "motion"));
-      IM_CHECK(ctx->ItemExists("//###Model/###motion_run")); // buttons back
+      IM_CHECK(ctx->ItemExists(
+          "//Motion###ToolWindow/###motion_run")); // buttons back
     }
 
-    ctx->ItemClick("//###Model/###motion_delete");
+    ctx->ItemClick("//Motion###ToolWindow/###motion_delete");
     ctx->Yield(2);
     IM_CHECK(s_App->assembly->GetMotionStudies().empty());
     IM_CHECK_EQ(s_App->activeMotionStudy, (uint64_t)0);
+    ctx->ItemClick("//Motion###ToolWindow/###motion_close");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->motionToolOpen);
   };
 
   // U13d: a row too long for the dock elides and can still be READ. ImGui
@@ -969,6 +1027,62 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // Kind-scoped, as a mate's selection is: picking a relation does not
     // drop the part you had selected with it.
     IM_CHECK_EQ(ui::SelectedOccurrenceId(*s_App), occs[1]);
+  };
+
+  // A mate row is a LIST row like any other now: clicking the selected one
+  // clears it (which is how the editor underneath goes away), and Delete
+  // removes what is picked. Both were missing — a mate could only be put
+  // away by selecting a different one, and only deleted from its own button.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_mate_row_closes_and_deletes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Mated");
+    ui::SetActivePart(*s_App, asmIdx);
+    uint64_t occs[2] = {0, 0};
+    for (int i = 0; i < 2; i++) {
+      Occurrence o;
+      o.name = i == 0 ? "A" : "B";
+      o.partId = s_App->parts[0].id;
+      o.fixed = i == 0;
+      occs[i] = s_App->assembly->AddOccurrence(o);
+    }
+    Mate axle;
+    axle.type = MateType::Revolute;
+    axle.a.occurrenceId = occs[0];
+    axle.a.anchor.origin = true;
+    axle.b.occurrenceId = occs[1];
+    axle.b.anchor.origin = true;
+    axle.flipped = false;
+    const uint64_t mateId = s_App->assembly->AddMate(axle);
+    ctx->Yield(3);
+    const std::string row = "//###Model/###mate_row_" + std::to_string(mateId);
+
+    // Click: selected, and the editor for it appears.
+    ctx->ItemClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::SelectedMateId(*s_App), mateId);
+    IM_CHECK(ctx->ItemExists("//###Model/###mate_delete"));
+
+    // Click the same row again: cleared, and the editor goes with it.
+    ctx->ItemClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::SelectedMateId(*s_App), (uint64_t)0);
+    IM_CHECK(!ctx->ItemExists("//###Model/###mate_delete"));
+
+    // Delete takes the selected mate — it used to reach occurrences only, so
+    // this key did nothing at all with a mate picked.
+    ctx->ItemClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->MateCount(), (size_t)1);
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->assembly->MateCount(), (size_t)0);
+    IM_CHECK_EQ(ui::SelectedMateId(*s_App), (uint64_t)0);
+    // The parts it held are still there: deleting a mate frees them, it does
+    // not take them with it.
+    IM_CHECK_EQ(s_App->assembly->OccurrenceCount(), (size_t)2);
   };
 
   // Refine's whole point is the seam a boolean leaves behind: count the

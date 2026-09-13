@@ -121,6 +121,11 @@ void ResetAppForTest() {
   // app clears on its own (a job outlives the window that made it, by
   // design). Its overlays draw over the viewport the next test clicks in.
   s_App->camToolOpen = false;
+  // The assembly's viewport modes are tool windows over the viewport the next
+  // test clicks in — the same leak as the CAM one below, and it showed up the
+  // same way: a rim pick and a section-arrow drag that hit a window instead.
+  s_App->explodeToolOpen = false;
+  s_App->motionToolOpen = false;
   s_App->camVerb = ui::AppState::CamVerb::None;
   s_App->camVerbOp = 0;
   s_App->camVerbTool = 0;
