@@ -1306,6 +1306,107 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->commands->CanUndo());
   };
 
+  // ONE drag polarity across the app: snap is the DEFAULT and Ctrl frees it.
+  // This handle used to mean the opposite by Ctrl — fine by default, coarse
+  // while held — so "Ctrl frees the snap" was true on an assembly tab and
+  // backwards on a part tab. Both halves of the contract are asserted here,
+  // from the SAME mouse positions, so the only difference is the modifier.
+  t = IM_REGISTER_TEST(engine, "handles", "a_preview_handle_snaps_unless_ctrl");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddRectangle({3, 0}, {5, 2}); // off the axis, or the arc collapses
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_sk_revolve");
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+
+    std::vector<PrimVertex> decor;
+    s_App->viewportHandles.clear();
+    ui::BuildPreviewHandleOverlay(*s_App, decor);
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)1);
+    const ui::ViewportHandle arc = s_App->viewportHandles[0];
+    const glm::vec3 centre = arc.origin, axis = arc.dir;
+    const float radius = arc.length;
+    IM_CHECK(radius > 0.1f);
+    const glm::vec3 b1 = ui::PerpTo(axis), b2 = glm::cross(axis, b1);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(centre + axis * (radius * 6.0f) +
+                               b1 * (radius * 0.5f));
+    ctx->Yield(2);
+
+    const auto at = [&](float deg) {
+      const float a = glm::radians(deg);
+      return centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius;
+    };
+    // No IM_CHECK inside these: the macro expands to a bare `return`, which
+    // a lambda yielding a double cannot take.
+    const auto angleNow = [&]() -> double {
+      auto* r =
+          dynamic_cast<RevolveFeature*>(ui::ResolvePendingFeature(*s_App));
+      return r != nullptr ? r->angleDeg : -1.0;
+    };
+    // Aimed deliberately OFF a multiple of 45 (360 - 88 = 272), so the raw
+    // drag value cannot itself be the snapped one and the two runs must
+    // differ. Negative, because the default 360 is the clamp ceiling.
+    bool grabbed = false;
+    // Back to the 360 default between runs, in place: re-arming the tool
+    // would build a NEW pending feature and unpublish the handle this drag
+    // is aimed at. A drag is relative to the grab, so both runs must start
+    // from the same value or they are not the same drag.
+    const auto reset = [&]() {
+      auto* r =
+          dynamic_cast<RevolveFeature*>(ui::ResolvePendingFeature(*s_App));
+      if (r != nullptr) {
+        r->angleDeg = 360.0;
+        Doc()->Regenerate();
+      }
+    };
+    const auto dragTo88 = [&](bool ctrl) -> double {
+      reset();
+      ctx->Yield(2);
+      ctx->MouseMoveToPos(WorldToWindow(at(0.0f)));
+      ctx->MouseDown(ImGuiMouseButton_Left);
+      if (ctrl)
+        ctx->KeyDown(ImGuiMod_Ctrl);
+      ctx->MouseMoveToPos(WorldToWindow(at(-88.0f)));
+      ctx->Yield(2);
+      grabbed = s_App->handleDrag.active && s_App->handleDrag.rotate;
+      const double v = angleNow();
+      ctx->MouseUp(ImGuiMouseButton_Left);
+      if (ctrl)
+        ctx->KeyUp(ImGuiMod_Ctrl);
+      ctx->Yield();
+      return v;
+    };
+
+    // Default: captured onto the round angle, exactly.
+    const double snapped = dragTo88(/*ctrl=*/false);
+    IM_CHECK(grabbed);
+    ctx->LogInfo("plain drag to -88 read %.4f", snapped);
+    IM_CHECK(std::abs(snapped - 270.0) < 1e-6);
+
+    // Ctrl: the same pixels, left where the drag put them.
+    const double freed = dragTo88(/*ctrl=*/true);
+    IM_CHECK(grabbed);
+    ctx->LogInfo("Ctrl-held, the same drag read %.4f", freed);
+    IM_CHECK(std::abs(freed - snapped) > 0.1);
+    IM_CHECK(std::abs(freed - 272.0) < 6.0); // ...near where it was aimed
+
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
   t = IM_REGISTER_TEST(engine, "handles", "fillet_marker_drag_sets_radius");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

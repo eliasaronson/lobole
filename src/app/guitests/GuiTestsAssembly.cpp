@@ -1388,6 +1388,173 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->mateTool.active);
   };
 
+  // U16: Flip answers "which side", Rotate answers "which way up". A
+  // fastened mate has no DOF, so it gets no gizmo and its inspector row used
+  // to be `break; // no DOF` — which left the twist about the connector axis
+  // unreachable from the GUI entirely. Reported from use as a wall that
+  // mated to the right faces and still stood a quarter turn out of its seat,
+  // in BOTH flip states. The button must move GEOMETRY, not just a number.
+  t = IM_REGISTER_TEST(engine, "assembly", "mate_tool_rotates_the_part");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const uint64_t partSlotId = s_App->parts[0].id;
+
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence first;
+    first.partId = partSlotId;
+    first.fixed = true;
+    s_App->assembly->AddOccurrence(first);
+    Occurrence second;
+    second.partId = partSlotId;
+    second.position = glm::vec3(10.0f, 0.0f, 0.0f);
+    const uint64_t secondId = s_App->assembly->AddOccurrence(second);
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+
+    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 mid = center + glm::vec3(5.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(mid +
+                               glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
+                                   glm::length(max - min) * 6.0f);
+    ctx->Yield();
+
+    // Fasten the two top faces through the session, as a human does.
+    ui::StartMateTool(*s_App, MateType::Fastened);
+    ctx->Yield();
+    const glm::vec3 topFirst(center.x, max.y, center.z);
+    const glm::vec3 topSecond = topFirst + glm::vec3(10.0f, 0.0f, 0.0f);
+    ctx->MouseMoveToPos(WorldToWindow(topFirst));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ctx->MouseMoveToPos(WorldToWindow(topSecond));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    const uint64_t mateId = s_App->mateTool.previewMateId;
+    IM_CHECK_NE(mateId, uint64_t{0});
+    // The prompt offers what the panel actually draws.
+    IM_CHECK(s_App->mateTool.message.find("Rotate") != std::string::npos);
+
+    const glm::quat before = s_App->assembly->FindById(secondId)->orientation;
+    ctx->ItemClick("//fastened###ToolWindow/###mate_rotate90");
+    ctx->Yield(2);
+    const Mate* m = s_App->assembly->FindMateById(mateId);
+    IM_CHECK(m != nullptr);
+    IM_CHECK(std::abs(glm::degrees(m->rotation) - 90.0f) < 1e-3f);
+    // ...and the driven part turned a quarter turn with it. The angle
+    // between two quats, without pulling in gtx: 2*acos|dot|.
+    const glm::quat after = s_App->assembly->FindById(secondId)->orientation;
+    const float dot = std::abs(glm::dot(before, after));
+    const float turn = 2.0f * std::acos(std::min(1.0f, dot));
+    ctx->LogInfo("Rotate 90 turned the driven part %.2f degrees",
+                 glm::degrees(turn));
+    IM_CHECK(std::abs(glm::degrees(turn) - 90.0f) < 1.0f);
+
+    // Four clicks come back to where they started: the angle wraps rather
+    // than winding the number up.
+    for (int i = 0; i < 3; i++) {
+      ctx->ItemClick("//fastened###ToolWindow/###mate_rotate90");
+      ctx->Yield(2);
+    }
+    IM_CHECK(std::abs(s_App->assembly->FindMateById(mateId)->rotation) < 1e-4f);
+
+    ui::CancelMateTool(*s_App);
+    ctx->Yield();
+    IM_CHECK(!s_App->mateTool.active);
+  };
+
+  // U16: a rotate drag in an assembly snaps to the common angles (multiples
+  // of 45), unless Ctrl says free. Assemblies are right angles far more
+  // often than not and the mouse cannot hit one exactly — the CAM placement
+  // spin has snapped for a while, this is the same ui::SnapAngleDeg.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "a_mate_rotate_snaps_to_the_common_angles");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    const uint64_t partSlotId = s_App->parts[0].id;
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence base;
+    base.partId = partSlotId;
+    base.fixed = true;
+    const uint64_t baseId = s_App->assembly->AddOccurrence(base);
+    Occurrence spinner;
+    spinner.partId = partSlotId;
+    const uint64_t spinId = s_App->assembly->AddOccurrence(spinner);
+    Mate axle;
+    axle.type = MateType::Revolute;
+    axle.a.occurrenceId = baseId;
+    axle.a.anchor.origin = true;
+    axle.b.occurrenceId = spinId;
+    axle.b.anchor.origin = true;
+    axle.flipped = false;
+    const uint64_t axleId = s_App->assembly->AddMate(axle);
+    ui::SolveActiveAssembly(*s_App);
+    ui::SelectOccurrence(*s_App, spinId);
+    ctx->Yield(3);
+
+    // The ring as PUBLISHED — its radius follows the camera distance, so it
+    // is read after the view is settled, and the rays are built in the same
+    // basis RotateAngle measures in (PerpTo(axis), axis x that).
+    const auto ring = [&]() -> ui::ViewportHandle {
+      s_App->viewportHandles.clear();
+      ui::PublishGizmoHandles(*s_App);
+      for (const ui::ViewportHandle& h : s_App->viewportHandles)
+        if (h.kind == ui::HandleKind::Rotate)
+          return h;
+      return {};
+    };
+    IM_CHECK(ring().length > 0.0f);
+    const glm::vec3 centre = ring().origin;
+    const glm::vec3 axis = ring().dir;
+    const float radius = ring().length;
+    const glm::vec3 b1 = ui::PerpTo(axis), b2 = glm::cross(axis, b1);
+    const auto rayAt = [&](float deg) {
+      const float a = glm::radians(deg);
+      Ray r;
+      r.origin = centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius +
+                 axis * 100.0f;
+      r.direction = -axis;
+      return r;
+    };
+    const auto rotationDeg = [&]() {
+      return glm::degrees(s_App->assembly->FindMateById(axleId)->rotation);
+    };
+
+    // 88 degrees of drag lands on exactly 90.
+    IM_CHECK(ui::HandleGizmoInput(*s_App, rayAt(0.0f), true, true, false));
+    IM_CHECK(s_App->gizmoDrag.active && s_App->gizmoDrag.rotate);
+    IM_CHECK(ui::HandleGizmoInput(*s_App, rayAt(88.0f), false, true, false));
+    ctx->LogInfo("88 degrees of drag read %.4f", rotationDeg());
+    IM_CHECK(std::abs(rotationDeg() - 90.0f) < 1e-3f);
+    ui::HandleGizmoInput(*s_App, rayAt(88.0f), false, false, true);
+    ctx->Yield(2);
+
+    // ...and with Ctrl held it does not: another 88 from 90 would be
+    // captured by 180 (2 degrees away), and instead reads 178.
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK(ui::HandleGizmoInput(*s_App, rayAt(0.0f), true, true, false));
+    IM_CHECK(ui::HandleGizmoInput(*s_App, rayAt(88.0f), false, true, false));
+    const float freeDeg = rotationDeg();
+    ui::HandleGizmoInput(*s_App, rayAt(88.0f), false, false, true);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield(2);
+    ctx->LogInfo("Ctrl-held, the same drag read %.4f", freeDeg);
+    IM_CHECK(std::abs(freeDeg - 178.0f) < 1.0f);
+
+    s_App->selection.Clear();
+  };
+
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).

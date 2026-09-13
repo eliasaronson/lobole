@@ -9,7 +9,11 @@
 > 2026-08-27 — the numeric-entry widget now actually accepts expressions
 > (the Ctrl+click path had silently dropped every variable-referencing one
 > since it shipped); its remaining phases convert the 32 raw fields and add
-> completion over the document's variables. The prose below is the original plan; per-round designs are the
+> completion over the document's variables.
+> [U16](u16-mate-rotate-and-angle-snap.md) 2026-09-12 — the mate's twist about
+> the connector axis reached the GUI (Flip says which side, Rotate says which
+> way up), and a rotate drag in an assembly snaps to multiples of 45° unless
+> Ctrl says free. The prose below is the original plan; per-round designs are the
 > `u*.md` files beside it.
 
 The workbench shell shipped (docking layout, dark theme, icon toolbar,

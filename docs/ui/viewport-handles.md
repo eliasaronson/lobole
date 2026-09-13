@@ -17,9 +17,13 @@ one of those is not interactive at all:
 | section offset | *grafted onto the preview handle* — `HandleDrag::sectionId` | same | same |
 | simulation force / pressure | force: `SimulationState::LoadDrag` (added 2026-08-20); pressure: none | inline in `HandleLoadDragInput` | `AppendSimulationBCGlyphs` |
 
-So: the *math* is already shared (`ui/DragMath.h` — `RayAxisParam`,
-`PointRayDist`, `RayPlane`, `RotateAngle`, `GizmoScale`; 10 uses in
-`AssemblyActions.cpp`, 8 in `PreviewHandles.cpp`), and both overlay builders
+So: the *math* is already shared, across `ui/RayMath.h` (`RayAxisParam`,
+`PointRayDist`, `RayPlane`, `RotateAngle`, `PerpTo`) and `ui/DragMath.h`
+(`GizmoScale`, plus the one snap rule every drag handle shares since U16 —
+`SnapValue` and its `SnapAngleDeg`/`SnapAngleRad`/`SnapLength` faces, a
+capture window around multiples of 45° or 0.5 units, snapping by DEFAULT with
+Ctrl to free); 19 uses in `GizmoInput.cpp`, 11 in `PreviewHandles.cpp`. Both
+overlay builders
 append to the same line channel, drawn together in `UI.cpp`. The
 *interaction* is duplicated, and the section handle riding on `HandleDrag`
 with an extra id field is the visible strain.

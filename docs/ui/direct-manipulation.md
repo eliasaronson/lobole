@@ -109,8 +109,13 @@ together:
 7. **Feedback & snapping**: the dialog field updates live for free (see
    above). Additionally a floating readout ("12.500") renders at the handle
    tip via the ImGui foreground draw list, like the measure readout. Values
-   round to display precision (0.001 / 0.1°) by default; holding **Ctrl**
-   snaps to coarse increments (0.5 length units, 5°). Esc during a drag
+   snap to the round one by default — a **capture window** around every
+   multiple of 45° for a revolve angle and of 0.5 units for a length
+   (`ui::SnapAngleDeg`/`SnapLength`), so a value that is not near a round one
+   is left where the drag put it — and **Ctrl frees** the snap; either way
+   the result reads at display precision (0.001 / 0.1°). **This polarity was
+   reversed until U16** (fine by default, Ctrl quantizing coarse), which is
+   what made Ctrl mean opposite things here and on the gizmo. Esc during a drag
    aborts the drag — restore `startValue`, regenerate, consume the Esc so it
    does *not* cancel the preview (ordering in ViewportInput's Esc ladder).
 8. **Undo**: v1 needs nothing — preview mutations aren't on the stack, and
@@ -122,8 +127,19 @@ together:
 
 ## Open questions
 
-- Snap polarity: Ctrl-to-snap (proposed) vs snap-by-default with
-  Shift-for-fine (Onshape). Cheap to flip; want a decision at sign-off.
+- ~~Snap polarity: Ctrl-to-snap (proposed) vs snap-by-default~~ —
+  **ANSWERED in U16 2026-09-13: snap is the default and Ctrl frees it,
+  everywhere a drag snaps at all.** The preview handles shipped the opposite
+  (Ctrl-to-snap, item 7) while the gizmo drags — CAM placement, and both
+  assembly rotate drags — shipped Ctrl-to-free, so the same modifier meant
+  opposite things on a part tab and an assembly tab. The handles were flipped
+  to match, and the mechanism unified on the gizmo's capture window rather
+  than the handles' hard quantum: snapping by default only costs you a value
+  if it *quantizes*, and a capture window does not.
+  `a_preview_handle_snaps_unless_ctrl` asserts both halves from the same
+  mouse positions. Note this is a rule about **polarity**, not about coverage
+  — a drag that snaps to nothing (assembly translation, the section offset)
+  still snaps to nothing.
 - Fillet drag axis on concave/interior edges can point oddly; fallback to
   the camera-right projection if the bbox heuristic degenerates?
 - TwoSided extrude: second arrow for `distance2` in v1, or wait? (Proposed:

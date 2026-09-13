@@ -140,7 +140,8 @@ OutlineRenderer per-mesh model (self-contained, needed by both). See
 > `ui::PickAssemblyFace` join (an assembly click resolves a persistent face
 > `ElementRef`). Headless `assembly_mates_smoke`. **Phase 3 SHIPPED**
 > (4578518): the GUI — an assembly-mode toolbar (Fasten/Revolute/Slider), a
-> two-click mate tool with a live connector-triad preview + Accept/Cancel/Flip,
+> two-click mate tool with a live connector-triad preview + Accept/Cancel/Flip
+> (+ Rotate since U16, for every type but ball),
 > and a mate list + editor in the Model dock (DOF drag = numeric mechanism
 > motion, error badges, delete). **Rest of A3 SHIPPED** (`6c59632`):
 > cylindrical/planar/ball mate types (format v25) + connector inference snap

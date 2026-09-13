@@ -66,7 +66,10 @@ with `depthTestEnable=FALSE`) so handles are always visible and grabbable.
 - On left-click, ray-test the handles (cylinder/torus proximity to the ray).
 - On grab: `SnapshotAssembly` once; record the axis + the grab point.
 - Per frame while dragging: intersect the ray with the axis line (translate) or
-  the rotation plane (rotate), compute the delta, apply to a **scratch** copy of
+  the rotation plane (rotate), compute the delta — a rotate delta SNAPS to
+  multiples of 45° within a 5° capture window (`ui::SnapAngleRad`) unless Ctrl
+  is held; on a free occurrence it is the *turn* that snaps, since its starting
+  orientation is arbitrary — apply to a **scratch** copy of
   the occurrence's `position`/`orientation`, and push it live via
   `SetInstanceTransform` + `SetMeshTransform` (phase 1) for every `documentMeshes`
   entry of the occurrence — **no `BumpVersion`, no resync**.
@@ -87,6 +90,14 @@ transform, the drag writes the **mate's DOF field** and calls `SolveActiveAssemb
 — so the mechanism moves and everything downstream re-solves. This reuses phase
 2's handle geometry + ray-mapping wholesale; only the "what the delta writes"
 target differs (occurrence transform vs mate DOF).
+
+A rotate drag here snaps the **absolute** mate rotation, not the turn: the
+mate's own frame is the zero, so a joint lands on 90° from its seat rather
+than 90° from wherever this particular drag was grabbed. Ball is the
+exception — it has no single angle, so it snaps the turn like a free
+occurrence. Translation drags are deliberately left free: what a part should
+butt against is a mate, not a round number. Ctrl frees the snap, which is
+what Ctrl already meant in the CAM placement drag (U16).
 
 ## Phase 4 — connector inference snap points
 

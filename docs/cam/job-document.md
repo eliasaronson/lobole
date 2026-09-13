@@ -765,7 +765,10 @@ motion, on purpose.
 
 **Later the same day.** The placement drag SNAPS: the part's edge to the
 sheet's edges and centre and to the other parts' edges (how parts are
-butted together on a board), the spin to multiples of 45°; Ctrl drags free.
+butted together on a board), the spin to multiples of 45° when the drag comes
+within 5° of one; Ctrl drags free. The spin rule left this file in U16 — it is
+`ui::SnapAngleDeg` in `ui/DragMath.h` now, shared with both assembly rotate
+drags, and this drag's behaviour is unchanged by the move.
 And the Preferences work area is three fields named X, Y, Z instead of two
 rows of unlabelled travel min/max — and a partially typed one survives,
 because the file used to omit the area until all three axes were stated

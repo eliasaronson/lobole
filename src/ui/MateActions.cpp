@@ -315,8 +315,17 @@ void MateConnectorPicked(AppState& state, const SelectionItem& item) {
   SnapshotAssembly(state);
   tool.previewMateId = state.assembly->AddMate(mate);
   const int errored = SolveActiveAssembly(state);
-  tool.message = errored ? "Over-constrained — try Flip, or Cancel"
-                         : "Accept, Flip, or Cancel";
+  // Rotate is offered for every type but Ball, whose twist about Z folds
+  // into its own DOF — so the prompt must not name a control that is not
+  // drawn beneath it.
+  const bool canRotate = mate.type != MateType::Ball;
+  if (errored)
+    tool.message = canRotate
+                       ? "Over-constrained — try Flip or Rotate, or Cancel"
+                       : "Over-constrained — try Flip, or Cancel";
+  else
+    tool.message = canRotate ? "Accept, Flip, Rotate, or Cancel"
+                             : "Accept, Flip, or Cancel";
   state.slotPick = {}; // both picked; the session shows Accept/Cancel
 }
 

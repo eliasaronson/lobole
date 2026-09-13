@@ -149,7 +149,10 @@ struct Mate {
 
   bool flipped = true;   // reverse b's Z against a's Z (two touching planar
                          // faces have opposing normals, hence default true)
-  float rotation = 0.0f; // twist about Z, radians (revolute/cylindrical DOF)
+  float rotation = 0.0f; // twist about Z, radians: the revolute/cylindrical
+                         // DOF, and on every other type — FASTENED included
+                         // — the authored twist about the connector axis.
+                         // flipped says which side, this says which way up.
   float offset = 0.0f;   // translation along +Z of a's connector frame (a's
                          // outward face normal): slider/cylindrical DOF, the
                          // revolute axial seat, the planar plane gap. A

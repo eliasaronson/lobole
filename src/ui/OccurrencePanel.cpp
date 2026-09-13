@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -296,7 +297,11 @@ void DrawMatesSection(AppState& state) {
     break;
   }
   case MateType::Fastened:
-    break; // no DOF
+    // No DOF, but the twist about the connector axis is still AUTHORED here:
+    // Flip answers "which side", this answers "which way up". Without it the
+    // tool window's Rotate could set an angle nothing could read back.
+    angleDof("Angle (deg)");
+    break;
   }
 
   if (!sel->error.empty())
@@ -1189,10 +1194,36 @@ void DrawMateToolWindow(AppState& state) {
 
   Mate* live = editM != nullptr ? editM : pm;
   if (live != nullptr) {
-    if (ImGui::Checkbox("Flip", &live->flipped)) {
+    // An edit session writes an EXISTING mate, so each change is its own undo
+    // step; a preview mate is popped whole by Cancel and snapshots nothing.
+    const auto edited = [&]() {
       if (editM != nullptr)
         SnapshotAssembly(state);
       SolveActiveAssembly(state);
+    };
+    if (ImGui::Checkbox("Flip", &live->flipped))
+      edited();
+    // Flip answers "which side", Rotate answers "which way up" — two faces
+    // can mate on the right planes and still land a quarter turn out, which
+    // no amount of flipping fixes. Ball is the exception: its twist about Z
+    // folds into ballRotation, so the control would be a second name for a
+    // DOF it already has.
+    if (live->type != MateType::Ball) {
+      ImGui::SameLine();
+      if (ImGui::Button("Rotate 90°###mate_rotate90")) {
+        // Wrapped into [0, 360), so four clicks come back to where they
+        // started rather than winding the number up.
+        const float turned = glm::degrees(live->rotation) + 90.0f;
+        live->rotation =
+            glm::radians(turned - 360.0f * std::floor(turned / 360.0f));
+        edited();
+      }
+      float deg = glm::degrees(live->rotation);
+      if (ExprDragFloat(state, "Angle (deg)###mateToolAngle", &deg, 1.0f,
+                        -FLT_MAX, FLT_MAX, "%.3f")) {
+        live->rotation = glm::radians(deg);
+        edited();
+      }
     }
     if (!live->error.empty())
       ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",

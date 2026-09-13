@@ -392,10 +392,17 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
         return true;
       v = h.startValue + glm::degrees(ang - h.startParam);
     }
-    // Round to display precision; Ctrl snaps coarse (0.5 units / 5°).
+    // Snap to the round value unless Ctrl says free — the app's one drag
+    // polarity (ui/DragMath.h). This used to be the OTHER way round here,
+    // Ctrl quantizing to 0.5/5° while the default ran free, so the same
+    // modifier meant opposite things on a part tab and an assembly tab.
+    // The capture window is what makes snap-by-default safe: a value that is
+    // not near a round one is left exactly where the drag put it.
     const bool deg = dynamic_cast<RevolveFeature*>(f) != nullptr;
-    const double quantum =
-        ImGui::GetIO().KeyCtrl ? (deg ? 5.0 : 0.5) : (deg ? 0.1 : 0.001);
+    const bool snap = !ImGui::GetIO().KeyCtrl;
+    v = deg ? SnapAngleDeg(v, snap) : SnapLength(v, snap);
+    // ...and whatever survives that still reads at display precision.
+    const double quantum = deg ? 0.1 : 0.001;
     v = std::round(v / quantum) * quantum;
     ApplyHandleValue(state, *f, v);
     return true;

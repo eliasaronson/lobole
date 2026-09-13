@@ -99,8 +99,11 @@ const glm::vec3 kGizmoAxis[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 const glm::vec3 kGizmoColor[3] = {
     {0.90f, 0.32f, 0.32f}, {0.35f, 0.82f, 0.38f}, {0.38f, 0.55f, 0.95f}};
 
-// Ray/axis/plane/arc math shared with the preview handles: ui/DragMath.h
-// (GizmoScale, PerpTo, RayAxisParam, RayPlane, PointRayDist, RotateAngle).
+// Ray/axis/plane/arc math shared with the preview handles: ui/RayMath.h
+// (PerpTo, RayAxisParam, RayPlane, PointRayDist, RotateAngle) and
+// ui/DragMath.h (GizmoScale, and SnapAngleDeg/SnapAngleRad + the 45/5
+// degree constants that the placement spin and both assembly rotate
+// drags share).
 
 // The gizmo-anchored occurrence: selected, non-fixed, mate tool idle. null
 // else.
@@ -198,7 +201,9 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
     spec.rot[0] = spec.rot[1] = spec.rot[2] = true;
     break;
   case MateType::Fastened:
-    return false; // no DOF
+    // No DOF, so no gizmo. Its authored twist about the connector axis is
+    // reached from the mate tool window / inspector, not from here.
+    return false;
   }
   return true;
 }
@@ -432,14 +437,10 @@ bool HandlePlacementGizmo(AppState& state, const Ray& ray, bool clicked,
     } else {
       float ang;
       if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
-        double deg = g.startRotZ +
-                     glm::degrees(static_cast<double>(UnwrappedTurn(g, ang)));
-        if (snap) {
-          const double nearest = std::round(deg / 45.0) * 45.0;
-          if (std::abs(deg - nearest) < 5.0)
-            deg = nearest;
-        }
-        place->rotZdeg = deg;
+        const double deg =
+            g.startRotZ +
+            glm::degrees(static_cast<double>(UnwrappedTurn(g, ang)));
+        place->rotZdeg = SnapAngleDeg(deg, snap);
       }
     }
     // The placed bodies are rebuilt from the placement on the next frame:
@@ -566,6 +567,11 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       PushOccurrenceLive(state, occ->id);
       return true;
     }
+    // A turn snaps to the common angles unless Ctrl says free — assemblies
+    // are right angles far more often than not, and the mouse cannot hit one
+    // exactly. Translation is deliberately left free: what a part should butt
+    // against is a mate, not a round number.
+    const bool snap = !ImGui::GetIO().KeyCtrl;
     if (!g.mateId) {
       // Free occurrence: drag its transform directly.
       if (!g.rotate) {
@@ -574,9 +580,13 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
         occ->position = g.startPos + A * (t - g.startParam);
       } else {
         float ang;
+        // The TURN is what snaps here: a free occurrence's starting
+        // orientation is arbitrary, so only the increment has a zero to
+        // measure from.
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
           occ->orientation =
-              glm::angleAxis(UnwrappedTurn(g, ang), A) * g.startRot;
+              glm::angleAxis(SnapAngleRad(UnwrappedTurn(g, ang), snap), A) *
+              g.startRot;
       }
     } else {
       // Drag-within-mate: write the mate's DOF, then re-solve so the
@@ -601,10 +611,15 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
         float ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
           const float d = UnwrappedTurn(g, ang);
+          // Here the ABSOLUTE value snaps: the mate's own frame is the zero,
+          // so a joint lands on 90 degrees from its seat rather than 90 from
+          // wherever this particular drag was grabbed. Ball has no single
+          // angle, so it snaps the turn like a free occurrence.
           if (mate->type == MateType::Ball)
-            mate->ballRotation = glm::angleAxis(d, A) * g.startBall;
+            mate->ballRotation =
+                glm::angleAxis(SnapAngleRad(d, snap), A) * g.startBall;
           else
-            mate->rotation = g.startDof + d;
+            mate->rotation = SnapAngleRad(g.startDof + d, snap);
         }
       }
       // The dragged mate drives its relations (a gear turns its partner).

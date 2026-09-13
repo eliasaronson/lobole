@@ -39,7 +39,8 @@ One relation type; its kinds are labels and unit conventions on it:
 
 `phase` is what makes teeth mesh (or where the rack sits at θ = 0). A
 relation names two mates by id and the DOF on each; a mate that lacks the
-DOF (a fastened mate has no rotation) is refused at creation, in words.
+DOF (a fastened mate has no rotational DOF — its `rotation` is authored,
+not free) is refused at creation, in words.
 
 **Where it is enforced — two places, on purpose.**
 
