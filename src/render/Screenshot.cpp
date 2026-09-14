@@ -18,7 +18,8 @@ bool CaptureScreenshot(
     const std::string& outputPath, std::string* error,
     VkSampleCountFlagBits samples,
     const std::function<void(VkCommandBuffer)>& recordPrepass,
-    FrameStats* stats, VkImageLayout colorFinalLayout) {
+    FrameStats* stats, VkImageLayout colorFinalLayout, uint32_t repeat,
+    const std::function<void()>& afterEachSubmit) {
   auto fail = [&](const char* what) {
     if (error)
       *error = what;
@@ -137,15 +138,21 @@ bool CaptureScreenshot(
   VkFramebuffer framebuffer = VK_NULL_HANDLE;
   vkCreateFramebuffer(device, &fbInfo, nullptr, &framebuffer);
 
+  // An empty path means MEASURE, not save: nothing is copied out and nothing
+  // is encoded, so the loop below is render-submit-render and the GPU keeps
+  // its clocks up.
+  const bool write = !outputPath.empty();
+
   // Host-visible readback buffer
   const VkDeviceSize bufferSize = VkDeviceSize(width) * height * 4;
   VkBuffer buffer = VK_NULL_HANDLE;
   VkDeviceMemory bufferMemory = VK_NULL_HANDLE;
-  vkutil::CreateBuffer(device, physicalDevice, bufferSize,
-                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                       buffer, bufferMemory);
+  if (write)
+    vkutil::CreateBuffer(device, physicalDevice, bufferSize,
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                         buffer, bufferMemory);
 
   // One-shot command buffer: render the scene again, then copy out
   VkCommandBufferAllocateInfo cbInfo{
@@ -156,52 +163,84 @@ bool CaptureScreenshot(
   VkCommandBuffer cb = VK_NULL_HANDLE;
   vkAllocateCommandBuffers(device, &cbInfo, &cb);
 
-  VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cb, &begin);
+  // The same scene, `repeat` times into the same target. The render pass
+  // clears and declares an UNDEFINED initial layout, so a re-run discards
+  // what the last one left and needs no transition of its own. The command
+  // buffer is re-recorded each pass (the pool carries
+  // RESET_COMMAND_BUFFER_BIT, so beginning it again resets it).
+  const uint32_t passes = std::max(1u, repeat);
+  for (uint32_t pass = 0; pass < passes; pass++) {
+    const bool last = pass + 1 == passes;
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cb, &begin);
 
-  // Scene prepasses (shadow map) go before the render pass, as on-screen.
-  if (recordPrepass)
-    recordPrepass(cb);
+    // Scene prepasses (shadow map) go before the render pass, as on-screen.
+    if (recordPrepass)
+      recordPrepass(cb);
 
-  VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-  rp.renderPass = renderPass;
-  rp.framebuffer = framebuffer;
-  rp.renderArea.extent = {width, height};
-  VkClearValue clears[2];
-  clears[0] = clearValue;
-  clears[1].depthStencil = {1.0f, 0};
-  rp.clearValueCount = 2;
-  rp.pClearValues = clears;
-  vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
-  recordScene(cb);
-  vkCmdEndRenderPass(cb);
+    VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rp.renderPass = renderPass;
+    rp.framebuffer = framebuffer;
+    rp.renderArea.extent = {width, height};
+    VkClearValue clears[2];
+    clears[0] = clearValue;
+    clears[1].depthStencil = {1.0f, 0};
+    rp.clearValueCount = 2;
+    rp.pClearValues = clears;
+    vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
+    recordScene(cb);
+    vkCmdEndRenderPass(cb);
 
-  // Transition from wherever the render pass left the image for the copy.
-  VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-  barrier.oldLayout = colorFinalLayout;
-  barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-  barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  barrier.image = image;
-  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-  vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                       nullptr, 1, &barrier);
+    if (write && last) {
+      // Transition from wherever the render pass left the image for the copy.
+      VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+      barrier.oldLayout = colorFinalLayout;
+      barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      barrier.image = image;
+      barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &barrier);
 
-  VkBufferImageCopy region{};
-  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  region.imageExtent = {width, height, 1};
-  vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                         buffer, 1, &region);
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {width, height, 1};
+      vkCmdCopyImageToBuffer(cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                             buffer, 1, &region);
+    }
 
-  vkEndCommandBuffer(cb);
+    vkEndCommandBuffer(cb);
 
-  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &cb;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cb;
+    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+    if (afterEachSubmit)
+      afterEachSubmit();
+  }
+
+  // Measuring only: nothing to read back, nothing to encode.
+  if (!write) {
+    vkFreeCommandBuffers(device, commandPool, 1, &cb);
+    vkDestroyFramebuffer(device, framebuffer, nullptr);
+    vkDestroyImageView(device, view, nullptr);
+    vkDestroyImage(device, image, nullptr);
+    vkFreeMemory(device, imageMemory, nullptr);
+    vkDestroyImageView(device, depthImageView, nullptr);
+    vkDestroyImage(device, depthImage, nullptr);
+    vkFreeMemory(device, depthMemory, nullptr);
+    if (msaaColorView)
+      vkDestroyImageView(device, msaaColorView, nullptr);
+    if (msaaColorImage)
+      vkDestroyImage(device, msaaColorImage, nullptr);
+    if (msaaColorMemory)
+      vkFreeMemory(device, msaaColorMemory, nullptr);
+    return true;
+  }
 
   // BGRA (typical swapchain format) -> RGB PNG
   void* mapped = nullptr;

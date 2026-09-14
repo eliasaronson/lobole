@@ -1392,8 +1392,12 @@ static int RunOffscreen(const CommandLineArgs& args) {
   LOG_INFO("Offscreen mode: real renderer, no window or display server");
 
   SetupVulkan({}, nullptr, /*wsi=*/false);
-  // The GUI sets this in SetupVulkanWindow, which never runs here.
+  // The GUI sets these in SetupVulkanWindow, which never runs here. The
+  // timer is why this mode is worth measuring in: with no swapchain there is
+  // no image to wait for, so the main pass reports shading and nothing else
+  // (docs/rendering/offscreen-gpu-timing-plan.md).
   g_MSAASamples = GetMaxUsableSampleCount();
+  g_GpuTimer.Initialize(g_Device, g_PhysicalDevice, g_QueueFamily);
 
   // Same defaults as the GUI and RunHeadless, so view/fit_view/get_state
   // agree across modes and a GUI session opening the same project sees the
@@ -1537,6 +1541,71 @@ static int RunOffscreen(const CommandLineArgs& args) {
     return 1;
   }
 
+  // The measuring verb (frame_stats {renders: N}). Synchronous: this runs on
+  // the main thread inside ProcessPending, which is the same thread the tick
+  // renders on, so there is no handshake to stage — unlike a screenshot,
+  // nothing here has to wait for a camera animation or produce a file.
+  g_App.renderBurst = [&](size_t count) -> size_t {
+    if (count == 0)
+      return 0;
+    SyncOffscreenScene();
+    const glm::mat4 view = g_Camera->GetViewMatrix();
+    const glm::mat4 proj = g_Camera->GetProjectionMatrix();
+    for (SceneRenderer* r : g_Scene)
+      r->UpdateCamera(view, proj);
+    vkQueueWaitIdle(g_Queue);
+    const ui::ClearColor vp = ui::ViewportClearColor();
+    VkClearValue clear{};
+    clear.color.float32[0] = vp.r;
+    clear.color.float32[1] = vp.g;
+    clear.color.float32[2] = vp.b;
+    clear.color.float32[3] = 1.0f;
+    constexpr uint32_t kTimerSlot = 0;
+    // Warm up first, measuring nothing. Two things are cold at the start of a
+    // burst and neither belongs in the answer: pipelines are created on first
+    // use, and the GPU is at its idle clock — a laptop ramps over the first
+    // tenth of a second, so an unwarmed burst of 300 had its median taken
+    // over frames that were still climbing (a bare box read 0.237 ms against
+    // 0.033 measured warm).
+    constexpr uint32_t kWarmup = 32;
+    const auto render = [&](uint32_t times,
+                            const std::function<void()>& after) {
+      return CaptureScreenshot(
+          g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, offscreenPass,
+          kOffFormat, kOffW, kOffH, clear,
+          [&](VkCommandBuffer cb) {
+            for (SceneRenderer* r : g_Scene)
+              r->Render(cb, 0);
+            g_GpuTimer.Write(cb, kTimerSlot,
+                             render::GpuTimer::Point::AfterMain);
+          },
+          /*outputPath=*/"", /*error=*/nullptr, g_MSAASamples,
+          [&](VkCommandBuffer cb) {
+            g_GpuTimer.BeginFrame(cb, kTimerSlot);
+            RecordScenePrepasses(cb, kTimerSlot, &g_GpuTimer);
+          },
+          /*stats=*/nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, times,
+          after);
+    };
+    render(kWarmup, {});
+    g_GpuTimer.ResetSamples(); // a burst is its own measurement window
+    g_App.gpuStats = {};
+    const bool ok = render(static_cast<uint32_t>(count),
+                           [&] { g_GpuTimer.Harvest(kTimerSlot); });
+    const render::GpuTimer::Snapshot gs = g_GpuTimer.Average();
+    g_App.gpuStats.supported = gs.supported;
+    g_App.gpuStats.samples = gs.samples;
+    g_App.gpuStats.shadowMs = gs.shadowMs;
+    g_App.gpuStats.ssaoMs = gs.ssaoMs;
+    g_App.gpuStats.mainMs = gs.mainMs;
+    g_App.gpuStats.totalMs = gs.totalMs;
+    g_App.gpuStats.shadowP50Ms = gs.shadowP50Ms;
+    g_App.gpuStats.ssaoP50Ms = gs.ssaoP50Ms;
+    g_App.gpuStats.mainP50Ms = gs.mainP50Ms;
+    g_App.gpuStats.totalP50Ms = gs.totalP50Ms;
+    return ok ? count : 0;
+  };
+
   std::signal(SIGINT, HandleOffscreenStop);
   std::signal(SIGTERM, HandleOffscreenStop);
 
@@ -1553,6 +1622,11 @@ static int RunOffscreen(const CommandLineArgs& args) {
   double animatingSince = -1.0;
   while (!g_OffscreenStopRequested) {
     server.ProcessPending(g_App);
+    if (g_App.gpuStatsReset) {
+      g_App.gpuStatsReset = false;
+      g_GpuTimer.ResetSamples();
+      g_App.gpuStats = {};
+    }
     const double now = seconds();
     // Real dt so orient_to_face's animation completes at wall-clock speed.
     g_Camera->Update(static_cast<float>(now - last));
@@ -1595,18 +1669,44 @@ static int RunOffscreen(const CommandLineArgs& args) {
       std::string shotError;
       FrameStats shotStats; // rect unset = judge the whole frame, which IS
                             // the viewport here (no panel chrome exists)
+      // ONE query slot, index 0: there are no swapchain images here and no
+      // frame loop to collide with. (The windowed screenshot path stays
+      // untimed — there it WOULD collide with the live frame's slot.)
+      constexpr uint32_t kTimerSlot = 0;
       const bool ok = CaptureScreenshot(
           g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, offscreenPass,
           kOffFormat, kOffW, kOffH, clear,
           [&](VkCommandBuffer cb) {
             // The scene only — no ImGui: nothing draws an interface in this
-            // mode, so a capture is the viewport, full frame.
+            // mode, so a capture is the viewport, full frame. Which also
+            // makes `main` here the SCENE's cost, with no interface over it.
             for (SceneRenderer* r : g_Scene)
               r->Render(cb, 0);
+            g_GpuTimer.Write(cb, kTimerSlot,
+                             render::GpuTimer::Point::AfterMain);
           },
           shotPath, &shotError, g_MSAASamples,
-          [&](VkCommandBuffer cb) { RecordScenePrepasses(cb, 0); }, &shotStats,
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+          [&](VkCommandBuffer cb) {
+            g_GpuTimer.BeginFrame(cb, kTimerSlot);
+            RecordScenePrepasses(cb, kTimerSlot, &g_GpuTimer);
+          },
+          &shotStats, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      // CaptureScreenshot waits on the queue, so this slot's results are
+      // already there: harvesting never stalls.
+      g_GpuTimer.Harvest(kTimerSlot);
+      {
+        const render::GpuTimer::Snapshot gs = g_GpuTimer.Average();
+        g_App.gpuStats.supported = gs.supported;
+        g_App.gpuStats.samples = gs.samples;
+        g_App.gpuStats.shadowMs = gs.shadowMs;
+        g_App.gpuStats.ssaoMs = gs.ssaoMs;
+        g_App.gpuStats.mainMs = gs.mainMs;
+        g_App.gpuStats.totalMs = gs.totalMs;
+        g_App.gpuStats.shadowP50Ms = gs.shadowP50Ms;
+        g_App.gpuStats.ssaoP50Ms = gs.ssaoP50Ms;
+        g_App.gpuStats.mainP50Ms = gs.mainP50Ms;
+        g_App.gpuStats.totalP50Ms = gs.totalP50Ms;
+      }
       server.ScreenshotDone(ok, shotError, shotStats.dominantFraction,
                             shotStats.hash);
     }
@@ -1633,6 +1733,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   // nothing and leave the buffers to a dead device. Before, not after.
   ui::ReleasePartRenderCache(g_App);
   ShutdownSceneRenderers();
+  g_GpuTimer.Shutdown(g_Device);
   g_RayTracingRenderer.reset();
   g_ShadowRenderer.reset();
   g_SSAORenderer.reset();
@@ -2376,6 +2477,10 @@ int main(int argc, char** argv) {
 
     // Mirror the GPU pass averages where frame_stats and the HUD read them.
     {
+      if (g_App.gpuStatsReset) {
+        g_App.gpuStatsReset = false;
+        g_GpuTimer.ResetSamples();
+      }
       const render::GpuTimer::Snapshot gs = g_GpuTimer.Average();
       g_App.gpuStats.supported = gs.supported;
       g_App.gpuStats.samples = gs.samples;
@@ -2383,6 +2488,10 @@ int main(int argc, char** argv) {
       g_App.gpuStats.ssaoMs = gs.ssaoMs;
       g_App.gpuStats.mainMs = gs.mainMs;
       g_App.gpuStats.totalMs = gs.totalMs;
+      g_App.gpuStats.shadowP50Ms = gs.shadowP50Ms;
+      g_App.gpuStats.ssaoP50Ms = gs.ssaoP50Ms;
+      g_App.gpuStats.mainP50Ms = gs.mainP50Ms;
+      g_App.gpuStats.totalP50Ms = gs.totalP50Ms;
     }
 
     // Everything above is per-frame CPU work on the document and renderers;

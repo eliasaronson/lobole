@@ -319,9 +319,17 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "fps, avg/p50/p95/max ms and the update|ui|wait|record|present split. "
      "{hud: true|false} toggles the overlay (off by default; also "
      "Ctrl+Shift+F). cpu_ms vs display_ms is the read: which of "
-     "wait/present holds the vsync idle is driver-dependent. Needs a "
-     "renderer — --headless runs no frame loop.",
-     "hud, window"},
+     "wait/present holds the vsync idle is driver-dependent. In --offscreen "
+     "there is no frame loop, so it reports the PER-PASS GPU time of the "
+     "renders taken so far (one sample per screenshot) and no frame numbers "
+     "— which is where to measure a shader, since a windowed frame's `main` "
+     "includes the wait for the swapchain image. --headless has no renderer "
+     "and refuses. {reset:true} clears the GPU pass samples so the next "
+     "renders are measured on their own; in --offscreen {renders:N} draws N "
+     "frames back to back (saving nothing) and reports THOSE — which is how "
+     "to measure a pass, since the encode between saved captures leaves the "
+     "GPU idle enough to drop its clocks.",
+     "hud, renders, reset, window"},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", ""},
     {"set_settings", "Change user preferences {key: value, ...}; persists.",
      "*", remote::NotInBatch},
@@ -1361,15 +1369,73 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // proves nothing (docs/rendering/frame-timing.md).
     if (p.contains("hud"))
       state.perfHudOpen = p.at("hud").get<bool>();
+    // Start a fresh measurement window and say so, rather than returning an
+    // average of the configuration you just changed and the one before it.
+    if (p.value("reset", false)) {
+      state.gpuStatsReset = true;
+      // Clear what a reader sees NOW, not when the loop next runs: the flag
+      // reaches the timer's ring a tick later, and a caller that asks again
+      // in the same batch of requests would otherwise be handed the very
+      // samples it just discarded.
+      state.gpuStats = {};
+      return {{"reset", true},
+              {"note", "GPU pass samples cleared; render again, then ask"}};
+    }
     const size_t window = p.value("window", render::FrameTimer::kHistory);
     const render::FrameTimer::Stats fs = state.frameTimer.Snapshot(window);
+    if (m_mode == RemoteMode::Offscreen) {
+      // No frame loop here — this mode draws only when asked — so there is no
+      // fps, no phase split and none of them are reported as zero, which
+      // would read as "infinitely fast" to anything that plots it. What IS
+      // measured is the part nothing else can measure honestly: with no
+      // swapchain there is no image to wait for, so `main` is shading and not
+      // the display stalling inside it (docs/rendering/
+      // offscreen-gpu-timing-plan.md). Each capture is one sample.
+      // {renders: N} measures N renders taken back to back, saving nothing:
+      // the PNG encode between captures is what leaves the GPU idle long
+      // enough for a laptop to drop its clocks, so a burst measures the card
+      // as it runs in a real frame loop rather than at its idle floor.
+      if (p.contains("renders")) {
+        const long want = p.at("renders").get<long>();
+        if (want <= 0 || want > 10000)
+          throw std::runtime_error(
+              "renders must be between 1 and 10000 (it is a count of frames "
+              "to draw, back to back, for the measurement)");
+        if (!state.renderBurst)
+          throw std::runtime_error("this build cannot render a burst here");
+        state.renderBurst(static_cast<size_t>(want));
+      }
+      if (state.gpuStats.samples == 0)
+        throw std::runtime_error(
+            "nothing rendered yet in --offscreen: pass {renders: N} to draw "
+            "N frames and measure them, or take a screenshot (each one is a "
+            "sample), then ask again");
+      return {{"mode", "offscreen"},
+              {"renders", state.gpuStats.samples},
+              {"gpu",
+               {{"supported", state.gpuStats.supported},
+                {"samples", state.gpuStats.samples},
+                {"shadow_ms", state.gpuStats.shadowMs},
+                {"ssao_ms", state.gpuStats.ssaoMs},
+                {"main_ms", state.gpuStats.mainMs},
+                {"total_ms", state.gpuStats.totalMs},
+                // Read THESE when measuring: the first render after a state
+                // change carries first-use work, and one outlier in six
+                // renders moved a 0.05 ms pass to 2.47.
+                {"shadow_p50_ms", state.gpuStats.shadowP50Ms},
+                {"ssao_p50_ms", state.gpuStats.ssaoP50Ms},
+                {"main_p50_ms", state.gpuStats.mainP50Ms},
+                {"total_p50_ms", state.gpuStats.totalP50Ms}}},
+              {"note",
+               "per-pass GPU time over the last renders; no frame loop, so "
+               "no fps or CPU phase split. `main` is the scene alone (no "
+               "interface is drawn) and carries no swapchain wait, which a "
+               "windowed frame's does."}};
+    }
     if (fs.frames == 0)
       throw std::runtime_error(
           m_mode == RemoteMode::Gui
               ? "no frames measured yet (the window may be minimised)"
-          : m_mode == RemoteMode::Offscreen
-              ? "no frame loop in --offscreen (it renders on demand); frame "
-                "timing exists only in a windowed instance"
               : "no frame loop under --headless: run the GUI (or "
                 "tools/headless-preview.sh --gui) to measure frame time");
     json phases = json::object();

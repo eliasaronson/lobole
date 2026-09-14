@@ -34,6 +34,15 @@ struct FrameStats {
 // ends at PRESENT_SRC_KHR (the default); an offscreen pass has no swapchain
 // (PRESENT_SRC is a VK_KHR_swapchain layout) and ends at
 // COLOR_ATTACHMENT_OPTIMAL instead.
+// An EMPTY `outputPath` renders and reads nothing back — no copy, no PNG,
+// no FrameStats. That is the measuring shape: the encode between renders is
+// CPU work that leaves the GPU idle, and an idle GPU on a laptop drops to its
+// lowest clock, so a burst that saves nothing measures the card as it
+// actually runs (docs/rendering/offscreen-gpu-timing-plan.md).
+//
+// `repeat` renders the same scene that many times into the same target — one
+// submit each, each waited on, only the last reading back. `afterEachSubmit`
+// runs on the CPU between them, which is where a timestamp harvest goes.
 bool CaptureScreenshot(
     VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
     VkCommandPool commandPool, VkRenderPass renderPass, VkFormat format,
@@ -43,4 +52,5 @@ bool CaptureScreenshot(
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
     const std::function<void(VkCommandBuffer)>& recordPrepass = {},
     FrameStats* stats = nullptr,
-    VkImageLayout colorFinalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    VkImageLayout colorFinalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    uint32_t repeat = 1, const std::function<void()>& afterEachSubmit = {});

@@ -148,7 +148,56 @@ def main():
         expect_error(d, "menu_click", "offscreen", path="Edit/Undo")
         expect_error(d, "key_press", "offscreen", chord="Ctrl+Z")
         expect_error(d, "viewport_drag", "offscreen")
-        expect_error(d, "frame_stats", "offscreen")
+
+        phase("frame_stats: per-pass GPU time, which is what this mode is for")
+        # No frame loop here, so no fps and no CPU phase split — and this is
+        # the one place a PASS can be measured honestly: with no swapchain
+        # there is no image to wait for, so `main` is shading rather than the
+        # display stalling inside it (docs/rendering/
+        # offscreen-gpu-timing-plan.md).
+        # Earlier phases have already rendered, so start a fresh window and
+        # check that a window with nothing in it says so rather than
+        # answering with stale numbers.
+        d.request("frame_stats", {"reset": True})
+        expect_error(d, "frame_stats", "nothing rendered yet")
+        for i in range(4):
+            d.request("screenshot", {"path": os.path.join(tmp, f"fs{i}.png")})
+        fs = d.request("frame_stats")
+        expect(fs["mode"] == "offscreen", f"mode named ({fs})")
+        expect("fps" not in fs and "phases_ms" not in fs,
+               f"no frame numbers where there is no frame loop ({fs})")
+        expect(fs["renders"] >= 4, f"one sample per capture ({fs})")
+        g = fs["gpu"]
+        expect("supported" in g, f"timestamp support is stated ({g})")
+        if g["supported"]:
+            expect(g["samples"] >= 4, f"samples counted ({g})")
+            expect(g["total_ms"] > 0.0, f"a pass took real time ({g})")
+            # The median is what a measurement reads: a mean over a handful
+            # of renders carries the first one's first-use work.
+            expect(g["total_p50_ms"] > 0.0, f"medians reported ({g})")
+        # A reset starts a fresh window rather than averaging in what came
+        # before — six renders of a new configuration once read as the
+        # average of those six and the 114 before them.
+        r = d.request("frame_stats", {"reset": True})
+        expect(r.get("reset") is True, f"reset acknowledged ({r})")
+        expect_error(d, "frame_stats", "nothing rendered yet")
+
+        phase("frame_stats {renders}: a burst, which is how to measure")
+        # Saving a PNG between renders is CPU work that leaves the GPU idle,
+        # and an idle laptop GPU drops to its lowest clock: the same scene
+        # measured 12.5 ms a frame over saved captures and 1.4 ms over a
+        # burst, which is the difference between measuring the card and
+        # measuring its idle floor. The burst also warms up first, because
+        # pipelines are built on first use and the clocks ramp over the first
+        # tenth of a second.
+        burst = d.request("frame_stats", {"renders": 40})
+        expect(burst["renders"] >= 40, f"the burst rendered ({burst})")
+        expect("fps" not in burst, f"still no frame loop to report ({burst})")
+        if burst["gpu"]["supported"]:
+            expect(burst["gpu"]["total_p50_ms"] > 0.0,
+                   f"the burst measured something ({burst['gpu']})")
+        expect_error(d, "frame_stats", "between 1 and 10000", renders=0)
+        expect_error(d, "frame_stats", "between 1 and 10000", renders=999999)
 
         phase("screenshot: a real framed raster capture, no warnings")
         shot1 = os.path.join(tmp, "shot1.png")

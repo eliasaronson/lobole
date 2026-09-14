@@ -176,45 +176,52 @@ rate.
 ## What the clean instrument says (2026-09-14)
 
 With per-pass timing available in `--offscreen` — no swapchain, no window, no
-occlusion, 1280x720, scene only — the passes can finally be read directly
-(docs/rendering/offscreen-gpu-timing-plan.md). Medians of 30 renders:
+occlusion, 1280x720, scene only — the passes can be read directly
+(docs/rendering/offscreen-gpu-timing-plan.md). Medians of 300 renders drawn
+**back to back**, after a warm-up, which takes 2.9 s for the whole table:
 
-| scene | shadow | ssao | main |
-|---|---|---|---|
-| one box, no AO, no shadows | 0.000 | 0.000 | **0.036** |
-| + AO half | 0.000 | **3.057** | 0.294 |
-| + AO full | 0.000 | **5.406** | 0.295 |
-| + shadows (no AO) | **2.037** | 0.000 | 0.438 |
-| AO half + shadows | 2.040 | 3.248 | 0.295 |
-| + procedural wood material | 2.040 | 3.250 | **0.295** |
-| side_wall part | 1.867 | 3.464 | 0.694 |
-| front_wall part | 1.445 | 3.686 | 1.255 |
-| speaker assembly | 4.084 | 4.378 | 4.999 |
+| scene | shadow | ssao | main | total |
+|---|---|---|---|---|
+| one box, no AO, no shadows | 0.000 | 0.000 | **0.029** | 0.029 |
+| + AO half | 0.000 | **0.343** | 0.033 | 0.376 |
+| + AO full | 0.000 | **0.603** | 0.033 | 0.635 |
+| + shadows (no AO) | **0.227** | 0.000 | 0.049 | 0.276 |
+| AO half + shadows | 0.229 | 0.362 | 0.033 | 0.624 |
+| + procedural wood material | 0.229 | 0.362 | 0.033 | **0.623** |
+| side_wall part | 0.210 | 0.391 | 0.075 | 0.676 |
+| front_wall part | 0.163 | 0.414 | 0.139 | 0.716 |
+| speaker assembly | 0.455 | 0.489 | 0.557 | **1.502** |
 
-(NVIDIA at **P8, 210 MHz**: a burst of captures separated by PNG encoding
-leaves the card idle between renders, so it never ramps for a measurement
-like this one. Every figure is therefore roughly fifteen times what the card
-spends in a real frame loop — the ratios between them are what to read. In an
-actual windowed frame the same app reaches P0/P5 and draws the same assembly
-with full-res AO at 60 fps.)
+**Our whole GPU frame for a real assembly is 1.5 ms.** The 93 ms frame this
+page opens with was display path, all of it.
+
+How the burst changes the answer, and why it is the right way to ask: saving
+a PNG between renders is CPU work that leaves the GPU idle, and an idle
+laptop GPU drops to its lowest clock. The same assembly measured **12.5 ms a
+frame over 30 saved captures and 1.4 ms over 300 back-to-back renders** — a
+9x error, and 200x slower to collect. The burst also warms up first: pipelines
+are built on first use and the clocks ramp over the first tenth of a second,
+which had a bare box reading 0.237 ms instead of 0.029.
+
+The same table on the Intel Arc, uncontended rows: AO half 0.615, AO full
+0.932, shadows 0.30, wood free, a bare box 0.042. So the discrete card is
+about 1.5-1.8x faster per pass — a believable gap at this resolution, and
+nothing like the ten times the windowed instrument suggested.
 
 Two things it settles:
 
-- **The scene is nearly free; the effects are the frame.** A box costs 0.036
-  ms to shade and 5.3 ms to shade with AO and shadows on. The procedural wood
-  material costs **0.001 ms** — measured as 0.295 against 0.295 with and
-  without, and separately on the Arc as 0.044 against 0.044 with AO off. The
-  grain shader is not why anything is slow.
+- **The scene is nearly free; the effects are the frame.** A box costs 0.029
+  ms to shade and 0.62 ms with AO and shadows on — twenty times its own cost.
+  The procedural wood material costs **0.001 ms** (0.623 against 0.624), so
+  the grain shader was never why anything was slow.
 - **AO is the single biggest pass**, half-res or not, and shadows cost about
-  as much as AO at half. That is the same conclusion the field report reached
-  from the other end, now from the pass itself.
+  two thirds of AO at half. That is the same conclusion the field report
+  reached from the other end, now from the pass itself.
 
 **What survives a loaded machine, and what does not.** Part of this round ran
-while another session was compiling and Chrome was busy; the whole table was
-then re-measured at load average 8.5 and came back the same to three
-decimals (AO half 3.060 against 3.057, the assembly 13.460 against 13.461).
-Nothing else uses the discrete GPU, so its timestamps do not care what the
-CPU is doing.
+while another session was compiling and Chrome was busy; the tables were
+re-measured afterwards and the discrete GPU's came back unchanged. Nothing
+else uses that card, so its timestamps do not care what the CPU is doing.
 
 The **Intel** figures do care, because that GPU draws the desktop. Simple
 scenes repeat (a bare box 0.042/0.044 ms, AO half 0.657/0.733, shadows

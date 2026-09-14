@@ -1628,6 +1628,18 @@ struct AppState {
   // which owns the server.
   int remotePort = 0;
   std::function<int()> ensureRemotePort;
+  // Render the scene N times back to back, measuring each, and report how
+  // many ran. Installed by main.cpp in --offscreen ONLY, where there is no
+  // swapchain to wait on and no window to be covered — the one place a PASS
+  // can be timed for what it shades. Null elsewhere, and frame_stats says so
+  // rather than pretending (docs/rendering/offscreen-gpu-timing-plan.md).
+  //
+  // A burst is its own measurement window: it clears the samples first, so
+  // what comes back describes THESE renders. And it saves nothing — the PNG
+  // encode between captures is CPU work that leaves the GPU idle, which on a
+  // laptop drops it to its lowest clock and measures the card at a fifteenth
+  // of its speed.
+  std::function<size_t(size_t)> renderBurst;
 
   // Frame-time accounting (docs/rendering/frame-timing.md). Always measured —
   // it costs five clock reads a frame — but the HUD is off unless asked for
@@ -1647,7 +1659,20 @@ struct AppState {
     double ssaoMs = 0.0;
     double mainMs = 0.0;
     double totalMs = 0.0;
+    // The median of the same samples. Measuring is where it matters: a mean
+    // over a handful of renders carries the first one's first-use work.
+    double shadowP50Ms = 0.0;
+    double ssaoP50Ms = 0.0;
+    double mainP50Ms = 0.0;
+    double totalP50Ms = 0.0;
   } gpuStats;
+  // frame_stats {reset:true} asks for a fresh measurement window. Set here
+  // and consumed by whichever loop owns the timer (main.cpp), because a
+  // rolling 120-sample ring answers the wrong question when you are
+  // MEASURING rather than watching (docs/rendering/
+  // offscreen-gpu-timing-plan.md). Plain bool: the RPC handlers run on the
+  // main thread, inside the same loop that consumes it.
+  bool gpuStatsReset = false;
   // The swapchain's shape, as the driver actually gave it — pure data here,
   // set by main.cpp at creation and on every resize. It belongs in the
   // instrument because it is INVISIBLE otherwise and it decides the frame
