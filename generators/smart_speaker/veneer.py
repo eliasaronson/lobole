@@ -39,8 +39,40 @@ plinth, where there is no neighbour.
 """
 from designer_sdk import SdkError
 
-# Which way each covering faces, and which of its edges meet a neighbour.
-# `outward` is the wall's own local direction to its outside face.
+# Which way each covering faces, which of its edges meet a neighbour, and how
+# far past its own wall it runs.
+#
+# A covering is NOT the outline of the wall it is glued to. It runs to the
+# cabinet's outer envelope — over the edges of the panels beside it — so that
+# its 45 degree mitre and its neighbour's cancel in the corner. How far past
+# depends on what is beside it:
+#
+#   a side covering    already spans the full depth (the side walls run past
+#                      the baffle), so it grows only by a covering's thickness
+#   a front or back    sits BETWEEN the side walls, so it grows by a wall AND
+#                      a covering on each side
+#   the top            sits between all four, so it grows by both on both axes
+#
+# Cut to the wall's own width instead, the baffle's covering stops 16 mm short
+# of each side wall and leaves its front edge bare — which is what this list
+# is correcting.
+def _grow(p):
+    # By the SETBACK, not the full thickness. The mitre is cut 45 degrees at
+    # `finish_wall_thickness - mitre_land` (a knife edge is refused by the
+    # kernel and by any router), so two coverings grown by the full thickness
+    # leave exactly the land's worth of each other behind: 3.6^2 - 2 * 3.45^2
+    # / 2 = 1.06 mm2, which over 1125.6 mm of corner is 1,189 mm3 of plywood
+    # inside plywood. Grown by the setback instead, the two wedges tile the
+    # column and the only thing left at the outer corner is a 0.15 mm flat —
+    # which is what a real mitre has anyway.
+    skin = p["finish_wall_thickness"] - p["mitre_land"]
+    past_wall = p["wall_thickness"] + skin
+    return {"veneer_side": (skin, skin),
+            "veneer_front": (past_wall, skin),
+            "veneer_back": (past_wall, skin),
+            "veneer_top": (past_wall, past_wall)}
+
+
 COVERINGS = [
     ("veneer_side", "side_wall", (-1, 0, 0), ("front", "back", "top")),
     ("veneer_front", "front_wall", (0, -1, 0), ("left", "right", "top")),
@@ -93,8 +125,9 @@ def build(app, p, name, source_part, outward, mitres):
                              "source_part": source_part.id,
                              "reference": True})
     plane, rev = _face_plane(p, source_part.name, Plane)
+    du, dv = _grow(p)[name]
     sk = part.sketch(plane, name="outline")
-    walls.silhouette(sk, p, source_part.name)
+    walls.silhouette(sk, p, source_part.name, du=du, dv=dv)
     part.extrude(sk.add(), distance=p["finish_wall_thickness"],
                  reversed=rev, name="covering")
     part.material("plywood_birch")
@@ -124,32 +157,38 @@ def _openings(part, p, source, plane, rev):
 
 
 def _mitre(part, p, outward, which):
-    """Chamfer 45 degrees, setback = thickness, on the edges that meet a
-    neighbour.
+    """Chamfer 45 degrees, setback = thickness, where this covering meets
+    another.
 
-    Selected by WHERE the edge is rather than by index: an edge on the
-    covering's outer face whose position is extreme along an axis the joint
-    runs across. A chamfer set is the one thing in this generator that has
-    taken the app down, so the set is kept to the joints that need it.
+    The cut is taken from the covering's INNER face — the one against its
+    wall — and not from the outside. Two sheets meeting at an outside corner
+    share a 3.6 x 3.6 column, and the mitre plane is the diagonal from the
+    column's OUTER corner to its inner one; each keeps the side its own body
+    runs to. Chamfering the outer edge of both removes the same wedge and
+    leaves both occupying the same triangle, which is 14,588 mm3 of two
+    sheets of plywood in each other, over the full height.
+
+    Extents come from the covering body's own edges, not `part.bbox()`: the
+    part also holds the reference ghost of its wall, whose extents are the
+    wrong ones — a side covering's inner face is at the wall's outer face,
+    which is in the MIDDLE of that combined box.
     """
     thick = float(p["finish_wall_thickness"])
     axis = [i for i in range(3) if outward[i]][0]
     sign = outward[axis]
-    # By NAME: the part has two bodies, the covering and the wall it is
-    # referenced to, and the ghost's edges are not ours to chamfer.
     body = part.body(name="covering")
-    lo, hi = part.bbox()
-    # A mitre is cut from the OUTER face inward, so only the outer edge of
-    # each corner is chamfered. Taking both edges asks for 2 x 3.45 mm of
-    # setback out of a 3.6 mm panel and the kernel refuses the lot
-    # ("radius too large for the geometry").
-    outer = hi[axis] if sign > 0 else lo[axis]
+    edges = [e for e in body.edges(kind="line") if e.midpoint is not None]
+    if not edges:
+        return
+    lo = [min(e.midpoint[i] for e in edges) for i in range(3)]
+    hi = [max(e.midpoint[i] for e in edges) for i in range(3)]
+    inner = lo[axis] if sign > 0 else hi[axis]
     picks = []
-    for edge in body.edges(kind="line"):
+    for edge in edges:
         m = edge.midpoint
-        if m is None or edge.length < thick * 3:
+        if edge.length < thick * 3:
             continue
-        if abs(m[axis] - outer) > 0.05:
+        if abs(m[axis] - inner) > 0.05:
             continue
         for side in which:
             k, want = _side(side, axis)

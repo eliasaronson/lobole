@@ -74,25 +74,33 @@ def _foot_profile(p, half_span, out):
     return right, left
 
 
-def silhouette(sk, p, panel):
+def silhouette(sk, p, panel, du=0.0, dv=0.0):
     """A panel's outline, drawn the same way for the panel and for the
     plywood covering that goes on it.
 
-    ONE function for both, because the covering is the wall's outline: a
+    ONE function for both, because the covering IS the wall's outline: a
     projected face comes into a sketch as locked CONSTRUCTION geometry, so
     an extrude cannot use it ("sketch has no closed profile") and the shape
     has to be real. Shared here rather than described twice.
+
+    `du`/`dv` grow it, which is what a covering needs and the wall does not.
+    A covering runs to the cabinet's OUTER envelope, past the panel it is
+    glued to and over the edges of the panels beside it, so that the 45
+    degree mitres on two of them cancel in the corner. Drawn at the wall's
+    own width instead, the baffle's covering stops 16 mm short of each side
+    wall and leaves its front edge bare.
     """
-    half_h = p["carcass_half_h"]
+    half_h = p["carcass_half_h"] + dv
     if panel == "top_wall":
         # Four lines, not `centered_rect`: a `rect` entity's corners are not
         # expression-driven, so a rect built from Params is a literal and the
         # covering stops following the cabinet's size.
-        hw = p["cabinet_internal_w"] / 2
-        hd = p["cabinet_internal_d"] / 2
+        hw = p["cabinet_internal_w"] / 2 + du
+        hd = p["cabinet_internal_d"] / 2 + dv
         sk.polyline([(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)], close=True)
         return sk
-    half_u = _outer_d(p) if panel == "side_wall" else p["cabinet_internal_w"] / 2
+    half_u = (_outer_d(p) if panel == "side_wall"
+              else p["cabinet_internal_w"] / 2) + du
     right, left = _foot_profile(p, half_u, half_u)
     sk.polyline([(half_u, half_h)] + right[1:]
                 + [left[3], left[2], left[1]]
