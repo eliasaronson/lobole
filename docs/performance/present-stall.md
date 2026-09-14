@@ -223,13 +223,25 @@ while another session was compiling and Chrome was busy; the tables were
 re-measured afterwards and the discrete GPU's came back unchanged. Nothing
 else uses that card, so its timestamps do not care what the CPU is doing.
 
-The **Intel** figures do care, because that GPU draws the desktop. Simple
-scenes repeat (a bare box 0.042/0.044 ms, AO half 0.657/0.733, shadows
-0.322/0.381 across runs); complex ones do not — the same assembly gave
-`main` 62.9 ms under contention and 3.5 ms quiet. The per-frame TOTAL median
-is what gives it away: with the component medians at 0.3-1.2 ms the total
-median was 16.2, which only happens when a *different* pass is interrupted
-each frame.
+The **Intel** figures do care, because that GPU draws the desktop — and the
+cleanest way to see it is **mean over median** on one burst. The same
+assembly, 300 renders each, at load average 2.25:
+
+| | p50 | mean | mean/p50 |
+|---|---|---|---|
+| NVIDIA | 1.406 | 1.406 | **1.00x** |
+| Arc | 5.21 | 21.6-29.6 | **4.2-5.7x** |
+
+The discrete card returns 1.00x to three decimals, twice: 300 consecutive
+frames, every one identical, because nothing else runs there. The Arc's
+MEDIAN frame is a respectable 5.2 ms; its mean is four to six times that,
+which is interruption, not capability.
+
+So the two terms are worth keeping apart. **Slower: about 3.7x** on this
+scene (5.21 against 1.41 median), and only 1.4-1.8x on simple ones — the gap
+widens with shading work, as an iGPU's bandwidth would predict. **Contended:
+another 4-6x on top**, and that is the term that decides whether it holds a
+frame rate.
 
 Quiet, the Arc costs **0.66 ms** for half-res AO against the P8 NVIDIA's
 3.06, and 0.32 ms for shadows against 2.04. That is not an argument for
