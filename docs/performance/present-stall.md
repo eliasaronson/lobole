@@ -76,6 +76,49 @@ vsynced app should sit.
   of the refresh period, with two images, is this cliff — and no other number
   in the app could distinguish it from a slow GPU.
 
+## Is three general, or is it a fix for one card?
+
+The number we set is a **request**. The driver clamps it into the surface's
+own `[minImageCount, maxImageCount]` (imgui_impl_vulkan does this before
+creating the swapchain), so "ask for 3" means "at least three wherever the
+driver permits, and never fewer than the driver's own floor". Both GPUs in
+this machine, logged at startup since 2026-09-14:
+
+```
+NVIDIA RTX 4060 : 3 images (asked 3, surface allows 2..8)
+Intel Arc (MTL) : 3 images (asked 3, surface allows 3..no limit)
+```
+
+**Mesa was never on the cliff and cannot be put on it.** Sweeping the request
+on the Intel — one wall, 1280x720, half-res AO, shadows on — it answers 3
+whether asked for 2, 3 or 4:
+
+| request | got | fps | avg | p50 | present | gpu |
+|---|---|---|---|---|---|---|
+| 2 | 3 | 15.8 | 63.5 | 57.0 | 0.0 | 58.15 |
+| 3 | 3 | 20.7 | 48.3 | 39.2 | 0.0 | 51.76 |
+| 4 | 3 | 17.0 | 58.8 | 54.0 | 0.0 | 63.37 |
+
+The spread there is GPU-bound noise, not the swapchain: the Arc spends 52-63
+ms a frame on a scene the NVIDIA draws in 5.6, and `present` is 0.0 ms
+because that GPU owns the display and nothing is copied. Its frame rate is a
+separate question — our shaders are heavy for an iGPU — and no swapchain
+depth changes it.
+
+So the shape of the rule is: **a driver whose floor is already 3 is
+unaffected; a driver whose floor is 2 gains the spare image.** NVIDIA's
+proprietary driver reports 2 on Windows as well, so the same cliff was
+reachable there (packaging/windows/) and the same fix covers it. AMD is
+unmeasured here.
+
+The one case the request cannot fix is a surface with `maxImageCount` of 2 —
+then the clamp hands back 2 and the app is on the cliff with nothing to do
+about it. That case is now **visible rather than mysterious**: the startup log
+prints what was asked and what the surface allowed, `frame_stats.swapchain`
+carries the count, and `remote_smoke` asserts the spare image so such a
+machine reports itself instead of quietly running at a third of its frame
+rate.
+
 ## What is still on the table
 
 - **`present` is 14.6 ms of a 16.9 ms frame even at 60 fps**, because every

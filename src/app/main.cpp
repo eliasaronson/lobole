@@ -934,7 +934,22 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
       : wd->PresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "immediate"
       : wd->PresentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "fifo_relaxed"
                                                             : "fifo";
-  LOG_INFO("Swapchain: {} images, {} per-frame slots", wd->ImageCount,
+  // ...and logged WITH THE SURFACE'S OWN LIMITS, because the request is only
+  // a request: the driver clamps it into [minImageCount, maxImageCount]. That
+  // is what makes this portable to report rather than to guess — measured
+  // here, NVIDIA allows 2..8 and hands back exactly what we ask for, while
+  // Mesa on the Intel Arc answers 3 whether asked for 2, 3 or 4. A machine
+  // that lands on 2 anyway (a surface with maxImageCount 2) is on the FIFO
+  // cliff with nothing the app can do, and this line is how anyone would
+  // know (docs/performance/present-stall.md).
+  VkSurfaceCapabilitiesKHR caps{};
+  vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, wd->Surface,
+                                            &caps);
+  LOG_INFO("Swapchain: {} images (asked {}, surface allows {}..{}), {} "
+           "per-frame slots",
+           wd->ImageCount, g_MinImageCount, caps.minImageCount,
+           caps.maxImageCount == 0 ? std::string("no limit")
+                                   : std::to_string(caps.maxImageCount),
            render::kMaxFramesInFlight);
 }
 
