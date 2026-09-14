@@ -21,9 +21,10 @@ a script that happened to produce a document once.
    wider is a literal that survived, and the run fails naming it. This is the
    check that would have caught the port's five hard-coded bolt positions.
 4. **It is the same cabinet.** Volumes against the parts that already exist —
-   the document for the six panels, the STEP for the port and the braces —
-   with the braces reported as a similarity rather than a match, because they
-   are re-drawn (see braces.py).
+   the document for the six panels, the STEP for the port and the braces.
+   The braces used to be reported as a similarity rather than a match,
+   because they were re-drawn; they are now recovered from the export's own
+   sections and land at 1.009 and 0.999 (braces.py).
 
 ## Use the verb, not the sweep
 

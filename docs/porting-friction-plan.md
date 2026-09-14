@@ -73,6 +73,17 @@ settled it. A brace was abandoned and re-drawn to a rule because its shape
 could not be recovered; the volume is 0.77x the original and that is the best
 available.
 
+**Closed, and the payoff was bigger than the fix.** `section {loops}` shipped,
+and reading the brace's real outline off it found that the re-drawn rule was
+not a simplification but three WRONG numbers, all taken from screenshots: the
+rail 8 mm where the export has 16, the spokes 24 where it has 16, and the ring
+at its face radius rather than its mid-thickness one. Both braces are now
+built from the sections and land at 1.009 and 0.999 of the export, with its
+R8 blends. The 0.77x was never "the best available" — it was a measurement
+nobody could check. That is the case for the verb, stated better than the
+plan stated it: the cost of not having it was not a rough part, it was a
+confidently wrong one.
+
 **The fix.** Two reads, both on geometry the kernel already has:
 
 - `section` gains the region **loops** (ordered segments: lines, arcs, their

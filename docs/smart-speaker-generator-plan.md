@@ -78,13 +78,19 @@ the generator writes those as expressions, not as the numbers they evaluate to.
 
 ### The parts that are missing
 
-- **Port-ring brace** (210 × 320 × 16 at z = −785.2) — a window frame with a
-  central ring the port tube passes through, cross members and four screw
-  holes. It is what closes the port bay; there is no separate shelf. Drawn from
-  `port_tube_od` and the internal cross-section, not from the ring diameter it
-  happens to have.
-- **Window-brace ladder** (210 × 320 × 345.7) — a four-window horizontal frame
-  with three vertical stiffeners and wall tabs, in the W170S chamber.
+- **Port-ring brace** (210 × 320 × 16 at z = −785.2) — **built.** Four windows
+  in a solid panel, each blending into the central ring the port tube passes
+  through, with four screw holes. It is what closes the port bay; there is no
+  separate shelf. Every dimension is read off the export's own mid-plane
+  section (`section {loops}`) and re-expressed in parameters: the rail, the
+  spokes and the ring wall are all one `wall_thickness`, the window-to-ring
+  blend is R11, and the rim carries the export's R8. 1.009 of the export by
+  volume — see braces.py for the three numbers this got wrong when they were
+  measured off screenshots instead.
+- **Window-brace ladder** (210 × 320 × 345.7) — **built.** A four-window
+  horizontal frame with three vertical stiffeners, in the W170S chamber, its
+  slots carrying the export's two families of R8 (the vertical corners, then
+  the rims over them). 0.999 of the export by volume.
 - **Port** — three revolves, as the STEP has them: the tube (Ø105 over Ø100
   bore, 250 long) and a flare at each end (Ø155 at the top, Ø160 bolted to the
   bottom wall on `outer_port_bolt_circle`). Revolved profiles rather than

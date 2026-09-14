@@ -160,6 +160,11 @@ TABLE = [
     ("brace_stud", "20.0", "the three support studs are square, this side"),
     ("brace_stud_gap", "2.5", "how far a stud stands off the wall it braces"),
     ("ring_brace_z", "-785.2", "port-ring brace, from the top datum"),
+    # Read off the export's own mid-plane section, not a screenshot: the
+    # blend that joins each window's straight edges to the ring is R11
+    # exactly ((h+R)^2 + 77.196^2 = (68.5+R)^2 solves at 11.000).
+    ("brace_blend_radius", "11.0",
+     "window-to-ring blend on the port brace"),
 
     # --- the electronics, bolted to the bay floor ---------------------------
     #
