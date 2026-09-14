@@ -101,13 +101,15 @@ re-drawn port tube goes from iou 0.333 to 1.000. Off by default, because a
 golden taken AT a position is a real thing to check, and `center_offset`
 still says how far it moved.
 
+Both are gated: `section {loops}` in `tests/test_measure.cpp` (a box's cut is
+one outer loop of four lines; drilled, two loops, one outer, and an arc that
+reports the bore's radius) and `compare_geometry {align}` in `sdk_smoke`.
+
 **Still to verify** the way that matters: rebuild the braces from loops and
-watch the ring brace stop being a re-draw at 0.77x. Neither `loops` nor
-`align` has a test yet.
+watch the ring brace stop being a re-draw at 0.77x.
 
 Touches the section/inspection RPC and its handler, `compare_geometry`,
-`tools/designer_sdk.py`. A case in `tests/` that reads a known part's loops
-back is owed and does not exist.
+`tools/designer_sdk.py`, `tests/test_measure.cpp`.
 
 ---
 
@@ -206,10 +208,10 @@ part stacked at the origin.
 version had missed: an allowance matching nothing, and a 0.15 mm near miss
 where a driver flange had been cut into its ply at exactly flange diameter.
 
-**Not gated.** `keep_origin` through the RPC has no test — the v97 golden
-covers the FEATURE and `headless_smoke` only passes the default. A round trip
-(export at a known position, re-import with `keep_origin`, assert the box did
-not move) is still owed.
+**Gated.** `headless_smoke` exports a box at x=400 and re-imports it twice:
+centred it lands on the origin, with `keep_origin` at 405. Only the FEATURE
+had a golden (v97); the RPC a bought part actually arrives through did not,
+which is how it came to be missing entirely.
 
 Touches `src/remote/RemoteInspection.cpp` and the import handler, the
 `describe` rows, `tools/designer_sdk.py`, the MCP workflow prompt.

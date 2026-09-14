@@ -126,7 +126,7 @@ instead of leaving them behind.
 
 ### CAM
 
-`cam.py` rebuilds the 6090 job: the setup frame, the `stock_max` origin, three
+**Built.** `cam.py` rebuilds the 6090 job: the setup frame, the `stock_max` origin, three
 tools, and the fourteen operations. Ten of those are one screw hole each, so
 the script writes them from `w170s_bolt_count` and `alpair_bolt_count` in a
 loop. Targets resolve **by geometry** — the cylinder at this radius at this
