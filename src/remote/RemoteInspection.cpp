@@ -28,6 +28,7 @@
 #include "ui/ViewActions.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -591,8 +592,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "plain-language verdicts; {missing_path}/{extra_path} export the diff "
      "solids as BREP. materialize:true DRAWS them on the part instead — "
      "missing red, extra green — so one screenshot shows WHERE it differs "
-     "(part tab only; clear_geometry_delta turns it off).",
-     "a, b, extra_path, golden_path, materialize, missing_path"},
+     "(part tab only; clear_geometry_delta turns it off). "
+     "{align: true} puts the candidate's centre of mass on the reference's "
+     "first, so the answer is about the SHAPE and not about where it sits: "
+     "a re-drawn tube whose volume matched to four figures scored iou 0.333 "
+     "because the reference was 900 mm away. Off by default — a golden taken "
+     "AT a position is a real thing to check — and `center_offset` still "
+     "says how far it moved.",
+     "a, align, b, extra_path, golden_path, materialize, missing_path"},
     {"clear_geometry_delta",
      "Remove the compare_geometry materialize overlay, leaving the plain "
      "model. Harmless when there is none.",
@@ -1429,8 +1436,24 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const bool materialize = p.value("materialize", false);
     const bool wantMissing = p.contains("missing_path") || materialize;
     const bool wantExtra = p.contains("extra_path") || materialize;
+    // `align`: put the candidate's centre of mass on the reference's before
+    // the boolean, and answer about the SHAPE rather than about where it
+    // happens to be. Without it a re-drawn port tube whose volume matched
+    // its reference to four figures scored an IoU of 0.333, because the
+    // reference sits where the cabinet puts it (z -1012..-762) and the part
+    // is built about its own origin 900 mm away. Opt-in, because a golden
+    // taken AT a position is a real thing to check and this would hide it;
+    // `center_offset` still reports how far it moved.
+    glm::mat4 alignB(1.0f);
+    if (p.value("align", false)) {
+      const auto probe = Measure::CompareBodySets(
+          refA, glm::mat4(1.0f), candB, glm::mat4(1.0f), nullptr, nullptr);
+      if (probe)
+        alignB = glm::translate(glm::mat4(1.0f), glm::vec3(probe->comA) -
+                                                     glm::vec3(probe->comB));
+    }
     const auto c =
-        Measure::CompareBodySets(refA, glm::mat4(1.0f), candB, glm::mat4(1.0f),
+        Measure::CompareBodySets(refA, glm::mat4(1.0f), candB, alignB,
                                  wantMissing ? &missingShape : nullptr,
                                  wantExtra ? &extraShape : nullptr);
     if (!c)
