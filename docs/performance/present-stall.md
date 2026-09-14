@@ -260,6 +260,40 @@ frame), and still lands 60 fps.
 A true cross-GPU comparison needs a machine where each GPU can be measured
 idle. This one has neither: one is clock-locked, the other draws the desktop.
 
+## At 165 Hz the ceiling is the handover, not the panel (2026-09-14)
+
+The internal panel was raised from 60 Hz to 165 (Lenovo Yoga Pro 9 16IMH9,
+3200x2000, the external display unplugged). The shipped build, speaker
+assembly, half-res AO, 1878x1100:
+
+```
+74.6 fps   avg 13.41 ms   p50 9.73   p95 27.61
+cpu 1.06   present 12.33   gpu 3.46
+```
+
+**60 fps becomes ~74**, and the median frame is under 10 ms — but not 165,
+and the reason is worth recording because three obvious suspects are all
+ruled out by measurement:
+
+- **Not vsync.** `IMMEDIATE` (no synchronisation at all) gives 70.6 fps
+  against FIFO's 72.2. `MAILBOX` is not offered by this surface at all.
+  There is nothing to gain from a vsync setting here, which is why none
+  shipped.
+- **Not the window.** 1878x1100 and 900x600 — four times fewer pixels —
+  both present in ~15 ms. A pixel copy would scale; this does not.
+- **Not our rendering.** 3.5 ms of GPU against a 13.4 ms frame.
+
+What is left is a fixed ~12-13 ms per frame inside `vkQueuePresentKHR`: the
+handover of the finished frame from the GPU that drew it to the one that owns
+the panel. `vkcube` hits the same wall (77 fps), so it is the path and not
+this app. An unsynced GLX program reaches 193 fps through the same offload,
+which says the ceiling belongs to the Vulkan present path specifically.
+
+Past it, the panel would have to be driven by the GPU that renders — a BIOS
+MUX or "discrete graphics" mode where the NVIDIA owns eDP-1. As wired today
+it is `Sink Output` only (`xrandr --listproviders`), so every frame is copied
+whatever we do.
+
 ## What is still on the table
 
 - **`present` is 14.6 ms of a 16.9 ms frame even at 60 fps**, because every
