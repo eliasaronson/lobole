@@ -35,6 +35,17 @@ simultaneously reporting 41-45% utilization. Every pass then costs ~15x what
 it should (full-res SSAO at 1.2 Mpix: 20 ms, where the card is capable of
 ~1.4), which overruns the next period, which idles the GPU again.
 
+**That P8 is a consequence, not a cause** — corrected 2026-09-14 after
+asserting the opposite twice. The governor works: a sustained load (glmark2
+off-screen through PRIME offload) takes the card to **P0, 1890 MHz, 90%
+utilization** within seconds. And with the spare swapchain image, our own app
+at 1878x1200 with FULL-res AO on the speaker assembly oscillates **P0 to P5**
+and holds **60.0 fps, 16.7 ms**. The card drops to P8 when the demand does,
+which for a vsync-paced viewport is most of the time — and at P8 there is one
+fifteenth of the throughput left, so a frame that grows tips over the period
+and the two-image cliff turns that into a collapse. Feeding the queue is what
+lifts it out.
+
 That is why the same scene measured anywhere between 10 and 25 fps run to
 run: it is a feedback loop, and where it settles depends on where it starts.
 
@@ -162,6 +173,74 @@ carries the count, and `remote_smoke` asserts the spare image so such a
 machine reports itself instead of quietly running at a third of its frame
 rate.
 
+## What the clean instrument says (2026-09-14)
+
+With per-pass timing available in `--offscreen` — no swapchain, no window, no
+occlusion, 1280x720, scene only — the passes can finally be read directly
+(docs/rendering/offscreen-gpu-timing-plan.md). Medians of 30 renders:
+
+| scene | shadow | ssao | main |
+|---|---|---|---|
+| one box, no AO, no shadows | 0.000 | 0.000 | **0.036** |
+| + AO half | 0.000 | **3.057** | 0.294 |
+| + AO full | 0.000 | **5.406** | 0.295 |
+| + shadows (no AO) | **2.037** | 0.000 | 0.438 |
+| AO half + shadows | 2.040 | 3.248 | 0.295 |
+| + procedural wood material | 2.040 | 3.250 | **0.295** |
+| side_wall part | 1.867 | 3.464 | 0.694 |
+| front_wall part | 1.445 | 3.686 | 1.255 |
+| speaker assembly | 4.084 | 4.378 | 4.999 |
+
+(NVIDIA at **P8, 210 MHz**: a burst of captures separated by PNG encoding
+leaves the card idle between renders, so it never ramps for a measurement
+like this one. Every figure is therefore roughly fifteen times what the card
+spends in a real frame loop — the ratios between them are what to read. In an
+actual windowed frame the same app reaches P0/P5 and draws the same assembly
+with full-res AO at 60 fps.)
+
+Two things it settles:
+
+- **The scene is nearly free; the effects are the frame.** A box costs 0.036
+  ms to shade and 5.3 ms to shade with AO and shadows on. The procedural wood
+  material costs **0.001 ms** — measured as 0.295 against 0.295 with and
+  without, and separately on the Arc as 0.044 against 0.044 with AO off. The
+  grain shader is not why anything is slow.
+- **AO is the single biggest pass**, half-res or not, and shadows cost about
+  as much as AO at half. That is the same conclusion the field report reached
+  from the other end, now from the pass itself.
+
+**What survives a loaded machine, and what does not.** Part of this round ran
+while another session was compiling and Chrome was busy; the whole table was
+then re-measured at load average 8.5 and came back the same to three
+decimals (AO half 3.060 against 3.057, the assembly 13.460 against 13.461).
+Nothing else uses the discrete GPU, so its timestamps do not care what the
+CPU is doing.
+
+The **Intel** figures do care, because that GPU draws the desktop. Simple
+scenes repeat (a bare box 0.042/0.044 ms, AO half 0.657/0.733, shadows
+0.322/0.381 across runs); complex ones do not — the same assembly gave
+`main` 62.9 ms under contention and 3.5 ms quiet. The per-frame TOTAL median
+is what gives it away: with the component medians at 0.3-1.2 ms the total
+median was 16.2, which only happens when a *different* pass is interrupted
+each frame.
+
+Quiet, the Arc costs **0.66 ms** for half-res AO against the P8 NVIDIA's
+3.06, and 0.32 ms for shadows against 2.04. That is not an argument for
+rendering on the Arc, and the reason is the answer to "why is it not faster
+in practice":
+
+**the Arc is never quiet.** It draws the desktop — two displays, 3840x2160
+and 3200x2000, plus a browser with 34 renderer processes — and every X11
+present on this machine is its work too. Our frame's GPU time is interleaved
+with all of it, and the timestamps show exactly that: the same scene, minutes
+apart, cost **3.83 ms offscreen and 54.88 ms in a window** on that GPU. The
+discrete card has the opposite deal — it does nothing but our rendering, pays
+a cross-GPU copy to hand the frame over (`present` 14.2 ms of a 16.7 ms
+frame), and still lands 60 fps.
+
+A true cross-GPU comparison needs a machine where each GPU can be measured
+idle. This one has neither: one is clock-locked, the other draws the desktop.
+
 ## What is still on the table
 
 - **`present` is 14.6 ms of a 16.9 ms frame even at 60 fps**, because every
@@ -170,10 +249,13 @@ rate.
   but its own passes cost 77 ms for this scene, so it is not a trade worth
   making here. A machine whose panel is wired to the discrete GPU would not
   pay either cost.
-- **The P8 clock floor is a system condition, not ours**: `NVreg_Dynamic\
-PowerManagement=3` with the X server on the Intel `modesetting` driver. It
-  amplifies the cliff but does not create it, and feeding the queue properly
-  is what lifts the card out of it in practice.
+- **The P8 state is demand-driven, not a system fault.** The card ramps to P0
+  under load and sits at P8 when a vsync-paced frame leaves it idle 90% of
+  the time. It is worth knowing because the per-pass numbers on this page
+  were taken there — a burst of captures separated by PNG encoding has the
+  same low duty cycle — so they are idle-clock figures and their RATIOS are
+  what to read. `nvidia-powerd` is not running and persistence mode is off;
+  neither prevents the ramp.
 - A **vsync setting** (mailbox/immediate) is not shipped. FIFO at three
   images reaches the refresh period on this machine, and an uncapped present
   mode buys nothing above it while costing power and tearing.
