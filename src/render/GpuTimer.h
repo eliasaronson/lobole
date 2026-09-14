@@ -48,6 +48,15 @@ public:
     double ssaoMs = 0.0;
     double mainMs = 0.0;
     double totalMs = 0.0;
+    // ...and the MEDIAN of the same samples. A mean over few renders is a
+    // liar here: the first render after a state change carries first-use
+    // work, and one 14 ms outlier in six turned a 0.05 ms pass into 2.47 —
+    // which read as "this material costs 2.4 ms" until the run was repeated
+    // with forty. The median says 0.05 with either count.
+    double shadowP50Ms = 0.0;
+    double ssaoP50Ms = 0.0;
+    double mainP50Ms = 0.0;
+    double totalP50Ms = 0.0;
   };
 
   // False (and inert thereafter) when the queue family reports
@@ -67,6 +76,15 @@ public:
   void Write(VkCommandBuffer cb, uint32_t imageIndex, Point point);
 
   Snapshot Average() const;
+
+  // Start a fresh measurement window: drop the samples collected so far. The
+  // ring holds 120, which for a frame loop is the point (a rolling average
+  // over ~2 s) and for a MEASUREMENT is a trap — six renders of a new
+  // configuration read as the average of those six and the 114 that came
+  // before, which walks the answer towards whatever ran previously
+  // (docs/rendering/offscreen-gpu-timing-plan.md). Queries in flight are
+  // unaffected: this touches the ring, not the pool.
+  void ResetSamples();
 
 private:
   static constexpr size_t kRing = 120; // ~2 s at 60 fps, ~12 s idle-paced

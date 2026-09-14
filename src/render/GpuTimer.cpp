@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "render/FramesInFlight.h"
 
+#include <algorithm>
 #include <vector>
 
 namespace render {
@@ -50,6 +51,12 @@ void GpuTimer::Shutdown(VkDevice device) {
     vkDestroyQueryPool(device, m_pool, nullptr);
   m_pool = VK_NULL_HANDLE;
   m_supported = false;
+}
+
+void GpuTimer::ResetSamples() {
+  m_ring = {};
+  m_next = 0;
+  m_count = 0;
 }
 
 void GpuTimer::Harvest(uint32_t imageIndex) {
@@ -118,6 +125,31 @@ GpuTimer::Snapshot GpuTimer::Average() const {
     s.shadowMs += f.shadowMs;
     s.ssaoMs += f.ssaoMs;
     s.mainMs += f.mainMs;
+  }
+  {
+    // Medians over the same samples, each pass independently (a frame is not
+    // ranked as a whole: the question is what a pass typically costs).
+    std::vector<float> shadow, ssao, main, total;
+    shadow.reserve(m_count);
+    ssao.reserve(m_count);
+    main.reserve(m_count);
+    total.reserve(m_count);
+    for (size_t i = 0; i < m_count; i++) {
+      const Sample& f = m_ring[i];
+      shadow.push_back(f.shadowMs);
+      ssao.push_back(f.ssaoMs);
+      main.push_back(f.mainMs);
+      total.push_back(f.shadowMs + f.ssaoMs + f.mainMs);
+    }
+    const auto median = [](std::vector<float>& v) {
+      const size_t mid = v.size() / 2;
+      std::nth_element(v.begin(), v.begin() + mid, v.end());
+      return static_cast<double>(v[mid]);
+    };
+    s.shadowP50Ms = median(shadow);
+    s.ssaoP50Ms = median(ssao);
+    s.mainP50Ms = median(main);
+    s.totalP50Ms = median(total);
   }
   const double n = static_cast<double>(m_count);
   s.shadowMs /= n;

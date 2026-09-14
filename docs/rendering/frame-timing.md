@@ -77,6 +77,22 @@ had barely moved.
 inside), so the statistics are unit-tested against a synthetic frame sequence
 with known percentiles rather than by staring at a HUD.
 
+## Where to read a PASS from (2026-09-14)
+
+Not from a windowed frame that is display-bound. The GPU's wait for the
+swapchain image falls INSIDE the main pass — the submit waits at
+`COLOR_ATTACHMENT_OUTPUT` — so a stalled frame reports shading it never did:
+the same box on the same GPU read `main 3.97 ms` visible and `11.07 ms` with
+the window occluded.
+
+`--offscreen` has no swapchain, no window to cover and no interface drawn over
+the scene, so `frame_stats` there reports the per-pass numbers and nothing
+else (no fps, no phase split — there is no frame loop, and a zero would read
+as infinitely fast). One sample per capture; `{reset: true}` starts a fresh
+measurement window, and `*_p50_ms` is what to read, because the first render
+after a state change carries first-use work.
+docs/rendering/offscreen-gpu-timing-plan.md.
+
 ## GPU timestamps — the deferral below, built (2026-08-26)
 
 What un-deferred it: the Intel-GPU performance assessment needed to know
