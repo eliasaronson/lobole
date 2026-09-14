@@ -280,7 +280,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Orient the camera to a named view {name: front|back|left|right|top|"
      "bottom|iso}.",
      "fit, name"},
-    {"fit_view", "Frame the geometry in the viewport.", ""},
+    {"fit_view",
+     "Frame the geometry in the viewport. `width` and `height` (PIXELS, both "
+     "together) frame it for a picture of that size instead — which is what "
+     "`render_still` renders at, and a fit solved for the viewport crops a "
+     "still whose aspect is narrower. Offscreen there is no window, so the "
+     "viewport's own aspect is whatever the framebuffer happens to be: pass "
+     "the size you are about to render.",
+     "height, width"},
     {"set_camera",
      "Direct camera control {target?, eye?, direction?, up?, distance?}. "
      "NOTE: direction points from target TOWARD the camera (a view-from "
@@ -308,8 +315,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "to 1920x1080 at 512 samples, the same as the GUI's Render dialog. "
      "`backdrop`: studio (a neutral sweep, the default) or environment (the "
      "HDRI itself). `outlines`: edges over the image, as the viewport draws "
-     "them (default true).",
-     "backdrop, ground, height, outlines, path, samples, seed, width",
+     "them (default true). `fit` frames the model for THIS picture's aspect "
+     "first: the still projects at width/height, while a plain `fit_view` "
+     "solves for the viewport, so fit-then-render crops whenever the two "
+     "differ — and offscreen the viewport is whatever the framebuffer "
+     "happens to be.",
+     "backdrop, fit, ground, height, outlines, path, samples, seed, width",
      remote::NotInBatch},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
@@ -1136,9 +1147,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"selection_items", selectionItems},
             {"selected_feature", ui::SelectedFeatureIndexOrMinus1(state)},
             {"camera",
+             // `fov` (VERTICAL, degrees) and `aspect` are here so a caller
+             // can reproduce the projection and check its own framing.
+             // Without them the block said where the camera is and not what
+             // it sees, and a script could not tell a fitted view from a
+             // cropped one (docs/rendering/still-framing-plan.md).
              {{"position", Vec3ToJson(state.camera->GetPosition())},
               {"target", Vec3ToJson(state.camera->GetTarget())},
-              {"distance", state.camera->GetDistance()}}},
+              {"distance", state.camera->GetDistance()},
+              {"fov_deg", state.camera->GetFOV()},
+              {"aspect", state.camera->GetAspectRatio()}}},
             {"can_undo", ui::CanGlobalUndo(state)},
             {"can_redo", ui::CanGlobalRedo(state)},
             {"rollback", stateDoc->Rollback()},
@@ -1198,6 +1216,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     uint32_t seed = p.value("seed", 1u);
     std::string path = p.value("path", std::string("render.png"));
     bool ground = p.value("ground", true); // shadow-catcher plane
+    // Frame the model for THIS picture before taking it. Off by default —
+    // the camera the caller set is the camera they get — but asking for it
+    // is the only way a script can frame correctly, because the still
+    // projects at width/height while `fit_view` alone solves for the
+    // viewport, which offscreen is whatever the framebuffer happens to be
+    // (docs/rendering/still-framing-plan.md).
+    if (p.value("fit", false))
+      ui::FitCameraToDocument(state, height > 0 ? static_cast<float>(width) /
+                                                      static_cast<float>(height)
+                                                : 0.0f);
     // Edges over the traced image. On by default because the viewport draws
     // them and their absence is what made butted boards render as one slab;
     // false renders the bare path-traced image.
@@ -1348,7 +1376,26 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (auto r = remote::HandleProjectRpc(state, m, p))
     return *r;
   if (m == "fit_view") {
-    ui::FitCameraToDocument(state);
+    // The aspect of the PICTURE being framed, when that is not the viewport.
+    // A `render_still` projects at the size it was asked for, so a fit solved
+    // for the viewport crops it (docs/rendering/still-framing-plan.md).
+    // Both or neither: a width without a height is an aspect nobody stated,
+    // and applying half of it silently frames for the wrong picture.
+    const bool hasW = p.contains("width"), hasH = p.contains("height");
+    if (hasW != hasH)
+      throw std::runtime_error(
+          "fit_view takes width AND height together — they are the size of "
+          "the picture being framed, and one alone is not an aspect");
+    float aspect = 0.0f;
+    if (hasW) {
+      const double w = p.at("width").get<double>();
+      const double h = p.at("height").get<double>();
+      if (!(w > 0.0) || !(h > 0.0))
+        throw std::runtime_error("fit_view width and height are pixels, both "
+                                 "greater than zero");
+      aspect = static_cast<float>(w / h);
+    }
+    ui::FitCameraToDocument(state, aspect);
     return json::object();
   }
   if (m == "view") {
@@ -1362,7 +1409,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           "; views: front, back, left, right, top, bottom, iso");
     return {{"position", Vec3ToJson(state.camera->GetPosition())},
             {"target", Vec3ToJson(state.camera->GetTarget())},
-            {"distance", state.camera->GetDistance()}};
+            {"distance", state.camera->GetDistance()},
+            {"fov_deg", state.camera->GetFOV()},
+            {"aspect", state.camera->GetAspectRatio()}};
   }
   if (m == "frame_stats") {
     // The door that matters for agents and CI: a HUD nobody is looking at

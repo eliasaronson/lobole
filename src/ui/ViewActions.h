@@ -114,7 +114,11 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
 // broken". Returns 0 when the scene is empty.
 float CenteredSectionOffset(AppState& state, int basePlane);
 
-void FitCameraToDocument(AppState& state);
+// Frames the camera on everything visible. `forAspect` is the aspect ratio
+// of the PICTURE being framed — pass it when that is not the viewport (a
+// `render_still` at its own size projects with width/height, so a fit solved
+// for the viewport crops the still); 0 means the viewport's own.
+void FitCameraToDocument(AppState& state, float forAspect = 0.0f);
 
 // Frames the camera on an explicit world-space box (render_sheet focus).
 void FitCameraToWorldBox(AppState& state, const glm::vec3& min,

@@ -99,8 +99,8 @@ namespace ui {
 namespace {
 // Aim the camera at a world-space box: the shared tail of the document and
 // selection fits.
-void FitCameraToBox(AppState& state, const glm::vec3& min,
-                    const glm::vec3& max) {
+void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
+                    float forAspect = 0.0f) {
   const glm::vec3 center = (min + max) * 0.5f;
 
   // The vertical half-FOV is fixed; the horizontal one is tan(fovY/2)*aspect,
@@ -110,8 +110,15 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
   // assumed a landscape viewport.
   Camera& cam = *state.camera;
   const float tanHalfV = std::tan(0.5f * glm::radians(cam.GetFOV()));
-  const float aspect =
-      cam.GetAspectRatio() > 0.0f ? cam.GetAspectRatio() : 1.0f;
+  // The aspect of the picture being framed, which is NOT always the
+  // viewport's: `render_still` projects with the size it was asked for
+  // (RendererSync's MakeStillDesc), so a fit solved for the viewport crops
+  // the still whenever the two differ — a fifth of a 210 mm panel in frame
+  // at 400x1100, correctly projected and framed for a different picture
+  // (docs/rendering/still-framing-plan.md).
+  float aspect = forAspect > 0.0f ? forAspect : cam.GetAspectRatio();
+  if (!(aspect > 0.0f))
+    aspect = 1.0f;
 
   // An open tool window covers the right of the viewport, and fitting used to
   // park the model underneath the very window that asked you to click it
@@ -564,13 +571,13 @@ void ClearSections(AppState& state) {
   state.sectionActiveId = 0;
 }
 
-void FitCameraToDocument(AppState& state) {
+void FitCameraToDocument(AppState& state, float forAspect) {
   if (!state.camera)
     return;
   glm::vec3 min, max;
   if (!VisibleSceneBounds(state, min, max))
     return;
-  FitCameraToBox(state, min, max);
+  FitCameraToBox(state, min, max, forAspect);
 }
 
 void FitCameraToWorldBox(AppState& state, const glm::vec3& min,

@@ -276,6 +276,72 @@ def main():
         d.call("delete_part", index=idx)
         d.call("reset_layout")  # harmless no-op headless (flag only)
 
+        # --- A fit frames the PICTURE, not just the viewport --------------
+        # `fit_view` solved for the viewport's aspect while `render_still`
+        # projects at the size it was asked for, so fit-then-render cropped
+        # whenever the two differed: a fifth of a 210 mm panel in frame at
+        # 400x1100, correctly projected and framed for a different picture
+        # (docs/rendering/still-framing-plan.md). Checked by projecting the
+        # part's own corners through the reported camera, which is why the
+        # camera block reports fov_deg and aspect at all — and it needs no
+        # GPU, unlike the picture it is about.
+        d.call("set_active_part", index=0)
+        st = d.call("get_state")
+        cam = st["camera"]
+        expect("fov_deg" in cam and "aspect" in cam,
+               f"the camera says what it SEES, not only where it is: {cam}")
+        lo = st["bodies"][0]["bbox_min"]
+        hi = st["bodies"][0]["bbox_max"]
+        pts = [[lo[0] if c & 1 else hi[0], lo[1] if c & 2 else hi[1],
+                lo[2] if c & 4 else hi[2]] for c in range(8)]
+
+        def worst_ndc(camera, aspect):
+            """How far the furthest corner lands from the frame's centre,
+            in NDC: over 1 is outside the picture."""
+            eye, tgt = camera["position"], camera["target"]
+            f = [t - e for t, e in zip(tgt, eye)]
+            n = math.sqrt(sum(v * v for v in f))
+            f = [v / n for v in f]
+            up = [0, 0, 1] if abs(f[2]) < 0.99 else [0, 1, 0]
+            r = [f[1] * up[2] - f[2] * up[1], f[2] * up[0] - f[0] * up[2],
+                 f[0] * up[1] - f[1] * up[0]]
+            n = math.sqrt(sum(v * v for v in r))
+            r = [v / n for v in r]
+            u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2],
+                 r[0] * f[1] - r[1] * f[0]]
+            tv = math.tan(math.radians(camera["fov_deg"]) / 2.0)
+            th = tv * aspect
+            out = 0.0
+            for pt in pts:
+                v = [a - b for a, b in zip(pt, eye)]
+                depth = max(sum(v[i] * f[i] for i in range(3)), 1e-3)
+                out = max(out,
+                          abs(sum(v[i] * r[i] for i in range(3))
+                              / (depth * th)),
+                          abs(sum(v[i] * u[i] for i in range(3))
+                              / (depth * tv)))
+            return out
+
+        # A plain fit frames for the VIEWPORT, so for a picture of a very
+        # different shape it is not enough — asserted so this cannot pass
+        # vacuously if the aspect stops being threaded through: without it
+        # both calls would frame identically and this line would fail.
+        d.call("view", name="top")
+        d.call("fit_view")
+        viewport_fit = worst_ndc(d.call("get_state")["camera"], 400 / 1100)
+        expect(viewport_fit > 1.0,
+               f"a fit for aspect {cam['aspect']:.3f} should NOT already "
+               f"frame a 400x1100 picture (got {viewport_fit:.3f}) — if it "
+               f"does, this check has lost its teeth")
+        for w, h in ((400, 1100), (1200, 800), (2000, 500)):
+            d.call("view", name="top")
+            d.call("fit_view", width=w, height=h)
+            got = worst_ndc(d.call("get_state")["camera"], w / h)
+            expect(got <= 1.0,
+                   f"fit for {w}x{h} left a corner {got:.3f} out of frame")
+        # Both or neither: half an aspect is not an aspect.
+        expect_error(d, "fit_view", "width AND height", width=800)
+
         phase("Autosave keeps the whole project, not the open tab")
         # F10. This is the scenario that used to fail: Autosaver was handed
         # the ACTIVE document, so a multi-document project autosaved one part
