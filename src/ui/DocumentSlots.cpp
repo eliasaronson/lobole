@@ -723,8 +723,10 @@ std::string WhyPartUndeletable(AppState& state, size_t index) {
   }
   if (!referencedBy.empty())
     return "'" + state.parts[index].name + "' is placed in " + referencedBy +
-           " — delete those occurrences first (right-click one in the "
-           "assembly's Model panel)";
+           " — delete those occurrences first: right-click one in the "
+           "assembly's Model panel, or call remove_occurrence on that "
+           "assembly's tab. Naming only the GUI leaves a script with a "
+           "refusal it cannot act on.";
   return {};
 }
 

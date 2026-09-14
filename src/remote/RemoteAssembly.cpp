@@ -63,16 +63,24 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
      "be omitted and keeps its current value, so sliding a part along one "
      "axis needs no quaternion.",
-     "id, transform"},
-    {"set_occurrence_visible", "Show/hide an occurrence.", "id, visible"},
-    {"set_occurrence_fixed", "Fix/free an occurrence for the solver.",
-     "fixed, id"},
-    {"rename_occurrence", "Rename an occurrence.", "id, name"},
+     "id, occurrence, transform"},
+    {"set_occurrence_visible",
+     "Show/hide an occurrence. Takes `occurrence` as well as `id` — its "
+     "neighbours here spell that argument `occurrence`, and one method "
+     "spelling it differently is a refusal in the middle of a loop.",
+     "id, occurrence, visible"},
+    {"set_occurrence_fixed",
+     "Fix/free an occurrence for the solver. Takes `occurrence` as well as "
+     "`id`.",
+     "fixed, id, occurrence"},
+    {"rename_occurrence",
+     "Rename an occurrence. Takes `occurrence` as well as `id`.",
+     "id, name, occurrence"},
     {"set_occurrence_configuration",
      "Choose which configuration of a placed SUB-ASSEMBLY this occurrence "
      "uses {id, configuration: name|id|null}; null = that document's active "
      "one. Two placements of one assembly can differ.",
-     "configuration, id"},
+     "configuration, id, occurrence"},
     {"select_occurrence", "Select an occurrence in the UI.", "id"},
     {"add_mate",
      "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
@@ -823,11 +831,19 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
-    Occurrence* occ = state.assembly->FindById(p.at("id").get<uint64_t>());
+    // `occurrence` as well as `id`: every neighbouring RPC names this
+    // argument `occurrence`, and these five named it `id` alone.
+    if (!p.contains("id") && !p.contains("occurrence"))
+      throw std::runtime_error(
+          "which occurrence? Pass `occurrence` (or `id`). Occurrences: " +
+          OccurrenceCandidates(*state.assembly));
+    const uint64_t occId = p.contains("id")
+                               ? p.at("id").get<uint64_t>()
+                               : p.at("occurrence").get<uint64_t>();
+    Occurrence* occ = state.assembly->FindById(occId);
     if (!occ)
       throw std::runtime_error(
-          "no occurrence with id " +
-          std::to_string(p.at("id").get<uint64_t>()) +
+          "no occurrence with id " + std::to_string(occId) +
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     ui::SnapshotAssembly(state);
     if (m == "set_occurrence_transform") {
