@@ -861,19 +861,28 @@ class SketchBuilder:
 
     def circle(self, center, d=None, r=None, construction=False):
         """A circle. Give `d` (diameter) or `r`; either may be an EXPRESSION
-        string, which keeps the dimension a variable."""
+        string OR a `Param`, which keeps the dimension a variable."""
         if (d is None) == (r is None):
             raise SdkError("circle takes exactly one of d= (diameter) or "
                            "r= (radius)")
         n = len(self.entities)
         e = {"type": "circle",
              "center": list(_uv(self, center, n, 0, "circle"))}
-        expr = d if isinstance(d, str) else (r if isinstance(r, str) else None)
+        # A Param counts as an expression, the same way `_dim` treats one.
+        # It did not, and a Param is a float subclass, so `circle(d=P["bore"])`
+        # took the literal branch below and wrote the NUMBER with no `r_expr`
+        # — a bore that looked parametric, was not, and said nothing. Every
+        # hole a generator drills goes through here.
+        given = d if d is not None else r
+        expr = (given if isinstance(given, str)
+                else (given.expr if isinstance(given, Param) else None))
         if expr is not None:
             # The app's own field is `r_expr` (a RADIUS), so a diameter given
             # as an expression is halved in the expression itself rather than
             # in python — the document stays the one thing that evaluates it.
-            e["radius"] = 0.0
+            e["radius"] = float(given) if isinstance(given, Param) else 0.0
+            if d is not None and isinstance(given, Param):
+                e["radius"] = float(given) / 2.0
             self._pending_exprs.append(
                 (n, "r", f"({expr}) / 2" if d is not None else expr))
         else:
@@ -1152,10 +1161,17 @@ def _uv(builder, at, entity=None, point=0, kind=None):
     a Face, an Edge, a Frame, a V — projected onto the builder's plane. This
     is the one place a world coordinate becomes a sketch coordinate.
 
-    A coordinate may be an EXPRESSION string. It is evaluated against the
-    document to place the entity, and — when `entity` says which entity and
-    point it belongs to — recorded so `.add()` can pin it with a real
-    dimensional constraint.
+    A coordinate may be an EXPRESSION string, or a `Param` — the same thing
+    with a number attached. It is evaluated against the document to place the
+    entity, and — when `entity` says which entity and point it belongs to —
+    recorded so `.add()` can pin it with a real dimensional constraint.
+
+    A Param counts here for the reason it counts in `_dim`: it is a float
+    subclass, so testing only for `str` sends `polyline(pts)` built out of
+    Params down the literal path and the profile silently stops following its
+    table. A generator whose whole outline is Param arithmetic then rebuilds
+    to exactly the same shape at any parameter value, and the document says
+    `cached, executed 0`.
     """
     if isinstance(at, (Face,)):
         return builder.plane.uv(at.centroid)
@@ -1170,14 +1186,24 @@ def _uv(builder, at, entity=None, point=0, kind=None):
     out = []
     fields = _COORD_FIELDS.get(kind or "", {}).get(point, (None, None))
     for field, c in zip(fields, (u, v)):
-        if isinstance(c, str):
-            if entity is None or field is None:
+        expr = c if isinstance(c, str) else (
+            c.expr if isinstance(c, Param) else None)
+        if expr is not None and (entity is None or field is None):
+            # A Param still has a NUMBER, so it can go in a coordinate the
+            # app does not make expression-driven (a rect's corners) — it
+            # just will not follow. A bare string has no value and cannot.
+            if isinstance(c, Param):
+                expr = None
+            else:
                 raise SdkError(
                     f"{c!r}: an expression can only drive a coordinate the "
                     f"app makes expression-driven (a point, a line endpoint, "
                     f"a circle or arc centre) — pass a number here")
-            builder._pending_exprs.append((entity, field, c))
-            out.append(0.0)  # the document overwrites this from the expression
+        if expr is not None:
+            builder._pending_exprs.append((entity, field, expr))
+            # The Param's own value keeps the entity in the right place until
+            # the document evaluates the expression over it.
+            out.append(float(c) if isinstance(c, Param) else 0.0)
         else:
             out.append(float(c))
     return (out[0], out[1])

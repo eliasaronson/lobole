@@ -135,6 +135,60 @@ def build_piston(part):
     return part.body()
 
 
+def check_params_drive(app):
+    """A part built ENTIRELY out of Params must follow its table.
+
+    Note the SCOPE: `part.param` declares a part variable, so the edit below
+    must name that scope too. Setting a project variable of the same name
+    creates a second one and the part correctly does not move — which is how
+    this test first "found" an app bug that was not there.
+
+    `Param` is a float that carries its expression, and that is the whole
+    reason a generator can be written as ordinary arithmetic. Two places did
+    not know it — `circle(d=)` built its expression by string interpolation,
+    and `_uv` (every line, point and polyline coordinate) had no Param branch
+    at all — so both took the literal path a float subclass falls into. The
+    document then builds, looks right, reports `cached, executed 0` when its
+    variable changes, and rebuilds to exactly the same shape at any value.
+    Nothing says so; that is why this is a test and not a review note.
+    """
+    part = app.part("param driven")
+    w = part.param("plate_w", 60.0)
+    h = part.param("plate_h", 40.0)
+    d = part.param("plate_bore", 10.0)
+    t = part.param("plate_t", 5.0)
+    # Every coordinate is Param arithmetic and the bore is a Param: no
+    # literal anywhere, and no expression STRINGS either — the point is that
+    # the arithmetic form works, since that is what a generator writes.
+    sk = part.sketch(sdk.Plane.xy(), name="plate")
+    sk.polyline([(-w / 2, -h / 2), (w / 2, -h / 2),
+                 (w / 2, h / 2), (-w / 2, h / 2)], close=True)
+    part.extrude(sk.add(), distance=t, name="plate")
+    bore = part.sketch(sdk.Plane.xy(), name="bore")
+    bore.circle((0, 0), d=d)
+    part.cut(bore.add(), distance=t, name="bore")
+
+    lo, hi = part.bbox()
+    expect(abs((hi.x - lo.x) - 60.0) < 0.01,
+           f"the plate starts one plate_w across: {hi.x - lo.x:.3f}")
+
+    app.set_variable(name="plate_w", expression="90.0", scope="part")
+    lo, hi = part.bbox()
+    expect(abs((hi.x - lo.x) - 90.0) < 0.01,
+           f"a Param COORDINATE must drive the profile — the plate is still "
+           f"{hi.x - lo.x:.3f} across after plate_w went to 90")
+
+    # Measured AFTER the widening above, or the plate growing swamps the
+    # bore growing and the comparison says nothing.
+    before = part.volume()
+    app.set_variable(name="plate_bore", expression="20.0",
+                     scope="part")
+    after = part.volume()
+    expect(after < before,
+           f"a Param DIAMETER must drive the bore — volume {after:.1f} did "
+           f"not fall from {before:.1f} when plate_bore doubled")
+
+
 # A word that names an angle. `pitch` is left out on purpose: a thread's
 # pitch is a length.
 ANGLE_WORDS = {"angle", "rotate", "rotation", "tilt", "twist", "sweep",
@@ -226,6 +280,9 @@ def main():
                  and '"""' not in l]
         expect(len(lines) <= 20,
                f"a piston in twenty lines of SDK: {len(lines)}")
+
+        # ---- A Param drives what it is passed to ------------------------
+        check_params_drive(app)
 
         # ---- References, not floats -------------------------------------
         bore = body.face(kind="cylinder",
