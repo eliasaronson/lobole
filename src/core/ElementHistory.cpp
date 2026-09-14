@@ -318,7 +318,7 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
   // The blend builder segfaults on a set it cannot build rather than
   // reporting a faulty contour, so the catch below only sees anything if
   // OCC's signals are exceptions first.
-  InstallOccSignalHandlersOnce();
+  ArmOccSignalHandlers();
   try {
     const TopoDS_Shape& shape = body.GetShape();
     TopTools_IndexedMapOfShape edges;

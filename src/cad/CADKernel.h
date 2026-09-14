@@ -11,22 +11,31 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <memory>
-#include <mutex>
 #include <vector>
 
 // Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
-// process-wide, once. `false` leaves floating-point traps unarmed.
+// once PER THREAD. `false` leaves floating-point traps unarmed.
 //
-// Call this before any OCC algorithm known to fall over rather than fail.
+// Per thread, not once: OCC installs these through OCC_CONVERT_SIGNALS and
+// the tree says so in its own words where it already does this by hand —
+// "OCC's handlers are per thread" (ui/SimulationActions.cpp), and the
+// mesher's pool arms every worker (ui/TessellationCache.cpp). A `call_once`
+// here would arm whichever thread arrived first and leave the guard off
+// everywhere else, which is the same bug as not having one.
+//
+// Call it before any OCC algorithm known to fall over rather than fail.
 // Exact HLR has needed it for a long time; so does the fillet builder, which
 // takes the whole process down on a blend set it cannot build — nine edges of
 // a brace blend and the tenth segfaults inside BRepBlend_SurfRstLineBuilder,
 // which for a generator means losing the session rather than one feature.
 // The callers already catch Standard_Failure; without this the exception
 // never arrives.
-inline void InstallOccSignalHandlersOnce() {
-  static std::once_flag flag;
-  std::call_once(flag, [] { OSD::SetSignal(Standard_False); });
+inline void ArmOccSignalHandlers() {
+  thread_local bool armed = false;
+  if (!armed) {
+    OSD::SetSignal(Standard_False);
+    armed = true;
+  }
 }
 
 class CADShape {
@@ -381,20 +390,10 @@ private:
 #else
 
 // Dummy implementations when OpenCASCADE is not available
-// Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
-// process-wide, once. `false` leaves floating-point traps unarmed.
-//
-// Call this before any OCC algorithm known to fall over rather than fail.
-// Exact HLR has needed it for a long time; so does the fillet builder, which
-// takes the whole process down on a blend set it cannot build — nine edges of
-// a brace blend and the tenth segfaults inside BRepBlend_SurfRstLineBuilder,
-// which for a generator means losing the session rather than one feature.
-// The callers already catch Standard_Failure; without this the exception
-// never arrives.
-inline void InstallOccSignalHandlersOnce() {
-  static std::once_flag flag;
-  std::call_once(flag, [] { OSD::SetSignal(Standard_False); });
-}
+// Nothing to arm without OpenCASCADE, and nothing to include either: this
+// branch has no <OSD.hxx>. It was a verbatim copy of the real body, which
+// compiled only because it is inline and no no-OCC build odr-used it.
+inline void ArmOccSignalHandlers() {}
 
 class CADShape {
 public:

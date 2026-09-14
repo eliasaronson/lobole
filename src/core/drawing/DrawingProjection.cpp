@@ -206,8 +206,10 @@ gp_Trsf ToTrsf(const glm::dmat4& m) {
 
 // Exact HLR is one of the historically crashiest corners of OCC. The shared
 // helper (cad/CADKernel.h) converts SIGSEGV and friends into Standard_Failure
-// so a bad view sets an error string instead of killing the app.
-void InstallSignalHandlersOnce() { InstallOccSignalHandlersOnce(); }
+// so a bad view sets an error string instead of killing the app. It arms per
+// THREAD; the `call_once` this used to do armed only the first one to
+// project, which is a guard HLR did not have on any other.
+void InstallSignalHandlersOnce() { ArmOccSignalHandlers(); }
 
 // One projected body's lookup state: the moved shape fed to the algo plus its
 // indexed sub-shape maps. Moved() shares TShapes with the original, so map
