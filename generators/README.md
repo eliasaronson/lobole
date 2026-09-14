@@ -44,6 +44,18 @@ than placed at coordinates. The coverings are their own parts carrying a
 `Derived` reference to the wall they cover, and take its outline from the
 same `walls.silhouette()`, mitred 45 degrees where they meet.
 
+**A frame built on ONE face has no meaningful X, and a fastened mate on it
+has eight outcomes the solver picks between arbitrarily.** Bolting the
+amplifier to the bay floor got, in turn, a case sunk 8 mm into its own floor
+(the frame was at the bores' midpoint, which is mid-thickness of a 16 mm
+panel), a case hanging under the floor (the base's normal points DOWN at it,
+not up), and a case standing on edge 72 mm tall (the bought STEP's own
+downward face was a 92 x 37 edge). The fix is to stop guessing which turn and
+write the criteria: `mates._lay_it_down` turns the mate until the box is above
+the floor, inside the bay, and lengthways. Where the bought geometry has real
+mounting holes, use them at both ends — the amp's four are the pattern the
+floor is drilled to, and the mate refuses if the case stops matching it.
+
 `extract_bought.py` slices the 48 MB Onshape export into the ~2 MB actually
 used, once; the output lives in `scratch/` and is regenerable, which is why
 neither it nor the project is tracked. `--stage carcass` builds everything

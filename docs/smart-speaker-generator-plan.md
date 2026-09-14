@@ -119,15 +119,28 @@ An exact sweep of the current assembly clashes on ten of twenty-one pairs.
 
 ### The assembly holds itself together
 
-Eight fixed transforms become mates: each wall to the carcass, the drivers
-coaxial to their cutouts, the port to its ring brace, the amp case to its
-bracket. The point is that a parameter change moves the parts that follow it
-instead of leaving them behind.
+**Built.** The ported document's fixed transforms become 27 mates: each wall
+to the carcass, the divider into its housing, every T-nut in its own hole, the
+port's three pieces to the ring brace, the drivers seated on their rebates,
+and the amplifier and supply bolted to the bay floor. Nothing is placed by
+position — a parameter change moves the parts that follow it instead of
+leaving them behind.
+
+The amplifier is bolted through the four mounting holes its own case is bored
+with (`amp_bolt_x`/`amp_bolt_y`, measured off the STEP, and mates.py refuses
+if the case ever disagrees with the table the floor is drilled from). The
+supply has no hole in the face it lies on, so its two are ours.
+
+A frame built on one face — or on a rectangle of holes — leaves the quarter
+turns indistinguishable, and the solver's pick between them is arbitrary. So
+where that is the case the generator states the criteria and turns the mate
+until they hold: `_lay_it_down` wants the box above the floor, inside the bay,
+and lengthways. Left to the solver it stood the amplifier on edge, 72 mm tall.
 
 ### CAM
 
-**Built.** `cam.py` rebuilds the 6090 job: the setup frame, the `stock_max` origin, three
-tools, and the fourteen operations. Ten of those are one screw hole each, so
+**Built.** `cam.py` rebuilds the 6090 job: the setup frame, the `stock_max`
+origin, two tools, and the fourteen operations. Ten of those are one screw hole each, so
 the script writes them from `w170s_bolt_count` and `alpair_bolt_count` in a
 loop. Targets resolve **by geometry** — the cylinder at this radius at this
 centre — never by the `10/cap1;M10` element strings the current job holds,

@@ -161,8 +161,26 @@ TABLE = [
     ("brace_stud_gap", "2.5", "how far a stud stands off the wall it braces"),
     ("ring_brace_z", "-785.2", "port-ring brace, from the top datum"),
 
-    # --- the amplifier ------------------------------------------------------
-    ("esp32_case_bolt_dist", "52.0", ""),
+    # --- the electronics, bolted to the bay floor ---------------------------
+    #
+    # The amp's case has four real mounting holes through the face it lies
+    # on, and these three are MEASURED off it (mates.py refuses if the case
+    # ever disagrees, the way the driver bolt circles are checked). The
+    # ported table's `esp32_case_bolt_dist: 52` was a guess nothing read, and
+    # it is not the pattern the case actually has.
+    #
+    # The supply has none — its only small holes are the case screws, whose
+    # axes lie IN the face it stands on — so its two are ours, at a spacing
+    # that clears the ends of a 142 mm brick.
+    ("amp_bolt_x", "82.4", "the amp case's own mounting holes, across"),
+    ("amp_bolt_y", "53.4", "and fore-and-aft"),
+    ("amp_bolt_dia", "7.0", "M6 clearance, as the case is bored"),
+    ("psu_bolt_dist", "100.0", "the supply's, across its 142 mm footprint"),
+    ("case_bolt_dia", "4.5", "M4 clearance through the floor"),
+    ("amp_y", "-110.0",
+     "the amp sits FORE of the port, where the bay has room: the flare's "
+     "bolt circle reaches r=72 and this is 113 out"),
+    ("psu_y", "120.0", "and the supply aft of it, 130 out"),
 ]
 
 # Names the port left behind that this generator does not declare, and why —

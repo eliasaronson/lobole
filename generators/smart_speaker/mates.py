@@ -56,6 +56,74 @@ def _face_normal_at(part, normal, coord, tol=0.2):
     return None
 
 
+def _lay_it_down(asm, app, mate_id, occurrence, floor, p, tol=0.5):
+    """Turn the mate until the box lies flat on the bay floor, lengthways.
+
+    A frame on one face, or on a rectangle of holes, leaves the quarter
+    turns indistinguishable to the solver, and its pick is arbitrary — the
+    first attempt at this stood the amplifier on edge, 72 mm tall like a
+    book, and the one before that hung it under the floor. So the criteria
+    are written out: the box is ABOVE the floor, INSIDE the bay, and its
+    long side runs ACROSS the cabinet, which is the only way round it fits.
+    The bay's free room is the two strips fore and aft of the port, and they
+    are 210 wide against about 80 deep.
+    """
+    half_w = float(p["cabinet_internal_w"]) / 2
+    half_d = float(p["cabinet_internal_d"]) / 2
+    for flipped in (False, True):
+        for twist in (0.0, 90.0, 180.0, 270.0):
+            app.set_mate(id=mate_id, flipped=flipped, rotation_deg=twist)
+            asm.solve()
+            lo, hi = occurrence.bbox()
+            span = [hi[i] - lo[i] for i in range(3)]
+            if (lo[2] > floor - tol
+                    and lo[0] > -half_w - tol and hi[0] < half_w + tol
+                    and lo[1] > -half_d - tol and hi[1] < half_d + tol
+                    and span[0] > max(span[1], span[2]) - tol):
+                return
+    raise SdkError(f"{occurrence.name}: no way round leaves it lying on the "
+                   f"bay floor, inside the cabinet, lengthways")
+
+
+def _floor_bolts(panel, dia, spacing, y, tol=1.0):
+    """The bores of this diameter drilled for one unit: two on the line y, or
+    the four corners of a `spacing` rectangle centred on it."""
+    dx, dy = float(spacing[0]), spacing[1]
+    wanted = [(-dx / 2, y), (dx / 2, y)] if dy is None else [
+        (sx * dx / 2, y + sy * float(dy) / 2)
+        for sx in (-1, 1) for sy in (-1, 1)]
+    r = float(dia) / 2.0
+    out = []
+    for wx, wy in wanted:
+        best, gap = None, None
+        for body in panel.bodies():
+            for f in body.faces(kind="cylinder"):
+                if not f.radius or abs(f.radius - r) > 0.05:
+                    continue
+                c = f.centroid
+                d = (c.x - wx) ** 2 + (c.y - wy) ** 2
+                if gap is None or d < gap:
+                    best, gap = f, d
+        if best is not None and gap < tol * tol:
+            out.append(best)
+    return out
+
+
+def _case_bolts(unit, thin, dia, tol=0.2):
+    """A bought case's own mounting holes: the bores of this size drilled
+    THROUGH the face it lies on. Returns their centroids."""
+    r = float(dia) / 2.0
+    out = []
+    for body in unit.bodies():
+        for f in body.faces(kind="cylinder"):
+            if not f.radius or abs(f.radius - r) > tol:
+                continue
+            if abs(f.axis[thin]) < 0.99:
+                continue
+            out.append(f)
+    return out
+
+
 def _panel_occ(part_name):
     """The occurrence a panel is placed as — the left side wall and the ring
     brace are named differently from their parts."""
@@ -147,6 +215,35 @@ def _mount_face(part, cutout_d, flange_d):
             d = abs(f.area - want)
             if d < want * 0.15 and (err is None or d < err):
                 best, err = f, d
+    return best
+
+
+def _broadest_base(part):
+    """The face a box lies on when you bolt it to a floor: its broadest.
+
+    NOT `_lowest_down_face`, which takes whichever face the bought STEP
+    happens to have pointing down in its own frame. For the amp that is a
+    92 x 37 edge, and the case stood up 72 mm tall like a book — legal,
+    clear of everything, and not how anyone mounts an amplifier. The face
+    is the one across the part's SMALLEST dimension, which is the same
+    statement as "lay it flat".
+    """
+    lo, hi = part.bbox()
+    axis = min(range(3), key=lambda i: hi[i] - lo[i])
+    best, out = None, None
+    for body in part.bodies():
+        for f in body.faces(kind="plane"):
+            n = f.normal
+            if n is None or abs(n[axis]) < 0.999:
+                continue
+            # How far out along its OWN normal it lies. Either side of the
+            # slab will do — the mate turns whichever one down — but it has
+            # to be the outer skin: the amp's largest -Y face is a step 10 mm
+            # inside the case, and standing on that buries it in the floor.
+            far = n[axis] * f.centroid[axis]
+            if out is None or far > out + 0.5 or (far > out - 0.5
+                                                  and f.area > best.area):
+                best, out = f, max(far, out if out is not None else far)
     return best
 
 
@@ -368,6 +465,93 @@ def build(app, asm, p, made):
                                 tol=0.6)
             n += 1
     print(f"  {sum((int(float(p['w170s_bolt_count'])), int(float(p['port_brace_bolt_count'])), int(float(p['outer_port_bolt_count']))))} T-nuts in their own holes")
+
+    # --- the electronics ---------------------------------------------------
+    #
+    # Bolted through the bay floor. The two cases are not the same case:
+    #
+    #   the amp    has four real mounting holes through the face it lies on,
+    #              so the floor is drilled to ITS pattern and the mate
+    #              anchors hole-frame to hole-frame — a bolt passes through
+    #              both parts, which is what a bolted joint is
+    #   the supply has none: the only small holes in it are the case screws,
+    #              and their axes lie IN the face it stands on. So its two
+    #              floor holes are ours, and the mate anchors the box's own
+    #              footprint centre over them. That is as far as the bought
+    #              geometry goes, and it is still a mate — move the holes and
+    #              the brick follows.
+    for occ_name, holes, dia, y in (
+            ("amp module", (p["amp_bolt_x"], p["amp_bolt_y"]),
+             p["amp_bolt_dia"], p["amp_y"]),
+            ("PSU brick", (p["psu_bolt_dist"], None),
+             p["case_bolt_dia"], p["psu_y"])):
+        unit = part(occ_name)
+        label = f"{occ_name} bolts"
+        floor_holes = _floor_bolts(bottom, dia, holes, float(y))
+        want = 4 if holes[1] is not None else 2
+        if len(floor_holes) != want:
+            raise SdkError(f"{occ_name}: {len(floor_holes)} floor bolts of "
+                           f"d{float(dia)} about y={float(y)}, wanted {want}")
+        # On the FACE the unit stands on, not at the bores' own midpoint,
+        # which is mid-thickness of a 16 mm panel — anchoring there sank
+        # both boxes 8 mm into their own floor.
+        bottom.frame(label, origin=(0.0, float(y),
+                                    float(p["wall_thickness"])),
+                     z=(0, 0, 1), x=(1, 0, 0))
+
+        base = _broadest_base(unit)
+        if base is None:
+            raise SdkError(f"{occ_name}: no face to stand it on")
+        lo, hi = unit.bbox()
+        thin = min(range(3), key=lambda i: hi[i] - lo[i])
+        if holes[1] is not None:
+            # The case's own four, checked against the table that drilled the
+            # floor for them. A measured number in params and the geometry it
+            # was measured from can otherwise drift apart silently.
+            own = _case_bolts(unit, thin, dia)
+            at = [f.centroid for f in own]
+            got = tuple(round(max(c[i] for c in at) - min(c[i] for c in at), 1)
+                        for i in range(3) if i != thin)
+            if float(holes[0]) < float(holes[1]):
+                raise SdkError("amp_bolt_x is the ACROSS spacing and has to "
+                               "be the longer of the two — the mate lays the "
+                               "pattern's long side across the cabinet")
+            if sorted(got) != sorted(round(float(h), 1) for h in holes):
+                raise SdkError(
+                    f"{occ_name}: the case's mounting holes are {got} apart, "
+                    f"but amp_bolt_x/amp_bolt_y say "
+                    f"{float(holes[0])} x {float(holes[1])} — the floor is "
+                    f"drilled to the table, so fix the table")
+            # Where the pattern is and which way it runs — but at the height
+            # of the face the case LIES on. `of=own` alone puts the frame at
+            # the holes' own middle, which is up inside a flange 6 mm above
+            # the base, and the case then sinks that far into the floor.
+            at = [f.centroid for f in own]
+            mid = [sum(c[i] for c in at) / len(at) for i in range(3)]
+            mid[thin] = base.centroid[thin]
+            long_axis = max((i for i in range(3) if i != thin),
+                            key=lambda i: max(c[i] for c in at)
+                            - min(c[i] for c in at))
+            x = [1.0 if i == long_axis else 0.0 for i in range(3)]
+            unit.frame("base", origin=tuple(mid), z=base.normal, x=x)
+        else:
+            # Its own footprint centre, projected onto the base plane. NOT
+            # the base face's centroid: a brick with a cable stub has one
+            # 13 mm off the middle of the box, and the box then hangs 13 mm
+            # to one side of the bolts that hold it.
+            mid = [(lo[i] + hi[i]) / 2.0 for i in range(3)]
+            mid[thin] = base.centroid[thin]
+            unit.frame("base", origin=tuple(mid), z=base.normal)
+
+        # NOT `fasten_in_place`: here the HOLES are the truth and the
+        # placement was invented, so the mate moves the unit onto them
+        # rather than being asked to preserve where it was put.
+        m = asm.fasten((occ[occ_name], "base"),
+                       (occ["bottom_wall"], label))
+        n += 1
+        floor = occ["bottom_wall"].frame(label).origin[2]
+        _lay_it_down(asm, app, m["id"], occ[occ_name], floor, p)
+    print("  amp and supply bolted to the bay floor")
 
     # --- the drivers -------------------------------------------------------
     #

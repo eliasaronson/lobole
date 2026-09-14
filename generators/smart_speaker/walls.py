@@ -409,6 +409,21 @@ def bottom_wall(app, p):
     part.cut(sk.add(), distance=t + p["plug_dia"], reversed=True)
 
     _drill_dowels(part, p, "bottom_wall")
+
+    # The electronics bolt down here, fore and aft of the port: the flare's
+    # bolt circle reaches r=72 and the middle of this panel belongs to the
+    # port. The amp's four are its case's OWN pattern, so a bolt passes
+    # through both; the supply's two are ours, its case having no hole in the
+    # face it stands on.
+    sk = part.sketch(Plane.xy(t), name="case_bolts")
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            sk.circle((p["amp_bolt_x"] / 2 * sx,
+                       p["amp_y"] + p["amp_bolt_y"] / 2 * sy),
+                      d=p["amp_bolt_dia"])
+        sk.circle((p["psu_bolt_dist"] / 2 * sx, p["psu_y"]),
+                  d=p["case_bolt_dia"])
+    part.cut(sk.add(), distance=t, reversed=True, name="case_bolts")
     return part
 
 

@@ -15,14 +15,21 @@ than at a coordinate copied from the export:
 
     the drivers   flange face down in their rebate, on their own axis height
     the flares    by port.py, which owns the port's stack
-    the amplifier and the supply — standing on the cabinet floor at the back
-                  of the port bay, clear of the tube
+    the amplifier lying on the bay floor, bolted through the four mounting
+                  holes its own case is bored with
+    the supply    lying beside it, over two holes drilled for it — its case
+                  has none in the face it stands on
 
-The last of those is the one place this generator invents a position. The
-export puts the supply at (-84.7, 130.1, -933.1) and the amplifier somewhere
-the group export did not preserve, so both are placed by a rule instead of
-transcribed. They are bought boxes in an empty bay; if they need to be
-somewhere exact, move the occurrence and it will stay moved.
+Only the last invents anything, and only the hole spacing: the export puts
+the supply at (-84.7, 130.1, -933.1) and the amplifier somewhere the group
+export did not preserve, so which strip of floor each lies on is a rule here
+(`amp_y`, `psu_y`) rather than a transcription. Everything after that is
+mates — see mates.py.
+
+The positions in `placements` are only where each occurrence STARTS. The
+mates move them onto their bolts, so a number here being 6 mm out changes
+nothing; a number here being on the wrong side of the port changes which
+solution the mate settles into, which is why they are not arbitrary either.
 """
 from pathlib import Path
 
@@ -102,12 +109,21 @@ def placements(p):
     return [
         ("W170S woofer", "W170S woofer", w170s, None),
         ("Alpair 7MS", "Alpair 7MS", alpair, None),
-        # Standing ON the bay floor, fore and aft of the port rather than
-        # beside it: the tube is 105 across on the cabinet's axis and the bay
-        # is only 210 wide, so there is no room either side, which is how
-        # both of these came to be inside the floor and inside the tube.
+        # Lying ON the bay floor, over the bolts drilled for them, fore and
+        # aft of the port: the tube is 105 across on the cabinet's axis and
+        # the bay only 210 wide, so there is no room either side — which is
+        # how both of these first came to be inside the floor and inside the
+        # tube. `amp_y`/`psu_y` are the same parameters the floor is drilled
+        # from, so a unit and its holes cannot drift apart.
         # Placed by their middles, because an import is centred on its origin.
-        ("amp module", "amp module", (0.0, -110.0, floor + 36.0), None),
-        ("PSU brick", "PSU brick", (0.0, 120.0, floor + 19.3),
+        # Both lie flat, long side across the cabinet: a quarter turn about
+        # X lays the amp's case down (its 37 mm is along its own Y), and one
+        # about Z turns the supply's 142 mm across. The mates would get them
+        # there from anywhere, but a start already the right way round is
+        # the difference between one candidate tried and eight.
+        ("amp module", "amp module",
+         (0.0, float(p["amp_y"]), floor + 18.5),
+         (-0.7071067811865476, 0.0, 0.0, 0.7071067811865476)),
+        ("PSU brick", "PSU brick", (0.0, float(p["psu_y"]), floor + 19.3),
          (0.0, 0.0, 0.7071067811865476, 0.7071067811865476)),
     ]
