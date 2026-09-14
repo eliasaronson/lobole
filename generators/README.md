@@ -28,6 +28,19 @@ takes `--port`; it never guesses):
 
     python3 generators/gear.py --module 2 --teeth 24 --thickness 8 --bore 6
 
+**Check an assembly with `asm.check()`, not by hand.** It gates the three
+things that matter at once — nothing clashing, nothing FLOATING (one connected
+component), and no near miss under a millimetre, which is almost always an
+arithmetic slip. Contacts that are meant to happen go in its `allow` map
+rather than into a loosened tolerance:
+
+    asm.check(allow={("port tube", "port flare"): 80.0})
+
+Written out by hand instead, a whole round shipped with eight T-nuts floating
+in mid-air and a clash reader that returned `[]` because it asked
+`interference` for a key that method did not have. `check_clashes()` is the
+same gate without the contact distances.
+
 `_lib.py` is the block every scratch script used to copy: sketch planes
 that spell out the V axis, entity builders, an arc through three points, a
 `check` that raises on a failed regeneration, and `connect`.

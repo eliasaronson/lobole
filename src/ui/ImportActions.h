@@ -46,9 +46,13 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // and a later regen re-reads the path exactly as before.
 // `unit` is the length unit an STL/BREP was drawn in (ImportFeature::
 // lengthUnit); a STEP refuses anything but the default.
+// `keepOrigin` keeps the file's own coordinates instead of centring the
+// import on its bounding box — what a neighbour part or a fixture needs,
+// and the only way a file's placement survives the round trip.
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      CADKernel::ImportedModel* parsed, std::string* error,
-                     units::Length unit = units::Length::Millimetre);
+                     units::Length unit = units::Length::Millimetre,
+                     bool keepOrigin = false);
 
 // Reference-image underlays (v49). Add reads/decodes the file and centres it on
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`

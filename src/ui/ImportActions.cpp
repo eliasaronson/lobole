@@ -203,7 +203,7 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      CADKernel::ImportedModel* parsed, std::string* error,
-                     units::Length unit) {
+                     units::Length unit, bool keepOrigin) {
   if (!state.document || !state.commands) {
     if (error)
       *error = "no active part document";
@@ -214,6 +214,7 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
   const std::string name = std::filesystem::path(filename).stem().string();
   auto feature = std::make_unique<ImportFeature>(name, filename);
   feature->lengthUnit = unit;
+  feature->keepOrigin = keepOrigin;
   // The import worker already read this file to decide it was a single
   // product; hand that over rather than parse it again (ImportFeature::
   // SeedGeometry). Only the first Execute uses it.

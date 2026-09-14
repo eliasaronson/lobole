@@ -78,8 +78,12 @@ static constexpr MethodDoc ProjectMethods[] = {
      "Import a STEP, STL or BREP file into the current project (STEP via "
      "XCAF: names, colors, real assemblies). `units` is the length unit an "
      "STL or BREP was drawn in — mm (default), cm, m, in — since neither "
-     "format carries one; refused for STEP, which declares its own.",
-     "as_assembly, path, units", remote::NeedsPart | remote::NotInBatch},
+     "format carries one; refused for STEP, which declares its own. "
+     "`keep_origin` keeps the file's OWN coordinates; without it the import "
+     "is centred on its bounding box, which loses the placement a bought "
+     "part was exported at and stacks every one of them on the origin.",
+     "as_assembly, keep_origin, path, units",
+     remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}), or — on an "
      "assembly tab — every occurrence at its SOLVED placement. `deflection` is "
@@ -1369,7 +1373,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const json preDigest = BodyDigestJson(*doc);
     std::string error;
     if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), nullptr,
-                             &error, unit))
+                             &error, unit, p.value("keep_origin", false)))
       throw std::runtime_error(error);
     return json{{"bodies", doc->GetBodies().size() - before},
                 {"regen", RegenSummaryJson(*doc)},

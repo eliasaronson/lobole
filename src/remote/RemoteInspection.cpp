@@ -534,7 +534,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
      "touching from clear; the no-pair assembly sweep stays clash-only — use "
-     "contact_report for the full picture. That sweep is BOUNDED: pairs whose "
+     "contact_report for the full picture. The no-pair sweep reports its "
+     "findings under BOTH `pairs` and `clashes` — they are the same list, "
+     "because it only ever reports clashes, and contact_report spells the "
+     "same thing `clashes`. That sweep is BOUNDED: pairs whose "
      "boxes do not overlap cannot clash and cost one box test, the rest are "
      "checked closest-first up to max_pairs (4000) or deadline_s (20 s, "
      "checked between pairs — a single boolean can overrun it) and the "
@@ -1072,7 +1075,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 hit["volume"] = v;
               pairs.push_back(std::move(hit));
             });
-        json out{{"clash", any}, {"pairs", pairs}, {"mode", mode}};
+        // Under BOTH names, and the duplication is the point. This sweep
+        // only ever pushes clashing pairs, so its `pairs` holds what
+        // contact_report calls `clashes` — while contact_report's own
+        // `pairs` holds EVERY pair it looked at. One key, two meanings,
+        // across two methods a caller uses interchangeably: reading
+        // `clashes` off this response returned an empty list on a document
+        // with 1,068,565 mm3 of one panel inside another, and the gate that
+        // did it passed for a whole round.
+        json out{{"clash", any},
+                 {"pairs", pairs},
+                 {"clashes", pairs},
+                 {"mode", mode}};
         if (mode == "mesh")
           out["deflection_mm"] = meshDeflection.load();
         // This sweep declines nothing: the face budget is contact_report's,
