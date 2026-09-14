@@ -2,6 +2,7 @@
 
 #ifdef HAVE_OPENCASCADE
 
+#include <OSD.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Solid.hxx>
 #include <glm/glm.hpp>
@@ -10,7 +11,23 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <memory>
+#include <mutex>
 #include <vector>
+
+// Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
+// process-wide, once. `false` leaves floating-point traps unarmed.
+//
+// Call this before any OCC algorithm known to fall over rather than fail.
+// Exact HLR has needed it for a long time; so does the fillet builder, which
+// takes the whole process down on a blend set it cannot build — nine edges of
+// a brace blend and the tenth segfaults inside BRepBlend_SurfRstLineBuilder,
+// which for a generator means losing the session rather than one feature.
+// The callers already catch Standard_Failure; without this the exception
+// never arrives.
+inline void InstallOccSignalHandlersOnce() {
+  static std::once_flag flag;
+  std::call_once(flag, [] { OSD::SetSignal(Standard_False); });
+}
 
 class CADShape {
 public:
@@ -364,6 +381,21 @@ private:
 #else
 
 // Dummy implementations when OpenCASCADE is not available
+// Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
+// process-wide, once. `false` leaves floating-point traps unarmed.
+//
+// Call this before any OCC algorithm known to fall over rather than fail.
+// Exact HLR has needed it for a long time; so does the fillet builder, which
+// takes the whole process down on a blend set it cannot build — nine edges of
+// a brace blend and the tenth segfaults inside BRepBlend_SurfRstLineBuilder,
+// which for a generator means losing the session rather than one feature.
+// The callers already catch Standard_Failure; without this the exception
+// never arrives.
+inline void InstallOccSignalHandlersOnce() {
+  static std::once_flag flag;
+  std::call_once(flag, [] { OSD::SetSignal(Standard_False); });
+}
+
 class CADShape {
 public:
   CADShape() = default;

@@ -315,6 +315,10 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
   if (!body.IsValid() || edgeIndices.empty()) {
     return CADShape();
   }
+  // The blend builder segfaults on a set it cannot build rather than
+  // reporting a faulty contour, so the catch below only sees anything if
+  // OCC's signals are exceptions first.
+  InstallOccSignalHandlersOnce();
   try {
     const TopoDS_Shape& shape = body.GetShape();
     TopTools_IndexedMapOfShape edges;

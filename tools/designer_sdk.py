@@ -409,7 +409,11 @@ class App:
         return self.call("list_parts")["parts"]
 
     def part(self, name=None, create=True):
-        """Switch to (or create) a part tab and return a `Part`."""
+        """Switch to (or create) a part tab and return a `Part`.
+
+        `name` may be a slot ID, which is the only address that works when
+        names repeat — as they do after any STEP import.
+        """
         return _open_tab(self, name, "part", create)
 
     def parts(self):
@@ -427,6 +431,17 @@ class App:
     def assembly(self, name=None, create=True):
         return _open_tab(self, name, "assembly", create)
 
+    def transaction(self, stop_on_error=True):
+        """A `Batch` over several calls: one transaction, one regeneration,
+        one undo step, and a rollback if any of them fails.
+
+        Named `transaction` and not `batch` because `batch` is a generated
+        RPC and `App.__getattr__` would hand you that instead — which fails
+        with "missing required parameter 'calls'" and reads like a bug in the
+        caller. `Part.batch()` is the same object for one part.
+        """
+        return Batch(self, stop_on_error)
+
     def new(self):
         self.call("new_project")
         return self
@@ -434,6 +449,19 @@ class App:
 
 def _open_tab(app, name, kind, create):
     slots = app.call("list_parts")["parts"]
+    # By id as well as by name. An imported STEP names thirty tabs `Part 1`,
+    # so the name is not an address and the slot id is the only way to say
+    # which one — reaching for `Part 1` returns whichever came first.
+    if isinstance(name, int):
+        hit = next((s for s in slots if s["id"] == name), None)
+        if hit is None:
+            raise SdkError(f"no tab with id {name}; the project has "
+                           f"{len(slots)} of them")
+        if hit["type"] != kind:
+            raise SdkError(f"tab {name} is a {hit['type']}, not a {kind}")
+        app.call("set_active_part", part=hit["id"])
+        app._active = hit["id"]
+        return (Part if kind == "part" else Asm)(app, hit)
     hit = next((s for s in slots if s["name"] == name and s["type"] == kind),
                None) if name else None
     if hit is None and name is not None and create:
@@ -2082,6 +2110,8 @@ VERDICT_CONTRACTS = {
         "rpc": "interference",
         "consumed": {"clash", "pairs", "truncated", "truncation", "receipt"},
         "ignored": {
+            "clashes": "the same list as `pairs`, under the name "
+                       "contact_report uses for it",
             "mode": "check_clashes explicitly selects exact mode",
             "pairs_checked": "coverage detail; truncated is the verdict",
             "pairs_unchecked": "quoted by truncation",

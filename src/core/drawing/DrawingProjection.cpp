@@ -204,14 +204,10 @@ gp_Trsf ToTrsf(const glm::dmat4& m) {
   return t;
 }
 
-// Exact HLR is the historically crashiest corner of OCC: convert SIGSEGV and
-// friends into Standard_Failure exceptions (process-wide, installed once) so
-// a bad view sets an error string instead of killing the app. The `false`
-// leaves floating-point traps unarmed.
-void InstallSignalHandlersOnce() {
-  static std::once_flag flag;
-  std::call_once(flag, [] { OSD::SetSignal(Standard_False); });
-}
+// Exact HLR is one of the historically crashiest corners of OCC. The shared
+// helper (cad/CADKernel.h) converts SIGSEGV and friends into Standard_Failure
+// so a bad view sets an error string instead of killing the app.
+void InstallSignalHandlersOnce() { InstallOccSignalHandlersOnce(); }
 
 // One projected body's lookup state: the moved shape fed to the algo plus its
 // indexed sub-shape maps. Moved() shares TShapes with the original, so map

@@ -189,6 +189,39 @@ def check_params_drive(app):
            f"not fall from {before:.1f} when plate_bore doubled")
 
 
+def check_bad_blend_refuses(app):
+    """A blend set the kernel cannot build must FAIL, not kill the process.
+
+    OCC's fillet builder segfaults rather than reporting a faulty contour:
+    on a braced panel, nine edges blend and the tenth goes down inside
+    `BRepBlend_SurfRstLineBuilder`. `EdgeBlendNamed` has always caught
+    `Standard_Failure`, but a raw SIGSEGV is not one until OCC's signals are
+    installed as exceptions — so the catch never saw it and a generator
+    asking for one bad blend lost the whole session.
+    """
+    part = app.part("bad blend")
+    frame = part.sketch(sdk.Plane.xy(), name="frame")
+    frame.polyline([(-105, -160), (105, -160), (105, 160), (-105, 160)])
+    part.extrude(frame.add(), distance=16.0, name="frame")
+    win = part.sketch(sdk.Plane.xy(16), name="window")
+    win.polyline([(-97, -152), (97, -152), (97, 152), (-97, 152)])
+    part.cut(win.add(), distance=16.0, reversed=True, name="window")
+    spokes = part.sketch(sdk.Plane.xy(), name="spokes")
+    spokes.polyline([(-12, -160), (12, -160), (12, 160), (-12, 160)])
+    part.extrude(spokes.add(), distance=16.0, mode="add", name="spokes")
+
+    edges = [e for e in part.body().edges(kind="line") if e.length > 15.0]
+    expect(len(edges) > 20, f"the test needs a big blend set: {len(edges)}")
+    part.fillet(edges, r=8.0, name="doomed")
+    # Still answering, which is the whole point of the test.
+    state = part.state()
+    expect(not state["regen"]["ok"],
+           "a blend the kernel cannot build must be reported as failed")
+    why = " ".join(f.get("error", "") for f in state["regen"]["failed"])
+    expect("fillet" in why or "OCCT" in why,
+           f"and say why, in its own words: {why!r}")
+
+
 # A word that names an angle. `pitch` is left out on purpose: a thread's
 # pitch is a length.
 ANGLE_WORDS = {"angle", "rotate", "rotation", "tilt", "twist", "sweep",
@@ -283,6 +316,9 @@ def main():
 
         # ---- A Param drives what it is passed to ------------------------
         check_params_drive(app)
+
+        # ---- A bad blend refuses, and the session survives it ------------
+        check_bad_blend_refuses(app)
 
         # ---- References, not floats -------------------------------------
         bore = body.face(kind="cylinder",
