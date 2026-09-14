@@ -256,7 +256,7 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
   BRepGProp::SurfaceProperties(f, props);
   out.area = props.Mass();
   const gp_Pnt c = props.CentreOfMass();
-  out.centroid = glm::vec3(c.X(), c.Y(), c.Z());
+  out.centroid = glm::dvec3(c.X(), c.Y(), c.Z());
   if (const auto n = FaceNormal(TopoDS::Face(f), c))
     out.normal = glm::vec3(n->X(), n->Y(), n->Z());
   const ShapeClass sc = ClassifyFace(TopoDS::Face(f));
@@ -282,7 +282,7 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
   const double midParam =
       0.5 * (curve.FirstParameter() + curve.LastParameter());
   const gp_Pnt mid = curve.Value(midParam);
-  out.midpoint = glm::vec3(mid.X(), mid.Y(), mid.Z());
+  out.midpoint = glm::dvec3(mid.X(), mid.Y(), mid.Z());
   const ShapeClass sc = ClassifyEdge(TopoDS::Edge(e));
   out.kind = sc.kind;
   out.radius = sc.radius;
@@ -1083,10 +1083,8 @@ std::vector<SectionLoop> SectionLoopsOf(const TopoDS_Face& face) {
       SectionSegment seg;
       const gp_Pnt a = BRep_Tool::Pnt(TopExp::FirstVertex(edge, Standard_True));
       const gp_Pnt b = BRep_Tool::Pnt(TopExp::LastVertex(edge, Standard_True));
-      seg.from = glm::vec3(static_cast<float>(a.X()), static_cast<float>(a.Y()),
-                           static_cast<float>(a.Z()));
-      seg.to = glm::vec3(static_cast<float>(b.X()), static_cast<float>(b.Y()),
-                         static_cast<float>(b.Z()));
+      seg.from = glm::dvec3(a.X(), a.Y(), a.Z());
+      seg.to = glm::dvec3(b.X(), b.Y(), b.Z());
       BRepAdaptor_Curve curve(edge);
       if (curve.GetType() == GeomAbs_Line) {
         seg.kind = "line";

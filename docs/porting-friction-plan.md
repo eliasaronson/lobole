@@ -344,6 +344,49 @@ code, `tools/designer_sdk.py`, the `delete_part` handler.
 
 ---
 
+## F. Found while finishing the port (2026-09-14)
+
+These came out of bolting the electronics down and rebuilding the braces, and
+they are the same family as everything above: the app was right and unhelpful.
+
+**A pick by POSITION with a tight tolerance matches nothing, silently.** This
+is the one that cost real time. Positions are float32 in the document —
+`SketchPlane` (src/cad/SketchPlane.h) holds its origin and axes as
+`glm::vec3` — so a panel drawn on a plane at -172.8 sits at -172.800003 and
+says so. Picking its rim edges with a 1e-6 window therefore matched NOTHING,
+and nothing said so, because an empty pick list looks exactly like nothing to
+do. Two halves to this:
+
+- **Done:** `Measure`'s `FaceInfo`/`EdgeInfo`/`SectionSegment`/`SectionRegion`
+  positions are double, so the measurement path no longer ADDS loss to an
+  answer the kernel computed exactly (a box at 164.8 reported 164.800003
+  before). Gated by `tests/test_measure.cpp`.
+- **Not done, and a judgement:** float32 geometry in the document is ~1e-5 mm
+  at 100 mm, under any manufacturing tolerance, and widening it touches the
+  format and every golden. The cost is not accuracy, it is that a caller
+  cannot compare a reported position against a computed one exactly. Worth
+  doing when something else touches that format, not on its own.
+
+**A refusal names a COUNT, not a place.** "the fillet failed on 3 contour(s)
+(radius too large for the geometry?)" is honest and unactionable: which three?
+Both times this came up the answer was inferable but only by reasoning about
+the model — once it was four d5.5 fixing holes being asked for an R8 rim, once
+it was three studs standing across the rims being rounded. A position per
+failing contour turns that from a guess into a read. Same shape as the
+`interference`/`clashes` finding in E: the app knows, and does not say.
+
+**A stale instance reads as a missing parameter.** The SDK builds its method
+surface from `describe` when it connects, so calling a verb added by a build
+the running app predates reports `add_mate() got derive; it takes a, b, ...`
+— which is indistinguishable from "that parameter does not exist". The app
+already reports a build; comparing it would let the message say so.
+
+**Smaller:** `set_active_part` takes `index`/`name`/`part` but not `id`, where
+its siblings take `id`; `occurrence.frame()` needs the assembly tab active,
+which a `Part.activate()` earlier in a loop silently undoes (the SDK's `Asm`
+methods self-activate, this one could too); `tests/generators_smoke.py` with
+no argument is a bare `IndexError` rather than a usage line.
+
 ## Not in this round
 
 **`add_occurrence` at scale.** Placing ~210 occurrences with transforms

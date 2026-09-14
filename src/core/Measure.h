@@ -43,16 +43,31 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 // edge by its ElementMap index — the same index conventions ResolveShape and
 // the element maps key on (faces = TopExp_Explorer order, edges = MapShapes
 // order, both 0-based) — and classify the underlying surface / curve.
+// POSITIONS HERE ARE DOUBLE, deliberately: the kernel computes them in
+// double and these are answers to "where is this face", not render data, so
+// the way out should not add loss the caller cannot see. A box at 164.8 now
+// reports 164.8 and not 164.800003.
+//
+// This is NOT the whole of that problem, and it would be misleading to read
+// it as the fix. Geometry built on a SKETCH is still positioned in float32,
+// because SketchPlane (src/cad/SketchPlane.h) holds its origin and axes as
+// glm::vec3 — so a panel drawn on a plane at -172.8 sits at -172.800003 and
+// faithfully reports it. That is a document-model precision choice (~1e-5 mm
+// at 100 mm, under any manufacturing tolerance) and changing it touches the
+// format. What it means for a CALLER is worth knowing either way: a position
+// filter needs a tolerance suited to the magnitude, because a 1e-6 window
+// matches NOTHING at cabinet scale — silently, since an empty pick list
+// looks exactly like nothing to do (docs/porting-friction-plan.md).
 struct FaceInfo {
   std::string kind; // "plane"|"cylinder"|"cone"|"sphere"|"torus"|"other"
   double area = 0.0;
-  glm::vec3 centroid{0.0f}; // face center of mass, world space
-  glm::vec3 normal{0.0f};   // outward unit surface normal at the centroid UV
+  glm::dvec3 centroid{0.0}; // face center of mass, world space
+  glm::dvec3 normal{0.0};   // outward unit surface normal at the centroid UV
   // Analytic extras for query_geometry: cylinders/spheres carry a radius,
   // cylinders/cones an axis DIRECTION (sign is arbitrary — compare |dot|).
   double radius = 0.0;
   bool hasRadius = false;
-  glm::vec3 axis{0.0f};
+  glm::dvec3 axis{0.0};
   bool hasAxis = false;
 };
 struct EdgeInfo {
@@ -60,8 +75,8 @@ struct EdgeInfo {
   double length = 0.0;
   double radius = 0.0; // circular edges ("circle" / "arc") only
   bool hasRadius = false;
-  glm::vec3 midpoint{0.0f}; // curve midpoint (parametric mid), world space
-  glm::vec3 axis{0.0f};     // circular edges: the circle's axis direction
+  glm::dvec3 midpoint{0.0}; // curve midpoint (parametric mid), world space
+  glm::dvec3 axis{0.0};     // circular edges: the circle's axis direction
   bool hasAxis = false;
 };
 std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex);
@@ -440,9 +455,9 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
 // else, whose ends still bound it.
 struct SectionSegment {
   std::string kind;
-  glm::vec3 from{0.0f};
-  glm::vec3 to{0.0f};
-  glm::vec3 center{0.0f}; // arc only
+  glm::dvec3 from{0.0};
+  glm::dvec3 to{0.0};
+  glm::dvec3 center{0.0}; // arc only
   double radius = 0.0;    // arc only
 };
 struct SectionLoop {
@@ -451,7 +466,7 @@ struct SectionLoop {
 };
 struct SectionRegion {
   double area = 0.0;
-  glm::vec3 centroid{0.0f};
+  glm::dvec3 centroid{0.0};
   // The region's OUTLINE, only when asked for: an area and a centroid say a
   // brace is 34,466 mm2 somewhere near the middle, and recovering a part you
   // did not draw needs the shape. Off by default because it walks every edge

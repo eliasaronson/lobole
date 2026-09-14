@@ -38,6 +38,57 @@ std::vector<std::string> EdgeNames(const Body& body) {
 }
 } // namespace
 
+TEST_CASE("An element's position is not quantised to float", "[measure]") {
+  // FaceInfo/EdgeInfo carried positions as glm::vec3 while the kernel
+  // computes them in double, so an answer to "where is this face" was
+  // quantised on the way out for no reason. 164.8 is not representable in
+  // binary, which is what makes it tell the two apart: as float it reads
+  // 164.800003.
+  //
+  // A body built on a SKETCH is still placed in float32 (SketchPlane holds
+  // its origin as glm::vec3), so this test uses a primitive deliberately —
+  // it pins the measurement path, which is the part that had no excuse.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::dvec3(0.0), 164.8, 164.8, 164.8));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  doc.Regenerate();
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+
+  bool sawFace = false, sawEdge = false;
+  for (const auto& [idx, name] : body.elementMap.names) {
+    const auto f = Measure::DescribeFaceAt(body, idx);
+    if (!f || f->kind != "plane")
+      continue;
+    for (int axis = 0; axis < 3; axis++) {
+      // Each face sits at 0 or 164.8 along its own normal.
+      if (std::abs(f->normal[axis]) < 0.5)
+        continue;
+      const double at = f->centroid[axis];
+      if (std::abs(at) < 1e-12)
+        continue;
+      CHECK_THAT(at, WithinAbs(164.8, 1e-12));
+      sawFace = true;
+    }
+  }
+  for (const auto& [idx, name] : body.elementMap.edgeNames) {
+    const auto e = Measure::DescribeEdgeAt(body, idx);
+    if (!e || e->kind != "line")
+      continue;
+    for (int axis = 0; axis < 3; axis++) {
+      const double at = e->midpoint[axis];
+      // An edge midpoint is at 0, 82.4 (mid-span) or 164.8.
+      if (std::abs(at) < 1e-12 || std::abs(at - 82.4) < 1e-12)
+        continue;
+      CHECK_THAT(at, WithinAbs(164.8, 1e-12));
+      sawEdge = true;
+    }
+  }
+  CHECK(sawFace); // a check that examined nothing is not a check
+  CHECK(sawEdge);
+}
+
 TEST_CASE("Measure a box's face areas and edge lengths", "[measure]") {
   Document doc;
   doc.AddFeature(
@@ -128,7 +179,7 @@ std::string FaceFacing(const Document& doc, const glm::vec3& axis) {
   const Body& body = doc.GetBodies()[0];
   for (const auto& [idx, name] : body.elementMap.names)
     if (const auto f = Measure::DescribeFaceAt(body, idx))
-      if (glm::dot(f->normal, axis) > 0.99f)
+      if (glm::dot(f->normal, glm::dvec3(axis)) > 0.99)
         return name;
   return {};
 }
@@ -758,8 +809,8 @@ TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a box", "[measure]") {
     CHECK(f->kind == "plane");
     CHECK((std::abs(f->area - 6.0) < 1e-6 || std::abs(f->area - 8.0) < 1e-6 ||
            std::abs(f->area - 12.0) < 1e-6));
-    CHECK_THAT(glm::length(f->normal), WithinRel(1.0f, 1e-4f));
-    if (glm::dot(f->normal, f->centroid - center) > 1e-4f)
+    CHECK_THAT(glm::length(f->normal), WithinRel(1.0, 1e-4));
+    if (glm::dot(f->normal, f->centroid - glm::dvec3(center)) > 1e-4)
       outwardNormals++;
   }
   CHECK(outwardNormals == 6); // all six faces point outward
