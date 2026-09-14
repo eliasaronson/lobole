@@ -3,7 +3,7 @@
 
     python3 generators/smart_speaker/smart_speaker.py [--port N]
             [--out scratch/smart_speaker.dsgn]
-            [--stage carcass|parts|assembly|all] [--no-save]
+            [--stage carcass|parts|assembly|cam|all] [--no-save]
 
 A two-way floorstander: a Visaton W 170 S in an 854 mm reflex chamber, a
 Markaudio Alpair 7 MS in a 120 mm sealed chamber above it, a flared port down
@@ -20,13 +20,9 @@ count and a diameter, and the parts that were missing.
 
 The run refuses to save what it has not checked — see `verify.py`.
 
-**No CAM yet.** The plan
-([../../docs/smart-speaker-generator-plan.md](../../docs/smart-speaker-generator-plan.md))
-has the baffle's 6090 job in scope — the setup frame, the `stock_max` origin,
-three tools and fourteen operations, ten of which are one screw hole each and
-so want writing from `w170s_bolt_count` in a loop. It is not written. The
-stage used to be advertised anyway, so `--stage all` — the default — died on
-`ModuleNotFoundError: No module named 'cam'`.
+`--stage cam` adds the baffle's job on the 6090 — see cam.py, whose targets
+are picked by geometry rather than by the element strings a ported job
+carries.
 """
 import argparse
 import math
@@ -199,7 +195,8 @@ def main():
     ap.add_argument("--port", type=int)
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--stage", default="all",
-                    choices=["carcass", "parts", "assembly", "all"])
+                    choices=["carcass", "parts", "assembly", "cam", "all"])
+    ap.add_argument("--skip-cam", action="store_true")
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--save-anyway", action="store_true",
                     help="save even though the checks failed — for LOOKING at "
@@ -222,6 +219,19 @@ def main():
         asm = build_assembly(app, p, made)
     if args.stage == "assembly":
         return _finish(app, args, asm, p, made)
+
+    if not args.skip_cam:
+        with phase("cam"):
+            import cam
+            _job, sid = cam.build(app, p)
+            ok, _v = cam.verify(app, sid)
+            if not ok:
+                print("  !! the job does not cut what it should")
+            elif not args.no_save:
+                cam.post(app, sid,
+                         Path(args.out).expanduser().with_suffix("")
+                         .with_name(Path(args.out).stem
+                                    + " - baffle face 1.nc"))
 
     return _finish(app, args, asm, p, made)
 
