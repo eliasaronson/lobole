@@ -342,6 +342,29 @@ TEST_CASE("An impossible radius fails with an error, not a crash", "[fillet]") {
   CHECK_FALSE(fillet->GetError().empty());
 }
 
+TEST_CASE("A failed fillet says WHERE, not just how many", "[fillet]") {
+  // The count alone is honest and unactionable. Asked which three contours
+  // of eight had failed, a caller could only reason about the model and
+  // guess; both times it came up in the smart-speaker port the answer was
+  // worth having (four d5.5 holes asked for an R8 rim, then three studs
+  // standing across the rims being rounded). OCC knows which contours
+  // failed and which edges lie on them.
+  Document doc;
+  uint64_t ext = 0;
+  BuildRectPrism(doc, ext);
+  const ElementRef edge = PickEdge(doc, AtZ(3.0f));
+  doc.AddFeature(
+      std::make_unique<FilletFeature>("Fillet", std::vector{edge}, 50.0));
+  auto* fillet = dynamic_cast<FilletFeature*>(doc.GetFeature(2));
+  CHECK_FALSE(doc.Regenerate());
+  const std::string err = fillet->GetError();
+  REQUIRE_FALSE(err.empty());
+  // A coordinate, so the offending edge can be found in the model.
+  CHECK(err.find("near ") != std::string::npos);
+  CHECK(err.find('(') != std::string::npos);
+  CHECK(err.find(',') != std::string::npos);
+}
+
 TEST_CASE("Fillet radius can be driven by a document parameter", "[fillet]") {
   Document doc;
   uint64_t ext = 0;

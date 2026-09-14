@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <utility>
@@ -305,6 +307,32 @@ CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
   return CADShape(result);
 }
 
+// WHERE the blend could not be built, not just how many places. The count
+// alone is honest and unactionable: asked which three contours of eight, a
+// caller can only reason about the model and guess — and the answer was
+// worth having both times it came up (four d5.5 fixing holes asked for an R8
+// rim; three studs standing across the rims being rounded). OCC knows which
+// contours failed and which edges are on them, so say so.
+std::string FaultyContourPlaces(BRepFilletAPI_MakeFillet& mk) {
+  std::string out;
+  for (int i = 1; i <= mk.NbFaultyContours(); i++) {
+    const int contour = mk.FaultyContour(i);
+    if (contour < 1 || contour > mk.NbContours() || mk.NbEdges(contour) < 1) {
+      continue;
+    }
+    // One point per contour: a contour is a chain, and the first edge's
+    // middle is enough to find it in the model.
+    BRepAdaptor_Curve curve(mk.Edge(contour, 1));
+    const gp_Pnt at =
+        curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "%s(%.3f, %.3f, %.3f)",
+                  out.empty() ? "" : ", ", at.X(), at.Y(), at.Z());
+    out += buf;
+  }
+  return out.empty() ? out : " — near " + out;
+}
+
 } // namespace
 
 CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
@@ -346,7 +374,8 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     CADShape result = RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
     if (!result.IsValid() && error && mk.NbFaultyContours() > 0) {
       *error = "the fillet failed on " + std::to_string(mk.NbFaultyContours()) +
-               " contour(s) (radius too large for the geometry?)";
+               " contour(s) (radius too large for the geometry?)" +
+               FaultyContourPlaces(mk);
     }
     return result;
   } catch (const Standard_Failure& e) {

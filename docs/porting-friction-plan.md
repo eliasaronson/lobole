@@ -375,6 +375,12 @@ it was three studs standing across the rims being rounded. A position per
 failing contour turns that from a guess into a read. Same shape as the
 `interference`/`clashes` finding in E: the app knows, and does not say.
 
+**Done.** `EdgeBlendNamed` appends a point per faulty contour, so the same
+refusal now reads "the fillet failed on 8 contour(s) (radius too large for
+the geometry?) — near (-2.750, -65.000, -8.000), (-67.750, 0.000, -8.000),
+..." — which is legibly the four fixings on the r65 circle at both faces.
+Gated by `tests/test_fillet.cpp`.
+
 **A stale instance reads as a missing parameter.** The SDK builds its method
 surface from `describe` when it connects, so calling a verb added by a build
 the running app predates reports `add_mate() got derive; it takes a, b, ...`
