@@ -933,6 +933,63 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
   };
 
+  // A cut is a fragment discard, so the PICK has to be told about it too:
+  // without that, hovering and clicking through a section answer with the
+  // material the cut removed — which on an assembly is the housing you
+  // sectioned to see past (docs/ui/section-pick-plan.md).
+  t = IM_REGISTER_TEST(engine, "section", "a_cut_picks_what_you_can_see");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 40, 20));
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
+    ui::SetActivePart(*s_App, asmIdx);
+    // Two copies stacked along Z, 100 mm apart: from straight above, one is
+    // exactly behind the other.
+    std::vector<uint64_t> occs;
+    for (int i = 0; i < 2; i++) {
+      Occurrence occ;
+      occ.name = i ? "Upper" : "Lower";
+      occ.partId = s_App->parts[0].id;
+      occ.fixed = true;
+      occ.position = glm::vec3(0.0f, 0.0f, i * 100.0f);
+      occs.push_back(s_App->assembly->AddOccurrence(occ));
+    }
+    ctx->Yield(2);
+
+    // Looking straight down at the lower block.
+    const glm::vec3 lowerTop(20.0f, 20.0f, 20.0f);
+    s_App->camera->SetTarget(lowerTop);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(lowerTop + glm::vec3(0.0f, 0.0f, 600.0f));
+    ctx->Yield(2);
+
+    // Clicking there with no cut selects the UPPER block: it is in the way,
+    // which is the whole point of sectioning it off.
+    ctx->MouseMoveToPos(WorldToWindow(lowerTop));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedOccurrenceId(*s_App), occs[1]);
+
+    // Cut everything above z = 50 away: the upper block is gone entirely.
+    const uint64_t sec = ui::AddSection(*s_App, 0);
+    IM_CHECK(sec != 0);
+    s_App->sections[0].offset = 50.0f;
+    ctx->Yield(3);
+    const glm::vec4 plane = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
+    IM_CHECK(glm::length(glm::vec3(plane) - glm::vec3(0, 0, 1)) < 1e-3f);
+    IM_CHECK(std::abs(plane.w - 50.0f) < 1e-3f);
+
+    // The same pixel now answers with the block you can actually see.
+    ctx->MouseMoveToPos(WorldToWindow(lowerTop));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedOccurrenceId(*s_App), occs[0]);
+
+    ui::ClearSections(*s_App);
+    ctx->Yield(2);
+  };
+
   // The drag arrow, driven THROUGH THE VIEWPORT — a real mouse press at the
   // arrow's screen position, not a direct call into the handler.
   //

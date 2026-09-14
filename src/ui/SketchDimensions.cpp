@@ -347,7 +347,9 @@ bool HandleProjectTool(AppState& state, SketchFeature& sketch, size_t index,
                        const Ray& ray) {
   SketchEditState& edit = state.sketchEdit;
   const EdgeHit edge = state.faceSelector->PickEdge(ray);
-  const RayHit face = state.faceSelector->PickFace(ray);
+  RayHit face = state.faceSelector->PickFace(ray);
+  if (face.cap)
+    face = RayHit{}; // a section cap has no element to project
   // Hover feedback: what a click would project.
   edit.actionMsg = edge.hit   ? "Project: click to project this edge"
                    : face.hit ? "Project: click to project this face"

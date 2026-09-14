@@ -95,7 +95,8 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   if (!state.assembly || !state.faceSelector)
     return false;
   const RayHit hit = state.faceSelector->PickFace(ray);
-  if (!hit.hit)
+  // A section cap carries no face name to mate against (RayHit::cap).
+  if (!hit.hit || hit.cap)
     return false;
 
   // meshId → the occurrence + which of its part's bodies was hit (both carried

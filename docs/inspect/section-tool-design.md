@@ -261,6 +261,34 @@ Everything else in P1 is plumbing.
   independently.
 - **Section in drawings** — `docs/drawings/` owns that.
 
+## Picking through a cut (2026-09-14)
+
+A section is a fragment discard, and for a long time only the RENDERERS knew:
+`FaceSelector` took the nearest triangle along the ray whether or not the cut
+had removed it. So sectioning an assembly to reach a part inside left every
+hover and click on the housing you had just cut open — the material was
+invisible and still in front of everything.
+
+The picker now carries the same planes (`SetClipPlanes`, pushed every frame by
+`SyncDocumentRenderers` alongside the meshes it registers). Two things follow:
+
+- **Nothing on the removed side is pickable.** The enabled half-spaces meet a
+  ray in one interval, so the per-triangle test is two compares.
+- **The cut face answers for the body it cuts.** Where the ray meets the plane
+  inside a solid, the pick returns a hit AT the plane on that body, flagged
+  `RayHit::cap`. No cap geometry is registered with the picker; being inside
+  the solid there is the whole of what a cap means. A cap is a Body or an
+  Occurrence and never a Face — it has no element name, so the mate tool, the
+  sketch-plane pick and the Project tool refuse it rather than quietly
+  substituting the wall the ray entered through.
+
+Caps also carry whose they are now (`AppState::SectionCapMesh`), so selecting
+or hovering a part lights its cut faces with the rest of it. They are separate
+instances, and leaving the largest surface of a sectioned part unlit read as
+the highlight landing on the wrong thing.
+
+docs/ui/section-pick-plan.md has the design.
+
 ## Dragging the arrow on an assembly (2026-08-20)
 
 Two bugs, both found by dogfooding after hover highlighting landed:

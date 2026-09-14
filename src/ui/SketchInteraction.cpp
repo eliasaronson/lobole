@@ -102,6 +102,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       // where no face is under the cursor — and only within their finite quad,
       // since the planes are infinite and would otherwise be "hit" everywhere.
       RayHit hit = state.faceSelector->PickFace(ray);
+      // A section cap is not a face you can sketch on: it has no name, and
+      // the face behind it is a wall the user did not point at. Treated as
+      // no hit, so the datum planes below stay reachable through a cut.
+      if (hit.cap)
+        hit = RayHit{};
       int plane = -1;
       uint64_t datumId = 0;
       if (!hit.hit) {

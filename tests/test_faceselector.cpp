@@ -10,6 +10,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 
@@ -433,4 +434,224 @@ TEST_CASE("the bounds prune never loses a hit", "[picking][placement]") {
   miss.origin = glm::vec3(30.0f, 50.0f, 0.0f);
   miss.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
   CHECK_FALSE(selector.PickFace(miss).hit);
+}
+
+// ---- Picking through a section view (docs/ui/section-pick-plan.md) --------
+//
+// A section is a fragment discard, so without these the pick answers about
+// material nobody can see: you section an assembly to reach a part inside,
+// and every hover lands on the housing you just cut open.
+
+// The plane convention is the shaders': material is REMOVED where
+// dot(n, p) > w. Keeping x <= 1 means cutting away the half a camera out
+// along +X is looking through.
+static const glm::vec4 kKeepBelowX1(1.0f, 0.0f, 0.0f, 1.0f);
+
+TEST_CASE("a section cut hands back the cap, on the body it cuts",
+          "[picking][section]") {
+  CADShape::Mesh mesh = BoxMesh(); // spans (0,0,0)..(2,2,2)
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  FaceSelector selector;
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::mat4(1.0f), {}, /*solid=*/true);
+
+  Ray ray; // straight at the middle of the +X face, from 20 mm out
+  ray.origin = glm::vec3(20.0f, 1.0f, 1.0f);
+  ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+
+  SECTION("uncut, the near wall") {
+    const RayHit h = selector.PickFace(ray);
+    REQUIRE(h.hit);
+    CHECK_FALSE(h.cap);
+    CHECK_THAT(h.point.x, WithinAbs(2.0f, 1e-3f));
+  }
+
+  SECTION("cut, the cap at the plane") {
+    selector.SetClipPlanes(std::array<glm::vec4, 1>{kKeepBelowX1});
+    const RayHit h = selector.PickFace(ray);
+    REQUIRE(h.hit);
+    CHECK(h.cap);
+    CHECK(h.meshId == 1); // the body the cut opened, which is the answer
+    // AT the plane, not the near wall it removed (x=2) and not the far one
+    // behind the cut (x=0).
+    CHECK_THAT(h.point.x, WithinAbs(1.0f, 1e-3f));
+    CHECK_THAT(h.distance, WithinAbs(19.0f, 1e-3f));
+    // Out of the kept material, which is where the plane's normal points.
+    CHECK_THAT(h.normal.x, WithinAbs(1.0f, 1e-3f));
+  }
+
+  SECTION("an open shell gets no cap, only what is still there") {
+    // Parity of crossings means nothing on a mesh that bounds no volume, so
+    // an imported shell must not sprout a cap floating in front of it.
+    FaceSelector shell;
+    shell.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                  glm::mat4(1.0f), {}, /*solid=*/false);
+    shell.SetClipPlanes(std::array<glm::vec4, 1>{kKeepBelowX1});
+    const RayHit h = shell.PickFace(ray);
+    REQUIRE(h.hit);
+    CHECK_FALSE(h.cap);
+    CHECK_THAT(h.point.x, WithinAbs(0.0f, 1e-3f)); // the far wall, uncut
+  }
+
+  SECTION("clearing the planes restores the uncut answer exactly") {
+    selector.SetClipPlanes(std::array<glm::vec4, 1>{kKeepBelowX1});
+    REQUIRE(selector.PickFace(ray).cap);
+    selector.SetClipPlanes({}); // section deleted / hidden
+    const RayHit h = selector.PickFace(ray);
+    REQUIRE(h.hit);
+    CHECK_FALSE(h.cap);
+    CHECK_THAT(h.point.x, WithinAbs(2.0f, 1e-3f));
+  }
+
+  SECTION("a disabled slot is not a plane") {
+    // SectionPlanes() always hands over four; the empty ones are all-zero.
+    selector.SetClipPlanes(std::array<glm::vec4, 4>{
+        glm::vec4(0.0f), glm::vec4(0.0f), glm::vec4(0.0f), glm::vec4(0.0f)});
+    const RayHit h = selector.PickFace(ray);
+    REQUIRE(h.hit);
+    CHECK_FALSE(h.cap);
+    CHECK_THAT(h.point.x, WithinAbs(2.0f, 1e-3f));
+  }
+}
+
+TEST_CASE("only the body the ray is INSIDE at the cut caps it",
+          "[picking][section]") {
+  // The near box is wholly on the removed side: the ray enters and LEAVES it
+  // before reaching the plane, so at the plane it is in open air as far as
+  // that box is concerned. A phantom cap there would put an invisible part
+  // in front of the one you sectioned to see.
+  CADShape::Mesh mesh = BoxMesh();
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  FaceSelector selector;
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::mat4(1.0f), {}, /*solid=*/true); // x 0..2
+  selector.AddMesh(2, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.0f, 0.0f)),
+                   {},
+                   /*solid=*/true); // x 3..5, entirely cut away
+  selector.SetClipPlanes(std::array<glm::vec4, 1>{kKeepBelowX1});
+
+  Ray ray;
+  ray.origin = glm::vec3(20.0f, 1.0f, 1.0f);
+  ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  const RayHit h = selector.PickFace(ray);
+  REQUIRE(h.hit);
+  CHECK(h.cap);
+  CHECK(h.meshId == 1); // the one the plane actually passes through
+  CHECK_THAT(h.point.x, WithinAbs(1.0f, 1e-3f));
+}
+
+TEST_CASE("nothing on the removed side is pickable", "[picking][section]") {
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
+  CADShape::Mesh mesh = box.GenerateMesh(0.1);
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+  const auto polys = box.GenerateEdgePolylines(0.1);
+
+  FaceSelector selector;
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::mat4(1.0f), polys, /*solid=*/true);
+
+  // The vertical edge at x=2, y=2 — pickable until the cut takes it.
+  Ray edgeRay;
+  edgeRay.origin = glm::vec3(12.0f, 12.0f, 1.0f);
+  edgeRay.direction =
+      glm::normalize(glm::vec3(2.0f, 2.0f, 1.0f) - edgeRay.origin);
+  REQUIRE(selector.PickEdge(edgeRay).hit);
+  selector.SetClipPlanes(std::array<glm::vec4, 1>{kKeepBelowX1});
+  CHECK_FALSE(selector.PickEdge(edgeRay).hit);
+
+  // One on the kept side still is: the vertical edge at x=0, y=2, seen from
+  // -X so nothing is between it and the eye.
+  FaceSelector kept;
+  kept.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces, glm::mat4(1.0f),
+               polys, /*solid=*/true);
+  kept.SetClipPlanes(std::array<glm::vec4, 1>{kKeepBelowX1});
+  Ray keptRay;
+  keptRay.origin = glm::vec3(-12.0f, 12.0f, 1.0f);
+  keptRay.direction =
+      glm::normalize(glm::vec3(0.0f, 2.0f, 1.0f) - keptRay.origin);
+  const EdgeHit e = kept.PickEdge(keptRay);
+  REQUIRE(e.hit);
+  CHECK_THAT(e.point.x, WithinAbs(0.0f, 1e-2f));
+  CHECK_THAT(e.point.y, WithinAbs(2.0f, 1e-2f));
+
+  // And a cut that removes everything leaves nothing to pick at all.
+  FaceSelector gone;
+  gone.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces, glm::mat4(1.0f),
+               polys, /*solid=*/true);
+  gone.SetClipPlanes(
+      std::array<glm::vec4, 1>{glm::vec4(1.0f, 0.0f, 0.0f, -5.0f)});
+  Ray straight;
+  straight.origin = glm::vec3(20.0f, 1.0f, 1.0f);
+  straight.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  CHECK_FALSE(gone.PickFace(straight).hit);
+  CHECK_FALSE(gone.PickEdge(straight).hit);
+}
+
+TEST_CASE("a mirrored placement still caps the body it cuts",
+          "[picking][section][placement]") {
+  // A mirror reverses winding, so the placed triangles report INWARD normals
+  // (pinned above). The "was the ray inside here" test runs in mesh space
+  // for exactly that reason: in world space every entry would read as an
+  // exit and a mirrored occurrence would never cap.
+  CADShape::Mesh mesh = BoxMesh();
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  FaceSelector selector;
+  // Mirrored across X: the box spans x -2..0.
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::scale(glm::mat4(1.0f), glm::vec3(-1, 1, 1)), {},
+                   /*solid=*/true);
+  selector.SetClipPlanes(std::array<glm::vec4, 1>{
+      glm::vec4(1.0f, 0.0f, 0.0f, -1.0f)}); // keep x<=-1
+
+  Ray ray;
+  ray.origin = glm::vec3(20.0f, 1.0f, 1.0f);
+  ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  const RayHit h = selector.PickFace(ray);
+  REQUIRE(h.hit);
+  CHECK(h.cap);
+  CHECK_THAT(h.point.x, WithinAbs(-1.0f, 1e-3f));
+}
+
+TEST_CASE("two sections leave the wedge between them pickable",
+          "[picking][section]") {
+  // Sections INTERSECT: a fragment survives only where every one keeps it,
+  // so the kept region along a ray is one interval and a hit past its far
+  // end is as invisible as one before its near end.
+  CADShape::Mesh mesh = BoxMesh();
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  FaceSelector selector;
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::mat4(1.0f), {}, /*solid=*/true);
+  // Keep x <= 1 and keep x >= 0.5 (normal -X removes below 0.5): a 0.5 mm
+  // slab of the box survives, seen from +X.
+  selector.SetClipPlanes(std::array<glm::vec4, 2>{
+      kKeepBelowX1, glm::vec4(-1.0f, 0.0f, 0.0f, -0.5f)});
+
+  Ray ray;
+  ray.origin = glm::vec3(20.0f, 1.0f, 1.0f);
+  ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  const RayHit h = selector.PickFace(ray);
+  REQUIRE(h.hit);
+  CHECK(h.cap); // the near cut of the slab
+  CHECK_THAT(h.point.x, WithinAbs(1.0f, 1e-3f));
+
+  // The far wall of the box (x = 0) is past the second plane: invisible, so
+  // a ray that meets no material inside the slab picks nothing.
+  FaceSelector past;
+  past.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces, glm::mat4(1.0f),
+               {}, /*solid=*/true);
+  past.SetClipPlanes(std::array<glm::vec4, 2>{
+      glm::vec4(1.0f, 0.0f, 0.0f, -3.0f),   // keep x <= -3
+      glm::vec4(-1.0f, 0.0f, 0.0f, 5.0f)}); // and x >= -5: empty of material
+  CHECK_FALSE(past.PickFace(ray).hit);
 }

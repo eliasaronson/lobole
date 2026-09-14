@@ -196,6 +196,15 @@ bool RenderMeshesCurrent(AppState& state) {
 }
 
 void SyncDocumentRenderers(AppState& state) {
+  // The section cuts reach the PICK from here, every frame and ahead of both
+  // gates below: the cut is a fragment discard, so without them a pick lands
+  // on the material it removed — you section an assembly to reach a part
+  // inside and every hover answers with the housing you just cut open
+  // (docs/ui/section-pick-plan.md). Ahead of the gates because the planes
+  // move live while the cap GEOMETRY deliberately settles on release, and a
+  // picture and a pick that disagree is the bug itself.
+  if (state.faceSelector)
+    state.faceSelector->SetClipPlanes(SectionPlanes(state));
   if (!state.meshRenderer)
     return;
   const std::optional<uint64_t> active = ActiveRenderVersion(state);
@@ -237,8 +246,8 @@ void SyncDocumentRenderers(AppState& state) {
   state.documentMeshes.clear();
   // Section caps live outside documentMeshes (no outline/pick, and they must
   // not disturb the body↔index alignment); remove them on every resync.
-  for (uint32_t capId : state.sectionCapMeshes)
-    state.meshRenderer->RemoveMesh(capId);
+  for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+    state.meshRenderer->RemoveMesh(cap.meshId);
   state.sectionCapMeshes.clear();
   // The topology shape-guide ghost is likewise rebuilt each resync.
   if (state.topoGhostInstance) {
@@ -361,7 +370,7 @@ void SyncDocumentRenderers(AppState& state) {
     if (state.faceSelector)
       state.faceSelector->AddMesh(meshId, tess->vertices, tess->indices,
                                   tess->triangleFaces, glm::mat4(1.0f),
-                                  tess->edges);
+                                  tess->edges, tess->solid);
     pickMs += msSince(pickStart);
     state.documentMeshes.push_back({meshId,
                                     outlineId,
@@ -1270,7 +1279,8 @@ void SyncAssemblyRenderers(AppState& state) {
       const auto pickStart = SyncClock::now();
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.tess->vertices, sb.tess->indices,
-                                    sb.tess->triangleFaces, xf, sb.tess->edges);
+                                    sb.tess->triangleFaces, xf, sb.tess->edges,
+                                    sb.tess->solid);
       pickMs += elapsedMsSince(pickStart);
       // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
       // localXf by construction, which is what lets the drag path recompose
@@ -1314,11 +1324,12 @@ void SyncAssemblyRenderers(AppState& state) {
       // plane. Scrubbing the air-cooled engine with one section on cost
       // 913 ms/step against 9.5 without — an OCC half-space boolean per
       // body, every step, for 27 parts of which four move.
-      AppendCapMeshes(
-          state,
-          Measure::SectionCaps(part->GetBodies(), localOrigin, localNormal,
-                               trim, &state.sectionCapCache),
-          capColors, xf, glm::normalize(glm::vec3(planes[i])), capAlphas);
+      AppendCapMeshes(state,
+                      Measure::SectionCaps(part->GetBodies(), localOrigin,
+                                           localNormal, trim,
+                                           &state.sectionCapCache),
+                      capColors, xf, glm::normalize(glm::vec3(planes[i])),
+                      capAlphas, occ.id);
     }
   }
   // Land every upload this sync recorded before anything reads the assets.

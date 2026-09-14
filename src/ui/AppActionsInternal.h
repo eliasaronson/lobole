@@ -73,6 +73,11 @@ struct BodyTessellation {
   std::vector<uint32_t> indices;
   std::vector<uint32_t> triangleFaces;
   std::vector<std::vector<glm::vec3>> edges;
+  // Does the shape bound a closed volume? Stamped once, with the entry: the
+  // pick asks it of every mesh it registers (a section cap is inferred only
+  // inside a solid), and asking OCC per sync would put a shape walk per body
+  // in the frame loop.
+  bool solid = false;
   uint32_t meshAsset = 0;
   // Created on FIRST use, not with the entry: a reference ghost draws no
   // outline, and the camera's 197 ghost bodies would otherwise pay for 197

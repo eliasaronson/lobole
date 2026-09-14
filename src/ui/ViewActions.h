@@ -98,10 +98,14 @@ void ClearSections(AppState& state);
 // assembly path (one call per occurrence) so both cuts look the same — the
 // double-sided emit and the nudge onto the kept side are fiddly enough that a
 // second copy would drift.
+// `occurrenceId` is 0 on a part tab; `caps` is one per body, in body order,
+// so its index is the body a cap belongs to — both recorded with the cap so
+// selecting or hovering that body can light it.
 void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
                      const std::vector<glm::vec3>& colors, const glm::mat4& xf,
                      const glm::vec3& worldNormal,
-                     const std::vector<float>& alphas = {});
+                     const std::vector<float>& alphas = {},
+                     uint64_t occurrenceId = 0);
 
 // The offset that puts the cut through the MIDDLE of what the tab is showing,
 // along `basePlane`'s normal. A section defaults to the world origin

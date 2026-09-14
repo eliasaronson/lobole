@@ -356,6 +356,7 @@ LookupOrBuildTessellation(AppState& state, const CADShape& shape,
   }
   auto entry = std::make_shared<BodyTessellation>();
   entry->shape = shape;
+  entry->solid = shape.SolidCount() > 0;
   if (prebuilt != nullptr && !prebuilt->vertices.empty()) {
     entry->vertices = std::move(prebuilt->vertices);
     entry->indices = std::move(prebuilt->indices);

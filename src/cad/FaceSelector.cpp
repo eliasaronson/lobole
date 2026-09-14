@@ -14,9 +14,10 @@ void FaceSelector::AddMesh(
     uint32_t meshId, const std::vector<Vertex3D>& vertices,
     const std::vector<uint32_t>& indices,
     const std::vector<uint32_t>& triangleFaces, const glm::mat4& transform,
-    const std::vector<std::vector<glm::vec3>>& edgePolylines) {
+    const std::vector<std::vector<glm::vec3>>& edgePolylines, bool solid) {
   auto meshData = std::make_unique<MeshData>();
   meshData->meshId = meshId;
+  meshData->solid = solid;
   meshData->vertices = vertices;
   meshData->indices = indices;
   meshData->edgePolylines = edgePolylines;
@@ -207,6 +208,47 @@ Ray FaceSelector::ScreenToWorldRay(float screenX, float screenY,
   return ray;
 }
 
+void FaceSelector::SetClipPlanes(std::span<const glm::vec4> planes) {
+  m_clipPlanes.clear(); // keeps the capacity: this runs every frame
+  for (const glm::vec4& p : planes)
+    if (glm::length(glm::vec3(p)) > 1e-6f) // an all-zero slot is disabled
+      m_clipPlanes.push_back(p);
+}
+
+bool FaceSelector::ClippedOut(const glm::vec3& p) const {
+  for (const glm::vec4& plane : m_clipPlanes)
+    if (glm::dot(glm::vec3(plane), p) > plane.w)
+      return true;
+  return false;
+}
+
+bool FaceSelector::KeptInterval(const Ray& ray, float& tEnter, float& tExit,
+                                glm::vec3& enterN) const {
+  tEnter = 0.0f; // the eye, never behind it
+  tExit = std::numeric_limits<float>::max();
+  enterN = glm::vec3(0.0f);
+  for (const glm::vec4& plane : m_clipPlanes) {
+    const glm::vec3 n(plane);
+    const float nd = glm::dot(n, ray.direction);
+    // Signed distance of the origin past the plane: positive = removed.
+    const float no = glm::dot(n, ray.origin) - plane.w;
+    if (std::abs(nd) < 1e-12f) {
+      // Parallel: the whole ray is on one side of this plane.
+      if (no > 0.0f)
+        return false;
+      continue;
+    }
+    const float t = -no / nd;
+    if (nd > 0.0f) {
+      tExit = std::min(tExit, t); // crossing INTO the removed half
+    } else if (t > tEnter) {
+      tEnter = t; // crossing out of it: the last one wins
+      enterN = glm::normalize(n);
+    }
+  }
+  return tEnter <= tExit;
+}
+
 // Slab test against a world-space AABB. Callers check `hasBounds` first: a
 // mesh with no triangles has nothing to hit, and an empty box must read as a
 // MISS rather than as everywhere.
@@ -239,6 +281,18 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
   RayHit closestHit;
   closestHit.distance = std::numeric_limits<float>::max();
 
+  // What a section leaves of this ray. The clip planes are half-spaces and
+  // their intersection with a line is ONE interval, so the per-triangle test
+  // below is two float compares rather than a dot product per plane — this
+  // loop is the most expensive thing in a frame the cursor is over the
+  // viewport (docs/performance/hover-pick.md) and must not grow.
+  float tEnter = 0.0f;
+  float tExit = std::numeric_limits<float>::max();
+  glm::vec3 enterNormal(0.0f);
+  if (!KeptInterval(ray, tEnter, tExit, enterNormal))
+    return closestHit; // every point on the ray is cut away
+  const bool sectioned = !m_clipPlanes.empty() && tEnter > 0.0f;
+
   LOG_TRACE("Testing ray against {} meshes", m_meshes.size());
 
   for (const auto& mesh : m_meshes) {
@@ -260,6 +314,17 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
     local.origin = glm::vec3(mesh->invTransform * glm::vec4(ray.origin, 1.0f));
     local.direction = glm::mat3(mesh->invTransform) * ray.direction;
 
+    // The last boundary this ray crossed BEFORE the cut, and whether it went
+    // in there rather than out: entering last means the ray was inside this
+    // solid where it met the plane, so what a viewer sees at the cut is this
+    // body's section cap. Orientation of the last crossing rather than
+    // parity of all of them, because a ray through the shared edge of two
+    // adjacent faces reports two hits at the same t — which flips a parity
+    // count and leaves an orientation test alone.
+    float lastCrossing = -1.0f;
+    bool lastCrossingEnters = false;
+    uint32_t lastCrossingFace = 0;
+
     // Test every triangle; the hit maps back to its B-Rep face
     for (size_t t = 0; t < mesh->triangleFaces.size(); t++) {
       const glm::vec3& v0 = mesh->vertices[mesh->indices[t * 3]].position;
@@ -269,9 +334,31 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
       float distance;
       glm::vec3 hitPoint;
       if (RayTriangleIntersect(local, v0, v1, v2, distance, hitPoint)) {
-        if (distance < closestHit.distance && distance > 0.0f) {
+        if (distance <= 0.0f)
+          continue;
+        if (distance < tEnter) {
+          // Cut away: invisible, and so unpickable. On the way past, it is a
+          // crossing of this solid's boundary — remember the last one.
+          if (mesh->solid && distance > lastCrossing) {
+            lastCrossing = distance;
+            // In MESH space, where the tessellation's winding is reliably
+            // outward. A mirrored placement reverses winding, so the world
+            // normal there points INWARD (docs/performance/hover-pick.md
+            // pins that quirk) — and a mirrored occurrence would then read
+            // every entry as an exit. The mapping preserves inside/outside,
+            // so the local sign is the physical one.
+            lastCrossingEnters =
+                glm::dot(local.direction, glm::cross(v1 - v0, v2 - v0)) < 0.0f;
+            lastCrossingFace = mesh->triangleFaces[t];
+          }
+          continue;
+        }
+        if (distance > tExit)
+          continue; // cut away by a second section, past the kept wedge
+        if (distance < closestHit.distance) {
           const uint32_t faceId = mesh->triangleFaces[t];
           closestHit.hit = true;
+          closestHit.cap = false;
           closestHit.distance = distance;
           // From the WORLD ray at the same parameter, not by transforming
           // the local point back: same answer, one fewer matrix.
@@ -283,6 +370,23 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
           closestHit.faceIndex = faceId;
         }
       }
+    }
+
+    // Inside this body at the cut: the cap is what is visible there, and it
+    // sits at the plane — in front of anything the ray goes on to reach,
+    // including this same body's far wall. `<=` so it also wins against a
+    // surface lying exactly on the plane, which is the cap's own outline.
+    if (sectioned && mesh->solid && lastCrossingEnters &&
+        tEnter <= closestHit.distance) {
+      closestHit.hit = true;
+      closestHit.cap = true;
+      closestHit.distance = tEnter;
+      closestHit.point = ray.origin + ray.direction * tEnter;
+      // The cap faces out of the kept material, which is where the plane's
+      // normal points (material is removed where dot(n, p) > w).
+      closestHit.normal = enterNormal;
+      closestHit.meshId = mesh->meshId;
+      closestHit.faceIndex = lastCrossingFace;
     }
 
     LOG_TRACE("  Mesh {}: {} faces checked", mesh->meshId, mesh->faces.size());
@@ -365,6 +469,11 @@ EdgeHit FaceSelector::PickEdge(const Ray& ray, const RayHit& occluder) const {
 
         const float radius = std::max(kTanPickAngle * t, kMinRadius);
         if (perp > radius)
+          continue;
+        // Cut away by a section: invisible, so unpickable. Tested on the
+        // point itself (it is near the ray, not on it) and only here, once a
+        // candidate is already under the cursor.
+        if (ClippedOut(onSeg))
           continue;
         // An edge behind the first-hit surface isn't pickable. Edges
         // on its boundary/silhouette have the same ray depth apart

@@ -1230,7 +1230,17 @@ struct AppState {
   // when the planes change and no widget is being dragged (so caps settle on
   // release while the shader clip previews live).
   ClipPlaneArray syncedSectionPlanes = NoClipPlanes();
-  std::vector<uint32_t> sectionCapMeshes;
+  // A cap knows whose cut it is: selecting or hovering a part lights its cut
+  // faces with the rest of it. Without that the biggest surface you see of a
+  // sectioned part — the cap you are pointing at — stayed unlit while its
+  // walls highlighted, which reads as the highlight landing on the wrong
+  // thing (docs/ui/section-pick-plan.md).
+  struct SectionCapMesh {
+    uint32_t meshId = 0;
+    uint64_t occurrenceId = 0; // 0 on a part tab
+    size_t bodyIndex = 0;      // into the tab's bodies, as documentMeshes
+  };
+  std::vector<SectionCapMesh> sectionCapMeshes;
   // Topology shape-guide ghost (TO4): a translucent render of a topology
   // study's optimized iso-surface, shown in the normal modeling workspace so
   // the user can re-model against it. `topoGhostStudyId` selects the study

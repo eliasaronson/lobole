@@ -687,7 +687,7 @@ namespace {
 void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
                      const std::vector<glm::vec3>& colors, const glm::mat4& xf,
                      const glm::vec3& worldNormal,
-                     const std::vector<float>& alphas) {
+                     const std::vector<float>& alphas, uint64_t occurrenceId) {
   const glm::vec3 n = worldNormal;
   const float eps = 1e-3f; // nudge to the kept side; invisible at mm scale
   for (size_t bi = 0; bi < caps.size(); bi++) {
@@ -750,7 +750,7 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
     // resets the alpha).
     if (bi < alphas.size() && alphas[bi] < 1.0f)
       state.meshRenderer->SetInstanceGlass(capId, alphas[bi]);
-    state.sectionCapMeshes.push_back(capId);
+    state.sectionCapMeshes.push_back({capId, occurrenceId, bi});
   }
 }
 

@@ -182,7 +182,12 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
   if (kinds & (KindBit(SelectionItem::Kind::Face) |
                KindBit(SelectionItem::Kind::Body))) {
     if (face.hit) {
-      if (kinds & KindBit(SelectionItem::Kind::Face)) {
+      // A SECTION CAP is the body, and only the body: the cut face is not a
+      // B-Rep face, has no name, and the face the ray entered through is not
+      // what the cursor is over. So no Face candidate here — the Occurrence
+      // and Body ones above and below stand, which is what makes hovering
+      // and clicking through a section land on the part you can see.
+      if ((kinds & KindBit(SelectionItem::Kind::Face)) && !face.cap) {
         if (state.assembly) {
           if (auto af = AssemblyElementAt(state, face.meshId, face.faceIndex,
                                           /*edge=*/false))
@@ -536,6 +541,21 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       state.mateTool.hover.innerPath = top.item.innerPath;
       state.mateTool.hoverSnapIsMidpoint = top.snapMidpoint;
       state.mateTool.hoverSnapIsCorner = top.snapCorner;
+    } else if (top.item.kind == SelectionItem::Kind::Body) {
+      // A part tab reaches a Body hover only when nothing nearer names an
+      // element — which is the section cap, whose cut face is not a B-Rep
+      // face. Light the whole body and its caps, the way an assembly lights
+      // a whole occurrence: pointing at a cut must show SOMETHING.
+      const std::vector<Body>& bodies = ui::ViewportBodies(state);
+      for (const DocumentRenderMesh& m : state.documentMeshes) {
+        if (m.bodyIndex < bodies.size() &&
+            bodies[m.bodyIndex].createdBy == top.item.id) {
+          state.meshRenderer->HoverInstance(m.meshId);
+          for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+            if (cap.occurrenceId == 0 && cap.bodyIndex == m.bodyIndex)
+              state.meshRenderer->HoverInstance(cap.meshId);
+        }
+      }
     } else if (top.item.kind == SelectionItem::Kind::Face ||
                top.item.kind == SelectionItem::Kind::Occurrence) {
       state.pick.hoverFace = top.item.element;
@@ -548,6 +568,9 @@ void HandleSelectionInput(AppState& state, bool overViewport,
         for (const DocumentRenderMesh& m : state.documentMeshes)
           if (m.occurrenceId == top.item.id)
             state.meshRenderer->HoverInstance(m.meshId);
+        for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+          if (cap.occurrenceId == top.item.id)
+            state.meshRenderer->HoverInstance(cap.meshId);
       } else {
         uint32_t first = 0, count = 0;
         if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,
@@ -640,6 +663,12 @@ void SyncSelectionHighlights(AppState& state) {
       for (const DocumentRenderMesh& m : state.documentMeshes)
         if (m.occurrenceId == it.id)
           state.meshRenderer->HighlightInstance(m.meshId);
+      // Its section caps too: on a sectioned part the cut face is most of
+      // what you can see of it, and leaving it unlit while the walls light
+      // reads as the highlight landing on something else.
+      for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+        if (cap.occurrenceId == it.id)
+          state.meshRenderer->HighlightInstance(cap.meshId);
     }
     // Measured faces highlight on their occurrence's instance while the
     // tool is armed (the element's id carries the occurrence).
@@ -651,6 +680,9 @@ void SyncSelectionHighlights(AppState& state) {
           for (const DocumentRenderMesh& m : state.documentMeshes)
             if (m.occurrenceId == e.occurrenceId)
               state.meshRenderer->HighlightInstance(m.meshId);
+          for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+            if (cap.occurrenceId == e.occurrenceId)
+              state.meshRenderer->HighlightInstance(cap.meshId);
           continue;
         }
         if (e.IsEdge())

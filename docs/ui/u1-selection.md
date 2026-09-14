@@ -120,6 +120,12 @@ produces:
 `FaceSelector` keeps its role as the *pick engine* (ray queries, face data)
 but stops owning selection state.
 
+Since 2026-09-14 the pick engine also knows about **section cuts**: material a
+section removed is not pickable, and where a cut passes through a solid the
+pick answers with that body (`RayHit::cap`) rather than with whatever lies
+behind it. A cap has no element name, so it produces Body and Occurrence
+candidates and never a Face — docs/ui/section-pick-plan.md.
+
 ### Consumers migrate, not duplicate
 
 - `selectedFeature` int → `SelectionItem{Feature, id}`. Kills the
