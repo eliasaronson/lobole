@@ -1889,6 +1889,102 @@ class Asm(_Tab):
     def fasten(self, a, b, **kw):
         return self._mate("fastened", a, b, **kw)
 
+    def fasten_in_place(self, a, b, tol=0.05, **kw):
+        """Fasten, and pick the way round that leaves the moving part where
+        it already is.
+
+        A fastened mate between two frames has four outcomes — which side,
+        and whether it is turned half a turn about the joint's axis — and
+        none is predictable from the call. Measured on one cabinet:
+        `flipped=True` seated a woofer correctly and turned another driver
+        magnet-first at the room, two mates written identically; and two
+        dowels at +/-110 are symmetric, so the half-turn is a real ambiguity
+        that brought a side wall back upside down.
+
+        When a caller has already placed the part correctly — a generator
+        computing its own layout — the placement is the answer to that one
+        question, and this asks it: try each way round, keep the one that
+        does not move the part. Raises if none does, which means the two
+        halves of the joint disagree and no mate can fix that.
+
+        `a` is the MOVING side.
+        """
+        moving = a[0] if isinstance(a, tuple) else a
+        was = _occ_centre(moving)
+        m = self._mate("fastened", a, b, **kw)
+        nearest, axial = None, None
+        for flipped in (False, True):
+            for twist in (0.0, 180.0):
+                self.app.set_mate(id=m["id"], flipped=flipped,
+                                  rotation_deg=twist)
+                self.solve()
+                now = _occ_centre(moving)
+                gaps = [abs(x - y) for x, y in zip(now, was)]
+                off = max(gaps)
+                if off <= tol:
+                    return m
+                nearest = off if nearest is None else min(nearest, off)
+                # A residual along ONE axis is the frames' own depths, not a
+                # disagreement: a frame built from bores sits at their
+                # MIDPOINT, and two mating holes are rarely drilled the same
+                # depth — 8 mm into a panel's face, 22 into an edge. That is
+                # closable with the offset, and only that case is.
+                if sorted(gaps)[1] <= tol and (axial is None
+                                               or off < axial[2]):
+                    axial = (flipped, twist, off)
+        if axial is not None:
+            flipped, twist, _ = axial
+            self.app.set_mate(id=m["id"], flipped=flipped,
+                              rotation_deg=twist)
+            self.solve()
+            now = _occ_centre(moving)
+            k = max(range(3), key=lambda i: abs(now[i] - was[i]))
+            self.seat(m, lambda: _occ_centre(moving)[k], was[k], tol=tol)
+            return m
+        raise SdkError(
+            f"no way round this mate leaves {moving.name!r} where it was "
+            f"(nearest {nearest:.2f} mm out, and not along one axis) — the "
+            f"two halves of the joint disagree, which a mate cannot fix")
+
+    def seat(self, mate, measure, want, tol=0.01):
+        """Solve a fastened mate's offset so something LANDS where it should.
+
+        `measure` returns the quantity (a face's height, a bbox edge) and
+        `want` is what it must equal. The offset's sensitivity is PROBED —
+        nudge by 1 mm, see which way the part went — and then solved in one
+        step, because a fastened mate is linear in its offset.
+
+        Probing rather than deriving is the point. The sign depends on which
+        way round the solver took the two frames, and it is not the same for
+        two mates written alike: correcting by `-err` seated a port flare
+        perfectly and sent the tube it carries to z = -2250.
+        """
+        mate_id = mate["id"] if isinstance(mate, dict) else int(mate)
+        base = self._mate_offset(mate_id)
+        self.solve()
+        first = measure()
+        if abs(want - first) <= tol:
+            return first
+        self.app.set_mate(id=mate_id, offset=base + 1.0)
+        self.solve()
+        slope = measure() - first
+        if abs(slope) < 1e-6:
+            raise SdkError(f"mate {mate_id}: its offset does not move what "
+                           f"is being measured")
+        self.app.set_mate(id=mate_id, offset=base + (want - first) / slope)
+        self.solve()
+        got = measure()
+        if abs(want - got) > tol:
+            raise SdkError(f"mate {mate_id}: wanted {want:.3f}, seated at "
+                           f"{got:.3f} — not linear in the offset")
+        return got
+
+    def _mate_offset(self, mate_id):
+        for m in self.app.list_mates()["mates"]:
+            if m["id"] == mate_id:
+                return float(m.get("offset", 0.0))
+        return 0.0
+
     def revolute(self, a, b, **kw):
         return self._mate("revolute", a, b, **kw)
 
@@ -2156,6 +2252,11 @@ VERDICT_CONTRACTS = {
         "optional": {"truncated", "truncation", "pairs_unchecked"},
     },
 }
+
+
+def _occ_centre(occurrence):
+    lo, hi = occurrence.bbox()
+    return [(lo[i] + hi[i]) / 2.0 for i in range(3)]
 
 
 def _conn(spec):
