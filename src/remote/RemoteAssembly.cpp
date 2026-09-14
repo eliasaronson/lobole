@@ -49,7 +49,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "slot id of either, transform?}. Returns {id, part_id, ref_kind}; a "
      "reference that would close a cycle is refused.",
      "fixed, name, part, transform, visible"},
-    {"remove_occurrence", "Remove an occurrence by id.", "id"},
+    {"remove_occurrence",
+     "Remove an occurrence. Takes `occurrence` as well as `id`.",
+     "id, occurrence"},
     {"list_occurrences",
      "List occurrences with transforms, state and ref_kind (part|assembly); a "
      "sub-assembly also reports leaf_count and the leaves' paths. "
@@ -81,7 +83,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "uses {id, configuration: name|id|null}; null = that document's active "
      "one. Two placements of one assembly can differ.",
      "configuration, id, occurrence"},
-    {"select_occurrence", "Select an occurrence in the UI.", "id"},
+    {"select_occurrence",
+     "Select an occurrence in the UI; nothing (or 0) clears it. Takes "
+     "`occurrence` as well as `id`.",
+     "id, occurrence"},
     {"add_mate",
      "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
      "a, b: connectors}. A connector is {occurrence: id|name, frame: <Frame "
@@ -739,12 +744,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
     ui::SnapshotAssembly(state);
-    if (!state.assembly->RemoveOccurrence(p.at("id").get<uint64_t>())) {
+    if (!p.contains("id") && !p.contains("occurrence"))
+      throw std::runtime_error(
+          "which occurrence? Pass `occurrence` (or `id`). Occurrences: " +
+          OccurrenceCandidates(*state.assembly));
+    const uint64_t gone = p.contains("id") ? p.at("id").get<uint64_t>()
+                                           : p.at("occurrence").get<uint64_t>();
+    if (!state.assembly->RemoveOccurrence(gone)) {
       state.assemblyHistory.undo
           .pop_back(); // nothing changed; drop the snapshot
       throw std::runtime_error(
-          "no occurrence with id " +
-          std::to_string(p.at("id").get<uint64_t>()) +
+          "no occurrence with id " + std::to_string(gone) +
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     }
     return json::object();
@@ -1676,7 +1686,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
-    const uint64_t id = p.value("id", uint64_t{0}); // 0 clears the selection
+    // `occurrence` as well as `id`, like its neighbours. 0 (or neither)
+    // clears the selection.
+    const uint64_t id = p.contains("occurrence")
+                            ? p.at("occurrence").get<uint64_t>()
+                            : p.value("id", uint64_t{0});
     if (id && !state.assembly->FindById(id))
       throw std::runtime_error(
           "no occurrence with id " + std::to_string(id) +
