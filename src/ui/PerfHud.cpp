@@ -159,7 +159,11 @@ void DrawPerfHud(AppState& state) {
       ImGui::SetTooltip(
           "Timestamp queries around the shadow pass, the SSAO chain\n"
           "(prepass + AO + blur) and the main pass (scene + UI).\n"
-          "GPU-bound means this total approaches the frame time.");
+          "GPU-bound means this total approaches the frame time.\n\n"
+          "Read these only when the frame is NOT display-bound: the\n"
+          "wait for the swapchain image falls INSIDE the main pass, so\n"
+          "a stalled frame reports shading time it never spent.\n"
+          "docs/performance/present-stall.md");
   }
   // The other half of a `present`-heavy frame: what the swapchain is. Two
   // images with FIFO is a cliff, not a detail.

@@ -89,21 +89,64 @@ NVIDIA RTX 4060 : 3 images (asked 3, surface allows 2..8)
 Intel Arc (MTL) : 3 images (asked 3, surface allows 3..no limit)
 ```
 
-**Mesa was never on the cliff and cannot be put on it.** Sweeping the request
-on the Intel — one wall, 1280x720, half-res AO, shadows on — it answers 3
-whether asked for 2, 3 or 4:
+**Mesa was never on the cliff and cannot be put on it**, because its floor is
+3 — the surface will not hand out a 2-image swapchain at all. It does honour
+larger requests, and they do not help; a sweep on the Intel (one box filling
+1280x720, AO and shadows off, so the GPU costs ~4 ms) moves nothing that is
+not noise:
 
-| request | got | fps | avg | p50 | present | gpu |
-|---|---|---|---|---|---|---|
-| 2 | 3 | 15.8 | 63.5 | 57.0 | 0.0 | 58.15 |
-| 3 | 3 | 20.7 | 48.3 | 39.2 | 0.0 | 51.76 |
-| 4 | 3 | 17.0 | 58.8 | 54.0 | 0.0 | 63.37 |
+| request | got | fps | avg | p50 | gpu | wait | present |
+|---|---|---|---|---|---|---|---|
+| 3 | 3 | 25.6 | 39.0 | 33.3 | 4.17 | 35.83 | 0.03 |
+| 4 | 4 | 23.5 | 42.6 | 34.4 | 4.36 | 37.54 | 0.03 |
+| 5 | 5 | 34.8 | 28.8 | 24.9 | 4.09 | 24.80 | 0.03 |
 
-The spread there is GPU-bound noise, not the swapchain: the Arc spends 52-63
-ms a frame on a scene the NVIDIA draws in 5.6, and `present` is 0.0 ms
-because that GPU owns the display and nothing is copied. Its frame rate is a
-separate question — our shaders are heavy for an iGPU — and no swapchain
-depth changes it.
+(An earlier version of this file claimed Mesa answers 3 whatever it is asked.
+It does not: that sweep ran after the environment override had been removed,
+so all three arms were the same build. The floor of 3 is the real finding and
+it is what the startup log shows.)
+
+Note where the idle sits on Mesa: `wait`, not `present` — the frame-timing
+doc's warning that which of the two holds it is a driver detail, in the flesh.
+
+## The iGPU is not slow at our shaders; the display path caps it
+
+The same measurement answers "should we worry about the Intel?". On the Arc,
+one box filling 1280x720 with AO and shadows off:
+
+| what is on the box | main pass |
+|---|---|
+| palette colour, no material | 3.97 ms |
+| aluminum | 4.49 ms |
+| plastic_white | 4.27 ms |
+| wood_oak / wood_pine / wood_walnut | 4.38 / 4.36 / 4.28 ms |
+| plywood_birch | 4.24 ms |
+
+The **procedural wood grain is free** — about 0.4 ms over a flat colour on an
+iGPU, which retires the obvious suspicion. And the Arc's ceiling is not ours
+at all: `vkcube`, an independent Vulkan program drawing one spinning cube,
+runs at **25.6 fps on that GPU on this display** — the same number our app
+gets. (On the NVIDIA, vkcube manages 50.1: that path pays the cross-GPU
+copy.) Whatever caps the iGPU here is in the X11 present path, and no amount
+of work removed from our frame will lift it.
+
+## A trap in our own instrument: `main` absorbs the stall
+
+`main_ms` is the interval between the SSAO timestamp and the end of the main
+render pass — and the GPU's wait for the swapchain image lands *inside* it,
+because the submit waits at `COLOR_ATTACHMENT_OUTPUT`. So when the app is
+display-bound, the main pass reports time it did not spend shading.
+
+Measured by accident, which is the best kind of proof here: the same box on
+the same GPU reported `main 3.97 ms` with the window visible and
+`main 11.07 ms` once the window was occluded (FIFO throttles a covered window
+to ~1 fps — `wait` went to 853 ms). Zoomed out to a handful of pixels it
+reported **15.21 ms**, more than when it filled the screen.
+
+So: **read the per-pass numbers only when the frame is NOT display-bound.**
+A pass number taken from a stalled frame is what made the Arc look ten times
+slower than it is — the 41-57 ms "main" in the first cross-GPU table on this
+page is that artefact, not a shader cost.
 
 So the shape of the rule is: **a driver whose floor is already 3 is
 unaffected; a driver whose floor is 2 gains the spare image.** NVIDIA's
