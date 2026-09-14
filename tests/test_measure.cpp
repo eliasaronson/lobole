@@ -1143,3 +1143,77 @@ TEST_CASE("A section says how many ISLANDS the cut crosses",
   REQUIRE(joined.has_value());
   CHECK(joined->size() == 1);
 }
+
+TEST_CASE("A section can report the OUTLINE of what it cuts",
+          "[measure][section]") {
+  // An area and a centroid say a brace is 34,466 mm2 somewhere near the
+  // middle. Recovering the SHAPE of a part you did not draw — which is most
+  // of what porting a design in consists of — needs the boundary, and
+  // without it one was measured off screenshots and then abandoned.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("plate", glm::vec3(0, 0, 0), 20, 10, 4));
+
+  // Off by default: it walks every edge of the cut.
+  auto plain = Measure::CrossSectionRegions(doc.GetBodies(), glm::vec3(0, 0, 2),
+                                            glm::vec3(0, 0, 1));
+  REQUIRE(plain.has_value());
+  REQUIRE(plain->size() == 1);
+  CHECK((*plain)[0].loops.empty());
+
+  auto cut = Measure::CrossSectionRegions(doc.GetBodies(), glm::vec3(0, 0, 2),
+                                          glm::vec3(0, 0, 1), true);
+  REQUIRE(cut.has_value());
+  REQUIRE(cut->size() == 1);
+  const Measure::SectionRegion& r = (*cut)[0];
+  REQUIRE(r.loops.size() == 1);
+  CHECK(r.loops[0].outer); // the one loop a solid rectangle has IS the outline
+  REQUIRE(r.loops[0].segments.size() == 4);
+
+  double minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  for (const Measure::SectionSegment& seg : r.loops[0].segments) {
+    CHECK(seg.kind == "line"); // a box's cut has no arcs in it
+    for (const glm::vec3& pt : {seg.from, seg.to}) {
+      minX = std::min(minX, double(pt.x));
+      maxX = std::max(maxX, double(pt.x));
+      minY = std::min(minY, double(pt.y));
+      maxY = std::max(maxY, double(pt.y));
+    }
+    CHECK_THAT(seg.from.z, WithinAbs(2.0f, 1e-4f)); // on the cutting plane
+  }
+  CHECK_THAT(maxX - minX, WithinRel(20.0, 1e-6));
+  CHECK_THAT(maxY - minY, WithinRel(10.0, 1e-6));
+
+  // A hole makes a second loop, and only the outline is the outer one — the
+  // distinction a caller needs to tell an outline from what is missing out
+  // of it. `BRepTools::OuterWire` does NOT survive the boolean that makes a
+  // cut face (nothing it returns is IsSame with any wire the explorer
+  // walks), so this is the largest bounding box instead.
+  Document holed;
+  holed.AddFeature(
+      std::make_unique<BoxFeature>("plate", glm::vec3(0, 0, 0), 20, 10, 4));
+  holed.AddFeature(std::make_unique<CylinderFeature>(
+      "bore", glm::vec3(10, 5, -1), glm::vec3(0, 0, 1), /*radius=*/2.0,
+      /*height=*/6.0));
+  holed.AddFeature(std::make_unique<BooleanFeature>(
+      "drill", holed.GetFeature(0)->GetId(), holed.GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  REQUIRE(holed.GetBodies().size() == 1);
+  auto ring = Measure::CrossSectionRegions(
+      holed.GetBodies(), glm::vec3(0, 0, 2), glm::vec3(0, 0, 1), true);
+  REQUIRE(ring.has_value());
+  REQUIRE(ring->size() == 1);
+  REQUIRE((*ring)[0].loops.size() == 2);
+  int outer = 0, arcs = 0;
+  for (const Measure::SectionLoop& loop : (*ring)[0].loops) {
+    if (loop.outer)
+      outer++;
+    for (const Measure::SectionSegment& seg : loop.segments)
+      if (seg.kind == "arc") {
+        arcs++;
+        CHECK_THAT(seg.radius, WithinRel(2.0, 1e-6)); // the bore, by radius
+      }
+  }
+  CHECK(outer == 1);
+  CHECK(arcs >= 1);
+}

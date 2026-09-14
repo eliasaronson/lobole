@@ -1245,6 +1245,29 @@ def main():
             "type": "Import", "name": "Explicit", "path": stl, "units": "mm",
             "keep_origin": False})
 
+        # `keep_origin` through the RPC, which is where a bought part needs
+        # it. Without it the import is CENTRED on its bounding box, so the
+        # placement a part was exported at is lost and every one of them
+        # lands on the origin — 47 clashing pairs, on a cabinet whose four
+        # bought assemblies all stacked in the top corner.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Away", "position": [400, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        placed = os.path.join(tmp, "placed.step")
+        d.call("export_step", path=placed)
+        for keep, want in ((False, 0.0), (True, 405.0)):
+            d.call("new_project")
+            args = {"path": placed}
+            if keep:
+                args["keep_origin"] = True
+            d.call("import_step", **args)
+            box = d.call("get_state")["bodies"][0]
+            mid = (box["bbox_min"][0] + box["bbox_max"][0]) / 2.0
+            expect(abs(mid - want) < 0.01,
+                   f"keep_origin={keep} put the box at x={mid:.2f}, "
+                   f"expected {want}")
+
         phase("Assembly import")
         # Assembly import (I2) into an UNSAVED project: it ADDS to the
         # current project (hand-modeled and imported parts mix); the .brep

@@ -222,6 +222,43 @@ def check_bad_blend_refuses(app):
            f"and say why, in its own words: {why!r}")
 
 
+def check_compare_aligns(app, tmp):
+    """`compare_geometry {align}` answers about the SHAPE, not the place.
+
+    IoU is computed where the two solids sit, so "is my re-draw right?" —
+    the question porting a design in asks over and over — could not be asked.
+    A re-drawn port tube whose volume matched its reference to four figures
+    scored 0.333, because the reference sits where the cabinet puts it and
+    the part is built about its own origin 900 mm away.
+    """
+    ref = app.part("far tube")
+    sk = ref.sketch(sdk.Plane.xy(-900.0), name="tube")
+    sk.circle((0, 0), d=105.0)
+    sk.circle((0, 0), d=100.0)
+    ref.extrude(sk.add(), distance=250.0, name="tube")
+    golden = os.path.join(tmp, "far-tube.step")
+    app.export_step(path=golden)
+
+    here = app.part("tube at origin")
+    sk = here.sketch(sdk.Plane.xy(0), name="tube")
+    sk.circle((0, 0), d=105.0)
+    sk.circle((0, 0), d=100.0)
+    here.extrude(sk.add(), distance=250.0, name="tube")
+
+    apart = app.compare_geometry(golden_path=golden)
+    expect(abs(apart["volume_ratio"] - 1.0) < 1e-3,
+           f"the same shape either way: volume ratio {apart['volume_ratio']}")
+    expect(apart["iou"] < 0.5,
+           f"unaligned, 900 mm apart, IoU must be poor: {apart['iou']:.3f}")
+
+    same = app.compare_geometry(golden_path=golden, align=True)
+    expect(same["iou"] > 0.99,
+           f"aligned, it is the same solid: IoU {same['iou']:.3f}")
+    # The alignment is never silent — the offset it closed is still reported.
+    expect(same.get("center_offset", 1.0) < 1e-3,
+           f"aligned, the centres coincide: {same.get('center_offset')}")
+
+
 # A word that names an angle. `pitch` is left out on purpose: a thread's
 # pitch is a length.
 ANGLE_WORDS = {"angle", "rotate", "rotation", "tilt", "twist", "sweep",
@@ -319,6 +356,9 @@ def main():
 
         # ---- A bad blend refuses, and the session survives it ------------
         check_bad_blend_refuses(app)
+
+        # ---- compare_geometry can be asked about shape alone -------------
+        check_compare_aligns(app, tmp)
 
         # ---- References, not floats -------------------------------------
         bore = body.face(kind="cylinder",
