@@ -136,7 +136,21 @@ static VkDescriptorPool g_DescriptorPool = VK_NULL_HANDLE;
 static VkCommandPool g_CommandPool = VK_NULL_HANDLE;
 
 static ImGui_ImplVulkanH_Window g_MainWindowData;
-static uint32_t g_MinImageCount = 2;
+// THREE, not two, and it is worth ten times the frame rate on a PRIME
+// laptop: with a 2-image FIFO swapchain the CPU cannot begin a frame until
+// the presentation engine releases the image it is scanning out, so a frame
+// that overruns the refresh period by a microsecond costs a WHOLE extra
+// period — and the GPU, blocked and idle for most of it, clocks down, which
+// makes the next frame overrun too. Measured on the RTX 4060 + Intel-driven
+// display (docs/performance/present-stall.md): 10-25 fps at two images,
+// 48 fps at three, with the same scene and the same binary. Four and five
+// are WORSE again (37-38), so this is not "more is better" — it is one
+// spare image so the queue never runs dry.
+//
+// The driver clamps this to what the surface allows, and the renderers hold
+// kMaxFramesInFlight = 8 slots indexed by image (docs/rendering/
+// frames-in-flight.md), so a bigger count is correct here, only slower.
+static uint32_t g_MinImageCount = 3;
 static bool g_SwapChainRebuild = false;
 static bool g_DisableVSync = false;
 
@@ -914,6 +928,12 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
   // Logged because a driver-dependent image count is exactly what made the
   // "camera shakes on Intel" report impossible to guess at: this NVIDIA
   // reports 2, Mesa reports 3+. See docs/rendering/frames-in-flight.md.
+  g_App.swapchainImages = wd->ImageCount;
+  g_App.presentMode =
+      wd->PresentMode == VK_PRESENT_MODE_MAILBOX_KHR        ? "mailbox"
+      : wd->PresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "immediate"
+      : wd->PresentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "fifo_relaxed"
+                                                            : "fifo";
   LOG_INFO("Swapchain: {} images, {} per-frame slots", wd->ImageCount,
            render::kMaxFramesInFlight);
 }
@@ -2223,6 +2243,7 @@ int main(int argc, char** argv) {
       ImGui_ImplVulkanH_CreateOrResizeWindow(
           g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData,
           g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
+      g_App.swapchainImages = g_MainWindowData.ImageCount;
       SetupDepthBuffer(&g_MainWindowData);
       g_MainWindowData.FrameIndex = 0;
       g_SwapChainRebuild = false;

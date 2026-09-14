@@ -132,6 +132,20 @@ def main():
                 slow += 1
         expect(slow <= 2, f"idle pings answered promptly ({slow}/8 >= 30 ms)")
 
+        phase("The swapchain has a spare image")
+        # Two images with FIFO is a performance CLIFF, not a detail: the CPU
+        # cannot start a frame until the presentation engine releases the one
+        # on screen, so any overrun of the refresh period costs a whole extra
+        # period and the idle GPU clocks down with it. Measured 10-25 fps at
+        # two images against 59 at three, same scene, same binary
+        # (docs/performance/present-stall.md). Asserted through frame_stats
+        # because that is also where a human reads it.
+        sc = d.call("frame_stats")["swapchain"]
+        expect(sc["images"] >= 3,
+               f"swapchain has a spare image ({sc}) — if a driver caps "
+               "maxImageCount below 3 this test is the right place to say so")
+        expect(sc["present_mode"] != "", f"present mode reported ({sc})")
+
         phase("Semantic tier")
         # Semantic tier: features as JSON
         d.call("new_project")

@@ -161,6 +161,18 @@ void DrawPerfHud(AppState& state) {
           "(prepass + AO + blur) and the main pass (scene + UI).\n"
           "GPU-bound means this total approaches the frame time.");
   }
+  // The other half of a `present`-heavy frame: what the swapchain is. Two
+  // images with FIFO is a cliff, not a detail.
+  if (state.swapchainImages > 0) {
+    ImGui::TextDisabled("swapchain %u images, %s", state.swapchainImages,
+                        state.presentMode.c_str());
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(
+          "With FIFO and TWO images a frame that overruns the refresh\n"
+          "period waits a whole extra period, and the idle GPU clocks\n"
+          "down — measured 10-25 fps at two, 48 at three.\n"
+          "docs/performance/present-stall.md");
+  }
 
   ImGui::Separator();
   for (size_t p = 0; p < render::kPhaseCount; p++) {

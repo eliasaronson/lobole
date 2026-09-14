@@ -1648,6 +1648,14 @@ struct AppState {
     double mainMs = 0.0;
     double totalMs = 0.0;
   } gpuStats;
+  // The swapchain's shape, as the driver actually gave it — pure data here,
+  // set by main.cpp at creation and on every resize. It belongs in the
+  // instrument because it is INVISIBLE otherwise and it decides the frame
+  // rate: two images with FIFO quantises every overrun to a whole refresh
+  // period (docs/performance/present-stall.md). 0 = no swapchain (headless,
+  // offscreen), which frame_stats reports rather than guessing.
+  uint32_t swapchainImages = 0;
+  std::string presentMode; // "fifo" | "mailbox" | "immediate" | ...
   bool perfHudOpen = false;
   // Idle throttle (docs/rendering/idle-throttle.md). The pacer itself lives
   // in main.cpp; these are its test/observability seams: `pacerForceEnable`

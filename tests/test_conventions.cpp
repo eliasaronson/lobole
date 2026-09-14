@@ -491,6 +491,16 @@ TEST_CASE("conventions: this binary is not older than the source",
       const std::string ext = e.path().extension().string();
       if (ext != ".cpp" && ext != ".h" && ext != ".hpp")
         continue;
+      // These three link into the APP binary only, never into this one, so a
+      // change to them leaves this binary complete. Worse than a false
+      // alarm: the rebuild the message asks for cannot clear it, because
+      // `ninja designer designer_tests` has no work to do for designer_tests
+      // — the gate would then keep failing while telling you to do the thing
+      // you just did.
+      const std::string rel = Relative(e.path());
+      if (rel == "src/app/main.cpp" || rel == "src/app/HeadlessMain.cpp" ||
+          rel == "src/app/CrashHandler.cpp")
+        continue;
       const auto at = fs::last_write_time(e.path());
       if (newest.empty() || at > newestAt) {
         newest = e.path();

@@ -38,6 +38,13 @@ the app idling until the display is ready. It only indicts the GPU when the
 total frame time is also above the refresh period, or when vsync is off
 (`--gui-tests` runs uncapped).
 
+When it IS above the period, read the swapchain line next to it (`images`,
+`present_mode` — reported since 2026-09-14). A `present` that is a multiple of
+the refresh period with two images is the FIFO cliff, where the app waits a
+whole extra period for an image it could have had: nothing else in the split
+distinguishes that from a slow GPU, and it was worth 4x the frame rate
+(docs/performance/present-stall.md).
+
 ## Not shown by default
 
 The measurement always runs — five `glfwGetTime()` calls per frame, which is

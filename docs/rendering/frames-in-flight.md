@@ -111,6 +111,16 @@ with MAILBOX. If a driver ever exceeds it the renderer logs once and falls
 back to the modulo — today's behaviour, wobble and all, rather than a crash or
 a silent out-of-bounds write.
 
+## Two images is also a PERFORMANCE cliff (2026-09-14)
+
+This doc made a 3-image swapchain *correct*. It stayed at two, because two was
+what the NVIDIA offered and nothing argued for more — and two turned out to
+cost 10-25 fps against 59 on the very same machine, because with FIFO the CPU
+cannot begin a frame until the presentation engine releases the image on
+screen. `g_MinImageCount` is now 3, and `frame_stats` reports what the
+swapchain actually is. docs/performance/present-stall.md has the measurements,
+including why four and five are worse again.
+
 ## Verification
 
 The mechanism is a **write-after-read hazard**, which is precisely what

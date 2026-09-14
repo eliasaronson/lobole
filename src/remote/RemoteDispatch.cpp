@@ -1417,6 +1417,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               {"ssao_ms", state.gpuStats.ssaoMs},
               {"main_ms", state.gpuStats.mainMs},
               {"total_ms", state.gpuStats.totalMs}}},
+            // The display half's own shape. A present time that is a MULTIPLE
+            // of the refresh period with `images` at 2 is the FIFO cliff, not
+            // a slow GPU — and nothing else in the app can be asked about it.
+            {"swapchain",
+             {{"images", state.swapchainImages},
+              {"present_mode", state.presentMode}}},
             {"hud", state.perfHudOpen}};
   }
   if (m == "get_settings") {
