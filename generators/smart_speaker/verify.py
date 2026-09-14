@@ -61,6 +61,11 @@ REBUILD_AT = {
 # not waved through by loosening the gate.
 ALLOW = {
     ("port tube", "port flare (bay)"): 1000.0,
+    # The bought driver is a whisker over the cut-out its own datasheet
+    # specifies: 20.5 mm3 spread round a d148 wall 143 mm tall is 0.3 MICRONS
+    # of mean depth. That is the STEP not being the physical part, and the
+    # answer is not to open a cut-out the CAM cuts to a datasheet number.
+    ("front_wall", "W170S woofer"): 40.0,
 }
 
 

@@ -386,6 +386,20 @@ def bottom_wall(app, p):
     # `port_flare_bottom_dia` deep enough to go clean through 16 mm of floor,
     # which is why the flare stopped clashing with it.
 
+    # Roll the underside of that hole. The flare's throat follows this
+    # radius on its way through, and the air leaves without turning a corner.
+    bore = part.body().faces(kind="cylinder", where=lambda f: (
+        f.radius and abs(f.radius * 2 - (float(p["port_spigot_od"])
+                                         + float(p["port_floor_clearance"])))
+        < 0.05))
+    if bore:
+        rim = part.body().edges(kind="circle", where=lambda e: (
+            e.radius and abs(e.radius * 2 - (float(p["port_spigot_od"])
+                                             + float(p["port_floor_clearance"])))
+            < 0.05 and e.midpoint is not None and abs(e.midpoint[2]) < 0.05))
+        if rim:
+            part.fillet(rim, r=p["port_hole_radius"], name="port hole radius")
+
     sk = part.sketch(Plane.xy(t), name="port_bolts")
     n = int(float(p["outer_port_bolt_count"]))
     for i in range(n):

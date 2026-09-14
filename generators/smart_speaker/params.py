@@ -83,6 +83,11 @@ TABLE = [
      "below the seating face. It, not the spigot, is what sizes the hole — "
      "sized to the spigot instead, the rim sits 5,266 mm3 inside the floor"),
     ("port_floor_clearance", "1.0", "round the spigot, per side x2"),
+    ("port_hole_radius", "11.0",
+     "the radius rolled onto the port hole's UNDERSIDE. The original has "
+     "one: the hole is d115 for only 5 mm of the 16, then flares to about "
+     "d137. Left sharp, the flare's throat sits 2,788 mm3 inside the floor "
+     "and the air turns a corner on the way out"),
     ("port_tube_insert", "13.6",
      "how far the tube plugs down inside the lower flare's throat; the "
      "export overlaps them by this much"),
