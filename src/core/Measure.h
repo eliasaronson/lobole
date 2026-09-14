@@ -435,13 +435,32 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
 // them as two solids and joining solids is what a Boolean (an extrude's
 // `add`) is for; a caller asking whether a feature is joined is asking about
 // a part that has been through that already.
+// One boundary curve of a cut region. `kind` is "line", "arc" (a circle or a
+// piece of one, which then carries centre and radius) or "other" for anything
+// else, whose ends still bound it.
+struct SectionSegment {
+  std::string kind;
+  glm::vec3 from{0.0f};
+  glm::vec3 to{0.0f};
+  glm::vec3 center{0.0f}; // arc only
+  double radius = 0.0;    // arc only
+};
+struct SectionLoop {
+  bool outer = false;
+  std::vector<SectionSegment> segments;
+};
 struct SectionRegion {
   double area = 0.0;
   glm::vec3 centroid{0.0f};
+  // The region's OUTLINE, only when asked for: an area and a centroid say a
+  // brace is 34,466 mm2 somewhere near the middle, and recovering a part you
+  // did not draw needs the shape. Off by default because it walks every edge
+  // of the cut.
+  std::vector<SectionLoop> loops;
 };
 std::optional<std::vector<SectionRegion>>
 CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
-                    const glm::vec3& normal);
+                    const glm::vec3& normal, bool withLoops = false);
 
 // The section-cut cap faces (I3 v2, C4): one CADShape per body — the body's
 // intersection with the section plane, lying on the plane — for rendering a

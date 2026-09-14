@@ -1053,11 +1053,67 @@ TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
                                   Standard_True);
   return BRepBuilderAPI_MakeFace(poly.Wire()).Face();
 }
+// A cut face's boundary, loop by loop. The outer wire is flagged so a caller
+// can tell the outline from the holes in it without re-deriving containment.
+std::vector<SectionLoop> SectionLoopsOf(const TopoDS_Face& face) {
+  std::vector<SectionLoop> loops;
+  // The outer wire is the one with the biggest bounding box, not the one
+  // `BRepTools::OuterWire` names: after the boolean that made this face, the
+  // wire it hands back is not `IsSame` as any wire the explorer walks, so
+  // every loop came back flagged inner. A planar face's outline is the one
+  // that contains the rest, and on a plane that is simply the largest.
+  std::vector<double> spans;
+  for (TopExp_Explorer we(face, TopAbs_WIRE); we.More(); we.Next()) {
+    Bnd_Box box;
+    BRepBndLib::Add(we.Current(), box);
+    spans.push_back(box.IsVoid() ? 0.0 : box.SquareExtent());
+  }
+  const size_t widest =
+      spans.empty()
+          ? 0
+          : static_cast<size_t>(std::max_element(spans.begin(), spans.end()) -
+                                spans.begin());
+  size_t index = 0;
+  for (TopExp_Explorer we(face, TopAbs_WIRE); we.More(); we.Next(), index++) {
+    const TopoDS_Wire& wire = TopoDS::Wire(we.Current());
+    SectionLoop loop;
+    loop.outer = (index == widest);
+    for (TopExp_Explorer ee(wire, TopAbs_EDGE); ee.More(); ee.Next()) {
+      const TopoDS_Edge& edge = TopoDS::Edge(ee.Current());
+      SectionSegment seg;
+      const gp_Pnt a = BRep_Tool::Pnt(TopExp::FirstVertex(edge, Standard_True));
+      const gp_Pnt b = BRep_Tool::Pnt(TopExp::LastVertex(edge, Standard_True));
+      seg.from = glm::vec3(static_cast<float>(a.X()), static_cast<float>(a.Y()),
+                           static_cast<float>(a.Z()));
+      seg.to = glm::vec3(static_cast<float>(b.X()), static_cast<float>(b.Y()),
+                         static_cast<float>(b.Z()));
+      BRepAdaptor_Curve curve(edge);
+      if (curve.GetType() == GeomAbs_Line) {
+        seg.kind = "line";
+      } else if (curve.GetType() == GeomAbs_Circle) {
+        seg.kind = "arc";
+        const gp_Circ circle = curve.Circle();
+        const gp_Pnt cc = circle.Location();
+        seg.center =
+            glm::vec3(static_cast<float>(cc.X()), static_cast<float>(cc.Y()),
+                      static_cast<float>(cc.Z()));
+        seg.radius = circle.Radius();
+      } else {
+        seg.kind = "other";
+      }
+      loop.segments.push_back(std::move(seg));
+    }
+    if (!loop.segments.empty())
+      loops.push_back(std::move(loop));
+  }
+  return loops;
+}
+
 } // namespace
 
 std::optional<std::vector<SectionRegion>>
 CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
-                    const glm::vec3& normal) {
+                    const glm::vec3& normal, bool withLoops) {
   std::vector<SectionRegion> out;
   if (bodies.empty())
     return out;
@@ -1081,9 +1137,14 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::vec3& origin,
         if (props.Mass() <= 1e-9)
           continue;
         const gp_Pnt c = props.CentreOfMass();
-        out.push_back({props.Mass(), glm::vec3(static_cast<float>(c.X()),
-                                               static_cast<float>(c.Y()),
-                                               static_cast<float>(c.Z()))});
+        SectionRegion region;
+        region.area = props.Mass();
+        region.centroid =
+            glm::vec3(static_cast<float>(c.X()), static_cast<float>(c.Y()),
+                      static_cast<float>(c.Z()));
+        if (withLoops)
+          region.loops = SectionLoopsOf(TopoDS::Face(ex.Current()));
+        out.push_back(std::move(region));
       }
     }
     std::sort(out.begin(), out.end(),

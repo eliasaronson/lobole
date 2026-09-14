@@ -608,8 +608,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "bolt bosses hang off its deck flange sections at 3293.8 where the sound "
      "one sections at 2586.9, and the difference is a boss standing as its "
      "own island. Islands are not a verdict — a fork has two tines — they are "
-     "a question you can ask cheaply.",
-     "base_plane, normal, offset, origin, part, regions"},
+     "a question you can ask cheaply. {loops: true} adds each island's "
+     "OUTLINE — its wires, the outer one flagged, as segments of kind "
+     "line | arc (centre and radius) | other with their endpoints. An area "
+     "and a centroid say a brace is 34,466 mm2 somewhere near the middle; "
+     "recovering the SHAPE of a part you did not draw — the whole job when "
+     "porting one in — needs the boundary, and without it a brace was "
+     "measured in screenshots and then redrawn to a rule.",
+     "base_plane, loops, normal, offset, origin, part, regions"},
     {"set_section",
      "Enable/disable the live section clip {base_plane: xy|xz|yz, offset?, "
      "reverse?}. Works on part AND assembly tabs, with filled cut caps on "
@@ -866,15 +872,35 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // The ISLANDS the cut crosses, biggest first. Off by default because the
     // total is what most callers want and this costs a second boolean.
     if (p.value("regions", false)) {
+      const bool withLoops = p.value("loops", false);
       const auto regions =
-          Measure::CrossSectionRegions(*bodies, origin, normal);
+          Measure::CrossSectionRegions(*bodies, origin, normal, withLoops);
       if (!regions)
         throw std::runtime_error("section regions failed — see the log");
       json arr = json::array();
-      for (const Measure::SectionRegion& r : *regions)
-        arr.push_back(
-            {{"area", r.area},
-             {"centroid", {r.centroid.x, r.centroid.y, r.centroid.z}}});
+      for (const Measure::SectionRegion& r : *regions) {
+        json one{{"area", r.area},
+                 {"centroid", {r.centroid.x, r.centroid.y, r.centroid.z}}};
+        if (withLoops) {
+          json loops = json::array();
+          for (const Measure::SectionLoop& l : r.loops) {
+            json segs = json::array();
+            for (const Measure::SectionSegment& sg : l.segments) {
+              json j{{"kind", sg.kind},
+                     {"from", {sg.from.x, sg.from.y, sg.from.z}},
+                     {"to", {sg.to.x, sg.to.y, sg.to.z}}};
+              if (sg.kind == "arc") {
+                j["center"] = {sg.center.x, sg.center.y, sg.center.z};
+                j["radius"] = sg.radius;
+              }
+              segs.push_back(std::move(j));
+            }
+            loops.push_back({{"outer", l.outer}, {"segments", segs}});
+          }
+          one["loops"] = loops;
+        }
+        arr.push_back(std::move(one));
+      }
       out["regions"] = arr;
       out["region_count"] = arr.size();
     }
