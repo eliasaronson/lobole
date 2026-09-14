@@ -25,10 +25,12 @@ what the SO-101 gripper dogfood was missing (docs/agent-scale-plan.md, G0):
 - compositions that are several RPCs — `bolt_circle`, `revolve_profile`,
   `fillet(edges=predicate)`, a sketch builder that CONSTRAINS rather than
   positioning by number.
-- `batch()` — a context manager over the `batch` RPC, so a run of edits is
-  one transaction, one regeneration and one undo step. Handles returned
-  inside it are `$ref`s, so a sketch and the extrude that names it go
-  together.
+- `part.batch()` / `app.transaction()` — a context manager over the `batch`
+  RPC, so a run of edits is one transaction, one regeneration and one undo
+  step. Handles returned inside it are `$ref`s, so a sketch and the extrude
+  that names it go together. On `App` the verb is `transaction`, because
+  `app.batch` resolves to the generated RPC and fails with "missing required
+  parameter 'calls'".
 
 Usage:
 

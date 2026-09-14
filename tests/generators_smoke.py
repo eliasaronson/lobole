@@ -6,6 +6,13 @@ gear" (docs/capability-review-2026-08-31.md): a Python generator against the
 API, an ordinary part out. This runs it against a headless app and checks
 the part by numbers — no display, no GPU.
 
+generators/smart_speaker builds its CARCASS here — the panels, coverings,
+braces, port and hardware, and none of the bought STEP, which lives in
+scratch/ and is not tracked because the projects are regenerable. What that
+case is really for is the joinery: the panels used to drill their own dowels
+independently and the holes did not meet (side walls at +/-126, the top wall
+at +/-110), so nothing could be mated to anything. It asserts they line up.
+
 Usage: generators_smoke.py <path-to-designer-binary>
 """
 import math
@@ -81,13 +88,59 @@ def main():
                    "the gear thickened with its variable")
         finally:
             d.close()
+        # ---- smart_speaker's carcass ---------------------------------
+        cabinet = os.path.join(ROOT, "generators", "smart_speaker",
+                               "smart_speaker.py")
+        out = subprocess.run(
+            [sys.executable, cabinet, "--port", str(app.port),
+             "--stage", "carcass", "--no-save"],
+            capture_output=True, text=True, env=env, timeout=300)
+        expect(out.returncode == 0,
+               f"smart_speaker carcass failed:\n{out.stdout}\n{out.stderr}")
+        expect("no failures" in out.stdout,
+               f"every part must build:\n{out.stdout}")
+        # The parametric gate inside the run prints this when a part did not
+        # move at a second parameter set — a literal that survived.
+        expect("unchanged, so not driven" not in out.stdout,
+               f"a part stopped following its table:\n{out.stdout}")
+
+        d = Designer(app.port)
+        try:
+            slots = {s["name"]: s for s in d.call("list_parts")["parts"]}
+            for want in ("side_wall", "front_wall", "top_wall", "veneer_top"):
+                expect(want in slots, f"no {want} tab: {sorted(slots)}")
+            expect("Part 1" not in slots,
+                   "the empty tab new_project opens with must be gone")
+            # THE joinery check: a dowel bored into one panel must have a
+            # partner in the panel it meets. Both come from joinery.py, and
+            # before that they did not agree.
+            def dowels(name):
+                # `list_elements` nests faces under each BODY, not at the
+                # top level.
+                els = d.call("list_elements", part=slots[name]["id"])
+                return [f for body in els["bodies"]
+                        for f in body.get("faces", [])
+                        if f.get("kind") == "cylinder"
+                        and abs((f.get("radius") or 0) - 4.0) < 0.05]
+            side, top = dowels("side_wall"), dowels("top_wall")
+            expect(len(side) == 8, f"the side wall takes 8 dowels: {len(side)}")
+            expect(len(top) == 8, f"the top wall takes 8 dowels: {len(top)}")
+            # The side wall's top-joint pair and the top wall's side-joint
+            # pair are the same joint, so they sit at the same depth across
+            # the cabinet: +/-(internal_d/2 - plug_side_dist) = +/-110.
+            ys = sorted({round(f["centroid"][1], 1) for f in top})
+            expect(any(abs(abs(y) - 110.0) < 0.2 for y in ys),
+                   f"the top wall's side-joint dowels sit at +/-110: {ys}")
+        finally:
+            d.close()
     finally:
         app.terminate()
         try:
             app.wait(timeout=10)
         except Exception:
             app.kill()
-    print("generators_smoke: gear.py built a gear and it stays parametric")
+    print("generators_smoke: gear.py built a gear and it stays parametric; "
+          "smart_speaker's carcass builds and its joinery meets")
     return 0
 
 

@@ -66,7 +66,7 @@ def report_phases():
         print(f"  {name:<16} {seconds:6.1f} s {100 * seconds / total:4.0f}%")
 
 
-def build_parts(app):
+def build_parts(app, with_bought=True):
     """Every part, and the parameter table they all read.
 
     The table is declared on the first part but at PROJECT scope, so there is
@@ -110,6 +110,10 @@ def build_parts(app):
     add(port_mod.tube)
     add(hardware.t_nut)
     add(hardware.dowel)
+    if not with_bought:
+        print("bought: skipped")
+        _file_tabs(app)
+        return p, made
     print("bought:")
     for part in bought.import_all(app, p):
         lo, hi = part.bbox()
@@ -187,7 +191,7 @@ def main():
     ap.add_argument("--port", type=int)
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--stage", default="all",
-                    choices=["parts", "assembly", "cam", "all"])
+                    choices=["carcass", "parts", "assembly", "cam", "all"])
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--save-anyway", action="store_true",
                     help="save even though the checks failed — for LOOKING at "
@@ -198,9 +202,13 @@ def main():
     app = connect(args.port)
     app.new()
 
+    # `carcass` is what CI can run: the panels, coverings, braces, port and
+    # hardware, and none of the bought STEP — those live in scratch/, which
+    # is not tracked, because the projects here are regenerable and the
+    # slices come back from `extract_bought.py`.
     with phase("parts"):
-        p, made = build_parts(app)
-    if args.stage == "parts":
+        p, made = build_parts(app, with_bought=(args.stage != "carcass"))
+    if args.stage in ("carcass", "parts"):
         return _finish(app, args, None, p, made)
 
     with phase("assembly"):

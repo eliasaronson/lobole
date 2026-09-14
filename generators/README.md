@@ -14,7 +14,7 @@ branch in a real language with no sandbox.
 
 **Layout.** A generator that is one file sits here; one that spans several
 sits in its own directory beside them — `om615/`, `fpv_drone/`,
-`cncest6090/`, `so101_gripper/` — with the same file names inside. Every
+`cncest6090/`, `so101_gripper/`, `smart_speaker/`, `watch/` — with the same file names inside. Every
 file adds BOTH its own directory and this one to `sys.path`, so a group's
 modules import each other by bare name and still reach `_lib` and `gear`.
 
@@ -27,6 +27,28 @@ Run one against the running app (it finds the one announced instance, or
 takes `--port`; it never guesses):
 
     python3 generators/gear.py --module 2 --teeth 24 --thickness 8 --bore 6
+
+`smart_speaker/` is a two-way floorstanding loudspeaker PORTED from Onshape:
+six MDF panels, four plywood coverings, two braces, a flared port, and the
+drivers and amplifier as bought STEP. It is the one generator here that
+started as somebody else's document, and most of what it is worth reading
+for comes from that.
+
+The parameter table arrived SIX times — a part-scoped copy in every wall —
+and had already drifted, so it is declared once at project scope. The panels
+each drilled their own dowels and the holes did not meet (side walls at
++/-126, the top wall at +/-110, the baffle none), so `joinery.py` makes the
+JOINT the unit and both panels of one ask the same function where their
+holes go; the carcass is then fastened along a tree by those holes rather
+than placed at coordinates. The coverings are their own parts carrying a
+`Derived` reference to the wall they cover, and take its outline from the
+same `walls.silhouette()`, mitred 45 degrees where they meet.
+
+`extract_bought.py` slices the 48 MB Onshape export into the ~2 MB actually
+used, once; the output lives in `scratch/` and is regenerable, which is why
+neither it nor the project is tracked. `--stage carcass` builds everything
+that does not need those slices, and is what `tests/generators_smoke.py`
+runs. What the run refuses to save without is in `verify.py`.
 
 **Check an assembly with `asm.check()`, not by hand.** It gates the three
 things that matter at once — nothing clashing, nothing FLOATING (one connected

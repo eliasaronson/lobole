@@ -1,8 +1,8 @@
 # Porting an outside design: what got in the way
 
-**A, D and E are built; B is built except `compare_geometry`; C is built as
-far as the SDK reaches.** What each one turned out to need — and the two
-items that dissolved on contact — is recorded against it below.
+**A, B, D and E are built; C is built as far as the SDK reaches, and E's
+camera fit is not.** What each one turned out to need — and the three items
+that dissolved on contact — is recorded against it below.
 
 Bringing a real Onshape cabinet into this app — six panels, two braces, a
 port, four bought assemblies, thirty occurrences — surfaced five things worth
@@ -96,14 +96,18 @@ one `BRepTools::OuterWire` names: after the boolean that makes a cut face,
 that wire is not `IsSame` as any the explorer walks and every loop came back
 flagged inner.
 
-**`compare_geometry` alignment is NOT built** and is what remains of B.
+**`compare_geometry {align: true}` is built too**, so B is complete: the
+re-drawn port tube goes from iou 0.333 to 1.000. Off by default, because a
+golden taken AT a position is a real thing to check, and `center_offset`
+still says how far it moved.
 
 **Still to verify** the way that matters: rebuild the braces from loops and
-watch the ring brace stop being a re-draw at 0.77x.
+watch the ring brace stop being a re-draw at 0.77x. Neither `loops` nor
+`align` has a test yet.
 
 Touches the section/inspection RPC and its handler, `compare_geometry`,
-`tools/designer_sdk.py`, and a case in `tests/` that reads a known part's
-loops back.
+`tools/designer_sdk.py`. A case in `tests/` that reads a known part's loops
+back is owed and does not exist.
 
 ---
 
@@ -132,7 +136,10 @@ alternatives. That is scaffolding around not being able to state the intent.
 
 **The fix.** A verb that says what the joint IS, and lets the app resolve it:
 
-    asm.seat(moving_face, onto_face, align=<frame pair>)
+    asm.join(moving_face, onto_face, align=<frame pair>)
+
+(`asm.seat` is taken: what shipped is `seat(mate, measure, want)`, which
+solves an offset. The app-side verb needs its own name.)
 
 "this face lands on that face, these bolt circles line up" — the app picks the
 side, the twist and the offset, because it can see both solids and the caller
@@ -183,20 +190,26 @@ part stacked at the origin.
 **The fix.**
 
 - `import_step` accepts and forwards `keep_origin`.
-- The two clash reads are named the same thing. `interference` returns its
-  findings under `pairs`; `contact_report` returns the same kind of thing
-  under `clashes`. Reading the wrong one yields `[]` and a gate that passes
-  for ever. One name, with the other kept as an alias that warns.
-- `interference`'s receipt says `claim: "no pair interferes"` with `verdict:
-  "fail"`. The claim does not invert with the verdict, so a green-sounding
-  line means its opposite. State the claim as what was found.
-- `asm.check` is what the modelling-workflow prompt points at for "is this
-  assembly right", ahead of the raw sweeps.
+- The whole-assembly `interference` sweep reports its findings under BOTH
+  `pairs` and `clashes` — the same list, since it only ever reports clashes,
+  and `clashes` is what `contact_report` calls the same thing. Nothing is
+  renamed and nothing is deprecated: both names are correct, which is the
+  cheapest way to stop a caller reading `[]` off the one that did not exist.
+- The receipt's claim wording is left alone. See "Not in this round".
+- `generators/README.md` points at `asm.check` — that, not the MCP prompt,
+  is where a generator author is standing when they hand-roll it. The MCP
+  workflow prompt already said to gate on `contact_report` and be one
+  connected component; it was right and is unchanged.
 
-**Verified by** the smart_speaker generator's `verify.py` shrinking to a call
-to `asm.check(allow=...)`, and by `import_step` round-tripping a part's
-placement: export at a known position, re-import with `keep_origin`, assert
-the bounding box did not move.
+**Verified by** the smart_speaker generator's `verify.py` shrinking to one
+`asm.check(allow=...)` — which immediately found two things the hand-written
+version had missed: an allowance matching nothing, and a 0.15 mm near miss
+where a driver flange had been cut into its ply at exactly flange diameter.
+
+**Not gated.** `keep_origin` through the RPC has no test — the v97 golden
+covers the FEATURE and `headless_smoke` only passes the default. A round trip
+(export at a known position, re-import with `keep_origin`, assert the box did
+not move) is still owed.
 
 Touches `src/remote/RemoteInspection.cpp` and the import handler, the
 `describe` rows, `tools/designer_sdk.py`, the MCP workflow prompt.

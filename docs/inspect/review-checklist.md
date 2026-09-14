@@ -46,6 +46,10 @@ these boxes each cost a review cycle.
 - [ ] `compare_geometry {golden_path}`: verdict "identical within
       tolerance" for regressions; for reproductions read the verdicts —
       they name over/under-generation and size/offset errors.
+- [ ] Reproducing a SHAPE rather than a placement? Add `align: true`. IoU is
+      computed where the two solids sit, so a correct re-draw built about its
+      own origin scores 0.333 against a reference a few hundred mm away —
+      measured, on a tube whose volume matched to four figures.
 - [ ] When the verdict is off: export `missing_path`/`extra_path` and look
       at WHERE the difference lives before touching parameters.
 

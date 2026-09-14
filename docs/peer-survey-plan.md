@@ -157,7 +157,15 @@ does its arithmetic in ordinary Python and the document receives the formula:
 Because a Param IS a float, every existing path keeps working untouched —
 face filtering by diameter, `V(...)`, comparisons, `math.*`. `_dim`/`_dim3`
 are the only places that need to know, and they are where every
-expression-capable field already funnels. A derived param names itself
+expression-capable field already funnels.
+
+**That last claim was wrong**, and being a float subclass is exactly why it
+was hard to see: two places tested only for `str` and so took the literal
+branch in silence — `SketchBuilder.circle`, which is every hole a generator
+drills, and `_uv`, which is every line, point and polyline coordinate. A
+document built entirely from Params reported `cached, executed 0` when its
+table changed. Both route Param now and `tests/sdk_smoke.py` gates the class
+(docs/porting-friction-plan.md, A). A derived param names itself
 (`part.param("bolt_out", "arm_len - 18")` has expression `bolt_out`), so the
 formula lives once, in the document.
 

@@ -302,7 +302,9 @@ The loop that works — follow it every time:
    distance, never just "no clash". Reproducing a reference or guarding a
    regression? compare_geometry {golden_path} gives IoU/precision/recall
    with plain-language verdicts, and missing_path/extra_path export the
-   difference as solids.
+   difference as solids. Add {align: true} when you are checking the SHAPE
+   and not where it sits — a re-draw whose volume matches to four figures
+   scores IoU 0.333 if the reference is a few hundred mm away.
    The full pre-delivery list: docs/inspect/review-checklist.md (one RPC
    per box, plus a symptom->cause->fix table for the classic traps).
 5. For 3D fillets/chamfers: list_elements to get stable edge names, then
@@ -710,12 +712,22 @@ def set_section(enabled: bool = True, base_plane: str = "xy",
 @_reference(description="Cross-section area where a plane cuts through all "
           "bodies (inspection). Plane: base_plane 'xy'|'xz'|'yz' + offset, "
           "or explicit origin+normal. Returns {area}. Use to check wall "
-          "thickness / material at a cut.")
+          "thickness / material at a cut. regions=True adds each connected "
+          "ISLAND ({area, centroid}, biggest first) — two islands where you "
+          "expected one is a feature that is not joined. loops=True adds "
+          "each island's OUTLINE as line/arc segments, which is how you "
+          "recover the shape of a part you did not draw.")
 def section(base_plane: str = "xy", offset: float = 0.0,
-            origin: list | None = None, normal: list | None = None) -> dict:
+            origin: list | None = None, normal: list | None = None,
+            regions: bool = False, loops: bool = False) -> dict:
+    kw = {}
+    if regions or loops:
+        kw["regions"] = True
+    if loops:
+        kw["loops"] = True
     if origin is not None and normal is not None:
-        return _call("section", origin=origin, normal=normal)
-    return _call("section", base_plane=base_plane, offset=offset)
+        return _call("section", origin=origin, normal=normal, **kw)
+    return _call("section", base_plane=base_plane, offset=offset, **kw)
 
 
 @_reference(description="Interference (clash) check: returns {clash: bool, "
@@ -724,8 +736,9 @@ def section(base_plane: str = "xy", offset: float = 0.0,
           "or occurrence names (str); each occurrence's part bodies are "
           "placed by its solved transform and checked in world space — or "
           "OMIT a/b to sweep EVERY visible occurrence pair (returns {clash, "
-          "pairs: [{a, b, clash, volume}]}). Run it after mating — clash "
-          "checks matter most in assemblies.")
+          "pairs: [{a, b, clash, volume}], and the same list again as "
+          "`clashes`, which is what contact_report calls it). Run it after "
+          "mating — clash checks matter most in assemblies.")
 def interference(a: int | str | None = None, b: int | str | None = None) -> dict:
     if a is None and b is None:
         return _call("interference")
@@ -1458,11 +1471,18 @@ def export_bom(path: str) -> dict:
 @_reference(description="Import a STEP, STL or BREP file's bodies as an "
           "Import feature. `units` is the length unit an STL/BREP was drawn "
           "in (mm default, cm, m, in) — those formats carry none; a STEP "
-          "declares its own and refuses it.")
-def import_step(path: str, units: str | None = None) -> dict:
-    if units is None:
-        return _call("import_step", path=path)
-    return _call("import_step", path=path, units=units)
+          "declares its own and refuses it. keep_origin=True keeps the "
+          "file's OWN coordinates: without it the import is centred on its "
+          "bounding box, so a bought part loses the placement it was "
+          "exported at and every one of them lands on the origin.")
+def import_step(path: str, units: str | None = None,
+                keep_origin: bool = False) -> dict:
+    kw = {"path": path}
+    if units is not None:
+        kw["units"] = units
+    if keep_origin:
+        kw["keep_origin"] = True
+    return _call("import_step", **kw)
 
 
 @_reference(description="Save the WHOLE project and name this state a "

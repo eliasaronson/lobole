@@ -141,11 +141,12 @@ The run refuses to save what it has not checked, as `fpv_drone.py` does:
 
 - regeneration clean — no failed feature, warnings printed.
 - **exact interference sweep empty.** Glued panel contacts are the expected
-  exception and are listed by name; anything else fails the run. The sweep's
-  list is `pairs` — `interference` spells it that way and `contact_report`
-  spells the same thing `clashes`, so a check that reads the wrong one gets
-  `[]` and passes for ever. The verification reads both and refuses if they
-  disagree.
+  exception and are declared by name AND by number in `asm.check`'s `allow`
+  map, which gates clashes, floating parts and near misses in one call.
+  Reading the sweep by hand is what this replaced: `interference` reported
+  its findings under `pairs` alone, a check that asked for `clashes` got
+  `[]`, and the gate passed on 1,068,565 mm3 of overlap. That method now
+  answers to both names.
 - **volumes match the reference.** Each generated part is compared against the
   corresponding solid — the port, the braces and the shelf come from
   `speaker.step`, which is the only place they exist; the six walls come from
