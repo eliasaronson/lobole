@@ -51,9 +51,13 @@ amplifier to the bay floor got, in turn, a case sunk 8 mm into its own floor
 panel), a case hanging under the floor (the base's normal points DOWN at it,
 not up), and a case standing on edge 72 mm tall (the bought STEP's own
 downward face was a 92 x 37 edge). The fix is to stop guessing which turn and
-write the criteria: `mates._lay_it_down` turns the mate until the box is above
-the floor, inside the bay, and lengthways. Where the bought geometry has real
-mounting holes, use them at both ends — the amp's four are the pattern the
+ask the app, which can see both frames: `asm.join` (`add_mate derive:"twist"`)
+gives an exact joint turned the way the part is already placed, and refuses
+rather than rounding when the two anchors are not square to one axis. What is
+left in the generator is the ASSERTION each search used as its acceptance
+test — the box is above the floor, inside the bay, lengthways — which now
+fails loudly instead of being searched around. Where the bought geometry has
+real mounting holes, use them at both ends: the amp's four are the pattern the
 floor is drilled to, and the mate refuses if the case stops matching it.
 
 `extract_bought.py` slices the 48 MB Onshape export into the ~2 MB actually

@@ -132,10 +132,11 @@ if the case ever disagrees with the table the floor is drilled from). The
 supply has no hole in the face it lies on, so its two are ours.
 
 A frame built on one face — or on a rectangle of holes — leaves the quarter
-turns indistinguishable, and the solver's pick between them is arbitrary. So
-where that is the case the generator states the criteria and turns the mate
-until they hold: `_lay_it_down` wants the box above the floor, inside the bay,
-and lengthways. Left to the solver it stood the amplifier on edge, 72 mm tall.
+turns indistinguishable, and left to the solver the pick between them is
+arbitrary: it stood the amplifier on edge, 72 mm tall. `asm.join` decides it
+from the placement instead (docs/porting-friction-plan.md, C), and what the
+generator keeps is the assertion — `_check_laid_down`: above the floor, inside
+the bay, lengthways.
 
 ### CAM
 

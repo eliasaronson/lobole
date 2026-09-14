@@ -23,17 +23,33 @@ place. Everything that MOUNTS to that carcass is mated:
     the port stack       flare -> bottom wall, tube -> flare, flare -> tube
     the T-nuts           into the holes they are hammered into
 
+    the amp and the supply   through the bay floor, the amp by the four
+                             mounting holes its own case is bored with
+
 ## Which way round, and how far along
 
-Both questions belong to the SDK now: `asm.fasten_in_place` picks the side
-and the half-turn that leave a part where its own placement put it (and
-closes a purely axial residual, which is only ever the two frames' drill
-depths), and `asm.seat` solves an offset by probing its sensitivity. This
-module used to carry all of that.
+Neither question is asked here any more, and that is the point of the round
+that ended it. A fastened mate between two frames has EIGHT outcomes — which
+side, and which quarter turn about the joint axis — and none of them is
+predictable from the call. This module used to carry four helpers that each
+searched those eight with a different acceptance test written by hand: does
+the part stay put, is this face looking up, is the box lying down.
 
-What is still here is the one case neither covers: a part whose placement is
-only approximate, where the test is not "did it move" but "is this face
-looking the right way" — `_face_up`, for the port flare.
+The app answers it now, because it can see both frames and the caller
+cannot:
+
+    asm.join(a, b)           an exact joint, turned the way the part is
+                             already placed (`add_mate derive:"twist"`)
+    asm.fasten_in_place      the same, then checked that the part did not
+                             move, with the eight tried and ranked if the
+                             derived one did not hold
+    asm.seat                 solves an offset by probing its sensitivity
+
+What is left here is the ASSERTIONS those searches used as their acceptance
+tests — `_bolts_below`, `_check_laid_down`. They are worth keeping as
+assertions: each names a thing that went wrong on a real run (a flare upside
+down three times, an amplifier standing on edge) and now fails loudly instead
+of being searched around.
 """
 from designer_sdk import Part, SdkError
 
@@ -56,33 +72,29 @@ def _face_normal_at(part, normal, coord, tol=0.2):
     return None
 
 
-def _lay_it_down(asm, app, mate_id, occurrence, floor, p, tol=0.5):
-    """Turn the mate until the box lies flat on the bay floor, lengthways.
+def _check_laid_down(occurrence, floor, p, tol=0.5):
+    """That the box ended up lying on the bay floor, inside the bay.
 
-    A frame on one face, or on a rectangle of holes, leaves the quarter
-    turns indistinguishable to the solver, and its pick is arbitrary — the
-    first attempt at this stood the amplifier on edge, 72 mm tall like a
-    book, and the one before that hung it under the floor. So the criteria
-    are written out: the box is ABOVE the floor, INSIDE the bay, and its
-    long side runs ACROSS the cabinet, which is the only way round it fits.
-    The bay's free room is the two strips fore and aft of the port, and they
-    are 210 wide against about 80 deep.
+    The turning is `asm.join`'s job now — it reads which side and how far
+    round off the placement. This is the assertion that used to be the
+    acceptance test of a search here: above the floor, between the walls,
+    and long side across the cabinet, which is the only way round it fits
+    between the baffle and the port. Kept because it is what "where there is
+    room" MEANS, and because the placement it is now derived from is one this
+    generator invents.
     """
     half_w = float(p["cabinet_internal_w"]) / 2
     half_d = float(p["cabinet_internal_d"]) / 2
-    for flipped in (False, True):
-        for twist in (0.0, 90.0, 180.0, 270.0):
-            app.set_mate(id=mate_id, flipped=flipped, rotation_deg=twist)
-            asm.solve()
-            lo, hi = occurrence.bbox()
-            span = [hi[i] - lo[i] for i in range(3)]
-            if (lo[2] > floor - tol
-                    and lo[0] > -half_w - tol and hi[0] < half_w + tol
-                    and lo[1] > -half_d - tol and hi[1] < half_d + tol
-                    and span[0] > max(span[1], span[2]) - tol):
-                return
-    raise SdkError(f"{occurrence.name}: no way round leaves it lying on the "
-                   f"bay floor, inside the cabinet, lengthways")
+    lo, hi = occurrence.bbox()
+    span = [hi[i] - lo[i] for i in range(3)]
+    if not (lo[2] > floor - tol
+            and lo[0] > -half_w - tol and hi[0] < half_w + tol
+            and lo[1] > -half_d - tol and hi[1] < half_d + tol
+            and span[0] > max(span[1], span[2]) - tol):
+        raise SdkError(
+            f"{occurrence.name} did not come to rest lying on the bay floor "
+            f"inside the cabinet: it spans {[round(v, 1) for v in lo]} to "
+            f"{[round(v, 1) for v in hi]} with the floor at {floor:.1f}")
 
 
 def _floor_bolts(panel, dia, spacing, y, tol=1.0):
@@ -218,15 +230,21 @@ def _mount_face(part, cutout_d, flange_d):
     return best
 
 
-def _broadest_base(part):
-    """The face a box lies on when you bolt it to a floor: its broadest.
+def _broadest_base(part, placed):
+    """The face a box lies on when you bolt it to a floor: the broad one that
+    faces DOWN where the occurrence is placed.
 
-    NOT `_lowest_down_face`, which takes whichever face the bought STEP
-    happens to have pointing down in its own frame. For the amp that is a
-    92 x 37 edge, and the case stood up 72 mm tall like a book — legal,
-    clear of everything, and not how anyone mounts an amplifier. The face
-    is the one across the part's SMALLEST dimension, which is the same
-    statement as "lay it flat".
+    Two things make this less obvious than it sounds. `_lowest_down_face`
+    takes whichever face the bought STEP happens to have pointing down in its
+    OWN frame — for the amp a 92 x 37 edge, which stood the case up 72 mm
+    tall like a book. And a brick has two equally broad faces, top and
+    bottom, identical in area and equally far out, so nothing in the part
+    alone chooses between them; picking by face order meant the supply could
+    hang under its floor on one run and lie on it the next.
+
+    So the part answers "which faces are broad" and the PLACEMENT answers
+    "which of those looks at the floor". `placed` maps a direction in the
+    part's frame to world.
     """
     lo, hi = part.bbox()
     axis = min(range(3), key=lambda i: hi[i] - lo[i])
@@ -236,9 +254,10 @@ def _broadest_base(part):
             n = f.normal
             if n is None or abs(n[axis]) < 0.999:
                 continue
-            # How far out along its OWN normal it lies. Either side of the
-            # slab will do — the mate turns whichever one down — but it has
-            # to be the outer skin: the amp's largest -Y face is a step 10 mm
+            if placed(n)[2] > -0.9:
+                continue            # this one does not face the floor
+            # How far out along its own normal it lies: it has to be the
+            # outer skin. The amp's largest downward face is a step 10 mm
             # inside the case, and standing on that buries it in the floor.
             far = n[axis] * f.centroid[axis]
             if out is None or far > out + 0.5 or (far > out - 0.5
@@ -294,25 +313,25 @@ def _bolt_ring(app, asm, part, occurrence, rmin, rmax, size="M3.5"):
     return out, refused, len(best)
 
 
-def _face_up(asm, app, mate_id, occurrence, frame_name, want_above):
-    """Turn a mate over until the part's bolt circle is on the right side.
+def _bolts_below(occurrence, frame_name):
+    """That a flare came to rest mouth-down: its bolt lugs below its middle.
 
-    `want_above` says whether the frame should sit ABOVE the part's own
-    middle. A flare bolted up under the floor has its lugs at the top; one
-    bolted down onto a brace has them at the bottom. Which way a fastened
-    mate takes the part is not predictable and is not the same for two mates
-    written alike, so it is decided by looking.
+    This used to be a search — turn the mate over, look, turn it back — for
+    the reason the whole of docs/porting-friction-plan.md C is about: which
+    way round a fastened mate takes a part was not predictable and was not
+    the same for two mates written alike. `asm.join` decides it from the
+    placement now, and this is the assertion that is left. It is worth
+    keeping as one: the flare's orientation was got wrong three times, and
+    the bolt lugs being at the mouth end is the fact that distinguishes the
+    two ways up.
     """
-    for _ in range(2):
-        asm.solve()
-        lo, hi = occurrence.bbox()
-        middle = (lo[2] + hi[2]) / 2.0
-        above = float(occurrence.frame(frame_name).origin[2]) > middle
-        if above == want_above:
-            return
-        app.set_mate(id=mate_id, flipped=True)
-    raise SdkError(f"{occurrence.name}: neither way round puts {frame_name} "
-                   f"{'above' if want_above else 'below'} its middle")
+    lo, hi = occurrence.bbox()
+    at = float(occurrence.frame(frame_name).origin[2])
+    if at > (lo[2] + hi[2]) / 2.0:
+        raise SdkError(f"{occurrence.name} came to rest with {frame_name} "
+                       f"ABOVE its middle ({at:.1f} against "
+                       f"{(lo[2] + hi[2]) / 2.0:.1f}) — it is upside down, "
+                       f"so check where port.placements puts it")
 
 
 def build(app, asm, p, made):
@@ -365,13 +384,15 @@ def build(app, asm, p, made):
     tube.frame("axis", of=_bores(tube, 52.0, 53.0, 1))
 
     floor_inner = -float(p["carcass_h"]) + float(p["wall_thickness"])
-    m = asm.fasten((occ["port flare (floor)"], "mount bolts"),
-                   (occ["bottom_wall"], "port bolts"), flipped=False)
+    # `join`: the flare's PLACEMENT is the authoritative statement of which
+    # way up it goes — mouth down, the orientation the source STEP has and
+    # the one this got wrong three times by re-deriving it — so the app reads
+    # which side and how far round off that placement rather than the caller
+    # turning the mate over and looking.
+    m = asm.join((occ["port flare (floor)"], "mount bolts"),
+                 (occ["bottom_wall"], "port bolts"))
     n += 1
-    # Mouth DOWN: after the turn the bolt lugs sit BELOW the flare's middle,
-    # down by the mouth, and the throat is the end that reaches the floor.
-    _face_up(asm, app, m["id"], occ["port flare (floor)"], "mount bolts",
-             want_above=False)
+    _bolts_below(occ["port flare (floor)"], "mount bolts")
     got = asm.seat(m, lambda: occ["port flare (floor)"].bbox()[1][2],
                    floor_inner + float(p["port_throat_protrusion"]))
     print(f"  port flare hangs mouth-down under the floor "
@@ -390,11 +411,10 @@ def build(app, asm, p, made):
     print(f"  port tube plugs into that throat ({got:.2f})")
 
     brace_top = float(occ["port ring brace"].bbox()[1][2])
-    m3 = asm.fasten((occ["port flare (bay)"], "lugs"),
-                    (occ["port ring brace"], "flare bolts"), flipped=False)
+    m3 = asm.join((occ["port flare (bay)"], "lugs"),
+                  (occ["port ring brace"], "flare bolts"))
     n += 1
-    _face_up(asm, app, m3["id"], occ["port flare (bay)"], "lugs",
-             want_above=False)
+    _bolts_below(occ["port flare (bay)"], "lugs")
     got = asm.seat(m3, lambda: occ["port flare (bay)"].bbox()[0][2],
                    brace_top)
     print(f"  port flare (bay) bolts onto the ring brace ({got:.2f})")
@@ -499,23 +519,31 @@ def build(app, asm, p, made):
                                     float(p["wall_thickness"])),
                      z=(0, 0, 1), x=(1, 0, 0))
 
-        base = _broadest_base(unit)
+        asm.activate()   # `occurrence` frames are an assembly-tab question
+        axes = occ[occ_name].frame()
+
+        def placed(n, axes=axes):
+            """A direction in the part's frame, as the assembly has it."""
+            return [axes.x[i] * n[0] + axes.y[i] * n[1] + axes.z[i] * n[2]
+                    for i in range(3)]
+
+        base = _broadest_base(unit, placed)
         if base is None:
-            raise SdkError(f"{occ_name}: no face to stand it on")
+            raise SdkError(f"{occ_name}: no broad face of it looks at the "
+                           f"floor where it is placed — see bought.placements")
         lo, hi = unit.bbox()
         thin = min(range(3), key=lambda i: hi[i] - lo[i])
         if holes[1] is not None:
             # The case's own four, checked against the table that drilled the
             # floor for them. A measured number in params and the geometry it
             # was measured from can otherwise drift apart silently.
-            own = _case_bolts(unit, thin, dia)
-            at = [f.centroid for f in own]
-            got = tuple(round(max(c[i] for c in at) - min(c[i] for c in at), 1)
-                        for i in range(3) if i != thin)
             if float(holes[0]) < float(holes[1]):
                 raise SdkError("amp_bolt_x is the ACROSS spacing and has to "
                                "be the longer of the two — the mate lays the "
                                "pattern's long side across the cabinet")
+            at = [f.centroid for f in _case_bolts(unit, thin, dia)]
+            got = tuple(round(max(c[i] for c in at) - min(c[i] for c in at), 1)
+                        for i in range(3) if i != thin)
             if sorted(got) != sorted(round(float(h), 1) for h in holes):
                 raise SdkError(
                     f"{occ_name}: the case's mounting holes are {got} apart, "
@@ -526,7 +554,6 @@ def build(app, asm, p, made):
             # of the face the case LIES on. `of=own` alone puts the frame at
             # the holes' own middle, which is up inside a flange 6 mm above
             # the base, and the case then sinks that far into the floor.
-            at = [f.centroid for f in own]
             mid = [sum(c[i] for c in at) / len(at) for i in range(3)]
             mid[thin] = base.centroid[thin]
             long_axis = max((i for i in range(3) if i != thin),
@@ -546,11 +573,14 @@ def build(app, asm, p, made):
         # NOT `fasten_in_place`: here the HOLES are the truth and the
         # placement was invented, so the mate moves the unit onto them
         # rather than being asked to preserve where it was put.
-        m = asm.fasten((occ[occ_name], "base"),
-                       (occ["bottom_wall"], label))
+        # `join`, not `fasten`: the app reads which side and how far round
+        # off the placement, where it can see both frames. `fasten` leaves
+        # that to the solver, and the solver's pick between eight is
+        # arbitrary — it stood this case on edge and hung it under the floor.
+        asm.join((occ[occ_name], "base"), (occ["bottom_wall"], label))
         n += 1
-        floor = occ["bottom_wall"].frame(label).origin[2]
-        _lay_it_down(asm, app, m["id"], occ[occ_name], floor, p)
+        _check_laid_down(occ[occ_name],
+                         occ["bottom_wall"].frame(label).origin[2], p)
     print("  amp and supply bolted to the bay floor")
 
     # --- the drivers -------------------------------------------------------
