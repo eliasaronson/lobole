@@ -1,14 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/AssemblyLoopSolve.h" // MateAdjustFor, DeriveMateDofs
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/Occurrence.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cmath>
 #include <memory>
 
 using Catch::Matchers::WithinAbs;
@@ -90,6 +93,64 @@ TEST_CASE("Fastened mate aligns an origin connector to a face frame",
 
   // The fixed anchor is never moved.
   CHECK(asmDoc.FindById(1)->position == glm::vec3(0, 0, 0));
+}
+
+TEST_CASE("DeriveMateDofs inverts the adjust it is the inverse of",
+          "[assembly][solve]") {
+  // Every arrangement a fastened mate can hold, composed forwards and read
+  // back. This is the arithmetic `add_mate derive:` runs, and the reason it
+  // can answer "which way round" without trying all eight.
+  const glm::quat none(1.0f, 0.0f, 0.0f, 0.0f);
+  for (const bool flipped : {false, true}) {
+    for (const float turn : {0.0f, 0.7f, 1.5708f, 3.0f, -2.2f}) {
+      const glm::mat4 rel =
+          assembly::MateAdjustFor(flipped, turn, 12.0f, 3.0f, -4.0f, none);
+      bool gotFlip = !flipped;
+      float gotTurn = 0.0f, dx = 0.0f, dy = 0.0f, offset = 0.0f;
+      REQUIRE(assembly::DeriveMateDofs(rel, assembly::MateDerive::Pose, gotFlip,
+                                       gotTurn, dx, dy, offset));
+      CHECK(gotFlip == flipped);
+      CHECK_THAT(std::sin(gotTurn), WithinAbs(std::sin(turn), 1e-4f));
+      CHECK_THAT(std::cos(gotTurn), WithinAbs(std::cos(turn), 1e-4f));
+      CHECK_THAT(dx, WithinAbs(3.0f, 1e-4f));
+      CHECK_THAT(dy, WithinAbs(-4.0f, 1e-4f));
+      CHECK_THAT(offset, WithinAbs(12.0f, 1e-4f));
+
+      // `Twist` takes the same turn and drops the translation on purpose:
+      // the anchors are meant to coincide, which is what makes it a joint
+      // rather than a copy of a placement.
+      bool tFlip = false;
+      float tTurn = 0.0f, tdx = 1.0f, tdy = 1.0f, toff = 1.0f;
+      REQUIRE(assembly::DeriveMateDofs(rel, assembly::MateDerive::Twist, tFlip,
+                                       tTurn, tdx, tdy, toff));
+      CHECK(tFlip == flipped);
+      CHECK_THAT(std::sin(tTurn), WithinAbs(std::sin(turn), 1e-4f));
+      CHECK(tdx == 0.0f);
+      CHECK(tdy == 0.0f);
+      CHECK(toff == 0.0f);
+    }
+  }
+}
+
+TEST_CASE("DeriveMateDofs refuses frames that are not square to one axis",
+          "[assembly][solve]") {
+  // A fastened adjust turns about Z and nothing else. Tilt one frame 20
+  // degrees about X and no (flipped, rotation) pair composes to it — so the
+  // answer is a refusal, not the nearest quarter turn, which would look
+  // exactly like a joint that fits.
+  glm::mat4 skew = assembly::MateAdjustFor(false, 0.4f, 5.0f, 0.0f, 0.0f,
+                                           glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+  skew = skew * glm::rotate(glm::mat4(1.0f), 0.35f, glm::vec3(1, 0, 0));
+  bool flipped = false;
+  float turn = 0.0f, dx = 0.0f, dy = 0.0f, offset = 0.0f;
+  CHECK_FALSE(assembly::DeriveMateDofs(skew, assembly::MateDerive::Pose,
+                                       flipped, turn, dx, dy, offset));
+  CHECK_FALSE(assembly::DeriveMateDofs(skew, assembly::MateDerive::Twist,
+                                       flipped, turn, dx, dy, offset));
+  // Untouched, so a caller that ignores the return value cannot end up with
+  // half a joint.
+  CHECK(turn == 0.0f);
+  CHECK(offset == 0.0f);
 }
 
 TEST_CASE("Slider offset slides the placement along the connector axis",

@@ -1,5 +1,7 @@
 #include "ui/AssemblyActions.h"
 
+#include "core/AssemblyLoopSolve.h" // MateDerive, DeriveMateDofs
+
 #include "core/cam/CamToolpath.h" // StockBounds (the placement snap)
 #include "imgui.h" // KeyCtrl: the placement drag snaps unless Ctrl says free
 #include "ui/CamPanel.h" // ActiveCamSetup, RefreshCamToolpaths (the placement gizmo)
@@ -207,6 +209,18 @@ std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
   if (!occ)
     return std::nullopt;
   return OccurrenceMatrix(*occ) * *local;
+}
+
+bool DeriveMateFromPlacement(AppState& state, Mate& mate,
+                             assembly::MateDerive how) {
+  const auto wa = ConnectorWorldFrame(state, mate.a);
+  const auto wb = ConnectorWorldFrame(state, mate.b);
+  if (!wa || !wb)
+    return false;
+  // What the solver will compose: world(b's frame) = world(a's frame) *
+  // adjust. So the adjust we want is what stands between them right now.
+  return assembly::DeriveMateDofs(glm::inverse(*wa) * *wb, how, mate.flipped,
+                                  mate.rotation, mate.dx, mate.dy, mate.offset);
 }
 
 // Arms one of the mate session's connector slots on the shared armed-slot

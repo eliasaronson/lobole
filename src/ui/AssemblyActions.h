@@ -466,6 +466,14 @@ glm::mat4 OccurrenceMatrix(const Occurrence& o);
 // per its refKind.
 AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId);
 
+// Fill a fastened mate's DOFs from where its two occurrences ALREADY lie —
+// see assembly::MateDerive. Resolves both connector frames (so the mate's
+// anchors must already be set) and hands the relative transform to
+// assembly::DeriveMateDofs. False when either anchor will not resolve, or the
+// two are not square to one axis; the mate is left untouched.
+[[nodiscard]] bool DeriveMateFromPlacement(AppState& state, Mate& mate,
+                                           assembly::MateDerive how);
+
 assembly::PartResolver PartResolverFor(AppState& state);
 
 assembly::AssemblyResolver AssemblyResolverFor(AppState& state);

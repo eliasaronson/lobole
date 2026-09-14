@@ -108,8 +108,17 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "degrees of freedom — a gear pair, a rack and pinion, a screw, a cam — "
      "the thing to add is a RELATION over those two mates (add_relation); "
      "that is also what drops a geared loop's DOF count. `describe` lists "
-     "both vocabularies as `mate_types` and `relation_kinds`.",
-     "a, b, ball_rotation, dx, dy, flipped, name, offset, rotation, "
+     "both vocabularies as `mate_types` and `relation_kinds`. "
+     "`derive` READS those numbers off where the two occurrences already "
+     "lie, for a fastened mate: 'twist' takes `flipped` and `rotation` and "
+     "leaves the anchors coincident (an exact joint, turned the way the part "
+     "already roughly was — which is the answer to 'it landed a quarter turn "
+     "out'), 'pose' takes all five so the mate holds the parts exactly where "
+     "they are, reproducing any error in that placement. Refused when the "
+     "two anchors are not square to one axis, because then no turn seats "
+     "them and a nearest quarter turn would be a guess wearing a joint's "
+     "clothes.",
+     "a, b, ball_rotation, derive, dx, dy, flipped, name, offset, rotation, "
      "rotation_deg, type"},
     {"set_mate",
      "Edit a mate's parameters, and the way to POSE a mechanism: turn a "
@@ -1097,10 +1106,42 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (!state.assembly->FindById(mate.a.occurrenceId) ||
         !state.assembly->FindById(mate.b.occurrenceId))
       throw std::runtime_error("mate references a missing occurrence");
+    // `derive` reads the numbers off where the two parts already lie, which
+    // only the app can do: it can see both frames, and the caller is
+    // otherwise reduced to trying the eight ways round and testing the
+    // result (docs/porting-friction-plan.md, C).
+    if (p.contains("derive")) {
+      if (mate.type != MateType::Fastened)
+        throw std::runtime_error(
+            "derive is for a FASTENED mate — the others leave the DOF it "
+            "would set free for the solver to move");
+      const std::string how = p.at("derive").get<std::string>();
+      assembly::MateDerive kind{};
+      if (how == "twist")
+        kind = assembly::MateDerive::Twist;
+      else if (how == "pose")
+        kind = assembly::MateDerive::Pose;
+      else
+        throw std::runtime_error(
+            "derive is 'twist' (which side and how far round, anchors "
+            "coincident) or 'pose' (all five, holding the parts where they "
+            "are); got '" +
+            how + "'");
+      if (!ui::DeriveMateFromPlacement(state, mate, kind))
+        throw std::runtime_error(
+            "derive cannot read this joint off the placement: the two "
+            "anchors are not square to one axis, so no turn about the "
+            "connector axis seats one on the other. Place the part roughly "
+            "right first, or mate frames that share an axis");
+    }
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddMate(mate);
     const int errored = ui::SolveActiveAssembly(state);
-    json out = DocumentIO::MateToJson(*state.assembly->FindMateById(id));
+    // MateJson, not MateToJson: the same shape `list_mates` reports, which
+    // matters now that `derive` decides some of these numbers — the reply is
+    // where a caller reads what the app chose, and it should not have to
+    // convert radians to know.
+    json out = MateJson(*state.assembly->FindMateById(id));
     // errored_mates is the GLOBAL count after the re-solve (an earlier
     // broken mate keeps it non-zero even when THIS mate is fine) — name the
     // actual offenders so a script never has to guess which one failed.

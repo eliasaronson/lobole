@@ -1891,13 +1891,35 @@ class Asm(_Tab):
     def fasten(self, a, b, **kw):
         return self._mate("fastened", a, b, **kw)
 
+    def join(self, a, b, **kw):
+        """Fasten, with the app choosing which side and how far round.
+
+        The one question a fastened mate between two frames cannot be asked
+        in the call — `flipped` and `rotation` have eight combinations and
+        none is predictable — is answered where both frames are visible:
+        `derive="twist"` reads them off where the two occurrences already
+        lie. The anchors still COINCIDE, so the joint is exact; only the way
+        round comes from the placement.
+
+        This is what to reach for when a part is placed roughly right and
+        should end up exactly on its mate. It refuses, rather than picking a
+        nearest turn, when the two anchors are not square to one axis — that
+        is a joint that does not fit, and rounding it would hide that.
+
+        `fasten_in_place` is the other question: keep the part exactly where
+        it is, choosing among the eight EXACT joints and saying how far the
+        nearest one was. Use that when the placement is the answer; use this
+        when the mate is.
+        """
+        return self._mate("fastened", a, b, derive="twist", **kw)
+
     def fasten_in_place(self, a, b, tol=0.05, **kw):
         """Fasten, and pick the way round that leaves the moving part where
         it already is.
 
-        A fastened mate between two frames has four outcomes — which side,
-        and whether it is turned half a turn about the joint's axis — and
-        none is predictable from the call. Measured on one cabinet:
+        A fastened mate between two frames has eight outcomes — which side,
+        and which quarter turn about the joint's axis — and none is
+        predictable from the call. Measured on one cabinet:
         `flipped=True` seated a woofer correctly and turned another driver
         magnet-first at the room, two mates written identically; and two
         dowels at +/-110 are symmetric, so the half-turn is a real ambiguity
@@ -1913,7 +1935,21 @@ class Asm(_Tab):
         """
         moving = a[0] if isinstance(a, tuple) else a
         was = _occ_centre(moving)
-        m = self._mate("fastened", a, b, **kw)
+        # First ask the app, which can see both frames: `derive="twist"`
+        # names the one exact joint whose way round matches the placement in
+        # hand. When the placement is right — a generator computing its own
+        # layout, which is this method's whole audience — that IS the answer,
+        # in one solve instead of up to eight. It refuses when the two
+        # anchors are not square to one axis, and then the search below still
+        # has something to say: the nearest of the eight, and how far off.
+        try:
+            m = self._mate("fastened", a, b, derive="twist", **kw)
+            self.solve()
+            if max(abs(x - y) for x, y in
+                   zip(_occ_centre(moving), was)) <= tol:
+                return m
+        except RuntimeError:
+            m = self._mate("fastened", a, b, **kw)
         nearest, axial = None, None
         for flipped in (False, True):
             for twist in (0.0, 180.0):

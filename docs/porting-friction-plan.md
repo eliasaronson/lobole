@@ -130,11 +130,11 @@ predictable from the call. Measured, in one assembly:
 - two dowels at +/-110 are symmetric, so the half-turn is a real ambiguity and
   the right side wall came back upside down.
 
-The generator now carries four helpers that exist solely to work around this:
-one that names an axis instead of a quaternion, one that probes a mate's
-offset sensitivity and solves it, one that turns a mate over until a face
-looks the right way, and one that checks a panel did not move and tries the
-alternatives. That is scaffolding around not being able to state the intent.
+The generator CARRIED four helpers that existed solely to work around this:
+one that named an axis instead of a quaternion, one that probed a mate's
+offset sensitivity and solved it, one that turned a mate over until a face
+looked the right way, and one that checked a panel did not move and tried the
+alternatives. That was scaffolding around not being able to state the intent.
 
 **The fix.** A verb that says what the joint IS, and lets the app resolve it:
 
@@ -162,11 +162,82 @@ Two things did not go, and the plan was wrong to expect them to.
 which is a different job from mating. And `_face_up` answers the one question
 neither verb covers: a part whose placement is only approximate has no "where
 it was" to keep, so the test has to be which way a FACE ends up looking. That
-is the remaining slice, and it wants the app-side verb this section proposed:
+is the remaining slice, and it wants the app-side verb this section proposed
+— under its own name, because `asm.seat` is taken by the offset solver that
+shipped:
 
-    asm.seat(moving_face, onto_face, align=<frame pair>)
+    asm.join(moving_face, onto_face)
 
-Touches the mate RPC, `tools/designer_sdk.py`, `generators/smart_speaker/`.
+A third instance arrived while bolting the amplifier to the bay floor, which
+is worth recording because it is the same problem from a new direction: a
+frame built on ONE face has no meaningful X either, so all four quarter turns
+are candidates as well as both sides. The solver picked, in turn, a case sunk
+8 mm into its own floor, a case hanging underneath it, and a case standing on
+edge. Each of those was a search over the same eight outcomes with a
+different acceptance test written by hand, because the call could not say
+what the joint IS.
+
+### What to build
+
+Not a new verb after all — a new ARGUMENT, because the app already computes
+this and only the fastener path can reach it. `ui::JoinAcrossInterface`
+(src/ui/FastenerActions.cpp:293) takes two touching faces and reads the five
+numbers off the placement in front of it:
+
+    rel = inverse(world_a * f_a) * (world_b * f_b)
+    flipped  = rel[2][2] < 0
+    rotation = atan2(rel[0][1], rel[0][0])
+    dx, dy, offset = rel[3][0..2]
+
+That is the whole of what the four helpers search for, done in closed form.
+
+    add_mate(..., derive: "twist")
+
+**`derive: "twist"`** takes `flipped` and `rotation` from where the two
+occurrences currently lie and leaves `dx`/`dy`/`offset` at zero. The joint is
+therefore EXACT — the two anchors coincide, which is the point of mating —
+and the part is turned the way it already roughly was, instead of landing on
+whichever of eight discrete candidates the solver reached first. Refused, not
+silently rounded, when the two anchors are not square to one axis: a caller
+who asks for the nearest quarter turn between skew frames is asking a
+question with no answer, which is the "the two halves of the joint disagree"
+case.
+
+`derive` is NOT `fasten_in_place`, and does not replace it: that one keeps a
+part where its own placement put it by choosing among eight EXACT joints and
+reporting how far the nearest one was. Deriving all five numbers instead
+would reproduce the placement exactly and thereby bake a 3 mm error into a
+joint that is supposed to be flush. Preserving a pose and stating a joint are
+different requests, and the difference is which one gets to be wrong.
+
+**Built.** `assembly::DeriveMateDofs`
+(src/core/AssemblyLoopSolve.cpp, beside `MateAdjustFor` whose exact inverse it
+is) and `ui::DeriveMateFromPlacement` (src/ui/MateActions.cpp, which resolves
+the two connector frames); `add_mate derive:` in
+src/remote/RemoteAssembly.cpp; `asm.join` in tools/designer_sdk.py, where
+`fasten_in_place` now asks for the derived joint FIRST and falls back to the
+eight-way search only when the app refuses. No format change — `flipped` and
+`rotation` are fields the mate already had; what moved is who computes them.
+
+`add_mate`'s reply also became `MateJson` rather than `MateToJson` — the same
+shape `list_mates` returns, with `rotation_deg` beside the radians. That reply
+is now where a caller reads what the app DECIDED, which is a different thing
+from an echo of what was sent.
+
+Two helpers are gone from the generator: `_face_up` (the flare's orientation
+— the case this section named as the remaining slice) and `_lay_it_down` (the
+amplifier's). What replaced each is the assertion it used as its acceptance
+test — `_bolts_below`, `_check_laid_down` — which is worth keeping, because
+each names something that went wrong on a real run and now fails loudly
+instead of being searched around. The cabinet builds identically: 27 mates,
+clean under `asm.check`, the flare's throat at -998.51 as the source STEP has
+it, and the assembly solve 6.1 s -> ~4 s.
+
+Verified by `tests/test_assembly_solve.cpp` ("DeriveMateDofs inverts the
+adjust it is the inverse of", over both sides and five turns, and the refusal
+on a tilted frame), `tests/assembly_mates_smoke.py` (the wire form, that a
+refused derive leaves NO mate behind, and both refusals), and by the generator
+building with the searches taken out.
 
 ---
 

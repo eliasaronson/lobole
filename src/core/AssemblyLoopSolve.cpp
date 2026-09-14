@@ -41,6 +41,37 @@ glm::mat4 MateAdjustFor(bool flipped, float rotation, float offset, float dx,
   return MateAdjustT<float>(flipped, rotation, offset, dx, dy, ballRotation);
 }
 
+bool DeriveMateDofs(const glm::mat4& rel, MateDerive how, bool& flipped,
+                    float& rotation, float& dx, float& dy, float& offset) {
+  // A fastened adjust is T(dx,dy,offset) * Rz(rotation) * [Rx(180)]. Its
+  // rotation part is therefore determined by the third column's sign and one
+  // atan2, and its translation IS the fourth column.
+  const bool over = rel[2][2] < 0.0f;
+  const float turn = std::atan2(rel[0][1], rel[0][0]);
+  const float tx = how == MateDerive::Pose ? rel[3][0] : 0.0f;
+  const float ty = how == MateDerive::Pose ? rel[3][1] : 0.0f;
+  const float tz = how == MateDerive::Pose ? rel[3][2] : 0.0f;
+
+  // Compose it back and insist it is what we were given. `Twist` discards the
+  // translation deliberately, so only the rotation is checked there — but it
+  // is checked, which is what separates "turned a quarter out" from "these
+  // two frames are skew and no turn will seat them".
+  const glm::mat4 back =
+      MateAdjustFor(over, turn, tz, tx, ty, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+  const int cols = how == MateDerive::Pose ? 4 : 3;
+  for (int c = 0; c < cols; c++)
+    for (int r = 0; r < 3; r++)
+      if (std::abs(back[c][r] - rel[c][r]) > 1e-3f)
+        return false;
+
+  flipped = over;
+  rotation = turn;
+  dx = tx;
+  dy = ty;
+  offset = tz;
+  return true;
+}
+
 int MateDofCount(MateType type) {
   switch (type) {
   case MateType::Fastened:

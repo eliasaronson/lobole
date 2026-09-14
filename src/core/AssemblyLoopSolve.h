@@ -33,6 +33,26 @@ namespace assembly {
 glm::mat4 MateAdjustFor(bool flipped, float rotation, float offset, float dx,
                         float dy, const glm::quat& ballRotation);
 
+// Which of a fastened mate's numbers to READ OFF the placement the two
+// occurrences are already in, rather than take from the caller.
+//
+//   Twist  which side and how far round — `flipped` and `rotation` — with
+//          dx/dy/offset left at zero, so the two anchors coincide. The joint
+//          is exact and the part is turned the way it already roughly was.
+//   Pose   all five, so the mate holds the parts exactly where they are.
+//          Reproduces any error in that placement, which is the trade.
+enum class MateDerive { Twist, Pose };
+
+// The exact inverse of `MateAdjustFor`: given b's connector frame relative to
+// a's, fill in the DOFs that compose to it. Returns false when `rel` is NOT of
+// that form — the two anchors are not square to one axis — leaving `flipped`,
+// `rotation`, `dx`, `dy` and `offset` untouched. Refusing there is the point:
+// the nearest quarter turn between skew frames is an answer to a question
+// nobody asked, and it is indistinguishable from a joint that fits.
+[[nodiscard]] bool DeriveMateDofs(const glm::mat4& rel, MateDerive how,
+                                  bool& flipped, float& rotation, float& dx,
+                                  float& dy, float& offset);
+
 // How many DOF this mate type leaves free — the width of its slice of q.
 // Fastened 0, Revolute/Slider 1, Cylindrical 2, Planar/Ball 3.
 int MateDofCount(MateType type);

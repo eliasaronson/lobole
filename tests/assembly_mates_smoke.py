@@ -109,6 +109,83 @@ def main():
         expect(len(lm) == 1 and lm[0]["mate_type"] == "slider", f"one slider: {lm}")
         expect("error" not in lm[0], f"no error on the good mate: {lm[0]}")
 
+        # --- derive: the app reads the joint off where the parts lie ------
+        # Without this, a fastened mate between two frames has eight outcomes
+        # (which side, which quarter turn) and none is predictable from the
+        # call, so a caller tries them and tests the result. Park the arm
+        # turned a quarter about Z and half over, and ask for a joint that
+        # keeps that: the mate must come back holding it, not one of the
+        # seven others (docs/porting-friction-plan.md, C).
+        d.call("remove_mate", id=mate_id)
+        turned = [0.0, 0.0, 0.70710678, 0.70710678]  # +90 deg about Z
+        d.call("set_occurrence_transform", id=o2,
+               transform={"position": [0, 0, 0], "orientation": turned})
+        got = d.call("add_mate", type="fastened", name="derived",
+                     a={"occurrence": o1, "origin": True},
+                     b={"occurrence": o2, "origin": True}, derive="pose")
+        expect(got.get("errored_mates", 0) == 0, f"derived mate solved: {got}")
+        arm = [o for o in d.call("list_occurrences")["occurrences"]
+               if o["id"] == o2][0]
+        q = arm["transform"]["orientation"]
+        expect(max(abs(q[i] - turned[i]) for i in range(4)) < 1e-3,
+               f"the derived mate held the pose it was read off: {q}")
+        expect(abs(got["rotation_deg"]) > 1e-6 or got["flipped"],
+               f"derive actually set a DOF rather than defaulting: {got}")
+
+        # 'twist' keeps the turn and drops the offsets — the anchors coincide,
+        # which is what makes it a joint and not a copy of a placement.
+        d.call("set_occurrence_transform", id=o2,
+               transform={"position": [40, 0, 0], "orientation": turned})
+        tw = d.call("set_mate", id=got["id"], offset=0.0)
+        d.call("remove_mate", id=got["id"])
+        tw = d.call("add_mate", type="fastened", name="twisted",
+                    a={"occurrence": o1, "origin": True},
+                    b={"occurrence": o2, "origin": True}, derive="twist")
+        expect(abs(tw.get("dx", 0.0)) < 1e-9 and abs(tw.get("dy", 0.0)) < 1e-9
+               and abs(tw["offset"]) < 1e-9,
+               f"twist leaves the anchors coincident: {tw}")
+        arm = [o for o in d.call("list_occurrences")["occurrences"]
+               if o["id"] == o2][0]
+        expect(all(abs(c) < 1e-3 for c in arm["transform"]["position"]),
+               f"twist pulled the arm onto the anchor: {arm}")
+
+        # A pose a fastened joint CANNOT hold is refused, not rounded to the
+        # nearest one it can. The adjust turns about Z (and may be flipped
+        # half a turn about X); a quarter turn about Y is not of that form,
+        # and the nearest joint that is would look exactly like a fit.
+        d.call("remove_mate", id=tw["id"])
+        d.call("set_occurrence_transform", id=o2,
+               transform={"position": [0, 0, 0],
+                          "orientation": [0.0, 0.70710678, 0.0, 0.70710678]})
+        try:
+            d.call("add_mate", type="fastened",
+                   a={"occurrence": o1, "origin": True},
+                   b={"occurrence": o2, "origin": True}, derive="pose")
+            raise AssertionError("derive accepted a skew placement")
+        except RuntimeError as e:
+            expect("not square to one axis" in str(e),
+                   f"refusal should say why: {e}")
+        expect(len(d.call("list_mates")["mates"]) == 0,
+               "a refused derive leaves NO mate behind")
+
+        # Refusals: an unknown word, and a mate type with a free DOF.
+        for kw, want in (({"derive": "sideways"}, "'twist'"),
+                         ({"derive": "twist", "type": "revolute"},
+                          "FASTENED")):
+            try:
+                d.call("add_mate", type=kw.get("type", "fastened"),
+                       a={"occurrence": o1, "origin": True},
+                       b={"occurrence": o2, "origin": True},
+                       derive=kw["derive"])
+                raise AssertionError(f"add_mate accepted derive={kw}")
+            except RuntimeError as e:
+                expect(want in str(e), f"refusal should name {want}: {e}")
+        mate = d.call("add_mate", type="slider", name="rail",
+                      a={"occurrence": o1, "origin": True},
+                      b={"occurrence": o2, "origin": True}, flipped=False)
+        mate_id = mate["id"]
+        d.call("set_mate", id=mate_id, offset=25.0)
+
         # --- A dangling connector reference is reported, not fatal ---------
         bad = d.call("add_mate", type="fastened",
                      a={"occurrence": o1,
