@@ -954,15 +954,15 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
       spanned.push_back(&seg);
     }
     for (size_t i = 0; i + 1 < spanned.size(); i++) {
-      const parts::StackSegment& near = *spanned[i];
+      const parts::StackSegment& nearSeg = *spanned[i];
       const parts::StackSegment& next = *spanned[i + 1];
-      if (near.occurrence == next.occurrence)
+      if (nearSeg.occurrence == next.occurrence)
         continue; // the same part twice down the axis is not an interface
-      const assembly::FlatInstance* a = instFor(near.occurrence);
+      const assembly::FlatInstance* a = instFor(nearSeg.occurrence);
       const assembly::FlatInstance* b = instFor(next.occurrence);
       if (a == nullptr || b == nullptr)
         continue;
-      if (const uint64_t id = JoinAcrossInterface(state, *a, near.exit, *b,
+      if (const uint64_t id = JoinAcrossInterface(state, *a, nearSeg.exit, *b,
                                                   next.enter, centre, axis))
         fit.mates.push_back(id);
     }

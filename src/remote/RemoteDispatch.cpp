@@ -86,7 +86,12 @@ using nlohmann::json;
 // stage 8a). RemoteServer.h is unchanged: these are the same class's members,
 // defined across three translation units instead of one.
 
-json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
+// RemoteHelpers.h already has this one. Defining a second, non-inline copy at
+// global scope made a STRONG symbol that collides with the inline one in
+// SerializationInternal.h -- which ELF resolves silently in favour of the
+// strong definition and PE/COFF refuses outright, so it only ever failed on
+// the Windows cross build.
+using remote::Vec3ToJson;
 
 // Levenshtein distance, for the "did you mean" hint on a rejected param key.
 size_t EditDistance(const std::string& a, const std::string& b) {

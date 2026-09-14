@@ -771,3 +771,48 @@ TEST_CASE("every boolean in Measure.cpp is built through BuildQuery",
   // the rule above could be satisfied by a helper that forgot the flag.
   CHECK(text.find("op.SetNonDestructive(Standard_True);") != std::string::npos);
 }
+
+TEST_CASE("nothing in src/ is named `near` or `far`", "[convention]") {
+  // `windows.h` defines both as EMPTY macros — `#define far` / `#define near`,
+  // unconditionally, in minwindef.h — and OpenCASCADE's headers pull it in on
+  // Windows. A local called `far` therefore compiles everywhere we test and
+  // fails only on the one platform nothing in CI builds: `double far = -1.0;`
+  // expands to `double = -1.0;`.
+  //
+  // Found by hand on 2026-09-14 in Measure.cpp, MeshCollide.cpp,
+  // FastenerActions.cpp and two GUI-test files — every one written long after
+  // the Windows port proved it worked, because nothing since had cross-built.
+  // Undefining the macros centrally does not survive the next `#include
+  // <windows.h>`, so the rule is the name.
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      size_t line = 1;
+      for (size_t i = 0, start = 0; i <= src.text.size(); i++) {
+        if (i != src.text.size() && src.text[i] != '\n')
+          continue;
+        std::string row = src.text.substr(start, i - start);
+        start = i + 1;
+        const size_t n = line++;
+        // Prose says "near" and "far" constantly — this rule is about code,
+        // so drop line comments and string literals before looking.
+        if (const size_t c = row.find("//"); c != std::string::npos)
+          row.erase(c);
+        row = std::regex_replace(row, std::regex(R"("(\\.|[^"\\])*")"), "\"\"");
+        // An identifier, not a word: `near` alone, never `nearest` or
+        // `Mesh::Near`. `.near`/`->near` count — a member named `near` breaks
+        // at its uses just the same.
+        static const std::regex ident(R"((^|[^A-Za-z0-9_:])(near|far)\b)");
+        if (std::regex_search(row, ident))
+          offenders.push_back(Relative(src.path) + ":" + std::to_string(n) +
+                              ": " + row);
+      }
+    }
+  INFO("`near`/`far` are windows.h macros; rename these:\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}

@@ -1163,6 +1163,18 @@ if(TARGET planegcs)
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+if(TARGET designer_adaptive)
+    # Adaptive clearing is a HARD dependency of designer_core, not a plugin:
+    # leave it out of the install and the installed binary does not start at
+    # all (`libdesigner_adaptive.so.1: cannot open shared object file`).
+    # It had no install rule from the day it was added -- invisible because
+    # every test runs from the build tree, where it sits beside the binary.
+    # Same LIBRARY/RUNTIME split as planegcs, and for the same reason: the
+    # LGPL boundary is only replaceable if the library is actually shipped.
+    install(TARGETS designer_adaptive
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 install(DIRECTORY "${SHADER_OUTPUT_DIR}/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/shaders")
 install(FILES

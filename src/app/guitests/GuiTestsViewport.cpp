@@ -290,12 +290,12 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     };
     // The two furthest apart on that face — a face diagonal.
     size_t bi = 0, bj = 1;
-    float far = 0.0f;
+    float farthest = 0.0f;
     for (size_t i = 0; i < corners.size(); i++)
       for (size_t j = i + 1; j < corners.size(); j++) {
         const float d = glm::distance(corners[i].point, corners[j].point);
-        if (d > far) {
-          far = d;
+        if (d > farthest) {
+          farthest = d;
           bi = i;
           bj = j;
         }
@@ -323,7 +323,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->measure.readout.find("Distance:") != std::string::npos);
     IM_CHECK_LE(std::abs(glm::distance(s_App->measure.dimension.a,
                                        s_App->measure.dimension.b) -
-                         far),
+                         farthest),
                 1e-3f);
     // ...and it draws, like every other measurement.
     std::vector<PrimVertex> prims;
@@ -618,7 +618,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ui::UpdateMeasureReadout(*s_App);
     ctx->Yield();
     IM_CHECK(s_App->measure.readout.find("(maximum)") != std::string::npos);
-    const float far =
+    const float farDist =
         glm::distance(s_App->measure.dimension.a, s_App->measure.dimension.b);
     s_App->measure.distanceKind = Measure::DistanceKind::Centres;
     ui::UpdateMeasureReadout(*s_App);
@@ -627,7 +627,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
              std::string::npos);
     const float mid =
         glm::distance(s_App->measure.dimension.a, s_App->measure.dimension.b);
-    IM_CHECK(far > mid); // corner-to-corner beats centre-to-centre
+    IM_CHECK(farDist > mid); // corner-to-corner beats centre-to-centre
 
     // Pin it: the measurement is kept, the picks are cleared for the next
     // one, and the tool stays armed.

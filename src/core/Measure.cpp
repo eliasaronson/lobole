@@ -1943,13 +1943,13 @@ std::optional<glm::vec3> NearestPointOn(const Target& t, const glm::vec3& p,
   try {
     if (kind == DistanceKind::Maximum) {
       std::optional<glm::vec3> best;
-      double far = -1.0;
+      double farthest = -1.0;
       for (TopExp_Explorer ex(shape, TopAbs_VERTEX); ex.More(); ex.Next()) {
         const gp_Pnt q = BRep_Tool::Pnt(TopoDS::Vertex(ex.Current()));
         const glm::vec3 v(q.X(), q.Y(), q.Z());
         const double d = glm::distance(p, v);
-        if (d > far) {
-          far = d;
+        if (d > farthest) {
+          farthest = d;
           best = v;
         }
       }

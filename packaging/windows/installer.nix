@@ -19,8 +19,14 @@ pkgs.stdenvNoCC.mkDerivation {
     runHook preBuild
     # Stage the self-contained bundle (bin/ + share/) writable.
     mkdir -p app/bin app/share
-    cp -r ${app}/bin/. app/bin/
-    cp -r ${app}/share/. app/share/
+    # -L, not -r alone: eight of the DLLs nix puts in bin/ are SYMLINKS into
+    # other store paths (glfw, vulkan-1, spdlog, fmt and the four mingw runtime
+    # libraries). Copied as links they dangle the moment they leave the store,
+    # and every dependent DLL then reports itself missing -- libTKernel.dll
+    # "not found" when the file is plainly there, because what is really
+    # missing is the libstdc++-6.dll it imports.
+    cp -rL ${app}/bin/. app/bin/
+    cp -rL ${app}/share/. app/share/
     chmod -R u+w app
 
     # Portable zip: unzip anywhere, run bin/designer.exe.

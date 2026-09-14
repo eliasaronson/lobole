@@ -316,7 +316,7 @@ It remains the near-free **headless** artifact only.
 
 ---
 
-## Deliverable 3 — Windows (cross-compiled from Linux) — **BUILT + WINE-VERIFIED (2026-07-26)**
+## Deliverable 3 — Windows (cross-compiled from Linux) — **BUILT + WINE-VERIFIED (2026-07-26, refreshed 2026-09-14)**
 
 The whole Windows toolchain lives in `packaging/windows/` and runs **on Linux** via
 nixpkgs cross (`pkgsCross.mingwW64`, gcc 15.2) — no Windows machine, no MSVC.
@@ -356,6 +356,55 @@ PlaneGCS sketch solver (verified *solving*), Spectra modal, and the **FEM-GPU
 Vulkan-compute topology solver** (enabled 2026-07-27 — compute shaders build
 natively via glslc, 204 objects). The one gap is **Netgen** (FEM meshing), so FEM
 *studies that need a mesh* are unavailable on Windows; everything else works.
+
+**Refreshed 2026-09-14** against a tree 594 `src/` commits newer, for a tester
+on real Windows. Nothing in CI cross-builds, so all six breakages below had
+been sitting there unseen; five were in code written after the port, and the
+sixth had never worked at all. See docs/packaging/windows-refresh-plan.md.
+
+- `far` and `near` are EMPTY macros in `minwindef.h` (`#define far`), which
+  OpenCASCADE's headers pull in — so `double far = -1.0;` becomes
+  `double = -1.0;`. Five locals across Measure, MeshCollide, FastenerActions
+  and two GUI-test files. Undefining them centrally does not survive the next
+  `#include <windows.h>`, so the rule is the NAME, and
+  `test_conventions.cpp` now scans for it.
+- `GuiTestsTerminal.cpp`'s last test sat AFTER its `#ifdef HAVE_TERMINAL`'s
+  `#endif` — broken for `-DENABLE_TERMINAL=OFF` as much as for Windows.
+- `ProjectActions.cpp`: `path::native()` is a `wstring` on Windows, so
+  `.starts_with("..")` does not compile (the first path COMPONENT is the right
+  question anyway), and `::getpid` is `_getpid` in `<process.h>`.
+- A second, non-inline `Vec3ToJson` at global scope in `RemoteDispatch.cpp`
+  collided with the inline one in `SerializationInternal.h`. ELF resolves that
+  silently in favour of the strong symbol; PE/COFF refuses to link.
+- **`designer_adaptive` had no `install()` rule at all** — and this one was
+  never Windows-specific: an installed Linux build (flake, Flatpak) fails to
+  start with `libdesigner_adaptive.so.1: cannot open shared object file`. It
+  went unseen because every test runs from the build tree, where the library
+  sits beside the binary.
+- Eight of the DLLs nix puts in `bin/` are SYMLINKS into other store paths, so
+  `installer.nix`'s `cp -r` shipped a zip full of dangling links. The symptom
+  is a liar: `libTKernel.dll` reports itself "not found" when the file is
+  plainly there, because what is missing is the `libstdc++-6.dll` it imports.
+  `cp -rL`.
+
+Per-user directories were the other half. `Autosaver::StateDir`, the settings
+directory and the IBL cache each resolved `XDG_*` then `$HOME` — and Windows
+has neither, so all three fell through to `temp_directory_path()`, i.e.
+`%TEMP%`: the tester's preferences, recent list, instance registry and
+crash-recovery autosave all written where Windows sweeps them. They now share
+one resolver (`RuntimePaths::User{Config,State,Cache}Dir`) with a `_WIN32`
+branch to `%LOCALAPPDATA%\Designer\{config,state,cache}` — one folder to find,
+one to delete for a clean slate. The Linux paths are unchanged.
+
+Verified 2026-09-14 on the refreshed build, all from Linux: `--version` runs;
+headless `--remote` serves RPC over 127.0.0.1 and a radius constraint SOLVES
+(circle r=1→2, extruded volume 25.133 — the check that separates "OCC loaded"
+from "PlaneGCS is really linked in"); `ping` reports cam, cam_adaptive and fem
+present and mesher absent; `boots_and_renders` passes 1/1 on the real NVIDIA
+RTX 4060 through winevulkan, hardware ray tracing initialised (max recursion
+depth 31); and the same test passes again from the extracted portable zip,
+which is what the tester actually gets. 1236 headless + 298 GUI + 5 pygui stay
+green on Linux.
 
 Remaining before a *polished* Windows release:
 - [ ] **Netgen** (FEM meshing) — attempted from-scratch (`netgen-cross.nix`) but

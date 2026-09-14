@@ -468,7 +468,6 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
   // Category "frametime", NOT "perf": the test engine routes a category of
   // exactly "perf" into ImGuiTestGroup_Perfs, which this suite never queues
   // (it queues ImGuiTestGroup_Tests) — the test would list but never run.
-#endif
   // Turning the terminal preference off and on again must give a working
   // shell. ShutdownTerminal terminated the PTY but KEPT the TerminalState, so
   // the panel could never open a shell again until the app restarted — the
@@ -498,6 +497,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
     s_App->settings.terminalPanel = had;
     ctx->Yield(4);
   };
+#endif
 
   // F10: the other half. Autosave writing the right documents is only useful
   // if recovery puts them back — and the old path opened the sidecar AS the

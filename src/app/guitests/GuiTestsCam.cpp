@@ -2482,14 +2482,14 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     grab2.origin = o2 + glm::vec3(0.5f * L, 0.0f, 100.0f);
     grab2.direction = {0.0f, 0.0f, -1.0f};
     IM_CHECK(ui::HandleGizmoInput(*s_App, grab2, true, true, false));
-    Ray near = grab2;
-    near.origin.x += 139.0f; // the part's far edge would sit at 199, 1 short
-    IM_CHECK(ui::HandleGizmoInput(*s_App, near, false, true, false));
+    Ray nearRay = grab2;
+    nearRay.origin.x += 139.0f; // the part's far edge would sit at 199, 1 short
+    IM_CHECK(ui::HandleGizmoInput(*s_App, nearRay, false, true, false));
     ctx->LogInfo("gizmo scale %.2f, snapped x %.3f", L,
                  Job()->FindSetup(setup.id)->placements[0].pos.x);
     IM_CHECK(std::abs(Job()->FindSetup(setup.id)->placements[0].pos.x - 140.0) <
              1e-3); // snapped: far edge ON the sheet's edge at 200
-    IM_CHECK(ui::HandleGizmoInput(*s_App, near, false, false, true));
+    IM_CHECK(ui::HandleGizmoInput(*s_App, nearRay, false, false, true));
     ctx->Yield(2);
 
     // ...and a spin to the common angles: 88 degrees becomes 90.

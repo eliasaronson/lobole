@@ -15,6 +15,12 @@
 #include <chrono>
 #include <utility>
 
+#if defined(_WIN32)
+#include <process.h> // _getpid
+#else
+#include <unistd.h> // getpid
+#endif
+
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
 #include "cad/FaceSelector.h"
@@ -119,7 +125,9 @@ void AdoptStagedImports(AppState& state, const std::filesystem::path& dir) {
         continue;
       const fs::path src(imp->path);
       const fs::path rel = src.lexically_relative(staging);
-      if (rel.empty() || rel.native().starts_with(".."))
+      // The first COMPONENT, not the first two characters: `native()` is a
+      // wstring on Windows, and "..foo" is not an escape from the staging dir.
+      if (rel.empty() || *rel.begin() == "..")
         continue; // not staged: an original STEP, or already project-owned
       const fs::path dest = dir / "imported" / rel;
       fs::create_directories(dest.parent_path(), ec);
@@ -760,9 +768,14 @@ GeometryChange CompareVersionGeometry(AppState& state,
   // directory rather than touching the working tree — the point of a diff is
   // to look without changing anything.
   std::error_code ec;
-  const fs::path scratch = fs::temp_directory_path() /
-                           ("designer-diff-" + std::to_string(::getpid()) +
-                            "-" + revision.substr(0, 8));
+#if defined(_WIN32)
+  const int pid = ::_getpid();
+#else
+  const int pid = ::getpid();
+#endif
+  const fs::path scratch =
+      fs::temp_directory_path() /
+      ("designer-diff-" + std::to_string(pid) + "-" + revision.substr(0, 8));
   fs::remove_all(scratch, ec);
   // A project with one part is saved FLAT — the document IS the project
   // directory, with no `parts/<name>/` under it (DocumentIO's dispatch). So
