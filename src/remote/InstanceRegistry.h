@@ -15,6 +15,7 @@
 // Each instance that opens a remote port writes
 //
 //   $XDG_STATE_HOME/designer/instances/<port>.json
+//   (%LOCALAPPDATA%\Designer\state\instances\<port>.json on Windows)
 //     { "app": "designer", "pid": …, "port": …,
 //       "mode": "gui"|"headless"|"offscreen", "started": <unix seconds> }
 //

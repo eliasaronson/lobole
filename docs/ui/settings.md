@@ -41,7 +41,15 @@ reasonably disagree, it belongs in bucket 1.
 `~/.config/designer/settings.json` — a sibling of the `onshape.env` already
 there. **Config, not state**: `~/.local/state/designer` (where the autosave
 lives) is for things the app can regenerate; this is for things the user
-chose. The path helper mirrors `Autosaver::StateDir()`.
+chose.
+
+All three per-user directories — config, state and the IBL cache — resolve
+through one helper, `RuntimePaths::User{Config,State,Cache}Dir`. Windows has
+neither `$XDG_*` nor `$HOME`, so each used to fall through to
+`temp_directory_path()`, putting the settings, the recent list, the instance
+registry and the recovery autosave in `%TEMP%`, which the OS sweeps. There
+they are `%LOCALAPPDATA%\Designer\{config,state,cache}`: one folder to find,
+one to delete for a clean slate.
 
 ```json
 { "settings_format": 1, "gpu_device": "", "shadows": true, "ssao": "half", … }

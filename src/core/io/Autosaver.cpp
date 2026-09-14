@@ -1,6 +1,7 @@
 #include "core/io/Autosaver.h"
 
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "core/Document.h"
 #include "core/io/Serialization.h"
 
@@ -10,11 +11,7 @@
 namespace fs = std::filesystem;
 
 std::string Autosaver::StateDir() {
-  if (const char* xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg)
-    return (fs::path(xdg) / "designer").string();
-  if (const char* home = std::getenv("HOME"); home && *home)
-    return (fs::path(home) / ".local" / "state" / "designer").string();
-  return (fs::temp_directory_path() / "designer-state").string();
+  return RuntimePaths::UserStateDir().string();
 }
 
 std::string Autosaver::SidecarPath(const std::string& projectPath) {

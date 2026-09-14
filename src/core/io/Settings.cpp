@@ -1,6 +1,7 @@
 #include "core/io/Settings.h"
 
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "core/io/Serialization.h" // WriteTextAtomic
 
 #include <nlohmann/json.hpp>
@@ -292,13 +293,9 @@ bool Settings::operator==(const Settings& other) const {
 std::span<const Field> Fields() { return kFields; }
 
 std::string ConfigDir() {
-  // CONFIG, not state: `~/.local/state/designer` holds what the app can
-  // regenerate (autosaves, the recent list); this holds what the user chose.
-  if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-    return (fs::path(xdg) / "designer").string();
-  if (const char* home = std::getenv("HOME"); home && *home)
-    return (fs::path(home) / ".config" / "designer").string();
-  return (fs::temp_directory_path() / "designer-config").string();
+  // CONFIG, not state: the state directory holds what the app can regenerate
+  // (autosaves, the recent list); this holds what the user chose.
+  return RuntimePaths::UserConfigDir().string();
 }
 
 std::string ConfigPath() {

@@ -27,4 +27,19 @@ std::filesystem::path EnvironmentHdri();
 // wrong in.
 std::filesystem::path PartsDir();
 
+// Writable per-user directories, by what they hold: what the user CHOSE
+// (settings), what the app can regenerate but must survive a restart
+// (autosaves, the recent list, the instance registry), and what it can throw
+// away (the precomputed IBL maps). On Linux these are the XDG directories, and
+// the executable's own directory is never one of them — it is read-only under
+// Nix, Flatpak and an installed prefix alike.
+//
+// They live here, together, because Windows has no $HOME and no XDG_*: all
+// three used to fall through to `temp_directory_path()`, which on Windows is
+// `%TEMP%` — a directory the OS sweeps. Settings, recovery autosaves and the
+// running-instance registry all landed somewhere Windows deletes.
+std::filesystem::path UserConfigDir();
+std::filesystem::path UserStateDir();
+std::filesystem::path UserCacheDir();
+
 } // namespace RuntimePaths

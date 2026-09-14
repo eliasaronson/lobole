@@ -67,6 +67,60 @@ std::filesystem::path EnvironmentHdri() {
 
 std::filesystem::path PartsDir() { return DataDir() / "parts"; }
 
+namespace {
+
+// The per-user root the three directories below hang off. Windows gets ONE
+// folder — %LOCALAPPDATA%\Designer — so there is a single thing to find when
+// a setting misbehaves and a single thing to delete for a clean slate. On
+// Linux each kind has its own XDG variable and they are resolved separately.
+#if defined(_WIN32)
+std::filesystem::path WindowsAppDir() {
+  if (const char* local = std::getenv("LOCALAPPDATA"); local && *local)
+    return std::filesystem::path(local) / "Designer";
+  if (const char* profile = std::getenv("USERPROFILE"); profile && *profile)
+    return std::filesystem::path(profile) / "AppData" / "Local" / "Designer";
+  return std::filesystem::temp_directory_path() / "Designer";
+}
+#endif
+
+} // namespace
+
+std::filesystem::path UserConfigDir() {
+#if defined(_WIN32)
+  return WindowsAppDir() / "config";
+#else
+  if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
+    return std::filesystem::path(xdg) / "designer";
+  if (const char* home = std::getenv("HOME"); home && *home)
+    return std::filesystem::path(home) / ".config" / "designer";
+  return std::filesystem::temp_directory_path() / "designer-config";
+#endif
+}
+
+std::filesystem::path UserStateDir() {
+#if defined(_WIN32)
+  return WindowsAppDir() / "state";
+#else
+  if (const char* xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg)
+    return std::filesystem::path(xdg) / "designer";
+  if (const char* home = std::getenv("HOME"); home && *home)
+    return std::filesystem::path(home) / ".local" / "state" / "designer";
+  return std::filesystem::temp_directory_path() / "designer-state";
+#endif
+}
+
+std::filesystem::path UserCacheDir() {
+#if defined(_WIN32)
+  return WindowsAppDir() / "cache";
+#else
+  if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
+    return std::filesystem::path(xdg) / "designer";
+  if (const char* home = std::getenv("HOME"); home && *home)
+    return std::filesystem::path(home) / ".cache" / "designer";
+  return std::filesystem::temp_directory_path() / "designer";
+#endif
+}
+
 std::filesystem::path ShaderDir() {
   const std::filesystem::path development =
       ExecutableDir() / "libraries" / "shaders";

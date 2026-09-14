@@ -7,8 +7,9 @@
 //
 // STATE, not config (docs/ui/settings.md's bucket rule): the app writes it,
 // the user never edits it, and losing it costs a convenience rather than a
-// choice. It lives beside the autosave in $XDG_STATE_HOME/designer, not in
-// the project and not in the config dir.
+// choice. It lives beside the autosave in the user state directory
+// (`$XDG_STATE_HOME/designer`; `%LOCALAPPDATA%\Designer\state` on Windows),
+// not in the project and not in the config dir.
 //
 // Deliberately dumb: paths as written, no validation at record time. A
 // project on an unplugged drive is still a project you had open, so the list

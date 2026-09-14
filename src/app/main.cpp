@@ -69,19 +69,12 @@
 #include <utility>
 
 namespace {
-// Writable per-user cache for precomputed IBL maps: $XDG_CACHE_HOME/designer
-// (else ~/.cache/designer, else a temp dir). The executable dir may be
-// read-only (Nix store, Flatpak /app), so the cache must live under $HOME.
+// Writable per-user cache for precomputed IBL maps. The executable dir may be
+// read-only (Nix store, Flatpak /app), so the cache cannot live beside it.
 std::string IblCacheDir() {
-  namespace fs = std::filesystem;
-  const char* xdg = std::getenv("XDG_CACHE_HOME");
-  const char* home = std::getenv("HOME");
-  fs::path base = xdg && *xdg     ? fs::path(xdg)
-                  : home && *home ? fs::path(home) / ".cache"
-                                  : fs::temp_directory_path();
-  fs::path dir = base / "designer";
+  const std::filesystem::path dir = RuntimePaths::UserCacheDir();
   std::error_code ec;
-  fs::create_directories(dir, ec);
+  std::filesystem::create_directories(dir, ec);
   return dir.string();
 }
 } // namespace

@@ -241,6 +241,10 @@ set(core_sources
     src/render/Camera.cpp
     src/common/BuildInfo.cpp
     src/common/Logger.cpp
+    # Per-user directories and the runtime data root. In CORE, not the app:
+    # core/parts, core/io/Autosaver and core/io/Settings all resolve paths
+    # through it, and a test binary that links only core still needs them.
+    src/common/RuntimePaths.cpp
     src/render/OutlineEdges.cpp
     src/cad/CADKernel.cpp
     src/cad/CADMeshConverter.cpp
@@ -589,7 +593,6 @@ target_precompile_headers(designer_core PRIVATE
 set(app_sources
     src/app/main.cpp
     src/app/FramePacer.cpp
-    src/common/RuntimePaths.cpp
     src/render/VulkanCommon.cpp
     src/render/GpuTimer.cpp
     src/app/CrashHandler.cpp
