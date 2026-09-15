@@ -45,15 +45,43 @@ cache would favour the other:
 **−9% on the build, −30% on the call.** The profiled share moved with it:
 `TraverseAxis` 22.9% → 11.2%.
 
-## What is left in fit_fastener
+## What is left in fit_fastener — measured, not guessed
 
-369 ms a call, and the profile attributes only ~200 of it to
-`FitFastenerToHole` itself. The rest is the placement the fit performs —
-adding the fastener, mating it to every interface it spans, and the
-regeneration that follows — which runs partly on worker threads and so does
-not attribute to the calling frame. Forty-six fasteners added one at a time
-is forty-six regenerations; `batch` is the lever there, and it belongs to the
-generator rather than to this function.
+The first answer here said the remainder was the placement and the
+regeneration behind it. **It is not.** A phase timer inside the function,
+over the engine's 46 fits:
+
+| phase | share | per fit |
+|---|---|---|
+| flatten the assembly | 0.0% | 0.1 ms |
+| **derive** (rim search + axis traversal) | **93.8%** | 433.7 ms |
+| place the hardware | 4.1% | 19.1 ms |
+| mate the joint | 2.0% | 9.3 ms |
+
+Placing three occurrences and mating every interface they span costs 28 ms
+together. Everything else is finding out what the bolt goes through.
+
+So the rim search got the same treatment as the traversal. It described the
+geometry of **every leaf in the assembly** — 302 of them — to find which
+carried the picked rim, when an `ElementRef` names a feature and a part
+without that feature cannot carry it. That is `Measure::Describe`'s own first
+test, done for free by comparing ids:
+
+| | derive per fit | all 46 fits |
+|---|---|---|
+| before | 433.7 ms | 21.26 s |
+| after | **370.7 ms** | **18.15 s** |
+
+What remains is the ray casting itself, against the bodies the axis really
+does cross — and on this engine those are the block and the head, where an
+OCC ray-shape intersection is not cheap. Going further would mean a mesh
+first pass (`collide::Mesh` has the BVH for it), and that trades exactness
+for speed in the one number a fastener must get right: its LENGTH. Not worth
+it without a reason.
+
+The phase line survives at DEBUG, so the next "why is fitting slow" is read
+rather than re-profiled — the same reason `SyncAssemblyRenderers` logs its
+phases.
 
 `tests/test_parts.cpp` pins the part that matters: a plate reads identically
 with thirty unreachable bodies added, and a body squarely ON the axis past it

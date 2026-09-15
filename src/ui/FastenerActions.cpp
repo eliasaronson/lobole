@@ -378,7 +378,9 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
 
   // Every placed leaf, once: the rim is on one of them and the stack is made
   // of the rest.
+  const auto tPhase0 = std::chrono::steady_clock::now();
   const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
+  const auto tPhaseFlat = std::chrono::steady_clock::now();
   std::vector<parts::PlacedBody> placed;
   // EVERY instance the element resolves on, not the first. An ElementRef is
   // unique within a PART; in an assembly it names one rim per placement of
@@ -405,6 +407,17 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
       pb.occurrence = inst.rootOccurrenceId;
       placed.push_back(pb);
     }
+    // An ElementRef names a feature, and a part that does not contain that
+    // feature cannot carry the rim — Measure::Describe's own first test, for
+    // free. Worth the two lines: this loop runs over every leaf in the
+    // assembly (302 on the OM615) and describes each one's geometry, which
+    // was HALF of a fit's time; a bolt's rim lives on one part
+    // (docs/performance/axis-stack.md).
+    const auto& instBodies = inst.part->GetBodies();
+    if (std::none_of(instBodies.begin(), instBodies.end(), [&](const Body& b) {
+          return b.createdBy == rim.element.featureId;
+        }))
+      continue;
     // The rim, in the frame the assembly puts it in. Described in the part's
     // own space and then placed, because that is where the ElementRef means
     // something.
@@ -891,6 +904,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     return fit;
   }
 
+  const auto tPhasePlan = std::chrono::steady_clock::now();
   // The commit just walks the plan. It used to recompute the same arithmetic
   // a second time, which is how a preview and a placement come to disagree.
   for (size_t i = 0; i < fit.plan.size(); i++) {
@@ -909,6 +923,7 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
         fit.parts.push_back(o.name);
   }
   fit.occurrence = fit.placed.front();
+  const auto tPhaseParts = std::chrono::steady_clock::now();
 
   // And the joint itself. Placing the hardware is not the same as holding the
   // parts together: the screw rides its plate, the nut rides the far one, and
@@ -969,6 +984,21 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   }
 
   fit.ok = true;
+  {
+    const auto ms = [](auto a, auto b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    const auto now = std::chrono::steady_clock::now();
+    // Kept, at DEBUG: the next "why is fitting slow" is READ rather than
+    // re-profiled, which is how SyncAssemblyRenderers earns its phase line.
+    // Derive is the axis traversal and the rim search; place is the hardware;
+    // mates are the joint (docs/performance/axis-stack.md).
+    LOG_DEBUG("fit_fastener phases: flatten {:.1f} ms, derive {:.1f}, place "
+              "{:.1f}, mates {:.1f} (total {:.1f})",
+              ms(tPhase0, tPhaseFlat), ms(tPhaseFlat, tPhasePlan),
+              ms(tPhasePlan, tPhaseParts), ms(tPhaseParts, now),
+              ms(tPhase0, now));
+  }
   return fit;
 }
 
