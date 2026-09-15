@@ -209,9 +209,19 @@ So the useful directions are not "make HLR faster":
   sheet is the sum of them: ~34 s becomes ~18 s (the longest) at best. The
   prerequisite is the isolated snapshot below — OCC shapes are written to by
   the algorithms that read them (docs/performance/query-booleans.md).
-- Bought parts are the ones that dominate and the ones least likely to carry
-  a dimension, which is what makes a per-occurrence quality choice worth
-  considering rather than a global one.
+- A per-occurrence quality choice is worth more than a global one — but
+  **not gated on "imported"**. The OM615's valve spring is 3 faces and 3
+  edges, all spline, entirely hand-modelled (Curve3D + Pipe), and it is the
+  part that makes that engine "47 s a view, 0.0 s with its two valve springs
+  left off". The same project's cylinder head carries 270 spline edges and
+  dominates nothing. A helix projects as overlapping coils and HLR's work is
+  in the overlaps, so neither provenance NOR a spline census predicts the
+  bill: three edges outweigh 1829.
+
+  The reliable signal is the one now measured per occurrence (a view reports
+  what each occupant cost). Which suggests the flow is measure-then-simplify,
+  with `budget_s` bounding the first exposure, rather than a rule applied in
+  advance.
 
 ## Remaining work
 
