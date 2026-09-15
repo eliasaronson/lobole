@@ -157,8 +157,14 @@ TABLE = [
     ("feet_angle", "110", ""),
     ("window_brace_width", "25.0", "rail width in both braces"),
     ("brace_ladder_h", "345.6", "window brace + studs, under the divider"),
-    ("brace_stud", "20.0", "the three support studs are square, this side"),
-    ("brace_stud_gap", "2.5", "how far a stud stands off the wall it braces"),
+    # The studs are `window_brace_width` OUT from the wall they brace and one
+    # `wall_thickness` across, and they TOUCH it — read off the export's own
+    # section, which runs them to x = +/-105, the side wall's inner face.
+    # They were 20 x 20 standing 2.5 mm clear here, and both errors hid
+    # because 20 x 20 and 25 x 16 are both 400 mm2: the part's volume matched
+    # the export and so did a section's area. Only the LOOPS showed it.
+    # A stud that does not reach the wall braces nothing, and these are the
+    # only members in the cabinet that shorten a panel's governing span.
     ("ring_brace_z", "-785.2", "port-ring brace, from the top datum"),
     # Read off the export's own mid-plane section, not a screenshot: the
     # blend that joins each window's straight edges to the ring is R11

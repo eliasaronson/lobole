@@ -214,9 +214,19 @@ def ladder(app, p):
     rails come to 34,344 mm2 of the same 210 x 320, so the rail width in the
     parameter table is the one the part was drawn with.
 
-    The studs stand `brace_stud_gap` off the wall each braces — two on the
-    side walls at mid depth, one on the back wall at mid width. That is what
-    they are for: breaking the unsupported span of the big panels.
+    The studs REACH the wall each braces — two on the side walls at mid
+    depth, one on the back wall at mid width — because that is what they are
+    for: breaking the unsupported span of the big panels. They stood 2.5 mm
+    clear here, and 20 x 20 instead of 25 out by 16 across, and neither error
+    showed in any check: 20 x 20 and 25 x 16 are both 400 mm2, so the part's
+    volume matched the export and so did a section's AREA. The loops did not
+    match, and they are what caught it.
+
+    It matters more than a millimetre of MDF. A modal study of the side wall
+    puts its fundamental at 311 Hz, set by the 320 mm span between the front
+    and back walls — and the horizontal braces (this panel, the divider, the
+    ring brace) do not touch that span, so they move it by 1.7%. These studs
+    are the only members in the cabinet that shorten it.
 
     The slots carry the export's two families of R8, both at half a wall:
     the four vertical corners of each slot, and the rim where each slot
@@ -232,8 +242,6 @@ def ladder(app, p):
     half_d = p["cabinet_internal_d"] / 2
     h = float(p["brace_ladder_h"])
     rail = p["window_brace_width"]
-    stud = p["brace_stud"]
-    gap = p["brace_stud_gap"]
 
     # The window brace, at the BOTTOM of the assembly.
     base = -h / 2
@@ -260,13 +268,18 @@ def ladder(app, p):
     # three studs. It is also the order the part would be made in.
     _slot_blends(part, p, t, base, half_w, half_d)
 
-    # Three studs, standing on it.
+    # Three studs, standing on it and REACHING the wall each braces: the
+    # export runs them to x = +/-105 and y = +160, which are the walls' inner
+    # faces. `window_brace_width` out from the wall, one wall thickness
+    # across.
     rise = h - float(t)
-    for at in ((-(half_w - stud / 2 - gap), 0.0),
-               (half_w - stud / 2 - gap, 0.0),
-               (0.0, half_d - stud / 2 - gap)):
+    out, across = float(rail), float(t)
+    for at, wide, deep in (
+            ((-(float(half_w) - out / 2), 0.0), out, across),
+            ((float(half_w) - out / 2, 0.0), out, across),
+            ((0.0, float(half_d) - out / 2), across, out)):
         sk = part.sketch(Plane.xy(base + float(t)), name="stud")
-        sk.centered_rect(at, stud, stud)
+        sk.centered_rect(at, wide, deep)
         part.extrude(sk.add(), distance=rise, mode="add", name="stud")
     return part
 
