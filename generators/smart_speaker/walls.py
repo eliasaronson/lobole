@@ -70,8 +70,28 @@ def _foot_profile(p, half_span, out):
         (out - flat, -half - drop),
         (inner, -half),
     ]
+    # The flat can VANISH, and on this cabinet it does. `feet_flat_width` is
+    # 16 and so is a wall, so the baffle's and the back wall's feet have no
+    # flat at all: their legs taper to a point on the floor and the whole
+    # 16 mm the eye reads as a foot is the side wall's own thickness. The
+    # ported document agrees to four figures — its front wall measures
+    # 0.73 mm across 2 mm above the floor, which is 2 * tan(20 deg) and
+    # nothing else. So drop the duplicate corner rather than emit a
+    # zero-length segment for a sketch to choke on.
+    right = _no_repeats(right)
     left = [(-u, v) for u, v in right]
     return right, left
+
+
+def _no_repeats(points, tol=1e-6):
+    """Consecutive coincident points removed, keeping the Params."""
+    out = []
+    for pt in points:
+        if out and (abs(float(pt[0]) - float(out[-1][0])) < tol
+                    and abs(float(pt[1]) - float(out[-1][1])) < tol):
+            continue
+        out.append(pt)
+    return out
 
 
 def silhouette(sk, p, panel, du=0.0, dv=0.0):
@@ -102,8 +122,10 @@ def silhouette(sk, p, panel, du=0.0, dv=0.0):
     half_u = (_outer_d(p) if panel == "side_wall"
               else p["cabinet_internal_w"] / 2) + du
     right, left = _foot_profile(p, half_u, half_u)
+    # Walked, not indexed: a foot whose flat has vanished is three corners,
+    # not four (see _foot_profile).
     sk.polyline([(half_u, half_h)] + right[1:]
-                + [left[3], left[2], left[1]]
+                + list(reversed(left[1:]))
                 + [(-half_u, half_h)], close=True)
     return sk
 
@@ -256,7 +278,14 @@ def front_wall(app, p):
     _drill_dowels(part, p, "front_wall")
 
     sk = part.sketch(Plane.xz(0), name="feet")
-    for loop in _foot_profile(p, half_w, half_w):
+    # `out` a wall thickness PAST this panel's own edge: this wall sits
+    # between the side walls, so the foot the eye sees at the corner is the
+    # side wall's leg and this one only makes up the difference. With a
+    # 16 mm flat and a 16 mm wall there is no difference to make up, and the
+    # leg tapers to a point — which is what the ported document has, and
+    # what made the front look 32 mm wide against the side's 16.
+    for loop in _foot_profile(p, half_w,
+                              half_w + p["wall_thickness"]):
         sk.polyline(loop, close=True)
     part.extrude(sk.add(), distance=t, mode="add")
 
@@ -335,7 +364,14 @@ def back_wall(app, p):
     _drill_dowels(part, p, "back_wall")
 
     sk = part.sketch(Plane.xz(0), name="feet")
-    for loop in _foot_profile(p, half_w, half_w):
+    # `out` a wall thickness PAST this panel's own edge: this wall sits
+    # between the side walls, so the foot the eye sees at the corner is the
+    # side wall's leg and this one only makes up the difference. With a
+    # 16 mm flat and a 16 mm wall there is no difference to make up, and the
+    # leg tapers to a point — which is what the ported document has, and
+    # what made the front look 32 mm wide against the side's 16.
+    for loop in _foot_profile(p, half_w,
+                              half_w + p["wall_thickness"]):
         sk.polyline(loop, close=True)
     part.extrude(sk.add(), distance=t, mode="add")
 
