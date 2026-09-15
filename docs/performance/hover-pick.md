@@ -80,6 +80,28 @@ step**, and unlike the prune it needs a build and an invalidation story;
 / Descend) built for shape-vs-shape, which is the obvious thing to reuse
 rather than write a second one.
 
+**Measured again 2026-09-15, before building it.** On the 35-occurrence
+speaker, windowed and focused, cursor parked (the pick runs every frame
+either way — see below):
+
+| cursor over | `ui` |
+|---|---|
+| the imported W170S driver | 3.84 ms |
+| the imported Alpair driver | 2.29 ms |
+| a bare cabinet face | 1.90 ms |
+| empty space (off the model) | 1.95 ms |
+
+So the pick costs about **2 ms over the imported driver and nothing
+measurable over a wall** — the driver is 39k triangles, roughly half the
+scene, against 3.3k for a wall, and the AABB prune means a ray that misses it
+pays nothing. The direction confirms the triangle-count theory; the magnitude
+says the BVH is not urgent, because a 3.8 ms `ui` still holds 60 fps.
+
+It also says the cheaper fix may be upstream: the same two imported parts are
+16 s of an 18 s drawing view and 3.5 s of first-display tessellation
+(docs/drawing-incremental-hlr-plan.md). A simplified representation for bought
+parts would take this with it.
+
 Not done, deliberately: caching the pick on (mouse position, camera, geometry
 version) so a stationary cursor costs nothing. It would have removed the whole
 cost in the measurements above — which are taken with a still cursor — but a
