@@ -162,6 +162,57 @@ nix-shell shell.nix --run 'DESIGNER_HLR_PROJECT=/path/to/copied/aircooled.dsgn b
 ./tools/gui-tests-xvfb.sh -f 'build_a_drawing_by_clicking'
 ```
 
+## Cold generation, measured on a real sheet (2026-09-15)
+
+The remaining-work list below asks for "new evidence of savings" before
+touching cold generation. Here is the evidence, from the 35-occurrence smart
+speaker assembly, exact quality, headless, cold cache each time:
+
+| view | cold |
+|---|---|
+| front | 8.74 s |
+| right | 5.13 s |
+| **top** | **17.85 s** |
+| iso | 2.22 s |
+
+A four-view sheet is ~34 s. A sampling profile of it
+(`tools/profile.sh --app`) puts **89% of a projection inside
+`HLRBRep_Hider::Hide`** — curve-curve intersection, B-spline evaluation,
+`math_FunctionSetRoot` — and our own `ProjectViewImpl` bookkeeping in the
+noise. There is no waste to delete inside the projection.
+
+**The cost is not spread across the assembly; it is two parts.** Hiding
+occurrences and re-measuring cold:
+
+| what is left out of the top view | cold |
+|---|---|
+| nothing (35 parts) | 18.02 s |
+| the 14 T-nuts | 17.32 s |
+| the 4 port parts (flares, tube, ring brace) | 16.11 s |
+| **the 2 loudspeaker drivers** | **0.46 s** |
+| drivers + port | 0.33 s |
+| everything but the 8-part shell | 0.12 s |
+
+Two imported driver models are **97% of the view**. That is the same shape
+the `add_drawing_view` description already records from the engine ("47 s a
+view, 0.0 s with its two valve springs left off"): exact HLR is priced by
+surface complexity, and one bought part with NURBS surfaces outweighs thirty
+extruded panels.
+
+So the useful directions are not "make HLR faster":
+
+- **Say where the time went.** A view that takes seconds should name the
+  occurrences that cost it, the way a capture names a frame that is one
+  colour. `hidden` already exists; nothing tells the user which two names to
+  put in it.
+- **Parallel views.** The four views are independent projections, and the
+  sheet is the sum of them: ~34 s becomes ~18 s (the longest) at best. The
+  prerequisite is the isolated snapshot below — OCC shapes are written to by
+  the algorithms that read them (docs/performance/query-booleans.md).
+- Bought parts are the ones that dominate and the ones least likely to carry
+  a dimension, which is what makes a per-occurrence quality choice worth
+  considering rather than a global one.
+
 ## Remaining work
 
 These are follow-ups, not completed stages or prerequisites for using the
