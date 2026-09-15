@@ -91,7 +91,18 @@ TABLE = [
     # design document, not from the part.
     ("port_end_correction", "183.0",
      "both flares' effective length; a plain tube would be 73 here"),
-    ("port_length_total", "250.0", "physical tube length with flares"),
+    # 221, not the 250 the plan drew. The plan sized the tube for its
+    # budgeted 50 L; the cabinet came out 53.3 L net, and the tube is the
+    # cheap thing to change — shortening it 29 mm lands fb back on the
+    # 33 Hz target without moving the ring brace off the baffle's antinode.
+    # CUT IT LONG AND TRIM: see BUILD.md. The flare's real effective length
+    # is `port_end_correction`, which comes from a design document rather
+    # than from the part, and the impedance saddle on the finished box is
+    # the only measurement that settles it.
+    ("port_length_total", "221.0", "physical tube length, before trimming"),
+    # What the cabinet exists to get right, so `verify` checks it rather
+    # than leaving it to whoever reads the printed number.
+    ("port_target_fb", "33.0", "Visaton's alignment for a 50 L box"),
     ("port_flare_top_dia", "155.0", "upper flare, free in the bay"),
     ("port_flare_bottom_dia", "160.0", "lower flare, bolted to the floor"),
     ("port_flare_h", "39.9", "how tall one flare is"),
@@ -194,7 +205,11 @@ TABLE = [
     # the export and so did a section's area. Only the LOOPS showed it.
     # A stud that does not reach the wall braces nothing, and these are the
     # only members in the cabinet that shorten a panel's governing span.
-    ("ring_brace_z", "-785.2", "port-ring brace, from the top datum"),
+    # NOT the brace's position — `port.ring_brace_mid` derives that from the
+    # port's length, because the brace has to follow the tube it carries.
+    # Kept because the ported document declared it and --check-drops reads
+    # this table against that one.
+    ("ring_brace_z", "-785.2", "vestigial: see port.ring_brace_mid"),
     # Read off the export's own mid-plane section, not a screenshot: the
     # blend that joins each window's straight edges to the ring is R11
     # exactly ((h+R)^2 + 77.196^2 = (68.5+R)^2 solves at 11.000).

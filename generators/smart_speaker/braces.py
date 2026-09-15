@@ -329,10 +329,10 @@ def placements(p):
     passes through it."""
     divider_under = -(float(p["alpair_chamber_h"])
                       + 2 * float(p["wall_thickness"]))
-    from port import RING_BRACE_MID
+    from port import ring_brace_mid
     return [
         ("brace_ladder", "brace ladder",
          (0, 0, divider_under - float(p["brace_ladder_h"]) / 2), None),
         ("ring_brace", "port ring brace",
-         (0, 0, -float(p["carcass_h"]) + RING_BRACE_MID), None),
+         (0, 0, -float(p["carcass_h"]) + ring_brace_mid(p)), None),
     ]

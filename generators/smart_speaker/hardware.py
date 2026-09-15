@@ -72,8 +72,8 @@ def placements(p):
     # Under the port-ring brace: the upper flare bolts DOWN onto the brace
     # from above, so the nuts take those bolts underneath. On the flare's own
     # lug circle — the same parameter the brace is drilled to.
-    from port import RING_BRACE_MID
-    brace_under = -carcass + RING_BRACE_MID - wall / 2
+    from port import ring_brace_mid
+    brace_under = -carcass + ring_brace_mid(p) - wall / 2
     for i, (x, y) in enumerate(seating.ring(p["port_brace_bolt_circle"],
                                             p["port_brace_bolt_count"],
                                             start_deg=0.0)):

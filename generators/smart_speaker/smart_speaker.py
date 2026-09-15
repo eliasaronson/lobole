@@ -278,9 +278,12 @@ def _chamber_occupants(app, asm, p):
 
 
 def _finish(app, args, asm, p, made):
+    displaced = _chamber_occupants(app, asm, p)
     with phase("verify"):
         ok = verify.run(app, p, made, asm, deep=args.deep)
-    displaced = _chamber_occupants(app, asm, p)
+        if displaced is not None:
+            tuned, _fb = verify.tuning(p, displaced)
+            ok = tuned and ok
     # Without an assembly there is nothing placed to measure, and the GROSS
     # figure is said to be gross rather than quietly printed as the answer.
     note = (f"{displaced:.1f} L standing in the chamber" if displaced

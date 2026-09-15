@@ -121,6 +121,29 @@ def run(app, p, made, asm, deep=False):
     return ok
 
 
+def tuning(p, displaced_litres):
+    """The port lands on its target, or the run says so.
+
+    This is the one number a listener hears and the one the cabinet cannot
+    be talked out of after glue-up, so it is CHECKED rather than printed and
+    left to be read. It went unnoticed twice: `helmholtz_fb` reported the
+    gross box for a while, and then reported a plain tube's end correction
+    for a flared port — 36.9 Hz against a 33 Hz target, which reads as a
+    design error and nearly bought a longer port for a port that was right.
+
+    Half a hertz of tolerance, because the volume is measured off the model
+    and the flare's effective length is not measured at all.
+    """
+    import params
+    got = params.helmholtz_fb(p, displaced_litres)
+    want = float(p["port_target_fb"])
+    off = abs(got - want)
+    flag = "" if off <= 0.5 else f"   <- {off:.1f} Hz off target"
+    print(f"  tuning           fb {got:.1f} Hz against {want:.1f} "
+          f"target{flag}")
+    return off <= 0.5, got
+
+
 def _compare(app, made, deep=False):
     """Against the reference STEPs, where there is one.
 
@@ -133,6 +156,13 @@ def _compare(app, made, deep=False):
     """
     refs = {"ring_brace": "ring_brace", "brace_ladder": "brace_ladder",
             "port_tube": "port_tube"}
+    # Where the design has deliberately LEFT the export, and by how much.
+    # The port tube is cut 221 mm against the 250 it was drawn at, to put fb
+    # back on its 33 Hz target now that the chamber is measured properly
+    # (221/250 = 0.884). Without this the run flags a part that is right,
+    # every time, and a check that cries wolf gets read past — which is
+    # exactly how the export's own 175.8 bolt circle got argued away.
+    expected = {"port_tube": 0.884}
     # Volume, bbox and the face/edge census — everything that needs no
     # boolean. `--deep` asks for the overlap too (iou/dice/precision/recall),
     # which is the only thing that can say two solids are the same SHAPE
@@ -150,7 +180,12 @@ def _compare(app, made, deep=False):
             part.activate()
             r = app.compare_geometry(golden_path=str(path), metrics=metrics)
             ratio = r.get("volume_ratio", 0)
-            flag = "" if 0.97 <= ratio <= 1.03 else "   <- re-drawn"
+            want = expected.get(name, 1.0)
+            flag = ("" if abs(ratio - want) <= 0.03
+                    else f"   <- {'re-drawn' if want == 1.0 else 'not the '
+                                  'expected divergence'}")
+            if want != 1.0 and not flag:
+                flag = f"   (cut shorter on purpose: {want:.3f} expected)"
             shape = ""
             if deep:
                 shape = f"  iou {r.get('iou', 0):5.3f}"

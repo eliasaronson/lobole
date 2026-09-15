@@ -43,7 +43,27 @@ ABS = "plastic_black"   # the flares and tube are moulded plastic, not MDF
 # placed by its bottom. That difference is worth the sentence — mixing the two
 # up put the lower flare 25 mm into the floor and mouth-first into the room.
 TUBE_SEAT = 0.0             # the tube's bottom, on the floor's underside
-RING_BRACE_MID = 236.8      # the brace the tube passes through
+
+# How far the brace's middle sits BELOW the tube's top: the tube's own seat
+# under the floor datum (9.9, set by the lower flare's throat), the bite it
+# takes into the bay flare above (15.1), less half a brace. Measured off the
+# stack as it seats, and constant while the flares are the parts they are.
+STACK_OFFSET = 13.2
+
+
+def ring_brace_mid(p):
+    """Where the port-ring brace sits, above the cabinet floor.
+
+    DERIVED from `port_length_total`, because it has to move with it. The
+    bay flare is located by this brace and not by the tube, so a brace left
+    behind when the tube was shortened opened a 14 mm hole in the middle of
+    the port — caught only because `verify` notices an allowance that has
+    stopped matching, which is a contact that stopped happening.
+
+    This was a literal (236.8) until then, which is the same class of thing
+    as the rail widths in braces.py: a number that was right once.
+    """
+    return float(p["port_length_total"]) - STACK_OFFSET
 
 
 def _floor(p):
