@@ -112,9 +112,18 @@ TABLE = [
      "round a driver flange, in the ply cut-out and the MDF rebate both. "
      "Cut to the flange diameter exactly, the W170S has 0.15 mm of air "
      "round it and cannot be dropped in"),
-    ("w170s_bolt_circle", "175.0",
-     "measured off the driver: five d5 holes at radius 87.50. The port's "
-     "table said 175.8, which is 0.4 mm out per bolt"),
+    # THE DATASHEET, not a measurement of the STEP. This said 175.0 —
+    # "measured off the driver", overriding the 175.8 the ported table had —
+    # and the ported table was right: Visaton's drawing (docs/drivers/
+    # W 170 S_9024_9025.pdf) gives 187.3 flange, 175.8 bolt circle, 148
+    # cut-out, 7 flange, 74 basket depth, and every one of those EXCEPT this
+    # matches the table still. A bought part's dimensions come from the
+    # people who made it.
+    #
+    # It is not a rounding argument either. The driver's own holes are d4.4
+    # (`w170s_bolt_dia`) on M4, which is 0.2 mm of radial slack, and a
+    # 0.4 mm error in the circle exceeds it: the bolts bind.
+    ("w170s_bolt_circle", "175.8", "Visaton's drawing: five holes at r 87.9"),
     ("w170s_bolt_count", "5", ""),
     ("w170s_basket_depth", "74.0", "protrusion into the cabinet behind the baffle"),
     ("w170s_bolt_dia", "4.4", "TODO: threads"),
