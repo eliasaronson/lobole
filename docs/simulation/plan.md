@@ -86,6 +86,41 @@ the headless solve loop ships in phase 2, before any GUI exists.
   able to say "fix this panel where that part touches it", which needs an
   imprint of the contact patch, not constraint equations. Worth separating
   from the hard half when this is picked up.
+
+  **P0 answered, 2026-09-15** (`tests/test_fem.cpp`, "a mesh spans two solids
+  only when they SHARE the face"). The technique works and the expensive
+  branch is not needed:
+
+  - a **general fuse** imprints the shared face, KEEPS both solids (so they
+    can carry different materials later), and Netgen then meshes that face
+    once — one connected tet component, no doubled nodes on the interface.
+    Load crosses it. The existing solver would analyse a bonded assembly
+    unchanged, because it takes a mesh and not an assembly. No tied
+    constraint equations.
+  - the control matters: an UNGLUED compound of the same two solids meshes
+    as two components with every interface node doubled, so the check has
+    teeth.
+  - **`SetFuzzyValue` is not optional.** Parts are placed at float32, so
+    nominally coincident faces sit microns apart; a strict boolean finds
+    nothing between them and the assembly silently meshes as loose pieces —
+    which LOOKS like a working study. 1e-3 imprints a 3 um gap.
+
+  Two things the real cabinet added that boxes could not:
+
+  - **granularity is a design decision, not an inference.** Fusing all 40
+    placed solids passed the boolean and then failed to mesh, on 2 faces of
+    1204 — a 19 mm2 cylinder where the port tube's line-to-line d105 fit
+    meets its flare, which fusing turns into slivers. T-nuts, drivers and a
+    press fit are not glue. Restricted to the 18 structural solids the fuse
+    took 1.1 s and meshed clean.
+  - **scale is the real ceiling, and it is nearer than estimated.** That
+    structural subset at a 40 mm size — coarse — came to 524,405 tets and
+    837,279 nodes: about 2.5M DOF, 73 s just to mesh. Not the global size
+    doing it (a uniform 40 mm fill of this volume would be ~1,100 tets) but
+    16 mm panels capping the local size and several hundred fastener holes
+    refining it further. A whole-cabinet modal solve therefore needs
+    DEFEATURING (suppress the fastener holes for analysis) before it needs a
+    better eigensolver, and per-panel studies keep their place regardless.
 - **Modal analysis** — the natural FEM2: mass matrix assembly is cheap once
   stiffness assembly exists, and density is already in the library. Wants a
   sparse eigensolver (Spectra is header-only BSD, vendors like PlaneGCS).

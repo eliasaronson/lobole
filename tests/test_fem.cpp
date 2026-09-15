@@ -12,12 +12,20 @@
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 
+#include <BOPAlgo_Builder.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS_Compound.hxx>
+#include <gp_Pnt.hxx>
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <set>
+#include <unordered_map>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -1151,3 +1159,146 @@ TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
 }
 
 #endif // HAVE_NETGEN
+
+// --- P0: can one mesh span two solids? (docs/simulation/plan.md) ----------
+//
+// The question the whole "assembly studies" ladder rests on. A bonded
+// assembly needs a CONFORMING mesh across the interface — the nodes on the
+// shared face belonging to the tets on BOTH sides — because that, and only
+// that, is what lets load pass from one part into the next. If Netgen gives
+// it for a compound whose solids share a face, the existing solver analyses
+// a glued cabinet unchanged, since it takes a mesh and not an assembly. If
+// it does not, bonding needs tied constraint equations instead, which is a
+// different and much larger job.
+//
+// Measured as connected components of the tet graph, which is the same
+// question in graph form, with the UNGLUED compound as the control: a check
+// that nothing fails is not a check.
+namespace {
+
+// Two stacked 100 x 100 x 16 blocks meeting on the z = 16 plane.
+TopoDS_Shape LowerBlock() {
+  return BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 100.0, 100.0, 16.0).Shape();
+}
+TopoDS_Shape UpperBlock() {
+  return BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 16.0), 100.0, 100.0, 16.0).Shape();
+}
+
+// How many pieces the mesh is in: union-find over tets that share a node.
+int MeshComponents(const fem::FemMesh& mesh) {
+  std::vector<int> parent(mesh.tets.size());
+  for (size_t i = 0; i < parent.size(); i++)
+    parent[i] = static_cast<int>(i);
+  std::function<int(int)> find = [&](int a) {
+    while (parent[a] != a) {
+      parent[a] = parent[parent[a]];
+      a = parent[a];
+    }
+    return a;
+  };
+  std::unordered_map<int, int> firstTetAtNode;
+  for (size_t t = 0; t < mesh.tets.size(); t++) {
+    for (int n : mesh.tets[t]) {
+      auto [it, fresh] = firstTetAtNode.emplace(n, static_cast<int>(t));
+      if (!fresh) {
+        const int a = find(it->second), b = find(static_cast<int>(t));
+        if (a != b)
+          parent[a] = b;
+      }
+    }
+  }
+  std::set<int> roots;
+  for (size_t i = 0; i < parent.size(); i++)
+    roots.insert(find(static_cast<int>(i)));
+  return static_cast<int>(roots.size());
+}
+
+// Nodes sitting on the interface plane that have a TWIN at the same place —
+// the signature of two meshes that merely touch.
+int DoubledInterfaceNodes(const fem::FemMesh& mesh) {
+  std::vector<glm::dvec3> onPlane;
+  for (const glm::dvec3& n : mesh.nodes)
+    if (std::abs(n.z - 16.0) < 1e-6)
+      onPlane.push_back(n);
+  int doubled = 0;
+  for (size_t i = 0; i < onPlane.size(); i++)
+    for (size_t j = i + 1; j < onPlane.size(); j++)
+      if (glm::length(onPlane[i] - onPlane[j]) < 1e-6)
+        doubled++;
+  return doubled;
+}
+
+} // namespace
+
+TEST_CASE("P0: a mesh spans two solids only when they SHARE the face",
+          "[fem][mesh]") {
+  fem::MeshSettings settings;
+  settings.maxSize = 12.0;
+  std::string err;
+
+  SECTION("the control: an unglued compound meshes as two separate pieces") {
+    TopoDS_Compound loose;
+    BRep_Builder builder;
+    builder.MakeCompound(loose);
+    builder.Add(loose, LowerBlock());
+    builder.Add(loose, UpperBlock());
+    auto mesh = fem::Mesh(loose, settings, &err);
+    INFO(err);
+    REQUIRE(mesh.has_value());
+    CHECK(MeshComponents(*mesh) == 2);
+    CHECK(DoubledInterfaceNodes(*mesh) > 0);
+  }
+
+  SECTION("general fuse imprints the shared face: ONE mesh, two solids") {
+    // Keeps both solids (so they can carry different materials later) while
+    // making the interface one face that belongs to both.
+    BOPAlgo_Builder gf;
+    gf.AddArgument(LowerBlock());
+    gf.AddArgument(UpperBlock());
+    gf.SetFuzzyValue(1e-3); // parts are PLACED at float32 — see Measure.h
+    gf.Perform();
+    REQUIRE_FALSE(gf.HasErrors());
+    const TopoDS_Shape glued = gf.Shape();
+    TopTools_IndexedMapOfShape solids;
+    TopExp::MapShapes(glued, TopAbs_SOLID, solids);
+    CHECK(solids.Extent() == 2);
+
+    auto mesh = fem::Mesh(glued, settings, &err);
+    INFO(err);
+    REQUIRE(mesh.has_value());
+    CHECK(MeshComponents(*mesh) == 1);
+    CHECK(DoubledInterfaceNodes(*mesh) == 0);
+  }
+
+  SECTION("a float32 gap still imprints, which is the real cabinet's case") {
+    // Parts are PLACED at float32 (SketchPlane holds its origin as a
+    // glm::vec3), so two faces that are nominally coincident sit a few
+    // microns apart — a panel drawn at -172.8 sits at -172.800003. A strict
+    // boolean finds nothing between them and the assembly silently meshes
+    // as loose pieces, which is the failure this whole technique would die
+    // of in the field rather than in a test with round numbers.
+    const double gap = 3e-6; // what float32 leaves at cabinet scale
+    BOPAlgo_Builder gf;
+    gf.AddArgument(LowerBlock());
+    gf.AddArgument(
+        BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 16.0 + gap), 100.0, 100.0, 16.0)
+            .Shape());
+    gf.SetFuzzyValue(1e-3);
+    gf.Perform();
+    REQUIRE_FALSE(gf.HasErrors());
+    auto mesh = fem::Mesh(gf.Shape(), settings, &err);
+    INFO(err);
+    REQUIRE(mesh.has_value());
+    CHECK(MeshComponents(*mesh) == 1);
+  }
+
+  SECTION("plain fuse melts them into one solid — the same-material path") {
+    const TopoDS_Shape one =
+        BRepAlgoAPI_Fuse(LowerBlock(), UpperBlock()).Shape();
+    auto mesh = fem::Mesh(one, settings, &err);
+    INFO(err);
+    REQUIRE(mesh.has_value());
+    CHECK(MeshComponents(*mesh) == 1);
+    CHECK(DoubledInterfaceNodes(*mesh) == 0);
+  }
+}
