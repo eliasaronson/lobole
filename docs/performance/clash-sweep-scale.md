@@ -1,5 +1,30 @@
 # Making the clash sweep scale
 
+## Where a small assembly's sweep goes (2026-09-15)
+
+Measured on the 35-occurrence smart speaker, whose standing check is 5.4 s —
+disproportionate against the 249-occurrence engine's 13 s below. It checks
+**93 pairs**, so ~50 ms a pair, and:
+
+- **It is not the near-miss band.** `near_tol` 1.0, 0.45 and 0.0 all cost
+  4.7-5.6 s and check the same 93 pairs: the tolerance classifies the exact
+  distances, it does not avoid computing them.
+- **It is four parts.** Hiding the imported driver, second driver, amp and
+  PSU takes it from **5.36 s to 1.92 s**; hiding the fourteen T-nuts as well
+  changes nothing (1.84 s).
+- The profile is OCC exact extrema — `math_GlobOptMin`, `Jacobi`,
+  `LU_Decompose`, `math_NewtonMinimum` — with **`__sincos_fma` at 15.65%**
+  from circle evaluation, over our own `collide::Mesh::Walk` prefilter at 6%.
+
+Which is the same finding the drawings round reached from the other side
+(docs/drawing-incremental-hlr-plan.md): spline surfaces make every EXACT
+query dear — HLR intersection, boolean, extrema alike — and on this project
+the same four imported parts are 64% of the clash sweep, 16 s of an 18 s
+drawing view, 3.5 s of first-display meshing and 2 ms of every hover pick.
+Nothing here is the sweep failing to scale; it is what exact answers cost on
+bought geometry.
+
+
 ## Follow-up: standing validation and iteration modes
 
 `Asm.check_clashes()` now provides an explicit whole-assembly, exact-volume
