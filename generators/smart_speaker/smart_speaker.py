@@ -236,6 +236,16 @@ def main():
                          Path(args.out).expanduser().with_suffix("")
                          .with_name(Path(args.out).stem
                                     + " - baffle face 1.nc"))
+            # The other side of both uprights: the divider dado and the face
+            # dowels, in two setups because they do not fit the machine at
+            # once (cam_back.py).
+            import cam_back
+            stem = Path(args.out).expanduser().with_suffix("")
+            cam_back.build_all(
+                app, p,
+                post_to=None if args.no_save else
+                (lambda panel, which:
+                 stem.with_name(f"{stem.stem} - {panel} back {which}.nc")))
 
     return _finish(app, args, asm, p, made)
 

@@ -61,18 +61,40 @@ arrives, measure it and update `port_end_correction`.
 design; two real parts at one nominal diameter do not assemble. Sand, or
 plan 0.2-0.3 mm.
 
+## A guide for the edge dowels
+
+The deep dowels go into the uprights' 16 mm END faces, which no flat setup
+reaches, so they are drilled by hand. The numbers make a single guide serve
+every one of them:
+
+- they sit at v +/-461 on a panel spanning -611..511, so **50 mm from the
+  top end and 150 mm from the bottom end**;
+- and at 8 mm from the inside face, which is dead centre of a 16 mm panel.
+
+So: a strip **200 mm long with one hole 50 mm from one end**, centred across
+its width. Butt it against the top end and the hole lands on the top dowel;
+turn it round and butt it against the bottom end, and 200 - 50 = 150 lands
+on the bottom one. One guide, four holes per upright, eight for the pair,
+and the same guide for both panels.
+
+Cut it from 16 mm offcut for 16 mm of drill guidance, with a groove in the
+underside to straddle the panel's edge and register on the inside face.
+Drill the guide hole on the machine, not by hand — the whole point is that
+it is more accurate than what it guides.
+
 ## What the CNC job does not cut
 
-`cam.py` posts fourteen operations, all on the BAFFLE: two flange recesses,
-two through openings, ten screw holes. It does not cut
+`cam.py` posts fourteen operations, all on the BAFFLE's front: two flange
+recesses, two through openings, ten screw holes. `cam_back.py` adds four
+more programs — each upright's back face, in two setups apiece — carrying
+the divider dado and the face dowels.
+
+Still not cut, by anything:
 
 - any panel outline, or the plinth's foot profile;
-- the divider's dados;
-- the T-nut holes in any other panel;
-- **the dowel holes** — and those are the accuracy-critical feature. The
-  whole carcass locates on them, `joinery.py` exists because they did not
-  line up, and there is no CAM for them. Jig or a second job, before
-  glue-up day.
+- the side walls' and the divider's own dados and face dowels;
+- the T-nut holes in any panel but the baffle;
+- **the edge dowels**, which is a drill's job — see the guide above.
 
 The baffle is 1122 mm against the 6090's 900 mm of travel, so the plinth end
 hangs off the bed; every machined feature is in the upper two thirds and
