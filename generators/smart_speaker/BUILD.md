@@ -78,6 +78,33 @@ The baffle is 1122 mm against the 6090's 900 mm of travel, so the plinth end
 hangs off the bed; every machined feature is in the upper two thirds and
 within reach, which is what `reach_offset="auto"` settles.
 
+## The one CAM warning still worth a decision
+
+Four of the job's warnings are about chip load, and three of those are now
+answered by using the speeds the shop settled on (6000 rpm on the 6 mm,
+9000 and 1100 mm/min on the 3 mm — the generated job had 12000 on both,
+which is half the chip load). The remaining one is not a number, it is a
+cutter:
+
+> T1 (6 mm, 4 flute) cuts a slot 16 mm deep in sheet goods — over 2.8
+> diameters, full width. More than two flutes leaves little room to carry
+> that dust out, and packed flutes burn and grab.
+
+That is the through-opening profile, and the advice is sound: a 1- or 2-flute
+cutter is what sheet goods want, and on a machine that tops out at 1500
+mm/min a 4-flute 6 mm tool cannot reach its chip-load band at any feed
+(it would need 5760 mm/min at 12000 rpm). The tool table declares 4 flutes
+because the ported job did. If the cutter actually in the collet is a 1- or
+2-flute spiral — which is what the ported job's own spare "8 mm flat 2F
+(flange recesses)" suggests you were already thinking about — then change
+`flutes` in `cam.py` to match it and the warning goes with it.
+
+The reach warning is real and already handled: the baffle needs 1122 mm of
+Y and the 6090 travels 900, so the plinth end hangs off the bed. Every
+machined feature is in the upper two thirds and within reach, which is what
+`reach_offset="auto"` settles — but check the clamping before pressing
+start.
+
 ## Damping
 
 **Stuff the Alpair chamber properly, not lightly.** Its volume does not

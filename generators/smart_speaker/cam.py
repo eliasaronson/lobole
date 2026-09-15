@@ -41,13 +41,25 @@ MACHINE = {
 # Two cutters. The ER11 collet tops out at 7 mm, so the openings and recesses
 # go with a 6 mm flat and the screw holes with a 3 mm — one tool change in the
 # program.
+# Speeds and feeds AS TEST CUT, read back out of the ported job
+# (~/Documents/smart_speaker.dsgn/jobs/). These were 12000 rpm on both tools
+# here, which is half the chip load the shop settled on:
+#
+#     tool          as generated          as cut       mm/tooth
+#     6 mm 4F   1200 @ 12000 rpm   1200 @  6000        0.025 -> 0.050
+#     3 mm 2F    700 @ 12000 rpm   1100 @  9000        0.029 -> 0.061
+#
+# Both were under the band the app wants for sheet goods and the 3 mm now
+# sits inside it. A cutter run at half the chip load it wants does not fail
+# loudly — it rubs, heats and burns — so the only authority worth having
+# here is a cut that happened.
 TOOLS = [
     {"number": 1, "name": "6 mm flat - recesses and openings",
      "diameter": 6.0, "tool_type": "flat", "flutes": 4,
-     "feed_cut": 1200.0, "feed_plunge": 400.0, "spindle_rpm": 12000.0},
+     "feed_cut": 1200.0, "feed_plunge": 400.0, "spindle_rpm": 6000.0},
     {"number": 3, "name": "3 mm flat - screw holes",
      "diameter": 3.0, "tool_type": "flat", "flutes": 2,
-     "feed_cut": 700.0, "feed_plunge": 250.0, "spindle_rpm": 12000.0},
+     "feed_cut": 1100.0, "feed_plunge": 300.0, "spindle_rpm": 9000.0},
 ]
 
 THROUGH_OVERRUN = 0.5  # mm past the far face, so a through cut is through
@@ -105,6 +117,17 @@ def build(app, p, part_name="front_wall"):
     # times; at the machine each change is a stop, a collet and a re-zero.
     app.set_cam_setup(id=sid, machine=MACHINE["name"], origin_at="stock_max",
                       order="tool")
+    # The stock IS the part: this panel arrives already cut to its outline
+    # from the sheet, and this job only puts the driver features in it. The
+    # default relative stock carries a 2 mm margin and a millimetre in Z,
+    # and since nothing here cuts an outline that rim is material the
+    # toolpath never touches and the part does not want — 3,878 mm2 of
+    # "leftover" against the 150 mm2 the ported job reports, all of it an
+    # artefact of stock nobody has. Zero margin makes the check mean
+    # something: it then matches the job that was test cut, 150.3 against
+    # 150.4 mm2, to within a sampling cell.
+    app.set_cam_setup(id=sid, stock={"mode": "relative", "margin": [0, 0, 0],
+                                     "bottom_margin": 0})
     for tool in TOOLS:
         app.set_cam_setup(id=sid, tool=tool)
 
