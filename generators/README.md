@@ -147,6 +147,29 @@ at any link angle, `_motion.py` mates them and drives the mechanism through a
 motion study, `_export.py` writes the deliverable. See
 [the friction it found](../docs/rpc-friction-plan.md).
 
+`bike/` is the opposite of every other generator here: a bicycle modelled
+from three photographs, with **no measurements at all**. `bike_spec.py` keeps
+what the pictures establish (a gents' diamond frame, 28" wheels, a 3-speed
+trigger shifter so an internal-gear hub, one chainring under a teardrop
+guard) strictly apart from what is assumed (every length and angle), and each
+assumption is a project variable, so correcting one is an edit. The run
+refuses to save what it has not checked, and what it checks is what decides
+whether something is a bicycle: positive trail, both axles at one height, a
+straight chainline, the crank clear of the ground and of the chainstay, and a
+motion study that turns the rear wheel 46/18 of a crank revolution through a
+chain relation. See [the model notes](../docs/modeling/bike.md).
+
+Two things it found are worth carrying to the next frame-shaped part.
+**Weld tubes SOLID and drill the bores afterwards** (`bike_shop.Weldment`):
+hollow pipes unioned at an angle put an end cap inside another tube's void,
+and whether that builds is a tangency lottery — a seat stay 11 mm off the
+seat tube's axis failed where 10 and 12 passed. And **a part is not finished
+until `check_geometry` says `verified`**: the frame passed "no feature
+errored" and "one solid" carrying a body OpenCASCADE calls badly nested, and
+an invalid body poisons everything asked of it — the assembly sweep reported
+17 cm3 of the rear cog buried in a frame that does not reach it, and the hunt
+for that phantom cost more than the rear triangle did to build.
+
 `toolmakers_clamp.py` is the dimensioned counterpart: an eight-part clamp based
 on an author's published plan, with screw-driven closed assembly loops, exact
 checks, STEP round-trip coverage, BOM and eight part sheets. See
