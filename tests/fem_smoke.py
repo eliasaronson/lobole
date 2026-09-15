@@ -140,6 +140,48 @@ def main():
             expect(abs(ratio - 2.0) < 0.05,
                    f"stress scales 2x with the load, got {ratio}")
 
+            # --- one word per thing, and `id` means what it does elsewhere
+            # This family used to ask for `kind` and report `type`, and name
+            # its own subject `study` where a mate, a section, a relation, a
+            # configuration and a CAM setup all answer to `id`.
+            made = d.call("add_study", type="modal", name="Modes")
+            expect(made["type"] == "modal",
+                   f"add_study reports the word it was given: {made}")
+            listed = [x for x in d.call("list_studies")["studies"]
+                      if x["id"] == made["id"]][0]
+            expect(listed["type"] == "modal",
+                   f"list_studies says the same word: {listed}")
+            expect(d.call("add_study", kind="modal", name="Legacy")["type"]
+                   == "modal", "`kind` still works")
+
+            # A verb that ACTS ON a study takes `id`...
+            d.call("set_study", id=made["id"], num_modes=4)
+            expect(d.call("study_status", id=made["id"]) is not None,
+                   "study_status by id")
+            # ...and `study` still means the same thing...
+            d.call("set_study", study=made["id"], num_modes=4)
+            # ...but two different studies in one call is a refusal, not a
+            # silent pick.
+            try:
+                d.call("set_study", id=made["id"], study=study, num_modes=4)
+                raise AssertionError("set_study took two different studies")
+            except RuntimeError as e:
+                expect("different studies" in str(e),
+                       f"refusal names the problem: {e}")
+
+            # A verb that only names a study for CONTEXT keeps `study`, and
+            # its own `id` is the thing it acts on: the load.
+            d.call("add_load", study=made["id"], type="fixed",
+                   face={"feature_id": created_by, "element": fixed_face})
+            loads = [x for x in d.call("list_studies")["studies"]
+                     if x["id"] == made["id"]][0]["loads"]
+            expect(len(loads) == 1, f"one load: {loads}")
+            d.call("remove_load", study=made["id"], id=loads[0]["id"])
+            loads = [x for x in d.call("list_studies")["studies"]
+                     if x["id"] == made["id"]][0]["loads"]
+            expect(not loads, f"remove_load by id took it away: {loads}")
+            d.call("remove_study", id=made["id"])
+
             print("fem_smoke: OK")
             return 0
     except Exception as e:

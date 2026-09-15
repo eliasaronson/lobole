@@ -393,8 +393,27 @@ was not seen because these scripts built `App(Designer(port=...))` by hand
 instead of calling `connect()`. The lesson is about the scripts, not the app:
 use `connect()`.
 
-**Smaller:** `set_active_part` takes `index`/`name`/`part` but not `id`, where
-its siblings take `id`; `occurrence.frame()` needs the assembly tab active,
+**One word per thing, in the study family — DONE.** Running panel modes put
+three names on one concept: you wrote `add_study {kind}`, `list_studies`
+reported `type`, and `study_results` reported `analysis`. And all 23 study
+methods named their own subject `study`, where a mate, a section, a
+relation, a configuration and a CAM setup answer to `id`. Now: `type`
+everywhere (with `kind` still accepted), and the seven verbs that ACT ON a
+study take `id` (with `study` still accepted, as `remove_occurrence` takes
+either). A verb that only names a study for CONTEXT — `add_load`,
+`add_refinement`, `set_result_display` — still takes `study`, because there
+`id` would mean the load or the refinement; that distinction is the rule the
+rest of the API already follows. `remove_load` gained `id` for the load it
+removes, and its row stopped saying "by index" for a number the code has
+always matched against `l.id`. Gated by `tests/fem_smoke.py`, including the
+refusal when `id` and `study` name different studies.
+
+**Withdrawn:** `set_active_part` not taking `id`. Its `part` parameter is the
+resolver the whole part family uses (`delete_part`, `rename_part`) and it
+already accepts a stable id — `set_active_part(part=42)` works. Adding `id`
+would be a fourth spelling, not a fix.
+
+**Smaller, still open:** `occurrence.frame()` needs the assembly tab active,
 which a `Part.activate()` earlier in a loop silently undoes (the SDK's `Asm`
 methods self-activate, this one could too); `tests/generators_smoke.py` with
 no argument is a bare `IndexError` rather than a usage line.

@@ -22,6 +22,36 @@ using nlohmann::json;
 
 namespace remote {
 
+namespace {
+
+// Which study a verb that ACTS ON one is addressing.
+//
+// `id` is what every other object in this API answers to — a mate, a
+// section, a relation, a configuration, a CAM setup — and the study family
+// was the one holdout, naming its own subject `study` in all 23 of its
+// methods. Both work now, exactly as `remove_occurrence` takes `id` or
+// `occurrence`. A verb that acts on something ELSE and merely names the
+// study for context (add_load, add_refinement, set_result_display) still
+// takes `study` only: there, `id` would mean the load or the refinement.
+//
+// Takes the VALUES, not the params object, so both key names stay visible
+// at the call site — `rpc_params_gate` reads the handler for the keys it
+// touches, and a helper that reached into `p` itself once made add_mate
+// look as though it had quietly stopped accepting either.
+uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
+  if (hasId && hasStudy && id != study)
+    throw std::runtime_error(
+        "id and study name different studies — pass one of them");
+  if (hasId)
+    return id;
+  if (hasStudy)
+    return study;
+  throw std::runtime_error(
+      "which study? pass `id` (or `study`, which means the same here)");
+}
+
+} // namespace
+
 // FEM study RPCs, carved out of RemoteServer::HandleSemantic. All act on the
 // active part document. Returns the result json when `m` is one of ours,
 // std::nullopt otherwise; throws std::runtime_error on error (the caller's
@@ -31,18 +61,30 @@ static constexpr MethodDoc SimulationMethods[] = {
     {"enter_simulation", "Enter simulation mode for the active part.", "study",
      remote::NeedsPart},
     {"exit_simulation", "Leave simulation mode.", "", remote::NeedsPart},
-    {"add_study", "Add a study {kind: static|modal|topology, name?}.",
-     "kind, name", remote::NeedsPart},
-    {"remove_study", "Remove a study by id.", "study", remote::NeedsPart},
+    {"add_study",
+     "Add a study {type: static|modal|topology, name?}. `kind` is accepted "
+     "for the same thing — the enum, the file and `list_studies` all say "
+     "`type`, and so do add_mate/add_load/add_cam_op/add_relation.",
+     "kind, name, type", remote::NeedsPart},
+    {"remove_study",
+     "Remove a study {id}. `study` names the same thing here and in every "
+     "verb that ACTS ON a study (set_study, mesh_study, run_study, "
+     "study_results, study_status, cancel_study): `id` is what a mate, a "
+     "section, a relation, a configuration and a CAM setup all answer to, "
+     "and this family was the holdout. A verb that only names a study for "
+     "CONTEXT (add_load, add_refinement, set_result_display) still takes "
+     "`study`, because there `id` would mean the load or the refinement.",
+     "id, study", remote::NeedsPart},
     {"list_studies", "List studies with status.", "", remote::NeedsPart},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; `gravity` is metres per second "
      "squared (m/s^2) as a [x, y, z] vector, so Earth down is [0, 0, -9.81] "
      "with Z up. volume_fraction is a fraction of 1 and the iteration counts "
-     "are counts.",
-     "filter_radius, gravity, max_iterations, mesh_size, name, num_modes, "
-     "study, type, volume_fraction",
+     "are counts. Takes `id` (or `study`, the same thing here) — see "
+     "remove_study.",
+     "filter_radius, gravity, id, max_iterations, mesh_size, name, "
+     "num_modes, study, type, volume_fraction",
      remote::NeedsPart},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure, face, "
@@ -55,8 +97,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "default a GUI placement takes). A `face` is {feature_id, element}, or "
      "just the element name — the body that has it is then found for you.",
      "direction, face, magnitude, study, type", remote::NeedsPart},
-    {"remove_load", "Remove a load by index.", "load, study",
-     remote::NeedsPart},
+    {"remove_load",
+     "Remove a load from a study {study, id}. `load` is accepted for the "
+     "same thing. It is the load's ID, as `add_load` and `list_studies` "
+     "report it — this row said \"by index\", which is the same number only "
+     "until you remove one.",
+     "id, load, study", remote::NeedsPart},
     {"add_refinement",
      "Add a local mesh refinement on an element: `size` is the target element "
      "edge length there, in MILLIMETRES.",
@@ -73,21 +119,27 @@ static constexpr MethodDoc SimulationMethods[] = {
      "client a long timeout (the server finishes even if the client gives "
      "up) or pass `async: true`: the mesh then runs on a background job and "
      "study_status answers {running, meshing: true} until it lands, after "
-     "which its `mesh` carries the same bodies/nodes/elements/worst_quality.",
-     "async, study", remote::NeedsPart},
+     "which its `mesh` carries the same bodies/nodes/elements/worst_quality. "
+     "Takes `id` (or `study`, the same thing here) — see remove_study.",
+     "async, id, study", remote::NeedsPart},
     {"run_study",
      "Solve the study (blocking, or `async` and poll study_status). Async "
      "meshes AND solves off the frame; the result is stored into the part "
-     "the study belongs to even if another tab is active when it lands.",
-     "async, study", remote::NeedsPart},
-    {"cancel_study", "Cancel a running study.", "study", remote::NeedsPart},
+     "the study belongs to even if another tab is active when it lands. Takes "
+     "`id` (or `study`, the same thing here) — see remove_study.",
+     "async, id, study", remote::NeedsPart},
+    {"cancel_study",
+     "Cancel a running study — takes `id` (or `study`, the same thing here) — "
+     "see remove_study.",
+     "id, study", remote::NeedsPart},
     {"study_status",
      "Status/progress of a study: {running, meshing?, iteration…} while a "
      "job runs, else the cached result's state plus `mesh` from the last "
-     "mesh_study {async}.",
-     "study", remote::NeedsPart},
+     "mesh_study {async}. Takes `id` (or `study`, the same thing here) — see "
+     "remove_study.",
+     "id, study", remote::NeedsPart},
     {"study_results",
-     "Result summary: {analysis, elements, nodes, stale} plus a `bodies` "
+     "Result summary: {type, elements, nodes, stale} plus a `bodies` "
      "array, one entry PER BODY, because a study meshes and solves each body "
      "separately (there is no bonded contact between them). A body carries "
      "max_displacement_mm: {value, at}, max_von_mises_mpa: {value, at} and "
@@ -100,8 +152,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "\"study has not been run\" when there is "
      "nothing to report -- a solved result is DERIVED and no project keeps "
      "one, so a study reopened from disk carries its load cases and no "
-     "answers (`has_results`, `stale` in list_studies).",
-     "study", remote::NeedsPart},
+     "answers (`has_results`, `stale` in list_studies). Takes `id` (or "
+     "`study`, the same thing here) — see remove_study.",
+     "id, study", remote::NeedsPart},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
      "the deformation {study, field: von_mises|displacement|shape|density|"
@@ -127,11 +180,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // Optional `kind` sets the analysis type at creation (the doc row always
     // promised it; it used to require a second set_study call). Folding it
     // into the create keeps this one undo step.
+    // `type` is what the enum (fem::AnalysisType), the serialization
+    // (AnalysisTypeToString) and `list_studies` all call this, and what the
+    // other add_ verbs take (add_mate, add_load, add_cam_op, add_relation).
+    // This one asked for `kind` and then reported `type` back, so the word
+    // you wrote was not the word you read. Both are accepted.
     fem::AnalysisType type = fem::AnalysisType::Static;
-    const bool hasKind = p.contains("kind");
-    if (hasKind &&
-        !fem::AnalysisTypeFromString(p.at("kind").get<std::string>(), type))
-      throw std::runtime_error("study kind must be static, modal, or topology");
+    const bool hasKind = p.contains("kind") || p.contains("type");
+    const std::string want = p.contains("type")
+                                 ? p.at("type").get<std::string>()
+                                 : p.value("kind", std::string{});
+    if (hasKind && !fem::AnalysisTypeFromString(want, type))
+      throw std::runtime_error("study type must be static, modal, or topology");
     auto cmd =
         std::make_unique<AddStudyCommand>(p.value("name", std::string{}));
     AddStudyCommand* raw = cmd.get();
@@ -141,10 +201,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       s->type = type;
     return json{{"id", s->id},
                 {"name", s->name},
-                {"kind", fem::AnalysisTypeToString(s->type)}};
+                {"type", fem::AnalysisTypeToString(s->type)}};
   }
   if (m == "remove_study") {
-    const uint64_t id = p.at("study").get<uint64_t>();
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
     if (!doc->FindStudy(id))
       throw std::runtime_error("no such study");
     state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), *doc);
@@ -229,7 +291,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   };
 
   if (m == "set_study") {
-    const uint64_t id = p.at("study").get<uint64_t>();
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
     modifyStudy(id, "Edit study", [&](fem::Study& s) {
       if (p.contains("name"))
         s.name = p.at("name").get<std::string>();
@@ -354,8 +418,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     return json{{"id", l.id}};
   }
   if (m == "remove_load") {
+    // The load is what this acts on, so it is `id`; the study is context and
+    // stays `study`. `load` remains accepted. The row said "by index" and
+    // the code has always compared against `l.id` — which happen to differ
+    // the moment you remove one.
     const uint64_t id = p.at("study").get<uint64_t>();
-    const uint64_t loadId = p.at("load").get<uint64_t>();
+    const uint64_t loadId = p.contains("id") ? p.at("id").get<uint64_t>()
+                                             : p.at("load").get<uint64_t>();
     modifyStudy(id, "Remove load", [&](fem::Study& s) {
       s.loads.erase(
           std::remove_if(s.loads.begin(), s.loads.end(),
@@ -367,7 +436,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   if (m == "mesh_study") {
     // Mesh (no solve) every body the study touches; a headless milestone
     // before the solver exists. params: {study, async?}
-    const uint64_t id = p.at("study").get<uint64_t>();
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
     fem::Study* s = doc->FindStudy(id);
     if (!s)
       throw std::runtime_error("no such study");
@@ -404,7 +475,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // read (the registry stores it into the part it ran on, whichever tab
     // is active).
     ui::ReapBackgroundJobs(state);
-    const uint64_t id = p.at("study").get<uint64_t>();
+    const uint64_t id =
+        StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
+                     p.contains("study"), p.value("study", uint64_t{0}));
     fem::Study* s = doc->FindStudy(id);
     if (!s)
       throw std::runtime_error("no such study");
@@ -496,7 +569,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
         nodes += b.mesh.stats.nodeCount;
         elements += b.mesh.stats.tetCount;
       }
-      return json{{"analysis", "topology"},
+      return json{{"type", "topology"},
                   {"nodes", nodes},
                   {"elements", elements},
                   {"iterations", rt->iterations},
@@ -523,7 +596,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           freqs.push_back(mode.frequencyHz);
         bodies.push_back({{"body", b.bodyName}, {"frequencies_hz", freqs}});
       }
-      return json{{"analysis", "modal"},
+      return json{{"type", "modal"},
                   {"nodes", nodes},
                   {"elements", elements},
                   {"bodies", bodies},

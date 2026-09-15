@@ -78,10 +78,12 @@ def main():
         faces = [f["name"] for f in els["faces"]]
         fixed_face, load_face = faces[0], faces[1]  # an opposite pair
 
-        # --- a topology study (kind set at creation, one call) --------------
+        # --- a topology study (type set at creation, one call) --------------
+        # `kind` is still accepted; the REPLY says `type`, which is what the
+        # enum, the file and list_studies have always called it.
         created = d.call("add_study", name="Generative", kind="topology")
-        expect(created["kind"] == "topology",
-               f"add_study kind applied: {created}")
+        expect(created["type"] == "topology",
+               f"add_study type applied: {created}")
         study = created["id"]
         d.call("set_study", study=study, mesh_size=7.0,
                volume_fraction=0.4, filter_radius=14.0, max_iterations=25)
@@ -117,7 +119,9 @@ def main():
         expect(st["solve_seconds"] > 0.0, "solve time reported")
 
         res = d.call("study_results", study=study)
-        expect(res["analysis"] == "topology", f"topology summary: {res}")
+        # `type`, the same word add_study takes and list_studies reports —
+        # this used to be a third name ("analysis") for one concept.
+        expect(res["type"] == "topology", f"topology summary: {res}")
         expect(res["elements"] > 0, "solved a mesh")
         expect(res["solver"] == st["solver"], "results echo the solver")
         expect(abs(res["volume_fraction"] - 0.4) < 0.03,
