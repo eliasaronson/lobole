@@ -57,6 +57,43 @@ def main():
                f"verdicts: {r['verdicts']}")
         expect(any("offset by 2.0 mm" in v for v in r["verdicts"]),
                f"verdicts: {r['verdicts']}")
+        expect(r.get("metrics") == "all", f"the mode is named: {r}")
+
+        # metrics "volume": everything that needs no boolean, and the ones
+        # that do are ABSENT rather than zero — an iou of 0 means "these do
+        # not overlap at all", which is the opposite of "not measured".
+        # Three booleans on a filleted part is seconds
+        # (docs/inspect/compare-metrics-plan.md).
+        v = d.call("compare_geometry", a=0, b=1, metrics="volume")
+        expect(v.get("metrics") == "volume", f"the mode is named: {v}")
+        for absent in ("iou", "dice", "precision", "recall", "volume_common",
+                       "volume_missing", "volume_extra"):
+            expect(absent not in v, f"{absent} must be absent, not zero: {v}")
+        expect(abs(v["volume_ratio"] - r["volume_ratio"]) < 1e-9,
+               f"the cheap mode agrees on volume: {v}")
+        expect(abs(v["center_offset"] - r["center_offset"]) < 1e-9,
+               f"the cheap mode agrees on the centre: {v}")
+        expect(v["faces"] == r["faces"] and v["edges"] == r["edges"],
+               f"the census survives: {v}")
+        expect(not any("match" in x for x in v["verdicts"]),
+               f"no shape verdict without a boolean: {v['verdicts']}")
+        # The receipt claims the VOLUME, not the shape.
+        claims = (v.get("receipt") or {}).get("claims") or []
+        expect(any("volume" in c.get("claim", "") for c in claims),
+               f"the receipt claims what it measured: {claims}")
+        expect(not any("same shape" in c.get("claim", "") for c in claims),
+               f"and never the shape: {claims}")
+
+        # Refusals: an unknown mode, and the diff solids that mode cannot make
+        for params, fragment in ((dict(metrics="iou"), "unknown metrics"),
+                                 (dict(metrics="volume", materialize=True),
+                                  "no diff solids")):
+            try:
+                d.call("compare_geometry", a=0, b=1, **params)
+                raise AssertionError(f"{params} must be refused")
+            except Exception as exc:
+                expect(fragment in str(exc),
+                       f"{params} refused clearly: {exc}")
 
         # Diff solids export as BREP.
         miss = os.path.join(tmp, "missing.brep")

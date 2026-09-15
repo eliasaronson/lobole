@@ -198,6 +198,10 @@ def main():
                     choices=["carcass", "parts", "assembly", "cam", "all"])
     ap.add_argument("--skip-cam", action="store_true")
     ap.add_argument("--no-save", action="store_true")
+    ap.add_argument("--deep", action="store_true",
+                    help="compare against the reference STEPs by SHAPE "
+                         "(iou/dice, three OCC booleans — 22 s of the run) "
+                         "rather than by size and census")
     ap.add_argument("--save-anyway", action="store_true",
                     help="save even though the checks failed — for LOOKING at "
                          "what failed. The document is not to be trusted.")
@@ -238,7 +242,7 @@ def main():
 
 def _finish(app, args, asm, p, made):
     with phase("verify"):
-        ok = verify.run(app, p, made, asm)
+        ok = verify.run(app, p, made, asm, deep=args.deep)
     print(f"\nport tuning: fb = {params.helmholtz_fb(p):.1f} Hz "
           f"(port {float(p['port_internal_dia']):.0f} x "
           f"{float(p['port_length_total']):.0f} mm)")

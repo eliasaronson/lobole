@@ -70,7 +70,7 @@ ALLOW = {
 }
 
 
-def run(app, p, made, asm):
+def run(app, p, made, asm, deep=False):
     ok = True
     print("\nverify:")
 
@@ -114,14 +114,14 @@ def run(app, p, made, asm):
             ok = False
 
     # 4 -- the same cabinet (before 3, which moves everything)
-    _compare(app, made)
+    _compare(app, made, deep)
 
     # 3 -- the parameters drive it
     ok = _parametric(app, p, made) and ok
     return ok
 
 
-def _compare(app, made):
+def _compare(app, made, deep=False):
     """Against the reference STEPs, where there is one.
 
     Volume and bounding box, NOT IoU. The references were exported from the
@@ -133,7 +133,14 @@ def _compare(app, made):
     """
     refs = {"ring_brace": "ring_brace", "brace_ladder": "brace_ladder",
             "port_tube": "port_tube"}
-    print("  against the export:")
+    # Volume, bbox and the face/edge census — everything that needs no
+    # boolean. `--deep` asks for the overlap too (iou/dice/precision/recall),
+    # which is the only thing that can say two solids are the same SHAPE
+    # rather than the same size, and costs three OCC booleans: 13.2 s for the
+    # ring brace alone, 22 s of a 56 s run for the three of them
+    # (docs/inspect/compare-metrics-plan.md).
+    metrics = "all" if deep else "volume"
+    print(f'  against the export ({"shape, deep" if deep else "size + census"}):')
     for name, stem in refs.items():
         path = REFERENCE / f"{stem}.step"
         part = made.get(name)
@@ -141,11 +148,23 @@ def _compare(app, made):
             continue
         try:
             part.activate()
-            r = app.compare_geometry(golden_path=str(path))
+            r = app.compare_geometry(golden_path=str(path), metrics=metrics)
             ratio = r.get("volume_ratio", 0)
             flag = "" if 0.97 <= ratio <= 1.03 else "   <- re-drawn"
+            shape = ""
+            if deep:
+                shape = f"  iou {r.get('iou', 0):5.3f}"
+            elif r["faces"]["reference"] != r["faces"]["candidate"]:
+                # Stated, not judged. The census catches a shape faked at the
+                # right volume (stacked discs against a true cone,
+                # docs/benchmark-construction-plan.md) — but a STEP round
+                # trip splits faces too, and these braces come back 95 faces
+                # against the export's 45 at an IoU of 0.991. --deep is what
+                # answers it.
+                shape = (f"  census {r['faces']['candidate']}f vs "
+                         f"{r['faces']['reference']}f")
             print(f"    {name:<20} volume {ratio:6.3f} of the export"
-                  f"{flag}")
+                  f"{flag}{shape}")
         except Exception as exc:
             print(f"    {name:<20} could not compare: {exc}")
 

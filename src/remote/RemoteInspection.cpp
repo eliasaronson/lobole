@@ -587,7 +587,15 @@ static constexpr MethodDoc InspectionMethods[] = {
      "near_point, normal, part, radius, radius_tol"},
     {"compare_geometry",
      "Boolean-diff similarity: {golden_path} (STEP/BREP reference) vs the "
-     "active doc, or {a, b} bodies/occurrences. Returns iou/dice/precision/"
+     "active doc, or {a, b} bodies/occurrences. `metrics`: \"all\" (the "
+     "default) or \"volume\" — the overlap metrics cost THREE OCC booleans, "
+     "which on a part carrying toroidal fillets is seconds (13.2 s for one "
+     "filleted brace against 0.03 s for a tube with none), so a caller "
+     "reading volume_ratio should ask for \"volume\" and get size, "
+     "placement and the face/edge census in milliseconds. In that mode "
+     "iou/dice/precision/recall and the diff volumes are ABSENT rather than "
+     "zero, and the receipt claims the volume rather than the shape. "
+     "Returns iou/dice/precision/"
      "recall, volume_ratio, center_offset, bbox_iou, topology counts and "
      "plain-language verdicts; {missing_path}/{extra_path} export the diff "
      "solids as BREP. materialize:true DRAWS them on the part instead — "
@@ -599,7 +607,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "because the reference was 900 mm away. Off by default — a golden taken "
      "AT a position is a real thing to check — and `center_offset` still "
      "says how far it moved.",
-     "a, align, b, extra_path, golden_path, materialize, missing_path"},
+     "a, align, b, extra_path, golden_path, materialize, metrics, "
+     "missing_path"},
     {"clear_geometry_delta",
      "Remove the compare_geometry materialize overlay, leaving the plain "
      "model. Harmless when there is none.",
@@ -1444,18 +1453,41 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // is built about its own origin 900 mm away. Opt-in, because a golden
     // taken AT a position is a real thing to check and this would hide it;
     // `center_offset` still reports how far it moved.
+    // Which metrics to compute. The overlap ones — IoU, dice, precision,
+    // recall and the diff solids — cost three OCC booleans, which on a part
+    // carrying toroidal fillets is SECONDS (13.2 s for one brace of the
+    // smart speaker, 0.03 s for a tube with none). A caller reading
+    // volume_ratio should not pay for them
+    // (docs/inspect/compare-metrics-plan.md).
+    const std::string metrics = p.value("metrics", std::string("all"));
+    if (metrics != "all" && metrics != "volume")
+      throw std::runtime_error("unknown metrics '" + metrics +
+                               "': accepted are \"all\" (the default — adds "
+                               "iou/dice/precision/recall and the diff "
+                               "solids, at the price of three booleans) and "
+                               "\"volume\" (size, placement and topology)");
+    const bool wantOverlap = metrics == "all";
+    if (!wantOverlap &&
+        (wantMissing || wantExtra || p.value("materialize", false)))
+      throw std::runtime_error(
+          "metrics \"volume\" computes no diff solids, so missing_path, "
+          "extra_path and materialize have nothing to write — ask for "
+          "metrics \"all\"");
+
     glm::mat4 alignB(1.0f);
     if (p.value("align", false)) {
+      // Centres of mass only — the probe never needed the booleans.
       const auto probe = Measure::CompareBodySets(
-          refA, glm::mat4(1.0f), candB, glm::mat4(1.0f), nullptr, nullptr);
+          refA, glm::mat4(1.0f), candB, glm::mat4(1.0f), nullptr, nullptr,
+          /*overlap=*/false);
       if (probe)
         alignB = glm::translate(glm::mat4(1.0f), glm::vec3(probe->comA) -
                                                      glm::vec3(probe->comB));
     }
-    const auto c =
-        Measure::CompareBodySets(refA, glm::mat4(1.0f), candB, alignB,
-                                 wantMissing ? &missingShape : nullptr,
-                                 wantExtra ? &extraShape : nullptr);
+    const auto c = Measure::CompareBodySets(
+        refA, glm::mat4(1.0f), candB, alignB,
+        wantMissing ? &missingShape : nullptr,
+        wantExtra ? &extraShape : nullptr, wantOverlap);
     if (!c)
       throw std::runtime_error(
           "compare failed — an OpenCASCADE boolean threw, usually on an "
@@ -1485,7 +1517,26 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
 
     std::vector<std::string> verdicts;
     char buf[160];
-    if (iou > 0.99)
+    // A shape verdict needs the overlap. Without it this says what it CAN
+    // support — size, placement, topology — and never "match", which only a
+    // boolean can earn.
+    if (!wantOverlap) {
+      // The census is stated, not judged. It separates a shape faked at the
+      // right volume (a frustum of stacked discs is cylinder:6 plane:7
+      // against cone:1 plane:2 — docs/benchmark-construction-plan.md), but
+      // a difference is not by itself a difference of SHAPE: a STEP
+      // round-trip splits faces, and this project's ring brace comes back
+      // 95/223 against the export's 45/171 at an IoU of 0.991.
+      snprintf(buf, sizeof buf,
+               "size and placement only (metrics \"volume\"): census "
+               "%d faces / %d edges against %d / %d%s — ask for metrics "
+               "\"all\" to compare the SHAPES",
+               c->facesB, c->edgesB, c->facesA, c->edgesA,
+               (c->facesA == c->facesB && c->edgesA == c->edgesB)
+                   ? " (the same)"
+                   : " (a round trip splits faces; not a verdict)");
+      verdicts.push_back(buf);
+    } else if (iou > 0.99)
       verdicts.push_back("identical within tolerance");
     else if (iou > 0.95)
       verdicts.push_back("excellent match");
@@ -1495,12 +1546,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       verdicts.push_back("partial match");
     else
       verdicts.push_back("poor match");
-    if (precision < recall - 0.05) {
+    if (wantOverlap && precision < recall - 0.05) {
       snprintf(buf, sizeof buf,
                "over-generating: %.1f%% of the candidate is extra geometry",
                (1.0 - precision) * 100.0);
       verdicts.push_back(buf);
-    } else if (recall < precision - 0.05) {
+    } else if (wantOverlap && recall < precision - 0.05) {
       snprintf(buf, sizeof buf,
                "under-generating: %.1f%% of the reference is missing",
                (1.0 - recall) * 100.0);
@@ -1518,42 +1569,68 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       verdicts.push_back(buf);
     }
 
-    json out = {{"iou", iou},
-                {"dice", dice},
-                {"precision", precision},
-                {"recall", recall},
+    // The overlap metrics are OMITTED in volume mode rather than reported as
+    // zero: an iou of 0 means "these do not overlap at all", which is the
+    // opposite of "not measured". `metrics` says which mode produced this.
+    json out = {{"metrics", metrics},
                 {"volume_ratio", volumeRatio},
                 {"center_offset", centerOffset},
                 {"bbox_iou", bboxIou},
                 {"volume_reference", c->volumeA},
                 {"volume_candidate", c->volumeB},
-                {"volume_common", c->common},
-                {"volume_missing", c->missing},
-                {"volume_extra", c->extra},
                 {"surface_reference", c->surfaceA},
                 {"surface_candidate", c->surfaceB},
                 {"faces", {{"reference", c->facesA}, {"candidate", c->facesB}}},
                 {"edges", {{"reference", c->edgesA}, {"candidate", c->edgesB}}},
                 {"verdicts", verdicts}};
+    if (wantOverlap) {
+      out["iou"] = iou;
+      out["dice"] = dice;
+      out["precision"] = precision;
+      out["recall"] = recall;
+      out["volume_common"] = c->common;
+      out["volume_missing"] = c->missing;
+      out["volume_extra"] = c->extra;
+    }
     {
       // A boolean diff on the real B-Rep, so VERIFIED — but the claim it
       // supports is "these are the same shape", and that is a judgement with
       // a threshold in it. The threshold is named in the note rather than
       // hidden in a verdict string, so a caller can disagree with it.
       receipt::Receipt receipt;
-      const receipt::Oracle oracle{"designer/boolean-diff", "1"};
       constexpr double kSame = 0.999; // IoU at which we call it the same shape
-      receipt::Claim same(
-          "the candidate is the same shape as the reference", oracle,
-          iou >= kSame ? receipt::Verdict::Pass : receipt::Verdict::Fail);
-      same.basis = receipt::Basis::Verified;
-      same.value = iou;
-      same.unit = "IoU";
-      same.note = "vol(A and B) / vol(A or B) on the exact solids, called the "
-                  "same at " +
-                  std::to_string(kSame) +
-                  "; the `verdicts` strings say which way it differs";
-      receipt.Add(std::move(same));
+      if (wantOverlap) {
+        const receipt::Oracle oracle{"designer/boolean-diff", "1"};
+        receipt::Claim same(
+            "the candidate is the same shape as the reference", oracle,
+            iou >= kSame ? receipt::Verdict::Pass : receipt::Verdict::Fail);
+        same.basis = receipt::Basis::Verified;
+        same.value = iou;
+        same.unit = "IoU";
+        same.note = "vol(A and B) / vol(A or B) on the exact solids, called "
+                    "the same at " +
+                    std::to_string(kSame) +
+                    "; the `verdicts` strings say which way it differs";
+        receipt.Add(std::move(same));
+      } else {
+        // No boolean ran, so the SHAPE claim cannot be made — and making it
+        // from an unmeasured IoU of zero would fail every comparison that
+        // asked for less. Claim what was measured instead.
+        const receipt::Oracle oracle{"designer/volume-ratio", "1"};
+        constexpr double kTol = 0.001; // 0.1% either way
+        receipt::Claim sized(
+            "the candidate has the same volume as the reference", oracle,
+            std::abs(1.0 - volumeRatio) <= kTol ? receipt::Verdict::Pass
+                                                : receipt::Verdict::Fail);
+        sized.basis = receipt::Basis::Verified;
+        sized.value = volumeRatio;
+        sized.unit = "ratio";
+        sized.note = "vol(B) / vol(A) on the exact solids. This is NOT a "
+                     "shape check — two different shapes can share a volume "
+                     "— and metrics \"volume\" ran no boolean; ask for "
+                     "metrics \"all\" for that claim";
+        receipt.Add(std::move(sized));
+      }
       AttachReceipt(out, receipt);
     }
     if (p.contains("missing_path")) {

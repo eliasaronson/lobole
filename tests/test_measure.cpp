@@ -1268,3 +1268,44 @@ TEST_CASE("A section can report the OUTLINE of what it cuts",
   CHECK(outer == 1);
   CHECK(arcs >= 1);
 }
+
+TEST_CASE("Comparing two sets without the overlap measures everything else",
+          "[measure][compare]") {
+  // The overlap metrics cost three OCC booleans, and on a part carrying
+  // toroidal fillets that is SECONDS — 13.2 s for one brace of the smart
+  // speaker against 0.03 s for a tube with none. A caller reading
+  // volume_ratio was paying for four metrics it never read
+  // (docs/inspect/compare-metrics-plan.md).
+  CADShape a = CADKernel::Instance().CreateBox(40.0, 30.0, 20.0);
+  CADShape b = CADKernel::Instance().CreateBox(40.0, 30.0, 22.0);
+  REQUIRE(a.IsValid());
+  REQUIRE(b.IsValid());
+  std::vector<Body> setA(1), setB(1);
+  setA[0].shape = a;
+  setB[0].shape = b;
+
+  const auto full = Measure::CompareBodySets(setA, glm::mat4(1.0f), setB,
+                                             glm::mat4(1.0f), nullptr, nullptr,
+                                             /*overlap=*/true);
+  const auto cheap =
+      Measure::CompareBodySets(setA, glm::mat4(1.0f), setB, glm::mat4(1.0f),
+                               nullptr, nullptr, /*overlap=*/false);
+  REQUIRE(full.has_value());
+  REQUIRE(cheap.has_value());
+
+  // Everything measured off the two shapes agrees between the modes.
+  CHECK(cheap->hasOverlap == false);
+  CHECK(full->hasOverlap == true);
+  CHECK_THAT(cheap->volumeA, WithinRel(full->volumeA, 1e-9));
+  CHECK_THAT(cheap->volumeB, WithinRel(full->volumeB, 1e-9));
+  CHECK_THAT(cheap->surfaceA, WithinRel(full->surfaceA, 1e-9));
+  CHECK(cheap->facesA == full->facesA);
+  CHECK(cheap->edgesB == full->edgesB);
+  CHECK_THAT(cheap->comB.z, WithinAbs(full->comB.z, 1e-9));
+
+  // The overlap really was computed in one and not the other — and the cheap
+  // one says so rather than leaving a zero that reads as "no overlap at all".
+  CHECK(full->common > 0.0);
+  CHECK(cheap->common == 0.0);
+  CHECK(cheap->hasOverlap == false);
+}

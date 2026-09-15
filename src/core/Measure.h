@@ -141,6 +141,13 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
 // arithmetic over these and live at the RPC layer. missingOut/extraOut, when
 // non-null, receive the diff SOLIDS so callers can export/render the delta.
 struct SetCompare {
+  // False when the caller asked for no overlap: `common`, `missing` and
+  // `extra` were never computed and are not zero-because-they-are-zero.
+  // Three OCC booleans is what they cost, and on a part carrying toroidal
+  // fillets that is seconds — 13.2 s for one brace of the smart speaker,
+  // against 30 ms for a tube with no fillets
+  // (docs/inspect/compare-metrics-plan.md).
+  bool hasOverlap = true;
   double volumeA = 0.0, volumeB = 0.0;
   double common = 0.0, missing = 0.0, extra = 0.0;
   double surfaceA = 0.0, surfaceB = 0.0;
@@ -148,10 +155,14 @@ struct SetCompare {
   glm::vec3 minA{0.0f}, maxA{0.0f}, minB{0.0f}, maxB{0.0f};
   int facesA = 0, facesB = 0, edgesA = 0, edgesB = 0;
 };
+// `overlap` false skips the three booleans — everything else (volumes,
+// surfaces, centres, bounds, the face/edge census) is measured from the two
+// shapes directly and costs milliseconds.
 std::optional<SetCompare>
 CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
                 const std::vector<Body>& bodiesB, const glm::mat4& xfB,
-                CADShape* missingOut = nullptr, CADShape* extraOut = nullptr);
+                CADShape* missingOut = nullptr, CADShape* extraOut = nullptr,
+                bool overlap = true);
 
 // Watertightness report for mesh export: shell count and free (naked) edge
 // count of a shape about to be tessellated. A shape is watertight when it has

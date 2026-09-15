@@ -737,7 +737,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
 std::optional<SetCompare>
 CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
                 const std::vector<Body>& bodiesB, const glm::mat4& xfB,
-                CADShape* missingOut, CADShape* extraOut) {
+                CADShape* missingOut, CADShape* extraOut, bool overlap) {
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
     // Each side is FUSED, not compounded: with overlapping bodies a compound
@@ -797,6 +797,12 @@ CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
             out.facesA, out.edgesA);
     measure(b, out.volumeB, out.surfaceB, out.comB, out.minB, out.maxB,
             out.facesB, out.edgesB);
+
+    // Everything above came off the two shapes directly. Everything below is
+    // three booleans, which is where the seconds are.
+    out.hasOverlap = overlap;
+    if (!overlap)
+      return out;
 
     const auto volumeOf = [](const TopoDS_Shape& s) {
       if (s.IsNull())
