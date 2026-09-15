@@ -246,6 +246,19 @@ def main():
         views = d.call("list_drawing_views")["views"]
         scales = {round(v["scale"], 6) for v in views}
         expect(len(scales) == 1, f"one scale per sheet: {scales}")
+
+        # What the view COST, by the name a reader can act on. An imported
+        # driver was 16 s of an 18 s assembly view and nothing said which
+        # occupant to leave out of `hidden`; the clocks the hide loop already
+        # keeps are attributed per source now
+        # (docs/drawings/view-cost-report-plan.md). Asserted on an ordinary
+        # view: the field exists without needing pathological geometry, and
+        # only the WARNING waits for a slow one.
+        cost = views[0]["cost"]
+        expect("by_occurrence" in cost, f"cost names its sources: {cost}")
+        for entry in cost["by_occurrence"]:
+            expect(entry["ms"] >= 0.0, f"a cost is not negative: {entry}")
+            expect("id" in entry, f"a cost names its source id: {entry}")
         chk = d.call("check_drawing")
         piles = [i for i in chk["issues"]
                  if i["kind"] in ("view_overlap", "view_overlaps_title_block",

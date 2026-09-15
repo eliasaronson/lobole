@@ -135,6 +135,8 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
     sb.input.sourceId = out.size(); // slot index: picks this entry on join
     sb.featureId = body.createdBy;
     sb.refId = occId ? occId : body.createdBy; // occurrence, else body owner
+    sb.input.groupId =
+        sb.refId; // what a cost is charged to, and `hidden` names
     sb.map = &body.elementMap;
     out.push_back(std::move(sb));
   }
@@ -285,6 +287,10 @@ AssembleSheetView(AppState& state, const DrawingView& view,
   result.dsEdges = projection.stats.dsEdges;
   result.projectionStats = projection.stats;
   result.bodies = static_cast<int>(bodies.size());
+  // Already grouped by refId (InputBody::groupId), dearest first.
+  result.costBySource = projection.stats.costBySource;
+  std::sort(result.costBySource.begin(), result.costBySource.end(),
+            [](const auto& a, const auto& b) { return a.ms > b.ms; });
   const drawing::ProjectionResult* projected = &projection;
 
   // Map an index-space SourceRef back to a stable ElementRef via the owning
@@ -774,6 +780,21 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   SnapshotDrawing(state);
   const uint64_t id = dwg.AddView(v);
   UpdateDrawingRenders(state);
+  // The probe above is the projection that DID the work; the re-projection
+  // just now was a cache hit by construction (same bodies, same direction —
+  // scale and position are sheet mapping, which HLR never saw). So the
+  // placed view carries the probe's bill: otherwise the one call that
+  // actually spent 18 seconds reports zero, which is true of that second
+  // projection and useless to the caller asking what the view cost.
+  if (const auto it = state.drawingRenders.find(id);
+      it != state.drawingRenders.end() && it->second.costBySource.empty() &&
+      !sv.costBySource.empty()) {
+    it->second.costBySource = sv.costBySource;
+    it->second.projectionStats = sv.projectionStats;
+    it->second.updateMs = sv.updateMs;
+    it->second.hideMs = sv.hideMs;
+    it->second.dsEdges = sv.dsEdges;
+  }
   return id;
 }
 

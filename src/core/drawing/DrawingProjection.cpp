@@ -491,6 +491,24 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
     for (const auto& body : bodies)
       if (!body.shape.IsNull())
         loaded.push_back(body);
+    // Cost attribution by GROUP (an occurrence, typically), same clocks as
+    // selfMs/pairMs. `slotGroup[i]` is the entry in costBySource that shape
+    // i + 1 charges to; several bodies of one occurrence share it.
+    std::vector<size_t> slotGroup(loaded.size(), 0);
+    for (size_t b = 0; b < loaded.size(); ++b) {
+      const uint64_t group =
+          loaded[b].groupId != 0 ? loaded[b].groupId : loaded[b].sourceId;
+      auto it = std::find_if(
+          result.stats.costBySource.begin(), result.stats.costBySource.end(),
+          [&](const auto& c) { return c.sourceId == group; });
+      if (it == result.stats.costBySource.end()) {
+        result.stats.costBySource.push_back({group, 0.0});
+        slotGroup[b] = result.stats.costBySource.size() - 1;
+      } else {
+        slotGroup[b] = static_cast<size_t>(
+            std::distance(result.stats.costBySource.begin(), it));
+      }
+    }
     for (int i = 1; i <= nbShapes; ++i) {
       if (stopped()) {
         if (error)
@@ -515,9 +533,11 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
           SaveVisibility(*cache, selfKey, *self);
         }
       }
-      result.stats.selfMs +=
+      const double selfMs =
           std::chrono::duration<double, std::milli>(Clock::now() - selfStart)
               .count();
+      result.stats.selfMs += selfMs;
+      result.stats.costBySource[slotGroup[i - 1]].ms += selfMs;
       auto combined = self;
       for (int j = 1; j <= nbShapes; ++j) {
         if (stopped()) {
@@ -554,9 +574,17 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
           ApplyVisibility(*algo, i, *pair, false);
           combined = ReadVisibility(*algo, i);
         }
-        result.stats.pairMs +=
+        const double pairMs =
             std::chrono::duration<double, std::milli>(Clock::now() - pairStart)
                 .count();
+        result.stats.pairMs += pairMs;
+        // BOTH: leaving either one out of the view avoids this pair. Once
+        // when they are the same group — two bodies of one occurrence go
+        // together, and charging their pair twice overstated the occurrence
+        // beyond the view's own total.
+        result.stats.costBySource[slotGroup[i - 1]].ms += pairMs;
+        if (slotGroup[j - 1] != slotGroup[i - 1])
+          result.stats.costBySource[slotGroup[j - 1]].ms += pairMs;
       }
     }
     if (stopped()) {
@@ -735,12 +763,18 @@ ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
   auto& cache = *options.cache->impl_;
   Cache::Key key{bodies, viewDir, up, options.mode, options.deflection};
   // Cached attribution is local to the geometry list, never an old occurrence.
-  for (size_t i = 0; i < key.bodies.size(); ++i)
+  for (size_t i = 0; i < key.bodies.size(); ++i) {
+    // The GROUP survives — it is the caller's own id and never part of the
+    // key — so the costs come back named without a remap.
+    if (key.bodies[i].groupId == 0)
+      key.bodies[i].groupId = key.bodies[i].sourceId;
     key.bodies[i].sourceId = i;
+  }
   const auto finish = [&](ProjectionResult result) {
     for (auto& curve : result.curves)
       if (curve.source.IsResolved())
         curve.source.sourceId = bodies.at(curve.source.sourceId).sourceId;
+
     if (!options.hiddenLines)
       std::erase_if(result.curves, [](const auto& c) { return !c.visible; });
     result.stats.cacheBytes = cache.bytes;

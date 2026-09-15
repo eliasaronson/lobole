@@ -340,6 +340,55 @@ TEST_CASE("HLR hides one instance behind another with per-instance attribution",
   CHECK(fromSecond > 0);
 }
 
+TEST_CASE("HLR says which source its time went to", "[drawing][hlr]") {
+  // A view that costs seconds is usually one occupant's fault — an imported
+  // driver was 16 s of an 18 s sheet view — and nothing said which. The
+  // clocks the hide loop already keeps are attributed per SOURCE, so the
+  // answer arrives with the view (docs/drawings/view-cost-report-plan.md).
+  CADShape part = BlockWithHole();
+  REQUIRE(part.IsValid());
+
+  std::vector<InputBody> bodies = One(part, 1);
+  bodies.push_back(
+      InputBody{part.GetShape(),
+                glm::translate(glm::dmat4(1.0), glm::dvec3(0, 60, 0)), 2});
+  // Two bodies of ONE source: their pair must be charged once, not twice.
+  bodies.push_back(
+      InputBody{part.GetShape(),
+                glm::translate(glm::dmat4(1.0), glm::dvec3(0, 120, 0)), 3});
+  bodies.back().groupId = 3;
+  bodies.push_back(
+      InputBody{part.GetShape(),
+                glm::translate(glm::dmat4(1.0), glm::dvec3(0, 180, 0)), 4});
+  bodies.back().groupId = 3; // same occurrence as the one above
+
+  std::string err;
+  auto result = ProjectView(bodies, kFrontDir, kFrontUp, {}, &err);
+  INFO(err);
+  REQUIRE(result.has_value());
+
+  const auto& costs = result->stats.costBySource;
+  // One entry per SOURCE (1, 2, and the two bodies grouped as 3), named in
+  // the caller's own ids rather than body slots.
+  CHECK(costs.size() == 3);
+  double total = 0.0;
+  for (const auto& c : costs) {
+    INFO("source " << c.sourceId);
+    CHECK(c.ms >= 0.0);
+    CHECK((c.sourceId == 1 || c.sourceId == 2 || c.sourceId == 3));
+    total += c.ms;
+  }
+  const double spent = result->stats.selfMs + result->stats.pairMs;
+  CHECK(total > 0.0);
+  // Shares OVERLAP by design — a pair counts for both of its members — so the
+  // sum exceeds what was spent. What must NOT happen is a single source
+  // exceeding it, which is what charging an occurrence's internal pairs twice
+  // did (one driver read as 113% of its own view).
+  CHECK(total >= spent);
+  for (const auto& c : costs)
+    CHECK(c.ms <= spent * 1.001);
+}
+
 TEST_CASE("HLR curve output: types and discretization (gate 3 record)",
           "[drawing][hlr]") {
   CADShape part = BlockWithHole();

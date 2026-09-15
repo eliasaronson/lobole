@@ -9,6 +9,7 @@
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // PartDocById / AssemblyDocById (view cost)
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 
@@ -49,6 +50,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. "
      "`hidden` leaves occurrences OFF this view, by id or name, refused if the "
      "name is not in the source. It is a per-SHEET choice, not a model change. "
+     "When this call projects (the auto-placed form), it returns `cost_ms` "
+     "and `by_occurrence` — which occupants carried it — plus a `warnings` "
+     "line when one of them carried most of a slow view, so the name to put "
+     "in `hidden` arrives with the bill rather than after a bisect. "
      "Exact HLR is priced by surface complexity, so one swept part can "
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
@@ -75,6 +80,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. "
      "`hidden` leaves occurrences OFF this view, by id or name, refused if the "
      "name is not in the source. It is a per-SHEET choice, not a model change. "
+     "When this call projects (the auto-placed form), it returns `cost_ms` "
+     "and `by_occurrence` — which occupants carried it — plus a `warnings` "
+     "line when one of them carried most of a slow view, so the name to put "
+     "in `hidden` arrives with the bill rather than after a bisect. "
      "Exact HLR is priced by surface complexity, so one swept part can "
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
@@ -82,7 +91,14 @@ static constexpr MethodDoc DrawingMethods[] = {
      "base_view, drawing, hidden, name, orientation, position, quality, "
      "scale, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
-    {"list_drawing_views", "List views with placement and scale.", ""},
+    {"list_drawing_views",
+     "List views with placement and scale, each with what its projection "
+     "COST: `cost.by_occurrence` names the occupants that carried it, "
+     "dearest first, in the ids `hidden` accepts. Shares OVERLAP and are not "
+     "normalised — a pair's time counts for both of its members, because "
+     "leaving out either avoids it. A cached re-projection reports zero, "
+     "which is what it spent.",
+     ""},
     {"update_drawing",
      "Re-project all views from current geometry. {drawing?} names the sheet. "
      "`budget_s` bounds the WHOLE "
@@ -91,7 +107,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "instead of blocking the server for as long as it takes. Exact HLR is "
      "priced by SURFACE complexity, not part count — 16 bored boxes are "
      "3.1 ms a view and one 4-turn helical spring is 6.4 s — so a view's "
-     "`quality: \"fast\"` is the other lever. Omit for no budget.",
+     "`quality: \"fast\"` is the other lever. Omit for no budget. A view "
+     "that took over a second and was mostly ONE occupant says so in its "
+     "`warnings`, naming it: on a 35-part speaker, one imported driver was "
+     "87% of an 16.8 s view.",
      "budget_s, drawing"},
     {"list_drawing_geometry",
      "Projected 2D curves of a view (for picking/dimensioning).", "view"},
@@ -295,6 +314,63 @@ void SelectDrawing(ui::AppState& state, const RpcParams& p) {
 
 } // namespace
 
+namespace {
+// What a view's projection cost, by the name a reader can act on. The ids in
+// `costBySource` are occurrence ids on an assembly view and body-owning
+// feature ids on a part view, which is exactly what `hidden` accepts.
+//
+// Shares OVERLAP and are not normalised: a pair's cost counts for both of its
+// members, because leaving out either one avoids that pair. Normalising them
+// into a pie would be a tidier lie.
+json CostBySourceJson(ui::AppState& state, const DrawingView& view,
+                      const drawing::SheetView& sheet) {
+  json arr = json::array();
+  Document* part = ui::PartDocById(state, view.sourceDocId);
+  const AssemblyDocument* asmDoc = ui::AssemblyDocById(state, view.sourceDocId);
+  for (const auto& cost : sheet.costBySource) {
+    json entry = {{"id", cost.sourceId}, {"ms", cost.ms}};
+    if (asmDoc != nullptr) {
+      if (const Occurrence* occ = asmDoc->FindById(cost.sourceId))
+        entry["name"] = occ->name;
+    } else if (part != nullptr) {
+      for (size_t i = 0; i < part->FeatureCount(); i++)
+        if (const Feature* f = part->GetFeature(i);
+            f && f->GetId() == cost.sourceId)
+          entry["name"] = f->GetName();
+    }
+    arr.push_back(std::move(entry));
+  }
+  return arr;
+}
+
+// "This view took 18 s and one occurrence was 88% of it" — with the name and
+// the parameter that acts on it, because a diagnosis nobody can act on is not
+// worth printing. Silent on fast views: every sheet would otherwise carry a
+// paragraph about a tenth of a second.
+std::optional<std::string> SlowViewWarning(ui::AppState& state,
+                                           const DrawingView& view,
+                                           const drawing::SheetView& sheet) {
+  constexpr double kWorthSaying = 1000.0; // ms
+  const double total = sheet.updateMs + sheet.hideMs;
+  if (total < kWorthSaying || sheet.costBySource.empty())
+    return std::nullopt;
+  const auto& top = sheet.costBySource.front(); // sorted by cost
+  if (top.ms < total * 0.5)
+    return std::nullopt; // spread across the model: nothing to single out
+  const json named = CostBySourceJson(state, view, sheet);
+  std::string name = named.empty() || !named.front().contains("name")
+                         ? std::to_string(top.sourceId)
+                         : named.front().at("name").get<std::string>();
+  char buf[256];
+  snprintf(buf, sizeof buf,
+           "this view cost %.1f s and '%s' accounts for %.0f%% of it — "
+           "`hidden` leaves it off this sheet, or `quality: \"fast\"` "
+           "projects the whole view polygonally",
+           total / 1000.0, name.c_str(), 100.0 * top.ms / total);
+  return std::string(buf);
+}
+} // namespace
+
 std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   if (m == "create_drawing") {
@@ -426,11 +502,27 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       // BEFORE the snapshot below rather than alongside it.
       v.scale = 0.0; // <= 0 asks it to choose a standard scale
       const uint64_t id = ui::AddDrawingViewPlaced(state, v);
-      // Placing a view means measuring it, so it is already projected.
-      return json{{"id", id},
-                  {"source_id", sourceId},
-                  {"needs_update", false},
-                  {"auto_placed", true}};
+      // Placing a view means measuring it, so it is already projected — and
+      // therefore this is the one moment that knows what it cost. A view that
+      // took seconds names the occurrence that carried it (W3's "an assembly
+      // view is 66-86 s and looked like a hang" was only half the problem:
+      // the other half is not knowing which part to leave out).
+      json resp{{"id", id},
+                {"source_id", sourceId},
+                {"needs_update", false},
+                {"auto_placed", true}};
+      const auto placed = state.drawingRenders.find(id);
+      if (placed != state.drawingRenders.end()) {
+        const DrawingView* added = state.drawing->FindView(id);
+        if (added != nullptr) {
+          resp["cost_ms"] = placed->second.updateMs + placed->second.hideMs;
+          resp["by_occurrence"] =
+              CostBySourceJson(state, *added, placed->second);
+          if (const auto warn = SlowViewWarning(state, *added, placed->second))
+            resp["warnings"] = json::array({*warn});
+        }
+      }
+      return resp;
     }
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddView(v);
@@ -632,18 +724,24 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         // projects it, and the bill is all HLR (W3).
         {
           const auto& stats = it->second.projectionStats;
-          vj["cost"] = {{"outline_ms", it->second.updateMs},
-                        {"hide_ms", it->second.hideMs},
-                        {"hlr_edges", it->second.dsEdges},
-                        {"bodies", it->second.bodies},
-                        {"self_ms", stats.selfMs},
-                        {"pair_ms", stats.pairMs},
-                        {"self_calls", stats.selfCalls},
-                        {"pair_calls", stats.pairCalls},
-                        {"self_hits", stats.selfHits},
-                        {"pair_hits", stats.pairHits},
-                        {"projection_hit", stats.projectionHit},
-                        {"cache_bytes", stats.cacheBytes}};
+          if (const auto warn = SlowViewWarning(state, view, it->second))
+            vj["warnings"] = json::array({*warn});
+          vj["cost"] = {
+              {"outline_ms", it->second.updateMs},
+              {"hide_ms", it->second.hideMs},
+              {"hlr_edges", it->second.dsEdges},
+              {"bodies", it->second.bodies},
+              {"self_ms", stats.selfMs},
+              {"pair_ms", stats.pairMs},
+              {"self_calls", stats.selfCalls},
+              {"pair_calls", stats.pairCalls},
+              {"self_hits", stats.selfHits},
+              {"pair_hits", stats.pairHits},
+              {"projection_hit", stats.projectionHit},
+              {"cache_bytes", stats.cacheBytes},
+              // WHICH occupants cost that, by name: the bill is
+              // rarely spread evenly and `hidden` acts on names.
+              {"by_occurrence", CostBySourceJson(state, view, it->second)}};
         }
         if (!it->second.error.empty())
           vj["error"] = it->second.error;

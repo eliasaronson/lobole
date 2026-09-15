@@ -33,6 +33,13 @@ struct InputBody {
   // Invalidate even when a caller edits geometry in place. Shapes must remain
   // immutable between revisions while retained by a cache.
   uint64_t geometryRevision = 0;
+  // Which SEMANTIC thing this body belongs to, for cost attribution only: an
+  // occurrence usually owns several bodies, and "what would hiding this cost
+  // me" is asked about the occurrence. Pairs BETWEEN two bodies of the same
+  // group are charged once, not twice — that double count made one driver
+  // read as 113% of its own view. 0 falls back to `sourceId`. Never part of
+  // the cache key: two placements of one part share their projection.
+  uint64_t groupId = 0;
 };
 
 // How a projected curve came to exist. Sharp/Smooth/Sewn curves are images of
@@ -109,9 +116,9 @@ struct ProjectionResult {
   // it can say so on the sheet; nothing here ever silently downgrades.
   ProjectionMode mode = ProjectionMode::Exact;
   struct Stats {
-    double updateMs = 0.0;     // HLRBRep Update(): outline building
-    double hideMs = 0.0;       // HLRBRep Hide(): visibility classification
-    int dsEdges = 0;           // edges in the HLR data structure
+    double updateMs = 0.0; // HLRBRep Update(): outline building
+    double hideMs = 0.0;   // HLRBRep Hide(): visibility classification
+    int dsEdges = 0;       // edges in the HLR data structure
     double selfMs = 0.0;
     double pairMs = 0.0;
     int selfCalls = 0;
@@ -121,6 +128,20 @@ struct ProjectionResult {
     bool projectionHit = false;
     size_t cacheBytes = 0;     // payload only, excluding retained OCC geometry
     int unresolvedSources = 0; // curves whose SourceRef could not be traced
+    // Where the hiding time went, per `InputBody::groupId` — the same two
+    // clocks as selfMs/pairMs, attributed instead of summed, in the caller's
+    // own ids.
+    //
+    // A PAIR's cost counts for BOTH of its members, because the question this
+    // answers is "what would leaving this one out save", and leaving out
+    // either member avoids that pair's work. So these overlap and their sum
+    // exceeds selfMs + pairMs; a reader who normalises them is lying to
+    // themselves (docs/drawings/view-cost-report-plan.md).
+    struct BodyCost {
+      uint64_t sourceId = 0; // the group's id
+      double ms = 0.0;
+    };
+    std::vector<BodyCost> costBySource;
   } stats;
 };
 

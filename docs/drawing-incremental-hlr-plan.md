@@ -201,10 +201,10 @@ extruded panels.
 
 So the useful directions are not "make HLR faster":
 
-- **Say where the time went.** A view that takes seconds should name the
-  occurrences that cost it, the way a capture names a frame that is one
-  colour. `hidden` already exists; nothing tells the user which two names to
-  put in it.
+- **Say where the time went.** BUILT — docs/drawings/view-cost-report-plan.md.
+  `list_drawing_views` reports `cost.by_occurrence`, and a view that took over
+  a second and was mostly one occupant says so in `warnings`, naming it: "this
+  view cost 16.8 s and 'W170S woofer' accounts for 87% of it".
 - **Parallel views.** The four views are independent projections, and the
   sheet is the sum of them: ~34 s becomes ~18 s (the longest) at best. The
   prerequisite is the isolated snapshot below — OCC shapes are written to by
