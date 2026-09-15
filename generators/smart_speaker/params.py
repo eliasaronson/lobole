@@ -31,6 +31,8 @@ Heights are derived from the chamber they belong to, never written twice:
 left of it once the Alpair chamber and the port bay are taken out.
 """
 
+from designer_sdk import SdkError
+
 # The table, in declaration order. (name, expression, comment) — the comment
 # reaches the document, so the reason a number is what it is travels with it.
 #
@@ -218,19 +220,29 @@ def declare(part):
     return out
 
 
-def helmholtz_fb(p):
+def helmholtz_fb(p, displaced_litres=0.0):
     """Port tuning, in Hz, for the box and port the table describes.
 
     Reported by every run because it is the number the cabinet exists to get
     right, and because it is the one thing that changes when someone edits
     `port_length_total` to make a part fit.
+
+    `displaced_litres` is everything standing INSIDE the woofer chamber —
+    the braces, the port tube's outer envelope, the driver, the electronics.
+    It matters and it is not small: 4.1 L of a 57.4 L chamber, which is 1.3
+    Hz of tuning. This used to say the caller measured and passed it in, and
+    no caller did, so every run printed the GROSS box's tuning as though it
+    were the real one. `smart_speaker.py` measures it off the assembly now.
+    Called without it you get the gross figure, which is optimistic — the
+    box is always smaller than its walls suggest, never larger.
     """
     import math
-    # Net internal volume, in m^3: the gross box less the walls' share is
-    # already what cabinet_internal_* describe, so this is that box minus the
-    # divider and the braces, which the caller measures and passes in.
-    v_litres = (float(p["cabinet_internal_w"]) * float(p["cabinet_internal_d"])
-                * float(p["w170s_chamber_h"])) / 1e6
+    v_litres = ((float(p["cabinet_internal_w"])
+                 * float(p["cabinet_internal_d"])
+                 * float(p["w170s_chamber_h"])) / 1e6) - float(displaced_litres)
+    if v_litres <= 0.0:
+        raise SdkError(f"the woofer chamber measures {v_litres:.1f} L net — "
+                       f"more is standing inside it than fits")
     r = float(p["port_internal_dia"]) / 2000.0
     length_m = float(p["port_length_total"]) / 1000.0
     # End correction: one flanged end, one free — 0.85r and 0.61r.

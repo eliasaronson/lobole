@@ -240,12 +240,55 @@ def main():
     return _finish(app, args, asm, p, made)
 
 
+def _chamber_occupants(app, asm, p):
+    """Litres of the woofer chamber that are NOT air, measured off the
+    assembly rather than assumed.
+
+    Everything whose middle falls inside the chamber counts — the braces,
+    the tube, the driver, the electronics, the T-nuts. Found by POSITION so
+    a new part cannot be left out of a list somebody has to remember.
+
+    The port tube counts by its OUTER ENVELOPE, not its material: the air in
+    its bore is the port, not the box, so the box loses the whole cylinder.
+    That one distinction is 1.9 of the 4.1 litres.
+    """
+    import math
+    if asm is None:
+        return None   # --stage carcass: nothing is placed to measure
+    asm.activate()
+    half_w = float(p["cabinet_internal_w"]) / 2
+    half_d = float(p["cabinet_internal_d"]) / 2
+    top = -float(p["alpair_chamber_h"]) - 3 * float(p["wall_thickness"])
+    floor = -float(p["carcass_h"]) + float(p["wall_thickness"])
+    total = 0.0
+    for o in app.list_occurrences(bounds=True)["occurrences"]:
+        lo, hi = o.get("bbox_min"), o.get("bbox_max")
+        if lo is None:
+            continue
+        mid = [(lo[i] + hi[i]) / 2 for i in range(3)]
+        if not (abs(mid[0]) < half_w and abs(mid[1]) < half_d
+                and floor < mid[2] < top):
+            continue
+        total += app.mass_properties(part=o["part_id"])["total"]["volume"] / 1e6
+        if o["name"] == "port tube":
+            bore = float(p["port_internal_dia"]) / 2000.0
+            length = (hi[2] - lo[2]) / 1000.0
+            total += math.pi * bore * bore * length * 1000.0  # its air
+    return total
+
+
 def _finish(app, args, asm, p, made):
     with phase("verify"):
         ok = verify.run(app, p, made, asm, deep=args.deep)
-    print(f"\nport tuning: fb = {params.helmholtz_fb(p):.1f} Hz "
+    displaced = _chamber_occupants(app, asm, p)
+    # Without an assembly there is nothing placed to measure, and the GROSS
+    # figure is said to be gross rather than quietly printed as the answer.
+    note = (f"{displaced:.1f} L standing in the chamber" if displaced
+            is not None else "GROSS box — nothing placed to measure")
+    print(f"\nport tuning: fb = "
+          f"{params.helmholtz_fb(p, displaced or 0.0):.1f} Hz "
           f"(port {float(p['port_internal_dia']):.0f} x "
-          f"{float(p['port_length_total']):.0f} mm)")
+          f"{float(p['port_length_total']):.0f} mm, {note})")
     if not ok and not args.save_anyway:
         print("\nNOT SAVED — the checks above did not pass")
         print("  (--save-anyway writes it regardless, to look at)")
