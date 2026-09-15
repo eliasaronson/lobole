@@ -82,18 +82,19 @@ sum of ~600 boolean cuts against an increasingly complex solid. The hole fix
 takes a large bite out of the constant; the shape of the curve is inherent to
 the modeling approach.
 
-**Opening a project rebuilds it from scratch (259 s).** Saving takes 0.4 s
-because the file is a recipe; opening re-executes the recipe. This is the
-single most valuable thing left: persist the built geometry (BREP per body,
-plus the element map) next to the recipe, keyed by the chain hash the regen
-cache already computes, and an open becomes a load rather than a rebuild. The
-invalidation rule already exists in `Document`'s prefix cache — this is
-storing what it computes, not inventing new logic. Format bump, golden file,
-and a staleness path for "the recipe changed since it was saved".
+**Opening a project rebuilds it from scratch (259 s).** ~~The single most
+valuable thing left~~ — **DONE**: baked geometry (`Document`, keyed by the
+chain hash the regen cache already computes) turned an open into a load.
+Re-measured 2026-09-14 on a 22-part project: **0.14 s**. Saving takes 0.4 s
+because the file is a recipe; opening no longer re-executes it.
 
-**`check_geometry` and `list_elements` cost ~10 s** on that part. Both walk
-every face and edge; neither is on a hot path today, but both would want a
-cheaper mode (counts and validity without the full element dump).
+**`check_geometry` and `list_elements` cost ~10 s** on the 148-feature part.
+Also worth re-measuring before acting on: on a 41-feature part they are
+**0.01 s each** today, so whatever is left scales with the part rather than
+being a fixed cost.
+
+Both walk every face and edge; neither is on a hot path today, but both would
+want a cheaper mode (counts and validity without the full element dump).
 
 ## Method notes
 
