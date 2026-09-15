@@ -73,6 +73,24 @@ TABLE = [
     ("port_internal_dia", "100.0", "air column diameter"),
     ("port_tube_od", "105.0", "outer tube diameter"),
     ("port_flange_dia", "145.0", "mounting flange diameter"),
+    # The two flares' contribution to the port's EFFECTIVE length. A plain
+    # tube's two ends are worth 1.46r = 73 mm at this diameter, and using
+    # that here reported 36.9 Hz for a port that tunes to 32 — enough to
+    # look like a 4 Hz design error and send someone lengthening a port that
+    # is already right.
+    #
+    # This is a Precision Port, and its flares are the reason it is one:
+    # ~/Documents/speakers/PLAN.md chose it because "a straight 100 mm tube
+    # would need 36 cm length, with pipe resonance at 476 Hz right in the
+    # crossover transition band", where the flared 25 cm resonates at 686 Hz.
+    # A 36 cm straight tube is Leff 433 mm, so at 250 mm physical these
+    # flares are worth 183 mm. That equivalence reproduces the plan's own
+    # 33 Hz at 50 L to 0.1 Hz, which is the check on it.
+    #
+    # Measure the real port if it matters to a hair: this is derived from a
+    # design document, not from the part.
+    ("port_end_correction", "183.0",
+     "both flares' effective length; a plain tube would be 73 here"),
     ("port_length_total", "250.0", "physical tube length with flares"),
     ("port_flare_top_dia", "155.0", "upper flare, free in the bay"),
     ("port_flare_bottom_dia", "160.0", "lower flare, bolted to the floor"),
@@ -254,8 +272,9 @@ def helmholtz_fb(p, displaced_litres=0.0):
                        f"more is standing inside it than fits")
     r = float(p["port_internal_dia"]) / 2000.0
     length_m = float(p["port_length_total"]) / 1000.0
-    # End correction: one flanged end, one free — 0.85r and 0.61r.
-    effective = length_m + (0.85 + 0.61) * r
+    # `port_end_correction` because this port is FLARED and the textbook
+    # 0.85r + 0.61r is for a plain tube's two ends — see the parameter.
+    effective = length_m + float(p["port_end_correction"]) / 1000.0
     area = math.pi * r * r
     return (343.0 / (2 * math.pi)) * math.sqrt(area / ((v_litres / 1000.0)
                                                        * effective))
