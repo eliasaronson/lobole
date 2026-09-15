@@ -381,11 +381,17 @@ the geometry?) — near (-2.750, -65.000, -8.000), (-67.750, 0.000, -8.000),
 ..." — which is legibly the four fixings on the r65 circle at both faces.
 Gated by `tests/test_fillet.cpp`.
 
-**A stale instance reads as a missing parameter.** The SDK builds its method
-surface from `describe` when it connects, so calling a verb added by a build
-the running app predates reports `add_mate() got derive; it takes a, b, ...`
-— which is indistinguishable from "that parameter does not exist". The app
-already reports a build; comparing it would let the message say so.
+~~**A stale instance reads as a missing parameter.**~~ **Withdrawn — this is
+already handled and the report was wrong.** The SDK builds its method surface
+from `describe` at connection, so a verb added by a build the running app
+predates reports `add_mate() got derive; it takes a, b, ...`, which does read
+as "that parameter does not exist". But `ping` carries `binary_replaced` and
+`connect()` prints "the instance on port N is running a binary that has been
+rebuilt since it started" for exactly this — with a comment saying the
+answers are otherwise indistinguishable from a missing feature. The warning
+was not seen because these scripts built `App(Designer(port=...))` by hand
+instead of calling `connect()`. The lesson is about the scripts, not the app:
+use `connect()`.
 
 **Smaller:** `set_active_part` takes `index`/`name`/`part` but not `id`, where
 its siblings take `id`; `occurrence.frame()` needs the assembly tab active,

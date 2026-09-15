@@ -63,6 +63,29 @@ the headless solve loop ships in phase 2, before any GUI exists.
   in per-occurrence meshing. Nothing in v1 precludes them; the Study model
   deliberately lives per-document so an assembly-level study kind can arrive
   later without reshaping this one.
+
+  **Field note, 2026-09-15 (panel modes of the smart speaker,
+  generators/smart_speaker/modal.py).** The deferral holds up: one panel at a
+  time answered the question that was asked, because a radiating panel's
+  modes are a panel property. Two things bit, and both are about BOUNDARY
+  CONDITIONS rather than about solving a whole assembly:
+
+  - a study on a part with several bodies reads as though it might couple
+    them, and does not — one eigenproblem per body. The per-body `bodies`
+    array in `study_results` is the only thing that says so, which is why
+    that row now spells it out.
+  - **a brace that BUTTS against a panel cannot be used as a support.** The
+    cabinet's ring brace lands on a continuous inner face, so there is no
+    face to clamp, and the one brace whose effect matters most (it crosses
+    the baffle's fundamental antinode) is the one that could not be
+    measured. The divider could, only because it happens to sit in a 4 mm
+    dado. The assembly KNOWS these parts touch — `asm.check` reports it —
+    and the study cannot use it.
+
+  So the cheap half of "assembly studies" is not the solver: it is being
+  able to say "fix this panel where that part touches it", which needs an
+  imprint of the contact patch, not constraint equations. Worth separating
+  from the hard half when this is picked up.
 - **Modal analysis** — the natural FEM2: mass matrix assembly is cheap once
   stiffness assembly exists, and density is already in the library. Wants a
   sparse eigensolver (Spectra is header-only BSD, vendors like PlaneGCS).

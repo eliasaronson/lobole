@@ -87,15 +87,30 @@ static constexpr MethodDoc SimulationMethods[] = {
      "mesh_study {async}.",
      "study", remote::NeedsPart},
     {"study_results",
-     "Result summary: {elements, nodes, max_displacement_mm: {value, at}, "
-     "max_von_mises_mpa: {value, at}, factor_of_safety} for a static study, "
-     "`frequencies_hz` for a modal one, and the optimization summary for a "
-     "topology one. Refused with \"study has not been run\" when there is "
+     "Result summary: {analysis, elements, nodes, stale} plus a `bodies` "
+     "array, one entry PER BODY, because a study meshes and solves each body "
+     "separately (there is no bonded contact between them). A body carries "
+     "max_displacement_mm: {value, at}, max_von_mises_mpa: {value, at} and "
+     "factor_of_safety for a static study, `frequencies_hz` for a modal one, "
+     "and the optimization summary for a topology one; the static maxima are "
+     "also aggregated at the top level. Read a modal result as "
+     "`bodies[i].frequencies_hz` — this row used to name the per-body keys "
+     "as though they were top-level, which is a KeyError rather than a wrong "
+     "answer, but only after the solve has been paid for. Refused with "
+     "\"study has not been run\" when there is "
      "nothing to report -- a solved result is DERIVED and no project keeps "
      "one, so a study reopened from disk carries its load cases and no "
      "answers (`has_results`, `stale` in list_studies).",
      "study", remote::NeedsPart},
-    {"set_result_display", "Choose the displayed result field/deform scale.",
+    {"set_result_display",
+     "Choose the result field the VIEWPORT draws, and how far it exaggerates "
+     "the deformation {study, field: von_mises|displacement|shape|density|"
+     "none, deform_scale?, mode? (0-based, which mode shape for a modal "
+     "study), threshold?}. It colours the raster viewport, which is what "
+     "`screenshot` captures. It does NOT reach `render_still`: the path "
+     "tracer renders the MODEL, so a still taken after this shows the "
+     "undeformed part in its own material and looks like the call silently "
+     "did nothing.",
      "deform_scale, field, mode, study, threshold", remote::NeedsPart},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
      "on, study", remote::NeedsPart},

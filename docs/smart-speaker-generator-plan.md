@@ -51,6 +51,7 @@ generators/smart_speaker/
   hardware.py          T-nuts and dowel plugs
   bought.py            STEP import of the drivers and the amp case
   cam.py               the baffle job on the 6090
+  modal.py             panel modes, run by hand (needs FEM; minutes)
   extract_bought.py    one-time: slice speaker.step into per-part STEPs
   BUILD.md             what the run produces and what it checked
 ```
@@ -143,6 +144,27 @@ arbitrary: it stood the amplifier on edge, 72 mm tall. `asm.join` decides it
 from the placement instead (docs/porting-friction-plan.md, C), and what the
 generator keeps is the assertion — `_check_laid_down`: above the floor, inside
 the bay, lengthways.
+
+### Panel modes
+
+**Built, run by hand.** `modal.py` clamps each panel on the faces it is glued
+in by and reports its six lowest modes. FEM here is part-scope — an assembly
+tab refuses a study, and even within one part each body is a separate
+eigenproblem — so this is one panel at a time, which is the right unit for
+panel colouration anyway.
+
+The baffle's fundamental is 850.5 Hz and the side wall's 311.0 Hz (converged:
+311.0 / 309.9 / 309.4 at 15k / 21k / 34k elements; clamped-strip theory says
+844 and 300). **Fixing the divider moves neither** — the baffle not at all,
+the side wall by 1.7% — because both fundamentals are set by the SHORT span
+and every brace in this cabinet is horizontal, subdividing the 1122 mm height
+that was never governing. The lever is a vertical stiffener at mid-depth, and
+the ladder's studs are exactly that; finding they stood 2.5 mm clear of the
+walls is what this study was worth.
+
+Read the numbers as a comparison, not a prediction: clamped versus simply
+supported edges is 844 against 372 Hz on the baffle, and a glued butt joint
+is somewhere between.
 
 ### CAM
 
