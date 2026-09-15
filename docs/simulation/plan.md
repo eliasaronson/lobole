@@ -87,7 +87,8 @@ the headless solve loop ships in phase 2, before any GUI exists.
   imprint of the contact patch, not constraint equations. Worth separating
   from the hard half when this is picked up.
 
-  **P0 answered, 2026-09-15** (`tests/test_fem.cpp`, "a mesh spans two solids
+  **Picked up in [assembly-studies-plan.md](assembly-studies-plan.md)
+  (S1-S4).** P0 answered (`tests/test_fem.cpp`, "a mesh spans two solids
   only when they SHARE the face"). The technique works and the expensive
   branch is not needed:
 
