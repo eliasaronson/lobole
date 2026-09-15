@@ -3,11 +3,13 @@
 #include "cad/CADKernel.h"
 
 #include <BRepClass3d_SolidClassifier.hxx>
+
 #include <BRepIntCurveSurface_Inter.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pnt.hxx>
+#include <optional>
 
 #include <algorithm>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -71,6 +73,37 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
       origin + u * offset, origin - u * offset, origin + v * offset,
       origin - v * offset};
 
+  // The BOX first. `placed` is every body of every leaf in the assembly —
+  // 300-odd on an engine — and a bolt's axis crosses three or four of them.
+  // Without this each fit paid four ray casts AND a solid classifier for
+  // every body in the model: fit_fastener was 747 ms a call, 21% of that
+  // engine's whole build. Same prune, same reason, as the hover pick
+  // (docs/performance/hover-pick.md). The bounds are memoized on CADShape,
+  // and the ray is already in the body's local frame, so this is a slab test
+  // against numbers already computed.
+  const auto reaches = [&](const glm::dvec3& localOrigin,
+                           const glm::dvec3& localDir, const glm::vec3& lo,
+                           const glm::vec3& hi) {
+    double tMin = 0.0, tMax = maxDist;
+    for (int a = 0; a < 3; ++a) {
+      const double d = localDir[a];
+      if (std::abs(d) < 1e-12) {
+        if (localOrigin[a] < lo[a] || localOrigin[a] > hi[a])
+          return false;
+        continue;
+      }
+      double t0 = (lo[a] - localOrigin[a]) / d;
+      double t1 = (hi[a] - localOrigin[a]) / d;
+      if (t0 > t1)
+        std::swap(t0, t1);
+      tMin = std::max(tMin, t0);
+      tMax = std::min(tMax, t1);
+      if (tMin > tMax)
+        return false;
+    }
+    return true;
+  };
+
   for (const PlacedBody& p : placed) {
     if (p.body == nullptr || !p.body->shape.IsValid())
       continue;
@@ -84,11 +117,25 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
     // The union of what the bundle finds: a body is entered where the FIRST
     // ray enters it and left where the LAST leaves, so a counterbore or a
     // chamfer on one side does not shorten the plate.
+    glm::vec3 lo(0.0f), hi(0.0f);
+    p.body->shape.GetBoundingBox(lo, hi);
+    // A hair of slack: the bundle sits a hole-radius off the axis and a
+    // conservative box is already generous, but a ray grazing a face at the
+    // box boundary must not be pruned.
+    lo -= glm::vec3(1e-3f);
+    hi += glm::vec3(1e-3f);
+
     double enter = 0.0, exit = 0.0;
     bool hit = false;
+    // One classifier per BODY, not per ray: constructing it explores the
+    // whole solid (BRepClass3d_SolidExplorer::InitShape was 11.5% of the
+    // engine build), and the four rays classify against the same shape.
+    std::optional<BRepClass3d_SolidClassifier> classifier;
     for (const glm::dvec3& rayOrigin : origins) {
       const glm::dvec3 localOrigin =
           glm::dvec3(toLocal * glm::dvec4(rayOrigin, 1.0));
+      if (!reaches(localOrigin, localDir, lo, hi))
+        continue; // this ray cannot meet the body at all
       const std::vector<double> hits =
           Crossings(p.body->shape.GetShape(),
                     gp_Pnt(localOrigin.x, localOrigin.y, localOrigin.z),
@@ -98,15 +145,16 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
       // Tangencies and coincident face boundaries need not alternate in/out.
       // Classify the intervals instead of discarding an odd crossing count:
       // discarding one hid blind floors and selected screws through them.
-      BRepClass3d_SolidClassifier classifier(p.body->shape.GetShape());
+      if (!classifier)
+        classifier.emplace(p.body->shape.GetShape());
       double previous = 0.0;
       for (size_t i = 0; i <= hits.size(); ++i) {
         const double next = i < hits.size() ? hits[i] : maxDist;
         if (next - previous > 1e-6) {
           const glm::dvec3 mid =
               localOrigin + localDir * ((previous + next) / 2);
-          classifier.Perform(gp_Pnt(mid.x, mid.y, mid.z), 1e-6);
-          if (classifier.State() == TopAbs_IN) {
+          classifier->Perform(gp_Pnt(mid.x, mid.y, mid.z), 1e-6);
+          if (classifier->State() == TopAbs_IN) {
             enter = hit ? std::min(enter, previous) : previous;
             exit = hit ? std::max(exit, next) : next;
             hit = true;

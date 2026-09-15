@@ -850,3 +850,47 @@ TEST_CASE("parts: a fastener round-trips through the document format",
   REQUIRE(reloaded.GetBodies().size() == 1);
   CHECK_THAT(reloaded.GetBodies()[0].shape.Volume(), WithinAbs(volume, 1e-6));
 }
+
+TEST_CASE("Axis traversal ignores the bodies its ray cannot reach",
+          "[parts][axis]") {
+  // `placed` is every body of every leaf in the assembly — 300-odd on the
+  // OM615 — and a bolt's axis crosses three or four. Without a box test each
+  // fit paid four ray casts AND a solid classifier for every body in the
+  // model: measured A/B on that engine's build, the prune is 82.1 s -> 74.9
+  // and fit_fastener 528 ms a call -> 369 (docs/performance/axis-stack.md).
+  //
+  // What must not change is the ANSWER.
+  Body plate;
+  plate.shape = CADShape(BRepPrimAPI_MakeBox(gp_Pnt(-5, -5, 20), 10, 10, 20));
+  std::vector<parts::PlacedBody> placed{{&plate, glm::mat4(1), "plate"}};
+  const auto alone = parts::TraverseAxis(placed, {0, 0, 0}, {0, 0, 1}, 0, 60);
+  REQUIRE(alone.size() == 1);
+
+  // Thirty bodies the axis comes nowhere near, on both sides and beyond the
+  // reach, plus one squarely ON the axis past the plate — that one MUST
+  // still be found.
+  std::vector<Body> far;
+  far.reserve(32);
+  for (int i = 0; i < 30; ++i) {
+    Body b;
+    const double x = 100.0 + 20.0 * i;
+    b.shape = CADShape(BRepPrimAPI_MakeBox(gp_Pnt(x, -5, 0), 10, 10, 10));
+    far.push_back(std::move(b));
+  }
+  Body beyond;
+  beyond.shape = CADShape(BRepPrimAPI_MakeBox(gp_Pnt(-5, -5, 45), 10, 10, 10));
+  for (Body& b : far)
+    placed.push_back({&b, glm::mat4(1), "far"});
+  placed.push_back({&beyond, glm::mat4(1), "beyond"});
+
+  const auto crowded = parts::TraverseAxis(placed, {0, 0, 0}, {0, 0, 1}, 0, 60);
+  // The plate reads exactly as it did alone, and the body ON the axis is
+  // found: a prune that loses it would silently shorten every bolt.
+  REQUIRE(crowded.size() == 2);
+  CHECK(crowded[0].part == "plate");
+  CHECK_THAT(crowded[0].enter, WithinAbs(alone[0].enter, 1e-9));
+  CHECK_THAT(crowded[0].exit, WithinAbs(alone[0].exit, 1e-9));
+  CHECK(crowded[1].part == "beyond");
+  CHECK_THAT(crowded[1].enter, WithinAbs(45.0, 1e-6));
+  CHECK_THAT(crowded[1].exit, WithinAbs(55.0, 1e-6));
+}
