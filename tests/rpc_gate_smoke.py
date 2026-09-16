@@ -32,17 +32,9 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 # gated anyway. Every entry is a claim someone has to stand behind; an empty
 # reason is not accepted.
 GATED_ON_PURPOSE = {
-    # A study is an object ON a part document (docs/simulation/plan.md): the
-    # study id means nothing without one, so these are part-scoped even where
-    # the handler reaches them through `state`.
-    "add_keep_face": "studies belong to a part document",
-    "add_refinement": "studies belong to a part document",
-    "cancel_study": "studies belong to a part document",
-    "exit_simulation": "simulation is a part-tab mode",
-    "remove_keep_face": "studies belong to a part document",
-    "remove_load": "studies belong to a part document",
-    "remove_refinement": "studies belong to a part document",
-    "set_study": "studies belong to a part document",
+    # The study verbs used to sit here ("studies belong to a part document").
+    # Since S1 (docs/simulation/assembly-studies-plan.md) a study lives on a
+    # part OR an assembly, and the handler resolves the tab itself.
     # A pending (preview) feature only ever exists on a part tab.
     "accept_pending": "a pending feature only exists on a part tab",
     "cancel_pending": "a pending feature only exists on a part tab",

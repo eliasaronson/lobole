@@ -1,5 +1,6 @@
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h"
+#include "ui/StudyPanel.h" // DrawSimulationToolWindow
 
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/OccurrencePanel.h"
@@ -576,6 +577,8 @@ void DrawToolWindow(AppState& state) {
       DrawExplodeToolWindow(state); // docs/ui/u15-assembly-panel.md
     else if (state.assembly && state.motionToolOpen)
       DrawMotionToolWindow(state);
+    else if (state.assembly && state.simulationToolOpen)
+      DrawSimulationToolWindow(state); // S1: the assembly's studies
     return;
   }
 

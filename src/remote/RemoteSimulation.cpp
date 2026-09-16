@@ -3,14 +3,18 @@
 #include "cad/CADMaterials.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Occurrence.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppState.h"
+#include "ui/AssemblyActions.h" // PartDocById, SnapshotAssembly, OccurrenceMatrix
 #include "ui/BackgroundJobs.h"
 #include "ui/SimulationActions.h"
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <functional>
@@ -50,22 +54,149 @@ uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
       "which study? pass `id` (or `study`, which means the same here)");
 }
 
+// Where the studies live: the active PART, or the active ASSEMBLY (S1,
+// docs/simulation/assembly-studies-plan.md). One handler, two homes — the
+// study record is the same, and the verbs are the same; what differs is how
+// an edit becomes an undo step (a command on a part, a full-state snapshot
+// on an assembly) and where a result's staleness is measured.
+struct Host {
+  ui::AppState& state;
+  Document* part = nullptr;
+  AssemblyDocument* asmDoc = nullptr;
+
+  bool IsAssembly() const { return asmDoc != nullptr; }
+  std::vector<fem::Study>& Studies() {
+    return part ? part->GetStudies() : asmDoc->GetStudies();
+  }
+  fem::Study* Find(uint64_t id) {
+    return part ? part->FindStudy(id) : asmDoc->FindStudy(id);
+  }
+  fem::Study& Require(uint64_t id) {
+    fem::Study* s = Find(id);
+    if (!s)
+      throw std::runtime_error("no such study");
+    return *s;
+  }
+  const fem::StudyRuntime* Results(uint64_t id) const {
+    return part ? part->StudyResults(id) : asmDoc->StudyResults(id);
+  }
+  bool Stale(uint64_t id) {
+    return part ? part->StudyResultsStale(id)
+                : ui::AssemblyStudyStale(state, *asmDoc, id);
+  }
+  uint64_t AllocateId() {
+    return part ? part->AllocateId() : asmDoc->AllocateId();
+  }
+  const SymbolTable& Symbols() const {
+    return part ? part->Symbols() : state.projectSymbols;
+  }
+  fem::Study& Add(const std::string& name) {
+    if (part) {
+      auto cmd = std::make_unique<AddStudyCommand>(name);
+      AddStudyCommand* raw = cmd.get();
+      state.commands->Execute(std::move(cmd), *part);
+      return *part->FindStudy(raw->StudyId());
+    }
+    ui::SnapshotAssembly(state);
+    return asmDoc->AddStudy(name);
+  }
+  void Remove(uint64_t id) {
+    Require(id);
+    if (part) {
+      state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), *part);
+      return;
+    }
+    ui::SnapshotAssembly(state);
+    asmDoc->RemoveStudy(id);
+  }
+  // One undoable mutation of one study.
+  void Modify(uint64_t id, const std::string& desc,
+              const std::function<void(fem::Study&)>& mutate) {
+    const fem::Study& cur = Require(id);
+    if (part) {
+      json before = DocumentIO::StudyToJson(cur);
+      fem::Study copy = cur;
+      mutate(copy);
+      json after = DocumentIO::StudyToJson(copy);
+      state.commands->Execute(
+          std::make_unique<ModifyStudyCommand>(desc, before, after), *part);
+      return;
+    }
+    fem::Study copy = cur;
+    mutate(copy); // may throw, BEFORE the snapshot: nothing to undo then
+    ui::SnapshotAssembly(state);
+    *asmDoc->FindStudy(id) = std::move(copy);
+    asmDoc->BumpVersion(); // an edit invalidates results, as on a part
+  }
+  // The material of a solved body, for the factor of safety: a part's body
+  // by index, an assembly's meshed occurrence's placed body by index.
+  std::string BodyMaterial(const fem::Study& s, int bodyIndex) {
+    if (part) {
+      const auto& bodies = part->GetBodies();
+      return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
+                 ? bodies[bodyIndex].material
+                 : std::string{};
+    }
+    for (const fem::Participant& pt : s.participants)
+      if (pt.role == fem::ParticipantRole::Meshed) {
+        const auto bodies = ui::OccurrenceSubtreeBodies(state, pt.occurrenceId);
+        return bodyIndex >= 0 && bodyIndex < (int)bodies.size()
+                   ? bodies[bodyIndex].material
+                   : std::string{};
+      }
+    return {};
+  }
+  // An occurrence of the assembly, by id or by name.
+  const Occurrence& OccurrenceOf(const json& v, const char* what) {
+    if (!asmDoc)
+      throw std::runtime_error(std::string(what) +
+                               " names an occurrence, which only an "
+                               "assembly's study has");
+    if (v.is_number_unsigned() || v.is_number_integer()) {
+      const Occurrence* occ = asmDoc->FindById(v.get<uint64_t>());
+      if (!occ)
+        throw std::runtime_error(std::string(what) +
+                                 ": no occurrence with id " +
+                                 std::to_string(v.get<uint64_t>()) +
+                                 " (list_occurrences names them)");
+      return *occ;
+    }
+    if (v.is_string()) {
+      for (const Occurrence& occ : asmDoc->GetOccurrences())
+        if (occ.name == v.get<std::string>())
+          return occ;
+      throw std::runtime_error(std::string(what) + ": no occurrence named '" +
+                               v.get<std::string>() +
+                               "' (list_occurrences names them)");
+    }
+    throw std::runtime_error(std::string(what) +
+                             " is an occurrence id or name");
+  }
+  std::string OccurrenceName(uint64_t id) const {
+    const Occurrence* occ = asmDoc ? asmDoc->FindById(id) : nullptr;
+    return occ ? occ->name : std::to_string(id);
+  }
+};
+
 } // namespace
 
 // FEM study RPCs, carved out of RemoteServer::HandleSemantic. All act on the
-// active part document. Returns the result json when `m` is one of ours,
-// std::nullopt otherwise; throws std::runtime_error on error (the caller's
-// try/catch turns it into an error response).
-// describe: one row per `m ==` branch below — extend together.
+// active PART or, since S1, the active ASSEMBLY (see Host above); a drawing
+// or job tab is refused by the handler, naming where studies live. Returns the
+// result json when `m` is one of ours, std::nullopt otherwise; throws
+// std::runtime_error on error (the caller's try/catch turns it into an error
+// response). describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc SimulationMethods[] = {
-    {"enter_simulation", "Enter simulation mode for the active part.", "study",
-     remote::NeedsPart},
-    {"exit_simulation", "Leave simulation mode.", "", remote::NeedsPart},
+    {"enter_simulation",
+     "Enter simulation mode on the active part or assembly (S1: an assembly's "
+     "studies live on it, drawn in its Simulation tool window).",
+     "study"},
+    {"exit_simulation", "Leave simulation mode.", ""},
     {"add_study",
      "Add a study {type: static|modal|topology, name?}. `kind` is accepted "
      "for the same thing — the enum, the file and `list_studies` all say "
      "`type`, and so do add_mate/add_load/add_cam_op/add_relation.",
-     "kind, name, type", remote::NeedsPart},
+     "kind, name, type"},
     {"remove_study",
      "Remove a study {id}. `study` names the same thing here and in every "
      "verb that ACTS ON a study (set_study, mesh_study, run_study, "
@@ -74,8 +205,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "and this family was the holdout. A verb that only names a study for "
      "CONTEXT (add_load, add_refinement, set_result_display) still takes "
      "`study`, because there `id` would mean the load or the refinement.",
-     "id, study", remote::NeedsPart},
-    {"list_studies", "List studies with status.", "", remote::NeedsPart},
+     "id, study"},
+    {"list_studies", "List studies with status.", ""},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; `gravity` is metres per second "
@@ -83,9 +214,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "with Z up. volume_fraction is a fraction of 1 and the iteration counts "
      "are counts. Takes `id` (or `study`, the same thing here) — see "
      "remove_study.",
-     "filter_radius, gravity, id, max_iterations, mesh_size, name, "
-     "num_modes, study, type, volume_fraction",
-     remote::NeedsPart},
+     ", filter_radius, gravity, id, max_iterations, mesh_size, name, "
+     "participants, "
+     "num_modes, study, type, volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure, face, "
      "magnitude, direction?}. `magnitude` is NEWTONS for a force -- the total "
@@ -96,23 +227,21 @@ static constexpr MethodDoc SimulationMethods[] = {
      "An omitted force `direction` pushes into the picked face (the same "
      "default a GUI placement takes). A `face` is {feature_id, element}, or "
      "just the element name — the body that has it is then found for you.",
-     "direction, face, magnitude, study, type", remote::NeedsPart},
+     "contact_with, direction, face, magnitude, occurrence, study, type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
      "report it — this row said \"by index\", which is the same number only "
      "until you remove one.",
-     "id, load, study", remote::NeedsPart},
+     "id, load, study"},
     {"add_refinement",
      "Add a local mesh refinement on an element: `size` is the target element "
      "edge length there, in MILLIMETRES.",
-     "face, size, study", remote::NeedsPart},
-    {"remove_refinement", "Remove a refinement.", "face, study",
-     remote::NeedsPart},
+     "face, occurrence, size, study"},
+    {"remove_refinement", "Remove a refinement.", "face, study"},
     {"add_keep_face", "Topology optimization: mark a face to keep.",
-     "face, study", remote::NeedsPart},
-    {"remove_keep_face", "Unmark a kept face.", "face, study",
-     remote::NeedsPart},
+     "face, study"},
+    {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
      "Mesh the study (Netgen tets); returns element counts/quality. "
      "Synchronous by default — a fine mesh takes minutes, so either give the "
@@ -121,23 +250,23 @@ static constexpr MethodDoc SimulationMethods[] = {
      "study_status answers {running, meshing: true} until it lands, after "
      "which its `mesh` carries the same bodies/nodes/elements/worst_quality. "
      "Takes `id` (or `study`, the same thing here) — see remove_study.",
-     "async, id, study", remote::NeedsPart},
+     "async, id, study"},
     {"run_study",
      "Solve the study (blocking, or `async` and poll study_status). Async "
      "meshes AND solves off the frame; the result is stored into the part "
      "the study belongs to even if another tab is active when it lands. Takes "
      "`id` (or `study`, the same thing here) — see remove_study.",
-     "async, id, study", remote::NeedsPart},
+     "async, id, study"},
     {"cancel_study",
      "Cancel a running study — takes `id` (or `study`, the same thing here) — "
      "see remove_study.",
-     "id, study", remote::NeedsPart},
+     "id, study"},
     {"study_status",
      "Status/progress of a study: {running, meshing?, iteration…} while a "
      "job runs, else the cached result's state plus `mesh` from the last "
      "mesh_study {async}. Takes `id` (or `study`, the same thing here) — see "
      "remove_study.",
-     "id, study", remote::NeedsPart},
+     "id, study"},
     {"study_results",
      "Result summary: {type, elements, nodes, stale} plus a `bodies` "
      "array, one entry PER BODY, because a study meshes and solves each body "
@@ -154,7 +283,7 @@ static constexpr MethodDoc SimulationMethods[] = {
      "one, so a study reopened from disk carries its load cases and no "
      "answers (`has_results`, `stale` in list_studies). Takes `id` (or "
      "`study`, the same thing here) — see remove_study.",
-     "id, study", remote::NeedsPart},
+     "id, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
      "the deformation {study, field: von_mises|displacement|shape|density|"
@@ -164,18 +293,39 @@ static constexpr MethodDoc SimulationMethods[] = {
      "tracer renders the MODEL, so a still taken after this shows the "
      "undeformed part in its own material and looks like the call silently "
      "did nothing.",
-     "deform_scale, field, mode, study, threshold", remote::NeedsPart},
+     "deform_scale, field, mode, study, threshold"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
-     "on, study", remote::NeedsPart},
+     "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
-     "path, smooth, study, threshold", remote::NeedsPart},
+     "path, smooth, study, threshold"},
 };
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
 
-std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
+std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                         const std::string& m,
                                         const RpcParams& p) {
-  Document* doc = &document; // keep the moved block's `doc->` verbatim
+  // Only ours past this point; and only where studies live.
+  {
+    bool ours = false;
+    for (const MethodDoc& d : SimulationMethods)
+      ours = ours || m == d.name;
+    if (!ours)
+      return std::nullopt;
+  }
+  if (!doc && !state.assembly) {
+    const char* kind = state.drawing ? "a drawing"
+                       : state.job   ? "a job"
+                                     : "not a part";
+    throw std::runtime_error("the active document is " + std::string(kind) +
+                             "; studies live on a part or an assembly — switch "
+                             "to one of those tabs");
+  }
+  Host host{state, doc, doc ? nullptr : state.assembly.get()};
+  const auto topoOnly = [&]() {
+    if (host.IsAssembly())
+      throw std::runtime_error("topology optimisation is a part study; an "
+                               "assembly study is static or modal");
+  };
   if (m == "add_study") {
     // Optional `kind` sets the analysis type at creation (the doc row always
     // promised it; it used to require a second set_study call). Folding it
@@ -192,11 +342,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                                  : p.value("kind", std::string{});
     if (hasKind && !fem::AnalysisTypeFromString(want, type))
       throw std::runtime_error("study type must be static, modal, or topology");
-    auto cmd =
-        std::make_unique<AddStudyCommand>(p.value("name", std::string{}));
-    AddStudyCommand* raw = cmd.get();
-    state.commands->Execute(std::move(cmd), *doc);
-    fem::Study* s = doc->FindStudy(raw->StudyId());
+    if (hasKind && type == fem::AnalysisType::Topology)
+      topoOnly();
+    fem::Study* s = &host.Add(p.value("name", std::string{}));
     if (hasKind)
       s->type = type;
     return json{{"id", s->id},
@@ -207,25 +355,32 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     const uint64_t id =
         StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
                      p.contains("study"), p.value("study", uint64_t{0}));
-    if (!doc->FindStudy(id))
-      throw std::runtime_error("no such study");
-    state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), *doc);
+    host.Remove(id);
     return json::object();
   }
   if (m == "list_studies") {
     json studies = json::array();
-    for (const fem::Study& s : doc->GetStudies()) {
+    for (const fem::Study& s : host.Studies()) {
       // Report evaluated sizes/magnitudes (against current parameters) without
       // mutating the stored study.
       fem::Study eval = s;
-      fem::EvaluateStudyExprs(eval, doc->Symbols(), nullptr);
+      fem::EvaluateStudyExprs(eval, host.Symbols(), nullptr);
       json loads = json::array();
       for (const fem::Load& l : eval.loads) {
-        json lj = {
-            {"id", l.id},
-            {"type", fem::LoadTypeToString(l.type)},
-            {"face",
-             {{"feature_id", l.face.featureId}, {"element", l.face.name}}}};
+        json lj = {{"id", l.id}, {"type", fem::LoadTypeToString(l.type)}};
+        // An assembly study's anchor says whose face it is, or which
+        // occurrence's contact it clamps (S1).
+        if (l.contactWith != 0) {
+          lj["contact_with"] = l.contactWith;
+          lj["contact_with_name"] = host.OccurrenceName(l.contactWith);
+        } else {
+          lj["face"] = {{"feature_id", l.face.featureId},
+                        {"element", l.face.name}};
+        }
+        if (l.occurrenceId != 0) {
+          lj["occurrence"] = l.occurrenceId;
+          lj["occurrence_name"] = host.OccurrenceName(l.occurrenceId);
+        }
         if (l.type != fem::LoadType::Fixed)
           lj["magnitude"] = l.magnitude;
         if (l.type == fem::LoadType::Force)
@@ -238,8 +393,20 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                  {"mesh_size", eval.meshSize},
                  {"loads", loads},
                  {"refinements", eval.refinements.size()},
-                 {"has_results", doc->StudyResults(s.id) != nullptr},
-                 {"stale", doc->StudyResultsStale(s.id)}};
+                 {"has_results", host.Results(s.id) != nullptr},
+                 {"stale", host.Stale(s.id)}};
+      if (!eval.participants.empty()) {
+        json parts = json::array();
+        for (const fem::Participant& pt : eval.participants) {
+          json pj = {{"occurrence", pt.occurrenceId},
+                     {"name", host.OccurrenceName(pt.occurrenceId)},
+                     {"role", fem::ParticipantRoleToString(pt.role)}};
+          if (pt.meshSize > 0.0)
+            pj["mesh_size"] = pt.meshSize;
+          parts.push_back(std::move(pj));
+        }
+        sj["participants"] = parts;
+      }
       if (s.type == fem::AnalysisType::Topology) {
         sj["volume_fraction"] = eval.volumeFraction;
         sj["filter_radius"] = eval.filterRadius;
@@ -279,15 +446,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   // `mutate` to a copy, snapshot after, execute.
   auto modifyStudy = [&](uint64_t id, const std::string& desc,
                          const std::function<void(fem::Study&)>& mutate) {
-    const fem::Study* cur = doc->FindStudy(id);
-    if (!cur)
-      throw std::runtime_error("no such study");
-    json before = DocumentIO::StudyToJson(*cur);
-    fem::Study copy = *cur;
-    mutate(copy);
-    json after = DocumentIO::StudyToJson(copy);
-    state.commands->Execute(
-        std::make_unique<ModifyStudyCommand>(desc, before, after), *doc);
+    host.Modify(id, desc, mutate);
   };
 
   if (m == "set_study") {
@@ -310,6 +469,43 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           !fem::AnalysisTypeFromString(p.at("type").get<std::string>(), s.type))
         throw std::runtime_error(
             "analysis type must be static, modal, or topology");
+      if (s.type == fem::AnalysisType::Topology && host.IsAssembly())
+        topoOnly();
+      // Assembly studies (S1): who takes part, and how. The whole list at
+      // once — a role table is one statement, not a sequence of edits.
+      if (p.contains("participants")) {
+        const json& list = p.at("participants");
+        if (!list.is_array())
+          throw std::runtime_error(
+              "participants is a list of {occurrence, role: "
+              "meshed|rigid|ignored, mesh_size?}");
+        s.participants.clear();
+        for (const json& pj : list) {
+          if (!pj.is_object() || !pj.contains("occurrence"))
+            throw std::runtime_error(
+                "each participant is {occurrence, role, mesh_size?}");
+          fem::Participant pt;
+          pt.occurrenceId =
+              host.OccurrenceOf(pj.at("occurrence"), "participant").id;
+          const std::string role = pj.value("role", std::string{"rigid"});
+          if (!fem::ParticipantRoleFromString(role, pt.role))
+            throw std::runtime_error("participant role '" + role +
+                                     "' is not one of meshed, rigid, ignored");
+          if (pj.contains("mesh_size")) {
+            const json& v = pj.at("mesh_size");
+            if (v.is_string())
+              pt.meshSizeExpr = v.get<std::string>();
+            else
+              pt.meshSize = v.get<double>();
+          }
+          for (const fem::Participant& have : s.participants)
+            if (have.occurrenceId == pt.occurrenceId)
+              throw std::runtime_error("participant " +
+                                       host.OccurrenceName(pt.occurrenceId) +
+                                       " is listed twice");
+          s.participants.push_back(std::move(pt));
+        }
+      }
       if (p.contains("num_modes"))
         s.numModes = p.at("num_modes").get<int>();
       if (p.contains("gravity")) {
@@ -366,6 +562,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Refinement r;
     r.face = studyFaceOf(p.at("face"));
+    if (p.contains("occurrence"))
+      r.occurrenceId = host.OccurrenceOf(p.at("occurrence"), "refinement").id;
+    else if (host.IsAssembly())
+      throw std::runtime_error(
+          "a refinement on an assembly study says whose face: pass "
+          "occurrence (id or name)");
     const json& v = p.at("size");
     if (v.is_string())
       r.sizeExpr = v.get<std::string>();
@@ -392,10 +594,47 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   if (m == "add_load") {
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Load l;
-    l.id = doc->AllocateId();
+    l.id = host.AllocateId();
     if (!fem::LoadTypeFromString(p.at("type").get<std::string>(), l.type))
       throw std::runtime_error("load type must be fixed, force, or pressure");
-    l.face = studyFaceOf(p.at("face"));
+    // An assembly study's anchor (S1): a face on a named occurrence, or —
+    // for a fixed support — the CONTACT with a rigid occurrence, which has
+    // no face to name because the patch exists in neither part.
+    const Document* faceDoc = doc;
+    if (p.contains("contact_with")) {
+      if (l.type != fem::LoadType::Fixed)
+        throw std::runtime_error(
+            "only a fixed support anchors on a contact; a force or pressure "
+            "names a face (occurrence + face)");
+      l.contactWith =
+          host.OccurrenceOf(p.at("contact_with"), "contact_with").id;
+      const fem::Study& study = host.Require(id);
+      const fem::Participant* pt = study.FindParticipant(l.contactWith);
+      if (!pt || pt->role != fem::ParticipantRole::Rigid)
+        throw std::runtime_error(
+            "contact_with " + host.OccurrenceName(l.contactWith) +
+            ": not a rigid participant of this study (set_study "
+            "participants: [{occurrence, role: rigid}, ...] first)");
+    } else {
+      l.face = studyFaceOf(p.at("face"));
+      if (p.contains("occurrence")) {
+        const Occurrence& occ =
+            host.OccurrenceOf(p.at("occurrence"), "occurrence");
+        l.occurrenceId = occ.id;
+        faceDoc = ui::PartDocById(state, occ.partId);
+        if (!faceDoc)
+          throw std::runtime_error("occurrence " + occ.name +
+                                   " refers to no part in this project");
+        fem::ResolvedFace rf;
+        std::string why;
+        if (!fem::ResolveFace(*faceDoc, l.face, "load", rf, &why))
+          throw std::runtime_error(why + " (on " + occ.name + ")");
+      } else if (host.IsAssembly()) {
+        throw std::runtime_error(
+            "a load on an assembly study says whose face: pass occurrence "
+            "(id or name), or contact_with for a fixed support at a contact");
+      }
+    }
     if (p.contains("magnitude")) {
       const json& v = p.at("magnitude");
       if (v.is_string())
@@ -411,8 +650,16 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       // No direction given: push into the face, exactly as a GUI placement
       // does. The alternative was the struct's literal, which is a world
       // direction that knows nothing about the face it was applied to.
-      if (const auto into = fem::DefaultForceDirection(*doc, l.face))
-        l.direction = *into;
+      if (faceDoc)
+        if (const auto into = fem::DefaultForceDirection(*faceDoc, l.face)) {
+          l.direction = *into;
+          // A part's inward normal, turned into the world the placed part
+          // is solved in.
+          if (l.occurrenceId != 0)
+            if (const Occurrence* occ = host.asmDoc->FindById(l.occurrenceId))
+              l.direction = glm::dvec3(glm::mat3_cast(occ->orientation) *
+                                       glm::vec3(l.direction));
+        }
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
     return json{{"id", l.id}};
@@ -439,13 +686,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     const uint64_t id =
         StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
                      p.contains("study"), p.value("study", uint64_t{0}));
-    fem::Study* s = doc->FindStudy(id);
-    if (!s)
-      throw std::runtime_error("no such study");
+    fem::Study* s = &host.Require(id);
     if (p.value("async", false)) {
       // Off the frame (docs/ui/long-operations.md, phase 3): the plan is
       // made here, the mesh on a worker; study_status says `meshing: true`
       // until it lands and then carries the same `bodies` this returns.
+      if (host.IsAssembly())
+        throw std::runtime_error(
+            "an assembly study meshes synchronously (run_study async: true "
+            "meshes and solves off the frame)");
       std::string err;
       if (!ui::StartMeshRun(state, *doc, id, &err))
         throw std::runtime_error(err);
@@ -453,7 +702,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     }
     std::vector<fem::StudyBodyMesh> meshes;
     std::string err;
-    if (!fem::MeshStudy(*doc, *s, meshes, &err))
+    const bool meshed =
+        host.IsAssembly()
+            ? ui::MeshAssemblyStudy(state, *host.asmDoc, id, meshes, &err)
+            : fem::MeshStudy(*doc, *s, meshes, &err);
+    if (!meshed)
       throw std::runtime_error(err);
     json bodies = json::array();
     for (const fem::StudyBodyMesh& bm : meshes) {
@@ -478,9 +731,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     const uint64_t id =
         StudySubject(p.contains("id"), p.value("id", uint64_t{0}),
                      p.contains("study"), p.value("study", uint64_t{0}));
-    fem::Study* s = doc->FindStudy(id);
-    if (!s)
-      throw std::runtime_error("no such study");
+    fem::Study* s = &host.Require(id);
 
     if (m == "cancel_study") {
       if (ui::GetStudyRunStatus(state, id).running)
@@ -513,7 +764,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                     {"elapsed_seconds", st.elapsedSeconds}};
       // Not running — report the cached result's state (if any), and what
       // the last mesh_study {async} found.
-      const fem::StudyRuntime* rt = doc->StudyResults(id);
+      const fem::StudyRuntime* rt = host.Results(id);
       json out{{"running", false},
                {"has_results", rt != nullptr},
                {"converged", rt && rt->converged},
@@ -521,8 +772,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                {"iterations", rt ? rt->iterations : 0},
                {"solver", rt ? rt->solver : ""},
                {"solve_seconds", rt ? rt->solveSeconds : 0.0},
-               {"stale", doc->StudyResultsStale(id)}};
-      if (const ui::MeshReport* mr = ui::MeshReportFor(state, *doc, id)) {
+               {"stale", host.Stale(id)}};
+      if (!s->error.empty())
+        out["error"] = s->error;
+      if (const ui::MeshReport* mr =
+              doc ? ui::MeshReportFor(state, *doc, id) : nullptr) {
         json bodies = json::array();
         for (const ui::MeshReport::Body& b : mr->bodies)
           bodies.push_back({{"body", b.name},
@@ -540,6 +794,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     if (m == "run_study") {
       if (s->type == fem::AnalysisType::Topology) {
         std::string err;
+        topoOnly();
         if (!ui::StartTopologyRun(state, *doc, id, &err))
           throw std::runtime_error(err);
         return json{{"started", true}, {"running", true}};
@@ -548,16 +803,24 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       // client's socket timeout when solved synchronously).
       if (p.value("async", false)) {
         std::string err;
-        if (!ui::StartStudyRun(state, *doc, id, &err))
+        const bool started =
+            host.IsAssembly()
+                ? ui::StartAssemblyStudyRun(state, *host.asmDoc, id, &err)
+                : ui::StartStudyRun(state, *doc, id, &err);
+        if (!started)
           throw std::runtime_error(err);
         return json{{"started", true}, {"running", true}};
       }
       std::string err;
-      if (!ui::RunStudyAndCache(*doc, id, &err))
+      const bool ran =
+          host.IsAssembly()
+              ? ui::RunAssemblyStudyAndCache(state, *host.asmDoc, id, &err)
+              : ui::RunStudyAndCache(*doc, id, &err);
+      if (!ran)
         throw std::runtime_error(err);
     }
 
-    const fem::StudyRuntime* rt = doc->StudyResults(id);
+    const fem::StudyRuntime* rt = host.Results(id);
     if (!rt)
       throw std::runtime_error("study has not been run");
 
@@ -581,8 +844,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                                      : rt->complianceHistory.back()},
                   {"solver", rt->solver},
                   {"solve_seconds", rt->solveSeconds},
-                  {"stale", doc->StudyResultsStale(id)}};
+                  {"stale", host.Stale(id)}};
     }
+
+    // An assembly study's answer carries its role table (S1): the reader
+    // must know which bound each neighbour holds — absent is a lower bound
+    // on stiffness, rigid an upper one.
+    json roles = json::array();
+    for (const fem::Participant& pt : s->participants)
+      roles.push_back({{"occurrence", pt.occurrenceId},
+                       {"name", host.OccurrenceName(pt.occurrenceId)},
+                       {"role", fem::ParticipantRoleToString(pt.role)}});
 
     // Modal studies report per-body natural frequencies instead of stress.
     if (s->type == fem::AnalysisType::Modal) {
@@ -596,11 +868,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           freqs.push_back(mode.frequencyHz);
         bodies.push_back({{"body", b.bodyName}, {"frequencies_hz", freqs}});
       }
-      return json{{"type", "modal"},
-                  {"nodes", nodes},
-                  {"elements", elements},
-                  {"bodies", bodies},
-                  {"stale", doc->StudyResultsStale(id)}};
+      json out{{"type", "modal"},
+               {"nodes", nodes},
+               {"elements", elements},
+               {"bodies", bodies},
+               {"stale", host.Stale(id)}};
+      if (!roles.empty())
+        out["participants"] = roles;
+      return out;
     }
 
     // Aggregate mesh size and a factor of safety (min over bodies with yield
@@ -616,10 +891,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                  {"max_von_mises_mpa", b.results.maxVonMises},
                  {"max_displacement_mm", b.results.maxDisplacement}};
       // Factor of safety against yield, when the body's material defines one.
-      if (b.bodyIndex >= 0 && b.bodyIndex < (int)doc->GetBodies().size() &&
-          b.results.maxVonMises > 0) {
+      if (b.results.maxVonMises > 0) {
         const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
-            doc->GetBodies()[b.bodyIndex].material);
+            host.BodyMaterial(*s, b.bodyIndex));
         const float yield =
             CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
         if (yield > 0) {
@@ -645,9 +919,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           {"at", {rt->maxDispAt.x, rt->maxDispAt.y, rt->maxDispAt.z}},
           {"body", rt->maxDispBody}}},
         {"bodies", perBody},
-        {"stale", doc->StudyResultsStale(id)}};
+        {"stale", host.Stale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    if (!roles.empty())
+      result["participants"] = roles;
     {
       // An FEM factor of safety is a PREDICTION (core/Receipt.h). It is a
       // linear-elastic solver's estimate on a tetrahedral approximation of
@@ -658,7 +934,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       receipt::Receipt r;
       const receipt::Oracle solver{"designer/fem-static",
                                    rt->solver.empty() ? "cpu" : rt->solver};
-      const bool stale = doc->StudyResultsStale(id);
+      const bool stale = host.Stale(id);
       if (stale) {
         // The numbers are real; they are just answers about a part that no
         // longer exists. Today that is a `stale: true` the caller has to know
@@ -703,8 +979,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // translucent render of its optimized shape, to re-model against.
     // params: {study, on?: true}
     const uint64_t id = p.at("study").get<uint64_t>();
-    if (!doc->FindStudy(id))
-      throw std::runtime_error("no such study");
+    host.Require(id);
     const bool on = p.value("on", true);
     state.topoGhostStudyId = on ? id : 0;
     state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
@@ -716,12 +991,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // smooth?: iterations (default 3)}
     ui::ReapBackgroundJobs(state);
     const uint64_t id = p.at("study").get<uint64_t>();
-    fem::Study* s = doc->FindStudy(id);
-    if (!s)
-      throw std::runtime_error("no such study");
+    fem::Study* s = &host.Require(id);
     if (s->type != fem::AnalysisType::Topology)
       throw std::runtime_error("not a topology study");
-    const fem::StudyRuntime* rt = doc->StudyResults(id);
+    const fem::StudyRuntime* rt = host.Results(id);
     if (!rt || rt->bodies.empty())
       throw std::runtime_error("study has no result to export");
     const fem::StudyBodyResult& b = rt->bodies.front();
@@ -751,8 +1024,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     ui::EnterSimulation(state);
     if (p.contains("study")) {
       const uint64_t id = p.at("study").get<uint64_t>();
-      if (!doc->FindStudy(id))
-        throw std::runtime_error("no such study");
+      host.Require(id);
       state.simulation.activeStudyId = id;
     }
     return json{{"active", state.simulation.active},
@@ -771,8 +1043,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     ui::EnterSimulation(state);
     if (p.contains("study")) {
       const uint64_t id = p.at("study").get<uint64_t>();
-      if (!doc->FindStudy(id))
-        throw std::runtime_error("no such study");
+      host.Require(id);
       state.simulation.activeStudyId = id;
     }
     const std::string f = p.value("field", std::string("von_mises"));

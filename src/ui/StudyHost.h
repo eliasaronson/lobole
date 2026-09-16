@@ -1,0 +1,73 @@
+#pragma once
+
+// Where the active tab's studies live (S1, docs/simulation/
+// assembly-studies-plan.md): on the PART, or on the ASSEMBLY. The record is
+// the same fem::Study; what differs is who owns it, how an edit becomes an
+// undo step (a command on a part, a full-state snapshot on an assembly), and
+// what a result's staleness is measured against. The panel, the glyphs, the
+// legend and the field overlay all read through this so there is one set of
+// drawing code for both tabs.
+
+#include "core/Document.h"
+#include "core/Occurrence.h"
+#include "core/fem/FemSolver.h"
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace ui {
+
+struct AppState;
+
+struct StudyHost {
+  Document* part = nullptr;
+  AssemblyDocument* asmDoc = nullptr;
+
+  explicit operator bool() const {
+    return part != nullptr || asmDoc != nullptr;
+  }
+  bool IsAssembly() const { return asmDoc != nullptr; }
+  std::vector<fem::Study>& Studies() const {
+    return part ? part->GetStudies() : asmDoc->GetStudies();
+  }
+  fem::Study* Find(uint64_t id) const {
+    return part ? part->FindStudy(id) : asmDoc->FindStudy(id);
+  }
+  const fem::StudyRuntime* Results(uint64_t id) const {
+    return part ? part->StudyResults(id) : asmDoc->StudyResults(id);
+  }
+  uint64_t ResultsEpoch() const {
+    return part ? part->StudyResultsEpoch() : asmDoc->StudyResultsEpoch();
+  }
+  uint64_t AllocateId() const {
+    return part ? part->AllocateId() : asmDoc->AllocateId();
+  }
+  uint64_t Version() const {
+    return part ? part->Version() : asmDoc->Version();
+  }
+  // The name of an occurrence of the assembly (its id as text when there is
+  // no assembly, or no such occurrence).
+  std::string OccurrenceName(uint64_t id) const {
+    const Occurrence* occ = asmDoc ? asmDoc->FindById(id) : nullptr;
+    return occ ? occ->name : std::to_string(id);
+  }
+};
+
+// The active tab's host; false on a drawing or job tab. SimulationActions.cpp.
+StudyHost StudyHostOf(AppState& state);
+// Stale against the part, or against the assembly AND every part it read.
+bool StudyStale(AppState& state, uint64_t studyId);
+// One undoable mutation of one study, on either host.
+void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
+                 const std::function<void(fem::Study&)>& mutate);
+// A new study, undoable, on either host; returns its id.
+uint64_t AddStudyOn(AppState& state, const std::string& name);
+// The contact patches of the active ASSEMBLY study, planned on demand (the
+// imprint is a boolean, so this is cached against the study's text and the
+// documents' versions) and empty on a part tab. What the picture tints as
+// "what is actually clamped".
+const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state);
+
+} // namespace ui

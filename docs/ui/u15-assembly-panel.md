@@ -128,3 +128,15 @@ that no test could address.
 - Test: `assembly/a_mate_row_closes_and_deletes`.
 
 Relations are the remaining list that Delete does not reach.
+
+## A third floating mode: Simulation (S1, 2026-09-16)
+
+The rule this round set — structure stays docked, viewport modes float —
+took its third tenant: a study on the assembly
+([../simulation/assembly-studies-plan.md](../simulation/assembly-studies-plan.md)).
+`###tb_asm_simulation` toggles `state.simulationToolOpen`, drawn from the
+same one-at-a-time slot as explode and motion (`DrawSimulationToolWindow`,
+StudyPanel.cpp), mutually exclusive with them; Close leaves simulation mode.
+Its body is the part tab's Studies panel over `ui::StudyHost`, plus a
+participants table — every top-level occurrence with a role combo and, on a
+rigid row, "Clamp here". Test: `sim/an_assembly_study_clamps_where_the_support_touches`.

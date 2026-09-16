@@ -1262,9 +1262,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (doc) {
     if (auto r = remote::HandleModelingRpc(state, *doc, m, p))
       return *r;
-    if (auto r = remote::HandleSimulationRpc(state, *doc, m, p))
-      return *r;
   }
+  // Studies live on a part OR an assembly (S1): the handler takes a nullable
+  // part and finds the assembly itself.
+  if (auto r = remote::HandleSimulationRpc(state, doc, m, p))
+    return *r;
   // Inspection takes a nullable doc: interference works on assembly
   // occurrence pairs, list_elements/measure on any part via `part`.
   if (auto r = remote::HandleCamRpc(state, doc, m, p))

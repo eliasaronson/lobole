@@ -16,9 +16,15 @@
 // docs/architecture-review-2026-08-24.md.
 namespace ui {
 
-// The Studies panel drawn in the Model dock while in simulation mode. Defined
-// in StudyPanel.cpp.
+// The Studies panel drawn in the Model dock while in simulation mode on a
+// PART tab. Defined in StudyPanel.cpp.
 void DrawStudyPanel(AppState& state);
+
+// The same studies on an ASSEMBLY tab (S1), as the floating tool window
+// beside explode and motion — the Model dock there is the occurrence panel.
+// Adds the participants table (each occurrence's role) and a clamp at each
+// rigid support's contact.
+void DrawSimulationToolWindow(AppState& state);
 
 // The result-field colorbar legend overlaid on the viewport while a field is
 // displayed. Defined in StudyPanel.cpp.
@@ -30,6 +36,11 @@ void DrawFieldLegend(AppState& state);
 // Applies the armed BC/keep tool to a picked face (U1c: the selection
 // pipeline resolves the pick; this consumes it).
 void SimulationApplyToFace(AppState& state, const ElementRef& face);
+// The same with the occurrence the face was picked on (an assembly tab):
+// only the MESHED occurrence takes a load, and a click elsewhere is refused
+// in the panel rather than silently dropped.
+void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
+                           const ElementRef& face);
 
 // Boundary-condition glyphs while simulation mode is active. A pressure is
 // a FIELD of arrows over its face (one per grid cell, into the local
@@ -71,8 +82,9 @@ struct FaceSample {
   glm::vec3 point;
   glm::vec3 normal;
 };
-std::vector<FaceSample> SampleFace(AppState& state, const ElementRef& face,
-                                   float spacing, int maxCount);
+std::vector<FaceSample> SampleFace(AppState& state, uint64_t occurrenceId,
+                                   const ElementRef& face, float spacing,
+                                   int maxCount);
 
 // Dragging a force arrow to change its magnitude. Its own grab payload
 // (SimulationState::loadDrag), like the gizmo's and the section arrow's —

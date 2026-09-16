@@ -73,6 +73,129 @@ def build_bar(d):
     return study, created_by, fixed_face, load_face
 
 
+def assembly_study(d):
+    """S1 (docs/simulation/assembly-studies-plan.md): a study on an ASSEMBLY
+    tab, over the same verbs. Two 100 x 100 x 16 steel blocks as parts, the
+    upper placed on the lower; the upper meshed, the lower a rigid support
+    clamped at their contact, a pressure on the upper's top."""
+    d.call("new_project")
+    parts = {}
+    for name in ("Lower", "Upper"):
+        slot = d.call("add_part", name=name)
+        d.call("set_active_part", part=slot["id"])
+        fid = d.call("add_feature", feature={"type": "Box", "name": name,
+                                             "position": [0, 0, 0],
+                                             "width": 100, "height": 100,
+                                             "depth": 16})["id"]
+        d.call("set_material", feature_id=fid, material="steel")
+        els = d.call("list_elements")["bodies"][0]
+        top = [f["name"] for f in els["faces"]
+               if abs(f["normal"][2] - 1.0) < 1e-6][0]
+        parts[name] = (slot["id"], top)
+    asm = d.call("add_assembly", name="Stack")
+    d.call("set_active_part", part=asm["id"])
+    lower = d.call("add_occurrence", part=parts["Lower"][0], name="Lower",
+                   fixed=True)["id"]
+    upper = d.call("add_occurrence", part=parts["Upper"][0], name="Upper",
+                   transform={"position": [0, 0, 16]})["id"]
+
+    # A study verb on an assembly tab is NOT refused any more (the twenty
+    # rows used to carry NeedsPart), and its participants are occurrences.
+    study = d.call("add_study", name="Upper on lower")["id"]
+    d.call("set_study", id=study, mesh_size=12.0,
+           participants=[{"occurrence": "Upper", "role": "meshed"},
+                         {"occurrence": lower, "role": "rigid"}])
+    listed = d.call("list_studies")["studies"][0]
+    roles = {p["name"]: p["role"] for p in listed["participants"]}
+    expect(roles == {"Upper": "meshed", "Lower": "rigid"},
+           f"participants by name with roles: {listed}")
+
+    # A fixed support anchored on the CONTACT: no face to name.
+    clamp = d.call("add_load", study=study, type="fixed", contact_with="Lower")
+    expect("id" in clamp, "contact anchor accepted")
+    # A pressure on a face, saying whose face.
+    d.call("add_load", study=study, type="pressure", occurrence=upper,
+           face=parts["Upper"][1], magnitude=0.5)
+    loads = d.call("list_studies")["studies"][0]["loads"]
+    expect(loads[0]["contact_with"] == lower
+           and loads[0]["contact_with_name"] == "Lower", f"contact: {loads}")
+    expect(loads[1]["occurrence_name"] == "Upper", f"whose face: {loads}")
+
+    # Refusals name what they refuse.
+    try:
+        d.call("add_load", study=study, type="force", contact_with="Lower",
+               magnitude=10)
+        raise AssertionError("a force took a contact anchor")
+    except RuntimeError as e:
+        expect("fixed support" in str(e), f"names the rule: {e}")
+    try:
+        d.call("add_load", study=study, type="pressure",
+               face=parts["Upper"][1], magnitude=0.5)
+        raise AssertionError("an assembly load without an occurrence")
+    except RuntimeError as e:
+        expect("occurrence" in str(e), f"asks whose face: {e}")
+    try:
+        d.call("set_study", id=study, type="topology")
+        raise AssertionError("topology on an assembly")
+    except RuntimeError as e:
+        expect("part study" in str(e), f"topology is a part study: {e}")
+
+    mesh = d.call("mesh_study", study=study)
+    expect(mesh["bodies"][0]["elements"] > 0
+           and mesh["bodies"][0]["body"] == "Upper", f"meshed: {mesh}")
+    res = d.call("run_study", study=study)
+    expect(res["elements"] > 0 and res["max_displacement_mm"]["value"] > 0,
+           f"solved: {res}")
+    expect(res["stale"] is False, "fresh")
+    got = {p["name"]: p["role"] for p in res["participants"]}
+    expect(got == {"Upper": "meshed", "Lower": "rigid"},
+           f"results carry the role table: {res['participants']}")
+    expect("factor_of_safety" in res, "steel gives a FoS on the assembly too")
+
+    # Stale against EVERY document the study read: the assembly (a moved
+    # occurrence), and a part (regenerated behind the assembly).
+    d.call("set_occurrence_transform", id=upper,
+           transform={"position": [0, 0, 16.0]})
+    expect(d.call("study_results", study=study)["stale"] is True,
+           "an assembly edit staled the result")
+    d.call("run_study", study=study)
+    expect(d.call("study_results", study=study)["stale"] is False, "fresh")
+    d.call("set_active_part", part=parts["Upper"][0])
+    box = d.call("get_state")["features"][0]
+    spec = dict(box)
+    spec["depth"] = 18
+    d.call("modify_feature", feature_id=box["id"], feature=spec)
+    d.call("set_active_part", part=asm["id"])
+    expect(d.call("study_results", study=study)["stale"] is True,
+           "a PART edit staled the assembly's result")
+
+    # The pre-flight: lift the upper block clear, and the contact anchor
+    # refuses by name instead of clamping nothing.
+    d.call("set_occurrence_transform", id=upper,
+           transform={"position": [0, 0, 40]})
+    try:
+        d.call("run_study", study=study)
+        raise AssertionError("a support in mid-air clamped something")
+    except RuntimeError as e:
+        expect("does not touch" in str(e) and "Lower" in str(e),
+               f"names the support: {e}")
+    # And sink it into the part: interpenetration is refused, not fused.
+    d.call("set_occurrence_transform", id=upper,
+           transform={"position": [0, 0, 8]})
+    try:
+        d.call("run_study", study=study)
+        raise AssertionError("an interpenetrating support was fused")
+    except RuntimeError as e:
+        expect("INTERPENETRATE" in str(e), f"names the overlap: {e}")
+
+    # The window: enter_simulation on the assembly tab opens its study
+    # window rather than refusing.
+    st = d.call("enter_simulation", study=study)
+    expect(st["active"] and st["study"] == study, f"entered: {st}")
+    d.call("exit_simulation")
+    print("fem_smoke: assembly study OK")
+
+
 def main():
     binary = sys.argv[1]
     try:
@@ -181,6 +304,8 @@ def main():
                      if x["id"] == made["id"]][0]["loads"]
             expect(not loads, f"remove_load by id took it away: {loads}")
             d.call("remove_study", id=made["id"])
+
+            assembly_study(d)
 
             print("fem_smoke: OK")
             return 0

@@ -329,7 +329,8 @@ void ConsumeMeasure(AppState& state, const Candidate& c) {
   MeasureElementClicked(state, e);
 }
 void ConsumeSimFace(AppState& state, const Candidate& c) {
-  SimulationApplyToFace(state, c.item.element);
+  // On an assembly tab the item's id is the occurrence the face is on (S1).
+  SimulationApplyToFace(state, c.item.id, c.item.element);
 }
 
 std::optional<ArmedContext> ActiveArmedContext(AppState& state) {

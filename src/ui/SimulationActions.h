@@ -42,6 +42,36 @@ struct StudyRunStatus {
 // nothing.
 void SimulationArmTool(AppState& state, SimulationState::Tool tool);
 
+// ---- Studies on an ASSEMBLY (S1, docs/simulation/assembly-studies-plan.md)
+// The assembly document does not own its parts, so everything that places
+// geometry or reads a part's version goes through the app state.
+//
+// The geometry source for fem::PlanAssemblyStudy: an occurrence's bodies in
+// world space (OccurrenceSubtreeBodies) and the project's variables.
+fem::AssemblyStudyContext AssemblyStudyContextFor(AppState& state);
+// The version of every part the study's participants reference, which is
+// what a result is stamped with and compared against.
+std::vector<std::pair<uint64_t, uint64_t>>
+AssemblyStudyPartVersions(AppState& state, const AssemblyDocument& asmDoc,
+                          const fem::Study& study);
+// Stale against the assembly AND its participants' parts.
+bool AssemblyStudyStale(AppState& state, const AssemblyDocument& asmDoc,
+                        uint64_t studyId);
+// Plan + mesh + solve on this thread, stamping and storing the result.
+bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
+                              uint64_t studyId, std::string* error);
+// The same on a worker: the plan (imprint included) is made here, the mesh
+// and solve run on the thread, and the result lands on the assembly tab it
+// was started from when the job is reaped.
+bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
+                           uint64_t studyId, std::string* error);
+// Plan + mesh only, for mesh_study on an assembly tab.
+bool MeshAssemblyStudy(AppState& state, AssemblyDocument& asmDoc,
+                       uint64_t studyId, std::vector<fem::StudyBodyMesh>& out,
+                       std::string* error);
+// The stable id of the active tab's slot (what a background job keys on).
+uint64_t ActiveSlotId(const AppState& state);
+
 void EnterSimulation(AppState& state);
 
 void ExitSimulation(AppState& state);

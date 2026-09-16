@@ -148,18 +148,65 @@ def study(app, name, axis, mesh_mm, braced, modes=6):
     return hz
 
 
+# The supports of the left side wall, by occurrence name, for the ASSEMBLY
+# study (S1, docs/simulation/assembly-studies-plan.md): the parts that touch
+# it, each clamped where it does. The braces are the two the part study could
+# not use — they butt against a continuous face.
+SIDE_WALL = "side_wall L"
+WALL_SUPPORTS = ("front_wall", "back_wall", "top_wall", "bottom_wall",
+                 "divider")
+BRACE_SUPPORTS = ("brace ladder", "port ring brace")
+
+
+def assembly_study(app, label, supports, mesh_mm, modes=6):
+    """The side wall meshed, the named occurrences rigid and clamped at their
+    contact with it. On the assembly tab; the same verbs as `study`."""
+    sid = app.add_study(kind="modal", name=f"{label} {mesh_mm:g}mm")["id"]
+    parts = [{"occurrence": SIDE_WALL, "role": "meshed"}]
+    parts += [{"occurrence": n, "role": "rigid"} for n in supports]
+    app.set_study(study=sid, mesh_size=mesh_mm, num_modes=modes,
+                  participants=parts)
+    for n in supports:
+        app.add_load(study=sid, type="fixed", contact_with=n)
+    t0 = time.time()
+    r = app.run_study(study=sid, _timeout=2400)
+    hz = r["bodies"][0]["frequencies_hz"]
+    print(f"  {label:34} {len(supports):2} supports, {r['elements']:6} el, "
+          f"{time.time() - t0:5.1f}s")
+    print(f"      f1 = {hz[0]:7.1f} Hz    {[round(v) for v in hz]}")
+    return hz
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--port", type=int)
     ap.add_argument("--mesh", type=float, default=25.0,
                     help="element size in mm (converged by 25)")
     ap.add_argument("--project", default=str(PROJECT))
+    ap.add_argument("--assembly", action="store_true",
+                    help="the side wall in its assembly: its neighbours as "
+                         "rigid supports clamped where they touch (S1), "
+                         "with and without the braces")
     args = ap.parse_args()
 
     app = connect(args.port)
     if not app.ping().get("features", {}).get("fem"):
         raise SystemExit("this build has no FEM — modal needs it (and Spectra)")
     app.open_project(path=args.project)
+
+    if args.assembly:
+        # What the part study could not measure: the braces. Measured
+        # 2026-09-16 at 25 mm: walls as contacts 352.5 Hz (the edge-clamped
+        # part study's 311 read ~20% low, as it said), with the braces
+        # 562.4 Hz — inside the 515-593 Hz hand calculation for the
+        # floor-to-brace regions.
+        app.part("speaker").activate()
+        print(f"modal on the assembly, mesh {args.mesh:g} mm:")
+        assembly_study(app, "side wall, walls as contacts", WALL_SUPPORTS,
+                       args.mesh)
+        assembly_study(app, "side wall, walls + braces",
+                       WALL_SUPPORTS + BRACE_SUPPORTS, args.mesh)
+        return
 
     print(f"modal, mesh {args.mesh:g} mm, MDF (E 3.6 GPa, rho 750, nu 0.25):")
     got = {}

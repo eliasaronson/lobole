@@ -62,7 +62,11 @@ the headless solve loop ships in phase 2, before any GUI exists.
   tier of difficulty (constraint equations or nonlinear iteration) and drag
   in per-occurrence meshing. Nothing in v1 precludes them; the Study model
   deliberately lives per-document so an assembly-level study kind can arrive
-  later without reshaping this one.
+  later without reshaping this one. **S1 shipped 2026-09-16** (format v106):
+  a study on the AssemblyDocument, one occurrence meshed, its rigid
+  neighbours clamped at their contact — the cheap half, which is a contact
+  patch imprinted at mesh time, not constraint equations
+  ([assembly-studies-plan.md](assembly-studies-plan.md), "S1 as built").
 
   **Field note, 2026-09-15 (panel modes of the smart speaker,
   generators/smart_speaker/modal.py).** The deferral holds up: one panel at a

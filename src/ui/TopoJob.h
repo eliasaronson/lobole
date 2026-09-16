@@ -47,7 +47,11 @@ struct TopoJob {
 // longer holds a frame either.
 struct StudyJob {
   uint64_t studyId = 0;
-  uint64_t partSlotId = 0;
+  uint64_t partSlotId = 0;     // a part's study: the tab it ran on
+  uint64_t assemblySlotId = 0; // an assembly's study (S1): its tab instead
+  // An assembly study's stale record, stamped at plan time (the versions of
+  // the parts the plan read) and stored with the result.
+  std::vector<std::pair<uint64_t, uint64_t>> partVersions;
   fem::StudyPlan plan;
   fem::StudyJobInput input;
   fem::StudyRuntime runtime; // read by main only after the join

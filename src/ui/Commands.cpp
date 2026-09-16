@@ -660,6 +660,16 @@ const std::vector<Command>& Table() {
             s.motionToolOpen = false;
         });
     add(
+        "assembly.simulation",
+        [](AppState& s) { return s.assembly != nullptr; },
+        [](AppState& s) {
+          // The third floating viewport mode (S1): a study on the assembly.
+          if (s.simulationToolOpen)
+            ExitSimulation(s);
+          else
+            EnterSimulation(s);
+        });
+    add(
         "assembly.motion", [](AppState& s) { return s.assembly != nullptr; },
         [](AppState& s) {
           s.motionToolOpen = !s.motionToolOpen;

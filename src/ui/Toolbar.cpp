@@ -892,6 +892,11 @@ void DrawAssemblyToolbar(AppState& state) {
   CommandButton(state, ICON_FA_FILM "###tb_asm_motion", "assembly.motion",
                 "Motion study (drive a mate and scrub the mechanism)",
                 state.motionToolOpen);
+  CommandButton(state, ICON_FA_GAUGE_HIGH "###tb_asm_simulation",
+                "assembly.simulation",
+                "Simulation (mesh one occurrence, clamp it where the others "
+                "touch)",
+                state.simulationToolOpen);
 
   Divider();
   CommandButton(state,

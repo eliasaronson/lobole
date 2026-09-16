@@ -14,6 +14,7 @@
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
+#include "core/fem/FemSolver.h" // ContactPatch (assembly studies)
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/ProjectStamp.h"
@@ -599,6 +600,15 @@ struct SimulationState {
   uint64_t comVersion = 0;
   bool comKnown = false;
   glm::vec3 com{0.0f};
+  // Assembly studies (S1): the active study's contact patches, planned on
+  // demand and cached against the study's text and the documents' versions
+  // (the imprint is a boolean; see ui::SimulationContacts).
+  uint64_t contactKey = 0;
+  std::vector<fem::ContactPatch> contacts;
+  std::string contactError; // why the plan refused, shown in the panel
+  // Why the last viewport placement was refused (a face clicked on an
+  // occurrence that is not the meshed one), shown in the panel.
+  std::string placeRefusal;
   int activeMode = 0;       // modal: which mode shape the overlay displays
   // Topology iso-surface threshold in [0,1]; 0 = auto (volume-matched).
   float topoThreshold = 0.0f;
@@ -1065,6 +1075,12 @@ struct AppState {
   // Section tool's cuts do: closing the window means done EDITING the
   // explode, not done looking at it, so activeExplodedView is left alone.
   bool explodeToolOpen = false;
+
+  // The Simulation tool window on an ASSEMBLY tab is open (S1,
+  // docs/simulation/assembly-studies-plan.md): the third of the floating
+  // viewport modes beside explode and motion, since the Model dock there is
+  // the occurrence panel. Its studies live on the AssemblyDocument.
+  bool simulationToolOpen = false;
 
   // Motion studies (G2): the panel's selection and scrub position, and the
   // results of runs, by study id. A result is a product of running, like a

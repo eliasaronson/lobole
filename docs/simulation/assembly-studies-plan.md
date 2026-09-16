@@ -204,6 +204,7 @@ draws a part study and an assembly study — the assembly study simply has
 more anchors.
 
 **S1 — studies on the assembly, one occurrence meshed, contacts clamped.**
+SHIPPED 2026-09-16 (format v106); see "S1 as built" below.
 The widest and least risky. `AssemblyDocument` gains a studies vector (it is
 a separate class from `Document`, so it does not inherit `m_studies`) and the
 multi-document stale record; the 20 study RPC rows carrying `NeedsPart` take
@@ -242,6 +243,72 @@ decimates what the field renderer is handed rather than what is solved.
 Rough sizes, for sequencing rather than scheduling: S0 2–3 days, S1 3–4, S2
 2–4, S4 3–5. S3 is unestimated until the defeaturing rule is chosen. Per-part studies
 are untouched throughout and remain the fast path, which matters given S3.
+
+## S1 as built
+
+What landed on 2026-09-16, and where it differs from the paragraphs above.
+
+- **The record.** `fem::Study` gained `participants` (occurrence, role
+  meshed|rigid|ignored, its own mesh size), loads and refinements gained
+  `occurrenceId`, and a fixed load gained `contactWith` — a contact anchor
+  with no face. `AssemblyDocument` holds its studies with the part's
+  accessors, and a result cache SHARED with its undo snapshots (a full-state
+  copy must not duplicate a mesh). Stale is measured against the assembly's
+  version and every participant part's version.
+- **The plan.** `fem::PlanAssemblyStudy` (src/core/fem/AssemblyStudy.cpp):
+  one meshed occurrence or a refusal naming both; the interference
+  pre-flight, refusing by name; a fuzzy `BOPAlgo_Builder` general fuse on
+  COPIES, `SetNonDestructive`, so no document's shape is written; the
+  imprinted solid found by centroid (the builder's `Modified` answers for
+  faces and edges, not reliably for solids); anchors mapped onto the
+  imprinted faces, a force's total split by area; the contact patch as the
+  faces both imprinted solids share, plus the rigid body's ORIGINAL faces
+  that carry it, for the picture. The result meshes and solves through the
+  unchanged `MeshPlannedStudy` / `SolvePreparedStudy`.
+- **One handler, two homes.** The twenty study RPCs lost `NeedsPart` and
+  resolve the tab themselves (`Host` in RemoteSimulation.cpp): `set_study
+  {participants: [{occurrence, role, mesh_size?}]}`, `add_load
+  {occurrence, face}` or `{contact_with}`, `add_refinement {occurrence}`;
+  `list_studies` and `study_results` carry the role table. An edit on an
+  assembly is one full-state snapshot and one version bump. The GUI reads
+  the same host (`ui::StudyHost`), so the panel body, the glyphs, the
+  tints, the labels, the legend and the field overlay are one set of code:
+  on the assembly tab they live in the **Simulation tool window**, the
+  third floating viewport mode beside explode and motion, with a
+  participants table and a "Clamp here" on each rigid row.
+- **The picture.** A rigid support is a ghost with its contact faces tinted
+  as the fixture they are; a click on any occurrence but the meshed one is
+  refused in the panel, not dropped. The contact patches are planned on
+  demand and cached against the study's text and the documents' versions.
+- **Narrower than planned, on purpose.** A participant is a TOP-LEVEL
+  occurrence; a sub-assembly participates whole (its leaves placed by
+  `Flatten`), which is what a bracket bolted to a unit wants, and the path
+  key above is not needed until someone wants one leaf of a unit alone. The
+  contact tint is the rigid body's whole touching face, not the patch cut
+  out of it — the seam is S2's. An assembly study meshes synchronously; the
+  solve runs off the frame (`run_study async: true`, the Run button).
+- **The ring-brace number.** On the cabinet (`generators/smart_speaker/modal.py
+  --assembly`), the side wall meshed at 25 mm with its neighbours as rigid
+  supports clamped where they touch:
+
+  | supports | f1 | f2..f6 |
+  |---|---|---|
+  | the four walls and the divider, as contacts | **352.5 Hz** | 408, 510, 662, 860, 924 |
+  | the same plus the brace ladder and the port ring brace | **562.4 Hz** | 1096, 1100, 1160, 1452, 1517 |
+
+  The part study clamped at the wall's EDGES gave 311 Hz and said of itself
+  that clamping the edges stretched the span from 320 to 352 mm, so it read
+  about 20% low: the contacts land 16 mm inboard and give 352. And the
+  braces — the measurement the part study could not make, because a brace
+  that butts against a continuous face has no face to clamp — lift the
+  fundamental to 562 Hz, inside the 515 to 593 Hz the hand calculation gives
+  for the floor-to-brace regions. Twelve seconds a solve.
+- **Verified by** `tests/test_fem.cpp` (S1: fixed nodes on the interface
+  plane only; the six refusals by name; stale across documents; the shared
+  cache), `tests/fem_smoke.py` (the whole verb set on an assembly tab, stale
+  on an assembly edit AND on a part edit, both pre-flight refusals), and
+  `sim/an_assembly_study_clamps_where_the_support_touches` (the window, the
+  clamp, one undo, the refusal, the ghost and the tint, the run).
 
 ## Verification
 

@@ -301,6 +301,9 @@ const Binding kDefaults[] = {
     // closes the other because both place the occurrences.
     {"assembly.explode", Context::Assembly, "Exploded view", "Tools", "X"},
     {"assembly.motion", Context::Assembly, "Motion study", "Tools", "M"},
+    // The third floating mode (S1): a study on the assembly, on the part
+    // tab's simulation key.
+    {"assembly.simulation", Context::Assembly, "Simulation", "Tools", "Q"},
 
     // Display only — hiding a part does not suppress it, so nothing moves.
     // One key for both directions (it shows what it hid), and Shift+H for

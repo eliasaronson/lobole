@@ -1,7 +1,10 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "render/MeshRenderer.h" // InstanceHighlightRanges (tint test)
+#include "ui/AssemblyActions.h"  // UndoAssembly, PartDocById (S1)
+#include "ui/DocumentSlots.h"    // AddAssembly, SetActivePart
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
 #include "ui/SimulationActions.h"
+#include "ui/StudyHost.h" // ModifyStudy, SimulationContacts, StudyStale
 #include "ui/StudyPanel.h"
 #include "ui/ViewportHandleDraw.h" // DrawViewportHandles
 
@@ -423,11 +426,11 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // nothing else; a spacing that divides it into ~16 cells gives about
     // that many, every one on the face's plane and inside its extent.
     const auto coarse =
-        ui::SampleFace(*s_App, face, 10.0f * std::sqrt(area), 160);
+        ui::SampleFace(*s_App, 0, face, 10.0f * std::sqrt(area), 160);
     IM_CHECK_EQ(coarse.size(), (size_t)1);
     IM_CHECK(glm::length(coarse[0].point - c) < 1e-3f);
     const auto fine =
-        ui::SampleFace(*s_App, face, std::sqrt(area / 16.0f), 160);
+        ui::SampleFace(*s_App, 0, face, std::sqrt(area / 16.0f), 160);
     IM_CHECK(fine.size() >= 12 && fine.size() <= 20);
     glm::vec3 lo(0.0f), hi(0.0f);
     body.shape.GetBoundingBox(lo, hi);
@@ -589,6 +592,150 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
       IM_CHECK(glm::length(prims[i].posThis - mid) > 1e-2f);
     ui::ExitSimulation(*s_App);
     ctx->Yield();
+  };
+
+  // S1 (docs/simulation/assembly-studies-plan.md): a study on an ASSEMBLY
+  // tab. Two placed blocks; the upper meshed, the lower a rigid support;
+  // one click clamps the upper where the lower touches it. The picture
+  // says so: the support is a ghost, its contact face tinted as a fixture.
+  t = IM_REGISTER_TEST(engine, "sim",
+                       "an_assembly_study_clamps_where_the_support_touches");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    {
+      const size_t index = Doc()->FeatureCount() - 1;
+      auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(index));
+      IM_CHECK(box != nullptr);
+      nlohmann::json before = DocumentIO::FeatureToJson(*box);
+      box->position = glm::vec3(0.0f);
+      box->width = 100.0;
+      box->height = 100.0;
+      box->depth = 16.0;
+      box->SetMaterial("steel");
+      nlohmann::json after = DocumentIO::FeatureToJson(*box);
+      s_App->commands->Execute(
+          std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+      ctx->Yield(2);
+    }
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
+    ui::SetActivePart(*s_App, asmIdx);
+    uint64_t lower = 0, upper = 0;
+    {
+      Occurrence lo;
+      lo.name = "Lower";
+      lo.partId = partId;
+      lo.fixed = true;
+      lower = s_App->assembly->AddOccurrence(lo);
+      Occurrence up;
+      up.name = "Upper";
+      up.partId = partId;
+      up.position = glm::vec3(0.0f, 0.0f, 16.0f);
+      upper = s_App->assembly->AddOccurrence(up);
+    }
+    ctx->Yield(3);
+
+    // The toolbar opens the Simulation tool window on an assembly tab.
+    ToolbarClick(ctx, "###tb_asm_simulation");
+    ctx->Yield(2);
+    IM_CHECK(s_App->simulation.active);
+    IM_CHECK(s_App->simulationToolOpen);
+    IM_CHECK(ctx->ItemExists("//Simulation###ToolWindow/###study_add"));
+    IM_CHECK_EQ(s_App->assembly->GetStudies().size(), (size_t)1);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    IM_CHECK(studyId != 0);
+
+    // Roles through the study edit path (the combos draw per occurrence).
+    ui::ModifyStudy(*s_App, studyId, "roles", [&](fem::Study& cs) {
+      cs.participants.push_back({upper, fem::ParticipantRole::Meshed, 0, ""});
+      cs.participants.push_back({lower, fem::ParticipantRole::Rigid, 0, ""});
+      cs.meshSize = 12.0;
+    });
+    ctx->Yield(2);
+    // The rigid row offers the clamp; one click adds the contact anchor.
+    const std::string clamp =
+        "//Simulation###ToolWindow/###clamp_" + std::to_string(lower);
+    IM_CHECK(ctx->ItemExists(clamp.c_str()));
+    ctx->ItemClick(clamp.c_str());
+    ctx->Yield(2);
+    const fem::Study* st = s_App->assembly->FindStudy(studyId);
+    IM_CHECK(st != nullptr);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    IM_CHECK(st->loads[0].type == fem::LoadType::Fixed);
+    IM_CHECK_EQ(st->loads[0].contactWith, lower);
+    // And one undo takes the clamp away again: a full-state snapshot.
+    ui::UndoAssembly(*s_App);
+    ctx->Yield();
+    st = s_App->assembly->FindStudy(studyId);
+    IM_CHECK(st != nullptr && st->loads.empty());
+    ctx->ItemClick(clamp.c_str());
+    ctx->Yield(2);
+    st = s_App->assembly->FindStudy(studyId);
+    IM_CHECK(st != nullptr && st->loads.size() == 1);
+
+    // A face clicked on the SUPPORT is refused in words, not dropped.
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::Pressure);
+    const Body& body = Doc() ? Doc()->GetBodies()[0]
+                             : ui::PartDocById(*s_App, partId)->GetBodies()[0];
+    const ElementRef someFace{body.createdBy,
+                              body.elementMap.names.begin()->second};
+    ui::SimulationApplyToFace(*s_App, lower, someFace);
+    IM_CHECK(!s_App->simulation.placeRefusal.empty());
+    st = s_App->assembly->FindStudy(studyId);
+    IM_CHECK(st != nullptr && st->loads.size() == 1);
+    ui::SimulationArmTool(*s_App, ui::SimulationState::Tool::None);
+
+    // The picture: the support's contact face is tinted as a fixture and
+    // the support itself is a ghost; the meshed part is neither.
+    ctx->Yield(2);
+    ui::SyncSelectionHighlights(*s_App);
+    ui::AppendSimulationFaceTints(*s_App);
+    const auto& contacts = ui::SimulationContacts(*s_App);
+    IM_CHECK_EQ(contacts.size(), (size_t)1);
+    IM_CHECK(!contacts[0].rigidFaces.empty());
+    bool tinted = false, ghost = false, meshedGhost = false;
+    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+      if (m.occurrenceId == lower) {
+        ghost = ghost || s_App->meshRenderer->IsInstanceGhost(m.meshId);
+        for (const glm::uvec2& r :
+             s_App->meshRenderer->InstanceHighlightRanges(m.meshId))
+          tinted = tinted || (r.y >> MeshRenderer::kTintShift) ==
+                                 MeshRenderer::kTintFixture;
+      }
+      if (m.occurrenceId == upper)
+        meshedGhost =
+            meshedGhost || s_App->meshRenderer->IsInstanceGhost(m.meshId);
+    }
+    IM_CHECK(tinted);
+    IM_CHECK(ghost);
+    IM_CHECK(!meshedGhost);
+
+#ifdef HAVE_NETGEN
+    // Run from the window; the result lands on the assembly and is fresh.
+    ctx->ItemClick("//Simulation###ToolWindow/###study_run");
+    for (int i = 0; i < 6000 && !s_App->assembly->StudyResults(studyId); ++i) {
+      const fem::Study* cur = s_App->assembly->FindStudy(studyId);
+      if (cur && !cur->error.empty())
+        break;
+      ctx->Yield();
+    }
+    const fem::Study* cur = s_App->assembly->FindStudy(studyId);
+    IM_CHECK(cur != nullptr);
+    if (!cur->error.empty())
+      ctx->LogError("assembly study: %s", cur->error.c_str());
+    const fem::StudyRuntime* rt = s_App->assembly->StudyResults(studyId);
+    IM_CHECK(rt != nullptr);
+    IM_CHECK(rt->maxDisplacement >= 0.0);
+    IM_CHECK(!ui::StudyStale(*s_App, studyId));
+#endif
+
+    // Close leaves simulation mode and the window goes with it.
+    ctx->ItemClick("//Simulation###ToolWindow/###simulation_close");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->simulation.active);
+    IM_CHECK(!s_App->simulationToolOpen);
   };
 
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");

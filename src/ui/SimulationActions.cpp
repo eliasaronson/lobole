@@ -1,5 +1,7 @@
 #include "ui/SimulationActions.h"
+#include "core/io/Serialization.h" // StudyToJson (undo pairs, contact key)
 #include "ui/AssemblyActions.h"
+#include "ui/StudyHost.h"
 
 #include "common/Logger.h"
 #include "core/Command.h"
@@ -37,12 +39,13 @@ void AppendStudyMarker(const AppState& state,
   // displacement). Topology views (Shape/Density) have no such peak — and a
   // topology runtime's maxVm/DispAt are (0,0,0), which would draw a stray cross
   // at the origin.
+  const StudyHost host = StudyHostOf(const_cast<AppState&>(state));
   if (!sim.IsActive() ||
       (sim.field != SimulationState::Field::VonMises &&
        sim.field != SimulationState::Field::Displacement) ||
-      !state.document)
+      !host)
     return;
-  const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
+  const fem::StudyRuntime* rt = host.Results(sim.activeStudyId);
   if (!rt)
     return;
   // A magenta cross at the peak of the displayed field (max von Mises or max
@@ -422,10 +425,22 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   // looks like an answer. Self-weight is a real number derived from what the
   // load acts on: "this part's own weight" is a scale a user can reason about
   // and edit (docs/ui/u10-defaults-and-refusals.md).
-  Document* doc = state.document.get();
-  if (!doc)
+  // The part's own weight — or, on an assembly, the MESHED occurrence's.
+  std::vector<Body> placed;
+  const std::vector<Body>* bodies = nullptr;
+  if (Document* doc = state.document.get()) {
+    bodies = &doc->GetBodies();
+  } else if (state.assembly) {
+    const fem::Study* s = state.assembly->FindStudy(sim.activeStudyId);
+    if (s)
+      for (const fem::Participant& pt : s->participants)
+        if (pt.role == fem::ParticipantRole::Meshed)
+          placed = OccurrenceSubtreeBodies(state, pt.occurrenceId);
+    bodies = &placed;
+  }
+  if (!bodies || bodies->empty())
     return;
-  const auto mass = Measure::MassOfBodies(doc->GetBodies());
+  const auto mass = Measure::MassOfBodies(*bodies);
   if (!mass || !mass->massKnown || mass->massG <= 0.0)
     return; // no material yet: the panel says so, and says why
   const double weightN = mass->massG * 0.001 * 9.81;
@@ -444,10 +459,292 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
   sim.pendingMagnitudeExpr.clear();
 }
 
+StudyHost StudyHostOf(AppState& state) {
+  return StudyHost{state.document.get(), state.assembly.get()};
+}
+
+bool StudyStale(AppState& state, uint64_t studyId) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return true;
+  return host.part ? host.part->StudyResultsStale(studyId)
+                   : AssemblyStudyStale(state, *host.asmDoc, studyId);
+}
+
+void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
+                 const std::function<void(fem::Study&)>& mutate) {
+  const StudyHost host = StudyHostOf(state);
+  const fem::Study* cur = host ? host.Find(id) : nullptr;
+  if (!cur)
+    return;
+  if (host.part) {
+    if (!state.commands)
+      return;
+    nlohmann::json before = DocumentIO::StudyToJson(*cur);
+    fem::Study copy = *cur;
+    mutate(copy);
+    nlohmann::json after = DocumentIO::StudyToJson(copy);
+    state.commands->Execute(
+        std::make_unique<ModifyStudyCommand>(desc, before, after), *host.part);
+    return;
+  }
+  // An assembly edits by full-state snapshot (AssemblyActions): one
+  // snapshot, one mutation, one version bump — the same one undo step.
+  fem::Study copy = *cur;
+  mutate(copy);
+  SnapshotAssembly(state);
+  *host.asmDoc->FindStudy(id) = std::move(copy);
+  host.asmDoc->BumpVersion();
+}
+
+uint64_t AddStudyOn(AppState& state, const std::string& name) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host)
+    return 0;
+  if (host.part) {
+    if (!state.commands)
+      return 0;
+    auto cmd = std::make_unique<AddStudyCommand>(name);
+    AddStudyCommand* raw = cmd.get();
+    state.commands->Execute(std::move(cmd), *host.part);
+    return raw->StudyId();
+  }
+  SnapshotAssembly(state);
+  return host.asmDoc->AddStudy(name).id;
+}
+
+const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state) {
+  SimulationState& sim = state.simulation;
+  static const std::vector<fem::ContactPatch> kNone;
+  AssemblyDocument* asmDoc = state.assembly.get();
+  const fem::Study* s = asmDoc ? asmDoc->FindStudy(sim.activeStudyId) : nullptr;
+  if (!s || !sim.IsActive()) {
+    sim.contacts.clear();
+    sim.contactKey = 0;
+    sim.contactError.clear();
+    return kNone;
+  }
+  // The key: the study as text, the assembly's version, and every part the
+  // study reads — the same record a result is stamped with.
+  uint64_t key = std::hash<std::string>{}(DocumentIO::StudyToJson(*s).dump());
+  key ^= asmDoc->Version() * 0x9E3779B97F4A7C15ull;
+  for (const auto& [partId, version] :
+       AssemblyStudyPartVersions(state, *asmDoc, *s))
+    key ^= (partId * 0x100000001B3ull) ^ (version * 0x9E3779B97F4A7C15ull);
+  if (key == sim.contactKey)
+    return sim.contacts;
+  sim.contactKey = key;
+  sim.contacts.clear();
+  sim.contactError.clear();
+  fem::Study copy = *s; // the plan writes its refusal into the study
+  fem::StudyPlan plan;
+  std::string err;
+  if (fem::PlanAssemblyStudy(*asmDoc, copy, AssemblyStudyContextFor(state),
+                             plan, &err))
+    sim.contacts = std::move(plan.contacts);
+  else
+    sim.contactError = err;
+  return sim.contacts;
+}
+
+uint64_t ActiveSlotId(const AppState& state) {
+  if (state.activePart < 0 ||
+      static_cast<size_t>(state.activePart) >= state.parts.size())
+    return 0;
+  return state.parts[state.activePart].id;
+}
+
+fem::AssemblyStudyContext AssemblyStudyContextFor(AppState& state) {
+  fem::AssemblyStudyContext ctx;
+  ctx.placedBodies = [&state](uint64_t occurrenceId) {
+    return OccurrenceSubtreeBodies(state, occurrenceId);
+  };
+  ctx.symbols = &state.projectSymbols;
+  return ctx;
+}
+
+std::vector<std::pair<uint64_t, uint64_t>>
+AssemblyStudyPartVersions(AppState& state, const AssemblyDocument& asmDoc,
+                          const fem::Study& study) {
+  std::vector<std::pair<uint64_t, uint64_t>> out;
+  for (const fem::Participant& pt : study.participants) {
+    if (pt.role == fem::ParticipantRole::Ignored)
+      continue;
+    const Occurrence* occ = asmDoc.FindById(pt.occurrenceId);
+    if (!occ)
+      continue;
+    bool seen = false;
+    for (const auto& [id, v] : out)
+      seen = seen || id == occ->partId;
+    if (seen)
+      continue;
+    const Document* part = PartDocById(state, occ->partId);
+    out.push_back({occ->partId, part ? part->Version() : 0});
+  }
+  return out;
+}
+
+bool AssemblyStudyStale(AppState& state, const AssemblyDocument& asmDoc,
+                        uint64_t studyId) {
+  return asmDoc.StudyResultsStale(studyId, [&state](uint64_t partId) {
+    const Document* part = PartDocById(state, partId);
+    return part ? part->Version() : uint64_t{0};
+  });
+}
+
+namespace {
+// Plan an assembly study for a run: the imprint and every refusal happen
+// here, on the main thread, against the placed geometry.
+bool PlanForRun(AppState& state, AssemblyDocument& asmDoc, uint64_t studyId,
+                fem::StudyPlan& plan, fem::Study** studyOut,
+                std::string* error) {
+  fem::Study* s = asmDoc.FindStudy(studyId);
+  if (!s) {
+    if (error)
+      *error = "no such study";
+    return false;
+  }
+  if (s->type == fem::AnalysisType::Topology) {
+    if (error)
+      *error = "topology optimisation is a part study";
+    return false;
+  }
+  if (studyOut)
+    *studyOut = s;
+  return fem::PlanAssemblyStudy(asmDoc, *s, AssemblyStudyContextFor(state),
+                                plan, error);
+}
+} // namespace
+
+bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
+                              uint64_t studyId, std::string* error) {
+  fem::StudyPlan plan;
+  fem::Study* s = nullptr;
+  if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
+    return false;
+  const auto partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
+  fem::StudyJobInput input;
+  fem::StudyRuntime rt;
+  std::string err;
+  if (!fem::MeshPlannedStudy(plan, input, &err) ||
+      !fem::SolvePreparedStudy(input, rt, &err)) {
+    s->error = err;
+    if (error)
+      *error = err;
+    return false;
+  }
+  rt.solvedAtVersion = asmDoc.Version();
+  rt.solvedPartVersions = partVersions;
+  rt.solver = "cpu (Eigen CG-IC)";
+  asmDoc.StoreStudyResults(studyId, std::move(rt));
+  return true;
+}
+
+bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
+                           uint64_t studyId, std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (BackgroundJobRunning(state, "topo") ||
+      BackgroundJobRunning(state, "study"))
+    return fail("a study run is already in progress");
+  auto job = std::make_shared<StudyJob>();
+  fem::Study* s = nullptr;
+  if (!PlanForRun(state, asmDoc, studyId, job->plan, &s, error))
+    return false;
+  job->studyId = studyId;
+  job->assemblySlotId = ActiveSlotId(state);
+  job->partVersions = AssemblyStudyPartVersions(state, asmDoc, *s);
+  job->started = std::chrono::steady_clock::now();
+
+  auto bg = std::make_unique<BackgroundJob>();
+  bg->kind = "study";
+  bg->label = "Solving '" + (s->name.empty() ? "study" : s->name) + "'";
+  bg->cancellable = false;
+  BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([job, raw]() {
+    OSD::SetSignal(Standard_False);
+    std::string err;
+    if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
+      job->error = err.empty() ? "meshing failed" : err;
+    else if (!fem::SolvePreparedStudy(job->input, job->runtime, &err))
+      job->error = err.empty() ? "solve failed" : err;
+    raw->done.store(true);
+  });
+  bg->finish = [job](AppState& st) {
+    StudyJob& j = *job;
+    AssemblyDocument* target = AssemblyDocById(st, j.assemblySlotId);
+    if (!target) {
+      LOG_WARN("study solve: the assembly it ran on was closed before it "
+               "finished; the result is dropped");
+    } else if (j.error.empty()) {
+      j.runtime.solvedAtVersion = target->Version();
+      j.runtime.solvedPartVersions = j.partVersions;
+      j.runtime.solver = "cpu (Eigen CG-IC)";
+      j.runtime.solveSeconds = Elapsed(j.started);
+      target->StoreStudyResults(j.studyId, std::move(j.runtime));
+    } else if (fem::Study* st2 = target->FindStudy(j.studyId)) {
+      st2->error = j.error;
+    }
+    if (st.studyJob == job)
+      st.studyJob.reset();
+    return true;
+  };
+  state.studyJob = job;
+  StartBackgroundJob(state, std::move(bg));
+  return true;
+}
+
+bool MeshAssemblyStudy(AppState& state, AssemblyDocument& asmDoc,
+                       uint64_t studyId, std::vector<fem::StudyBodyMesh>& out,
+                       std::string* error) {
+  fem::StudyPlan plan;
+  fem::Study* s = nullptr;
+  if (!PlanForRun(state, asmDoc, studyId, plan, &s, error))
+    return false;
+  fem::StudyJobInput input;
+  std::string err;
+  if (!fem::MeshPlannedStudy(plan, input, &err)) {
+    s->error = err;
+    if (error)
+      *error = err;
+    return false;
+  }
+  out.clear();
+  for (fem::StudyJobBody& jb : input.bodies) {
+    fem::StudyBodyMesh bm;
+    bm.bodyIndex = jb.bodyIndex;
+    bm.bodyName = jb.bodyName;
+    bm.mesh = std::move(jb.mesh);
+    out.push_back(std::move(bm));
+  }
+  return true;
+}
+
 void EnterSimulation(AppState& state) {
   Document* doc = state.document.get();
-  if (!doc)
-    return; // parts only (an assembly tab has no studies)
+  if (!doc) {
+    // An assembly tab: the studies live on the assembly, and the window is
+    // the floating tool window beside explode and motion (S1).
+    AssemblyDocument* asmDoc = state.assembly.get();
+    if (!asmDoc)
+      return;
+    state.measure = MeasureState{};
+    state.simulation.active = true;
+    state.simulationToolOpen = true;
+    state.explodeToolOpen = false;
+    state.motionToolOpen = false;
+    if (asmDoc->GetStudies().empty()) {
+      SnapshotAssembly(state);
+      asmDoc->AddStudy("");
+    }
+    if (!asmDoc->FindStudy(state.simulation.activeStudyId))
+      state.simulation.activeStudyId = asmDoc->GetStudies().front().id;
+    state.syncedDocumentVersion = UINT64_MAX;
+    return;
+  }
   // Drop the measure tool: it owns the viewport while active, and the
   // simulation toolbar has no Measure toggle to turn it back off.
   state.measure = MeasureState{};
@@ -480,13 +777,21 @@ void ExitSimulation(AppState& state) {
   if (state.fieldRenderer)
     state.fieldRenderer->SetMesh({}, {});
   state.simulation = SimulationState{};
+  state.simulationToolOpen = false;
   state.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
 }
 void SyncFieldRenderer(AppState& state) {
   if (!state.fieldRenderer || !state.meshRenderer)
     return;
   SimulationState& sim = state.simulation;
-  Document* doc = state.document.get();
+  const StudyHost host = StudyHostOf(state);
+  // On an assembly, the solved bodies are the MESHED occurrence's.
+  uint64_t meshedOcc = 0;
+  if (host.IsAssembly())
+    if (const fem::Study* s = host.Find(sim.activeStudyId))
+      for (const fem::Participant& pt : s->participants)
+        if (pt.role == fem::ParticipantRole::Meshed)
+          meshedOcc = pt.occurrenceId;
 
   auto restoreBodies = [&]() {
     for (uint32_t meshId : sim.hiddenMeshes)
@@ -509,7 +814,8 @@ void SyncFieldRenderer(AppState& state) {
     std::vector<uint32_t> want;
     for (const fem::StudyBodyResult& b : rt->bodies)
       for (const DocumentRenderMesh& m : state.documentMeshes)
-        if (static_cast<int>(m.bodyIndex) == b.bodyIndex)
+        if (static_cast<int>(m.bodyIndex) == b.bodyIndex &&
+            m.occurrenceId == meshedOcc)
           want.push_back(m.meshId);
     for (uint32_t id : want)
       if (std::find(sim.hiddenMeshes.begin(), sim.hiddenMeshes.end(), id) ==
@@ -519,8 +825,8 @@ void SyncFieldRenderer(AppState& state) {
   };
 
   const fem::StudyRuntime* rt =
-      doc ? doc->StudyResults(sim.activeStudyId) : nullptr;
-  const fem::Study* study = doc ? doc->FindStudy(sim.activeStudyId) : nullptr;
+      host ? host.Results(sim.activeStudyId) : nullptr;
+  const fem::Study* study = host ? host.Find(sim.activeStudyId) : nullptr;
   const bool show = sim.IsActive() &&
                     sim.field != SimulationState::Field::None && rt != nullptr;
   if (!show) {
@@ -566,8 +872,7 @@ void SyncFieldRenderer(AppState& state) {
     const uint64_t tq = static_cast<uint64_t>(
         std::lround(std::clamp(sim.topoThreshold, 0.0f, 1.0f) * 1000.0f));
     const uint64_t key =
-        (sim.activeStudyId * 1000003ull + doc->StudyResultsEpoch()) *
-            100003ull +
+        (sim.activeStudyId * 1000003ull + host.ResultsEpoch()) * 100003ull +
         tq + 1;
     if (key != sim.topoIsoKey) {
       std::vector<glm::vec3> pos, nrm;
@@ -608,7 +913,7 @@ void SyncFieldRenderer(AppState& state) {
   const uint64_t key =
       ((static_cast<uint64_t>(sim.field) * 1000003ull + sim.activeStudyId) *
            1000003ull +
-       doc->StudyResultsEpoch()) *
+       host.ResultsEpoch()) *
           1000003ull +
       (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0);
   if (key == sim.fieldBuiltKey) {

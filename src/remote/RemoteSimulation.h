@@ -19,8 +19,11 @@ struct AppState;
 // error. `doc` is the active part document (caller guarantees non-null).
 namespace remote {
 
+// `doc` is the active PART, or null on any other tab: an assembly tab's
+// studies live on state.assembly (S1), and the handler refuses a drawing or
+// a job tab itself, naming where studies live.
 std::optional<nlohmann::json> HandleSimulationRpc(ui::AppState& state,
-                                                  Document& doc,
+                                                  Document* doc,
                                                   const std::string& method,
                                                   const RpcParams& params);
 

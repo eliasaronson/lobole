@@ -135,3 +135,9 @@ instance (`headless-preview.sh --gui`).
 GUI cases: `sim/pressure_is_a_field_over_the_face`,
 `sim/fixed_and_loaded_faces_are_tinted`,
 `sim/gravity_is_drawn_at_the_centre_of_mass`.
+
+On an ASSEMBLY tab (S1, 2026-09-16) the same glyphs, tints, labels and
+legend draw for the assembly's study: every anchor is occurrence-qualified,
+a rigid support is a ghost with its contact faces tinted as a fixture, a
+contact clamp is labelled "clamped at «support»", and the field overlay
+replaces the meshed occurrence's meshes only.

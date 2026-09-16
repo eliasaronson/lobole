@@ -836,6 +836,10 @@ void DrawUI(AppState& state) {
     }
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel
+    if (state.simulation.IsActive()) {
+      DrawFieldLegend(state); // S1: the assembly's study, same overlays
+      DrawSimulationLabels(state);
+    }
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
   }
@@ -999,8 +1003,9 @@ void DrawUI(AppState& state) {
     if (state.document) {
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendCalibrationMarkers(state, prims);   // calibrate-image picks
-      AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
     }
+    if (state.document || state.assembly)
+      AppendSimulationBCGlyphs(state, prims); // FEM load/fixed/keep glyphs
     if (state.document || state.job) {
       AppendCamToolpathOverlay(state, prims); // CAM backplot
       prims.insert(prims.end(), camPrims.begin(), camPrims.end());
