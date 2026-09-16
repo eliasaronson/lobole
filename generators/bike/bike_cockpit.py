@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
-from designer_sdk import Plane, V, _id  # noqa: E402
+from designer_sdk import Plane, SdkError, V, _id  # noqa: E402
 import bike_shop as shop  # noqa: E402
 from bike_shop import (axle_frame, bowed_tube, cut, disc,  # noqa: E402
                        seat_frame, tube, union)
@@ -54,44 +54,88 @@ def stem(app, S):
     return part
 
 
-def handlebar(app, S):
-    """North-road bars: straight across the clamp, then swept back and up to
-    the grips — which is the shape that puts the rider upright, and the
-    reason the saddle in the photographs sits well above the bars."""
-    part = app.part("Handlebar")
-    _, _, clamp = _stem_points(S)
-    d = float(S["BAR_D"])
+def _bar_path(S):
+    """A north-road bar's centreline, in the plane it is BENT in.
+
+    A handlebar is one pipe with two bends in it, and it has to be built as
+    one: three tubes welded end to end show their seams and a step at every
+    joint, which is what the first one did. So the path is a chain — line,
+    arc, line, arc, line — in a single sketch, and one `Pipe` sweeps it.
+
+    The plane is the bar's own: across the bicycle, and tilted back and up so
+    the grips end up BAR_SWEEP behind the clamp and BAR_RISE above it. The
+    bend ANGLE is then not a free number — it is whatever puts the grips at
+    that reach for the given width and bend radius — so it is solved for
+    rather than guessed, and the spec keeps the three dimensions a rider
+    would actually measure.
+    """
     half = float(S["BAR_WIDTH"]) / 2.0
-    ids = [tube(part, (clamp[0], -80, clamp[2]), (clamp[0], 80, clamp[2]),
-                d, 1.6, "Centre", weld=(20, 20))]
-    ends = {}
-    for side in (+1, -1):
-        a = (clamp[0], side * 80.0, clamp[2])
-        b = (clamp[0] - float(S["BAR_SWEEP"]), side * half,
-             clamp[2] + float(S["BAR_RISE"]))
-        ids.append(bowed_tube(part, a, b, (0, 0, 1), 26.0, d, 1.6,
-                              f"Sweep {side:+d}", weld=(20, 20)))
-        ends[side] = (a, b)
-    union(part, ids, "Bar build")
+    centre = float(S["BAR_CENTRE"]) / 2.0
+    radius = float(S["BAR_BEND_R"])
+    sweep = math.hypot(float(S["BAR_SWEEP"]), float(S["BAR_RISE"]))
+
+    def reach(theta):
+        """How far back the grip lands, if the bend turns through theta."""
+        run = (half - centre - radius * math.sin(theta)) / math.cos(theta)
+        return radius * (1 - math.cos(theta)) + run * math.sin(theta)
+
+    lo, hi = math.radians(1.0), math.radians(75.0)
+    if reach(hi) < sweep:
+        raise SdkError(f"a {S['BAR_WIDTH']} mm bar bent to "
+                       f"{S['BAR_BEND_R']} mm cannot reach {sweep:.0f} mm "
+                       "back — widen it, or bend it tighter")
+    for _ in range(60):                      # bisection: reach() is monotone
+        mid = (lo + hi) / 2.0
+        lo, hi = (mid, hi) if reach(mid) < sweep else (lo, mid)
+    theta = (lo + hi) / 2.0
+    tangent = (centre + radius * math.sin(theta),
+               radius * (1 - math.cos(theta)))
+    return theta, centre, radius, half, sweep, tangent
+
+
+def _bar_plane(S):
+    """The plane the bar is bent in: U across the bicycle, V back and UP."""
+    _, _, _, _, _, _ = _bar_path(S)
+    back = V(-float(S["BAR_SWEEP"]), 0.0, float(S["BAR_RISE"])).unit()
+    u = V(0, 1, 0)
+    return Plane(V(_stem_points(S)[2]), u.cross(back), u), back
+
+
+def handlebar(app, S):
+    """North-road bars: straight across the clamp, then bent back and up to
+    the grips — the shape that puts the rider upright, and the reason the
+    saddle in the photographs sits above the bars."""
+    part = app.part("Handlebar")
+    theta, centre, radius, half, sweep, tangent = _bar_path(S)
+    plane, _ = _bar_plane(S)
+    sk = part.sketch(plane, name="Bar path")
+    deg = math.degrees(theta)
+    sk.line((-half, sweep), (-tangent[0], tangent[1]))
+    sk.arc((-centre, radius), radius, -90.0 - deg, -90.0)
+    sk.line((-centre, 0.0), (centre, 0.0))
+    sk.arc((centre, radius), radius, -90.0, -90.0 + deg)
+    sk.line((tangent[0], tangent[1]), (half, sweep))
+    shop.path_tube(part, sk.add(), S["BAR_D"], 1.6, "Handlebar")
+
     shop.finish(part, "steel", "chrome")
     seat_frame(part)
-    for side, name in ((+1, "grip left"), (-1, "grip right")):
-        a, b = ends[side]
-        # The grip slides on along the bar's own direction at the end, not
-        # along Y: these bars arrive at the hand pointing back and up.
-        direction = (V(b) - V(a)).unit() * -1.0
-        axle_frame(part, name, b, tuple(direction), x=(0, 0, 1))
-    # The lever and the bell go INBOARD of the grip, not on top of it: at
-    # exactly GRIP_LEN their clamps straddled the grip's inner end and sat
-    # 3300 mm3 inside it.
-    axle_frame(part, "lever", tuple(V(ends[-1][1])
-                                    + (V(ends[-1][0]) - V(ends[-1][1])).unit()
-                                    * (float(S["GRIP_LEN"]) + 22.0)),
-               (0, 0, -1), x=(1, 0, 0))
-    axle_frame(part, "bell", tuple(V(ends[+1][1])
-                                   + (V(ends[+1][0]) - V(ends[+1][1])).unit()
-                                   * (float(S["GRIP_LEN"]) + 34.0)),
-               (0, 0, 1), x=(1, 0, 0))
+    # Where things clamp ON the bar. Each frame's Z runs ALONG the bar, so a
+    # grip, a lever or a bell is a ring round it rather than a ring on some
+    # other axis perched beside it.
+    for side, name in ((+1, "left"), (-1, "right")):
+        tip = plane.world(side * half, sweep)
+        inward = (V(plane.world(side * tangent[0], tangent[1])) - V(tip)).unit()
+        axle_frame(part, f"grip {name}", tip, tuple(inward), x=(0, 0, 1))
+        # The bell's dome is as wide ALONG the bar as it is across, so it
+        # needs more room past the grip than the lever's clamp does.
+        clear = 18.0 if side < 0 else float(S["BELL_D"]) / 2.0 + 10.0
+        at = tuple(V(tip) + inward * (float(S["GRIP_LEN"]) + clear))
+        # The lever hangs off the right bar pointing FORWARD and down; the
+        # bell stands UP off the left one. Both are the frame's X.
+        want = V(1, 0, -0.45) if side < 0 else V(0, 0, 1)
+        across = (want - inward * inward.dot(want)).unit()
+        axle_frame(part, "lever" if side < 0 else "bell", at, tuple(inward),
+                   x=tuple(across))
     shop.verified(part, 1)
     return part
 
@@ -101,12 +145,15 @@ def grip(app, S):
     the same part fits both ends."""
     part = app.part("Grip")
     length = float(S["GRIP_LEN"])
-    body = shop.revolved(part, [(float(S["BAR_D"]) / 2.0 - 0.2, 0),
-                                (float(S["GRIP_D"]) / 2.0, 6.0),
-                                (float(S["GRIP_D"]) / 2.0, length - 8.0),
-                                (float(S["GRIP_D"]) / 2.0 + 2.5, length - 4.0),
-                                (float(S["GRIP_D"]) / 2.0 + 2.5, length),
-                                (float(S["BAR_D"]) / 2.0 - 0.2, length)],
+    bore = float(S["BAR_D"]) / 2.0 - 0.2
+    fat = float(S["GRIP_D"]) / 2.0
+    # CLOSED at its outer end. A grip bored right through is a piece of pipe,
+    # and it looks like one: the bar stops at the grip's end, so you see
+    # straight down the hole.
+    body = shop.revolved(part, [(0.0, 0.0), (fat - 4.0, 0.0), (fat, 4.0),
+                                (fat, length - 8.0), (fat + 2.5, length - 4.0),
+                                (fat + 2.5, length), (bore, length),
+                                (bore, 7.0), (0.0, 7.0)],
                          (0, 0, 0), (0, 0, 1), "Grip")
     del body
     shop.finish(part, "rubber", "white")
@@ -116,13 +163,19 @@ def grip(app, S):
 
 
 def brake_lever(app, S):
-    """A lever on its own axis, hanging under the right-hand bar."""
+    """A lever whose clamp goes ROUND the bar.
+
+    Its local Z is the bar's own axis, so the clamp is a ring on it and the
+    blade reaches out along local X. Built on a vertical axis instead — which
+    is where this started — the clamp is a ring standing on the bar rather
+    than round it, and it shows.
+    """
     part = app.part("Brake lever")
-    ids = [shop.revolved(part, [(16, -14), (16, 14), (11, 14), (11, -14)],
+    bore = float(S["BAR_D"]) / 2.0 - 0.1        # gripping it, not floating
+    ids = [shop.revolved(part, [(bore, -14), (16, -14), (16, 14), (bore, 14)],
                          (0, 0, 0), (0, 0, 1), "Clamp")]
     sk = part.sketch(Plane.xy(-6.0), name="Blade profile")
-    sk.polyline([(8, -5), (float(S["LEVER_LEN"]), -16),
-                 (float(S["LEVER_LEN"]), -24), (6, -14)], close=True)
+    sk.slot((14.0, 0.0), (float(S["LEVER_LEN"]), 0.0), 13.0)
     ids.append(part._add({"type": "Extrude", "name": "Blade",
                           "sketch_id": _id(sk.add()), "mode": "new_body",
                           "distance": 12.0})["id"])
@@ -134,24 +187,41 @@ def brake_lever(app, S):
 
 
 def bell(app, S):
-    """A pressed-steel dome on a clamp — a SHELL, not a solid dome: solid, a
-    54 mm bell weighs 320 g, which is more than the chainguard."""
+    """A pressed-steel dome on a clamp that goes ROUND the bar.
+
+    Local Z is the bar; the dome is turned about local X, which is the one
+    other axis a Revolve will take — and it is why the part is built on the
+    bar's axis rather than the dome's.
+    """
     part = app.part("Bell")
     r = float(S["BELL_D"]) / 2.0
-    wall, n = 1.2, 10
+    bore = float(S["BAR_D"]) / 2.0 - 0.1
+    wall, n, base = 1.2, 10, 11.0
 
-    def arc(radius, height, shift):
-        return [(radius * math.sin(math.pi / 2 * k / n),
-                 shift + height * (1 - math.cos(math.pi / 2 * k / n)))
+    def arc(radius, height, shift, inset=0.0):
+        """A quarter dome, WIDEST AT ITS BASE and closed at the crown.
+
+        Written the other way up — starting on the axis at the base and
+        flaring away from the bar — it is a brass bowl bolted to the
+        handlebar, which is what the first one rendered as.
+        """
+        return [(max(radius - inset, 0.0) * math.cos(math.pi / 2 * k / n),
+                 shift + (height - inset) * math.sin(math.pi / 2 * k / n))
                 for k in range(n + 1)]
 
-    dome = ([(0.0, 0.0)] + arc(r, 14.0, 0.0)[1:] + [(r, 18.0), (r - wall, 18.0)]
-            + list(reversed(arc(r - wall, 14.0, wall)))[:-1] + [(0.0, wall)])
-    ids = [shop.revolved(part, dome, (0, 0, 0), (0, 0, 1), "Dome"),
-           # The clamp runs UP INTO the dome: ending level with its base
-           # leaves the two tangent, and a bell in two pieces.
-           shop.revolved(part, [(11, -22), (16, -22), (16, 6), (11, 6)],
-                         (0, 0, 0), (0, 0, 1), "Clamp")]
+    outer = arc(r, 17.0, base)
+    # The inner surface is the outer one offset inward by `wall` — SAME
+    # base plane, one wall less of height. Shifted up by a wall instead, the
+    # crown closes to a point and the shell is degenerate there.
+    inner = list(reversed(arc(r, 17.0, base, wall)))
+    dome = outer + inner
+    ids = [shop.revolved(part, dome, (0, 0, 0), (1, 0, 0), "Dome"),
+           shop.revolved(part, [(bore, -9), (15, -9), (15, 9), (bore, 9)],
+                         (0, 0, 0), (0, 0, 1), "Clamp"),
+           # The post the dome is held on. The dome is a SHELL and its base
+           # is open, so it touches the clamp nowhere — without this the bell
+           # is a cap hovering over a ring, and comes back as two solids.
+           tube(part, (10.0, 0, 0), (base + 16.0, 0, 0), 9.0, 0.0, "Post")]
     union(part, ids, "Bell build")
     shop.finish(part, "steel", "brass")
     axle_frame(part, "axis", (0, 0, 0), (0, 0, 1), x=(1, 0, 0))
@@ -171,6 +241,31 @@ def seatpost(app, S):
     seat_frame(part)
     shop.verified(part, 1)
     return part
+
+
+def _smooth(points, per_span=4):
+    """A Catmull-Rom pass over a closed outline.
+
+    Ten points describe a saddle's plan; ten SEGMENTS render as ten facets,
+    and a lofted shell built on them is visibly cut from flats. This puts
+    four points where there was one, which is the cheapest way to a curve the
+    shading believes — the sketch entity for a real spline is another matter.
+    """
+    n = len(points)
+    out = []
+    for i in range(n):
+        p0, p1 = points[(i - 1) % n], points[i]
+        p2, p3 = points[(i + 1) % n], points[(i + 2) % n]
+        for k in range(per_span):
+            t = k / float(per_span)
+            t2, t3 = t * t, t * t * t
+            out.append(tuple(
+                0.5 * ((2 * p1[c])
+                       + (-p0[c] + p2[c]) * t
+                       + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t2
+                       + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t3)
+                for c in (0, 1)))
+    return out
 
 
 def saddle_top(S):
@@ -193,10 +288,12 @@ def saddle(app, S):
     length = float(S["SADDLE_LEN"])
     wide = float(S["SADDLE_W"]) / 2.0
     high = float(S["SADDLE_H"])
-    plan = [(0.55, 0.0), (0.42, 0.10), (0.18, 0.22), (-0.06, 0.55),
-            (-0.28, 0.95), (-0.41, 1.0), (-0.45, 0.62), (-0.45, 0.0)]
-    outline = [(length * u, wide * v) for u, v in plan] + \
-              [(length * u, -wide * v) for u, v in reversed(plan[1:-1])]
+    plan = [(0.55, 0.0), (0.46, 0.09), (0.24, 0.17), (0.02, 0.33),
+            (-0.10, 0.62), (-0.22, 0.92), (-0.34, 1.0), (-0.44, 0.86),
+            (-0.47, 0.45), (-0.47, 0.0)]
+    half_outline = [(length * u, wide * v) for u, v in plan]
+    outline = _smooth(half_outline
+                      + [(x, -y) for x, y in reversed(half_outline[1:-1])])
     sketches = []
     for scale, z in ((0.74, seat[2]), (1.00, seat[2] + 0.62 * high),
                      (0.66, seat[2] + high)):
@@ -210,10 +307,13 @@ def saddle(app, S):
     for side in (+1, -1):
         # The rails hang under the shell and BITE into it — level with its
         # underside they only touch it, and the saddle comes out as three
-        # solids: a shell and two loose rods.
-        rails.append(tube(part, (seat[0] + length * 0.30, side * 28.0,
+        # solids: a shell and two loose rods. They also have to stay UNDER
+        # it: run from 0.30 of the length forward to 0.36 back, at 28 mm
+        # out, they came through the nose and out of the tail, because the
+        # shell is only 14 mm wide that far forward.
+        rails.append(tube(part, (seat[0] + length * 0.04, side * 21.0,
                                  seat[2] - 2.0),
-                          (seat[0] - length * 0.36, side * 28.0,
+                          (seat[0] - length * 0.30, side * 21.0,
                            seat[2] - 2.0), 8.0, 0.0, f"Rail {side:+d}"))
     # The clamp that holds it on the post. Without it the saddle sits in the
     # air above the post touching nothing, and comes back as its own floating

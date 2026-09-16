@@ -156,8 +156,12 @@ GUARD_TAIL_W = 20.0        # ASSUMED depth of the tail's strip below the
 # trigger shifter, a quill stem, a chrome seatpost well out of the frame.
 BAR_D = 22.2               # ASSUMED
 BAR_WIDTH = 560.0          # ASSUMED, tip to tip
-BAR_RISE = 60.0            # ASSUMED
+BAR_RISE = 60.0            # ASSUMED: how far the grips sit above the clamp
 BAR_SWEEP = 150.0          # ASSUMED: how far back the grips sit
+BAR_CENTRE = 120.0         # ASSUMED: the straight run the stem clamps
+BAR_BEND_R = 55.0          # ASSUMED: the radius the tube is BENT to. A
+                           # handlebar is one pipe with two bends in it, and
+                           # this is what makes it read as one
 STEM_QUILL_UP = 95.0       # ASSUMED: stem clamp above the head tube's top
 STEM_REACH = 60.0          # ASSUMED
 STEM_D = 22.6              # ASSUMED quill. A TENTH over the steerer's bore,
@@ -174,7 +178,8 @@ SEATPOST_OUT = 185.0       # ASSUMED exposed length — the photographs show a
                            # lot of post, which is what makes the frame read
                            # as ridden by someone tall
 SADDLE_LEN = 265.0         # ASSUMED
-SADDLE_W = 170.0           # ASSUMED
+SADDLE_W = 196.0           # ASSUMED — READ: the owner's is a wide padded
+                           # city saddle, round at the back and long-nosed
 SADDLE_H = 55.0            # ASSUMED shell + padding
 BELL_D = 54.0              # ASSUMED
 

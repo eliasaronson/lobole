@@ -127,6 +127,20 @@ runs for its whole length.
 mudguard, and the mudguard has a hole for the caliper's bolt. Every roadster
 guard has that hole for the same reason.
 
+**A handlebar is one pipe with two bends in it**, and building it as three
+tubes welded end to end shows every seam. Drawn as a chain — line, arc, line,
+arc, line — in the plane the bar is bent in, it is one `Pipe` and one sketch,
+and the bend angle is solved for rather than guessed: the spec keeps width,
+sweep and rise, which is what a rider would measure, and the angle is
+whatever puts the grips there. That is also the shape that found the sketch
+bug below.
+
+Two more from looking at the render rather than the checks: a grip bored
+right through is a piece of pipe and looks like one (it wants a closed outer
+end), and anything that clamps ON the bar — a lever, a bell — must be built
+on the BAR's axis, or its clamp is a ring standing beside the bar rather than
+round it.
+
 One measurement worth keeping: **24 samples is not a fine enough sweep for a
 crank.** At 15 degrees apart, the pedal moves 44 mm of arc between samples,
 which is wider than the chainguard's tail — the study stepped over it. What
@@ -134,6 +148,18 @@ found it was sweeping the crank by hand at 5 degrees and asking `interference`
 for an exact volume at each: the pedal's spindle through the chain, 621 mm³ at
 215 degrees, and through the guard, 170 mm³ at 210. Worth doing whenever a
 study says a mechanism is clean and the parts are thin.
+
+## What it found in the app
+
+**An open sketch path's edges did not share vertices, and a closed loop's
+did.** The chain walker accepts a joint within `kChainTol` (1e-4), and
+`BRepBuilderAPI_MakeWire` then merges at OCC's confusion (1e-7) and refuses
+the edge — so a path whose lines meet its arcs at points no float32 holds
+exactly was rejected as "not an open sketch chain", which it was. A handlebar
+is exactly that path. `MakeLoopWire` had solved this years earlier for closed
+profiles, with measured per-joint vertex tolerances;
+`BuildOpenPathWire` now does the same (`tests/test_pipe.cpp`, "a line-arc-line
+path whose joints are irrational").
 
 ## Not drawn
 
