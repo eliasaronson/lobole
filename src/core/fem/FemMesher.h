@@ -40,6 +40,10 @@ struct FemMesh {
   //   7 = edge(0,3), 8 = edge(1,3), 9 = edge(2,3)
   std::vector<glm::dvec3> nodes;
   std::vector<std::array<int, 10>> tets;
+  // The 0-based domain (netgen: the solid) each tet lies in, parallel to
+  // `tets`; empty means one domain. A mesh over several glued solids (an
+  // assembly study's bonded group, S2) carries a material per domain.
+  std::vector<int> tetDomain;
 
   // Boundary surface triangles (6-node tri6: 3 corners then 3 edge-midsides),
   // each tagged with the 0-based OCC face index it lies on — the anchor for

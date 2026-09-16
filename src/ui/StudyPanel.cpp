@@ -467,8 +467,9 @@ void DrawParticipants(AppState& state, const fem::Study& s) {
   ImGui::SeparatorText("Participants");
   // Wrapped, or this one line sets the whole auto-sized window's width.
   ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 22.0f);
-  ImGui::TextDisabled("Meshed: solved. Rigid: a support, clamped where it "
-                      "touches. Ignored: absent.");
+  ImGui::TextDisabled("Meshed: solved. Bonded: glued to it, solved with "
+                      "it. Rigid: a support, clamped where it touches. "
+                      "Ignored: absent.");
   ImGui::PopTextWrapPos();
   const char* kRoles[] = {"Ignored", "Rigid", "Meshed"};
   // No PushID(int) around the rows: every widget carries its occurrence id
@@ -1321,6 +1322,25 @@ void AppendSimulationFaceTints(AppState& state) {
         if (m.occurrenceId == pt.occurrenceId &&
             !state.meshRenderer->IsInstanceGhost(m.meshId))
           state.meshRenderer->SetInstanceGhost(m.meshId, 0.35f);
+  // The glued seams (S2): both sides' faces in the bond tint.
+  for (const fem::BondPatch& bond : SimulationBonds(state)) {
+    const auto tintSide = [&](uint64_t occ, int body,
+                              const std::vector<int>& faces) {
+      for (const DocumentRenderMesh& m : state.documentMeshes) {
+        if (m.occurrenceId != occ || static_cast<int>(m.bodyIndex) != body)
+          continue;
+        for (int face : faces) {
+          uint32_t first = 0, count = 0;
+          if (state.faceSelector->GetFaceVertexRange(
+                  m.meshId, static_cast<uint32_t>(face), first, count))
+            state.meshRenderer->SetFaceHighlight(m.meshId, first, count,
+                                                 MeshRenderer::kTintBond);
+        }
+      }
+    };
+    tintSide(bond.occurrenceA, bond.bodyA, bond.facesA);
+    tintSide(bond.occurrenceB, bond.bodyB, bond.facesB);
+  }
   bool clamped = false;
   for (const fem::Load& load : s->loads)
     clamped = clamped || load.contactWith != 0;

@@ -208,6 +208,7 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
       for (int k = 0; k < 10; ++k)
         t[k] = int(el.PNum(kTetRemap[k])) - 1;
       out.tets.push_back(t);
+      out.tetDomain.push_back(std::max(0, el.GetIndex() - 1));
       worst = std::min(worst, TetQuality(out.nodes[t[0]], out.nodes[t[1]],
                                          out.nodes[t[2]], out.nodes[t[3]]));
     }

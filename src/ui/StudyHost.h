@@ -69,5 +69,7 @@ uint64_t AddStudyOn(AppState& state, const std::string& name);
 // documents' versions) and empty on a part tab. What the picture tints as
 // "what is actually clamped".
 const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state);
+// The glued seams of the active assembly study (S2), from the same plan.
+const std::vector<fem::BondPatch>& SimulationBonds(AppState& state);
 
 } // namespace ui

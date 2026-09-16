@@ -72,6 +72,13 @@ std::optional<FemResults>
 Solve(const FemMesh& mesh, const Material& material,
       const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
       std::string* error, const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
+// The same over a mesh of several glued solids (S2): one material per
+// domain of FemMesh::tetDomain. A mesh with no domain record takes the
+// first; a domain beyond the list takes the last.
+std::optional<FemResults>
+Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
+      const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
+      std::string* error, const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
 
 // Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
 // `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
@@ -79,6 +86,10 @@ Solve(const FemMesh& mesh, const Material& material,
 // std::nullopt and sets *error on failure or when built without Spectra.
 std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const Material& material,
+           const std::vector<int>& fixedNodes, int numModes,
+           std::string* error);
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<int>& fixedNodes, int numModes,
            std::string* error);
 
@@ -175,6 +186,9 @@ struct StudyJobBody {
   std::string bodyName;
   FemMesh mesh;
   Material mat;
+  // A bonded group (S2): one material per mesh domain, derived by
+  // MeshPlannedStudy from the plan's members. Empty = `mat` throughout.
+  std::vector<Material> materials;
   std::vector<int> fixedNodes;
   std::vector<FaceLoad> faceLoads;
 };
@@ -200,6 +214,15 @@ struct StudyBodyPlan {
   MeshSettings settings;
   Material mat;
   std::vector<std::pair<int, Load>> loads; // (face index, the load)
+  // A bonded group (S2): `shape` is then a compound of these imprinted
+  // solids, which share the faces where they touch so one mesh spans them,
+  // and each carries its own material. Empty for a single solid.
+  struct Member {
+    TopoDS_Shape solid;
+    Material mat;
+    std::string name;
+  };
+  std::vector<Member> members;
 };
 // Where a meshed body touches a rigid support, as the imprint found it: the
 // faces of the meshed body's imprinted shape that it shares with the rigid
@@ -214,12 +237,20 @@ struct ContactPatch {
   int rigidBody = 0; // index into the rigid occurrence's placed bodies
   std::vector<int> rigidFaces;
 };
+// Where two bonded members share a face (S2): the ORIGINAL faces on each
+// side that carry the seam, for the picture.
+struct BondPatch {
+  uint64_t occurrenceA = 0, occurrenceB = 0;
+  int bodyA = 0, bodyB = 0; // indices into each occurrence's placed bodies
+  std::vector<int> facesA, facesB;
+};
 struct StudyPlan {
   AnalysisType type = AnalysisType::Static;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
   std::vector<StudyBodyPlan> bodies;
   std::vector<ContactPatch> contacts;
+  std::vector<BondPatch> bonds;
 };
 bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
                std::string* error);

@@ -520,6 +520,7 @@ const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state) {
   const fem::Study* s = asmDoc ? asmDoc->FindStudy(sim.activeStudyId) : nullptr;
   if (!s || !sim.IsActive()) {
     sim.contacts.clear();
+    sim.bonds.clear();
     sim.contactKey = 0;
     sim.contactError.clear();
     return kNone;
@@ -535,16 +536,24 @@ const std::vector<fem::ContactPatch>& SimulationContacts(AppState& state) {
     return sim.contacts;
   sim.contactKey = key;
   sim.contacts.clear();
+  sim.bonds.clear();
   sim.contactError.clear();
   fem::Study copy = *s; // the plan writes its refusal into the study
   fem::StudyPlan plan;
   std::string err;
   if (fem::PlanAssemblyStudy(*asmDoc, copy, AssemblyStudyContextFor(state),
-                             plan, &err))
+                             plan, &err)) {
     sim.contacts = std::move(plan.contacts);
-  else
+    sim.bonds = std::move(plan.bonds);
+  } else {
     sim.contactError = err;
+  }
   return sim.contacts;
+}
+
+const std::vector<fem::BondPatch>& SimulationBonds(AppState& state) {
+  SimulationContacts(state); // one plan feeds both
+  return state.simulation.bonds;
 }
 
 uint64_t ActiveSlotId(const AppState& state) {
@@ -787,11 +796,17 @@ void SyncFieldRenderer(AppState& state) {
   const StudyHost host = StudyHostOf(state);
   // On an assembly, the solved bodies are the MESHED occurrence's.
   uint64_t meshedOcc = 0;
+  std::vector<uint64_t> solvedOccs; // meshed + bonded (S2): one field mesh
   if (host.IsAssembly())
     if (const fem::Study* s = host.Find(sim.activeStudyId))
-      for (const fem::Participant& pt : s->participants)
+      for (const fem::Participant& pt : s->participants) {
         if (pt.role == fem::ParticipantRole::Meshed)
           meshedOcc = pt.occurrenceId;
+        if (pt.role == fem::ParticipantRole::Meshed ||
+            pt.role == fem::ParticipantRole::Bonded)
+          solvedOccs.push_back(pt.occurrenceId);
+      }
+  const bool bondedGroup = solvedOccs.size() > 1;
 
   auto restoreBodies = [&]() {
     for (uint32_t meshId : sim.hiddenMeshes)
@@ -813,10 +828,18 @@ void SyncFieldRenderer(AppState& state) {
   auto hideBodies = [&](const fem::StudyRuntime* rt) {
     std::vector<uint32_t> want;
     for (const fem::StudyBodyResult& b : rt->bodies)
-      for (const DocumentRenderMesh& m : state.documentMeshes)
+      for (const DocumentRenderMesh& m : state.documentMeshes) {
+        if (bondedGroup) {
+          // The group's field mesh covers every solved occurrence.
+          for (uint64_t occ : solvedOccs)
+            if (m.occurrenceId == occ)
+              want.push_back(m.meshId);
+          continue;
+        }
         if (static_cast<int>(m.bodyIndex) == b.bodyIndex &&
             m.occurrenceId == meshedOcc)
           want.push_back(m.meshId);
+      }
     for (uint32_t id : want)
       if (std::find(sim.hiddenMeshes.begin(), sim.hiddenMeshes.end(), id) ==
           sim.hiddenMeshes.end())

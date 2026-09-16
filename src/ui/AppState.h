@@ -605,6 +605,7 @@ struct SimulationState {
   // (the imprint is a boolean; see ui::SimulationContacts).
   uint64_t contactKey = 0;
   std::vector<fem::ContactPatch> contacts;
+  std::vector<fem::BondPatch> bonds; // S2: the glued seams, same cache
   std::string contactError; // why the plan refused, shown in the panel
   // Why the last viewport placement was refused (a face clicked on an
   // occurrence that is not the meshed one), shown in the panel.

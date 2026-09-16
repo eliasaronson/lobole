@@ -219,7 +219,8 @@ and role ghosts from S0. `study_results` carries the role table so a reader
 knows which bound each neighbour holds. Format bump plus an assembly golden.
 Delivers the ring-brace number.
 
-**S2 — a neighbour meshed and bonded.** `StudyPlan` gains a mode where
+**S2 — a neighbour meshed and bonded.** SHIPPED 2026-09-17 (format v107);
+see "S2 as built" below. `StudyPlan` gains a mode where
 several solids become ONE `FemMesh` rather than one per body, reusing S1's
 imprint to make the interface shared. `Solve` takes a single `Material`
 today, so this is also where materials become per-element — the stiffness
@@ -309,6 +310,39 @@ What landed on 2026-09-16, and where it differs from the paragraphs above.
   on an assembly edit AND on a part edit, both pre-flight refusals), and
   `sim/an_assembly_study_clamps_where_the_support_touches` (the window, the
   clamp, one undo, the refusal, the ghost and the tint, the run).
+
+## S2 as built
+
+- **A role, not a flag.** `bonded` beside meshed, rigid and ignored: meshed
+  AND glued to the meshed occurrence where the two touch. Declared per
+  occurrence, so "what is bonded to what" is an input, as the plan asked.
+- **One fuse, one compound, one mesh.** `PlanBondedGroup`
+  (src/core/fem/AssemblyStudy.cpp): every member solid and every rigid body
+  through one fuzzy non-destructive general fuse; the members' imprinted
+  solids in one compound, whose faces are indexed the way the mesher indexes
+  them (`TopExp::MapShapes`, a shared face once); anchors on any member's
+  face; contacts with the rigid supports as in S1; a bonded member that
+  shares no face with the group is refused by name, as is any member pair
+  that shares volume.
+- **A material per domain.** `FemMesh` records the domain of every tet
+  (netgen's solid index) and `Solve` / `SolveModal` take one material per
+  domain — stiffness, mass and stress recovery each with their own
+  elasticity. Which domain is which member is answered by geometry (a tet
+  centroid classified against the members), not by trusting the mesher's
+  numbering.
+- **The picture.** The glued seams are tinted in the bond colour on both
+  sides (the whole faces that carry them), and the field overlay replaces
+  every solved occurrence's meshes at once. The group reports as one body,
+  "Upper + Lower".
+- **Verified by** `tests/test_fem.cpp` (S2: one mesh component, no doubled
+  interface nodes, two domains, steel above z = 16 and aluminium below, the
+  fixed nodes on the lower block's bottom only, and the bonded answer
+  SOFTER than the rigid support's — the bracket the plan asked for) and
+  `tests/fem_smoke.py` (the bonded study over the RPCs, one body for the
+  group, softer than rigid).
+- **Not yet.** Per-member mesh size is honoured on a bonded member's faces
+  but the study's global size still governs the interior; the seam tint is
+  the whole face, not the patch.
 
 ## Verification
 

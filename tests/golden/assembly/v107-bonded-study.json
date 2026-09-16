@@ -1,0 +1,96 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Lower",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Upper",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          16.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "studies": [
+    {
+      "id": 3,
+      "loads": [
+        {
+          "face": {
+            "element": "1/face4",
+            "feature_id": 0
+          },
+          "id": 4,
+          "magnitude": 0.0,
+          "occurrence": 1,
+          "type": "fixed"
+        },
+        {
+          "face": {
+            "element": "1/face5",
+            "feature_id": 0
+          },
+          "id": 5,
+          "magnitude": 0.5,
+          "occurrence": 2,
+          "type": "pressure"
+        }
+      ],
+      "mesh_size": 12.0,
+      "name": "Upper bonded to lower",
+      "participants": [
+        {
+          "occurrence": 2,
+          "role": "meshed"
+        },
+        {
+          "occurrence": 1,
+          "role": "bonded"
+        }
+      ],
+      "type": "Study"
+    }
+  ],
+  "version": 107
+}

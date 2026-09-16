@@ -17,7 +17,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    106; // v106: FEM studies on an ASSEMBLY (`studies` in the assembly file,
+    107; // v107: a participant role `bonded` (S2): meshed AND glued to the
+         //      meshed occurrence where they touch — one mesh spans them,
+         //      each keeps its material. A v106 build refuses the file
+         //      rather than reading the role as something else.
+         // v106: FEM studies on an ASSEMBLY (`studies` in the assembly file,
          //      absent when none): `participants` [{occurrence, role:
          //      meshed|rigid|ignored, mesh_size?}], loads and refinements
          //      carrying `occurrence`, and a fixed load anchored on a CONTACT

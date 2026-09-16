@@ -91,7 +91,9 @@ def assembly_study(d):
         els = d.call("list_elements")["bodies"][0]
         top = [f["name"] for f in els["faces"]
                if abs(f["normal"][2] - 1.0) < 1e-6][0]
-        parts[name] = (slot["id"], top)
+        bottom = [f["name"] for f in els["faces"]
+                  if abs(f["normal"][2] + 1.0) < 1e-6][0]
+        parts[name] = (slot["id"], top, bottom)
     asm = d.call("add_assembly", name="Stack")
     d.call("set_active_part", part=asm["id"])
     lower = d.call("add_occurrence", part=parts["Lower"][0], name="Lower",
@@ -187,6 +189,28 @@ def assembly_study(d):
         raise AssertionError("an interpenetrating support was fused")
     except RuntimeError as e:
         expect("INTERPENETRATE" in str(e), f"names the overlap: {e}")
+
+    # S2: the lower block BONDED instead of rigid — one mesh over both, the
+    # lower's own bottom fixed, and a softer answer than the rigid support.
+    d.call("set_occurrence_transform", id=upper,
+           transform={"position": [0, 0, 16]})
+    rigid_disp = d.call("run_study", study=study)["max_displacement_mm"]["value"]
+    bonded = d.call("add_study", name="Bonded")["id"]
+    d.call("set_study", id=bonded, mesh_size=12.0,
+           participants=[{"occurrence": upper, "role": "meshed"},
+                         {"occurrence": lower, "role": "bonded"}])
+    d.call("add_load", study=bonded, type="fixed", occurrence=lower,
+           face=parts["Lower"][2])
+    d.call("add_load", study=bonded, type="pressure", occurrence=upper,
+           face=parts["Upper"][1], magnitude=0.5)
+    res = d.call("run_study", study=bonded)
+    expect(res["bodies"][0]["body"] == "Upper + Lower",
+           f"one body for the group: {res['bodies']}")
+    expect(res["max_displacement_mm"]["value"] > rigid_disp,
+           f"bonded is softer than rigid: {res['max_displacement_mm']} vs "
+           f"{rigid_disp}")
+    roles = {p["name"]: p["role"] for p in res["participants"]}
+    expect(roles == {"Upper": "meshed", "Lower": "bonded"}, f"roles: {roles}")
 
     # The window: enter_simulation on the assembly tab opens its study
     # window rather than refusing.

@@ -1,6 +1,9 @@
 #include "core/fem/FemStudy.h"
 
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <TopAbs_State.hxx>
+#include <gp_Pnt.hxx>
 
 #include "cad/CADMaterials.h"
 #include "core/Document.h"
@@ -78,6 +81,8 @@ const char* ParticipantRoleToString(ParticipantRole role) {
     return "rigid";
   case ParticipantRole::Ignored:
     return "ignored";
+  case ParticipantRole::Bonded:
+    return "bonded";
   }
   return "rigid";
 }
@@ -93,6 +98,10 @@ bool ParticipantRoleFromString(const std::string& s, ParticipantRole& out) {
   }
   if (s == "ignored") {
     out = ParticipantRole::Ignored;
+    return true;
+  }
+  if (s == "bonded") {
+    out = ParticipantRole::Bonded;
     return true;
   }
   return false;
@@ -417,6 +426,40 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     if (!mesh)
       return fail("body '" + bp.bodyName + "': " + err);
 
+    // A bonded group (S2): the mesh spans several solids, each its own
+    // domain, each its own material. Which domain is which member is
+    // answered by geometry — a tet's centroid is inside exactly one — not
+    // by trusting the mesher's numbering.
+    std::vector<Material> materials;
+    if (!bp.members.empty()) {
+      int domains = 0;
+      for (int d : mesh->tetDomain)
+        domains = std::max(domains, d + 1);
+      materials.assign(std::max(domains, 1), bp.mat);
+      std::vector<bool> known(materials.size(), false);
+      for (size_t t = 0; t < mesh->tets.size(); ++t) {
+        const int d = mesh->tetDomain.empty() ? 0 : mesh->tetDomain[t];
+        if (known[d])
+          continue;
+        const auto& tet = mesh->tets[t];
+        const glm::dvec3 c = 0.25 * (mesh->nodes[tet[0]] + mesh->nodes[tet[1]] +
+                                     mesh->nodes[tet[2]] + mesh->nodes[tet[3]]);
+        bool found = false;
+        for (const StudyBodyPlan::Member& m : bp.members) {
+          BRepClass3d_SolidClassifier cls(m.solid, gp_Pnt(c.x, c.y, c.z), 1e-6);
+          if (cls.State() == TopAbs_IN) {
+            materials[d] = m.mat;
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+          return fail("body '" + bp.bodyName +
+                      "': a mesh domain lies in none of the bonded members");
+        known[d] = true;
+      }
+    }
+
     // Build fixed-node set and face tractions from the resolved faces. Fixed
     // faces contribute all their boundary-tri nodes; force/pressure faces
     // contribute their tri indices.
@@ -446,6 +489,7 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     jb.bodyIndex = bp.bodyIndex;
     jb.bodyName = bp.bodyName;
     jb.mat = bp.mat;
+    jb.materials = std::move(materials);
     jb.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
     jb.faceLoads = std::move(faceLoads);
     jb.mesh = std::move(*mesh);
@@ -486,13 +530,20 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
 
     if (in.type == AnalysisType::Modal) {
       auto modes =
-          SolveModal(jb.mesh, jb.mat, jb.fixedNodes, in.numModes, &err);
+          jb.materials.empty()
+              ? SolveModal(jb.mesh, jb.mat, jb.fixedNodes, in.numModes, &err)
+              : SolveModal(jb.mesh, jb.materials, jb.fixedNodes, in.numModes,
+                           &err);
       if (!modes)
         return fail("body '" + jb.bodyName + "': " + err);
       sbr.results.modes = std::move(*modes);
     } else {
       const glm::dvec3 g = in.gravity * 1000.0; // m/s^2 -> mm/s^2
-      auto res = Solve(jb.mesh, jb.mat, jb.fixedNodes, jb.faceLoads, &err, g);
+      auto res =
+          jb.materials.empty()
+              ? Solve(jb.mesh, jb.mat, jb.fixedNodes, jb.faceLoads, &err, g)
+              : Solve(jb.mesh, jb.materials, jb.fixedNodes, jb.faceLoads, &err,
+                      g);
       if (!res)
         return fail("body '" + jb.bodyName + "': " + err);
       if (res->maxVonMises > rt.maxVonMises) {

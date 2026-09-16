@@ -179,6 +179,25 @@ TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
   fs::remove(path);
 }
 
+// v107 (S2): a BONDED participant, and a fixed load on the bonded member's
+// own face rather than on a contact.
+TEST_CASE("Frozen v107 assembly golden carries a bonded participant",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v107-bonded-study.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc);
+  REQUIRE(asmDoc->GetStudies().size() == 1);
+  const fem::Study& s = asmDoc->GetStudies()[0];
+  REQUIRE(s.participants.size() == 2);
+  CHECK(s.participants[1].role == fem::ParticipantRole::Bonded);
+  REQUIRE(s.loads.size() == 2);
+  CHECK(s.loads[0].contactWith == 0);
+  CHECK(s.loads[0].occurrenceId == 1);
+  CHECK(s.loads[0].face.name == "1/face4");
+}
+
 // A FROZEN golden for the attachment schema (v72): an occurrence that RIDES
 // on another, which is how a fastener travels with the part it is bolted to.
 TEST_CASE("Frozen v72 assembly golden carries an attachment",

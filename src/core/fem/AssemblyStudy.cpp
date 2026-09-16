@@ -16,12 +16,16 @@
 #include <BOPAlgo_Builder.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepGProp.hxx>
+#include <BRep_Builder.hxx>
 #include <GProp_GProps.hxx>
 #include <TopAbs_ShapeEnum.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 
 #include <cmath>
@@ -121,7 +125,75 @@ double AreaOf(const TopoDS_Shape& face) {
 
 std::string Quote(const std::string& s) { return "«" + s + "»"; }
 
+// A participant with its placed bodies: a rigid support, or a bonded member.
+struct RigidSet {
+  const Participant* p = nullptr;
+  const Occurrence* occ = nullptr;
+  std::vector<Body> bodies;
+};
+
+// One member of a bonded group: a placed body of the meshed or a bonded
+// occurrence.
+struct GroupMember {
+  const Participant* p = nullptr;
+  const Occurrence* occ = nullptr;
+  int bodyIndex = 0; // within its occurrence's placed bodies
+  const Body* body = nullptr;
+  TopoDS_Shape original;  // a copy
+  TopoDS_Shape imprinted; // after the fuse
+  std::vector<TopoDS_Shape> originalFaces;
+  Material mat;
+};
+
+struct RigidBodyRef {
+  size_t rigidSet = 0;
+  int bodyIndex = 0;
+  TopoDS_Shape original;
+  TopoDS_Shape imprinted;
+};
+
+bool MaterialOf(const Body& body, const std::string& label, AnalysisType type,
+                const glm::dvec3& gravity, Material& out, std::string* error) {
+  const auto matType =
+      CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material);
+  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+  if (mp.youngGPa <= 0.0f) {
+    if (error)
+      *error = Quote(label) + ": material '" +
+               (body.material.empty() ? "default" : body.material) +
+               "' has no stiffness data";
+    return false;
+  }
+  const bool needsDensity =
+      type == AnalysisType::Modal ||
+      (gravity.x != 0 || gravity.y != 0 || gravity.z != 0);
+  if (needsDensity && mp.density <= 0.0f) {
+    if (error)
+      *error = Quote(label) + ": material has no density (needed for " +
+               std::string(type == AnalysisType::Modal ? "modal analysis"
+                                                       : "gravity") +
+               ")";
+    return false;
+  }
+  out = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+  return true;
+}
+
 } // namespace
+
+// S2: the meshed occurrence and its BONDED neighbours as ONE mesh. Every
+// member solid and every rigid body go through one fuzzy general fuse, so
+// the faces two members share are imprinted once and the mesher meshes
+// them once (P0: one connected component, no doubled nodes); each member
+// keeps its own material by domain. Face indices are the mesher's own —
+// TopExp::MapShapes over the compound, which counts a shared face once.
+static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
+                            const Participant* meshed,
+                            const Occurrence* meshedOcc,
+                            const std::vector<Body>& meshedBodies,
+                            const std::vector<RigidSet>& bonded,
+                            const std::vector<RigidSet>& rigid, StudyPlan& out,
+                            std::string* error);
 
 bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
                        const AssemblyStudyContext& ctx, StudyPlan& out,
@@ -151,12 +223,8 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   // absent, and a study that names none says so rather than solving nothing.
   const Participant* meshed = nullptr;
   const Occurrence* meshedOcc = nullptr;
-  struct RigidSet {
-    const Participant* p = nullptr;
-    const Occurrence* occ = nullptr;
-    std::vector<Body> bodies;
-  };
   std::vector<RigidSet> rigid;
+  std::vector<RigidSet> bonded; // S2: meshed AND glued to the group
   for (const Participant& pt : study.participants) {
     const Occurrence* occ = asmDoc.FindById(pt.occurrenceId);
     if (!occ)
@@ -174,6 +242,9 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     case ParticipantRole::Rigid:
       rigid.push_back({&pt, occ, {}});
       break;
+    case ParticipantRole::Bonded:
+      bonded.push_back({&pt, occ, {}});
+      break;
     case ParticipantRole::Ignored:
       break;
     }
@@ -190,26 +261,61 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
     if (r.bodies.empty())
       return fail("rigid support " + Quote(r.occ->name) + " has no bodies");
   }
+  for (RigidSet& b : bonded) {
+    b.bodies = ctx.placedBodies(b.p->occurrenceId);
+    if (b.bodies.empty())
+      return fail("bonded participant " + Quote(b.occ->name) +
+                  " has no bodies");
+  }
 
   // Pre-flight: a support that interpenetrates the part is a press fit, and
   // P0 showed what fusing one does (the port tube's slivers). Refuse, naming
   // the pair, with `ignored` as the named way out.
   const glm::mat4 I(1.0f);
-  for (const RigidSet& r : rigid) {
-    const auto c = Measure::ContactBetween(meshedBodies, I, r.bodies, I,
-                                           /*wantDistance=*/false);
+  const auto overlapCheck = [&](const std::string& nameA,
+                                const std::vector<Body>& a,
+                                const std::string& nameB,
+                                const std::vector<Body>& b, const char* what) {
+    const auto c = Measure::ContactBetween(a, I, b, I, /*wantDistance=*/false);
     if (!c)
-      return fail("could not test whether " + Quote(meshedOcc->name) + " and " +
-                  Quote(r.occ->name) + " overlap");
+      return fail("could not test whether " + Quote(nameA) + " and " +
+                  Quote(nameB) + " overlap");
     if (c->volume > kOverlapRefuseMm3) {
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%.3g", c->volume);
-      return fail(Quote(meshedOcc->name) + " and " + Quote(r.occ->name) +
-                  " INTERPENETRATE by " + buf +
-                  " mm^3; a rigid support must touch the part, not overlap "
-                  "it. Mark it ignored, or fix the placement");
+      return fail(Quote(nameA) + " and " + Quote(nameB) +
+                  " INTERPENETRATE by " + buf + " mm^3; " + what);
     }
+    return true;
+  };
+  constexpr const char* kRigidRule =
+      "a rigid support must touch the part, not overlap it. Mark it ignored, "
+      "or fix the placement";
+  constexpr const char* kBondRule =
+      "bonded parts share a face, they do not share volume (a press fit is "
+      "not glue). Fix the placement";
+  for (const RigidSet& r : rigid) {
+    if (!overlapCheck(meshedOcc->name, meshedBodies, r.occ->name, r.bodies,
+                      kRigidRule))
+      return false;
+    for (const RigidSet& b : bonded)
+      if (!overlapCheck(b.occ->name, b.bodies, r.occ->name, r.bodies,
+                        kRigidRule))
+        return false;
   }
+  for (size_t i = 0; i < bonded.size(); ++i) {
+    if (!overlapCheck(meshedOcc->name, meshedBodies, bonded[i].occ->name,
+                      bonded[i].bodies, kBondRule))
+      return false;
+    for (size_t j = i + 1; j < bonded.size(); ++j)
+      if (!overlapCheck(bonded[i].occ->name, bonded[i].bodies,
+                        bonded[j].occ->name, bonded[j].bodies, kBondRule))
+        return false;
+  }
+  // S2: with bonded neighbours the group is ONE mesh; its own planner.
+  if (!bonded.empty())
+    return PlanBondedGroup(asmDoc, study, meshed, meshedOcc, meshedBodies,
+                           bonded, rigid, out, error);
 
   // Resolve every anchor before any geometry work, so a bad reference is
   // refused in a millisecond rather than after a fuse.
@@ -478,6 +584,321 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
   }
   if (out.bodies.empty())
     return fail(Quote(meshedOcc->name) + ": nothing to solve");
+  return true;
+}
+
+static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
+                            const Participant* meshed,
+                            const Occurrence* meshedOcc,
+                            const std::vector<Body>& meshedBodies,
+                            const std::vector<RigidSet>& bonded,
+                            const std::vector<RigidSet>& rigid, StudyPlan& out,
+                            std::string* error) {
+  auto fail = [&](const std::string& m) {
+    study.error = m;
+    if (error)
+      *error = m;
+    return false;
+  };
+  // The members, with materials validated before any geometry work.
+  std::vector<GroupMember> members;
+  const auto addMembers = [&](const Participant* p, const Occurrence* occ,
+                              const std::vector<Body>& bodies) -> bool {
+    for (int bi = 0; bi < static_cast<int>(bodies.size()); ++bi) {
+      GroupMember m;
+      m.p = p;
+      m.occ = occ;
+      m.bodyIndex = bi;
+      m.body = &bodies[bi];
+      std::string why;
+      if (!MaterialOf(bodies[bi],
+                      occ->name +
+                          (bodies.size() > 1 ? "/" + bodies[bi].name : ""),
+                      study.type, study.gravity, m.mat, &why))
+        return fail(why);
+      m.original = BRepBuilderAPI_Copy(bodies[bi].shape.GetShape()).Shape();
+      m.originalFaces = FacesOf(m.original);
+      members.push_back(std::move(m));
+    }
+    return true;
+  };
+  if (!addMembers(meshed, meshedOcc, meshedBodies))
+    return false;
+  for (const RigidSet& b : bonded)
+    if (!addMembers(b.p, b.occ, b.bodies))
+      return false;
+
+  // One fuse for everything that touches: members and supports.
+  BOPAlgo_Builder gf;
+  gf.SetNonDestructive(Standard_True);
+  gf.SetFuzzyValue(kImprintFuzzMm);
+  for (GroupMember& m : members)
+    gf.AddArgument(m.original);
+  std::vector<RigidBodyRef> rigidBodies;
+  for (size_t ri = 0; ri < rigid.size(); ++ri)
+    for (size_t rb = 0; rb < rigid[ri].bodies.size(); ++rb) {
+      RigidBodyRef r;
+      r.rigidSet = ri;
+      r.bodyIndex = static_cast<int>(rb);
+      r.original =
+          BRepBuilderAPI_Copy(rigid[ri].bodies[rb].shape.GetShape()).Shape();
+      gf.AddArgument(r.original);
+      rigidBodies.push_back(std::move(r));
+    }
+  gf.Perform();
+  if (gf.HasErrors())
+    return fail("imprinting the bonded group failed in the kernel");
+  for (GroupMember& m : members) {
+    m.imprinted = ResultSolidOf(m.original, gf.Shape());
+    if (m.imprinted.IsNull())
+      return fail(Quote(m.occ->name) +
+                  ": the imprint did not leave one solid where the part was "
+                  "(are two participants overlapping?)");
+  }
+  for (RigidBodyRef& r : rigidBodies)
+    r.imprinted = ResultSolidOf(r.original, gf.Shape());
+
+  // The group as one shape, its faces indexed the way the mesher indexes
+  // them (a shared face once).
+  TopoDS_Compound group;
+  BRep_Builder builder;
+  builder.MakeCompound(group);
+  for (const GroupMember& m : members)
+    builder.Add(group, m.imprinted);
+  TopTools_IndexedMapOfShape faceMap;
+  TopExp::MapShapes(group, TopAbs_FACE, faceMap);
+  const auto indexIn = [&](const TopoDS_Shape& face) -> int {
+    const int i = faceMap.FindIndex(face);
+    return i > 0 ? i - 1 : -1;
+  };
+  // The group faces an ORIGINAL face of a member became.
+  const auto piecesOf = [&](const GroupMember& m, int originalFace) {
+    std::vector<int> outIdx;
+    if (originalFace < 0 || originalFace >= (int)m.originalFaces.size())
+      return outIdx;
+    const TopoDS_Shape& of = m.originalFaces[originalFace];
+    const TopTools_ListOfShape& mod = gf.Modified(of);
+    if (mod.IsEmpty()) {
+      const int i = indexIn(of);
+      if (i >= 0)
+        outIdx.push_back(i);
+      return outIdx;
+    }
+    for (TopTools_ListOfShape::Iterator it(mod); it.More(); it.Next()) {
+      const int i = indexIn(it.Value());
+      if (i >= 0)
+        outIdx.push_back(i);
+    }
+    return outIdx;
+  };
+
+  StudyBodyPlan bp;
+  bp.bodyIndex = 0;
+  bp.bodyName = meshedOcc->name;
+  for (const RigidSet& b : bonded)
+    bp.bodyName += " + " + b.occ->name;
+  bp.shape = group;
+  bp.mat = members.front().mat;
+  bp.settings.maxSize =
+      meshed->meshSize > 0.0 ? meshed->meshSize : study.meshSize;
+  for (const GroupMember& m : members) {
+    bp.members.push_back({m.imprinted, m.mat, m.occ->name});
+    // A bonded member's own mesh size lands on every face of its solid.
+    if (m.p != meshed && m.p->meshSize > 0.0)
+      for (TopExp_Explorer ex(m.imprinted, TopAbs_FACE); ex.More(); ex.Next())
+        bp.settings.faceSizes.push_back({indexIn(ex.Current()), m.p->meshSize});
+  }
+
+  // Anchors: a load or refinement on any member's face.
+  const auto resolveMember = [&](const ElementRef& ref, uint64_t occurrenceId,
+                                 const std::string& what, const GroupMember*& m,
+                                 int& face) -> bool {
+    std::vector<const GroupMember*> hits;
+    for (const GroupMember& cand : members) {
+      if (occurrenceId != 0 && cand.occ->id != occurrenceId)
+        continue;
+      if (ref.featureId != 0 && cand.body->createdBy != ref.featureId)
+        continue;
+      if (const auto idx = cand.body->elementMap.Resolve(ref.name)) {
+        hits.push_back(&cand);
+        m = &cand;
+        face = *idx;
+      }
+    }
+    if (hits.size() == 1)
+      return true;
+    if (hits.size() > 1)
+      return fail(what + ": '" + ref.name + "' is on " +
+                  std::to_string(hits.size()) +
+                  " bodies of the group; say which with occurrence and "
+                  "feature_id");
+    const Occurrence* o = asmDoc.FindById(occurrenceId);
+    return fail(what + ": face '" + ref.name + "' is not on " +
+                Quote(o ? o->name : "a meshed or bonded occurrence"));
+  };
+  bool hasFixed = false;
+  std::vector<size_t> contactLoads;
+  for (size_t li = 0; li < study.loads.size(); ++li) {
+    const Load& l = study.loads[li];
+    if (l.contactWith != 0) {
+      if (l.type != LoadType::Fixed)
+        return fail("load " + std::to_string(li + 1) +
+                    ": only a fixed support anchors on a contact");
+      bool known = false;
+      for (const RigidSet& r : rigid)
+        known = known || r.p->occurrenceId == l.contactWith;
+      if (!known) {
+        const Occurrence* o = asmDoc.FindById(l.contactWith);
+        return fail("load " + std::to_string(li + 1) + ": contact with " +
+                    Quote(o ? o->name : std::to_string(l.contactWith)) +
+                    ", which is not a rigid participant of this study");
+      }
+      contactLoads.push_back(li);
+      continue;
+    }
+    const GroupMember* m = nullptr;
+    int face = -1;
+    if (!resolveMember(l.face, l.occurrenceId, "load " + std::to_string(li + 1),
+                       m, face))
+      return false;
+    const std::vector<int> pieces = piecesOf(*m, face);
+    if (pieces.empty())
+      return fail("load " + std::to_string(li + 1) +
+                  ": its face vanished in the imprint");
+    if (l.type == LoadType::Fixed)
+      hasFixed = true;
+    if (l.type == LoadType::Force && pieces.size() > 1) {
+      double total = 0.0;
+      for (int piece : pieces)
+        total += AreaOf(faceMap(piece + 1));
+      for (int piece : pieces) {
+        Load part = l;
+        part.magnitude = total > 0.0
+                             ? l.magnitude * AreaOf(faceMap(piece + 1)) / total
+                             : 0.0;
+        bp.loads.push_back({piece, part});
+      }
+    } else {
+      for (int piece : pieces)
+        bp.loads.push_back({piece, l});
+    }
+  }
+  for (size_t ri = 0; ri < study.refinements.size(); ++ri) {
+    const GroupMember* m = nullptr;
+    int face = -1;
+    if (!resolveMember(study.refinements[ri].face,
+                       study.refinements[ri].occurrenceId,
+                       "refinement " + std::to_string(ri + 1), m, face))
+      return false;
+    for (int piece : piecesOf(*m, face))
+      bp.settings.faceSizes.push_back({piece, study.refinements[ri].size});
+  }
+
+  // Contacts with the rigid supports: faces the group shares with them.
+  std::set<size_t> contactSatisfied;
+  for (size_t ri = 0; ri < rigid.size(); ++ri) {
+    ContactPatch patch;
+    patch.rigidOccurrenceId = rigid[ri].p->occurrenceId;
+    patch.rigidName = rigid[ri].occ->name;
+    patch.meshedBody = 0;
+    std::set<int> meshedFaces, rigidFaces;
+    for (const RigidBodyRef& r : rigidBodies) {
+      if (r.rigidSet != ri || r.imprinted.IsNull())
+        continue;
+      const std::vector<TopoDS_Shape> rigidResultFaces = FacesOf(r.imprinted);
+      for (const TopoDS_Shape& rf : rigidResultFaces) {
+        const int i = indexIn(rf);
+        if (i >= 0)
+          meshedFaces.insert(i);
+      }
+      const std::vector<TopoDS_Shape> rfOrig = FacesOf(r.original);
+      for (size_t f = 0; f < rfOrig.size(); ++f)
+        for (int piece : ImprintedFaces(gf, rfOrig[f], rigidResultFaces))
+          if (indexIn(rigidResultFaces[piece]) >= 0) {
+            rigidFaces.insert(static_cast<int>(f));
+            patch.rigidBody = r.bodyIndex;
+          }
+    }
+    patch.meshedFaces.assign(meshedFaces.begin(), meshedFaces.end());
+    patch.rigidFaces.assign(rigidFaces.begin(), rigidFaces.end());
+    for (size_t li : contactLoads) {
+      const Load& l = study.loads[li];
+      if (l.contactWith != patch.rigidOccurrenceId || patch.meshedFaces.empty())
+        continue;
+      hasFixed = true;
+      contactSatisfied.insert(li);
+      for (int piece : patch.meshedFaces)
+        bp.loads.push_back({piece, l});
+    }
+    if (!patch.meshedFaces.empty())
+      out.contacts.push_back(std::move(patch));
+  }
+  for (size_t li : contactLoads)
+    if (!contactSatisfied.count(li)) {
+      const Occurrence* o = asmDoc.FindById(study.loads[li].contactWith);
+      return fail("load " + std::to_string(li + 1) + ": " +
+                  Quote(o ? o->name : "?") +
+                  " does not touch the group (no "
+                  "shared face after imprinting at 1e-3 mm), so there is "
+                  "nothing to clamp");
+    }
+
+  // Bonds: the faces two members share. A bonded member that shares
+  // nothing is not bonded to anything, and says so.
+  std::vector<bool> touched(members.size(), false);
+  for (size_t a = 0; a < members.size(); ++a) {
+    TopTools_MapOfShape facesA;
+    for (TopExp_Explorer ex(members[a].imprinted, TopAbs_FACE); ex.More();
+         ex.Next())
+      facesA.Add(ex.Current());
+    for (size_t b = a + 1; b < members.size(); ++b) {
+      const std::vector<TopoDS_Shape> bFaces = FacesOf(members[b].imprinted);
+      bool shared = false;
+      for (const TopoDS_Shape& f : bFaces)
+        shared = shared || facesA.Contains(f);
+      if (!shared)
+        continue;
+      touched[a] = touched[b] = true;
+      BondPatch bond;
+      bond.occurrenceA = members[a].occ->id;
+      bond.occurrenceB = members[b].occ->id;
+      bond.bodyA = members[a].bodyIndex;
+      bond.bodyB = members[b].bodyIndex;
+      const auto originalsCarrying = [&](const GroupMember& m,
+                                         const TopTools_MapOfShape& other) {
+        std::vector<int> outFaces;
+        const std::vector<TopoDS_Shape> resultFaces = FacesOf(m.imprinted);
+        for (size_t f = 0; f < m.originalFaces.size(); ++f)
+          for (int piece : ImprintedFaces(gf, m.originalFaces[f], resultFaces))
+            if (other.Contains(resultFaces[piece])) {
+              outFaces.push_back(static_cast<int>(f));
+              break;
+            }
+        return outFaces;
+      };
+      TopTools_MapOfShape facesB;
+      for (const TopoDS_Shape& f : bFaces)
+        facesB.Add(f);
+      bond.facesA = originalsCarrying(members[a], facesB);
+      bond.facesB = originalsCarrying(members[b], facesA);
+      out.bonds.push_back(std::move(bond));
+    }
+  }
+  for (size_t i = 0; i < members.size(); ++i)
+    if (!touched[i] && members[i].p != meshed)
+      return fail(Quote(members[i].occ->name) +
+                  " is marked bonded but shares no face with the group "
+                  "(nothing to glue it to at 1e-3 mm); make it rigid, or "
+                  "ignored, or fix the placement");
+  if (members.size() > 1 && !touched[0])
+    return fail(Quote(meshedOcc->name) +
+                " shares no face with its bonded neighbours");
+
+  if (bp.loads.empty())
+    return fail(Quote(bp.bodyName) + ": nothing to solve");
+  if (!hasFixed)
+    return fail(Quote(bp.bodyName) + " has loads but no fixed support");
+  out.bodies.push_back(std::move(bp));
   return true;
 }
 

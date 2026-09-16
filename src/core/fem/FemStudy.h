@@ -47,6 +47,11 @@ enum class ParticipantRole {
   Meshed,  // a participant: meshed and solved, its own flexibility counts
   Rigid,   // a support: its contact patches are clamped on the parts it touches
   Ignored, // not in the analysis at all
+  // Meshed AND glued (S2): one mesh spans it and the meshed occurrence where
+  // they touch, so load crosses the joint and each keeps its own material.
+  // Bonding is declared, not inferred — T-nuts, drivers and press fits are
+  // not glue.
+  Bonded,
 };
 struct Participant {
   uint64_t occurrenceId = 0; // a TOP-LEVEL occurrence of the assembly

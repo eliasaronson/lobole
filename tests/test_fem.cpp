@@ -1370,6 +1370,41 @@ struct TwoBlocks {
     return "";
   }
 
+  // The bonded variant (S2): the lower block glued to the upper, its own
+  // bottom face fixed, the same pressure on the upper's top. `lowerMaterial`
+  // lets the two members differ.
+  fem::Study StudyBonded() const {
+    fem::Study s;
+    s.id = 2;
+    s.name = "upper bonded to lower";
+    s.meshSize = 12.0;
+    s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
+    s.participants.push_back({lowerOcc, fem::ParticipantRole::Bonded, 0.0, ""});
+    fem::Load fix;
+    fix.id = 20;
+    fix.type = fem::LoadType::Fixed;
+    fix.occurrenceId = lowerOcc;
+    fix.face = ElementRef{0, LowerBottomFace()};
+    s.loads.push_back(fix);
+    fem::Load press;
+    press.id = 21;
+    press.type = fem::LoadType::Pressure;
+    press.occurrenceId = upperOcc;
+    press.face = ElementRef{0, UpperTopFace()};
+    press.magnitude = 0.5;
+    s.loads.push_back(press);
+    return s;
+  }
+  std::string LowerBottomFace() const {
+    const Body& b = lower->GetBodies()[0];
+    for (const auto& [faceIndex, name] : b.elementMap.names) {
+      const auto info = Measure::DescribeFaceAt(b, faceIndex);
+      if (info && std::abs(info->centroid.z) < 1e-6)
+        return name;
+    }
+    return "";
+  }
+
   fem::Study StudyWithContactSupport() const {
     fem::Study s;
     s.id = 1;
@@ -1542,4 +1577,99 @@ TEST_CASE("S1: an assembly's study results go stale when any part it read "
   AssemblyDocument copy = asmDoc;
   CHECK(copy.StudyResults(s.id) != nullptr);
   CHECK(copy.StudyResultsEpoch() == asmDoc.StudyResultsEpoch());
+}
+
+// ---- S2: a neighbour meshed and BONDED
+
+#ifdef HAVE_NETGEN
+namespace {
+int ComponentsOf(const fem::FemMesh& mesh) { return MeshComponents(mesh); }
+} // namespace
+
+TEST_CASE("S2: a bonded neighbour joins the mesh with its own material, and "
+          "the answer sits between rigid and absent",
+          "[fem][assembly]") {
+  TwoBlocks world(16.0f);
+  // Two materials, so the domain-to-member mapping is visible in the answer.
+  world.lower->GetFeature(0)->SetMaterial("aluminum");
+  world.lower->Regenerate();
+  std::string err;
+
+  fem::Study bonded = world.StudyBonded();
+  fem::StudyPlan plan;
+  REQUIRE(fem::PlanAssemblyStudy(world.asmDoc, bonded, world.Context(), plan,
+                                 &err));
+  INFO(err);
+  REQUIRE(plan.bodies.size() == 1);
+  CHECK(plan.bodies[0].bodyName == "Upper + Lower");
+  CHECK(plan.bodies[0].members.size() == 2);
+  REQUIRE(plan.bonds.size() == 1);
+  CHECK_FALSE(plan.bonds[0].facesA.empty());
+  CHECK_FALSE(plan.bonds[0].facesB.empty());
+
+  fem::StudyJobInput input;
+  REQUIRE(fem::MeshPlannedStudy(plan, input, &err));
+  INFO(err);
+  REQUIRE(input.bodies.size() == 1);
+  const fem::StudyJobBody& jb = input.bodies[0];
+  // ONE mesh over both solids, two domains, two materials, and every node on
+  // the interface shared (P0's measure).
+  CHECK(ComponentsOf(jb.mesh) == 1);
+  CHECK(DoubledInterfaceNodes(jb.mesh) == 0);
+  std::set<int> domains(jb.mesh.tetDomain.begin(), jb.mesh.tetDomain.end());
+  CHECK(domains.size() == 2);
+  REQUIRE(jb.materials.size() == 2);
+  CHECK(jb.materials[0].youngMPa != jb.materials[1].youngMPa);
+  // The domain above z = 16 is steel (the upper block), below is aluminium.
+  for (size_t t = 0; t < jb.mesh.tets.size(); ++t) {
+    const auto& tet = jb.mesh.tets[t];
+    const double cz =
+        0.25 * (jb.mesh.nodes[tet[0]].z + jb.mesh.nodes[tet[1]].z +
+                jb.mesh.nodes[tet[2]].z + jb.mesh.nodes[tet[3]].z);
+    const double E = jb.materials[jb.mesh.tetDomain[t]].youngMPa;
+    if (cz > 16.0)
+      CHECK(E > 150000.0); // steel
+    else
+      CHECK(E < 100000.0); // aluminium
+  }
+  // The fixed nodes are on the LOWER block's bottom, none on the interface.
+  REQUIRE_FALSE(jb.fixedNodes.empty());
+  for (int n : jb.fixedNodes)
+    CHECK(std::abs(jb.mesh.nodes[n].z) < 1e-6);
+
+  fem::StudyRuntime rtBonded;
+  REQUIRE(fem::SolvePreparedStudy(input, rtBonded, &err));
+  INFO(err);
+  CHECK(rtBonded.maxDisplacement > 0.0);
+
+  // The bracket: the same upper block on a RIGID lower (clamped at the
+  // contact) is stiffer, so it moves less under the same pressure. A
+  // bonded answer that did not exceed the rigid one would mean the joint
+  // carried no compliance — the mesh was not one mesh after all.
+  fem::Study rigid = world.StudyWithContactSupport();
+  fem::StudyPlan planR;
+  REQUIRE(fem::PlanAssemblyStudy(world.asmDoc, rigid, world.Context(), planR,
+                                 &err));
+  fem::StudyJobInput inputR;
+  REQUIRE(fem::MeshPlannedStudy(planR, inputR, &err));
+  fem::StudyRuntime rtRigid;
+  REQUIRE(fem::SolvePreparedStudy(inputR, rtRigid, &err));
+  CHECK(rtBonded.maxDisplacement > rtRigid.maxDisplacement);
+}
+#endif // HAVE_NETGEN
+
+TEST_CASE("S2: a bonded participant that touches nothing is refused by name",
+          "[fem][assembly]") {
+  TwoBlocks world(40.0f); // 24 mm of air
+  std::string err;
+  fem::Study bonded = world.StudyBonded();
+  fem::StudyPlan plan;
+  CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, bonded, world.Context(),
+                                     plan, &err));
+  CHECK_THAT(err, Catch::Matchers::ContainsSubstring("marked bonded"));
+  CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Lower"));
+  fem::ParticipantRole role = fem::ParticipantRole::Rigid;
+  CHECK(fem::ParticipantRoleFromString("bonded", role));
+  CHECK(role == fem::ParticipantRole::Bonded);
+  CHECK(std::string(fem::ParticipantRoleToString(role)) == "bonded");
 }

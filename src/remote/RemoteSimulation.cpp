@@ -478,7 +478,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         if (!list.is_array())
           throw std::runtime_error(
               "participants is a list of {occurrence, role: "
-              "meshed|rigid|ignored, mesh_size?}");
+              "meshed|bonded|rigid|ignored, mesh_size?}");
         s.participants.clear();
         for (const json& pj : list) {
           if (!pj.is_object() || !pj.contains("occurrence"))
@@ -489,8 +489,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
               host.OccurrenceOf(pj.at("occurrence"), "participant").id;
           const std::string role = pj.value("role", std::string{"rigid"});
           if (!fem::ParticipantRoleFromString(role, pt.role))
-            throw std::runtime_error("participant role '" + role +
-                                     "' is not one of meshed, rigid, ignored");
+            throw std::runtime_error(
+                "participant role '" + role +
+                "' is not one of meshed, bonded, rigid, ignored");
           if (pj.contains("mesh_size")) {
             const json& v = pj.at("mesh_size");
             if (v.is_string())

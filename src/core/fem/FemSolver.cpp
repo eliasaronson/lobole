@@ -76,6 +76,14 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
                                 const std::vector<FaceLoad>& loads,
                                 std::string* error,
                                 const glm::dvec3& gravityAccel) {
+  return Solve(mesh, std::vector<Material>{material}, fixedNodes, loads, error,
+               gravityAccel);
+}
+
+std::optional<FemResults>
+Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
+      const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
+      std::string* error, const glm::dvec3& gravityAccel) {
   auto fail = [&](const std::string& m) -> std::optional<FemResults> {
     if (error)
       *error = m;
@@ -84,8 +92,23 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
   const int nNodes = static_cast<int>(mesh.nodes.size());
   if (nNodes == 0 || mesh.tets.empty())
     return fail("empty mesh");
-  if (material.youngMPa <= 0)
-    return fail("material has no stiffness data");
+  if (byDomain.empty())
+    return fail("no material");
+  for (const Material& m : byDomain)
+    if (m.youngMPa <= 0)
+      return fail("material has no stiffness data");
+  // The material of tet `t`: its domain's, or the only one.
+  const auto matOf = [&](size_t t) -> const Material& {
+    const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+    return byDomain[std::min(d, byDomain.size() - 1)];
+  };
+  std::vector<Eigen::Matrix<double, 6, 6>> Ds;
+  for (const Material& m : byDomain)
+    Ds.push_back(Elasticity(m.youngMPa, m.poisson));
+  const auto DOf = [&](size_t t) -> const Eigen::Matrix<double, 6, 6>& {
+    const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+    return Ds[std::min(d, Ds.size() - 1)];
+  };
 
   // DOF reduction map: -1 for fixed DOFs, else a compacted free-DOF index.
   const DofMap dofs = BuildDofMap(nNodes, fixedNodes);
@@ -94,12 +117,13 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
   if (nFree == 0)
     return fail("model is fully constrained (no free DOF)");
 
-  const auto D = Elasticity(material.youngMPa, material.poisson);
-
-  // Assemble the reduced stiffness matrix from element contributions.
+  // Assemble the reduced stiffness matrix from element contributions, each
+  // with its own domain's elasticity (S2: a bonded group of materials).
   std::vector<Eigen::Triplet<double>> triplets;
   triplets.reserve(mesh.tets.size() * 900);
-  for (const auto& tet : mesh.tets) {
+  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+    const auto& tet = mesh.tets[ti];
+    const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
     Vector3d X[10];
     for (int i = 0; i < 10; ++i) {
       const auto& p = mesh.nodes[tet[i]];
@@ -151,11 +175,13 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
   // Body force (gravity / self-weight): b = rho * g per unit volume, consistent
   // nodal loads f_i = integral rho*g*N_i dV. Units: rho in t/mm^3, g in mm/s^2
   // => t*mm/s^2/mm^3 = N/mm^3, integrated over mm^3 => N.
-  if ((gravityAccel.x != 0 || gravityAccel.y != 0 || gravityAccel.z != 0) &&
-      material.densityTPerMM3 > 0) {
-    const Vector3d b = material.densityTPerMM3 *
-                       Vector3d(gravityAccel.x, gravityAccel.y, gravityAccel.z);
-    for (const auto& tet : mesh.tets) {
+  if (gravityAccel.x != 0 || gravityAccel.y != 0 || gravityAccel.z != 0) {
+    const Vector3d gvec(gravityAccel.x, gravityAccel.y, gravityAccel.z);
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      if (matOf(ti).densityTPerMM3 <= 0)
+        continue;
+      const Vector3d b = matOf(ti).densityTPerMM3 * gvec;
       Vector3d X[10];
       for (int i = 0; i < 10; ++i) {
         const auto& p = mesh.nodes[tet[i]];
@@ -207,7 +233,9 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
   std::vector<Eigen::Matrix<double, 6, 1>> stressAccum(
       nNodes, Eigen::Matrix<double, 6, 1>::Zero());
   std::vector<double> weight(nNodes, 0.0);
-  for (const auto& tet : mesh.tets) {
+  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+    const auto& tet = mesh.tets[ti];
+    const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
     Vector3d X[10];
     Eigen::Matrix<double, 30, 1> ue;
     for (int i = 0; i < 10; ++i) {
@@ -259,6 +287,14 @@ std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const Material& material,
            const std::vector<int>& fixedNodes, int numModes,
            std::string* error) {
+  return SolveModal(mesh, std::vector<Material>{material}, fixedNodes, numModes,
+                    error);
+}
+
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
+           const std::vector<int>& fixedNodes, int numModes,
+           std::string* error) {
   auto fail = [&](const std::string& m)
       -> std::optional<std::vector<FemResults::ModeShape>> {
     if (error)
@@ -268,10 +304,21 @@ SolveModal(const FemMesh& mesh, const Material& material,
   const int nNodes = static_cast<int>(mesh.nodes.size());
   if (nNodes == 0 || mesh.tets.empty())
     return fail("empty mesh");
-  if (material.youngMPa <= 0)
-    return fail("material has no stiffness data");
-  if (material.densityTPerMM3 <= 0)
-    return fail("material has no density (needed for modal mass)");
+  if (byDomain.empty())
+    return fail("no material");
+  for (const Material& m : byDomain) {
+    if (m.youngMPa <= 0)
+      return fail("material has no stiffness data");
+    if (m.densityTPerMM3 <= 0)
+      return fail("material has no density (needed for modal mass)");
+  }
+  const auto matOf = [&](size_t t) -> const Material& {
+    const size_t d = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[t];
+    return byDomain[std::min(d, byDomain.size() - 1)];
+  };
+  std::vector<Eigen::Matrix<double, 6, 6>> Ds;
+  for (const Material& m : byDomain)
+    Ds.push_back(Elasticity(m.youngMPa, m.poisson));
   if (numModes < 1)
     numModes = 1;
 
@@ -296,11 +343,14 @@ SolveModal(const FemMesh& mesh, const Material& material,
   if (nFree < numModes + 1)
     return fail("mesh too small for the requested modes");
 
-  const auto D = Elasticity(material.youngMPa, material.poisson);
   std::vector<Eigen::Triplet<double>> kt, mt;
   kt.reserve(mesh.tets.size() * 900);
   mt.reserve(mesh.tets.size() * 300);
-  for (const auto& tet : mesh.tets) {
+  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+    const auto& tet = mesh.tets[ti];
+    const size_t dom = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[ti];
+    const Eigen::Matrix<double, 6, 6>& D = Ds[std::min(dom, Ds.size() - 1)];
+    const double rho = matOf(ti).densityTPerMM3;
     Vector3d X[10];
     for (int i = 0; i < 10; ++i) {
       const auto& p = mesh.nodes[tet[i]];
@@ -319,7 +369,7 @@ SolveModal(const FemMesh& mesh, const Material& material,
       TetShape(g[0], g[1], g[2], N);
       for (int i = 0; i < 10; ++i)
         for (int j = 0; j < 10; ++j)
-          Me(i, j) += material.densityTPerMM3 * dV * N[i] * N[j];
+          Me(i, j) += rho * dV * N[i] * N[j];
     }
     for (int a = 0; a < 30; ++a) {
       const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
