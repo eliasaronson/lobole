@@ -21,6 +21,7 @@ regen there would always report ok and tell a caller nothing.
 
 Usage: regen_honesty_smoke.py <path-to-designer-binary>
 """
+import math
 import os
 import subprocess
 import sys
@@ -115,6 +116,88 @@ def main():
         d.call("new_project")
         opened = d.call("open_project", path=proj)
         broken(opened, "open_project on a project whose feature does not build")
+
+        # --- a boolean whose result is not a well-formed solid -------------
+        # `CADShape::IsValid` is a null check, so a boolean could return a
+        # shape with a plausible volume that OpenCASCADE calls invalid, and
+        # say nothing. Everything measured on it afterwards was then
+        # confidently wrong: this configuration — a bicycle's rear dropouts
+        # with two bowed stays landing on each of them, bored for the axle in
+        # ONE pass through both plates and the 130 mm of air between — gives
+        # "bad wire nesting", and the assembly sweep went on to report
+        # 17,297 mm3 of a rear cog buried in a frame whose bounding box does
+        # not reach it.
+        #
+        # The geometry is faithful on purpose. The same test written with
+        # straight cylinders builds cleanly and asserts nothing, which is the
+        # kind of check that passes for years while the thing it was written
+        # for goes unguarded.
+        d.call("new_project")
+
+        def bowed(name, a, b, bulge, sag, od):
+            """A solid pipe bowing `sag` toward `bulge`, as a frame's stays
+            are bent. Mirrors generators/bike/bike_shop.bowed_tube."""
+            u = [b[i] - a[i] for i in range(3)]
+            length = math.dist(a, b)
+            u = [c / length for c in u]
+            dot = sum(u[i] * bulge[i] for i in range(3))
+            v = [bulge[i] - u[i] * dot for i in range(3)]
+            vlen = math.dist(v, [0, 0, 0])
+            v = [c / vlen for c in v]
+            normal = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2],
+                      u[0] * v[1] - u[1] * v[0]]
+            # The arc through (0,0), (L/2, sag), (L,0), as the app's entity:
+            # a centre, a radius and a counter-clockwise angular span.
+            yc = (sag * sag - length * length / 4.0) / (2.0 * sag)
+            radius = math.hypot(length / 2.0, yc)
+            first = math.atan2(-yc, -length / 2.0)
+            last = math.atan2(-yc, length / 2.0)
+            mid = math.atan2(sag - yc, 0.0)
+            tau = 2 * math.pi
+            if (mid - first) % tau > (last - first) % tau:
+                first, last = last, first
+            sk = d.call("add_feature", feature={
+                "type": "Sketch", "name": f"{name} path",
+                "plane": {"origin": list(a), "normal": normal, "uAxis": u},
+                "entities": [{"type": "arc", "center": [length / 2.0, yc],
+                              "radius": radius, "start_angle": first,
+                              "end_angle": last}]})["id"]
+            return d.call("add_feature", feature={
+                "type": "Pipe", "name": name, "path_id": sk,
+                "outer_diameter": od, "wall_thickness": 0.0})["id"]
+
+        axle_x, axle_z, dy = -460.43, 65.0, 65.5
+        ids = []
+        for side in (1, -1):
+            drop = [axle_x, side * dy, axle_z]
+            ids.append(d.call("add_feature", feature={
+                "type": "Cylinder", "name": f"Dropout {side}",
+                "center": [axle_x, side * dy - 2.5, axle_z],
+                "direction": [0, 1, 0], "radius": 26.0, "height": 5.0,
+            })["id"])
+            ids.append(bowed(f"Chainstay {side}", [0.0, side * 22.0, 12.0],
+                             drop, [0, side, 0], 5.0, 16.0))
+            ids.append(bowed(f"Seatstay {side}", [-168.7, side * 11.0, 519.3],
+                             drop, [0, side, 0], 4.0, 16.0))
+        weld = ids[0]
+        for k, tool in enumerate(ids[1:], 1):
+            weld = d.call("add_feature", feature={
+                "type": "Boolean", "name": f"Weld {k}", "target_id": weld,
+                "tool_id": tool, "op": "union"})["id"]
+        bore = d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Axle bore",
+            "center": [axle_x, -70.0, axle_z], "direction": [0, 1, 0],
+            "radius": 4.55, "height": 140.0})["id"]
+        reg = d.call("add_feature", feature={
+            "type": "Boolean", "name": "One-pass bore", "target_id": weld,
+            "tool_id": bore, "op": "subtract"})["regen"]
+        expect(not reg["ok"],
+               "this is the configuration that produced a badly nested "
+               f"solid; if the kernel has changed, find another: {reg}")
+        failed = [f for f in reg["failed"] if f["name"] == "One-pass bore"]
+        expect(failed, f"the bore is the feature that failed: {reg}")
+        expect("INVALID" in failed[0]["error"],
+               f"and it says the solid is invalid: {failed[0]['error']}")
 
         print("regen_honesty_smoke: OK")
     finally:

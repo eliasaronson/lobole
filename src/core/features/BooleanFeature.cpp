@@ -1,5 +1,7 @@
 #include "core/features/BooleanFeature.h"
 
+#include "core/Measure.h"
+
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
@@ -49,6 +51,27 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
     SetError("operation produced an empty or invalid solid (are the bodies "
              "disjoint?)" +
              (boolErr.empty() ? "" : " — " + boolErr));
+    return false;
+  }
+  // `CADShape::IsValid` is a null check, not a validity check. A boolean can
+  // return a shape that is not null, has a plausible volume, and is not a
+  // well-formed B-Rep — and everything asked of it afterwards is then
+  // confidently wrong: one axle bore drilled through both dropouts of a
+  // bicycle frame in a single pass left a body OpenCASCADE calls "bad wire
+  // nesting", and the assembly's interference sweep went on to report
+  // 17,297 mm3 of the rear cog buried in a frame whose bounding box does not
+  // reach it. The check costs 0.2 s on the worst body in that bicycle (a rim
+  // laced to a hub with 36 spokes) and is worth it HERE, at the operation
+  // that made the mess, where the feature can simply fail.
+  const Measure::GeometryReport report = Measure::CheckGeometry(result);
+  if (!report.valid) {
+    std::string why;
+    for (const std::string& r : report.reasons)
+      why += (why.empty() ? "" : ", ") + r;
+    SetError("operation produced an INVALID solid" +
+             (why.empty() ? "" : " (" + why + ")") +
+             " — it has volume and is not a well-formed B-Rep, so anything "
+             "measured on it afterwards would be wrong");
     return false;
   }
   // A subtract/union whose result equals the target did nothing — the operands
