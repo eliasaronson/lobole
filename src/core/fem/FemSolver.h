@@ -11,9 +11,15 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
+
+class AssemblyDocument;
+struct Body;
 
 namespace fem {
 
@@ -121,6 +127,11 @@ struct StudyBodyResult {
 // persisted into the document and reloaded into this same cache slot.
 struct StudyRuntime {
   uint64_t solvedAtVersion = 0;
+  // Assembly studies: the version of every PART the solve read, beside the
+  // assembly's own above. Stale when any of them moved — a panel regenerated
+  // behind a fresh-looking result is the stale drawing's lie. Empty on a
+  // part study.
+  std::vector<std::pair<uint64_t, uint64_t>> solvedPartVersions;
   std::vector<StudyBodyResult> bodies;
   double maxVonMises = 0.0;
   glm::dvec3 maxVmAt{0, 0, 0};
@@ -190,16 +201,59 @@ struct StudyBodyPlan {
   Material mat;
   std::vector<std::pair<int, Load>> loads; // (face index, the load)
 };
+// Where a meshed body touches a rigid support, as the imprint found it: the
+// faces of the meshed body's imprinted shape that it shares with the rigid
+// body (indices into the shape MeshPlannedStudy meshes), and the rigid
+// body's ORIGINAL faces that carry the patch, which is what a picture can
+// tint. Assembly studies only.
+struct ContactPatch {
+  uint64_t rigidOccurrenceId = 0;
+  std::string rigidName;
+  int meshedBody = 0; // index into StudyPlan::bodies
+  std::vector<int> meshedFaces;
+  int rigidBody = 0; // index into the rigid occurrence's placed bodies
+  std::vector<int> rigidFaces;
+};
 struct StudyPlan {
   AnalysisType type = AnalysisType::Static;
   int numModes = 8;
   glm::dvec3 gravity{0.0};
   std::vector<StudyBodyPlan> bodies;
+  std::vector<ContactPatch> contacts;
 };
 bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
                std::string* error);
 bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
                       std::string* error);
+
+// PlanStudy for a study on an ASSEMBLY (S1, docs/simulation/
+// assembly-studies-plan.md): one occurrence meshed, the rigid ones clamped
+// where they touch it. The caller supplies the placed geometry, because the
+// assembly document does not own its parts: `placedBodies` returns an
+// occurrence's bodies in WORLD space (reference bodies excluded), element
+// maps intact. What it does, in order: refuses more or fewer than one meshed
+// occurrence; refuses a rigid support that INTERPENETRATES the meshed part
+// (a press fit fuses into slivers); imprints every rigid body onto the
+// meshed body with a fuzzy general fuse (parts sit microns apart at float32)
+// WITHOUT touching either document; maps each load's face onto the imprinted
+// shape (a face the imprint split becomes several, a force's total spread by
+// area); and turns each contact anchor into the shared faces, refusing one
+// whose support does not touch. The result meshes and solves through
+// MeshPlannedStudy / SolvePreparedStudy unchanged, in world coordinates.
+struct AssemblyStudyContext {
+  std::function<std::vector<Body>(uint64_t occurrenceId)> placedBodies;
+  const SymbolTable* symbols = nullptr; // the project's variables; may be null
+};
+bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
+                       const AssemblyStudyContext& ctx, StudyPlan& out,
+                       std::string* error);
+
+// The derived results of an assembly's studies, shared between the document
+// and its undo snapshots (a full-state copy must not duplicate meshes).
+struct StudyRuntimeCache {
+  std::map<uint64_t, StudyRuntime> byStudy;
+  uint64_t epoch = 0;
+};
 bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
                         std::string* error);
 

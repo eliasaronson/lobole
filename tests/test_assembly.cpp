@@ -134,6 +134,51 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
 // A FROZEN golden (docs/versioning/format.md): hardcoded keys/values, never
 // regenerated. Loading it pins the exact v23 on-disk schema, so a silent key
 // rename (which a save→load round-trip would not catch) fails here.
+// A FROZEN golden for an assembly's own FEM study (v106, S1): participants
+// with roles, a load whose anchor is a CONTACT rather than a face, and a
+// pressure that says whose face it is on.
+TEST_CASE("Frozen v106 assembly golden carries a study", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v106-assembly-study.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc);
+  REQUIRE(asmDoc->GetStudies().size() == 1);
+  const fem::Study& s = asmDoc->GetStudies()[0];
+  CHECK(s.id == 3);
+  CHECK(s.name == "Upper on lower");
+  CHECK(s.meshSize == 12.0);
+  REQUIRE(s.participants.size() == 2);
+  CHECK(s.participants[0].occurrenceId == 2);
+  CHECK(s.participants[0].role == fem::ParticipantRole::Meshed);
+  CHECK(s.participants[1].occurrenceId == 1);
+  CHECK(s.participants[1].role == fem::ParticipantRole::Rigid);
+  CHECK(s.participants[1].meshSize == 20.0);
+  REQUIRE(s.loads.size() == 2);
+  CHECK(s.loads[0].type == fem::LoadType::Fixed);
+  CHECK(s.loads[0].contactWith == 1);
+  CHECK(s.loads[0].face.name.empty());
+  CHECK(s.loads[1].type == fem::LoadType::Pressure);
+  CHECK(s.loads[1].occurrenceId == 2);
+  CHECK(s.loads[1].face.name == "1/face5");
+  CHECK(s.loads[1].magnitude == 0.5);
+  // The loader raised the id counter past the study AND its loads.
+  Occurrence extra;
+  extra.partId = 9;
+  CHECK(asmDoc->AddOccurrence(extra) == 6);
+  // And it round-trips through the single-file form byte-for-byte on the
+  // study, contact anchor included.
+  const fs::path path = fs::temp_directory_path() / "designer_asm_study.json";
+  REQUIRE(testio::SaveAssembly(*asmDoc, path.string()));
+  auto again = testio::LoadAssembly(path.string());
+  REQUIRE(again);
+  REQUIRE(again->GetStudies().size() == 1);
+  CHECK(again->GetStudies()[0].loads[0].contactWith == 1);
+  CHECK(again->GetStudies()[0].participants[0].role ==
+        fem::ParticipantRole::Meshed);
+  fs::remove(path);
+}
+
 // A FROZEN golden for the attachment schema (v72): an occurrence that RIDES
 // on another, which is how a fastener travels with the part it is bolted to.
 TEST_CASE("Frozen v72 assembly golden carries an attachment",

@@ -36,16 +36,48 @@ struct Refinement {
   ElementRef face;
   double size = 0.0;
   std::string sizeExpr;
+  uint64_t occurrenceId = 0; // assembly studies: whose face (0 on a part)
 };
+
+// Assembly studies (S1, docs/simulation/assembly-studies-plan.md): a study on
+// an AssemblyDocument names OCCURRENCES, each in one role. Absent and rigid
+// bracket the truth — a part left out is a lower bound on stiffness, the same
+// part rigid an upper bound, and meshed the number between them.
+enum class ParticipantRole {
+  Meshed,  // a participant: meshed and solved, its own flexibility counts
+  Rigid,   // a support: its contact patches are clamped on the parts it touches
+  Ignored, // not in the analysis at all
+};
+struct Participant {
+  uint64_t occurrenceId = 0; // a TOP-LEVEL occurrence of the assembly
+  ParticipantRole role = ParticipantRole::Rigid;
+  // Per-participant element size (mm; 0 = the study's global size): a 16 mm
+  // panel and a 60 mm brace do not want one number. value+expr convention.
+  double meshSize = 0.0;
+  std::string meshSizeExpr;
+};
+const char* ParticipantRoleToString(ParticipantRole role);
+[[nodiscard]] bool ParticipantRoleFromString(const std::string& s,
+                                             ParticipantRole& out);
 
 // One boundary condition. `magnitude` is N (Force) or MPa (Pressure), ignored
 // for Fixed. `direction` is the force direction (Force only; need not be
 // normalized — it is normalized at solve time). Magnitude follows the value+
 // expr convention so it can read "bolt_preload * 1.5".
+//
+// On an assembly study every anchor is occurrence-qualified (`occurrenceId`,
+// the job document's `{jobPartId, ElementRef}` shape), and a Fixed load may
+// anchor on a CONTACT instead of a face: `contactWith` names the rigid
+// occurrence, and the load clamps the patch the two share, re-derived every
+// time the study meshes. The patch does not exist in either part, so there is
+// no face to name; and an anchor that is re-derived survives a rebuild the
+// way a mate on a frame does. `face` is empty for a contact anchor.
 struct Load {
   uint64_t id = 0;
   LoadType type = LoadType::Fixed;
   ElementRef face;
+  uint64_t occurrenceId = 0; // 0 on a part study
+  uint64_t contactWith = 0; // Fixed only: clamped where this occurrence touches
   double magnitude = 0.0;
   std::string magnitudeExpr;
   // Down, for a load whose face could not be resolved. Every path that HAS a
@@ -74,6 +106,17 @@ struct Study {
 
   std::vector<Refinement> refinements;
   std::vector<Load> loads;
+
+  // Assembly studies only (empty on a part study): who takes part, and how.
+  // An occurrence not listed is ignored.
+  std::vector<Participant> participants;
+  const Participant* FindParticipant(uint64_t occurrenceId) const {
+    for (const Participant& p : participants)
+      if (p.occurrenceId == occurrenceId)
+        return &p;
+    return nullptr;
+  }
+  bool IsAssemblyStudy() const { return !participants.empty(); }
 
   // Static only: uniform gravity/self-weight acceleration (m/s^2 in world
   // axes; 0 = off). Needs the body's material density.

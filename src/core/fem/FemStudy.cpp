@@ -70,6 +70,34 @@ bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
   return false;
 }
 
+const char* ParticipantRoleToString(ParticipantRole role) {
+  switch (role) {
+  case ParticipantRole::Meshed:
+    return "meshed";
+  case ParticipantRole::Rigid:
+    return "rigid";
+  case ParticipantRole::Ignored:
+    return "ignored";
+  }
+  return "rigid";
+}
+
+bool ParticipantRoleFromString(const std::string& s, ParticipantRole& out) {
+  if (s == "meshed") {
+    out = ParticipantRole::Meshed;
+    return true;
+  }
+  if (s == "rigid") {
+    out = ParticipantRole::Rigid;
+    return true;
+  }
+  if (s == "ignored") {
+    out = ParticipantRole::Ignored;
+    return true;
+  }
+  return false;
+}
+
 bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
                         std::string* error) {
   bool ok = true;
@@ -94,6 +122,8 @@ bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
     eval(r.sizeExpr, r.size, "refinement size");
   for (auto& l : study.loads)
     eval(l.magnitudeExpr, l.magnitude, "load magnitude");
+  for (auto& pt : study.participants)
+    eval(pt.meshSizeExpr, pt.meshSize, "participant mesh size");
   if (study.type == AnalysisType::Topology) {
     eval(study.volumeFractionExpr, study.volumeFraction, "volume fraction");
     eval(study.filterRadiusExpr, study.filterRadius, "filter radius");

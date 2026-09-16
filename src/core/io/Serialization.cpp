@@ -283,6 +283,14 @@ void LoadMotionStudies(AssemblyDocument& asmDoc,
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
 
+// FEM studies on an assembly (v106): the same again, through RestoreStudy
+// so a load's id also raises the counter.
+void LoadAssemblyStudies(AssemblyDocument& asmDoc,
+                         const std::vector<json>& jsons) {
+  for (const json& sj : jsons)
+    asmDoc.RestoreStudy(StudyFromJson(sj));
+}
+
 // Binary sibling of WriteTextAtomic for reference-image pixel files (v49):
 // same temp+rename + identical-content skip, but byte-exact (no text-mode
 // translation).
@@ -974,6 +982,30 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    // FEM studies (v106) mirror the part's: file-per-study under studies/,
+    // absent when none. Mesh and results are derived and never written.
+    const fs::path asmStudyDir = dir / "studies";
+    if (!asmDoc.GetStudies().empty()) {
+      index["studies"] = json::array();
+      fs::create_directories(asmStudyDir);
+    }
+    std::set<std::string> wantedStudies;
+    for (const fem::Study& s : asmDoc.GetStudies()) {
+      const std::string file =
+          std::to_string(IdForFile(s.id, "study", s.name)) + "-" +
+          LabelSlug(s.name) + ".json";
+      if (!WriteTextAtomic(asmStudyDir / file, StudyToJson(s).dump(2) + "\n",
+                           error))
+        return false;
+      index["studies"].push_back(s.id);
+      wantedStudies.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(asmStudyDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedStudies.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     // Configurations (v31): file-per-config + active id in the index; absent
     // when none so older assemblies stay byte-identical.
     if (asmDoc.ActiveConfiguration() != 0)
@@ -1180,6 +1212,30 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         jsons.push_back(ParseProjectFile(it->second));
       }
       LoadMotionStudies(*asmDoc, jsons);
+    }
+
+    // FEM studies (v106): id-prefix files under studies/, index order.
+    {
+      std::map<uint64_t, fs::path> byId;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
+        if (entry.path().extension() != ".json")
+          continue;
+        InsertIdFile(byId, entry.path(), "study");
+      }
+      CheckIndexIdsUnique(index.value("studies", json::array()), "study");
+      std::vector<json> jsons;
+      for (const auto& idJson : index.value("studies", json::array())) {
+        const uint64_t id = idJson.get<uint64_t>();
+        const auto it = byId.find(id);
+        if (it == byId.end()) {
+          if (error)
+            *error = "missing study file for id " + std::to_string(id);
+          return nullptr;
+        }
+        jsons.push_back(ParseProjectFile(it->second));
+      }
+      LoadAssemblyStudies(*asmDoc, jsons);
     }
 
     // Configurations (v31): id-prefix files under configurations/, index order.
@@ -1399,6 +1455,11 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       for (const MotionStudy& s : asmDoc.GetMotionStudies())
         j["motion"].push_back(MotionStudyToJson(s));
     }
+    if (!asmDoc.GetStudies().empty()) { // absent when none (v106)
+      j["studies"] = json::array();
+      for (const fem::Study& s : asmDoc.GetStudies())
+        j["studies"].push_back(StudyToJson(s));
+    }
     if (!asmDoc.GetAssertions().empty()) { // absent when none (v97)
       j["assertions"] = json::array();
       for (const ClearanceAssertion& a : asmDoc.GetAssertions())
@@ -1470,6 +1531,8 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
                   j.value("relations", json::array()).get<std::vector<json>>());
     LoadMotionStudies(
         *asmDoc, j.value("motion", json::array()).get<std::vector<json>>());
+    LoadAssemblyStudies(
+        *asmDoc, j.value("studies", json::array()).get<std::vector<json>>());
     LoadAssertions(
         *asmDoc, j.value("assertions", json::array()).get<std::vector<json>>());
     for (const auto& cj : j.value("configurations", json::array())) // v31

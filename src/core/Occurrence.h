@@ -3,11 +3,14 @@
 #include "core/Configuration.h"
 #include "core/ElementMap.h"
 #include "core/Units.h"
+#include "core/fem/FemStudy.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -360,6 +363,11 @@ struct ClearanceAssertion {
 // references another part, which Feature/RegenContext (same-document only)
 // cannot reach, so an assembly regenerates by a placement pass, not by
 // executing features.
+namespace fem {
+struct StudyRuntime;
+struct StudyRuntimeCache;
+} // namespace fem
+
 class AssemblyDocument {
 public:
   // The units this assembly is READ in — same rule and same storage
@@ -452,6 +460,32 @@ public:
       m_nextId = next;
   }
 
+  // ---- FEM studies (S1, docs/simulation/assembly-studies-plan.md) --------
+  // A study is a question asked of the assembly and lives on it, the way a
+  // part's studies live on the part: participants by occurrence, loads with
+  // occurrence-qualified anchors. The same fem::Study record; the shape of
+  // the accessors is Document's. Ids come from the shared counter.
+  const std::vector<fem::Study>& GetStudies() const { return m_studies; }
+  std::vector<fem::Study>& GetStudies() { return m_studies; }
+  const fem::Study* FindStudy(uint64_t id) const;
+  fem::Study* FindStudy(uint64_t id);
+  fem::Study& AddStudy(const std::string& name = ""); // bumps the version
+  bool RemoveStudy(uint64_t id);                      // bumps the version
+  void RestoreStudy(fem::Study study);         // load/undo: keeps its ids
+  uint64_t AllocateId() { return m_nextId++; } // a load's id
+  // Derived mesh + results, never serialized, SHARED with every full-state
+  // copy of this document (the undo snapshots): results are not document
+  // state, and a snapshot that duplicated a 2.5M-DOF mesh would be the
+  // reason nobody could undo.
+  const fem::StudyRuntime* StudyResults(uint64_t studyId) const;
+  void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt);
+  uint64_t StudyResultsEpoch() const;
+  // Stale against the assembly AND every part the solve read: `partVersion`
+  // answers a part id with its current version (the drawing's source rule).
+  bool StudyResultsStale(
+      uint64_t studyId,
+      const std::function<uint64_t(uint64_t partId)>& partVersion) const;
+
   // Configurations (workstream 13, C4): named assembly variants. Reuses the
   // Configuration type — for an assembly, `suppressedFeatures` holds suppressed
   // OCCURRENCE ids (a suppressed occurrence is hidden from render / solve /
@@ -510,6 +544,8 @@ private:
   std::vector<MotionStudy> m_motionStudies;
   std::vector<ClearanceAssertion> m_assertions;
   std::vector<Configuration> m_configurations;
+  std::vector<fem::Study> m_studies;
+  std::shared_ptr<fem::StudyRuntimeCache> m_studyRuntime; // see StudyResults
   uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id
                          // space shared by occurrences, mates, and views

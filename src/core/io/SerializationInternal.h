@@ -17,7 +17,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    105; // v105: a CLICK relation (a pawl: one DOF that may only travel one
+    106; // v106: FEM studies on an ASSEMBLY (`studies` in the assembly file,
+         //      absent when none): `participants` [{occurrence, role:
+         //      meshed|rigid|ignored, mesh_size?}], loads and refinements
+         //      carrying `occurrence`, and a fixed load anchored on a CONTACT
+         //      (`contact_with`, no `face`) — clamped where that rigid
+         //      occurrence touches the meshed one, re-derived at mesh time
+         //      (docs/simulation/assembly-studies-plan.md, S1).
+         // v105: a CLICK relation (a pawl: one DOF that may only travel one
          //      way), and a freewheel's `teeth` and `ride` — riding over
          //      them lifts a named DOF (docs/click-and-breguet-plan.md).
          // v104: a FREEWHEEL relation (one-way clutch): `kind` "freewheel",

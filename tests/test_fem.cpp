@@ -7,6 +7,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Measure.h"
+#include "core/Occurrence.h"
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -20,6 +21,8 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Pnt.hxx>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
 #include <cmath>
@@ -1301,4 +1304,242 @@ TEST_CASE("P0: a mesh spans two solids only when they SHARE the face",
     CHECK(MeshComponents(*mesh) == 1);
     CHECK(DoubledInterfaceNodes(*mesh) == 0);
   }
+}
+
+// ---- S1: a study on an assembly (docs/simulation/assembly-studies-plan.md)
+
+namespace {
+
+// Two 100 x 100 x 16 steel blocks as PARTS, the upper placed on the lower by
+// an occurrence at z = `upperZ` (16 = touching, more = a gap, less = an
+// overlap). Element maps come from the real Document, so loads can name
+// faces the way the RPCs do.
+struct TwoBlocks {
+  std::unique_ptr<Document> lower = std::make_unique<Document>();
+  std::unique_ptr<Document> upper = std::make_unique<Document>();
+  AssemblyDocument asmDoc;
+  uint64_t lowerOcc = 0, upperOcc = 0;
+  float upperZ = 16.0f;
+
+  explicit TwoBlocks(float z) : upperZ(z) {
+    for (Document* d : {lower.get(), upper.get()}) {
+      auto box = std::make_unique<BoxFeature>("Block", glm::vec3(0.0f), 100.0,
+                                              100.0, 16.0);
+      box->SetMaterial("steel");
+      d->AddFeature(std::move(box));
+    }
+    Occurrence lo;
+    lo.name = "Lower";
+    lo.partId = 1;
+    lo.fixed = true;
+    lowerOcc = asmDoc.AddOccurrence(lo);
+    Occurrence up;
+    up.name = "Upper";
+    up.partId = 2;
+    up.position = glm::vec3(0.0f, 0.0f, upperZ);
+    upperOcc = asmDoc.AddOccurrence(up);
+  }
+
+  fem::AssemblyStudyContext Context() const {
+    fem::AssemblyStudyContext ctx;
+    ctx.placedBodies = [this](uint64_t occId) {
+      std::vector<Body> out;
+      const Document* part = occId == lowerOcc ? lower.get() : upper.get();
+      const glm::mat4 world = glm::translate(
+          glm::mat4(1.0f),
+          occId == lowerOcc ? glm::vec3(0.0f) : glm::vec3(0.0f, 0.0f, upperZ));
+      for (const Body& b : part->GetBodies()) {
+        Body nb = b;
+        nb.shape = b.shape.Transformed(world);
+        out.push_back(std::move(nb));
+      }
+      return out;
+    };
+    return ctx;
+  }
+
+  // The name of the upper block's face whose centroid is at z = 32 in the
+  // world: its top.
+  std::string UpperTopFace() const {
+    const Body& b = upper->GetBodies()[0];
+    for (const auto& [faceIndex, name] : b.elementMap.names) {
+      const auto info = Measure::DescribeFaceAt(b, faceIndex);
+      if (info && std::abs(info->centroid.z - 16.0) < 1e-6)
+        return name;
+    }
+    return "";
+  }
+
+  fem::Study StudyWithContactSupport() const {
+    fem::Study s;
+    s.id = 1;
+    s.name = "upper on lower";
+    s.meshSize = 12.0;
+    s.participants.push_back({upperOcc, fem::ParticipantRole::Meshed, 0.0, ""});
+    s.participants.push_back({lowerOcc, fem::ParticipantRole::Rigid, 0.0, ""});
+    fem::Load clamp;
+    clamp.id = 10;
+    clamp.type = fem::LoadType::Fixed;
+    clamp.contactWith = lowerOcc;
+    s.loads.push_back(clamp);
+    fem::Load press;
+    press.id = 11;
+    press.type = fem::LoadType::Pressure;
+    press.occurrenceId = upperOcc;
+    press.face = ElementRef{0, UpperTopFace()};
+    press.magnitude = 0.5;
+    s.loads.push_back(press);
+    return s;
+  }
+};
+
+} // namespace
+
+TEST_CASE("S1: an assembly study clamps the meshed part where its rigid "
+          "support touches it, and nowhere else",
+          "[fem][assembly]") {
+  TwoBlocks world(16.0f);
+  REQUIRE_FALSE(world.UpperTopFace().empty());
+  fem::Study study = world.StudyWithContactSupport();
+  fem::StudyPlan plan;
+  std::string err;
+  REQUIRE(
+      fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(), plan, &err));
+  INFO(err);
+  // One body meshed: the upper block, imprinted.
+  REQUIRE(plan.bodies.size() == 1);
+  CHECK(plan.bodies[0].bodyName == "Upper");
+  // One contact patch, on the lower block, with faces on both sides.
+  REQUIRE(plan.contacts.size() == 1);
+  CHECK(plan.contacts[0].rigidOccurrenceId == world.lowerOcc);
+  CHECK(plan.contacts[0].rigidName == "Lower");
+  CHECK_FALSE(plan.contacts[0].meshedFaces.empty());
+  CHECK_FALSE(plan.contacts[0].rigidFaces.empty());
+  // The clamp landed on the shared faces, the pressure on the top.
+  int fixedFaces = 0, pressureFaces = 0;
+  for (const auto& [face, load] : plan.bodies[0].loads) {
+    if (load.type == fem::LoadType::Fixed)
+      ++fixedFaces;
+    else
+      ++pressureFaces;
+  }
+  CHECK(fixedFaces == static_cast<int>(plan.contacts[0].meshedFaces.size()));
+  CHECK(pressureFaces == 1);
+
+#ifdef HAVE_NETGEN
+  SECTION("the fixed nodes all lie on the interface plane") {
+    fem::StudyJobInput input;
+    REQUIRE(fem::MeshPlannedStudy(plan, input, &err));
+    INFO(err);
+    REQUIRE(input.bodies.size() == 1);
+    const fem::StudyJobBody& jb = input.bodies[0];
+    REQUIRE_FALSE(jb.fixedNodes.empty());
+    for (int n : jb.fixedNodes)
+      CHECK(std::abs(jb.mesh.nodes[n].z - 16.0) < 1e-6);
+    // ...and the top face, which carries the pressure, has none of them.
+    int topNodes = 0;
+    for (const glm::dvec3& p : jb.mesh.nodes)
+      if (std::abs(p.z - 32.0) < 1e-6)
+        ++topNodes;
+    CHECK(topNodes > 0);
+    // A static solve under the pressure completes, in world coordinates.
+    fem::StudyRuntime rt;
+    REQUIRE(fem::SolvePreparedStudy(input, rt, &err));
+    INFO(err);
+    CHECK(rt.maxDisplacement > 0.0);
+    CHECK(rt.maxVonMises > 0.0);
+  }
+#endif
+}
+
+TEST_CASE("S1: an assembly study refuses what it cannot mean",
+          "[fem][assembly]") {
+  std::string err;
+  fem::StudyPlan plan;
+
+  SECTION("a support that does not touch the part") {
+    TwoBlocks world(40.0f); // 24 mm of air between them
+    fem::Study study = world.StudyWithContactSupport();
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("does not touch"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Lower"));
+    CHECK(study.error == err);
+  }
+  SECTION("a support that interpenetrates the part") {
+    TwoBlocks world(10.0f); // 6 mm of overlap
+    fem::Study study = world.StudyWithContactSupport();
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("INTERPENETRATE"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Upper"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Lower"));
+  }
+  SECTION("two occurrences marked meshed, naming both") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyWithContactSupport();
+    study.participants[1].role = fem::ParticipantRole::Meshed;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("ONE occurrence"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Upper"));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("Lower"));
+  }
+  SECTION("no occurrence marked meshed") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyWithContactSupport();
+    study.participants[0].role = fem::ParticipantRole::Ignored;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("marked meshed"));
+  }
+  SECTION("a load on an occurrence that is not the meshed one") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyWithContactSupport();
+    study.loads[1].occurrenceId = world.lowerOcc;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("not the meshed"));
+  }
+  SECTION("a contact anchor on something that is not a rigid participant") {
+    TwoBlocks world(16.0f);
+    fem::Study study = world.StudyWithContactSupport();
+    study.participants[1].role = fem::ParticipantRole::Ignored;
+    CHECK_FALSE(fem::PlanAssemblyStudy(world.asmDoc, study, world.Context(),
+                                       plan, &err));
+    CHECK_THAT(err, Catch::Matchers::ContainsSubstring("not a rigid"));
+  }
+  SECTION("a role string that does not parse is refused, not defaulted") {
+    fem::ParticipantRole role = fem::ParticipantRole::Meshed;
+    CHECK_FALSE(fem::ParticipantRoleFromString("rigd", role));
+    CHECK(role == fem::ParticipantRole::Meshed);
+    CHECK(fem::ParticipantRoleFromString("ignored", role));
+    CHECK(role == fem::ParticipantRole::Ignored);
+  }
+}
+
+TEST_CASE("S1: an assembly's study results go stale when any part it read "
+          "moves, not only the assembly",
+          "[fem][assembly]") {
+  AssemblyDocument asmDoc;
+  Occurrence o;
+  o.name = "A";
+  o.partId = 7;
+  asmDoc.AddOccurrence(o);
+  fem::Study& s = asmDoc.AddStudy("s");
+  CHECK(asmDoc.StudyResultsStale(s.id, nullptr)); // never run
+  fem::StudyRuntime rt;
+  rt.solvedAtVersion = asmDoc.Version();
+  rt.solvedPartVersions = {{7, 3}};
+  asmDoc.StoreStudyResults(s.id, std::move(rt));
+  const auto partAt = [](uint64_t v) { return [v](uint64_t) { return v; }; };
+  CHECK_FALSE(asmDoc.StudyResultsStale(s.id, partAt(3)));
+  CHECK(asmDoc.StudyResultsStale(s.id, partAt(4))); // the part regenerated
+  asmDoc.BumpVersion();                             // a mate moved
+  CHECK(asmDoc.StudyResultsStale(s.id, partAt(3)));
+  // The cache is SHARED with a full-state copy (an undo snapshot), so the
+  // copy neither duplicates the mesh nor loses the results.
+  AssemblyDocument copy = asmDoc;
+  CHECK(copy.StudyResults(s.id) != nullptr);
+  CHECK(copy.StudyResultsEpoch() == asmDoc.StudyResultsEpoch());
 }

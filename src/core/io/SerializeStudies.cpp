@@ -54,10 +54,27 @@ json StudyToJson(const fem::Study& s) {
   if (!s.meshSizeExpr.empty())
     j["mesh_size_expr"] = s.meshSizeExpr;
 
+  // Assembly studies (v106): the participants and their roles. Absent on a
+  // part study, so every earlier study file re-saves byte-identically.
+  if (!s.participants.empty()) {
+    j["participants"] = json::array();
+    for (const fem::Participant& pt : s.participants) {
+      json pj = {{"occurrence", pt.occurrenceId},
+                 {"role", fem::ParticipantRoleToString(pt.role)}};
+      if (pt.meshSize != 0.0 || !pt.meshSizeExpr.empty())
+        pj["mesh_size"] = pt.meshSize;
+      if (!pt.meshSizeExpr.empty())
+        pj["mesh_size_expr"] = pt.meshSizeExpr;
+      j["participants"].push_back(std::move(pj));
+    }
+  }
+
   if (!s.refinements.empty()) {
     j["refinements"] = json::array();
     for (const fem::Refinement& r : s.refinements) {
       json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size}};
+      if (r.occurrenceId != 0)
+        rj["occurrence"] = r.occurrenceId;
       if (!r.sizeExpr.empty())
         rj["size_expr"] = r.sizeExpr;
       j["refinements"].push_back(std::move(rj));
@@ -69,8 +86,15 @@ json StudyToJson(const fem::Study& s) {
     for (const fem::Load& l : s.loads) {
       json lj = {{"id", l.id},
                  {"type", fem::LoadTypeToString(l.type)},
-                 {"face", ElementRefJson(l.face)},
                  {"magnitude", l.magnitude}};
+      // A contact anchor has no face to name (v106); a face anchor on an
+      // assembly study says whose face it is.
+      if (l.contactWith != 0)
+        lj["contact_with"] = l.contactWith;
+      else
+        lj["face"] = ElementRefJson(l.face);
+      if (l.occurrenceId != 0)
+        lj["occurrence"] = l.occurrenceId;
       if (!l.magnitudeExpr.empty())
         lj["magnitude_expr"] = l.magnitudeExpr;
       if (l.type == fem::LoadType::Force)
@@ -109,9 +133,24 @@ fem::Study StudyFromJson(const json& j) {
   s.meshSize = j.value("mesh_size", 0.0);
   s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
 
+  for (const json& pj : j.value("participants", json::array())) {
+    fem::Participant pt;
+    pt.occurrenceId = pj.at("occurrence").get<uint64_t>();
+    // A role that does not parse is refused, not defaulted to rigid: a
+    // meshed panel silently read as a support is a different study.
+    const std::string roleStr = pj.value("role", std::string{});
+    if (!fem::ParticipantRoleFromString(roleStr, pt.role))
+      throw std::runtime_error("unknown participant role '" + roleStr +
+                               "' (expected one of: meshed, rigid, ignored)");
+    pt.meshSize = pj.value("mesh_size", 0.0);
+    pt.meshSizeExpr = pj.value("mesh_size_expr", std::string{});
+    s.participants.push_back(std::move(pt));
+  }
+
   for (const json& rj : j.value("refinements", json::array())) {
     fem::Refinement r;
     r.face = ElementRefFromJson(rj.at("face"));
+    r.occurrenceId = rj.value("occurrence", uint64_t{0});
     r.size = rj.value("size", 0.0);
     r.sizeExpr = rj.value("size_expr", std::string{});
     s.refinements.push_back(std::move(r));
@@ -124,7 +163,13 @@ fem::Study StudyFromJson(const json& j) {
     if (!fem::LoadTypeFromString(loadStr, l.type))
       throw std::runtime_error("unknown load type '" + loadStr +
                                "' (expected one of: fixed, force, pressure)");
-    l.face = ElementRefFromJson(lj.at("face"));
+    l.contactWith = lj.value("contact_with", uint64_t{0});
+    l.occurrenceId = lj.value("occurrence", uint64_t{0});
+    if (l.contactWith == 0)
+      l.face = ElementRefFromJson(lj.at("face"));
+    else if (l.type != fem::LoadType::Fixed)
+      throw std::runtime_error("load " + std::to_string(l.id) +
+                               ": only a fixed support anchors on a contact");
     l.magnitude = lj.value("magnitude", 0.0);
     l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
     if (lj.contains("direction")) {
