@@ -87,6 +87,39 @@ def main():
         expect(any("touch nothing" in w for w in cg.get("warnings", [])),
                f"warning names the island: {cg.get('warnings')}")
 
+        # Bodies whose BOUNDING BOXES overlap completely — a rod inside a
+        # sleeve — are what the bbox prefilter cannot separate, so they are
+        # the pairs the connectivity pass actually pays for. It used to pay
+        # an exact boolean plus BRepExtrema for each: on a 36-spoke bicycle
+        # wheel (rim, spoked hub, tyre — all concentric) check_geometry took
+        # 96 s, of which 0.2 was the B-Rep check it is named after. The
+        # triangles decide it now, and these two cases are what that must
+        # keep getting right.
+        d.call("add_part", name="Sleeve")
+        d.call("set_active_part", name="Sleeve")
+        d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Sleeve", "center": [0, 0, 0],
+            "direction": [0, 0, 1], "radius": 10, "height": 40})
+        d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Bore", "center": [0, 0, -1],
+            "direction": [0, 0, 1], "radius": 6, "height": 42})
+        d.call("add_feature", feature={
+            "type": "Boolean", "name": "Tube", "target_id":
+            d.call("get_state")["features"][0]["id"], "tool_id":
+            d.call("get_state")["features"][1]["id"], "op": "subtract"})
+        d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Rod", "center": [0, 0, 5],
+            "direction": [0, 0, 1], "radius": 6, "height": 30})
+        cg = d.call("check_geometry")
+        expect(cg["connected"], f"a rod touching its sleeve's bore: {cg}")
+
+        d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Free", "center": [0, 0, 8],
+            "direction": [0, 0, 1], "radius": 3, "height": 10})
+        cg = d.call("check_geometry")
+        expect(not cg["connected"],
+               f"a 3 mm rod floating inside the same bore: {cg}")
+
         # --- Assembly: bolted / floating / near-miss / clash ---------------
         part = d.call("list_parts")["parts"][0]["name"]
         d.call("add_assembly", name="Rig")

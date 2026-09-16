@@ -366,9 +366,31 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
           glm::vec3(0.0f));
       if (glm::length(gap) > window)
         continue;
-      const auto c = Measure::ContactBetween(ents[i].single, glm::mat4(1.0f),
-                                             ents[j].single, glm::mat4(1.0f));
-      if (c && (c->volume > 1e-9 || c->distance <= touchTol))
+      // The TRIANGLES decide it, not a boolean. This is a yes/no — are these
+      // two bodies part of the same lump — and paying `ContactBetween` for it
+      // means an OCC boolean plus BRepExtrema on every pair whose bounding
+      // boxes overlap. A bicycle wheel's rim, spoked hub and tyre are
+      // concentric, so all three pairs qualified, and `check_geometry` on one
+      // wheel took 96 s of which 0.2 was the validity check it is named
+      // after. The mesh answer is `distance` +/- `tolerance` (the sum of the
+      // two deflections), so "not clearly apart" is the connective test, and
+      // it errs toward CONNECTED — a false alarm about floating geometry is
+      // worse than a missed one at a tenth of a millimetre, and
+      // contact_report gives the exact gaps when they matter.
+      bool joined = false;
+      const Measure::Target ta{&ents[i].single, glm::mat4(1.0f), {}};
+      const Measure::Target tb{&ents[j].single, glm::mat4(1.0f), {}};
+      const collide::Gap mesh = Measure::MeshGap(ta, tb);
+      if (mesh.known) {
+        joined = mesh.distance <= touchTol + mesh.tolerance;
+      } else {
+        // No triangles to ask (a shape that will not tessellate): the exact
+        // answer is the only one there is.
+        const auto c = Measure::ContactBetween(ents[i].single, glm::mat4(1.0f),
+                                               ents[j].single, glm::mat4(1.0f));
+        joined = c && (c->volume > 1e-9 || c->distance <= touchTol);
+      }
+      if (joined)
         parent[find(i)] = find(j);
     }
   std::map<size_t, std::vector<std::string>> comps;
@@ -391,7 +413,13 @@ BodyComponentNames(const Document& doc, double touchTol, double window) {
 static constexpr MethodDoc InspectionMethods[] = {
     {"check_geometry",
      "Did the model build? {ok, valid, body_count, "
-     "feature_errors, bodies:[...B-Rep checks]}.",
+     "feature_errors, bodies:[...B-Rep checks]}. On a multi-body part it "
+     "also warns about FLOATING bodies: `connected` and `body_components` "
+     "are decided off the tessellations (the answer `interference "
+     "mode=mesh` gives, within the sum of the two deflections), because it "
+     "is a yes/no riding on a cheap check — contact_report on the same tab "
+     "gives the exact gaps. Naming a `body` checks that one and skips the "
+     "connectivity pass entirely.",
      "body", remote::NeedsPart},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
