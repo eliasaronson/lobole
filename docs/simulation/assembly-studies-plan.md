@@ -235,7 +235,13 @@ capping the local size and several hundred fastener holes refining it
 further. Suppressing those holes for the analysis shape is what makes S4
 worth attempting, and it belongs in the same shape pipeline as the imprint.
 
-**S4 — the whole box.** S2's meshing with N occurrences instead of two, plus
+**S4 — the whole box.** First try, 2026-09-17, on the cabinet with S2: the
+side wall meshed and the other five walls plus the divider BONDED at 30 mm,
+the bottom wall's underside fixed. The headless instance died during the
+run with nothing in its log — no crash-handler stack, no study line — before
+any mesh statistic came back. Not chased; it is the shape S3 predicts (the
+fastener holes drive the count), and the next attempt should watch memory
+and start from a defeatured shape. S2's meshing with N occurrences instead of two, plus
 reporting and result display at that scale. Technically the smallest step and
 the one most exposed to the eigensolver's limits — and to memory: a
 `StudyRuntime` at 2.5M DOF is held whole today, so S4 states a budget and
