@@ -88,7 +88,7 @@ the headless solve loop ships in phase 2, before any GUI exists.
   from the hard half when this is picked up.
 
   **Picked up in [assembly-studies-plan.md](assembly-studies-plan.md)
-  (S1-S4).** P0 answered (`tests/test_fem.cpp`, "a mesh spans two solids
+  (S0-S4).** P0 answered (`tests/test_fem.cpp`, "a mesh spans two solids
   only when they SHARE the face"). The technique works and the expensive
   branch is not needed:
 
@@ -304,9 +304,11 @@ FieldVertex { vec3 position;      // undeformed node position
   on result fields for free** — clipping into a stressed part is exactly the
   raster section payoff (std140 discipline per `MeshRenderer.h:32`).
 - While a field is displayed, the body's normal instance hides and the field
-  overlay replaces it; other bodies render normally. Legend (min/max +
-  colormap bar) as an ImGui overlay; max-value marker in the viewport, like
-  the CoG marker.
+  overlay replaces it; other bodies render normally. Legend as an ImGui
+  overlay — since S0 (2026-09-16, [../ui/u11-simulation-setup.md](../ui/u11-simulation-setup.md))
+  it names the study and analysis, the deformation factor, the quantity with
+  quarter ticks, the mode and frequency of a modal result, and where the
+  maximum is; the max-value marker in the viewport is its caption's cross.
 - Fields v1: von Mises, displacement magnitude. Not pickable, no outlines.
 - Mesh preview (before/without solving) reuses the existing line pipeline:
   boundary-edge overlay, plus node/element/quality stats in the panel.
