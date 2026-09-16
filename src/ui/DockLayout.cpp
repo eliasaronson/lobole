@@ -156,9 +156,14 @@ void BeginDockspace(AppState& state) {
   // font preference -- the bar got measurably tighter the more a user scaled
   // the UI up, which is the opposite of what they asked for. Reported by the
   // first Windows tester (docs/ui/windows-tester-round.md).
+  //
+  // The vertical figure is what separates the buttons from the menu bar above
+  // and the panel tabs below, and 4 was too little to see: at the 2.0 scale a
+  // 192-dpi display asks for it is 8 device pixels, which reads as the icons
+  // being glued to the menu. Both testers asked for the same thing here.
   const float ui = ui::UiScale();
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
-                      ImVec2(6.0f * ui, 4.0f * ui));
+                      ImVec2(6.0f * ui, 8.0f * ui));
   // The row WRAPS rather than scrolling (see Toolbar.cpp WrapIfNeeded), so its
   // height depends on how many rows the current width needs, and the height
   // has to be chosen before the content is laid out -- hence measuring the
