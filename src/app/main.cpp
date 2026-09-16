@@ -1975,6 +1975,11 @@ int main(int argc, char** argv) {
   // does later — one multiplication in both places, or the first frame and
   // every frame after it would disagree.
   ui::ApplySettings(g_App);
+  // The two factors separately, because they fail differently: a content
+  // scale of 1.00 on a HiDPI display means the display's scaling never
+  // reached us, while a preference of 1.00 just means nobody changed it.
+  LOG_INFO("Display content scale {:.2f} x font preference {:.2f}",
+           std::max(1.0f, std::max(scaleX, scaleY)), g_App.uiFontScale);
   ui::ApplyTheme(std::max(1.0f, std::max(scaleX, scaleY)) * g_App.uiFontScale);
   static float s_pendingContentScale = 0.0f; // 0 = no change pending
   glfwSetWindowContentScaleCallback(

@@ -178,6 +178,14 @@ float s_UiScale = 1.0f;
 float UiScale() { return s_UiScale; }
 
 void ApplyTheme(float scale) {
+  // Say what the UI is being sized at, and in what. A tester's screenshot
+  // cannot answer "did Windows' display scaling reach the app?" -- the first
+  // one's icons were reported unreadably small and the only way to tell a
+  // display running at 100% (where 14 px icons are simply too small) from a
+  // scale that never arrived was to ask him to read a control panel. The log
+  // knows, so it should say.
+  LOG_INFO("UI scale {:.2f} — text {:.0f} px, icons {:.0f} px", scale,
+           16.0f * scale, 14.0f * scale);
   s_UiScale = scale;
   ImGuiStyle& style = ImGui::GetStyle();
   style = ImGuiStyle(); // reset so repeated calls don't compound scaling
