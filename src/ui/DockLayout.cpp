@@ -159,20 +159,29 @@ void BeginDockspace(AppState& state) {
   const float ui = ui::UiScale();
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
                       ImVec2(6.0f * ui, 4.0f * ui));
-  // When the window is narrower than the button row, scroll instead of
-  // clipping (U4); the row grows by the scrollbar's height while overflowed
-  // so the bar never overlays the buttons.
-  // The row WRAPS rather than scrolling (see Toolbar.cpp WrapIfNeeded), so
-  // its height depends on how many rows the current width needs. Measured
-  // from the previous frame, like the scrollbar allowance it replaces: the
-  // height has to be chosen before the content is laid out.
+  // The row WRAPS rather than scrolling (see Toolbar.cpp WrapIfNeeded), so its
+  // height depends on how many rows the current width needs, and the height
+  // has to be chosen before the content is laid out -- hence measuring the
+  // previous frame.
+  //
+  // What it measures is the CONTENT's bottom edge plus the same padding used
+  // above it. It used to be the cursor plus half a BUTTON height of slop,
+  // which left a band of dead space under the icons -- ~13 px at scale 1.0,
+  // and ~26 at the 2.0 an Xft.dpi of 192 asks for, where it reads as a gap
+  // someone put there on purpose. Padding you can see is a decision; slop
+  // that doubles with the display is a bug you only notice on a monitor
+  // unlike your own.
   static float toolbarRowsH = 0.0f;
-  const float oneRow = ImGui::GetFrameHeight() + 12.0f * ui;
+  const float padY = ImGui::GetStyle().WindowPadding.y; // the one pushed above
+  const float oneRow = ImGui::GetFrameHeight() + padY * 2.0f;
   const float toolbarH = std::max(oneRow, toolbarRowsH);
   ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH),
                     ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
   DrawToolbar(state);
-  toolbarRowsH = ImGui::GetCursorPosY() + ImGui::GetFrameHeight() * 0.5f;
+  // Cursor sits one ItemSpacing BELOW the last row; back that out so the
+  // padding under the buttons matches the padding over them.
+  toolbarRowsH =
+      ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y + padY;
   ImGui::EndChild();
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
