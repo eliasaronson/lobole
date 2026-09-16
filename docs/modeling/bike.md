@@ -9,8 +9,9 @@ the rear wheel through a chain relation.
     python3 generators/bike/bike.py [--port N] [--out DIR]
                                     [--stage parts|assembly|all]
 
-About four minutes, of which three are the parts and most of that is the
-validity check on two 36-spoke wheels.
+About a hundred seconds: 26 s of parts, 38 s of checks, 37 s of renders. It
+was four minutes until the app stopped paying for an exact contact sweep
+inside every `check_geometry` (below).
 
 ## The thing this model is actually about
 
@@ -150,6 +151,24 @@ for an exact volume at each: the pedal's spindle through the chain, 621 mm³ at
 study says a mechanism is clean and the parts are thin.
 
 ## What it found in the app
+
+Four things, all fixed; `docs/inspection-friction-plan.md` is the round that
+came out of measuring this one.
+
+**`check_geometry` cost 96 s on a wheel and 0.2 of it was the check.** The
+rest was its floating-bodies warning, which ran an EXACT contact — an OCC
+boolean plus BRepExtrema — on every pair of bodies whose bounding boxes
+overlap. A wheel's rim, spoked hub and tyre are concentric, so all three
+pairs qualified. The warning asks the triangles now: the same verdict in
+0.27 s, and this generator's parts phase went from 200 s to 26.
+
+**A boolean did not check its own result.** `CADShape::IsValid` is a null
+check, so the axle bore that produced "bad wire nesting" reported success and
+every question asked of that body afterwards was confidently wrong. A boolean
+that produces an invalid solid is a failed feature now.
+
+**`flipped` defaults to TRUE and frame-to-frame mates want FALSE** — the SDK's
+mate verbs pass it, which is the surface where the mistake was made.
 
 **An open sketch path's edges did not share vertices, and a closed loop's
 did.** The chain walker accepts a joint within `kChainTol` (1e-4), and
