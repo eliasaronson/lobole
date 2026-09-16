@@ -106,14 +106,13 @@ def assemble(app, S, P):
         occ[f"pedal {side}"] = asm.place(P["pedal"], name=f"Pedal {side}")
         occ[f"grip {side}"] = asm.place(P["grip"], name=f"Grip {side}")
 
-    # The joints. `flipped=False` on every one of them, because it DEFAULTS
-    # TO TRUE: two connectors meet face to face with their normals opposed,
-    # which is what two touching FACES do and the opposite of what two frames
-    # want. Left at its default it turned the fork end for end about its own
-    # steering axis — taking the front wheel with it, up to z = 771 — flipped
-    # the seatpost, the saddle and the carrier under the bicycle, and
-    # mirrored the chain and its guard onto the wrong side. Everything still
-    # "assembled"; it was just a different bicycle.
+    # The joints. `flipped=False` is what two FRAMES want — the SDK now
+    # defaults it that way for frame-to-frame mates, and this says it anyway,
+    # because it is the one thing that silently produced a different bicycle:
+    # left at the RPC's default of TRUE the fork turned end for end about its
+    # own steering axis and took the front wheel to z = 771, the seatpost,
+    # saddle and carrier hung underneath, and the chain and its guard were
+    # mirrored onto the wrong side. Everything still "assembled".
     square = dict(flipped=False)
     mates["steering"] = asm.revolute((occ["frame"], "head axis"),
                                      (occ["fork"], "head axis"), **square)

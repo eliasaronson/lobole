@@ -59,7 +59,23 @@ def finish(part, slug, appearance, body=None):
 
 def _frame_of(a, b, bulge=None):
     """A plane containing the run a->b, with V pointing along `bulge` if one
-    is given (so an arc in this plane bows the way the caller meant)."""
+    is given (so an arc in this plane bows the way the caller meant).
+
+    The tubes are swept along SKETCHES, and it is worth knowing that a pipe
+    swept along a sketch ARC is fragile in a way one along a 3D curve is not:
+    a hollow bowed stay unioned into a hollow seat tube failed at 11 of 29
+    offsets tried half a millimetre apart, and the same tube through the same
+    points as a `Curve3D` fit-spline failed at none. An analytic spine gives
+    the sweep analytic surfaces, and their exact intersections are where the
+    booleans go degenerate.
+
+    It does not bite HERE, because `Weldment` unions solid rods and bores
+    them afterwards, and a solid union does not care. Moving everything onto
+    curves anyway was measured and reverted: the frame went from 3.1 s to
+    12.3 s, and the wheel's 36 straight spokes started failing their unions
+    with "self-intersecting wire". Curves for bows, sketches for straights —
+    and for a frame, neither, because it is welded solid.
+    """
     u = (V(b) - V(a)).unit()
     if bulge is not None:
         v = V(bulge) - u * u.dot(V(bulge))

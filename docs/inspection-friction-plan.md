@@ -149,8 +149,25 @@ Files: `src/remote/RemoteModeling.cpp`; a new `tests/rpc_names_gate.py`.
 ## What this plan does NOT do
 
 A `Frame` feature — members along paths, mitred and coped where they meet, and
-a cut list — is the other thing this round argued for, and it is a bigger
-piece than all four stages above put together. The evidence for it is real
-(fourteen tubes cost 80 features and a third of the round's failures were
-booleans meeting at tangents) and the recipe is proven in
-`generators/bike/bike_shop.py`'s `Weldment`. It gets its own plan.
+a cut list. It is a bigger piece than all four stages above put together, and
+it gets its own plan. What this round measured about it:
+
+**The GUI can already build a tube.** `part.curve3d` takes points typed as
+coordinates or expressions, `part.pipe` sweeps a section along that curve with
+an outer diameter and a wall, and `part.boolean` unions two bodies. So a tube
+between two points is two features, and a joint is a third. Nothing is
+missing; what is missing is that a bicycle frame is fourteen tubes, so it is
+41 dialogs to weld it solid and 83 to get it hollow with solid joints — the
+construction `bike_shop.Weldment` uses, which is what makes the mass right.
+
+**And the two path types are not equally robust.** A hollow bowed tube swept
+along a sketch ARC, unioned into another hollow tube, failed at **11 of 29**
+offsets tried half a millimetre apart; the same tube through the same points
+on a `Curve3D` fit-spline failed at **none**. An analytic spine gives the
+sweep analytic surfaces, and their exact intersections are where the booleans
+go degenerate. It is not a free swap — moving the generator's straight tubes
+onto curves as well made the frame 4x slower (3.1 s to 12.3) and broke the
+wheel's 36 spoke unions outright, so it was measured and reverted. A person
+in the GUI cannot be expected to know which of the two to reach for, and a
+Frame feature would not make them: it would pick the spine, weld solid, bore
+after, and hand back a cut list.
