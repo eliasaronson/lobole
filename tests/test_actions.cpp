@@ -33,6 +33,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/ProjectActions.h"
+#include "ui/StudyPanel.h" // SimulationLoadLabel
 #include "ui/ViewActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -2306,4 +2307,27 @@ TEST_CASE("an empty sketch reports no DOF status at all", "[actions][sketch]") {
   sk->AddEntity(sketch::Line{{0, 0}, {2, 0}});
   ui::UpdateSketchStatus(state);
   CHECK(state.sketchEdit.dof == 4);
+}
+
+// The label beside a boundary-condition glyph says the value AND its unit,
+// scaled to read: a 1200 N force is "1.2 kN", a 0.02 MPa pressure "20 kPa".
+// A label with the raw stored number ("1200", "0.02") is the panel again.
+TEST_CASE("Simulation glyph labels carry a value and a unit", "[sim][ui]") {
+  fem::Load l;
+  l.type = fem::LoadType::Fixed;
+  CHECK(ui::SimulationLoadLabel(l) == "fixed");
+  l.type = fem::LoadType::Force;
+  l.magnitude = 350.0;
+  CHECK(ui::SimulationLoadLabel(l) == "350 N");
+  l.magnitude = 1200.0;
+  CHECK(ui::SimulationLoadLabel(l) == "1.2 kN");
+  l.type = fem::LoadType::Pressure;
+  l.magnitude = 0.5;
+  CHECK(ui::SimulationLoadLabel(l) == "0.5 MPa");
+  l.magnitude = 0.02;
+  CHECK(ui::SimulationLoadLabel(l) == "20 kPa");
+  l.magnitude = 0.0;
+  CHECK(ui::SimulationLoadLabel(l) == "0 MPa");
+  CHECK(ui::SimulationGravityLabel(glm::dvec3(0.0, 0.0, -9.81)) ==
+        "g 9.81 m/s^2");
 }

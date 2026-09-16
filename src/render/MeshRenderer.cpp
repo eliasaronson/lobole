@@ -504,13 +504,25 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
 }
 
 void MeshRenderer::SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
-                                    uint32_t count) {
+                                    uint32_t count, uint32_t tint) {
   MeshInstance* instance = GetInstance(instanceId);
   if (!instance)
     return;
   // Additive: multi-select shows every face (the projection clears per
   // frame). The old single-slot semantics kept only the LAST synced face.
-  instance->selRanges.push_back(glm::uvec2(firstVertex, firstVertex + count));
+  // The tint rides in the end's top bits (see the header): the shader
+  // unpacks it, and so does InstanceHighlightRanges' reader.
+  const uint32_t end = (firstVertex + count) & kRangeMask;
+  instance->selRanges.push_back(
+      glm::uvec2(firstVertex, end | ((tint & 0xFu) << kTintShift)));
+}
+
+std::vector<glm::uvec2>
+MeshRenderer::InstanceHighlightRanges(uint32_t instanceId) const {
+  if (instanceId == 0 || instanceId > m_instances.size() ||
+      !m_instances[instanceId - 1])
+    return {};
+  return m_instances[instanceId - 1]->selRanges;
 }
 
 void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex,

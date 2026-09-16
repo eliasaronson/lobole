@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <glm/glm.hpp>
 #include <memory>
 #include <span>
@@ -115,6 +116,17 @@ public:
   // rendering). Returns false if the face doesn't exist.
   bool GetFaceVertexRange(uint32_t meshId, uint32_t faceIndex,
                           uint32_t& firstVertex, uint32_t& vertexCount) const;
+  // Every triangle of a face, in WORLD space, in the mesh's index order.
+  // Returns false (visiting nothing) when the face does not exist. This is
+  // what lets a caller draw something OVER a face -- a pressure field, a
+  // support hatch -- rather than one glyph at its centre: the centre of a
+  // curved or L-shaped face can lie off the face entirely.
+  bool ForEachFaceTriangle(
+      uint32_t meshId, uint32_t faceIndex,
+      const std::function<void(const glm::vec3&, const glm::vec3&,
+                               const glm::vec3&)>& fn) const;
+  // World-space area of a face (mm^2); 0 when it does not exist.
+  float GetFaceArea(uint32_t meshId, uint32_t faceIndex) const;
 
 private:
   struct MeshData {

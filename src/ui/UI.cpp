@@ -829,7 +829,8 @@ void DrawUI(AppState& state) {
     // assembly tab turns it into the occurrence panel.
     if (state.simulation.IsActive()) {
       DrawStudyPanel(state);
-      DrawFieldLegend(state); // colorbar overlay when a field is shown
+      DrawFieldLegend(state);      // colorbar overlay when a field is shown
+      DrawSimulationLabels(state); // value + unit beside every BC glyph
     } else {
       DrawFeatureTreePanel(state);
     }
@@ -1011,6 +1012,9 @@ void DrawUI(AppState& state) {
     // depth-tested one is drawn inside the solid where nothing can see it.
     std::vector<PrimVertex> measurePrims;
     AppendMeasureOverlay(state, measurePrims);
+    if (state.document)
+      AppendSimulationOverlayGlyphs(state,
+                                    measurePrims); // gravity, through the part
     // The handles: thick, on top, and drawn from the same records the hit
     // test uses. After AppendSimulationBCGlyphs above, which publishes the
     // force arrows.

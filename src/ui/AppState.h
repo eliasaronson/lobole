@@ -589,6 +589,16 @@ struct SimulationState {
   enum class Field { None, VonMises, Displacement, Shape, Density };
   Field field = Field::None;
   float deformScale = 0.0f; // shader-side warp multiplier (0 = undeformed)
+  // Value-and-unit labels beside every boundary-condition glyph ("1.2 kN",
+  // "0.5 MPa", "fixed", "g 9.81 m/s^2"). On by default: a setup whose
+  // numbers are only in the panel cannot be checked against the picture.
+  bool showLabels = true;
+  // The gravity glyph stands at the centre of mass, which is an OCC volume
+  // integral over every body; cached against the document version so the
+  // glyph pass does not recompute it per frame.
+  uint64_t comVersion = 0;
+  bool comKnown = false;
+  glm::vec3 com{0.0f};
   int activeMode = 0;       // modal: which mode shape the overlay displays
   // Topology iso-surface threshold in [0,1]; 0 = auto (volume-matched).
   float topoThreshold = 0.0f;

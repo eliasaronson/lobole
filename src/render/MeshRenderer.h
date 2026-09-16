@@ -245,8 +245,30 @@ public:
   // Face highlighting (vertex ranges within the instance's asset).
   // ADDITIVE per call — the per-frame selection projection clears first
   // (SyncSelectionHighlights), so several faces highlight together.
+  //
+  // `tint` picks the colour family (HighlightTint): the selection's amber
+  // by default, or one of the simulation's boundary-condition tints, so a
+  // fixed face and a loaded face read as what they ARE and not as "picked".
+  // The push constant is at its 128-byte ceiling, so the tint rides in the
+  // top four bits of the range's end (a vertex count never reaches 2^28) and
+  // the vertex stage unpacks it — see mesh.vert.
   void SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
-                        uint32_t count);
+                        uint32_t count, uint32_t tint = 0);
+  // The tints SetFaceHighlight accepts. mesh.frag holds the palette in the
+  // same order; a new entry goes in both.
+  enum HighlightTint : uint32_t {
+    kTintSelection = 0,
+    kTintFixture = 1, // a fixed support, or a rigid contact patch
+    kTintLoad = 2,    // a force or pressure face
+    kTintKeep = 3,    // a topology keep face
+    kTintBond = 4,    // a bonded interface (assembly studies)
+  };
+  static constexpr uint32_t kTintShift = 28;
+  static constexpr uint32_t kRangeMask = (1u << kTintShift) - 1u;
+  // The highlight ranges an instance carries, packed as SetFaceHighlight
+  // stored them ({first, end | tint << 28}). Read by the GUI tests, which
+  // assert that a boundary condition tints its face.
+  std::vector<glm::uvec2> InstanceHighlightRanges(uint32_t instanceId) const;
   void SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint32_t count);
   void ClearFaceHighlight();
   void ClearFaceHover();

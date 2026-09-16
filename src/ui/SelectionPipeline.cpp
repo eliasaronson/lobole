@@ -413,7 +413,11 @@ bool ResolveElementItem(const AppState& state, const SelectionItem& item,
     if (m.occurrenceId != item.id || m.bodyIndex >= bodies->size())
       continue;
     const Body& body = (*bodies)[m.bodyIndex];
-    if (body.createdBy != item.element.featureId)
+    // featureId 0 means "whichever body has this element" -- the study
+    // RPCs' convention (add_load takes a bare element name), which
+    // fem::ResolveFace honours and this did not, so a load placed over RPC
+    // solved correctly and drew nothing.
+    if (item.element.featureId != 0 && body.createdBy != item.element.featureId)
       continue;
     const auto idx = edge ? body.elementMap.ResolveEdge(item.element.name)
                           : body.elementMap.Resolve(item.element.name);
@@ -695,6 +699,7 @@ void SyncSelectionHighlights(AppState& state) {
           state.meshRenderer->SetFaceHighlight(mesh, first, count);
       }
     }
+    AppendSimulationFaceTints(state);
     return;
   }
   // Every Face item highlights — SetFaceHighlight is additive per instance
@@ -720,6 +725,10 @@ void SyncSelectionHighlights(AppState& state) {
     for (const MeasureState::Element& e : state.measure.picked)
       if (!e.IsEdge())
         highlightFace({SelectionItem::Kind::Face, 0, e.ref});
+  // A study's boundary-condition faces, each in its family's colour, on top
+  // of (and after) the selection: the projection clears first, so this has
+  // to be part of it rather than an imperative call somewhere else.
+  AppendSimulationFaceTints(state);
 }
 
 void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {

@@ -623,6 +623,38 @@ bool FaceSelector::GetFaceVertexRange(uint32_t meshId, uint32_t faceIndex,
   return false;
 }
 
+bool FaceSelector::ForEachFaceTriangle(
+    uint32_t meshId, uint32_t faceIndex,
+    const std::function<void(const glm::vec3&, const glm::vec3&,
+                             const glm::vec3&)>& fn) const {
+  for (const auto& mesh : m_meshes) {
+    if (mesh->meshId != meshId || faceIndex >= mesh->faces.size())
+      continue;
+    const auto world = [&](uint32_t idx) {
+      const auto& p = mesh->vertices[idx].position;
+      return glm::vec3(mesh->transform * glm::vec4(p[0], p[1], p[2], 1.0f));
+    };
+    for (size_t t = 0; t < mesh->triangleFaces.size(); t++) {
+      if (mesh->triangleFaces[t] != faceIndex)
+        continue;
+      fn(world(mesh->indices[t * 3]), world(mesh->indices[t * 3 + 1]),
+         world(mesh->indices[t * 3 + 2]));
+    }
+    return true;
+  }
+  return false;
+}
+
+float FaceSelector::GetFaceArea(uint32_t meshId, uint32_t faceIndex) const {
+  float area = 0.0f;
+  ForEachFaceTriangle(
+      meshId, faceIndex,
+      [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) {
+        area += 0.5f * glm::length(glm::cross(b - a, c - a));
+      });
+  return area;
+}
+
 glm::vec3 FaceSelector::GetFaceNormal(uint32_t meshId,
                                       uint32_t faceIndex) const {
   for (const auto& mesh : m_meshes) {

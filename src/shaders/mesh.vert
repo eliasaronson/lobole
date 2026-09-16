@@ -81,11 +81,16 @@ void main() {
     mat3 normalMatrix = transpose(inverse(mat3(pc.model)));
     fragNormal = normalize(normalMatrix * inNormal);
 
-    // Face highlight: 1 = selected, 0.5 = hovered
+    // Face highlight: 0.5 = hovered; 1 + tint = selected, where the tint
+    // (0 selection amber, 1 fixture, 2 load, 3 keep, 4 bond -- the palette
+    // in mesh.frag) rides in the top four bits of the selected range's end,
+    // because the push constant is full (MeshRenderer::SetFaceHighlight).
     uint v = uint(gl_VertexIndex);
+    uint selEnd = pc.highlight.y & 0x0FFFFFFFu;
+    uint tint = pc.highlight.y >> 28;
     fragHighlight = 0.0;
     if (v >= pc.highlight.z && v < pc.highlight.w) fragHighlight = 0.5;
-    if (v >= pc.highlight.x && v < pc.highlight.y) fragHighlight = 1.0;
+    if (v >= pc.highlight.x && v < selEnd) fragHighlight = 1.0 + float(tint);
 
     // Signed distance past the section plane (linear in world pos, so the
     // interpolated value is exact); frag discards where it is > 0.

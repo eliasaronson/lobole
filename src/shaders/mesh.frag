@@ -238,7 +238,7 @@ void main() {
         // below is mixed into the colour either way, but at glass's own
         // alpha — 0.05 face-on — the blend threw it away and a picked
         // crystal looked exactly like an unpicked one.
-        outAlpha = max(outAlpha, fragHighlight * 0.7);
+        outAlpha = max(outAlpha, min(fragHighlight, 1.0) * 0.7);
         vec3 premultiplied =
             albedo * 0.5 * tintAlpha + mirror * Fv + glare;
         finalColor = premultiplied / outAlpha;
@@ -251,9 +251,21 @@ void main() {
     // Slight brightness boost for better visibility
     finalColor *= 1.1;
 
-    // Face highlight tint: selected (1.0) strong, hovered (0.5) subtle
-    const vec3 highlightColor = vec3(1.0, 0.65, 0.15);
-    finalColor = mix(finalColor, highlightColor, fragHighlight * 0.55);
+    // Face highlight tint: selected (>= 1) strong, hovered (0.5) subtle.
+    // The selected value carries a palette index (1 + tint, see mesh.vert):
+    // the selection's amber, then the simulation's boundary conditions --
+    // a fixed support, a loaded face, a topology keep face, a bonded
+    // interface -- so a face reads as what it IS, not as "picked". The
+    // order is MeshRenderer::HighlightTint's.
+    const vec3 kTints[5] = vec3[5](
+        vec3(1.0, 0.65, 0.15),   // selection
+        vec3(0.20, 0.80, 0.35),  // fixture: green, every FEM tool's convention
+        vec3(0.85, 0.30, 0.75),  // load: magenta
+        vec3(0.25, 0.75, 0.95),  // keep: cyan, like its diamond glyph
+        vec3(0.95, 0.80, 0.20)); // bond: amber seam
+    float strength = fragHighlight >= 0.75 ? 0.55 : fragHighlight * 0.55;
+    int tintIndex = clamp(int(fragHighlight + 0.5) - 1, 0, 4);
+    finalColor = mix(finalColor, kTints[tintIndex], strength);
 
     // Extra multi-select sub-draws (highlight.z sentinel): the geometry was
     // already shaded by the main draw; keep ONLY this range's tinted

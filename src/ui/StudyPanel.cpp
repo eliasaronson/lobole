@@ -4,9 +4,11 @@
 #include "common/Logger.h"
 #include "core/Command.h"
 #include "core/Conventions.h"
+#include "core/MassProps.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
+#include "render/MeshRenderer.h"
 #include "ui/AppState.h"
 #include "ui/DockLayout.h"  // PanelHeading
 #include "ui/ExprInput.h"   // expression-capable numeric fields
@@ -15,6 +17,7 @@
 #include "ui/PanelTitles.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/SimulationActions.h"
+#include "ui/SketchInteraction.h" // WorldToScreen (labels)
 #include "ui/SketchOverlay.h"
 #include "ui/ViewportHandle.h"
 #include <utility>
@@ -157,6 +160,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   arm(ICON_FA_BOLT " Force###sim_bc_force", SimulationState::Tool::Force);
   arm(ICON_FA_DOWN_LONG " Pressure###sim_bc_pressure",
       SimulationState::Tool::Pressure);
+  ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
 
   // Pending magnitude/direction applied to the next placed force/pressure.
   if (sim.tool == SimulationState::Tool::Force ||
@@ -671,12 +675,55 @@ void DrawFieldLegend(AppState& state) {
                       : vm    ? "von Mises"
                               : "displacement";
 
-  // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
+  // What the picture is a picture OF, above the bar: the study and its
+  // analysis, the mode and its frequency, the factor the deformation is
+  // drawn at. A colorbar with a number and no subject was a picture a
+  // reader had to trust.
   ImDrawList* dl = ViewportDrawList();
   const float x = state.viewportPos.x + 16.0f;
   const float barW = 18.0f, barH = 180.0f;
   const float y1 = state.viewportPos.y + state.viewportSize.y - 28.0f;
   const float y0 = y1 - barH;
+  const float lineH = ImGui::GetTextLineHeight();
+  std::vector<std::string> head;
+  if (study) {
+    head.push_back(study->name + "  " +
+                   (modal  ? "modal"
+                    : topo ? "topology"
+                           : "static"));
+  }
+  if (modal) {
+    const fem::FemResults::ModeShape* mode = nullptr;
+    size_t modes = 0;
+    for (const fem::StudyBodyResult& b : rt->bodies) {
+      if (b.results.modes.empty())
+        continue;
+      modes = b.results.modes.size();
+      const int mi = std::clamp(sim.activeMode, 0, (int)modes - 1);
+      mode = &b.results.modes[mi];
+      break;
+    }
+    if (mode) {
+      char buf[96];
+      std::snprintf(buf, sizeof(buf), "mode %d of %zu  %.4g Hz",
+                    std::clamp(sim.activeMode, 0, (int)modes - 1) + 1, modes,
+                    mode->frequencyHz);
+      head.push_back(buf);
+    }
+  }
+  if (sim.deformScale > 0.0f && !density) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "deformation x%.3g", sim.deformScale);
+    head.push_back(buf);
+  }
+  head.push_back(title);
+  float ty = y0 - 10.0f - lineH * (float)head.size();
+  for (const std::string& line : head) {
+    dl->AddText(ImVec2(x, ty), IM_COL32_WHITE, line.c_str());
+    ty += lineH;
+  }
+
+  // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
   const int segs = 48;
   for (int i = 0; i < segs; ++i) {
     const float t0 = i / (float)segs, t1 = (i + 1) / (float)segs;
@@ -687,11 +734,28 @@ void DrawFieldLegend(AppState& state) {
   }
   dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1),
               IM_COL32(255, 255, 255, 160));
-  char buf[64];
+  char buf[96];
   std::snprintf(buf, sizeof(buf), "%.3g %s", maxVal, unit);
   dl->AddText(ImVec2(x + barW + 6, y0 - 6), IM_COL32_WHITE, buf);
+  // Intermediate ticks, so a colour halfway up the bar is a number too.
+  for (int k = 1; k < 4; ++k) {
+    const float yk = y1 - barH * (k / 4.0f);
+    dl->AddLine(ImVec2(x + barW, yk), ImVec2(x + barW + 4, yk),
+                IM_COL32(255, 255, 255, 160));
+    std::snprintf(buf, sizeof(buf), "%.3g", maxVal * (k / 4.0));
+    dl->AddText(ImVec2(x + barW + 8, yk - lineH * 0.5f),
+                IM_COL32(255, 255, 255, 200), buf);
+  }
   dl->AddText(ImVec2(x + barW + 6, y1 - 6), IM_COL32_WHITE, "0");
-  dl->AddText(ImVec2(x, y0 - 22), IM_COL32_WHITE, title);
+  // Where the maximum is, in world millimetres and on which body: the
+  // magenta cross in the viewport marks it, and this is its caption.
+  if (!modal && !density) {
+    const glm::dvec3 at = vm ? rt->maxVmAt : rt->maxDispAt;
+    const std::string& body = vm ? rt->maxVmBody : rt->maxDispBody;
+    std::snprintf(buf, sizeof(buf), "max at (%.1f, %.1f, %.1f)%s%s", at.x, at.y,
+                  at.z, body.empty() ? "" : " on ", body.c_str());
+    dl->AddText(ImVec2(x, y1 + 8.0f), IM_COL32(255, 255, 255, 200), buf);
+  }
 }
 
 namespace {
@@ -787,6 +851,112 @@ bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
   return true; // consumed: do not also re-pick the face behind the arrow
 }
 
+namespace {
+// The view-scaled glyph length every simulation glyph is built from (the
+// peak marker uses the same rule): a fixed 1.2 model-mm arrow vanished
+// entirely on a 90 mm part.
+float GlyphLength(const AppState& state) {
+  return state.camera ? std::max(0.055f * state.camera->GetDistance(), 1.2f)
+                      : 1.2f;
+}
+
+// Radical-inverse (van der Corput) sequence in base b: the low-discrepancy
+// numbers behind SampleFace, so the arrows over a face are evenly spread
+// and identical from one frame to the next.
+float Halton(int i, int base) {
+  float f = 1.0f, r = 0.0f;
+  while (i > 0) {
+    f /= static_cast<float>(base);
+    r += f * static_cast<float>(i % base);
+    i /= base;
+  }
+  return r;
+}
+
+const glm::vec4 kFixed{0.20f, 0.80f, 0.35f, 1.0f};    // green, like its tint
+const glm::vec4 kForce{1.00f, 0.65f, 0.20f, 1.0f};    // the handle's orange
+const glm::vec4 kPressure{0.85f, 0.30f, 0.75f, 1.0f}; // magenta, like its tint
+const glm::vec4 kKeep{0.35f, 0.85f, 0.95f, 1.0f};
+const glm::vec4 kGravity{0.55f, 0.55f, 1.00f, 1.0f};
+
+// An anchor hatch: a ground line with strokes fanning off it, in BOTH
+// in-plane axes. It used to draw along one axis only, so from most angles
+// a fixed support was a single stick lying on the face. The strokes lean
+// OUT of the face (+n): leaning in, they were inside the solid and the
+// depth test left only the ground lines, a cross that read as a marker.
+void AnchorGlyph(const glm::vec3& c, const glm::vec3& n, float len,
+                 std::vector<PrimVertex>& out) {
+  glm::vec3 side =
+      glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  side = glm::normalize(glm::cross(n, side));
+  const glm::vec3 other = glm::normalize(glm::cross(n, side));
+  for (const glm::vec3& axis : {side, other}) {
+    ui::AppendPrimLine(c - axis * len * 0.4f, c + axis * len * 0.4f, 2.4f,
+                       kFixed, out);
+    for (int i = -1; i <= 1; i++) {
+      const glm::vec3 base = c + axis * (len * 0.3f * i);
+      ui::AppendPrimLine(base, base + n * len * 0.3f - axis * len * 0.15f, 1.8f,
+                         kFixed, out);
+    }
+  }
+}
+} // namespace
+
+std::vector<FaceSample> SampleFace(AppState& state, const ElementRef& face,
+                                   float spacing, int maxCount) {
+  std::vector<FaceSample> out;
+  uint32_t mesh = 0, index = 0;
+  if (!state.faceSelector ||
+      !ResolveFaceItem(state, {SelectionItem::Kind::Face, 0, face}, mesh,
+                       index))
+    return out;
+  struct Tri {
+    glm::vec3 a, b, c, n;
+    float cumArea;
+  };
+  std::vector<Tri> tris;
+  float area = 0.0f;
+  state.faceSelector->ForEachFaceTriangle(
+      mesh, index,
+      [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c) {
+        const glm::vec3 cr = glm::cross(b - a, c - a);
+        const float l = glm::length(cr);
+        if (l < 1e-12f)
+          return;
+        area += 0.5f * l;
+        tris.push_back({a, b, c, cr / l, area});
+      });
+  // Always the centre with the face's average normal: the one glyph a face
+  // had before, and the one a face too small for the grid still gets.
+  out.push_back({state.faceSelector->GetFaceCenter(mesh, index),
+                 state.faceSelector->GetFaceNormal(mesh, index)});
+  if (tris.empty() || spacing <= 0.0f)
+    return out;
+  // One sample per spacing^2 of area, capped; below two the centre alone
+  // is the honest picture.
+  const int count = std::min(
+      maxCount, static_cast<int>(std::floor(area / (spacing * spacing))));
+  if (count < 2)
+    return out;
+  out.clear();
+  for (int i = 0; i < count; ++i) {
+    // Pick the triangle by area (Halton base 2 against the cumulative
+    // areas), then a point in it (bases 3 and 5, folded into the triangle).
+    const float pick = Halton(i + 1, 2) * area;
+    const auto it =
+        std::lower_bound(tris.begin(), tris.end(), pick,
+                         [](const Tri& t, float v) { return t.cumArea < v; });
+    const Tri& t = it == tris.end() ? tris.back() : *it;
+    float u = Halton(i + 1, 3), v = Halton(i + 1, 5);
+    if (u + v > 1.0f) {
+      u = 1.0f - u;
+      v = 1.0f - v;
+    }
+    out.push_back({t.a + (t.b - t.a) * u + (t.c - t.a) * v, t.n});
+  }
+  return out;
+}
+
 void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
   SimulationState& sim = state.simulation;
   Document* doc = state.document.get();
@@ -795,10 +965,6 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
   const fem::Study* s = doc->FindStudy(sim.activeStudyId);
   if (s == nullptr)
     return;
-  const glm::vec4 kFixed{0.95f, 0.35f, 0.35f, 1.0f};
-  const glm::vec4 kForce{1.00f, 0.65f, 0.20f, 1.0f};
-  const glm::vec4 kPressure{0.95f, 0.85f, 0.30f, 1.0f};
-  const glm::vec4 kKeep{0.35f, 0.85f, 0.95f, 1.0f};
 
   const auto faceFrame = [&](const ElementRef& ref, glm::vec3& center,
                              glm::vec3& normal) {
@@ -810,11 +976,13 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     normal = state.faceSelector->GetFaceNormal(mesh, index);
     return true;
   };
-  // Glyph scale tracks the view (like the peak marker): a fixed 1.2 model-mm
-  // arrow vanished entirely on a 90 mm part.
-  const float len = state.camera
-                        ? std::max(0.055f * state.camera->GetDistance(), 1.2f)
-                        : 1.2f;
+  const float len = GlyphLength(state);
+  // A distributed condition covers its face at one glyph per cell of this
+  // spacing -- derived from the glyph length, so zooming in fills the face
+  // in and zooming out thins it, and never fewer than the centre. The cap
+  // keeps a sheet from costing thousands of lines a frame.
+  const float spacing = len * 1.6f;
+  constexpr int kMaxGlyphsPerFace = 160;
 
   for (const fem::Load& load : s->loads) {
     glm::vec3 c(0.0f), n(0.0f);
@@ -822,38 +990,31 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       continue;
     switch (load.type) {
     case fem::LoadType::Fixed: {
-      // Anchor hatch: a ground line with strokes fanning off it, in BOTH
-      // in-plane axes. It used to draw along `side` only — `other` was
-      // computed and discarded with a (void) cast — so from most angles a
-      // fixed support was a single red stick lying on the face.
-      glm::vec3 side =
-          glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-      side = glm::normalize(glm::cross(n, side));
-      const glm::vec3 other = glm::normalize(glm::cross(n, side));
-      for (const glm::vec3& axis : {side, other}) {
-        ui::AppendPrimLine(c - axis * len * 0.4f, c + axis * len * 0.4f, 2.4f,
-                           kFixed, out);
-        for (int i = -1; i <= 1; i++) {
-          const glm::vec3 base = c + axis * (len * 0.3f * i);
-          ui::AppendPrimLine(base, base - n * len * 0.3f - axis * len * 0.15f,
-                             1.8f, kFixed, out);
-        }
-      }
+      // The hatch repeated over the face, so "what is fixed" reads as an
+      // AREA -- and each hatch stands on its own triangle's normal, which on
+      // a curved face is not the average one.
+      const auto samples =
+          SampleFace(state, load.face, spacing * 1.5f, kMaxGlyphsPerFace / 2);
+      const float hatch = samples.size() > 1 ? len * 0.55f : len;
+      for (const FaceSample& fs : samples)
+        AnchorGlyph(fs.point, fs.normal, hatch, out);
       break;
     }
     case fem::LoadType::Force: {
       const glm::vec3 dir = glm::normalize(
           glm::vec3(load.direction.x, load.direction.y, load.direction.z));
-      // The arrow flies ALONG the force; which end sits on the face depends
-      // on where the shaft is visible. A push approaches from outside and
-      // lands head-on the face. A pull drawn the same way would put the whole
-      // shaft INSIDE the solid — depth-tested away, an invisible load — so a
-      // pull takes off from the face instead: tail on the face, head out.
+      // One resultant arrow: a force is "this much in total", and the
+      // tinted face says where it is spread. The arrow flies ALONG the
+      // force; which end sits on the face depends on where the shaft is
+      // visible. A push approaches from outside and lands head-on the face.
+      // A pull drawn the same way would put the whole shaft INSIDE the
+      // solid -- depth-tested away, an invisible load -- so a pull takes
+      // off from the face instead: tail on the face, head out.
       const glm::vec3 tail = glm::dot(dir, n) > 0.0f ? c : c - dir * len;
-      // Draggable (docs/ui/viewport-handles.md): the shaft is the handle, so
-      // what highlights is exactly what a click grabs. Published, not drawn:
-      // DrawViewportHandles draws it with every other handle, on top — so
-      // the pull case above is now belt and braces rather than load-bearing.
+      // Draggable (docs/ui/viewport-handles.md): the shaft is the handle,
+      // so what highlights is exactly what a click grabs. Published, not
+      // drawn: DrawViewportHandles draws it with every other handle, on
+      // top -- so the pull case above is belt and braces.
       ViewportHandle vh;
       vh.id = HandleId(HandleOwner::Load, load.id);
       vh.kind = HandleKind::Linear;
@@ -865,8 +1026,14 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       break;
     }
     case fem::LoadType::Pressure: {
-      // Pressure presses along -normal: a shorter arrow at the face.
-      ArrowGlyph(c + n * len * 0.8f, c, kPressure, out);
+      // A pressure is a FIELD: one arrow per cell, each pressing along its
+      // own triangle's inward normal. One arrow at the centre read as a
+      // point load on a face that carries none.
+      const auto samples =
+          SampleFace(state, load.face, spacing, kMaxGlyphsPerFace);
+      const float arrow = samples.size() > 1 ? len * 0.6f : len * 0.8f;
+      for (const FaceSample& fs : samples)
+        ArrowGlyph(fs.point + fs.normal * arrow, fs.point, kPressure, out);
       break;
     }
     }
@@ -884,6 +1051,166 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
                               c - other * r};
     for (int i = 0; i < 4; i++)
       ui::AppendPrimLine(pts[i], pts[(i + 1) % 4], 2.0f, kKeep, out);
+  }
+}
+
+void AppendSimulationOverlayGlyphs(AppState& state,
+                                   std::vector<PrimVertex>& out) {
+  SimulationState& sim = state.simulation;
+  Document* doc = state.document.get();
+  if (!sim.IsActive() || doc == nullptr)
+    return;
+  const fem::Study* s = doc->FindStudy(sim.activeStudyId);
+  if (s == nullptr)
+    return;
+  // Gravity: one arrow leaving the centre of mass, the way the weight acts.
+  // A self-weight study whose picture showed no weight was a setup nobody
+  // could check against the panel. The centre of mass is inside the solid,
+  // so this goes in the see-through channel.
+  if (s->type != fem::AnalysisType::Static || glm::length(s->gravity) < 1e-9)
+    return;
+  if (sim.comVersion != doc->Version() || !sim.comKnown) {
+    sim.comVersion = doc->Version();
+    sim.comKnown = false;
+    if (const auto mass = Measure::MassOfBodies(doc->GetBodies())) {
+      sim.com = glm::vec3(mass->centerOfMass);
+      sim.comKnown = mass->volume > 0.0;
+    }
+  }
+  if (!sim.comKnown)
+    return;
+  const float len = GlyphLength(state);
+  const glm::vec3 g = glm::normalize(glm::vec3(s->gravity));
+  // A small cross marks the point itself; the arrow leaves it.
+  const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  for (const glm::vec3& a : ax)
+    ui::AppendPrimLine(sim.com - a * len * 0.12f, sim.com + a * len * 0.12f,
+                       2.0f, kGravity, out);
+  ArrowGlyph(sim.com, sim.com + g * len * 1.3f, kGravity, out);
+}
+
+void AppendSimulationFaceTints(AppState& state) {
+  const SimulationState& sim = state.simulation;
+  const Document* doc = state.document.get();
+  if (!sim.IsActive() || doc == nullptr || !state.faceSelector ||
+      !state.meshRenderer)
+    return;
+  const fem::Study* s = doc->FindStudy(sim.activeStudyId);
+  if (s == nullptr)
+    return;
+  const auto tintFace = [&](const ElementRef& ref, uint32_t tint) {
+    uint32_t mesh = 0, index = 0, first = 0, count = 0;
+    if (ResolveFaceItem(state, {SelectionItem::Kind::Face, 0, ref}, mesh,
+                        index) &&
+        state.faceSelector->GetFaceVertexRange(mesh, index, first, count))
+      state.meshRenderer->SetFaceHighlight(mesh, first, count, tint);
+  };
+  for (const fem::Load& load : s->loads)
+    tintFace(load.face, load.type == fem::LoadType::Fixed
+                            ? MeshRenderer::kTintFixture
+                            : MeshRenderer::kTintLoad);
+  for (const ElementRef& keep : s->keepFaces)
+    tintFace(keep, MeshRenderer::kTintKeep);
+}
+
+std::string SimulationLoadLabel(const fem::Load& load) {
+  char buf[64];
+  switch (load.type) {
+  case fem::LoadType::Fixed:
+    return "fixed";
+  case fem::LoadType::Force:
+    if (std::abs(load.magnitude) >= 1000.0)
+      std::snprintf(buf, sizeof(buf), "%.3g kN", load.magnitude / 1000.0);
+    else
+      std::snprintf(buf, sizeof(buf), "%.3g N", load.magnitude);
+    return buf;
+  case fem::LoadType::Pressure:
+    if (std::abs(load.magnitude) < 0.1 && load.magnitude != 0.0)
+      std::snprintf(buf, sizeof(buf), "%.3g kPa", load.magnitude * 1000.0);
+    else
+      std::snprintf(buf, sizeof(buf), "%.3g MPa", load.magnitude);
+    return buf;
+  }
+  return "";
+}
+
+std::string SimulationGravityLabel(const glm::dvec3& gravity) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "g %.3g m/s^2", glm::length(gravity));
+  return buf;
+}
+
+void DrawSimulationLabels(AppState& state) {
+  SimulationState& sim = state.simulation;
+  Document* doc = state.document.get();
+  if (!sim.IsActive() || !sim.showLabels || doc == nullptr ||
+      !state.faceSelector || !state.camera)
+    return;
+  const fem::Study* s = doc->FindStudy(sim.activeStudyId);
+  if (s == nullptr)
+    return;
+  ImDrawList* dl = ViewportDrawList();
+  const float len = GlyphLength(state);
+  const glm::mat4 viewProj =
+      state.camera->GetProjectionMatrix() * state.camera->GetViewMatrix();
+  // A pill behind the text, so a label stays legible over a lit face or a
+  // colormap. Skipped when the anchor is behind the camera.
+  const auto label = [&](const glm::vec3& at, const std::string& text,
+                         ImU32 colour) {
+    const glm::vec4 clip = viewProj * glm::vec4(at, 1.0f);
+    if (clip.w <= 1e-6f)
+      return;
+    const glm::vec2 p = WorldToScreen(state, at);
+    if (p.x < state.viewportPos.x ||
+        p.x > state.viewportPos.x + state.viewportSize.x ||
+        p.y < state.viewportPos.y ||
+        p.y > state.viewportPos.y + state.viewportSize.y)
+      return;
+    const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+    const ImVec2 pos(p.x + 8.0f, p.y - size.y * 0.5f);
+    dl->AddRectFilled(ImVec2(pos.x - 4.0f, pos.y - 2.0f),
+                      ImVec2(pos.x + size.x + 4.0f, pos.y + size.y + 2.0f),
+                      IM_COL32(20, 20, 24, 190), 4.0f);
+    dl->AddText(pos, colour, text.c_str());
+  };
+  const auto col = [](const glm::vec4& c) {
+    return IM_COL32(int(c.r * 255), int(c.g * 255), int(c.b * 255), 255);
+  };
+  for (const fem::Load& load : s->loads) {
+    uint32_t mesh = 0, index = 0;
+    if (!ResolveFaceItem(state, {SelectionItem::Kind::Face, 0, load.face}, mesh,
+                         index))
+      continue;
+    const glm::vec3 c = state.faceSelector->GetFaceCenter(mesh, index);
+    const glm::vec3 n = state.faceSelector->GetFaceNormal(mesh, index);
+    switch (load.type) {
+    case fem::LoadType::Fixed:
+      label(c, SimulationLoadLabel(load), col(kFixed));
+      break;
+    case fem::LoadType::Force: {
+      // At the arrow's free end, whichever end that is (see the glyph).
+      const glm::vec3 dir = glm::normalize(glm::vec3(load.direction));
+      const glm::vec3 tail = glm::dot(dir, n) > 0.0f ? c : c - dir * len;
+      const glm::vec3 free = glm::dot(dir, n) > 0.0f ? tail + dir * len : tail;
+      label(free, SimulationLoadLabel(load), col(kForce));
+      break;
+    }
+    case fem::LoadType::Pressure:
+      label(c + n * len * 0.8f, SimulationLoadLabel(load), col(kPressure));
+      break;
+    }
+  }
+  for (const ElementRef& keep : s->keepFaces) {
+    uint32_t mesh = 0, index = 0;
+    if (ResolveFaceItem(state, {SelectionItem::Kind::Face, 0, keep}, mesh,
+                        index))
+      label(state.faceSelector->GetFaceCenter(mesh, index), "keep", col(kKeep));
+  }
+  if (s->type == fem::AnalysisType::Static && sim.comKnown &&
+      glm::length(s->gravity) > 1e-9) {
+    const glm::vec3 g = glm::normalize(glm::vec3(s->gravity));
+    label(sim.com + g * len * 1.3f, SimulationGravityLabel(s->gravity),
+          col(kGravity));
   }
 }
 

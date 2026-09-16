@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "render/MeshRenderer.h" // InstanceHighlightRanges (tint test)
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (arrow-placement test)
 #include "ui/SimulationActions.h"
 #include "ui/StudyPanel.h"
@@ -376,6 +377,219 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
            "(a_static_run_matches_beam_theory, topology_holds_its_volume_"
            "target) — this build has no Netgen, so a study cannot be meshed");
 #endif // HAVE_NETGEN
+
+  // A pressure is a FIELD: one arrow per cell of the face, each standing ON
+  // the face and pressing into it. One arrow at the centre read as a point
+  // load on a face that carries none, and on a curved or L-shaped face the
+  // centre is not even on the face.
+  t = IM_REGISTER_TEST(engine, "sim", "pressure_is_a_field_over_the_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    // The default box is 2 mm on a side, and the glyph length has a floor
+    // of 1.2 mm, so a 4 mm^2 face can never hold a second arrow: make it a
+    // part-sized box through the command layer, as the cantilever helper
+    // does.
+    {
+      const size_t index = Doc()->FeatureCount() - 1;
+      auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(index));
+      IM_CHECK(box != nullptr);
+      nlohmann::json before = DocumentIO::FeatureToJson(*box);
+      box->width = 40.0;
+      box->height = 40.0;
+      box->depth = 40.0;
+      nlohmann::json after = DocumentIO::FeatureToJson(*box);
+      s_App->commands->Execute(
+          std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+      ctx->Yield(2);
+    }
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK(!body.elementMap.names.empty());
+    const ElementRef face{body.createdBy,
+                          body.elementMap.names.begin()->second};
+    uint32_t mesh = 0, index = 0;
+    IM_CHECK(ui::ResolveFaceItem(
+        *s_App, {ui::SelectionItem::Kind::Face, 0, face}, mesh, index));
+    const glm::vec3 c = s_App->faceSelector->GetFaceCenter(mesh, index);
+    const glm::vec3 n = s_App->faceSelector->GetFaceNormal(mesh, index);
+    const float area = s_App->faceSelector->GetFaceArea(mesh, index);
+    IM_CHECK(area > 0.0f);
+
+    // The sampler alone: a spacing wider than the face gives the centre and
+    // nothing else; a spacing that divides it into ~16 cells gives about
+    // that many, every one on the face's plane and inside its extent.
+    const auto coarse =
+        ui::SampleFace(*s_App, face, 10.0f * std::sqrt(area), 160);
+    IM_CHECK_EQ(coarse.size(), (size_t)1);
+    IM_CHECK(glm::length(coarse[0].point - c) < 1e-3f);
+    const auto fine =
+        ui::SampleFace(*s_App, face, std::sqrt(area / 16.0f), 160);
+    IM_CHECK(fine.size() >= 12 && fine.size() <= 20);
+    glm::vec3 lo(0.0f), hi(0.0f);
+    body.shape.GetBoundingBox(lo, hi);
+    for (const ui::FaceSample& fs : fine) {
+      IM_CHECK(std::abs(glm::dot(fs.point - c, n)) < 1e-3f); // on the plane
+      IM_CHECK(glm::dot(fs.normal, n) > 0.99f);
+      for (int k = 0; k < 3; ++k)
+        IM_CHECK(fs.point[k] > lo[k] - 1e-3f && fs.point[k] < hi[k] + 1e-3f);
+    }
+
+    // The glyph pass, with the camera close enough that the view-scaled
+    // spacing divides the face: more than one arrow, and every arrow's HEAD
+    // (the shaft's far end, the second vertex of its first primitive) on
+    // the face.
+    fem::Load load;
+    load.id = Doc()->AllocateId();
+    load.type = fem::LoadType::Pressure;
+    load.face = face;
+    load.magnitude = 0.5;
+    study->loads.push_back(load);
+    ctx->Yield(2);
+    s_App->camera->StopAnimation();
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetPosition(mid + n * 14.0f);
+    ctx->Yield(2);
+    std::vector<PrimVertex> prims;
+    s_App->viewportHandles.clear();
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    // Three primitives per arrow (shaft + two barbs); each primitive is a
+    // six-vertex quad in the prim channel, and the shaft comes first.
+    constexpr size_t kArrowVerts = 3 * 6;
+    IM_CHECK(prims.size() >= 2 * kArrowVerts);
+    int arrows = 0, onFace = 0;
+    for (size_t i = 0; i + kArrowVerts <= prims.size(); i += kArrowVerts) {
+      const glm::vec3 head = prims[i].posOther;
+      const glm::vec3 tail = prims[i].posThis;
+      ++arrows;
+      if (std::abs(glm::dot(head - c, n)) < 1e-3f &&
+          glm::dot(glm::normalize(head - tail), n) < -0.99f) // INTO the face
+        ++onFace;
+    }
+    IM_CHECK(arrows > 1);
+    IM_CHECK_EQ(onFace, arrows);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // A boundary condition tints the face it acts on, in its family's colour,
+  // through the same highlight channel a selection uses -- so "what is
+  // actually fixed" is an area on the part and not an inference from a
+  // glyph at its centre.
+  t = IM_REGISTER_TEST(engine, "sim", "fixed_and_loaded_faces_are_tinted");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK(body.elementMap.names.size() >= 2);
+    auto it = body.elementMap.names.begin();
+    const ElementRef fixedFace{body.createdBy, it->second};
+    ++it;
+    const ElementRef loadedFace{body.createdBy, it->second};
+    fem::Load fixed;
+    fixed.id = Doc()->AllocateId();
+    fixed.type = fem::LoadType::Fixed;
+    fixed.face = fixedFace;
+    study->loads.push_back(fixed);
+    fem::Load press;
+    press.id = Doc()->AllocateId();
+    press.type = fem::LoadType::Pressure;
+    press.face = loadedFace;
+    press.magnitude = 1.0;
+    study->loads.push_back(press);
+    ctx->Yield(2);
+
+    ui::SyncSelectionHighlights(*s_App);
+    const auto rangeOf = [&](const ElementRef& f, uint32_t& mesh,
+                             uint32_t& first, uint32_t& end) {
+      uint32_t index = 0, count = 0;
+      IM_CHECK_RETV(ui::ResolveFaceItem(*s_App,
+                                        {ui::SelectionItem::Kind::Face, 0, f},
+                                        mesh, index),
+                    false);
+      IM_CHECK_RETV(
+          s_App->faceSelector->GetFaceVertexRange(mesh, index, first, count),
+          false);
+      end = first + count;
+      return true;
+    };
+    const auto tinted = [&](const ElementRef& f, uint32_t tint) {
+      uint32_t mesh = 0, first = 0, end = 0;
+      if (!rangeOf(f, mesh, first, end))
+        return false;
+      for (const glm::uvec2& r :
+           s_App->meshRenderer->InstanceHighlightRanges(mesh))
+        if (r.x == first && (r.y & MeshRenderer::kRangeMask) == end &&
+            (r.y >> MeshRenderer::kTintShift) == tint)
+          return true;
+      return false;
+    };
+    IM_CHECK(tinted(fixedFace, MeshRenderer::kTintFixture));
+    IM_CHECK(tinted(loadedFace, MeshRenderer::kTintLoad));
+    IM_CHECK(!tinted(fixedFace, MeshRenderer::kTintLoad));
+    // Nothing is SELECTED, so no range carries the selection's tint.
+    IM_CHECK(!tinted(fixedFace, MeshRenderer::kTintSelection));
+    IM_CHECK(!tinted(loadedFace, MeshRenderer::kTintSelection));
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Gravity is drawn: one arrow leaving the centre of mass along g. A
+  // self-weight study whose picture showed no weight could not be checked
+  // against the panel.
+  t = IM_REGISTER_TEST(engine, "sim", "gravity_is_drawn_at_the_centre_of_mass");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+    study->gravity = conv::kGravity;
+    ctx->Yield(2);
+    // The arrow leaves the centre of mass, which is INSIDE the solid, so it
+    // is drawn in the see-through channel the measurements use -- the
+    // depth-tested one would hide it.
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationOverlayGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    // A box's centre of mass is its bounding-box centre.
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    const glm::vec3 g = glm::normalize(glm::vec3(conv::kGravity));
+    // The longest primitive that starts at the centre of mass is the arrow's
+    // shaft, and it runs along g.
+    float best = 0.0f;
+    glm::vec3 along(0.0f);
+    for (size_t i = 0; i < prims.size(); i += 6) {
+      if (glm::length(prims[i].posThis - mid) > 1e-2f)
+        continue;
+      const float l = glm::length(prims[i].posOther - prims[i].posThis);
+      if (l > best) {
+        best = l;
+        along = glm::normalize(prims[i].posOther - prims[i].posThis);
+      }
+    }
+    IM_CHECK(best > 0.0f);
+    IM_CHECK(glm::dot(along, g) > 0.999f);
+    // And with gravity off, nothing stands at the centre of mass.
+    study->gravity = glm::dvec3(0.0);
+    prims.clear();
+    ui::AppendSimulationOverlayGlyphs(*s_App, prims);
+    for (size_t i = 0; i < prims.size(); i += 6)
+      IM_CHECK(glm::length(prims[i].posThis - mid) > 1e-2f);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
 
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");
   t->TestFunc = [](ImGuiTestContext* ctx) {
