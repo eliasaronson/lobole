@@ -171,7 +171,14 @@ static const ImWchar kUiRanges[] = {
 
 ImFont* MonoFont() { return s_MonoFont; }
 
+namespace {
+float s_UiScale = 1.0f;
+}
+
+float UiScale() { return s_UiScale; }
+
 void ApplyTheme(float scale) {
+  s_UiScale = scale;
   ImGuiStyle& style = ImGui::GetStyle();
   style = ImGuiStyle(); // reset so repeated calls don't compound scaling
   ApplyColors(style);

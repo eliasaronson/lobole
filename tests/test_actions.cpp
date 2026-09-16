@@ -65,6 +65,7 @@
 #include "ui/JobActions.h"
 #include "ui/Overlays.h"
 #include "ui/SimulationActions.h"
+#include "ui/SketchInteraction.h" // UpdateSketchStatus
 #include "ui/SyncJob.h"
 #include "ui/TerminalPanel.h"
 
@@ -2274,4 +2275,35 @@ TEST_CASE(
   REQUIRE(result.hasGeometry);
   CHECK_FALSE(result.projectionStats.projectionHit);
   CHECK_THAT(result.bboxMax.x - result.bboxMin.x, WithinAbs(50, 1e-8));
+}
+
+// ---------------------------------------------------------------------------
+// An EMPTY sketch has no constraint status
+//
+// The first outside tester (docs/ui/windows-tester-round.md) opened a sketch,
+// drew nothing, and the app told him it was "Fully defined". The solver was
+// not wrong -- an empty system has no free parameters, so zero degrees of
+// freedom is the arithmetic truth -- but that pill answers "am I done
+// constraining?", and answering "yes" before there is anything to constrain is
+// the app being confidently wrong about geometry it does not have.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("an empty sketch reports no DOF status at all", "[actions][sketch]") {
+  ui::AppState state = MakeHeadlessState();
+  state.document->AddFeature(
+      std::make_unique<SketchFeature>("Sketch", SketchPlane(PlaneType::XY)));
+  SketchFeature* sk = dynamic_cast<SketchFeature*>(
+      state.document->GetFeature(state.document->FeatureCount() - 1));
+  REQUIRE(sk != nullptr);
+  state.sketchEdit.activeSketchId = sk->GetId();
+  REQUIRE(state.sketchEdit.IsEditing());
+
+  ui::UpdateSketchStatus(state);
+  CHECK(state.sketchEdit.dof == -1); // -1 = no status, NOT "fully defined"
+
+  // One line, both endpoints free: now there is something to report, and it
+  // is four degrees of freedom rather than silence.
+  sk->AddEntity(sketch::Line{{0, 0}, {2, 0}});
+  ui::UpdateSketchStatus(state);
+  CHECK(state.sketchEdit.dof == 4);
 }

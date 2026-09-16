@@ -37,6 +37,12 @@ void DrawWindowShadow(const ImVec2& min, const ImVec2& max);
 // Call once after ImGui::CreateContext(), before the first frame.
 void ApplyTheme(float scale);
 
+// The scale ApplyTheme last ran with (content scale x the font-size
+// preference). Anything sizing a RAW PIXEL literal must multiply by this:
+// ImGui's own metrics go through ScaleAllSizes, so a hand-written 4.0f beside
+// them silently shrinks as the display or the preference grows.
+float UiScale();
+
 // Viewport (3D canvas) background, matching the theme.
 struct ClearColor {
   float r, g, b;

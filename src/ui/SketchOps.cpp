@@ -332,6 +332,14 @@ void UpdateSketchStatus(AppState& state) {
   SketchFeature* sketch = ResolveActiveSketch(state);
   if (!sketch)
     return;
+  // An EMPTY sketch is not "fully defined" -- it has nothing to define. The
+  // solver answers 0 for it, honestly (no free parameters, so no degrees of
+  // freedom), but 0 is also the answer that prints "Fully defined", which is
+  // the app's reply to "am I done constraining?" before there is anything to
+  // constrain. The first Windows tester read it as the app being wrong about
+  // geometry, and it is: dof is not a status until there is geometry.
+  if (sketch->entities.empty())
+    return; // dof stays -1: no status
   sketch::Solver solver;
   solver.Load(
       *sketch); // solve for status only — no WriteBack, sketch unchanged

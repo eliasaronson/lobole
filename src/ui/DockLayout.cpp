@@ -8,6 +8,7 @@
 #include <cstring>
 #include <unordered_map>
 
+#include "ui/Theme.h" // UiScale (raw pixel literals must scale)
 #include "ui/Toolbar.h"
 
 #include <glm/glm.hpp>
@@ -149,7 +150,15 @@ void BeginDockspace(AppState& state) {
   ImVec4 barBg = ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg);
   barBg.w = 1.0f;
   ImGui::PushStyleColor(ImGuiCol_ChildBg, barBg);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 4.0f));
+  // Scaled, like every other metric. These were raw pixels pushed AFTER
+  // ScaleAllSizes had run, so the row's only breathing room stayed at 4
+  // physical pixels while the buttons inside it grew with the display and the
+  // font preference -- the bar got measurably tighter the more a user scaled
+  // the UI up, which is the opposite of what they asked for. Reported by the
+  // first Windows tester (docs/ui/windows-tester-round.md).
+  const float ui = ui::UiScale();
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                      ImVec2(6.0f * ui, 4.0f * ui));
   // When the window is narrower than the button row, scroll instead of
   // clipping (U4); the row grows by the scrollbar's height while overflowed
   // so the bar never overlays the buttons.
@@ -158,7 +167,7 @@ void BeginDockspace(AppState& state) {
   // from the previous frame, like the scrollbar allowance it replaces: the
   // height has to be chosen before the content is laid out.
   static float toolbarRowsH = 0.0f;
-  const float oneRow = ImGui::GetFrameHeight() + 12.0f;
+  const float oneRow = ImGui::GetFrameHeight() + 12.0f * ui;
   const float toolbarH = std::max(oneRow, toolbarRowsH);
   ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH),
                     ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
