@@ -58,11 +58,26 @@ path is correct and survives a font rebuild.
 ## 3. The toolbar row is cramped — and this one IS a scaling bug
 
 The tester drew a line along the toolbar's top edge asking for more room.
-src/ui/DockLayout.cpp:149-168 sets the row's padding and height from **raw
-unscaled literals** — `WindowPadding = (6, 4)` and `oneRow = GetFrameHeight()
-+ 12.0f` — pushed AFTER `ScaleAllSizes()` has run. So every other metric grows
-with DPI and the font preference while the toolbar's breathing room stays at 4
-and 12 physical pixels. At 150% the row is measurably tighter than at 100%.
+The first answer — that the row's `WindowPadding` and height were raw
+unscaled literals pushed after `ScaleAllSizes()` — was true and not the cause.
+Measuring the rendered pixels found the real one: **the padding was never
+applied at all.** Since ImGui 1.90 a child window with no border ignores
+`WindowPadding` ("no padding by default for non-bordered child windows",
+imgui.h), and `##ToolbarRow` is borderless. The buttons sat flush against the
+top and left edges of the bar, and the only reason the bar looked padded
+underneath is that the height calculation added padding the layout then
+refused to apply, so all of it piled up below the icons.
+
+Measured at scale 1.0, child rows 26-67 against button rows 26-51: **0 px
+above, 16 below**. With `ImGuiChildFlags_AlwaysUseWindowPadding`: buttons at
+34-59, **8 above and 8 below**.
+
+Worth keeping as a method note. Three fixes in a row — scale the literals,
+stop the height slop, double the padding — each moved the number and none
+found the cause, because all three were read out of the source. The pixels
+settled it in one measurement, and the way to get them was a screenshot with
+the bar's background temporarily set to pure red, which makes the child's
+real rect unambiguous.
 
 ## 4. "Fully defined" on a sketch that is not — it is the EMPTY sketch
 

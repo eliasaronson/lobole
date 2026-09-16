@@ -180,8 +180,16 @@ void BeginDockspace(AppState& state) {
   const float padY = ImGui::GetStyle().WindowPadding.y; // the one pushed above
   const float oneRow = ImGui::GetFrameHeight() + padY * 2.0f;
   const float toolbarH = std::max(oneRow, toolbarRowsH);
+  // AlwaysUseWindowPadding, or the WindowPadding pushed above is INERT: since
+  // ImGui 1.90 a child with no border ignores it ("no padding by default for
+  // non-bordered child windows", imgui.h). The bar had therefore never been
+  // padded at all -- buttons flush to the top and the left edge -- and the
+  // only reason it looked padded at the BOTTOM is that the height below adds
+  // the padding the layout then refused to apply, so every pixel of it piled
+  // up under the icons. Measured, not read: 0 px above, 16 below.
   ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH),
-                    ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+                    ImGuiChildFlags_AlwaysUseWindowPadding,
+                    ImGuiWindowFlags_NoScrollbar);
   DrawToolbar(state);
   // Cursor sits one ItemSpacing BELOW the last row; back that out so the
   // padding under the buttons matches the padding over them.
