@@ -1885,8 +1885,28 @@ class Asm(_Tab):
 
     # --- mates: a connector is a FRAME NAME, not a coordinate -------------
     def _mate(self, type_, a, b, **kw):
+        """Every mate goes through here, which is why the `flipped` default
+        is fixed here.
+
+        `add_mate`'s own default is TRUE: the two connectors meet face to
+        face with their normals opposed, which is what two touching FACES do
+        and the opposite of what two FRAMES want. Its help says so. Left at
+        the default, a bicycle's twenty-two occurrences all mated, nothing
+        errored, and the result was a different bicycle — the fork turned end
+        for end about its own steering axis and took the front wheel 700 mm
+        into the air; the seatpost, saddle and carrier hung underneath; the
+        chain and its guard were mirrored onto the wrong side.
+
+        So: frame to frame defaults to FALSE here, face anchors keep the
+        RPC's default, and anything that says `flipped` or `derive` for
+        itself is left alone.
+        """
         self.activate()
-        return self.app.add_mate(type=type_, a=_conn(a), b=_conn(b), **kw)
+        ca, cb = _conn(a), _conn(b)
+        if ("flipped" not in kw and "derive" not in kw
+                and "frame" in ca and "frame" in cb):
+            kw["flipped"] = False
+        return self.app.add_mate(type=type_, a=ca, b=cb, **kw)
 
     def fasten(self, a, b, **kw):
         return self._mate("fastened", a, b, **kw)
