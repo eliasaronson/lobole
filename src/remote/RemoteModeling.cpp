@@ -261,15 +261,18 @@ static constexpr MethodDoc ModelingMethods[] = {
      "recoloring rebuilds no geometry.",
      "body, color, feature_id, metallic, roughness", remote::NeedsPart},
     {"set_rollback",
-     "Move the rollback bar: only features [0, index) regenerate; -1 = end.",
-     "index", remote::NeedsPart},
+     "Move the rollback bar: only features before it regenerate. Takes "
+     "`feature_id` — the bar stops just BEFORE that feature — or `index` "
+     "(features [0, index) regenerate; -1 = end).",
+     "feature_id, index", remote::NeedsPart},
     {"suppress_feature",
      "Toggle suppression by feature_id; suppressed "
      "features are skipped but keep parameters.",
      "feature_id, suppressed", remote::NeedsPart | remote::Deferrable},
     {"delete_feature",
-     "Delete a feature by `id` or `index`; one undo step; returns {regen}.",
-     "id, index", remote::NeedsPart | remote::Deferrable},
+     "Delete a feature by `feature_id` (`id` is the older spelling) or "
+     "`index`; one undo step; returns {regen}.",
+     "feature_id, id, index", remote::NeedsPart | remote::Deferrable},
     {"project_geometry",
      "Project a body face/edge (feature_id + element) into "
      "a sketch as live locked construction geometry.",
@@ -726,8 +729,24 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   if (m == "set_rollback") {
     // Move the rollback bar: regeneration executes features [0, index) only;
     // -1 (or >= count) = end. Not undoable — it is a view of the history,
-    // not an edit of it. params: {index}
-    doc->SetRollback(p.at("index").get<int>());
+    // not an edit of it. params: {feature_id | index}
+    //
+    // `feature_id` because that is how every other method here names a
+    // feature, and because an INDEX is the one thing a caller holding a
+    // feature does not have — it has to count the tree to roll back to the
+    // thing it just made.
+    int stop = -1;
+    if (p.contains("feature_id")) {
+      size_t index = 0;
+      const uint64_t id = p.at("feature_id").get<uint64_t>();
+      if (doc->FindFeatureById(id, &index) == nullptr)
+        throw std::runtime_error("no feature with id " + std::to_string(id) +
+                                 " (get_state lists features with their ids)");
+      stop = static_cast<int>(index); // the bar stops just BEFORE it
+    } else {
+      stop = p.at("index").get<int>();
+    }
+    doc->SetRollback(stop);
     return json{{"rollback", doc->Rollback()},
                 {"regen", RegenSummaryJson(*doc)}};
   }
@@ -758,17 +777,26 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // `id` as well as `index`: every other verb that names a feature takes
     // an id, and get_state reports both, so requiring the index here was a
     // detour every caller made once.
+    // `feature_id` as well, because that is what every OTHER method naming a
+    // feature takes — suppress_feature, select_feature, modify_feature,
+    // update_derived, set_material, set_appearance, frame. This was the one
+    // out of step, and a caller who had just written suppress_feature had to
+    // learn it twice.
     size_t index = 0;
-    if (p.contains("id")) {
-      const uint64_t id = p.at("id").get<uint64_t>();
+    const char* idKey = p.contains("feature_id") ? "feature_id"
+                        : p.contains("id")       ? "id"
+                                                 : nullptr;
+    if (idKey != nullptr) {
+      const uint64_t id = p.at(idKey).get<uint64_t>();
       if (doc->FindFeatureById(id, &index) == nullptr)
         throw std::runtime_error("no feature with id " + std::to_string(id) +
                                  " (get_state lists features with their ids)");
     } else if (p.contains("index")) {
       index = p.at("index").get<size_t>();
     } else {
-      throw std::runtime_error("delete_feature needs `id` or `index` "
-                               "(get_state lists features with both)");
+      throw std::runtime_error("delete_feature needs `feature_id` (or `id`) "
+                               "or `index` (get_state lists features with "
+                               "both)");
     }
     if (!state.commands->Execute(std::make_unique<RemoveFeatureCommand>(index),
                                  *doc)) {
