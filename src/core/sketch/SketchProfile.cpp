@@ -776,38 +776,111 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
   // MakeEdge fail; calling .Edge() on a failed maker THROWS StdFail_NotDone,
   // which uncaught aborts the whole app. Check IsDone() before Edge(), and
   // catch any OCC failure — a bad path is a rejected feature, not a crash.
+  //
+  // Consecutive edges share one explicit vertex per joint, for the reason
+  // MakeLoopWire does it: the walk above matched endpoints within kChainTol
+  // (1e-4), but MakeWire merges at OCC's confusion (1e-7), and a joint that
+  // is merely CLOSE is an edge MakeWire refuses to add. A handlebar drawn as
+  // line-arc-line-arc-line — the ordinary way to draw a bent tube — has its
+  // lines meeting the arcs at points no float32 can hold exactly, landed
+  // 2.7e-6 out, and came back as "pipe path must be an open sketch chain",
+  // which it was. Shared vertices connect by construction.
   try {
-    BRepBuilderAPI_MakeWire wire;
-    for (const LoopEdge& e : chain) {
-      if (e.spline) {
-        // Orient the poles to the walked a->b direction (the chain walker may
-        // have swapped endpoints to connect the chain without reversing poles).
-        BSpline s = *e.spline;
-        if (!Near(s.poles.front(), e.a))
-          std::reverse(s.poles.begin(), s.poles.end());
-        BRepBuilderAPI_MakeEdge mk(MakeBSplineCurve(plane, s));
-        if (!mk.IsDone())
-          return TopoDS_Wire();
-        wire.Add(mk.Edge());
-        if (wire.Error() != BRepBuilderAPI_WireDone)
-          return TopoDS_Wire();
+    const size_t n = chain.size();
+    // Whether edge i runs along its canonical span (the walk may have
+    // swapped a/b to connect the chain; the span itself is untouched).
+    std::vector<bool> forward(n, true);
+    for (size_t i = 0; i < n; i++) {
+      const LoopEdge& e = chain[i];
+      if (!e.arc)
         continue;
+      const glm::vec2 canonStart = OnCircle(e.center, e.radius, e.angStart);
+      forward[i] =
+          glm::length(e.a - canonStart) <= glm::length(e.b - canonStart);
+    }
+    auto endPointWorld = [&](size_t i, bool atB) {
+      const LoopEdge& e = chain[i];
+      if (e.arc) {
+        const double ang = (atB == forward[i]) ? e.angEnd : e.angStart;
+        return toPnt(OnCircle(e.center, e.radius, ang));
       }
-      // Parameter bounds stay on the analytic circle. Converting its ends
-      // through glm::vec2/vec3 first moves them beyond OCC's edge tolerance
-      // at engine scale, rejecting a perfectly valid arc as a sweep path.
-      BRepBuilderAPI_MakeEdge mk =
-          e.arc ? BRepBuilderAPI_MakeEdge(
-                      gp_Circ(gp_Ax2(toPnt(e.center), normal,
-                                     gp_Dir(uAxis.x, uAxis.y, uAxis.z)),
-                              e.radius),
-                      e.angStart, e.angEnd)
-                : BRepBuilderAPI_MakeEdge(toPnt(e.a), toPnt(e.b));
-      if (!mk.IsDone())
-        return TopoDS_Wire(); // degenerate edge → reject the path
-      wire.Add(mk.Edge());
-      if (wire.Error() != BRepBuilderAPI_WireDone)
+      return toPnt(atB ? e.b : e.a);
+    };
+    // n + 1 vertices: the chain's two free ends, and one per joint. A
+    // joint's tolerance is the measured distance to the curves it joins
+    // (see MakeLoopWire: MakeEdge projects the vertex onto an exact-double
+    // gp_Circ, while every UV point here came through float32).
+    BRep_Builder builder;
+    std::vector<TopoDS_Vertex> nodes(n + 1);
+    for (size_t k = 0; k <= n; k++) {
+      const bool first = (k == 0), last = (k == n);
+      const glm::vec2 mid =
+          first
+              ? chain[0].a
+              : (last ? chain[n - 1].b : (chain[k - 1].b + chain[k].a) * 0.5f);
+      const gp_Pnt p = toPnt(mid);
+      double tol = Precision::Confusion();
+      auto growForEdge = [&](size_t i, bool atB) {
+        const LoopEdge& e = chain[i];
+        if (!e.arc && !e.spline)
+          return;
+        tol = std::max(tol, p.Distance(endPointWorld(i, atB)) +
+                                Precision::Confusion());
+        if (e.arc)
+          tol = std::max(tol, std::abs(p.Distance(toPnt(e.center)) - e.radius) +
+                                  Precision::Confusion());
+      };
+      if (!first)
+        growForEdge(k - 1, true);
+      if (!last)
+        growForEdge(k, false);
+      builder.MakeVertex(nodes[k], p, tol);
+    }
+
+    BRepBuilderAPI_MakeWire wire;
+    for (size_t i = 0; i < n; i++) {
+      const LoopEdge& e = chain[i];
+      const TopoDS_Vertex& from = nodes[i];
+      const TopoDS_Vertex& to = nodes[i + 1];
+      auto addEdge = [&](BRepBuilderAPI_MakeEdge& me) {
+        if (!me.IsDone()) {
+          LOG_ERROR("Sketch path: edge {} of {} failed to build "
+                    "(vertex off curve?)",
+                    i, n);
+          return false;
+        }
+        wire.Add(me.Edge());
+        return true;
+      };
+      if (e.spline) {
+        BSpline sp = *e.spline;
+        if (!Near(sp.poles.front(), e.a))
+          std::reverse(sp.poles.begin(), sp.poles.end());
+        BRepBuilderAPI_MakeEdge mk(MakeBSplineCurve(plane, sp), from, to);
+        if (!addEdge(mk))
+          return TopoDS_Wire();
+      } else if (e.arc) {
+        // Parameter bounds stay on the analytic circle; the shared vertices
+        // trim it, ordered to match the canonical span.
+        gp_Circ circ(
+            gp_Ax2(toPnt(e.center), normal, gp_Dir(uAxis.x, uAxis.y, uAxis.z)),
+            e.radius);
+        BRepBuilderAPI_MakeEdge mk(circ, forward[i] ? from : to,
+                                   forward[i] ? to : from);
+        if (!addEdge(mk))
+          return TopoDS_Wire();
+      } else {
+        const gp_Pnt p0 = BRep_Tool::Pnt(from), p1 = BRep_Tool::Pnt(to);
+        if (p0.Distance(p1) < Precision::Confusion())
+          continue; // degenerate sliver after snapping
+        BRepBuilderAPI_MakeEdge mk(GC_MakeSegment(p0, p1).Value(), from, to);
+        if (!addEdge(mk))
+          return TopoDS_Wire();
+      }
+      if (wire.Error() != BRepBuilderAPI_WireDone) {
+        LOG_ERROR("Sketch path: wire rejected edge {} of {}", i, n);
         return TopoDS_Wire();
+      }
     }
     return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
   } catch (const Standard_Failure&) {
