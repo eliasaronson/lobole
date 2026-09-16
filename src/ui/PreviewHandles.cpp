@@ -1,4 +1,5 @@
 #include "ui/PreviewHandles.h"
+#include "ui/Overlays.h" // ViewportDrawList
 
 #include "ui/SketchOverlay.h"
 #include "ui/ViewActions.h" // section helpers, VisibleSceneBounds
@@ -336,7 +337,7 @@ void BuildPreviewHandleOverlay(AppState& state, std::vector<PrimVertex>& out) {
       snprintf(buf, sizeof(buf), "%.1f\xc2\xb0", spec.value);
     else
       snprintf(buf, sizeof(buf), "%.3f", spec.value);
-    ImDrawList* fg = ImGui::GetForegroundDrawList();
+    ImDrawList* fg = ViewportDrawList();
     const ImVec2 pos(s.x + 12.0f, s.y - ImGui::GetFontSize() - 4.0f);
     fg->AddText(ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, 200), buf);
     fg->AddText(pos, IM_COL32(255, 214, 90, 255), buf);

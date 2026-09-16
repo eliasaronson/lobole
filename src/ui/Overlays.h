@@ -2,6 +2,8 @@
 
 #include "ui/AppState.h"
 
+#include "imgui.h" // ImDrawList
+
 #include <string>
 
 // Foreground-draw-list overlays: text and pills painted over the viewport,
@@ -13,6 +15,20 @@
 // pure document logic. See docs/architecture-review-2026-08-24.md; separating
 // them is the first step toward that logic being unit-testable.
 namespace ui {
+
+// The draw list every viewport annotation belongs in: the dockspace host's,
+// which ImGui renders FIRST and therefore behind every other window.
+//
+// Not the foreground list. That one is composited over everything, including
+// modals and floating panels, so the sketch's dimensions and constraint
+// badges painted straight across an open Preferences window -- reported by
+// the first outside tester, with a screenshot of exactly that. An annotation
+// on the viewport is part of the viewport: whatever the user puts in front of
+// it has to cover it.
+//
+// Falls back to the foreground list if the host window is not up yet, so a
+// caller can never get null.
+ImDrawList* ViewportDrawList();
 
 enum class PromptPill {
   StatusGood, // green: "Fully defined"

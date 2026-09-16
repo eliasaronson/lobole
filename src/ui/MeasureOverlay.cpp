@@ -1,6 +1,7 @@
 #include "ui/MeasureOverlay.h"
 
 #include "render/Camera.h"
+#include "ui/Overlays.h"          // ViewportDrawList
 #include "ui/SketchInteraction.h" // WorldToScreen
 #include "ui/SketchOverlay.h"     // AppendPrimLine / AppendPrimDot
 
@@ -87,7 +88,7 @@ void DrawWorldLabel(AppState& state, const glm::vec3& world,
   if (text.empty())
     return;
   const glm::vec2 at = WorldToScreen(state, world);
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImVec2 size = ImGui::CalcTextSize(text.c_str());
   // Centred on the point, then nudged up so the line it annotates is not
   // drawn through the text.
@@ -103,7 +104,7 @@ void DrawWorldLabel(AppState& state, const glm::vec3& world,
 void DrawCursorLabel(AppState& state, const std::string& text) {
   (void)state;
   const ImVec2 m = ImGui::GetIO().MousePos;
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImVec2 size = ImGui::CalcTextSize(text.c_str());
   const ImVec2 pos(m.x + 18.0f, m.y + 16.0f);
   dl->AddRectFilled(ImVec2(pos.x - 6.0f, pos.y - 4.0f),

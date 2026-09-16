@@ -116,11 +116,31 @@ every window.
   dialog being open. Preferences is not even a modal
   (src/ui/SettingsWindow.cpp:611), so nothing else holds it back either.
 
-The second is unambiguously wrong: a dialog is in front, and the drawing must
-not cross it. The first is a **design decision, not a defect** — SolidWorks and
-Onshape both keep the active sketch's dimensions on top of the model while you
-edit it, deliberately. What is not defensible is doing it for a sketch that is
-NOT being edited, which is what the tester was looking at.
+**Through the solid: already what SolidWorks and Onshape do, so it stays.**
+Both keep the dimensions of the sketch you are EDITING on top of the model,
+deliberately. The claim once made here — that ours also does it for sketches
+that are not being edited — was wrong: `DrawDimensions` and
+`DrawConstraintGlyphs` both return early unless `edit.IsEditing()` and read
+`ResolveActiveSketch`, so only the active sketch is ever annotated
+(src/ui/SketchDimensionDraw.cpp:244, :810). No change.
+
+(The sketch's entity LINES are the other way round — depth-tested with a
+small bias, src/render/SketchRenderer.cpp:161-163 — so a solid hides them
+while their dimensions stay on top. SolidWorks draws the active sketch's
+geometry on top too. Nobody has complained, so it is noted, not changed.)
+
+**Over the Preferences window: fixed.** Every viewport annotation now draws
+into the dockspace host's draw list (`ui::ViewportDrawList`) instead of the
+foreground list. ImGui renders `##DockHost` first, so anything the user puts
+in front of the viewport covers the annotation, which is what "in front"
+means. Ten call sites moved; a screenshot with a dimensioned sketch open in
+edit mode behind the Preferences window shows the labels in the viewport and
+a clean dialog.
+
+Finding the last of them needed the picture. After the first six were moved,
+the dialog still had the sketch's "U +X" / "V +Y" axis compass painted across
+it — a seventh site in a different file that no grep for "dimension" would
+have turned up.
 
 ## 6. The uninstaller cleaned up correctly
 

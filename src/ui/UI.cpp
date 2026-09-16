@@ -352,7 +352,7 @@ void DrawSketchAxisLabels(AppState& state) {
       origin.y > vp1.y) {
     return; // the origin is off-screen; a compass with no needle helps nobody
   }
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const struct {
     glm::vec2 uv;
     glm::vec3 dir;
@@ -393,7 +393,7 @@ void DrawEmptyStateHint(AppState& state) {
   // picking is arm-then-click).
   const char* line2 = "Press S (or the toolbar's pencil), then click a plane "
                       "- or add a box from the toolbar";
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImVec2 c(state.viewportPos.x + state.viewportSize.x * 0.5f,
                  state.viewportPos.y + state.viewportSize.y * 0.72f);
   const ImVec2 s1 = ImGui::CalcTextSize(line1);

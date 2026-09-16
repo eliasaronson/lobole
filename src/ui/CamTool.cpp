@@ -1,4 +1,5 @@
 #include "ui/CamTool.h"
+#include "ui/Overlays.h" // ViewportDrawList
 
 #ifdef HAVE_CAM
 
@@ -1101,7 +1102,7 @@ void DrawCamLabels(AppState& state) {
       state, glm::vec3(centre.x, centre.y, (op->topZ + op->bottomZ) * 0.5));
   char text[64];
   std::snprintf(text, sizeof(text), "%.3g mm deep", op->topZ - op->bottomZ);
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImVec2 size = ImGui::CalcTextSize(text);
   dl->AddRectFilled(ImVec2(at.x - 4.0f, at.y - 3.0f),
                     ImVec2(at.x + size.x + 4.0f, at.y + size.y + 3.0f),

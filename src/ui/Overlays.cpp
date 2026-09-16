@@ -10,16 +10,27 @@
 #include "ui/SketchInteraction.h" // WorldToScreen / SketchUVToScreen
 #include "ui/SketchOverlay.h"     // EdgeElementRef
 
+#include "imgui_internal.h" // FindWindowByName (the dock host's draw list)
+
 #include "imgui.h"
 
 #include <algorithm>
 
 namespace ui {
 
+ImDrawList* ViewportDrawList() {
+  // "##DockHost" is begun by DrawDockLayout and hosts the DockSpace, so it
+  // spans the whole main viewport and is the bottom-most window.
+  if (ImGuiWindow* host = ImGui::FindWindowByName("##DockHost"))
+    if (host->DrawList != nullptr)
+      return host->DrawList;
+  return ImGui::GetForegroundDrawList();
+}
+
 void DrawDatumLabels(AppState& state) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImU32 col = IM_COL32(230, 180, 90, 230);
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
     Feature* f = state.document->GetFeature(i);
@@ -89,7 +100,7 @@ void DrawPromptPill(AppState& state, float& y, const std::string& text,
     fg = IM_COL32(255, 205, 120, 255);
     break;
   }
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
   const glm::vec4 r = PromptPillRect(state, y, glm::vec2(sz.x, sz.y));
   const ImVec2 a(r.x, r.y), b(r.z, r.w);
@@ -109,7 +120,7 @@ void DrawElementNameOverlay(AppState& state) {
                                     state.pick.edgeHoverIndex);
     const char* text = ref ? ref->name.c_str() : "(unnamed)";
     const ImVec2 mouse = ImGui::GetIO().MousePos;
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    ImDrawList* dl = ViewportDrawList();
     const ImVec2 sz = ImGui::CalcTextSize(text);
     dl->AddRectFilled(ImVec2(mouse.x + 12 - 3, mouse.y + 12 - 2),
                       ImVec2(mouse.x + 12 + sz.x + 3, mouse.y + 12 + sz.y + 2),
@@ -136,7 +147,7 @@ void DrawElementNameOverlay(AppState& state) {
   const std::string* name =
       body.elementMap.NameOf(static_cast<int>(face->faceIndex));
 
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const glm::vec3 center =
       state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
   const glm::vec2 s = WorldToScreen(state, center);

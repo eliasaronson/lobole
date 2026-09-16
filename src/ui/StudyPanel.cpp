@@ -8,8 +8,9 @@
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "ui/AppState.h"
-#include "ui/DockLayout.h" // PanelHeading
+#include "ui/DockLayout.h"  // PanelHeading
 #include "ui/ExprInput.h"   // expression-capable numeric fields
+#include "ui/Overlays.h"    // ViewportDrawList
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
@@ -671,7 +672,7 @@ void DrawFieldLegend(AppState& state) {
                               : "displacement";
 
   // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const float x = state.viewportPos.x + 16.0f;
   const float barW = 18.0f, barH = 180.0f;
   const float y1 = state.viewportPos.y + state.viewportSize.y - 28.0f;

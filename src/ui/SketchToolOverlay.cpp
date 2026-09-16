@@ -239,7 +239,7 @@ void DrawSelectionBox(AppState& state) {
   if (glm::length(edit.boxEnd - edit.boxStart) < 2.0f)
     return;
   const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImVec2 a(std::min(edit.boxStart.x, edit.boxEnd.x),
                  std::min(edit.boxStart.y, edit.boxEnd.y));
   const ImVec2 b(std::max(edit.boxStart.x, edit.boxEnd.x),
@@ -274,7 +274,7 @@ void DrawSnapGlyphs(AppState& state) {
 
   const glm::vec2 p =
       SketchUVToScreen(state, sketch->plane, edit.currentSnap.uv);
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   const ImU32 accent = IM_COL32(255, 220, 120, 255);
 
   // Alignment guides: a dashed inference line from the shared vertex through

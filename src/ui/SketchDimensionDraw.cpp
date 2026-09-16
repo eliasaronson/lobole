@@ -248,7 +248,7 @@ void DrawDimensions(AppState& state) {
   if (!sketch)
     return;
 
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   ImGuiIO& io = ImGui::GetIO();
   const ImU32 col = IM_COL32(120, 200, 255, 235);
   const ImU32 colHot = IM_COL32(255, 220, 130, 255);
@@ -813,7 +813,7 @@ void DrawConstraintGlyphs(AppState& state) {
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
     return;
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImDrawList* dl = ViewportDrawList();
   ImGuiIO& io = ImGui::GetIO();
   const ImU32 col = IM_COL32(150, 210, 170, 220);
   const ImU32 colSel = IM_COL32(255, 220, 130, 255);
