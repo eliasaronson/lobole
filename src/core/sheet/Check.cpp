@@ -95,7 +95,9 @@ CheckResult Check(const Body& body, const SheetMetalRules& rules) {
       // flange was made: changing the gauge or the alloy afterwards leaves
       // every existing bend exactly where it was, and a part that was fine
       // in aluminium cracks in stainless.
-      if (b.radius < minR - 1e-9) {
+      // A hem is crushed flat rather than bent round a die, so the die's
+      // minimum radius says nothing about it.
+      if (!b.crushed && b.radius < minR - 1e-9) {
         out.violations.push_back(
             {"bend_below_minimum_radius",
              "bend " + std::to_string(i + 1) + " has an inside radius of " +

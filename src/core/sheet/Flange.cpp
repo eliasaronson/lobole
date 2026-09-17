@@ -555,6 +555,7 @@ std::string ApplyFlanges(std::vector<Body>& bodies,
       bend.axisOrigin = {axisPt.X(), axisPt.Y(), axisPt.Z()};
       bend.axisDir = {plan.frame.e.X(), plan.frame.e.Y(), plan.frame.e.Z()};
       bend.radius = R;
+      bend.crushed = spec.crushed;
       bend.width = plan.a1 - plan.a0;
       bend.angle = spec.angle;
       bend.kFactor = rules.EffectiveKFactor(R);

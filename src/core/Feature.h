@@ -58,6 +58,12 @@ struct BendRegion {
   // answers it for the side asked about. A sense stored against axisDir
   // flipped with whichever way the picked edge happened to run.
   double angle = 0.0;
+  // A hem: folded flat on itself rather than bent round a die, so its radius
+  // is the gap the return leaves and is deliberately far under what the
+  // material takes. Nothing downstream can tell that from the radius alone,
+  // and check_sheet_metal fired the minimum-radius violation on every hem
+  // until this said so.
+  bool crushed = false;
   double kFactor = 0.0;
   // Where that K came from ("table:steel R/t<2", "rules", "override"). A bend
   // whose K nobody can trace is a bend nobody can argue with when the part

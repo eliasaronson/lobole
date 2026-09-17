@@ -58,7 +58,14 @@ bool HemFeature::Execute(RegenContext& ctx) {
   // At 180 degrees the fold's outside is R + t past its tangent line, so
   // setting the line back by that much keeps the outline where it was drawn.
   spec.setback = outside ? 0.0 : spec.radius + t;
-  spec.relief = sheet::ReliefStyle::None;
+  spec.crushed = true;
+  // An inset hem stops its fold inside the panel exactly as an inset flange
+  // does, and the metal tears from the end of the fold just the same — a
+  // shop notches the corner. So it takes the document's relief, like any
+  // other bend line that stops short.
+  spec.relief = rules.reliefStyle;
+  spec.reliefWidth = rules.EffectiveReliefWidth();
+  spec.reliefDepth = rules.EffectiveReliefDepth(spec.radius);
   spec.offsetStart = offsetStart;
   spec.offsetEnd = offsetEnd;
   if (offsetStart < 0.0 || offsetEnd < 0.0) {

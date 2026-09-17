@@ -12,6 +12,7 @@
 #include "core/features/RefoldFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/UnfoldFeature.h"
+#include "core/sheet/Check.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -19,6 +20,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <set>
@@ -202,12 +204,26 @@ TEST_CASE("a hem stops short of the wall beside it", "[sheetmetal][hem]") {
   CHECK(Sound(doc));
 
   // Exactly the full-length hem, less the two ends that were not folded:
-  // the return, its sector, and the setback that is no longer cut away.
+  // the return, its sector, and the setback that is no longer cut away —
+  // and less the relief notched at each end, because a fold stopping inside
+  // a panel tears from its end whether it was bent or crushed.
   const double setback = r + kT;
   const double span = kW - 2.0 * inset;
+  const double reliefW = std::max(1.5 * kT, 1.0);
+  const double reliefD = r + kT; // EffectiveReliefDepth of the hem's radius
+  const double notch = reliefW * (reliefD + setback) * kT;
   const double expected = kW * kD * kT - span * setback * kT +
-                          Sector(kPi, r, span) + ret * kT * span;
+                          Sector(kPi, r, span) + ret * kT * span - 2.0 * notch;
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(expected, 1e-5));
+
+  // ...and with the relief cut, nothing in the part is a violation: not the
+  // hem's own radius, which is a crushed fold and not a die bend, and not
+  // the ends, which are relieved.
+  const sheet::CheckResult chk =
+      sheet::Check(doc.GetBodies()[0], *doc.SheetMetal());
+  for (const sheet::Violation& v : chk.violations)
+    UNSCOPED_INFO(v.message);
+  CHECK(chk.violations.empty());
 
   // And the hem is a bend the width of what was left, not of the whole edge.
   REQUIRE(doc.GetBodies()[0].bends.size() == 1);

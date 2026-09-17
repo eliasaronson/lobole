@@ -46,6 +46,9 @@ struct FlangeSpec {
   // touch at a point (bent outside the panel), close the corner: extend each
   // past the corner as far as the other sticks out, then mitre them.
   bool closedCorners = false;
+  // A hem rather than a bend: crushed flat, so exempt from the material's
+  // minimum bend radius (the radius here is the gap, not a die).
+  bool crushed = false;
 };
 
 // Builds one flange per picked edge onto the bodies they belong to and

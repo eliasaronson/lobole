@@ -67,6 +67,7 @@ json BendToJson(const BendRegion& b) {
               {"axis_origin", V3(b.axisOrigin)},
               {"axis_dir", V3(b.axisDir)},
               {"radius", b.radius},
+              {"crushed", b.crushed},
               {"width", b.width},
               {"angle", b.angle},
               {"k_factor", b.kFactor},
@@ -92,6 +93,7 @@ BendRegion BendFromJson(const json& j) {
   b.axisOrigin = V3(j.value("axis_origin", json()), b.axisOrigin);
   b.axisDir = V3(j.value("axis_dir", json()), b.axisDir);
   b.radius = j.value("radius", 0.0);
+  b.crushed = j.value("crushed", false);
   b.width = j.value("width", 0.0);
   b.angle = j.value("angle", 0.0);
   b.kFactor = j.value("k_factor", 0.0);
