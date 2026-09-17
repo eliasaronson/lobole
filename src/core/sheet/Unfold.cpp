@@ -7,6 +7,7 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -1399,8 +1400,6 @@ std::optional<FlatResult> NormalCut(const Body& body,
         return fail("from this direction the cut's outline lands on more "
                     "than one part of the sheet - sketch it where it sees "
                     "only the face to be cut");
-      const gp_Trsf& place =
-          all.pieces[static_cast<size_t>(*pieces.begin())].second;
       TopoDS_Face face;
       for (const auto& row : samples)
         for (const Sample_& smp : row)
@@ -1412,17 +1411,50 @@ std::optional<FlatResult> NormalCut(const Body& body,
       gp_Dir out = surf.Plane().Axis().Direction();
       if (face.Orientation() == TopAbs_REVERSED)
         out.Reverse();
-      const CADShape cutter =
-          cutterIn(all, surf.Plane().Location().Transformed(place),
-                   out.Transformed(place));
-      if (split)
-        return fail("from this direction the cut's outline lands on more "
-                    "than one part of the sheet - sketch it where it sees "
-                    "only the face to be cut");
+
+      // One flat panel. Where the sketch faces that panel square on — a
+      // hole cut straight down onto a flat sheet, which is most of them —
+      // the profile goes on AS DRAWN, carried along the sketch's direction
+      // and prismed through the sheet. Sampling the wire and laying a
+      // polygon down answers the same question, and it is what a cut across
+      // a bend has to do, but on a panel it turns a hole into a 380-sided
+      // pit: 383 faces where a bored hole has 7, in the file, in the DXF a
+      // shop cuts from, and in every boolean afterwards.
+      const gp_Pnt seat = surf.Plane().Location();
+      const double denom = gp_Vec(out).Dot(gp_Vec(along));
+      CADShape cutter;
+      if (std::abs(std::abs(denom) - 1.0) < 1e-6) {
+        const TopoDS_Wire wire = BRepTools::OuterWire(profile);
+        BRepAdaptor_Curve probe(
+            TopoDS::Edge(TopExp_Explorer(wire, TopAbs_EDGE).Current()));
+        const gp_Pnt on = probe.Value(probe.FirstParameter());
+        gp_Trsf onto;
+        onto.SetTranslation(gp_Vec(along) *
+                            (gp_Vec(on, seat).Dot(gp_Vec(out)) / denom));
+        gp_Trsf lift;
+        lift.SetTranslation(gp_Vec(out) * eps);
+        const TopoDS_Shape laid =
+            BRepBuilderAPI_Transform(profile, lift * onto, Standard_True)
+                .Shape();
+        cutter =
+            CADShape(BRepPrimAPI_MakePrism(laid, gp_Vec(out) * -(t + 2.0 * eps))
+                         .Shape());
+      } else {
+        // Oblique: the outline lands on the panel as a squashed copy of
+        // itself, and the sampled polygon is what carries it there.
+        const gp_Trsf& place =
+            all.pieces[static_cast<size_t>(*pieces.begin())].second;
+        const CADShape flatCutter =
+            cutterIn(all, seat.Transformed(place), out.Transformed(place));
+        if (split)
+          return fail("from this direction the cut's outline lands on more "
+                      "than one part of the sheet - sketch it where it sees "
+                      "only the face to be cut");
+        cutter = Transformed(flatCutter, place.Inverted());
+      }
       if (!cutter.IsValid())
         return fail("the cut's outline does not land on the sheet");
-      Named cut = Subtract(Named{body.shape, body.elementMap},
-                           Transformed(cutter, place.Inverted()), tag);
+      Named cut = Subtract(Named{body.shape, body.elementMap}, cutter, tag);
       if (const std::string bad = checked(cut, body.shape.Volume());
           !bad.empty())
         return fail(bad);

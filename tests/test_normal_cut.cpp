@@ -112,9 +112,27 @@ TEST_CASE("a normal cut through a panel is a plain hole",
   INFO(Last(doc).GetError());
   REQUIRE(Last(doc).GetError().empty());
   CHECK(Sound(doc));
-  // A 72-point polygon of the circle: within a tenth of a percent.
+  // EXACTLY a hole: the profile goes onto the panel as drawn, so the circle
+  // stays a circle. It used to be laid down as a sampled polygon — a 380-
+  // sided pit that was within a tenth of a percent by volume and wrong in
+  // every other way: 383 faces instead of 7, a DXF full of chords, and a
+  // cylinder no downstream feature could recognise.
   CHECK_THAT(before - doc.GetBodies()[0].shape.Volume(),
-             WithinRel(kPi * 9.0 * kT, 2e-3));
+             WithinRel(kPi * 9.0 * kT, 1e-9));
+  const TopoDS_Shape& shape = doc.GetBodies()[0].shape.GetShape();
+  int faces = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+    ++faces;
+  CHECK(faces == 7); // the blank's six, and the bore
+  int circles = 0;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+    if (c.GetType() == GeomAbs_Circle)
+      ++circles;
+  }
+  CHECK(circles == 2); // the bore's rims, top and bottom
 }
 
 TEST_CASE("a normal cut through a bend is square to the metal",
