@@ -39,4 +39,9 @@ else
   fi
 fi
 
+# On a Wayland session GLFW picks Wayland over the X display xvfb-run sets,
+# so the app would land on the developer's compositor after all — and a
+# --hidden window there never receives a frame callback, so it hangs before
+# answering its first RPC. Xvfb is the display; say so.
+unset WAYLAND_DISPLAY
 exec "$XVFB_RUN" -a -s '-screen 0 1600x1000x24' "$@"
