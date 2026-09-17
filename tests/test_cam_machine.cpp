@@ -995,8 +995,6 @@ TEST_CASE("cam machine: an operation wholly beyond the travel FAILS, it does "
   CHECK(gcode.find("SKIPPED op 11") != std::string::npos);
 }
 
-#endif // HAVE_CAM
-
 TEST_CASE("cam: a grbl file states its own tool numbers", "[cam][post]") {
   // GRBL takes no M6, so the change is a pause with a message -- and for a
   // year that message was the ONLY thing naming the tool. Nothing that reads
@@ -1040,3 +1038,5 @@ TEST_CASE("cam: a grbl file states its own tool numbers", "[cam][post]") {
     cutWithFour |= m.tool == 4;
   CHECK(cutWithFour);
 }
+
+#endif // HAVE_CAM

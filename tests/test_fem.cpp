@@ -1163,6 +1163,13 @@ TEST_CASE("PlanStudy + MeshPlannedStudy is PrepareStudy, on copied shapes",
 
 #endif // HAVE_NETGEN
 
+// Netgen-gated like every other meshing case in this file: without it
+// fem::Mesh returns nullopt and the REQUIREs below fail, which is what the
+// stock-Ubuntu containers (no Netgen in apt) saw — invisibly, because CI was
+// red for another reason at the time. tools/ci-local.sh --containers is what
+// catches this class.
+#ifdef HAVE_NETGEN
+
 // --- P0: can one mesh span two solids? (docs/simulation/plan.md) ----------
 //
 // The question the whole "assembly studies" ladder rests on. A bonded
@@ -1305,6 +1312,8 @@ TEST_CASE("P0: a mesh spans two solids only when they SHARE the face",
     CHECK(DoubledInterfaceNodes(*mesh) == 0);
   }
 }
+
+#endif // HAVE_NETGEN
 
 // ---- S1: a study on an assembly (docs/simulation/assembly-studies-plan.md)
 
