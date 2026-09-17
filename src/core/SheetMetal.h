@@ -46,6 +46,9 @@ struct Gauge {
 
 // Everything stocked, in material then descending-thickness order.
 [[nodiscard]] const std::vector<Gauge>& GaugeTable();
+// The materials sheet data is carried for, in table order. The list IS the
+// scope: a picker built from it cannot offer one LookupGauge would refuse.
+[[nodiscard]] const std::vector<std::string>& Materials();
 // The designations carried for one material, in table order. The list IS the
 // scope: a picker built from it cannot offer a row LookupGauge would refuse.
 [[nodiscard]] std::vector<std::string> GaugesFor(const std::string& material);

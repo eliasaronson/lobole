@@ -165,6 +165,8 @@ const std::vector<Gauge>& GaugeTable() {
   return table;
 }
 
+const std::vector<std::string>& Materials() { return SheetMaterials(); }
+
 std::vector<std::string> GaugesFor(const std::string& material) {
   std::vector<std::string> v;
   for (const Gauge& g : GaugeTable()) {

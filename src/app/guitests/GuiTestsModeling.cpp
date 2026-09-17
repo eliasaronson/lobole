@@ -1,6 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Angles.h"
 #include "core/Measure.h"
+#include "core/SheetMetal.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "ui/DocumentSlots.h"
 #include "ui/FeatureTreePanel.h"
@@ -1732,6 +1733,50 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     const glm::vec3 span = max - min;
     const float thin = std::min({span.x, span.y, span.z});
     IM_CHECK(std::abs(thin - 1.5f) < 1e-3f);
+  };
+
+  // The Sheet Metal panel: declaring the stock is a real undoable edit, and
+  // the numbers it shows are the DERIVED ones a flange will use rather than
+  // the zeros that are stored.
+  t = IM_REGISTER_TEST(engine, "sheetmetal", "panel_declares_the_stock");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+    IM_CHECK(!Doc()->SheetMetal().has_value());
+
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    // A CollapsingHeader's open state lives in ImGui's ini and outlives the
+    // per-test reset, so open it only when the button is not already there.
+    if (ctx->ItemInfo("//###Variables/###sm_make", ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Sheet metal");
+      ctx->Yield(2);
+    }
+    ctx->ItemClick("//###Variables/###sm_make");
+    ctx->Yield(2);
+
+    IM_CHECK(Doc()->SheetMetal().has_value());
+    const sheet::SheetMetalRules& rules = *Doc()->SheetMetal();
+    IM_CHECK(!rules.material.empty());
+    IM_CHECK(rules.thickness > 0.0);
+    // Stored unset, shown DERIVED: the radius a flange will use is the
+    // material's own minimum, not a zero and not a literal.
+    IM_CHECK(rules.bendRadius == 0.0);
+    IM_CHECK(std::abs(rules.EffectiveBendRadius() -
+                      sheet::MinBendRadius(rules.material, rules.thickness)) <
+             1e-9);
+    // One undoable step, like every other document-level statement.
+    IM_CHECK(s_App->commands->CanUndo());
+    s_App->commands->Undo(*Doc());
+    ctx->Yield();
+    IM_CHECK(!Doc()->SheetMetal().has_value());
+
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
   };
 
   // Feature tree affordances: context-menu rename (inline edit) and the

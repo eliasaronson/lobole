@@ -1,5 +1,6 @@
 #include "core/features/EdgeFlangeFeature.h"
 
+#include "core/Angles.h"
 #include "core/ElementHistory.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -334,8 +335,8 @@ bool EdgeFlangeFeature::Execute(RegenContext& ctx) {
   }
   const sheet::SheetMetalRules& rules = *ctx.sheetMetal;
   const double t = rules.thickness;
-  const double theta = angleDeg * std::numbers::pi / 180.0;
-  if (theta <= 1e-6 || theta > std::numbers::pi + 1e-9) {
+  const double theta = angles::ToRadians(angleDeg);
+  if (theta <= 1e-6 || theta > angles::kPi + 1e-9) {
     SetError("bend angle must be above 0 and at most 180 degrees (got " +
              std::to_string(angleDeg) + ")");
     return false;

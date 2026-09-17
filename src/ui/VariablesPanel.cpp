@@ -1,5 +1,6 @@
 #include "ui/VariablesPanel.h"
 #include "ui/CatalogActions.h"
+#include "ui/SheetMetalActions.h"
 #include "ui/ToleranceActions.h"
 
 #include "ui/DockLayout.h" // PanelHeading
@@ -121,6 +122,7 @@ void DrawVariablesPanel(AppState& state) {
   // first appearance (fresh layout builds select the last-appearing tab).
   ImGui::Begin(kPanelVariables, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   PanelHeading(kPanelVariables);
+  DrawSheetMetalSection(state);
   DrawTolerancesSection(state);
   DrawCatalogSection(state);
   // NOT `if (!state.document) return`, which is what this did until
