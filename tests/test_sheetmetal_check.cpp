@@ -142,6 +142,27 @@ TEST_CASE("a bend line stopping inside a panel is caught",
   const sheet::CheckResult after =
       sheet::Check(doc.GetBodies()[0], *doc.SheetMetal());
   CHECK_FALSE(Fired(after, "missing_bend_relief"));
+
+  // ...whichever mold line the flange was dimensioned to. The relief's depth
+  // is measured from the TANGENT LINE, and it used to be measured from the
+  // setback: a material_inside flange — the DEFAULT — then got a notch
+  // exactly as deep as its own setback, which stops at the tangent line and
+  // relieves nothing. The part claimed relief, the metal had none, and this
+  // check was the only thing that said so.
+  for (const FlangePosition pos :
+       {FlangePosition::MaterialInside, FlangePosition::MaterialOutside,
+        FlangePosition::BendOutside}) {
+    f->position = pos;
+    doc.ClearRegenCache();
+    REQUIRE(doc.Regenerate());
+    INFO("position " << FlangePositionName(pos));
+    REQUIRE(doc.GetFeature(2)->GetError().empty());
+    const sheet::CheckResult each =
+        sheet::Check(doc.GetBodies()[0], *doc.SheetMetal());
+    for (const sheet::Violation& v : each.violations)
+      UNSCOPED_INFO(v.message);
+    CHECK_FALSE(Fired(each, "missing_bend_relief"));
+  }
 }
 
 TEST_CASE("a hole too close to a bend is caught", "[sheetmetal][dfm]") {

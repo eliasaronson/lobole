@@ -491,7 +491,15 @@ std::string ApplyFlanges(std::vector<Body>& bodies,
         const double w = spec.reliefWidth;
         const double s0 = end == 0 ? plan.a0 - w : plan.a1;
         const double s1 = end == 0 ? plan.a0 : plan.a1 + w;
-        const double back = spec.setback - spec.reliefDepth;
+        // `origin` is the TANGENT LINE, so the relief has to reach
+        // reliefDepth back INTO the panel (negative u) and then out over
+        // whatever the setback removed. Measured from the setback line
+        // instead, a material_inside flange — the default — got a notch
+        // exactly as deep as its own setback, which stops AT the tangent
+        // line and relieves nothing: the metal still tears from the corner
+        // of the cut, and check_sheet_metal said so while the part claimed
+        // to have relief.
+        const double back = -spec.reliefDepth;
         if (spec.relief == ReliefStyle::Obround) {
           tools.push_back(FrameBox(plan.frame, plan.origin, back + w / 2.0,
                                    spec.setback + eps, -t - eps, eps, s0, s1));
