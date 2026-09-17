@@ -870,9 +870,28 @@ std::optional<FlatResult> UnfoldImpl(const Body& body,
             Along(f.C.Translated(f.W(f.theta) * (f.R + f.t / 2.0) +
                                  gp_Vec(f.cd) * f.t),
                   f.A, f.width);
-        if (!ComponentAt(side.shape, side.map, probes, child.shape, child.map))
+        if (!ComponentAt(side.shape, side.map, probes, child.shape,
+                         child.map)) {
+          // The wall is THERE — it just is not in this piece any more,
+          // because an earlier bend's child took it: two flanges that touch
+          // are one solid, so the corner is continuous metal. No blank folds
+          // into that, and saying "no wall past it" sends the reader to look
+          // for a missing wall they can see is present.
+          const bool inBody =
+              std::any_of(probes.begin(), probes.end(), [&](const gp_Pnt& p) {
+                return Contains(body.shape.GetShape(), p);
+              });
+          if (inBody)
+            return fail(
+                "the wall past bend " + std::to_string(bi + 1) +
+                " is joined to another panel, so the two cannot be folded "
+                "apart - a flange running the full length of a wall meets "
+                "the wall beside it at the corner and fuses to it. Inset it "
+                "(offset_start / offset_end) by a bend radius and a "
+                "thickness, or mitre the corner (corners: closed)");
           return fail("bend " + std::to_string(bi + 1) +
                       " has no wall past it to lay flat");
+        }
       }
       // The bend's own material: between the two tangent planes and within
       // the span along the axis — bounded so that panel beside an inset

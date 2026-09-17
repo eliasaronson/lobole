@@ -344,3 +344,90 @@ TEST_CASE("up and down are seen from a side of the blank",
   CHECK(count("LINE\n8\nBEND_DOWN\n") == 1);
   std::filesystem::remove(path);
 }
+
+TEST_CASE("a flange that runs into the wall beside it says so",
+          "[sheetmetal][unfold]") {
+  // A pan with two walls on ADJACENT edges and a rim along the top of one of
+  // them. The rim runs the full length of its wall, so at the mitred corner
+  // it meets the other wall and fuses to it: the corner is then continuous
+  // metal, and no blank folds into that. The refusal has to name THAT — it
+  // used to say the wall past the bend did not exist, sending the reader to
+  // look for a wall plainly visible in the viewport.
+  Document doc;
+  const uint64_t base = Blank(doc);
+  const std::string front =
+      EdgeNamed(doc.GetBodies()[0], {0, 0, kT}, {kW, 0, kT});
+  const std::string side =
+      EdgeNamed(doc.GetBodies()[0], {kW, 0, kT}, {kW, kD, kT});
+  REQUIRE_FALSE(front.empty());
+  REQUIRE_FALSE(side.empty());
+  auto walls = std::make_unique<EdgeFlangeFeature>(
+      "Walls",
+      std::vector<ElementRef>{ElementRef{base, front}, ElementRef{base, side}},
+      40.0, 90.0);
+  walls->position = FlangePosition::MaterialInside;
+  doc.AddFeature(std::move(walls));
+  REQUIRE(doc.GetFeature(2)->GetError().empty());
+
+  // The rim, along the whole top edge of the front wall.
+  const Body& body = doc.GetBodies()[0];
+  std::string top;
+  {
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+    // The front wall's OUTER top edge: of the edges that run in X, the one
+    // highest up and then furthest forward. Picked by extreme rather than by
+    // a computed height — which of the two edges a hair apart is picked is
+    // what decides which way the rim folds.
+    double bestZ = -1e30, bestY = 1e30;
+    for (int pass = 0; pass < 2; ++pass) {
+      for (int i = 1; i <= edges.Extent(); ++i) {
+        BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+        if (c.GetType() != GeomAbs_Line)
+          continue;
+        const gp_Pnt a = c.Value(c.FirstParameter());
+        const gp_Pnt b = c.Value(c.LastParameter());
+        if (std::abs(a.X() - b.X()) < 1e-6) // runs in Y: the side wall
+          continue;
+        if (std::abs(a.Z() - b.Z()) > 1e-6)
+          continue;
+        const double z = a.Z(), y = (a.Y() + b.Y()) * 0.5;
+        if (pass == 0) {
+          bestZ = std::max(bestZ, z);
+        } else if (std::abs(z - bestZ) < 1e-6 && y < bestY) {
+          bestY = y;
+          if (const std::string* n = body.elementMap.EdgeNameOf(i - 1))
+            top = *n;
+        }
+      }
+    }
+  }
+  REQUIRE_FALSE(top.empty());
+  auto rim = std::make_unique<EdgeFlangeFeature>(
+      "Rim", std::vector<ElementRef>{ElementRef{base, top}}, 15.0, 90.0);
+  doc.AddFeature(std::move(rim));
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+
+  std::string why;
+  const auto flat =
+      sheet::Unfold(doc.GetBodies()[0], AluRules(), {}, 99, {}, &why);
+  REQUIRE_FALSE(flat.has_value());
+  INFO(why);
+  CHECK(why.find("joined to another panel") != std::string::npos);
+  CHECK(why.find("offset_start") != std::string::npos);
+
+  // Inset by a radius and a thickness and the same part lays flat: the rim
+  // stops short of its neighbour, so the corner comes apart again.
+  auto* edited = dynamic_cast<EdgeFlangeFeature*>(doc.GetFeature(3));
+  REQUIRE(edited != nullptr);
+  edited->offsetStart = kR + kT;
+  edited->offsetEnd = kR + kT;
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetFeature(3)->GetError().empty());
+  std::string why2;
+  const auto flat2 =
+      sheet::Unfold(doc.GetBodies()[0], AluRules(), {}, 100, {}, &why2);
+  INFO(why2);
+  REQUIRE(flat2.has_value());
+  CHECK_THAT(ThicknessOf(Body{.shape = flat2->shape}), WithinAbs(kT, 1e-6));
+}
