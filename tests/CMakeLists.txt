@@ -750,8 +750,13 @@ set_tests_properties(packaging_smoke PROPERTIES TIMEOUT 60)
 
 # Models a bracket through the MCP server (stdio) over the same live app.
 # Skips (77) when the python mcp SDK is not installed.
+#
+# Through XVFB_EXEC like the other two windowed smokes: it launches the app
+# --hidden, which on a Wayland session opened a window on the developer's own
+# compositor that never received a frame callback — the app then hung before
+# answering its first RPC and this timed out at 600 s.
 add_test(NAME mcp_smoke
-         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.py
+         COMMAND ${XVFB_EXEC} python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(mcp_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 600
                      SKIP_RETURN_CODE 77)
