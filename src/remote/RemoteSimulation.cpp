@@ -213,10 +213,18 @@ static constexpr MethodDoc SimulationMethods[] = {
      "squared (m/s^2) as a [x, y, z] vector, so Earth down is [0, 0, -9.81] "
      "with Z up. volume_fraction is a fraction of 1 and the iteration counts "
      "are counts. Takes `id` (or `study`, the same thing here) — see "
-     "remove_study.",
-     ", filter_radius, gravity, id, max_iterations, mesh_size, name, "
-     "participants, "
-     "num_modes, study, type, volume_fraction"},
+     "remove_study.\n"
+     "On an ASSEMBLY, `participants` is the study: a list of {occurrence, "
+     "role: meshed|bonded|rigid|ignored, mesh_size?}. Exactly one occurrence "
+     "is `meshed`; `bonded` is meshed AND glued to it where they touch, with "
+     "its own material; `rigid` is not meshed and holds the meshed part "
+     "where they touch — but only once CLAMPED, which is a load "
+     "(add_load {type: fixed, contact_with}), not a consequence of the role. "
+     "A clamp is resolved against the whole group, so a rigid support that "
+     "touches only a bonded member holds it just the same; one that touches "
+     "nothing meshed is refused by name.",
+     "filter_radius, gravity, id, max_iterations, mesh_size, name, num_modes, "
+     "participants, study, type, volume_fraction"},
     {"add_load",
      "Add a load/fixture to a study {study, type: fixed|force|pressure, face, "
      "magnitude, direction?}. `magnitude` is NEWTONS for a force -- the total "

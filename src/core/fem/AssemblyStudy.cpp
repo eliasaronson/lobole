@@ -384,8 +384,23 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
       return false;
     perBody[a.body].loads.push_back({a.face, i});
   }
-  if (perBody.empty())
+  if (perBody.empty()) {
+    // A rigid participant is not a fixture until it is CLAMPED, and there is
+    // nothing in "no loads to solve" to say so — a caller who has declared
+    // six supports reads it as a contradiction. The GUI has a Clamp here
+    // button on every rigid row; over the RPC the same thing is a load.
+    int rigid = 0;
+    for (const Participant& pt : study.participants)
+      if (pt.role == ParticipantRole::Rigid)
+        rigid++;
+    if (rigid > 0)
+      return fail("study has no loads to solve — it has " +
+                  std::to_string(rigid) +
+                  " rigid participant(s), and a rigid support holds nothing "
+                  "until it is clamped: add_load {type: fixed, contact_with: "
+                  "<that occurrence>}");
     return fail("study has no loads to solve");
+  }
   for (size_t i = 0; i < study.refinements.size(); ++i) {
     Anchor a;
     if (!resolveOn(study.refinements[i].face, study.refinements[i].occurrenceId,
