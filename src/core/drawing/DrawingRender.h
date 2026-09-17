@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,28 @@ struct SheetCurve {
   double conicRadius = -1.0;
   bool closed = false; // conic interval sweeps the full circle (bore vs arc)
 };
+
+// Line styles, in sheet millimetres: alternating dash and gap lengths, and
+// the stroke width. One table, because the viewport, the SVG and the PDF must
+// draw the same line — a hidden edge that is dashed on screen and solid in
+// the exported sheet is a drawing that means two different things.
+struct LineStyle {
+  std::span<const double> dash; // empty = a solid line
+  double widthMM = 0.35;
+};
+inline constexpr double kHiddenDashMM[] = {1.6, 1.2};
+// A chain line (long dash, gap, dot, gap): the drafting convention for a
+// centreline, and what a flat pattern's bend lines are drawn with.
+inline constexpr double kBendDashMM[] = {6.0, 1.2, 0.6, 1.2};
+
+// How a projected curve is drawn, from what it IS.
+[[nodiscard]] inline LineStyle StyleOf(const SheetCurve& c) {
+  if (c.kind == CurveKind::Bend)
+    return {kBendDashMM, 0.25};
+  if (!c.visible)
+    return {kHiddenDashMM, 0.25};
+  return {{}, 0.35};
+}
 
 // All geometry for one view, ready to render or export.
 struct SheetView {

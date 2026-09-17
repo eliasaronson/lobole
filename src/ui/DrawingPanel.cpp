@@ -17,7 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <initializer_list>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -75,13 +75,12 @@ void StrokePolyline(ImDrawList* dl, AppState& state,
                 col, px);
 }
 
-// Hidden edges: dashed, in sheet-mm units so the dash pattern is stable under
-// zoom (the design's CPU-dashing, in sheet space).
-// `pattern` alternates dash and gap lengths, sheet mm; a bend line is a chain
-// (long dash, gap, dot, gap), the same pattern the exporters write.
+// A dashed line, in sheet-mm units so the pattern is stable under zoom (the
+// design's CPU-dashing, in sheet space). The pattern comes from
+// drawing::StyleOf, the same table the exporters draw from.
 void StrokeDashed(ImDrawList* dl, AppState& state,
                   const std::vector<glm::dvec2>& pts, ImU32 col, float px,
-                  std::initializer_list<double> pattern = {1.6, 1.2}) {
+                  std::span<const double> pattern) {
   for (size_t i = 1; i < pts.size(); ++i) {
     const glm::dvec2 a = pts[i - 1], b = pts[i];
     const double len = glm::length(b - a);
@@ -367,12 +366,13 @@ void DrawViews(ImDrawList* dl, AppState& state) {
     for (const drawing::SheetCurve& c : sv.curves) {
       if (c.points.size() < 2)
         continue;
-      if (c.kind == drawing::CurveKind::Bend)
-        StrokeDashed(dl, state, c.points, visible, 1.0f, {6.0, 1.2, 0.6, 1.2});
-      else if (c.visible)
+      const drawing::LineStyle style = drawing::StyleOf(c);
+      if (style.dash.empty())
         StrokePolyline(dl, state, c.points, visible, 1.6f);
       else
-        StrokeDashed(dl, state, c.points, hidden, 1.0f);
+        StrokeDashed(dl, state, c.points,
+                     c.kind == drawing::CurveKind::Bend ? visible : hidden,
+                     1.0f, style.dash);
     }
     // Centre marks on visible circles (v66) — same rule as the exporters.
     for (const drawing::SheetCurve& c : sv.curves) {
@@ -627,6 +627,14 @@ void DrawViewsSection(AppState& state) {
     // blank of a sheet-metal part beside its folded views.
     const Document* srcDoc =
         DrawingSourceDocument(state, partSlots[srcIdx]->id);
+    // Configuration ids are per document, so the id chosen for one part can
+    // name a DIFFERENT configuration in the next one. Forget it when the
+    // source changes rather than carrying a number across.
+    static uint64_t addConfigFor = 0;
+    if (addConfigFor != partSlots[srcIdx]->id) {
+      addConfigFor = partSlots[srcIdx]->id;
+      addConfig = 0;
+    }
     if (srcDoc && srcDoc->FindConfiguration(addConfig) == nullptr)
       addConfig = 0;
     if (srcDoc && !srcDoc->GetConfigurations().empty()) {
