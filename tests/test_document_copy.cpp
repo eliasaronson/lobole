@@ -4,6 +4,7 @@
 #include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/SheetMetal.h"
 #include "core/Units.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
@@ -63,6 +64,12 @@ std::unique_ptr<Document> BuildLoadedDocument() {
 
   doc->SetAsset("underlay.png", {1, 2, 3, 4, 5});
   doc->SetUnits({units::Length::Inch, units::Mass::Gram, units::Angle::Radian});
+  // Sheet-metal rules: a copy without them regenerates every flange red.
+  sheet::SheetMetalRules rules;
+  rules.material = "steel";
+  rules.gauge = "16ga";
+  rules.thickness = 1.519;
+  doc->SetSheetMetal(rules);
   doc->SetActiveConfiguration(cfg.id);
   doc->SetRollback(1);
   doc->Regenerate();

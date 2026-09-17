@@ -55,6 +55,7 @@ Document::Document(const Document& other, bool reuseGeometry)
       m_projectParameters(other.m_projectParameters), m_nextId(other.m_nextId),
       m_rollback(other.m_rollback), m_commitGeometry(other.m_commitGeometry) {
   m_generator = other.m_generator;
+  m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
   m_features.reserve(other.m_features.size());
   for (const std::unique_ptr<Feature>& f : other.m_features)
     m_features.push_back(f->Clone());
