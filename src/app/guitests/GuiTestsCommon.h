@@ -136,7 +136,12 @@ enum class Needs {
   TwoBodies,
   ClosedSketch,
   TwoSketches,
-  ProfileAndPath
+  ProfileAndPath,
+  // Sheet metal: the stock declared plus a closed profile, and then that
+  // profile thickened into a blank. Setting the rules is part of the SETUP
+  // and not of the tool — a flange has no thickness of its own.
+  SheetRules,
+  SheetBlank
 };
 enum class Expect {
   Changes,            // accept with defaults => the model is different
@@ -150,7 +155,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[26];
+extern const ToolCase kToolCases[29];
 const ToolCase* FindToolCase(const char* testName);
 
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);

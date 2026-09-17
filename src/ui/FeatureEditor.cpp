@@ -12,14 +12,17 @@
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/ThreadStandards.h"
+#include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
+#include "core/features/EdgeFlangeFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
@@ -879,6 +882,26 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       return true;
     }
     return false;
+  case PickSlot::FlatPatternBody:
+    if (auto* fp = dynamic_cast<FlatPatternFeature*>(&f);
+        fp != nullptr && item.kind == SelectionItem::Kind::Body) {
+      fp->bodyId = item.id;
+      return true;
+    }
+    return false;
+  case PickSlot::EdgeFlangeEdges:
+    if (auto* ef = dynamic_cast<EdgeFlangeFeature*>(&f);
+        ef != nullptr && item.kind == SelectionItem::Kind::Edge) {
+      // Every picked edge has to be on ONE sheet body — a flange bends a
+      // panel, not two parts at once — so the first pick names the body and
+      // a later edge from elsewhere is refused rather than left to break
+      // regeneration. The same rule Shell's open faces follow.
+      if (!ef->edges.empty() &&
+          item.element.featureId != ef->edges.front().featureId)
+        return false;
+      return ToggleRefInList(ef->edges, item.element);
+    }
+    return false;
   case PickSlot::ShellOpenFaces:
     if (auto* sh = dynamic_cast<ShellFeature*>(&f);
         sh != nullptr && item.kind == SelectionItem::Kind::Face) {
@@ -1041,6 +1064,16 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
     return {{PickSlot::ThreadFace, "Face", kFace, false,
              "Pick the cylindrical face to thread"}};
   }
+  if (dynamic_cast<const EdgeFlangeFeature*>(&feature) != nullptr) {
+    return {{PickSlot::EdgeFlangeEdges, "Edges", kEdge, true,
+             "Click STRAIGHT edges of a flat panel (click again to remove). "
+             "Which of a rim's two edges you pick decides which way the wall "
+             "folds"}};
+  }
+  if (dynamic_cast<const FlatPatternFeature*>(&feature) != nullptr) {
+    return {{PickSlot::FlatPatternBody, "Body", kBody, false,
+             "Pick the sheet body to lay flat"}};
+  }
   if (auto* sp = dynamic_cast<const SplitFeature*>(&feature)) {
     std::vector<SlotSpec> specs = {
         {PickSlot::SplitBody, "Body", kBody, false, "Pick the body to split"}};
@@ -1123,6 +1156,14 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::ThreadFace: {
     auto* th = dynamic_cast<const ThreadFeature*>(&feature);
     return th != nullptr && !th->face.name.empty();
+  }
+  case PickSlot::EdgeFlangeEdges: {
+    auto* ef = dynamic_cast<const EdgeFlangeFeature*>(&feature);
+    return ef != nullptr && !ef->edges.empty();
+  }
+  case PickSlot::FlatPatternBody: {
+    auto* fp = dynamic_cast<const FlatPatternFeature*>(&feature);
+    return fp != nullptr && fp->bodyId != 0;
   }
   case PickSlot::BlendEdges: {
     auto* fil = dynamic_cast<const FilletFeature*>(&feature);
@@ -1829,6 +1870,48 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     PickSlotRow(state, feature, PickSlot::RibBody,
                 rb->bodyId == 0 ? "(nearest)"
                                 : BodyRefLabel(state, rb->bodyId));
+  } else if (auto* bf = dynamic_cast<BaseFlangeFeature*>(&feature)) {
+    // No thickness row: a blank is cut from ONE sheet, so the gauge belongs
+    // to the document and not to this feature. The Sheet Metal panel is where
+    // it is changed.
+    HandleEdit(state, feature, ImGui::Checkbox("Other side", &bf->reversed),
+               index, commit);
+  } else if (auto* ef = dynamic_cast<EdgeFlangeFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Length", ef->lengthExpr,
+            ef->length);
+    const char* modes[] = {"Flat wall", "To outside mold line",
+                           "To inside mold line"};
+    int mode = std::to_underlying(ef->lengthMode);
+    if (LabeledCombo("Length is", &mode, modes, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*ef);
+      ef->lengthMode = static_cast<FlangeLengthMode>(mode);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ExprDim(state, feature, index, commit, "Angle", ef->angleDegExpr,
+            ef->angleDeg);
+    // 0 means "the document's", which is itself the material's minimum — so
+    // the field shows what it will USE rather than a bare zero.
+    ExprDim(state, feature, index, commit, "Radius", ef->radiusExpr,
+            ef->radius);
+    const char* positions[] = {"Material inside", "Material outside",
+                               "Bend outside"};
+    int pos = std::to_underlying(ef->position);
+    if (LabeledCombo("Position", &pos, positions, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*ef);
+      ef->position = static_cast<FlangePosition>(pos);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ExprDim(state, feature, index, commit, "Inset start", ef->offsetStartExpr,
+            ef->offsetStart);
+    ExprDim(state, feature, index, commit, "Inset end", ef->offsetEndExpr,
+            ef->offsetEnd);
+    PickSlotRow(
+        state, feature, PickSlot::EdgeFlangeEdges,
+        ef->edges.empty() ? "" : std::to_string(ef->edges.size()) + " picked");
+    RefListRows(state, feature, index, commit, ef->edges);
+  } else if (auto* fp = dynamic_cast<FlatPatternFeature*>(&feature)) {
+    PickSlotRow(state, feature, PickSlot::FlatPatternBody,
+                BodyRefLabel(state, fp->bodyId));
   } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", sh->thicknessExpr,
             sh->thickness);

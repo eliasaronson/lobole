@@ -30,6 +30,7 @@ that a feature appeared.
 | Thread | `###tb_thread` | `thread/face_pick_fills_the_slot` |
 | Boolean | `###tb_boolean` | three tests |
 | Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/circular_preview_param_edits_survive`, `pattern/cut_row_is_the_pattern_source` (a hole patterns as a hole — the source is the CUT's tree row), defaults gate |
+| Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern` | `sheetmetal/edge_pick_bends_a_wall` (stock → blank → a real viewport edge click → a wall → flat again), and the defaults gate |
 | Datum plane / axis | `###tb_datum_plane`, `###tb_datum_axis` | `datum/plane_offset_then_sketch_on_its_row`, defaults gate |
 
 Plus the `defaults/*` gate (`docs/ui/u10-defaults-and-refusals.md`), which opens

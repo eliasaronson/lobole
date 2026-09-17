@@ -146,6 +146,13 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       // Derive: a copy of another part is placed once per part from the
       // toolbar or the RPC, like an import — not something typed mid-flow.
       "part.derive",
+      // Sheet metal: three tools used in sequence on a part that IS sheet
+      // metal, in the order they appear on the toolbar — not typed mid-flow
+      // the way a fillet or a hole is. Every free letter left is worth more
+      // to a tool used on every part.
+      "part.sheet_base_flange",
+      "part.sheet_edge_flange",
+      "part.sheet_flat_pattern",
   };
   for (const keymap::Binding& b : keymap::Defaults()) {
     INFO(b.id);

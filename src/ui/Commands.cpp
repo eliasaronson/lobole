@@ -485,6 +485,18 @@ const std::vector<Command>& Table() {
         [](AppState& s) { CreatePattern(s); });
     add("part.split", IdleBody, [](AppState& s) { CreateSplit(s); });
     add("part.refine", IdleBody, [](AppState& s) { CreateRefine(s); });
+
+    // Sheet metal (docs/sheetmetal/plan.md). The base flange needs a closed
+    // profile like an extrude does; the other two need a body to grow off or
+    // to lay flat. None of them needs the rules to be SET — each refuses
+    // visibly and names set_sheet_metal_rules, which is more use than a
+    // greyed-out button that says nothing.
+    add("part.sheet_base_flange", HasProfile,
+        [](AppState& s) { CreateBaseFlange(s); });
+    add("part.sheet_edge_flange", IdleBody,
+        [](AppState& s) { CreateEdgeFlange(s); });
+    add("part.sheet_flat_pattern", IdleBody,
+        [](AppState& s) { CreateFlatPattern(s); });
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
 
     // ------------------------------------------------------------- Job (CAM)

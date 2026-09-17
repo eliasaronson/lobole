@@ -424,6 +424,16 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
+  // Sheet metal: the blank, the bend, and the blank again.
+  btn(ICON_FA_LAYER_GROUP "###tb_base_flange", "part.sheet_base_flange",
+      "Base flange (a sheet part one gauge thick from a profile)");
+  btn(ICON_FA_ARROW_TURN_UP "###tb_edge_flange", "part.sheet_edge_flange",
+      "Edge flange (bend a wall up from a straight edge)");
+  btn(ICON_FA_FILE_LINES "###tb_flat_pattern", "part.sheet_flat_pattern",
+      "Flat pattern (lay the sheet flat; the blank a shop cuts)");
+
+  Divider();
+
   btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit", "view.fit",
       "Fit view");
   // An eye, not a second grid: TABLE_CELLS sat one row from Datum Plane's

@@ -1,6 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Angles.h"
 #include "core/Measure.h"
+#include "core/features/EdgeFlangeFeature.h"
 #include "ui/DocumentSlots.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/MeasureActions.h"
@@ -1649,6 +1650,88 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);
     IM_CHECK(s_App->commands->CanUndo()); // accept = one undoable action
+  };
+
+  // Sheet metal: the whole Tier 1 flow through the GUI — declare the stock,
+  // thicken a profile into a blank, click an edge of it and get a wall, then
+  // lay it flat again. Clicking the edge is the point: which of a rim's two
+  // edges is picked is the only control there is over which way the wall
+  // folds, and nothing but a real viewport click exercises it.
+  t = IM_REGISTER_TEST(engine, "sheetmetal", "edge_pick_bends_a_wall");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // A fresh document first: this test declares sheet-metal stock, and a
+    // document carried in from a predecessor would arrive already holding
+    // somebody else's geometry.
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    SetupFor(ctx, Needs::SheetBlank);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    const double blank = Doc()->GetBodies()[0].shape.Volume();
+    IM_CHECK(Doc()->GetBodies()[0].bends.empty());
+
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const glm::vec3 center = (min + max) * 0.5f;
+    const float radius = glm::length(max - min) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(center);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(
+        center + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 5.0f);
+    ctx->Yield();
+
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_edge_flange");
+    ctx->Yield();
+    IM_CHECK(s_App->slotPick.Active()); // the edge slot armed itself
+    auto* flange = dynamic_cast<EdgeFlangeFeature*>(
+        Doc()->FindFeatureById(s_App->slotPick.featureId));
+    IM_CHECK(flange != nullptr);
+    // The default wall came from the STOCK (5t), not from a literal.
+    IM_CHECK(std::abs(flange->length - 5.0 * 1.5) < 1e-9);
+
+    // Click the nearest straight edge: a silhouette or front edge from this
+    // viewpoint, so the pick cannot be occluded.
+    const auto polys = Doc()->GetBodies()[0].shape.GenerateEdgePolylines();
+    const glm::vec3 eye = s_App->camera->GetPosition();
+    glm::vec3 target(0.0f);
+    float bestDist = FLT_MAX;
+    for (const auto& poly : polys) {
+      if (poly.size() < 2)
+        continue;
+      const glm::vec3 mid = poly[poly.size() / 2];
+      const float d = glm::length(mid - eye);
+      if (d < bestDist) {
+        bestDist = d;
+        target = mid;
+      }
+    }
+    ctx->MouseMoveToPos(WorldToWindow(target));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(flange->edges.size(), (size_t)1);
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() > blank + 1e-6);
+    // And the bend was RECORDED, which is what the flat pattern runs on.
+    IM_CHECK_EQ(Doc()->GetBodies()[0].bends.size(), (size_t)1);
+
+    // Lay it flat: one gauge thick everywhere, which no wrong fold survives.
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_flat_pattern");
+    ctx->Yield();
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const glm::vec3 span = max - min;
+    const float thin = std::min({span.x, span.y, span.z});
+    IM_CHECK(std::abs(thin - 1.5f) < 1e-3f);
   };
 
   // Feature tree affordances: context-menu rename (inline edit) and the

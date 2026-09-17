@@ -50,6 +50,10 @@ enum class PickSlot : int {
   // past it into material the fastener is not meant to span. Same session and
   // same sentinel as FastenerRim — one tool, two slots.
   FastenerFarEnd,
+  // Sheet metal: the straight edges a wall is bent up from, and the body a
+  // flat pattern lays flat.
+  EdgeFlangeEdges, // Edge, multi
+  FlatPatternBody, // Body
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

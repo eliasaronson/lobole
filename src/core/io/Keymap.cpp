@@ -199,6 +199,15 @@ const Binding kDefaults[] = {
     {"part.refine", Context::Part, "Refine (merge faces / seams)", "Modify",
      "Y"},
 
+    // Sheet metal. Unbound: three tools used in sequence on a part that is
+    // sheet metal, not typed mid-flow like a fillet.
+    {"part.sheet_base_flange", Context::Part,
+     "Base flange (a sheet part from a profile)", "Sheet metal", ""},
+    {"part.sheet_edge_flange", Context::Part,
+     "Edge flange (bend a wall up from an edge)", "Sheet metal", ""},
+    {"part.sheet_flat_pattern", Context::Part, "Flat pattern (the blank)",
+     "Sheet metal", ""},
+
     {"part.simulation", Context::Part, "Simulation (FEM stress study)", "Tools",
      "Q"},
 

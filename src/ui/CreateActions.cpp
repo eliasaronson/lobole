@@ -1,5 +1,6 @@
 #include "ui/CreateActions.h"
 #include "ui/RendererSync.h"
+#include "ui/SketchToolbar.h" // ClosedProfileSketch (a base flange takes one)
 
 #include "core/Units.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
@@ -26,12 +27,15 @@
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/EdgeFlangeFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Autosaver.h"
@@ -287,6 +291,12 @@ bool ProducesBody(const Feature& f) {
   if (auto* r = dynamic_cast<const RevolveFeature*>(&f)) {
     return r->mode == ExtrudeMode::NewBody;
   }
+  // A base flange is a new body like a primitive is, so every body-op tool
+  // that defaults to "the most recent producer" can reach it. Leaving it out
+  // is not a missing feature but a silently wrong DEFAULT: the flat pattern
+  // opened pointing at a body that did not exist.
+  if (dynamic_cast<const BaseFlangeFeature*>(&f))
+    return true;
   return false;
 }
 } // namespace
@@ -439,6 +449,42 @@ void CreateDraft(AppState& state) {
   BeginPreviewFeature(
       state, std::make_unique<DraftFeature>(NextName(state, "Draft"), 0,
                                             std::vector<ElementRef>{}, 5.0));
+}
+
+void CreateBaseFlange(AppState& state) {
+  if (!state.document)
+    return;
+  SketchFeature* sk = ClosedProfileSketch(state);
+  if (sk == nullptr)
+    return;
+  // No thickness argument: the wall is one gauge, and the gauge is the
+  // document's. With no rules set the feature refuses visibly rather than
+  // inventing a millimetre (U10 / docs/sheetmetal/plan.md).
+  BeginPreviewFeature(state, std::make_unique<BaseFlangeFeature>(
+                                 NextName(state, "Base flange"), sk->GetId()));
+}
+
+void CreateEdgeFlange(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // The wall's default length is the shortest one the brake can make: half a
+  // die opening (8t, the air-bending default) plus a thickness. Derived from
+  // the stock, so it changes with the gauge and never lands under what
+  // check_sheet_metal will ask for.
+  double wall = 10.0;
+  if (const auto& rules = state.document->SheetMetal())
+    wall = 5.0 * rules->thickness;
+  auto flange = std::make_unique<EdgeFlangeFeature>(
+      NextName(state, "Flange"), std::vector<ElementRef>{}, wall, 90.0);
+  BeginPreviewFeature(state, std::move(flange));
+}
+
+void CreateFlatPattern(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state,
+                      std::make_unique<FlatPatternFeature>(
+                          NextName(state, "Flat pattern"), NewestBody(state)));
 }
 
 std::optional<SketchPlane>

@@ -88,6 +88,15 @@ void CreateDraft(AppState& state);
 
 void CreateSplit(AppState& state);
 
+// Sheet metal (docs/sheetmetal/plan.md). Each opens the normal preview; the
+// defaults come from the document's sheet-metal rules, so none of them
+// carries a literal millimetre of its own.
+void CreateBaseFlange(AppState& state);
+
+void CreateEdgeFlange(AppState& state);
+
+void CreateFlatPattern(AppState& state);
+
 // The plane a plane-referencing feature points at (a base plane, or an
 // earlier DatumPlane by id), as the UI sees it: the datum's last regenerated
 // output. nullopt when the id does not resolve. The regen path has

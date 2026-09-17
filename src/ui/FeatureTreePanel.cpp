@@ -133,6 +133,12 @@ const char* FeatureIcon(const std::string& type) {
     return ICON_FA_SCISSORS;
   if (type == "Refine")
     return ICON_FA_BROOM;
+  if (type == "BaseFlange")
+    return ICON_FA_LAYER_GROUP;
+  if (type == "EdgeFlange")
+    return ICON_FA_ARROW_TURN_UP;
+  if (type == "FlatPattern")
+    return ICON_FA_FILE_LINES;
   if (type == "Loft")
     return ICON_FA_BEZIER_CURVE;
   if (type == "Sweep")

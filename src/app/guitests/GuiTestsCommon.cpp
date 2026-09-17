@@ -1,5 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "core/SheetMetal.h"
+
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
 #include "ui/ProjectActions.h"
@@ -325,7 +327,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[26] = {
+const ToolCase kToolCases[29] = {
     {"box", "###tb_box", Needs::Nothing, Expect::Changes},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
@@ -356,6 +358,18 @@ const ToolCase kToolCases[26] = {
     {"rib", "###tb_rib", Needs::BodyAndOpenSketch, Expect::Changes},
     {"hole", "###tb_hole", Needs::Body, Expect::ArmsAPick},
     {"new_sketch", "###tb_new_sketch", Needs::Nothing, Expect::ArmsAPick},
+    // Sheet metal. The base flange thickens the profile by the document's
+    // gauge, so with stock declared it changes the model on its defaults.
+    {"base_flange", "###tb_base_flange", Needs::SheetRules, Expect::Changes},
+    // A flange has to be told WHICH edge: which of a rim's two edges is
+    // picked is the whole of the direction control, so there is nothing
+    // sensible to default to.
+    {"edge_flange", "###tb_edge_flange", Needs::SheetBlank,
+     Expect::RefusesUntilPicked},
+    // A blank with no bends flattens to itself. No change is the honest
+    // answer, and the feature says so in a warning.
+    {"flat_pattern", "###tb_flat_pattern", Needs::SheetBlank,
+     Expect::HarmlessNoOp},
 };
 
 const ToolCase* FindToolCase(const char* testName) {
@@ -457,6 +471,20 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     AddRectSketch(ctx, 1, 1.5f);
     AddRectSketch(ctx, 1, 1.0f);
     break;
+  case Needs::SheetRules:
+  case Needs::SheetBlank: {
+    // The stock, set straight on the document: declaring it is setup, not
+    // something the tool under test is supposed to do for itself.
+    sheet::SheetMetalRules rules;
+    rules.material = "aluminum";
+    rules.gauge = "1.5mm";
+    rules.thickness = 1.5;
+    Doc()->SetSheetMetal(rules);
+    AddRectSketch(ctx, 1, 8.0f);
+    if (needs == Needs::SheetBlank)
+      ToolbarCreateAccept(ctx, "###tb_base_flange");
+    break;
+  }
   case Needs::BodyAndOpenSketch: {
     // A rib grows a thin web from an open profile down onto a body, so the
     // gate needs both: the default box, and a line hanging above it.
