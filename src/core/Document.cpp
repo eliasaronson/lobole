@@ -658,9 +658,13 @@ const Configuration* Document::ActiveConfig() const {
 bool Document::EffectiveSuppressed(size_t index) const {
   if (index >= m_features.size())
     return false;
+  const Configuration* c = ActiveConfig();
+  // Unsuppression is the last word, so a configuration can turn ON a feature
+  // the authored model keeps off — which is what a flat pattern is.
+  if (c != nullptr && c->Unsuppresses(m_features[index]->GetId()))
+    return false;
   if (m_features[index]->IsSuppressed())
     return true;
-  const Configuration* c = ActiveConfig();
   return c != nullptr && c->Suppresses(m_features[index]->GetId());
 }
 

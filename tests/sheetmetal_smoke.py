@@ -163,6 +163,38 @@ def main():
         check = d.call("check_geometry")
         expect(check.get("ok", True) is not False, check)
 
+        # ---- The blank -------------------------------------------------
+        # Authored OFF, and a configuration turns it on: one document, one
+        # undo stack, and the folded part and its blank never both occupy the
+        # viewport (they occupy the same space).
+        flat = d.call("add_feature", feature={
+            "type": "FlatPattern", "name": "Flat",
+            "body_id": base})["id"]
+        d.call("suppress_feature", feature_id=flat, suppressed=True)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - want)
+               / want < 1e-4, "suppressing the flat pattern changed the part")
+
+        cfg = d.call("add_configuration", name="Flat")["id"]
+        d.call("set_configuration", id=cfg, unsuppressed_features=[flat])
+        d.call("set_active_configuration", id=cfg)
+        k = 0.41  # aluminum at R/t = 1.5, from the table
+        allowance = quarter * (MIN_RADIUS + k * THICKNESS)
+        blank = (WIDTH * DEPTH + allowance * WIDTH
+                 + wall * WIDTH) * THICKNESS
+        bodies = d.call("get_state")["bodies"]
+        expect(abs(bodies[0]["volume"] - blank) / blank < 1e-4,
+               f"blank volume {bodies[0]['volume']} want {blank}")
+        # A blank is one gauge thick everywhere. Any bend left unrotated
+        # shows up here and nowhere else.
+        span = bodies[0]["bbox_max"][2] - bodies[0]["bbox_min"][2]
+        expect(abs(span - THICKNESS) < 1e-4,
+               f"the blank is not one gauge thick: {span}")
+
+        # Back to the authored model, and the part is folded again.
+        d.call("set_active_configuration", id=0)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - want)
+               / want < 1e-4, "leaving the configuration did not refold")
+
         # And it survives the round trip through disk.
         project = os.path.join(tmp, "sheet.dsgn")
         d.call("save_project", path=project)

@@ -28,6 +28,10 @@ json ConfigurationToJson(const Configuration& c) {
   }
   if (!c.suppressedFeatures.empty())
     j["suppressed_features"] = c.suppressedFeatures;
+  // v110, part only; absent when empty so every earlier configuration
+  // re-saves byte-identically.
+  if (!c.unsuppressedFeatures.empty())
+    j["unsuppressed_features"] = c.unsuppressedFeatures;
   // v101, assembly only; absent when empty, so older files re-save
   // byte-identically.
   if (!c.suppressedMates.empty())
@@ -57,6 +61,8 @@ Configuration ConfigurationFromJson(const json& j) {
                                       oj.value("expression", std::string{}));
   c.suppressedFeatures =
       j.value("suppressed_features", std::vector<uint64_t>{});
+  c.unsuppressedFeatures =
+      j.value("unsuppressed_features", std::vector<uint64_t>{});
   c.suppressedMates = j.value("suppressed_mates", std::vector<uint64_t>{});
   c.suppressedRelations =
       j.value("suppressed_relations", std::vector<uint64_t>{});

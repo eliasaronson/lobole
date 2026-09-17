@@ -91,8 +91,16 @@ Given the folded body and its `bends`, BFS from the fixed panel:
    seam come out right.
 4. Fuse the pieces.
 
-The involution test drives this: unfold, refold, compare volume and bounding box
-to the original, and compare face count.
+The blank is built by taking the part apart and putting it back together, and a
+boolean renames what it touches, so the flat carries ITS OWN element names
+rather than the folded body's. Every face of it is named — it is a body people
+pick on, dimension and cut — but a dimension taken on the folded part is not
+the same reference as one taken on the blank. Carrying a name across the fold
+is a real thing to want and it is not what this does.
+
+What drives the tests is the blank's OUTLINE, not only its thickness: a wall
+folded the wrong way round still lands flat and still has the right volume, and
+only the extent of the blank catches it.
 
 **A cut that lies inside a bend face is refused**, naming the bend. Replacing the
 slab in step 3 would silently eat it. Tier 2's Unfold/Refold pair is the answer
@@ -208,10 +216,12 @@ assumed the old behaviour get fixed.
 - `tests/test_sheetmetal.cpp` — rules round-trip, base flange volume equals
   `area × t`, edge flange volume against the hand-computed sector-plus-wall,
   relief cut where the hinge stops short.
-- `tests/test_unfold.cpp` — **the involution**: unfold, refold, compare volume,
-  bbox and face count against the original, over a chain, a tree of three
-  flanges off one panel, and a hem. Plus the flat area against
-  `Σ panel_area + Σ BA·width` computed by hand.
+- `tests/test_unfold.cpp` — the blank is exactly one gauge thick, its outline
+  matches `Σ panel + Σ BA·width` computed by hand, and it comes out the same
+  over a single bend, a tree of flanges off one panel, and a chain of a flange
+  on a flange. Flattening a blank twice is refused. **The involution**
+  (`refold(unfold(x)) == x`) lands with S9, which is what builds the fold
+  back up.
 - `tests/test_sheetmetal_check.cpp` — every violation kind fires on a part built
   to trip it, and the clean part fires none. A check nothing fails is not a
   check.

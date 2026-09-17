@@ -218,6 +218,13 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   which dimension `length` states (a drawing dimensions to a mold line, not
   to the flat wall). Each edge records a bend on the body: radius, angle, K
   and where that K came from.
+- FlatPattern (the BLANK: a sheet body laid flat): {{"type": "FlatPattern",
+  "name": str, "body_id": <the sheet body's created_by>, "fixed_face"?:
+  {{"feature_id": ..., "element": ...}}}} — replaces the body's shape in
+  place, so author it SUPPRESSED and put its id in a configuration's
+  `unsuppressed_features` to switch between folded and flat. It must sit
+  AFTER every feature that reshapes the sheet, since it flattens from the
+  bends those features recorded; flattening a blank twice is refused.
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
 - Derived (a copy of another part's bodies, to draw on): {{"type":
   "Derived", "name": str, "source_part": <part slot id from

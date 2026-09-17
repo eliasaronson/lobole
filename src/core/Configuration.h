@@ -35,6 +35,13 @@ struct Configuration {
   // On an ASSEMBLY these are occurrence ids.
   std::vector<uint64_t> suppressedFeatures;
 
+  // Feature ids this configuration turns BACK ON, and the last word:
+  // effective = (authored OR suppressed here) AND NOT here. Without it a
+  // configuration could only ever remove, so a feature that is off in the
+  // authored model — a flat pattern, a variant's extra boss — could not be
+  // the thing a configuration is FOR. Part configurations only.
+  std::vector<uint64_t> unsuppressedFeatures;
+
   // Assembly only (v101): mates and relations taken out of the solve, and
   // mate DOFs held at a value of the configuration's own. An OVERLAY applied
   // inside the solve, never written into the mates — "crown pulled out" is a
@@ -55,6 +62,13 @@ struct Configuration {
 
   [[nodiscard]] bool Suppresses(uint64_t featureId) const {
     for (uint64_t id : suppressedFeatures)
+      if (id == featureId)
+        return true;
+    return false;
+  }
+
+  [[nodiscard]] bool Unsuppresses(uint64_t featureId) const {
+    for (uint64_t id : unsuppressedFeatures)
       if (id == featureId)
         return true;
     return false;

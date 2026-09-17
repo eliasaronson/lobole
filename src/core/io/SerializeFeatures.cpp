@@ -14,6 +14,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
@@ -1041,6 +1042,11 @@ json FeatureToJson(const Feature& feature) {
       j["offset_end_expr"] = ef->offsetEndExpr;
     if (ef->reliefStyle)
       j["relief"] = sheet::ReliefStyleName(*ef->reliefStyle);
+  } else if (auto* fp = dynamic_cast<const FlatPatternFeature*>(&feature)) {
+    j["body_id"] = fp->bodyId;
+    if (fp->fixedFace.IsSet())
+      j["fixed_face"] = {{"feature_id", fp->fixedFace.featureId},
+                         {"element", fp->fixedFace.name}};
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
     j["thickness"] = sh->thickness;
@@ -1223,6 +1229,14 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "insets that stop the bend line INSIDE the panel and so call for "
      "relief, relief?: none|rectangular|obround|tear (omitted = the "
      "document's). One bend per edge, each recorded on the body"},
+    {"FlatPattern", 110,
+     "body_id (the sheet body's created_by), fixed_face? {feature_id, "
+     "element} - the BLANK: the body laid flat, replacing its shape in "
+     "place rather than adding a second body (a folded part and its blank "
+     "occupy the same space). Author it SUPPRESSED and put it in a "
+     "configuration's `unsuppressed_features` to switch between folded and "
+     "flat. Must sit after every feature that reshapes the sheet, since it "
+     "flattens from the bends those features recorded"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -1944,6 +1958,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       ef->reliefStyle = style;
     }
     out = std::move(ef);
+  } else if (type == "FlatPattern") { // v110
+    auto fp = std::make_unique<FlatPatternFeature>(
+        name, j.at("body_id").get<uint64_t>());
+    if (j.contains("fixed_face")) {
+      const auto& fj = j.at("fixed_face");
+      fp->fixedFace = ElementRef{fj.value("feature_id", uint64_t{0}),
+                                 fj.value("element", std::string{})};
+    }
+    out = std::move(fp);
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
     for (const auto& ej : j.value("open_faces", json::array()))

@@ -515,6 +515,7 @@ bool EdgeFlangeFeature::Execute(RegenContext& ctx) {
     bend.axisOrigin = {axisPt.X(), axisPt.Y(), axisPt.Z()};
     bend.axisDir = {frame.e.X(), frame.e.Y(), frame.e.Z()};
     bend.radius = R;
+    bend.width = a1 - a0;
     bend.angle = theta;
     // The sense of the fold about the axis, stated frame-independently: the
     // wall turns from `outward` toward `up`, so the rotation is right-handed
@@ -525,6 +526,8 @@ bool EdgeFlangeFeature::Execute(RegenContext& ctx) {
     bend.kFactor = rules.EffectiveKFactor(R);
     bend.kSource = rules.KSource(R);
     bend.parentFace = ref;
+    bend.parentDir = {frame.outward.X(), frame.outward.Y(), frame.outward.Z()};
+    bend.upDir = {frame.up.X(), frame.up.Y(), frame.up.Z()};
     // The two cylindrical faces of the bend, found by their radii on the
     // flange we just named.
     int fi = 0;

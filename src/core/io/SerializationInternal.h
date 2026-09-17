@@ -17,7 +17,17 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    109; // v109: the first two sheet features. `BaseFlange` {sketch_id,
+    110; // v110: the BLANK. `FlatPattern` {body_id, fixed_face?} replaces a
+         //      sheet body's shape with its flat pattern IN PLACE (a folded
+         //      part and its blank occupy the same space, so a second body
+         //      would sit inside the first). It is authored SUPPRESSED and
+         //      turned on by a configuration, which needed the other half of
+         //      this bump: a part configuration's `unsuppressed_features`,
+         //      the last word over both suppression lists. Without it a
+         //      configuration could only ever REMOVE, so a feature that is
+         //      off in the authored model could not be the thing a
+         //      configuration is for (docs/sheetmetal/plan.md, S4).
+         // v109: the first two sheet features. `BaseFlange` {sketch_id,
          //      reversed?, regions?} is a closed profile thickened by the
          //      document's sheet-metal thickness; `EdgeFlange` {edges,
          //      length, angle_deg, radius?, position?, length_mode?,

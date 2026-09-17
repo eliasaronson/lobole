@@ -27,13 +27,17 @@ static constexpr MethodDoc ConfigurationMethods[] = {
     {"list_configurations", "List configurations and the active one.", ""},
     {"set_configuration",
      "Edit a configuration's overrides/suppressions. PART: "
-     "parameter_overrides [{name, expression}], suppressed_features [ids]. "
+     "parameter_overrides [{name, expression}], suppressed_features [ids], "
+     "unsuppressed_features [ids] - features the authored model keeps OFF "
+     "that this configuration turns on, and the last word over both "
+     "suppression lists (a flat pattern is exactly this). "
      "ASSEMBLY: suppressed_occurrences, suppressed_mates, "
      "suppressed_relations [ids], mate_overrides [{mate, rotation (radians) "
      "| rotation_deg, offset (mm)}] — DOFs the configuration holds; an "
      "overlay, so leaving it restores the mates. Each list replaces; the "
      "other kind's keys are refused. Editing the active one re-solves.",
      "id, name, parameter_overrides, suppressed_features, "
+     "unsuppressed_features, "
      "suppressed_occurrences, suppressed_mates, suppressed_relations, "
      "mate_overrides"},
     {"set_active_configuration",
@@ -77,7 +81,8 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
       arr.push_back({{"id", c.id},
                      {"name", c.name},
                      {"parameter_overrides", overrides},
-                     {"suppressed_features", c.suppressedFeatures}});
+                     {"suppressed_features", c.suppressedFeatures},
+                     {"unsuppressed_features", c.unsuppressedFeatures}});
     }
     out = {{"configurations", arr}, {"active", doc.ActiveConfiguration()}};
     return true;
@@ -91,7 +96,8 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
         throw std::runtime_error(
             std::string(k) +
             " belongs to an ASSEMBLY configuration; a part configuration "
-            "takes parameter_overrides and suppressed_features");
+            "takes parameter_overrides, suppressed_features and "
+            "unsuppressed_features");
     // Full-field edit: name / parameter_overrides / suppressed_features each
     // replace when present. The caller reads list_configurations, adjusts, and
     // sends the desired state back (one ModifyConfigurationCommand).
@@ -113,6 +119,9 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     if (p.contains("suppressed_features"))
       copy.suppressedFeatures =
           p.at("suppressed_features").get<std::vector<uint64_t>>();
+    if (p.contains("unsuppressed_features"))
+      copy.unsuppressedFeatures =
+          p.at("unsuppressed_features").get<std::vector<uint64_t>>();
     json after = DocumentIO::ConfigurationToJson(copy);
     state.commands->Execute(
         std::make_unique<ModifyConfigurationCommand>(
@@ -208,7 +217,8 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
     if (!c)
       throw std::runtime_error("no such configuration");
     // A PART configuration's keys used to be ignored here in silence.
-    for (const char* k : {"parameter_overrides", "suppressed_features"})
+    for (const char* k : {"parameter_overrides", "suppressed_features",
+                          "unsuppressed_features"})
       if (p.contains(k))
         throw std::runtime_error(
             std::string(k) +

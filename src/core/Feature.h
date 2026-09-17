@@ -52,6 +52,7 @@ struct BendRegion {
   glm::dvec3 axisOrigin{0.0};
   glm::dvec3 axisDir{0.0, 0.0, 1.0};
   double radius = 0.0; // INSIDE radius, mm
+  double width = 0.0;  // how far the bend runs along its axis, mm
   double angle = 0.0;  // radians, always > 0; `up` carries the sense
   bool up = false; // sense about axisDir; the DXF layer a bend line lands on
   double kFactor = 0.0;
@@ -61,6 +62,27 @@ struct BendRegion {
   std::string kSource;
   ElementRef parentFace, childFace; // the flat panels it joins
   ElementRef innerFace, outerFace;  // the cylindrical faces themselves
+
+  // The frame the bend was built in, which is what makes this record
+  // self-contained: `parentDir` is the in-plane direction the PARENT panel
+  // runs toward the bend, `upDir` the parent face's outward normal. The
+  // child's direction is cos(angle)*parentDir + sin(angle)*upDir, and
+  // unfolding is a rotation about parentDir x upDir. Without them the
+  // unfolder would have to re-derive a frame from the cylinders, which is
+  // exactly the measuring-it-back-afterwards this design avoids.
+  glm::dvec3 parentDir{1.0, 0.0, 0.0};
+  glm::dvec3 upDir{0.0, 0.0, 1.0};
+
+  // Filled by the unfolder, zero on a folded body: how much flat stock the
+  // bend eats (the neutral arc), and the crease centreline in the FLAT
+  // pattern — what a bend line is drawn from, and what the DXF puts on its
+  // BEND_UP / BEND_DOWN layer.
+  double allowance = 0.0;
+  glm::dvec3 flatA{0.0}, flatB{0.0};
+  // Set on a body that has ALREADY been flattened. The angle and radius stay
+  // (a bend note says "UP 90 R2.25"), so without this a second flatten would
+  // cheerfully unfold a blank a second time and hand back a longer one.
+  bool flat = false;
 };
 
 struct Body {
