@@ -470,6 +470,20 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
   si << inFile.rdbuf();
   CHECK(si.str().find(">in<") != std::string::npos);
   fs::remove(outIn);
+
+  // A sheet with notes and no dimensions still writes its notes: they sat
+  // inside the dimension group, so a notes-only sheet exported none.
+  drawing::ResolvedNote note;
+  note.text = "DEBURR ALL EDGES";
+  note.pos = {100, 100};
+  const fs::path outNote = fs::temp_directory_path() / "drawing_note.svg";
+  REQUIRE(
+      DrawingExport::SaveSVG(doc, {view}, {}, outNote.string(), &err, {note}));
+  std::ifstream noteFile(outNote);
+  std::stringstream sn;
+  sn << noteFile.rdbuf();
+  CHECK(sn.str().find(">DEBURR ALL EDGES<") != std::string::npos);
+  fs::remove(outNote);
 }
 
 TEST_CASE("PDF export writes a valid single-page document",

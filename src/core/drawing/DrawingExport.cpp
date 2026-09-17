@@ -199,7 +199,7 @@ bool SaveSVG(const DrawingDocument& doc,
         y -= drawing::kLabelLineMM;
       }
     };
-    if (!dims.empty()) {
+    if (!dims.empty() || !notes.empty()) {
       out << "  <g font-family=\"Helvetica, sans-serif\" font-size=\"3.5\">\n";
       for (const drawing::ResolvedDim& d : dims) {
         if (!d.resolved)
