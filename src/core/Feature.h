@@ -53,8 +53,11 @@ struct BendRegion {
   glm::dvec3 axisDir{0.0, 0.0, 1.0};
   double radius = 0.0; // INSIDE radius, mm
   double width = 0.0;  // how far the bend runs along its axis, mm
-  double angle = 0.0;  // radians, always > 0; `up` carries the sense
-  bool up = false; // sense about axisDir; the DXF layer a bend line lands on
+  // Radians, always > 0. Whether a bend is UP or DOWN is not stored: it is
+  // only meaningful from one side of the blank, and sheet::FoldsToward
+  // answers it for the side asked about. A sense stored against axisDir
+  // flipped with whichever way the picked edge happened to run.
+  double angle = 0.0;
   double kFactor = 0.0;
   // Where that K came from ("table:steel R/t<2", "rules", "override"). A bend
   // whose K nobody can trace is a bend nobody can argue with when the part

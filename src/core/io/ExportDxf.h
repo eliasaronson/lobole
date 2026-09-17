@@ -22,6 +22,8 @@
 //   CUT       - the outline and every hole (continuous)
 //   BEND_UP   - bend lines that fold toward the viewer (dashed)
 //   BEND_DOWN - bend lines that fold away (dashed)
+// and the viewer looks at the blank from the side its first flange was picked
+// on, so a part whose flanges were all picked on one face is all UP.
 namespace dxf {
 
 // What a flat pattern hands the writer.

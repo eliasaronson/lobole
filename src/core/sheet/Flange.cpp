@@ -549,12 +549,6 @@ std::string ApplyFlanges(std::vector<Body>& bodies,
       bend.radius = R;
       bend.width = plan.a1 - plan.a0;
       bend.angle = spec.angle;
-      // The sense of the fold about the axis, stated frame-independently:
-      // the wall turns from `outward` toward `up`, so the rotation is
-      // right-handed about the axis exactly when outward x up runs with it.
-      bend.up = gp_Vec(plan.frame.outward)
-                    .Crossed(gp_Vec(plan.frame.up))
-                    .Dot(gp_Vec(plan.frame.e)) > 0.0;
       bend.kFactor = rules.EffectiveKFactor(R);
       bend.kSource = rules.KSource(R);
       bend.parentFace = plan.edge;

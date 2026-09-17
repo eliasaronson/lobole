@@ -324,7 +324,6 @@ bool JogFeature::Execute(RegenContext& ctx) {
       bend.radius = R;
       bend.width = width;
       bend.angle = theta;
-      bend.up = gp_Vec(parent).Crossed(gp_Vec(face)).Dot(gp_Vec(e)) > 0.0;
       bend.kFactor = rules.EffectiveKFactor(R);
       bend.kSource = rules.KSource(R);
       bend.parentDir = G(parent.XYZ());

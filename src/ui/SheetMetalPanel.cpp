@@ -219,9 +219,8 @@ void DrawSheetMetalSection(AppState& state) {
     for (const BendRegion& bend : body.bends) {
       ++n;
       char buf[128];
-      std::snprintf(buf, sizeof(buf), "%d  %s %.1f deg  R %.2f", n,
-                    bend.up ? "up" : "down", angles::ToDegrees(bend.angle),
-                    bend.radius);
+      std::snprintf(buf, sizeof(buf), "%d  %.1f deg  R %.2f", n,
+                    angles::ToDegrees(bend.angle), bend.radius);
       ImGui::TextUnformatted(buf);
       ImGui::SameLine();
       ImGui::TextDisabled("K %.3f %s", bend.kFactor, bend.kSource.c_str());

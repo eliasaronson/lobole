@@ -39,6 +39,12 @@ class gp_Dir;
 // ADDED to a bend, which has no flat shape at all.
 namespace sheet {
 
+// Whether `bend` folds toward `side` — UP as seen from that side of the
+// sheet. The wall turns toward the bend's `upDir`, carried to wherever its
+// parent panel sits now. Only a crease lying square to `side` has an answer
+// a reader would recognise; for anything else this is just the sign.
+[[nodiscard]] bool FoldsToward(const BendRegion& bend, const glm::dvec3& side);
+
 struct FlatResult {
   CADShape shape;
   ElementMap map;

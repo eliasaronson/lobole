@@ -1440,4 +1440,9 @@ std::optional<FlatResult> NormalCut(const Body& body,
   }
 }
 
+bool FoldsToward(const BendRegion& bend, const glm::dvec3& side) {
+  const glm::dvec3 up(bend.parentPlace * glm::dvec4(bend.upDir, 0.0));
+  return glm::dot(up, side) > 0.0;
+}
+
 } // namespace sheet

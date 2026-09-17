@@ -8,6 +8,8 @@
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/ExportDxf.h"
+#include "core/sheet/Unfold.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <TopExp.hxx>
@@ -16,7 +18,10 @@
 #include <TopoDS.hxx>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <numbers>
+#include <sstream>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -289,4 +294,53 @@ TEST_CASE("a configuration switches folded and flat", "[sheetmetal][unfold]") {
 
   doc.SetActiveConfiguration(0);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(folded, 1e-9));
+}
+
+TEST_CASE("up and down are seen from a side of the blank",
+          "[sheetmetal][unfold][dxf]") {
+  // Two flanges picked on the TOP face, on opposite edges, and one picked on
+  // the BOTTOM face. Seen from the top the first two fold up and the third
+  // folds down — whichever way each picked edge happens to run, which is what
+  // a sense stored against the edge's own direction depended on.
+  Document doc;
+  const uint64_t base = Blank(doc);
+  Flange(doc, base, 0.0, 20.0);
+  Flange(doc, base, kD, 20.0);
+  const std::string under =
+      EdgeNamed(doc.GetBodies()[0], {kW, 0, 0}, {kW, kD, 0});
+  REQUIRE_FALSE(under.empty());
+  auto down = std::make_unique<EdgeFlangeFeature>(
+      "Down", std::vector<ElementRef>{ElementRef{base, under}}, 20.0, 90.0);
+  down->position = FlangePosition::BendOutside;
+  doc.AddFeature(std::move(down));
+  for (size_t i = 2; i < doc.FeatureCount(); ++i)
+    REQUIRE(doc.GetFeature(i)->GetError().empty());
+
+  doc.AddFeature(std::make_unique<FlatPatternFeature>("Flat", base));
+  REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+  const Body& flat = doc.GetBodies()[0];
+  REQUIRE(flat.bends.size() == 3);
+  const glm::dvec3 top(0, 0, 1);
+  CHECK(sheet::FoldsToward(flat.bends[0], top));
+  CHECK(sheet::FoldsToward(flat.bends[1], top));
+  CHECK_FALSE(sheet::FoldsToward(flat.bends[2], top));
+  CHECK_FALSE(sheet::FoldsToward(flat.bends[0], -top));
+
+  // The DXF reads from the first flange's side, so it says the same.
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "designer_up_down.dxf";
+  REQUIRE(
+      dxf::WriteFlatPattern({flat.shape, flat.bends}, path.string()).empty());
+  std::stringstream text;
+  text << std::ifstream(path).rdbuf();
+  const auto count = [&](const std::string& needle) {
+    size_t n = 0;
+    for (size_t at = text.str().find(needle); at != std::string::npos;
+         at = text.str().find(needle, at + 1))
+      ++n;
+    return n;
+  };
+  CHECK(count("LINE\n8\nBEND_UP\n") == 2);
+  CHECK(count("LINE\n8\nBEND_DOWN\n") == 1);
+  std::filesystem::remove(path);
 }

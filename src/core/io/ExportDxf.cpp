@@ -1,5 +1,7 @@
 #include "core/io/ExportDxf.h"
 
+#include "core/sheet/Unfold.h"
+
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
@@ -240,10 +242,23 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
       return "this body is not flat - export the flat pattern (a FlatPattern "
              "feature, shown by its configuration), not the folded part";
 
+    // The side the file is READ from, which is what UP and DOWN mean: the
+    // side the first flange was picked on (its parent panel's face, carried
+    // to where the blank lies). The largest face is either of the blank's
+    // two, so its own normal would make every bend's layer a coin toss.
+    gp_Dir reader = n;
+    for (const BendRegion& b : drawing.creases) {
+      if (!b.flat)
+        continue;
+      const glm::dvec3 up(b.parentPlace * glm::dvec4(b.upDir, 0.0));
+      if (gp_Vec(up.x, up.y, up.z).Dot(gp_Vec(n)) < 0.0)
+        reader = n.Reversed();
+      break;
+    }
     Frame frame;
     frame.origin = plane.Location();
     frame.x = plane.XAxis().Direction();
-    frame.y = plane.YAxis().Direction();
+    frame.y = reader.Crossed(frame.x);
 
     Out o;
     o.f.open(path);
@@ -261,11 +276,13 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
       for (TopExp_Explorer ex(wx.Current(), TopAbs_EDGE); ex.More(); ex.Next())
         WriteEdge(o, frame, "CUT", TopoDS::Edge(ex.Current()));
 
-    // The bend lines, each on the layer its direction says.
+    // The bend lines, each on the layer its direction says — as seen by
+    // whoever reads the file, looking down the frame's normal.
+    const glm::dvec3 side(reader.X(), reader.Y(), reader.Z());
     for (const BendRegion& b : drawing.creases) {
       if (!b.flat)
         continue;
-      WriteLine(o, frame, b.up ? "BEND_UP" : "BEND_DOWN",
+      WriteLine(o, frame, sheet::FoldsToward(b, side) ? "BEND_UP" : "BEND_DOWN",
                 gp_Pnt(b.flatA.x, b.flatA.y, b.flatA.z),
                 gp_Pnt(b.flatB.x, b.flatB.y, b.flatB.z));
     }
