@@ -88,12 +88,19 @@ bool CornerReliefFeature::Execute(RegenContext& ctx) {
       const BendRegion& a = bends[i];
       const BendRegion& b = bends[j];
       const gp_Vec ua = V(a.upDir), ub = V(b.upDir);
-      if (ua.Dot(ub) < 1.0 - 1e-9)
-        continue; // not folding off the same side of the same panel
+      // The same PANEL, folding either way off it. Two bend lines that cross
+      // tear the corner between them whichever side each wall turns to —
+      // a heat tent, whose ridge folds up and whose end tabs fold down, is
+      // the ordinary case, and requiring one side left it with a corner
+      // check_sheet_metal called out and this feature refused to cut.
+      if (std::abs(ua.Dot(ub)) < 1.0 - 1e-9)
+        continue; // not the same panel at all
       const gp_Pnt ta = P(a.axisOrigin).Translated(ua * -a.radius);
       const gp_Pnt tb = P(b.axisOrigin).Translated(ub * -b.radius);
-      if (std::abs(gp_Vec(ta, tb).Dot(ua)) > 1e-6)
-        continue; // parallel faces, not the same one
+      // Same face, or the two faces of the one sheet: anything further apart
+      // is two different panels that happen to be parallel.
+      if (std::abs(gp_Vec(ta, tb).Dot(ua)) > t + 1e-6)
+        continue;
       const gp_Vec da = V(a.axisDir), db = V(b.axisDir);
       const double cross = da.Crossed(db).Magnitude();
       if (cross < 1e-9)

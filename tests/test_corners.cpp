@@ -9,6 +9,7 @@
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/sheet/Check.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -72,6 +73,33 @@ ElementRef Edge(const Document& doc, uint64_t base, const glm::dvec3& a,
   }
   FAIL("no such edge");
   return {};
+}
+
+// The straight edge whose MIDPOINT is nearest `at` — for picking an edge
+// whose ends have moved (a flange's setback trims the panel back from them).
+ElementRef EdgeNear(const Document& doc, uint64_t base, const glm::dvec3& at) {
+  TopTools_IndexedMapOfShape edges;
+  const Body& body = doc.GetBodies()[0];
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+  double best = 1e30;
+  ElementRef found;
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+    if (c.GetType() != GeomAbs_Line)
+      continue;
+    const gp_Pnt p0 = c.Value(c.FirstParameter());
+    const gp_Pnt p1 = c.Value(c.LastParameter());
+    const gp_Pnt mid((p0.X() + p1.X()) / 2.0, (p0.Y() + p1.Y()) / 2.0,
+                     (p0.Z() + p1.Z()) / 2.0);
+    const double dist = mid.Distance(gp_Pnt(at.x, at.y, at.z));
+    if (dist < best)
+      if (const std::string* n = body.elementMap.EdgeNameOf(i - 1)) {
+        best = dist;
+        found = ElementRef{base, *n};
+      }
+  }
+  REQUIRE(best < 1e30);
+  return found;
 }
 
 void CornerFlanges(Document& doc, uint64_t base, FlangePosition pos,
@@ -187,6 +215,55 @@ TEST_CASE("a square corner gets its relief", "[sheetmetal][corner]") {
     CHECK(Volume(doc) < before);
     LaysFlat(doc, base);
   }
+}
+
+TEST_CASE("a corner counts even when the two walls fold opposite ways",
+          "[sheetmetal][corner]") {
+  // A heat tent: a ridge folded UP along one edge and an end tab folded DOWN
+  // at the other. The two bend lines still cross, and the corner between
+  // them still tears — check_sheet_metal says so — but the pairing asked for
+  // both walls to leave the same FACE, so this part had a corner the check
+  // called out and the relief refused to cut.
+  Document doc;
+  const uint64_t base = Rect(doc);
+  auto ridge = std::make_unique<EdgeFlangeFeature>(
+      "Ridge",
+      std::vector<ElementRef>{Edge(doc, base, {0, 0, kT}, {100, 0, kT})}, 30.0,
+      60.0);
+  doc.AddFeature(std::move(ridge));
+  Ok(doc);
+  // The tab hangs off the far side of the same panel: picked on the
+  // UNDERSIDE, so it folds the other way.
+  // The ridge's own setback trimmed the panel back from y = 0, so this edge
+  // no longer runs corner to corner: picked by where it LIES.
+  auto tab = std::make_unique<EdgeFlangeFeature>(
+      "Tab", std::vector<ElementRef>{EdgeNear(doc, base, {0, 31, 0})}, 15.0,
+      90.0);
+  doc.AddFeature(std::move(tab));
+  Ok(doc);
+
+  const sheet::CheckResult before =
+      sheet::Check(doc.GetBodies()[0], *doc.SheetMetal());
+  const bool tears =
+      std::any_of(before.violations.begin(), before.violations.end(),
+                  [](const sheet::Violation& v) {
+                    return v.kind == "missing_bend_relief";
+                  });
+  CHECK(tears); // the check knows the corner is there
+
+  const double volume = Volume(doc);
+  doc.AddFeature(std::make_unique<CornerReliefFeature>("Relief", base));
+  Ok(doc);
+  CHECK(Sound(doc));
+  CHECK(Volume(doc) < volume); // ...and now so does the relief
+  const sheet::CheckResult after =
+      sheet::Check(doc.GetBodies()[0], *doc.SheetMetal());
+  for (const sheet::Violation& v : after.violations)
+    UNSCOPED_INFO(v.message);
+  CHECK(std::none_of(after.violations.begin(), after.violations.end(),
+                     [](const sheet::Violation& v) {
+                       return v.kind == "missing_bend_relief";
+                     }));
 }
 
 TEST_CASE("a body with no corner has nothing to relieve",
