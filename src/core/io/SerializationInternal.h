@@ -17,7 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    107; // v107: a participant role `bonded` (S2): meshed AND glued to the
+    108; // v108: sheet-metal rules in the envelope (`sheet_metal`, absent
+         //      when the part is not sheet metal): {material, gauge,
+         //      thickness, bend_radius?, k_factor?, relief?, relief_width?,
+         //      relief_depth?}. The optional fields are DERIVED from the
+         //      material and gauge when absent, so a table correction reaches
+         //      the part; a v107 build drops the object and every sheet
+         //      feature then refuses for want of a thickness
+         //      (docs/sheetmetal/plan.md, S1).
+         // v107: a participant role `bonded` (S2): meshed AND glued to the
          //      meshed occurrence where they touch — one mesh spans them,
          //      each keeps its material. A v106 build refuses the file
          //      rather than reading the role as something else.

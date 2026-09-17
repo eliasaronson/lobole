@@ -1,0 +1,17 @@
+{
+  "features": 1,
+  "bodies": 1,
+  "volumes": [
+    9000.0
+  ],
+  "sheet_metal": {
+    "material": "aluminum",
+    "gauge": "1.5mm",
+    "thickness": 1.5,
+    "bend_radius": 3.0,
+    "k_factor": 0.46,
+    "relief": "obround",
+    "relief_width": 2.25,
+    "relief_depth": 4.5
+  }
+}

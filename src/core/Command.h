@@ -265,6 +265,27 @@ private:
   bool m_had = false;
 };
 
+// ---- Sheet metal (docs/sheetmetal/plan.md) --------------------------------
+
+// Sets (or clears, with nullopt) the document's sheet-metal rules. One
+// command for the whole object rather than one per field: the gauge, the
+// radius and the K are read together by every flange, so a half-applied edit
+// is a part briefly made of a thickness nobody chose. Geometry-bearing —
+// unlike a tolerance this DOES rebuild, which is why Execute regenerates.
+class SetSheetMetalRulesCommand : public Command {
+public:
+  explicit SetSheetMetalRulesCommand(
+      std::optional<sheet::SheetMetalRules> rules);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  std::optional<sheet::SheetMetalRules> m_after;
+  std::optional<sheet::SheetMetalRules> m_before;
+};
+
 // ---- Configurations (the study command trio, verbatim) --------------------
 
 // Adds a new (empty) configuration; the created id is captured for redo.

@@ -245,6 +245,26 @@ void SetToleranceCommand::Undo(Document& doc) {
     doc.RemoveTolerance(m_after.id);
 }
 
+SetSheetMetalRulesCommand::SetSheetMetalRulesCommand(
+    std::optional<sheet::SheetMetalRules> rules)
+    : m_after(std::move(rules)) {}
+
+std::string SetSheetMetalRulesCommand::Description() const {
+  if (!m_after)
+    return "Clear sheet-metal rules";
+  return "Set sheet metal " + m_after->gauge + " " + m_after->material;
+}
+
+bool SetSheetMetalRulesCommand::Execute(Document& doc) {
+  m_before = doc.SheetMetal();
+  doc.SetSheetMetal(m_after);
+  return true;
+}
+
+void SetSheetMetalRulesCommand::Undo(Document& doc) {
+  doc.SetSheetMetal(m_before);
+}
+
 ClearToleranceCommand::ClearToleranceCommand(uint64_t toleranceId)
     : m_id(toleranceId) {}
 

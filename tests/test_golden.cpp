@@ -505,12 +505,47 @@ void AssertTolerances(const Document& doc, const nlohmann::json& expect) {
   }
 }
 
+// The sheet-metal rules, and — the half a stored field cannot show — the
+// numbers they RESOLVE to. A golden that reloads its gauge but derives a
+// different K bends the same part to a different flat length, and the
+// document looks identical either way.
+void AssertSheetMetal(const Document& doc, const nlohmann::json& expect) {
+  if (!expect.contains("sheet_metal")) {
+    CHECK_FALSE(doc.SheetMetal().has_value());
+    return;
+  }
+  const nlohmann::json& want = expect.at("sheet_metal");
+  REQUIRE(doc.SheetMetal().has_value());
+  const sheet::SheetMetalRules& got = *doc.SheetMetal();
+  CHECK(got.material == want.at("material").get<std::string>());
+  CHECK(got.gauge == want.at("gauge").get<std::string>());
+  CHECK_THAT(got.thickness, Catch::Matchers::WithinAbs(
+                                want.at("thickness").get<double>(), 1e-9));
+  const double radius = got.EffectiveBendRadius();
+  CHECK_THAT(radius, Catch::Matchers::WithinAbs(
+                         want.at("bend_radius").get<double>(), 1e-9));
+  CHECK_THAT(
+      got.EffectiveKFactor(radius),
+      Catch::Matchers::WithinAbs(want.at("k_factor").get<double>(), 1e-9));
+  CHECK(sheet::ReliefStyleName(got.reliefStyle) ==
+        want.value("relief", std::string("rectangular")));
+  if (want.contains("relief_width"))
+    CHECK_THAT(got.EffectiveReliefWidth(),
+               Catch::Matchers::WithinAbs(want.at("relief_width").get<double>(),
+                                          1e-9));
+  if (want.contains("relief_depth"))
+    CHECK_THAT(got.EffectiveReliefDepth(radius),
+               Catch::Matchers::WithinAbs(want.at("relief_depth").get<double>(),
+                                          1e-9));
+}
+
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   if (expect.contains("generator"))
     CHECK(doc.Generator() == expect.at("generator"));
   if (expect.contains("catalogs"))
     CHECK(doc.GetCatalogs() == expect.at("catalogs"));
   AssertTolerances(doc, expect);
+  AssertSheetMetal(doc, expect);
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
   std::vector<double> volumes;

@@ -266,6 +266,7 @@ set(core_sources
     src/core/Measure.cpp
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
+    src/core/SheetMetal.cpp
     src/core/ToleranceStack.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp
@@ -700,6 +701,7 @@ set(app_sources
     src/remote/RemoteDispatch.cpp
     src/remote/RemoteUiActions.cpp
     src/remote/RemoteConfigurations.cpp
+    src/remote/RemoteSheetMetal.cpp
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
     src/remote/RemoteInspection.cpp

@@ -34,6 +34,7 @@
 #include "remote/RemoteModeling.h"
 #include "remote/RemoteMotion.h"
 #include "remote/RemoteProject.h"
+#include "remote/RemoteSheetMetal.h"
 #include "remote/RemoteSimulation.h"
 #include "remote/RpcParams.h"
 
@@ -476,6 +477,7 @@ const remote::MethodDoc* FindMethod(const std::string& m) {
     add(remote::CamMethodDocs());
     add(remote::DrawingMethodDocs());
     add(remote::ConfigurationMethodDocs());
+    add(remote::SheetMetalMethodDocs());
     add(remote::SimulationMethodDocs());
     return out;
   }();
@@ -512,6 +514,7 @@ static bool IsKnownMethod(const std::string& m) {
     add(remote::CamMethodDocs());
     add(remote::DrawingMethodDocs());
     add(remote::ConfigurationMethodDocs());
+    add(remote::SheetMetalMethodDocs());
     add(remote::SimulationMethodDocs());
     return s;
   }();
@@ -833,6 +836,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::CamMethodDocs());
     addDocs(remote::DrawingMethodDocs());
     addDocs(remote::ConfigurationMethodDocs());
+    addDocs(remote::SheetMetalMethodDocs());
     addDocs(remote::SimulationMethodDocs());
     if (!only.empty() && methods.empty())
       throw std::runtime_error(
@@ -887,6 +891,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (doc) {
     if (json cfgOut; remote::HandleConfigurationRpc(state, *doc, m, p, cfgOut))
       return cfgOut;
+    // Sheet metal is a PART-only object (the rules describe one blank), so
+    // unlike the config RPCs it has no assembly half.
+    if (json smOut; remote::HandleSheetMetalRpc(state, *doc, m, p, smOut))
+      return smOut;
   } else if (state.assembly) {
     if (json cfgOut; remote::HandleAssemblyConfigurationRpc(
             state, *state.assembly, m, p, cfgOut))

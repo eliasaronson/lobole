@@ -1,0 +1,26 @@
+{
+  "format": "designer-document",
+  "version": 108,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Blank",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 100,
+      "height": 60,
+      "depth": 1.5
+    }
+  ],
+  "sheet_metal": {
+    "material": "aluminum",
+    "gauge": "1.5mm",
+    "thickness": 1.5,
+    "bend_radius": 3.0,
+    "relief": "obround"
+  }
+}

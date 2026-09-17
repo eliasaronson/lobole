@@ -54,6 +54,7 @@ add_executable(designer_tests
     test_loft.cpp
     test_rib.cpp
     test_thread.cpp
+    test_sheetmetal.cpp
     test_sweep.cpp
     test_curve3d.cpp
     test_pipe.cpp

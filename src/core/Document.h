@@ -5,6 +5,7 @@
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/SheetMetal.h"
 #include "core/Units.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -14,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -349,6 +351,27 @@ public:
   const units::System& Units() const { return m_units; }
   void SetUnits(const units::System& u) { m_units = u; }
 
+  // ---- Sheet metal (docs/sheetmetal/plan.md) -----------------------------
+  // The stock this part is made from and how it bends: one per document,
+  // read by every sheet feature during regeneration. Unset until a sheet
+  // feature needs it, and then required — a flange cannot guess its own
+  // thickness. Document-level for the reason units and tolerances are: a
+  // part is cut from ONE sheet, so a per-feature gauge would let a body be
+  // two thicknesses at once and nothing could refuse it.
+  //
+  // Unlike tolerances, this one IS geometry: changing the gauge rebuilds
+  // every sheet feature, which is why it participates in the regen chain
+  // hash (Document::ChainHash).
+  const std::optional<sheet::SheetMetalRules>& SheetMetal() const {
+    return m_sheetMetal;
+  }
+  // Regenerates, unlike SetUnits and the tolerance mutators: the gauge is an
+  // input to geometry, so changing it has to rebuild the flanges that read it.
+  void SetSheetMetal(std::optional<sheet::SheetMetalRules> rules) {
+    m_sheetMetal = std::move(rules);
+    Regenerate();
+  }
+
   // ---- Configurations ---------------------------------------------------
   // Named variants (parameter overrides + feature suppression), a sibling to
   // the parameter table like studies — not Features. The ACTIVE configuration
@@ -572,6 +595,7 @@ private:
 
   std::vector<Configuration> m_configurations;
   units::System m_units;
+  std::optional<sheet::SheetMetalRules> m_sheetMetal;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.

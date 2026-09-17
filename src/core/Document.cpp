@@ -268,6 +268,21 @@ bool Document::Regenerate() {
   // matching prefix implies identical inputs, hence identical state.
   std::vector<size_t> hashes(upTo);
   size_t chain = 0x9e3779b97f4a7c15ull;
+  // The sheet-metal rules seed the chain rather than sitting in any one
+  // feature's JSON: every sheet feature reads the gauge, so changing it
+  // rebuilds all of them. Seeding is how "invalidate everything" is spelled
+  // in a chained cache — and the absent case must hash as absent, or a part
+  // that never was sheet metal would pick up a different tip hash and rebuild
+  // once for nothing.
+  if (m_sheetMetal) {
+    const sheet::SheetMetalRules& r = *m_sheetMetal;
+    chain = std::hash<std::string>{}(
+        std::to_string(chain) + "|sheet|" + r.material + "|" + r.gauge + "|" +
+        std::to_string(r.thickness) + "|" + std::to_string(r.bendRadius) + "|" +
+        std::to_string(r.kFactor) + "|" +
+        sheet::ReliefStyleName(r.reliefStyle) + "|" +
+        std::to_string(r.reliefWidth) + "|" + std::to_string(r.reliefDepth));
+  }
   for (size_t i = 0; i < upTo; i++) {
     // Fold in the active configuration's effective suppression: the feature
     // JSON encodes only the authored `suppressed` flag, so a config that

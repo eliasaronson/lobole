@@ -104,6 +104,60 @@ units::System UnitsFromEnvelope(const json& j) {
   return sys;
 }
 
+// The sheet-metal rules off an envelope (v108). Absent = not a sheet part,
+// which is what every document written before v108 means. An unknown relief
+// style is REFUSED rather than read as rectangular: a relief that is quietly
+// the wrong shape is a corner that cracks at the brake, and the document
+// loads looking perfect.
+std::optional<sheet::SheetMetalRules> SheetMetalFromEnvelope(const json& j) {
+  if (!j.contains("sheet_metal"))
+    return std::nullopt;
+  const json m = j.at("sheet_metal");
+  sheet::SheetMetalRules r;
+  r.material = m.value("material", std::string{});
+  r.gauge = m.value("gauge", std::string{});
+  r.thickness = m.value("thickness", 0.0);
+  r.bendRadius = m.value("bend_radius", 0.0);
+  r.kFactor = m.value("k_factor", 0.0);
+  if (m.contains("relief")) {
+    const std::string v = m.at("relief").get<std::string>();
+    if (!sheet::ReliefStyleFromString(v, r.reliefStyle))
+      throw std::runtime_error(
+          "unknown sheet-metal relief style '" + v +
+          "' (expected one of: " + sheet::ReliefStyleList() + ")");
+  }
+  r.reliefWidth = m.value("relief_width", 0.0);
+  r.reliefDepth = m.value("relief_depth", 0.0);
+  if (const std::string why = sheet::Validate(r); !why.empty())
+    throw std::runtime_error("sheet-metal rules: " + why);
+  return r;
+}
+
+// Written only when the part IS sheet metal, so every document that is not
+// re-saves byte-identically and the goldens stay valid. The derived fields
+// (bend radius, K, relief size) are written only when overridden, for the
+// same reason: a stored 1.5 that came from the table would silently stop
+// tracking the table.
+void SheetMetalToEnvelope(const std::optional<sheet::SheetMetalRules>& rules,
+                          json& j) {
+  if (!rules)
+    return;
+  json m = {{"material", rules->material},
+            {"gauge", rules->gauge},
+            {"thickness", rules->thickness}};
+  if (rules->bendRadius > 0.0)
+    m["bend_radius"] = rules->bendRadius;
+  if (rules->kFactor > 0.0)
+    m["k_factor"] = rules->kFactor;
+  if (rules->reliefStyle != sheet::ReliefStyle::Rectangular)
+    m["relief"] = sheet::ReliefStyleName(rules->reliefStyle);
+  if (rules->reliefWidth > 0.0)
+    m["relief_width"] = rules->reliefWidth;
+  if (rules->reliefDepth > 0.0)
+    m["relief_depth"] = rules->reliefDepth;
+  j["sheet_metal"] = std::move(m);
+}
+
 // The same three keys, written only when they differ from the default.
 void UnitsToEnvelope(const units::System& u, json& j) {
   if (u.IsDefault())
@@ -174,6 +228,8 @@ json DocumentEnvelope(const Document& doc) {
   // reason: every document written before this re-saves byte-identically.
   // Presentation only — storage is mm/g/deg whatever this says.
   UnitsToEnvelope(doc.Units(), j);
+  // Sheet-metal rules (v108), omitted when the part is not sheet metal.
+  SheetMetalToEnvelope(doc.SheetMetal(), j);
   return j;
 }
 
@@ -706,6 +762,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       t.comment = tj.value("comment", std::string{});
       doc->RestoreTolerance(std::move(t));
     }
+    // Sheet-metal rules (v108) BEFORE the features: a flange reads the
+    // gauge during Execute, and AddFeature below regenerates.
+    doc->SetSheetMetal(SheetMetalFromEnvelope(index));
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
     std::map<uint64_t, fs::path> byId;
@@ -1392,6 +1451,8 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
       t.comment = tj.value("comment", std::string{});
       doc->RestoreTolerance(std::move(t));
     }
+    // Sheet-metal rules (v108) BEFORE the features, for the reason above.
+    doc->SetSheetMetal(SheetMetalFromEnvelope(j));
     // Assets (v49 image bytes, v84 derived snapshots): decode the base64
     // "assets" map into the doc store BEFORE the features regenerate — a
     // Derived feature reads its B-Reps from it during Execute.
