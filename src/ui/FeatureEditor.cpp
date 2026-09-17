@@ -2018,6 +2018,12 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     HandleEdit(state, feature,
                ImGui::Checkbox("Outside the edge", &hm->outside), index,
                commit);
+    // Where the hem stops short of each end of the edge: a hem running the
+    // whole length of a pan's wall fuses to the wall beside it.
+    ExprDim(state, feature, index, commit, "Inset start", hm->offsetStartExpr,
+            hm->offsetStart);
+    ExprDim(state, feature, index, commit, "Inset end", hm->offsetEndExpr,
+            hm->offsetEnd);
     PickSlotRow(
         state, feature, PickSlot::HemEdges,
         hm->edges.empty() ? "" : std::to_string(hm->edges.size()) + " picked");

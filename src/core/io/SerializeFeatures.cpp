@@ -1080,6 +1080,14 @@ json FeatureToJson(const Feature& feature) {
       j["gap_expr"] = hm->gapExpr;
     if (hm->outside)
       j["outside"] = true;
+    if (hm->offsetStart != 0.0) // v116
+      j["offset_start"] = hm->offsetStart;
+    if (!hm->offsetStartExpr.empty())
+      j["offset_start_expr"] = hm->offsetStartExpr;
+    if (hm->offsetEnd != 0.0)
+      j["offset_end"] = hm->offsetEnd;
+    if (!hm->offsetEndExpr.empty())
+      j["offset_end_expr"] = hm->offsetEndExpr;
   } else if (auto* jg = dynamic_cast<const JogFeature*>(&feature)) {
     j["sketch_id"] = jg->sketchId;
     j["height"] = jg->height;
@@ -1314,8 +1322,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "length (+_expr) mm - the return past the fold, kind?: closed "
      "(default; the return lies a tenth of the sheet off the panel) | open, "
      "gap? (+_expr) mm (open only; omitted = one thickness), outside? - "
-     "fold starting AT the edge instead of keeping the drawn outline. A hem "
-     "is crushed, so it is exempt from the minimum bend radius"},
+     "fold starting AT the edge instead of keeping the drawn outline, "
+     "offset_start?/offset_end? (+_expr) mm (v116) - insets from the ends of "
+     "the picked edge: a hem running the full length of a pan's wall meets "
+     "the wall beside it at the corner and fuses to it, and the part then "
+     "flattens from no blank. A hem is crushed, so it is exempt from the "
+     "minimum bend radius and cuts no relief"},
     {"Jog", 112,
      "sketch_id (a sketch holding ONE line drawn on a panel face), height "
      "(+_expr) mm - face to face, angle_deg? (+_expr, (0, 90], default 90), "
@@ -2102,6 +2114,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     hm->gap = j.value("gap", 0.0);
     hm->gapExpr = j.value("gap_expr", std::string{});
     hm->outside = j.value("outside", false);
+    hm->offsetStart = j.value("offset_start", 0.0); // v116
+    hm->offsetStartExpr = j.value("offset_start_expr", std::string{});
+    hm->offsetEnd = j.value("offset_end", 0.0);
+    hm->offsetEndExpr = j.value("offset_end_expr", std::string{});
     out = std::move(hm);
   } else if (type == "Jog") { // v112
     auto jg = std::make_unique<JogFeature>(

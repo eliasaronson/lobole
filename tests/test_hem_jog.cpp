@@ -181,6 +181,53 @@ TEST_CASE("a closed hem folds the edge back on itself", "[sheetmetal][hem]") {
         sheet::MinBendRadius("aluminum", kT));
 }
 
+TEST_CASE("a hem stops short of the wall beside it", "[sheetmetal][hem]") {
+  // The shape every hemmed tray has: walls up, and a hem along the top of
+  // one of them. Run the hem the full length and it meets the wall beside it
+  // at the corner and fuses to it — a corner of continuous metal, which
+  // folds from no blank. The inset is what a real tray has cut into it, and
+  // a hem had no way to say it until v116.
+  Document doc;
+  const uint64_t base = Blank(doc);
+  const double ret = 6.0, inset = kR + kT;
+  const double r = kT / 20.0; // a closed hem's own radius
+
+  auto hem = std::make_unique<HemFeature>(
+      "Hem", std::vector<ElementRef>{Top(doc, base, {0, 0, kT}, {kW, 0, kT})},
+      ret);
+  hem->offsetStart = inset;
+  hem->offsetEnd = inset;
+  doc.AddFeature(std::move(hem));
+  Ok(doc);
+  CHECK(Sound(doc));
+
+  // Exactly the full-length hem, less the two ends that were not folded:
+  // the return, its sector, and the setback that is no longer cut away.
+  const double setback = r + kT;
+  const double span = kW - 2.0 * inset;
+  const double expected = kW * kD * kT - span * setback * kT +
+                          Sector(kPi, r, span) + ret * kT * span;
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(expected, 1e-5));
+
+  // And the hem is a bend the width of what was left, not of the whole edge.
+  REQUIRE(doc.GetBodies()[0].bends.size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].bends[0].width, WithinAbs(span, 1e-6));
+
+  // A negative inset is refused rather than quietly clamped.
+  auto* edited = dynamic_cast<HemFeature*>(doc.GetFeature(2));
+  REQUIRE(edited != nullptr);
+  edited->offsetStart = -1.0;
+  doc.ClearRegenCache();
+  doc.Regenerate();
+  CHECK_FALSE(doc.GetFeature(2)->GetError().empty());
+  edited->offsetStart = inset;
+  doc.ClearRegenCache();
+  REQUIRE(doc.Regenerate());
+
+  // It survives the round trip through the file, and lays flat.
+  RoundTrip(doc, base);
+}
+
 TEST_CASE("an open hem stands off by its gap", "[sheetmetal][hem]") {
   Document doc;
   const uint64_t base = Blank(doc);

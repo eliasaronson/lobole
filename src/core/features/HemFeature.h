@@ -38,6 +38,8 @@ public:
   void VisitExprs(const ExprVisitor& visit) override {
     visit(lengthExpr, length);
     visit(gapExpr, gap);
+    visit(offsetStartExpr, offsetStart);
+    visit(offsetEndExpr, offsetEnd);
   }
 
   [[nodiscard]] std::string WhyIncomplete() const override {
@@ -61,4 +63,14 @@ public:
   // part does not grow past its drawn outline. Outside: the fold starts at
   // the edge and adds to it.
   bool outside = false;
+  // Inset of each end from the ends of the picked edge, mm. A hem that runs
+  // the full length of a pan's wall meets the wall beside it at the corner
+  // and fuses to it, and a corner of continuous metal folds from no blank —
+  // so a hemmed tray needs its hem stopped short, exactly as an edge flange
+  // does. Unlike a flange's, these cut no relief: a hem is crushed flat
+  // against the panel, so there is no bend line stopping inside it.
+  double offsetStart = 0.0;
+  std::string offsetStartExpr;
+  double offsetEnd = 0.0;
+  std::string offsetEndExpr;
 };

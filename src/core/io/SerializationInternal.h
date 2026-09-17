@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    115; // v115: a drawing view's `configuration` (omitted = the part's
+    116; // v116: a Hem's `offset_start` / `offset_end` (+ _expr): insets
+         //      from the ends of the picked edge, as an EdgeFlange has. A
+         //      hem running the full length of a pan's wall fuses to the
+         //      wall beside it and the part flattens from no blank
+         //      (docs/sheetmetal/plan.md, S7).
+         // v115: a drawing view's `configuration` (omitted = the part's
          //      active one) and a drawing note's `table`: none | bends — a
          //      flat pattern on a sheet (docs/sheetmetal/plan.md, S11).
          // v114: `NormalCut` {sketch_id, body_id?, regions?}: a cut through

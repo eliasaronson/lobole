@@ -59,6 +59,12 @@ bool HemFeature::Execute(RegenContext& ctx) {
   // setting the line back by that much keeps the outline where it was drawn.
   spec.setback = outside ? 0.0 : spec.radius + t;
   spec.relief = sheet::ReliefStyle::None;
+  spec.offsetStart = offsetStart;
+  spec.offsetEnd = offsetEnd;
+  if (offsetStart < 0.0 || offsetEnd < 0.0) {
+    SetError("a hem's inset cannot be negative");
+    return false;
+  }
   const std::string why =
       sheet::ApplyFlanges(ctx.bodies, edges, spec, rules, GetId(), t / 10.0);
   if (!why.empty()) {

@@ -229,9 +229,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   str, "edges": [{{"feature_id": ..., "element": <straight panel edge>}}],
   "length": num (the return), "length_expr"?: str, "kind"?: "closed"
   (default) | "open", "gap"?: num (open only; omitted = one thickness),
-  "outside"?: bool}} — exempt from the minimum bend radius (a hem is
-  crushed). As with EdgeFlange, which of a rim's two edges you pick decides
-  which way it folds.
+  "outside"?: bool, "offset_start"?/"offset_end"?: num (+_expr) — insets
+  from the ends of the picked edge}} — exempt from the minimum bend radius
+  (a hem is crushed). As with EdgeFlange, which of a rim's two edges you
+  pick decides which way it folds; and on a pan, inset the hem or it meets
+  the wall beside it at the corner and the part flattens from no blank.
 - Jog (step a panel up along a line): {{"type": "Jog", "name": str,
   "sketch_id": <a sketch holding ONE line drawn on the panel face>,
   "height": num (face to face), "height_expr"?: str, "angle_deg"?: num

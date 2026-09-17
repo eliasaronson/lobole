@@ -1,0 +1,218 @@
+{
+  "format": "designer-document",
+  "version": 116,
+  "sheet_metal": {
+    "gauge": "1.5mm",
+    "material": "aluminum",
+    "thickness": 1.5
+  },
+  "features": [
+    {
+      "constraints": [
+        {
+          "a": [
+            2,
+            1
+          ],
+          "b": [
+            3,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3,
+            1
+          ],
+          "b": [
+            4,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4,
+            1
+          ],
+          "b": [
+            5,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            5,
+            1
+          ],
+          "b": [
+            2,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            2,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        },
+        {
+          "a": [
+            5,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        }
+      ],
+      "entities": [
+        {
+          "a": [
+            -50.0,
+            -30.0
+          ],
+          "b": [
+            50.0,
+            -30.0
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            50.0,
+            -30.0
+          ],
+          "b": [
+            50.0,
+            30.0
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            50.0,
+            30.0
+          ],
+          "b": [
+            -50.0,
+            30.0
+          ],
+          "id": 4,
+          "type": "line"
+        },
+        {
+          "a": [
+            -50.0,
+            30.0
+          ],
+          "b": [
+            -50.0,
+            -30.0
+          ],
+          "id": 5,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Blank profile",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "id": 2,
+      "name": "Blank",
+      "sketch_id": 1,
+      "type": "BaseFlange"
+    },
+    {
+      "angle_deg": 90.0,
+      "edges": [
+        {
+          "element": "2/g4;U3",
+          "feature_id": 2
+        },
+        {
+          "element": "2/g3;U3",
+          "feature_id": 2
+        }
+      ],
+      "id": 3,
+      "length": 25.0,
+      "name": "Walls",
+      "type": "EdgeFlange"
+    },
+    {
+      "edges": [
+        {
+          "element": "3/f0/face6;U3",
+          "feature_id": 2
+        }
+      ],
+      "id": 4,
+      "length": 6.0,
+      "name": "Safe edge",
+      "offset_end": 3.75,
+      "offset_start": 3.75,
+      "type": "Hem"
+    }
+  ]
+}
