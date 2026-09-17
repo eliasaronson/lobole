@@ -171,6 +171,10 @@ buys back the coverage.
   reaps orphaned Xvfb on its next run.
 - `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
   containers), deriving the package list and test exclusions from ci.yml.
+  **`--pixel` is the third**: the gui-suite job's byte-exact render gate, in a
+  container carrying the runner's llvmpipe — the only place its baseline can
+  be checked or (`--pixel-record`) written, since a developer GPU records a
+  different key. Nothing mirrored that step, and it sat red for two weeks.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add
   a golden AT that version, AND a row in docs/versioning/format.md's version
   history. **Both are gated** (`test_golden.cpp`): the newest golden must

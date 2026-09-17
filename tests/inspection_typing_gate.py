@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require static diagnostics on each seeded error, not simply a failing mypy."""
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -8,6 +9,21 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# ctest reads 77 as "skipped". mypy is a DEV tool, not a build dependency:
+# the nix shell carries it and CI's build-and-test installs it, but a
+# stock-Ubuntu container built from the README's list has no reason to, and
+# there this gate cannot run at all — it failed every such job with
+# "No module named mypy" rather than saying so.
+#
+# A skip is only honest while the gate really runs somewhere, so the job that
+# installs mypy ALSO runs this script directly (ci.yml, "Typing gate"): a
+# dropped package is a red build there, not a quiet skip everywhere.
+SKIP = 77
+if importlib.util.find_spec('mypy') is None:
+    print(f'inspection typing: SKIP — no mypy for this interpreter '
+          f'({sys.executable}). nix-shell has it; apt: python3-mypy')
+    sys.exit(SKIP)
 with tempfile.TemporaryDirectory(prefix='inspection-mypy-') as cache:
     env = dict(os.environ, MYPYPATH=str(ROOT / 'tools'))
     base = [sys.executable, '-m', 'mypy', '--follow-imports=silent',

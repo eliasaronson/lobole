@@ -750,9 +750,14 @@ add_test(NAME inspection_contracts_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/inspection_contracts_smoke.py
                          $<TARGET_FILE:designer>)
 set_tests_properties(inspection_contracts_smoke PROPERTIES TIMEOUT 120)
+# Skips (77) where this interpreter has no mypy — a stock-Ubuntu container
+# built from the README's list, which has no reason to carry a dev linter.
+# CI's build-and-test installs mypy and runs the script DIRECTLY, so the gate
+# still applies on every push (see ci.yml).
 add_test(NAME inspection_typing_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/inspection_typing_gate.py)
-set_tests_properties(inspection_typing_gate PROPERTIES TIMEOUT 120)
+set_tests_properties(inspection_typing_gate PROPERTIES TIMEOUT 120
+                     SKIP_RETURN_CODE 77)
 
 add_test(NAME component_update_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/component_update_smoke.py

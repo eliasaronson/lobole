@@ -143,8 +143,27 @@ jobs:
       # right on a developer's GPU and wrong here. A Mesa bump changes the key
       # on purpose; this turns that into a red build so someone re-records
       # deliberately, instead of a gate that silently stopped applying.
+      # The baseline is recorded in a container that matches this runner, not
+      # on a developer GPU: `tools/ci-local.sh --pixel` checks it here and
+      # `--pixel-record` writes it, both against ubuntu:24.04's llvmpipe. That
+      # is also the answer to "why is a golden PNG in the tree portable at
+      # all": measured on that image, the render is byte-identical across
+      # runs AND with AVX2/FMA disabled (GALLIUM_OVERRIDE_CPU_CAPS=avx), so it
+      # does not depend on the host CPU — only on the driver, which the key
+      # names.
       - name: Pixel regression (software Vulkan, NO Xvfb)
         run: python3 tests/render_pixel_smoke.py build/designer --require-baseline
+
+      # A pixel diff nobody can look at is a failure nobody can act on: the
+      # smoke writes the render it got beside the baseline, so hand it over.
+      # Re-recording is then a download and a commit, whatever the cause.
+      - name: The render it actually produced
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-actual
+          path: tests/golden/render/*.actual.png
+          if-no-files-found: ignore
 
   build-and-test:
     runs-on: ubuntu-24.04
@@ -164,7 +183,8 @@ jobs:
             libocct-data-exchange-dev libocct-modeling-algorithms-dev \
             libocct-modeling-data-dev libocct-foundation-dev \
             libocct-ocaf-dev libocct-visualization-dev libtbb-dev \
-            libvterm-dev
+            libvterm-dev \
+            python3-mypy
 
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.
@@ -198,6 +218,13 @@ jobs:
         run: |
           ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure \
             -E "Assembly import plan|Shell that removes no material"
+
+      # The gate above SKIPS where the interpreter has no mypy, which is right
+      # for a stock-Ubuntu container and wrong here: this is the job that
+      # installs it. Running the script directly makes a dropped package a red
+      # build rather than a gate that quietly stopped applying everywhere.
+      - name: Typing gate (mypy is installed here, so it must not skip)
+        run: python3 tests/inspection_typing_gate.py
 
       # The build without Dear ImGui Test Engine — the configuration for
       # anyone who cannot take that dependency's license (it is free for

@@ -5,9 +5,15 @@
 # If CI changes, this follows.
 #
 #   tools/ci-local.sh              # everything: nix suite + both containers
-#   tools/ci-local.sh --nix        # just the local (nix) suite, ~2 min
+#   tools/ci-local.sh --nix        # just the local (nix) jobs, ~5 min:
+#                                  # the suite, then the two configurations
+#                                  # nobody builds by accident (no test
+#                                  # engine, no CAM)
 #   tools/ci-local.sh --containers # just the stock-Ubuntu containers
 #   tools/ci-local.sh --image ubuntu:26.04
+#   tools/ci-local.sh --pixel      # the gui-suite job's PIXEL gate, in a
+#                                  # container that matches the runner
+#   tools/ci-local.sh --pixel-record  # ...and record the baseline it wants
 #   tools/ci-local.sh --asan       # ASan+UBSan build and suite, ~6 min warm
 #   tools/ci-local.sh --tsan       # ThreadSanitizer build and suite
 #
@@ -37,6 +43,8 @@ run_containers=1
 run_asan=0
 run_tsan=0
 run_gui=1
+run_pixel=0
+pixel_record=0
 only_image=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,6 +55,13 @@ while [ $# -gt 0 ]; do
     # "did I break the build?" run.
     --asan) run_asan=1; run_nix=0; run_containers=0 ;;
     --tsan) run_tsan=1; run_nix=0; run_containers=0 ;;
+    # The gui-suite job's pixel gate. Its baseline is keyed to the DRIVER, so
+    # it can only be checked — or recorded — where the driver is the runner's:
+    # llvmpipe from the same Ubuntu image, not the nix mesa this machine
+    # builds against. Nothing else here covered that step, and it was red for
+    # two weeks with no local way to see it.
+    --pixel) run_pixel=1; run_nix=0; run_containers=0 ;;
+    --pixel-record) run_pixel=1; pixel_record=1; run_nix=0; run_containers=0 ;;
     # The GUI suite is ~95 s and needs a display; --no-gui is the escape
     # hatch for a machine without one (and for --containers, which has none).
     --no-gui) run_gui=0 ;;
@@ -75,6 +90,23 @@ for line in block.splitlines():
     if not line.rstrip().endswith("\\"):
         break
 print("PACKAGES=" + " ".join(p for p in pkgs if p and not p.startswith("-")))
+# The gui-suite job's own apt list — the same shape, and the first "apt-get
+# install" in the file, since that job comes first. It carries the pieces the
+# pixel gate needs (mesa-vulkan-drivers) and the README's list does not.
+gui = text.split("gui-suite:", 1)[1]
+gpkgs, collecting = [], False
+for line in gui.splitlines():
+    if not collecting:
+        collecting = "apt-get install" in line
+        continue
+    gpkgs += line.strip().rstrip("\\").split()
+    if not line.rstrip().endswith("\\"):
+        break
+print("GUI_PACKAGES=" + " ".join(p for p in gpkgs if p and not p.startswith("-")))
+# ...and the runner it runs on ("ubuntu-24.04"), which names the image whose
+# driver its pixel baseline belongs to. Stated here so moving the job to a
+# newer runner moves the local check with it.
+print("GUI_RUNS_ON=" + re.search(r"runs-on:\s*(\S+)", gui).group(1))
 
 # The matrix: image and the tests it excludes. "@@" separates them because
 # the exclusion is itself a |-alternation.
@@ -86,6 +118,8 @@ PY
 }
 
 eval "$(read_workflow | grep '^PACKAGES=' | sed 's/^PACKAGES=/PACKAGES="/; s/$/"/')"
+eval "$(read_workflow | grep '^GUI_PACKAGES=' | sed 's/^GUI_PACKAGES=/GUI_PACKAGES="/; s/$/"/')"
+eval "$(read_workflow | grep '^GUI_RUNS_ON=' | sed 's/^GUI_RUNS_ON=/GUI_RUNS_ON="/; s/$/"/')"
 mapfile -t MATRIX < <(read_workflow | sed -n 's/^MATRIX=//p')
 
 step() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
@@ -161,6 +195,17 @@ if [ "$run_nix" = 1 ]; then
   else
     fail "engine-free build FAILED"; failures=$((failures+1))
   fi
+
+  # ...and without CAM, the job's last two steps. Both configurations exist
+  # for the same reason and break the same way: nobody compiles them by
+  # accident, so the only thing that holds them up is a job that does. Two
+  # were broken on the same afternoon -- an engine-free compile and a
+  # Spectra-less link -- and neither could be seen from a nix build.
+  step "build without CAM"
+  run_build no-cam -S . -B .ci-local/build-nocam -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_CAM=OFF \
+    -- .ci-local/build-nocam -j$(nproc)
+  run_tests nocam "CAM-free suite" \
+    nix-shell shell.nix --run "ctest --test-dir .ci-local/build-nocam -LE gui -j$(nproc) --output-on-failure"
 fi
 
 # ---- the sanitizer job (opt-in here, weekly/manual on GitHub) --------------
@@ -222,6 +267,43 @@ if [ "$run_containers" = 1 ]; then
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
          cmake --build /b -j\$(nproc) && $ctest_cmd"
   done
+fi
+
+# ---- the gui-suite job's pixel gate, in the runner's driver ----------------
+# Not the whole job: the GUI suite itself runs here under nix already. What
+# only a matching container can answer is the PIXEL comparison, whose golden
+# is keyed to the driver that drew it -- llvmpipe from ubuntu:24.04, which is
+# what the runner installs and is NOT the mesa in shell.nix. The image is the
+# workflow's own gui-suite package list, so it cannot drift from CI.
+if [ "$run_pixel" = 1 ]; then
+  command -v docker > /dev/null || { fail "docker not found"; exit 1; }
+  # The job runs on a RUNNER, not in a container; the closest an image can
+  # sit to it is the same Ubuntu release, which is where its driver comes
+  # from. Derived, so moving the job moves this.
+  image="${GUI_RUNS_ON/ubuntu-/ubuntu:}"
+  tag="designer-ci-gui"
+  build_dir=".ci-local/gui-build"
+  mkdir -p "$build_dir"
+  step "gui-suite pixel gate ($image)"
+  printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 %s && rm -rf /var/lib/apt/lists/*\n' \
+    "$image" "$GUI_PACKAGES" > "$build_dir/Dockerfile"
+  docker build -q -t "$tag" "$build_dir" > /dev/null
+  # The ICD discovery step of the job, verbatim in spirit: lavapipe's filename
+  # moved once already (lvp_icd.x86_64.json -> lvp_icd.json).
+  pixel_cmd="python3 tests/render_pixel_smoke.py /b/designer --require-baseline"
+  [ "$pixel_record" = 1 ] && pixel_cmd="python3 tests/render_pixel_smoke.py /b/designer --record"
+  # --user: a root-owned PNG in tests/golden/ is a file nobody can commit.
+  run_tests pixel "pixel gate" \
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+      -v "$root:/src" -v "$root/$build_dir:/b" -v "$root/.ci-local/ccache:/tmp/ccache" \
+      -e CCACHE_DIR=/tmp/ccache "$tag" bash -c "
+         set -o pipefail
+         export VK_DRIVER_FILES=\$(ls /usr/share/vulkan/icd.d/lvp_icd*.json /usr/lib/*/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)
+         [ -n \"\$VK_DRIVER_FILES\" ] || { echo 'no lavapipe ICD in the image'; exit 1; }
+         cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release \
+               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache &&
+         cmake --build /b -j\$(nproc) --target designer &&
+         cd /src && $pixel_cmd"
 fi
 
 printf '\n%s in %dm%02ds\n' \

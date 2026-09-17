@@ -18,6 +18,18 @@ differs the SAME way every time. So the output is deterministic per driver, and
 the baseline is keyed to the driver that produced it -- `ping` reports it, down
 to the LLVM version for lavapipe.
 
+One thing that measurement did not answer, because it ran three processes on
+ONE machine: whether the baseline survives a different CPU. llvmpipe JITs its
+shaders, so it could in principle. Measured 2026-09-17 in the runner's own
+image (ubuntu:24.04, mesa 25.2.8, LLVM 20.1.2): the same scene rendered with
+AVX2 and FMA DISABLED (GALLIUM_OVERRIDE_CPU_CAPS=avx) is byte-identical to the
+native render. Fused multiply-add is the classic way two x86 machines disagree
+about a float, and it changes nothing here -- so the key names everything the
+output depends on, and a baseline recorded in that image is CI's baseline
+whatever core the runner lands on. The vector width is part of the key and is
+not a CPU property either: llvmpipe caps itself at 256 bits unless
+LP_NATIVE_VECTOR_WIDTH says otherwise.
+
 That key is what makes exact byte equality usable instead of a tolerance. A
 tolerance is a number nobody can justify, and it hides exactly the small real
 regression this is for. A driver the baseline does not cover is REFUSED as
@@ -33,6 +45,10 @@ re-records deliberately.
     tests/render_pixel_smoke.py <designer>                  # compare, skip if unkeyed
     tests/render_pixel_smoke.py <designer> --require-baseline
     tests/render_pixel_smoke.py <designer> --record         # write the baseline
+
+CI's baseline belongs to CI's driver, so recording it on a developer GPU
+records a different file. `tools/ci-local.sh --pixel` runs this gate in a
+container matching the runner, and `--pixel-record` writes that baseline.
 """
 
 import hashlib
@@ -167,6 +183,8 @@ def main():
             msg = (f"no baseline for this device ({gpu}).\n"
                    f"  Record one:  tests/render_pixel_smoke.py "
                    f"<designer> --record\n"
+                   f"  For CI's driver, not this machine's: "
+                   f"tools/ci-local.sh --pixel-record\n"
                    f"  A driver update changes the key on purpose — the "
                    f"output changes with it, so the old baseline would be "
                    f"comparing against a different renderer.")
