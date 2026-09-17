@@ -709,14 +709,29 @@ void DrawViewsSection(AppState& state) {
         DrawingNote n;
         n.table = NoteTable::Bends;
         n.viewId = view.id;
-        // Sized by its own text: left edge a line's height clear of the
-        // view, top level with the view's top.
+        // Sized by its own text: a line's height clear of the view, on the
+        // side of it that has room, and inside the border either way — a
+        // table placed off the sheet is a table nobody can read.
         const drawing::ResolvedNote rn = ResolveDrawingNote(state, n);
         glm::dvec2 mn, mx;
         drawing::LabelBox(n.pos, rn.text, mn, mx);
-        n.pos += glm::dvec2(it->second.bboxMax.x + drawing::kLabelLineMM,
-                            it->second.bboxMax.y) -
-                 glm::dvec2(mn.x, mx.y);
+        const glm::dvec2 size = mx - mn;
+        const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
+        const double gap = drawing::kLabelLineMM;
+        double left = it->second.bboxMax.x + gap;
+        if (left + size.x > chrome.borderMax.x)
+          left = it->second.bboxMin.x - gap - size.x; // the other side
+        left = std::clamp(
+            left, chrome.borderMin.x,
+            std::max(chrome.borderMin.x, chrome.borderMax.x - size.x));
+        double top = it->second.bboxMax.y;
+        top = std::clamp(top, chrome.borderMin.y + size.y, chrome.borderMax.y);
+        // ...and not on top of the title block, which owns its corner.
+        if (left + size.x > chrome.titleBlockMin.x &&
+            top - size.y < chrome.titleBlockMax.y)
+          top = std::min(chrome.borderMax.y,
+                         chrome.titleBlockMax.y + size.y + gap);
+        n.pos += glm::dvec2(left, top) - glm::dvec2(mn.x, mx.y);
         SnapshotDrawing(state);
         state.drawing->AddNote(std::move(n));
       }

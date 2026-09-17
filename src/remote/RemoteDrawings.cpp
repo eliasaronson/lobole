@@ -310,6 +310,15 @@ uint64_t ParseViewConfiguration(ui::AppState& state, const DrawingView& view,
                            " in this view's source part — " + KnownList(known));
 }
 
+// Bend lines are drawn, not projected: they carry no source edge, so they are
+// counted apart from the visible/hidden edges rather than among them.
+int CountBends(const drawing::SheetView& sv) {
+  return static_cast<int>(std::count_if(
+      sv.curves.begin(), sv.curves.end(), [](const drawing::SheetCurve& c) {
+        return c.kind == drawing::CurveKind::Bend;
+      }));
+}
+
 std::string RequireQuality(const nlohmann::json& j) {
   const std::string q = j.get<std::string>();
   if (q != "exact" && q != "fast")
@@ -531,8 +540,19 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       v.quality = RequireQuality(p.at("quality"));
     if (p.contains("hidden"))
       v.hidden = ParseHidden(state, v, p.at("hidden"));
-    if (p.contains("configuration"))
+    if (p.contains("configuration")) {
       v.configuration = ParseViewConfiguration(state, v, p.at("configuration"));
+      // Two views of one part at one orientation, both called "top", are two
+      // rows nobody can tell apart — the GUI names the configured one after
+      // its configuration, and so does this.
+      if (!p.contains("name") && v.configuration != 0) {
+        const Document* src = ui::DrawingSourceDocument(state, sourceId);
+        const Configuration* cfg =
+            src ? src->FindConfiguration(v.configuration) : nullptr;
+        if (cfg)
+          v.name += " (" + cfg->name + ")";
+      }
+    }
     if (p.contains("position")) {
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -718,11 +738,12 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       json vj = {{"id", view.id}, {"name", view.name}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
-        int vis = 0, hid = 0, outline = 0, bends = 0;
+        int vis = 0, hid = 0, outline = 0;
+        const int bends = CountBends(it->second);
         for (const drawing::SheetCurve& c : it->second.curves) {
           if (c.kind == drawing::CurveKind::Bend)
-            ++bends;
-          else if (c.visible)
+            continue; // counted above; not a projected edge either way
+          if (c.visible)
             ++vis;
           else
             ++hid;
@@ -761,11 +782,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();
-        vj["bend_lines"] =
-            std::count_if(it->second.curves.begin(), it->second.curves.end(),
-                          [](const drawing::SheetCurve& c) {
-                            return c.kind == drawing::CurveKind::Bend;
-                          });
+        vj["bend_lines"] = CountBends(it->second);
         vj["has_geometry"] = it->second.hasGeometry;
         vj["stale"] = ui::DrawingSourceVersion(state, view.sourceDocId) !=
                       it->second.solvedSourceVersion;
@@ -818,8 +835,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (p.contains("table")) {
       const std::string name = p.at("table").get<std::string>();
       if (!NoteTableFromString(name, table))
-        throw std::runtime_error("unknown note table '" + name +
-                                 "' (expected one of: none, bends)");
+        throw std::runtime_error(UnknownNoteTable(name));
     }
     const std::string text = p.value("text", std::string{});
     if (text.empty() && table == NoteTable::None)

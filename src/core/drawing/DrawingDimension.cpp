@@ -427,8 +427,10 @@ glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
 }
 
 std::string BendTableText(const Document& doc, const std::string& caption,
-                          const units::System& units,
                           const glm::dvec3& viewDir) {
+  // A drawing is written in its SOURCE document's units, like every other
+  // number on the sheet — so the document answers that, not the caller.
+  const units::System units = doc.Units();
   const glm::dvec3 reader = -glm::normalize(viewDir);
   std::string rows;
   int n = 0;
@@ -437,11 +439,8 @@ std::string BendTableText(const Document& doc, const std::string& caption,
       continue;
     for (const BendRegion& bend : body.bends) {
       std::string row = "B" + std::to_string(++n) + "  ";
-      if (bend.flat) {
-        const glm::dvec3 up(bend.parentPlace * glm::dvec4(bend.upDir, 0.0));
-        if (std::abs(glm::dot(up, reader)) > 1.0 - 1e-6)
-          row += sheet::FoldsToward(bend, reader) ? "UP " : "DOWN ";
-      }
+      if (bend.flat && sheet::SquareTo(bend, reader))
+        row += sheet::FoldsToward(bend, reader) ? "UP " : "DOWN ";
       row += units::FormatAngle(angles::ToDegrees(bend.angle), units) + "  R " +
              units::FormatLength(bend.radius, units);
       char k[32];

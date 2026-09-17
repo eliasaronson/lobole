@@ -1440,9 +1440,24 @@ std::optional<FlatResult> NormalCut(const Body& body,
   }
 }
 
+glm::dvec3 CreaseNormal(const BendRegion& bend, const glm::dmat4& placement) {
+  const glm::dvec3 up(placement * bend.parentPlace *
+                      glm::dvec4(bend.upDir, 0.0));
+  const double len = glm::length(up);
+  return len > 1e-12 ? up / len : glm::dvec3(0.0);
+}
+
 bool FoldsToward(const BendRegion& bend, const glm::dvec3& side) {
-  const glm::dvec3 up(bend.parentPlace * glm::dvec4(bend.upDir, 0.0));
-  return glm::dot(up, side) > 0.0;
+  return glm::dot(CreaseNormal(bend), side) > 0.0;
+}
+
+bool SquareTo(const BendRegion& bend, const glm::dvec3& side,
+              const glm::dmat4& placement) {
+  const double len = glm::length(side);
+  if (len < 1e-12)
+    return false;
+  return std::abs(glm::dot(CreaseNormal(bend, placement), side / len)) >
+         1.0 - 1e-6;
 }
 
 } // namespace sheet

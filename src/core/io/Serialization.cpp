@@ -1758,8 +1758,7 @@ DrawingNote DrawingNoteFromJson(const json& j) {
     n.leader = ProjRefFromJson(j.at("leader"));
   const std::string table = j.value("table", std::string("none"));
   if (!NoteTableFromString(table, n.table))
-    throw std::runtime_error("unknown note table '" + table +
-                             "' (expected one of: none, bends)");
+    throw std::runtime_error(UnknownNoteTable(table));
   return n;
 }
 

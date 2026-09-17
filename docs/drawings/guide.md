@@ -44,7 +44,10 @@ dimension list).
   dimensioned to yet.
 - **Bend table** — a note whose rows are its view's part's bends: angle,
   inside radius, K, the allowance a flat crease eats, and UP or DOWN as seen
-  from that view (edge-on, a crease has neither). Regenerated from the part
+  from that view (edge-on, a crease has neither). UP is a question about a
+  SIDE, so a bottom view calls the same crease DOWN — and the DXF, which is
+  read from the side the part's first flange was picked on, can label it
+  differently again. Regenerated from the part
   at every resolve; its own text is only the caption. Rows are numbered in
   the part's body order, and the bend lines are not labelled with those
   numbers yet.

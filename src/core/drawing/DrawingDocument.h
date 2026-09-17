@@ -231,6 +231,9 @@ const char* ViewOrientationToString(ViewOrientation o);
                                              ViewOrientation& out);
 const char* NoteTableToString(NoteTable t);
 [[nodiscard]] bool NoteTableFromString(const std::string& s, NoteTable& out);
+// The refusal both the loader and the RPC say, written once: two copies of a
+// list is how one of them ends up naming a value the other does not accept.
+[[nodiscard]] std::string UnknownNoteTable(const std::string& given);
 const char* DrawingDimKindToString(DrawingDimKind k);
 [[nodiscard]] bool DrawingDimKindFromString(const std::string& s,
                                             DrawingDimKind& out);

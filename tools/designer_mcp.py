@@ -1959,14 +1959,22 @@ def remove_drawing_view(id: int) -> dict:
 
 
 @_reference(description="Edit a view in place: position [x,y] sheet mm, scale, "
-          "name, show_hidden, base_view (0 clears folding). Re-projects. A "
+          "name, show_hidden, quality ('exact'|'fast'), configuration (a "
+          "configuration of the source part, by name; '' leaves it alone and "
+          "'base' draws whatever the part has active), base_view (0 clears "
+          "folding). Re-projects. A "
           "folded child's shared axis follows its base — the reply's "
           "effective_position/folded_axes say when a requested coordinate "
           "was overridden.")
 def set_drawing_view(id: int, position: list | None = None, scale: float = 0,
                      name: str = "", show_hidden: int = -1,
-                     base_view: int = -1) -> dict:
+                     base_view: int = -1, quality: str = "",
+                     configuration: str = "") -> dict:
     params = {"id": id}
+    if quality:
+        params["quality"] = quality
+    if configuration:
+        params["configuration"] = 0 if configuration == "base" else configuration
     if position is not None:
         params["position"] = position
     if scale > 0:

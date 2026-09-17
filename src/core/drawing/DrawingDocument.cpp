@@ -240,6 +240,10 @@ bool NoteTableFromString(const std::string& s, NoteTable& out) {
   return true;
 }
 
+std::string UnknownNoteTable(const std::string& given) {
+  return "unknown note table '" + given + "' (expected one of: none, bends)";
+}
+
 const char* DrawingDimKindToString(DrawingDimKind k) {
   switch (k) {
   case DrawingDimKind::Distance:

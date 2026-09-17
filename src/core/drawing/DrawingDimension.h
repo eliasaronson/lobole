@@ -102,15 +102,16 @@ ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,
                          const SymbolTable& symbols = {});
 
 // The rows of a bend table (a note with `table` Bends): one line per bend of
-// `doc`'s bodies, numbered in body order — the order the sheet-metal panel
-// lists them in — with angle, inside radius, K and, on a flat crease, the
-// allowance it eats and whether it folds UP or DOWN as seen by a reader
-// looking along `viewDir` (a crease the view does not look square onto has
-// no direction to state). `caption` heads it. Empty when the part has no
-// bends, which the caller turns into an unresolved note.
+// `doc`'s own bodies, numbered in body order. Derived ghosts are skipped —
+// they are another part's bends — so a part carrying one is numbered here
+// differently from the sheet-metal panel, which lists every body. With angle,
+// inside radius, K and, on a flat crease, the allowance it eats and whether it
+// folds UP or DOWN as seen by a reader looking along `viewDir` (a crease the
+// view does not look square onto has no direction to state). `caption` heads
+// it. Empty when the part has no bends, which the caller turns into an
+// unresolved note.
 [[nodiscard]] std::string BendTableText(const Document& doc,
                                         const std::string& caption,
-                                        const units::System& units,
                                         const glm::dvec3& viewDir);
 
 // What auto-placement must stay clear of: rectangles already taken (every

@@ -23,7 +23,11 @@
 //   BEND_UP   - bend lines that fold toward the viewer (dashed)
 //   BEND_DOWN - bend lines that fold away (dashed)
 // and the viewer looks at the blank from the side its first flange was picked
-// on, so a part whose flanges were all picked on one face is all UP.
+// on, so a part whose flanges were all picked on one face is all UP. A bend
+// TABLE on a drawing answers the same question from its own view's side
+// instead (docs/drawings/guide.md), so the two can disagree about one crease
+// — they are answering "up from where?" differently, which is why neither
+// stores an answer.
 namespace dxf {
 
 // What a flat pattern hands the writer.

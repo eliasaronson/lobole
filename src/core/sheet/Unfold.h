@@ -39,11 +39,26 @@ class gp_Dir;
 // ADDED to a bend, which has no flat shape at all.
 namespace sheet {
 
+// The direction the bend's parent panel faces NOW: its recorded `upDir`
+// carried through `parentPlace` (which composes, so the result is only unit
+// up to rounding and is normalised here) and then through `placement` — the
+// occurrence transform for an assembly, identity for a part.
+[[nodiscard]] glm::dvec3
+CreaseNormal(const BendRegion& bend,
+             const glm::dmat4& placement = glm::dmat4(1.0));
+
 // Whether `bend` folds toward `side` — UP as seen from that side of the
 // sheet. The wall turns toward the bend's `upDir`, carried to wherever its
 // parent panel sits now. Only a crease lying square to `side` has an answer
-// a reader would recognise; for anything else this is just the sign.
+// a reader would recognise (SquareTo says so); for anything else this is
+// just the sign.
 [[nodiscard]] bool FoldsToward(const BendRegion& bend, const glm::dvec3& side);
+
+// Does this crease lie square to `side` — flat on, rather than edge-on? The
+// one threshold, so a bend line and its table row cannot disagree about
+// whether the crease is being looked at.
+[[nodiscard]] bool SquareTo(const BendRegion& bend, const glm::dvec3& side,
+                            const glm::dmat4& placement = glm::dmat4(1.0));
 
 struct FlatResult {
   CADShape shape;
