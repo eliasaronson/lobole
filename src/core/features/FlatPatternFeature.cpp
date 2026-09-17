@@ -24,7 +24,8 @@ bool FlatPatternFeature::Execute(RegenContext& ctx) {
   }
 
   std::string why;
-  auto flat = sheet::Unfold(*body, *ctx.sheetMetal, fixedFace, GetId(), &why);
+  auto flat =
+      sheet::Unfold(*body, *ctx.sheetMetal, fixedFace, GetId(), {}, &why);
   if (!flat) {
     SetError(why.empty() ? "the body could not be flattened" : why);
     return false;
@@ -37,6 +38,6 @@ bool FlatPatternFeature::Execute(RegenContext& ctx) {
   }
   body->shape = std::move(flat->shape);
   body->elementMap = std::move(flat->map);
-  body->bends = std::move(flat->creases);
+  body->bends = std::move(flat->bends);
   return true;
 }

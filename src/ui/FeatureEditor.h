@@ -54,6 +54,7 @@ enum class PickSlot : int {
   // flat pattern lays flat.
   EdgeFlangeEdges, // Edge, multi
   FlatPatternBody, // Body
+  UnfoldBody,      // Body
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

@@ -1,0 +1,157 @@
+{
+  "format": "designer-document",
+  "version": 111,
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Blank",
+      "id": 1,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "line",
+          "id": 1,
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            100,
+            0
+          ]
+        },
+        {
+          "type": "line",
+          "id": 2,
+          "a": [
+            100,
+            0
+          ],
+          "b": [
+            100,
+            60
+          ]
+        },
+        {
+          "type": "line",
+          "id": 3,
+          "a": [
+            100,
+            60
+          ],
+          "b": [
+            0,
+            60
+          ]
+        },
+        {
+          "type": "line",
+          "id": 4,
+          "a": [
+            0,
+            60
+          ],
+          "b": [
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "type": "BaseFlange",
+      "name": "Base",
+      "id": 2,
+      "sketch_id": 1
+    },
+    {
+      "type": "EdgeFlange",
+      "name": "Wall",
+      "id": 3,
+      "edges": [
+        {
+          "feature_id": 2,
+          "element": "2/g1;U3"
+        }
+      ],
+      "length": 20,
+      "angle_deg": 90,
+      "position": "bend_outside"
+    },
+    {
+      "type": "Unfold",
+      "name": "Unfold",
+      "id": 4,
+      "body_id": 2
+    },
+    {
+      "type": "Sketch",
+      "name": "Vent",
+      "id": 5,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "circle",
+          "id": 1,
+          "center": [
+            50,
+            -2.25
+          ],
+          "radius": 1.5
+        }
+      ]
+    },
+    {
+      "type": "Extrude",
+      "name": "Vent cut",
+      "id": 6,
+      "sketch_id": 5,
+      "distance": 10,
+      "mode": "cut",
+      "end_mode": "through_all"
+    },
+    {
+      "type": "Refold",
+      "name": "Refold",
+      "id": 7,
+      "unfold_id": 4
+    }
+  ],
+  "sheet_metal": {
+    "material": "aluminum",
+    "gauge": "1.5mm",
+    "thickness": 1.5
+  }
+}

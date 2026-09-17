@@ -254,7 +254,7 @@ TEST_CASE("flattening a blank twice is refused", "[sheetmetal][unfold]") {
   doc.AddFeature(std::make_unique<FlatPatternFeature>("Flat again", base));
   const std::string why = doc.GetFeature(4)->GetError();
   CHECK_FALSE(why.empty());
-  CHECK(why.find("already a flat pattern") != std::string::npos);
+  CHECK(why.find("already flat") != std::string::npos);
 }
 
 TEST_CASE("the flat pattern is deterministic", "[sheetmetal][unfold]") {

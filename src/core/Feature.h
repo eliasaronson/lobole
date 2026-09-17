@@ -83,6 +83,14 @@ struct BendRegion {
   // (a bend note says "UP 90 R2.25"), so without this a second flatten would
   // cheerfully unfold a blank a second time and hand back a longer one.
   bool flat = false;
+  // On a flat crease: the Unfold (or FlatPattern) feature that flattened it,
+  // and where its PARENT panel went — the transform from the coordinates the
+  // bend record above is written in to where that panel sits now. Together
+  // with the record, that is everything Refold needs to put the bend back, so
+  // nothing about the fold has to be measured off the flat geometry. Kept
+  // current: a later Unfold that moves this crease composes onto it.
+  uint64_t unfoldedBy = 0;
+  glm::dmat4 parentPlace{1.0};
 };
 
 struct Body {

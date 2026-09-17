@@ -141,7 +141,11 @@ enum class Needs {
   // profile thickened into a blank. Setting the rules is part of the SETUP
   // and not of the tool — a flange has no thickness of its own.
   SheetRules,
-  SheetBlank
+  SheetBlank,
+  // A blank with one wall bent up, and then that wall laid flat by an
+  // Unfold: the two states the Unfold and Refold tools start from.
+  SheetFlanged,
+  SheetUnfolded
 };
 enum class Expect {
   Changes,            // accept with defaults => the model is different
@@ -155,7 +159,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[29];
+extern const ToolCase kToolCases[31];
 const ToolCase* FindToolCase(const char* testName);
 
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);

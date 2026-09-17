@@ -171,10 +171,24 @@ at a corner where two bends meet) and closed-corner treatment on a miter. This
 is the part that is fiddly rather than hard: three-way and non-orthogonal
 corners are refused by name, not approximated.
 
-**S9 — Unfold / Refold.** The escape hatch S4's refusal points at: `Unfold`
-takes a fixed face and a set of bends and flattens just those, `Refold` puts
-them back. Cuts authored between the pair live on a flat panel and survive
-both. Same machinery as S4, scoped to a bend subset. Format bump.
+**S9 — Unfold / Refold.** `Unfold` lays the bends made by chosen flange
+features (all, by default) flat in place; whatever follows is drawn and cut
+flat; `Refold` folds exactly those back, parent side fixed, child side
+swinging home. Every crease carries its parent's placement, so a Refold needs
+nothing measured off the flat geometry, and a later Unfold that moves a crease
+composes onto it. Format bump.
+
+The same step fixed what S4 got wrong: its unfolder rebuilt each bend from
+the seam face and silently dropped anything cut through the bend, and it kept
+only the parent's connected piece, dropping panel that sat past a tangent
+plane beside an inset flange. Now both directions work from the IDEAL shapes —
+the full annular sector, the full flat strip — minus the cut-outs carried
+across by the neutral-axis map. In a cylinder's own (angle, height)
+parameters that map is affine, so a flat outline wraps onto the inside and
+outside cylinders as exact curves (poles mapped), joined by exactly radial
+ruled walls; bend to flat, the outline is sampled and laid down as a
+polygon. A cut that does not go through the sheet has no outline the map can
+carry and is refused; so is material added to a bend.
 
 **S10 — Normal cut.** A cut through sheet is normal to the surface, not
 projected along the sketch normal — otherwise every cut on a bend comes out
@@ -223,9 +237,12 @@ assumed the old behaviour get fixed.
 - `tests/test_unfold.cpp` — the blank is exactly one gauge thick, its outline
   matches `Σ panel + Σ BA·width` computed by hand, and it comes out the same
   over a single bend, a tree of flanges off one panel, and a chain of a flange
-  on a flange. Flattening a blank twice is refused. **The involution**
-  (`refold(unfold(x)) == x`) lands with S9, which is what builds the fold
-  back up.
+  on a flange. Flattening a blank twice is refused.
+- `tests/test_refold.cpp` — **the involution**, `refold(unfold(x)) == x` to a
+  micron over one bend, a tree, a chain and a partial unfold; a hole drawn flat
+  across a crease removes exactly `A·t(2R+t) / 2(R+K·t)` once wrapped, and the
+  flat pattern lays it down as the same hole again; a hole straddling the
+  tangent line; the refusals.
 - `tests/test_sheetmetal_check.cpp` — every violation kind fires on a part built
   to trip it, and the clean part fires none. A check nothing fails is not a
   check.

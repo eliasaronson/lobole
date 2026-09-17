@@ -431,6 +431,12 @@ void DrawModelToolbar(AppState& state) {
       "Edge flange (bend a wall up from a straight edge)");
   btn(ICON_FA_FILE_LINES "###tb_flat_pattern", "part.sheet_flat_pattern",
       "Flat pattern (lay the sheet flat; the blank a shop cuts)");
+  btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_unfold",
+      "part.sheet_unfold",
+      "Unfold (lay bends flat, to draw a cut across them)");
+  btn(ICON_FA_DOWN_LEFT_AND_UP_RIGHT_TO_CENTER "###tb_refold",
+      "part.sheet_refold",
+      "Refold (fold the last Unfold back up, carrying its cuts)");
 
   Divider();
 

@@ -21,6 +21,7 @@
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
+#include "core/features/RefoldFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
@@ -28,6 +29,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/features/UnfoldFeature.h"
 
 #include <nlohmann/json.hpp>
 
@@ -1047,6 +1049,15 @@ json FeatureToJson(const Feature& feature) {
     if (fp->fixedFace.IsSet())
       j["fixed_face"] = {{"feature_id", fp->fixedFace.featureId},
                          {"element", fp->fixedFace.name}};
+  } else if (auto* uf = dynamic_cast<const UnfoldFeature*>(&feature)) {
+    j["body_id"] = uf->bodyId;
+    if (uf->fixedFace.IsSet())
+      j["fixed_face"] = {{"feature_id", uf->fixedFace.featureId},
+                         {"element", uf->fixedFace.name}};
+    if (!uf->bendFeatures.empty())
+      j["bends"] = uf->bendFeatures;
+  } else if (auto* rf = dynamic_cast<const RefoldFeature*>(&feature)) {
+    j["unfold_id"] = rf->unfoldId;
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
     j["thickness"] = sh->thickness;
@@ -1237,6 +1248,17 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "configuration's `unsuppressed_features` to switch between folded and "
      "flat. Must sit after every feature that reshapes the sheet, since it "
      "flattens from the bends those features recorded"},
+    {"Unfold", 111,
+     "body_id (the sheet body's created_by), fixed_face? {feature_id, "
+     "element}, bends? [the ids of the flange features whose bends to lay "
+     "flat; omitted = all] - lays those bends flat IN PLACE so the features "
+     "after it are drawn and cut in the flat; a Refold folds them back, "
+     "carrying every through-thickness cut across each crease onto the bend"},
+    {"Refold", 111,
+     "unfold_id - folds back up every bend that Unfold laid flat. A cut made "
+     "between the two that crosses a crease is WRAPPED onto the bend; one "
+     "that does not go right through the sheet is refused, since the "
+     "neutral-axis map cannot carry it"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -1967,6 +1989,19 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                  fj.value("element", std::string{})};
     }
     out = std::move(fp);
+  } else if (type == "Unfold") { // v111
+    auto uf =
+        std::make_unique<UnfoldFeature>(name, j.at("body_id").get<uint64_t>());
+    if (j.contains("fixed_face")) {
+      const auto& fj = j.at("fixed_face");
+      uf->fixedFace = ElementRef{fj.value("feature_id", uint64_t{0}),
+                                 fj.value("element", std::string{})};
+    }
+    uf->bendFeatures = j.value("bends", std::vector<uint64_t>{});
+    out = std::move(uf);
+  } else if (type == "Refold") { // v111
+    out = std::make_unique<RefoldFeature>(name,
+                                          j.at("unfold_id").get<uint64_t>());
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
     for (const auto& ej : j.value("open_faces", json::array()))

@@ -497,6 +497,8 @@ const std::vector<Command>& Table() {
         [](AppState& s) { CreateEdgeFlange(s); });
     add("part.sheet_flat_pattern", IdleBody,
         [](AppState& s) { CreateFlatPattern(s); });
+    add("part.sheet_unfold", IdleBody, [](AppState& s) { CreateUnfold(s); });
+    add("part.sheet_refold", Idle, [](AppState& s) { CreateRefold(s); });
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
 
     // ------------------------------------------------------------- Job (CAM)

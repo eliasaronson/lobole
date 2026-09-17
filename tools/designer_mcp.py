@@ -225,6 +225,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   `unsuppressed_features` to switch between folded and flat. It must sit
   AFTER every feature that reshapes the sheet, since it flattens from the
   bends those features recorded; flattening a blank twice is refused.
+- Unfold (lay sheet bends flat so the next features cut in the flat):
+  {{"type": "Unfold", "name": str, "body_id": <the sheet body's
+  created_by>, "fixed_face"?: {{"feature_id": ..., "element": ...}},
+  "bends"?: [<ids of the EdgeFlange features whose bends to unfold>]}}
+  — omit `bends` for all of them.
+- Refold (fold an Unfold's bends back up): {{"type": "Refold", "name": str,
+  "unfold_id": <the Unfold's id>}} — through-cuts made in between are
+  wrapped onto the bend; a partial-depth cut across a crease is refused.
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
 - Derived (a copy of another part's bodies, to draw on): {{"type":
   "Derived", "name": str, "source_part": <part slot id from

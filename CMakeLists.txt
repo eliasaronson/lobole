@@ -270,6 +270,8 @@ set(core_sources
     src/core/features/BaseFlangeFeature.cpp
     src/core/features/EdgeFlangeFeature.cpp
     src/core/features/FlatPatternFeature.cpp
+    src/core/features/UnfoldFeature.cpp
+    src/core/features/RefoldFeature.cpp
     src/core/sheet/Unfold.cpp
     src/core/sheet/Check.cpp
     src/core/io/ExportDxf.cpp

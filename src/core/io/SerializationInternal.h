@@ -17,7 +17,13 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    110; // v110: the BLANK. `FlatPattern` {body_id, fixed_face?} replaces a
+    111; // v111: `Unfold` {body_id, fixed_face?, bends?} and `Refold`
+         //      {unfold_id}: lay chosen bends flat in place, and fold them
+         //      back carrying every through-cut across each crease. The
+         //      creases they leave carry their parent placement on the body,
+         //      transiently — nothing new is written but the two features
+         //      (docs/sheetmetal/plan.md, S9).
+         // v110: the BLANK. `FlatPattern` {body_id, fixed_face?} replaces a
          //      sheet body's shape with its flat pattern IN PLACE (a folded
          //      part and its blank occupy the same space, so a second body
          //      would sit inside the first). It is authored SUPPRESSED and

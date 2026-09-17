@@ -1,6 +1,8 @@
 #include "app/guitests/GuiTestsCommon.h"
 
 #include "core/SheetMetal.h"
+#include "core/features/EdgeFlangeFeature.h"
+#include "core/features/UnfoldFeature.h"
 
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
@@ -327,7 +329,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[29] = {
+const ToolCase kToolCases[31] = {
     {"box", "###tb_box", Needs::Nothing, Expect::Changes},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
@@ -370,6 +372,11 @@ const ToolCase kToolCases[29] = {
     // answer, and the feature says so in a warning.
     {"flat_pattern", "###tb_flat_pattern", Needs::SheetBlank,
      Expect::HarmlessNoOp},
+    // Every bend of the newest body, by default: with a wall up, that lays
+    // it down.
+    {"unfold", "###tb_unfold", Needs::SheetFlanged, Expect::Changes},
+    // The one Unfold still open is the only sensible thing to fold back.
+    {"refold", "###tb_refold", Needs::SheetUnfolded, Expect::Changes},
 };
 
 const ToolCase* FindToolCase(const char* testName) {
@@ -472,7 +479,9 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     AddRectSketch(ctx, 1, 1.0f);
     break;
   case Needs::SheetRules:
-  case Needs::SheetBlank: {
+  case Needs::SheetBlank:
+  case Needs::SheetFlanged:
+  case Needs::SheetUnfolded: {
     // The stock, set straight on the document: declaring it is setup, not
     // something the tool under test is supposed to do for itself.
     sheet::SheetMetalRules rules;
@@ -481,8 +490,39 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     rules.thickness = 1.5;
     Doc()->SetSheetMetal(rules);
     AddRectSketch(ctx, 1, 8.0f);
+    if (needs == Needs::SheetRules)
+      break;
+    ToolbarCreateAccept(ctx, "###tb_base_flange");
     if (needs == Needs::SheetBlank)
-      ToolbarCreateAccept(ctx, "###tb_base_flange");
+      break;
+    // A wall on the first straight edge that takes one. Straight onto the
+    // document: which edge is picked is not what these tools are about, and
+    // the edge-click itself has its own test.
+    {
+      const Body& body = Doc()->GetBodies()[0];
+      const uint64_t base = body.createdBy;
+      std::vector<std::string> names;
+      for (const auto& [idx, name] : body.elementMap.edgeNames)
+        names.push_back(name);
+      bool made = false;
+      for (const std::string& name : names) {
+        Doc()->AddFeature(std::make_unique<EdgeFlangeFeature>(
+            "Wall", std::vector<ElementRef>{ElementRef{base, name}}, 5.0,
+            90.0));
+        if (Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty()) {
+          made = true;
+          break;
+        }
+        Doc()->RemoveFeature(Doc()->FeatureCount() - 1);
+      }
+      IM_CHECK_SILENT(made);
+    }
+    if (needs == Needs::SheetFlanged)
+      break;
+    Doc()->AddFeature(std::make_unique<UnfoldFeature>(
+        "Unfold", Doc()->GetBodies()[0].createdBy));
+    IM_CHECK_SILENT(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
     break;
   }
   case Needs::BodyAndOpenSketch: {

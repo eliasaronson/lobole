@@ -37,6 +37,8 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/RefoldFeature.h"
+#include "core/features/UnfoldFeature.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
@@ -485,6 +487,32 @@ void CreateFlatPattern(AppState& state) {
   BeginPreviewFeature(state,
                       std::make_unique<FlatPatternFeature>(
                           NextName(state, "Flat pattern"), NewestBody(state)));
+}
+
+void CreateUnfold(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<UnfoldFeature>(
+                                 NextName(state, "Unfold"), NewestBody(state)));
+}
+
+void CreateRefold(AppState& state) {
+  if (!state.document)
+    return;
+  // The Unfold to close is the most recent one still OPEN — the one whose
+  // creases are flat on a body right now. Anything older is either closed
+  // already or would fold up underneath a newer flat, which is not what a
+  // "fold it back" button means.
+  uint64_t target = 0;
+  for (const Body& body : state.document->GetBodies())
+    for (const BendRegion& b : body.bends)
+      if (b.flat && b.unfoldedBy != 0) {
+        const Feature* f = state.document->FindFeatureById(b.unfoldedBy);
+        if (f != nullptr && f->TypeName() == "Unfold")
+          target = std::max(target, b.unfoldedBy);
+      }
+  BeginPreviewFeature(state, std::make_unique<RefoldFeature>(
+                                 NextName(state, "Refold"), target));
 }
 
 std::optional<SketchPlane>

@@ -1,0 +1,34 @@
+#pragma once
+
+#include "core/Feature.h"
+
+#include <cstdint>
+#include <string>
+
+// Folds back up the bends an Unfold laid flat (docs/sheetmetal/plan.md, S9),
+// carrying every through-thickness cut made across a crease onto the bend.
+// See UnfoldFeature.h for the pair.
+class RefoldFeature : public Feature {
+public:
+  RefoldFeature(const std::string& name, uint64_t unfoldId);
+
+  std::string TypeName() const override { return "Refold"; }
+
+  std::unique_ptr<Feature> Clone() const override {
+    return std::make_unique<RefoldFeature>(*this);
+  }
+
+  bool Execute(RegenContext& ctx) override;
+
+  void VisitFeatureRefs(const RefVisitor& visit) const override {
+    visit(unfoldId);
+  }
+
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    return unfoldId == 0 ? "pick the Unfold to fold back up" : std::string{};
+  }
+
+  // The Unfold whose bends this folds back. Nothing else: the creases carry
+  // everything a fold needs, so there is no second copy of it to disagree.
+  uint64_t unfoldId = 0;
+};

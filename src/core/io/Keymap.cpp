@@ -207,6 +207,10 @@ const Binding kDefaults[] = {
      "Edge flange (bend a wall up from an edge)", "Sheet metal", ""},
     {"part.sheet_flat_pattern", Context::Part, "Flat pattern (the blank)",
      "Sheet metal", ""},
+    {"part.sheet_unfold", Context::Part,
+     "Unfold (lay bends flat to cut across them)", "Sheet metal", ""},
+    {"part.sheet_refold", Context::Part, "Refold (fold an Unfold back up)",
+     "Sheet metal", ""},
 
     {"part.simulation", Context::Part, "Simulation (FEM stress study)", "Tools",
      "Q"},

@@ -29,6 +29,7 @@
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
+#include "core/features/RefoldFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
@@ -36,6 +37,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/features/UnfoldFeature.h"
 #include "core/io/Serialization.h"
 #include "core/parts/FastenerTable.h"
 #include "render/Camera.h"
@@ -889,6 +891,13 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       return true;
     }
     return false;
+  case PickSlot::UnfoldBody:
+    if (auto* uf = dynamic_cast<UnfoldFeature*>(&f);
+        uf != nullptr && item.kind == SelectionItem::Kind::Body) {
+      uf->bodyId = item.id;
+      return true;
+    }
+    return false;
   case PickSlot::EdgeFlangeEdges:
     if (auto* ef = dynamic_cast<EdgeFlangeFeature*>(&f);
         ef != nullptr && item.kind == SelectionItem::Kind::Edge) {
@@ -1070,6 +1079,10 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
              "Which of a rim's two edges you pick decides which way the wall "
              "folds"}};
   }
+  if (dynamic_cast<const UnfoldFeature*>(&feature) != nullptr) {
+    return {{PickSlot::UnfoldBody, "Body", kBody, false,
+             "Pick the sheet body whose bends to lay flat"}};
+  }
   if (dynamic_cast<const FlatPatternFeature*>(&feature) != nullptr) {
     return {{PickSlot::FlatPatternBody, "Body", kBody, false,
              "Pick the sheet body to lay flat"}};
@@ -1160,6 +1173,10 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::EdgeFlangeEdges: {
     auto* ef = dynamic_cast<const EdgeFlangeFeature*>(&feature);
     return ef != nullptr && !ef->edges.empty();
+  }
+  case PickSlot::UnfoldBody: {
+    auto* uf = dynamic_cast<const UnfoldFeature*>(&feature);
+    return uf != nullptr && uf->bodyId != 0;
   }
   case PickSlot::FlatPatternBody: {
     auto* fp = dynamic_cast<const FlatPatternFeature*>(&feature);
@@ -1909,6 +1926,19 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         state, feature, PickSlot::EdgeFlangeEdges,
         ef->edges.empty() ? "" : std::to_string(ef->edges.size()) + " picked");
     RefListRows(state, feature, index, commit, ef->edges);
+  } else if (auto* uf = dynamic_cast<UnfoldFeature*>(&feature)) {
+    PickSlotRow(state, feature, PickSlot::UnfoldBody,
+                BodyRefLabel(state, uf->bodyId));
+    ImGui::TextDisabled(uf->bendFeatures.empty() ? "Every bend of the body"
+                                                 : "The bends of %zu flange(s)",
+                        uf->bendFeatures.size());
+  } else if (auto* rf = dynamic_cast<RefoldFeature*>(&feature)) {
+    // Which Unfold it closes is not a pick: it is the one still open, and a
+    // Refold naming any other would fold up underneath a newer flat.
+    const Feature* target = state.document->FindFeatureById(rf->unfoldId);
+    ImGui::TextUnformatted(target != nullptr
+                               ? ("Folds back: " + target->GetName()).c_str()
+                               : "No open Unfold to fold back");
   } else if (auto* fp = dynamic_cast<FlatPatternFeature*>(&feature)) {
     PickSlotRow(state, feature, PickSlot::FlatPatternBody,
                 BodyRefLabel(state, fp->bodyId));
