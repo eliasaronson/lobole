@@ -1,0 +1,130 @@
+"""What a shop gets: a DXF per folded part, a drawing with the blank beside
+the part and a bend table, and the checks that say the numbers are right.
+
+The blank is checked against the bend-allowance arithmetic done here, from
+the documented formula and the document's own K — not against what the
+unfolder happened to produce. A flat pattern that agrees with the feature
+that made it proves nothing.
+"""
+import math
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from grill_lib import sheet_ok  # noqa: E402
+
+import grill_spec as S  # noqa: E402
+
+# Every part that is folded from one blank, and so has a flat pattern.
+SHEET_PARTS = ["Firebox", "Hood", "Heat tent", "Grease tray", "Control panel",
+               "Cart side", "Cart back", "Cart shelf", "Cart door",
+               "Side shelf"]
+
+
+def bend_allowance(angle_deg, radius, k, t):
+    """BA = angle * (R + K*t), the neutral arc through the bend."""
+    return math.radians(angle_deg) * (radius + k * t)
+
+
+def flat_config_of(d, part):
+    for c in d.call("list_configurations")["configurations"]:
+        if c["name"] == "Flat":
+            return c["id"]
+    raise SystemExit(f"{part} has no Flat configuration")
+
+
+def blanks(d, out_dir):
+    """Every sheet part, laid flat, checked, and written out as a DXF."""
+    os.makedirs(out_dir, exist_ok=True)
+    made = []
+    for part in SHEET_PARTS:
+        d.call("set_active_part", part=part)
+        cfg = flat_config_of(d, part)
+        d.call("set_active_configuration", id=cfg)
+        body = d.call("get_state")["bodies"][0]
+        rules = d.call("get_sheet_metal_rules")["rules"]
+        t = rules["thickness_mm"]
+        span = [body["bbox_max"][i] - body["bbox_min"][i] for i in range(3)]
+        thin = min(span)
+        if abs(thin - t) > 1e-4:
+            raise SystemExit(f"{part}: the blank is {thin:.4f} thick, not {t} "
+                             "— a bend did not lay flat")
+        path = os.path.join(out_dir, part.lower().replace(" ", "-") + ".dxf")
+        d.call("export_dxf", path=os.path.abspath(path))
+        text = open(path).read()
+        bends = text.count("LINE\n8\nBEND_UP") + text.count("LINE\n8\nBEND_DOWN")
+        made.append((part, sorted(span)[1], sorted(span)[2], bends,
+                     os.path.basename(path)))
+        d.call("set_active_configuration", id=0)
+    return made
+
+
+def firebox_blank_is_right(d):
+    """The firebox blank against the arithmetic, not against the unfolder.
+
+    Across the box: the panel between its two setbacks, then per side a bend
+    allowance, the wall, another allowance and the rim.
+    """
+    d.call("set_active_part", part="Firebox")
+    rules = d.call("get_sheet_metal_rules")["rules"]
+    t = rules["thickness_mm"]
+    r = rules["bend_radius_mm"]
+    k = rules["k_factor"]
+    ba = bend_allowance(90.0, r, k, t)
+    setback = r + t                      # material_inside: the outside mold
+    per_side = ba + S.BOX_H + ba + S.BOX_RIM
+    want_x = S.BOX_X - 2 * setback + 2 * per_side
+    want_y = S.BOX_Y - 2 * setback + 2 * per_side
+
+    cfg = flat_config_of(d, "Firebox")
+    d.call("set_active_configuration", id=cfg)
+    body = d.call("get_state")["bodies"][0]
+    got_x = body["bbox_max"][0] - body["bbox_min"][0]
+    got_y = body["bbox_max"][1] - body["bbox_min"][1]
+    d.call("set_active_configuration", id=0)
+    for axis, want, got in (("across", want_x, got_x), ("deep", want_y, got_y)):
+        if abs(want - got) > 0.05:
+            raise SystemExit(f"firebox blank {axis}: {got:.2f} mm, the bend "
+                             f"allowance says {want:.2f} mm")
+    return want_x, want_y, ba
+
+
+def drawing(d, out_dir):
+    """A sheet with the firebox folded, its blank, and a bend table."""
+    d.call("create_drawing", name="Firebox drawing",
+           sheet={"size": "a2", "landscape": True,
+                  "title_block": {"project": "Three-burner gas grill",
+                                  "document": "Firebox — fold and blank",
+                                  "author": "generators/grill"}})
+    folded = d.call("add_drawing_view", source="Firebox", orientation="top",
+                    scale=0.25, position=[150, 320])["id"]
+    flat = d.call("add_drawing_view", source="Firebox", orientation="top",
+                  scale=0.25, position=[430, 300], configuration="Flat")["id"]
+    d.call("update_drawing")
+    views = {v["id"]: v for v in d.call("list_drawing_views")["views"]}
+    if views[flat].get("bend_lines", 0) < 4:
+        raise SystemExit(f"the blank's view has {views[flat].get('bend_lines')} "
+                         "bend lines; the firebox has eight bends")
+    table = d.call("add_drawing_note", table="bends", view=flat,
+                   position=[430, 120], text="FIREBOX — BEND TABLE")
+    pdf = os.path.join(out_dir, "firebox.pdf")
+    d.call("export_drawing", path=os.path.abspath(pdf))
+    svg = os.path.join(out_dir, "firebox.svg")
+    d.call("export_drawing", path=os.path.abspath(svg))
+    return views[folded], views[flat], table
+
+
+def shop(d, out_dir="scratch/grill"):
+    made = blanks(d, out_dir)
+    print("  blanks (mm, and bend lines in the DXF):")
+    for part, w, l, bends, name in made:
+        print(f"    {part:15s} {w:7.1f} x {l:7.1f}  {bends:2d} bends  {name}")
+    want_x, want_y, ba = firebox_blank_is_right(d)
+    print(f"  firebox blank {want_x:.1f} x {want_y:.1f} mm, "
+          f"bend allowance {ba:.3f} mm — matches the arithmetic")
+    folded, flat, table = drawing(d, out_dir)
+    print(f"  drawing: folded view {folded['curves']} curves, "
+          f"blank {flat['curves']} curves with {flat['bend_lines']} bend lines")
+    print(f"  bend table: {table['text'].splitlines()[1].strip()} ...")
+    return made
