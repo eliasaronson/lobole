@@ -217,8 +217,20 @@ bool ResolveFrame(const Body& body, const ElementRef& ref, double thickness,
   // part whose panel happens to be only a few millimetres wide.
   const double t0 = ExtentAlong(planar[0], n1);
   const double t1 = ExtentAlong(planar[1], n0);
-  const int rimIdx =
-      std::abs(t0 - thickness) < std::abs(t1 - thickness) ? 0 : 1;
+  // Exactly ONE of them may be a thickness wide. Where two rims meet at a
+  // corner both are, and every other check below passes — two flat faces,
+  // perpendicular, the edge in both — so without this a flange grows off the
+  // short corner edge of the sheet and records a bend one gauge long.
+  const double tol = std::max(1e-6, thickness * 1e-6);
+  const bool rim0 = std::abs(t0 - thickness) < tol;
+  const bool rim1 = std::abs(t1 - thickness) < tol;
+  if (rim0 == rim1) {
+    error = "edge '" + ref.name +
+            "' is not the edge of a panel - pick an edge where the sheet's "
+            "broad face meets its rim, not a corner where two rims meet";
+    return false;
+  }
+  const int rimIdx = rim0 ? 0 : 1;
   const int panelIdx = 1 - rimIdx;
   FaceNormal(planar[rimIdx], out.outward);
   FaceNormal(planar[panelIdx], out.up);
@@ -427,12 +439,15 @@ bool EdgeFlangeFeature::Execute(RegenContext& ctx) {
     ElementMap workingMap = body->elementMap;
     const double eps = std::max(t, 1.0) * 1e-3;
 
-    // Cut the panel back to the tangent line over the flange's span. At
+    // Cut the panel back to the tangent line over the flange's span —
+    // EXACTLY to it. Starting the cut even a micron behind the line leaves
+    // the panel and the bend not touching, and the body two solids, while
+    // every volume still reads right to five figures. At
     // bend_outside there is nothing to cut — the bend starts at the edge.
     if (setback > 1e-9) {
       ElementMap boxMap, cutMap;
       const CADShape box =
-          FrameBox(frame, origin, -eps, setback + eps, -t - eps, eps, a0, a1);
+          FrameBox(frame, origin, 0.0, setback + eps, -t - eps, eps, a0, a1);
       std::string cutErr;
       CADShape cut =
           topo::BooleanNamed(BooleanOp::Subtract, working, workingMap, box,

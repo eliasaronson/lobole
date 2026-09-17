@@ -328,3 +328,30 @@ TEST_CASE("a flange refuses a curved edge", "[sheetmetal]") {
   CHECK_FALSE(why.empty());
   CHECK(why.find("not straight") != std::string::npos);
 }
+
+TEST_CASE("a corner edge is not a panel edge", "[sheetmetal]") {
+  // Where two rims meet, both faces are a thickness wide, both are flat and
+  // perpendicular, and the edge lies in both: every other check passes.
+  Document doc;
+  const uint64_t base = Blank(doc);
+  const std::string corner =
+      EdgeNamed(doc.GetBodies()[0], {0, 0, 0}, {0, 0, kThickness});
+  REQUIRE_FALSE(corner.empty());
+  doc.AddFeature(std::make_unique<EdgeFlangeFeature>(
+      "Flange", std::vector<ElementRef>{ElementRef{base, corner}}, 10.0, 90.0));
+  const std::string why = doc.GetFeature(2)->GetError();
+  CHECK(why.find("not the edge of a panel") != std::string::npos);
+}
+
+TEST_CASE("a set-back flange is one solid with its panel", "[sheetmetal]") {
+  // The setback cut used to start a micron behind the tangent line, leaving a
+  // gap no volume could see: 0.2 mm3 in 12 700, and two solids.
+  Document doc;
+  const uint64_t base = Blank(doc);
+  const std::string edge = EdgeNamed(doc.GetBodies()[0], {0, 0, kThickness},
+                                     {kWidth, 0, kThickness});
+  doc.AddFeature(std::make_unique<EdgeFlangeFeature>(
+      "Flange", std::vector<ElementRef>{ElementRef{base, edge}}, 20.0, 90.0));
+  REQUIRE(doc.GetFeature(2)->GetError().empty());
+  CHECK(doc.GetBodies()[0].shape.SolidCount() == 1);
+}

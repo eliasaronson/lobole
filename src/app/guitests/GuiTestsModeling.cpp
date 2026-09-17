@@ -1,5 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Angles.h"
+#include "core/ElementHistory.h"
 #include "core/Measure.h"
 #include "core/SheetMetal.h"
 #include "core/features/EdgeFlangeFeature.h"
@@ -1693,16 +1694,21 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     // The default wall came from the STOCK (5t), not from a literal.
     IM_CHECK(std::abs(flange->length - 5.0 * 1.5) < 1e-9);
 
-    // Click the nearest straight edge: a silhouette or front edge from this
-    // viewpoint, so the pick cannot be occluded.
+    // Click the nearest LONG edge: a silhouette or front edge from this
+    // viewpoint, so the pick cannot be occluded, and longer than the sheet is
+    // thick — the short edges at the corners, where two rims meet, are not
+    // panel edges, and this test once passed by bending a wall off one.
     const auto polys = Doc()->GetBodies()[0].shape.GenerateEdgePolylines();
     const glm::vec3 eye = s_App->camera->GetPosition();
     glm::vec3 target(0.0f);
     float bestDist = FLT_MAX;
     for (const auto& poly : polys) {
-      if (poly.size() < 2)
+      if (poly.size() < 2 || glm::length(poly.back() - poly.front()) < 3.0f)
         continue;
-      const glm::vec3 mid = poly[poly.size() / 2];
+      // The ARC midpoint, not poly[size / 2]: a straight edge tessellates to
+      // its two endpoints, so the middle ELEMENT is a corner vertex, and the
+      // click lands on whichever edge meets there.
+      const glm::vec3 mid = topo::PolylineArcMidpoint(poly);
       const float d = glm::length(mid - eye);
       if (d < bestDist) {
         bestDist = d;
