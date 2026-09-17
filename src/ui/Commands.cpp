@@ -499,6 +499,8 @@ const std::vector<Command>& Table() {
         [](AppState& s) { CreateFlatPattern(s); });
     add("part.sheet_unfold", IdleBody, [](AppState& s) { CreateUnfold(s); });
     add("part.sheet_refold", Idle, [](AppState& s) { CreateRefold(s); });
+    add("part.sheet_hem", IdleBody, [](AppState& s) { CreateHem(s); });
+    add("part.sheet_jog", Idle, [](AppState& s) { CreateJog(s); });
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
 
     // ------------------------------------------------------------- Job (CAM)

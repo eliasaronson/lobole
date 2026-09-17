@@ -211,6 +211,10 @@ const Binding kDefaults[] = {
      "Unfold (lay bends flat to cut across them)", "Sheet metal", ""},
     {"part.sheet_refold", Context::Part, "Refold (fold an Unfold back up)",
      "Sheet metal", ""},
+    {"part.sheet_hem", Context::Part, "Hem (fold an edge back on itself)",
+     "Sheet metal", ""},
+    {"part.sheet_jog", Context::Part, "Jog (step a panel along a line)",
+     "Sheet metal", ""},
 
     {"part.simulation", Context::Part, "Simulation (FEM stress study)", "Tools",
      "Q"},

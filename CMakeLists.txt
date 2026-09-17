@@ -271,8 +271,11 @@ set(core_sources
     src/core/features/EdgeFlangeFeature.cpp
     src/core/features/FlatPatternFeature.cpp
     src/core/features/UnfoldFeature.cpp
+    src/core/features/HemFeature.cpp
+    src/core/features/JogFeature.cpp
     src/core/features/RefoldFeature.cpp
     src/core/sheet/Unfold.cpp
+    src/core/sheet/Flange.cpp
     src/core/sheet/Check.cpp
     src/core/io/ExportDxf.cpp
     src/core/ToleranceStack.cpp

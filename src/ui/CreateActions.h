@@ -103,6 +103,13 @@ void CreateUnfold(AppState& state);
 
 void CreateRefold(AppState& state);
 
+// A hem's return defaults to four thicknesses, the usual least a hemming die
+// takes; a jog's height to the least its two bends allow plus one
+// thickness, on the newest sketch that holds one line.
+void CreateHem(AppState& state);
+
+void CreateJog(AppState& state);
+
 // The plane a plane-referencing feature points at (a base plane, or an
 // earlier DatumPlane by id), as the UI sees it: the datum's last regenerated
 // output. nullopt when the id does not resolve. The regen path has

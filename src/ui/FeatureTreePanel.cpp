@@ -139,6 +139,10 @@ const char* FeatureIcon(const std::string& type) {
     return ICON_FA_ARROW_TURN_UP;
   if (type == "FlatPattern")
     return ICON_FA_FILE_LINES;
+  if (type == "Hem")
+    return ICON_FA_ROTATE_LEFT;
+  if (type == "Jog")
+    return ICON_FA_STAIRS;
   if (type == "Unfold")
     return ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER;
   if (type == "Refold")

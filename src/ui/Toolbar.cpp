@@ -431,6 +431,10 @@ void DrawModelToolbar(AppState& state) {
       "Edge flange (bend a wall up from a straight edge)");
   btn(ICON_FA_FILE_LINES "###tb_flat_pattern", "part.sheet_flat_pattern",
       "Flat pattern (lay the sheet flat; the blank a shop cuts)");
+  btn(ICON_FA_ROTATE_LEFT "###tb_hem", "part.sheet_hem",
+      "Hem (fold a panel edge right back on itself)");
+  btn(ICON_FA_STAIRS "###tb_jog", "part.sheet_jog",
+      "Jog (step a panel up along a one-line sketch)");
   btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_unfold",
       "part.sheet_unfold",
       "Unfold (lay bends flat, to draw a cut across them)");

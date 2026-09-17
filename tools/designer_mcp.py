@@ -225,6 +225,20 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   `unsuppressed_features` to switch between folded and flat. It must sit
   AFTER every feature that reshapes the sheet, since it flattens from the
   bends those features recorded; flattening a blank twice is refused.
+- Hem (fold a sheet edge right back on itself): {{"type": "Hem", "name":
+  str, "edges": [{{"feature_id": ..., "element": <straight panel edge>}}],
+  "length": num (the return), "length_expr"?: str, "kind"?: "closed"
+  (default) | "open", "gap"?: num (open only; omitted = one thickness),
+  "outside"?: bool}} — exempt from the minimum bend radius (a hem is
+  crushed). As with EdgeFlange, which of a rim's two edges you pick decides
+  which way it folds.
+- Jog (step a panel up along a line): {{"type": "Jog", "name": str,
+  "sketch_id": <a sketch holding ONE line drawn on the panel face>,
+  "height": num (face to face), "height_expr"?: str, "angle_deg"?: num
+  (0 < a <= 90, default 90), "flip"?: bool (which side is carried)}} — the
+  bends run the full panel width; a height under (2R + t)(1 - cos a) is
+  refused.
+- An EdgeFlange whose edges meet at a corner MITRES the flanges there.
 - Unfold (lay sheet bends flat so the next features cut in the flat):
   {{"type": "Unfold", "name": str, "body_id": <the sheet body's
   created_by>, "fixed_face"?: {{"feature_id": ..., "element": ...}},

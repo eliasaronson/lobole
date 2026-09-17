@@ -37,6 +37,8 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/HemFeature.h"
+#include "core/features/JogFeature.h"
 #include "core/features/RefoldFeature.h"
 #include "core/features/UnfoldFeature.h"
 #include "core/fem/FemTopo.h"
@@ -513,6 +515,42 @@ void CreateRefold(AppState& state) {
       }
   BeginPreviewFeature(state, std::make_unique<RefoldFeature>(
                                  NextName(state, "Refold"), target));
+}
+
+void CreateHem(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  double ret = 6.0;
+  if (const auto& rules = state.document->SheetMetal())
+    ret = 4.0 * rules->thickness;
+  BeginPreviewFeature(
+      state, std::make_unique<HemFeature>(NextName(state, "Hem"),
+                                          std::vector<ElementRef>{}, ret));
+}
+
+void CreateJog(AppState& state) {
+  if (!state.document)
+    return;
+  uint64_t line = 0;
+  for (const auto& f : state.document->GetFeatures()) {
+    const auto* sk = dynamic_cast<const SketchFeature*>(f.get());
+    if (sk == nullptr)
+      continue;
+    int lines = 0;
+    for (const sketch::Entity& e : sk->entities)
+      if (const auto* l = std::get_if<sketch::Line>(&e);
+          l != nullptr && !l->construction)
+        ++lines;
+    if (lines == 1)
+      line = sk->GetId();
+  }
+  // The least height the two bends allow, and one thickness of wall
+  // between them — derived from the stock, never a literal millimetre.
+  double height = 10.0;
+  if (const auto& rules = state.document->SheetMetal())
+    height = 2.0 * rules->EffectiveBendRadius() + 2.0 * rules->thickness;
+  BeginPreviewFeature(state, std::make_unique<JogFeature>(
+                                 NextName(state, "Jog"), line, height));
 }
 
 std::optional<SketchPlane>

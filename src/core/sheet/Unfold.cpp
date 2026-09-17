@@ -6,6 +6,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Section.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -31,6 +32,7 @@
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <ShapeAnalysis_FreeBounds.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <Standard_Failure.hxx>
 #include <TColStd_Array1OfInteger.hxx>
@@ -38,6 +40,7 @@
 #include <TColgp_Array1OfPnt2d.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_HSequenceOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -125,6 +128,8 @@ TopoDS_Face PolygonFace(const std::vector<gp_Pnt>& pts) {
   for (const gp_Pnt& p : pts)
     poly.Add(p);
   poly.Close();
+  if (!poly.IsDone())
+    return {};
   BRepBuilderAPI_MakeFace face(poly.Wire(), Standard_True);
   return face.IsDone() ? face.Face() : TopoDS_Face{};
 }
@@ -307,6 +312,10 @@ void Move(BendRegion& b, const gp_Trsf& m) {
   b.axisDir = G(D(b.axisDir).Transformed(m));
   b.parentDir = G(D(b.parentDir).Transformed(m));
   b.upDir = G(D(b.upDir).Transformed(m));
+  for (BendRegion::Trim& trim : b.trims) {
+    trim.point = G(P(trim.point).Transformed(m));
+    trim.normal = G(D(trim.normal).Transformed(m));
+  }
 }
 
 // Where a bend's material is NOW, for asking which piece carries it: the
@@ -416,7 +425,13 @@ bool ThroughCut(double innerFlat, double outerFlat) {
 double Step(const BendFrame& f) { return std::clamp(f.t / 4.0, 0.05, 0.25); }
 
 // The flat strip for a bend whose material is `slab` (folded, this frame):
-// the ideal strip, less every through-cut the bend carries, unwrapped.
+// the ideal strip, less every through-cut the bend carries, laid flat along
+// the NEUTRAL surface.
+//
+// Neutral rather than inside or outside, because a cut that is not square to
+// the sheet — the bisector of a mitred corner — crosses the two faces along
+// different outlines, and the blank is cut to the one the bend allowance
+// itself is measured on. For a cut square to the sheet all three agree.
 std::optional<CADShape> StripFor(const BendFrame& f, const CADShape& slab,
                                  int index, std::string& why) {
   const CADShape sector = f.Sector();
@@ -431,31 +446,65 @@ std::optional<CADShape> StripFor(const BendFrame& f, const CADShape& slab,
   const CADShape removed = Cut(sector, slab);
   if (Volume(removed) <= tol)
     return strip;
+
   const double neutral = f.R + f.K * f.t;
-  const std::vector<TopoDS_Face> inner = OnCylinder(removed, f, f.R);
-  const std::vector<TopoDS_Face> outer = OnCylinder(removed, f, f.R + f.t);
-  if (!ThroughCut(SumArea(inner, neutral / f.R),
-                  SumArea(outer, neutral / (f.R + f.t)))) {
-    why = "bend " + std::to_string(index) +
-          " has a cut that does not go through the sheet; only a "
-          "through-cut can be carried across a bend into the blank";
-    return std::nullopt;
-  }
+  const double sA = gp_Vec(f.A).Dot(gp_Vec(f.n)) > 0.0 ? 1.0 : -1.0;
+  const double v0 = std::min(0.0, sA * f.width) - 1.0;
+  const double v1 = std::max(0.0, sA * f.width) + 1.0;
+  const TopoDS_Face neutralFace = BRepBuilderAPI_MakeFace(
+      new Geom_CylindricalSurface(gp_Ax3(f.C, f.n, f.up.Reversed()), neutral),
+      -0.01, f.theta + 0.01, v0, v1, 1e-7);
+
   CADShape out = strip;
   const double eps = std::max(1e-3, f.t * 1e-3);
-  for (const TopoDS_Face& face : inner) {
-    int wires = 0;
-    for (TopExp_Explorer wx(face, TopAbs_WIRE); wx.More(); wx.Next())
-      ++wires;
-    if (wires != 1) {
+  for (TopExp_Explorer sx(removed.GetShape(), TopAbs_SOLID); sx.More();
+       sx.Next()) {
+    const CADShape plug(sx.Current());
+    if (Volume(plug) <= tol)
+      continue;
+    // Through the sheet or not at all: a pocket from one side has no outline
+    // the blank can be cut to, and laying one down anyway would quietly turn
+    // it into a hole.
+    if (OnCylinder(plug, f, f.R).empty() ||
+        OnCylinder(plug, f, f.R + f.t).empty()) {
       why = "bend " + std::to_string(index) +
-            " has a cut with an island inside it, which cannot be carried "
-            "across the bend yet";
+            " has a cut that does not go through the sheet; only a "
+            "through-cut can be carried across a bend into the blank";
       return std::nullopt;
     }
+    BRepAlgoAPI_Section section(plug.GetShape(), neutralFace, Standard_False);
+    section.ComputePCurveOn2(Standard_True);
+    section.Build();
+    if (!section.IsDone()) {
+      why = "a cut across bend " + std::to_string(index) +
+            " could not be found on the bend's neutral surface";
+      return std::nullopt;
+    }
+    Handle(TopTools_HSequenceOfShape) edges = new TopTools_HSequenceOfShape;
+    for (TopExp_Explorer ex(section.Shape(), TopAbs_EDGE); ex.More(); ex.Next())
+      edges->Append(ex.Current());
+    Handle(TopTools_HSequenceOfShape) wires;
+    ShapeAnalysis_FreeBounds::ConnectEdgesToWires(edges, 1e-5, Standard_False,
+                                                  wires);
+    if (wires.IsNull() || wires->Length() != 1) {
+      why = "bend " + std::to_string(index) +
+            (wires.IsNull() || wires->Length() == 0
+                 ? " has a cut that could not be traced on it"
+                 : " has a cut with an island inside it, which cannot be "
+                   "carried across the bend yet");
+      return std::nullopt;
+    }
+    // Laid down ON the plane: keep each point's (u, w) and set its height,
+    // rather than trusting the third coordinate of the unwrap. The section's
+    // points sit on the neutral cylinder only to the section's tolerance, and
+    // a polygon a hundredth of a micron out of plane is not a face.
     std::vector<gp_Pnt> loop;
-    for (const gp_Pnt& p : Sample(BRepTools::OuterWire(face), Step(f)))
-      loop.push_back(f.Unwrap(p).Translated(gp_Vec(f.up) * eps));
+    for (const gp_Pnt& p : Sample(TopoDS::Wire(wires->Value(1)), Step(f))) {
+      const gp_Vec d(f.Tf, f.Unwrap(p));
+      loop.push_back(f.Tf.Translated(gp_Vec(f.pd) * d.Dot(gp_Vec(f.pd)) +
+                                     gp_Vec(f.A) * d.Dot(gp_Vec(f.A)) +
+                                     gp_Vec(f.up) * eps));
+    }
     const TopoDS_Face flat = PolygonFace(loop);
     if (flat.IsNull()) {
       why = "a cut across bend " + std::to_string(index) +
@@ -571,10 +620,17 @@ CADShape WrappedCutter(const BendFrame& f, const TopoDS_Face& flatFace) {
 // The bend for a band whose material is `band` (flat, this frame): the ideal
 // sector, less every through-cut the band carries, wrapped.
 std::optional<CADShape> SectorFor(const BendFrame& f, const CADShape& band,
-                                  int index, std::string& why) {
-  const CADShape sector = f.Sector();
-  const CADShape strip = f.Strip();
-  const double tol = std::max(1e-6, 1e-6 * Volume(strip));
+                                  const CADShape& trimmedSector,
+                                  const CADShape& expectedStrip, int index,
+                                  std::string& why) {
+  // Where a mitre cut the bend, the trim is a PLANE through it, and no radial
+  // wrap of a flat outline reproduces a plane. So the bend starts as the
+  // ideal sector cut by its trims, exactly; the band is compared with what
+  // the unfolder makes of THAT; and only what was cut beyond it — while the
+  // bend lay flat — is wrapped.
+  CADShape sector = trimmedSector;
+  const CADShape& strip = expectedStrip;
+  const double tol = std::max(1e-6, 1e-6 * Volume(f.Strip()));
   if (Volume(Cut(band, strip)) > tol) {
     why = "crease " + std::to_string(index) +
           " has material ADDED across it, which cannot be bent - move the "
@@ -721,6 +777,11 @@ std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
       size_t bend = 0;
       int parent = -1, child = -1;
       CADShape strip; // in the parent's frame; placed with the parent
+      // Where each side's material is. Which PIECE holds it is settled only
+      // once every cut is made: a jog puts two new bends between the root
+      // and a flange that is older than both, so the piece an old bend was
+      // cut from is not the piece its panel ends up in.
+      std::vector<gp_Pnt> parentAt, childAt;
     };
     std::vector<Link> links;
 
@@ -764,6 +825,10 @@ std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
       slab = Common(slab, HalfSpace(f.C, f.A, size));
       slab = Common(slab, HalfSpace(f.C.Translated(gp_Vec(f.A) * f.width),
                                     f.A.Reversed(), size));
+      // A mitred corner: the neighbour's bend sits in this one's region, and
+      // the trims are where the two were cut apart.
+      for (const BendRegion::Trim& trim : b.trims)
+        slab = Common(slab, HalfSpace(P(trim.point), D(trim.normal), size));
       if (!slab.IsValid())
         return fail("bend " + std::to_string(bi + 1) +
                     " has no material left in it to unfold");
@@ -783,7 +848,25 @@ std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
 
       pieces[pi].part = std::move(parent);
       pieces.push_back({std::move(child), gp_Trsf(), false});
-      links.push_back({bi, pi, static_cast<int>(pieces.size() - 1), *strip});
+      links.push_back({bi, pi, static_cast<int>(pieces.size() - 1), *strip,
+                       Along(f.C.Translated(-gp_Vec(f.up) * (f.R + f.t / 2.0) -
+                                            gp_Vec(f.pd) * f.t),
+                             f.A, f.width),
+                       Along(f.C.Translated(f.W(f.theta) * (f.R + f.t / 2.0) +
+                                            gp_Vec(f.cd) * f.t),
+                             f.A, f.width)});
+    }
+
+    for (Link& link : links) {
+      const auto holder = [&](const std::vector<gp_Pnt>& at, int fallback) {
+        for (const gp_Pnt& p : at)
+          for (size_t i = 0; i < pieces.size(); ++i)
+            if (Contains(pieces[i].part.shape.GetShape(), p))
+              return static_cast<int>(i);
+        return fallback;
+      };
+      link.parent = holder(link.parentAt, link.parent);
+      link.child = holder(link.childAt, link.child);
     }
 
     // ---- 2. Walk the tree from the fixed panel, placing each piece -------
@@ -934,17 +1017,27 @@ std::optional<FlatResult> Refold(const Body& body, const SheetMetalRules& rules,
       const gp_Dir Un = f.up.Transformed(F);
       const gp_Dir An = f.A.Transformed(F);
       const gp_Pnt T1 = T0.Translated(gp_Vec(Dn) * f.BA);
-      const double eps = std::max(1e-3, f.t * 1e-3);
 
-      CADShape band = Common(work.shape, HalfSpace(T0, Dn, size));
-      band = Common(band, HalfSpace(T1, Dn.Reversed(), size));
-      band = Common(band, HalfSpace(T0, An, size));
-      band = Common(band, HalfSpace(T0.Translated(gp_Vec(An) * f.width),
-                                    An.Reversed(), size));
-      band = Common(band, HalfSpace(T0.Translated(gp_Vec(Un) * eps),
-                                    Un.Reversed(), size));
-      band = Common(
-          band, HalfSpace(T0.Translated(gp_Vec(Un) * -(f.t + eps)), Un, size));
+      // The band is exactly what the unfolder laid down for this bend: the
+      // ideal strip, or — where a mitre trimmed the bend — the strip it made
+      // of the trimmed sector. Any plane standing in for that outline is
+      // exact only where it touches it, and whatever falls between is left
+      // behind flat.
+      CADShape sector0 = f.Sector();
+      const double reach = (f.width + f.R + f.t + f.BA) * 4.0 + 100.0;
+      for (const BendRegion::Trim& trim : crease.trims)
+        sector0 =
+            Common(sector0, HalfSpace(P(trim.point), D(trim.normal), reach));
+      CADShape expected = f.Strip();
+      if (!crease.trims.empty()) {
+        std::string why;
+        const auto trimmed =
+            StripFor(f, sector0, static_cast<int>(ci + 1), why);
+        if (!trimmed)
+          return fail(why);
+        expected = *trimmed;
+      }
+      const CADShape band = Common(work.shape, Transformed(expected, F));
 
       Named child;
       {
@@ -958,8 +1051,8 @@ std::optional<FlatResult> Refold(const Body& body, const SheetMetalRules& rules,
       }
 
       std::string why;
-      const auto sector =
-          SectorFor(f, Transformed(band, Finv), static_cast<int>(ci + 1), why);
+      const auto sector = SectorFor(f, Transformed(band, Finv), sector0,
+                                    expected, static_cast<int>(ci + 1), why);
       if (!sector)
         return fail(why);
 

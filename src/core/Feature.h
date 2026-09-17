@@ -91,6 +91,17 @@ struct BendRegion {
   // current: a later Unfold that moves this crease composes onto it.
   uint64_t unfoldedBy = 0;
   glm::dmat4 parentPlace{1.0};
+
+  // Where a mitred corner cut this bend short: planes (a point, and the
+  // normal of the side the bend KEEPS), in the same coordinates as the record
+  // above. Two flanges meeting at a corner occupy overlapping space, so
+  // without these the unfolder would sweep the neighbour's bend into this
+  // one's and call it material added.
+  struct Trim {
+    glm::dvec3 point{0.0};
+    glm::dvec3 normal{0.0, 0.0, 1.0};
+  };
+  std::vector<Trim> trims;
 };
 
 struct Body {

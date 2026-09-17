@@ -16,7 +16,9 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/HemFeature.h"
 #include "core/features/HoleFeature.h"
+#include "core/features/JogFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
@@ -1058,6 +1060,33 @@ json FeatureToJson(const Feature& feature) {
       j["bends"] = uf->bendFeatures;
   } else if (auto* rf = dynamic_cast<const RefoldFeature*>(&feature)) {
     j["unfold_id"] = rf->unfoldId;
+  } else if (auto* hm = dynamic_cast<const HemFeature*>(&feature)) {
+    json arr = json::array();
+    for (const auto& ref : hm->edges)
+      arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
+    j["edges"] = std::move(arr);
+    j["length"] = hm->length;
+    if (!hm->lengthExpr.empty())
+      j["length_expr"] = hm->lengthExpr;
+    if (hm->kind != HemKind::Closed)
+      j["kind"] = HemKindName(hm->kind);
+    if (hm->gap > 0.0)
+      j["gap"] = hm->gap;
+    if (!hm->gapExpr.empty())
+      j["gap_expr"] = hm->gapExpr;
+    if (hm->outside)
+      j["outside"] = true;
+  } else if (auto* jg = dynamic_cast<const JogFeature*>(&feature)) {
+    j["sketch_id"] = jg->sketchId;
+    j["height"] = jg->height;
+    if (!jg->heightExpr.empty())
+      j["height_expr"] = jg->heightExpr;
+    if (jg->angleDeg != 90.0)
+      j["angle_deg"] = jg->angleDeg;
+    if (!jg->angleDegExpr.empty())
+      j["angle_deg_expr"] = jg->angleDegExpr;
+    if (jg->flip)
+      j["flip"] = true;
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
     j["thickness"] = sh->thickness;
@@ -1259,6 +1288,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "between the two that crosses a crease is WRAPPED onto the bend; one "
      "that does not go right through the sheet is refused, since the "
      "neutral-axis map cannot carry it"},
+    {"Hem", 112,
+     "edges [{feature_id, element}] (straight panel edges, as EdgeFlange), "
+     "length (+_expr) mm - the return past the fold, kind?: closed "
+     "(default; the return lies a tenth of the sheet off the panel) | open, "
+     "gap? (+_expr) mm (open only; omitted = one thickness), outside? - "
+     "fold starting AT the edge instead of keeping the drawn outline. A hem "
+     "is crushed, so it is exempt from the minimum bend radius"},
+    {"Jog", 112,
+     "sketch_id (a sketch holding ONE line drawn on a panel face), height "
+     "(+_expr) mm - face to face, angle_deg? (+_expr, (0, 90], default 90), "
+     "flip? - which side of the line is carried up. Two opposing bends the "
+     "full width of the panel; a height under what the two bends alone climb, "
+     "(2R + t)(1 - cos angle), is refused"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -2002,6 +2044,32 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Refold") { // v111
     out = std::make_unique<RefoldFeature>(name,
                                           j.at("unfold_id").get<uint64_t>());
+  } else if (type == "Hem") { // v112
+    std::vector<ElementRef> picked;
+    for (const auto& ej : j.value("edges", json::array()))
+      picked.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
+                                  ej.value("element", std::string{})});
+    auto hm = std::make_unique<HemFeature>(name, std::move(picked),
+                                           j.value("length", 5.0));
+    hm->lengthExpr = j.value("length_expr", std::string{});
+    if (j.contains("kind")) {
+      const std::string v = j.at("kind").get<std::string>();
+      if (!HemKindFromString(v, hm->kind))
+        throw std::runtime_error("unknown hem kind '" + v +
+                                 "' (expected one of: " + HemKindList() + ")");
+    }
+    hm->gap = j.value("gap", 0.0);
+    hm->gapExpr = j.value("gap_expr", std::string{});
+    hm->outside = j.value("outside", false);
+    out = std::move(hm);
+  } else if (type == "Jog") { // v112
+    auto jg = std::make_unique<JogFeature>(
+        name, j.at("sketch_id").get<uint64_t>(), j.value("height", 5.0));
+    jg->heightExpr = j.value("height_expr", std::string{});
+    jg->angleDeg = j.value("angle_deg", 90.0);
+    jg->angleDegExpr = j.value("angle_deg_expr", std::string{});
+    jg->flip = j.value("flip", false);
+    out = std::move(jg);
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
     for (const auto& ej : j.value("open_faces", json::array()))

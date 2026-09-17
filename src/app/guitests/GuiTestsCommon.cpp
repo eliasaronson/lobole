@@ -329,7 +329,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[31] = {
+const ToolCase kToolCases[33] = {
     {"box", "###tb_box", Needs::Nothing, Expect::Changes},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
@@ -377,6 +377,10 @@ const ToolCase kToolCases[31] = {
     {"unfold", "###tb_unfold", Needs::SheetFlanged, Expect::Changes},
     // The one Unfold still open is the only sensible thing to fold back.
     {"refold", "###tb_refold", Needs::SheetUnfolded, Expect::Changes},
+    // A hem has to be told which edge, as a flange does.
+    {"hem", "###tb_hem", Needs::SheetBlank, Expect::RefusesUntilPicked},
+    // With no one-line sketch to step along, the jog says so and waits.
+    {"jog", "###tb_jog", Needs::SheetBlank, Expect::RefusesUntilPicked},
 };
 
 const ToolCase* FindToolCase(const char* testName) {

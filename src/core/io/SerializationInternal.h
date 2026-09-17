@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    111; // v111: `Unfold` {body_id, fixed_face?, bends?} and `Refold`
+    112; // v112: `Hem` {edges, length, kind?, gap?, outside?} and `Jog`
+         //      {sketch_id, height, angle_deg?, flip?}; an edge flange over
+         //      edges meeting at a corner now MITRES them (bends record the
+         //      trim, transiently). An unknown hem `kind` is refused by name
+         //      (docs/sheetmetal/plan.md, S7).
+         // v111: `Unfold` {body_id, fixed_face?, bends?} and `Refold`
          //      {unfold_id}: lay chosen bends flat in place, and fold them
          //      back carrying every through-cut across each crease. The
          //      creases they leave carry their parent placement on the body,

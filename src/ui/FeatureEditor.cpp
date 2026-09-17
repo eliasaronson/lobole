@@ -24,7 +24,9 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/HemFeature.h"
 #include "core/features/HoleFeature.h"
+#include "core/features/JogFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
@@ -442,6 +444,19 @@ bool AcceptSketch(const Feature* f) {
 }
 // A sketch (open chain) or a Curve3D — anything usable as a sweep/loft path or
 // guide (mirrors SweepFeature's ResolveSweepPathWire).
+// A sketch holding exactly one line: what a jog is located by.
+bool AcceptJogLine(const Feature* f) {
+  const auto* sk = dynamic_cast<const SketchFeature*>(f);
+  if (sk == nullptr)
+    return false;
+  int lines = 0;
+  for (const sketch::Entity& e : sk->entities)
+    if (const auto* l = std::get_if<sketch::Line>(&e);
+        l != nullptr && !l->construction)
+      ++lines;
+  return lines == 1;
+}
+
 bool AcceptPathLike(const Feature* f) {
   return dynamic_cast<const SketchFeature*>(f) != nullptr ||
          dynamic_cast<const CurveFeature*>(f) != nullptr;
@@ -891,6 +906,15 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       return true;
     }
     return false;
+  case PickSlot::HemEdges:
+    if (auto* hm = dynamic_cast<HemFeature*>(&f);
+        hm != nullptr && item.kind == SelectionItem::Kind::Edge) {
+      if (!hm->edges.empty() &&
+          item.element.featureId != hm->edges.front().featureId)
+        return false;
+      return ToggleRefInList(hm->edges, item.element);
+    }
+    return false;
   case PickSlot::UnfoldBody:
     if (auto* uf = dynamic_cast<UnfoldFeature*>(&f);
         uf != nullptr && item.kind == SelectionItem::Kind::Body) {
@@ -1079,6 +1103,11 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
              "Which of a rim's two edges you pick decides which way the wall "
              "folds"}};
   }
+  if (dynamic_cast<const HemFeature*>(&feature) != nullptr) {
+    return {{PickSlot::HemEdges, "Edges", kEdge, true,
+             "Click STRAIGHT edges of a flat panel to hem (click again to "
+             "remove). Which of a rim's two edges decides which way it folds"}};
+  }
   if (dynamic_cast<const UnfoldFeature*>(&feature) != nullptr) {
     return {{PickSlot::UnfoldBody, "Body", kBody, false,
              "Pick the sheet body whose bends to lay flat"}};
@@ -1173,6 +1202,10 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::EdgeFlangeEdges: {
     auto* ef = dynamic_cast<const EdgeFlangeFeature*>(&feature);
     return ef != nullptr && !ef->edges.empty();
+  }
+  case PickSlot::HemEdges: {
+    auto* hm = dynamic_cast<const HemFeature*>(&feature);
+    return hm != nullptr && !hm->edges.empty();
   }
   case PickSlot::UnfoldBody: {
     auto* uf = dynamic_cast<const UnfoldFeature*>(&feature);
@@ -1926,6 +1959,36 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         state, feature, PickSlot::EdgeFlangeEdges,
         ef->edges.empty() ? "" : std::to_string(ef->edges.size()) + " picked");
     RefListRows(state, feature, index, commit, ef->edges);
+  } else if (auto* hm = dynamic_cast<HemFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Return", hm->lengthExpr,
+            hm->length);
+    const char* kinds[] = {"Closed", "Open"};
+    int kind = std::to_underlying(hm->kind);
+    if (LabeledCombo("Kind", &kind, kinds, 2)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*hm);
+      hm->kind = static_cast<HemKind>(kind);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    if (hm->kind == HemKind::Open)
+      ExprDim(state, feature, index, commit, "Gap", hm->gapExpr, hm->gap);
+    HandleEdit(state, feature,
+               ImGui::Checkbox("Outside the edge", &hm->outside), index,
+               commit);
+    PickSlotRow(
+        state, feature, PickSlot::HemEdges,
+        hm->edges.empty() ? "" : std::to_string(hm->edges.size()) + " picked");
+    RefListRows(state, feature, index, commit, hm->edges);
+  } else if (auto* jg = dynamic_cast<JogFeature*>(&feature)) {
+    // The line is not a pick in the viewport: it is the sketch drawn on the
+    // panel, and the combo offers only sketches that hold exactly one.
+    DrawFeatureRefCombo(state, feature, "Line", &jg->sketchId, index, commit,
+                        /*allowNone=*/false, AcceptJogLine);
+    ExprDim(state, feature, index, commit, "Height", jg->heightExpr,
+            jg->height);
+    ExprDim(state, feature, index, commit, "Angle", jg->angleDegExpr,
+            jg->angleDeg);
+    HandleEdit(state, feature, ImGui::Checkbox("Other side", &jg->flip), index,
+               commit);
   } else if (auto* uf = dynamic_cast<UnfoldFeature*>(&feature)) {
     PickSlotRow(state, feature, PickSlot::UnfoldBody,
                 BodyRefLabel(state, uf->bodyId));

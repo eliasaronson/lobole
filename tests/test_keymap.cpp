@@ -155,6 +155,8 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "part.sheet_flat_pattern",
       "part.sheet_unfold",
       "part.sheet_refold",
+      "part.sheet_hem",
+      "part.sheet_jog",
   };
   for (const keymap::Binding& b : keymap::Defaults()) {
     INFO(b.id);

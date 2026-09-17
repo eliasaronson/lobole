@@ -160,11 +160,33 @@ shop can cut.
 
 ## Tier 2 — the rest of a working sheet-metal tool
 
-**S7 — Miter, hem, jog.** All three are S3 with a different cross-section, so
-each is one feature type plus its section builder. Hem: a 180° flange at
-`R = t/2` closed or `(gap+t)/2` open. Jog: two opposing flanges from a sketch
-line on a face, offset by a given amount. Miter: a flange along a chain of
-edges, with the end faces cut to the bisector at each corner. Format bump.
+**S7 — Mitre, hem, jog.** One builder (`src/core/sheet/Flange.cpp`) for
+every wall bent up from an edge, so the edge flange and the hem cannot
+disagree about a bend line or what a bend records. Format bump.
+
+- *Mitre* is not a tool of its own: an edge flange whose picked edges meet at
+  a corner trims the flanges that would overlap back from the corner's
+  bisector, leaving a tenth of the sheet between them — touching walls fuse,
+  and then no flat pattern can say which bend the corner belongs to. Flanges
+  bent outside the panel only touch at a point and are left as an open
+  corner. Each bend RECORDS its trim: two mitred bends occupy overlapping
+  space, and the unfolder bounds each slab by it.
+- A mitre is a PLANE through the bend, not a radial cut, so the flat
+  pattern lays down its trace on the NEUTRAL surface — the line the bend
+  allowance is measured on — rather than on either face; for a cut square to
+  the sheet all three agree. Refolding starts from the ideal sector cut by
+  its trims, exactly, and takes as its band the very strip the unfolder made
+  of that — a plane standing in for the curved trace is exact only where it
+  touches it, and the first attempt left a sliver of band behind.
+- *Hem*: the builder at 180 degrees, its radius set by the gap the return
+  leaves (a tenth of the sheet when closed) and so exempt from the minimum
+  bend radius.
+- *Jog*: two opposing bends the full width of a panel along a one-line
+  sketch drawn on it; the far side is carried, never turned. The two bends
+  alone climb `(2R + t)(1 − cos a)`, and a lower jog is refused. A jog puts
+  NEW bends between the base and flanges older than it, so the unfolder
+  settles which piece each bend folds from by where its material is once
+  every cut is made, not by the order it was cut in.
 
 **S8 — Corners.** `CornerReliefFeature` (rectangular / obround / tear, applied
 at a corner where two bends meet) and closed-corner treatment on a miter. This
@@ -217,8 +239,8 @@ math), `src/core/sheet/Unfold.{h,cpp}` (the graph walk), `src/core/sheet/
 Check.{h,cpp}`, `src/core/io/ExportDxf.{h,cpp}`, `src/remote/RemoteSheetMetal.cpp`,
 `src/ui/SheetMetalPanel.cpp`.
 
-Six feature types (BaseFlange, EdgeFlange, Miter, Hem, Jog, CornerRelief) plus
-FlatPattern and Unfold/Refold: call it 9 × ~600 lines of plumbing, and
+Seven feature types (BaseFlange, EdgeFlange, Hem, Jog, CornerRelief, and the
+Unfold/Refold pair) plus FlatPattern — the mitre lives inside EdgeFlange: call it 9 × ~600 lines of plumbing, and
 5,000-6,000 lines of geometry, check, export and UI on top.
 
 ## Format
