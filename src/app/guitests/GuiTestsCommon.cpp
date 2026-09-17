@@ -330,7 +330,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[34] = {
+const ToolCase kToolCases[35] = {
     {"box", "###tb_box", Needs::Nothing, Expect::Changes},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
@@ -385,6 +385,10 @@ const ToolCase kToolCases[34] = {
     // Every corner of the newest body where two bends cross.
     {"corner_relief", "###tb_corner_relief", Needs::SheetCornered,
      Expect::Changes},
+    // The newest closed sketch is the blank's own outline; a normal cut asks
+    // which profile rather than cutting the whole part away.
+    {"normal_cut", "###tb_normal_cut", Needs::SheetBlank,
+     Expect::RefusesUntilPicked},
 };
 
 const ToolCase* FindToolCase(const char* testName) {

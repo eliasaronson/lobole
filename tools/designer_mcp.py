@@ -246,6 +246,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "style"?: "circular" (default) | "rectangular", "size"?: num (radius or
   half-side; omitted = bend radius + thickness)}} — every such corner of
   the body; three bends at one corner, or a non-square corner, is refused.
+- NormalCut (a cut through SHEET, square to the metal wherever it lands):
+  {{"type": "NormalCut", "name": str, "sketch_id": <closed profile>,
+  "body_id"?: <sheet body>, "regions"?: [...]}} — use it instead of an
+  Extrude cut on sheet metal: an extrude cut through a bend comes out
+  slanted to the metal. Sketch it where it sees only the face to cut.
 - Unfold (lay sheet bends flat so the next features cut in the flat):
   {{"type": "Unfold", "name": str, "body_id": <the sheet body's
   created_by>, "fixed_face"?: {{"feature_id": ..., "element": ...}},

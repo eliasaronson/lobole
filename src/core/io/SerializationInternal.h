@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    113; // v113: `CornerRelief` {body_id, style?, size?} and an EdgeFlange's
+    114; // v114: `NormalCut` {sketch_id, body_id?, regions?}: a cut through
+         //      a sheet square to the metal wherever the profile lands
+         //      (docs/sheetmetal/plan.md, S10).
+         // v113: `CornerRelief` {body_id, style?, size?} and an EdgeFlange's
          //      `corners`: open (default) | closed. Both refuse an unknown
          //      name (docs/sheetmetal/plan.md, S8).
          // v112: `Hem` {edges, length, kind?, gap?, outside?} and `Jog`

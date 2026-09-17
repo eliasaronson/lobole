@@ -438,6 +438,8 @@ void DrawModelToolbar(AppState& state) {
   btn(ICON_FA_CIRCLE_HALF_STROKE "###tb_corner_relief",
       "part.sheet_corner_relief",
       "Corner relief (cut where two bends cross, so neither tears)");
+  btn(ICON_FA_CIRCLE_MINUS "###tb_normal_cut", "part.sheet_normal_cut",
+      "Normal cut (through the sheet, square to it wherever it lands)");
   btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_unfold",
       "part.sheet_unfold",
       "Unfold (lay bends flat, to draw a cut across them)");

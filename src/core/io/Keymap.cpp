@@ -217,6 +217,8 @@ const Binding kDefaults[] = {
      "Sheet metal", ""},
     {"part.sheet_corner_relief", Context::Part,
      "Corner relief (where two bends cross)", "Sheet metal", ""},
+    {"part.sheet_normal_cut", Context::Part,
+     "Normal cut (square to the sheet wherever it lands)", "Sheet metal", ""},
 
     {"part.simulation", Context::Part, "Simulation (FEM stress study)", "Tools",
      "Q"},

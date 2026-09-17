@@ -40,6 +40,7 @@
 #include "core/features/FrameFeature.h"
 #include "core/features/HemFeature.h"
 #include "core/features/JogFeature.h"
+#include "core/features/NormalCutFeature.h"
 #include "core/features/RefoldFeature.h"
 #include "core/features/UnfoldFeature.h"
 #include "core/fem/FemTopo.h"
@@ -552,6 +553,13 @@ void CreateJog(AppState& state) {
     height = 2.0 * rules->EffectiveBendRadius() + 2.0 * rules->thickness;
   BeginPreviewFeature(state, std::make_unique<JogFeature>(
                                  NextName(state, "Jog"), line, height));
+}
+
+void CreateNormalCut(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<NormalCutFeature>(
+                                 NextName(state, "Normal cut"), 0));
 }
 
 void CreateCornerRelief(AppState& state) {

@@ -10,6 +10,9 @@
 #include <string>
 #include <vector>
 
+class TopoDS_Face;
+class gp_Dir;
+
 // Flattening a sheet body, and folding it back (docs/sheetmetal/plan.md, S4
 // and S9).
 //
@@ -68,5 +71,17 @@ Unfold(const Body& body, const SheetMetalRules& rules,
                                                const SheetMetalRules& rules,
                                                uint64_t unfoldTag, uint64_t tag,
                                                std::string* error);
+
+// A cut NORMAL TO THE SHEET everywhere (S10): the planar `profile`, carried
+// along `along` to where it meets the folded body, laid onto the blank —
+// rigidly on a panel, by the neutral map on a bend — cut straight through
+// there, and folded back up. A cut taken straight along a sketch's normal
+// through a bend or a leaning wall comes out slanted to the sheet, and no
+// laser-then-brake process makes that; this is the cut that process DOES
+// make. Returns the folded body with the cut, or nullopt with `error`.
+[[nodiscard]] std::optional<FlatResult>
+NormalCut(const Body& body, const SheetMetalRules& rules,
+          const TopoDS_Face& profile, const gp_Dir& along, uint64_t tag,
+          std::string* error);
 
 } // namespace sheet

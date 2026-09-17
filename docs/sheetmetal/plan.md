@@ -225,9 +225,18 @@ ruled walls; bend to flat, the outline is sampled and laid down as a
 polygon. A cut that does not go through the sheet has no outline the map can
 carry and is refused; so is material added to a bend.
 
-**S10 — Normal cut.** A cut through sheet is normal to the surface, not
+**S10 — Normal cut.** A cut through sheet is normal to the metal, not
 projected along the sketch normal — otherwise every cut on a bend comes out
-tapered. An option on the existing cut path when the target is a sheet body.
+slanted, a hole no laser cuts in the blank and no brake then folds into.
+`NormalCut` is its own feature rather than an extrude option, because an
+extrude's depth and end condition mean nothing for it. It is made the way the
+shop makes it: unfold, carry each point of the outline along the sketch's
+normal to where it meets the sheet and lay it on the blank — rigidly from a
+panel, by the neutral map from a bend — cut straight through there, and fold
+back; the refold's radial wrap IS a cut square to a bend. An outline that,
+from its sketch's direction, lands on two separate parts of the sheet (the
+tip of a wall standing in front of the bend) is refused rather than strung
+across the part. Format bump.
 
 **S11 — Flat pattern on a drawing.** `DrawingView` gains a `configuration`
 selector (`src/core/drawing/DrawingDocument.h:81-109`), which is what lets a

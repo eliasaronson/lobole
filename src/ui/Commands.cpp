@@ -503,6 +503,8 @@ const std::vector<Command>& Table() {
     add("part.sheet_jog", Idle, [](AppState& s) { CreateJog(s); });
     add("part.sheet_corner_relief", IdleBody,
         [](AppState& s) { CreateCornerRelief(s); });
+    add("part.sheet_normal_cut", IdleBody,
+        [](AppState& s) { CreateNormalCut(s); });
     add("part.simulation", IdleBody, [](AppState& s) { EnterSimulation(s); });
 
     // ------------------------------------------------------------- Job (CAM)

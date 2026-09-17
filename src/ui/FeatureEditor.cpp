@@ -29,6 +29,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/JogFeature.h"
 #include "core/features/LoftFeature.h"
+#include "core/features/NormalCutFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
@@ -43,6 +44,7 @@
 #include "core/features/UnfoldFeature.h"
 #include "core/io/Serialization.h"
 #include "core/parts/FastenerTable.h"
+#include "core/sketch/SketchProfile.h"
 #include "render/Camera.h"
 #include "ui/CreateActions.h"
 #include "ui/SketchOverlay.h"
@@ -445,6 +447,12 @@ bool AcceptSketch(const Feature* f) {
 }
 // A sketch (open chain) or a Curve3D — anything usable as a sweep/loft path or
 // guide (mirrors SweepFeature's ResolveSweepPathWire).
+// A sketch with at least one closed profile: what a cut is made from.
+bool AcceptClosedSketch(const Feature* f) {
+  const auto* sk = dynamic_cast<const SketchFeature*>(f);
+  return sk != nullptr && !sketch::BuildLoops(sk->entities).empty();
+}
+
 // A sketch holding exactly one line: what a jog is located by.
 bool AcceptJogLine(const Feature* f) {
   const auto* sk = dynamic_cast<const SketchFeature*>(f);
@@ -1978,6 +1986,11 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         state, feature, PickSlot::EdgeFlangeEdges,
         ef->edges.empty() ? "" : std::to_string(ef->edges.size()) + " picked");
     RefListRows(state, feature, index, commit, ef->edges);
+  } else if (auto* nc = dynamic_cast<NormalCutFeature*>(&feature)) {
+    DrawFeatureRefCombo(state, feature, "Profile", &nc->sketchId, index, commit,
+                        /*allowNone=*/false, AcceptClosedSketch);
+    ImGui::TextDisabled(nc->bodyId == 0 ? "Cuts the body it lands on"
+                                        : "Cuts the named body");
   } else if (auto* cr = dynamic_cast<CornerReliefFeature*>(&feature)) {
     PickSlotRow(state, feature, PickSlot::CornerReliefBody,
                 BodyRefLabel(state, cr->bodyId));

@@ -32,6 +32,7 @@
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
 #include <ShapeAnalysis_FreeBounds.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <Standard_Failure.hxx>
@@ -51,6 +52,7 @@
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
+#include <limits>
 
 #include <algorithm>
 #include <cmath>
@@ -724,10 +726,43 @@ double SizeOf(const CADShape& s) {
 
 } // namespace
 
+namespace {
+
+// Where everything went, for a caller that needs to map a point of the folded
+// body onto the blank: each piece and its placement, and each bend's frame
+// with its parent's placement.
+struct Placement {
+  std::vector<std::pair<CADShape, gp_Trsf>> pieces;
+  struct Bent {
+    BendFrame f;
+    gp_Trsf parentPlace;
+    std::vector<BendRegion::Trim> trims;
+  };
+  std::vector<Bent> bends;
+};
+
+std::optional<FlatResult> UnfoldImpl(const Body& body,
+                                     const SheetMetalRules& rules,
+                                     const ElementRef& fixedFace, uint64_t tag,
+                                     const std::vector<uint64_t>& onlyFrom,
+                                     Placement* placement, std::string* error);
+
+} // namespace
+
 std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
                                  const ElementRef& fixedFace, uint64_t tag,
                                  const std::vector<uint64_t>& onlyFrom,
                                  std::string* error) {
+  return UnfoldImpl(body, rules, fixedFace, tag, onlyFrom, nullptr, error);
+}
+
+namespace {
+
+std::optional<FlatResult> UnfoldImpl(const Body& body,
+                                     const SheetMetalRules& rules,
+                                     const ElementRef& fixedFace, uint64_t tag,
+                                     const std::vector<uint64_t>& onlyFrom,
+                                     Placement* placement, std::string* error) {
   const auto fail = [&](const std::string& why) -> std::optional<FlatResult> {
     if (error)
       *error = why;
@@ -741,6 +776,8 @@ std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
     FlatResult flat;
     flat.shape = body.shape;
     flat.map = body.elementMap;
+    if (placement != nullptr)
+      placement->pieces.push_back({body.shape, gp_Trsf()});
     return flat;
   }
 
@@ -970,6 +1007,14 @@ std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
     }
     if (!flat.shape.IsValid())
       return fail("the flat pattern came out empty");
+    if (placement != nullptr) {
+      for (const Piece& piece : pieces)
+        placement->pieces.push_back({piece.part.shape, piece.place});
+      for (const Link& link : links)
+        placement->bends.push_back({FrameOf(body.bends[link.bend], rules),
+                                    pieces[link.parent].place,
+                                    body.bends[link.bend].trims});
+    }
     result.shape = std::move(flat.shape);
     result.map = std::move(flat.map);
     return result;
@@ -977,6 +1022,8 @@ std::optional<FlatResult> Unfold(const Body& body, const SheetMetalRules& rules,
     return fail(std::string("flattening failed: ") + e.GetMessageString());
   }
 }
+
+} // namespace
 
 std::optional<FlatResult> Refold(const Body& body, const SheetMetalRules& rules,
                                  uint64_t unfoldTag, uint64_t tag,
@@ -1102,6 +1149,184 @@ std::optional<FlatResult> Refold(const Body& body, const SheetMetalRules& rules,
     return result;
   } catch (const Standard_Failure& e) {
     return fail(std::string("refolding failed: ") + e.GetMessageString());
+  }
+}
+
+namespace {
+
+// Which region of the folded body a point belongs to, and where it lands on
+// the blank: in a bend's wedge it is unwrapped by the neutral map, otherwise it
+// rides rigidly with the piece that holds it. `region` remembers the last
+// answer, so a point just off the sheet — a notch running out past an edge —
+// is carried the same way as its neighbour.
+std::optional<gp_Pnt> ToFlat(const Placement& pl, const gp_Pnt& p,
+                             int& region) {
+  const auto inBend = [&](const Placement::Bent& b) {
+    const BendFrame& f = b.f;
+    const gp_Vec d(f.C, p);
+    const double w = d.Dot(gp_Vec(f.A));
+    const gp_Vec rv = d - gp_Vec(f.A) * w;
+    const double r = rv.Magnitude();
+    const double phi = std::atan2(rv.Dot(gp_Vec(f.pd)), -rv.Dot(gp_Vec(f.up)));
+    const double tol = 1e-6;
+    if (w < -tol || w > f.width + tol || r < f.R - tol || r > f.R + f.t + tol ||
+        phi < -tol || phi > f.theta + tol)
+      return false;
+    for (const BendRegion::Trim& trim : b.trims)
+      if (gp_Vec(P(trim.point), p).Dot(gp_Vec(D(trim.normal))) < -tol)
+        return false;
+    return true;
+  };
+  const auto viaBend = [&](size_t i) {
+    return pl.bends[i].f.Unwrap(p).Transformed(pl.bends[i].parentPlace);
+  };
+  for (size_t i = 0; i < pl.bends.size(); ++i)
+    if (inBend(pl.bends[i])) {
+      region = -static_cast<int>(i) - 1;
+      return viaBend(i);
+    }
+  for (size_t i = 0; i < pl.pieces.size(); ++i)
+    if (Contains(pl.pieces[i].first.GetShape(), p)) {
+      region = static_cast<int>(i);
+      return p.Transformed(pl.pieces[i].second);
+    }
+  if (region >= 0)
+    return p.Transformed(pl.pieces[static_cast<size_t>(region)].second);
+  if (region < 0 && region != std::numeric_limits<int>::min())
+    return viaBend(static_cast<size_t>(-region - 1));
+  return std::nullopt;
+}
+
+// Where the line through `p` along `dir` first meets the body, nearest `p`.
+std::optional<gp_Pnt> Hit(const CADShape& body, const gp_Pnt& p,
+                          const gp_Dir& dir) {
+  IntCurvesFace_ShapeIntersector inter;
+  inter.Load(body.GetShape(), 1e-7);
+  inter.Perform(gp_Lin(p, dir), -1e9, 1e9);
+  if (!inter.IsDone() || inter.NbPnt() == 0)
+    return std::nullopt;
+  int best = 1;
+  for (int i = 2; i <= inter.NbPnt(); ++i)
+    if (std::abs(inter.WParameter(i)) < std::abs(inter.WParameter(best)))
+      best = i;
+  return inter.Pnt(best);
+}
+
+} // namespace
+
+std::optional<FlatResult> NormalCut(const Body& body,
+                                    const SheetMetalRules& rules,
+                                    const TopoDS_Face& profile,
+                                    const gp_Dir& along, uint64_t tag,
+                                    std::string* error) {
+  const auto fail = [&](const std::string& why) -> std::optional<FlatResult> {
+    if (error)
+      *error = why;
+    return std::nullopt;
+  };
+  for (const BendRegion& b : body.bends)
+    if (b.flat)
+      return fail("this body has bends laid flat - a normal cut is made on "
+                  "the folded part, so refold them first");
+  ArmOccSignalHandlers();
+  try {
+    Placement pl;
+    std::string why;
+    auto flat = UnfoldImpl(body, rules, {}, tag, {}, &pl, &why);
+    if (!flat)
+      return fail(why);
+
+    // The blank's plane: its largest flat face, and the material behind it.
+    TopoDS_Face big;
+    double bigArea = 0.0;
+    for (TopExp_Explorer ex(flat->shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next()) {
+      const TopoDS_Face face = TopoDS::Face(ex.Current());
+      if (BRepAdaptor_Surface(face).GetType() != GeomAbs_Plane)
+        continue;
+      const double a = Area(face);
+      if (a > bigArea) {
+        bigArea = a;
+        big = face;
+      }
+    }
+    if (big.IsNull())
+      return fail("the blank has no flat face to cut on");
+    const gp_Pln plane = BRepAdaptor_Surface(big).Plane();
+    gp_Dir out = plane.Axis().Direction();
+    if (big.Orientation() == TopAbs_REVERSED)
+      out.Reverse();
+    const double t = rules.thickness;
+    const double eps = std::max(1e-3, t * 1e-3);
+
+    // Each loop of the outline, sampled, carried to where it meets the sheet
+    // along `along`, and laid on the blank.
+    bool split = false;
+    const auto layDown = [&](const TopoDS_Wire& wire) -> TopoDS_Face {
+      std::vector<gp_Pnt> loop;
+      int region = std::numeric_limits<int>::min();
+      for (const gp_Pnt& p : Sample(wire, 0.25)) {
+        const auto hit = Hit(body.shape, p, along);
+        if (!hit && region == std::numeric_limits<int>::min())
+          continue; // nothing known yet to carry an off-sheet point with
+        const auto q = ToFlat(pl, hit ? *hit : p, region);
+        if (!q)
+          continue;
+        const double off = gp_Vec(plane.Location(), *q).Dot(gp_Vec(out));
+        loop.push_back(q->Translated(gp_Vec(out) * (eps - off)));
+      }
+      // Neighbouring samples are a quarter of a millimetre apart; laid on the
+      // blank they stay close unless the outline landed on two different
+      // parts of the sheet — the tip of a wall standing in the way, say —
+      // and a polygon strung between them would cut a slot across the part.
+      const double jump = std::max(5.0, 10.0 * t);
+      for (size_t k = 0; k < loop.size(); ++k)
+        if (loop[k].Distance(loop[(k + 1) % loop.size()]) > jump) {
+          split = true;
+          return TopoDS_Face{};
+        }
+      return loop.size() >= 3 ? PolygonFace(loop) : TopoDS_Face{};
+    };
+    const TopoDS_Wire outerWire = BRepTools::OuterWire(profile);
+    const TopoDS_Face outer = layDown(outerWire);
+    if (split)
+      return fail("from this direction the cut's outline lands on more than "
+                  "one part of the sheet - sketch it where it sees only the "
+                  "face to be cut");
+    if (outer.IsNull())
+      return fail("the cut's outline does not land on the sheet");
+    const gp_Vec through = gp_Vec(out) * -(t + 2.0 * eps);
+    CADShape cutter(BRepPrimAPI_MakePrism(outer, through).Shape());
+    for (TopExp_Explorer wx(profile, TopAbs_WIRE); wx.More(); wx.Next()) {
+      if (wx.Current().IsSame(outerWire))
+        continue;
+      // An island inside the outline stays: it is taken out of the cutter.
+      const TopoDS_Face island = layDown(TopoDS::Wire(wx.Current()));
+      if (island.IsNull())
+        continue;
+      cutter =
+          Cut(cutter, CADShape(BRepPrimAPI_MakePrism(island, through).Shape()));
+    }
+
+    Named cut = Subtract(Named{flat->shape, flat->map}, cutter, tag);
+    if (!cut.shape.IsValid() || cut.shape.Volume() <= 1e-9)
+      return fail("the cut would remove the whole sheet");
+    if (cut.shape.Volume() >= flat->shape.Volume() - 1e-9)
+      return fail("the cut removed nothing from the sheet");
+
+    if (flat->bends.empty()) {
+      FlatResult result;
+      result.shape = std::move(cut.shape);
+      result.map = std::move(cut.map);
+      return result;
+    }
+    Body laid = body;
+    laid.shape = cut.shape;
+    laid.elementMap = cut.map;
+    laid.bends = flat->bends;
+    return Refold(laid, rules, tag, tag, error);
+  } catch (const Standard_Failure& e) {
+    return fail(std::string("normal cut failed: ") + e.GetMessageString());
   }
 }
 

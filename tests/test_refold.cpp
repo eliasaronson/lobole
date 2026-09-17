@@ -172,8 +172,11 @@ double ThicknessOf(const Document& doc) {
   return hi.z - lo.z;
 }
 
+// Valid AND one piece: a refold whose joins quietly failed is a valid
+// compound of loose panels.
 bool Sound(const Document& doc) {
-  return BRepCheck_Analyzer(doc.GetBodies()[0].shape.GetShape()).IsValid();
+  return BRepCheck_Analyzer(doc.GetBodies()[0].shape.GetShape()).IsValid() &&
+         doc.GetBodies()[0].shape.SolidCount() == 1;
 }
 
 double Allowance() { return sheet::BendAllowance(kQuarter, kR, kK, kT); }

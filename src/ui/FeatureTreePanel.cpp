@@ -139,6 +139,8 @@ const char* FeatureIcon(const std::string& type) {
     return ICON_FA_ARROW_TURN_UP;
   if (type == "FlatPattern")
     return ICON_FA_FILE_LINES;
+  if (type == "NormalCut")
+    return ICON_FA_CIRCLE_MINUS;
   if (type == "CornerRelief")
     return ICON_FA_CIRCLE_HALF_STROKE;
   if (type == "Hem")

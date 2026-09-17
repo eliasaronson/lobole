@@ -113,6 +113,10 @@ void CreateJog(AppState& state);
 // Relieves every corner of the newest body where two bends cross.
 void CreateCornerRelief(AppState& state);
 
+// Opens a normal cut with no sketch chosen: the newest closed sketch is, as
+// often as not, the one the blank was made from.
+void CreateNormalCut(AppState& state);
+
 // The plane a plane-referencing feature points at (a base plane, or an
 // earlier DatumPlane by id), as the UI sees it: the datum's last regenerated
 // output. nullopt when the id does not resolve. The regen path has

@@ -1,0 +1,142 @@
+{
+  "format": "designer-document",
+  "version": 114,
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Blank",
+      "id": 1,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "line",
+          "id": 1,
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            100,
+            0
+          ]
+        },
+        {
+          "type": "line",
+          "id": 2,
+          "a": [
+            100,
+            0
+          ],
+          "b": [
+            100,
+            60
+          ]
+        },
+        {
+          "type": "line",
+          "id": 3,
+          "a": [
+            100,
+            60
+          ],
+          "b": [
+            0,
+            60
+          ]
+        },
+        {
+          "type": "line",
+          "id": 4,
+          "a": [
+            0,
+            60
+          ],
+          "b": [
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "type": "BaseFlange",
+      "name": "Base",
+      "id": 2,
+      "sketch_id": 1
+    },
+    {
+      "type": "EdgeFlange",
+      "name": "Wall",
+      "id": 3,
+      "edges": [
+        {
+          "feature_id": 2,
+          "element": "2/g1;U3"
+        }
+      ],
+      "length": 20,
+      "angle_deg": 90,
+      "position": "bend_outside"
+    },
+    {
+      "type": "Sketch",
+      "name": "Vent",
+      "id": 4,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          30
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "circle",
+          "id": 1,
+          "center": [
+            50,
+            1.5
+          ],
+          "radius": 0.6
+        }
+      ]
+    },
+    {
+      "type": "NormalCut",
+      "name": "Vent through the bend",
+      "id": 5,
+      "sketch_id": 4
+    }
+  ],
+  "sheet_metal": {
+    "material": "aluminum",
+    "gauge": "1.5mm",
+    "thickness": 1.5
+  }
+}

@@ -21,6 +21,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/JogFeature.h"
 #include "core/features/LoftFeature.h"
+#include "core/features/NormalCutFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
@@ -1098,6 +1099,12 @@ json FeatureToJson(const Feature& feature) {
       j["size"] = cr->size;
     if (!cr->sizeExpr.empty())
       j["size_expr"] = cr->sizeExpr;
+  } else if (auto* nc = dynamic_cast<const NormalCutFeature*>(&feature)) {
+    j["sketch_id"] = nc->sketchId;
+    if (nc->bodyId != 0)
+      j["body_id"] = nc->bodyId;
+    if (!nc->regions.empty())
+      j["regions"] = nc->regions;
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
     j["thickness"] = sh->thickness;
@@ -1320,6 +1327,13 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "radius or half-side, omitted = bend radius + thickness. Cuts a relief "
      "at EVERY corner where two bends of the body cross; three bends at one "
      "corner, or two at other than a right angle, are refused"},
+    {"NormalCut", 114,
+     "sketch_id (a closed profile), body_id? (omitted = the body the "
+     "profile lands on), regions? - cut through a SHEET normal to it wherever "
+     "the profile lands along the sketch's normal: square to a panel, "
+     "radially through a bend. Use it rather than an extrude cut on sheet: "
+     "an extrude cut goes straight along the sketch normal and comes out "
+     "slanted to the metal on a bend or a leaning wall"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -2110,6 +2124,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     cr->size = j.value("size", 0.0);
     cr->sizeExpr = j.value("size_expr", std::string{});
     out = std::move(cr);
+  } else if (type == "NormalCut") { // v114
+    auto nc = std::make_unique<NormalCutFeature>(
+        name, j.at("sketch_id").get<uint64_t>());
+    nc->bodyId = j.value("body_id", uint64_t{0});
+    if (j.contains("regions"))
+      nc->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
+    out = std::move(nc);
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
     for (const auto& ej : j.value("open_faces", json::array()))
