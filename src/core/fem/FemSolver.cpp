@@ -13,7 +13,6 @@
 
 #ifdef HAVE_SPECTRA
 #include <Spectra/MatOp/SparseSymMatProd.h>
-#include <Spectra/MatOp/SymShiftInvert.h>
 #include <Spectra/SymGEigsShiftSolver.h>
 #endif
 
@@ -119,42 +118,47 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
 
   // Assemble the reduced stiffness matrix from element contributions, each
   // with its own domain's elasticity (S2: a bonded group of materials).
-  std::vector<Eigen::Triplet<double>> triplets;
-  triplets.reserve(mesh.tets.size() * 900);
-  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
-    const auto& tet = mesh.tets[ti];
-    const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
-    Vector3d X[10];
-    for (int i = 0; i < 10; ++i) {
-      const auto& p = mesh.nodes[tet[i]];
-      X[i] = Vector3d(p.x, p.y, p.z);
-    }
-    Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
-    for (const auto& g : kTetGauss) {
-      Eigen::Matrix<double, 6, 30> B;
-      // B (physical gradients) is orientation-independent; the volume measure
-      // is |detJ|. Netgen orders tet corners with negative orientation, so
-      // detJ is consistently < 0 — take the magnitude, reject only if ~0.
-      const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
-      if (std::abs(detJ) < 1e-12)
-        return fail("mesh has a degenerate element");
-      Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
-    }
-    // Scatter into the reduced system, skipping fixed DOFs.
-    for (int a = 0; a < 30; ++a) {
-      const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-      if (ga < 0)
-        continue;
-      for (int b = 0; b < 30; ++b) {
-        const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-        if (gb < 0)
+  // The triplet scratch is SCOPED: 900 of them per element is 1.5 GB on a
+  // 100k-element bonded group, and holding it through the factorization is
+  // what puts an assembly study out of memory.
+  Eigen::SparseMatrix<double> K(nFree, nFree);
+  {
+    std::vector<Eigen::Triplet<double>> triplets;
+    triplets.reserve(mesh.tets.size() * 900);
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      const Eigen::Matrix<double, 6, 6>& D = DOf(ti);
+      Vector3d X[10];
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+      }
+      Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        // B (physical gradients) is orientation-independent; the volume measure
+        // is |detJ|. Netgen orders tet corners with negative orientation, so
+        // detJ is consistently < 0 — take the magnitude, reject only if ~0.
+        const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+        if (std::abs(detJ) < 1e-12)
+          return fail("mesh has a degenerate element");
+        Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
+      }
+      // Scatter into the reduced system, skipping fixed DOFs.
+      for (int a = 0; a < 30; ++a) {
+        const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
+        if (ga < 0)
           continue;
-        triplets.emplace_back(ga, gb, Ke(a, b));
+        for (int b = 0; b < 30; ++b) {
+          const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
+          if (gb < 0)
+            continue;
+          triplets.emplace_back(ga, gb, Ke(a, b));
+        }
       }
     }
+    K.setFromTriplets(triplets.begin(), triplets.end());
   }
-  Eigen::SparseMatrix<double> K(nFree, nFree);
-  K.setFromTriplets(triplets.begin(), triplets.end());
 
   // Consistent nodal load vector: face tractions (shared with the topology
   // loop), then the optional gravity body force.
@@ -283,6 +287,49 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
 }
 
 #ifdef HAVE_SPECTRA
+namespace {
+// (K - sigma*M)^-1 by CHOLESKY, which is what the shift-invert eigensolve
+// needs here: a modal study refuses without a support, so K is symmetric
+// positive definite. Spectra's stock SymShiftInvert takes the sparse/sparse
+// path instead — it EXPANDS both operands to full symmetric matrices and
+// factorizes with SparseLU, storing an L and a U for a matrix that needs one
+// triangle. On the ~500k-DOF bonded group of an assembly study that is
+// gigabytes, and it does not fail politely: the process is killed and the
+// study simply never answers.
+class SpdShiftInvert {
+public:
+  using Scalar = double;
+  // Both matrices hold their LOWER triangle only, which is all
+  // SimplicialLDLT<Lower> and SparseSymMatProd<Lower> ever read.
+  SpdShiftInvert(const Eigen::SparseMatrix<double>& k,
+                 const Eigen::SparseMatrix<double>& m)
+      : k(k), m(m) {}
+  Eigen::Index rows() const { return k.rows(); }
+  Eigen::Index cols() const { return k.rows(); }
+  void set_shift(const Scalar& sigma) {
+    if (sigma == 0.0) {
+      solver.compute(k);
+    } else {
+      const Eigen::SparseMatrix<double> a = k - sigma * m;
+      solver.compute(a);
+    }
+    factored = solver.info() == Eigen::Success;
+  }
+  bool ok() const { return factored; }
+  void perform_op(const Scalar* xIn, Scalar* yOut) const {
+    Eigen::Map<const Eigen::VectorXd> x(xIn, k.rows());
+    Eigen::Map<Eigen::VectorXd> y(yOut, k.rows());
+    y = solver.solve(x);
+  }
+
+private:
+  const Eigen::SparseMatrix<double>& k;
+  const Eigen::SparseMatrix<double>& m;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>, Eigen::Lower> solver;
+  bool factored = false;
+};
+} // namespace
+
 std::optional<std::vector<FemResults::ModeShape>>
 SolveModal(const FemMesh& mesh, const Material& material,
            const std::vector<int>& fixedNodes, int numModes,
@@ -343,64 +390,89 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   if (nFree < numModes + 1)
     return fail("mesh too small for the requested modes");
 
-  std::vector<Eigen::Triplet<double>> kt, mt;
-  kt.reserve(mesh.tets.size() * 900);
-  mt.reserve(mesh.tets.size() * 300);
-  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
-    const auto& tet = mesh.tets[ti];
-    const size_t dom = mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[ti];
-    const Eigen::Matrix<double, 6, 6>& D = Ds[std::min(dom, Ds.size() - 1)];
-    const double rho = matOf(ti).densityTPerMM3;
-    Vector3d X[10];
-    for (int i = 0; i < 10; ++i) {
-      const auto& p = mesh.nodes[tet[i]];
-      X[i] = Vector3d(p.x, p.y, p.z);
-    }
-    Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
-    Eigen::Matrix<double, 10, 10> Me = Eigen::Matrix<double, 10, 10>::Zero();
-    for (const auto& g : kTetGauss) {
-      Eigen::Matrix<double, 6, 30> B;
-      const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
-      if (std::abs(detJ) < 1e-12)
-        return fail("mesh has a degenerate element");
-      const double dV = kTetW * std::abs(detJ);
-      Ke += dV * (B.transpose() * D * B);
-      double N[10];
-      TetShape(g[0], g[1], g[2], N);
-      for (int i = 0; i < 10; ++i)
-        for (int j = 0; j < 10; ++j)
-          Me(i, j) += rho * dV * N[i] * N[j];
-    }
-    for (int a = 0; a < 30; ++a) {
-      const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-      if (ga < 0)
-        continue;
-      for (int b = 0; b < 30; ++b) {
-        const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-        if (gb < 0)
+  // K and M are assembled in two SCOPED passes, each holding only the
+  // triplets of the matrix it builds, and only the LOWER triangle of it.
+  // Both matter at assembly-study size: the full 30x30 element block is 900
+  // triplets, 1.5 GB of scratch on a 100k-element bonded group, and Spectra
+  // reads both operands through selfadjointView<Lower> — so the upper half we
+  // used to assemble was built, stored and then ignored. A study that died
+  // without a word (the kernel kills the process; there is no bad_alloc to
+  // report) now has room to finish.
+  Eigen::SparseMatrix<double> K(nFree, nFree), M(nFree, nFree);
+  {
+    std::vector<Eigen::Triplet<double>> kt;
+    kt.reserve(mesh.tets.size() * 465); // 30*31/2, the lower block
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      const size_t dom =
+          mesh.tetDomain.empty() ? 0 : (size_t)mesh.tetDomain[ti];
+      const Eigen::Matrix<double, 6, 6>& D = Ds[std::min(dom, Ds.size() - 1)];
+      Vector3d X[10];
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+      }
+      Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+        if (std::abs(detJ) < 1e-12)
+          return fail("mesh has a degenerate element");
+        Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
+      }
+      for (int a = 0; a < 30; ++a) {
+        const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
+        if (ga < 0)
           continue;
-        kt.emplace_back(ga, gb, Ke(a, b));
+        for (int b = 0; b < 30; ++b) {
+          const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
+          if (gb < 0 || gb > ga)
+            continue;
+          kt.emplace_back(ga, gb, Ke(a, b));
+        }
       }
     }
-    // Consistent mass couples same-direction DOFs (block-diagonal in x/y/z).
-    for (int i = 0; i < 10; ++i)
-      for (int j = 0; j < 10; ++j)
-        for (int d = 0; d < 3; ++d) {
-          const int ga = dofMap[3 * tet[i] + d];
-          const int gb = dofMap[3 * tet[j] + d];
-          if (ga >= 0 && gb >= 0)
-            mt.emplace_back(ga, gb, Me(i, j));
-        }
+    K.setFromTriplets(kt.begin(), kt.end());
   }
-  Eigen::SparseMatrix<double> K(nFree, nFree), M(nFree, nFree);
-  K.setFromTriplets(kt.begin(), kt.end());
-  M.setFromTriplets(mt.begin(), mt.end());
   K.makeCompressed();
+  {
+    std::vector<Eigen::Triplet<double>> mt;
+    mt.reserve(mesh.tets.size() * 165); // 10*11/2 pairs, three directions
+    for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+      const auto& tet = mesh.tets[ti];
+      const double rho = matOf(ti).densityTPerMM3;
+      Vector3d X[10];
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+      }
+      Eigen::Matrix<double, 10, 10> Me = Eigen::Matrix<double, 10, 10>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B; // only detJ is wanted here
+        const double dV = kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
+        double N[10];
+        TetShape(g[0], g[1], g[2], N);
+        for (int i = 0; i < 10; ++i)
+          for (int j = 0; j < 10; ++j)
+            Me(i, j) += rho * dV * N[i] * N[j];
+      }
+      // Consistent mass couples same-direction DOFs (block-diagonal in x/y/z).
+      for (int i = 0; i < 10; ++i)
+        for (int j = 0; j < 10; ++j)
+          for (int d = 0; d < 3; ++d) {
+            const int ga = dofMap[3 * tet[i] + d];
+            const int gb = dofMap[3 * tet[j] + d];
+            if (ga >= 0 && gb >= 0 && ga >= gb)
+              mt.emplace_back(ga, gb, Me(i, j));
+          }
+    }
+    M.setFromTriplets(mt.begin(), mt.end());
+  }
   M.makeCompressed();
 
   // Generalized eigenproblem K phi = lambda M phi, lowest eigenvalues via
   // shift-invert at sigma=0 (K is positive-definite here).
-  using OpType = Spectra::SymShiftInvert<double, Eigen::Sparse, Eigen::Sparse>;
+  using OpType = SpdShiftInvert;
   using BOpType = Spectra::SparseSymMatProd<double>;
   OpType op(K, M);
   BOpType Bop(M);
@@ -408,6 +480,10 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   const int ncv = std::min(std::max(2 * nev + 1, 20), nFree);
   Spectra::SymGEigsShiftSolver<OpType, BOpType, Spectra::GEigsMode::ShiftInvert>
       geigs(op, Bop, nev, ncv, 0.0);
+  // The constructor sets the shift, which is where the factorization happens.
+  if (!op.ok())
+    return fail(
+        "model is insufficiently constrained (singular stiffness matrix)");
   try {
     geigs.init();
     geigs.compute(Spectra::SortRule::LargestMagn, 1000, 1e-10,

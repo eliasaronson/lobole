@@ -346,6 +346,22 @@ What landed on 2026-09-16, and where it differs from the paragraphs above.
   SOFTER than the rigid support's — the bracket the plan asked for) and
   `tests/fem_smoke.py` (the bonded study over the RPCs, one body for the
   group, softer than rigid).
+- **What the group costs to solve.** A bonded group is ONE mesh, so its
+  solve is the whole group's: the speaker's side wall with its two braces is
+  103k elements / 174k nodes where the wall alone is 15k. That is the size at
+  which the modal path's MEMORY became the wall, and it did not fail
+  politely — over 6 GB the kernel killed the process and the study simply
+  never answered. Two things were wrong, both in `SolveModal`: Spectra reads
+  both operands through `selfadjointView<Lower>`, so the upper triangle we
+  assembled was built, stored and ignored (900 triplets per element, 1.5 GB
+  of scratch held through the factorization); and its stock
+  `SymShiftInvert` sparse path expands both to full matrices and factorizes
+  with `SparseLU`, storing an L and a U for a matrix that is symmetric
+  positive definite. It now assembles the lower triangle only, in two passes
+  each scoping its own triplets, and factorizes with `SimplicialLDLT` behind
+  a small `SpdShiftInvert` op: that group solves in 3.1 GB and 90 s, and the
+  part-scope cases come back to the digit (352.5 Hz, 562.4 Hz) two to three
+  times faster.
 - **Not yet.** Per-member mesh size is honoured on a bonded member's faces
   but the study's global size still governs the interior; the seam tint is
   the whole face, not the patch.

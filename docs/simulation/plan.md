@@ -126,6 +126,11 @@ the headless solve loop ships in phase 2, before any GUI exists.
     refining it further. A whole-cabinet modal solve therefore needs
     DEFEATURING (suppress the fastener holes for analysis) before it needs a
     better eigensolver, and per-panel studies keep their place regardless.
+    The eigensolver did get cheaper on the way — `SolveModal` assembles only
+    the lower triangle Spectra reads and factorizes with `SimplicialLDLT`
+    rather than the `SparseLU` its stock shift-invert would use, which took a
+    100k-element bonded group from over 6 GB (killed by the kernel, with no
+    error to read) to 3.1 GB — but that buys a factor, not an order.
 - **Modal analysis** — the natural FEM2: mass matrix assembly is cheap once
   stiffness assembly exists, and density is already in the library. Wants a
   sparse eigensolver (Spectra is header-only BSD, vendors like PlaneGCS).
