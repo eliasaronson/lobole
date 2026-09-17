@@ -446,12 +446,24 @@ SolveModal(const FemMesh& mesh, const std::vector<Material>& byDomain,
   return modes;
 }
 #else  // !HAVE_SPECTRA
+// Both overloads, and the single-material one delegates exactly as the real
+// implementation does: a stub that covers only one of them links on a build
+// with Spectra and fails on the build that needs the stub — which is the
+// only build nobody compiles by accident (Ubuntu ships no Spectra, so the
+// stock-container job is what catches it).
 std::optional<std::vector<FemResults::ModeShape>>
-SolveModal(const FemMesh&, const Material&, const std::vector<int>&, int,
-           std::string* error) {
+SolveModal(const FemMesh&, const std::vector<Material>&,
+           const std::vector<int>&, int, std::string* error) {
   if (error)
     *error = "built without modal support (Spectra not found)";
   return std::nullopt;
+}
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const Material& material,
+           const std::vector<int>& fixedNodes, int numModes,
+           std::string* error) {
+  return SolveModal(mesh, std::vector<Material>{material}, fixedNodes, numModes,
+                    error);
 }
 #endif // HAVE_SPECTRA
 
@@ -460,7 +472,7 @@ SolveModal(const FemMesh&, const Material&, const std::vector<int>&, int,
 bool SolverAvailable() { return false; }
 bool ModalAvailable() { return false; }
 
-std::optional<FemResults> Solve(const FemMesh&, const Material&,
+std::optional<FemResults> Solve(const FemMesh&, const std::vector<Material>&,
                                 const std::vector<int>&,
                                 const std::vector<FaceLoad>&,
                                 std::string* error, const glm::dvec3&) {
@@ -469,12 +481,29 @@ std::optional<FemResults> Solve(const FemMesh&, const Material&,
   return std::nullopt;
 }
 
+std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
+                                const std::vector<int>& fixedNodes,
+                                const std::vector<FaceLoad>& loads,
+                                std::string* error,
+                                const glm::dvec3& gravityAccel) {
+  return Solve(mesh, std::vector<Material>{material}, fixedNodes, loads, error,
+               gravityAccel);
+}
+
 std::optional<std::vector<FemResults::ModeShape>>
-SolveModal(const FemMesh&, const Material&, const std::vector<int>&, int,
-           std::string* error) {
+SolveModal(const FemMesh&, const std::vector<Material>&,
+           const std::vector<int>&, int, std::string* error) {
   if (error)
     *error = "built without FEM solver support (Eigen not found)";
   return std::nullopt;
+}
+
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const Material& material,
+           const std::vector<int>& fixedNodes, int numModes,
+           std::string* error) {
+  return SolveModal(mesh, std::vector<Material>{material}, fixedNodes, numModes,
+                    error);
 }
 
 #endif // HAVE_FEM_SOLVER
