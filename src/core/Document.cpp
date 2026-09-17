@@ -608,6 +608,7 @@ Configuration& Document::AddConfiguration(const std::string& name) {
           ? ("Configuration " + std::to_string(m_configurations.size() + 1))
           : name;
   m_configurations.push_back(std::move(cfg));
+  m_configurationsRevision++;
   return m_configurations.back();
 }
 
@@ -615,6 +616,7 @@ bool Document::RemoveConfiguration(uint64_t id) {
   for (auto it = m_configurations.begin(); it != m_configurations.end(); ++it) {
     if (it->id == id) {
       m_configurations.erase(it);
+      m_configurationsRevision++;
       if (m_activeConfiguration == id) {
         m_activeConfiguration = 0; // fall back to base
         Regenerate();
@@ -628,6 +630,7 @@ bool Document::RemoveConfiguration(uint64_t id) {
 void Document::RestoreConfiguration(Configuration cfg) {
   EnsureNextIdAtLeast(cfg.id + 1);
   m_configurations.push_back(std::move(cfg));
+  m_configurationsRevision++;
 }
 
 bool Document::ReplaceConfiguration(Configuration cfg) {
@@ -635,6 +638,7 @@ bool Document::ReplaceConfiguration(Configuration cfg) {
     if (c.id == cfg.id) {
       const bool active = m_activeConfiguration == cfg.id;
       c = std::move(cfg);
+      m_configurationsRevision++;
       if (active)
         Regenerate(); // its overrides changed the applied model
       return true;

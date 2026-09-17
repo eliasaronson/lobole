@@ -3,6 +3,7 @@
 #include "ui/RendererSync.h"
 
 #include "core/Units.h"
+#include "core/sheet/Unfold.h"     // sheet::SquareTo (bend lines)
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
 #include "ui/CamTool.h"            // RunCamVerification (job undo)
@@ -360,9 +361,7 @@ AssembleSheetView(AppState& state, const DrawingView& view,
     for (const BendRegion& bend : *sb.bends) {
       if (!bend.flat)
         continue;
-      const glm::dvec3 normal = glm::normalize(
-          glm::dvec3(xf * bend.parentPlace * glm::dvec4(bend.upDir, 0.0)));
-      if (std::abs(glm::dot(normal, d)) < 1.0 - 1e-6)
+      if (!sheet::SquareTo(bend, d, xf))
         continue;
       drawing::SheetCurve sc;
       sc.kind = drawing::CurveKind::Bend;
@@ -544,8 +543,7 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
     if (doc) {
       glm::dvec3 viewDir, up;
       OrientationAxes(view->orientation, viewDir, up);
-      table.text =
-          drawing::BendTableText(*doc, note.text, doc->Units(), viewDir);
+      table.text = drawing::BendTableText(*doc, note.text, viewDir);
     }
     if (!doc || table.text.empty()) {
       drawing::ResolvedNote rn;
@@ -661,18 +659,37 @@ const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
     return fail("the source part has no configuration " +
                 std::to_string(view.configuration) +
                 " any more; pick another for this view");
-  AppState::ConfiguredSource& cached =
-      state.configuredSources[{view.sourceDocId, view.configuration}];
-  if (!cached.doc || cached.sourceInstance != live->InstanceId() ||
-      cached.sourceVersion != live->Version()) {
+  const std::pair<uint64_t, uint64_t> key{view.sourceDocId, view.configuration};
+  const auto hit = state.configuredSources.find(key);
+  const bool fresh =
+      hit != state.configuredSources.end() && hit->second.doc &&
+      hit->second.sourceInstance == live->InstanceId() &&
+      hit->second.sourceVersion == live->Version() &&
+      hit->second.configurationsRevision == live->ConfigurationsRevision();
+  if (!fresh) {
     auto copy = std::make_unique<Document>(*live);
-    if (!copy->SetActiveConfiguration(view.configuration))
-      return fail("could not evaluate configuration '" + cfg->name + "'");
+    copy->SetActiveConfiguration(view.configuration);
+    // What the copy's own regeneration said. Nobody can LOOK at this
+    // document — the model tab is on another configuration — so a feature
+    // that failed here would otherwise show up only as the folded part
+    // drawn in the blank's place, with nothing anywhere saying why.
+    for (size_t i = 0; i < copy->GetFeatures().size(); ++i) {
+      const Feature& f = *copy->GetFeatures()[i];
+      if (copy->EffectiveSuppressed(i) || f.GetError().empty())
+        continue;
+      return fail("in configuration '" + cfg->name + "', " + f.GetName() +
+                  " failed: " + f.GetError());
+    }
+    // Inserted only once it is a document worth keeping: a refusal above
+    // must not leave an empty entry behind.
+    AppState::ConfiguredSource& cached = state.configuredSources[key];
     cached.doc = std::move(copy);
     cached.sourceInstance = live->InstanceId();
     cached.sourceVersion = live->Version();
+    cached.configurationsRevision = live->ConfigurationsRevision();
+    return cached.doc.get();
   }
-  return cached.doc.get();
+  return hit->second.doc.get();
 }
 
 namespace {

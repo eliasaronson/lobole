@@ -1367,6 +1367,9 @@ struct AppState {
   struct ConfiguredSource {
     uint64_t sourceInstance = 0; // Document::InstanceId(): a version alone
     uint64_t sourceVersion = 0;  // is not an identity across projects
+    // ...and a version alone is not freshness either: editing a
+    // configuration the part does not have active moves no version.
+    uint64_t configurationsRevision = 0;
     std::unique_ptr<Document> doc;
   };
   std::map<std::pair<uint64_t, uint64_t>, ConfiguredSource> configuredSources;

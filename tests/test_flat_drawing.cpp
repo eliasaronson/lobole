@@ -65,8 +65,9 @@ std::string EdgeAlongX(const Body& body, double y, double z) {
 
 // A 100 x 60 aluminium blank with one 20 mm flange, and a Flat
 // configuration that turns its (suppressed) flat pattern on. Returns the
-// Flat configuration's id; the document stays in its base configuration.
-uint64_t FlangedPart(Document& doc) {
+// Flat configuration's id (and its flat pattern feature's, through
+// `flatFeatureOut`); the document stays in its base configuration.
+uint64_t FlangedPart(Document& doc, uint64_t* flatFeatureOut = nullptr) {
   sheet::SheetMetalRules rules;
   rules.material = "aluminum";
   rules.gauge = "1.5mm";
@@ -95,6 +96,8 @@ uint64_t FlangedPart(Document& doc) {
   doc.Regenerate();
   Configuration& flat = doc.AddConfiguration("Flat");
   flat.unsuppressedFeatures = {flatId};
+  if (flatFeatureOut)
+    *flatFeatureOut = flatId;
   return flat.id;
 }
 
@@ -117,7 +120,8 @@ size_t BendLines(const drawing::SheetView& sv) {
 TEST_CASE("a drawing view draws the configuration it names",
           "[sheetmetal][drawing]") {
   ui::AppState state = MakeState();
-  const uint64_t flatCfg = FlangedPart(*state.document);
+  uint64_t flatFeature = 0;
+  const uint64_t flatCfg = FlangedPart(*state.document, &flatFeature);
   REQUIRE(state.document->GetFeature(2)->GetError().empty());
   const uint64_t part = state.parts[state.activePart].id;
   const uint64_t liveVersion = state.document->Version();
@@ -199,6 +203,20 @@ TEST_CASE("a drawing view draws the configuration it names",
   ui::UpdateDrawingRenders(state);
   const drawing::SheetView& after = state.drawingRenders.at(blankId);
   CHECK_THAT(after.bboxMax.y - after.bboxMin.y, WithinAbs(before + 10.0, 1e-6));
+
+  // An edit to the CONFIGURATION reaches it too. Editing one the document
+  // does not have active changes no geometry, so it bumps no version — the
+  // sheet still has to notice, or it keeps drawing the variant as it was and
+  // reports itself up to date while doing it.
+  Configuration edited = *doc->FindConfiguration(flatCfg);
+  edited.unsuppressedFeatures.clear(); // no longer unfolds anything
+  REQUIRE(doc->ReplaceConfiguration(edited));
+  ui::UpdateDrawingRenders(state);
+  CHECK(BendLines(state.drawingRenders.at(blankId)) == 0);
+  edited.unsuppressedFeatures = {flatFeature};
+  REQUIRE(doc->ReplaceConfiguration(edited));
+  ui::UpdateDrawingRenders(state);
+  CHECK(BendLines(state.drawingRenders.at(blankId)) == 1);
 
   // A configuration the part no longer has is an error on the view, not the
   // active configuration drawn in its place.
@@ -316,7 +334,7 @@ TEST_CASE("a bend table lists the bends of its view's part",
   box->AddFeature(
       std::make_unique<BoxFeature>("Box", glm::vec3(0), 10, 10, 10));
   const Document boxDoc(*box);
-  CHECK(drawing::BendTableText(boxDoc, "", {}, {0, 0, -1}).empty());
+  CHECK(drawing::BendTableText(boxDoc, "", {0, 0, -1}).empty());
   DrawingNote free;
   free.table = NoteTable::Bends;
   rn = ui::ResolveDrawingNote(state, free);

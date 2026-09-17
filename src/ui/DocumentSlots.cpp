@@ -112,6 +112,10 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // parts.clear() sites, where a fifth would eventually be missed.
   ReleasePartRenderCache(state);
   state.drawingProjectionCache.Clear();
+  // Whole Documents, one per configuration a drawing view named. The
+  // instance-id guard keeps them from ever being READ as the new project's,
+  // but nothing would otherwise free them for the rest of the session.
+  state.configuredSources.clear();
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
   // The active tab may have been an assembly or drawing: this replacement

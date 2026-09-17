@@ -400,6 +400,14 @@ public:
   // Regenerates when it is the active one. Backs the modify Command.
   bool ReplaceConfiguration(Configuration cfg);
 
+  // Bumped whenever the CONFIGURATION LIST changes — added, removed, edited.
+  // Editing a configuration the document does not have active changes no
+  // geometry, so Version() does not move; anything that evaluates this
+  // document in another configuration (a drawing view naming one) would go on
+  // showing the variant as it was. Session-local like Version(), and not
+  // copied: a copy starts its own count.
+  uint64_t ConfigurationsRevision() const { return m_configurationsRevision; }
+
   // Which configuration regeneration applies (0 = base). Persisted like the
   // rollback bar. SetActiveConfiguration regenerates; returns false for an
   // unknown non-zero id.
@@ -602,6 +610,7 @@ private:
   const SymbolTable* m_projectSymbols = nullptr;
   const std::vector<Parameter>* m_projectParameters = nullptr;
   uint64_t m_version = 0;
+  uint64_t m_configurationsRevision = 0;
   // Handed out once per instance by NextInstanceId(); see InstanceId().
   const uint64_t m_instanceId = NextInstanceId();
   uint64_t m_nextId = 1;
