@@ -202,6 +202,15 @@ ImVec2 FractionToPos(const json& params, const char* xKey = "x",
                 pos.y + params.value(yKey, yDef) * size.y);
 }
 
+// Everything from here to BuildSheetFooter speaks the test engine's types
+// (ImGuiTestRef, ImGuiTestItemInfo, ImGuiTestContext) or reaches into
+// imgui_internal.h, which only the engine's headers pull in — so none of it
+// compiles in the -DENABLE_TEST_ENGINE=OFF build, and all of it is used only
+// from QueueUiAction's engine branch below. It was outside the guard, which
+// broke that build; the job that compiles it never got that far, because the
+// step before it was failing.
+#ifdef HAVE_TEST_ENGINE
+
 // A widget addressed either by test-engine path ({ref}) or by the numeric id
 // {id} that `ui_items` reports. Ids are the only handle on widgets whose
 // label is hidden ("##Type" — every LabeledCombo), which no path can reach.
@@ -335,6 +344,8 @@ std::string UiActionFailureReason(ImGuiTest* test) {
   }
   return out;
 }
+
+#endif // HAVE_TEST_ENGINE
 
 // V3 render_sheet footer: the kernel digest burned under the view grid, so
 // the eyeball pass and the numbers live in the same image. Reuses the
