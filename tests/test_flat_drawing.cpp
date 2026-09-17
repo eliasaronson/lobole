@@ -21,6 +21,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <numbers>
 
 using Catch::Matchers::WithinAbs;
 
@@ -96,6 +98,14 @@ uint64_t FlangedPart(Document& doc) {
   return flat.id;
 }
 
+// The bend allowance this part's one bend eats, from the same functions the
+// feature used — a literal here would agree with the code by luck.
+double Allowance() {
+  const double r = sheet::MinBendRadius("aluminum", kT);
+  return sheet::BendAllowance(std::numbers::pi / 2.0, r,
+                              sheet::KFactor("aluminum", r, kT), kT);
+}
+
 size_t BendLines(const drawing::SheetView& sv) {
   return std::count_if(sv.curves.begin(), sv.curves.end(), [](const auto& c) {
     return c.kind == drawing::CurveKind::Bend;
@@ -137,7 +147,10 @@ TEST_CASE("a drawing view draws the configuration it names",
   const double foldedY = fv.bboxMax.y - fv.bboxMin.y;
   const double blankY = bv.bboxMax.y - bv.bboxMin.y;
   CHECK(foldedY < kD + 2.0 * kT + 3.0);
-  CHECK(blankY > kD + kWall);
+  // The blank on the sheet is the panel, the bend allowance and the wall —
+  // the whole of the flat-pattern arithmetic, measured off the DRAWING at
+  // 1:1 rather than off the body.
+  CHECK_THAT(blankY, WithinAbs(kD + Allowance() + kWall, 1e-6));
   CHECK_THAT(bv.bboxMax.x - bv.bboxMin.x, WithinAbs(kW, 1e-6));
 
   // One crease on the blank, none on the folded part (its bend is a real
@@ -152,13 +165,17 @@ TEST_CASE("a drawing view draws the configuration it names",
   const glm::dvec2 a = crease->points[0], b = crease->points[1];
   CHECK_THAT(glm::length(b - a), WithinAbs(kW, 1e-6));
   CHECK_THAT(a.y, WithinAbs(b.y, 1e-9));
-  // Inside the blank, between the panel and the flange: the panel's 60 mm
-  // are on one side of it and the wall's 20 on the other.
+  // And it lands where the allowance says: the crease is the centreline of
+  // the flattened bend, so it sits half an allowance in from the panel and
+  // the wall plus half an allowance in from the blank's other end. A bend
+  // line drawn at the tangent instead would be half an allowance out, which
+  // is the error that bends a part to the wrong length.
   const double fromTop = bv.bboxMax.y - a.y;
   const double fromBottom = a.y - bv.bboxMin.y;
-  CHECK((std::min(fromTop, fromBottom) > kWall - 1e-6 &&
-         std::max(fromTop, fromBottom) > kD));
-  CHECK(std::min(fromTop, fromBottom) < kWall + kT * 4);
+  CHECK_THAT(std::min(fromTop, fromBottom),
+             WithinAbs(kWall + Allowance() / 2.0, 1e-6));
+  CHECK_THAT(std::max(fromTop, fromBottom),
+             WithinAbs(kD + Allowance() / 2.0, 1e-6));
 
   // The model tab never moved: still base configuration, still bent.
   CHECK(doc->ActiveConfiguration() == 0);
@@ -191,6 +208,59 @@ TEST_CASE("a drawing view draws the configuration it names",
         std::string::npos);
 }
 
+TEST_CASE("a dimension across the blank reads the developed length",
+          "[sheetmetal][drawing]") {
+  // The number a shop reads off the flat pattern. It goes the whole way
+  // through — bend record, unfold, projection, dimension — and it is the one
+  // that is expensive to get wrong: cut to the folded depth and every part
+  // in the batch is short by the bend allowance.
+  ui::AppState state = MakeState();
+  const uint64_t flatCfg = FlangedPart(*state.document);
+  const uint64_t part = state.parts[state.activePart].id;
+  ui::AddDrawing(state, "Sheet");
+  DrawingView blank;
+  blank.sourceDocId = part;
+  blank.orientation = ViewOrientation::Top;
+  blank.configuration = flatCfg;
+  blank.scale = 0.5; // not 1:1, so a sheet-mm answer cannot pass as model mm
+  blank.position = {150.0, 150.0};
+  const uint64_t viewId = state.drawing->AddView(blank);
+  ui::UpdateDrawingRenders(state);
+  const drawing::SheetView sv = state.drawingRenders.at(viewId);
+  REQUIRE(sv.hasGeometry);
+
+  // The blank's two ends: the outermost curves running across the view,
+  // which are the edges a draughtsman would pick.
+  const drawing::SheetCurve* low = nullptr;
+  const drawing::SheetCurve* high = nullptr;
+  for (const drawing::SheetCurve& c : sv.curves) {
+    if (c.kind == drawing::CurveKind::Bend || !c.visible || !c.edge.IsSet())
+      continue;
+    if (c.points.size() != 2 || std::abs(c.points[0].y - c.points[1].y) > 1e-9)
+      continue;
+    if (!low || c.points[0].y < low->points[0].y)
+      low = &c;
+    if (!high || c.points[0].y > high->points[0].y)
+      high = &c;
+  }
+  REQUIRE((low != nullptr && high != nullptr));
+
+  DrawingDim dim;
+  dim.kind = DrawingDimKind::DistanceY;
+  dim.viewId = viewId;
+  dim.refs.push_back(ProjRef{viewId, 0, low->edge, {}, 0});
+  dim.refs.push_back(ProjRef{viewId, 0, high->edge, {}, 0});
+  const drawing::ResolvedDim rd = ui::ResolveDrawingDim(state, dim);
+  INFO(rd.text);
+  REQUIRE(rd.resolved);
+  // Model millimetres: the panel, the bend allowance, and the wall.
+  CHECK_THAT(rd.value, WithinAbs(kD + Allowance() + kWall, 1e-6));
+  // The folded part measures the panel and a wall's thickness instead, so
+  // the two views do NOT read the same number — which is the whole point of
+  // putting the blank on the sheet.
+  CHECK(rd.value > kD + kWall);
+}
+
 TEST_CASE("a bend table lists the bends of its view's part",
           "[sheetmetal][drawing]") {
   ui::AppState state = MakeState();
@@ -212,9 +282,17 @@ TEST_CASE("a bend table lists the bends of its view's part",
   INFO(rn.error);
   REQUIRE(rn.resolved);
   CHECK(rn.text.rfind("BEND TABLE\nB1  UP 90", 0) == 0);
-  CHECK(rn.text.find("K 0.4") != std::string::npos);
-  // A flat crease says how much it eats.
-  CHECK(rn.text.find("BA ") != std::string::npos);
+  // The numbers are the PART's, not a rounding of something near them: the
+  // radius the flange used and the allowance the unfolder ate, formatted the
+  // way the rest of the sheet formats lengths.
+  const double radius = sheet::MinBendRadius("aluminum", kT);
+  CHECK(rn.text.find("R " + units::FormatLength(radius, {})) !=
+        std::string::npos);
+  CHECK(rn.text.find("BA " + units::FormatLength(Allowance(), {})) !=
+        std::string::npos);
+  char k[32];
+  std::snprintf(k, sizeof k, "K %.3f", sheet::KFactor("aluminum", radius, kT));
+  CHECK(rn.text.find(k) != std::string::npos);
   CHECK(rn.text.find("B2") == std::string::npos);
 
   // UP and DOWN are the READER's: the same crease seen from underneath
