@@ -50,7 +50,8 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "Write a sheet body's FLAT PATTERN to a DXF a shop can cut: R12 ASCII, "
      "millimetres ($INSUNITS 4), outline and holes on CUT, bend lines on "
      "BEND_UP / BEND_DOWN, dashed and red/blue the way nesting software "
-     "expects. Arcs stay arcs. The body must BE flat - activate the "
+     "expects — UP as seen from the side the first flange was picked on. "
+     "Arcs stay arcs. The body must BE flat - activate the "
      "configuration that unsuppresses its FlatPattern first - because a "
      "folded part's silhouette is a picture of a part that cuts to nothing.",
      "path, body, part", NotInBatch},

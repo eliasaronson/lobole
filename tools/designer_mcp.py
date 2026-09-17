@@ -1931,12 +1931,17 @@ def list_drawings() -> dict:
           "'right'|'top'|'bottom'|'iso' (default front). scale = drawing:model "
           "ratio, e.g. 0.5 for 1:2 (default 1.0). position = [x,y] sheet mm "
           "(default sheet centre). base_view = a view id to fold this one from "
-          "(D2b). The view is added but NOT projected — call update_drawing. "
+          "(D2b). configuration = the name of one of the part's "
+          "configurations to draw (default: whatever it has active) — 'Flat' "
+          "draws a sheet-metal part's blank with its bend lines. "
+          "The view is added but NOT projected — call update_drawing. "
           "Returns the new view id.")
 def add_drawing_view(source: str, orientation: str = "", scale: float = 1.0,
                      position: list | None = None, name: str = "",
-                     base_view: int = 0) -> dict:
+                     base_view: int = 0, configuration: str = "") -> dict:
     params = {"source": source, "scale": scale}
+    if configuration:
+        params["configuration"] = configuration
     if orientation:
         params["orientation"] = orientation
     if position is not None:

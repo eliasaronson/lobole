@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    114; // v114: `NormalCut` {sketch_id, body_id?, regions?}: a cut through
+    115; // v115: a drawing view's `configuration` (omitted = the part's
+         //      active one) and a drawing note's `table`: none | bends — a
+         //      flat pattern on a sheet (docs/sheetmetal/plan.md, S11).
+         // v114: `NormalCut` {sketch_id, body_id?, regions?}: a cut through
          //      a sheet square to the metal wherever the profile lands
          //      (docs/sheetmetal/plan.md, S10).
          // v113: `CornerRelief` {body_id, style?, size?} and an EdgeFlange's

@@ -220,6 +220,26 @@ bool ViewOrientationFromString(const std::string& s, ViewOrientation& out) {
   return true;
 }
 
+const char* NoteTableToString(NoteTable t) {
+  switch (t) {
+  case NoteTable::None:
+    return "none";
+  case NoteTable::Bends:
+    return "bends";
+  }
+  return "none";
+}
+
+bool NoteTableFromString(const std::string& s, NoteTable& out) {
+  if (s == "none")
+    out = NoteTable::None;
+  else if (s == "bends")
+    out = NoteTable::Bends;
+  else
+    return false;
+  return true;
+}
+
 const char* DrawingDimKindToString(DrawingDimKind k) {
   switch (k) {
   case DrawingDimKind::Distance:

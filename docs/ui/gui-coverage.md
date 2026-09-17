@@ -30,7 +30,7 @@ that a feature appeared.
 | Thread | `###tb_thread` | `thread/face_pick_fills_the_slot` |
 | Boolean | `###tb_boolean` | three tests |
 | Pattern / Mirror | `###tb_pattern`, `###tb_mirror` | `pattern/circular_preview_param_edits_survive`, `pattern/cut_row_is_the_pattern_source` (a hole patterns as a hole — the source is the CUT's tree row), defaults gate |
-| Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern` | `sheetmetal/edge_pick_bends_a_wall` (stock → blank → a real viewport edge click → a wall → flat again), and the defaults gate |
+| Sheet metal | `###tb_base_flange`, `###tb_edge_flange`, `###tb_flat_pattern`, `###tb_hem`, `###tb_jog`, `###tb_corner_relief`, `###tb_normal_cut`, `###tb_unfold`, `###tb_refold`; the Variables panel's Sheet metal section; the drawing panel's `###dwg_configuration` combo and `###dwg_bend_table_<view>` button | `sheetmetal/edge_pick_bends_a_wall` (stock → blank → a real viewport edge click → a wall → flat again), `sheetmetal/panel_declares_the_stock`, `sheetmetal/flat_view_on_a_sheet` (a view of the Flat configuration by clicking, its bend line, its bend table), and the defaults gate |
 | Datum plane / axis | `###tb_datum_plane`, `###tb_datum_axis` | `datum/plane_offset_then_sketch_on_its_row`, defaults gate |
 
 Plus the `defaults/*` gate (`docs/ui/u10-defaults-and-refusals.md`), which opens

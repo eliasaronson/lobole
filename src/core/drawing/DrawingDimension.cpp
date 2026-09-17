@@ -1,9 +1,12 @@
 #include "core/drawing/DrawingDimension.h"
 
+#include "core/Angles.h"
+#include "core/Document.h"
 #include "core/drawing/DrawingCallout.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
+#include "core/sheet/Unfold.h"
 
 #include <algorithm>
 #include <cmath>
@@ -421,6 +424,37 @@ glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
   default: // new kinds (callouts) fall back until they add an arm
     return kFallback;
   }
+}
+
+std::string BendTableText(const Document& doc, const std::string& caption,
+                          const units::System& units,
+                          const glm::dvec3& viewDir) {
+  const glm::dvec3 reader = -glm::normalize(viewDir);
+  std::string rows;
+  int n = 0;
+  for (const Body& body : doc.GetBodies()) {
+    if (body.reference)
+      continue;
+    for (const BendRegion& bend : body.bends) {
+      std::string row = "B" + std::to_string(++n) + "  ";
+      if (bend.flat) {
+        const glm::dvec3 up(bend.parentPlace * glm::dvec4(bend.upDir, 0.0));
+        if (std::abs(glm::dot(up, reader)) > 1.0 - 1e-6)
+          row += sheet::FoldsToward(bend, reader) ? "UP " : "DOWN ";
+      }
+      row += units::FormatAngle(angles::ToDegrees(bend.angle), units) + "  R " +
+             units::FormatLength(bend.radius, units);
+      char k[32];
+      std::snprintf(k, sizeof k, "  K %.3f", bend.kFactor);
+      row += k;
+      if (bend.allowance > 0.0)
+        row += "  BA " + units::FormatLength(bend.allowance, units);
+      rows += "\n" + row;
+    }
+  }
+  if (n == 0)
+    return {};
+  return (caption.empty() ? std::string("BEND TABLE") : caption) + rows;
 }
 
 ResolvedNote ResolveNote(const DrawingNote& note, const SheetView* view,

@@ -1706,6 +1706,8 @@ json DrawingViewToJson(const DrawingView& v) {
     j["base_view"] = v.baseViewId;
   if (!v.scaleExpr.empty())
     j["scale_expr"] = v.scaleExpr;
+  if (v.configuration != 0) // v115
+    j["configuration"] = v.configuration;
   return j;
 }
 
@@ -1728,6 +1730,7 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.showHidden = j.value("show_hidden", true);
   v.quality = j.value("quality", std::string("exact"));
   v.hidden = j.value("hidden", std::vector<uint64_t>{});
+  v.configuration = j.value("configuration", uint64_t{0});
   return v;
 }
 
@@ -1739,6 +1742,8 @@ json DrawingNoteToJson(const DrawingNote& n) {
     j["view"] = n.viewId;
   if (n.leader.edge.IsSet() || n.leader.silFace.IsSet())
     j["leader"] = ProjRefJson(n.leader);
+  if (n.table != NoteTable::None) // v115
+    j["table"] = NoteTableToString(n.table);
   return j;
 }
 
@@ -1751,6 +1756,10 @@ DrawingNote DrawingNoteFromJson(const json& j) {
   n.viewId = j.value("view", uint64_t{0});
   if (j.contains("leader"))
     n.leader = ProjRefFromJson(j.at("leader"));
+  const std::string table = j.value("table", std::string("none"));
+  if (!NoteTableFromString(table, n.table))
+    throw std::runtime_error("unknown note table '" + table +
+                             "' (expected one of: none, bends)");
   return n;
 }
 

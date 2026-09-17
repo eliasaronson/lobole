@@ -39,7 +39,11 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"list_drawings", "List drawing documents.", ""},
     {"set_drawing_view",
      "Edit a view {id, position?, scale?, name?, "
-     "show_hidden?, quality?, base_view?}; folded axes note. "
+     "show_hidden?, quality?, base_view?, configuration?}; folded axes note. "
+     "`configuration` (name or id of the SOURCE part's configurations; 0 = "
+     "whatever it has active) draws the part in that variant, so a sheet of "
+     "the Flat configuration shows the blank whatever the model tab is on; a "
+     "flat blank's bend lines draw as chain lines in a view square onto it. "
      "`quality` picks the projection: \"exact\" (the default — curve HLR, "
      "every curve traced to the 3D edge that made it, which is what a "
      "dimension attaches to) or \"fast\" (polygonal HLR over the shapes' "
@@ -58,7 +62,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
      "still draw exactly. ",
-     "base_view, hidden, id, name, position, quality, scale, show_hidden"},
+     "base_view, configuration, hidden, id, name, position, quality, scale, "
+     "show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
@@ -67,7 +72,12 @@ static constexpr MethodDoc DrawingMethods[] = {
      "drawing, update"},
     {"add_drawing_view",
      "Add an HLR view of a part/assembly {drawing, source, orientation, "
-     "scale, position}. Omit BOTH scale and position and it is placed the "
+     "scale, position, configuration?}. "
+     "`configuration` (name or id of the SOURCE part's configurations; 0 = "
+     "whatever it has active) draws the part in that variant, so a sheet of "
+     "the Flat configuration shows the blank whatever the model tab is on; a "
+     "flat blank's bend lines draw as chain lines in a view square onto it. "
+     "Omit BOTH scale and position and it is placed the "
      "way the Add view button places it: fitted to the sheet, clear of the "
      "views already there, and projected (needs_update false). "
      "`quality` picks the projection: \"exact\" (the default — curve HLR, "
@@ -88,8 +98,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "dominate a sheet: the single-cylinder engine is 47 s a view and 0.0 s "
      "with its two valve springs left off, while the other seventeen bodies "
      "still draw exactly. ",
-     "base_view, drawing, hidden, name, orientation, position, quality, "
-     "scale, source"},
+     "base_view, configuration, drawing, hidden, name, orientation, position, "
+     "quality, scale, source"},
     {"remove_drawing_view", "Remove a view by id.", "id"},
     {"list_drawing_views",
      "List views with placement and scale, each with what its projection "
@@ -129,10 +139,13 @@ static constexpr MethodDoc DrawingMethods[] = {
      "source-part variables with view) {text, position: [x,y] sheet mm, view?, "
      "ref?: "
      "{feature_id, element}} — ref draws a leader from that geometry (needs "
-     "view). The annotation class no dimension kind covers.",
-     "position, ref, text, view"},
+     "view). The annotation class no dimension kind covers. "
+     "`table: \"bends\"` makes it a bend table of `view`'s part instead: one "
+     "row per bend (direction, angle, radius, K, allowance), regenerated "
+     "from the part every time, with `text` as its optional caption.",
+     "position, ref, table, text, view"},
     {"remove_drawing_note", "Remove a note by id.", "id"},
-    {"list_drawing_notes", "List notes with leader state.", ""},
+    {"list_drawing_notes", "List notes with leader state and table kind.", ""},
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 
@@ -268,6 +281,33 @@ std::vector<uint64_t> ParseHidden(ui::AppState& state, const DrawingView& view,
     out.push_back(hits.front());
   }
   return out;
+}
+
+// A view's `configuration`: a configuration of the SOURCE part, by name or
+// id; 0 or null is the part's active one. Refused for an assembly source, and
+// for a name the part does not have — naming the ones it does, since a
+// misspelt "Flat" would otherwise draw the folded part and look right.
+uint64_t ParseViewConfiguration(ui::AppState& state, const DrawingView& view,
+                                const nlohmann::json& j) {
+  if (j.is_null() || (j.is_number_unsigned() && j.get<uint64_t>() == 0))
+    return 0;
+  if (!j.is_string() && !j.is_number_unsigned())
+    throw std::runtime_error(
+        "`configuration` is a configuration name or id of the source part");
+  const Document* doc = ui::DrawingSourceDocument(state, view.sourceDocId);
+  if (doc == nullptr)
+    throw std::runtime_error(
+        "`configuration` applies to a view of a part; this view's source is "
+        "an assembly");
+  std::vector<std::string> known;
+  for (const Configuration& c : doc->GetConfigurations()) {
+    known.push_back(c.name);
+    if ((j.is_string() && c.name == j.get<std::string>()) ||
+        (j.is_number_unsigned() && c.id == j.get<uint64_t>()))
+      return c.id;
+  }
+  throw std::runtime_error("no configuration " + j.dump() +
+                           " in this view's source part — " + KnownList(known));
 }
 
 std::string RequireQuality(const nlohmann::json& j) {
@@ -491,6 +531,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       v.quality = RequireQuality(p.at("quality"));
     if (p.contains("hidden"))
       v.hidden = ParseHidden(state, v, p.at("hidden"));
+    if (p.contains("configuration"))
+      v.configuration = ParseViewConfiguration(state, v, p.at("configuration"));
     if (p.contains("position")) {
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -565,7 +607,12 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
               "base_view cycle: that view already folds from this one");
       }
     }
+    const uint64_t configuration =
+        p.contains("configuration")
+            ? ParseViewConfiguration(state, *view, p.at("configuration"))
+            : view->configuration;
     ui::SnapshotDrawing(state);
+    view->configuration = configuration;
     if (p.contains("position")) {
       const json& pos = p.at("position");
       view->position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -671,9 +718,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       json vj = {{"id", view.id}, {"name", view.name}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
-        int vis = 0, hid = 0, outline = 0;
+        int vis = 0, hid = 0, outline = 0, bends = 0;
         for (const drawing::SheetCurve& c : it->second.curves) {
-          if (c.visible)
+          if (c.kind == drawing::CurveKind::Bend)
+            ++bends;
+          else if (c.visible)
             ++vis;
           else
             ++hid;
@@ -684,6 +733,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         vj["visible"] = vis;
         vj["hidden"] = hid;
         vj["silhouettes"] = outline;
+        vj["bend_lines"] = bends;
         vj["has_geometry"] = it->second.hasGeometry;
         if (!it->second.error.empty())
           vj["error"] = it->second.error;
@@ -706,10 +756,16 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                  {"position", {view.position.x, view.position.y}},
                  {"show_hidden", view.showHidden},
                  {"quality", view.quality},
-                 {"hidden", view.hidden}};
+                 {"hidden", view.hidden},
+                 {"configuration", view.configuration}};
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) {
         vj["curves"] = it->second.curves.size();
+        vj["bend_lines"] =
+            std::count_if(it->second.curves.begin(), it->second.curves.end(),
+                          [](const drawing::SheetCurve& c) {
+                            return c.kind == drawing::CurveKind::Bend;
+                          });
         vj["has_geometry"] = it->second.hasGeometry;
         vj["stale"] = ui::DrawingSourceVersion(state, view.sourceDocId) !=
                       it->second.solvedSourceVersion;
@@ -758,15 +814,28 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "add_drawing_note") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
-    const std::string text = p.at("text").get<std::string>();
-    if (text.empty())
+    NoteTable table = NoteTable::None;
+    if (p.contains("table")) {
+      const std::string name = p.at("table").get<std::string>();
+      if (!NoteTableFromString(name, table))
+        throw std::runtime_error("unknown note table '" + name +
+                                 "' (expected one of: none, bends)");
+    }
+    const std::string text = p.value("text", std::string{});
+    if (text.empty() && table == NoteTable::None)
       throw std::runtime_error("text must be non-empty");
+    if (table != NoteTable::None && !p.contains("view"))
+      throw std::runtime_error(
+          "a bend table needs `view` — its rows are that view's part's bends");
+    if (table != NoteTable::None && p.contains("ref"))
+      throw std::runtime_error("a table has no leader; drop `ref`");
     const json& pos = p.at("position");
     if (!pos.is_array() || pos.size() != 2 || !pos.at(0).is_number() ||
         !pos.at(1).is_number())
       throw std::runtime_error("position is [x, y] in sheet mm");
     DrawingNote n;
     n.text = text;
+    n.table = table;
     n.pos = {pos.at(0).get<double>(), pos.at(1).get<double>()};
     if (p.contains("view")) {
       n.viewId = p.at("view").get<uint64_t>();
@@ -811,6 +880,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                      {"error", rn.error},
                      {"pos", {n.pos.x, n.pos.y}},
                      {"view", n.viewId},
+                     {"table", NoteTableToString(n.table)},
                      {"leader_resolved", rn.hasLeader}});
     }
     return json{{"notes", arr}};

@@ -34,6 +34,20 @@ dimension list).
 - **Note** — a line of text placed on the sheet, optionally with a leader to
   a piece of projected geometry. The annotation class no dimension kind
   covers ("6× Ø4.4 on Ø175.8 PCD", "break all sharp edges").
+- **Configuration** — a view of a PART can name one of its configurations and
+  draws the part in that variant, whatever the model tab has active. That is
+  how a sheet shows a sheet-metal part's `Flat` blank beside its folded
+  views. Left unset, a view draws whatever the part has active.
+- **Bend line** — a flat sheet-metal blank's crease, drawn as a chain line
+  (long dash, dot) in a view that looks square onto the blank. It comes from
+  the bend the feature recorded, not from projected geometry, so it cannot be
+  dimensioned to yet.
+- **Bend table** — a note whose rows are its view's part's bends: angle,
+  inside radius, K, the allowance a flat crease eats, and UP or DOWN as seen
+  from that view (edge-on, a crease has neither). Regenerated from the part
+  at every resolve; its own text is only the caption. Rows are numbered in
+  the part's body order, and the bend lines are not labelled with those
+  numbers yet.
 - **Centre mark** — the little cross at the centre of every visible circle,
   drawn automatically (sized from the circle) in the GUI, the SVG and the PDF.
   Nothing to add and nothing to place.
@@ -56,8 +70,10 @@ dimension list).
    carry no suffix, as drafting practice wants, which is exactly why the UNITS
    row exists; angles keep their `°` (or three decimals and `rad` on a
    document that asked for radians).
-3. **Views** — choose a source (part or assembly) + orientation + scale, then
-   **Add view**. Set a view's `base_view` to fold it from another. Click
+3. **Views** — choose a source (part or assembly) + orientation + scale — and,
+   for a part with configurations, which **Configuration** to draw — then
+   **Add view**. A view of a part with bends gets a **Bend table** button in
+   the view list, which places the table beside that view. Set a view's `base_view` to fold it from another. Click
    **Update views** to (re)project; the button turns amber and shows a count
    when any view is stale.
 4. **Dimensions** — click a kind (Distance, Dist X/Y, Radius, Diameter, Angle),
@@ -67,7 +83,8 @@ dimension list).
 5. **File → Export…** writes the sheet as **SVG** or **PDF**.
 
 Notes are drawn on the sheet (and exported) but are **added over the RPC**
-today — `add_drawing_note` below; there is no button for them yet.
+today — `add_drawing_note` below; the bend table's button is the only note
+the GUI adds.
 
 ## Over RPC / MCP
 
@@ -75,12 +92,14 @@ The same workflow headless (snake_case RPCs; the MCP tools mirror them 1:1):
 
 ```
 create_drawing {name?, sheet?: {size, landscape, title_block:{...}}}
-add_drawing_view {source, orientation?, scale?, position?, base_view?}
+add_drawing_view {source, orientation?, scale?, position?, base_view?,
+                  configuration?}   # a part's configuration, by name or id
 update_drawing            # the explicit HLR re-projection; returns per-view counts
 list_drawing_geometry {view}   # discover a view's edges/circles + the ref to dimension
 add_drawing_dim {view, kind, refs:[{edge|sil_face:{feature_id, element},
                                      occurrence?, end?}], offset?}
-add_drawing_note {text, position:[x,y], view?, ref?:{feature_id, element}}
+add_drawing_note {text, position:[x,y], view?, ref?:{feature_id, element},
+                  table?: "bends"}  # a bend table of `view`'s part
 list_drawing_notes / remove_drawing_note {id}
 check_drawing            # views stale/dangling refs/labels that collide
 export_drawing {path}     # .svg or .pdf by extension

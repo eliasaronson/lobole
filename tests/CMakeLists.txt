@@ -61,6 +61,7 @@ add_executable(designer_tests
     test_hem_jog.cpp
     test_corners.cpp
     test_normal_cut.cpp
+    test_flat_drawing.cpp
     test_sheetmetal_check.cpp
     test_sweep.cpp
     test_curve3d.cpp

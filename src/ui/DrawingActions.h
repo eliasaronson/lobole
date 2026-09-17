@@ -71,6 +71,13 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
 // list_drawing_geometry name the feature a projected curve came from.
 Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId);
 
+// The part a VIEW draws: its source evaluated in the view's configuration
+// (the live document when that is 0 or already active, else a cached copy).
+// Null for assembly sources, a missing slot, or a configuration the part no
+// longer has — and then `error` (may be null) says which.
+const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
+                                    std::string* error = nullptr);
+
 // The units the active sheet is written in: its first view's SOURCE document,
 // not the reader's preference — a drawing of an inch part is an inch drawing
 // wherever it is opened. One accessor, because the title block on screen, the

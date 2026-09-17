@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <utility>
 
@@ -76,19 +77,29 @@ void StrokePolyline(ImDrawList* dl, AppState& state,
 
 // Hidden edges: dashed, in sheet-mm units so the dash pattern is stable under
 // zoom (the design's CPU-dashing, in sheet space).
+// `pattern` alternates dash and gap lengths, sheet mm; a bend line is a chain
+// (long dash, gap, dot, gap), the same pattern the exporters write.
 void StrokeDashed(ImDrawList* dl, AppState& state,
-                  const std::vector<glm::dvec2>& pts, ImU32 col, float px) {
-  const double dash = 1.6, gap = 1.2; // sheet mm
+                  const std::vector<glm::dvec2>& pts, ImU32 col, float px,
+                  std::initializer_list<double> pattern = {1.6, 1.2}) {
   for (size_t i = 1; i < pts.size(); ++i) {
     const glm::dvec2 a = pts[i - 1], b = pts[i];
     const double len = glm::length(b - a);
     if (len < 1e-9)
       continue;
     const glm::dvec2 dir = (b - a) / len;
-    for (double t = 0.0; t < len; t += dash + gap) {
-      const double t2 = std::min(t + dash, len);
-      dl->AddLine(SheetToScreen(state, a + dir * t),
-                  SheetToScreen(state, a + dir * t2), col, px);
+    double t = 0.0;
+    for (bool draw = true; t < len;) {
+      for (double step : pattern) {
+        const double t2 = std::min(t + step, len);
+        if (draw)
+          dl->AddLine(SheetToScreen(state, a + dir * t),
+                      SheetToScreen(state, a + dir * t2), col, px);
+        draw = !draw;
+        t = t2;
+        if (t >= len)
+          break;
+      }
     }
   }
 }
@@ -356,7 +367,9 @@ void DrawViews(ImDrawList* dl, AppState& state) {
     for (const drawing::SheetCurve& c : sv.curves) {
       if (c.points.size() < 2)
         continue;
-      if (c.visible)
+      if (c.kind == drawing::CurveKind::Bend)
+        StrokeDashed(dl, state, c.points, visible, 1.0f, {6.0, 1.2, 0.6, 1.2});
+      else if (c.visible)
         StrokePolyline(dl, state, c.points, visible, 1.6f);
       else
         StrokeDashed(dl, state, c.points, hidden, 1.0f);
@@ -593,6 +606,7 @@ void DrawViewsSection(AppState& state) {
   // Add a view: pick a source part, orientation, scale.
   static int srcIdx = 0, orientIdx = 0;
   static float addScale = 1.0f;
+  static uint64_t addConfig = 0; // 0 = the part's active configuration
   std::vector<const PartSlot*> partSlots;
   for (const PartSlot& s : state.parts)
     if (s.kind == DocKind::Part || s.kind == DocKind::Assembly)
@@ -609,6 +623,31 @@ void DrawViewsSection(AppState& state) {
           srcIdx = i;
       ImGui::EndCombo();
     }
+    // A part with configurations can be drawn in any of them — the Flat
+    // blank of a sheet-metal part beside its folded views.
+    const Document* srcDoc =
+        DrawingSourceDocument(state, partSlots[srcIdx]->id);
+    if (srcDoc && srcDoc->FindConfiguration(addConfig) == nullptr)
+      addConfig = 0;
+    if (srcDoc && !srcDoc->GetConfigurations().empty()) {
+      const Configuration* chosen = srcDoc->FindConfiguration(addConfig);
+      LeftLabel("Configuration");
+      if (ImGui::BeginCombo("###dwg_configuration",
+                            chosen ? chosen->name.c_str() : "Active")) {
+        if (ImGui::Selectable("Active", addConfig == 0))
+          addConfig = 0;
+        // Named by id as well: two configurations may share a name, and a
+        // string id is one a GUI test can address.
+        for (const Configuration& c : srcDoc->GetConfigurations()) {
+          const std::string label = c.name + "##cfg" + std::to_string(c.id);
+          if (ImGui::Selectable(label.c_str(), c.id == addConfig))
+            addConfig = c.id;
+        }
+        ImGui::EndCombo();
+      }
+    } else {
+      addConfig = 0;
+    }
     LeftLabel("Orientation");
     ImGui::Combo("###dwg_orientation", &orientIdx, kOrientLabels,
                  IM_ARRAYSIZE(kOrientLabels));
@@ -619,6 +658,10 @@ void DrawViewsSection(AppState& state) {
       v.name = std::string(kOrientLabels[orientIdx]);
       v.sourceDocId = partSlots[srcIdx]->id;
       v.orientation = static_cast<ViewOrientation>(orientIdx);
+      v.configuration = srcDoc ? addConfig : 0;
+      if (const Configuration* c =
+              srcDoc ? srcDoc->FindConfiguration(addConfig) : nullptr)
+        v.name += " (" + c->name + ")";
       // A scale typed here is respected; 0 asks for the fitted standard one.
       v.scale = addScale > 0 ? addScale : 0.0;
       AddDrawingViewPlaced(state, v);
@@ -642,6 +685,34 @@ void DrawViewsSection(AppState& state) {
         ViewOrientationToString(view.orientation),
         it != state.drawingRenders.end() ? it->second.curves.size() : size_t{0},
         status);
+    // A bend table for a view of a part that has bends, placed beside the
+    // view's top-right corner.
+    const Document* viewDoc = DrawingViewDocument(state, view);
+    bool hasBends = false;
+    if (viewDoc)
+      for (const Body& b : viewDoc->GetBodies())
+        hasBends = hasBends || (!b.reference && !b.bends.empty());
+    if (hasBends && it != state.drawingRenders.end() &&
+        it->second.hasGeometry) {
+      ImGui::SameLine();
+      const std::string label =
+          "Bend table###dwg_bend_table_" + std::to_string(view.id);
+      if (ImGui::SmallButton(label.c_str())) {
+        DrawingNote n;
+        n.table = NoteTable::Bends;
+        n.viewId = view.id;
+        // Sized by its own text: left edge a line's height clear of the
+        // view, top level with the view's top.
+        const drawing::ResolvedNote rn = ResolveDrawingNote(state, n);
+        glm::dvec2 mn, mx;
+        drawing::LabelBox(n.pos, rn.text, mn, mx);
+        n.pos += glm::dvec2(it->second.bboxMax.x + drawing::kLabelLineMM,
+                            it->second.bboxMax.y) -
+                 glm::dvec2(mn.x, mx.y);
+        SnapshotDrawing(state);
+        state.drawing->AddNote(std::move(n));
+      }
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("x")) {
       SnapshotDrawing(state);

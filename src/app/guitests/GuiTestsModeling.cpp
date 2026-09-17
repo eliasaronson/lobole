@@ -4,7 +4,9 @@
 #include "core/Measure.h"
 #include "core/SheetMetal.h"
 #include "core/features/EdgeFlangeFeature.h"
+#include "core/features/FlatPatternFeature.h"
 #include "ui/DocumentSlots.h"
+#include "ui/DrawingActions.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
@@ -1783,6 +1785,84 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
     ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
     ctx->Yield(2);
+  };
+
+  // A flat pattern on a drawing, by clicking (S11): the Add-view form's
+  // configuration combo draws the Flat blank beside the folded part — with
+  // its crease as a bend line — and the view's Bend table button lists it.
+  t = IM_REGISTER_TEST(engine, "sheetmetal", "flat_view_on_a_sheet");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+    SetupFor(ctx, Needs::SheetFlanged);
+    Document* part = Doc();
+    const uint64_t base = part->GetBodies()[0].createdBy;
+    // The Flat configuration, as the Sheet Metal panel's "Show the blank"
+    // makes it: a suppressed flat pattern that the configuration turns on.
+    part->AddFeature(
+        std::make_unique<FlatPatternFeature>("Flat pattern", base));
+    const uint64_t flatFeature =
+        part->GetFeature(part->FeatureCount() - 1)->GetId();
+    part->GetFeature(part->FeatureCount() - 1)->SetSuppressed(true);
+    part->Regenerate();
+    Configuration& cfg = part->AddConfiguration("Flat");
+    cfg.unsuppressedFeatures = {flatFeature};
+    const uint64_t cfgId = cfg.id;
+    // The orientation that looks square onto the blank.
+    const glm::dvec3 normal(ui::DefaultPlane(1).GetNormal());
+    const char* orient = nullptr;
+    const char* names[] = {"front", "back", "left", "right", "top", "bottom"};
+    for (int i = 0; i < 6 && !orient; ++i) {
+      glm::dvec3 dir, up;
+      OrientationAxes(static_cast<ViewOrientation>(i), dir, up);
+      if (std::abs(glm::dot(glm::normalize(dir), normal)) > 1.0 - 1e-9)
+        orient = names[i];
+    }
+    IM_CHECK_SILENT(orient != nullptr);
+
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Drawing##adddwg");
+    ctx->Yield(3);
+    IM_CHECK_SILENT(s_App->drawing != nullptr);
+    ctx->SetRef("//###Model");
+    ctx->ItemInputValue("###dwg_scale", 0.0f);
+    ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
+    ctx->ComboClick(
+        ("###dwg_configuration/Flat##cfg" + std::to_string(cfgId)).c_str());
+    ctx->Yield();
+    ctx->ItemClick("###dwg_add_view");
+    ctx->Yield(3);
+
+    const auto& views = s_App->drawing->GetViews();
+    IM_CHECK_EQ_NO_RET(views.size(), (size_t)1);
+    if (views.size() != 1)
+      return;
+    const uint64_t viewId = views[0].id;
+    IM_CHECK_EQ(views[0].configuration, cfgId);
+    const auto it = s_App->drawingRenders.find(viewId);
+    IM_CHECK_SILENT(it != s_App->drawingRenders.end());
+    size_t bends = 0;
+    for (const drawing::SheetCurve& c : it->second.curves)
+      bends += c.kind == drawing::CurveKind::Bend ? 1 : 0;
+    IM_CHECK_EQ(bends, (size_t)1);
+    // The part's own tab never left its authored configuration.
+    IM_CHECK_EQ(part->ActiveConfiguration(), (uint64_t)0);
+
+    ctx->ItemClick(("**/###dwg_bend_table_" + std::to_string(viewId)).c_str());
+    ctx->Yield(2);
+    const auto& notes = s_App->drawing->GetNotes();
+    IM_CHECK_EQ_NO_RET(notes.size(), (size_t)1);
+    if (notes.size() != 1)
+      return;
+    IM_CHECK(notes[0].table == NoteTable::Bends);
+    const drawing::ResolvedNote rn = ui::ResolveDrawingNote(*s_App, notes[0]);
+    IM_CHECK(rn.resolved);
+    IM_CHECK(rn.text.rfind("BEND TABLE\nB1  ", 0) == 0);
+    // Placed clear of the view it tabulates.
+    glm::dvec2 mn, mx;
+    drawing::LabelBox(rn.pos, rn.text, mn, mx);
+    IM_CHECK(mn.x > it->second.bboxMax.x);
   };
 
   // Feature tree affordances: context-menu rename (inline edit) and the

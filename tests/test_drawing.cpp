@@ -1074,6 +1074,46 @@ TEST_CASE("Drawing golden loads and round-trips (v89 view quality)",
   fs::remove(tmp);
 }
 
+TEST_CASE("Drawing golden loads and round-trips (v115 flat pattern sheet)",
+          "[drawing][serialization][golden]") {
+  // v115 added a view's `configuration` and a note's `table`. The golden has
+  // a view of the part as it is (no key: whatever it has active) beside a
+  // view of its Flat configuration, a bend table on that view, and a plain
+  // note that says nothing about tables.
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "drawing" / "v115-flat-pattern-sheet.json";
+  REQUIRE(fs::exists(golden));
+  auto dwg = testio::LoadDrawing(golden.string());
+  REQUIRE(dwg != nullptr);
+  REQUIRE(dwg->ViewCount() == 2);
+  CHECK(dwg->GetViews()[0].configuration == 0);
+  CHECK(dwg->GetViews()[1].configuration == 12);
+  REQUIRE(dwg->NoteCount() == 2);
+  CHECK(dwg->GetNotes()[0].table == NoteTable::Bends);
+  CHECK(dwg->GetNotes()[0].viewId == 2);
+  CHECK(dwg->GetNotes()[1].table == NoteTable::None);
+
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v115_rt.json";
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  CHECK(reloaded->GetViews()[1].configuration == 12);
+  CHECK(reloaded->GetNotes()[0].table == NoteTable::Bends);
+  fs::remove(tmp);
+
+  // A table kind this build does not know is refused, not read as a note.
+  std::ifstream in(golden);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  std::string text = ss.str();
+  const std::string from = "\"table\": \"bends\"";
+  text.replace(text.find(from), from.size(), "\"table\": \"holes\"");
+  const fs::path bad = fs::temp_directory_path() / "dwg_v115_bad.json";
+  std::ofstream(bad) << text;
+  CHECK(testio::LoadDrawing(bad.string()) == nullptr);
+  fs::remove(bad);
+}
+
 TEST_CASE("Drawing golden loads and round-trips (v90 hidden occurrences)",
           "[drawing][serialization][golden]") {
   // v90 added a view's `hidden`. The golden carries a view that drops two

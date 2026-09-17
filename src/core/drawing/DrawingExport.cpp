@@ -137,9 +137,12 @@ bool SaveSVG(const DrawingDocument& doc,
             out << ' ';
           out << Num(c.points[i].x) << ',' << Num(fy(c.points[i].y));
         }
+        const bool bend = c.kind == drawing::CurveKind::Bend;
         out << "\" fill=\"none\" stroke=\"#141418\" stroke-width=\""
-            << (c.visible ? "0.35" : "0.25") << '"';
-        if (!c.visible)
+            << (c.visible && !bend ? "0.35" : "0.25") << '"';
+        if (bend) // a chain line: long dash, gap, dot, gap
+          out << " stroke-dasharray=\"6 1.2 0.6 1.2\"";
+        else if (!c.visible)
           out << " stroke-dasharray=\"1.6 1.2\"";
         out << "/>\n";
       }
@@ -315,11 +318,15 @@ bool SavePDF(const DrawingDocument& doc,
        << ' ' << P(H - 2 * m) << " re S\n";
 
     const auto poly = [&](const std::vector<glm::dvec2>& pts, double w,
-                          bool dash) {
+                          bool dash, bool chain = false) {
       if (pts.size() < 2)
         return;
       cs << P(w) << " w ";
-      if (dash)
+      dash = dash || chain;
+      if (chain)
+        cs << "[" << P(6.0) << ' ' << P(1.2) << ' ' << P(0.6) << ' ' << P(1.2)
+           << "] 0 d ";
+      else if (dash)
         cs << "[" << P(1.6) << ' ' << P(1.2) << "] 0 d ";
       cs << P(pts[0].x) << ' ' << P(pts[0].y) << " m ";
       for (size_t i = 1; i < pts.size(); ++i)
@@ -366,7 +373,10 @@ bool SavePDF(const DrawingDocument& doc,
 
     for (const drawing::SheetView& v : views) {
       for (const drawing::SheetCurve& c : v.curves)
-        poly(c.points, c.visible ? 0.35 : 0.25, !c.visible);
+        if (c.kind == drawing::CurveKind::Bend)
+          poly(c.points, 0.25, false, true);
+        else
+          poly(c.points, c.visible ? 0.35 : 0.25, !c.visible);
       for (const drawing::SheetCurve& c : v.curves) {
         if (!c.visible || c.conicRadius <= 0.0)
           continue; // centre marks: the machinist aims at the centre

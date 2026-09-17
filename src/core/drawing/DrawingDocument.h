@@ -106,6 +106,12 @@ struct DrawingView {
   //
   // Only meaningful for an assembly source; a part has no occurrences.
   std::vector<uint64_t> hidden;
+  // Which configuration of a PART source this view draws; 0 = whatever the
+  // part has active. A sheet names its configuration so a flat-pattern view
+  // shows the blank whichever variant the model tab is on — the drawing of
+  // the blank and the drawing of the folded part are two views of one part
+  // (docs/sheetmetal/plan.md, S11).
+  uint64_t configuration = 0;
 };
 
 // A driven dimension: measured from projected geometry, read-only, re-measured
@@ -122,12 +128,18 @@ struct DrawingDim {
 // — the class of annotation no dimension kind covers. Optional leader: when
 // `leader` is set, a line runs from the resolved geometry (a picked edge or
 // circle in `viewId`, resolved like a dim ref) to the text.
+// What a note's text is generated from, if anything. A table note carries
+// only a caption in `text`; its rows come from the source of `viewId` each
+// time it is resolved, so it cannot go stale against the part.
+enum class NoteTable { None, Bends };
+
 struct DrawingNote {
   uint64_t id = 0;
   std::string text;
   glm::dvec2 pos{0.0}; // text anchor, sheet mm
   uint64_t viewId = 0; // 0 = free note; else the leader's view
   ProjRef leader;      // unset = no leader line
+  NoteTable table = NoteTable::None;
 };
 
 // The document. Views and dims share one never-reused id counter (the
@@ -217,6 +229,8 @@ const char* SheetSizeToString(SheetSize size);
 const char* ViewOrientationToString(ViewOrientation o);
 [[nodiscard]] bool ViewOrientationFromString(const std::string& s,
                                              ViewOrientation& out);
+const char* NoteTableToString(NoteTable t);
+[[nodiscard]] bool NoteTableFromString(const std::string& s, NoteTable& out);
 const char* DrawingDimKindToString(DrawingDimKind k);
 [[nodiscard]] bool DrawingDimKindFromString(const std::string& s,
                                             DrawingDimKind& out);

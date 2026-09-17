@@ -152,10 +152,12 @@ the folded part on screen rather than the blank.
 / `check_fasteners`: hole-to-bend distance, flange below minimum height,
 bend longer than the brake, missing relief, non-uniform thickness — each naming
 the element and the required-versus-actual number. A `Violation` list over RPC,
-the same list in the panel. Then `export_dxf` over `ProjectedCurve`, which
-already carries conic centre, radius and closed-ness: LWPOLYLINE / ARC / CIRCLE
+the same list in the panel. Then `export_dxf` (`src/core/io/ExportDxf.cpp`),
+which writes the flat body's largest planar face — its outer wire and every
+hole — as R12 LINE / ARC / CIRCLE, arcs kept as arcs, plus each flat crease,
 on layers `CUT`, `BEND_UP`, `BEND_DOWN` with a dashed linetype on the bend
-layers, `$INSUNITS = 4`. This is the first file this project produces that a
+layers, `$INSUNITS = 4`. UP is as seen from the side the first flange was
+picked on. This is the first file this project produces that a
 shop can cut.
 
 ## Tier 2 — the rest of a working sheet-metal tool
@@ -238,11 +240,24 @@ from its sketch's direction, lands on two separate parts of the sheet (the
 tip of a wall standing in front of the bend) is refused rather than strung
 across the part. Format bump.
 
-**S11 — Flat pattern on a drawing.** `DrawingView` gains a `configuration`
-selector (`src/core/drawing/DrawingDocument.h:81-109`), which is what lets a
-sheet name the `Flat` configuration and is worth having for every other
-configured part. A `Bend` curve kind so bend lines project dashed, and a bend
-table annotation on the sheet. Format bump.
+**S11 — Flat pattern on a drawing.** `DrawingView::configuration` names a
+configuration of a part source (`src/core/drawing/DrawingDocument.h`); the
+view draws a copy of the part evaluated in it, cached in
+`AppState::configuredSources` by (document, configuration) and rebuilt when
+the part's version moves, so the model tab's active configuration never
+changes (`ui::DrawingViewDocument`). That is what lets a sheet name the `Flat`
+configuration, and it serves every other configured part as well. A
+`CurveKind::Bend` sheet curve is synthesised for each flat crease from its
+recorded `flatA`/`flatB` through `drawing::ProjectPoint` — only in a view
+square onto the blank — and drawn as a chain line in the GUI, SVG and PDF. A
+bend table is a note with `table: bends`: its rows come from
+`drawing::BendTableText` at every resolve, so the whole note path (placement,
+validation, export, list/remove) serves it unchanged. UP and DOWN are
+answered by `sheet::FoldsToward(bend, side)` for the side asked about: the
+view's reader for the table, and for the DXF the side the first flange was
+picked on. RPCs: `configuration` on `add_drawing_view` / `set_drawing_view`
+/ `list_drawing_views` (with `bend_lines`), `table` on `add_drawing_note`.
+Format v115.
 
 ## What it touches
 

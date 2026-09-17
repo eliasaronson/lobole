@@ -820,4 +820,14 @@ ProjectView(const std::vector<InputBody>&, const glm::dvec3&, const glm::dvec3&,
 
 #endif // HAVE_OPENCASCADE
 
+glm::dvec2 ProjectPoint(const glm::dvec3& p, const glm::dvec3& viewDir,
+                        const glm::dvec3& up) {
+  // ProjectViewImpl's viewing system: Z toward the viewer, X = d x up, and
+  // Y = Z x X, which is `up` with its component along the view removed.
+  const glm::dvec3 d = glm::normalize(viewDir);
+  const glm::dvec3 x = glm::normalize(glm::cross(d, up));
+  const glm::dvec3 y = glm::cross(-d, x);
+  return {glm::dot(p, x), glm::dot(p, y)};
+}
+
 } // namespace drawing

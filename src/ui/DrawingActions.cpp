@@ -115,6 +115,7 @@ struct SourceBody {
   uint64_t featureId = 0; // the body's createdBy (owner of its element names)
   uint64_t refId = 0;     // semantic source id -> SheetCurve.sourceId
   const ElementMap* map = nullptr;
+  const std::vector<BendRegion>* bends = nullptr; // flat creases to draw
 };
 
 // Appends one part document's bodies at the given world placement.
@@ -138,6 +139,7 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
     sb.input.groupId =
         sb.refId; // what a cost is charged to, and `hidden` names
     sb.map = &body.elementMap;
+    sb.bends = &body.bends;
     out.push_back(std::move(sb));
   }
 }
@@ -153,14 +155,22 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
     if (state.parts[i].id != view.sourceDocId)
       continue;
     if (state.parts[i].kind == DocKind::Part) {
-      const Document* doc = SlotDoc(state, i);
-      if (!doc) {
+      if (!SlotDoc(state, i)) {
         *error = "source document is empty";
         return false;
       }
-      *sourceVersion = doc->Version();
+      // The configured copy lives in AppState's cache, so the element maps
+      // and bends `out` points into outlive the projection.
+      const Document* doc = DrawingViewDocument(state, view, error);
+      if (!doc)
+        return false;
+      *sourceVersion = SlotDoc(state, i)->Version();
       AppendBodies(*doc, glm::dmat4(1.0), 0, out);
       return true;
+    }
+    if (view.configuration != 0) {
+      *error = "a configuration can only be chosen for a view of a part";
+      return false;
     }
     if (state.parts[i].kind == DocKind::Assembly) {
       const AssemblyDocument* asmDoc = SlotAssembly(state, i);
@@ -335,6 +345,42 @@ AssembleSheetView(AppState& state, const DrawingView& view,
     }
     result.curves.push_back(std::move(sc));
   }
+
+  // Bend lines. A flat blank has no edge where a crease is, so nothing above
+  // drew one; they come from the bends the features recorded, and only in a
+  // view that looks square onto the blank — seen edge-on, a crease is a
+  // point or lies along the sheet's own outline.
+  glm::dvec3 viewDir, up;
+  OrientationAxes(view.orientation, viewDir, up);
+  const glm::dvec3 d = glm::normalize(viewDir);
+  for (const SourceBody& sb : bodies) {
+    if (!sb.bends)
+      continue;
+    const glm::dmat4& xf = sb.input.transform;
+    for (const BendRegion& bend : *sb.bends) {
+      if (!bend.flat)
+        continue;
+      const glm::dvec3 normal = glm::normalize(
+          glm::dvec3(xf * bend.parentPlace * glm::dvec4(bend.upDir, 0.0)));
+      if (std::abs(glm::dot(normal, d)) < 1.0 - 1e-6)
+        continue;
+      drawing::SheetCurve sc;
+      sc.kind = drawing::CurveKind::Bend;
+      sc.visible = true;
+      sc.curveType = 0; // a line
+      sc.sourceId = sb.refId;
+      for (const glm::dvec3& p : {bend.flatA, bend.flatB}) {
+        const glm::dvec3 w(xf * glm::dvec4(p, 1.0));
+        const glm::dvec2 sheet =
+            effectivePos + s * drawing::ProjectPoint(w, viewDir, up);
+        sc.points.push_back(sheet);
+        lo = glm::min(lo, sheet);
+        hi = glm::max(hi, sheet);
+      }
+      result.curves.push_back(std::move(sc));
+    }
+  }
+
   if (!result.curves.empty()) {
     result.hasGeometry = true;
     result.bboxMin = lo;
@@ -387,7 +433,7 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
   drawing::DimContext ctx;
   if (state.drawing) {
     if (const DrawingView* view = state.drawing->FindView(dim.viewId)) {
-      ctx.sourceDoc = DrawingSourceDocument(state, view->sourceDocId);
+      ctx.sourceDoc = DrawingViewDocument(state, *view);
       ctx.viewScale = view->scale;
       // A fastener callout names the part an OCCURRENCE places, which is a
       // different document from the assembly the view is of. Resolved through
@@ -459,7 +505,7 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
   SymbolTable symbols = state.projectSymbols;
   const DrawingView* view = state.drawing->FindView(note.viewId);
   if (view) {
-    if (const Document* doc = DrawingSourceDocument(state, view->sourceDocId)) {
+    if (const Document* doc = DrawingViewDocument(state, *view)) {
       for (const auto& [name, value] : doc->Symbols())
         symbols[name] = value;
       for (size_t i = 0; i < doc->GetFeatures().size(); ++i) {
@@ -486,8 +532,33 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
     }
   }
   const auto it = state.drawingRenders.find(note.viewId);
-  return drawing::ResolveNote(
-      note, it == state.drawingRenders.end() ? nullptr : &it->second, symbols);
+  const drawing::SheetView* sheetView =
+      it == state.drawingRenders.end() ? nullptr : &it->second;
+  if (note.table == NoteTable::Bends) {
+    // The rows are the part's bends NOW, in the configuration the view draws,
+    // so the table cannot disagree with the bend lines beside it.
+    std::string why = "a bend table needs a view of a part";
+    const Document* doc =
+        view ? DrawingViewDocument(state, *view, &why) : nullptr;
+    DrawingNote table = note;
+    if (doc) {
+      glm::dvec3 viewDir, up;
+      OrientationAxes(view->orientation, viewDir, up);
+      table.text =
+          drawing::BendTableText(*doc, note.text, doc->Units(), viewDir);
+    }
+    if (!doc || table.text.empty()) {
+      drawing::ResolvedNote rn;
+      rn.id = note.id;
+      rn.pos = note.pos;
+      rn.text = note.text.empty() ? "BEND TABLE" : note.text;
+      rn.resolved = false;
+      rn.error = doc ? "the part this view draws has no bends" : why;
+      return rn;
+    }
+    return drawing::ResolveNote(table, sheetView, symbols);
+  }
+  return drawing::ResolveNote(note, sheetView, symbols);
 }
 
 units::System ActiveDrawingUnits(AppState& state) {
@@ -570,6 +641,38 @@ Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
       return SlotDoc(state, i);
   }
   return nullptr;
+}
+
+const Document* DrawingViewDocument(AppState& state, const DrawingView& view,
+                                    std::string* error) {
+  const auto fail = [&](std::string why) -> const Document* {
+    if (error)
+      *error = std::move(why);
+    return nullptr;
+  };
+  const Document* live = DrawingSourceDocument(state, view.sourceDocId);
+  if (!live)
+    return fail("source document is not a part");
+  if (view.configuration == 0 ||
+      live->ActiveConfiguration() == view.configuration)
+    return live;
+  const Configuration* cfg = live->FindConfiguration(view.configuration);
+  if (!cfg)
+    return fail("the source part has no configuration " +
+                std::to_string(view.configuration) +
+                " any more; pick another for this view");
+  AppState::ConfiguredSource& cached =
+      state.configuredSources[{view.sourceDocId, view.configuration}];
+  if (!cached.doc || cached.sourceInstance != live->InstanceId() ||
+      cached.sourceVersion != live->Version()) {
+    auto copy = std::make_unique<Document>(*live);
+    if (!copy->SetActiveConfiguration(view.configuration))
+      return fail("could not evaluate configuration '" + cfg->name + "'");
+    cached.doc = std::move(copy);
+    cached.sourceInstance = live->InstanceId();
+    cached.sourceVersion = live->Version();
+  }
+  return cached.doc.get();
 }
 
 namespace {

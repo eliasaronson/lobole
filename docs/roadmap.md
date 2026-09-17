@@ -251,14 +251,15 @@ mesh off the frame (`async: true`) — that known-bugs entry is closed — and
 **phase 4** put the STEP import on it. **A3 is complete.** Plus the absences worth knowing: no
 user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
 surfacing. **The sheet-metal absence closed 2026-09-17**
-([sheetmetal/plan.md](sheetmetal/plan.md), S1-S6, v108-v110): the stock a part
+([sheetmetal/plan.md](sheetmetal/plan.md), S1-S11, v108-v115): the stock a part
 is cut from, a base flange, an edge flange with automatic bend relief, a flat
 pattern that unfolds from the bends the features RECORDED rather than by
 developing the cylinders afterwards, `check_sheet_metal`, and a DXF a shop can
 cut — the first file this project writes that is a manufacturing order rather
-than a model. Tier 2 (miter / hem / jog, corner relief, unfold-refold to cut
-across a bend, normal cut, the flat pattern on a drawing) is planned and
-unbuilt. **The standard-parts absence closed 2026-09-01**
+than a model. Tier 2 followed the same day: mitred and closed corners, hems,
+jogs, corner relief, Unfold/Refold to cut across a bend, a cut square to the
+sheet wherever it lands, and the flat pattern on a drawing — a view that names
+the `Flat` configuration, its creases as bend lines, and a bend table. **The standard-parts absence closed 2026-09-01**
 ([parts/plan.md](parts/plan.md), F1 phases 1-5): seven vendored ISO standards,
 a fastener derived from the hole you pick — size out of the clearance table
 read backwards, length out of the stack, washers and nut included — a BOM that

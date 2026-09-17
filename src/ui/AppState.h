@@ -1359,6 +1359,18 @@ struct AppState {
   // Session-local, bounded geometry cache, shared across drawing tabs.
   drawing::ProjectionCache drawingProjectionCache;
 
+  // A part evaluated in a configuration it does not have active, for the
+  // drawing views that name one (a sheet of the Flat blank while the model
+  // tab shows the folded part). Keyed by (document id, configuration) and
+  // rebuilt when the part's version moves; a copy regenerates, so this is
+  // the difference between one rebuild per edit and one per repaint.
+  struct ConfiguredSource {
+    uint64_t sourceInstance = 0; // Document::InstanceId(): a version alone
+    uint64_t sourceVersion = 0;  // is not an identity across projects
+    std::unique_ptr<Document> doc;
+  };
+  std::map<std::pair<uint64_t, uint64_t>, ConfiguredSource> configuredSources;
+
   // Dimension-placement tool (D4): armed from the panel with a kind, then the
   // user clicks projected edges/circles on the sheet to pick refs; the dim is
   // created once enough are picked. All refs must share one view.

@@ -1,0 +1,67 @@
+{
+  "format": "designer-document",
+  "version": 115,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Bracket",
+      "document": "Flat pattern",
+      "author": "Elias",
+      "date": "2026-09-17"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "top",
+      "source": 3,
+      "orientation": "top",
+      "scale": 1.0,
+      "position": [
+        80.0,
+        180.0
+      ],
+      "show_hidden": true,
+      "quality": "exact",
+      "hidden": []
+    },
+    {
+      "id": 2,
+      "name": "top (Flat)",
+      "source": 3,
+      "orientation": "top",
+      "scale": 1.0,
+      "position": [
+        240.0,
+        180.0
+      ],
+      "show_hidden": false,
+      "quality": "exact",
+      "hidden": [],
+      "configuration": 12
+    }
+  ],
+  "dims": [],
+  "notes": [
+    {
+      "id": 4,
+      "text": "",
+      "pos": [
+        360.0,
+        200.0
+      ],
+      "view": 2,
+      "table": "bends"
+    },
+    {
+      "id": 5,
+      "text": "DEBURR ALL EDGES",
+      "pos": [
+        360.0,
+        60.0
+      ]
+    }
+  ]
+}

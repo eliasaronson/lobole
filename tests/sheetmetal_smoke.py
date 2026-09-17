@@ -168,6 +168,48 @@ def tier2(d):
     expect(abs(span - THICKNESS) < 1e-4, f"the blank is not flat: {span}")
 
 
+def flat_sheet(d, tmp):
+    """S11 over the wire: a sheet with the part and its blank side by side,
+    the blank's crease drawn as a bend line and listed in a bend table."""
+    parts = d.call("list_parts")["parts"]
+    part = next(x["name"] for x in parts if x["type"] == "part")
+    d.call("create_drawing", name="flat-dwg", sheet={"size": "a3"})
+    refused(d, "add_drawing_view", "no configuration", source=part,
+            orientation="top", configuration="Flatt")
+    folded = d.call("add_drawing_view", source=part, orientation="top")["id"]
+    flat = d.call("add_drawing_view", source=part, orientation="top",
+                  configuration="Flat")["id"]
+    views = {v["id"]: v for v in d.call("list_drawing_views")["views"]}
+    expect(views[folded]["bend_lines"] == 0, views[folded])
+    expect(views[flat]["bend_lines"] == 1, views[flat])
+    expect(views[flat]["configuration"] != 0, views[flat])
+    # The blank is longer than the folded part is deep: it IS the blank.
+    span = lambda v: v["bbox"][1][1] - v["bbox"][0][1]
+    expect(span(views[flat]) > span(views[folded]) + 10.0,
+           f"flat {span(views[flat])} folded {span(views[folded])}")
+
+    refused(d, "add_drawing_note", "needs `view`", table="bends",
+            position=[300, 250])
+    note = d.call("add_drawing_note", table="bends", view=flat,
+                  position=[330, 250])
+    expect(note["text"].startswith("BEND TABLE\nB1  "), note)
+    expect("K 0.4" in note["text"], note)
+    notes = d.call("list_drawing_notes")["notes"]
+    expect(notes[0]["table"] == "bends", notes)
+
+    svg = os.path.join(tmp, "flat.svg")
+    d.call("export_drawing", path=svg)
+    text = open(svg).read()
+    expect('stroke-dasharray="6 1.2 0.6 1.2"' in text,
+           "the exported sheet has no bend line")
+    expect(">BEND TABLE<" in text, "the exported sheet has no bend table")
+
+    # Back to the part as it is: the crease goes with the configuration.
+    d.call("set_drawing_view", id=flat, configuration=0)
+    views = {v["id"]: v for v in d.call("list_drawing_views")["views"]}
+    expect(views[flat]["bend_lines"] == 0, views[flat])
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -345,6 +387,7 @@ def main():
         expect(back["gauge"] == "1.5mm" and back["material"] == "aluminum",
                back)
 
+        flat_sheet(d, tmp)
         tier2(d)
         print("sheet metal smoke OK")
     finally:
