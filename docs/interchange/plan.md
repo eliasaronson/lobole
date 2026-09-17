@@ -86,8 +86,11 @@ planned: `src/MeshExport.{h,cpp}` builds one shape→XCAF bridge
   shell, not a B-Rep solid; useful only as a reference/visualization body.
   Needs a "mesh body" concept (non-parametric, render + measure only). Defer
   until a real need appears.
-- **DXF** (2D sketch interchange) — not in OCC; out of scope for now, same
-  status as 2D drawings.
+- **DXF** (2D sketch interchange) — not in OCC. A writer now exists for
+  sheet-metal FLAT PATTERNS (`src/core/io/ExportDxf.cpp`, `export_dxf`): R12
+  ASCII, millimetres, LINE/ARC/CIRCLE on CUT / BEND_UP / BEND_DOWN, arcs kept
+  as arcs. A general drawing DXF over `ProjectedCurve` is still open and would
+  reuse that writer's entity half.
 
 ## Explicitly deferred
 

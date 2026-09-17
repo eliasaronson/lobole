@@ -271,6 +271,8 @@ set(core_sources
     src/core/features/EdgeFlangeFeature.cpp
     src/core/features/FlatPatternFeature.cpp
     src/core/sheet/Unfold.cpp
+    src/core/sheet/Check.cpp
+    src/core/io/ExportDxf.cpp
     src/core/ToleranceStack.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp

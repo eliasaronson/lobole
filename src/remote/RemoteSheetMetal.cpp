@@ -3,6 +3,8 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/SheetMetal.h"
+#include "core/io/ExportDxf.h"
+#include "core/sheet/Check.h"
 #include "ui/AppState.h"
 
 #include <memory>
@@ -35,6 +37,23 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "materials and gauges this build carries. `rules` is null when the part "
      "is not sheet metal.",
      "part", NeedsPart | Deferrable},
+    {"check_sheet_metal",
+     "Can a brake actually make this? Every finding names the element and the "
+     "required-versus-actual number: a bend tighter than the material takes "
+     "(re-checked here, because changing the gauge afterwards leaves every "
+     "existing bend where it was), a wall too short to sit on the die, a bend "
+     "line stopping inside a panel with nothing to relieve it, a hole near "
+     "enough to a bend to draw into an oval. `not_checked` says what this "
+     "build cannot answer, so a clean verdict is never mistaken for one.",
+     "body, part", NeedsPart | Deferrable},
+    {"export_dxf",
+     "Write a sheet body's FLAT PATTERN to a DXF a shop can cut: R12 ASCII, "
+     "millimetres ($INSUNITS 4), outline and holes on CUT, bend lines on "
+     "BEND_UP / BEND_DOWN, dashed and red/blue the way nesting software "
+     "expects. Arcs stay arcs. The body must BE flat - activate the "
+     "configuration that unsuppresses its FlatPattern first - because a "
+     "folded part's silhouette is a picture of a part that cuts to nothing.",
+     "path, body, part", NotInBatch},
 };
 
 std::span<const MethodDoc> SheetMetalMethodDocs() { return SheetMetalMethods; }
@@ -143,6 +162,57 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
                             doc);
     out = {{"rules", RulesJson(r)}};
     AttachRegen(out, &doc);
+    return true;
+  }
+
+  if (m == "check_sheet_metal" || m == "export_dxf") {
+    const Document& src =
+        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : doc;
+    const std::vector<Body>& bodies = src.GetBodies();
+    if (bodies.empty())
+      throw std::runtime_error("this part has no bodies");
+    const size_t idx = p.value("body", size_t{0});
+    if (idx >= bodies.size())
+      throw std::runtime_error("no body " + std::to_string(idx) +
+                               " - this "
+                               "part has " +
+                               std::to_string(bodies.size()));
+    const Body& target = bodies[idx];
+    if (!src.SheetMetal())
+      throw std::runtime_error(
+          "this part has no sheet-metal rules, so there is nothing to check "
+          "it against (set_sheet_metal_rules)");
+
+    if (m == "export_dxf") {
+      dxf::FlatDrawing drawing{target.shape, target.bends};
+      const std::string why =
+          dxf::WriteFlatPattern(drawing, p.at("path").get<std::string>());
+      if (!why.empty())
+        throw std::runtime_error(why);
+      out = {{"path", p.at("path")},
+             {"bend_lines", static_cast<int>(target.bends.size())}};
+      return true;
+    }
+
+    const sheet::CheckResult r = sheet::Check(target, *src.SheetMetal());
+    json violations = json::array();
+    for (const sheet::Violation& v : r.violations) {
+      json j = {{"kind", v.kind},
+                {"message", v.message},
+                {"actual_mm", v.actual},
+                {"required_mm", v.required}};
+      if (v.bend != 0)
+        j["bend"] = v.bend;
+      if (!v.element.name.empty())
+        j["element"] = {{"feature_id", v.element.featureId},
+                        {"element", v.element.name}};
+      violations.push_back(std::move(j));
+    }
+    out = {{"ok", r.violations.empty()},
+           {"violations", std::move(violations)},
+           {"bends_checked", r.bendsChecked},
+           {"holes_checked", r.holesChecked},
+           {"not_checked", r.notChecked}};
     return true;
   }
 

@@ -57,6 +57,7 @@ add_executable(designer_tests
     test_sheetmetal.cpp
     test_flange.cpp
     test_unfold.cpp
+    test_sheetmetal_check.cpp
     test_sweep.cpp
     test_curve3d.cpp
     test_pipe.cpp

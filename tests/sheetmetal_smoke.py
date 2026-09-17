@@ -159,6 +159,11 @@ def main():
         expect(abs(bodies[0]["volume"] - want) / want < 1e-4,
                f"flanged volume {bodies[0]['volume']} want {want}")
 
+        # Exporting the FOLDED part is refused: its silhouette is a picture
+        # of a part that cuts to nothing.
+        refused(d, "export_dxf", "not flat",
+                path=os.path.join(tmp, "folded.dxf"))
+
         # It is still one sound solid, not two lumps that happen to touch.
         check = d.call("check_geometry")
         expect(check.get("ok", True) is not False, check)
@@ -189,6 +194,28 @@ def main():
         span = bodies[0]["bbox_max"][2] - bodies[0]["bbox_min"][2]
         expect(abs(span - THICKNESS) < 1e-4,
                f"the blank is not one gauge thick: {span}")
+
+        # The check: a part a brake can make fires nothing, and says what it
+        # could NOT answer so clean is never read as all-clear.
+        chk = d.call("check_sheet_metal")
+        expect(chk["ok"], chk["violations"])
+        expect(chk["bends_checked"] == 1, chk)
+        expect(chk["not_checked"], "the check claims to have checked "
+                                   "everything, which it has not")
+
+        # The DXF. This is the first file this project writes that a shop can
+        # cut, so the test reads it back rather than trusting the call.
+        out = os.path.join(tmp, "blank.dxf")
+        d.call("export_dxf", path=out)
+        text = open(out).read()
+        for needed in ("AC1009", "$INSUNITS", "CUT", "BEND_UP", "BEND_DOWN",
+                       "DASHED", "ENDSEC", "EOF"):
+            expect(needed in text, f"the DXF has no {needed}")
+        # Millimetres, stated. A file that does not say costs a part at 25.4x.
+        units = text.split("$INSUNITS")[1].split("\n")
+        expect(units[2].strip() == "4", f"$INSUNITS is {units[2]!r}, want 4")
+        # One bend, so exactly one bend line, and it is not on the cut layer.
+        expect(text.count("BEND_UP") + text.count("BEND_DOWN") >= 3, text[:200])
 
         # Back to the authored model, and the part is folded again.
         d.call("set_active_configuration", id=0)
