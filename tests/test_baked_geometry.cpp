@@ -5,13 +5,22 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
+#include "core/SheetMetal.h"
+#include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GeometryCache.h"
+#include "core/sheet/Unfold.h"
+
+#include <BRepAdaptor_Curve.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
 
 #include <filesystem>
 #include <fstream>
@@ -196,6 +205,79 @@ TEST_CASE("Datums are resolved on a baked open", "[baked][frame][datum]") {
   CHECK(lid->GetError().empty());
   CHECK_THAT(lid->Origin().y, WithinRel(10.0f, 1e-4f)); // the box's top
   CHECK_THAT(lid->ZAxis().y, WithinRel(1.0f, 1e-5f));
+  fs::remove_all(proj);
+}
+
+TEST_CASE("Bends survive a baked open", "[baked][sheetmetal]") {
+  // A bend record is derived, like the element map — and a baked open
+  // executes nothing to derive it again. Without it in the blob, a reopened
+  // project exported a DXF with no bend lines (a blank with nothing saying
+  // where to fold) and check_sheet_metal checked nothing while reporting ok.
+  const fs::path proj = TempProject("baked-bends.dsgn");
+  Document doc;
+  sheet::SheetMetalRules rules;
+  rules.material = "aluminum";
+  rules.gauge = "1.5mm";
+  rules.thickness = 1.5;
+  doc.SetSheetMetal(rules);
+  auto sk = std::make_unique<SketchFeature>(
+      "Blank",
+      SketchPlane(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  sk->AddEntity(sketch::Line{{0, 0}, {100, 0}, 1});
+  sk->AddEntity(sketch::Line{{100, 0}, {100, 60}, 2});
+  sk->AddEntity(sketch::Line{{100, 60}, {0, 60}, 3});
+  sk->AddEntity(sketch::Line{{0, 60}, {0, 0}, 4});
+  doc.AddFeature(std::move(sk));
+  doc.AddFeature(
+      std::make_unique<BaseFlangeFeature>("Base", doc.GetFeature(0)->GetId()));
+  const uint64_t base = doc.GetFeature(1)->GetId();
+  std::string edge;
+  {
+    const Body& body = doc.GetBodies()[0];
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent() && edge.empty(); ++i) {
+      BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+      if (c.GetType() != GeomAbs_Line)
+        continue;
+      const gp_Pnt a = c.Value(c.FirstParameter());
+      const gp_Pnt b = c.Value(c.LastParameter());
+      if (std::abs(a.Y()) < 1e-6 && std::abs(b.Y()) < 1e-6 &&
+          std::abs(a.Z() - 1.5) < 1e-6 && std::abs(b.Z() - 1.5) < 1e-6)
+        if (const std::string* n = body.elementMap.EdgeNameOf(i - 1))
+          edge = *n;
+    }
+  }
+  REQUIRE_FALSE(edge.empty());
+  auto flange = std::make_unique<EdgeFlangeFeature>(
+      "Wall", std::vector<ElementRef>{ElementRef{base, edge}}, 20.0, 90.0);
+  flange->position = FlangePosition::BendOutside;
+  doc.AddFeature(std::move(flange));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies()[0].bends.size() == 1);
+  const BendRegion before = doc.GetBodies()[0].bends[0];
+  REQUIRE(testio::Save(doc, proj.string()));
+
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->LastRegenStats().executed == 0); // nothing rebuilt: the blob
+  REQUIRE(loaded->GetBodies().size() == 1);
+  REQUIRE(loaded->GetBodies()[0].bends.size() == 1);
+  const BendRegion& after = loaded->GetBodies()[0].bends[0];
+  CHECK(after.featureId == before.featureId);
+  CHECK_THAT(after.radius, WithinRel(before.radius, 1e-12));
+  CHECK_THAT(after.angle, WithinRel(before.angle, 1e-12));
+  CHECK_THAT(after.kFactor, WithinRel(before.kFactor, 1e-12));
+  CHECK(after.kSource == before.kSource);
+  CHECK_THAT(after.width, WithinRel(before.width, 1e-12));
+  CHECK(after.parentFace.name == before.parentFace.name);
+  CHECK(glm::length(after.axisOrigin - before.axisOrigin) < 1e-12);
+  CHECK(glm::length(after.upDir - before.upDir) < 1e-12);
+  CHECK(glm::length(after.parentDir - before.parentDir) < 1e-12);
+  // Which is what the flat pattern is computed from: it must still flatten to
+  // the same blank, and the DXF must still know which way the wall folds.
+  CHECK(sheet::FoldsToward(after, {0, 0, 1}) ==
+        sheet::FoldsToward(before, {0, 0, 1}));
   fs::remove_all(proj);
 }
 

@@ -386,6 +386,23 @@ def main():
         back = d.call("get_sheet_metal_rules")["rules"]
         expect(back["gauge"] == "1.5mm" and back["material"] == "aluminum",
                back)
+        # ...including the BENDS. A reopened project loads baked geometry and
+        # executes nothing, so a bend record that the blob does not carry is
+        # simply gone: the DXF came back with no bend lines at all — a blank
+        # with nothing saying where to fold — and the check reported ok while
+        # checking nothing.
+        chk = d.call("check_sheet_metal")
+        expect(chk["bends_checked"] == 1,
+               f"a reopened project lost its bends: {chk}")
+        flat_cfg = [c for c in d.call("list_configurations")["configurations"]
+                    if c["name"] == "Flat"][0]["id"]
+        d.call("set_active_configuration", id=flat_cfg)
+        reopened = os.path.join(tmp, "reopened.dxf")
+        d.call("export_dxf", path=reopened)
+        text = open(reopened).read()
+        expect(text.count("LINE\n8\nBEND_") == 1,
+               "the reopened blank's DXF has no bend line")
+        d.call("set_active_configuration", id=0)
 
         flat_sheet(d, tmp)
         tier2(d)

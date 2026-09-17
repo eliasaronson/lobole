@@ -29,7 +29,98 @@ namespace {
 // kVersion, which this does not touch: an older build ignores a directory it
 // does not know, a newer one rebuilds when the blob is absent, and both are
 // already correct.
-constexpr int kGeometryFormat = 1;
+// 2: bends. A sheet body's BendRegions are derived like its element map, and
+// a baked open executes nothing to re-derive them — so before this the bend
+// lines vanished from a reopened project's DXF and check_sheet_metal checked
+// nothing while reporting ok. An older blob is ignored, which rebuilds and
+// re-stamps them.
+constexpr int kGeometryFormat = 2;
+
+// A bend record, whole. It is not document data — the features stamp it on
+// every regeneration — but a baked open regenerates nothing, so the blob has
+// to carry it for the same reason it carries the element map.
+json V3(const glm::dvec3& v) { return json::array({v.x, v.y, v.z}); }
+glm::dvec3 V3(const json& j, const glm::dvec3& fallback = {}) {
+  if (!j.is_array() || j.size() != 3)
+    return fallback;
+  return {j[0].get<double>(), j[1].get<double>(), j[2].get<double>()};
+}
+json RefJson(const ElementRef& r) {
+  return json{{"feature", r.featureId}, {"element", r.name}};
+}
+ElementRef RefFromJson(const json& j) {
+  if (!j.is_object())
+    return {};
+  return ElementRef{j.value("feature", uint64_t{0}),
+                    j.value("element", std::string{})};
+}
+
+json BendToJson(const BendRegion& b) {
+  json trims = json::array();
+  for (const BendRegion::Trim& t : b.trims)
+    trims.push_back({{"point", V3(t.point)}, {"normal", V3(t.normal)}});
+  json place = json::array();
+  for (int c = 0; c < 4; ++c)
+    for (int r = 0; r < 4; ++r)
+      place.push_back(b.parentPlace[c][r]);
+  return json{{"feature", b.featureId},
+              {"axis_origin", V3(b.axisOrigin)},
+              {"axis_dir", V3(b.axisDir)},
+              {"radius", b.radius},
+              {"width", b.width},
+              {"angle", b.angle},
+              {"k_factor", b.kFactor},
+              {"k_source", b.kSource},
+              {"parent_face", RefJson(b.parentFace)},
+              {"child_face", RefJson(b.childFace)},
+              {"inner_face", RefJson(b.innerFace)},
+              {"outer_face", RefJson(b.outerFace)},
+              {"parent_dir", V3(b.parentDir)},
+              {"up_dir", V3(b.upDir)},
+              {"allowance", b.allowance},
+              {"flat_a", V3(b.flatA)},
+              {"flat_b", V3(b.flatB)},
+              {"flat", b.flat},
+              {"unfolded_by", b.unfoldedBy},
+              {"parent_place", std::move(place)},
+              {"trims", std::move(trims)}};
+}
+
+BendRegion BendFromJson(const json& j) {
+  BendRegion b;
+  b.featureId = j.value("feature", uint64_t{0});
+  b.axisOrigin = V3(j.value("axis_origin", json()), b.axisOrigin);
+  b.axisDir = V3(j.value("axis_dir", json()), b.axisDir);
+  b.radius = j.value("radius", 0.0);
+  b.width = j.value("width", 0.0);
+  b.angle = j.value("angle", 0.0);
+  b.kFactor = j.value("k_factor", 0.0);
+  b.kSource = j.value("k_source", std::string{});
+  b.parentFace = RefFromJson(j.value("parent_face", json()));
+  b.childFace = RefFromJson(j.value("child_face", json()));
+  b.innerFace = RefFromJson(j.value("inner_face", json()));
+  b.outerFace = RefFromJson(j.value("outer_face", json()));
+  b.parentDir = V3(j.value("parent_dir", json()), b.parentDir);
+  b.upDir = V3(j.value("up_dir", json()), b.upDir);
+  b.allowance = j.value("allowance", 0.0);
+  b.flatA = V3(j.value("flat_a", json()), b.flatA);
+  b.flatB = V3(j.value("flat_b", json()), b.flatB);
+  b.flat = j.value("flat", false);
+  b.unfoldedBy = j.value("unfolded_by", uint64_t{0});
+  const json place = j.value("parent_place", json::array());
+  if (place.is_array() && place.size() == 16) {
+    for (int c = 0; c < 4; ++c)
+      for (int r = 0; r < 4; ++r)
+        b.parentPlace[c][r] = place[c * 4 + r].get<double>();
+  }
+  for (const json& tj : j.value("trims", json::array())) {
+    BendRegion::Trim t;
+    t.point = V3(tj.value("point", json()), t.point);
+    t.normal = V3(tj.value("normal", json()), t.normal);
+    b.trims.push_back(t);
+  }
+  return b;
+}
 
 fs::path GeometryDir(const std::string& dir) {
   return fs::path(dir) / "geometry";
@@ -147,6 +238,12 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
       // reloaded jaw would weigh its servo (v84).
       if (body.reference)
         entry["reference"] = true;
+      if (!body.bends.empty()) {
+        json bends = json::array();
+        for (const BendRegion& b : body.bends)
+          bends.push_back(BendToJson(b));
+        entry["bends"] = std::move(bends);
+      }
       index["bodies"].push_back(std::move(entry));
       wanted.push_back(file);
     }
@@ -226,6 +323,8 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
                              c[2].get<float>()};
       }
       body.reference = bj.value("reference", false);
+      for (const json& bendJson : bj.value("bends", json::array()))
+        body.bends.push_back(BendFromJson(bendJson));
       bodies.push_back(std::move(body));
     }
     if (bodies.empty())
