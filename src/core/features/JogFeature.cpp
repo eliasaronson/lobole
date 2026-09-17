@@ -259,6 +259,16 @@ bool JogFeature::Execute(RegenContext& ctx) {
     movedPart = CADShape(
         BRepBuilderAPI_Transform(movedPart.GetShape(), carry, Standard_True)
             .Shape());
+    // Both halves of every face and edge the step cuts across came out of
+    // the SAME intersect under the same tag, so they carry the same name —
+    // and a name that resolves to two elements resolves to whichever comes
+    // first, which put a wall picked on the near half onto the far one. The
+    // carried side says it was carried.
+    const std::string stepped = ";S" + std::to_string(GetId());
+    for (auto& [idx, name] : movedMap.names)
+      name += stepped;
+    for (auto& [idx, name] : movedMap.edgeNames)
+      name += stepped;
 
     CADShape result = keptPart;
     ElementMap resultMap = keptMap;

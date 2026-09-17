@@ -18,6 +18,7 @@
 #include <TopoDS.hxx>
 
 #include <cmath>
+#include <set>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -231,5 +232,65 @@ TEST_CASE("a corner that is not square is refused, not approximated",
     Ok(doc);
     doc.AddFeature(std::make_unique<CornerReliefFeature>("Relief", base));
     CHECK(Last(doc).GetError().find("right angle") != std::string::npos);
+  }
+}
+
+#include "core/features/HemFeature.h"
+#include "core/features/JogFeature.h"
+#include "core/features/RefoldFeature.h"
+#include "core/features/UnfoldFeature.h"
+// A hem, a jog, a side wall picked on the NEAR panel after the jog, and an
+// unfold/refold round trip: the wall has to land on the near panel, and its
+// corner with the hem has to still be found. The jog once named both halves
+// of the left edge alike, and the wall went up on the far panel instead.
+TEST_CASE("a wall picked after a jog lands where it was picked",
+          "[sheetmetal][corner]") {
+  for (int variant = 0; variant < 3; ++variant) {
+    Document doc;
+    const uint64_t base = Rect(doc);
+    doc.AddFeature(std::make_unique<HemFeature>(
+        "Hem",
+        std::vector<ElementRef>{Edge(doc, base, {0, 0, kT}, {100, 0, kT})},
+        6.0));
+    Ok(doc);
+    if (variant >= 1) {
+      auto sk = std::make_unique<SketchFeature>(
+          "Step", SketchPlane(glm::vec3(0, 0, kT), glm::vec3(0, 0, 1),
+                              glm::vec3(1, 0, 0)));
+      sk->AddEntity(sketch::Line{{0, 30}, {100, 30}, 1});
+      doc.AddFeature(std::move(sk));
+      doc.AddFeature(
+          std::make_unique<JogFeature>("Jog", Last(doc).GetId(), 10.0));
+      Ok(doc);
+    }
+    const double setback = kT / 20.0 + kT;
+    auto f = std::make_unique<EdgeFlangeFeature>(
+        "Side",
+        std::vector<ElementRef>{Edge(doc, base, {0, setback, kT},
+                                     {0, variant >= 1 ? 30.0 : 60.0, kT})},
+        15.0, 90.0);
+    f->position = FlangePosition::BendOutside;
+    doc.AddFeature(std::move(f));
+    Ok(doc);
+    // The side wall's bend is on the near panel, level with the base.
+    const BendRegion& side = doc.GetBodies()[0].bends.back();
+    CHECK_THAT(side.axisOrigin.z, WithinAbs(kT + kR, 1e-6));
+    if (variant >= 1)
+      CHECK(side.axisOrigin.y <= 30.0 + 1e-6);
+    // And no name on the body resolves to two elements.
+    std::set<std::string> edges;
+    for (const auto& [idx, n] : doc.GetBodies()[0].elementMap.edgeNames)
+      edges.insert(n);
+    CHECK(edges.size() == doc.GetBodies()[0].elementMap.edgeNames.size());
+    if (variant == 2) {
+      doc.AddFeature(std::make_unique<UnfoldFeature>("Unfold", base));
+      Ok(doc);
+      doc.AddFeature(
+          std::make_unique<RefoldFeature>("Refold", Last(doc).GetId()));
+      Ok(doc);
+    }
+    doc.AddFeature(std::make_unique<CornerReliefFeature>("Relief", base));
+    INFO("variant " << variant);
+    Ok(doc);
   }
 }

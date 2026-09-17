@@ -55,6 +55,119 @@ def straight_edge(d, want_mid):
     raise AssertionError(f"no straight edge at {want_mid} in {body['edges']}")
 
 
+def blank(d):
+    """A fresh part: aluminium 1.5 mm, a 100 x 60 base flange."""
+    d.call("new_project")
+    d.call("set_sheet_metal_rules", material="aluminum", gauge="1.5mm")
+    sk = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Blank",
+        "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                  "uAxis": [1, 0, 0]},
+        "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [WIDTH, 0]},
+            {"type": "line", "id": 2, "a": [WIDTH, 0], "b": [WIDTH, DEPTH]},
+            {"type": "line", "id": 3, "a": [WIDTH, DEPTH], "b": [0, DEPTH]},
+            {"type": "line", "id": 4, "a": [0, DEPTH], "b": [0, 0]}]})["id"]
+    return d.call("add_feature", feature={
+        "type": "BaseFlange", "name": "Base", "sketch_id": sk})["id"]
+
+
+def volume(d):
+    return d.call("get_state")["bodies"][0]["volume"]
+
+
+def tier2(d):
+    """S7-S10 over the wire: each feature, its refusal by name, and the
+    blank still one gauge thick at the end."""
+    base = blank(d)
+    top_front = straight_edge(d, (WIDTH / 2.0, 0.0, THICKNESS))
+
+    # A hem on the front edge; an unknown kind is refused by name.
+    refused(d, "add_feature", "expected one of", feature={
+        "type": "Hem", "name": "x", "length": 6, "kind": "tight",
+        "edges": [{"feature_id": base, "element": top_front}]})
+    r = d.call("add_feature", feature={
+        "type": "Hem", "name": "Safe edge", "length": 6,
+        "edges": [{"feature_id": base, "element": top_front}]})
+    expect(r["regen"]["ok"], r["regen"])
+
+    # A jog across the panel; one lower than its own bends is refused.
+    line = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Step",
+        "plane": {"origin": [0, 0, THICKNESS], "normal": [0, 0, 1],
+                  "uAxis": [1, 0, 0]},
+        "entities": [{"type": "line", "id": 1, "a": [0, 30],
+                      "b": [WIDTH, 30]}]})["id"]
+    r = d.call("add_feature", feature={
+        "type": "Jog", "name": "Too low", "sketch_id": line, "height": 3})
+    expect(not r["regen"]["ok"] and "lower than its" in str(r["regen"]),
+           r["regen"])
+    d.call("delete_feature", id=r["id"])
+    r = d.call("add_feature", feature={
+        "type": "Jog", "name": "Step", "sketch_id": line, "height": 10})
+    expect(r["regen"]["ok"], r["regen"])
+
+    # A wall on the left edge — picked AFTER the jog, which split every edge
+    # its line crosses, so the name the blank gave that edge is gone. The
+    # closed hem set the front of the panel back by its radius plus a
+    # thickness, so that edge now runs from there to the jog line.
+    hem_setback = THICKNESS / 20.0 + THICKNESS
+    top_left = straight_edge(d, (0.0, (hem_setback + 30.0) / 2.0, THICKNESS))
+    r = d.call("add_feature", feature={
+        "type": "EdgeFlange", "name": "Side", "length": 15,
+        "position": "bend_outside",
+        "edges": [{"feature_id": base, "element": top_left}]})
+    expect(r["regen"]["ok"], r["regen"])
+
+    # Unfold and back up: nothing moves.
+    folded = volume(d)
+    unfold = d.call("add_feature", feature={
+        "type": "Unfold", "name": "Unfold", "body_id": base})
+    expect(unfold["regen"]["ok"], unfold["regen"])
+    bodies = d.call("get_state")["bodies"]
+    span = bodies[0]["bbox_max"][2] - bodies[0]["bbox_min"][2]
+    expect(abs(span - THICKNESS) < 1e-4, f"unfolded, not flat: {span}")
+    refold = d.call("add_feature", feature={
+        "type": "Refold", "name": "Refold", "unfold_id": unfold["id"]})
+    expect(refold["regen"]["ok"], refold["regen"])
+    expect(abs(volume(d) - folded) / folded < 1e-6,
+           f"refold did not restore the part: {volume(d)} vs {folded}")
+
+    # The hem and the side wall meet at the front-left corner: relieve it.
+    # An unknown style is refused by name first.
+    refused(d, "add_feature", "expected one of", feature={
+        "type": "CornerRelief", "name": "x", "body_id": base,
+        "style": "oval"})
+    before = volume(d)
+    r = d.call("add_feature", feature={
+        "type": "CornerRelief", "name": "Relief", "body_id": base})
+    expect(r["regen"]["ok"], r["regen"])
+    expect(volume(d) < before, "the corner relief cut nothing")
+
+    # A normal cut through the flat panel in front of the step.
+    vent = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Vent",
+        "plane": {"origin": [0, 0, 40], "normal": [0, 0, 1],
+                  "uAxis": [1, 0, 0]},
+        "entities": [{"type": "circle", "id": 1, "center": [50, 15],
+                      "radius": 3}]})["id"]
+    before = volume(d)
+    r = d.call("add_feature", feature={
+        "type": "NormalCut", "name": "Vent", "sketch_id": vent})
+    expect(r["regen"]["ok"], r["regen"])
+    removed = before - volume(d)
+    expect(abs(removed - math.pi * 9 * THICKNESS) / removed < 5e-3,
+           f"normal cut removed {removed}")
+
+    # And the whole of it still lays flat, and still checks.
+    r = d.call("add_feature", feature={
+        "type": "FlatPattern", "name": "Flat", "body_id": base})
+    expect(r["regen"]["ok"], r["regen"])
+    bodies = d.call("get_state")["bodies"]
+    span = bodies[0]["bbox_max"][2] - bodies[0]["bbox_min"][2]
+    expect(abs(span - THICKNESS) < 1e-4, f"the blank is not flat: {span}")
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -231,6 +344,8 @@ def main():
         back = d.call("get_sheet_metal_rules")["rules"]
         expect(back["gauge"] == "1.5mm" and back["material"] == "aluminum",
                back)
+
+        tier2(d)
         print("sheet metal smoke OK")
     finally:
         app.terminate()
