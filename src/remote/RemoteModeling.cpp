@@ -130,12 +130,21 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
     // still refused below.
     if (dialect.count(it.key()) != 0)
       continue;
-    std::string accepted;
+    // What this feature serialized is what it is SURE of; the type's own
+    // row lists the rest, including every field left at its default (a Hem's
+    // `kind`, `gap` and `outside` are all accepted, and none of them shows
+    // up here). Naming only these as "accepted" sent a caller to delete a
+    // field that works — and printed `type` twice, once as the prefix and
+    // once out of the round trip.
+    std::string accepted = "type";
     for (auto o = out.begin(); o != out.end(); ++o)
-      accepted += (accepted.empty() ? "" : ", ") + o.key();
-    throw std::runtime_error("unknown field '" + it.key() + "' for " +
-                             built.TypeName() + ". Accepted: type, " +
-                             accepted + ".");
+      if (o.key() != "type")
+        accepted += ", " + o.key();
+    throw std::runtime_error(
+        "unknown field '" + it.key() + "' for " + built.TypeName() +
+        ". This one serialized: " + accepted + " — the rest of what " +
+        built.TypeName() +
+        " accepts is in its row of describe {method: \"add_feature\"}.");
   }
 }
 

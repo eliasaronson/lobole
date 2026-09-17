@@ -9,7 +9,10 @@ material' BOM row was the first visible symptom.
 
 def run(d, expect):
     # WRONG: Box has no mode. Must error AND name the accepted vocabulary
-    # (the full-template principle: don't reveal one constraint per trip).
+    # (the full-template principle: don't reveal one constraint per trip) —
+    # both the fields this feature holds and where the rest of the type's
+    # dialect is written down, since a field left at its DEFAULT does not
+    # serialize and so cannot be listed from the feature itself.
     try:
         d.call("add_feature", feature={
             "type": "Box", "name": "B", "position": [0, 0, 0],
@@ -17,7 +20,10 @@ def run(d, expect):
         raise AssertionError("Box mode:'add' must be rejected")
     except RuntimeError as e:
         expect("unknown field 'mode'" in str(e), f"names the field: {e}")
-        expect("Accepted:" in str(e), f"lists the vocabulary: {e}")
+        expect("width" in str(e) and "height" in str(e),
+               f"lists the fields it does hold: {e}")
+        expect("add_feature" in str(e),
+               f"says where the rest of the vocabulary is: {e}")
 
     # RIGHT: to merge prisms, extrude with mode:"add" (Extrude has one).
     d.call("add_feature", feature={
