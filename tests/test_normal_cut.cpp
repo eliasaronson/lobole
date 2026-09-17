@@ -135,6 +135,30 @@ TEST_CASE("a normal cut through a panel is a plain hole",
   CHECK(circles == 2); // the bore's rims, top and bottom
 }
 
+TEST_CASE("a normal cut makes every hole its sketch holds",
+          "[sheetmetal][normalcut]") {
+  // Three circles for three burner ports. Only the first was cut — silently,
+  // so the part looked finished and two burners passed through solid steel,
+  // which nothing but a clash sweep would ever have noticed.
+  Document doc;
+  Blank(doc);
+  const double before = doc.GetBodies()[0].shape.Volume();
+  auto sk = std::make_unique<SketchFeature>(
+      "Ports",
+      SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  sk->AddEntity(sketch::Circle{{25, 30}, 4.0, 1});
+  sk->AddEntity(sketch::Circle{{50, 30}, 4.0, 2});
+  sk->AddEntity(sketch::Circle{{75, 30}, 4.0, 3});
+  doc.AddFeature(std::move(sk));
+  const uint64_t ports = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  doc.AddFeature(std::make_unique<NormalCutFeature>("Ports", ports));
+  INFO(Last(doc).GetError());
+  REQUIRE(Last(doc).GetError().empty());
+  CHECK(Sound(doc));
+  CHECK_THAT(before - doc.GetBodies()[0].shape.Volume(),
+             WithinRel(3.0 * kPi * 16.0 * kT, 1e-9));
+}
+
 TEST_CASE("a normal cut through a bend is square to the metal",
           "[sheetmetal][normalcut]") {
   // Looking straight down on the bend, a 0.6 mm hole whose middle sits over

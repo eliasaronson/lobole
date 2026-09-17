@@ -55,7 +55,11 @@ bool NormalCutFeature::Execute(RegenContext& ctx) {
   const glm::vec3 n = sketch->plane.GetNormal();
   const gp_Pnt origin(o.x, o.y, o.z);
   const gp_Dir normal(n.x, n.y, n.z);
-  TopoDS_Face profile;
+  // EVERY region the sketch holds, not just the first: three circles drawn
+  // for three burner ports are three separate profiles, and stopping at the
+  // first cut one port and left the other two burners passing through solid
+  // steel — with nothing said about it.
+  std::vector<TopoDS_Face> profiles;
   for (TopExp_Explorer ex(prism.GetShape(), TopAbs_FACE); ex.More();
        ex.Next()) {
     const TopoDS_Face face = TopoDS::Face(ex.Current());
@@ -64,11 +68,10 @@ bool NormalCutFeature::Execute(RegenContext& ctx) {
       continue;
     const gp_Pln pln = surf.Plane();
     if (pln.Axis().Direction().IsParallel(normal, 1e-6) &&
-        pln.Distance(origin) < 1e-4) {
-      profile = face;
-      break;
-    }
+        pln.Distance(origin) < 1e-4)
+      profiles.push_back(face);
   }
+  const TopoDS_Face profile = profiles.empty() ? TopoDS_Face{} : profiles[0];
   if (profile.IsNull()) {
     SetError("the sketch's profile could not be found on its plane");
     return false;
@@ -102,16 +105,18 @@ bool NormalCutFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  std::string why;
-  auto cut =
-      sheet::NormalCut(*body, *ctx.sheetMetal, profile, normal, GetId(), &why);
-  if (!cut) {
-    SetError(why.empty() ? "the normal cut failed" : why);
-    return false;
+  for (const TopoDS_Face& one : profiles) {
+    std::string why;
+    auto cut =
+        sheet::NormalCut(*body, *ctx.sheetMetal, one, normal, GetId(), &why);
+    if (!cut) {
+      SetError(why.empty() ? "the normal cut failed" : why);
+      return false;
+    }
+    body->shape = std::move(cut->shape);
+    body->elementMap = std::move(cut->map);
+    body->bends = std::move(cut->bends);
   }
-  body->shape = std::move(cut->shape);
-  body->elementMap = std::move(cut->map);
-  body->bends = std::move(cut->bends);
   // An Unfold/Refold pair inside the cut stamped this feature's id on the
   // creases; once folded back up there is nothing of it left on them.
   return true;
