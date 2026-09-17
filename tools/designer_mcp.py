@@ -238,7 +238,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   (0 < a <= 90, default 90), "flip"?: bool (which side is carried)}} — the
   bends run the full panel width; a height under (2R + t)(1 - cos a) is
   refused.
-- An EdgeFlange whose edges meet at a corner MITRES the flanges there.
+- An EdgeFlange whose edges meet at a corner MITRES the flanges there;
+  add "corners": "closed" to carry flanges that only touch at a square
+  corner round it and mitre them shut.
+- CornerRelief (a relief wherever two bends cross): {{"type":
+  "CornerRelief", "name": str, "body_id": <sheet body's created_by>,
+  "style"?: "circular" (default) | "rectangular", "size"?: num (radius or
+  half-side; omitted = bend radius + thickness)}} — every such corner of
+  the body; three bends at one corner, or a non-square corner, is refused.
 - Unfold (lay sheet bends flat so the next features cut in the flat):
   {{"type": "Unfold", "name": str, "body_id": <the sheet body's
   created_by>, "fixed_face"?: {{"feature_id": ..., "element": ...}},

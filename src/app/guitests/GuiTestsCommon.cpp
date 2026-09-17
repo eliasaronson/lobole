@@ -1,6 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 
 #include "core/SheetMetal.h"
+#include "core/features/CornerReliefFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/UnfoldFeature.h"
 
@@ -329,7 +330,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[33] = {
+const ToolCase kToolCases[34] = {
     {"box", "###tb_box", Needs::Nothing, Expect::Changes},
     // A fresh project has one part and nothing to derive from: the window
     // says so and Accept stays disabled until a source exists and is picked.
@@ -381,6 +382,9 @@ const ToolCase kToolCases[33] = {
     {"hem", "###tb_hem", Needs::SheetBlank, Expect::RefusesUntilPicked},
     // With no one-line sketch to step along, the jog says so and waits.
     {"jog", "###tb_jog", Needs::SheetBlank, Expect::RefusesUntilPicked},
+    // Every corner of the newest body where two bends cross.
+    {"corner_relief", "###tb_corner_relief", Needs::SheetCornered,
+     Expect::Changes},
 };
 
 const ToolCase* FindToolCase(const char* testName) {
@@ -485,7 +489,8 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
   case Needs::SheetRules:
   case Needs::SheetBlank:
   case Needs::SheetFlanged:
-  case Needs::SheetUnfolded: {
+  case Needs::SheetUnfolded:
+  case Needs::SheetCornered: {
     // The stock, set straight on the document: declaring it is setup, not
     // something the tool under test is supposed to do for itself.
     sheet::SheetMetalRules rules;
@@ -499,6 +504,45 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     ToolbarCreateAccept(ctx, "###tb_base_flange");
     if (needs == Needs::SheetBlank)
       break;
+    if (needs == Needs::SheetCornered) {
+      // Two walls on two straight edges that meet at a corner: the first
+      // pair that flanges cleanly AND gives the relief a corner to cut.
+      const Body& body = Doc()->GetBodies()[0];
+      const uint64_t base = body.createdBy;
+      std::vector<std::string> names;
+      for (const auto& [idx, name] : body.elementMap.edgeNames)
+        names.push_back(name);
+      bool made = false;
+      for (size_t i = 0; i < names.size() && !made; ++i) {
+        for (size_t j = i + 1; j < names.size() && !made; ++j) {
+          auto walls = std::make_unique<EdgeFlangeFeature>(
+              "Walls",
+              std::vector<ElementRef>{ElementRef{base, names[i]},
+                                      ElementRef{base, names[j]}},
+              5.0, 90.0);
+          walls->position = FlangePosition::BendOutside;
+          Doc()->AddFeature(std::move(walls));
+          const bool ok =
+              Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty();
+          if (ok) {
+            Doc()->AddFeature(
+                std::make_unique<CornerReliefFeature>("Probe", base));
+            const bool corner = Doc()
+                                    ->GetFeature(Doc()->FeatureCount() - 1)
+                                    ->GetError()
+                                    .empty();
+            Doc()->RemoveFeature(Doc()->FeatureCount() - 1);
+            if (corner) {
+              made = true;
+              break;
+            }
+          }
+          Doc()->RemoveFeature(Doc()->FeatureCount() - 1);
+        }
+      }
+      IM_CHECK_SILENT(made);
+      break;
+    }
     // A wall on the first straight edge that takes one. Straight onto the
     // document: which edge is picked is not what these tools are about, and
     // the edge-click itself has its own test.

@@ -14,6 +14,7 @@
 #include "core/ThreadStandards.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CornerReliefFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -906,6 +907,13 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
       return true;
     }
     return false;
+  case PickSlot::CornerReliefBody:
+    if (auto* cr = dynamic_cast<CornerReliefFeature*>(&f);
+        cr != nullptr && item.kind == SelectionItem::Kind::Body) {
+      cr->bodyId = item.id;
+      return true;
+    }
+    return false;
   case PickSlot::HemEdges:
     if (auto* hm = dynamic_cast<HemFeature*>(&f);
         hm != nullptr && item.kind == SelectionItem::Kind::Edge) {
@@ -1103,6 +1111,10 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
              "Which of a rim's two edges you pick decides which way the wall "
              "folds"}};
   }
+  if (dynamic_cast<const CornerReliefFeature*>(&feature) != nullptr) {
+    return {{PickSlot::CornerReliefBody, "Body", kBody, false,
+             "Pick the sheet body whose corners to relieve"}};
+  }
   if (dynamic_cast<const HemFeature*>(&feature) != nullptr) {
     return {{PickSlot::HemEdges, "Edges", kEdge, true,
              "Click STRAIGHT edges of a flat panel to hem (click again to "
@@ -1202,6 +1214,10 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::EdgeFlangeEdges: {
     auto* ef = dynamic_cast<const EdgeFlangeFeature*>(&feature);
     return ef != nullptr && !ef->edges.empty();
+  }
+  case PickSlot::CornerReliefBody: {
+    auto* cr = dynamic_cast<const CornerReliefFeature*>(&feature);
+    return cr != nullptr && cr->bodyId != 0;
   }
   case PickSlot::HemEdges: {
     auto* hm = dynamic_cast<const HemFeature*>(&feature);
@@ -1951,6 +1967,9 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ef->position = static_cast<FlangePosition>(pos);
       CommitDiscrete(state, feature, before, index, commit);
     }
+    HandleEdit(state, feature,
+               ImGui::Checkbox("Close corners", &ef->closedCorners), index,
+               commit);
     ExprDim(state, feature, index, commit, "Inset start", ef->offsetStartExpr,
             ef->offsetStart);
     ExprDim(state, feature, index, commit, "Inset end", ef->offsetEndExpr,
@@ -1959,6 +1978,18 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         state, feature, PickSlot::EdgeFlangeEdges,
         ef->edges.empty() ? "" : std::to_string(ef->edges.size()) + " picked");
     RefListRows(state, feature, index, commit, ef->edges);
+  } else if (auto* cr = dynamic_cast<CornerReliefFeature*>(&feature)) {
+    PickSlotRow(state, feature, PickSlot::CornerReliefBody,
+                BodyRefLabel(state, cr->bodyId));
+    const char* styles[] = {"Circular", "Rectangular"};
+    int style = std::to_underlying(cr->style);
+    if (LabeledCombo("Shape", &style, styles, 2)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*cr);
+      cr->style = static_cast<CornerReliefStyle>(style);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    // 0 is "from the bend": radius plus thickness, what clears both bends.
+    ExprDim(state, feature, index, commit, "Size", cr->sizeExpr, cr->size);
   } else if (auto* hm = dynamic_cast<HemFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Return", hm->lengthExpr,
             hm->length);

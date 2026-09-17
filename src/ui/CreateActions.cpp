@@ -29,6 +29,7 @@
 #include "core/drawing/DrawingRender.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CornerReliefFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -551,6 +552,14 @@ void CreateJog(AppState& state) {
     height = 2.0 * rules->EffectiveBendRadius() + 2.0 * rules->thickness;
   BeginPreviewFeature(state, std::make_unique<JogFeature>(
                                  NextName(state, "Jog"), line, height));
+}
+
+void CreateCornerRelief(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state,
+                      std::make_unique<CornerReliefFeature>(
+                          NextName(state, "Corner relief"), NewestBody(state)));
 }
 
 std::optional<SketchPlane>

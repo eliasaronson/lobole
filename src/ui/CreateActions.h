@@ -110,6 +110,9 @@ void CreateHem(AppState& state);
 
 void CreateJog(AppState& state);
 
+// Relieves every corner of the newest body where two bends cross.
+void CreateCornerRelief(AppState& state);
+
 // The plane a plane-referencing feature points at (a base plane, or an
 // earlier DatumPlane by id), as the UI sees it: the datum's last regenerated
 // output. nullopt when the id does not resolve. The regen path has

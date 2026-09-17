@@ -188,10 +188,23 @@ disagree about a bend line or what a bend records. Format bump.
   settles which piece each bend folds from by where its material is once
   every cut is made, not by the order it was cut in.
 
-**S8 — Corners.** `CornerReliefFeature` (rectangular / obround / tear, applied
-at a corner where two bends meet) and closed-corner treatment on a miter. This
-is the part that is fiddly rather than hard: three-way and non-orthogonal
-corners are refused by name, not approximated.
+**S8 — Corners.** Two things a corner where two walls meet can need, and
+the corners neither is shaped for refused by name. Format bump.
+
+- *Closed corners*, an EdgeFlange option: two flanges that only touch at a
+  square corner are each carried past it as far as the other sticks out
+  there, then mitred exactly as flanges that overlapped to begin with — so
+  the unfolder already knows what to do with them.
+- *Corner relief*, a feature: a round or square cut at every corner of a body
+  where two bends cross, centred where their bend lines meet and, unless
+  sized, one bend radius plus a thickness across — what clears both bends.
+  It cuts through the panel and up to where the walls start, and no higher.
+  It crosses the bends at a slant, so the flat pattern carries it by its
+  neutral trace like a mitre; a refold of a relieved corner wraps it
+  radially instead, and is not exact.
+- Three bends at one corner, or two meeting at other than a right angle, are
+  refused: a relief or a mitre shaped for a square two-bend corner would be
+  plausible there, and wrong.
 
 **S9 — Unfold / Refold.** `Unfold` lays the bends made by chosen flange
 features (all, by default) flat in place; whatever follows is drawn and cut

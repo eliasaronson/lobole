@@ -152,6 +152,7 @@ bool EdgeFlangeFeature::Execute(RegenContext& ctx) {
   spec.relief = relief;
   spec.reliefWidth = reliefW;
   spec.reliefDepth = reliefD;
+  spec.closedCorners = closedCorners;
   // A mitred corner leaves a gap a tenth of the sheet wide: enough that the
   // two walls are two walls — touching ones fuse into one solid, and the flat
   // pattern cannot say which bend the corner belongs to.

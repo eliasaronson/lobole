@@ -104,4 +104,9 @@ public:
   // DFM check is later entitled to say about it — Tear is a decision, None
   // is the claim that there is nothing to relieve.
   std::optional<sheet::ReliefStyle> reliefStyle;
+
+  // Where two picked edges meet at a corner and their flanges only touch
+  // there, carry both past the corner and mitre them into a closed corner.
+  // Open (false) leaves the square notch a brake would leave.
+  bool closedCorners = false;
 };

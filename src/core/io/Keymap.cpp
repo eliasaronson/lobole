@@ -215,6 +215,8 @@ const Binding kDefaults[] = {
      "Sheet metal", ""},
     {"part.sheet_jog", Context::Part, "Jog (step a panel along a line)",
      "Sheet metal", ""},
+    {"part.sheet_corner_relief", Context::Part,
+     "Corner relief (where two bends cross)", "Sheet metal", ""},
 
     {"part.simulation", Context::Part, "Simulation (FEM stress study)", "Tools",
      "Q"},

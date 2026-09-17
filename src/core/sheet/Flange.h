@@ -42,6 +42,10 @@ struct FlangeSpec {
   double offsetStart = 0.0, offsetEnd = 0.0; // insets from the edge's ends
   ReliefStyle relief = ReliefStyle::None;
   double reliefWidth = 0.0, reliefDepth = 0.0;
+  // Where two of the picked edges meet at a corner and their flanges only
+  // touch at a point (bent outside the panel), close the corner: extend each
+  // past the corner as far as the other sticks out, then mitre them.
+  bool closedCorners = false;
 };
 
 // Builds one flange per picked edge onto the bodies they belong to and

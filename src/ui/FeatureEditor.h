@@ -52,10 +52,11 @@ enum class PickSlot : int {
   FastenerFarEnd,
   // Sheet metal: the straight edges a wall is bent up from, and the body a
   // flat pattern lays flat.
-  EdgeFlangeEdges, // Edge, multi
-  FlatPatternBody, // Body
-  UnfoldBody,      // Body
-  HemEdges,        // Edge, multi
+  EdgeFlangeEdges,  // Edge, multi
+  FlatPatternBody,  // Body
+  UnfoldBody,       // Body
+  HemEdges,         // Edge, multi
+  CornerReliefBody, // Body
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace sheet {
 namespace {
@@ -339,6 +340,88 @@ std::string ApplyFlanges(std::vector<Body>& bodies,
       plans.push_back(std::move(plan));
     }
 
+    // The corner two plans share, if any, and each edge's direction AWAY
+    // from it, into its own span.
+    struct Corner {
+      gp_Pnt at;
+      gp_Vec di, dj;
+      bool iStart = false, jStart = false;
+    };
+    const auto cornerOf = [](const Plan& a,
+                             const Plan& b) -> std::optional<Corner> {
+      for (const gp_Pnt& va : {a.frame.p0, a.frame.p1})
+        for (const gp_Pnt& vb : {b.frame.p0, b.frame.p1})
+          if (Coincide(va, vb)) {
+            Corner c;
+            c.at = va;
+            c.iStart = Coincide(va, a.frame.p0);
+            c.jStart = Coincide(vb, b.frame.p0);
+            c.di = gp_Vec(va, c.iStart ? a.frame.p1 : a.frame.p0);
+            c.dj = gp_Vec(vb, c.jStart ? b.frame.p1 : b.frame.p0);
+            c.di.Normalize();
+            c.dj.Normalize();
+            return c;
+          }
+      return std::nullopt;
+    };
+
+    // ---- 1b. Closing corners: an open corner — two flanges that only touch
+    // at a point — is closed by carrying each flange past the corner as far
+    // as the other one sticks out there. The mitre below then cuts them
+    // apart along the bisector, exactly as it does flanges that overlapped
+    // to begin with.
+    if (spec.closedCorners) {
+      std::vector<double> extStart(plans.size(), 0.0);
+      std::vector<double> extEnd(plans.size(), 0.0);
+      const auto reach = [](const CADShape& solid, const gp_Pnt& from,
+                            const gp_Vec& dir) {
+        double far_ = 0.0;
+        for (TopExp_Explorer ex(solid.GetShape(), TopAbs_VERTEX); ex.More();
+             ex.Next())
+          far_ = std::max(
+              far_, gp_Vec(from, BRep_Tool::Pnt(TopoDS::Vertex(ex.Current())))
+                        .Dot(dir));
+        return far_;
+      };
+      for (size_t i = 0; i < plans.size(); ++i) {
+        for (size_t j = i + 1; j < plans.size(); ++j) {
+          if (plans[i].body != plans[j].body)
+            continue;
+          const auto c = cornerOf(plans[i], plans[j]);
+          if (!c)
+            continue;
+          const double tol = 1e-9 * std::max(1.0, plans[i].solid.Volume());
+          if (OverlapVolume(plans[i].solid, plans[j].solid) > tol)
+            continue; // already overlapping: the mitre alone closes it
+          if (std::abs(c->di.Dot(c->dj)) > 1e-6)
+            return "only a square corner can be closed - these two edges "
+                   "meet at another angle";
+          // An end the user inset is meant to stop short; leave it alone.
+          const double ei = reach(plans[j].solid, c->at, -c->di);
+          const double ej = reach(plans[i].solid, c->at, -c->dj);
+          if (c->iStart ? spec.offsetStart <= 1e-9 : spec.offsetEnd <= 1e-9)
+            (c->iStart ? extStart[i] : extEnd[i]) =
+                std::max(c->iStart ? extStart[i] : extEnd[i], ei);
+          if (c->jStart ? spec.offsetStart <= 1e-9 : spec.offsetEnd <= 1e-9)
+            (c->jStart ? extStart[j] : extEnd[j]) =
+                std::max(c->jStart ? extStart[j] : extEnd[j], ej);
+        }
+      }
+      for (size_t i = 0; i < plans.size(); ++i) {
+        if (extStart[i] <= 0.0 && extEnd[i] <= 0.0)
+          continue;
+        Plan& plan = plans[i];
+        plan.a0 -= extStart[i];
+        plan.a1 += extEnd[i];
+        std::string why;
+        plan.solid = BuildFlange(
+            plan.frame, At(plan.frame, plan.origin, 0.0, 0.0, plan.a0), R,
+            spec.angle, t, spec.wall, plan.a1 - plan.a0, why);
+        if (!plan.solid.IsValid())
+          return why;
+      }
+    }
+
     // ---- 2. Mitre every pair that meets at a corner AND overlaps. Two
     // flanges set back into the panel both fill the corner square; left
     // alone they fuse into a solid block, and the flat pattern cannot say
@@ -350,27 +433,14 @@ std::string ApplyFlanges(std::vector<Body>& bodies,
         Plan& pj = plans[j];
         if (pi.body != pj.body)
           continue;
-        gp_Pnt corner;
-        gp_Vec di, dj;
-        bool shared = false;
-        for (const gp_Pnt& vi : {pi.frame.p0, pi.frame.p1})
-          for (const gp_Pnt& vj : {pj.frame.p0, pj.frame.p1})
-            if (!shared && Coincide(vi, vj)) {
-              shared = true;
-              corner = vi;
-              di = gp_Vec(vi, Coincide(vi, pi.frame.p0) ? pi.frame.p1
-                                                        : pi.frame.p0);
-              dj = gp_Vec(vj, Coincide(vj, pj.frame.p0) ? pj.frame.p1
-                                                        : pj.frame.p0);
-            }
-        if (!shared)
+        const auto c = cornerOf(pi, pj);
+        if (!c)
           continue;
+        const gp_Pnt corner = c->at;
         const double tol = 1e-9 * std::max(1.0, pi.solid.Volume());
         if (OverlapVolume(pi.solid, pj.solid) <= tol)
           continue;
-        di.Normalize();
-        dj.Normalize();
-        gp_Vec split = di - dj;
+        gp_Vec split = c->di - c->dj;
         if (split.Magnitude() < 1e-9)
           return "two picked edges run the same way from one corner, so "
                  "there is no mitre between them";

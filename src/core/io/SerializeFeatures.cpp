@@ -5,6 +5,7 @@
 #include "core/Feature.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CornerReliefFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -1046,6 +1047,8 @@ json FeatureToJson(const Feature& feature) {
       j["offset_end_expr"] = ef->offsetEndExpr;
     if (ef->reliefStyle)
       j["relief"] = sheet::ReliefStyleName(*ef->reliefStyle);
+    if (ef->closedCorners)
+      j["corners"] = "closed";
   } else if (auto* fp = dynamic_cast<const FlatPatternFeature*>(&feature)) {
     j["body_id"] = fp->bodyId;
     if (fp->fixedFace.IsSet())
@@ -1087,6 +1090,14 @@ json FeatureToJson(const Feature& feature) {
       j["angle_deg_expr"] = jg->angleDegExpr;
     if (jg->flip)
       j["flip"] = true;
+  } else if (auto* cr = dynamic_cast<const CornerReliefFeature*>(&feature)) {
+    j["body_id"] = cr->bodyId;
+    if (cr->style != CornerReliefStyle::Circular)
+      j["style"] = CornerReliefStyleName(cr->style);
+    if (cr->size > 0.0)
+      j["size"] = cr->size;
+    if (!cr->sizeExpr.empty())
+      j["size_expr"] = cr->sizeExpr;
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
     j["thickness"] = sh->thickness;
@@ -1268,7 +1279,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "dimension `length` states, offset_start?/offset_end? (+_expr) mm - "
      "insets that stop the bend line INSIDE the panel and so call for "
      "relief, relief?: none|rectangular|obround|tear (omitted = the "
-     "document's). One bend per edge, each recorded on the body"},
+     "document's), corners?: open (default) | closed - carry two flanges "
+     "that meet at a square corner past it and mitre them shut. One bend "
+     "per edge, each recorded on the body; edges meeting at a corner whose "
+     "flanges would overlap are always mitred"},
     {"FlatPattern", 110,
      "body_id (the sheet body's created_by), fixed_face? {feature_id, "
      "element} - the BLANK: the body laid flat, replacing its shape in "
@@ -1301,6 +1315,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "flip? - which side of the line is carried up. Two opposing bends the "
      "full width of the panel; a height under what the two bends alone climb, "
      "(2R + t)(1 - cos angle), is refused"},
+    {"CornerRelief", 113,
+     "body_id, style?: circular (default) | rectangular, size? (+_expr) mm - "
+     "radius or half-side, omitted = bend radius + thickness. Cuts a relief "
+     "at EVERY corner where two bends of the body cross; three bends at one "
+     "corner, or two at other than a right angle, are refused"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -2021,6 +2040,14 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "' (expected one of: " + sheet::ReliefStyleList() + ")");
       ef->reliefStyle = style;
     }
+    if (j.contains("corners")) { // v113
+      const std::string v = j.at("corners").get<std::string>();
+      if (v == "closed")
+        ef->closedCorners = true;
+      else if (v != "open")
+        throw std::runtime_error("unknown flange corners '" + v +
+                                 "' (expected one of: open, closed)");
+    }
     out = std::move(ef);
   } else if (type == "FlatPattern") { // v110
     auto fp = std::make_unique<FlatPatternFeature>(
@@ -2070,6 +2097,19 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     jg->angleDegExpr = j.value("angle_deg_expr", std::string{});
     jg->flip = j.value("flip", false);
     out = std::move(jg);
+  } else if (type == "CornerRelief") { // v113
+    auto cr = std::make_unique<CornerReliefFeature>(
+        name, j.at("body_id").get<uint64_t>());
+    if (j.contains("style")) {
+      const std::string v = j.at("style").get<std::string>();
+      if (!CornerReliefStyleFromString(v, cr->style))
+        throw std::runtime_error(
+            "unknown corner relief style '" + v +
+            "' (expected one of: " + CornerReliefStyleList() + ")");
+    }
+    cr->size = j.value("size", 0.0);
+    cr->sizeExpr = j.value("size_expr", std::string{});
+    out = std::move(cr);
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
     for (const auto& ej : j.value("open_faces", json::array()))

@@ -17,7 +17,10 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    112; // v112: `Hem` {edges, length, kind?, gap?, outside?} and `Jog`
+    113; // v113: `CornerRelief` {body_id, style?, size?} and an EdgeFlange's
+         //      `corners`: open (default) | closed. Both refuse an unknown
+         //      name (docs/sheetmetal/plan.md, S8).
+         // v112: `Hem` {edges, length, kind?, gap?, outside?} and `Jog`
          //      {sketch_id, height, angle_deg?, flip?}; an edge flange over
          //      edges meeting at a corner now MITRES them (bends record the
          //      trim, transiently). An unknown hem `kind` is refused by name
