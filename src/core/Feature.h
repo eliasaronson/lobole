@@ -3,6 +3,7 @@
 #include "cad/CADKernel.h"
 #include "core/ElementMap.h"
 #include "core/Expression.h"
+#include "core/SheetMetal.h"
 #include "core/Units.h"
 
 #include <functional>
@@ -36,6 +37,30 @@ struct ThreadRegion {
   std::string designation;
   double length = 0.0, minimumEngagement = 0.0;
   bool external = false;
+};
+
+// A bend a sheet feature MADE, written down rather than measured back off the
+// cylindrical faces afterwards (docs/sheetmetal/plan.md). Unfolding is then
+// arithmetic over a graph of these — BA = angle * (R + K*t) — instead of
+// surface development, which is what makes refold(unfold(x)) == x a property
+// a test can assert rather than a tolerance to hope about.
+//
+// Transient like the shape and the element map: the producing feature stamps
+// it on every regeneration, and nothing about it is serialized.
+struct BendRegion {
+  uint64_t featureId = 0; // the feature that made this bend
+  glm::dvec3 axisOrigin{0.0};
+  glm::dvec3 axisDir{0.0, 0.0, 1.0};
+  double radius = 0.0; // INSIDE radius, mm
+  double angle = 0.0;  // radians, always > 0; `up` carries the sense
+  bool up = false; // sense about axisDir; the DXF layer a bend line lands on
+  double kFactor = 0.0;
+  // Where that K came from ("table:steel R/t<2", "rules", "override"). A bend
+  // whose K nobody can trace is a bend nobody can argue with when the part
+  // comes back the wrong length.
+  std::string kSource;
+  ElementRef parentFace, childFace; // the flat panels it joins
+  ElementRef innerFace, outerFace;  // the cylindrical faces themselves
 };
 
 struct Body {
@@ -82,6 +107,8 @@ struct Body {
   // bodies. Transient like the shape, stamped by the creating feature.
   bool reference = false;
   std::vector<ThreadRegion> threadRegions; // derived opt-in contact semantics
+  // The bends this body carries, in the order the features made them.
+  std::vector<BendRegion> bends;
 };
 
 class Feature;
@@ -102,6 +129,11 @@ struct RegenContext {
   // bytes rather than parameters loads from. Null only in a hand-built
   // context.
   const std::map<std::string, std::vector<unsigned char>>* assets = nullptr;
+
+  // The document's sheet-metal rules, or null when the part is not sheet
+  // metal. A flange REFUSES rather than guessing a thickness, so this being
+  // null is a reportable state and not a default to fall back on.
+  const sheet::SheetMetalRules* sheetMetal = nullptr;
 
   // Searches features[0, currentIndex) by stable id; nullptr if absent.
   const Feature* FindById(uint64_t id) const;

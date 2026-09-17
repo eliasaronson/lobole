@@ -364,7 +364,9 @@ bool Document::Regenerate() {
         if (!m_features[i]->IsDatum() || EffectiveSuppressed(i))
           continue;
         m_features[i]->ClearError();
-        RegenContext ctx{m_bodies, m_features, i, &m_symbols, &m_assets};
+        RegenContext ctx{m_bodies,  m_features,
+                         i,         &m_symbols,
+                         &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         datums++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty())
@@ -414,7 +416,9 @@ bool Document::Regenerate() {
       m_features[i]->ClearError();
       m_features[i]->ClearWarning();
       if (!EffectiveSuppressed(i)) {
-        RegenContext ctx{m_bodies, m_features, i, &m_symbols, &m_assets};
+        RegenContext ctx{m_bodies,  m_features,
+                         i,         &m_symbols,
+                         &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         m_lastStats.executed++;
         if (!m_features[i]->Execute(ctx)) {
           if (m_features[i]->GetError().empty()) {

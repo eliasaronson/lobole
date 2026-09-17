@@ -55,6 +55,7 @@ add_executable(designer_tests
     test_rib.cpp
     test_thread.cpp
     test_sheetmetal.cpp
+    test_flange.cpp
     test_sweep.cpp
     test_curve3d.cpp
     test_pipe.cpp
@@ -461,6 +462,14 @@ add_test(NAME derived_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/derived_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(derived_smoke PROPERTIES TIMEOUT 120)
+
+# Sheet metal (v108/v109): the rules and the first two features over the RPC —
+# the gauge tables, the refusals in words, and a flanged volume checked
+# against the bend allowance by hand.
+add_test(NAME sheetmetal_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sheetmetal_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sheetmetal_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A4 propagation: editing a part re-solves the assembly on tab
 # activation, without an explicit solve_assembly. Headless (no display).

@@ -199,6 +199,25 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "thickness_expr"?: str, "open_faces": [{{"feature_id": <same body>,
   "element": <stable face name from list_elements>}}, ...]}} — at least one
   open face is required (the faces removed to hollow through).
+- BaseFlange (the first wall of a SHEET part): {{"type": "BaseFlange",
+  "name": str, "sketch_id": <a closed-profile sketch>, "reversed"?: bool,
+  "regions"?: [[entity ids]]}} — the profile thickened by the document's
+  sheet-metal thickness, so it takes none of its own. Call
+  set_sheet_metal_rules (material + gauge) first or it REFUSES: a blank is
+  cut from one sheet, so a flange has no thickness to guess.
+- EdgeFlange (bend a wall up from a sheet edge): {{"type": "EdgeFlange",
+  "name": str, "edges": [{{"feature_id": <the sheet body's created_by>,
+  "element": <stable STRAIGHT edge name from list_elements>}}, ...],
+  "length": num, "length_expr"?: str, "angle_deg": num (default 90),
+  "angle_deg_expr"?: str, "radius"?: num (omitted = the document's bend
+  radius), "radius_expr"?: str, "position"?: "material_inside" (default) |
+  "material_outside" | "bend_outside", "length_mode"?: "flat" (default) |
+  "outside" | "inside", "offset_start"?: num, "offset_end"?: num,
+  "relief"?: "none"|"rectangular"|"obround"|"tear"}} — WHICH of a rim's two
+  edges you pick decides which way the wall folds, and `length_mode` says
+  which dimension `length` states (a drawing dimensions to a mold line, not
+  to the flat wall). Each edge records a bend on the body: radius, angle, K
+  and where that K came from.
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
 - Derived (a copy of another part's bodies, to draw on): {{"type":
   "Derived", "name": str, "source_part": <part slot id from

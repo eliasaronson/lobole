@@ -17,7 +17,16 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    108; // v108: sheet-metal rules in the envelope (`sheet_metal`, absent
+    109; // v109: the first two sheet features. `BaseFlange` {sketch_id,
+         //      reversed?, regions?} is a closed profile thickened by the
+         //      document's sheet-metal thickness; `EdgeFlange` {edges,
+         //      length, angle_deg, radius?, position?, length_mode?,
+         //      offset_start?, offset_end?, relief?} bends a wall up from a
+         //      straight edge of a panel. Neither carries a thickness — that
+         //      is what v108's rules are for — and an unknown `position`,
+         //      `length_mode` or `relief` is refused naming the accepted set
+         //      (docs/sheetmetal/plan.md, S2+S3).
+         // v108: sheet-metal rules in the envelope (`sheet_metal`, absent
          //      when the part is not sheet metal): {material, gauge,
          //      thickness, bend_radius?, k_factor?, relief?, relief_width?,
          //      relief_depth?}. The optional fields are DERIVED from the

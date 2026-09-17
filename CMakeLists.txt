@@ -267,6 +267,8 @@ set(core_sources
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
     src/core/SheetMetal.cpp
+    src/core/features/BaseFlangeFeature.cpp
+    src/core/features/EdgeFlangeFeature.cpp
     src/core/ToleranceStack.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp

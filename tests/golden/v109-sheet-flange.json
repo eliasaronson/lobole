@@ -1,0 +1,33 @@
+{
+  "format": "designer-document",
+  "version": 109,
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Blank",
+      "id": 1,
+      "plane": {
+        "origin": [0, 0, 0],
+        "normal": [0, 0, 1],
+        "uAxis": [1, 0, 0]
+      },
+      "entities": [
+        {"type": "line", "id": 1, "a": [0, 0], "b": [100, 0]},
+        {"type": "line", "id": 2, "a": [100, 0], "b": [100, 60]},
+        {"type": "line", "id": 3, "a": [100, 60], "b": [0, 60]},
+        {"type": "line", "id": 4, "a": [0, 60], "b": [0, 0]}
+      ]
+    },
+    {
+      "type": "BaseFlange",
+      "name": "Base",
+      "id": 2,
+      "sketch_id": 1
+    }
+  ],
+  "sheet_metal": {
+    "material": "aluminum",
+    "gauge": "1.5mm",
+    "thickness": 1.5
+  }
+}

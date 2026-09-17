@@ -3,12 +3,14 @@
 
 #include "core/Angles.h"
 #include "core/Feature.h"
+#include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
+#include "core/features/EdgeFlangeFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
@@ -1004,6 +1006,41 @@ json FeatureToJson(const Feature& feature) {
       arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
     }
     j["edges"] = std::move(arr);
+  } else if (auto* bf = dynamic_cast<const BaseFlangeFeature*>(&feature)) {
+    j["sketch_id"] = bf->sketchId;
+    if (bf->reversed)
+      j["reversed"] = true;
+    if (!bf->regions.empty())
+      j["regions"] = bf->regions;
+  } else if (auto* ef = dynamic_cast<const EdgeFlangeFeature*>(&feature)) {
+    json arr = json::array();
+    for (const auto& ref : ef->edges)
+      arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
+    j["edges"] = std::move(arr);
+    j["length"] = ef->length;
+    if (!ef->lengthExpr.empty())
+      j["length_expr"] = ef->lengthExpr;
+    j["angle_deg"] = ef->angleDeg;
+    if (!ef->angleDegExpr.empty())
+      j["angle_deg_expr"] = ef->angleDegExpr;
+    if (ef->radius > 0.0)
+      j["radius"] = ef->radius;
+    if (!ef->radiusExpr.empty())
+      j["radius_expr"] = ef->radiusExpr;
+    if (ef->position != FlangePosition::MaterialInside)
+      j["position"] = FlangePositionName(ef->position);
+    if (ef->lengthMode != FlangeLengthMode::Flat)
+      j["length_mode"] = FlangeLengthModeName(ef->lengthMode);
+    if (ef->offsetStart != 0.0)
+      j["offset_start"] = ef->offsetStart;
+    if (!ef->offsetStartExpr.empty())
+      j["offset_start_expr"] = ef->offsetStartExpr;
+    if (ef->offsetEnd != 0.0)
+      j["offset_end"] = ef->offsetEnd;
+    if (!ef->offsetEndExpr.empty())
+      j["offset_end_expr"] = ef->offsetEndExpr;
+    if (ef->reliefStyle)
+      j["relief"] = sheet::ReliefStyleName(*ef->reliefStyle);
   } else if (auto* sh = dynamic_cast<const ShellFeature*>(&feature)) {
     j["body_id"] = sh->bodyId;
     j["thickness"] = sh->thickness;
@@ -1169,6 +1206,23 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
      "(docs/parts/plan.md)"},
+    {"BaseFlange", 109,
+     "sketch_id, reversed?, regions? - the FIRST wall of a sheet part: the "
+     "closed profile thickened by the document's sheet-metal thickness, so "
+     "it takes no thickness of its own (set_sheet_metal_rules first, or it "
+     "REFUSES - a blank is cut from one sheet). The profile is the inside "
+     "face; `reversed` grows the material the other way"},
+    {"EdgeFlange", 109,
+     "edges [{feature_id, element}] (STRAIGHT edges of a flat panel of one "
+     "sheet body), length (+_expr) mm, angle_deg (+_expr, default 90 - the "
+     "bend's included sweep), radius? (+_expr) mm (omitted = the document's "
+     "bend radius), position?: material_inside (default) | material_outside "
+     "| bend_outside - which mold line the picked edge marks, length_mode?: "
+     "flat (default, the wall past the bend) | outside | inside - which "
+     "dimension `length` states, offset_start?/offset_end? (+_expr) mm - "
+     "insets that stop the bend line INSIDE the panel and so call for "
+     "relief, relief?: none|rectangular|obround|tear (omitted = the "
+     "document's). One bend per edge, each recorded on the body"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -1844,6 +1898,52 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         type == "Chamfer" ? EdgeBlendOp::Chamfer : EdgeBlendOp::Fillet);
     fil->radiusExpr = j.value("radius_expr", std::string{});
     out = std::move(fil);
+  } else if (type == "BaseFlange") { // v109
+    auto bf = std::make_unique<BaseFlangeFeature>(
+        name, j.at("sketch_id").get<uint64_t>(), j.value("reversed", false));
+    if (j.contains("regions"))
+      bf->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
+    out = std::move(bf);
+  } else if (type == "EdgeFlange") { // v109
+    std::vector<ElementRef> picked;
+    for (const auto& ej : j.value("edges", json::array()))
+      picked.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
+                                  ej.value("element", std::string{})});
+    auto ef = std::make_unique<EdgeFlangeFeature>(name, std::move(picked),
+                                                  j.value("length", 10.0),
+                                                  j.value("angle_deg", 90.0));
+    ef->lengthExpr = j.value("length_expr", std::string{});
+    ef->angleDegExpr = j.value("angle_deg_expr", std::string{});
+    ef->radius = j.value("radius", 0.0);
+    ef->radiusExpr = j.value("radius_expr", std::string{});
+    if (j.contains("position")) {
+      const std::string v = j.at("position").get<std::string>();
+      if (!FlangePositionFromString(v, ef->position))
+        throw std::runtime_error("unknown flange position '" + v +
+                                 "' (expected one of: " + FlangePositionList() +
+                                 ")");
+    }
+    if (j.contains("length_mode")) {
+      const std::string v = j.at("length_mode").get<std::string>();
+      if (!FlangeLengthModeFromString(v, ef->lengthMode))
+        throw std::runtime_error(
+            "unknown flange length_mode '" + v +
+            "' (expected one of: " + FlangeLengthModeList() + ")");
+    }
+    ef->offsetStart = j.value("offset_start", 0.0);
+    ef->offsetStartExpr = j.value("offset_start_expr", std::string{});
+    ef->offsetEnd = j.value("offset_end", 0.0);
+    ef->offsetEndExpr = j.value("offset_end_expr", std::string{});
+    if (j.contains("relief")) {
+      const std::string v = j.at("relief").get<std::string>();
+      sheet::ReliefStyle style{};
+      if (!sheet::ReliefStyleFromString(v, style))
+        throw std::runtime_error(
+            "unknown relief style '" + v +
+            "' (expected one of: " + sheet::ReliefStyleList() + ")");
+      ef->reliefStyle = style;
+    }
+    out = std::move(ef);
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
     for (const auto& ej : j.value("open_faces", json::array()))
