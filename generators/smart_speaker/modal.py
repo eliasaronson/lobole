@@ -5,17 +5,16 @@ at are a property of the panel, its thickness, its material and the span
 between whatever holds it. This runs a modal study on the two that matter and
 reports the six lowest.
 
-## One panel at a time, because that is what the app does
+## One panel at a time, which is the right unit anyway
 
-FEM here is PART-scope: a `Study` is a document-level object on a part, an
-assembly tab refuses it ("the active document is an assembly, not a part"),
-and even within one part each body is meshed and solved SEPARATELY — one
-eigenproblem per body, no shared stiffness matrix and no bonded contact. So
-there is no way to ask for a mode of the whole cabinet, and no way to fake
-one by putting six panels in a part: that is six plate problems.
+This script is PART-scope: a `Study` on a part, each body meshed and solved
+separately — one plate problem per panel. It is the panel that radiates and
+its modes are a panel property, so that is the unit to reason in.
 
-For panel colouration this is the right unit anyway. It is the panel that
-radiates, and its modes are a panel property.
+The app can also study a panel IN the assembly now (S1/S2: a `meshed`
+occurrence with its neighbours `rigid` or `bonded`), and that is what answers
+the question this idealisation cannot — see "What the braces are actually
+worth" below.
 
 ## The idealisation, which matters more than anything below
 
@@ -70,6 +69,27 @@ Two things follow, and the second is the interesting one:
     ring brace butts against a continuous face, so there is no face to
     clamp, and only the divider's dado is a real one. That measurement needs
     the baffle's inner face split along the brace line first.
+
+## What the braces are actually worth
+
+An ASSEMBLY study answers it, because the braces come in as their own
+occurrences and the fuse imprints the contact patch for us. The side wall,
+meshed, with the five walls it is glued to as rigid supports, and the ring
+brace and brace ladder in three states (25 mm mesh, `scratch/`):
+
+    braces absent (walls only)        352.5 Hz   15,045 el
+    braces BONDED (their own stiffness) 458.9 Hz  103,086 el
+    braces RIGID (the idealisation)   562.4 Hz   14,972 el
+
+The bonded figure is the real one and it lands where a bracket says it must,
+between the two. So the horizontal braces DO buy the side wall 30% — 353 to
+459 Hz — which is more than the plate formula above credits them with,
+because they stiffen the panel as ribs rather than only shortening its span.
+Reading the rigid number as the answer would have overstated it by 22%.
+
+(The 352.5 Hz here and the 311.0 Hz in the table are the same panel under
+different clamps: this one is held where the walls actually touch it, the
+table's on its edge faces. That is the 20% the idealisation note predicts.)
 
 Trust: mesh-converged at 311.0 / 309.9 / 309.4 Hz over 15k / 21k / 34k
 elements, and the hand calculation above agrees within 5%.
