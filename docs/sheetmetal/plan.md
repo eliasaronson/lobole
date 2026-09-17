@@ -136,13 +136,17 @@ needs. Format bump (S2 + S3 together).
 plus the `Flat` configuration, plus `fixedFace` (defaults to the base flange's
 first face). Format bump.
 
-**S5 — Seeing it.** Bend lines as a `SceneOverlays` layer on the flat body: red
-up, blue down, with angle and radius labels. A Sheet Metal panel beside
-Variables and Tolerances: the rules at the top, one row per bend below — radius,
-angle, direction, K and where the K came from — each editable, writing a
-per-bend override. Toolbar `Flatten` toggle (the configuration switch), tree
-icons, `Commands.cpp` + `Keymap.cpp` rows, `kToolCases` rows for the three new
-features.
+**S5 — Seeing it.** A Sheet Metal section of the Variables panel: the stock at
+the top with every derived number labelled by where it came from, "Show the
+blank" as the Flat configuration, and one row per bend below — angle, radius,
+direction, K, its provenance and the flat stock it eats. Toolbar buttons, tree
+icons, `Commands.cpp` + `Keymap.cpp` rows, pick slots and editor fields, and
+`kToolCases` rows for the three new tools.
+
+Bend lines as a 3D `SceneOverlays` layer (red up, blue down, with labels) are
+NOT part of this: the bend list carries the same facts in text and the DXF
+carries them where a shop reads them. Worth adding when somebody is reading
+the folded part on screen rather than the blank.
 
 **S6 — `check_sheet_metal` and DXF.** The check in the shape of `check_geometry`
 / `check_fasteners`: hole-to-bend distance, flange below minimum height,
