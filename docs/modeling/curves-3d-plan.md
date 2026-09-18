@@ -1,4 +1,4 @@
-# 3D curves — plan (fit-spline, helix, control-poly) + the features they unlock
+# 3D curves — plan (fit-spline, helix, control-poly, bent-path) + the features they unlock
 
 **Status (2026-07-21):** Phases 0–3 **SHIPPED + tested** — 3D curves, curve
 sweep paths, Pipe, guided sweep, **and guided loft** (single guide, FreeCAD's
@@ -12,12 +12,16 @@ picking for fit/control curves — today points are typed/dragged in the panel).
 Supersedes [interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md)
 §3 ("3D fit-spline"), widening it from an import driver into a modeling
 workstream. Scope signed off 2026-07-21: **build through Phase 3** (guided
-sweeps/lofts), curve kinds **fit-spline + helix + 3D control-poly**.
+sweeps/lofts), curve kinds **fit-spline + helix + 3D control-poly**. A fourth
+kind, **bent-path**, arrived 2026-09-18 (format v117) from the grill dogfood:
+a bent tube is not a curve anyone fits, it is corners and a former.
 
 ### Progress
-- **P0 ✅ (format v42)** — `CurveFeature` ("Curve3D"): FitSpline
-  (`GeomAPI_Interpolate`), Helix (line on `Geom_CylindricalSurface`),
-  ControlPoly (clamped B-spline). Non-body, caches edge + polyline; renders via
+- **P0 ✅ (format v42, extended v117)** — `CurveFeature` ("Curve3D"):
+  FitSpline (`GeomAPI_Interpolate`), Helix (line on
+  `Geom_CylindricalSurface`), ControlPoly (clamped B-spline), BentPath
+  (line–arc–line, `GC_MakeArcOfCircle`; golden `v117-bent-path`). Non-body,
+  caches edge + polyline; renders via
   `AppendCurve3DLines`; feature-tree icon; MCP `add_feature`; golden
   `v42-curve3d`. Tests: `tests/test_curve3d.cpp`.
 - **P1 ✅** — Sweep path generalized to sketch **or** Curve3D
@@ -127,6 +131,18 @@ class:
 3. **`ControlPolyBSpline3D`** — poles in space + degree, direct
    `Geom_BSplineCurve` (clamped-uniform knots, mirroring the 2D
    `MakeBSplineCurve`). Sibling to the 2D control-poly spline.
+4. **`BentPath`** (v117) — the corners of a centreline and ONE `radius`, the
+   former the tube is bent round. Built line–arc–line: at each corner the
+   tangent length is `R·tan(θ/2)`, and `GC_MakeArcOfCircle` through three
+   points gives the arc, so the result is exact circular geometry rather
+   than a fit through samples. It REFUSES what a bender would: a straight
+   too short to hold two adjacent arcs (naming the length it has and the
+   one it needs) and a corner that doubles back. `Bends()` reads each corner
+   back as `{angle, radius, straight_before, roll}` — which is the program a
+   bender is given, served by the `tube_schedule` RPC — and `Length()` is
+   the cut length, arcs included. **The manufacturing driver**: a spline
+   fitted through sampled arc points is a tube nobody can quote a former
+   for.
 
 ### Render
 `AppendCurve3DLines(state, overlay)` beside `AppendDatumAxisLines`

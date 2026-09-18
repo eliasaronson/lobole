@@ -1399,9 +1399,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "applied as parent · T · Rx · Ry · Rz"},
     {"Curve3D", 42,
      "kind: fit_spline|control_poly|bent_path|helix; points [[x,y,z]...], "
-     "degree?, "
-     "closed?; helix: origin, axis, radius (+_expr), pitch (+_expr), turns "
-     "(+_expr), left_handed?"},
+     "degree?, closed?; bent_path: points are the CORNERS in order and "
+     "radius (+_expr) is REQUIRED — the former the tube is bent round, to "
+     "its centreline, built line-arc-line; helix: origin, axis, radius "
+     "(+_expr), pitch (+_expr), turns (+_expr), left_handed?"},
     {"Boolean", 1,
      "target_id, tool_id (body created_by ids), op: "
      "union|subtract|intersect"},

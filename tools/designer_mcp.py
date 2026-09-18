@@ -170,9 +170,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "mode": "new_body"|"add"|"cut"}} — each sketch's outer profile is a
   section, in order; put the sketches on datum planes at different heights.
 - Curve3D (a 3D curve for sweep/pipe/loft paths): {{"type": "Curve3D",
-  "name": str, "kind": "fit_spline"|"control_poly"|"helix", ...}}
+  "name": str, "kind": "fit_spline"|"control_poly"|"bent_path"|"helix",
+  ...}}
   fit_spline/control_poly: "points": [[x,y,z], ...], "degree"?: int,
   "closed"?: bool
+  bent_path (a bent tube's centreline): "points": [[x,y,z], ...] — the
+  CORNERS, in order — and "radius": num (+"radius_expr"), the former it is
+  bent round, to the centreline. Built line-arc-line, so the bend has a
+  radius and an angle a bender can be given (tube_schedule)
   helix: "origin": [x,y,z], "axis": [x,y,z], "radius": num, "pitch": num,
   "turns": num (each with "_expr" twins), "left_handed"?: bool
 - Pipe (tube along a path, no profile sketch needed): {{"type": "Pipe",

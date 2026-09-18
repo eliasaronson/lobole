@@ -337,10 +337,12 @@ def exhaust(app):
         plane=Plane.xz(), axis="z", name="Flange")
     # The path: straight out of the flange, then a quarter turn away.
     #
-    # Sampled and fitted, because Curve3D offers `fit_spline`, `helix` and
-    # `control_poly` and not an arc — so the bend is 16 points on a circle
-    # and the spline through them. Close enough for a header, and it is the
-    # feature doing what it is for rather than a shape wished into existence.
+    # Sampled and fitted, because when this was written Curve3D offered no
+    # arc — so the bend is 16 points on a circle and the spline through them.
+    # Close enough for a header, and it is the feature doing what it is for
+    # rather than a shape wished into existence. A header bent on a former
+    # would be written as a `bent_path` today (v117): the corners and one
+    # radius, which is also what a bender would be given.
     R = 70.0
     pts = [[0.0, 0.0, 16.0], [0.0, 0.0, 40.0]]
     for j in range(1, 17):

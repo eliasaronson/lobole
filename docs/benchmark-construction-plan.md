@@ -135,12 +135,14 @@ Four things this changed:
    OR-tuple.
 3. **A bend has two legitimate spellings with DIFFERENT surface kinds.**
    Sweeping along a sketch arc gives a real `torus`; a `Pipe` along a
-   `fit_spline` gives `bspline`. `Curve3D` has no arc kind at all — only
-   `fit_spline`, `control_poly` and `helix` — so a true torus bend is reachable
-   *only* through a sketch path. `t3-bent-tube` must therefore accept
-   `[torus, bspline]`, or it stops being a check on construction and becomes a
-   check on which of two correct methods the agent picked. This is the case the
-   OR-tuple exists for, found by measuring rather than by taste.
+   `fit_spline` gives `bspline`. (Measured 2026-07; `Curve3D` had no arc kind
+   then. Since v117 it has one — `bent_path` builds tangent arcs, so a `Pipe`
+   along one is a third spelling, and it is on the `torus` side.) So a true
+   torus bend is reachable two ways and a bspline one a third, and
+   `t3-bent-tube` must accept `[torus, bspline]`, or it stops being a check on
+   construction and becomes a check on which of three correct methods the
+   agent picked. This is the case the OR-tuple exists for, found by measuring
+   rather than by taste.
 4. **Shell is not census-checkable as a wall, but is as a count.** Shelling
    changes no surface *kind* — a shelled box is `plane:11` against a solid
    box's `plane:6`. So a hollow part is distinguishable from a solid one by
