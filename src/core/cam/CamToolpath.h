@@ -147,6 +147,43 @@ struct WallContour {
 ProjectedOutlines(const std::vector<Body>& bodies, double topZ,
                   const std::vector<double>& passes, double deflection = 0.02);
 
+// What a click on a face of ANY orientation means for a finishing pass: the
+// region to stay inside, as its SILHOUETTE in XY (docs/cam/surfacing.md).
+//
+// The two picks above both refuse curvature on purpose -- one wants a level
+// face, the other a dead-vertical one -- and between them they cover the 2.5D
+// question "what is the outline at this level". A surfacing pass asks a
+// different one, and a curved or tilted face cannot answer it the same way: it
+// has no single depth to machine to, which is exactly what PickedFaceRegion
+// says when it refuses one.
+//
+// So the face contributes its OUTLINE and nothing else. The depths come from
+// the cutter-location surface of the whole model (CamDropCutter.h), because a
+// pass that took its Z from the picked face alone would gouge whatever stands
+// beside it. "Finish within this face" is the honest reading of the verb.
+//
+// Being a B-Rep app is worth spending here. Kiri:Moto needs a dihedral-angle
+// flood fill with a user-tunable threshold to turn a clicked triangle into a
+// face; a B-Rep face IS that answer, with no threshold to get wrong.
+struct SurfaceRegion {
+  std::vector<Loop> loops; // outer (hole=false) first, then any holes
+  double minZ = 0.0;       // the face's own Z extent, for reporting
+  double maxZ = 0.0;
+  bool ok = false;
+  std::string why; // when !ok: what to click instead, in words
+};
+
+[[nodiscard]] SurfaceRegion PickedSurfaceRegion(const std::vector<Body>& bodies,
+                                                const ElementRef& ref,
+                                                double deflection = 0.02,
+                                                uint64_t jobPartId = 0);
+
+// The silhouette of every body in XY, for the no-pick form of the verb --
+// "finish the whole part", which mirrors how Face and "cut out the whole
+// part" already need no pick.
+[[nodiscard]] SurfaceRegion WholePartSilhouette(const std::vector<Body>& bodies,
+                                                double deflection = 0.02);
+
 // Whether `ref` names a vertical face — the question every caller asks before
 // deciding which of the two picks above applies.
 [[nodiscard]] bool IsWallFace(const std::vector<Body>& bodies,

@@ -173,6 +173,58 @@ TEST_CASE("drop cutter: a cutter too fat for a gap stays out of it",
   CHECK_THAT(At(s, 24.0, 15.0), WithinAbs(20.0, 1e-2));
 }
 
+TEST_CASE("surface pick: a curved face gives its shadow, not its wire",
+          "[cam][surface]") {
+  // The pick the other two refuse. A cylinder's curved face has an outer wire
+  // that runs over the surface in 3D, so flattening THAT gives the boundary of
+  // a curved patch and not the area underneath it. The silhouette of a
+  // cylinder of radius 10 lying along Y over a length of 40 is a 20 x 40
+  // rectangle, and its area says which of the two was computed.
+  Body body;
+  body.name = "Cyl";
+  body.shape = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0.0f, -20.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f), 10.0, 40.0);
+  REQUIRE(body.shape.IsValid());
+  std::vector<Body> bodies;
+  bodies.push_back(std::move(body));
+
+  const cam::SurfaceRegion whole = cam::WholePartSilhouette(bodies, 0.05);
+  INFO(whole.why);
+  REQUIRE(whole.ok);
+  REQUIRE_FALSE(whole.loops.empty());
+  CHECK_FALSE(whole.loops.front().hole);
+
+  // Area of the shadow: 20 wide (the diameter) by 40 long.
+  double area = 0.0;
+  const std::vector<glm::dvec2>& p = whole.loops.front().pts;
+  for (size_t i = 0, n = p.size(); i < n; i++) {
+    const glm::dvec2& a = p[i];
+    const glm::dvec2& b = p[(i + 1) % n];
+    area += a.x * b.y - b.x * a.y;
+  }
+  area = std::abs(area) * 0.5;
+  INFO("silhouette area " << area << " mm2");
+  CHECK_THAT(area, WithinRel(800.0, 0.02));
+
+  // The Z extent is the face's own, reported but not machined to.
+  CHECK_THAT(whole.minZ, WithinAbs(-10.0, 0.2));
+  CHECK_THAT(whole.maxZ, WithinAbs(10.0, 0.2));
+}
+
+TEST_CASE("surface pick: what it refuses", "[cam][surface]") {
+  std::vector<Body> none;
+  const cam::SurfaceRegion empty = cam::WholePartSilhouette(none, 0.05);
+  CHECK_FALSE(empty.ok);
+  CHECK_THAT(empty.why, Catch::Matchers::ContainsSubstring("nothing"));
+
+  auto doc = BlockDoc(40, 30, 20);
+  ElementRef nowhere;
+  const cam::SurfaceRegion unset =
+      cam::PickedSurfaceRegion(doc->GetBodies(), nowhere, 0.05, 0);
+  CHECK_FALSE(unset.ok);
+  CHECK_THAT(unset.why, Catch::Matchers::ContainsSubstring("nothing picked"));
+}
+
 TEST_CASE("drop cutter: what it refuses, and what it derives",
           "[cam][surface]") {
   auto doc = BlockDoc(40, 30, 20);
