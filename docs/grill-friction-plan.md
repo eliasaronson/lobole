@@ -272,24 +272,41 @@ the handle's bbox matching its true extent.
 
 ### Found while building stage 4
 
-**An exact boolean can lose a bore.** A Ø6 pin standing in the Ø5 bore of the
-lid handle's plug reports an overlap of 305.4 mm3 — the WHOLE pin — where the
-truth is the annulus around it, 93.3. The handle's solid is valid
-(`BRepCheck_Analyzer`), its volume is right to 3 mm3 in 52,190, its faces are
-named and its bore measures Ø5 exactly. Reduced: an extruded tube with a ring
-plug and a pin answers 93.3; a straight `Pipe` swept along a `Curve3D` with
-the same plug and pin answers 93.3; only this body — the bent handle, two
-plugs, a union each — answers 305.4. It is the class of failure the bicycle
-round hit from the other side (an invalid body making `interference` report
-17 cm3 of cog inside a frame that does not reach it), except that here every
-check says the body is sound.
+**"An exact boolean can lose a bore" — NOT REPRODUCIBLE, and the reduction is
+the record.** While building stage 4 a Ø6 pin standing in the Ø5 bore of the
+lid handle's plug was seen to report 305.4 mm3 — the WHOLE pin — where the
+truth is the annulus around it, 93.3, on a body every check calls sound. That
+number mattered enough to chase, because `interference` and `contact_report`
+are the gates this whole round is verified by and a boolean that swallows a
+void turns a correct model into a clash report nobody can act on.
 
-It matters beyond one handle: `interference` and `contact_report` are the
-gates this whole round is verified by, and a boolean that silently swallows a
-void turns a correct model into a clash report nobody can act on. Next step
-is a reduction that runs headlessly — the shape is in `scratch/grill.dsgn`
-and the pin is fifteen lines — and then either a fix or a refusal, because a
-measurement that cannot be trusted has to say so.
+The reduction was run (2026-09-18,
+`scratch/pin_in_bore_reduction.py <port> [grill.dsgn]`). **Nothing reproduces
+it.** Twenty-four runs, every one exact:
+
+- the bent `Pipe` with a plug — capped and open — at pin depths 10, 12, 20
+  and 40 mm, so the tip stands in the plug, in the cap, and on into the
+  tube's hollow interior; and the straight-`Pipe` and extruded-ring twins of
+  every one of those, as a `Boolean intersect` feature;
+- a pin standing wholly inside the hollow tube with no plug at all, where the
+  truth is nothing and an empty result is what comes back;
+- and the REAL handle out of `scratch/grill.dsgn` through `interference`
+  `mode: exact` in an assembly, with both occurrences at identity, rotated
+  30° about X, and rotated 47° about an off-axis vector: 142.9 mm3 every
+  time, which is the annulus through the plug plus the pin's own section
+  through the cap.
+
+So the claim above is retracted as a description of the CODE. What produced
+the 305.4 was a state of the model during stage 4 that no longer exists and
+was not captured — most likely the handle before its plug was unioned in, in
+which case the number was right about the geometry it was asked about. The
+lesson is the one this plan keeps relearning: **a measurement worth recording
+is worth a driver script recorded with it**, because a finding you cannot
+re-run is a finding you cannot fix or dismiss.
+
+Nothing in the model depends on it. The plug's cap is a blind tapping, which
+is the normal part — a tube with an open bore has nothing to seal it — not a
+workaround.
 
 ## 8. The small ones, as one wave
 

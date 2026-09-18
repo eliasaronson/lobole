@@ -407,12 +407,10 @@ def lid_handle(d):
         "outer_diameter": S.HANDLE_D, "wall_thickness": S.HANDLE_WALL})
     check(tube, "handle tube")
     body = owner(d, tube, "Tube")
-    # A plug with a BLIND tapping, capped at the top. Bored right through it
-    # is the same part to a shop and the joint reads correctly either way
-    # (a thread ends a joint the way a nut does) — but on THIS body, and not
-    # on a straight swept tube or an extruded one, an exact boolean between
-    # the open bore and the screw in it comes back as the whole screw rather
-    # than the annulus around it, 305 mm3 against 93. See the findings.
+    # A plug with a BLIND tapping, capped at the top: a tube end has to be
+    # sealed, and a screw into a tapping ends where the tapping does whether
+    # or not the bore goes through (a thread ends a joint the way a nut
+    # does).
     for i, sx in enumerate(S.sides()):
         bore = S.HANDLE_PLUG - 2.0
         plug = extrude(d, f"Plug {i + 1}", plane_at_z(0.0),
