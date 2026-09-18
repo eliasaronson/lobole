@@ -505,12 +505,52 @@ LoopSolution SolveComponent(const LoopProblem& problem) {
     buildJacobian(q, r);
     const Eigen::MatrixXd jtj = jac.transpose() * jac;
     const Eigen::VectorXd jtr = jac.transpose() * r;
+    // A DOF that changes NO residual is not being solved for, and must not
+    // be moved. Marquardt's damping is RELATIVE — lambda * jtj(i,i) — so a
+    // column of zeros gets a zero diagonal as well, and the solve hands that
+    // unknown whatever satisfies 0 = 0.
+    //
+    // It is not a corner case: every bolt a fastener fits across an
+    // interface is a mate, so a bolted joint between two parts that were
+    // already mated closes a small loop, and everything hanging off that
+    // component is then inside the loop problem. On the grill it was the
+    // lid: its hinge is nowhere near the loop the handle's two bolts close,
+    // and the lid came out standing 443 degrees open — with the loop closed
+    // to a ten-thousandth of a millimetre and every mate "satisfied".
+    // "No influence" is measured in the residual's own units: a column norm
+    // is millimetres of loop error per unit of DOF (the rotation rows are
+    // scaled by the characteristic length, so a radian and a millimetre
+    // weigh alike). A DOF that cannot move the loop by the tolerance it has
+    // to close to — 1e-3 mm — when moved a WHOLE unit is not solving
+    // anything: a real linkage's columns are tens or hundreds of mm per
+    // radian, and the grill's free hinges came back at 8e-7 to 3.4e-6,
+    // which is what a finite difference through a metre-wide tree cancels
+    // to rather than a derivative. A relative test cannot help here, since
+    // on this assembly EVERY column was that noise.
+    std::vector<bool> frozen(static_cast<size_t>(cols), false);
+    int live = 0;
+    for (int i = 0; i < cols; i++) {
+      frozen[static_cast<size_t>(i)] =
+          std::sqrt(std::max(0.0, jtj(i, i))) <= kCloseTolMm;
+      live += frozen[static_cast<size_t>(i)] ? 0 : 1;
+    }
+    if (live == 0)
+      break; // nothing here can move the residual; the poses stand
     bool stepped = false, tiny = false;
     for (int backoff = 0; backoff < 16; backoff++) {
       Eigen::MatrixXd damped = jtj;
-      for (int i = 0; i < cols; i++)
+      Eigen::VectorXd rhs = -jtr;
+      for (int i = 0; i < cols; i++) {
+        if (frozen[static_cast<size_t>(i)]) {
+          damped.row(i).setZero();
+          damped.col(i).setZero();
+          damped(i, i) = 1.0;
+          rhs[i] = 0.0;
+          continue;
+        }
         damped(i, i) += lambda * std::max(1e-12, jtj(i, i));
-      const Eigen::VectorXd step = damped.ldlt().solve(-jtr);
+      }
+      const Eigen::VectorXd step = damped.ldlt().solve(rhs);
       if (!step.allFinite()) {
         lambda *= 10.0;
         continue;

@@ -248,6 +248,39 @@ TEST_CASE("A redundant but consistent mate is named, not failed",
   CHECK(Lists(s.redundant, 3));
 }
 
+TEST_CASE("A hinge hanging off a loop keeps the angle it was posed at",
+          "[assembly][solve][loops]") {
+  // The flange above, with a lid on it: two parts bolted twice (a loop the
+  // solver has to close) and a revolute joining a third part to one of them
+  // — a bridge, on no cycle, so nothing about the loop depends on its angle.
+  //
+  // It came out of the grill, where the lid's hinge is nowhere near the two
+  // bolts that hold its handle on. Damping is RELATIVE to the diagonal, and
+  // an unconstrained column has none, so the solve gave that DOF whatever
+  // satisfied 0 = 0: the lid stood 443 degrees open while the loop closed to
+  // a ten-thousandth of a millimetre.
+  assembly::LoopProblem p;
+  p.mates.push_back(Fastened(1, 10, glm::mat4(1.0f), 20, glm::mat4(1.0f)));
+  p.mates.push_back(Fastened(2, 10, AtX(25.0f), 20, AtX(25.0f)));
+  p.mates.push_back(
+      Revolute(3, 30, glm::mat4(1.0f), 10, glm::mat4(1.0f), 0.0f));
+  p.tree.push_back({0, 10, 20, false});
+  p.tree.push_back({2, 10, 30, true});
+  p.cut.push_back(1);
+  p.anchor.emplace_back(10, glm::mat4(1.0f));
+
+  const assembly::LoopSolution s = assembly::SolveLoops(p);
+  REQUIRE(s.unavailable.empty());
+  CHECK(s.converged);
+  CHECK_THAT(s.solved[2].rotation, WithinAbs(0.0, 1e-9));
+  // And a pose that is NOT zero is just as much a pose.
+  p.mates[2].rotation = 0.75f;
+  const assembly::LoopSolution posed = assembly::SolveLoops(p);
+  REQUIRE(posed.unavailable.empty());
+  CHECK(posed.converged);
+  CHECK_THAT(posed.solved[2].rotation, WithinAbs(0.75, 1e-9));
+}
+
 TEST_CASE("A loop that cannot close reports how far off it is",
           "[assembly][solve][loops]") {
   // Same pair, two fastened mates demanding placements 10 mm apart.
