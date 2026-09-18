@@ -45,6 +45,7 @@ enum class PickSlot : int {
   CamLayFaceUp,      // CAM S2: the face to clamp facing the spindle (fixture)
   CamEdgeWall,       // CAM R15: the wall whose top edge to round or chamfer
   CamDrillHole,      // CAM: the cylindrical face of a hole to drill
+  CamSurfaceRegion,  // CAM v118: a face of ANY orientation to finish within
   FastenerRim,       // F1 p6: the circular EDGE a fastener's head sits on
   // The optional SECOND pick: where the joint ENDS, when the axis carries on
   // past it into material the fastener is not meant to span. Same session and

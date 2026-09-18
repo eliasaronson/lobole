@@ -50,9 +50,15 @@ constexpr glm::vec4 kRapidColor(0.50f, 0.52f, 0.60f, 0.55f);
 
 // Order matches cam::OpType. "Adaptive" is a pocket cut a different way,
 // so it reads as a strategy rather than as a separate kind of job.
-// In OpType order — the combo writes the index straight back as the enum.
-const char* kOpTypes[] = {"Profile", "Pocket",   "Face",
-                          "Drill",   "Adaptive", "Edge break"};
+// In OpType order — the combo writes the index straight back as the enum,
+// and indexes it by that enum at three more places, so a row out of step is
+// an out-of-bounds read and a row missing is the wrong label on every type
+// after it. Asserted rather than trusted.
+const char* kOpTypes[] = {"Profile",        "Pocket",      "Face",
+                          "Drill",          "Adaptive",    "Edge break",
+                          "Finish surface", "Finish walls"};
+static_assert(IM_ARRAYSIZE(kOpTypes) == static_cast<int>(cam::OpType::Count),
+              "kOpTypes must have one label per OpType, in enum order");
 
 } // namespace
 
@@ -1387,6 +1393,47 @@ void DrawCamPanel(AppState& state) {
         ImGui::SetItemTooltip("Radius of the round (ball) or width of the "
                               "bevel (V-bit), mm. 0 = the biggest this tool "
                               "can make within the wall.");
+      }
+      // Surfacing: across, along and down. Three fields because they are
+      // three quantities, and the table decides which of them this type has.
+      if (cam::OpTypeHas(op.type, cam::OpField::CutAngle)) {
+        ImGui::SetNextItemWidth(70.0f);
+        float angle = static_cast<float>(op.cutAngleDeg);
+        if (ExprDragFloat(state, "deg###cutangle", &angle, 1.0f, -180.0f,
+                          180.0f, "%.0f")) {
+          op.cutAngleDeg = angle;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip("Raster direction, degrees anticlockwise from "
+                              "+X. Run the passes ACROSS the steepest slope, "
+                              "not along it.");
+        ImGui::SameLine();
+      }
+      if (cam::OpTypeHas(op.type, cam::OpField::ZStep)) {
+        ImGui::SetNextItemWidth(70.0f);
+        float zs = static_cast<float>(op.zStep);
+        if (ExprDragFloat(state, "Z step###zstep", &zs, 0.05f, 0.0f, 20.0f,
+                          "%.2f")) {
+          op.zStep = zs;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip("Millimetres of Z between laps. NOT a stepover: "
+                              "a waterline's spacing is a depth. 0 derives it "
+                              "from the cutter.");
+        ImGui::SameLine();
+      }
+      if (cam::OpTypeHas(op.type, cam::OpField::SampleStep)) {
+        ImGui::SetNextItemWidth(70.0f);
+        float ss = static_cast<float>(op.sampleStep);
+        if (ExprDragFloat(state, "sample###samplestep", &ss, 0.02f, 0.0f, 5.0f,
+                          "%.2f")) {
+          op.sampleStep = ss;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip("Millimetres ALONG a pass, where the surface is "
+                              "read. 0 derives it from the cutter and the "
+                              "scallop.");
+        ImGui::SameLine();
       }
       if (cam::OpTypeHas(op.type, cam::OpField::Stepover)) {
         ImGui::SetNextItemWidth(70.0f);

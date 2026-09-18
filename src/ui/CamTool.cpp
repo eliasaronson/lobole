@@ -220,6 +220,27 @@ constexpr Verb kVerbs[] = {
      "Follow the part's own outline — no pick needed."},
     {CamVerb::Face, "Face the top", cam::OpType::Face, PickSlot::CamTopFace,
      false, true, "", "Skim the material sitting above the part."},
+    // The two verbs that take a curved or tilted face -- the pick every other
+    // verb refuses. The face gives its OUTLINE and not its depths: those come
+    // from the whole model's surface, because a pass taking Z from the picked
+    // face alone would gouge whatever stands beside it. So the wording is
+    // "within", not "of".
+    {CamVerb::Surface, "Finish a surface", cam::OpType::SurfaceParallel,
+     PickSlot::CamSurfaceRegion, true, true,
+     "Click the surface to finish — curved or sloped is fine",
+     "Rake a ball nose back and forth over the surface, following it in Z. "
+     "This is the verb for anything the level-by-level ops refuse: a curved "
+     "face, or a flat one that is tilted and so has no single depth. It "
+     "FINISHES -- rough the bulk out first with Clear a pocket, then come "
+     "back to this. Best on shallow surfaces; on a steep wall the passes "
+     "crowd together and Finish walls suits it better."},
+    {CamVerb::Walls, "Finish walls", cam::OpType::SurfaceWaterline,
+     PickSlot::CamSurfaceRegion, true, true,
+     "Click the surface whose walls to finish",
+     "Lap the surface at constant depths, like contour lines. The opposite "
+     "of Finish a surface and for the opposite shape: good where the wall is "
+     "steep, poor where it is shallow, because the laps spread out as the "
+     "surface flattens."},
 };
 
 const Verb* FindVerb(CamVerb verb) {
@@ -629,6 +650,13 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     break;
   case PickSlot::CamProfileOutline:
     type = cam::OpType::Profile;
+    break;
+  case PickSlot::CamSurfaceRegion:
+    // Which of the two finishing verbs armed it. They share a slot because
+    // they take the same pick and differ only in the pattern.
+    type = state.camVerb == ui::AppState::CamVerb::Walls
+               ? cam::OpType::SurfaceWaterline
+               : cam::OpType::SurfaceParallel;
     break;
   default:
     LOG_WARN("CAM: pick slot {} has no operation type; treating it as a "
