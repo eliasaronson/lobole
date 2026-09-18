@@ -119,6 +119,14 @@ def tier2(d):
         "edges": [{"feature_id": base, "element": top_left}]})
     expect(r["regen"]["ok"], r["regen"])
 
+    # Every face the body has is in the listing: `unnamed_faces` is what
+    # makes that claim checkable. A face the element map never named cannot
+    # be picked, threaded or fitted, and the listing looked complete without
+    # it — a bore came back with no cylinder while the hole was in the solid.
+    listing = d.request("list_elements", {})["bodies"][0]
+    expect(listing["unnamed_faces"] == 0,
+           f"{listing['unnamed_faces']} faces of this part have no name")
+
     # Every bend as DATA, and the three sources agreeing about them. A bend
     # audit used to be assembled out of the rules, a check's counts and the
     # TEXT of a drawing note; this is the same answer in one call, so the

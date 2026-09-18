@@ -19,6 +19,7 @@
 #include "remote/RemoteHelpers.h"
 #include "render/ClipPlanes.h"
 #include "ui/AppState.h"
+
 #include "ui/AssemblyActions.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
@@ -26,6 +27,7 @@
 #include "ui/RendererSync.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
+#include <TopExp_Explorer.hxx>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -557,7 +559,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Stable face/edge names per body (the toponaming handles "
      "measure/fillet/mates use). Bounded by max_faces (default 4000, the "
      "faces it would DESCRIBE — each is an OCC surface analysis): pass "
-     "body: <index> for one body of a many-bodied part.",
+     "body: <index> for one body of a many-bodied part. `unnamed_faces` says "
+     "how many faces the body has that the element map never named: they are "
+     "not in this list and CANNOT be picked, threaded, filleted or fitted, "
+     "so a zero there is what makes the rest of the list a complete answer "
+     "rather than merely a long one. Edges are named only when something "
+     "needs them (a plain box has six named faces and no named edges), so "
+     "there is no such count for them.",
      "body, max_faces, part"},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
@@ -3259,12 +3267,30 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         edges.push_back(e);
       }
-      out.push_back({{"body", i},
-                     {"name", bodies[i].name},
-                     {"created_by", bodies[i].createdBy},
-                     {"job_part", bodies[i].jobPartId},
-                     {"faces", faces},
-                     {"edges", edges}});
+      // What is NOT here. This listing walks the element map, so a FACE the
+      // map never named is invisible: it cannot be threaded, picked,
+      // filleted or fitted, and the listing looks complete. A bore drilled
+      // in one end of a handle came back with no cylinder at all while the
+      // hole was plainly in the solid, and the only clue anywhere was that a
+      // screw in it read as interference (docs/grill-friction-plan.md).
+      //
+      // Faces only: an EDGE is named when something needs it, so a plain box
+      // has six named faces and no named edges, and counting those would be
+      // noise rather than a signal.
+      int shapeFaces = 0;
+      for (TopExp_Explorer ex(bodies[i].shape.GetShape(), TopAbs_FACE);
+           ex.More(); ex.Next())
+        ++shapeFaces;
+      out.push_back(
+          {{"body", i},
+           {"name", bodies[i].name},
+           {"created_by", bodies[i].createdBy},
+           {"job_part", bodies[i].jobPartId},
+           {"faces", faces},
+           {"edges", edges},
+           {"unnamed_faces",
+            std::max(0, shapeFaces - static_cast<int>(
+                                         bodies[i].elementMap.names.size()))}});
     }
     return json{{"bodies", out}};
   }
