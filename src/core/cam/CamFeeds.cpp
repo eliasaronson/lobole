@@ -265,6 +265,30 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
         out.findings.push_back(f);
       }
     }
+
+    // Reach. The one failure here is not a finish problem: past the flutes a
+    // cutter is a plain shank, and past the shank is the collet and the
+    // spindle nose, so a cut deeper than the cutter is long rubs the work
+    // with something that has no edge and then drives the holder into it.
+    //
+    // EVERY op that cuts at depth, not just the two chip room asks about: a
+    // pocket or an adaptive pass buries a short cutter exactly as well as a
+    // slot does, and it is the deepest one that decides.
+    double reach = 0.0;
+    for (const Operation& op : setup.operations)
+      if (op.enabled && op.toolNumber == t.number)
+        reach = std::max(reach, op.topZ - op.bottomZ);
+    if (t.fluteLength > 0.0 && reach > t.fluteLength) {
+      Finding f;
+      f.tool = t.number;
+      f.source = "the cutter's own usable length";
+      f.text = who + " cuts " + Fmt("%.1f", reach) + " mm deep and has " +
+               Fmt("%.1f", t.fluteLength) + " mm of flute, so the last " +
+               Fmt("%.1f", reach - t.fluteLength) +
+               " mm is cut by the shank and the holder is in the work. Use a "
+               "longer cutter, or take the depth in two setups";
+      out.findings.push_back(f);
+    }
   }
   return out;
 }

@@ -135,11 +135,16 @@ constexpr MethodDoc kCamMethods[] = {
      "one of its "
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
-     "spindle_rpm?, flutes?, chipload_min?, chipload_max?}} — the tool is "
+     "spindle_rpm?, flutes?, flute_length?, chipload_min?, chipload_max?}} "
+     "— the tool is "
      "added when the number is new. chipload_min/max are mm per tooth THIS "
      "cutter wants in the material this setup cuts (a vendor's chart), given "
      "as a pair or not at all; without them the chip-load check falls back "
      "to a rule off the diameter, and every finding cites which it used. "
+     "flute_length is the cutter's USABLE DEPTH in mm (the fluted part, not "
+     "the whole tool): an operation cutting deeper than that is cutting with "
+     "the shank and driving the holder into the work, and the reach finding "
+     "says so. diameter, tip_angle and the feeds are mm, degrees and mm/min. "
      "tool_type is the shape of the end: it decides what the verifier thinks "
      "was removed, and an edge_round op reads it to know whether it is "
      "cutting a bevel (vbit, tip_angle is the INCLUDED angle) or an arc "
@@ -489,12 +494,22 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
 }
 
 json ToolJson(const cam::Tool& t) {
-  return json{
-      {"number", t.number},         {"name", t.name},
-      {"diameter", t.diameter},     {"tool_type", cam::ToolTypeName(t.type)},
-      {"tip_angle", t.tipAngleDeg}, {"flutes", t.flutes},
-      {"feed_cut", t.feedCut},      {"feed_plunge", t.feedPlunge},
-      {"spindle_rpm", t.spindleRpm}};
+  // Everything set_setup accepts comes back out. `flute_length` and the
+  // chipload pair used to go in and vanish, so a caller could not read back
+  // what it had just written -- and flute_length in particular decides a
+  // safety finding, which makes it worth seeing.
+  return json{{"number", t.number},
+              {"name", t.name},
+              {"diameter", t.diameter},
+              {"tool_type", cam::ToolTypeName(t.type)},
+              {"tip_angle", t.tipAngleDeg},
+              {"flutes", t.flutes},
+              {"flute_length", t.fluteLength},
+              {"feed_cut", t.feedCut},
+              {"feed_plunge", t.feedPlunge},
+              {"spindle_rpm", t.spindleRpm},
+              {"chipload_min", t.chiploadMin},
+              {"chipload_max", t.chiploadMax}};
 }
 
 json OpJson(const cam::Operation& op) {
@@ -1155,6 +1170,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         tool->type = ToolTypeFrom(tj.at("tool_type").get<std::string>());
       tool->tipAngleDeg = tj.value("tip_angle", tool->tipAngleDeg);
       tool->flutes = tj.value("flutes", tool->flutes);
+      tool->fluteLength = tj.value("flute_length", tool->fluteLength);
       tool->feedCut = tj.value("feed_cut", tool->feedCut);
       tool->feedPlunge = tj.value("feed_plunge", tool->feedPlunge);
       tool->spindleRpm = tj.value("spindle_rpm", tool->spindleRpm);
@@ -1162,6 +1178,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       tool->chiploadMax = tj.value("chipload_max", tool->chiploadMax);
       if (tool->diameter <= 0.0)
         throw std::runtime_error("tool diameter must be positive");
+      if (tool->fluteLength <= 0.0)
+        throw std::runtime_error(
+            "flute_length must be positive: it is how deep this cutter can "
+            "cut, and the reach check compares every operation's depth "
+            "against it");
       // Half a band is not a band, and a backwards one is a typo that would
       // pass every feed silently. Refused rather than repaired.
       if ((tool->chiploadMin > 0.0) != (tool->chiploadMax > 0.0))

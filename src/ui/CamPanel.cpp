@@ -861,6 +861,21 @@ void DrawCamPanel(AppState& state) {
       }
       ImGui::SameLine();
       ImGui::SetNextItemWidth(70.0f);
+      // How deep this cutter can actually cut. It was drawn on the tool in
+      // the simulation and settable nowhere, so every tool in every job
+      // carried the 20 mm default whatever was in the spindle -- and the
+      // reach finding compares against it.
+      float flute = static_cast<float>(t.fluteLength);
+      if (ExprDragFloat(state, "flute###flutelen", &flute, 0.5f, 0.5f, 300.0f,
+                        "%.1f")) {
+        t.fluteLength = flute;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("Usable depth, mm: the fluted part, not the whole "
+                            "tool. Cut deeper than this and the shank rubs "
+                            "and the holder goes into the work.");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(70.0f);
       float feed = static_cast<float>(t.feedCut);
       if (ExprDragFloat(state, "F###feed", &feed, 10.0f, 1.0f, 10000.0f,
                         "%.0f")) {

@@ -200,6 +200,14 @@ almost answer:
   profile for the whole assembly; a cell whose stock stands above the shank
   envelope is a collision, reported with its G-code line — the same shape as
   the existing `rapidsThroughStock` check, which is already trusted.
+
+  Still the real version, but no longer the only line of defence: `CamFeeds`
+  now compares the deepest enabled operation on each tool against that tool's
+  `flute_length` and says so (docs/cam/reach-and-fidelity-plan.md). That
+  catches the case this bullet exists for — a cut deeper than the cutter is
+  long — without a swept envelope, and it catches it at the SETUP rather than
+  on the posted file. What it cannot do is notice a holder fouling something
+  the tool never cut into, which is what the envelope is for.
 - **Deviation map.** `machined - designed` on the same grid, painted on the
   stock. `Compare` computes it now and throws away everything but the extremes.
 

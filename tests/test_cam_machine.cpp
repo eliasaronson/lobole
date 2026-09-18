@@ -667,6 +667,10 @@ TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
   setup.tools[0].flutes = 4;
   setup.tools[0].spindleRpm = 9000.0;
   setup.tools[0].feedCut = 1200.0;
+  // Long enough for the 20.5 mm cut below, so the reach finding stays out of
+  // this case -- it is tested on its own, and `clean.Empty()` further down
+  // means "nothing to say about the FEEDS".
+  setup.tools[0].fluteLength = 25.0;
   cam::Operation op;
   op.id = 1;
   op.type = cam::OpType::Profile;
@@ -725,6 +729,77 @@ TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
   INFO(blind.unchecked[0]);
   CHECK(blind.unchecked[0].find("no material") != std::string::npos);
   CHECK_FALSE(blind.Empty()); // NOT silence
+}
+
+TEST_CASE("cam reach: a cut deeper than the cutter is long is named",
+          "[cam][feeds]") {
+  // The failure this exists for is not a finish problem. Past the flutes a
+  // cutter is a plain shank with no edge on it; past the shank is the collet
+  // and the spindle nose. A cut deeper than the flutes rubs, and then the
+  // holder is in the work.
+  //
+  // Nothing checked it before: fluteLength was serialized, DRAWN on the tool
+  // glyph in the simulation, and compared against nothing -- and it was not
+  // settable over RPC or in the panel either, so every tool in every job
+  // carried the 20 mm default whatever was really in the spindle.
+  auto doc = BlockDoc();
+  for (Body& b : const_cast<std::vector<Body>&>(doc->GetBodies()))
+    b.material = "mdf";
+  cam::Setup setup = BasicSetup();
+  setup.tools[0].diameter = 6.0;
+  setup.tools[0].flutes = 2;
+  setup.tools[0].spindleRpm = 12000.0;
+  setup.tools[0].feedCut = 2880.0; // 0.12 mm/tooth: the feeds are fine
+  setup.tools[0].fluteLength = 20.0;
+
+  // A POCKET, not a profile or a drill: chip room asks only about those two,
+  // and a pocket buries a short cutter exactly as well.
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Pocket;
+  op.toolNumber = 1;
+  op.topZ = 0.0;
+  op.bottomZ = -30.0;
+  op.stepdown = 2.0;
+  setup.operations.push_back(op);
+
+  const cam::FeedReport over = cam::FeedsFor(setup, doc->GetBodies());
+  const auto says = [](const cam::FeedReport& r, const char* txt) {
+    for (const cam::Finding& f : r.findings)
+      if (f.text.find(txt) != std::string::npos)
+        return true;
+    return false;
+  };
+  for (const cam::Finding& f : over.findings)
+    INFO(f.text);
+  CHECK(says(over, "30.0 mm deep"));
+  CHECK(says(over, "20.0 mm of flute"));
+  CHECK(says(over, "the last 10.0 mm")); // the overhang, by arithmetic
+  CHECK(says(over, "holder is in the work"));
+
+  // A cutter long enough for it says nothing. The depth did not change; the
+  // tool did.
+  setup.tools[0].fluteLength = 40.0;
+  const cam::FeedReport ok = cam::FeedsFor(setup, doc->GetBodies());
+  for (const cam::Finding& f : ok.findings)
+    INFO(f.text);
+  CHECK_FALSE(says(ok, "of flute"));
+
+  // Exactly at the limit is not over it: a 30 mm cutter cuts 30 mm.
+  setup.tools[0].fluteLength = 30.0;
+  CHECK_FALSE(says(cam::FeedsFor(setup, doc->GetBodies()), "of flute"));
+
+  // The DEEPEST operation decides, and a disabled one does not vote.
+  setup.tools[0].fluteLength = 20.0;
+  setup.operations[0].bottomZ = -10.0; // now within reach
+  cam::Operation deep = op;
+  deep.id = 2;
+  deep.bottomZ = -45.0;
+  deep.enabled = false;
+  setup.operations.push_back(deep);
+  CHECK_FALSE(says(cam::FeedsFor(setup, doc->GetBodies()), "of flute"));
+  setup.operations[1].enabled = true;
+  CHECK(says(cam::FeedsFor(setup, doc->GetBodies()), "45.0 mm deep"));
 }
 
 TEST_CASE("cam feeds: a cutter's own figures beat the rule, and say so",
