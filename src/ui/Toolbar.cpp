@@ -337,6 +337,56 @@ void SectionToolButton(AppState& state) {
                 state.sectionToolOpen);
 }
 
+// A flyout group of COMMANDS — the sketch bar's toolGroup, for a toolbar
+// whose buttons run a command rather than arm a tool.
+//
+// Nine sheet-metal tools in a row made the part bar unreadable: the bar is
+// what a person scans for the one thing they are after, and a workstream
+// that adds nine buttons to it drowns the twenty that were already there.
+// The group shows the one last used, and the caret opens the rest — so every
+// tool is still one click from the bar, and the bar is still scannable.
+//
+// Each variant keeps its own "###tb_*" id, on the face when it is the one
+// showing and on its row in the popup otherwise, because that id is what
+// tests, the defaults gate and agents address.
+struct CommandVariant {
+  const char* icon;
+  const char* id;
+  const char* label;
+};
+
+void CommandGroup(AppState& state, const char* groupId, int& current,
+                  std::initializer_list<CommandVariant> variants) {
+  const CommandVariant* v = variants.begin();
+  const int n = static_cast<int>(variants.size());
+  if (current < 0 || current >= n)
+    current = 0;
+  ImGui::PushID(groupId);
+  if (CommandButton(state, v[current].icon, v[current].id, v[current].label))
+    ; // the command ran; the face keeps showing it
+  if (FlyoutCaret())
+    ImGui::OpenPopup("variants");
+  if (ImGui::BeginPopup("variants")) {
+    for (int i = 0; i < n; i++) {
+      // The icon carries the "###tb_*" id, so the row is addressable by the
+      // same name the face button would have.
+      const std::string item =
+          std::string(v[i].icon).substr(0, std::string(v[i].icon).find("###")) +
+          "   " + WithChord(state, v[i].id, v[i].label) +
+          std::string(v[i].icon).substr(std::string(v[i].icon).find("###"));
+      ImGui::BeginDisabled(!CommandEnabled(state, v[i].id));
+      if (ImGui::Selectable(item.c_str(), i == current)) {
+        current = i;
+        RunCommand(state, v[i].id);
+      }
+      ImGui::EndDisabled();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopID();
+  ImGui::SameLine();
+}
+
 void DrawModelToolbar(AppState& state) {
   // Icon buttons carry a stable "###tb_*" id (hidden from the glyph label) so
   // the GUI/remote tests can address them regardless of the icon codepoint.
@@ -424,28 +474,31 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
-  // Sheet metal: the blank, the bend, and the blank again.
-  btn(ICON_FA_LAYER_GROUP "###tb_base_flange", "part.sheet_base_flange",
-      "Base flange (a sheet part one gauge thick from a profile)");
-  btn(ICON_FA_ARROW_TURN_UP "###tb_edge_flange", "part.sheet_edge_flange",
-      "Edge flange (bend a wall up from a straight edge)");
-  btn(ICON_FA_FILE_LINES "###tb_flat_pattern", "part.sheet_flat_pattern",
-      "Flat pattern (lay the sheet flat; the blank a shop cuts)");
-  btn(ICON_FA_ROTATE_LEFT "###tb_hem", "part.sheet_hem",
-      "Hem (fold a panel edge right back on itself)");
-  btn(ICON_FA_STAIRS "###tb_jog", "part.sheet_jog",
-      "Jog (step a panel up along a one-line sketch)");
-  btn(ICON_FA_CIRCLE_HALF_STROKE "###tb_corner_relief",
-      "part.sheet_corner_relief",
-      "Corner relief (cut where two bends cross, so neither tears)");
-  btn(ICON_FA_CIRCLE_MINUS "###tb_normal_cut", "part.sheet_normal_cut",
-      "Normal cut (through the sheet, square to it wherever it lands)");
-  btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_unfold",
-      "part.sheet_unfold",
-      "Unfold (lay bends flat, to draw a cut across them)");
-  btn(ICON_FA_DOWN_LEFT_AND_UP_RIGHT_TO_CENTER "###tb_refold",
-      "part.sheet_refold",
-      "Refold (fold the last Unfold back up, carrying its cuts)");
+  // Sheet metal, in one group: nine tools in a row is most of a toolbar.
+  static int sheetTool = 0;
+  CommandGroup(
+      state, "sheet", sheetTool,
+      {{ICON_FA_LAYER_GROUP "###tb_base_flange", "part.sheet_base_flange",
+        "Base flange (a sheet part one gauge thick from a profile)"},
+       {ICON_FA_ARROW_TURN_UP "###tb_edge_flange", "part.sheet_edge_flange",
+        "Edge flange (bend a wall up from a straight edge)"},
+       {ICON_FA_ROTATE_LEFT "###tb_hem", "part.sheet_hem",
+        "Hem (fold a panel edge right back on itself)"},
+       {ICON_FA_STAIRS "###tb_jog", "part.sheet_jog",
+        "Jog (step a panel up along a one-line sketch)"},
+       {ICON_FA_CIRCLE_HALF_STROKE "###tb_corner_relief",
+        "part.sheet_corner_relief",
+        "Corner relief (cut where two bends cross, so neither tears)"},
+       {ICON_FA_CIRCLE_MINUS "###tb_normal_cut", "part.sheet_normal_cut",
+        "Normal cut (through the sheet, square to it wherever it lands)"},
+       {ICON_FA_FILE_LINES "###tb_flat_pattern", "part.sheet_flat_pattern",
+        "Flat pattern (lay the sheet flat; the blank a shop cuts)"},
+       {ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_unfold",
+        "part.sheet_unfold",
+        "Unfold (lay bends flat, to draw a cut across them)"},
+       {ICON_FA_DOWN_LEFT_AND_UP_RIGHT_TO_CENTER "###tb_refold",
+        "part.sheet_refold",
+        "Refold (fold the last Unfold back up, carrying its cuts)"}});
 
   Divider();
 

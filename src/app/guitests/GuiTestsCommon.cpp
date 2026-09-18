@@ -203,6 +203,16 @@ ImVec2 WorldToWindow(const glm::vec3& p) {
 // wildcard; the "###" id makes the match independent of the icon glyph.
 void ToolbarClick(ImGuiTestContext* ctx, const char* tbId) {
   ctx->SetRef("//##DockHost");
+  // The sheet-metal tools live in a flyout group: whichever was used last is
+  // on the bar and the rest are behind its caret. Every one still answers to
+  // its own "###tb_*" id — this opens the group when the one asked for is
+  // not the one showing, so a caller names the TOOL, not where it sits.
+  if (ctx->ItemInfo((std::string("**/") + tbId).c_str(),
+                    ImGuiTestOpFlags_NoError)
+          .ID == 0) {
+    ctx->ItemClick("**/sheet/###more");
+    ctx->Yield();
+  }
   ctx->ItemClick((std::string("**/") + tbId).c_str());
   ctx->Yield();
   // Leave the ref on the menu bar, matching the old Create-menu helper: several
