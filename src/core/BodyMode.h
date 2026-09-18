@@ -5,6 +5,7 @@
 #include "core/features/ExtrudeFeature.h" // ExtrudeMode
 
 #include <string>
+#include <utility>
 #include <vector>
 
 // Applies a freshly built solid to the body list according to `mode`, shared
@@ -43,14 +44,18 @@ bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
                             ElementMap shapeMap, ExtrudeMode mode,
                             Feature& owner);
 
-// Fuses `instanceShapes` (a pattern/mirror's seed + transformed copies), splits
-// the result back into its connected solids, erases every body created by
-// `sourceId`, and appends each solid as a body owned by `ownerId`. Instances
-// that touch merge into one body; disjoint instances become separate bodies.
-// Returns false if no source body was found or the fuse failed; `error`
-// (optional) receives the reason for callers to SetError.
-bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
-                                  std::vector<CADShape> instanceShapes,
-                                  const std::string& name,
-                                  const std::string& material, uint64_t ownerId,
-                                  std::string* error = nullptr);
+// Fuses `instances` (a pattern/mirror's seed + transformed copies, each with
+// its ElementMap), splits the result back into its connected solids, erases
+// every body created by `sourceId`, and appends each solid as a body owned by
+// `ownerId`. Instances that touch merge into one body; disjoint instances
+// become separate bodies. Each instance's names travel with it through the
+// fuse, so a patterned body's faces can be picked, threaded and fitted like
+// the seed's — the caller suffixes them per instance ("4/g7" -> "4/g7#2"),
+// the convention patterned CUTS already use. Returns false if no source body
+// was found or the fuse failed; `error` (optional) receives the reason for
+// callers to SetError.
+bool FuseInstancesReplacingSource(
+    std::vector<Body>& bodies, uint64_t sourceId,
+    std::vector<std::pair<CADShape, ElementMap>> instances,
+    const std::string& name, const std::string& material, uint64_t ownerId,
+    std::string* error = nullptr);

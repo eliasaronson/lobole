@@ -182,12 +182,12 @@ bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
   return ok;
 }
 
-bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
-                                  std::vector<CADShape> instanceShapes,
-                                  const std::string& name,
-                                  const std::string& material, uint64_t ownerId,
-                                  std::string* error) {
-  if (instanceShapes.empty()) {
+bool FuseInstancesReplacingSource(
+    std::vector<Body>& bodies, uint64_t sourceId,
+    std::vector<std::pair<CADShape, ElementMap>> instances,
+    const std::string& name, const std::string& material, uint64_t ownerId,
+    std::string* error) {
+  if (instances.empty()) {
     Fail(error, "pattern produced no instances");
     return false;
   }
@@ -200,16 +200,24 @@ bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
     return false;
   }
 
-  // Fuse all instances, then split back into connected solids.
-  CADShape fused = std::move(instanceShapes[0]);
-  for (size_t i = 1; i < instanceShapes.size(); i++) {
-    CADShape next = fused.Union(instanceShapes[i]);
+  // Fuse all instances, then split back into connected solids. The union runs
+  // through the naming boolean so each instance's names survive it: a face of
+  // the fourth bar of a grate is then as referenceable as one of the first,
+  // which is what makes a patterned body pickable at all.
+  CADShape fused = std::move(instances[0].first);
+  ElementMap fusedMap = std::move(instances[0].second);
+  for (size_t i = 1; i < instances.size(); i++) {
+    ElementMap out;
+    CADShape next = topo::BooleanNamed(BooleanOp::Union, fused, fusedMap,
+                                       instances[i].first, instances[i].second,
+                                       ownerId, out, nullptr);
     if (!next.IsValid()) {
       Fail(error,
            "fusing pattern instance " + std::to_string(i + 1) + " failed");
       return false;
     }
     fused = std::move(next);
+    fusedMap = std::move(out);
   }
   std::vector<CADShape> solids = fused.SplitSolids();
 
@@ -221,8 +229,13 @@ bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
   for (size_t i = 0; i < solids.size(); i++) {
     std::string bodyName =
         solids.size() > 1 ? name + " " + std::to_string(i + 1) : name;
+    // The pieces of the split share their faces with the shape they came out
+    // of, so each one's names are a lookup, not a second history pass.
+    ElementMap pieceMap;
+    topo::NamesOfSubShape(fused, fusedMap, solids[i], pieceMap);
     bodies.push_back(
         {std::move(bodyName), std::move(solids[i]), material, ownerId});
+    bodies.back().elementMap = std::move(pieceMap);
   }
   return true;
 }

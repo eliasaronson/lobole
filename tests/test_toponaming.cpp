@@ -2,10 +2,12 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "core/AxisRef.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
@@ -14,6 +16,7 @@
 #include <array>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
@@ -569,4 +572,92 @@ TEST_CASE("Revolve names its faces like extrude does", "[toponaming]") {
     CHECK_FALSE(map.Resolve(std::to_string(revId) + "/cap0").has_value());
     CHECK(map.names.size() == FaceCount(doc));
   }
+}
+
+// ---- Patterned bodies carry names -----------------------------------------
+
+TEST_CASE("A patterned body's instances are named, suffixed per instance",
+          "[toponaming]") {
+  // A face with no name cannot be picked, threaded, filleted or fitted, and
+  // `list_elements` does not show it — so a patterned body used to be
+  // invisible to everything downstream. Every part of the grill that repeats
+  // (the grate's bars, the warming rack's) was in that state.
+  Document doc;
+  const uint64_t ext =
+      AddRectExtrude(doc, {0, 0}, {4, 4}, 3.0, ExtrudeMode::NewBody);
+  auto pat = std::make_unique<PatternFeature>("Bars", PatternKind::Linear, ext);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 3;
+  pat->spacing = 10.0; // disjoint: three separate bodies
+  doc.AddFeature(std::move(pat));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 3);
+
+  // Every face of every instance is named.
+  for (const Body& b : doc.GetBodies()) {
+    const auto mesh = b.shape.GenerateMesh();
+    uint32_t maxId = 0;
+    for (uint32_t f : mesh.triangleFaces) {
+      maxId = std::max(maxId, f);
+    }
+    const size_t faces = mesh.triangleFaces.empty() ? 0 : maxId + 1;
+    CHECK(b.elementMap.names.size() == faces);
+    CHECK_FALSE(b.elementMap.Empty());
+  }
+
+  // The seed keeps its names; the copies carry the instance suffix, so a face
+  // of the third bar is as referenceable as one of the first.
+  const auto suffixCount = [&doc](const std::string& suffix) {
+    int n = 0;
+    for (const Body& b : doc.GetBodies()) {
+      for (const auto& [idx, name] : b.elementMap.names) {
+        if (name.size() >= suffix.size() &&
+            name.compare(name.size() - suffix.size(), suffix.size(), suffix) ==
+                0) {
+          n++;
+        }
+      }
+    }
+    return n;
+  };
+  CHECK(suffixCount("#1") > 0);
+  CHECK(suffixCount("#2") > 0);
+  // And the names are distinct across instances — the whole point of the
+  // suffix is that two bars' matching faces are different references.
+  std::vector<std::string> all;
+  for (const Body& b : doc.GetBodies()) {
+    for (const auto& [idx, name] : b.elementMap.names) {
+      all.push_back(name);
+    }
+  }
+  const size_t total = all.size();
+  std::sort(all.begin(), all.end());
+  all.erase(std::unique(all.begin(), all.end()), all.end());
+  CHECK(all.size() == total);
+}
+
+TEST_CASE("A mirrored body is named too", "[toponaming]") {
+  Document doc;
+  const uint64_t ext =
+      AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0, ExtrudeMode::NewBody);
+  auto pat =
+      std::make_unique<PatternFeature>("Mirrored", PatternKind::Mirror, ext);
+  pat->basePlane = PlaneType::YZ;
+  doc.AddFeature(std::move(pat));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 2);
+  for (const Body& b : doc.GetBodies()) {
+    CHECK_FALSE(b.elementMap.Empty());
+  }
+  // The reflection is suffixed "#m", not "#1": it is not the first of a
+  // series, and a reference must be able to say which side it means.
+  bool mirrored = false;
+  for (const Body& b : doc.GetBodies()) {
+    for (const auto& [idx, name] : b.elementMap.names) {
+      if (name.find("#m") != std::string::npos) {
+        mirrored = true;
+      }
+    }
+  }
+  CHECK(mirrored);
 }

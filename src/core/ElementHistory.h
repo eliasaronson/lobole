@@ -57,6 +57,15 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
 void NamePrimitiveElements(const CADShape& shape, const std::string& prefix,
                            ElementMap& out);
 
+// Names for one connected piece of an already-named shape. Every face and
+// edge of `part` that IS an element of `whole` (same TopoDS shape, which a
+// TopExp walk of a compound guarantees) takes that element's name. No history
+// is involved and none is needed: the pieces of a split share their faces with
+// the shape they came out of. Used where a fused result is split back into
+// connected solids — a pattern's instances, which may touch and merge.
+void NamesOfSubShape(const CADShape& whole, const ElementMap& wholeMap,
+                     const CADShape& part, ElementMap& out);
+
 // The U and L fallback passes alone, for builders whose history already
 // seeded `map` (extrude/revolve): U — a named face names its still-unnamed
 // boundary edges "<faceName>;U<localIdx>" (localIdx counts every unique

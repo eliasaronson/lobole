@@ -16,12 +16,32 @@ PatternFeature::PatternFeature(const std::string& name, PatternKind kind,
   m_name = name;
 }
 
+namespace {
+
+// One instance's names: the source's, with an instance suffix ("4/g7" ->
+// "4/g7#2", a mirror's "#m"), so a face of the third bar is as referenceable
+// as one of the first. Nothing parses a MappedName — it is compared whole —
+// so the suffix is opaque everywhere else.
+ElementMap Suffixed(const ElementMap& src, const std::string& tag) {
+  ElementMap m;
+  for (const auto& [i, n] : src.names)
+    m.names[i] = n + "#" + tag;
+  for (const auto& [i, n] : src.edgeNames)
+    m.edgeNames[i] = n + "#" + tag;
+  return m;
+}
+
+} // namespace
+
 bool PatternFeature::Execute(RegenContext& ctx) {
-  // Collect the seed body/bodies produced by the referenced feature.
-  std::vector<CADShape> instances;
+  // Collect the seed body/bodies produced by the referenced feature, each
+  // with its names — an instance that arrives unnamed leaves unnamed, and a
+  // face with no name cannot be picked, threaded, filleted or fitted.
+  std::vector<std::pair<CADShape, ElementMap>> instances;
   for (const Body& b : ctx.bodies) {
     if (b.createdBy == sourceId) {
-      instances.push_back(b.shape); // copy: source stays until we replace it
+      // copy: the source stays until we replace it
+      instances.emplace_back(b.shape, b.elementMap);
     }
   }
   if (instances.empty()) {
@@ -55,9 +75,10 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     const glm::vec3 o = plane->GetOrigin();
     const glm::vec3 n = plane->GetNormal();
     for (size_t i = 0; i < seedCount; i++) {
-      CADShape reflected = instances[i];
+      CADShape reflected = instances[i].first;
       reflected.Mirror(o, n);
-      instances.push_back(std::move(reflected));
+      instances.emplace_back(std::move(reflected),
+                             Suffixed(instances[i].second, "m"));
     }
   } else {
     glm::vec3 axisOrigin{0.0f};
@@ -79,14 +100,15 @@ bool PatternFeature::Execute(RegenContext& ctx) {
 
     for (size_t i = 0; i < seedCount; i++) {
       for (int k = 1; k < n; k++) {
-        CADShape copy = instances[i];
+        CADShape copy = instances[i].first;
         if (kind == PatternKind::Linear) {
           copy.Translate(axisDir * static_cast<float>(k * spacing));
         } else { // Circular
           copy.RotateAbout(axisOrigin, axisDir,
                            glm::radians(static_cast<double>(k) * angleDeg));
         }
-        instances.push_back(std::move(copy));
+        instances.emplace_back(
+            std::move(copy), Suffixed(instances[i].second, std::to_string(k)));
       }
     }
   }
@@ -102,17 +124,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
 
 bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
                                         const ElementMap& toolMap, bool adds) {
-  // Each instance's cutter carries the source cut's names with an instance
-  // suffix ("4/g7" -> "4/g7#2"), so a face cut by the third hole is as
-  // referenceable as the one cut by the first. Nothing parses a MappedName —
-  // it is compared whole — so the suffix is opaque everywhere else.
   const auto suffixed = [&toolMap](const std::string& tag) {
-    ElementMap m;
-    for (const auto& [i, n] : toolMap.names)
-      m.names[i] = n + "#" + tag;
-    for (const auto& [i, n] : toolMap.edgeNames)
-      m.edgeNames[i] = n + "#" + tag;
-    return m;
+    return Suffixed(toolMap, tag);
   };
   std::vector<std::pair<CADShape, ElementMap>> cutters;
   if (kind == PatternKind::Mirror) {

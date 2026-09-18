@@ -402,6 +402,30 @@ void NamePrimitiveElements(const CADShape& shape, const std::string& prefix,
   FallbackPasses(shape.GetShape(), out);
 }
 
+void NamesOfSubShape(const CADShape& whole, const ElementMap& wholeMap,
+                     const CADShape& part, ElementMap& out) {
+  out = ElementMap{};
+  if (!whole.IsValid() || !part.IsValid()) {
+    return;
+  }
+  TopTools_IndexedMapOfShape wholeFaces, wholeEdges, partFaces, partEdges;
+  MapSubshapes(whole.GetShape(), wholeFaces, wholeEdges);
+  MapSubshapes(part.GetShape(), partFaces, partEdges);
+
+  for (int i = 1; i <= partFaces.Extent(); i++) {
+    const int w = wholeFaces.FindIndex(partFaces(i));
+    if (const std::string* n = w > 0 ? wholeMap.NameOf(w - 1) : nullptr) {
+      out.names[i - 1] = *n;
+    }
+  }
+  for (int i = 1; i <= partEdges.Extent(); i++) {
+    const int w = wholeEdges.FindIndex(partEdges(i));
+    if (const std::string* n = w > 0 ? wholeMap.EdgeNameOf(w - 1) : nullptr) {
+      out.edgeNames[i - 1] = *n;
+    }
+  }
+}
+
 void ApplyFallbackPasses(const CADShape& shape, ElementMap& map) {
   if (!shape.IsValid()) {
     return;
