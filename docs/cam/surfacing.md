@@ -172,17 +172,20 @@ phase 1's refusals, not here.
 
 ## Phase 1 — surfacing
 
-> The ENGINE is built and tested: the cutter-location surface
-> (`CamDropCutter`), the silhouette pick (`PickedSurfaceRegion` /
-> `WholePartSilhouette`), and both patterns (`ParallelPasses`,
-> `WaterlinePasses`). What remains is the WIRING — two `OpType` values, three
-> `Operation` fields, derivation, the strategy dispatch, serialization, RPC
-> and panel — and the closed-loop generate/post/verify test that needs them.
+> **BUILT** at v118. The cutter-location surface (`CamDropCutter`), the
+> silhouette pick (`PickedSurfaceRegion` / `WholePartSilhouette`), both
+> patterns (`ParallelPasses`, `WaterlinePasses`), the two `OpType`s with their
+> three fields, derivation and its refusals, the strategy dispatch,
+> serialization, the RPC surface, the panel fields and two verbs.
 >
-> The wiring carries the format bump, and that is why it is a seam rather than
-> a pause: a new enum value is a format change, so it takes a `kVersion`, a
-> golden at that version and a history row, and a version number chosen while
-> something else lands on main is a renumbering.
+> Phase 0 paid for itself on the first build of the enum values: the missing
+> `kRows` entries and the two `default:`-less switches broke the compile,
+> rather than producing an op that saved as `"profile"` and derived a default
+> `Operation` reporting success.
+>
+> What is NOT built, and is the honest next step: **a dogfood**. Every number
+> here is checked against arithmetic, and the one thing arithmetic cannot say
+> is whether the verbs are the ones a person reaches for on a real part.
 
 ### What a surfacing pass is
 
@@ -367,15 +370,33 @@ engine is the cost, not the ops.
 
 ### Verification
 
-- The CL surface against shapes with known answers: a ball nose on a sphere
-  sits at a computable offset; a flat mill on a plane sits on it; a ball in a
-  concave corner cannot reach the corner, and must not claim to.
-- **Closed loop**: generate, post, and run the existing verifier on a dome —
-  `maxGouge` within tolerance and `leftoverArea` accounted for. This is the
-  check that matters, and it works today only because `CarveSweep` models the
-  real tool profile.
-- Stepover against scallop: halving `stepover` must halve the cusp the
-  verifier measures, not merely change the path count.
-- The refusals: every field listed above, refused by name on a surfacing op.
-- `render_pixel_smoke.py` byte-identical — surfacing meshes finely, and the
-  drop cutter must mesh DETACHED or it re-tessellates the document.
+All in `tests/test_cam_surface.cpp`, and every expected value is arithmetic
+rather than a number recorded from a run:
+
+- The CL surface: a flat mill rests exactly on a flat top; its rim holds it up
+  until its centre is one full radius past the wall; a ball nose over a
+  cylinder of radius R sits at `sqrt((R+r)^2 - x^2) - r`, which is the case a
+  flat-tool sampler gets wrong everywhere but the apex; and a 6 mm ball over a
+  2 mm gap dips `3 - sqrt(8)` and no further — it enters, because it is round,
+  and never reaches the floor it can see.
+- The silhouette: a cylinder of radius 10 over a length of 40 gives an 800 mm2
+  rectangle, which is the number that says the shadow was taken and not the
+  wire.
+- The raster: spacing is the stepover at 0 degrees AND at 45, measured
+  perpendicular — walking at an angle instead of rotating the geometry gives
+  `stepover/cos 45`, so every scallop would be 41% too big. A hole in the
+  region splits the crossing passes and no point lands inside it.
+- The waterline: laps a truncated cone at `R0 + (R1-R0)(z/H) + r`, and every
+  point of a lap is at exactly that lap's Z.
+- **Closed loop**: a dome through the real post and the real verifier, with
+  `maxGouge` **zero**. The one check that sees the posted file rather than a
+  `vector<Move>`. It deliberately does not assert `rapidsThroughStock == 0`:
+  the job finishes RAW stock, so a retract lifts a ball whose rim overhangs
+  the uncut neighbours, and the verifier is right to say so. A real job roughs
+  first.
+- The refusals: a V-bit and a drill by name at derivation; every field the
+  types do not have, by name, at the RPC.
+
+Still to do: a stepover-against-scallop check — halving `stepover` should
+halve the cusp the verifier measures, not merely change the path count — and
+`render_pixel_smoke.py` stays byte-identical, which it is.
