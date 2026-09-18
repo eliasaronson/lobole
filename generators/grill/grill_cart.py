@@ -59,13 +59,18 @@ def control_panel(d):
                          [rect((-S.PANEL_X / 2, -S.PANEL_H / 2),
                                (S.PANEL_X / 2, S.PANEL_H / 2))],
                          name="Panel blank")
-    # Turned BACK, away from the cook: picked on the rear face so the flange
-    # folds away from the face rather than across it.
-    rails = edges_at(d, lambda m: abs(m[1] + t) < near(t)
+    # Turned BACK, away from the cook. The blank's material runs from the
+    # sketch plane along -Y, so the REAR face is the one at y = 0 and the
+    # front — the one a hand touches — is at y = -t: picking the front face
+    # folded the stiffeners forward, over the knobs.
+    rails = edges_at(d, lambda m: abs(m[1]) < near(t)
                      and abs(abs(m[2]) - S.PANEL_H / 2) < near(t),
                      what="panel edge")
+    # Inset at the ends, clear of the cart's own side panels: a flange that
+    # runs the full width would turn back into them. The inset stops the bend
+    # line inside the panel, so it takes the document's relief.
     flange(d, base, rails, S.PANEL_TOP, name="Stiffeners",
-           position="material_inside")
+           position="material_inside", offset_start=34.0, offset_end=34.0)
     # The valve stems and the igniter, square through the face.
     bores = []
     for i in range(S.BURNERS):
@@ -108,6 +113,32 @@ def cart_side(d):
                [circle((S.CART_Y / 2 - 70.0, -95.0), S.AXLE_D / 2 + 1.0)],
                name="Axle hole")
     frame(d, "inner", (t, 0.0, 0.0))
+    # The cart side is what the grill is built OUT from, so it carries the
+    # socket for everything that hangs off it. The left panel is the root of
+    # the assembly; the right one is the same part, mated to "opposite".
+    # The cart's own centreline, in this panel's coordinates: the left panel
+    # is the root, so anything that belongs to the CART rather than to the
+    # panel is half a cart away from it.
+    mid = S.CART_X / 2 - t / 2
+    frame(d, "opposite", (S.CART_X - t, 0.0, 0.0))
+    frame(d, "back", (mid, S.CART_Y / 2 - t, 0.0))
+    frame(d, "shelf", (mid, 0.0, 30.0))
+    frame(d, "door", (0.0, -S.CART_Y / 2, 60.0 + S.DOOR_Y / 2))
+    frame(d, "axle", (mid, S.CART_Y / 2 - 70.0, 95.0), z_axis=(1, 0, 0),
+          x_axis=(0, 1, 0))
+    frame(d, "firebox", (mid, 0.0, S.CART_H))
+    # Handed: this one part is used on both sides, so "outward" and "inward"
+    # are opposite directions on the two of them. A single socket sent the
+    # right-hand shelf straight through the firebox.
+    frame(d, "side_shelf_left",
+          (-(S.SIDE_SHELF_X / 2 + 16.0), -40.0, S.CART_H))
+    # The right-hand panel is this same part translated, not mirrored, so
+    # its stiffening flanges stand OUT of the cart: the shelf on that side
+    # has to clear them as well as the panel.
+    frame(d, "side_shelf_right",
+          (t + S.CART_FLANGE + S.SIDE_SHELF_X / 2 + 16.0, -40.0, S.CART_H))
+    frame(d, "foot_left", (30.0, -S.CART_Y / 2 + 70.0, 0.0))
+    frame(d, "foot_right", (t - 30.0, -S.CART_Y / 2 + 70.0, 0.0))
     flat_config(d, base)
     sheet_ok(d, "cart side")
     return base
@@ -135,6 +166,7 @@ def cart_shelf(d):
     part(d, "Cart shelf", S.CART_STOCK)
     base = pan(d, S.SHELF_X, S.SHELF_Y, S.SHELF_WALL, "Shelf")
     frame(d, "seat", (0.0, 0.0, 0.0))
+    frame(d, "tank", (0.0, 0.0, thickness(d)))
     flat_config(d, base)
     sheet_ok(d, "cart shelf")
     return base
@@ -163,8 +195,12 @@ def cart_door(d):
                     what="door end edge")
     hem(d, base, ends, S.DOOR_HEM, name="End hems",
         offset_start=inset + S.DOOR_HEM, offset_end=inset + S.DOOR_HEM)
-    frame(d, "hinge", (-S.DOOR_X / 2, 0.0, S.DOOR_Y / 2), z_axis=(0, 0, 1),
-          x_axis=(1, 0, 0))
+    # One door part, hung on either side: the left door swings on its left
+    # edge and the right door on its right, so it carries both hinges.
+    frame(d, "hinge_left", (-S.DOOR_X / 2 - 12.0, 0.0, S.DOOR_Y / 2),
+          z_axis=(0, 0, 1), x_axis=(1, 0, 0))
+    frame(d, "hinge_right", (S.DOOR_X / 2 + 12.0, 0.0, S.DOOR_Y / 2),
+          z_axis=(0, 0, 1), x_axis=(1, 0, 0))
     flat_config(d, base)
     sheet_ok(d, "cart door")
     return base

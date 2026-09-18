@@ -91,6 +91,30 @@ def firebox_pan(d):
     frame(d, "hinge", (0.0, S.BOX_Y / 2, top_z + t + S.LID_GAP),
           z_axis=(1, 0, 0), x_axis=(0, 1, 0))
     frame(d, "underside", (0.0, 0.0, 0.0))
+    # Sockets: everything the firebox carries is mated to one of these, so
+    # the assembly holds no positions of its own.
+    axis_z = t + S.BURNER_AXIS_Z
+    frame(d, "panel", (0.0, -(S.BOX_Y / 2 + 60.0), 30.0 - S.VALVE_Z),
+          z_axis=(0, -1, 0), x_axis=(1, 0, 0))
+    frame(d, "manifold", (0.0, -(S.BOX_Y / 2 + 18.0), 30.0),
+          z_axis=(1, 0, 0), x_axis=(0, 1, 0))
+    frame(d, "tray", (0.0, -120.0, -30.0))
+    frame(d, "rack", (0.0, 60.0, axis_z + 120.0))
+    tilt = math.radians((180.0 - S.TENT_DEG) / 2.0)
+    for i in range(S.BURNERS):
+        x = (i - (S.BURNERS - 1) / 2.0) * S.BURNER_PITCH
+        # The burner is mated by its MOUTH, so the socket is where the
+        # mouth goes — just clear of the front wall, with the tube running
+        # back through the port into the box.
+        frame(d, f"burner_{i + 1}", (x, -(S.BOX_Y / 2 + 10.0), axis_z),
+              z_axis=(0, -1, 0), x_axis=(1, 0, 0))
+        # The tent hangs from its ridge, tilted so its legs fall away evenly:
+        # the tilt belongs to the socket, not to a quaternion in the
+        # assembly.
+        frame(d, f"tent_{i + 1}", (x, 0.0, axis_z + 30.0),
+              z_axis=(math.sin(tilt), 0.0, math.cos(tilt)),
+              x_axis=(math.cos(tilt), 0.0, -math.sin(tilt)))
+        frame(d, f"grate_{i + 1}", (x, 0.0, axis_z + 100.0))
     frame(d, "front_face", (0.0, -(S.BOX_Y / 2), t + S.BOX_H / 2),
           z_axis=(0, -1, 0), x_axis=(1, 0, 0))
     flat_config(d, base)
@@ -123,7 +147,12 @@ def hood(d):
     drop = S.HOOD_FACET * _m.sin(_m.radians(S.HOOD_FACET_DEG))
     frame(d, "hinge", (0.0, S.HOOD_TOP_Y / 2 + run, -drop), z_axis=(1, 0, 0),
           x_axis=(0, 1, 0))
-    frame(d, "handle_left", (-S.HANDLE_SPAN / 2, -S.HOOD_TOP_Y / 2 - 40.0, -40.0))
+    # On the flat of the lid, near its front edge, legs down.
+    frame(d, "handle", (0.0, -(S.HOOD_TOP_Y / 2 - 35.0), t))
+    frame(d, "thermo", (0.0, 0.0, t + 0.5))
+    for side, x in (("cap_left", -1), ("cap_right", +1)):
+        frame(d, side, (x * (S.BOX_X / 2 - t), 0.0, 0.0), z_axis=(1, 0, 0),
+              x_axis=(0, 1, 0))
     flat_config(d, base)
     sheet_ok(d, "hood")
     return base

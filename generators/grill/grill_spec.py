@@ -59,7 +59,11 @@ TRAY_HEM = 8.0                           # the edge a person pulls on
 # --- control panel --------------------------------------------------------
 PANEL_X = 690.0
 PANEL_H = 150.0
-PANEL_TOP = 25.0                         # flange back, under the firebox
+# The panel's flanges turn back toward the firebox, stopping short of the
+# burner tubes that cross above them on their way through the front wall:
+# the face stands 60 clear of the wall, and the burners' mouths are 10 in
+# front of it.
+PANEL_TOP = 40.0
 PANEL_BOTTOM = 20.0
 VALVE_BORE = 22.0
 VALVE_Z = 40.0                           # above the panel's centre: the bore
@@ -69,7 +73,7 @@ IGNITER_BORE = 16.0
 # --- cart -----------------------------------------------------------------
 CART_X = 690.0
 # The back sits BETWEEN the sides, clear of their return flanges.
-BACK_X = 690.0 - 2 * (20.0 + 1.0 + 1.0)
+BACK_X = 690.0 - 2 * (20.0 + 1.0 + 4.0)
 CART_Y = 500.0
 CART_H = 650.0                           # floor to firebox underside
 CART_FLANGE = 20.0
@@ -77,7 +81,7 @@ SHELF_X = 650.0
 SHELF_Y = 420.0                          # clear of the back panel's flanges
 SHELF_WALL = 30.0
 DOOR_X = 330.0
-DOOR_Y = 500.0
+DOOR_Y = 480.0                           # hung clear of the control panel
 DOOR_HEM = 10.0
 SIDE_SHELF_X = 420.0
 SIDE_SHELF_Y = 300.0
@@ -91,6 +95,9 @@ MANIFOLD_D = 20.0
 MANIFOLD_LEN = COOK_X
 VALVE_BODY = (28.0, 26.0, 26.0)
 VALVE_STEM_D = 8.0
+# Long enough to reach through the control panel and carry a knob clear of
+# its face: the gap between the manifold and the panel, plus the knob's seat.
+VALVE_STEM_L = 42.0
 KNOB_D = 55.0
 KNOB_H = 24.0
 GRATE_BAR_D = 8.0
@@ -106,7 +113,7 @@ FOOT_D = 40.0
 FOOT_H = 25.0                            # under the shelf, which is at 30
 TANK_D = 310.0
 TANK_H = 480.0
-TANK_COLLAR_H = 90.0
+TANK_COLLAR_H = 80.0                     # ends below the regulator's hose
 THERMO_BEZEL_D = 60.0
 THERMO_STEM_D = 10.0
 

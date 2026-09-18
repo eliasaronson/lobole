@@ -34,12 +34,28 @@ already uses, driven against a scratch instance:
 | `grill_firebox.py` | firebox pan, hood facets + end caps, heat tents, grease tray |
 | `grill_cart.py` | side panels, back, bottom shelf, doors, side shelves, control panel |
 | `grill_hardware.py` | burner tubes, manifold, valves, knobs, grates, warming rack, wheels, tank, regulator, handle, thermometer |
-| `grill_assemble.py` | occurrences and mates, exploded view |
+| `grill_assemble.py` | occurrences, the 39 mates that hold them, exploded view |
 | `grill_shop.py` | flat patterns, drawings with bend tables, DXF out, the checks |
 | `grill.py` | the driver that runs them in order |
 
 The model lands in `scratch/grill.dsgn`; the DXFs, the drawing and the
 renders in `scratch/grill/`.
+
+## How it is held together
+
+One occurrence is fixed — the left-hand cart side — and every other part is
+placed by a MATE to a named socket on the part that carries it: the firebox
+to the cart, the lid to the firebox's hinge, each valve to its own place on
+the manifold, each wheel to its end of the axle. No occurrence carries a
+transform typed into the assembly, so a dimension change moves the sockets
+and the parts follow. The lid, both doors, both wheels and the three knobs
+are revolute; the other 32 joints are fastened.
+
+The parts themselves are drawn, not assembled out of primitives: a propane
+bottle is a profile revolved about its axis, a knob is a turned profile, and
+the lid handle is a tube swept along its own bent centreline (a `Curve3D`
+through the bends, then a `Pipe`) — which is what a handle IS. Two cylinders
+unioned at a square corner is a picture of something nobody can make.
 
 ## How it is verified
 
@@ -130,6 +146,22 @@ feature tests that shipped with S1–S11.
    on the adjacent edges, `CornerRelief` with the default circular style,
    then a flat pattern — and measure the blank's thickness. The grill's tents
    use a rectangular relief, which is what a shop would punch there anyway.
+
+### Found in the second pass (the assembly)
+
+Mating everything, rather than typing transforms, found four placement
+faults that the eye had let through — each one visible only once the solver
+put the part where the mate said it belonged:
+
+- both wheels collapsed onto the axle's single centre frame;
+- the lid hinged about the VERTICAL, because a frame's z is the axis a
+  revolute turns on and both hinge frames pointed up;
+- one part used on both sides of the cart carries sockets that point the
+  wrong way on the second one — the right-hand shelf went through the
+  firebox — so those sockets are handed;
+- a valve mated to its manifold the way round that put it inside the
+  firebox: `flipped` decides which of the eight ways two frames meet, and
+  the default is not always the one meant.
 
 ### What held up
 
