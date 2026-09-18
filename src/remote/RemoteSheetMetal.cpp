@@ -1,10 +1,12 @@
 #include "remote/RemoteSheetMetal.h"
 
+#include "core/Angles.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/SheetMetal.h"
 #include "core/io/ExportDxf.h"
 #include "core/sheet/Check.h"
+#include "core/sheet/Unfold.h"
 #include "ui/AppState.h"
 
 #include <memory>
@@ -46,6 +48,18 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "enough to a bend to draw into an oval. `not_checked` says what this "
      "build cannot answer, so a clean verdict is never mistaken for one.",
      "body, part", NeedsPart | Deferrable},
+    {"list_bends",
+     "Every bend of a sheet body, as DATA: its inside radius against the "
+     "material's minimum (`below_minimum` is the DFM verdict, and a HEM is "
+     "exempt because it is crushed flat rather than bent round a die), the "
+     "angle, the K and where that K came from, the bend allowance once the "
+     "part has been flattened, how far the bend runs along its axis, and the "
+     "axis itself. `side` [x,y,z] adds `folds`: UP or DOWN as seen from that "
+     "side, which is the only sense a bend has (sheet::FoldsToward) — omit it "
+     "and no direction is claimed. The rules the part was built under come "
+     "back beside them, so a bend audit is ONE call instead of three plus a "
+     "drawing note's text.",
+     "part, body, side", NeedsPart | Deferrable},
     {"export_dxf",
      "Write a sheet body's FLAT PATTERN to a DXF a shop can cut: R12 ASCII, "
      "millimetres ($INSUNITS 4), outline and holes on CUT, bend lines on "
@@ -214,6 +228,79 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
            {"bends_checked", r.bendsChecked},
            {"holes_checked", r.holesChecked},
            {"not_checked", r.notChecked}};
+    return true;
+  }
+
+  if (m == "list_bends") {
+    const Document& src =
+        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : doc;
+    if (!src.SheetMetal())
+      throw std::runtime_error(
+          "this part has no sheet-metal rules, so it has no bends to list "
+          "(set_sheet_metal_rules)");
+    const std::vector<Body>& bodies = src.GetBodies();
+    std::optional<size_t> only;
+    if (p.contains("body")) {
+      only = p.at("body").get<size_t>();
+      if (*only >= bodies.size())
+        throw std::runtime_error("no body " + std::to_string(*only) +
+                                 " - this part has " +
+                                 std::to_string(bodies.size()));
+    }
+    std::optional<glm::dvec3> side;
+    if (p.contains("side")) {
+      const auto& v = p.at("side");
+      if (!v.is_array() || v.size() != 3)
+        throw std::runtime_error("side is a direction [x, y, z]");
+      side = glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                        v[2].get<double>());
+    }
+    const sheet::SheetMetalRules& rules = *src.SheetMetal();
+    const double minimum =
+        sheet::MinBendRadius(rules.material, rules.thickness);
+    json bends = json::array();
+    int index = 0;
+    for (size_t b = 0; b < bodies.size(); b++) {
+      if (only && b != *only)
+        continue;
+      if (bodies[b].reference)
+        continue;
+      for (const BendRegion& bend : bodies[b].bends) {
+        json j = {
+            {"index", ++index},
+            {"body", static_cast<int>(b)},
+            {"feature_id", bend.featureId},
+            {"angle_deg", angles::ToDegrees(bend.angle)},
+            {"radius_mm", bend.radius},
+            {"min_radius_mm", minimum},
+            // A hem is crushed flat, not bent round a die: its radius
+            // is the gap its return leaves and is MEANT to be under
+            // what the material takes.
+            {"crushed", bend.crushed},
+            {"below_minimum", !bend.crushed && bend.radius < minimum - 1e-9},
+            {"width_mm", bend.width},
+            {"k_factor", bend.kFactor},
+            {"k_source", bend.kSource},
+            {"flat", bend.flat},
+            {"axis", {bend.axisDir.x, bend.axisDir.y, bend.axisDir.z}},
+            {"axis_origin",
+             {bend.axisOrigin.x, bend.axisOrigin.y, bend.axisOrigin.z}}};
+        // Only once the part has been laid flat: the allowance is what the
+        // unfolder worked out, not something the fold recorded.
+        if (bend.allowance > 0.0)
+          j["allowance_mm"] = bend.allowance;
+        if (side) {
+          if (sheet::SquareTo(bend, *side))
+            j["folds"] = sheet::FoldsToward(bend, *side) ? "up" : "down";
+          else
+            j["folds"] = nullptr; // not square to that side: no answer to give
+        }
+        bends.push_back(std::move(j));
+      }
+    }
+    out = {{"bends", std::move(bends)},
+           {"count", index},
+           {"rules", RulesJson(rules)}};
     return true;
   }
 

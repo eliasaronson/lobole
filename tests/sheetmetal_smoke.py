@@ -119,6 +119,26 @@ def tier2(d):
         "edges": [{"feature_id": base, "element": top_left}]})
     expect(r["regen"]["ok"], r["regen"])
 
+    # Every bend as DATA, and the three sources agreeing about them. A bend
+    # audit used to be assembled out of the rules, a check's counts and the
+    # TEXT of a drawing note; this is the same answer in one call, so the
+    # three must not drift apart.
+    listed = d.request("list_bends", {"side": [0, 0, 1]})
+    chk = d.call("check_sheet_metal")
+    expect(listed["count"] == chk["bends_checked"],
+           f"list_bends says {listed['count']}, the check saw "
+           f"{chk['bends_checked']}")
+    hems = [b for b in listed["bends"] if b["crushed"]]
+    expect(len(hems) == 1, f"the hem is the one crushed bend: {listed}")
+    # A hem's radius is the gap its return leaves — far under what the
+    # material takes — and it is exempt for exactly that reason.
+    expect(hems[0]["radius_mm"] < listed["rules"]["min_bend_radius_mm"]
+           and not hems[0]["below_minimum"], hems[0])
+    walls = [b for b in listed["bends"] if not b["crushed"]]
+    expect(all(not b["below_minimum"] and b["k_source"] for b in walls), walls)
+    expect(any(b.get("folds") == "up" for b in listed["bends"]),
+           f"nothing folds up as seen from +Z: {listed['bends']}")
+
     # Unfold and back up: nothing moves.
     folded = volume(d)
     unfold = d.call("add_feature", feature={

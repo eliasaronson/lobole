@@ -314,6 +314,11 @@ Each is a papercut that cost this round minutes, not hours:
   `add_occurrence` + `add_mate` + socket frames. One SDK call —
   `place(part, on={occurrence, frame}, with=frame, type=...)`, returning both
   ids — removes about forty lines per generator.
+- **A read-only question that NAMES its part is still gated on the active
+  tab.** `list_bends`, `check_sheet_metal` and `get_sheet_metal_rules` all
+  take `part`, and all refuse from an assembly tab — so a bend audit over
+  sixteen parts walks the tabs to ask them, and `list_elements` (which does
+  handle it) shows what the other shape looks like.
 - **The staleness convention test fires on any source file**, so editing an
   unrelated subsystem in another window fails the suite with a message about
   a stale binary. Compare against the files that link into the binary.

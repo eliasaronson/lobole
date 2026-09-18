@@ -143,33 +143,41 @@ def shop(d, out_dir="scratch/grill"):
 def bend_audit(d, parts=None):
     """Every bend on the grill against the rule for the metal it is in.
 
-    The question this answers is not "did it fold" but "would a shop fold it
-    THIS way": the inside radius against the material's own minimum, the
-    K-factor and where it came from, and the relief cut at the end of every
-    bend line that stops inside a panel. All of it is read from the document
-    — the rules a part was built under and the app's own DFM check — rather
-    than restated here, so a table that disagrees with the model cannot be
-    printed.
+    ONE call per part: `list_bends` answers the DFM question a shop asks —
+    each bend's inside radius against the material's own minimum, the angle,
+    the K and where it came from, and whether the bend is a crushed hem and
+    so exempt. `check_sheet_metal` beside it is the app's own verdict, and
+    the two have to agree about how many bends there are.
     """
     rows = []
     for part in (parts or SHEET_PARTS):
+        # Both are read-only and both NAME their part, but both are gated on
+        # a part tab being active, so an audit run from the assembly has to
+        # walk the tabs to ask about them.
         d.call("set_active_part", part=part)
-        r = d.call("get_sheet_metal_rules")["rules"]
-        chk = d.call("check_sheet_metal")
+        listed = d.request("list_bends", {"part": part})
+        chk = d.request("check_sheet_metal", {"part": part})
+        if listed["count"] != chk["bends_checked"]:
+            raise SystemExit(f"{part}: list_bends says {listed['count']} bends "
+                             f"and check_sheet_metal checked "
+                             f"{chk['bends_checked']}")
+        r = listed["rules"]
+        bends = listed["bends"]
         rows.append({
             "part": part,
             "material": r["material"],
             "gauge": r["gauge"],
             "t": r["thickness_mm"],
-            "radius": r["bend_radius_mm"],
+            "radius": min((b["radius_mm"] for b in bends), default=0.0),
             "min_radius": r["min_bend_radius_mm"],
-            "radius_source": r["bend_radius_source"],
             "k": r["k_factor"],
             "k_source": r["k_factor_source"],
             "relief": r["relief"],
             "relief_w": r["relief_width_mm"],
             "relief_d": r["relief_depth_mm"],
-            "bends": chk["bends_checked"],
+            "bends": listed["count"],
+            "hems": sum(1 for b in bends if b["crushed"]),
+            "under": [b["index"] for b in bends if b["below_minimum"]],
             "holes": chk["holes_checked"],
             "violations": chk["violations"],
         })
@@ -179,17 +187,21 @@ def bend_audit(d, parts=None):
 def print_bend_audit(rows):
     print("  bends, and the rule for the metal they are in:")
     print("    part              material         gauge   t     R    Rmin  "
-          "K     relief          bends  holes  violations")
+          "K     relief          bends hems  holes  violations")
     for r in rows:
-        ok = "none" if not r["violations"] else str(r["violations"])
+        ok = "none" if not r["violations"] and not r["under"] else \
+            f"{r['violations']} under-minimum bends {r['under']}"
         print(f"    {r['part']:17s} {r['material']:15s} {r['gauge']:6s} "
               f"{r['t']:4.2f} {r['radius']:5.2f} {r['min_radius']:5.2f} "
               f"{r['k']:5.2f} {r['relief']:>11s} "
               f"{r['relief_w']:4.2f}x{r['relief_d']:<4.2f} "
-              f"{r['bends']:4d} {r['holes']:6d}  {ok}")
-    worst = [r for r in rows if r["radius"] < r["min_radius"] - 1e-9
-             or r["violations"]]
+              f"{r['bends']:4d} {r['hems']:4d} {r['holes']:6d}  {ok}")
+    worst = [r for r in rows if r["under"] or r["violations"]]
     if worst:
         raise SystemExit(f"bends below the minimum radius, or in violation: "
                          f"{[w['part'] for w in worst]}")
+    print(f"    {sum(r['bends'] for r in rows)} bends, "
+          f"{sum(r['hems'] for r in rows)} of them crushed hems (exempt from "
+          f"the minimum radius), {sum(r['holes'] for r in rows)} holes, "
+          f"no violations")
     return rows
