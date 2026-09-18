@@ -32,10 +32,21 @@ ImVec4 ElevatedWindowBorder();
 // is tinted twice.
 void DrawWindowShadow(const ImVec2& min, const ImVec2& max);
 
-// Applies the application theme: colors, metrics, and font, scaled for the
-// display (pass the window content scale; 1.0 on standard-DPI screens).
-// Call once after ImGui::CreateContext(), before the first frame.
-void ApplyTheme(float scale);
+// Applies the application theme: colors, metrics, and font.
+//
+// `uiScale` is how much bigger the interface should be than its 1x design —
+// the display's content scale times the user's font-size preference.
+// `framebufferScale` is how much the BACKEND already magnifies ImGui's
+// coordinates on its way to the screen (io.DisplayFramebufferScale): 1.0 on
+// X11, where the framebuffer is the window; the display scale on Wayland,
+// where GLFW renders into a framebuffer that many times larger.
+//
+// The two are not the same knob and multiplying by both is how the UI ended
+// up at 1.96x on a 1.4 display. Style metrics are in ImGui's logical space so
+// they take uiScale/framebufferScale; the font is RASTERIZED at the physical
+// size (uiScale) and then divided back down by FontGlobalScale, which is what
+// keeps text crisp instead of a 16 px atlas magnified 1.4 times.
+void ApplyTheme(float uiScale, float framebufferScale = 1.0f);
 
 // The scale ApplyTheme last ran with (content scale x the font-size
 // preference). Anything sizing a RAW PIXEL literal must multiply by this:

@@ -39,6 +39,36 @@ One helper, `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`, and four guards in
 `src/app/main.cpp`: the content-scale comparison, the position set, the
 position get, and the show path. No behaviour changes on X11.
 
+## 4. The DPI scale was applied TWICE
+
+Found after the three above, by comparing the app against other programs on
+the same screen: everything in it was visibly larger. It was, by 1.4x.
+
+On Wayland GLFW scales the framebuffer itself — measured, window 1350x1465
+against a framebuffer of 1890x2051 — and the ImGui backend reports that ratio
+as `io.DisplayFramebufferScale`, so every ImGui coordinate is already
+multiplied by 1.4 on its way to the screen. The theme then multiplied its
+metrics and font sizes by the content scale as well: 1.4 x 1.4 = **1.96**.
+Measured in-frame: `DisplaySize 1350x1490, FramebufferScale 1.40,
+fontSize 22.0` — 22 logical pixels is 30.8 physical, where a 1.4 display
+wants 22.4.
+
+On X11 the framebuffer IS the window, that ratio is 1.0, and multiplying by
+the content scale is exactly right. Which is why this had never shown up:
+until this week every window this app drew was an X11 one.
+
+The two are separate knobs and `ApplyTheme` now takes both:
+
+- **style metrics** scale by `uiScale / framebufferScale` — ImGui's own
+  coordinate space, logical.
+- **the font atlas** is rasterized at `uiScale`, i.e. PHYSICAL pixels, and
+  `io.FontGlobalScale = 1 / framebufferScale` divides it back down for
+  layout. That is what keeps text crisp: a 22 px atlas shown at 22 physical
+  pixels, rather than a 16 px atlas magnified 1.4 times.
+
+On X11 both reduce to today's behaviour exactly (`fb == 1`), which the GUI
+suite — which runs under Xvfb, on X11 — is what protects.
+
 ## Not a bug, worth knowing
 
 The UI scale arrives LATE on Wayland. The surface has no output and no

@@ -177,15 +177,21 @@ float s_UiScale = 1.0f;
 
 float UiScale() { return s_UiScale; }
 
-void ApplyTheme(float scale) {
+void ApplyTheme(float uiScale, float framebufferScale) {
+  const float fb = framebufferScale > 0.0f ? framebufferScale : 1.0f;
+  // What ImGui's own coordinates must be scaled by. On X11 this IS uiScale;
+  // on Wayland the backend already multiplies every coordinate by fb, so the
+  // style must not do it a second time.
+  const float scale = uiScale / fb;
   // Say what the UI is being sized at, and in what. A tester's screenshot
   // cannot answer "did Windows' display scaling reach the app?" -- the first
   // one's icons were reported unreadably small and the only way to tell a
   // display running at 100% (where 14 px icons are simply too small) from a
   // scale that never arrived was to ask him to read a control panel. The log
   // knows, so it should say.
-  LOG_INFO("UI scale {:.2f} — text {:.0f} px, icons {:.0f} px", scale,
-           16.0f * scale, 14.0f * scale);
+  LOG_INFO("UI scale {:.2f} — text {:.0f} px, icons {:.0f} px (framebuffer "
+           "scale {:.2f})",
+           uiScale, 16.0f * uiScale, 14.0f * uiScale, fb);
   s_UiScale = scale;
   ImGuiStyle& style = ImGui::GetStyle();
   style = ImGuiStyle(); // reset so repeated calls don't compound scaling
@@ -198,7 +204,7 @@ void ApplyTheme(float scale) {
   const std::string fontPath = (dir / "Roboto-Medium.ttf").string();
   if (std::filesystem::exists(fontPath)) {
     io.Fonts->Clear();
-    io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * scale, nullptr,
+    io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * uiScale, nullptr,
                                  kUiRanges);
 
     // Merge Font Awesome icons into the same atlas so ICON_FA_* works inline
@@ -208,9 +214,9 @@ void ApplyTheme(float scale) {
       ImFontConfig cfg;
       cfg.MergeMode = true;
       cfg.PixelSnapH = true;
-      cfg.GlyphMinAdvanceX = 15.0f * scale; // fixed-width icon column
-      cfg.GlyphOffset = ImVec2(0.0f, 2.0f * scale);
-      io.Fonts->AddFontFromFileTTF(iconPath.c_str(), 14.0f * scale, &cfg,
+      cfg.GlyphMinAdvanceX = 15.0f * uiScale; // fixed-width icon column
+      cfg.GlyphOffset = ImVec2(0.0f, 2.0f * uiScale);
+      io.Fonts->AddFontFromFileTTF(iconPath.c_str(), 14.0f * uiScale, &cfg,
                                    kIconRange);
     } else {
       LOG_WARN("Icon font not found at {}", iconPath);
@@ -223,8 +229,8 @@ void ApplyTheme(float scale) {
     // 260 KB and the alternative is rebuilding the atlas on a preference.
     const std::string monoPath = (dir / "JetBrainsMono-Regular.ttf").string();
     if (std::filesystem::exists(monoPath)) {
-      s_MonoFont = io.Fonts->AddFontFromFileTTF(monoPath.c_str(), 14.0f * scale,
-                                                nullptr, kMonoRanges);
+      s_MonoFont = io.Fonts->AddFontFromFileTTF(
+          monoPath.c_str(), 14.0f * uiScale, nullptr, kMonoRanges);
     } else {
       s_MonoFont = nullptr;
       LOG_WARN("Monospace font not found at {}", monoPath);
@@ -232,6 +238,11 @@ void ApplyTheme(float scale) {
   } else {
     LOG_WARN("Font not found at {}, using ImGui default", fontPath);
   }
+  // The atlas was rasterized at uiScale (physical pixels); ImGui lays out in
+  // logical ones. Dividing the whole font back by the framebuffer scale makes
+  // a glyph occupy the space it would have at `scale`, drawn from a texture
+  // with fb times the detail. On X11 fb is 1 and this is a no-op.
+  io.FontGlobalScale = 1.0f / fb;
 }
 
 ImVec4 AccentColor() { return kAccent; }

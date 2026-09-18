@@ -2007,7 +2007,17 @@ int main(int argc, char** argv) {
   // changed" rebuilt the whole font atlas each time the window was dragged.
   static float s_contentScale = std::max(1.0f, std::max(scaleX, scaleY));
   static float s_pendingContentScale = 0.0f; // 0 = no change pending
-  ui::ApplyTheme(s_contentScale * g_App.uiFontScale);
+  // How much the backend already magnifies ImGui's coordinates: the ratio of
+  // the framebuffer GLFW draws into to the window's logical size. 1.0 on X11;
+  // the display scale on Wayland, where GLFW scales the framebuffer itself.
+  const auto framebufferScale = [](GLFWwindow* w) {
+    int ww = 0, wh = 0, fw = 0, fh = 0;
+    glfwGetWindowSize(w, &ww, &wh);
+    glfwGetFramebufferSize(w, &fw, &fh);
+    return (ww > 0 && fw > 0) ? static_cast<float>(fw) / static_cast<float>(ww)
+                              : 1.0f;
+  };
+  ui::ApplyTheme(s_contentScale * g_App.uiFontScale, framebufferScale(window));
   glfwSetWindowContentScaleCallback(
       window, [](GLFWwindow*, float sx, float sy) {
         const float s = std::max(1.0f, std::max(sx, sy));
@@ -2360,7 +2370,8 @@ int main(int argc, char** argv) {
       g_App.fontRebuildRequested = false;
       vkDeviceWaitIdle(g_Device); // the old font texture may be in flight
       ImGui_ImplVulkan_DestroyFontsTexture();
-      ui::ApplyTheme(s_contentScale * g_App.uiFontScale);
+      ui::ApplyTheme(s_contentScale * g_App.uiFontScale,
+                     framebufferScale(window));
       ImGui_ImplVulkan_CreateFontsTexture();
     }
 
