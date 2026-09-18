@@ -1249,6 +1249,64 @@ def main():
         expect(abs(tube["length_mm"] - want) < 1e-6,
                f"cut length {tube['length_mm']:.3f} is the arc length {want:.3f}")
 
+        phase("Cut list")
+        # A cut list is a list of members that EXIST (v118). Three ways it
+        # used to be wrong, each one an order a shop could not fill.
+        d.call("new_project")
+
+        def tube_member(name, pts, od, wall, radius=76.2):
+            cl = d.call("add_feature", feature={
+                "type": "Curve3D", "name": name + " CL", "kind": "bent_path",
+                "radius": radius, "points": pts})
+            return d.call("add_feature", feature={
+                "type": "Pipe", "name": name, "path_id": cl["id"],
+                "outer_diameter": od, "wall_thickness": wall})
+
+        # 1. A MIRRORED member is a member. Half a symmetric frame used to go
+        # unordered, because the schedule walked curves and a mirror makes no
+        # curve.
+        seed = tube_member("Side brace",
+                           [[100, 0, 0], [100, 0, 500], [100, 400, 500]],
+                           25.4, 1.65)
+        src = [b for b in d.call("get_state")["bodies"]
+               if b.get("created_by") == seed["id"]][0]["created_by"]
+        d.call("add_feature", feature={
+            "type": "Pattern", "name": "Mirrored", "kind": "mirror",
+            "source_id": src, "base_plane": "yz", "count": 2})
+        sched = d.request("tube_schedule", {})
+        expect(len(d.call("get_state")["bodies"]) == 2 and
+               sched["members"] == 2 and sched["count"] == 1,
+               "a mirrored member is ordered too, as a quantity of two")
+
+        # 2. A COPED member is cut to the metal, not to the node. The
+        # difference is 8.4 mm on a 19.05 brace into a 25.4 run, per end.
+        d.call("new_project")
+        run = tube_member("Run", [[0, -300, 0], [0, 300, 0]], 25.4, 2.4)
+        brace = tube_member("Brace", [[400, 0, 0], [0, 0, 0]], 19.05, 1.65)
+        d.call("add_feature", feature={
+            "type": "Cope", "name": "Cope", "member_id": brace["id"],
+            "against": [run["id"]]})
+        rows = {t["name"]: t for t in d.request("tube_schedule", {})["tubes"]}
+        cut = rows["Brace CL"]
+        expect(abs(cut["path_length_mm"] - 400.0) < 1e-6,
+               "the path is still the node-to-node 400 mm")
+        expect(8.0 < cut["coped_off_mm"] < 9.0 and
+               abs(cut["cut_length_mm"] + cut["coped_off_mm"] - 400.0) < 1e-6,
+               f"the cope took {cut['coped_off_mm']:.2f} mm off what is cut")
+        expect(len(d.call("get_state")["bodies"]) == 2,
+               "and the run it was coped to is still there")
+
+        # 3. Identical members collapse into one row that says how many.
+        d.call("new_project")
+        for i in range(4):
+            tube_member(f"Brace {i + 1}",
+                        [[0, i * 100.0, 0], [400, i * 100.0, 0]], 19.05, 1.65)
+        sched = d.request("tube_schedule", {})
+        expect(sched["count"] == 1 and sched["members"] == 4 and
+               sched["tubes"][0]["quantity"] == 4 and
+               len(sched["tubes"][0]["bodies"]) == 4,
+               "four identical braces are one row of four")
+
         # Loft (M8): frustum between two squares on offset datum planes
         d.call("new_project")
         dp = d.call("add_feature", feature={

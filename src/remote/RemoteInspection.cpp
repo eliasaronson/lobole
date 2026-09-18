@@ -18,6 +18,8 @@
 #include "core/features/FrameFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/io/Serialization.h"
+#include "core/tube/CutList.h"
+#include "core/tube/Rules.h"
 #include "remote/RemoteHelpers.h"
 #include "render/ClipPlanes.h"
 #include "ui/AppState.h"
@@ -583,16 +585,22 @@ static constexpr MethodDoc InspectionMethods[] = {
      "there is no such count for them.",
      "body, max_faces, part"},
     {"tube_schedule",
-     "What a tube bender is programmed with, for every bent path in the part: "
-     "the CUT LENGTH of the straight tube it starts as, and per bend the "
-     "angle, the former's radius, the free straight before it and the ROLL — "
-     "how far the tube turns about its own axis between one bend and the "
-     "next. Where a Pipe sweeps the path, its outer diameter comes too, with "
-     "`radius_over_diameter` beside each bend and `tight` when that is under "
-     "1.5, which is a rule of thumb for a mandrel bend and NOT a material "
-     "table: this build has no tube-bending data, and says so rather than "
-     "implying one. The sheet side's answer to the same question is "
-     "list_bends.",
+     "The cut list and the bend schedule for every tube MEMBER of the part. "
+     "It walks the BODIES: a member is a length of tube that EXISTS, so a "
+     "curve whose tube was consumed is not one, and a member a pattern or a "
+     "mirror made is (half a symmetric frame used to go unordered). Identical "
+     "members collapse into one row carrying `quantity` and the `bodies` it "
+     "stands for. `cut_length_mm` is the METAL, measured along the member's "
+     "own path, so a coped end comes off it and `coped_off_mm` says how much; "
+     "`path_length_mm` is the node-to-node centreline it was swept along, "
+     "which is 8-9 mm longer per coped end and not what a saw is set to. Per "
+     "bend: the angle, the former's radius, the free straight before it and "
+     "the ROLL — how far the tube turns about its own axis between one bend "
+     "and the next. A bend is `tight` against the MATERIAL and the WALL when "
+     "the part declares its stock (set_tube_rules, and check_tube is the full "
+     "answer); without that it falls back to a bare R < 1.5 x D and says so "
+     "in `tight_rule`. `curve` narrows it to one path. The sheet side's "
+     "answer to the same question is list_bends.",
      "part, curve", Deferrable},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
@@ -3207,29 +3215,49 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"elements", std::move(elements)}};
   }
   if (m == "tube_schedule") {
-    if (!p.contains("part") && doc == nullptr)
-      throw std::runtime_error(
-          "there is no active part on this tab, so name the one you mean: "
-          "`part` takes a name, a stable id or a slot index");
-    const Document& src =
-        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : *doc;
+    // rpc-params: part
+    const Document& src = SubjectPart(state, doc, p);
     const uint64_t only = p.value("curve", uint64_t{0});
+
+    // Walk the BODIES, not the features. A cut list is a list of members that
+    // EXIST: a curve whose tube was consumed is not a member (a throwaway
+    // cutter used to report as one), and a member a pattern or a mirror made
+    // is (half a symmetric frame used to go unordered). The path a body was
+    // swept along is found by provenance — back through whatever made it.
     json tubes = json::array();
-    for (const std::unique_ptr<Feature>& feature : src.GetFeatures()) {
-      const auto* curve = dynamic_cast<const CurveFeature*>(feature.get());
+    for (const Body& body : src.GetBodies()) {
+      const CurveFeature* curve = nullptr;
+      const PipeFeature* pipe = nullptr;
+      // Breadth-first back through the features that made this body until a
+      // Pipe turns up: a Cope leaves the member's own Pipe as its maker, a
+      // Pattern names its source, a Boolean its two operands.
+      std::vector<uint64_t> frontier = {body.createdBy};
+      std::set<uint64_t> seen;
+      while (!frontier.empty() && pipe == nullptr) {
+        const uint64_t id = frontier.back();
+        frontier.pop_back();
+        if (id == 0 || !seen.insert(id).second)
+          continue;
+        const Feature* f = src.FindFeatureById(id);
+        if (f == nullptr)
+          continue;
+        if (const auto* asPipe = dynamic_cast<const PipeFeature*>(f)) {
+          pipe = asPipe;
+          break;
+        }
+        f->VisitFeatureRefs([&](uint64_t ref) { frontier.push_back(ref); });
+      }
+      if (pipe == nullptr)
+        continue; // not a length of tube; nothing to cut or bend
+      curve =
+          dynamic_cast<const CurveFeature*>(src.FindFeatureById(pipe->pathId));
       if (curve == nullptr || curve->kind != Curve3DKind::BentPath)
-        continue;
+        continue; // a tube on a sketch or a spline has no former to quote
       if (only != 0 && curve->GetId() != only)
         continue;
-      // The tube this path is swept into, when something sweeps it: the
-      // diameter is what decides whether a radius is bendable.
-      double diameter = 0.0, wall = 0.0;
-      for (const std::unique_ptr<Feature>& other : src.GetFeatures())
-        if (const auto* pipe = dynamic_cast<const PipeFeature*>(other.get()))
-          if (pipe->pathId == curve->GetId()) {
-            diameter = pipe->outerDiameter;
-            wall = pipe->wallThickness;
-          }
+
+      const double diameter = pipe->outerDiameter;
+      const double wall = pipe->wallThickness;
       json bends = json::array();
       int n = 0;
       for (const CurveFeature::Bend& b : curve->Bends()) {
@@ -3241,24 +3269,84 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                   {"corner", {b.corner.x, b.corner.y, b.corner.z}}};
         if (diameter > 1e-9) {
           j["radius_over_diameter"] = b.radius / diameter;
-          j["tight"] = b.radius < 1.5 * diameter;
+          // Against the declared stock when there is some, and only against
+          // a bare ratio when there is not — the literal was the whole
+          // complaint (docs/tube/plan.md).
+          if (src.Tube()) {
+            j["min_radius_mm"] =
+                tube::MinBendRadius(src.Tube()->material, diameter, wall);
+            j["tight"] = b.radius < j["min_radius_mm"].get<double>();
+          } else {
+            j["tight"] = b.radius < 1.5 * diameter;
+            j["tight_rule"] =
+                "no tube rules are set, so this is a bare R < 1.5 x D - "
+                "set_tube_rules gives the limit the MATERIAL and the WALL "
+                "actually impose";
+          }
         }
         bends.push_back(std::move(j));
       }
-      json t = {{"curve", curve->GetId()},
+
+      // What to CUT, which is not the same as the path. A coped member stops
+      // short of its node, and the metal is what a saw is set to.
+      const double pathLength = curve->Length();
+      double cutLength = pathLength;
+      const auto span = tube::MetalAlongPath(body, curve->EdgeShape());
+      if (span.has_value())
+        cutLength = span->second - span->first;
+      json t = {{"body", body.name},
+                {"curve", curve->GetId()},
                 {"name", curve->GetName()},
-                {"length_mm", curve->Length()},
+                {"cut_length_mm", cutLength},
+                {"path_length_mm", pathLength},
+                {"length_mm", cutLength}, // the name the schedule shipped with
                 {"bends", std::move(bends)}};
+      if (span.has_value() && pathLength - cutLength > 1e-6) {
+        t["coped_off_mm"] = pathLength - cutLength;
+      }
       if (diameter > 1e-9) {
         t["outer_diameter_mm"] = diameter;
         t["wall_mm"] = wall;
       }
       tubes.push_back(std::move(t));
     }
-    // The count BEFORE the move: `tubes` is moved into the object first, so
+
+    // Identical members collapse into one row with a quantity: four braces
+    // authored four ways are still four of the same tube to the shop, and a
+    // cut list that says so is one they can work from.
+    json rows = json::array();
+    for (json& t : tubes) {
+      const auto same = [&](const json& a, const json& b) {
+        return a["cut_length_mm"].get<double>() ==
+                   b["cut_length_mm"].get<double>() &&
+               a["bends"] == b["bends"] &&
+               a.value("outer_diameter_mm", 0.0) ==
+                   b.value("outer_diameter_mm", 0.0) &&
+               a.value("wall_mm", 0.0) == b.value("wall_mm", 0.0);
+      };
+      bool merged = false;
+      for (json& row : rows) {
+        if (same(row, t)) {
+          row["quantity"] = row["quantity"].get<int>() + 1;
+          row["bodies"].push_back(t["body"]);
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        t["quantity"] = 1;
+        t["bodies"] = json::array({t["body"]});
+        rows.push_back(std::move(t));
+      }
+    }
+    // The counts BEFORE the move: `rows` is moved into the object first, so
     // asking its size afterwards answered 0 with a tube in the array.
-    const int count = static_cast<int>(tubes.size());
-    return json{{"tubes", std::move(tubes)}, {"count", count}};
+    const int count = static_cast<int>(rows.size());
+    int members = 0;
+    for (const json& row : rows)
+      members += row["quantity"].get<int>();
+    return json{
+        {"tubes", std::move(rows)}, {"count", count}, {"members", members}};
   }
 
   if (m == "list_elements") {

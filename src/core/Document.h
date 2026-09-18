@@ -130,12 +130,21 @@ public:
 
   size_t FeatureCount() const { return m_features.size(); }
   Feature* GetFeature(size_t index);
+  [[nodiscard]] const Feature* GetFeature(size_t index) const {
+    return const_cast<Document*>(this)->GetFeature(index);
+  }
   const std::vector<std::unique_ptr<Feature>>& GetFeatures() const {
     return m_features;
   }
   // Lookup by stable id (see Feature::GetId); nullptr if absent. Returns the
   // feature's current index through outIndex if given.
   Feature* FindFeatureById(uint64_t id, size_t* outIndex = nullptr);
+  // The const half, for the readers: a question about a document has no
+  // business needing a mutable one.
+  [[nodiscard]] const Feature*
+  FindFeatureById(uint64_t id, size_t* outIndex = nullptr) const {
+    return const_cast<Document*>(this)->FindFeatureById(id, outIndex);
+  }
 
   // Mutators regenerate automatically so bodies always match the features.
   void AddFeature(std::unique_ptr<Feature> feature);

@@ -56,7 +56,7 @@ namespace {
 // The bends of every BentPath curve in the document, as the checker's plain
 // records. A curve that is not a bent path is not a bendable member: a spline
 // has no former to check.
-std::vector<tube::Member> MembersOf(Document& doc) {
+std::vector<tube::Member> MembersOf(const Document& doc) {
   std::vector<tube::Member> members;
   for (size_t i = 0; i < doc.FeatureCount(); i++) {
     const auto* curve = dynamic_cast<const CurveFeature*>(doc.GetFeature(i));
@@ -165,7 +165,7 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
 
   if (m == "check_tube") {
     // rpc-params: part
-    Document& subject = const_cast<Document&>(SubjectPart(state, doc, p));
+    const Document& subject = SubjectPart(state, doc, p);
     if (!subject.Tube()) {
       throw std::runtime_error(
           "this part has no tube rules, so there is nothing to check a bend "
