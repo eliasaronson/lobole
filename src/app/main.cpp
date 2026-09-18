@@ -83,6 +83,11 @@ std::string IblCacheDir() {
 #include <GLFW/glfw3.h>
 
 #if defined(__linux__)
+// Which display protocol this session actually runs. Wayland deliberately
+// provides no window POSITION (a client may not know or choose where it sits)
+// and has no X11 handles, so three things below have to ask before they act.
+static bool OnWayland() { return glfwGetPlatform() == GLFW_PLATFORM_WAYLAND; }
+
 // Map the window ourselves via XMapWindow instead of glfwShowWindow. GLFW's
 // show path calls waitForVisibilityNotify, which blocks until the window is
 // unobscured — a deadlock under a tiling WM (i3) when the window opens behind a
@@ -97,6 +102,13 @@ int XMapWindow(void* display, unsigned long window);
 int XFlush(void* display);
 }
 static void ShowWindowNonBlocking(GLFWwindow* window) {
+  // Ask the PLATFORM, not for a handle. This used to call the X11 getters and
+  // fall back when they returned null, which works but logs two "X11: Platform
+  // not initialized" errors on the way to the right answer.
+  if (OnWayland()) {
+    glfwShowWindow(window);
+    return;
+  }
   void* dpy = glfwGetX11Display();
   unsigned long xw = glfwGetX11Window(window);
   if (dpy && xw) {
@@ -1332,7 +1344,13 @@ static void RecordWindowGeometry(GLFWwindow* w) {
   // un-maximise and you get a full-screen window with no memory of what it
   // was. Keep the last un-maximised rect and the flag beside it.
   if (!g.maximized) {
-    glfwGetWindowPos(w, &g.x, &g.y);
+    // Wayland has no window position. Asking anyway is not just an error per
+    // window event: glfwGetWindowPos ZEROES its out-params before failing, so
+    // the rect would record as 0,0 -- which differs from what is stored, marks
+    // the settings dirty, and writes 0,0 over the position an X11 session
+    // saved. Keep whatever is stored and record only what this session knows.
+    if (!OnWayland())
+      glfwGetWindowPos(w, &g.x, &g.y);
     glfwGetWindowSize(w, &g.w, &g.h);
   }
   if (g == g_App.settings.window)
@@ -1896,8 +1914,10 @@ int main(int argc, char** argv) {
       geom.w, geom.h, "Designer - 3D CAD Software", nullptr, nullptr);
   if (window && rememberGeometry) {
     // Position after creation: the hint-based route needs a monitor handle
-    // and would make this fullscreen.
-    glfwSetWindowPos(window, geom.x, geom.y);
+    // and would make this fullscreen. Wayland refuses positioning outright --
+    // the compositor places windows -- so there it is not attempted.
+    if (!OnWayland())
+      glfwSetWindowPos(window, geom.x, geom.y);
     if (g_App.settings.window.maximized)
       glfwMaximizeWindow(window);
   }
@@ -1980,11 +2000,19 @@ int main(int argc, char** argv) {
   // reached us, while a preference of 1.00 just means nobody changed it.
   LOG_INFO("Display content scale {:.2f} x font preference {:.2f}",
            std::max(1.0f, std::max(scaleX, scaleY)), g_App.uiFontScale);
-  ui::ApplyTheme(std::max(1.0f, std::max(scaleX, scaleY)) * g_App.uiFontScale);
+  // The scale the theme is currently built at, and a pending one when the
+  // display's changes. Both live here so the callback can tell a real change
+  // from a repeat: Wayland's wp_fractional_scale_v1 re-sends the preferred
+  // scale on every configure, and treating "the callback fired" as "the scale
+  // changed" rebuilt the whole font atlas each time the window was dragged.
+  static float s_contentScale = std::max(1.0f, std::max(scaleX, scaleY));
   static float s_pendingContentScale = 0.0f; // 0 = no change pending
+  ui::ApplyTheme(s_contentScale * g_App.uiFontScale);
   glfwSetWindowContentScaleCallback(
       window, [](GLFWwindow*, float sx, float sy) {
-        s_pendingContentScale = std::max(1.0f, std::max(sx, sy));
+        const float s = std::max(1.0f, std::max(sx, sy));
+        if (s != s_contentScale)
+          s_pendingContentScale = s;
       });
 
   // Remember where the window ends up. Recorded on move/resize/maximise and
@@ -2326,19 +2354,13 @@ int main(int argc, char** argv) {
     // user picked a font size (U5): re-apply the theme and rebuild the font
     // atlas — both must happen outside a frame, hence only flags here.
     if (s_pendingContentScale > 0.0f || g_App.fontRebuildRequested) {
-      static float s_baseContentScale = 0.0f;
-      if (s_baseContentScale <= 0.0f) {
-        float sx = 1.0f, sy = 1.0f;
-        glfwGetWindowContentScale(window, &sx, &sy);
-        s_baseContentScale = std::max(1.0f, std::max(sx, sy));
-      }
       if (s_pendingContentScale > 0.0f)
-        s_baseContentScale = s_pendingContentScale;
+        s_contentScale = s_pendingContentScale;
       s_pendingContentScale = 0.0f;
       g_App.fontRebuildRequested = false;
       vkDeviceWaitIdle(g_Device); // the old font texture may be in flight
       ImGui_ImplVulkan_DestroyFontsTexture();
-      ui::ApplyTheme(s_baseContentScale * g_App.uiFontScale);
+      ui::ApplyTheme(s_contentScale * g_App.uiFontScale);
       ImGui_ImplVulkan_CreateFontsTexture();
     }
 
