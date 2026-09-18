@@ -1423,7 +1423,9 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "fit?: {thread: \"M6\", kind: close|normal|loose|tapped, pitch?} — what "
      "the hole is FOR, which DERIVES the diameter (6.6 for an M6 normal "
      "clearance, 5.0 tapped) and is what a drawing callout and a fastener "
-     "check read (docs/modeling/hole-standards.md)"},
+     "check read. A TAPPED fit also threads the bore it cuts, so a screw in "
+     "it engages instead of reading as interference "
+     "(docs/modeling/hole-standards.md)"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},

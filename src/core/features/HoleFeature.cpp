@@ -13,6 +13,11 @@
 #include "core/ElementHistory.h"
 #include "core/features/SketchFeature.h"
 
+#include <BRepAdaptor_Surface.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <gp_Cylinder.hxx>
+
 #include <algorithm>
 #include <variant>
 #include <vector>
@@ -266,5 +271,44 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     SetError("hole cut failed");
     return false;
   }
+  if (fitKind == "tapped" && !fitThread.empty())
+    RecordTapping(ctx.bodies);
   return true;
+}
+
+// A hole drilled FOR a thread IS threaded.
+//
+// `fit: {thread: "M6", kind: "tapped"}` already derives the 5 mm tap drill,
+// which is the whole of what the geometry can say — but until this, nothing
+// downstream knew what the hole was for, because only a separate `Thread`
+// feature ever wrote a thread region. So a screw in a correctly drilled,
+// correctly declared tapped hole came back as 40 mm3 of CLASH, with
+// `engaged_thread_pairs: 0` the only hint and no refusal anywhere: the
+// clearance check relieves an engaged length only between threads it was
+// told about (docs/grill-friction-plan.md).
+//
+// Every bore this feature cut, by its own name prefix and its radius — a
+// counterbore or a countersink on the same hole is a different radius and is
+// not a thread. The region carries no length, so it is the whole bore, and
+// no minimum engagement, so the standard's pitch stands.
+void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
+  const std::string mine = std::to_string(GetId()) + "/";
+  const double want = diameter / 2.0;
+  for (Body& body : bodies) {
+    if (body.reference || !body.shape.IsValid())
+      continue;
+    int index = 0;
+    for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), index++) {
+      const std::string* name = body.elementMap.NameOf(index);
+      if (name == nullptr || name->rfind(mine, 0) != 0)
+        continue;
+      BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
+      if (surf.GetType() != GeomAbs_Cylinder ||
+          std::abs(surf.Cylinder().Radius() - want) > 1e-6)
+        continue;
+      body.threadRegions.push_back(
+          {ElementRef{body.createdBy, *name}, fitThread, 0.0, 0.0, false});
+    }
+  }
 }

@@ -6,10 +6,14 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <glm/gtc/matrix_transform.hpp>
+#include <gp_Ax2.hxx>
 
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/ThreadStandards.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 
@@ -226,4 +230,81 @@ TEST_CASE("thread engagement relieves only matching bounded coaxial spans",
   CHECK(check() > 1); // the unthreaded remainder still collides
   screw.threadRegions.clear();
   CHECK(check() > 1); // no unilateral declaration of engagement
+}
+
+TEST_CASE("a hole drilled FOR a thread is threaded", "[thread][hole]") {
+  // `fit: {thread: "M6", kind: "tapped"}` derives the 5 mm tap drill, which
+  // is all the geometry can say. Until the hole recorded the thread as well,
+  // nothing downstream knew what it was for: a screw in a correctly drilled,
+  // correctly declared tapped hole came back as a CLASH with
+  // engaged_thread_pairs 0, because the clearance check relieves an engaged
+  // length only between threads it was told about.
+  const auto block = [](const std::string& fit) {
+    auto doc = std::make_unique<Document>();
+    auto pad =
+        std::make_unique<SketchFeature>("Block", SketchPlane(PlaneType::XY));
+    pad->AddRectangle({-20, -20}, {20, 20});
+    doc->AddFeature(std::move(pad));
+    doc->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Pad", doc->GetFeature(0)->GetId(), 20.0, ExtrudeMode::NewBody));
+    auto centre = std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(glm::vec3(0, 0, 20), glm::vec3(0, 0, 1),
+                              glm::vec3(1, 0, 0)));
+    centre->AddEntity(sketch::Point{{0, 0}, 1});
+    doc->AddFeature(std::move(centre));
+    const uint64_t at = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+    auto hole = std::make_unique<HoleFeature>("Tapping", at, HoleKind::Simple,
+                                              5.0, 12.0);
+    if (!fit.empty()) {
+      hole->fitThread = "M6";
+      hole->fitKind = fit;
+    }
+    doc->AddFeature(std::move(hole));
+    doc->Regenerate();
+    return doc;
+  };
+  // An M6 screw standing in the bore: the shank is the major diameter, so it
+  // is 0.8 mm of steel wider than the hole all the way round — that overlap
+  // IS the thread, and is exactly what must not read as interference.
+  Body screw;
+  screw.shape = CADShape(
+      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 9), gp_Dir(0, 0, 1)), 3, 10)
+          .Shape());
+  {
+    int i = 0;
+    for (TopExp_Explorer ex(screw.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), ++i) {
+      BRepAdaptor_Surface surface(TopoDS::Face(ex.Current()));
+      if (surface.GetType() == GeomAbs_Cylinder) {
+        screw.elementMap.names[i] = "shank";
+        screw.threadRegions.push_back({{1, "shank"}, "M6", 0, 0, true});
+      }
+    }
+    REQUIRE(screw.threadRegions.size() == 1);
+  }
+
+  const std::unique_ptr<Document> tapped = block("tapped");
+  INFO(tapped->GetFeature(tapped->FeatureCount() - 1)->GetError());
+  REQUIRE(tapped->GetFeature(tapped->FeatureCount() - 1)->GetError().empty());
+  const Body& drilled = tapped->GetBodies()[0];
+  REQUIRE(drilled.threadRegions.size() == 1);
+  CHECK(drilled.threadRegions[0].designation == "M6");
+  CHECK_FALSE(drilled.threadRegions[0].external);
+  const auto engaged = Measure::ContactBetween({drilled}, glm::mat4(1), {screw},
+                                               glm::mat4(1), false);
+  REQUIRE(engaged.has_value());
+  CHECK(engaged->engagedThreadPairs == 1);
+  CHECK(engaged->volume < 1e-6);
+  CHECK(engaged->threadEngagementVolume > 1);
+
+  // The same hole, drilled to the same 5 mm and declared as nothing: the
+  // screw in it is interference, and should be.
+  const std::unique_ptr<Document> plain = block("");
+  const Body& raw = plain->GetBodies()[0];
+  CHECK(raw.threadRegions.empty());
+  const auto clash = Measure::ContactBetween({raw}, glm::mat4(1), {screw},
+                                             glm::mat4(1), false);
+  REQUIRE(clash.has_value());
+  CHECK(clash->engagedThreadPairs == 0);
+  CHECK(clash->volume > 1.0);
 }

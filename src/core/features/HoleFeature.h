@@ -28,6 +28,11 @@ public:
 
   bool Execute(RegenContext& ctx) override;
 
+  // A hole drilled for a thread IS threaded: `fit.kind == "tapped"` records
+  // the internal thread on every bore it cut, so a screw in it engages
+  // rather than clashes. Nothing else wrote one but a `Thread` feature.
+  void RecordTapping(std::vector<Body>& bodies) const;
+
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(sketchId); // the hole-centre sketch
   }

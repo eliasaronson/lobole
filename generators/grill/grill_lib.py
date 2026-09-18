@@ -239,38 +239,28 @@ def drill(d, axis, level, toward, centres, diameter, depth, name="Drill"):
 
 
 def tapped(d, axis, level, toward, centres, size, depth, name="Tapped"):
-    """A tapped blind hole: the tap drill, and the thread that says so.
+    """A tapped blind hole: ONE feature that knows what it is for.
 
-    The thread is what makes a screw in it not a clash — `Measure` relieves
-    the engaged length between an external thread and an internal one of the
-    same designation, and it only looks at threads that ALLOW engagement. A
-    hole drilled at the tap size with no thread on it reads as 40 mm3 of
-    steel and screw occupying the same place.
+    `fit: {thread, kind: "tapped"}` derives the tap drill from the thread and
+    records the thread on the bore it cuts, so a screw in it ENGAGES rather
+    than clashing. Drilled by hand it took three coordinated things — the tap
+    drill diameter, a Thread feature, and engagement allowed on it — and
+    missing any one of them was 40 mm3 of silent interference.
     """
     import grill_spec as _S
     if size not in _S.TAP:
         raise SystemExit(f"no tap drill for {size}")
-    drill(d, axis, level, toward, centres, _S.TAP[size], depth, name=name)
-    want = _S.TAP[size] / 2.0
-    faces = []
-    for body in d.call("list_elements")["bodies"]:
-        for f in body["faces"]:
-            if f["kind"] != "cylinder" or abs(f.get("radius", 0) - want) > 1e-4:
-                continue
-            faces.append((body["created_by"], f["name"]))
-    if len(faces) != len(centres):
-        raise SystemExit(
-            f"{name}: {len(centres)} tapped holes asked for and {len(faces)} "
-            f"faces of {size} tap size to thread — an unthreaded hole is a "
-            "clash with the screw in it, not a joint")
-    for feature_id, element in faces:
-        r = d.call("add_feature", feature={
-            "type": "Thread", "name": name + " thread",
-            "face": {"feature_id": feature_id, "element": element},
-            "designation": size, "pitch": _S.PITCH[size],
-            "allow_engagement": True})
-        check(r, name + " thread")
-    return len(faces)
+    # A Hole drills along -normal, so the plane looks back the way the hole
+    # goes in.
+    plane, uv = sheet_plane(axis, level, -toward)
+    sk = sketch(d, plane, [{"type": "point", "p": list(uv(c))} for c in centres],
+                name + " centres")
+    r = d.call("add_feature", feature={
+        "type": "Hole", "name": name, "sketch_id": sk, "hole_kind": "simple",
+        "depth": depth, "diameter": _S.TAP[size],
+        "fit": {"thread": size, "kind": "tapped"}})
+    check(r, name)
+    return r["id"]
 
 
 def bracket_frame(out, up):

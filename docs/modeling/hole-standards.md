@@ -96,6 +96,14 @@ Two things to get right:
   the key is `M6-1`, not `M6` — the same key bd_warehouse's fastener tables
   use. Getting this wrong produces a hole that taps badly rather than one that
   is obviously wrong.
+- **A tapped fit THREADS the bore.** The drill is only half of what "tapped"
+  means: the hole also records the internal thread on every bore it cuts, so
+  a screw in it engages instead of reading as interference. Without it the
+  declaration was inert — a correctly drilled, correctly declared M6 tapping
+  with an M6 screw in it came back as 40 mm3 of clash and
+  `engaged_thread_pairs: 0`, and the only way to say what the hole was for
+  was a second `Thread` feature with `allow_engagement` on the right face
+  (docs/grill-friction-plan.md).
 - **Attribution travels with the data.** Apache-2.0 requires the NOTICE to be
   preserved; the vendored CSVs need a header saying where they came from, and
   `THIRD_PARTY.md` needs the entry.
