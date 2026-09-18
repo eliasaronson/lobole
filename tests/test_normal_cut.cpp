@@ -13,8 +13,10 @@
 #include "core/features/UnfoldFeature.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
+#include <Bnd_Box.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
@@ -70,6 +72,30 @@ void Wall(Document& doc, uint64_t base) {
   REQUIRE_FALSE(name.empty());
   auto f = std::make_unique<EdgeFlangeFeature>(
       "Wall", std::vector<ElementRef>{ElementRef{base, name}}, 20.0, 90.0);
+  f->position = FlangePosition::BendOutside;
+  doc.AddFeature(std::move(f));
+  REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+}
+
+// The same, bent up from the far edge along y = 60.
+void FarWall(Document& doc, uint64_t base) {
+  TopTools_IndexedMapOfShape edges;
+  const Body& body = doc.GetBodies()[0];
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_EDGE, edges);
+  std::string name;
+  for (int i = 1; i <= edges.Extent() && name.empty(); ++i) {
+    BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+    const gp_Pnt a = c.Value(c.FirstParameter());
+    const gp_Pnt b = c.Value(c.LastParameter());
+    if (c.GetType() == GeomAbs_Line && std::abs(a.Y() - 60.0) < 1e-6 &&
+        std::abs(b.Y() - 60.0) < 1e-6 && std::abs(a.Z() - kT) < 1e-6 &&
+        std::abs(b.Z() - kT) < 1e-6)
+      if (const std::string* n = body.elementMap.EdgeNameOf(i - 1))
+        name = *n;
+  }
+  REQUIRE_FALSE(name.empty());
+  auto f = std::make_unique<EdgeFlangeFeature>(
+      "Far wall", std::vector<ElementRef>{ElementRef{base, name}}, 20.0, 90.0);
   f->position = FlangePosition::BendOutside;
   doc.AddFeature(std::move(f));
   REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
@@ -133,6 +159,36 @@ TEST_CASE("a normal cut through a panel is a plain hole",
       ++circles;
   }
   CHECK(circles == 2); // the bore's rims, top and bottom
+}
+
+TEST_CASE("a normal cut lands on the sheet its sketch looks at",
+          "[sheetmetal][normalcut]") {
+  // Two walls, and a plane between them that LOOKS at the far one. The cut
+  // used to land on whichever wall was nearer the plane, either side of it,
+  // so a port sketched inside a firebox facing its front wall came out in
+  // the back wall — 1.5 mm nearer — with nothing said about it.
+  Document doc;
+  const uint64_t base = Blank(doc);
+  Wall(doc, base);
+  FarWall(doc, base);
+  const double before = doc.GetBodies()[0].shape.Volume();
+  // At y = 40 the far wall (y = 60) is 20 away and the near one (y = 0) is
+  // 40 — and the sketch faces the near one.
+  const uint64_t sk =
+      Circle(doc, {0, 40, 0}, {0, -1, 0}, {1, 0, 0}, {50, 10}, 3.0);
+  doc.AddFeature(std::make_unique<NormalCutFeature>("Cut", sk));
+  INFO(Last(doc).GetError());
+  REQUIRE(Last(doc).GetError().empty());
+  CHECK(Sound(doc));
+  CHECK_THAT(before - doc.GetBodies()[0].shape.Volume(),
+             WithinRel(kPi * 9.0 * kT, 1e-9));
+  CHECK_FALSE(Inside(doc, gp_Pnt(50, -kT / 2, 10))); // cut here
+  // ... and the far wall, whichever side of y = 60 it bent to, is untouched.
+  Bnd_Box box;
+  BRepBndLib::Add(doc.GetBodies()[0].shape.GetShape(), box);
+  double lo[3], hi[3];
+  box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+  CHECK(Inside(doc, gp_Pnt(50, hi[1] - kT / 2, 10)));
 }
 
 TEST_CASE("a normal cut makes every hole its sketch holds",

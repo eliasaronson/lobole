@@ -1239,8 +1239,16 @@ std::optional<gp_Pnt> ToFlat(const Placement& pl, const gp_Pnt& p,
   return std::nullopt;
 }
 
-// Where the line through `p` along `dir` first meets the body, nearest `p`,
-// and on which face.
+// Where the line through `p` along `dir` meets the body, and on which face:
+// the sheet the sketch LOOKS AT when it looks at one, else the nearest.
+//
+// A normal cut carries each point of its outline along the sketch's normal
+// (docs/sheetmetal/plan.md, S10), so a panel IN FRONT of the plane wins over
+// a nearer one behind it. Taking the nearest either way put the firebox's
+// burner ports — sketched inside the box, facing its front wall — through
+// the BACK wall, which happened to be a millimetre and a half nearer the
+// plane, and nothing anywhere said so. A plane with sheet on one side only
+// still cuts it, which is the common case and what the pick means there.
 std::optional<std::pair<gp_Pnt, TopoDS_Face>>
 Hit(const CADShape& body, const gp_Pnt& p, const gp_Dir& dir) {
   IntCurvesFace_ShapeIntersector inter;
@@ -1249,9 +1257,17 @@ Hit(const CADShape& body, const gp_Pnt& p, const gp_Dir& dir) {
   if (!inter.IsDone() || inter.NbPnt() == 0)
     return std::nullopt;
   int best = 1;
-  for (int i = 2; i <= inter.NbPnt(); ++i)
+  for (int i = 2; i <= inter.NbPnt(); ++i) {
+    const bool aheadI = inter.WParameter(i) > 0;
+    const bool aheadBest = inter.WParameter(best) > 0;
+    if (aheadI != aheadBest) {
+      if (aheadI)
+        best = i;
+      continue;
+    }
     if (std::abs(inter.WParameter(i)) < std::abs(inter.WParameter(best)))
       best = i;
+  }
   return std::make_pair(inter.Pnt(best), inter.Face(best));
 }
 
