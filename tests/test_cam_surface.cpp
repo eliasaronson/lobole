@@ -4,6 +4,7 @@
 
 #include "cad/CADKernel.h"
 #include "core/cam/CamDropCutter.h"
+#include "core/cam/CamSurface.h"
 
 // The cutter-location surface (docs/cam/surfacing.md, phase 1).
 //
@@ -263,6 +264,177 @@ TEST_CASE("drop cutter: what it refuses, and what it derives",
   CHECK_THAT(cam::DerivedDropRes(ball, 0.0, 0.06),
              WithinAbs(std::clamp(step / 8.0, 0.01, 0.5), 1e-12));
   CHECK_THAT(cam::DerivedDropRes(ball, 0.25, 0.06), WithinAbs(0.25, 1e-12));
+}
+
+TEST_CASE("parallel passes: the raster spacing is what was asked for",
+          "[cam][surface]") {
+  // A flat top is the case where every number is checkable by hand: the
+  // passes must be flat, spaced exactly `stepover_mm` apart, and inside the
+  // region. Spacing is the one a raster gets wrong when it walks at an angle
+  // instead of rotating the geometry -- the step then comes out
+  // stepover/cos(angle) and the scallop is wrong everywhere.
+  auto doc = BlockDoc(40, 30, 20);
+  const cam::Tool tool = FlatMill(6.0);
+  cam::DropRequest drop;
+  drop.min = {5.0, 5.0};
+  drop.max = {35.0, 25.0};
+  drop.res = 0.25;
+  drop.floorZ = -10.0;
+  const cam::CLSurface cl = cam::DropCut(doc->GetBodies(), tool, drop);
+  REQUIRE(cl.ok);
+
+  std::vector<cam::Loop> region;
+  cam::Loop box;
+  box.pts = {{10.0, 10.0}, {30.0, 10.0}, {30.0, 20.0}, {10.0, 20.0}};
+  region.push_back(box);
+
+  cam::ParallelRequest req;
+  req.stepover_mm = 2.0;
+  req.sampleStep_mm = 1.0;
+  req.floorZ = -10.0;
+
+  const cam::SurfacePaths p = cam::ParallelPasses(cl, region, req);
+  INFO(p.why);
+  REQUIRE(p.ok);
+  // 10 mm of region at a 2 mm step is six rows counting both edges, but the
+  // row lying exactly ON the far boundary is a degenerate intersection that
+  // Clipper may or may not keep -- and it would cut nothing a neighbour 2 mm
+  // away has not already covered with a 6 mm tool. So the count is a range
+  // and the SPACING below is the real assertion.
+  CHECK(p.passes.size() >= 5);
+  CHECK(p.passes.size() <= 6);
+
+  for (const cam::SurfacePath& pass : p.passes) {
+    REQUIRE(pass.size() >= 2);
+    for (const glm::dvec3& pt : pass) {
+      CHECK_THAT(pt.z, WithinAbs(20.0, 1e-3)); // flat top, flat pass
+      CHECK(pt.x >= 10.0 - 1e-6);
+      CHECK(pt.x <= 30.0 + 1e-6);
+      CHECK(pt.y >= 10.0 - 1e-6);
+      CHECK(pt.y <= 20.0 + 1e-6);
+    }
+  }
+  // Spacing between consecutive passes is the stepover, not something
+  // scaled by the angle.
+  for (size_t i = 1; i < p.passes.size(); i++)
+    CHECK_THAT(p.passes[i].front().y - p.passes[i - 1].front().y,
+               WithinAbs(2.0, 1e-6));
+}
+
+TEST_CASE("parallel passes: an angled raster keeps its spacing",
+          "[cam][surface]") {
+  // The same region at 45 degrees. The passes are no longer rows of constant
+  // Y, so the check is the PERPENDICULAR distance between them, which must
+  // still be exactly the stepover.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::DropRequest drop;
+  drop.min = {5.0, 5.0};
+  drop.max = {35.0, 25.0};
+  drop.res = 0.25;
+  drop.floorZ = -10.0;
+  const cam::CLSurface cl = cam::DropCut(doc->GetBodies(), FlatMill(6.0), drop);
+  REQUIRE(cl.ok);
+
+  cam::ParallelRequest req;
+  req.stepover_mm = 2.0;
+  req.sampleStep_mm = 1.0;
+  req.cutAngleDeg = 45.0;
+  req.floorZ = -10.0;
+
+  std::vector<cam::Loop> region;
+  cam::Loop box;
+  box.pts = {{10.0, 10.0}, {30.0, 10.0}, {30.0, 20.0}, {10.0, 20.0}};
+  region.push_back(box);
+
+  const cam::SurfacePaths p = cam::ParallelPasses(cl, region, req);
+  INFO(p.why);
+  REQUIRE(p.ok);
+  REQUIRE(p.passes.size() >= 3);
+
+  // Perpendicular offset of each pass from the origin, along the raster's
+  // own normal. Consecutive passes differ by the stepover.
+  const double n = std::sqrt(0.5);
+  std::vector<double> offsets;
+  for (const cam::SurfacePath& pass : p.passes)
+    offsets.push_back(-pass.front().x * n + pass.front().y * n);
+  std::sort(offsets.begin(), offsets.end());
+  offsets.erase(
+      std::unique(offsets.begin(), offsets.end(),
+                  [](double a, double b) { return std::abs(a - b) < 1e-6; }),
+      offsets.end());
+  REQUIRE(offsets.size() >= 3);
+  // 1e-3 and not tighter: Clipper works in integers at kScale = 1e4, so a
+  // coordinate carries 0.1 um of quantisation and a 45-degree rotation
+  // through it compounds to about that. The error this guards against is
+  // walking at an angle instead of rotating the geometry, which would make
+  // the step stepover/cos(45) = 2.83 -- four hundred times the tolerance.
+  for (size_t i = 1; i < offsets.size(); i++)
+    CHECK_THAT(offsets[i] - offsets[i - 1], WithinAbs(2.0, 1e-3));
+}
+
+TEST_CASE("parallel passes: a hole in the region breaks the pass",
+          "[cam][surface]") {
+  // A pass that ran straight through a hole would cut across whatever lies
+  // in it. The hole must END a pass and start another, so the tool lifts.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::DropRequest drop;
+  drop.min = {5.0, 5.0};
+  drop.max = {35.0, 25.0};
+  drop.res = 0.25;
+  drop.floorZ = -10.0;
+  const cam::CLSurface cl = cam::DropCut(doc->GetBodies(), FlatMill(6.0), drop);
+  REQUIRE(cl.ok);
+
+  std::vector<cam::Loop> region;
+  cam::Loop outer;
+  outer.pts = {{10.0, 10.0}, {30.0, 10.0}, {30.0, 20.0}, {10.0, 20.0}};
+  region.push_back(outer);
+  cam::Loop hole;
+  hole.hole = true;
+  hole.pts = {{18.0, 12.0}, {18.0, 18.0}, {22.0, 18.0}, {22.0, 12.0}};
+  region.push_back(hole);
+
+  cam::ParallelRequest req;
+  req.stepover_mm = 2.0;
+  req.sampleStep_mm = 0.5;
+  req.floorZ = -10.0;
+
+  const cam::SurfacePaths p = cam::ParallelPasses(cl, region, req);
+  INFO(p.why);
+  REQUIRE(p.ok);
+  // Six rows, of which the four crossing the hole are split in two.
+  CHECK(p.passes.size() > 6);
+  // Nothing inside the hole.
+  for (const cam::SurfacePath& pass : p.passes)
+    for (const glm::dvec3& pt : pass) {
+      const bool inHole = pt.x > 18.0 + 1e-6 && pt.x < 22.0 - 1e-6 &&
+                          pt.y > 12.0 + 1e-6 && pt.y < 18.0 - 1e-6;
+      CHECK_FALSE(inHole);
+    }
+}
+
+TEST_CASE("parallel passes: what they refuse", "[cam][surface]") {
+  cam::CLSurface none;
+  cam::ParallelRequest req;
+  req.stepover_mm = 1.0;
+  const cam::SurfacePaths a = cam::ParallelPasses(none, {}, req);
+  CHECK_FALSE(a.ok);
+  CHECK_THAT(a.why, Catch::Matchers::ContainsSubstring("cutter-location"));
+
+  auto doc = BlockDoc(40, 30, 20);
+  cam::DropRequest drop;
+  drop.min = {5.0, 5.0};
+  drop.max = {35.0, 25.0};
+  drop.res = 0.5;
+  drop.floorZ = -10.0;
+  const cam::CLSurface cl = cam::DropCut(doc->GetBodies(), FlatMill(6.0), drop);
+  REQUIRE(cl.ok);
+
+  cam::ParallelRequest zero;
+  zero.stepover_mm = 0.0;
+  const cam::SurfacePaths b = cam::ParallelPasses(cl, {}, zero);
+  CHECK_FALSE(b.ok);
+  CHECK_THAT(b.why, Catch::Matchers::ContainsSubstring("never advance"));
 }
 
 #endif // HAVE_CAM
