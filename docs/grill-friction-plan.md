@@ -22,7 +22,7 @@ Reproduce with `python3 scratch/time_build.py` (the harness wraps
 `Designer.request` and aggregates by method and feature type) and
 `tools/profile.sh --app scratch/profile_firebox.py` for the C++ attribution.
 
-Six stages, in the order of what they cost.
+Eight stages, in the order of what they cost.
 
 ## 1. A hole should not unfold the part
 
@@ -212,7 +212,65 @@ Files: `src/remote/RemoteInspection.cpp` (the listing),
 cylinder of the cut is named; and the listing's count asserted on a body with
 a deliberately unnamed face.
 
-## 7. The small ones, as one wave
+## 7. A bent tube is a part, not a picture
+
+The lid handle is the one bent tube on the grill, and the pipe system made a
+real one: a `Curve3D` (`kind: fit_spline`) through the centreline, then a
+`Pipe` with an outer diameter and a wall. It is accurate — the swept surfaces
+measure 34,017 mm² and 28,914 mm² against π·D·L of 34,015 and 28,913 for a
+541.4 mm path, six thousandths of a percent — it takes a boolean afterwards
+(the plugs welded in its ends) and a tapped hole in those, and it is visibly
+the part rather than two cylinders meeting at a corner, which is what it
+replaced. That part of it works.
+
+What is missing is everything a SHOP needs, and the path itself:
+
+- **There is no line–arc–line path.** A tube is bent by a former of radius R,
+  through an angle, at a distance from the last bend, rotated about the tube
+  — that is literally what a bender is programmed with. `fit_spline` takes
+  points, so the handle's centreline is 29 of them, generated in Python: extra
+  points ALONG the straights, because a spline through two ends bows and the
+  tube trumpets where it does, and eight per 90° corner to approximate a 45 mm
+  former. The bend radius is therefore an approximation that nothing in the
+  model knows exists.
+- **There is no DFM and no shop output for it.** Every sheet part here got a
+  minimum bend radius per material, a relief rule, a flat pattern, a bend
+  table and a DXF. The one tube got none: no minimum centreline radius (the
+  1.5–3 × OD rule that decides wall thinning and ovality), no cut length, no
+  bend schedule — distance, rotation, angle per bend. `grill_shop.bend_audit`
+  could audit sixteen sheet parts and not the handle.
+- **A swept body's `bbox` is its control hull, not its extent.** The handle
+  measures ±227.6 × ±19.0 × 118.0 for a tube whose real extent is ±210 × ±10
+  × 100: a rational circle's poles sit at 2R, and the fitted spline's poles
+  overshoot at the bends. Revolved and prismatic bodies are exact (the wheel
+  is ±75.0, the bottle ±155.0), so this bites only NURBS — but generators
+  measure with `bbox` constantly. Three placements in this round were landed
+  by it (the lid onto the rim, the tray onto its rail, the tent onto its
+  ledge), and on a swept body every one of them would have been 17 mm out
+  with nothing to say so.
+
+**The fix.** A `Curve3D` kind that IS a bent tube's path: a polyline plus a
+bend radius (per corner, or one for the part), built as exact line–arc–line,
+which makes `Pipe` exact and gives every bend a radius and an angle that can
+be read back. Then the tube's own shop record beside the sheet one: cut
+length, and per bend its radius, angle and rotation, checked against a
+minimum centreline radius for the material — `check_tube` to `check_sheet_
+metal` as a bend table is to a blank. And `bbox` either computed optimally
+for spline bodies or reported as the conservative box it is.
+
+Files: `src/core/features/Curve3DFeature.{h,cpp}` (the new kind),
+`src/core/sheet/` has no business here — a tube table belongs beside the
+fastener tables in `src/core/parts/` or its own `src/core/tube/`;
+`src/remote/RemoteInspection.cpp` for `check_tube`; `src/core/Measure.cpp`
+for the optimal box.
+
+**Verified by**: the handle rebuilt from a polyline and a 45 mm radius,
+asserting its swept area against π·D·L for the exact path length (the same
+arithmetic that passes today, now against a path whose length is known
+rather than sampled); a bend below the minimum radius REFUSED by name; and
+the handle's bbox matching its true extent.
+
+## 8. The small ones, as one wave
 
 Each is a papercut that cost this round minutes, not hours:
 
@@ -243,5 +301,6 @@ Each is a papercut that cost this round minutes, not hours:
 
 1 first: it is the loop every other change is tested through, and 73% of it
 is one feature doing work it then discards. Then 2, 3 and 4 — each removes a
-class of SILENT wrongness, which is worse than slow. Then 5 and 6, which are
-about being able to ask. Then 7 as one wave.
+class of SILENT wrongness, which is worse than slow. Then 5, 6 and 7, which
+are about being able to ASK: what a bend is, what a face is called, and what
+a bent tube would cost a shop. Then 8 as one wave.
