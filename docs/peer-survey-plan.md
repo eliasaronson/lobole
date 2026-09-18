@@ -334,7 +334,65 @@ of it `d.param` already bought.
 
 ---
 
-## W6 — a DFM check that returns fixable issues — INVESTIGATED, NOT DOING
+## W6 — a DFM check that returns fixable issues — RE-DECIDED
+
+**Verdict: still not building W6 as scoped — and two of its four reasons are
+now false, so the verdict rests on different ground and points somewhere
+else.** The re-decision is first; the original follows it unchanged.
+
+### What the grill round did to the evidence
+
+Reason 1 said "no defect any dogfood round has found was DFM-shaped." The
+grill's did. Every hem on the grease tray failed the minimum-radius check;
+bend relief relieved nothing on the default mould line; a hole sat too close
+to a bend. Reason 4 said "nothing here measures wall thickness — and nothing
+has needed it": sheet metal now measures the thing that matters in its place,
+a bend radius against what the MATERIAL takes, and it found fifteen defects
+over three passes.
+
+But those defects were found BY a check of exactly this kind, not missed for
+want of one. `check_sheet_metal` is a per-material rule pack in all but name,
+and it is the strongest evidence in the repo that rule packs pay. So the grill
+does not meet the stated reversal condition — "a part that passes every check
+here and cannot be made" — with one exception worth naming: finding 9, the
+circular corner relief whose flat pattern comes out 1.67 mm thick on 1 mm
+sheet. That part passes every check and cannot be cut. It is a defect in the
+unfolder, though, not a rule nobody wrote; a rule pack would not have caught
+it either.
+
+Reason 3 stands untouched: there is still no printing pipeline, so the FDM
+families would still feed nothing. Reason 2 stands and generalises.
+
+### The rule this replaces it with
+
+Generalising reason 2 — the two milling rules "are better in CAM, computed
+with the ACTUAL tool in the ACTUAL job" — with what sheet metal has since
+shown:
+
+**A manufacturability check belongs to a declared process, beside the feature
+that declares it. A check that has to GUESS the process is the one not worth
+building.**
+
+Sheet metal declares its process and its material (`sheet::SheetMetalRules` —
+material, gauge, resolved thickness, bend radius, K with a provenance string),
+so `check_sheet_metal` can state a minimum radius rather than assume one. CAM
+declares the tool and the machine, so `cam_verify` can cut the real part in
+the real fixture. Both work for the same reason. A cross-process rule pack
+guessing a 6 mm cutter and a 3 mm wall is the version that does not.
+
+That reading has an immediate consumer, and it is why this was re-opened:
+**tube bending declares neither.** There is no rules object for a tube and no
+bender profile, and the only manufacturability rule in the build is a
+hard-coded `radius < 1.5 × diameter` flag on `tube_schedule` — a literal, in a
+project that derives its defaults. So the work W6 would have gone into goes
+into `docs/tube/plan.md` instead, as `tube::TubeRules` and `check_tube` built
+in the shape `SheetMetalRules` and `check_sheet_metal` already proved, and W6
+stays closed.
+
+If a printing pipeline ever lands, reason 3 expires and the FDM half of the
+original is worth the same week — built per-process, declared the same way.
+
+### The original verdict, for whoever revisits it
 
 **Verdict: not worth building now.** Four pieces of evidence, and a condition
 that would reverse it.

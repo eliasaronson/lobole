@@ -135,10 +135,27 @@ re-pick repair action. Edge picking = `FaceSelector::PickEdge`
 sketch-primitive pipeline. Format v17. Mutation tests:
 `tests/test_toponaming.cpp` (T5 section), `tests/test_fillet.cpp`.
 
-From here every new feature uses `ElementRef` from birth. *Still out of
-scope: pattern/mirror (`FuseInstancesReplacingSource`) does not propagate
-maps — pattern outputs stay unnamed until per-instance references are
-designed (FreeCAD's `;:C` child maps, deliberately skipped).*
+From here every new feature uses `ElementRef` from birth.
+
+**Patterned bodies are named too** (`FuseInstancesReplacingSource`). Each
+instance carries the seed's names with an instance suffix — `"4/g7"` becomes
+`"4/g7#2"` for the third copy and `"4/g7#m"` for a mirror's reflection — the
+convention patterned CUTS had used since R14, now on the body path as well.
+The instances fuse through `topo::BooleanNamed` so the names survive the
+union, and the split back into connected solids is a lookup rather than a
+second history pass (`topo::NamesOfSubShape`: the pieces share their faces
+with the shape they came out of). Nothing parses a MappedName — it is
+compared whole — so the suffix stays opaque everywhere else.
+
+It matters because an unnamed face is not merely unlabelled: it cannot be
+picked, threaded, filleted, fitted or measured, and `list_elements` does not
+show it, so the listing looks complete. Every repeated part of the gas grill
+was in that state — 105 faces across the cooking grate and the warming rack,
+each patterned bar reporting three faces of three unnamed.
+
+*Still out of scope: per-instance REFERENCES into a pattern as a structure
+(FreeCAD's `;:C` child maps) — the suffix names the face, it does not give
+the pattern a queryable instance list.*
 
 ## Test strategy
 
