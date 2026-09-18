@@ -13,6 +13,7 @@
 #include "core/features/UnfoldFeature.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
@@ -159,6 +160,70 @@ TEST_CASE("a normal cut through a panel is a plain hole",
       ++circles;
   }
   CHECK(circles == 2); // the bore's rims, top and bottom
+}
+
+TEST_CASE("every hole of a sketch is cut as one body, not one at a time",
+          "[sheetmetal][normalcut]") {
+  // Twelve holes in ONE sketch against the same twelve one feature at a
+  // time: the same body, to the last face. What changed underneath is that
+  // the first pays for the ray tree — and for the unfold, where some outline
+  // needs it — once instead of twelve times, which took a grill's firebox
+  // from 26 s to 3 (docs/grill-friction-plan.md).
+  const auto grid = [](int i, int j) {
+    return glm::vec2{20.0f + 20.0f * static_cast<float>(i),
+                     15.0f + 15.0f * static_cast<float>(j)};
+  };
+  const auto faceCount = [](const Document& doc) {
+    int n = 0;
+    for (TopExp_Explorer ex(doc.GetBodies()[0].shape.GetShape(), TopAbs_FACE);
+         ex.More(); ex.Next())
+      ++n;
+    return n;
+  };
+
+  Document together;
+  const uint64_t base = Blank(together);
+  Wall(together, base);
+  auto sk = std::make_unique<SketchFeature>(
+      "Holes",
+      SketchPlane(glm::vec3(0, 0, 5), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  int entity = 1;
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 3; j++)
+      sk->AddEntity(sketch::Circle{grid(i, j), 2.0, entity++});
+  together.AddFeature(std::move(sk));
+  together.AddFeature(std::make_unique<NormalCutFeature>(
+      "Holes", together.GetFeature(together.FeatureCount() - 1)->GetId()));
+  INFO(Last(together).GetError());
+  REQUIRE(Last(together).GetError().empty());
+  CHECK(Sound(together));
+
+  Document apart;
+  const uint64_t base2 = Blank(apart);
+  Wall(apart, base2);
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 3; j++) {
+      const uint64_t one =
+          Circle(apart, {0, 0, 5}, {0, 0, 1}, {1, 0, 0}, grid(i, j), 2.0);
+      apart.AddFeature(std::make_unique<NormalCutFeature>("Hole", one));
+      INFO(Last(apart).GetError());
+      REQUIRE(Last(apart).GetError().empty());
+    }
+
+  CHECK_THAT(together.GetBodies()[0].shape.Volume(),
+             WithinRel(apart.GetBodies()[0].shape.Volume(), 1e-9));
+  CHECK(faceCount(together) == faceCount(apart));
+  // And they are BORES: twelve cylinders, not twelve sampled pits.
+  int bores = 0;
+  for (TopExp_Explorer ex(together.GetBodies()[0].shape.GetShape(),
+                          TopAbs_FACE);
+       ex.More(); ex.Next()) {
+    BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
+    if (surf.GetType() == GeomAbs_Cylinder &&
+        std::abs(surf.Cylinder().Radius() - 2.0) < 1e-9)
+      ++bores;
+  }
+  CHECK(bores == 12);
 }
 
 TEST_CASE("a normal cut lands on the sheet its sketch looks at",

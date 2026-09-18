@@ -1250,9 +1250,7 @@ std::optional<gp_Pnt> ToFlat(const Placement& pl, const gp_Pnt& p,
 // plane, and nothing anywhere said so. A plane with sheet on one side only
 // still cuts it, which is the common case and what the pick means there.
 std::optional<std::pair<gp_Pnt, TopoDS_Face>>
-Hit(const CADShape& body, const gp_Pnt& p, const gp_Dir& dir) {
-  IntCurvesFace_ShapeIntersector inter;
-  inter.Load(body.GetShape(), 1e-7);
+Hit(IntCurvesFace_ShapeIntersector& inter, const gp_Pnt& p, const gp_Dir& dir) {
   inter.Perform(gp_Lin(p, dir), -1e9, 1e9);
   if (!inter.IsDone() || inter.NbPnt() == 0)
     return std::nullopt;
@@ -1271,13 +1269,50 @@ Hit(const CADShape& body, const gp_Pnt& p, const gp_Dir& dir) {
   return std::make_pair(inter.Pnt(best), inter.Face(best));
 }
 
-} // namespace
+// What every profile in ONE sketch shares: the ray tree its outlines are
+// traced against, and the part laid flat.
+//
+// Both are per BODY and both are expensive — the intersector builds a tree
+// over every face, and the unfold is a boolean per bend — and a sketch used
+// to pay for one of each PER HOLE, times one ray cast per 0.25 mm of every
+// outline. The firebox's thirteen holes unfolded the firebox thirteen times
+// and loaded ~2,300 face trees to do it, which was 73% of the whole grill's
+// build (docs/grill-friction-plan.md).
+//
+// The unfold is built on demand and only if some outline needs it: it
+// answers "which panel, or which bend, does this land on", and a hole square
+// onto a flat panel — most holes — answers that from the face its samples
+// hit. The tree is loaded on the body as it was BEFORE the first cut, which
+// is where every outline of the sketch was traced from anyway.
+struct CutShared {
+  const Body& body;
+  const SheetMetalRules& rules;
+  uint64_t tag;
+  IntCurvesFace_ShapeIntersector rays;
+  std::optional<Placement> laid;
+  std::string why;
 
-std::optional<FlatResult> NormalCut(const Body& body,
-                                    const SheetMetalRules& rules,
-                                    const TopoDS_Face& profile,
-                                    const gp_Dir& along, uint64_t tag,
-                                    std::string* error) {
+  CutShared(const Body& b, const SheetMetalRules& r, uint64_t t)
+      : body(b), rules(r), tag(t) {
+    rays.Load(b.shape.GetShape(), 1e-7);
+  }
+
+  const Placement* Flat() {
+    if (!laid) {
+      Placement all;
+      if (!UnfoldImpl(body, rules, {}, tag, {}, &all, &why))
+        return nullptr;
+      laid = std::move(all);
+    }
+    return &*laid;
+  }
+};
+
+std::optional<FlatResult> NormalCutOne(const Body& body, CutShared& shared,
+                                       const TopoDS_Face& profile,
+                                       const gp_Dir& along, uint64_t tag,
+                                       std::string* error) {
+  const SheetMetalRules& rules = shared.rules;
   const auto fail = [&](const std::string& why) -> std::optional<FlatResult> {
     if (error)
       *error = why;
@@ -1309,7 +1344,7 @@ std::optional<FlatResult> NormalCut(const Body& body,
       for (const gp_Pnt& p : Sample(wire, 0.25)) {
         Sample_ smp;
         smp.at = p;
-        if (const auto h = Hit(body.shape, p, along)) {
+        if (const auto h = Hit(shared.rays, p, along)) {
           smp.hit = h->first;
           smp.face = h->second;
         }
@@ -1365,33 +1400,61 @@ std::optional<FlatResult> NormalCut(const Body& body,
       return cutter;
     };
 
-    // Pass one: where does the outline land? Everything is unfolded only to
-    // find out — a normal cut must not refold bends it never touched, since
-    // a refold is exact only for what the unfolder itself laid down.
-    Placement all;
-    std::string why;
-    if (!UnfoldImpl(body, rules, {}, tag, {}, &all, &why))
-      return fail(why);
-    std::set<int> pieces;
-    std::vector<uint64_t> crossed;
+    // Pass one: where does the outline land? The samples already name the
+    // FACE each one met, and that answers it outright for the common case —
+    // every sample on ONE planar face is one panel and no bend, which is
+    // what a hole square onto a sheet is. The unfold below says the same
+    // thing for the rest, and costs a boolean per bend to say it.
+    TopoDS_Face landed;
+    bool onePanel = true, anyHit = false;
     for (const std::vector<Sample_>& row : samples)
       for (const Sample_& smp : row) {
         if (!smp.hit)
           continue;
-        int region = std::numeric_limits<int>::min();
-        if (!ToFlat(all, *smp.hit, region))
-          continue;
-        if (region >= 0) {
-          pieces.insert(region);
-        } else {
-          const uint64_t id =
-              all.bends[static_cast<size_t>(-region - 1)].featureId;
-          if (std::find(crossed.begin(), crossed.end(), id) == crossed.end())
-            crossed.push_back(id);
-        }
+        anyHit = true;
+        if (landed.IsNull())
+          landed = smp.face;
+        else if (!smp.face.IsSame(landed))
+          onePanel = false;
       }
-    if (pieces.empty() && crossed.empty())
+    if (!anyHit)
       return fail("the cut's outline does not land on the sheet");
+    if (onePanel && BRepAdaptor_Surface(landed).GetType() != GeomAbs_Plane)
+      onePanel = false; // a bend, or some other curved face: unfold to see
+
+    std::set<int> pieces;
+    std::vector<uint64_t> crossed;
+    // Which flat piece, or which bends, the outline covers — the question
+    // only the unfold can answer, and only asked when it has to be.
+    const auto landing = [&](const Placement& all) {
+      pieces.clear();
+      crossed.clear();
+      for (const std::vector<Sample_>& row : samples)
+        for (const Sample_& smp : row) {
+          if (!smp.hit)
+            continue;
+          int region = std::numeric_limits<int>::min();
+          if (!ToFlat(all, *smp.hit, region))
+            continue;
+          if (region >= 0) {
+            pieces.insert(region);
+          } else {
+            const uint64_t id =
+                all.bends[static_cast<size_t>(-region - 1)].featureId;
+            if (std::find(crossed.begin(), crossed.end(), id) == crossed.end())
+              crossed.push_back(id);
+          }
+        }
+    };
+    std::string why;
+    if (!onePanel) {
+      const Placement* all = shared.Flat();
+      if (all == nullptr)
+        return fail(shared.why);
+      landing(*all);
+      if (pieces.empty() && crossed.empty())
+        return fail("the cut's outline does not land on the sheet");
+    }
 
     const auto result = [&](Named cut) -> std::optional<FlatResult> {
       FlatResult r;
@@ -1411,16 +1474,14 @@ std::optional<FlatResult> NormalCut(const Body& body,
 
     if (crossed.empty()) {
       // One panel, no bend: lay the cutter out in the blank and move it
-      // straight back onto the panel. Nothing is unfolded at all.
-      if (pieces.size() != 1)
+      // straight back onto the panel. Nothing is unfolded at all — which is
+      // now true of the pass above as well, when every sample landed on the
+      // same flat face.
+      if (!onePanel && pieces.size() != 1)
         return fail("from this direction the cut's outline lands on more "
                     "than one part of the sheet - sketch it where it sees "
                     "only the face to be cut");
-      TopoDS_Face face;
-      for (const auto& row : samples)
-        for (const Sample_& smp : row)
-          if (smp.hit && face.IsNull())
-            face = smp.face;
+      const TopoDS_Face& face = landed;
       BRepAdaptor_Surface surf(face);
       if (surf.GetType() != GeomAbs_Plane)
         return fail("the cut lands on a curved face that is not a bend");
@@ -1457,7 +1518,18 @@ std::optional<FlatResult> NormalCut(const Body& body,
                          .Shape());
       } else {
         // Oblique: the outline lands on the panel as a squashed copy of
-        // itself, and the sampled polygon is what carries it there.
+        // itself, and the sampled polygon is what carries it there — laid
+        // out in the blank, so this one does need the part laid flat.
+        const Placement* flat = shared.Flat();
+        if (flat == nullptr)
+          return fail(shared.why);
+        if (pieces.empty())
+          landing(*flat);
+        if (pieces.size() != 1)
+          return fail("from this direction the cut's outline lands on more "
+                      "than one part of the sheet - sketch it where it sees "
+                      "only the face to be cut");
+        const Placement& all = *flat;
         const gp_Trsf& place =
             all.pieces[static_cast<size_t>(*pieces.begin())].second;
         const CADShape flatCutter =
@@ -1505,6 +1577,37 @@ std::optional<FlatResult> NormalCut(const Body& body,
   } catch (const Standard_Failure& e) {
     return fail(std::string("normal cut failed: ") + e.GetMessageString());
   }
+}
+
+} // namespace
+
+std::optional<FlatResult> NormalCut(const Body& body,
+                                    const SheetMetalRules& rules,
+                                    const std::vector<TopoDS_Face>& profiles,
+                                    const gp_Dir& along, uint64_t tag,
+                                    std::string* error) {
+  if (profiles.empty()) {
+    if (error)
+      *error = "the sketch has no closed profile to cut";
+    return std::nullopt;
+  }
+  // Every region of the sketch, against ONE ray tree and at most one unfold.
+  // Each cut is made on the body the last one left — three burner ports are
+  // three holes in one pan — while what they share is read from the body as
+  // it was before any of them: cutting a hole moves no panel and turns no
+  // bend, so where an outline lands does not depend on the holes beside it.
+  CutShared shared(body, rules, tag);
+  Body running = body;
+  std::optional<FlatResult> out;
+  for (const TopoDS_Face& profile : profiles) {
+    out = NormalCutOne(running, shared, profile, along, tag, error);
+    if (!out)
+      return std::nullopt;
+    running.shape = out->shape;
+    running.elementMap = out->map;
+    running.bends = out->bends;
+  }
+  return out;
 }
 
 glm::dvec3 CreaseNormal(const BendRegion& bend, const glm::dmat4& placement) {

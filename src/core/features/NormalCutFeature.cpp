@@ -105,18 +105,19 @@ bool NormalCutFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  for (const TopoDS_Face& one : profiles) {
-    std::string why;
-    auto cut =
-        sheet::NormalCut(*body, *ctx.sheetMetal, one, normal, GetId(), &why);
-    if (!cut) {
-      SetError(why.empty() ? "the normal cut failed" : why);
-      return false;
-    }
-    body->shape = std::move(cut->shape);
-    body->elementMap = std::move(cut->map);
-    body->bends = std::move(cut->bends);
+  // All of them in ONE call: the cut's costly half — the ray tree, and the
+  // part laid flat when some outline crosses a bend — is per body, and this
+  // loop used to pay for it per hole.
+  std::string why;
+  auto cut =
+      sheet::NormalCut(*body, *ctx.sheetMetal, profiles, normal, GetId(), &why);
+  if (!cut) {
+    SetError(why.empty() ? "the normal cut failed" : why);
+    return false;
   }
+  body->shape = std::move(cut->shape);
+  body->elementMap = std::move(cut->map);
+  body->bends = std::move(cut->bends);
   // An Unfold/Refold pair inside the cut stamped this feature's id on the
   // creases; once folded back up there is nothing of it left on them.
   return true;

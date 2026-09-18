@@ -100,9 +100,15 @@ Unfold(const Body& body, const SheetMetalRules& rules,
 // through a bend or a leaning wall comes out slanted to the sheet, and no
 // laser-then-brake process makes that; this is the cut that process DOES
 // make. Returns the folded body with the cut, or nullopt with `error`.
+//
+// EVERY profile of the sketch in one call, because the expensive half of a
+// cut is per BODY, not per hole: the ray tree the outlines are traced
+// against, and — only when one of them lands across a bend — the part laid
+// flat. Cut one at a time, a thirteen-hole sketch unfolded the part thirteen
+// times (docs/grill-friction-plan.md).
 [[nodiscard]] std::optional<FlatResult>
 NormalCut(const Body& body, const SheetMetalRules& rules,
-          const TopoDS_Face& profile, const gp_Dir& along, uint64_t tag,
-          std::string* error);
+          const std::vector<TopoDS_Face>& profiles, const gp_Dir& along,
+          uint64_t tag, std::string* error);
 
 } // namespace sheet
