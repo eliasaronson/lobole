@@ -7,6 +7,7 @@
 #include "core/Units.h"
 #include "core/cam/CamJob.h"
 #include "core/cam/CamToolpath.h"
+#include "core/features/CurveFeature.h"
 #include "core/io/Serialization.h"
 
 #include <nlohmann/json.hpp>
@@ -557,6 +558,33 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   REQUIRE(volumes.size() == expected.size());
   for (size_t i = 0; i < volumes.size(); i++)
     CHECK_THAT(volumes[i], WithinRel(expected[i], 1e-3));
+  // v117: a bent path's FORMER. The corners survive a round trip as points
+  // whatever happens, but `radius` is the one field a bender is set from —
+  // lost, the path refuses to build at all, and read as a spline's the same
+  // tube comes back with no radius to quote. So the golden states the
+  // radius, the bend angles and the exact path length the arcs give.
+  if (expect.contains("bent_path")) {
+    const CurveFeature* curve = nullptr;
+    for (const auto& f : doc.GetFeatures())
+      if (const auto* c = dynamic_cast<const CurveFeature*>(f.get()))
+        if (c->kind == Curve3DKind::BentPath)
+          curve = c;
+    REQUIRE(curve != nullptr);
+    const nlohmann::json& want = expect.at("bent_path");
+    CHECK_THAT(curve->radius, WithinRel(want.at("radius").get<double>(), 1e-9));
+    const std::vector<CurveFeature::Bend> bends = curve->Bends();
+    REQUIRE(bends.size() == want.at("bends").get<size_t>());
+    const auto angles = want.at("angles_deg").get<std::vector<double>>();
+    REQUIRE(angles.size() == bends.size());
+    for (size_t i = 0; i < bends.size(); i++) {
+      INFO("bend " << i);
+      CHECK_THAT(bends[i].angleDeg, WithinRel(angles[i], 1e-6));
+      CHECK_THAT(bends[i].radius,
+                 WithinRel(want.at("radius").get<double>(), 1e-9));
+    }
+    CHECK_THAT(curve->Length(),
+               WithinRel(want.at("length_mm").get<double>(), 1e-9));
+  }
   // v97: whether an Import keeps the file's own coordinates. A flag that
   // round-trips as `false` is an import that silently moves — the whole
   // reason the flag exists — so the golden states it and the round-trip has

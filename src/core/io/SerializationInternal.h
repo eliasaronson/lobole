@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    116; // v116: a Hem's `offset_start` / `offset_end` (+ _expr): insets
+    117; // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
+         //      of a centreline and `radius` (+ _expr) the former it is
+         //      bent round, swept line-arc-line. A build without the kind
+         //      refuses the file by name, which is why it is a bump
+         //      (docs/modeling/curves-3d-plan.md).
+         // v116: a Hem's `offset_start` / `offset_end` (+ _expr): insets
          //      from the ends of the picked edge, as an EdgeFlange has. A
          //      hem running the full length of a pan's wall fuses to the
          //      wall beside it and the part flattens from no blank
