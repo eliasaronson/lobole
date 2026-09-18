@@ -116,13 +116,31 @@ types, the serializer writes it for three, `OpJson` reports it for **one**
 (`RemoteCam.cpp:538-541`, so a pocket's stepover is settable and unreadable),
 and `CamDerive` sets it for all six.
 
-`OpTypeRow` already is the capability table; it carries one flag. It grows the
-columns the scattered predicates are re-deriving locally — cuts at depth,
-follows a contour, takes tabs, has a stepdown, reads a stepover — and the
-serializer, the panel, `OpJson`, `ApplyOpFields`, the `CamFeeds` checks and the
-refusals all read the row. The agent-facing type list in the RPC prose
-(`RemoteCam.cpp:178-179`) comes from `OpTypeNameList()` rather than being a
-second hand-maintained copy.
+`OpTypeRow` already is the capability table; it carries one flag. It grows an
+`OpField` mask — one bit per field a type reads, plus two per-type FACTS that
+were also scattered predicates: `FullWidth` (what the chip-room check is really
+asking when it names profile and drill) and `ClearsInside` (why a missing
+`side` defaults to Inside, which the loader and the RPC each had their own copy
+of).
+
+The panel's guards, `OpJson`, `ApplyOpFields`, the `CamFeeds` checks and the
+edge-break census all read the row. `OpJson` becomes fully table-driven, so
+**what a read reports is exactly what a write accepts** — it used to report
+`peck` and `lead_arcs` for every type including the ones that never read them,
+while reporting `stepover` for `edge_round` alone. And `ApplyOpFields` refuses
+a field the type does not have instead of applying it into a struct nobody
+reads: tabs on a drill, `peck` on a face, `edge_size` on a profile all landed
+silently and came back out of `get_state` looking like settings that meant
+something.
+
+Serialization needs no row at all, because it writes by value.
+
+Two more silent substitutions go with it: the pick-slot ladder in
+`CamTool.cpp` ended in a bare `: OpType::Profile`, so a slot added later and
+not listed would quietly have produced a profile; and the agent-facing type
+list in the RPC prose (`RemoteCam.cpp:178-179`) is pinned to `OpTypes()` by a
+convention test, since a `MethodDoc` row is a compile-time literal and cannot
+call `OpTypeNameList()`.
 
 This is what makes surfacing's ten refusals (below) one table column instead of
 a tenth predicate chain.
@@ -132,14 +150,25 @@ a tenth predicate chain.
 `core/cam/CamNames.{h,cpp}` · `core/cam/CamJob.h` · `CMakeLists.txt` ·
 `core/io/SerializeCam.cpp` · `remote/RemoteCam.cpp` · `ui/CamPanel.cpp` ·
 `ui/CamTool.cpp` · `core/cam/CamFeeds.cpp` · `tests/test_golden.cpp` ·
-`tests/test_cam.cpp` · `SerializationInternal.h` + `docs/versioning/format.md`
-+ one golden.
+`tests/test_cam.cpp` · `tests/test_conventions.cpp` · `tests/headless_smoke.py`.
+
+Not `SerializationInternal.h` and no golden: nothing here is a format change.
+No key is added, removed, renamed or reinterpreted, and a file written before
+or after loads identically — the writer only stops dropping a value.
 
 Verified by: a round-trip test that sets a non-default `stepover` on an
-adaptive op and reads it back — it fails today, which is the point; the
-`static_assert`; a build with `-Werror=switch` and a deliberately unhandled
-type; `rpc_units_gate.py` still green, now truthfully; and the full suite,
-since capability columns touch every op type.
+adaptive op and reads it back — it fails against the old writer, which is the
+point, and was checked by restoring it; a second covering all eighteen fields;
+the `static_assert`; a build with `-Werror=switch` and a deliberately unhandled
+type; a smoke that a profile refuses `edge_size` and `stepover` by name while
+`lead_arcs` applies and reads back; `rpc_units_gate.py` still green, now
+truthfully; and the full suite, since capability columns touch every op type.
+
+One thing this phase deliberately leaves: `DeriveOperation`'s refusal of a
+V-bit or drill still names three types rather than asking the row
+(`CamDerive.cpp:126`). Surfacing needs its own rule there — a drill dropped
+onto a cutter-location surface is the worst case there is — so it belongs with
+phase 1's refusals, not here.
 
 ## Phase 1 — surfacing
 

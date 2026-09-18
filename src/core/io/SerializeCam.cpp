@@ -588,8 +588,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     // profile's notion. So the default when the key is missing depends on the
     // type — which is what repairs the documents written before this was
     // saved at all, without asking anyone to re-make their job.
-    const bool clears =
-        op.type == cam::OpType::Pocket || op.type == cam::OpType::Adaptive;
+    const bool clears = cam::OpTypeHas(op.type, cam::OpField::ClearsInside);
     op.side = SideFromName(
         oj.value("side", std::string(clears ? "inside" : "outside")));
     op.climb = oj.value("climb", true);

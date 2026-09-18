@@ -6,6 +6,7 @@
 #include "common/Logger.h"
 #include "core/Document.h"
 #include "core/cam/CamFeeds.h"
+#include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
@@ -610,11 +611,31 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     return;
   }
 
-  const cam::OpType type =
-      slot == PickSlot::CamPocketFloor ? cam::OpType::Pocket
-      : slot == PickSlot::CamEdgeWall  ? cam::OpType::EdgeRound
-      : slot == PickSlot::CamDrillHole ? cam::OpType::Drill
-                                       : cam::OpType::Profile;
+  // Which op a picked slot makes. The last arm used to be a bare fallback to
+  // Profile, so a slot added later and not listed here would have quietly
+  // produced a PROFILE -- the same silent substitution the op-type table
+  // exists to abolish, one layer up. Named arms, and the default is the one
+  // slot that really does mean a profile.
+  cam::OpType type = cam::OpType::Profile;
+  switch (slot) {
+  case PickSlot::CamPocketFloor:
+    type = cam::OpType::Pocket;
+    break;
+  case PickSlot::CamEdgeWall:
+    type = cam::OpType::EdgeRound;
+    break;
+  case PickSlot::CamDrillHole:
+    type = cam::OpType::Drill;
+    break;
+  case PickSlot::CamProfileOutline:
+    type = cam::OpType::Profile;
+    break;
+  default:
+    LOG_WARN("CAM: pick slot {} has no operation type; treating it as a "
+             "profile",
+             static_cast<int>(slot));
+    break;
+  }
   // The slot stays armed either way. A refusal keeps it because the user's
   // next click is almost always the face they meant; a SUCCESS keeps it
   // because one verb is almost never one face — a part has six holes to
@@ -1154,7 +1175,8 @@ void RunCamVerification(AppState& state) {
   const double tolerance = kRes * 1.5;
   bool breaksAnEdge = false;
   for (const cam::Operation& op : setup->operations)
-    breaksAnEdge |= op.enabled && op.type == cam::OpType::EdgeRound;
+    breaksAnEdge |=
+        op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
   state.camVerdict = cam::Explain(
       insp.verdict, tolerance, cam::CuttingMinutes(*setup, state.camToolpaths),
       breaksAnEdge);

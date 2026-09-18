@@ -59,6 +59,16 @@ enum class OpField : uint32_t {
   EdgeSize = 1u << 10,
   UseOutline = 1u << 11,
   Finish = 1u << 12,
+  // Not a field on Operation: two per-type FACTS that were also written as
+  // scattered predicates, in three files between them.
+  //
+  // FullWidth -- the cut engages the whole width of the cutter, which is what
+  // the chip-room check is really asking when it names profile and drill.
+  // ClearsInside -- the op clears INSIDE its boundary, so a missing `side`
+  // defaults to Inside rather than to a profile's Outside. Both the loader
+  // and the RPC had their own copy of that list.
+  FullWidth = 1u << 13,
+  ClearsInside = 1u << 14,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {

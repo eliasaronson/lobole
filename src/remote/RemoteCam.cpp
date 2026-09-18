@@ -402,6 +402,45 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
                    bool keepType = false) {
   if (p.contains("type") && !keepType)
     op.type = TypeFrom(p.at("type").get<std::string>());
+
+  // A field this op type does not have is REFUSED, not applied and ignored.
+  // Every one of these used to be accepted for every type: tabs on a drill,
+  // `peck` on a face, `edge_size` on a profile all landed in the struct,
+  // were never read, and came back out of `get_state` looking like settings
+  // that meant something. Checked after the type is settled above, because
+  // the same call can change it.
+  static const struct {
+    const char* key;
+    cam::OpField field;
+  } kOwned[] = {
+      {"stepdown", cam::OpField::Stepdown},
+      {"stepover", cam::OpField::Stepover},
+      {"stock_to_leave", cam::OpField::StockToLeave},
+      {"side", cam::OpField::Side},
+      {"climb", cam::OpField::Climb},
+      {"tabs", cam::OpField::Tabs},
+      {"corner_relief", cam::OpField::CornerRelief},
+      {"lead_arcs", cam::OpField::LeadArcs},
+      {"drilled_bores", cam::OpField::DrilledBores},
+      {"peck", cam::OpField::Peck},
+      {"edge_size", cam::OpField::EdgeSize},
+      {"use_outline", cam::OpField::UseOutline},
+      {"finish_tool", cam::OpField::Finish},
+      {"finish_stock", cam::OpField::Finish},
+  };
+  for (const auto& row : kOwned) {
+    if (!p.contains(row.key) || cam::OpTypeHas(op.type, row.field))
+      continue;
+    std::string takes;
+    for (const auto& other : kOwned)
+      if (cam::OpTypeHas(op.type, other.field))
+        takes += (takes.empty() ? "" : ", ") + std::string(other.key);
+    throw std::runtime_error(
+        std::string("a ") + cam::OpTypeNameOrThrow(op.type) +
+        " operation has no " + row.key + " — it takes " + takes +
+        ". Setting it would change a number nothing reads.");
+  }
+
   if (p.contains("name"))
     op.name = p.at("name").get<std::string>();
   if (p.contains("tool")) {
@@ -517,39 +556,44 @@ json ToolJson(const cam::Tool& t) {
 }
 
 json OpJson(const cam::Operation& op) {
-  json j = {{"id", op.id},
-            {"name", op.name},
-            {"type", TypeName(op.type)},
-            {"tool", op.toolNumber},
-            {"top_z", op.topZ},
-            {"bottom_z", op.bottomZ},
-            {"stepdown", op.stepdown},
-            {"peck", op.peck},
-            {"lead_arcs", op.leadArcs},
-            {"finish_tool", op.finishTool},
-            {"finish_stock", op.finishStock},
-            {"corner_relief",
-             op.cornerRelief == cam::CornerRelief::Dogbone ? "dogbone"
-             : op.cornerRelief == cam::CornerRelief::TBone ? "tbone"
-                                                           : "none"},
-            // Both settable since they landed and neither reported, so a
-            // script could state a boundary and an allowance it could not
-            // then read back — and a job built over the RPC could not be
-            // checked against the one the panel shows.
-            {"stock_to_leave", op.stockToLeave},
-            {"use_outline", op.useOutline},
-            {"enabled", op.enabled}};
-  // What this TYPE uses, from the one table (CamNames.h). These were three
-  // hand-kept lists that disagreed with the panel's and the serializer's:
-  // `stepover` was reported for edge_round ALONE, so a pocket's stepover was
-  // settable over the RPC and unreadable, and a script could not check what
-  // it had just written.
-  if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize))
+  json j = {
+      {"id", op.id},           {"name", op.name},  {"type", TypeName(op.type)},
+      {"tool", op.toolNumber}, {"top_z", op.topZ}, {"bottom_z", op.bottomZ},
+      {"enabled", op.enabled}};
+  // Everything else is what this TYPE uses, from the one table (CamNames.h),
+  // so what comes back out is exactly what set_cam_op will take in. It used
+  // to be three hand-kept lists that disagreed with the panel's and the
+  // serializer's: `stepover` was reported for edge_round ALONE, so a pocket's
+  // stepover was settable and unreadable, while `peck` and `lead_arcs` were
+  // reported for every type including the ones that never read them.
+  const auto has = [&](cam::OpField f) { return cam::OpTypeHas(op.type, f); };
+  if (has(cam::OpField::Stepdown))
+    j["stepdown"] = op.stepdown;
+  if (has(cam::OpField::StockToLeave))
+    j["stock_to_leave"] = op.stockToLeave;
+  if (has(cam::OpField::EdgeSize))
     j["edge_size"] = op.edgeSize;
-  if (cam::OpTypeHas(op.type, cam::OpField::Stepover))
+  if (has(cam::OpField::Stepover))
     j["stepover"] = op.stepover;
-  if (cam::OpTypeHas(op.type, cam::OpField::Peck))
+  if (has(cam::OpField::Peck))
     j["peck"] = op.peck;
+  if (has(cam::OpField::LeadArcs))
+    j["lead_arcs"] = op.leadArcs;
+  if (has(cam::OpField::DrilledBores))
+    j["drilled_bores"] = op.drilledBores;
+  if (has(cam::OpField::Climb))
+    j["climb"] = op.climb;
+  if (has(cam::OpField::UseOutline))
+    j["use_outline"] = op.useOutline;
+  if (has(cam::OpField::Finish)) {
+    j["finish_tool"] = op.finishTool;
+    j["finish_stock"] = op.finishStock;
+  }
+  if (has(cam::OpField::CornerRelief))
+    j["corner_relief"] = op.cornerRelief == cam::CornerRelief::Dogbone
+                             ? "dogbone"
+                         : op.cornerRelief == cam::CornerRelief::TBone ? "tbone"
+                                                                       : "none";
   // Side is reported for the clearing types too. It was profile-only, so a
   // pocket built over the RPC kept the struct's Outside default INVISIBLY —
   // and adaptive, the one strategy that reads it, then cleared outside a
@@ -1271,7 +1315,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // A clearing operation clears INSIDE its boundary; the struct's Outside
     // default is a profile's notion and means "nothing to cut" here.
     if (!p.contains("side") && !derive &&
-        (op.type == cam::OpType::Pocket || op.type == cam::OpType::Adaptive))
+        cam::OpTypeHas(op.type, cam::OpField::ClearsInside))
       op.side = cam::Side::Inside;
     if (op.name.empty())
       op.name = std::string(TypeName(op.type)) + " " +
@@ -1370,7 +1414,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     // agent gets the worse one.
     bool breaksAnEdge = false;
     for (const cam::Operation& op : setup.operations)
-      breaksAnEdge |= op.enabled && op.type == cam::OpType::EdgeRound;
+      breaksAnEdge |=
+          op.enabled && cam::OpTypeHas(op.type, cam::OpField::EdgeSize);
     json says = json::array();
     for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0, breaksAnEdge))
       says.push_back(line.text);

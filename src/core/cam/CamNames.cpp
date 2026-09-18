@@ -29,20 +29,22 @@ constexpr OpTypeRow kRows[] = {
     {OpType::Profile, "profile", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Tabs | OpField::CornerRelief |
-         OpField::LeadArcs | OpField::DrilledBores | OpField::Finish},
+         OpField::LeadArcs | OpField::DrilledBores | OpField::Finish |
+         OpField::FullWidth},
     {OpType::Pocket, "pocket", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Stepover | OpField::UseOutline |
-         OpField::CornerRelief | OpField::Finish},
+         OpField::CornerRelief | OpField::Finish | OpField::ClearsInside},
     {OpType::Face, "face", false,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Stepover | OpField::Finish},
     {OpType::Drill, "drill", false,
      OpField::StockToLeave | OpField::Stepover | OpField::Peck |
-         OpField::Finish},
+         OpField::Finish | OpField::FullWidth},
     {OpType::Adaptive, "adaptive", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Side |
-         OpField::Stepover | OpField::UseOutline | OpField::Finish},
+         OpField::Stepover | OpField::UseOutline | OpField::Finish |
+         OpField::ClearsInside},
     {OpType::EdgeRound, "edge_round", true,
      OpField::Climb | OpField::Side | OpField::Stepover | OpField::EdgeSize |
          OpField::Finish},

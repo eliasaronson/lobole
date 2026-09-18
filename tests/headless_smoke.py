@@ -1781,6 +1781,29 @@ def main():
             d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
             expect("warnings" not in d.call("cam_toolpath", setup=cam_setup),
                    "restored top_z clears the warning")
+            # A field the op type does not have is REFUSED, naming what it
+            # does take. Every one of these used to be accepted for every
+            # type and then never read: a drill carried tabs, a face carried
+            # a peck, and `get_state` reported them like settings that meant
+            # something.
+            # This op is a PROFILE, which reads no stepover and no edge_size.
+            for bad, val in (("edge_size", 1.0), ("stepover", 0.3)):
+                try:
+                    d.call("set_cam_op", id=cam_ops[0]["id"], **{bad: val})
+                    raise AssertionError(f"{bad} on a profile must refuse")
+                except RuntimeError as e:
+                    expect(f"has no {bad}" in str(e) and "it takes" in str(e),
+                           f"the refusal names the field and what it does take: {e}")
+            # ...and a field it DOES have applies and reads back, so the
+            # response shape is exactly what set_cam_op accepts.
+            d.call("set_cam_op", id=cam_ops[0]["id"], lead_arcs=True)
+            back = d.call("list_cam_setups")["setups"][0]["operations"][0]
+            expect(back.get("lead_arcs") is True,
+                   f"a profile's lead_arcs applies and reads back: {back}")
+            expect("stepover" not in back and "edge_size" not in back,
+                   f"and it reports no field it does not read: {back}")
+            d.call("set_cam_op", id=cam_ops[0]["id"], lead_arcs=False)
+
             # R7: a targetless drill derive teaches, instead of "not a verb".
             try:
                 d.call("cam_derive_op", setup=cam_setup, type="drill")

@@ -1,5 +1,7 @@
 #include "core/cam/CamFeeds.h"
 
+#include "core/cam/CamNames.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <map>
@@ -248,7 +250,7 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
       double deepest = 0.0;
       for (const Operation& op : setup.operations)
         if (op.enabled && op.toolNumber == t.number &&
-            (op.type == OpType::Profile || op.type == OpType::Drill))
+            OpTypeHas(op.type, OpField::FullWidth))
           deepest = std::max(deepest, op.topZ - op.bottomZ);
       if (deepest > t.diameter * 2.0) {
         Finding f;
