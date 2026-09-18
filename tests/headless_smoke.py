@@ -1219,6 +1219,36 @@ def main():
         expect(abs(st["bodies"][0]["volume"] - _m2.pi * 8) < 0.2,
                "swept cylinder volume ~8pi")
 
+        phase("Bent path")
+        # A bent tube (v117): the corners and the former, line-arc-line, and
+        # `tube_schedule` reading the program back out of it. The count is
+        # asserted against the array because it once came from a moved-from
+        # vector and answered 0 with a tube in the list.
+        d.call("new_project")
+        rise, half, former = 60.0, 200.0, 45.0
+        path = d.call("add_feature", feature={
+            "type": "Curve3D", "name": "Centreline", "kind": "bent_path",
+            "radius": former,
+            "points": [[-half, 0, 0], [-half, 0, rise],
+                       [half, 0, rise], [half, 0, 0]]})
+        d.call("add_feature", feature={
+            "type": "Pipe", "name": "Tube", "path_id": path["id"],
+            "outer_diameter": 20.0, "wall_thickness": 1.5})
+        sched = d.request("tube_schedule", {})
+        expect(sched["count"] == len(sched["tubes"]) == 1,
+               "tube_schedule counts the tubes it lists")
+        tube = sched["tubes"][0]
+        expect(len(tube["bends"]) == 2, "two corners, two bends")
+        expect(all(abs(b["angle_deg"] - 90.0) < 1e-6 and
+                   abs(b["radius_mm"] - former) < 1e-9 for b in tube["bends"]),
+               "each bend is 90 degrees on the former")
+        # Straights + arcs: the tangent length is R at a right angle, so the
+        # legs lose R each and every corner adds a quarter of the former.
+        legs = 2 * (rise - former) + (2 * half - 2 * former)
+        want = legs + 2 * (math.pi / 2.0) * former
+        expect(abs(tube["length_mm"] - want) < 1e-6,
+               f"cut length {tube['length_mm']:.3f} is the arc length {want:.3f}")
+
         # Loft (M8): frustum between two squares on offset datum planes
         d.call("new_project")
         dp = d.call("add_feature", feature={

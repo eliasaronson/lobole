@@ -3242,8 +3242,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       }
       tubes.push_back(std::move(t));
     }
-    return json{{"tubes", std::move(tubes)},
-                {"count", static_cast<int>(tubes.size())}};
+    // The count BEFORE the move: `tubes` is moved into the object first, so
+    // asking its size afterwards answered 0 with a tube in the array.
+    const int count = static_cast<int>(tubes.size());
+    return json{{"tubes", std::move(tubes)}, {"count", count}};
   }
 
   if (m == "list_elements") {
