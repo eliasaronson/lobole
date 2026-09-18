@@ -61,7 +61,7 @@ research.
 |---|---|---|
 | **Clipper2** (`clipper2-2.0.1`, already in nixpkgs) | Boost | Polygon clipping + offsetting. `ClipperOffset` with Miter/Round/Square joins and `EndType::Polygon`. This is the 2.5D primitive, and it costs nothing to adopt |
 | **`libarea/Adaptive.cpp`** (FreeCAD) | LGPL-2.1-or-later | Kresimir Tusek's adaptive clearing, 4.6k lines, clean `Adaptive2d` interface (`toolDiameter`, `stepOverFactor`, `stockToLeave`, `helixRamp*`, `Execute(stockPaths, paths, clearedPaths…)`), built on Clipper 1. Adaptive is the one algorithm nobody should reinvent |
-| **opencamlib** | LGPL-2.1+ | 8k lines; drop-cutter and waterline against **triangle meshes**, which we already produce. Boost coupling is one `foreach` include. Not in nixpkgs → vendor as a submodule *if* 3-axis surfacing is ever wanted |
+| **opencamlib** | LGPL-2.1+ | **10 956 lines** of C++ library (the often-quoted 14 322 is the whole `src/` *including* the Python/Node/Emscripten bindings nobody would vendor; ~6.2k non-comment). Drop-cutter and waterline against **triangle meshes**, which we already produce. Drop-cutter and waterline share nothing but the cutter class — 6 043 lines for a compilable drop-cutter subset, a separate 3 083 for waterline — so they are budgeted apart. Boost is header-only and collapses to `BOOST_FOREACH` in the drop-cutter subset. C++14, OpenMP, raw owning pointers. Not in nixpkgs → vendor as a submodule *if* 3-axis surfacing is ever wanted |
 
 ### What Designer already owns
 
@@ -230,7 +230,7 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 | **C8** | Adaptive clearing (vendor Tusek's `Adaptive2d`) | **done** `27033f2` (LGPL, linked as a shared library) |
 | **C9** | Indexed 4th axis (one A per setup) | **done** `ee530f9` |
 | **S1-S5** | Cutting simulation: scrub the posted program, watch the stock come off ([simulation.md](simulation.md)) | **done** 2026-08-27 |
-| later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | each on demand, and none of them costed |
+| later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | surfacing is costed in [surfacing.md](surfacing.md); the other two remain on demand |
 
 ## What C1–C4 shipped
 
@@ -328,11 +328,27 @@ presentation:
 Excluded on purpose: **3-axis surfacing**, because it breaks the 2.5D framing
 (stepover semantics, the Setup model and the verb all need rethinking) and
 because it is the item least aligned with cutting plates on a hobby mill.
+That framing still holds and [surfacing.md](surfacing.md) is what it costs to
+answer it — the three quantities one "stepover" would have to carry, the ten
+`Operation` fields a surfacing op must refuse, and the new pick a curved face
+needs.
 When it is wanted, the in-house route is cheaper than it looks —
 `CamVerify::SampleModel` is already a flat-tool drop cutter on a grid, and
-what it lacks is a tool-profile dilation — but opencamlib (14 322 lines, not
+what it lacks is a tool-profile dilation — but opencamlib (10 956 lines, not
 in nixpkgs) computes exact cutter-location points against triangles and is
 the better answer if accuracy ever matters more than the dependency.
+
+The dilation is cheaper than that comparison suggests, and the reason is
+worth keeping: `TipHeight(tool, r)` is the SAME abstraction as opencamlib's
+`MillingCutter::height(r)`, but there it serves only the VERTEX-drop case.
+Facet drop wants a richer three-scalar offset-surface descriptor, and edge
+drop a closed form per cutter — the toroidal one iterating with Brent and
+warning past 200 iterations. A Z-map dodges most of that: dilating the map by
+the tool's own profile buys vertex and facet accuracy and loses precision only
+on sharp convex edges. That is why in-house is smaller than a line-for-line
+comparison implies, and it is also why the LGPL question is not the deciding
+one — `designer_adaptive` and `planegcs` already ship as separate shared
+libraries for exactly the relinking reason.
 
 Order matters between these four: **C6 → C7 → C8 → C9**. C6 helps
 immediately and is half a session. C7 makes everything after it post
