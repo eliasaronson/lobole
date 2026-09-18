@@ -580,7 +580,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "table: this build has no tube-bending data, and says so rather than "
      "implying one. The sheet side's answer to the same question is "
      "list_bends.",
-     "part, curve", NeedsPart | Deferrable},
+     "part, curve", Deferrable},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
@@ -3194,6 +3194,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"elements", std::move(elements)}};
   }
   if (m == "tube_schedule") {
+    if (!p.contains("part") && doc == nullptr)
+      throw std::runtime_error(
+          "there is no active part on this tab, so name the one you mean: "
+          "`part` takes a name, a stable id or a slot index");
     const Document& src =
         p.contains("part") ? *ResolvePartParam(state, p.at("part")) : *doc;
     const uint64_t only = p.value("curve", uint64_t{0});

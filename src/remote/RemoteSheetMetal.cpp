@@ -38,7 +38,7 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "a flange will use and labelled with where it came from, plus the "
      "materials and gauges this build carries. `rules` is null when the part "
      "is not sheet metal.",
-     "part", NeedsPart | Deferrable},
+     "part", Deferrable},
     {"check_sheet_metal",
      "Can a brake actually make this? Every finding names the element and the "
      "required-versus-actual number: a bend tighter than the material takes "
@@ -47,7 +47,7 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "line stopping inside a panel with nothing to relieve it, a hole near "
      "enough to a bend to draw into an oval. `not_checked` says what this "
      "build cannot answer, so a clean verdict is never mistaken for one.",
-     "body, part", NeedsPart | Deferrable},
+     "body, part", Deferrable},
     {"list_bends",
      "Every bend of a sheet body, as DATA: its inside radius against the "
      "material's minimum (`below_minimum` is the DFM verdict, and a HEM is "
@@ -59,7 +59,7 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "and no direction is claimed. The rules the part was built under come "
      "back beside them, so a bend audit is ONE call instead of three plus a "
      "drawing note's text.",
-     "part, body, side", NeedsPart | Deferrable},
+     "part, body, side", Deferrable},
     {"export_dxf",
      "Write a sheet body's FLAT PATTERN to a DXF a shop can cut: R12 ASCII, "
      "millimetres ($INSUNITS 4), outline and holes on CUT, bend lines on "
@@ -74,6 +74,23 @@ static constexpr MethodDoc SheetMetalMethods[] = {
 std::span<const MethodDoc> SheetMetalMethodDocs() { return SheetMetalMethods; }
 
 namespace {
+
+// WHICH part the question is about: the one named, or the tab you are on.
+//
+// A read-only question that NAMES its part has no business caring what tab
+// is active — a bend audit over sixteen parts ran from an assembly and was
+// refused sixteen times, so it walked the tabs to ask (list_elements has
+// always got this right; these had not).
+const Document& Subject(ui::AppState& state, Document* active,
+                        const remote::RpcParams& p) {
+  if (p.contains("part"))
+    return *ResolvePartParam(state, p.at("part"));
+  if (active == nullptr)
+    throw std::runtime_error(
+        "there is no active part on this tab, so name the one you mean: "
+        "`part` takes a name, a stable id or a slot index");
+  return *active;
+}
 
 // The rules as an agent reads them back: what was stored, and next to it the
 // number a flange will actually use. A caller that sees only `bend_radius: 0`
@@ -120,21 +137,23 @@ json ReliefStylesJson() {
 
 } // namespace
 
-bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
+bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
                          const std::string& m, const RpcParams& p, json& out) {
   if (m == "set_sheet_metal_rules") {
+    // The only one here that WRITES, and it writes to the tab you are on.
+    Document& active = *doc;
     if (p.value("clear", false)) {
       state.commands->Execute(
-          std::make_unique<SetSheetMetalRulesCommand>(std::nullopt), doc);
+          std::make_unique<SetSheetMetalRulesCommand>(std::nullopt), active);
       out = {{"rules", nullptr}};
-      AttachRegen(out, &doc);
+      AttachRegen(out, &active);
       return true;
     }
     // Start from what is already set, so changing only the relief style does
     // not silently clear the gauge.
     sheet::SheetMetalRules r;
-    if (doc.SheetMetal())
-      r = *doc.SheetMetal();
+    if (active.SheetMetal())
+      r = *active.SheetMetal();
     if (p.contains("material"))
       r.material = p.at("material").get<std::string>();
     if (p.contains("gauge"))
@@ -174,15 +193,15 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
       throw std::runtime_error(bad);
 
     state.commands->Execute(std::make_unique<SetSheetMetalRulesCommand>(r),
-                            doc);
+                            active);
     out = {{"rules", RulesJson(r)}};
-    AttachRegen(out, &doc);
+    AttachRegen(out, &active);
     return true;
   }
 
   if (m == "check_sheet_metal" || m == "export_dxf") {
-    const Document& src =
-        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : doc;
+    // rpc-params: part
+    const Document& src = Subject(state, doc, p);
     const std::vector<Body>& bodies = src.GetBodies();
     if (bodies.empty())
       throw std::runtime_error("this part has no bodies");
@@ -232,8 +251,8 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
   }
 
   if (m == "list_bends") {
-    const Document& src =
-        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : doc;
+    // rpc-params: part
+    const Document& src = Subject(state, doc, p);
     if (!src.SheetMetal())
       throw std::runtime_error(
           "this part has no sheet-metal rules, so it has no bends to list "
@@ -307,8 +326,8 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
   if (m == "get_sheet_metal_rules") {
     // Read-only, so it answers about any part rather than only the active tab
     // (docs/agent-scale-followup-plan.md, W2).
-    const Document& src =
-        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : doc;
+    // rpc-params: part
+    const Document& src = Subject(state, doc, p);
     out = {{"rules",
             src.SheetMetal() ? RulesJson(*src.SheetMetal()) : json(nullptr)},
            {"stock", StockJson()},

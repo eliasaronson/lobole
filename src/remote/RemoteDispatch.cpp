@@ -888,13 +888,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
   // Doc-level-object RPCs carved into their own module (decision 7). The
   // config RPCs target whichever tab is active — part or assembly.
+  // Sheet metal is a PART-only object (the rules describe one blank), so
+  // unlike the config RPCs it has no assembly half — but its READ-ONLY half
+  // names the part it is asking about, and a question that names its part has
+  // no business caring which tab is active. It is consulted from any tab and
+  // refuses for itself when there is neither a name nor an active part.
+  if (json smOut; remote::HandleSheetMetalRpc(state, doc, m, p, smOut))
+    return smOut;
   if (doc) {
     if (json cfgOut; remote::HandleConfigurationRpc(state, *doc, m, p, cfgOut))
       return cfgOut;
-    // Sheet metal is a PART-only object (the rules describe one blank), so
-    // unlike the config RPCs it has no assembly half.
-    if (json smOut; remote::HandleSheetMetalRpc(state, *doc, m, p, smOut))
-      return smOut;
   } else if (state.assembly) {
     if (json cfgOut; remote::HandleAssemblyConfigurationRpc(
             state, *state.assembly, m, p, cfgOut))

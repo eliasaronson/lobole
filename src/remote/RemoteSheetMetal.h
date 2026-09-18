@@ -20,7 +20,7 @@ namespace remote {
 // Handles the sheet-metal RPCs. Returns true and fills `out` if `method` is
 // one of them; false if it belongs elsewhere. Throws std::runtime_error on
 // error. `doc` is the active part document (non-null, guaranteed by caller).
-bool HandleSheetMetalRpc(ui::AppState& state, Document& doc,
+bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
                          const std::string& method, const RpcParams& params,
                          nlohmann::json& out);
 

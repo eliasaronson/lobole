@@ -293,19 +293,29 @@ measurement that cannot be trusted has to say so.
 
 ## 8. The small ones, as one wave
 
-Each is a papercut that cost this round minutes, not hours:
+Each is a papercut that cost this round minutes, not hours. Two of the six
+were tried and DROPPED once the build answered back — recorded here because
+a plan that only lists what worked is a worse guide than one that says which
+of its own ideas were wrong:
 
-- **A zero-depth overlap is touching, not a clash.** A heat tent resting on
-  its ledge is an edge on a face; the fuzzy boolean leaves 0.002 mm³ over
-  78 mm², and `contact_report` calls it a clash. Compare the overlap's DEPTH
-  (volume over contact area) against `touch_tol` before calling it one.
-- **`new_project` on a dirty document should refuse** unless `force: true`.
-  It silently discarded two and a half minutes of built model when a probe
-  script ran against the wrong instance.
+- ~~**A zero-depth overlap is touching, not a clash.**~~ DROPPED. The case
+  that motivated it — a heat tent's edge resting on its ledge, 0.002 mm³ over
+  78 mm² — turned out to be a real 0.086 mm penetration once the tent's seat
+  was measured properly, and a rule that calls that touching would hide the
+  next one. The fix belonged in the model, and is there: a resting part is
+  seated with a tenth of a millimetre of clearance.
+- ~~**`new_project` on a dirty document should refuse** unless
+  `force: true`.~~ DROPPED. Implemented, and it broke six smokes at once —
+  because a script that resets between phases means exactly that, and this is
+  the call it means it with. The accident it was meant to prevent (a probe
+  pointed at the wrong instance) is answered by `ping`, which says which
+  instance and which project before anything is discarded. The row now says
+  plainly that the call discards unsaved work.
 - **A flange's `length` is measured from the tangent line**, so it reaches
-  `length + radius` past the face its edge is on. Nothing in `feature_types`
-  says so; the control panel's lip landed 1.5 mm inside the firebox wall
-  until a calibration coupon explained it. It is a sentence in the row.
+  `length + radius` past the face its edge is on. The row DID say it —
+  `length_mode: flat (the wall past the bend)` — and I did not read it, which
+  is its own kind of evidence: the row now spells out the number to work back
+  from when a flange has to land on something.
 - **`modify_feature` replaces the whole feature.** Landing the lid on the rim
   — moving one sketch plane by a measured delta — is read, strip `id` and
   `index`, mutate, send back. A patch form, or `set_sketch_plane`, makes
@@ -315,10 +325,10 @@ Each is a papercut that cost this round minutes, not hours:
   `place(part, on={occurrence, frame}, with=frame, type=...)`, returning both
   ids — removes about forty lines per generator.
 - **A read-only question that NAMES its part is still gated on the active
-  tab.** `list_bends`, `check_sheet_metal` and `get_sheet_metal_rules` all
-  take `part`, and all refuse from an assembly tab — so a bend audit over
-  sixteen parts walks the tabs to ask them, and `list_elements` (which does
-  handle it) shows what the other shape looks like.
+  tab.** DONE: `list_bends`, `check_sheet_metal`, `get_sheet_metal_rules`,
+  `export_dxf` and `tube_schedule` now answer from any tab and refuse for
+  themselves when there is neither a name nor an active part. The grill's
+  audit dropped its tab walk.
 - **The staleness convention test fires on any source file**, so editing an
   unrelated subsystem in another window fails the suite with a message about
   a stale binary. Compare against the files that link into the binary.

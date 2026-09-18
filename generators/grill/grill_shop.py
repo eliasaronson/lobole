@@ -133,7 +133,6 @@ def tube_schedule(d, parts=("Lid handle",)):
     """
     out = []
     for part in parts:
-        d.call("set_active_part", part=part)
         for tube in d.request("tube_schedule", {"part": part})["tubes"]:
             print(f"  {part}: cut {tube['length_mm']:.1f} mm of "
                   f"{tube.get('outer_diameter_mm', 0):.0f} x "
@@ -180,10 +179,6 @@ def bend_audit(d, parts=None):
     """
     rows = []
     for part in (parts or SHEET_PARTS):
-        # Both are read-only and both NAME their part, but both are gated on
-        # a part tab being active, so an audit run from the assembly has to
-        # walk the tabs to ask about them.
-        d.call("set_active_part", part=part)
         listed = d.request("list_bends", {"part": part})
         chk = d.request("check_sheet_metal", {"part": part})
         if listed["count"] != chk["bends_checked"]:

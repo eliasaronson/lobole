@@ -45,8 +45,12 @@ namespace remote {
 // be null on an assembly tab, matching the original un-guarded behavior).
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc ProjectMethods[] = {
-    {"new_project", "Reset to an empty project (one empty part).", "",
-     remote::NotInBatch},
+    {"new_project",
+     "Reset to an empty project (one empty part). DISCARDS whatever is open, "
+     "unsaved changes included — a script that resets between phases means "
+     "exactly that, so it is not gated, and `ping` is how a caller checks "
+     "which instance and which project it is talking to first.",
+     "", remote::NotInBatch},
     {"open_project", "Open a project {path} (.json file or .dsgn directory).",
      "path", remote::NotInBatch},
     {"save_project",
