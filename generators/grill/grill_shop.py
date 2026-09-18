@@ -124,8 +124,37 @@ def drawing(d, out_dir):
     return views[folded], views[flat], table
 
 
+def tube_schedule(d, parts=("Lid handle",)):
+    """The other half of what a shop gets: the bent tube's own program.
+
+    A sheet part hands over a blank and a bend table; a bent tube hands over
+    a CUT LENGTH and a schedule — per bend the angle, the former, the free
+    straight before it and the roll. Read from the model, not restated here.
+    """
+    out = []
+    for part in parts:
+        d.call("set_active_part", part=part)
+        for tube in d.request("tube_schedule", {"part": part})["tubes"]:
+            print(f"  {part}: cut {tube['length_mm']:.1f} mm of "
+                  f"{tube.get('outer_diameter_mm', 0):.0f} x "
+                  f"{tube.get('wall_mm', 0):.1f} tube, "
+                  f"{len(tube['bends'])} bends")
+            for b in tube["bends"]:
+                tight = " TIGHT" if b.get("tight") else ""
+                print(f"    bend {b['index']}: {b['angle_deg']:5.1f} deg on "
+                      f"R{b['radius_mm']:.0f} (R/D "
+                      f"{b.get('radius_over_diameter', 0):.2f}{tight}), after "
+                      f"{b['straight_before_mm']:6.1f} mm straight, roll "
+                      f"{b['roll_deg']:.0f} deg")
+            if any(b.get("tight") for b in tube["bends"]):
+                raise SystemExit(f"{part}: a bend tighter than 1.5 diameters")
+            out.append(tube)
+    return out
+
+
 def shop(d, out_dir="scratch/grill"):
     print_bend_audit(bend_audit(d))
+    tube_schedule(d)
     made = blanks(d, out_dir)
     print("  blanks (mm, and bend lines in the DXF):")
     for part, w, l, bends, name in made:

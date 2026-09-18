@@ -14,7 +14,9 @@
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
 #include "core/ToleranceStack.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "render/ClipPlanes.h"
@@ -567,6 +569,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "needs them (a plain box has six named faces and no named edges), so "
      "there is no such count for them.",
      "body, max_faces, part"},
+    {"tube_schedule",
+     "What a tube bender is programmed with, for every bent path in the part: "
+     "the CUT LENGTH of the straight tube it starts as, and per bend the "
+     "angle, the former's radius, the free straight before it and the ROLL — "
+     "how far the tube turns about its own axis between one bend and the "
+     "next. Where a Pipe sweeps the path, its outer diameter comes too, with "
+     "`radius_over_diameter` beside each bend and `tight` when that is under "
+     "1.5, which is a rule of thumb for a mandrel bend and NOT a material "
+     "table: this build has no tube-bending data, and says so rather than "
+     "implying one. The sheet side's answer to the same question is "
+     "list_bends.",
+     "part, curve", NeedsPart | Deferrable},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
@@ -3179,6 +3193,55 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"space", "part"},
                 {"elements", std::move(elements)}};
   }
+  if (m == "tube_schedule") {
+    const Document& src =
+        p.contains("part") ? *ResolvePartParam(state, p.at("part")) : *doc;
+    const uint64_t only = p.value("curve", uint64_t{0});
+    json tubes = json::array();
+    for (const std::unique_ptr<Feature>& feature : src.GetFeatures()) {
+      const auto* curve = dynamic_cast<const CurveFeature*>(feature.get());
+      if (curve == nullptr || curve->kind != Curve3DKind::BentPath)
+        continue;
+      if (only != 0 && curve->GetId() != only)
+        continue;
+      // The tube this path is swept into, when something sweeps it: the
+      // diameter is what decides whether a radius is bendable.
+      double diameter = 0.0, wall = 0.0;
+      for (const std::unique_ptr<Feature>& other : src.GetFeatures())
+        if (const auto* pipe = dynamic_cast<const PipeFeature*>(other.get()))
+          if (pipe->pathId == curve->GetId()) {
+            diameter = pipe->outerDiameter;
+            wall = pipe->wallThickness;
+          }
+      json bends = json::array();
+      int n = 0;
+      for (const CurveFeature::Bend& b : curve->Bends()) {
+        json j = {{"index", ++n},
+                  {"angle_deg", b.angleDeg},
+                  {"radius_mm", b.radius},
+                  {"straight_before_mm", b.straightBefore},
+                  {"roll_deg", b.rollDeg},
+                  {"corner", {b.corner.x, b.corner.y, b.corner.z}}};
+        if (diameter > 1e-9) {
+          j["radius_over_diameter"] = b.radius / diameter;
+          j["tight"] = b.radius < 1.5 * diameter;
+        }
+        bends.push_back(std::move(j));
+      }
+      json t = {{"curve", curve->GetId()},
+                {"name", curve->GetName()},
+                {"length_mm", curve->Length()},
+                {"bends", std::move(bends)}};
+      if (diameter > 1e-9) {
+        t["outer_diameter_mm"] = diameter;
+        t["wall_mm"] = wall;
+      }
+      tubes.push_back(std::move(t));
+    }
+    return json{{"tubes", std::move(tubes)},
+                {"count", static_cast<int>(tubes.size())}};
+  }
+
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and
     // edges — what Fillet/Chamfer edge refs {feature_id, element} point at
