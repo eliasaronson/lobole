@@ -20,6 +20,7 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Shell.hxx>
@@ -794,17 +795,27 @@ CADShape::Mesh CADShape::GenerateMesh(double deflection) const {
   // (a small cylinder becomes a visible ~16-gon whose flat facets flicker as
   // the camera orbits). Scale the linear deflection to the model's size and
   // add an angular deflection so circles stay smooth at any scale.
-  Bnd_Box bbox;
-  BRepBndLib::Add(m_shape, bbox);
+  //
+  // Only when the caller did not say. A stated deflection is a caller that
+  // knows what it is meshing FOR, and this rule -- which is about triangle
+  // budget, not accuracy -- has no business overruling it.
   double linDeflection = deflection;
-  if (!bbox.IsVoid()) {
-    double xmin, ymin, zmin, xmax, ymax, zmax;
-    bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-    const double diag = std::sqrt((xmax - xmin) * (xmax - xmin) +
-                                  (ymax - ymin) * (ymax - ymin) +
-                                  (zmax - zmin) * (zmax - zmin));
-    if (diag > Precision::Confusion())
-      linDeflection = diag * 0.002; // 0.2% of the bounding diagonal
+  if (linDeflection <= 0.0) {
+    Bnd_Box bbox;
+    BRepBndLib::Add(m_shape, bbox);
+    if (!bbox.IsVoid()) {
+      double xmin, ymin, zmin, xmax, ymax, zmax;
+      bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+      const double diag = std::sqrt((xmax - xmin) * (xmax - xmin) +
+                                    (ymax - ymin) * (ymax - ymin) +
+                                    (zmax - zmin) * (zmax - zmin));
+      if (diag > Precision::Confusion())
+        linDeflection = diag * 0.002; // 0.2% of the bounding diagonal
+    }
+    // A degenerate shape has no size to derive from. Anything positive will
+    // do; OCC refuses a deflection of zero.
+    if (linDeflection <= 0.0)
+      linDeflection = 0.1;
   }
   const double angDeflection = 0.2; // radians (~11.5°) → ~32 segments / circle
   BRepMesh_IncrementalMesh meshGen(m_shape, linDeflection, Standard_False,
@@ -888,6 +899,18 @@ CADShape::Mesh CADShape::GenerateMesh(double deflection) const {
   }
 
   return mesh;
+}
+
+CADShape::Mesh CADShape::GenerateMeshDetached(double deflection) const {
+  if (!IsValid())
+    return Mesh();
+  // A deep copy, so BRepMesh writes the triangulation onto a TShape nobody
+  // else holds. Without it a verifier asking for its own tolerance silently
+  // re-meshes the document (see the header).
+  BRepBuilderAPI_Copy copier(m_shape);
+  if (!copier.IsDone())
+    return GenerateMesh(deflection);
+  return CADShape(copier.Shape()).GenerateMesh(deflection);
 }
 
 std::vector<std::vector<glm::vec3>>

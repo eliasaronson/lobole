@@ -367,10 +367,25 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
   HeightMap out = like;
   out.z.assign(out.z.size(), static_cast<float>(floorZ));
 
+  // Mesh the reference surface finer than the grid that samples it. This is
+  // the surface every gouge and leftover figure is measured AGAINST, so its
+  // faceting is measurement noise, and noise coarser than a cell is noise the
+  // comparison cannot tell from a real defect. A quarter of a cell puts it
+  // below what the grid can resolve at all.
+  //
+  // Derived from the grid rather than typed: the caller picks `res` for the
+  // job (`Inspect` takes it), and a literal here would be right at 0.25 mm and
+  // wrong at every other resolution. Zero when there is no grid to derive
+  // from, which asks the kernel for its own size-scaled default.
+  const double deflection = like.res > 0.0 ? like.res * 0.25 : 0.0;
+
   for (const Body& body : bodies) {
     if (!body.shape.IsValid())
       continue;
-    const CADShape::Mesh mesh = body.shape.GenerateMesh(0.05);
+    // Detached: this is the CHECK's tolerance, not the document's. Meshing
+    // the body itself here would make the renderer's mesh of the same part
+    // fine too, because the triangulation rides on the shared TShape.
+    const CADShape::Mesh mesh = body.shape.GenerateMeshDetached(deflection);
     for (size_t tri = 0; tri + 2 < mesh.indices.size(); tri += 3) {
       const glm::vec3& p0 = mesh.vertices[mesh.indices[tri]].position;
       const glm::vec3& p1 = mesh.vertices[mesh.indices[tri + 1]].position;

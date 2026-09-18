@@ -19,7 +19,7 @@ using Catch::Matchers::WithinAbs;
 static CADShape::Mesh BoxMesh() {
   CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
   REQUIRE(box.IsValid());
-  return box.GenerateMesh(0.1);
+  return box.GenerateMesh();
 }
 
 TEST_CASE("GenerateMesh maps triangles to B-Rep faces with real normals",
@@ -192,7 +192,7 @@ TEST_CASE("GenerateEdgePolylines covers every edge in index order",
 TEST_CASE("PickEdge finds the edge under the ray and honors occlusion",
           "[picking][edges]") {
   CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
-  CADShape::Mesh mesh = box.GenerateMesh(0.1);
+  CADShape::Mesh mesh = box.GenerateMesh();
   std::vector<Vertex3D> vertices =
       CADMeshConverter::ConvertCADMeshToVertices(mesh);
   const auto polys = box.GenerateEdgePolylines(0.1);
@@ -301,7 +301,7 @@ TEST_CASE("PickEdge down a bore takes the NEAREST of the coaxial rims",
 TEST_CASE("PickEdge rejects a slightly hidden edge at normal camera distance",
           "[picking][edges]") {
   CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
-  CADShape::Mesh mesh = box.GenerateMesh(0.1);
+  CADShape::Mesh mesh = box.GenerateMesh();
   const std::vector<Vertex3D> vertices =
       CADMeshConverter::ConvertCADMeshToVertices(mesh);
 
@@ -547,7 +547,7 @@ TEST_CASE("only the body the ray is INSIDE at the cut caps it",
 
 TEST_CASE("nothing on the removed side is pickable", "[picking][section]") {
   CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
-  CADShape::Mesh mesh = box.GenerateMesh(0.1);
+  CADShape::Mesh mesh = box.GenerateMesh();
   const std::vector<Vertex3D> vertices =
       CADMeshConverter::ConvertCADMeshToVertices(mesh);
   const auto polys = box.GenerateEdgePolylines(0.1);

@@ -1052,7 +1052,7 @@ TEST_CASE("Section caps fill the cut face (C4)", "[measure][section]") {
   REQUIRE(caps[0].ComputeMassProps(mp));
   CHECK_THAT(mp.surfaceArea, WithinRel(12.0, 1e-6));
   // The cap tessellates to a non-empty mesh (what the renderer fills with).
-  CHECK_FALSE(caps[0].GenerateMesh(0.05).vertices.empty());
+  CHECK_FALSE(caps[0].GenerateMesh().vertices.empty());
   // A plane missing the body yields an empty/invalid cap, not a crash.
   auto missCaps = Measure::SectionCaps(doc.GetBodies(), glm::vec3(0, 0, 99),
                                        glm::vec3(0, 0, 1));

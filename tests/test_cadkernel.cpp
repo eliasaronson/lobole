@@ -382,6 +382,81 @@ TEST_CASE("the two bounding-box flavours keep their own memo",
   CHECK(againHi == tHi);
 }
 
+TEST_CASE("GenerateMesh honours a stated deflection", "[kernel][mesh]") {
+  // The deflection argument used to be decoration: the size-scaling rule
+  // (0.2% of the bounding diagonal) overwrote it whenever the shape had a
+  // bounding box, which is always. So `GenerateMesh(0.05)` on a 200 mm part
+  // meshed at 0.4 mm, and the CAM verifier compared machined stock against a
+  // "designed" surface coarser than the 0.25 mm grid measuring it
+  // (docs/cam/reach-and-fidelity-plan.md).
+  //
+  // A cylinder, because only a curved face has a chord tolerance to observe.
+  const auto cylinder = [] {
+    return CADKernel::Instance().CreateCylinder(
+        glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 50.0, 200.0);
+  };
+
+  // A FRESH shape per measurement. Meshing writes the triangulation into the
+  // shape, so asking one shape twice measures OCC's cache, not the argument.
+  const size_t derived = cylinder().GenerateMesh().indices.size() / 3;
+  const size_t fine = cylinder().GenerateMesh(0.01).indices.size() / 3;
+  const size_t finer = cylinder().GenerateMesh(0.001).indices.size() / 3;
+  REQUIRE(derived > 0);
+
+  // Asked for finer, got finer: the scaling rule here would give
+  // diag * 0.002 ~ 0.49 mm, so 0.01 mm is far tighter and must show up.
+  CHECK(fine > derived);
+  // ...and it keeps scaling, rather than snapping to one "fine" setting. A
+  // one-sided check against `derived` alone would pass on a clamp that
+  // refined once and then ignored the argument.
+  CHECK(finer > fine);
+  // Saying nothing still gets the size-scaled default, not zero and not a
+  // literal -- the behaviour every existing caller relies on.
+  CHECK(cylinder().GenerateMesh(0.0).indices.size() / 3 == derived);
+
+  // COARSER than the derived value is deliberately NOT asserted, and the
+  // reason is the other half of the tessellation rule rather than a gap in
+  // this test: the angular deflection (0.2 rad) floors every circle at ~32
+  // segments, and on r=50 the chord term only becomes the binding constraint
+  // below 0.25 mm. Above that, asking for 0.5 mm and 5 mm gives the same mesh
+  // -- which is the behaviour that stopped small cylinders rendering as
+  // n-gons, and is why the two deflections either side of `fine` above are
+  // both chosen inside the chord-bound regime.
+  CHECK(cylinder().GenerateMesh(5.0).indices.size() / 3 == derived);
+}
+
+TEST_CASE("a detached mesh leaves the shape's own tessellation alone",
+          "[kernel][mesh]") {
+  // The triangulation rides on the SHARED TShape, so it is visible through
+  // every copy of a shape -- including the copies the document and the
+  // renderer are holding. A verifier meshing a Body at its own fine tolerance
+  // therefore re-meshed the whole document behind the renderer's back: a
+  // cylinder answering 248 triangles answers 888 forever after any copy of it
+  // is meshed at 0.01 mm. Same hazard as the bounding box that disagreed with
+  // itself once the shape had been meshed.
+  CADShape shape = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 50.0, 200.0);
+  REQUIRE(shape.IsValid());
+
+  CADShape sharer = shape; // what a Body hands around
+  const size_t before = sharer.GenerateMesh().indices.size() / 3;
+  REQUIRE(before > 0);
+
+  // The fine mesh is real...
+  const size_t fine = shape.GenerateMeshDetached(0.01).indices.size() / 3;
+  CHECK(fine > before);
+
+  // ...and cost the sharer nothing.
+  CHECK(sharer.GenerateMesh().indices.size() / 3 == before);
+  CHECK(shape.GenerateMesh().indices.size() / 3 == before);
+
+  // The undetached call is what would have moved it, and still does -- this
+  // is the behaviour GenerateMeshDetached exists to avoid, pinned so that a
+  // change to it is a decision rather than a surprise.
+  CHECK(shape.GenerateMesh(0.01).indices.size() / 3 == fine);
+  CHECK(sharer.GenerateMesh().indices.size() / 3 == fine);
+}
+
 TEST_CASE("GenerateMesh produces triangles for a box", "[kernel][mesh]") {
   CADShape box = CADKernel::Instance().CreateBox(1.0, 1.0, 1.0);
   CADShape::Mesh mesh = box.GenerateMesh();

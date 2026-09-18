@@ -264,7 +264,32 @@ public:
     std::vector<uint32_t> triangleFaces;
   };
 
-  Mesh GenerateMesh(double deflection = 0.1) const;
+  // `deflection` is the chord tolerance in mm. ZERO -- the default -- means
+  // "you choose", and the choice is 0.2% of the model's bounding diagonal, so
+  // a large model does not tessellate into millions of triangles. A POSITIVE
+  // value is honoured as asked: a caller that has a reason (a check whose grid
+  // is finer than that rule would give) states it and gets it. It used to be
+  // the other way round -- the argument was overwritten whenever the shape had
+  // a bounding box, so every value ever passed here was decoration, and the
+  // CAM verifier compared machined stock against a 0.4 mm-faceted "designed"
+  // surface on a 0.25 mm grid (docs/cam/reach-and-fidelity-plan.md).
+  Mesh GenerateMesh(double deflection = 0.0) const;
+
+  // The same mesh, WITHOUT touching this shape's own triangulation.
+  //
+  // `GenerateMesh` writes its result into the shape, and the triangulation
+  // lives on the shared underlying TShape -- so it is visible through every
+  // copy of the shape, and through every other copy the document is holding.
+  // Asking one Body for a fine mesh therefore makes the RENDERER's mesh of
+  // the same body fine too, whenever it next asks. (A cylinder meshed at the
+  // derived tolerance gives 248 triangles; mesh any copy of it at 0.01 mm and
+  // every copy answers 888 from then on.) This is the same hazard as the
+  // bounding box that disagreed with itself once a shape had been meshed.
+  //
+  // So: a caller wanting a tolerance of its OWN -- finer than the shape would
+  // otherwise carry, for a check rather than for the screen -- asks here, and
+  // pays a deep copy to keep the side effect to itself.
+  Mesh GenerateMeshDetached(double deflection) const;
 
   // Tessellates each B-Rep edge into a world-space polyline, indexed by
   // edgeIndex in the deduplicated TopExp::MapShapes(TopAbs_EDGE)
@@ -419,7 +444,8 @@ public:
     std::vector<uint32_t> triangleFaces;
   };
 
-  Mesh GenerateMesh(double deflection = 0.1) const { return Mesh(); }
+  Mesh GenerateMesh(double deflection = 0.0) const { return Mesh(); }
+  Mesh GenerateMeshDetached(double) const { return Mesh(); }
   std::vector<std::vector<glm::vec3>>
   GenerateEdgePolylines(double deflection = 0.1) const {
     return {};

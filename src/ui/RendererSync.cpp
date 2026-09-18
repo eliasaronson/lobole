@@ -149,7 +149,7 @@ void SyncGeometryDelta(AppState& state) {
   const auto add = [&](const CADShape& shape, const glm::vec3& color) {
     if (!shape.IsValid())
       return uint32_t{0};
-    CADShape::Mesh mesh = shape.GenerateMesh(0.1);
+    CADShape::Mesh mesh = shape.GenerateMesh();
     if (mesh.vertices.empty())
       return uint32_t{0};
     const uint32_t id = state.meshRenderer->AddMesh(
@@ -560,7 +560,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     const BodyTessellation* cached = cachedBodyFor(it);
     CADShape::Mesh cadMesh;
     if (cached == nullptr) {
-      cadMesh = body.shape.GenerateMesh(0.1);
+      cadMesh = body.shape.GenerateMesh();
       if (cadMesh.vertices.empty())
         continue;
       meshed++;
@@ -693,7 +693,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
              bi++) {
           if (!shapes[bi].IsValid())
             continue;
-          CADShape::Mesh cm = shapes[bi].GenerateMesh(0.05);
+          CADShape::Mesh cm = shapes[bi].GenerateMesh();
           if (cm.vertices.empty())
             continue;
           std::vector<Vertex3D> cv =

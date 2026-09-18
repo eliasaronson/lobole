@@ -181,7 +181,7 @@ void SyncFastenerGhost(AppState& state) {
     if (scratch.GetBodies().empty())
       continue; // the fit already reported why; a ghost does not re-refuse
     const CADShape::Mesh mesh =
-        scratch.GetBodies().front().shape.GenerateMesh(0.1);
+        scratch.GetBodies().front().shape.GenerateMesh();
     if (mesh.vertices.empty())
       continue;
     const uint32_t asset = state.meshRenderer->CreateAsset(

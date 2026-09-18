@@ -280,7 +280,7 @@ void PrewarmTessellations(AppState& state, const std::vector<uint64_t>& parts,
     groups.push_back(&items);
 
   const auto meshOne = [&out](const Item& item) {
-    CADShape::Mesh m = item.shape->GenerateMesh(0.1);
+    CADShape::Mesh m = item.shape->GenerateMesh();
     if (m.vertices.empty())
       return;
     CpuBody& dst = out[item.partId][item.bodyIndex];
@@ -363,7 +363,7 @@ LookupOrBuildTessellation(AppState& state, const CADShape& shape,
     entry->triangleFaces = std::move(prebuilt->triangleFaces);
     entry->edges = std::move(prebuilt->edges);
   } else {
-    CADShape::Mesh mesh = shape.GenerateMesh(0.1);
+    CADShape::Mesh mesh = shape.GenerateMesh();
     if (mesh.vertices.empty())
       return nullptr;
     entry->vertices = CADMeshConverter::ConvertCADMeshToVertices(mesh);

@@ -700,7 +700,7 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
   for (size_t bi = 0; bi < caps.size(); bi++) {
     if (!caps[bi].IsValid())
       continue;
-    CADShape::Mesh cm = caps[bi].GenerateMesh(0.05);
+    CADShape::Mesh cm = caps[bi].GenerateMesh();
     if (cm.vertices.empty())
       continue;
     std::vector<Vertex3D> base = CADMeshConverter::ConvertCADMeshToVertices(cm);
