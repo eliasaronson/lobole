@@ -467,6 +467,23 @@ regen's input surface for.
      entered after the washer and left after the nut. Reading the end of the
      ordered list said a stale screw still reached — the exact case the check
      exists for. Both the check and the fit now take the maximum exit.
+   - **A part the axis crosses TWICE is two segments.** `TraverseAxis` used
+     to report one per body, from the first entry to the last exit, so a
+     chamfer on one of its four rays could not shorten a plate. A FOLDED part
+     is crossed twice — a cart's side panel has a flange under the firebox
+     and another 650 mm below it at the floor — and the union made the whole
+     cart read as solid: ten nuts bearing on the top flange were reported
+     "buried" in it. Intervals merge only where they overlap or abut.
+   - **A joint ends at the FIRST nut on the axis**, and at a jam nut tight
+     against it. The last one belongs to whatever else is down that line: on
+     a grill the bolt facing this one from the other side of the cart, 646 mm
+     away, which made the joint read as blind on a rail in between.
+   - **A second pick AT a blind floor is not a truncation.** Picking the
+     bottom rim of a tapping is how a caller says where the joint ends, and
+     that pick lands on the plane the on-axis ray found, to a rounding error.
+     Read as a bound it turned a blind hole into a through joint — and a
+     through joint is sized UP to a stocked length, so the screw bottomed out
+     on the floor and clamped nothing.
    - **A placed fastener does not know its hole.** It knows its size, so the
      probe is offset past the LOOSEST clearance that size is drilled to. A
      ray at the thread radius runs down the inside of the bore and finds no

@@ -116,6 +116,18 @@ Levenberg-Marquardt, seeded from the stored q. LM rather than Gauss-Newton
 specifically because the damping term is also what keeps drag (a later stage)
 stable through singular configurations, e.g. a linkage at full extension.
 
+A DOF in the component that changes NO residual is not being solved for, and
+is held at its seed rather than stepped. Marquardt's damping is relative to
+the diagonal, so a column of zeros has none and the solve hands that unknown
+whatever satisfies 0 = 0 — which is not a corner case, because a fastener
+mating the parts it clamps closes a small loop wherever those parts were
+already mated, and everything hanging off that component then sits in the
+loop problem. The test is in the residual's own units: a column that cannot
+move the loop by `kCloseTolMm` when moved a whole unit (a radian, a
+millimetre) is noise, not a derivative — a real linkage's are tens or
+hundreds of mm per radian. That is what makes `set_mate`'s pose hold inside
+a loop as well as outside one.
+
 ### DOF and redundancy: why NOT Grübler
 
 The obvious cheap answer — Grübler/Kutzbach mobility from the graph — is
