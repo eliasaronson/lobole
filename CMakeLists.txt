@@ -457,6 +457,7 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     list(APPEND core_sources src/core/cam/CamGeometry.cpp
                              src/core/cam/CamDerive.cpp
+                             src/core/cam/CamDropCutter.cpp
                              src/core/cam/CamStrategies.cpp
                              src/core/cam/CamVerify.cpp
                              src/core/cam/CamFeeds.cpp

@@ -1,0 +1,216 @@
+#include "cam_fixtures.h"
+
+#ifdef HAVE_CAM
+
+#include "cad/CADKernel.h"
+#include "core/cam/CamDropCutter.h"
+
+// The cutter-location surface (docs/cam/surfacing.md, phase 1).
+//
+// Every case here has an answer a machinist could work out on paper, because
+// the failure this file exists to prevent is a finishing pass that gouges: a
+// CL surface one cutter radius wrong is a part cut to the wrong shape with
+// nothing in the toolpath that looks unusual.
+
+namespace {
+
+cam::Tool FlatMill(double diameter) {
+  cam::Tool t;
+  t.number = 1;
+  t.diameter = diameter;
+  t.type = cam::ToolType::Flat;
+  return t;
+}
+
+cam::Tool BallNose(double diameter) {
+  cam::Tool t;
+  t.number = 2;
+  t.diameter = diameter;
+  t.type = cam::ToolType::Ball;
+  return t;
+}
+
+// The CL height at a point, by nearest cell.
+double At(const cam::CLSurface& s, double x, double y) {
+  const int i = static_cast<int>(std::lround((x - s.z.x0) / s.z.res - 0.5));
+  const int j = static_cast<int>(std::lround((y - s.z.y0) / s.z.res - 0.5));
+  REQUIRE(i >= 0);
+  REQUIRE(j >= 0);
+  REQUIRE(i < s.z.nx);
+  REQUIRE(j < s.z.ny);
+  return s.z.At(i, j);
+}
+
+} // namespace
+
+TEST_CASE("drop cutter: a flat mill rests on a flat top", "[cam][surface]") {
+  // The simplest answer there is, and the one that catches a sign error in
+  // the dilation: TipHeight is 0 everywhere under a flat mill, so its tip
+  // sits exactly on the surface it is standing on.
+  auto doc = BlockDoc(40, 30, 20); // top at z = 20
+  const cam::Tool tool = FlatMill(6.0);
+
+  cam::DropRequest req;
+  req.min = {5.0, 5.0};
+  req.max = {35.0, 25.0};
+  req.res = 0.5;
+  req.floorZ = -10.0;
+
+  const cam::CLSurface s = cam::DropCut(doc->GetBodies(), tool, req);
+  INFO(s.why);
+  REQUIRE(s.ok);
+  CHECK_THAT(At(s, 20.0, 15.0), WithinAbs(20.0, 1e-3));
+  CHECK_THAT(At(s, 10.0, 10.0), WithinAbs(20.0, 1e-3));
+}
+
+TEST_CASE("drop cutter: a flat mill's rim holds it up past the edge",
+          "[cam][surface]") {
+  // The dilation's whole point. A flat mill whose CENTRE is outside the block
+  // is still resting on it until the centre is one radius clear -- that is
+  // what stops a finishing pass diving down the side of the part.
+  auto doc = BlockDoc(40, 30, 20); // block spans x 0..40
+  const cam::Tool tool = FlatMill(6.0);
+
+  cam::DropRequest req;
+  req.min = {-10.0, 10.0};
+  req.max = {50.0, 20.0};
+  req.res = 0.25;
+  req.floorZ = -10.0;
+
+  const cam::CLSurface s = cam::DropCut(doc->GetBodies(), tool, req);
+  INFO(s.why);
+  REQUIRE(s.ok);
+  // Just past the wall: the rim is still on the top face.
+  CHECK_THAT(At(s, 42.0, 15.0), WithinAbs(20.0, 1e-3));
+  // Just short of a full radius: still held up.
+  CHECK_THAT(At(s, 42.8, 15.0), WithinAbs(20.0, 1e-3));
+  // Past the radius: nothing under the tool at all.
+  CHECK_THAT(At(s, 44.0, 15.0), WithinAbs(-10.0, 1e-3));
+}
+
+TEST_CASE("drop cutter: a ball nose on a cylinder is where the arithmetic says",
+          "[cam][surface]") {
+  // A ball of radius r rolling over a cylinder of radius R has its CENTRE on
+  // a circle of radius R+r, so its tip is at sqrt((R+r)^2 - x^2) - r. This is
+  // the case a flat-tool sampler gets wrong everywhere except the apex, and
+  // it is what says the tool PROFILE is really being used.
+  const double R = 10.0;
+  const double r = 2.0;
+  Body body;
+  body.name = "Cyl";
+  // Axis along Y so the section in X is a circle, centred on z = 0.
+  body.shape = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0.0f, -20.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f), R, 40.0);
+  REQUIRE(body.shape.IsValid());
+  std::vector<Body> bodies;
+  bodies.push_back(std::move(body));
+
+  const cam::Tool tool = BallNose(2.0 * r);
+  cam::DropRequest req;
+  req.min = {-6.0, -5.0};
+  req.max = {6.0, 5.0};
+  req.res = 0.1;
+  req.floorZ = -30.0;
+
+  const cam::CLSurface s = cam::DropCut(bodies, tool, req);
+  INFO(s.why);
+  REQUIRE(s.ok);
+  for (const double x : {0.0, 2.0, 4.0, 6.0}) {
+    const double want = std::sqrt((R + r) * (R + r) - x * x) - r;
+    INFO("x = " << x << ", expected tip z " << want);
+    // Loose enough for the grid and the tessellation, tight enough that the
+    // flat-tool answer (sqrt(R^2 - x^2), which is 0.17 mm out at x = 4 and
+    // 1.1 mm out at x = 6) cannot pass.
+    CHECK_THAT(At(s, x, 0.0), WithinAbs(want, 0.05));
+  }
+}
+
+TEST_CASE("drop cutter: a cutter too fat for a gap stays out of it",
+          "[cam][surface]") {
+  // The other half of "the lowest Z it can sit without cutting into the
+  // model". Two 20 mm-tall blocks with a 2 mm gap between them: a 6 mm ball
+  // cannot enter the gap, so over its middle the tool is still resting on the
+  // two tops and the CL surface is 20 -- NOT the floor it can see but cannot
+  // reach. A surface that dipped here would be planning a gouge into both
+  // walls.
+  std::vector<Body> bodies;
+  Body left;
+  left.name = "L";
+  left.shape = CADKernel::Instance().CreateBox(19.0, 30.0, 20.0);
+  REQUIRE(left.shape.IsValid());
+  bodies.push_back(std::move(left));
+
+  Body right;
+  right.name = "R";
+  right.shape = CADKernel::Instance().CreateBox(19.0, 30.0, 20.0);
+  REQUIRE(right.shape.IsValid());
+  right.shape.Translate(glm::vec3(21.0f, 0.0f, 0.0f));
+  bodies.push_back(std::move(right));
+
+  const cam::Tool tool = BallNose(6.0);
+  cam::DropRequest req;
+  req.min = {14.0, 5.0};
+  req.max = {26.0, 25.0};
+  req.res = 0.2;
+  req.floorZ = -10.0;
+
+  const cam::CLSurface s = cam::DropCut(bodies, tool, req);
+  INFO(s.why);
+  REQUIRE(s.ok);
+
+  // Dead centre of the gap. The answer is NOT 20: a ball is round, so its
+  // flank does enter a gap narrower than itself, resting on the two top
+  // edges 1 mm either side. Its tip then sits TipHeight(r=3, d=1) below
+  // them -- 3 - sqrt(8) = 0.1716 mm -- and not one micron further.
+  const double dip = 3.0 - std::sqrt(8.0);
+  CHECK_THAT(At(s, 20.0, 15.0), WithinAbs(20.0 - dip, 5e-3));
+  // What it must not do is reach the floor it can see between them. A
+  // surface that let the tool to z = 0 here would plan a full-depth cut
+  // into both walls.
+  CHECK(At(s, 20.0, 15.0) > 19.0);
+  // On the tops themselves it rests on them exactly.
+  CHECK_THAT(At(s, 16.0, 15.0), WithinAbs(20.0, 1e-2));
+  CHECK_THAT(At(s, 24.0, 15.0), WithinAbs(20.0, 1e-2));
+}
+
+TEST_CASE("drop cutter: what it refuses, and what it derives",
+          "[cam][surface]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::DropRequest req;
+  req.min = {5.0, 5.0};
+  req.max = {35.0, 25.0};
+  req.res = 0.5;
+
+  cam::Tool none = FlatMill(0.0);
+  const cam::CLSurface a = cam::DropCut(doc->GetBodies(), none, req);
+  CHECK_FALSE(a.ok);
+  CHECK_THAT(a.why, Catch::Matchers::ContainsSubstring("no diameter"));
+
+  cam::DropRequest empty = req;
+  empty.max = empty.min;
+  const cam::CLSurface b = cam::DropCut(doc->GetBodies(), FlatMill(6.0), empty);
+  CHECK_FALSE(b.ok);
+  CHECK_THAT(b.why, Catch::Matchers::ContainsSubstring("empty"));
+
+  // A rotated frame is the rotary case. REFUSED rather than ignored: a frame
+  // silently dropped would plan against the wrong axis of the model and look
+  // like a perfectly ordinary surface.
+  cam::DropRequest turned = req;
+  turned.frame = glm::dquat(glm::dvec3(glm::radians(90.0), 0.0, 0.0));
+  const cam::CLSurface c =
+      cam::DropCut(doc->GetBodies(), FlatMill(6.0), turned);
+  CHECK_FALSE(c.ok);
+  CHECK_THAT(c.why, Catch::Matchers::ContainsSubstring("rotary"));
+
+  // The derived numbers, so a caller can report them without running a drop.
+  const cam::Tool ball = BallNose(6.0);
+  CHECK_THAT(cam::DerivedCusp(ball, 0.0), WithinAbs(0.06, 1e-12));
+  CHECK_THAT(cam::DerivedCusp(ball, 0.02), WithinAbs(0.02, 1e-12));
+  // Same cusp equation DerivedStepover solves, over eight samples.
+  const double step = 2.0 * std::sqrt(2.0 * 3.0 * 0.06 - 0.06 * 0.06);
+  CHECK_THAT(cam::DerivedDropRes(ball, 0.0, 0.06),
+             WithinAbs(std::clamp(step / 8.0, 0.01, 0.5), 1e-12));
+  CHECK_THAT(cam::DerivedDropRes(ball, 0.25, 0.06), WithinAbs(0.25, 1e-12));
+}
+
+#endif // HAVE_CAM
