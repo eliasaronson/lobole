@@ -125,8 +125,14 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
     lo -= glm::vec3(1e-3f);
     hi += glm::vec3(1e-3f);
 
-    double enter = 0.0, exit = 0.0;
-    bool hit = false;
+    // Every interval of MATERIAL the bundle finds, not one span from the
+    // first entry to the last exit. A folded part is crossed twice by one
+    // axis — a cart's side panel has a flange under the firebox and another
+    // 650 mm below it at the floor — and reporting that as one segment made
+    // the whole cart read as solid between them: the nut on the top flange
+    // was called "buried in Cart side left", and a check that cries wolf on
+    // a correct model is worse than no check.
+    std::vector<std::pair<double, double>> spans;
     // One classifier per BODY, not per ray: constructing it explores the
     // whole solid (BRepClass3d_SolidExplorer::InitShape was 11.5% of the
     // engine build), and the four rays classify against the same shape.
@@ -154,24 +160,37 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
           const glm::dvec3 mid =
               localOrigin + localDir * ((previous + next) / 2);
           classifier->Perform(gp_Pnt(mid.x, mid.y, mid.z), 1e-6);
-          if (classifier->State() == TopAbs_IN) {
-            enter = hit ? std::min(enter, previous) : previous;
-            exit = hit ? std::max(exit, next) : next;
-            hit = true;
-          }
+          if (classifier->State() == TopAbs_IN)
+            spans.emplace_back(previous, next);
         }
         previous = next;
       }
     }
-    if (!hit || exit - enter <= 1.0e-6)
+    if (spans.empty())
       continue;
-    StackSegment seg;
-    seg.part = p.part;
-    seg.partId = p.partId;
-    seg.occurrence = p.occurrence;
-    seg.enter = enter;
-    seg.exit = exit;
-    out.push_back(seg);
+    // The four rays see the same plate four times, and a chamfer or a
+    // counterbore on one side makes one of them start late: intervals that
+    // overlap or abut are the same piece of material and merge, which is the
+    // union the comment above asks for — bounded to that piece.
+    std::sort(spans.begin(), spans.end());
+    std::vector<std::pair<double, double>> merged;
+    for (const auto& span : spans) {
+      if (!merged.empty() && span.first <= merged.back().second + 1.0e-3)
+        merged.back().second = std::max(merged.back().second, span.second);
+      else
+        merged.push_back(span);
+    }
+    for (const auto& span : merged) {
+      if (span.second - span.first <= 1.0e-6)
+        continue;
+      StackSegment seg;
+      seg.part = p.part;
+      seg.partId = p.partId;
+      seg.occurrence = p.occurrence;
+      seg.enter = span.first;
+      seg.exit = span.second;
+      out.push_back(seg);
+    }
   }
   std::sort(out.begin(), out.end(),
             [](const StackSegment& a, const StackSegment& b) {
@@ -201,7 +220,14 @@ JointExtent JointEnd(const std::vector<StackSegment>& stack,
   // off the axis alone refused the nut on every through-bolt whose line
   // happened to carry on into another part — an arm bolt with its nyloc on
   // the mid plate, refused because the top plate is 15 mm further up.
-  if (truncate > 0.0 && truncate < e.end) {
+  //
+  // AT the floor is not before it. Picking the bottom rim of a tapped hole is
+  // how a caller says "the joint ends here", and that pick lands on the same
+  // plane the on-axis ray found, to a rounding error. Read as a truncation it
+  // turned a blind joint into a through one, and a through one is sized UP to
+  // a stocked length: the grill's burner screws came back M5x14 in a 13.5 mm
+  // hole, bottoming out on the floor and clamping nothing.
+  if (truncate > 0.0 && truncate < e.end - 1e-3) {
     e.end = truncate;
     e.blind = false;
   }

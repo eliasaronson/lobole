@@ -284,10 +284,22 @@ FastenerReport CheckFasteners(AppState& state) {
             return parts::ProfileFor(f->standard);
       return nullptr;
     };
+    // ITS nut: the FIRST one along the axis, and any jam nut tight against
+    // it. Taking the last one found the nut of the bolt facing this one from
+    // the other side of the cart — 646 mm away, past the joint, past the
+    // grease tray's rail in between — and the joint then read as blind on
+    // that rail, so four correct side-shelf bolts were reported as having no
+    // thread in a part they do not touch.
     for (const parts::StackSegment& seg : stack) {
       const parts::Profile* rider = riderOn(seg.occurrence);
-      if (rider != nullptr && rider->kind == parts::Kind::Nut)
+      if (rider == nullptr || rider->kind != parts::Kind::Nut)
+        continue;
+      if (nutEnds <= 0.0)
         nutEnds = seg.exit;
+      else if (seg.enter <= nutEnds + 1e-3)
+        nutEnds = std::max(nutEnds, seg.exit);
+      else
+        break;
     }
     // The SAME answer fit_fastener derived from, from the same helper.
     const parts::JointExtent extent = parts::JointEnd(stack, onAxis, nutEnds);
