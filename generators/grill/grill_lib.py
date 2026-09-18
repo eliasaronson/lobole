@@ -176,3 +176,147 @@ def geometry_ok(d, what):
     if bad:
         raise SystemExit(f"{what}: geometry issues {bad}")
     return chk
+
+
+# --- world-coordinate sheet work -------------------------------------------
+# Most of the grill's parts are drawn where they LIVE, in world coordinates,
+# so that a socket on one part is the world position of the part it carries
+# and a hole in two parts is one number in grill_spec. That needs a sketch
+# plane placed on a world face, and the in-plane (u, v) of a world point on
+# it: V = normal x uAxis, so v is not always the axis one expects, and every
+# sign below is that cross product rather than a guess.
+
+def sheet_plane(axis, level, toward):
+    """(plane, uv): a plane on `axis` at `level`, its normal `toward` (+-1).
+
+    Material grows along the normal, so a panel whose finished face is at
+    `level` is drawn here and comes out on the `toward` side of it.
+    """
+    s = 1.0 if toward > 0 else -1.0
+    if axis == "z":
+        return ({"origin": [0, 0, level], "normal": [0, 0, s],
+                 "uAxis": [1, 0, 0]},
+                lambda p: (p[0], s * p[1]))
+    if axis == "x":
+        return ({"origin": [level, 0, 0], "normal": [s, 0, 0],
+                 "uAxis": [0, 1, 0]},
+                lambda p: (p[1], s * p[2]))
+    if axis == "y":
+        return ({"origin": [0, level, 0], "normal": [0, s, 0],
+                 "uAxis": [1, 0, 0]},
+                lambda p: (p[0], -s * p[2]))
+    raise SystemExit(f"axis must be x, y or z, not {axis!r}")
+
+
+def sheet_panel(d, axis, level, toward, corner_a, corner_b, name="Blank"):
+    """A rectangular blank between two WORLD corners on that plane."""
+    plane, uv = sheet_plane(axis, level, toward)
+    return profile_blank(d, plane, [rect(uv(corner_a), uv(corner_b))],
+                         name=name)
+
+
+def holes(d, axis, level, toward, centres, diameter, name="Holes"):
+    """Clearance holes square to the sheet, at WORLD centres.
+
+    The plane looks at the panel from `level` along `toward`: a plane that
+    sees two panels has no single sheet to cut, so it is placed between them.
+    """
+    plane, uv = sheet_plane(axis, level, toward)
+    return normal_cut(d, plane, [circle(uv(c), diameter / 2.0) for c in centres],
+                      name=name)
+
+
+def drill(d, axis, level, toward, centres, diameter, depth, name="Drill"):
+    """A plain drilled hole in a SOLID part (not sheet): a cut extrude."""
+    plane, uv = sheet_plane(axis, level, toward)
+    sk = sketch(d, plane, [circle(uv(c), diameter / 2.0) for c in centres],
+                name + " profile")
+    r = d.call("add_feature", feature={
+        "type": "Extrude", "name": name, "sketch_id": sk,
+        "distance": depth, "mode": "cut"})
+    check(r, name)
+    return r["id"]
+
+
+def tapped(d, axis, level, toward, centres, size, depth, name="Tapped"):
+    """A tapped blind hole: the tap drill, and the thread that says so.
+
+    The thread is what makes a screw in it not a clash — `Measure` relieves
+    the engaged length between an external thread and an internal one of the
+    same designation, and it only looks at threads that ALLOW engagement. A
+    hole drilled at the tap size with no thread on it reads as 40 mm3 of
+    steel and screw occupying the same place.
+    """
+    import grill_spec as _S
+    if size not in _S.TAP:
+        raise SystemExit(f"no tap drill for {size}")
+    drill(d, axis, level, toward, centres, _S.TAP[size], depth, name=name)
+    want = _S.TAP[size] / 2.0
+    faces = []
+    for body in d.call("list_elements")["bodies"]:
+        for f in body["faces"]:
+            if f["kind"] != "cylinder" or abs(f.get("radius", 0) - want) > 1e-4:
+                continue
+            faces.append((body["created_by"], f["name"]))
+    if len(faces) != len(centres):
+        raise SystemExit(
+            f"{name}: {len(centres)} tapped holes asked for and {len(faces)} "
+            f"faces of {size} tap size to thread — an unthreaded hole is a "
+            "clash with the screw in it, not a joint")
+    for feature_id, element in faces:
+        r = d.call("add_feature", feature={
+            "type": "Thread", "name": name + " thread",
+            "face": {"feature_id": feature_id, "element": element},
+            "designation": size, "pitch": _S.PITCH[size],
+            "allow_engagement": True})
+        check(r, name + " thread")
+    return len(faces)
+
+
+def bracket_frame(out, up):
+    """The frame a folded angle is welded by: `out` is where its flat leg
+    points, `up` where its upstand goes — both world directions.
+
+    The part is drawn with its flat leg along -y from the heel and its
+    upstand along +z, so the socket maps local -y to `out` and local z to
+    `up`; x follows from the two, and getting it from the cross product is
+    what stops a ledge being welded on inside out.
+    """
+    y = [-o for o in out]
+    z = list(up)
+    x = [y[1] * z[2] - y[2] * z[1], y[2] * z[0] - y[0] * z[2],
+         y[0] * z[1] - y[1] * z[0]]
+    return {"z_axis": z, "x_axis": x}
+
+
+def rim(d, part, centre, axis, level, diameter, occurrence=None):
+    """The circular edge a bolt head sits against: {feature_id, element}.
+
+    A circle edge's midpoint is a point ON the circle, not its centre, so a
+    hole is found by its axial position and its distance from the centre —
+    which is also what tells two coaxial rims (the two ends of one hole)
+    apart.
+    """
+    ai = {"x": 0, "y": 1, "z": 2}[axis]
+    want = diameter / 2.0
+    best = None
+    for body in d.request("list_elements", {"part": part})["bodies"]:
+        for e in body["edges"]:
+            if e.get("kind") != "circle":
+                continue
+            if abs(e.get("radius", 0.0) - want) > 0.05:
+                continue
+            mid = e["midpoint"]
+            if abs(mid[ai] - level) > 0.05:
+                continue
+            off = [mid[i] - centre[i] for i in range(3)]
+            off[ai] = 0.0
+            if abs(sum(o * o for o in off) ** 0.5 - want) > 0.05:
+                continue
+            best = {"feature_id": body["created_by"], "element": e["name"]}
+    if best is None:
+        raise SystemExit(
+            f"{part}: no rim of {diameter} at {axis}={level} around {centre}")
+    if occurrence is not None:
+        best["occurrence"] = occurrence
+    return best

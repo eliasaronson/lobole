@@ -1,18 +1,19 @@
 """The cold half: the cart that carries the firebox, and the control panel.
 
-Every part here is one blank and a few bends — which is the point. A cart is
-where sheet metal is cheapest and most obvious: flanges for stiffness, hems
-where a hand goes, and nothing that a brake cannot make in one setup.
+Handed, and drawn in place. The two side panels are mirror parts rather than
+one part used twice, because a flange that turns IN on one side turns OUT on
+the other — which is how the right-hand shelf came to pass through the
+firebox in the last round. Every panel here is one blank and a few bends.
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from grill_lib import (bend_radius, blank, corner_relief, edges_at, flange,  # noqa: E402
-                       flat_config, frame, hem, normal_cut, outer_edge, part,
-                       profile_blank, sheet_ok, thickness)
-from _lib import circle, plane_at_x, plane_at_y, plane_at_z, rect  # noqa: E402
+from grill_lib import (bend_radius, corner_relief, drill, edges_at, flange,  # noqa: E402
+                       flat_config, frame, hem, holes, outer_edge, part,
+                       sheet_ok, sheet_panel, thickness)
+from _lib import circle, rect  # noqa: E402
 
 import grill_spec as S  # noqa: E402
 
@@ -21,204 +22,277 @@ def near(t):
     return max(1e-4, 0.25 * t)
 
 
-def plane_facing_front(y):
-    """At `y`, looking toward -Y; V runs up (+Z)."""
-    return {"origin": [0, y, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]}
+def hand_name(hand):
+    return "left" if hand < 0 else "right"
 
 
-def pan(d, x, y, wall, name, hem_rim=0.0):
-    """A blank with four walls up, corners relieved — the cart's shape."""
+# --- the cart's sides: everything else hangs off one of these --------------
+
+def cart_side(d, hand):
+    """One side of the cart: a panel with a flange turned IN on every edge,
+    and the holes for everything bolted to it."""
+    side = hand_name(hand)
+    part(d, f"Cart side {side}", S.CART_STOCK)
     t = thickness(d)
-    base = blank(d, x, y, name=name + " blank")
-    walls = edges_at(d, lambda m: abs(m[2] - t) < near(t) and (
-        abs(abs(m[0]) - x / 2) < near(t) or abs(abs(m[1]) - y / 2) < near(t)),
-        what="pan base edge")
-    flange(d, base, walls, wall, name=name + " walls",
-           position="material_inside")
-    corner_relief(d, base, name=name + " relief")
-    if hem_rim > 0.0:
-        inset = bend_radius(d) + t
-        top_z = t + wall
-        rim = []
-        for axis, sign, extent in ((0, +1, x), (0, -1, x), (1, +1, y),
-                                   (1, -1, y)):
-            rim.append(outer_edge(
-                d, lambda m, a=axis, s=sign, e=extent: (
-                    abs(m[2] - top_z) < 3.0 and s * m[a] > e / 2 - 5.0),
-                axis, sign, what="pan wall top edge"))
-        hem(d, base, rim, hem_rim, name=name + " safe edges",
-            offset_start=inset, offset_end=inset)
-    return base
-
-
-def control_panel(d):
-    """The face the knobs come through, flanged back top and bottom."""
-    part(d, "Control panel", S.PANEL_STOCK)
-    t = thickness(d)
-    base = profile_blank(d, plane_at_y(0.0),
-                         [rect((-S.PANEL_X / 2, -S.PANEL_H / 2),
-                               (S.PANEL_X / 2, S.PANEL_H / 2))],
-                         name="Panel blank")
-    # Turned BACK, away from the cook. The blank's material runs from the
-    # sketch plane along -Y, so the REAR face is the one at y = 0 and the
-    # front — the one a hand touches — is at y = -t: picking the front face
-    # folded the stiffeners forward, over the knobs.
-    rails = edges_at(d, lambda m: abs(m[1]) < near(t)
-                     and abs(abs(m[2]) - S.PANEL_H / 2) < near(t),
-                     what="panel edge")
-    # Inset at the ends, clear of the cart's own side panels: a flange that
-    # runs the full width would turn back into them. The inset stops the bend
-    # line inside the panel, so it takes the document's relief.
-    flange(d, base, rails, S.PANEL_TOP, name="Stiffeners",
-           position="material_inside", offset_start=34.0, offset_end=34.0)
-    # The valve stems and the igniter, square through the face.
-    bores = []
-    for i in range(S.BURNERS):
-        x = (i - (S.BURNERS - 1) / 2.0) * S.BURNER_PITCH
-        bores.append(circle((x, S.VALVE_Z), S.VALVE_BORE / 2.0))
-    bores.append(circle((S.PANEL_X / 2 - 60.0, S.VALVE_Z),
-                        S.IGNITER_BORE / 2.0))
-    normal_cut(d, plane_facing_front(-80.0), bores, name="Valve bores")
-    frame(d, "face", (0.0, 0.0, 0.0), z_axis=(0, -1, 0), x_axis=(1, 0, 0))
-    flat_config(d, base)
-    sheet_ok(d, "control panel")
-    return base
-
-
-def cart_side(d):
-    """One side of the cart: a panel with a flange turned in on every edge.
-
-    Drawn on the plane it lives on (YZ), not flat on the bench and rotated
-    later: a part built in place needs no orientation in the assembly, and
-    an orientation is the easiest thing in an assembly to get wrong.
-    """
-    part(d, "Cart side", S.CART_STOCK)
-    t = thickness(d)
-    base = profile_blank(d, plane_at_x(0.0),
-                         [rect((-S.CART_Y / 2, 0.0), (S.CART_Y / 2, S.CART_H))],
-                         name="Side blank")
-    edges = edges_at(d, lambda m: abs(m[0] - t) < near(t) and (
+    out = hand * S.SIDE_OUT
+    inner = hand * S.SIDE_IN
+    base = sheet_panel(d, "x", out, -hand,
+                       (out, S.CART_FRONT, 0.0), (out, S.CART_BACK, S.CART_H),
+                       name="Side blank")
+    edges = edges_at(d, lambda m: abs(m[0] - inner) < near(t) and (
         abs(abs(m[1]) - S.CART_Y / 2) < near(t)
         or abs(m[2]) < near(t) or abs(m[2] - S.CART_H) < near(t)),
         what="side panel edge")
     flange(d, base, edges, S.CART_FLANGE, name="Stiffening flanges",
            position="material_inside")
     corner_relief(d, base, name="Corner relief")
-    # The axle passes through, so the panel has a hole for it rather than the
-    # two occupying the same steel.
-    # V = normal x uAxis, so on this plane v runs DOWN (-Z): the hole's
-    # height is negative here, and a positive one puts it under the floor.
-    normal_cut(d, {"origin": [60.0, 0, 0], "normal": [-1, 0, 0],
-                   "uAxis": [0, 1, 0]},
-               [circle((S.CART_Y / 2 - 70.0, -95.0), S.AXLE_D / 2 + 1.0)],
-               name="Axle hole")
-    frame(d, "inner", (t, 0.0, 0.0))
-    # The cart side is what the grill is built OUT from, so it carries the
-    # socket for everything that hangs off it. The left panel is the root of
-    # the assembly; the right one is the same part, mated to "opposite".
-    # The cart's own centreline, in this panel's coordinates: the left panel
-    # is the root, so anything that belongs to the CART rather than to the
-    # panel is half a cart away from it.
-    mid = S.CART_X / 2 - t / 2
-    frame(d, "opposite", (S.CART_X - t, 0.0, 0.0))
-    frame(d, "back", (mid, S.CART_Y / 2 - t, 0.0))
-    frame(d, "shelf", (mid, 0.0, 30.0))
-    frame(d, "door", (0.0, -S.CART_Y / 2, 60.0 + S.DOOR_Y / 2))
-    frame(d, "axle", (mid, S.CART_Y / 2 - 70.0, 95.0), z_axis=(1, 0, 0),
-          x_axis=(0, 1, 0))
-    frame(d, "firebox", (mid, 0.0, S.CART_H))
-    # Handed: this one part is used on both sides, so "outward" and "inward"
-    # are opposite directions on the two of them. A single socket sent the
-    # right-hand shelf straight through the firebox.
-    frame(d, "side_shelf_left",
-          (-(S.SIDE_SHELF_X / 2 + 16.0), -40.0, S.CART_H))
-    # The right-hand panel is this same part translated, not mirrored, so
-    # its stiffening flanges stand OUT of the cart: the shelf on that side
-    # has to clear them as well as the panel.
-    frame(d, "side_shelf_right",
-          (t + S.CART_FLANGE + S.SIDE_SHELF_X / 2 + 16.0, -40.0, S.CART_H))
-    frame(d, "foot_left", (30.0, -S.CART_Y / 2 + 70.0, 0.0))
-    frame(d, "foot_right", (t - 30.0, -S.CART_Y / 2 + 70.0, 0.0))
+
+    # Holes, each cut from a plane that sees ONE flange: a normal cut needs a
+    # single sheet, and a plane that looks the length of the cart sees two.
+    mine = [(x, v) for x, v in S.FIREBOX_BOLTS if x * hand > 0]
+    holes(d, "z", S.CART_H - 50.0, +1, [(x, y, 0.0) for x, y in mine],
+          S.CLEAR[S.FIREBOX_BOLT], name="Firebox bolt holes")
+    mine = [(x, v) for x, v in S.SHELF_BOLTS if x * hand > 0]
+    holes(d, "z", 20.0, -1, [(x, y, 0.0) for x, y in mine],
+          S.CLEAR[S.SHELF_BOLT], name="Shelf bolt holes")
+    holes(d, "z", 20.0, -1, [(hand * S.FLANGE_BOLT_X, S.FOOT_Y, 0.0)],
+          S.CLEAR[S.FOOT_BOLT], name="Foot bolt hole")
+    mine = [(x, v) for x, v in S.BACK_BOLTS if x * hand > 0]
+    holes(d, "y", 100.0, +1, [(x, 0.0, z) for x, z in mine],
+          S.CLEAR[S.BACK_BOLT], name="Back bolt holes")
+    mine = [(x, v) for x, v in S.PANEL_BOLTS if x * hand > 0]
+    holes(d, "y", -100.0, -1, [(x, 0.0, z) for x, z in mine],
+          S.CLEAR[S.PANEL_BOLT], name="Panel bolt holes")
+
+    # Through the panel itself: the wheel's axle bolt, the side shelf, and
+    # the two hinge leaves the door hangs on.
+    holes(d, "x", 0.0, hand,
+          [(0.0, S.WHEEL_AXIS_Y, S.WHEEL_AXIS_Z)], S.AXLE_BOLT_D + 0.2,
+          name="Axle bolt hole")
+    holes(d, "x", 0.0, hand,
+          [(0.0, S.SIDE_SHELF_Y_C + y, S.SIDE_SHELF_BOLT_Z)
+           for y in S.SIDE_SHELF_BOLTS],
+          S.CLEAR[S.SIDE_SHELF_BOLT], name="Side shelf bolt holes")
+    leaf = [(0.0, S.CART_FRONT - S.T_CART - S.HINGE_TANG + x,
+             S.hinge_bolt_z(hand, z))
+            for z in S.DOOR_HINGE_Z for x in S.HINGE_BOLT_X]
+    holes(d, "x", 0.0, hand, leaf, S.CLEAR[S.HINGE_BOLT],
+          name="Hinge leaf holes")
+
+    # --- sockets, in world coordinates, because the part is drawn in them --
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    frame(d, "side_shelf", (hand * (S.SIDE_OUT + S.SIDE_SHELF_X / 2.0),
+                            S.SIDE_SHELF_Y_C, S.SIDE_SHELF_Z),
+          z_axis=(0, 0, 1), x_axis=(hand, 0, 0))
+    frame(d, "foot", (hand * S.FLANGE_BOLT_X, S.FOOT_Y, 0.0))
+    # The wheel stands OUTSIDE the panel, so its own axis points outward;
+    # the bolt goes the other way, in from the head.
+    frame(d, "wheel", (hand * S.SIDE_OUT, S.WHEEL_AXIS_Y, S.WHEEL_AXIS_Z),
+          z_axis=(hand, 0, 0), x_axis=(0, 1, 0))
+    frame(d, "axle_bolt", (hand * (S.SIDE_OUT + S.WHEEL_W), S.WHEEL_AXIS_Y,
+                           S.WHEEL_AXIS_Z),
+          z_axis=(-hand, 0, 0), x_axis=(0, 1, 0))
+    knuckle = (hand * (S.SIDE_OUT + S.HINGE_TANG),
+               S.CART_FRONT - S.T_CART - S.HINGE_TANG)
+    # The door turns about the hinge's knuckle — the axis the leaves share.
+    frame(d, "door", (knuckle[0], knuckle[1], S.DOOR_BOTTOM),
+          z_axis=(0, 0, 1), x_axis=(1, 0, 0))
+    for i, z in enumerate(S.DOOR_HINGE_Z):
+        # The cart's leaf takes the lower half of the knuckle on the left
+        # and the upper half on the right, so the door's leaf takes the
+        # other one and the two interleave rather than occupying the same
+        # 20 mm of pin.
+        up = (0, 0, 1) if hand > 0 else (0, 0, -1)
+        frame(d, f"hinge_leaf_{i + 1}", (knuckle[0], knuckle[1], z + 20.0),
+              z_axis=up, x_axis=(0, 1, 0))
+        frame(d, f"hinge_pin_{i + 1}", (knuckle[0], knuckle[1], z + 42.0),
+              z_axis=(0, 0, -1), x_axis=(1, 0, 0))
     flat_config(d, base)
-    sheet_ok(d, "cart side")
+    sheet_ok(d, f"cart side {side}")
     return base
 
 
 def cart_back(d):
-    """The back panel, drawn standing in the XZ plane."""
+    """The back panel: between the sides, on their back flanges."""
     part(d, "Cart back", S.CART_STOCK)
     t = thickness(d)
-    base = profile_blank(d, plane_at_y(0.0),
-                         [rect((-S.BACK_X / 2, 0.0), (S.BACK_X / 2, S.CART_H))],
-                         name="Back blank")
-    edges = edges_at(d, lambda m: abs(m[1] + t) < near(t)
-                     and abs(abs(m[0]) - S.BACK_X / 2) < near(t),
+    face = S.CART_BACK - S.T_CART                 # the flanges' inner face
+    base = sheet_panel(d, "y", face, -1,
+                       (-S.BACK_X / 2, face, S.BACK_BOTTOM),
+                       (S.BACK_X / 2, face, S.BACK_TOP), name="Back blank")
+    rails = edges_at(d, lambda m: abs(m[1] - (face - t)) < near(t)
+                     and (abs(m[2] - S.BACK_BOTTOM) < near(t)
+                          or abs(m[2] - S.BACK_TOP) < near(t)),
                      what="back panel edge")
-    flange(d, base, edges, S.CART_FLANGE, name="Return flanges",
+    flange(d, base, rails, S.CART_FLANGE, name="Stiffeners",
            position="material_inside")
-    frame(d, "inner", (0.0, 0.0, 0.0))
+    holes(d, "y", 100.0, +1, [(x, 0.0, z) for x, z in S.BACK_BOLTS],
+          S.CLEAR[S.BACK_BOLT], name="Bolt holes")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     flat_config(d, base)
     sheet_ok(d, "cart back")
     return base
 
 
 def cart_shelf(d):
+    """The bottom shelf: a pan on the sides' bottom flanges, holding the
+    bottle."""
     part(d, "Cart shelf", S.CART_STOCK)
-    base = pan(d, S.SHELF_X, S.SHELF_Y, S.SHELF_WALL, "Shelf")
-    frame(d, "seat", (0.0, 0.0, 0.0))
-    frame(d, "tank", (0.0, 0.0, thickness(d)))
+    t = thickness(d)
+    base = sheet_panel(d, "z", S.SHELF_Z, +1,
+                       (-S.SHELF_X / 2, -S.SHELF_Y / 2, S.SHELF_Z),
+                       (S.SHELF_X / 2, S.SHELF_Y / 2, S.SHELF_Z),
+                       name="Shelf blank")
+    walls = edges_at(d, lambda m: abs(m[2] - (S.SHELF_Z + t)) < near(t) and (
+        abs(abs(m[0]) - S.SHELF_X / 2) < near(t)
+        or abs(abs(m[1]) - S.SHELF_Y / 2) < near(t)), what="shelf base edge")
+    flange(d, base, walls, S.SHELF_WALL, name="Shelf walls",
+           position="material_inside")
+    corner_relief(d, base, name="Corner relief")
+    holes(d, "z", S.SHELF_Z + 20.0, -1, [(x, y, 0.0) for x, y in S.SHELF_BOLTS],
+          S.CLEAR[S.SHELF_BOLT], name="Bolt holes")
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    frame(d, "tank", (0.0, S.TANK_Y, S.SHELF_Z + t))
     flat_config(d, base)
     sheet_ok(d, "cart shelf")
     return base
 
 
-def cart_door(d):
-    """A door: flat, hemmed all round so no cut edge is exposed."""
-    part(d, "Cart door", S.CART_STOCK)
+def control_panel(d):
+    """The face the knobs come through: bolted to the cart's front flanges,
+    and to the firebox's front wall by a lip at the top."""
+    part(d, "Control panel", S.PANEL_STOCK)
     t = thickness(d)
-    base = profile_blank(d, plane_at_y(0.0),
-                         [rect((-S.DOOR_X / 2, 0.0), (S.DOOR_X / 2, S.DOOR_Y))],
-                         name="Door blank")
+    base = sheet_panel(d, "y", S.PANEL_FACE, -1,
+                       (-S.PANEL_X / 2, S.PANEL_FACE, S.PANEL_BOTTOM_Z),
+                       (S.PANEL_X / 2, S.PANEL_FACE, S.PANEL_TOP_Z),
+                       name="Panel blank")
+    # Turned BACK, away from the cook: the blank's material runs to -Y, so
+    # the REAR face is the one at PANEL_FACE and the front — the one a hand
+    # touches — is a thickness in front of it. Picking the front face folded
+    # the stiffeners forward, over the knobs.
+    inset = S.PANEL_STIFF_INSET
+    bottom = edges_at(d, lambda m: abs(m[1] - S.PANEL_FACE) < near(t)
+                      and abs(m[2] - S.PANEL_BOTTOM_Z) < near(t),
+                      what="panel bottom edge")
+    flange(d, base, bottom, S.PANEL_BOTTOM_STIFF, name="Bottom stiffener",
+           position="material_inside", offset_start=inset, offset_end=inset)
+    top = edges_at(d, lambda m: abs(m[1] - S.PANEL_FACE) < near(t)
+                   and abs(m[2] - S.PANEL_TOP_Z) < near(t),
+                   what="panel top edge")
+    # A flange REACHES its length plus a bend radius: the length is measured
+    # from the bend's tangent line, not from the face the edge is on. The
+    # lip on the end of this one has to land on the firebox's front wall, so
+    # the reach is the number that matters and the length is derived from it.
+    flange(d, base, top, S.PANEL_TOP_REACH - bend_radius(d),
+           name="Top stiffener", position="material_inside",
+           offset_start=inset, offset_end=inset)
+    # And up, onto the firebox's front wall: the lip that carries the panel's
+    # top. material_inside puts its outer face on the wall it bolts to.
+    lip_edge = edges_at(d, lambda m: abs(m[2] - S.PANEL_TOP_Z) < near(t)
+                        and abs(m[1] - S.FRONT_WALL_OUT) < near(t),
+                        what="top stiffener edge")
+    flange(d, base, lip_edge, S.PANEL_LIP, name="Lip",
+           position="material_inside")
+
+    # Everything through the face, from one plane in front of it: the valve
+    # stems, the screws that hold each valve, and the bolts into the cart.
+    bores = [(S.burner_x(i), 0.0, S.BURNER_Z) for i in range(S.BURNERS)]
+    holes(d, "y", -100.0, -1, bores, S.STEM_BORE, name="Valve bores")
+    screws = [(S.burner_x(i) + sx * S.VALVE_SCREW_X, 0.0, S.BURNER_Z)
+              for i in range(S.BURNERS) for sx in S.sides()]
+    holes(d, "y", -100.0, -1, screws, S.CLEAR[S.VALVE_BOLT],
+          name="Valve screw holes")
+    holes(d, "y", -100.0, -1, [(x, 0.0, z) for x, z in S.PANEL_BOLTS],
+          S.CLEAR[S.PANEL_BOLT], name="Cart bolt holes")
+    holes(d, "y", -100.0, -1,
+          [(x, 0.0, S.PANEL_LIP_Z) for x in S.PANEL_LIP_BOLTS],
+          S.CLEAR[S.PANEL_LIP_BOLT], name="Lip bolt holes")
+
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    for i in range(S.BURNERS):
+        frame(d, f"valve_{i + 1}", (S.burner_x(i), S.PANEL_FACE, S.BURNER_Z),
+              z_axis=(0, 1, 0), x_axis=(1, 0, 0))
+    flat_config(d, base)
+    sheet_ok(d, "control panel")
+    return base
+
+
+def cart_door(d, hand):
+    """A door: flat, hemmed on the three edges a hand meets, hung on two
+    leaves welded to its front."""
+    side = hand_name(hand)
+    part(d, f"Cart door {side}", S.CART_STOCK)
+    t = thickness(d)
+    outer = hand * S.SIDE_OUT
+    innerx = hand * (S.SIDE_OUT - S.DOOR_X)
+    lo, hi = min(outer, innerx), max(outer, innerx)
+    base = sheet_panel(d, "y", S.DOOR_FACE, -1,
+                       (lo, S.DOOR_FACE, S.DOOR_BOTTOM),
+                       (hi, S.DOOR_FACE, S.DOOR_TOP), name="Door blank")
+    front = S.DOOR_FACE - t
     inset = bend_radius(d) + t
-    # Two opposite edges first, then the other two: hemming all four at once
-    # would have each hem run into its neighbour at the corner. Each pick is
-    # a FULL edge, so its midpoint sits on the panel's centre line — the
-    # little edges the first hems leave at the corners do not.
-    sides = edges_at(d, lambda m: abs(m[1] + t) < near(t)
-                     and abs(abs(m[0]) - S.DOOR_X / 2) < near(t)
-                     and abs(m[2] - S.DOOR_Y / 2) < near(t),
-                     what="door side edge")
-    hem(d, base, sides, S.DOOR_HEM, name="Side hems")
-    ends = edges_at(d, lambda m: abs(m[1] + t) < near(t)
-                    and (abs(m[2]) < near(t) or abs(m[2] - S.DOOR_Y) < near(t))
-                    and abs(m[0]) < near(t),
+    # Hemmed toward the FRONT, so the back stays flat against the cart's
+    # flange. The latch-side edge first, then top and bottom inset clear of
+    # it: hemming two edges that meet would have each hem run into its
+    # neighbour at the corner.
+    latch = edges_at(d, lambda m: abs(m[1] - front) < near(t)
+                     and abs(m[0] - innerx) < near(t),
+                     what="door latch edge")
+    hem(d, base, latch, S.DOOR_HEM, name="Latch hem")
+    # The latch hem shortened these two edges, so their midpoints have moved
+    # off the panel's centre line by half a hem: the pick is "the long edge
+    # along the top and the bottom", not a point.
+    ends = edges_at(d, lambda m: abs(m[1] - front) < near(t)
+                    and (abs(m[2] - S.DOOR_BOTTOM) < near(t)
+                         or abs(m[2] - S.DOOR_TOP) < near(t))
+                    and abs(m[0] - (lo + hi) / 2.0) < S.DOOR_HEM,
                     what="door end edge")
     hem(d, base, ends, S.DOOR_HEM, name="End hems",
         offset_start=inset + S.DOOR_HEM, offset_end=inset + S.DOOR_HEM)
-    # One door part, hung on either side: the left door swings on its left
-    # edge and the right door on its right, so it carries both hinges.
-    frame(d, "hinge_left", (-S.DOOR_X / 2 - 12.0, 0.0, S.DOOR_Y / 2),
+
+    knuckle = (hand * (S.SIDE_OUT + S.HINGE_TANG),
+               S.DOOR_FACE - t - S.HINGE_TANG)
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    frame(d, "hinge", (knuckle[0], knuckle[1], S.DOOR_BOTTOM),
           z_axis=(0, 0, 1), x_axis=(1, 0, 0))
-    frame(d, "hinge_right", (S.DOOR_X / 2 + 12.0, 0.0, S.DOOR_Y / 2),
-          z_axis=(0, 0, 1), x_axis=(1, 0, 0))
+    for i, z in enumerate(S.DOOR_HINGE_Z):
+        up = (0, 0, -1) if hand > 0 else (0, 0, 1)
+        frame(d, f"hinge_leaf_{i + 1}", (knuckle[0], knuckle[1], z + 20.0),
+              z_axis=up, x_axis=(-hand, 0, 0))
     flat_config(d, base)
-    sheet_ok(d, "cart door")
+    sheet_ok(d, f"cart door {side}")
     return base
 
 
 def side_shelf(d):
-    """A fold-down shelf: flat, with a drop edge on three sides."""
+    """A side shelf: a tray with a drop edge all round, bolted to the cart
+    through the drop edge nearest it.
+
+    All four edges drop, so ONE part serves both sides: turned end for end,
+    the edge that carries the bolts faces the other way.
+    """
     part(d, "Side shelf", S.SHELF_STOCK)
     t = thickness(d)
-    base = blank(d, S.SIDE_SHELF_X, S.SIDE_SHELF_Y, name="Shelf blank")
-    drops = edges_at(d, lambda m: abs(m[2]) < near(t) and (
-        abs(abs(m[0]) - S.SIDE_SHELF_X / 2) < near(t)
-        or m[1] < -S.SIDE_SHELF_Y / 2 + near(t)),
-        what="shelf edge")
+    half_x, half_y = S.SIDE_SHELF_X / 2.0, S.SIDE_SHELF_Y / 2.0
+    base = sheet_panel(d, "z", 0.0, -1, (-half_x, -half_y, 0.0),
+                       (half_x, half_y, 0.0), name="Shelf blank")
+    drops = edges_at(d, lambda m: abs(m[2] + t) < near(t) and (
+        abs(abs(m[0]) - half_x) < near(t)
+        or abs(abs(m[1]) - half_y) < near(t)), what="shelf edge")
     flange(d, base, drops, S.SIDE_SHELF_DROP, name="Drop edges",
            position="material_inside")
-    corner_relief(d, base, name="Corner relief")
-    frame(d, "hinge", (0.0, S.SIDE_SHELF_Y / 2, 0.0))
+    # No corner relief here: four edges folded the same way in ONE flange
+    # feature come out with their corners already open, and asking for a
+    # relief is refused — "a corner relief cut nothing".
+    # Only the -x drop edge is drilled: it is the one that meets the cart,
+    # and a plane looking that way from the middle of the shelf sees no
+    # other sheet.
+    holes(d, "x", 0.0, -1,
+          [(0.0, y, -(S.SIDE_SHELF_Z - S.SIDE_SHELF_BOLT_Z))
+           for y in S.SIDE_SHELF_BOLTS],
+          S.CLEAR[S.SIDE_SHELF_BOLT], name="Bolt holes")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     flat_config(d, base)
     sheet_ok(d, "side shelf")
     return base

@@ -7,8 +7,11 @@ into — and a box-and-cylinder stand-in is a picture of something else. Even
 the plain round bars are sketched and extruded, so every part opens the same
 way and any dimension on it can be edited.
 
-Each part also carries the frames it is mated by: a mate connector belongs to
-the part, not to a number typed into the assembly.
+Each part carries the frames it is mated by, and the holes its JOINT needs: a
+valve's screws are tapped into the valve, the burner's tail takes the screw
+that comes through the firebox's back wall, and the handle's ends have plugs
+to screw into. Every one of those is drawn along the part's OWN axis, so the
+socket that places it is the only thing that knows which way it faces.
 """
 import math
 import os
@@ -16,7 +19,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from grill_lib import check, frame, part, sketch  # noqa: E402
+from grill_lib import check, drill, frame, part, sketch, tapped  # noqa: E402
 from _lib import circle, line, plane_at_x, plane_at_y, plane_at_z, rect  # noqa: E402
 
 import grill_spec as S  # noqa: E402
@@ -81,77 +84,136 @@ def material(d, name):
         d.call("set_material", material=name, body=i)
 
 
-def burner_x(i):
-    return (i - (S.BURNERS - 1) / 2.0) * S.BURNER_PITCH
+def thread_all(d, radius, size, expect, name="Thread"):
+    """Thread EVERY cylinder of `radius` — and refuse if there are not the
+    `expect`ed number of them.
+
+    A hole whose face the element map never named is invisible here, and an
+    unthreaded hole with a screw in it is a clash rather than a joint, so the
+    count is the check.
+    """
+    body = d.call("list_elements")["bodies"][0]
+    faces = [f for f in body["faces"]
+             if f["kind"] == "cylinder" and abs(f["radius"] - radius) < 1e-4]
+    if len(faces) != expect:
+        raise SystemExit(f"{name}: {expect} tappings expected, "
+                         f"{len(faces)} threadable faces of radius {radius}")
+    for i, f in enumerate(faces):
+        r = d.call("add_feature", feature={
+            "type": "Thread", "name": f"{name} {i + 1}",
+            "face": {"feature_id": body["created_by"], "element": f["name"]},
+            "designation": size, "pitch": S.PITCH[size],
+            "allow_engagement": True})
+        check(r, name)
+
+
+def thread_on(d, radius, size, name="Thread"):
+    """A cosmetic thread that ALLOWS engagement, on the cylinder of `radius`.
+
+    Without it a nut on a stem is a clash, because nothing downstream can
+    know the two are meant to screw together: the checker relieves the
+    engaged length only between threads it was told about.
+    """
+    body = d.call("list_elements")["bodies"][0]
+    faces = [f for f in body["faces"]
+             if f["kind"] == "cylinder" and abs(f["radius"] - radius) < 1e-4]
+    if not faces:
+        raise SystemExit(f"{name}: no cylinder of radius {radius} to thread")
+    r = d.call("add_feature", feature={
+        "type": "Thread", "name": name,
+        "face": {"feature_id": body["created_by"], "element": faces[0]["name"]},
+        "designation": size, "pitch": S.PITCH[size], "allow_engagement": True})
+    check(r, name)
 
 
 # --- the gas train ---------------------------------------------------------
 
 def burner(d):
-    """A burner tube and the venturi that slides over the valve's orifice:
-    one profile, revolved about the tube's own axis."""
+    """A burner tube and the venturi that slides over the valve's orifice.
+
+    Drawn along its OWN axis — local +Z, the mouth at the origin — and
+    turned into the box by its socket, with a tapped hole in its tail for
+    the screw that comes through the firebox's back wall.
+    """
     part(d, "Burner")
     r_tube = S.BURNER_D / 2.0
-    r_vent = r_tube + 3.0
-    back = S.BURNER_LEN / 2.0
-    front = -S.BURNER_LEN / 2.0
-    mouth = front - 40.0
-    # (u, v) = (y along the tube, radius): the venturi, the step, the tube.
-    revolve(d, "Tube", plane_at_x(0.0),
-            [(mouth, 0.0), (mouth, r_vent), (front, r_vent), (front, r_tube),
-             (back, r_tube), (back, 0.0)], axis="y")
-    frame(d, "inlet", (0.0, mouth, 0.0), z_axis=(0, -1, 0), x_axis=(1, 0, 0))
+    r_vent = S.VENTURI_D / 2.0
+    revolve(d, "Tube", plane_at_y(0.0),
+            [(0.0, 0.0), (r_vent, 0.0), (r_vent, S.VENTURI_L),
+             (r_tube, S.VENTURI_L), (r_tube, S.BURNER_LEN),
+             (0.0, S.BURNER_LEN)], axis="z")
+    tapped(d, "z", S.BURNER_LEN + 5.0, -1, [(0.0, 0.0, 0.0)], S.BURNER_BOLT,
+           5.0 + S.BURNER_TAP_DEPTH, name="Tail tapping")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "stainless_steel")
 
 
 def manifold(d):
-    """The tube the valves hang off — a tube, with a bore."""
+    """The tube the valves screw into — drawn along its own axis, with a
+    port for each valve's boss."""
     part(d, "Manifold")
     half = S.MANIFOLD_LEN / 2.0
     r_out = S.MANIFOLD_D / 2.0
-    r_in = r_out - 2.0
+    r_in = r_out - S.MANIFOLD_WALL
     revolve(d, "Manifold tube", plane_at_y(0.0),
-            [(-half, r_in), (half, r_in), (half, r_out), (-half, r_out)],
-            axis="x")
-    frame(d, "centre", (0.0, 0.0, 0.0), z_axis=(1, 0, 0), x_axis=(0, 1, 0))
-    # One socket per valve, on the tube's front.
-    for i in range(S.BURNERS):
-        frame(d, f"valve_{i + 1}", (burner_x(i), -r_out, 0.0),
-              z_axis=(0, -1, 0), x_axis=(1, 0, 0))
+            [(r_in, -half), (r_out, -half), (r_out, half), (r_in, half)],
+            axis="z")
+    drill(d, "y", -r_out - 5.0, +1,
+          [(0.0, 0.0, S.burner_x(i)) for i in range(S.BURNERS)],
+          S.VALVE_BOSS_D, 5.0 + S.MANIFOLD_WALL + 1.0, name="Valve ports")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "brass")
 
 
 def valve(d):
-    """One burner valve: a drawn body, a stem through the panel, and the
-    orifice that feeds the venturi behind it."""
+    """One burner valve: a body, a stem through the panel, the orifice that
+    feeds the venturi, and the boss that goes up into the manifold.
+
+    Local +Z runs into the cart and local +Y is up, so ONE socket on the
+    control panel places body, stem, orifice and boss together.
+    """
     part(d, "Valve")
     w, h, dp = S.VALVE_BODY
-    body = extrude(d, "Body", plane_at_y(dp / 2.0),
+    body = extrude(d, "Body", plane_at_z(0.0),
                    [rect((-w / 2.0, -h / 2.0), (w / 2.0, h / 2.0))], dp)
-    stem = extrude(d, "Stem", plane_at_y(-dp / 2.0),
-                   [circle((0.0, 0.0), S.VALVE_STEM_D / 2.0)], S.VALVE_STEM_L)
+    stem = extrude(d, "Stem", plane_at_z(0.0),
+                   [circle((0.0, 0.0), S.VALVE_STEM_D / 2.0)],
+                   -S.VALVE_STEM_L)
     body = boolean(d, "Body and stem", body, stem)
-    frame(d, "stem_end", (0.0, -dp / 2.0 - S.VALVE_STEM_L, 0.0),
-          z_axis=(0, -1, 0),
-          x_axis=(1, 0, 0))
-    frame(d, "manifold", (0.0, dp / 2.0, 0.0), z_axis=(0, 1, 0),
-          x_axis=(1, 0, 0))
+    orifice = extrude(d, "Orifice", plane_at_z(dp),
+                      [circle((0.0, 0.0), S.ORIFICE_D / 2.0)], S.ORIFICE_L)
+    body = boolean(d, "With orifice", body, orifice)
+    # Up into the manifold, line to line with the port drilled for it.
+    boss_len = S.MANIFOLD_Z - S.BURNER_Z - h / 2.0
+    boss = extrude(d, "Manifold boss",
+                   {"origin": [0, h / 2.0, 0], "normal": [0, 1, 0],
+                    "uAxis": [1, 0, 0]},
+                   [circle((0.0, -dp / 2.0), S.VALVE_BOSS_D / 2.0)], boss_len)
+    boolean(d, "With boss", body, boss)
+    tapped(d, "z", -5.0, +1,
+           [(sx * S.VALVE_SCREW_X, 0.0, 0.0) for sx in S.sides()],
+           S.VALVE_BOLT, 5.0 + 10.0, name="Screw tappings")
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    frame(d, "knob", (0.0, 0.0, -(S.T_PANEL + S.KNOB_OFF)),
+          z_axis=(0, 0, -1), x_axis=(1, 0, 0))
     material(d, "brass")
 
 
 def knob(d):
     """A control knob: a skirt, a waist and a grip — revolved, because that
-    is what a turned knob is."""
+    is what a turned knob is — bored for the stem it grips."""
     part(d, "Knob")
     r = S.KNOB_D / 2.0
-    # (u, v) = (y along the shaft, radius); y = 0 is the face it seats on.
-    revolve(d, "Knob body", plane_at_x(0.0),
-            [(0.0, 0.0), (0.0, r - 8.0), (-4.0, r), (-16.0, r),
-             (-S.KNOB_H, r - 6.0), (-S.KNOB_H, 0.0)], axis="y")
+    revolve(d, "Knob body", plane_at_y(0.0),
+            [(0.0, 0.0), (r - 8.0, 0.0), (r, 4.0), (r, 16.0),
+             (r - 6.0, S.KNOB_H), (0.0, S.KNOB_H)], axis="z")
     # The pointer a thumb finds.
-    extrude(d, "Pointer", plane_at_z(r - 10.0),
-            [rect((-3.0, -S.KNOB_H), (3.0, -2.0))], r + 4.0, mode="add")
-    frame(d, "shaft", (0.0, 0.0, 0.0), z_axis=(0, -1, 0), x_axis=(1, 0, 0))
+    extrude(d, "Pointer", plane_at_z(2.0),
+            [rect((-3.0, r - 12.0), (3.0, r + 4.0))], S.KNOB_H - 4.0,
+            mode="add")
+    drill(d, "z", -5.0, +1, [(0.0, 0.0, 0.0)], S.VALVE_STEM_D,
+          5.0 + S.KNOB_BORE_DEPTH, name="Stem bore")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "plastic_black")
 
 
@@ -178,76 +240,84 @@ def grate(d):
         "type": "Pattern", "name": "Bars", "kind": "linear",
         "source_id": bar, "count": count, "spacing": S.GRATE_PITCH,
         "axis": {"kind": "y"}}), "grate bars")
-    frame(d, "seat", (0.0, 0.0, 0.0))
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "steel")  # porcelain-coated cast iron in life
 
 
 def warming_rack(d):
-    """The half-shelf up under the lid."""
+    """The half-shelf up under the lid, resting on two welded ledges."""
     part(d, "Warming rack")
     r = S.RACK_BAR_D / 2.0
-    frame_x = S.COOK_X - 20.0
-    front = extrude(d, "Front rail", plane_at_x(-frame_x / 2.0),
-                    [circle((-S.RACK_Y / 2.0, 0.0), r)], frame_x)
-    back = extrude(d, "Back rail", plane_at_x(-frame_x / 2.0),
-                   [circle((S.RACK_Y / 2.0, 0.0), r)], frame_x)
+    half = S.RACK_LEN / 2.0
+    front = extrude(d, "Front rail", plane_at_x(-half),
+                    [circle((-S.RACK_Y / 2.0, r), r)], S.RACK_LEN)
+    back = extrude(d, "Back rail", plane_at_x(-half),
+                   [circle((S.RACK_Y / 2.0, r), r)], S.RACK_LEN)
     front = boolean(d, "Rails", front, back)
     bar = extrude(d, "Bar", plane_at_y(S.RACK_Y / 2.0),
-                  [circle((-frame_x / 2.0 + 20.0, 0.0), r)], S.RACK_Y)
-    count = int((frame_x - 40.0) // 40.0) + 1
+                  [circle((-half + 20.0, r), r)], S.RACK_Y)
+    count = int((S.RACK_LEN - 40.0) // 40.0) + 1
     check(d.call("add_feature", feature={
         "type": "Pattern", "name": "Bars", "kind": "linear",
         "source_id": bar, "count": count, "spacing": 40.0,
         "axis": {"kind": "x"}}), "rack bars")
-    frame(d, "hang", (0.0, S.RACK_Y / 2.0, 0.0))
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "stainless_steel")
 
 
 # --- the cart's running gear ----------------------------------------------
 
 def wheel(d):
-    """A wheel: tread, dished web and bore, revolved about the axle's own
-    axis — so the hub frame IS the axis it spins on."""
+    """A wheel: tread, dished web and bore, revolved about the axis it turns
+    on — so its own +Z IS that axis and the socket only has to aim it."""
     part(d, "Wheel")
     r_out = S.WHEEL_D / 2.0
-    r_bore = S.AXLE_D / 2.0
-    half = S.WHEEL_W / 2.0
-    # (u, v) = (x along the axle, radius): bore, web, rim, tread.
+    r_bore = S.WHEEL_BORE / 2.0
+    w = S.WHEEL_W
     revolve(d, "Wheel", plane_at_y(0.0),
-            [(-half, r_bore), (half, r_bore), (half, r_out - 18.0),
-             (half - 6.0, r_out - 18.0), (half - 6.0, r_out),
-             (-half + 6.0, r_out), (-half + 6.0, r_out - 18.0),
-             (-half, r_out - 18.0)], axis="x")
-    frame(d, "hub", (0.0, 0.0, 0.0), z_axis=(1, 0, 0), x_axis=(0, 1, 0))
+            [(r_bore, 0.0), (r_out - 18.0, 0.0), (r_out - 18.0, 6.0),
+             (r_out, 6.0), (r_out, w - 6.0), (r_out - 18.0, w - 6.0),
+             (r_out - 18.0, w), (r_bore, w)], axis="z")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "plastic_black")
 
 
-def axle(d):
-    part(d, "Axle")
-    half = (S.CART_X + 80.0) / 2.0
-    extrude(d, "Rod", plane_at_x(-half), [circle((0.0, 0.0), S.AXLE_D / 2.0)],
-            S.CART_X + 80.0)
-    frame(d, "centre", (0.0, 0.0, 0.0), z_axis=(1, 0, 0), x_axis=(0, 1, 0))
-    # One frame per wheel: a revolute aligns frame ORIGINS, so both wheels
-    # mated to a single centre frame ended up in the same place.
-    for side, x in (("left_hub", -1), ("right_hub", +1)):
-        frame(d, side,
-              (x * (S.CART_X / 2.0 + S.WHEEL_W / 2.0 + 28.0), 0.0, 0.0),
-              z_axis=(1, 0, 0), x_axis=(0, 1, 0))
+def axle_bolt(d):
+    """The bolt a wheel turns on: a head, a plain shoulder through wheel and
+    panel, and a thread for the nut inside.
+
+    A shoulder bolt, not a screw pulled up tight through a wheel that has to
+    turn: the shoulder is exactly wheel plus panel long, so the nut clamps
+    its END against the panel and leaves the wheel free on it.
+    """
+    part(d, "Axle bolt")
+    r_head = 11.0
+    r_sh = S.AXLE_BOLT_D / 2.0
+    r_th = 5.0
+    grip = S.WHEEL_W + S.T_CART
+    revolve(d, "Bolt", plane_at_y(0.0),
+            [(0.0, -5.0), (r_head, -5.0), (r_head, 0.0), (r_sh, 0.0),
+             (r_sh, grip), (r_th, grip), (r_th, grip + 12.0),
+             (0.0, grip + 12.0)], axis="z")
+    thread_on(d, r_th, S.AXLE_THREAD, name="M10 thread")
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    frame(d, "nut", (0.0, 0.0, grip))
     material(d, "steel")
 
 
 def foot(d):
-    """A moulded foot: a taper, revolved."""
+    """A moulded foot with a threaded insert: a taper, revolved, tapped."""
     part(d, "Foot")
     r = S.FOOT_D / 2.0
     # About Z the profile is (radius, height): u is the distance from the
     # axis and v is how far up it. About X or Y it is the other way round,
     # which is the one thing to get right in every one of these.
     revolve(d, "Foot", plane_at_y(0.0),
-            [(0.0, 0.0), (r, 0.0), (r, S.FOOT_H - 6.0), (r - 5.0, S.FOOT_H),
-             (0.0, S.FOOT_H)], axis="z")
-    frame(d, "top", (0.0, 0.0, S.FOOT_H), z_axis=(0, 0, 1), x_axis=(1, 0, 0))
+            [(0.0, 0.0), (r, 0.0), (r, -(S.FOOT_H - 6.0)),
+             (r - 5.0, -S.FOOT_H), (0.0, -S.FOOT_H)], axis="z")
+    tapped(d, "z", 5.0, -1, [(0.0, 0.0, 0.0)], S.FOOT_BOLT, 5.0 + 15.0,
+           name="Insert")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "rubber")
 
 
@@ -282,8 +352,8 @@ def tank(d):
                          [(0.0, top - 5.0), (20.0, top - 5.0),
                           (20.0, top + valve_h - 8.0), (14.0, top + valve_h),
                           (0.0, top + valve_h)], axis="z")
-    body = boolean(d, "With valve", body, valve_body)
-    frame(d, "floor", (0.0, 0.0, 0.0))
+    boolean(d, "With valve", body, valve_body)
+    frame(d, "origin", (0.0, 0.0, 0.0))
     frame(d, "outlet", (0.0, 0.0, top + valve_h))
     material(d, "steel")
 
@@ -294,13 +364,12 @@ def regulator(d):
     body = revolve(d, "Bell", plane_at_y(0.0),
                    [(0.0, 0.0), (22.0, 0.0), (22.0, 6.0), (35.0, 10.0),
                     (35.0, 40.0), (26.0, 46.0), (0.0, 46.0)], axis="z")
-    # High on the bell, so the hose clears the bottle's collar below it.
     # High on the bell: the hose has to clear the bottle's collar, and the
     # stub's own radius is what kept catching its rim.
     stub = extrude(d, "Hose stub", plane_at_x(0.0), [circle((0.0, 36.0), 7.0)],
                    90.0)
-    body = boolean(d, "Bell and stub", body, stub)
-    frame(d, "inlet", (0.0, 0.0, 0.0))
+    boolean(d, "Bell and stub", body, stub)
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "brass")
 
 
@@ -313,6 +382,10 @@ def lid_handle(d):
     Pipe — which is what the part IS: a length of tube through a bender. Two
     cylinders unioned at a sharp corner is a picture of something nobody can
     make, and it shows: the corner has a seam and no radius.
+
+    Each end takes a welded plug, tapped, so the screw that comes up through
+    the lid has something to pull on. A tube with nothing in its ends is
+    held on by its paint.
     """
     part(d, "Lid handle")
     half = S.HANDLE_SPAN / 2.0
@@ -321,44 +394,114 @@ def lid_handle(d):
     # The straights carry intermediate points of their own: a spline fitted
     # through two ends wanders between them, and the tube trumpets where it
     # does.
-    pts = [[-half, 0.0, -rise - 0.0]]
+    pts = [[-half, 0.0, 0.0]]
     for k in range(1, 4):
-        pts.append([-half, 0.0, -rise + (rise - bend_r) * k / 3.0])
+        pts.append([-half, 0.0, (rise - bend_r) * k / 3.0])
     for k in range(1, 8):  # up and over the near bend
         a = math.radians(90.0 * k / 8.0)
         pts.append([-half + bend_r * (1.0 - math.cos(a)), 0.0,
-                    -bend_r * (1.0 - math.sin(a))])
+                    rise - bend_r * (1.0 - math.sin(a))])
     span = (half - bend_r) - (-half + bend_r)
     for k in range(0, 7):
-        pts.append([-half + bend_r + span * k / 6.0, 0.0, 0.0])
+        pts.append([-half + bend_r + span * k / 6.0, 0.0, rise])
     for k in range(1, 8):  # and down the far one
         a = math.radians(90.0 * k / 8.0)
         pts.append([half - bend_r * (1.0 - math.sin(a)), 0.0,
-                    -bend_r * (1.0 - math.cos(a))])
+                    rise - bend_r * (1.0 - math.cos(a))])
     for k in range(0, 4):
-        pts.append([half, 0.0, -bend_r - (rise - bend_r) * k / 3.0])
+        pts.append([half, 0.0, (rise - bend_r) * (3 - k) / 3.0])
     path = d.call("add_feature", feature={
         "type": "Curve3D", "name": "Centreline", "kind": "fit_spline",
         "points": pts})
     check(path, "handle centreline")
-    check(d.call("add_feature", feature={
+    tube = d.call("add_feature", feature={
         "type": "Pipe", "name": "Tube", "path_id": path["id"],
-        "outer_diameter": S.HANDLE_D, "wall_thickness": 1.5}), "handle tube")
-    # Mounted by the MIDDLE of its two feet: mating it by one foot hangs the
-    # whole handle off to one side of wherever it was meant to sit.
-    frame(d, "mount", (0.0, 0.0, -rise))
-    frame(d, "left_foot", (-half, 0.0, -rise))
-    frame(d, "right_foot", (half, 0.0, -rise))
+        "outer_diameter": S.HANDLE_D, "wall_thickness": S.HANDLE_WALL})
+    check(tube, "handle tube")
+    body = owner(d, tube, "Tube")
+    # Each plug is drawn as a RING — the tapping is the sketch's inner loop,
+    # not a hole drilled afterwards. Drilled, the bore at one end came out
+    # with no NAME on its cylindrical face (see the findings), and a face
+    # with no name cannot be threaded, picked or fitted: the screw then sat
+    # in an unthreaded hole and read as a clash.
+    for i, sx in enumerate(S.sides()):
+        bore = S.HANDLE_PLUG - 2.0
+        plug = extrude(d, f"Plug {i + 1}", plane_at_z(0.0),
+                       [circle((sx * half, 0.0),
+                               S.HANDLE_D / 2.0 - S.HANDLE_WALL),
+                        circle((sx * half, 0.0), S.TAP[S.HANDLE_BOLT] / 2.0)],
+                       bore)
+        body = boolean(d, f"With plug {i + 1}", body, plug)
+        # And a cap over it, so the tapping is BLIND: with the bore open into
+        # the tube the screw's axis runs on up the inside of the handle, and
+        # a check that re-derives the joint from the rim finds its far end in
+        # the tube's far wall rather than in the thread.
+        cap = extrude(d, f"Plug cap {i + 1}", plane_at_z(bore),
+                      [circle((sx * half, 0.0),
+                              S.HANDLE_D / 2.0 - S.HANDLE_WALL)], 2.0)
+        body = boolean(d, f"With plug cap {i + 1}", body, cap)
+    thread_all(d, S.TAP[S.HANDLE_BOLT] / 2.0, S.HANDLE_BOLT, expect=2,
+               name="Plug tapping")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "stainless_steel")
 
 
 def thermometer(d):
-    """Bezel, glass and stem: one revolve."""
+    """Bezel, glass and stem: one revolve, and the thread the nut that holds
+    it in the lid runs on."""
     part(d, "Thermometer")
     r = S.THERMO_BEZEL_D / 2.0
+    stem = S.THERMO_STEM_D / 2.0
     revolve(d, "Thermometer", plane_at_y(0.0),
-            [(0.0, -40.0), (S.THERMO_STEM_D / 2.0, -40.0),
-             (S.THERMO_STEM_D / 2.0, 0.0), (r - 6.0, 0.0), (r, 4.0),
-             (r, 16.0), (r - 4.0, 18.0), (0.0, 18.0)], axis="z")
-    frame(d, "seat", (0.0, 0.0, 0.0))
+            [(0.0, -40.0), (stem, -40.0), (stem, 0.0), (r - 6.0, 0.0),
+             (r, 4.0), (r, 16.0), (r - 4.0, 18.0), (0.0, 18.0)], axis="z")
+    thread_on(d, stem, "M10", name="Stem thread")
+    frame(d, "origin", (0.0, 0.0, 0.0))
     material(d, "stainless_steel")
+
+
+# --- the pins the grill turns on ------------------------------------------
+
+def hinge_pin(d, name, diameter, length, head=2.5):
+    """A clevis pin: a head, a plain shank line-to-line in its bores, and the
+    cross hole for the split pin that keeps it there."""
+    part(d, name)
+    r = diameter / 2.0
+    revolve(d, "Pin", plane_at_y(0.0),
+            [(0.0, -head), (r + 2.5, -head), (r + 2.5, 0.0), (r, 0.0),
+             (r, length), (0.0, length)], axis="z")
+    drill(d, "x", -diameter, +1, [(0.0, 0.0, length - 3.0)],
+          max(1.6, diameter / 3.0), 2 * diameter, name="Split-pin hole")
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    material(d, "stainless_steel")
+
+
+def lid_pin(d):
+    return hinge_pin(d, "Lid hinge pin", S.PIN_D, 2 * S.T_BRK + 6.0)
+
+
+def door_pin(d):
+    return hinge_pin(d, "Door hinge pin", S.HINGE_PIN_D, 44.0)
+
+
+def hinge_leaf(d):
+    """One leaf of a corner hinge: a plate tangent to its own knuckle.
+
+    BOTH leaves of a hinge are this part — the second is the first turned
+    over — which is what makes their knuckles interleave on one pin instead
+    of wanting the same 20 mm of it.
+    """
+    part(d, "Hinge leaf")
+    rk = S.HINGE_KNUCKLE_D / 2.0
+    length, tall = S.HINGE_LEAF
+    body = extrude(d, "Knuckle", plane_at_z(0.0), [circle((0.0, 0.0), rk)],
+                   tall)
+    extrude(d, "Leaf", plane_at_z(0.0),
+            [rect((0.0, rk - S.T_BRK), (length, rk))], tall, mode="add")
+    drill(d, "z", -5.0, +1, [(0.0, 0.0, 0.0)], S.HINGE_PIN_D,
+          5.0 + tall + 5.0, name="Pin bore")
+    drill(d, "y", 0.0, +1, [(x, 0.0, tall / 2.0) for x in S.HINGE_BOLT_X],
+          S.CLEAR[S.HINGE_BOLT], rk + 1.0, name="Bolt holes")
+    frame(d, "origin", (0.0, 0.0, 0.0))
+    material(d, "steel")
+    return body

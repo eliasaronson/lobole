@@ -18,8 +18,9 @@ import grill_spec as S  # noqa: E402
 
 # Every part that is folded from one blank, and so has a flat pattern.
 SHEET_PARTS = ["Firebox", "Hood", "Heat tent", "Grease tray", "Control panel",
-               "Cart side", "Cart back", "Cart shelf", "Cart door",
-               "Side shelf"]
+               "Cart side left", "Cart side right", "Cart back", "Cart shelf",
+               "Cart door left", "Cart door right", "Side shelf",
+               "Grate ledge", "Tent ledge", "Rack ledge", "Tray rail"]
 
 
 def bend_allowance(angle_deg, radius, k, t):
@@ -63,8 +64,16 @@ def blanks(d, out_dir):
 def firebox_blank_is_right(d):
     """The firebox blank against the arithmetic, not against the unfolder.
 
-    Across the box: the panel between its two setbacks, then per side a bend
-    allowance, the wall, another allowance and the rim.
+    Across the box: the base between its two setbacks, then per side a bend
+    allowance, the wall (itself less a setback, because the rim is folded
+    off its end the same way), another allowance and the rim.
+
+    A `material_inside` flange of length L reaches L + R past the face its
+    edge is on, and lays flat as L: the panel it folds from loses a SETBACK
+    of R + t, and the flange itself contributes its length plus the bend
+    allowance. Both numbers are calibrated against the app on a single
+    100 mm coupon (a blank, one 20 mm flange): base 97 + BA 3.322 + flange
+    20 = 120.322, which is what the flat pattern measures.
     """
     d.call("set_active_part", part="Firebox")
     rules = d.call("get_sheet_metal_rules")["rules"]
@@ -72,8 +81,8 @@ def firebox_blank_is_right(d):
     r = rules["bend_radius_mm"]
     k = rules["k_factor"]
     ba = bend_allowance(90.0, r, k, t)
-    setback = r + t                      # material_inside: the outside mold
-    per_side = ba + S.BOX_H + ba + S.BOX_RIM
+    setback = r + t
+    per_side = ba + (S.BOX_H - setback) + ba + S.BOX_RIM
     want_x = S.BOX_X - 2 * setback + 2 * per_side
     want_y = S.BOX_Y - 2 * setback + 2 * per_side
 
@@ -116,6 +125,7 @@ def drawing(d, out_dir):
 
 
 def shop(d, out_dir="scratch/grill"):
+    print_bend_audit(bend_audit(d))
     made = blanks(d, out_dir)
     print("  blanks (mm, and bend lines in the DXF):")
     for part, w, l, bends, name in made:
@@ -128,3 +138,58 @@ def shop(d, out_dir="scratch/grill"):
           f"blank {flat['curves']} curves with {flat['bend_lines']} bend lines")
     print(f"  bend table: {table['text'].splitlines()[1].strip()} ...")
     return made
+
+
+def bend_audit(d, parts=None):
+    """Every bend on the grill against the rule for the metal it is in.
+
+    The question this answers is not "did it fold" but "would a shop fold it
+    THIS way": the inside radius against the material's own minimum, the
+    K-factor and where it came from, and the relief cut at the end of every
+    bend line that stops inside a panel. All of it is read from the document
+    — the rules a part was built under and the app's own DFM check — rather
+    than restated here, so a table that disagrees with the model cannot be
+    printed.
+    """
+    rows = []
+    for part in (parts or SHEET_PARTS):
+        d.call("set_active_part", part=part)
+        r = d.call("get_sheet_metal_rules")["rules"]
+        chk = d.call("check_sheet_metal")
+        rows.append({
+            "part": part,
+            "material": r["material"],
+            "gauge": r["gauge"],
+            "t": r["thickness_mm"],
+            "radius": r["bend_radius_mm"],
+            "min_radius": r["min_bend_radius_mm"],
+            "radius_source": r["bend_radius_source"],
+            "k": r["k_factor"],
+            "k_source": r["k_factor_source"],
+            "relief": r["relief"],
+            "relief_w": r["relief_width_mm"],
+            "relief_d": r["relief_depth_mm"],
+            "bends": chk["bends_checked"],
+            "holes": chk["holes_checked"],
+            "violations": chk["violations"],
+        })
+    return rows
+
+
+def print_bend_audit(rows):
+    print("  bends, and the rule for the metal they are in:")
+    print("    part              material         gauge   t     R    Rmin  "
+          "K     relief          bends  holes  violations")
+    for r in rows:
+        ok = "none" if not r["violations"] else str(r["violations"])
+        print(f"    {r['part']:17s} {r['material']:15s} {r['gauge']:6s} "
+              f"{r['t']:4.2f} {r['radius']:5.2f} {r['min_radius']:5.2f} "
+              f"{r['k']:5.2f} {r['relief']:>11s} "
+              f"{r['relief_w']:4.2f}x{r['relief_d']:<4.2f} "
+              f"{r['bends']:4d} {r['holes']:6d}  {ok}")
+    worst = [r for r in rows if r["radius"] < r["min_radius"] - 1e-9
+             or r["violations"]]
+    if worst:
+        raise SystemExit(f"bends below the minimum radius, or in violation: "
+                         f"{[w['part'] for w in worst]}")
+    return rows
