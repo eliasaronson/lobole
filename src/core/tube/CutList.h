@@ -2,9 +2,14 @@
 
 #include "cad/CADKernel.h"
 #include "core/Feature.h" // Body
+#include "core/tube/Check.h" // Bend
 
 #include <optional>
+#include <string>
 #include <utility>
+#include <vector>
+
+class Document;
 
 // How much of a member's path still has metal on it (docs/tube/plan.md, T3).
 //
@@ -25,5 +30,49 @@ namespace tube {
 // edge or the body has no vertices to project.
 [[nodiscard]] std::optional<std::pair<double, double>>
 MetalAlongPath(const Body& body, const CADShape& pathEdge);
+
+// One row of the cut list: a member, and the identical ones it stands for.
+struct MemberRow {
+  std::string name;                // the centreline's name
+  std::vector<std::string> bodies; // every body this row orders
+  int quantity = 1;
+  double cutLength = 0.0;  // the METAL, with any cope taken off
+  double pathLength = 0.0; // the node-to-node centreline it was swept along
+  double outerDiameter = 0.0;
+  double wallThickness = 0.0;
+  std::vector<Bend> bends;
+  uint64_t curveId = 0;
+};
+
+// Every tube member of `doc`, as the cut list and the bend schedule both read
+// it — ONE derivation, so the schedule an agent queries and the CSV a shop is
+// sent cannot disagree.
+//
+// A member is a length of tube that EXISTS: this walks the bodies and finds
+// each one's path by provenance (back through whatever made it — a Cope
+// leaves the member's own Pipe in place, a Pattern names its source), so a
+// curve whose tube was consumed is not a member and one a mirror made is.
+// Identical members collapse into a single row carrying the quantity.
+// `onlyCurve` (0 = all) narrows it to one path.
+[[nodiscard]] std::vector<MemberRow> Members(const Document& doc,
+                                             uint64_t onlyCurve = 0);
+
+// One stick of stock and what was cut from it.
+struct Stick {
+  std::vector<double> pieces; // cut lengths, in the order they come off
+  double used = 0.0;          // including the saw kerf between them
+  double offcut = 0.0;        // what is left of the stick
+};
+
+// How many lengths of stock a cut list needs, by first-fit decreasing: the
+// longest piece finds the first stick it fits, which is the pack a saw
+// operator does by hand and close enough to optimal that the difference is
+// not worth a solver. `kerf` is taken off between two pieces on one stick —
+// forgetting it is how the last piece comes up short.
+//
+// It is NOT the sheet-nesting workstream: one dimension, exact, no rotation
+// and no grain.
+[[nodiscard]] std::vector<Stick> PackIntoStock(std::vector<double> pieces,
+                                               double stockLength, double kerf);
 
 } // namespace tube

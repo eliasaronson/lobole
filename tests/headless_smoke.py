@@ -1307,6 +1307,49 @@ def main():
                len(sched["tubes"][0]["bodies"]) == 4,
                "four identical braces are one row of four")
 
+        # 4. An UNCOPED member is cut to its whole path — including a BENT
+        # one. Measuring along the path found only orthogonal projections at
+        # first, and a tube's end face has none on the leg it sits at the end
+        # of, so a two-bend hoop measured 1511 mm of its 2335 mm path: one
+        # whole leg missing, and nothing said so.
+        d.call("new_project")
+        hoop_r = 76.2
+        tube_member("Hoop", [[0, 0, 0], [0, 0, 900], [600, 0, 900],
+                             [600, 0, 0]], 25.4, 2.4, radius=hoop_r)
+        row = d.request("tube_schedule", {})["tubes"][0]
+        expect(abs(row["cut_length_mm"] - row["path_length_mm"]) < 1e-6,
+               "an uncoped bent member is cut to its whole developed path")
+        legs = (900 - hoop_r) + (600 - 2 * hoop_r) + (900 - hoop_r)
+        want_hoop = legs + 2 * (math.pi / 2.0) * hoop_r
+        expect(abs(row["cut_length_mm"] - want_hoop) < 1e-6,
+               f"and that is {want_hoop:.2f} mm: three legs and two arcs")
+
+        phase("The order")
+        # The files a shop is actually sent, read back to the same numbers.
+        out = os.path.join(tmp, "cut_list.csv")
+        d.call("set_tube_rules", material="steel", size="25.4x2.4")
+        res = d.call("export_cut_list", path=out, stock_length_mm=6000.0,
+                     kerf_mm=2.0)
+        with open(out) as f:
+            lines = [ln for ln in f.read().splitlines() if ln]
+        header, first = lines[0], lines[1].split(",")
+        expect(header.startswith("member,quantity,material,size,"
+                                 "cut_length_mm"),
+               "the cut list's columns follow the BOM's where they carry over")
+        expect(abs(float(first[4]) - row["cut_length_mm"]) < 0.01,
+               "the CSV carries the same cut length the schedule reports")
+        expect(res["sticks"] and res["sticks"][0]["offcut_mm"] > 0.0,
+               "and it says how many lengths of stock to buy")
+
+        bends_csv = os.path.join(tmp, "bends.csv")
+        res = d.call("export_bend_schedule", path=bends_csv)
+        with open(bends_csv) as f:
+            rows = [ln for ln in f.read().splitlines() if ln]
+        expect(rows[0].startswith("member,bend,distance_mm,angle_deg,roll_deg"),
+               "the bend schedule is one row per BEND, as a bender is set up")
+        expect(len(rows) - 1 == res["bends"] == 2,
+               "two bends, two rows")
+
         # Loft (M8): frustum between two squares on offset datum planes
         d.call("new_project")
         dp = d.call("add_feature", feature={

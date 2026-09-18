@@ -3,10 +3,14 @@
 #include "core/Document.h"
 #include "core/features/CurveFeature.h"
 #include "core/tube/Check.h"
+#include "core/tube/CutList.h"
 #include "core/tube/Rules.h"
 #include "ui/AppState.h"
 
+#include <cstdio>
+#include <fstream>
 #include <optional>
+#include <string>
 #include <vector>
 
 using nlohmann::json;
@@ -38,6 +42,24 @@ static constexpr MethodDoc TubeMethods[] = {
      "lists what IS stocked, so a picker built from it cannot offer a size "
      "set_tube_rules would refuse.",
      "part", remote::Deferrable},
+    {"export_cut_list",
+     "Write the cut list to a CSV {path}: one row per distinct member with "
+     "the quantity, the material and size the part declares, the CUT length "
+     "(the metal, with any cope taken off) and the bend count. Columns follow "
+     "export_bom's where they carry over, so a shop reading both files meets "
+     "one spelling of `material`. Pass `stock_length_mm` (and `kerf_mm`, the "
+     "saw's) and it also answers the question a cut list exists for - how "
+     "many lengths to BUY - by packing the pieces first-fit decreasing and "
+     "reporting the sticks and their offcuts. There is no default stock "
+     "length: a six-metre stick is a supplier's fact, not something derivable "
+     "from the part, so it is asked for rather than guessed.",
+     "kerf_mm, part, path, stock_length_mm", NotInBatch},
+    {"export_bend_schedule",
+     "Write the bend schedule to a CSV {path}: one row per BEND — member, "
+     "bend number, the distance from the last one, the angle, the roll and "
+     "the former. That row order is what a bender is programmed from, and it "
+     "is not the cut list's shape, which is why it is a second file.",
+     "part, path", NotInBatch},
     {"check_tube",
      "Manufacturability of every bent path in the part against its tube "
      "rules: a former tighter than the wall can take (the limit is set by "
@@ -70,6 +92,33 @@ std::vector<tube::Member> MembersOf(const Document& doc) {
     members.push_back(std::move(m));
   }
   return members;
+}
+
+// A CSV field, quoted only where it has to be — the same rule export_bom's
+// writer uses, so two files from one project do not disagree about quoting.
+std::string Field(const std::string& v) {
+  if (v.find_first_of(",\"\n") == std::string::npos)
+    return v;
+  std::string quoted = "\"";
+  for (const char c : v) {
+    if (c == '"')
+      quoted += '"';
+    quoted += c;
+  }
+  return quoted + "\"";
+}
+
+std::string Num(double v) {
+  char buf[64];
+  snprintf(buf, sizeof buf, "%.6g", v);
+  return std::string(buf);
+}
+
+std::string Join(const std::vector<std::string>& v) {
+  std::string out;
+  for (const std::string& s : v)
+    out += out.empty() ? s : "; " + s;
+  return out;
 }
 
 json SizesJson(const std::string& material) {
@@ -186,6 +235,98 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
            {"members_checked", res.membersChecked},
            {"bends_checked", res.bendsChecked},
            {"not_checked", res.notChecked}};
+    return true;
+  }
+
+  if (m == "export_cut_list" || m == "export_bend_schedule") {
+    // rpc-params: part
+    const Document& subject = SubjectPart(state, doc, p);
+    const std::string path = p.at("path").get<std::string>();
+    const std::vector<tube::MemberRow> rows = tube::Members(subject);
+    if (rows.empty()) {
+      throw std::runtime_error(
+          "this part has no bent-path tube members, so there is nothing to "
+          "cut or bend - a member is a Pipe swept along a Curve3D of kind "
+          "bent_path");
+    }
+    const std::string material =
+        subject.Tube() ? subject.Tube()->material : std::string{};
+    const std::string size =
+        subject.Tube() ? subject.Tube()->size : std::string{};
+
+    std::string csv;
+    json out_extra = json::object();
+    if (m == "export_cut_list") {
+      csv = "member,quantity,material,size,cut_length_mm,bends,bodies\n";
+      for (const tube::MemberRow& r : rows) {
+        csv += Field(r.name) + "," + std::to_string(r.quantity) + "," +
+               Field(material) + "," + Field(size) + "," + Num(r.cutLength) +
+               "," + std::to_string(r.bends.size()) + "," +
+               Field(Join(r.bodies)) + "\n";
+      }
+      if (p.contains("stock_length_mm")) {
+        const double stock = p.at("stock_length_mm").get<double>();
+        const double kerf = p.value("kerf_mm", 0.0);
+        std::vector<double> pieces;
+        for (const tube::MemberRow& r : rows) {
+          for (int i = 0; i < r.quantity; i++) {
+            if (r.cutLength > stock + 1e-9) {
+              throw std::runtime_error(
+                  "'" + r.name + "' is " + Num(r.cutLength) +
+                  " mm and the stock is " + Num(stock) +
+                  " mm - it cannot be cut from one length, and joining it is "
+                  "a decision this cannot make for you");
+            }
+            pieces.push_back(r.cutLength);
+          }
+        }
+        const std::vector<tube::Stick> sticks =
+            tube::PackIntoStock(pieces, stock, kerf);
+        csv += "\n";
+        csv += "stick,pieces,used_mm,offcut_mm\n";
+        int n = 0;
+        json sticksJson = json::array();
+        double offcut = 0.0;
+        for (const tube::Stick& s : sticks) {
+          csv += std::to_string(++n) + "," + std::to_string(s.pieces.size()) +
+                 "," + Num(s.used) + "," + Num(s.offcut) + "\n";
+          sticksJson.push_back({{"pieces", s.pieces},
+                                {"used_mm", s.used},
+                                {"offcut_mm", s.offcut}});
+          offcut += s.offcut;
+        }
+        out_extra["sticks"] = std::move(sticksJson);
+        out_extra["stock_length_mm"] = stock;
+        out_extra["offcut_mm"] = offcut;
+      }
+    } else {
+      csv = "member,bend,distance_mm,angle_deg,roll_deg,former_radius_mm\n";
+      for (const tube::MemberRow& r : rows) {
+        int n = 0;
+        for (const tube::Bend& b : r.bends) {
+          csv += Field(r.name) + "," + std::to_string(++n) + "," +
+                 Num(b.straightBefore) + "," + Num(b.angleDeg) + "," +
+                 Num(b.rollDeg) + "," + Num(b.radius) + "\n";
+        }
+      }
+    }
+
+    std::ofstream file(path, std::ios::binary);
+    if (!file)
+      throw std::runtime_error("cannot write '" + path + "'");
+    file << csv;
+    if (!file)
+      throw std::runtime_error("failed while writing '" + path + "'");
+    int members = 0, bends = 0;
+    for (const tube::MemberRow& r : rows) {
+      members += r.quantity;
+      bends += static_cast<int>(r.bends.size()) * r.quantity;
+    }
+    out = {{"path", path},
+           {"rows", static_cast<int>(rows.size())},
+           {"members", members},
+           {"bends", bends}};
+    out.update(out_extra);
     return true;
   }
 
