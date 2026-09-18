@@ -992,6 +992,58 @@ TEST_CASE("A second pick says where the joint ends", "[actions][parts]") {
   CHECK(fit.why.find("head's side") != std::string::npos);
 }
 
+TEST_CASE("A far end on several placements is refused, not taken as the first",
+          "[actions][parts]") {
+  // An element name is unique within a PART, so several placements answer to
+  // it — every part placed twice, and every part built the same way as
+  // another. The RIM has always refused that and named them; the second pick
+  // said it "resolved the same way" and took the first, which fitted a bolt
+  // on a grill's right-hand cart side to the hole in its LEFT one, 624 mm
+  // away, and only a disagreement about the axis gave it away
+  // (docs/grill-friction-plan.md).
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate front = MakePlate(state, "Front", 12.0, 6.6, -1.0, 0.0);
+  const DrilledPlate rear = MakePlate(state, "Rear", 12.0, 6.6, -1.0, 0.0);
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Two of them"));
+  const auto place = [&](const char* part, float z) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = glm::vec3(0.0f, 0.0f, z);
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t frontOcc = place("Front", 0.0f); // z 0..12
+  const uint64_t rearOcc = place("Rear", -12.0f); // z -12..0
+  place("Rear", -40.0f); // the same part again, further down the axis
+
+  ui::FastenerRequest req;
+  req.dryRun = true;
+  req.farEnd = ui::RimPick{0, rear.bottomRim}; // which Rear? which plate?
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{frontOcc, front.topRim}, req);
+  CHECK_FALSE(fit.ok);
+  INFO(fit.why);
+  // THREE, not two: Front is a different part that MakePlate built the same
+  // way, so it answers to the name as well — which is the half of this
+  // ambiguity that is easy to forget, and the reason the message lists them.
+  CHECK(fit.why.find("3 placements") != std::string::npos);
+  CHECK(fit.why.find("which occurrence") != std::string::npos);
+  CHECK(fit.why.find("occurrence 2") != std::string::npos);
+  CHECK(fit.why.find("occurrence 3") != std::string::npos);
+
+  // Said which, it is the ordinary two-plate joint it always was.
+  req.farEnd = ui::RimPick{rearOcc, rear.bottomRim};
+  fit = ui::FitFastenerToHole(state, ui::RimPick{frontOcc, front.topRim}, req);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  CHECK_THAT(fit.grip, WithinAbs(24.0, 1e-3));
+}
+
 TEST_CASE("A countersunk screw needs a countersunk hole", "[actions][parts]") {
   // F1 refused iso10642 outright: the rim you pick on a plain bore is the
   // bore's, so the head would end up inside solid material. Two things

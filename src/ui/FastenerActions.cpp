@@ -602,8 +602,15 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   // sizing the screw to its shadow.
   double truncate = 0.0; // 0 = span everything on the axis
   if (request.farEnd.element.IsSet()) {
-    const assembly::FlatInstance* on = nullptr;
-    std::optional<glm::vec3> local;
+    // Every placement that answers to this name, not the first of them. A
+    // name is unique within a PART, so both cart sides of a grill — mirror
+    // parts built by the same code, so the same feature ids and the same
+    // mapped names — carry it, and taking the first answered a bolt on the
+    // right-hand side with the left-hand side's hole, 624 mm away. The rim
+    // above has always refused that; this said it resolved "the same way"
+    // and did not.
+    std::vector<const assembly::FlatInstance*> carry;
+    std::vector<glm::vec3> where;
     for (const assembly::FlatInstance& inst : flat) {
       if (inst.part == nullptr || !inst.visible)
         continue;
@@ -612,11 +619,24 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
         continue;
       if (const std::optional<glm::vec3> c = Measure::CentreOf(
               inst.part->GetBodies(), request.farEnd.element)) {
-        on = &inst;
-        local = c;
-        break;
+        carry.push_back(&inst);
+        where.push_back(*c);
       }
     }
+    if (carry.size() > 1) {
+      std::string names;
+      for (const assembly::FlatInstance* inst : carry)
+        names += (names.empty() ? "" : ", ") + inst->path + " (occurrence " +
+                 std::to_string(inst->rootOccurrenceId) + ")";
+      return fail("that far end is on " + std::to_string(carry.size()) +
+                  " placements — " + names +
+                  ". Say which occurrence you mean: the second pick takes one "
+                  "the same way the rim does.");
+    }
+    const assembly::FlatInstance* on = carry.empty() ? nullptr : carry.front();
+    std::optional<glm::vec3> local;
+    if (!where.empty())
+      local = where.front();
     if (!local)
       return fail("the far end you picked is not on any visible part — pick "
                   "the rim the fastener should stop at");
