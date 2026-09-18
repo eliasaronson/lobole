@@ -1,0 +1,247 @@
+# What the grill's joints cost, and what to do about it
+
+Building `generators/grill/` to a real bill of materials — 35 parts, 43
+derived fasteners, one connected structure — took three passes. The third
+one, which designed the JOINTS rather than the placements, is where both the
+defects and the friction were: five app bugs (fixed, see
+`docs/grill-dogfood-plan.md`) and a build loop that costs **two minutes a
+turn** for a model whose geometry is a few dozen flanges and a hundred holes.
+
+Measured, on this machine, over a full build of the grill:
+
+| | |
+|---|---|
+| whole build, part tabs + assembly + fasteners | **117 s** |
+| of that, `NormalCut` — 30 calls, 2.87 s each | **86 s (73%)** |
+| `FlatPattern` — 16 calls | 9.8 s (8%) |
+| `fit_fastener` — 43 calls | 5.4 s |
+| `check_fasteners` + `contact_report`, once each | 8.0 s |
+| every other RPC — 855 calls, flanges and sketches and mates included | **7.9 s** |
+
+Reproduce with `python3 scratch/time_build.py` (the harness wraps
+`Designer.request` and aggregates by method and feature type) and
+`tools/profile.sh --app scratch/profile_firebox.py` for the C++ attribution.
+
+Six stages, in the order of what they cost.
+
+## 1. A hole should not unfold the part
+
+`sheet::NormalCut` is 33% of the app's CPU during a firebox build, and the
+profile says where it goes:
+
+```
+44.78%  sheet::UnfoldImpl                 <- the whole part, laid flat
+  └ 24.16% of it called from sheet::NormalCut
+13.06%    sheet::Fuse          (boolean per bend)
+11.95%    sheet::StripFor
+ 8.22%    sheet::Common
+ 9.13%  IntCurvesFace_Intersector::Intersector()   <- one per sample point
+ 5.35%  IntCurvesFace_Intersector::Perform
+ 3.52%  IntCurvesFace_ShapeIntersector::Load
+```
+
+Two costs, both paid for every hole, and neither needed by most of them:
+
+- **The outline is sampled every 0.25 mm and each sample gets its own ray
+  intersector.** `Hit()` constructs `IntCurvesFace_ShapeIntersector`, `Load`s
+  the WHOLE body into it, performs one ray, and throws the face tree away.
+  A Ø30 port is 377 samples; the firebox's five cuts are ~2,300 ray casts,
+  each rebuilding a tree over a thousand-face solid.
+- **The part is unfolded — completely — to answer "where does this outline
+  land?"**, and the unfold is itself a chain of booleans (Fuse, StripFor,
+  Common: 33% of the app between them). For the common case the answer is
+  thrown away three lines later: *"One panel, no bend: lay the cutter out in
+  the blank and move it straight back onto the panel. Nothing is unfolded at
+  all."* — except that it was, already, unconditionally.
+
+And both are paid **per REGION**: `NormalCutFeature::Execute` loops over the
+sketch's profiles and calls `sheet::NormalCut` once each, so the firebox's
+13 holes unfold the firebox 13 times.
+
+**The fix**, in three moves, smallest first:
+
+1. **One intersector per cut.** `Hit` takes a loaded
+   `IntCurvesFace_ShapeIntersector&` instead of a body; `NormalCut` loads it
+   once. Pure mechanics, no behaviour change.
+2. **The unfold becomes lazy.** The sample hits already name the FACE each
+   one lands on. If every hit is on the same planar face, the outline is on
+   one panel and crosses no bend — which is the question `pieces` and
+   `crossed` were unfolding to answer. Unfold only when the faces disagree,
+   which is exactly the across-a-bend case the machinery exists for.
+3. **The region loop shares the work.** `sheet::NormalCut` takes the profile
+   faces as a set (or a small context holding the intersector and the
+   lazily-built `Placement`), so a four-hole sketch pays at most once for
+   whichever of the two it turns out to need.
+
+Files: `src/core/sheet/Unfold.cpp` (`Hit`, `NormalCut`, a `CutContext`),
+`src/core/sheet/Unfold.h` (the entry point takes several profiles),
+`src/core/features/NormalCutFeature.cpp` (hand it every region).
+
+**Verified by**: the five existing `[normalcut]` cases unchanged — the exact
+circle, every hole its sketch holds, across a bend, the oblique landing, and
+the sheet its sketch looks at — plus a new one that cuts a twelve-hole sketch
+into a folded pan and asserts the body is identical (volume, face count,
+named cylinders) to cutting the same twelve one feature at a time. The number
+to beat is the firebox: **26 s today**, and the arithmetic says ~4 s once a
+plain hole stops unfolding anything.
+
+If `FlatPattern`'s 9.8 s still stands out afterwards, the same `Placement` is
+what it builds: caching one per (body shape, rules) serves both, and is a
+separate change with its own risk.
+
+## 2. A tapped hole should be ONE thing
+
+Today a tapped hole is three coordinated things, and two of them are
+invisible: the hole must be at the TAP DRILL diameter, carry a `Thread`
+feature, and that thread must set `allow_engagement`. Miss any one and the
+screw in it is a clash — 40 mm³ of steel and fastener in the same place, with
+`engaged_thread_pairs: 0` the only hint, and no refusal anywhere.
+
+`Hole` already accepts what the caller means: `fit: {thread: "M6", kind:
+"tapped"}`, which derives the 5.0 mm drill. It just does not stamp the thread
+region, so nothing downstream knows what the hole is FOR. Only
+`ThreadFeature` and `FastenerFeature` ever populate `Body::threadRegions`.
+
+**The fix.** A `Hole` whose fit kind is `tapped` records the internal thread
+itself — designation and pitch from the fit it was drilled for, engagement
+allowed, minimum engagement 0 — which is what `ThreadFeature` does, minus the
+second feature and the face pick. The explicit route stays for a thread on a
+face that no Hole cut.
+
+Files: `src/core/features/HoleFeature.{h,cpp}`, the `Hole` row in
+`SerializeFeatures.cpp`'s type table (documentation only — `fit` is already
+serialized), `docs/parts/plan.md`.
+
+**Verified by**: a block with an M6 tapped `Hole`, an ISO 7380 M6x12 fitted
+into it from the rim, and `interference` reporting **no clash** with
+`thread_engagement_volume > 0`; `check_fasteners` ok on the same pair; and
+the negative — the same hole with `kind: "normal"` still clashes, because a
+clearance hole is not a thread.
+
+## 3. A rim must resolve in the part it belongs to
+
+`fit_fastener`'s `rim` is `{feature_id, element}`, and a feature id is unique
+within a part, not across the project. Its own documentation says the
+occurrence is "needed only when the part is placed more than once". It is
+needed always: handed the right-hand cart side's hole without one, the app
+answered with the LEFT side's — the same feature id in a different part, 624
+mm away. It surfaced only because a second pick disagreed about the axis.
+
+**The fix.** Resolve the rim by finding the occurrences whose part owns that
+feature id AND resolves that element name. One candidate: use it. Several:
+refuse, naming them and asking for `occurrence` — the same shape as every
+other ambiguity refusal here. Then correct the `MethodDoc` row, which is
+currently wrong in a way that reads as permission.
+
+Files: `src/ui/FastenerActions.cpp` (the rim resolution), the `fit_fastener`
+row in `src/remote/RemoteAssembly.cpp`, `tests/test_actions.cpp`.
+
+**Verified by**: two parts that both carry a hole at the same feature id,
+placed once each; fitting without an occurrence is REFUSED naming both, and
+with one is correct. The grill is the regression: its 43 fasteners all pass
+the occurrence today, and the refusal must not fire on them.
+
+## 4. The joint a bolt is in has to survive re-derivation
+
+`check_fasteners` stores nothing — a placed fastener's rim and axis are its
+own position and orientation, which is the right design and is what lets it
+check a screw nobody derived. But `far_end` is not recorded, so a joint that
+legitimately ends before its axis does can only be re-derived when a NUT
+bounds it. A screw into a tapped boss with anything beyond it re-derives as a
+different, longer joint and reports a finding against a correct model: on the
+grill, "0 mm of thread in Lid handle" for two M6s that are fine.
+
+**The fix**, cheapest first: **a thread bounds a joint the way a nut does.**
+The model already knows — `Measure::ThreadSpans` reads the internal thread
+regions for the clash check — so a screw whose axis enters a thread of its
+own designation ends where that engagement ends. That covers every tapped
+joint without storing anything. Where a joint genuinely ends in open air with
+material beyond and no nut and no thread, nothing can re-derive it, and THAT
+is the case worth a recorded far end (a format bump) rather than the general
+one.
+
+Files: `src/core/parts/AxisStack.{h,cpp}` (`JointEnd` takes the threads it
+finds), `src/core/Measure.{h,cpp}` (`ThreadSpans` moves somewhere both can
+reach it), `src/ui/Bom.cpp`.
+
+**Verified by**: the grill with its tappings NOT artificially blind — the lid
+handle's bore open into the tube, where the finding came from — reporting no
+findings; plus a unit case with a boss bored right through into open air.
+
+## 5. Say what a bend IS
+
+There is no way to ask the app about a bend. `check_sheet_metal` returns
+counts, `get_sheet_metal_rules` returns the rules a part was built under, and
+the only per-bend data anywhere is the TEXT of a drawing note. The bend audit
+this round needed — every bend's radius against the material's minimum, its
+relief, its allowance — was assembled out of those three by hand.
+
+**The fix.** `list_bends` (or `bends` on `list_elements`): per bend, its id,
+angle, inside radius, the K and allowance used, its length, which way it
+folds for a given side, and the relief cut at each end with its style and
+size. `drawing::BendTableText` already computes most of this for the table;
+this is the same record, as data.
+
+Files: `src/remote/RemoteInspection.cpp` (+ its `MethodDoc` row),
+`src/core/sheet/Unfold.h` if the per-bend record needs widening,
+`tests/sheetmetal_smoke.py`.
+
+**Verified by**: `generators/grill/grill_shop.py`'s audit reading the RPC
+instead of three sources; a smoke assertion that the row count matches
+`check_sheet_metal`'s `bends_checked` and the drawing table's rows, so the
+three cannot drift.
+
+## 6. A face with no name is invisible, and says nothing
+
+`list_elements` walks `elementMap.names`, so a face the map never named does
+not appear — it cannot be threaded, picked, filleted or fitted, and the
+listing looks complete. That is how finding 15 presented: a bore drilled in
+one end of a pipe-and-plug body had no cylinder to thread, while the other
+end, same feature, same call, did.
+
+**The fix**, two parts. The naming defect itself needs a reproduction reduced
+from the handle (a `Pipe`, two `Extrude` unions, one `Extrude` cut) — and
+until it is understood, the listing must at least COUNT what it is not
+showing: `unnamed_faces: N` per body, so "nothing to thread here" is
+distinguishable from "no such face".
+
+Files: `src/remote/RemoteInspection.cpp` (the listing),
+`src/core/ElementMap.h` (the count), then wherever the reduction lands.
+
+**Verified by**: the reduced repro as a `[toponaming]` case asserting every
+cylinder of the cut is named; and the listing's count asserted on a body with
+a deliberately unnamed face.
+
+## 7. The small ones, as one wave
+
+Each is a papercut that cost this round minutes, not hours:
+
+- **A zero-depth overlap is touching, not a clash.** A heat tent resting on
+  its ledge is an edge on a face; the fuzzy boolean leaves 0.002 mm³ over
+  78 mm², and `contact_report` calls it a clash. Compare the overlap's DEPTH
+  (volume over contact area) against `touch_tol` before calling it one.
+- **`new_project` on a dirty document should refuse** unless `force: true`.
+  It silently discarded two and a half minutes of built model when a probe
+  script ran against the wrong instance.
+- **A flange's `length` is measured from the tangent line**, so it reaches
+  `length + radius` past the face its edge is on. Nothing in `feature_types`
+  says so; the control panel's lip landed 1.5 mm inside the firebox wall
+  until a calibration coupon explained it. It is a sentence in the row.
+- **`modify_feature` replaces the whole feature.** Landing the lid on the rim
+  — moving one sketch plane by a measured delta — is read, strip `id` and
+  `index`, mutate, send back. A patch form, or `set_sketch_plane`, makes
+  measure-then-correct a two-liner.
+- **Assembly placement is boilerplate.** Every generator rewrites
+  `add_occurrence` + `add_mate` + socket frames. One SDK call —
+  `place(part, on={occurrence, frame}, with=frame, type=...)`, returning both
+  ids — removes about forty lines per generator.
+- **The staleness convention test fires on any source file**, so editing an
+  unrelated subsystem in another window fails the suite with a message about
+  a stale binary. Compare against the files that link into the binary.
+
+## Order
+
+1 first: it is the loop every other change is tested through, and 73% of it
+is one feature doing work it then discards. Then 2, 3 and 4 — each removes a
+class of SILENT wrongness, which is worse than slow. Then 5 and 6, which are
+about being able to ask. Then 7 as one wave.
