@@ -348,6 +348,7 @@ set(core_sources
     src/core/features/ThreadFeature.cpp
     src/core/features/SweepFeature.cpp
     src/core/features/PipeFeature.cpp
+    src/core/features/CopeFeature.cpp
     src/core/features/HoleFeature.cpp
     src/core/features/DraftFeature.cpp
     src/core/features/DatumAxisFeature.cpp

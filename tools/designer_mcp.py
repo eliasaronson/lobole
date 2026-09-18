@@ -184,6 +184,15 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "name": str, "path_id": <sketch/Curve3D id>, "outer_diameter": num,
   "wall_thickness": num (0 = solid rod), "outer_diameter_expr"?/
   "wall_thickness_expr"?: str, "mode": "new_body"|"add"|"cut"}}
+- Cope (cut a frame member to fit what it MEETS, leaving those standing):
+  {{"type": "Cope", "name": str, "member_id": <the member's Pipe id>,
+  "against": [<feature ids it meets>], "gap"?: num (+"gap_expr", mm on the
+  radius, for the weld root; a tube neighbour only)}}. Each neighbour cuts
+  with its OUTER solid and SURVIVES — a Boolean consumes both operands, so
+  coping with one needs a throwaway copy of the neighbour per joint, and
+  every throwaway is a tube in the cut list nobody ordered. One Cope per
+  member handles all of its joints. A cope that removes nothing is REFUSED:
+  the two do not meet, so there is no joint there to cut
 - Rib (thicken an open sketch chain into a web up to the body):
   {{"type": "Rib", "name": str, "sketch_id": <open-profile sketch id>,
   "thickness": num, "thickness_expr"?: str, "flip"?: bool,

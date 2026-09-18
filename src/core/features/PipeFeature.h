@@ -15,6 +15,16 @@
 // SweepProfileAlongSpine — no duplicate sweep code. Modes reuse ApplyBodyMode.
 // Regeneration fails per-feature when the path is missing/unusable, the wall is
 // thicker than the radius, or OCC rejects the sweep.
+// The OUTER solid a tube occupies: `pathId` swept by a circle of
+// `outerDiameter` grown by `extra` on the radius, ignoring any wall. What a
+// COPE cuts with — the outside of the neighbour is what a member has to
+// clear, whether or not the neighbour is hollow, and subtracting a hollow
+// tube would leave the member filling its bore. Returns an invalid CADShape
+// with `error` (may be null) set when the path or the sweep will not build.
+[[nodiscard]] CADShape PipeOuterSolid(const RegenContext& ctx, uint64_t pathId,
+                                      double outerDiameter, double extra,
+                                      std::string* error);
+
 class PipeFeature : public Feature {
 public:
   PipeFeature(const std::string& name, uint64_t pathId, double outerDiameter,

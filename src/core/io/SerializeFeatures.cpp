@@ -5,6 +5,7 @@
 #include "core/Feature.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CopeFeature.h"
 #include "core/features/CornerReliefFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
@@ -1244,6 +1245,13 @@ json FeatureToJson(const Feature& feature) {
           j["angle_expr"] = pat->angleExpr;
       }
     }
+  } else if (auto* cope = dynamic_cast<const CopeFeature*>(&feature)) {
+    j["member_id"] = cope->memberId;
+    j["against"] = cope->against;
+    if (cope->gap > 0.0)
+      j["gap"] = cope->gap;
+    if (!cope->gapExpr.empty())
+      j["gap_expr"] = cope->gapExpr;
   } else {
     throw std::runtime_error("Unserializable feature type: " +
                              feature.TypeName());
@@ -1441,6 +1449,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},
+    {"Cope", 118,
+     "member_id (the member being cut), against: [feature ids it MEETS - each "
+     "cuts with its OUTER solid and SURVIVES, so a node is one cope per "
+     "member and not a throwaway copy per pair), gap (+_expr, mm on the "
+     "radius, for the weld root; a tube neighbour only)"},
     {"Pattern", 1,
      "kind: linear|circular, source_id (feature to repeat), count (+_expr), "
      "linear: base_plane/axis + spacing (+_expr); circular: axis + angle_deg "
@@ -2258,6 +2271,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         PlaneTypeFromString(j.value("neutral_plane", "xy")));
     dr->angleExpr = j.value("angle_expr", std::string{});
     out = std::move(dr);
+  } else if (type == "Cope") {
+    std::vector<uint64_t> against;
+    for (const auto& a : j.at("against"))
+      against.push_back(a.get<uint64_t>());
+    auto cope = std::make_unique<CopeFeature>(
+        name, j.at("member_id").get<uint64_t>(), std::move(against));
+    cope->gap = j.value("gap", 0.0);
+    cope->gapExpr = j.value("gap_expr", std::string{});
+    return cope;
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),

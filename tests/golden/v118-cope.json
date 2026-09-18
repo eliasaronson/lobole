@@ -1,0 +1,72 @@
+{
+  "format": "designer-document",
+  "version": 118,
+  "features": [
+    {
+      "id": 1,
+      "type": "Curve3D",
+      "kind": "bent_path",
+      "name": "Run CL",
+      "radius": 60.0,
+      "points": [
+        [
+          0.0,
+          -300.0,
+          0.0
+        ],
+        [
+          0.0,
+          300.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": 2,
+      "type": "Pipe",
+      "name": "Run",
+      "path_id": 1,
+      "mode": "new_body",
+      "outer_diameter": 25.4,
+      "wall_thickness": 2.4
+    },
+    {
+      "id": 3,
+      "type": "Curve3D",
+      "kind": "bent_path",
+      "name": "Brace CL",
+      "radius": 60.0,
+      "points": [
+        [
+          400.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": 4,
+      "type": "Pipe",
+      "name": "Brace",
+      "path_id": 3,
+      "mode": "new_body",
+      "outer_diameter": 19.05,
+      "wall_thickness": 1.65
+    },
+    {
+      "id": 5,
+      "type": "Cope",
+      "name": "Cope",
+      "member_id": 4,
+      "against": [
+        2
+      ],
+      "gap": 0.5
+    }
+  ]
+}
