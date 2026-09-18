@@ -69,6 +69,12 @@ enum class OpField : uint32_t {
   // and the RPC had their own copy of that list.
   FullWidth = 1u << 13,
   ClearsInside = 1u << 14,
+  // Surfacing (v118). Three names because they are three quantities: across,
+  // along, and down. A single "stepover" carrying all three is the defect
+  // every surveyed CAM shipped.
+  CutAngle = 1u << 15,
+  SampleStep = 1u << 16,
+  ZStep = 1u << 17,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {

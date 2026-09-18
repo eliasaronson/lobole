@@ -17,7 +17,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    117; // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
+    118; // v118: two finishing OpTypes, `surface_parallel` and
+         //      `surface_waterline`, whose Z varies continuously WITHIN a
+         //      pass -- and the three quantities they need, each named for
+         //      what it is: `cut_angle_deg` (the raster direction),
+         //      `sample_step_mm` (spacing ALONG a pass) and `z_step_mm` (the
+         //      Z between waterline laps, which is NOT a stepover). A build
+         //      without the types refuses the file by name, which is why it
+         //      is a bump (docs/cam/surfacing.md).
+         // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
          //      of a centreline and `radius` (+ _expr) the former it is
          //      bent round, swept line-arc-line. A build without the kind
          //      refuses the file by name, which is why it is a bump

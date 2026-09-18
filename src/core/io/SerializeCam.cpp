@@ -457,6 +457,13 @@ json CamSetupToJson(const cam::Setup& setup) {
       oj["stepover"] = op.stepover;
     if (op.edgeSize != 0.0)
       oj["edge_size"] = op.edgeSize;
+    // v118, surfacing. By value like everything else here.
+    if (op.cutAngleDeg != 0.0)
+      oj["cut_angle_deg"] = op.cutAngleDeg;
+    if (op.sampleStep != 0.0)
+      oj["sample_step_mm"] = op.sampleStep;
+    if (op.zStep != 0.0)
+      oj["z_step_mm"] = op.zStep;
     if (!op.enabled)
       oj["enabled"] = false;
     if (!op.targets.empty()) {
@@ -616,6 +623,9 @@ cam::Setup CamSetupFromJson(const json& j) {
     }
     op.stepover = oj.value("stepover", kDefaultStepover);
     op.edgeSize = oj.value("edge_size", 0.0);
+    op.cutAngleDeg = oj.value("cut_angle_deg", 0.0);
+    op.sampleStep = oj.value("sample_step_mm", 0.0);
+    op.zStep = oj.value("z_step_mm", 0.0);
     op.enabled = oj.value("enabled", true);
     for (const json& rj : oj.value("targets", json::array()))
       op.targets.push_back(TargetFromJson(rj));

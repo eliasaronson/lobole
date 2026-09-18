@@ -249,7 +249,13 @@ TEST_CASE("the RPC's op-type list matches the table", "[convention]") {
   REQUIRE(f.good());
   std::stringstream ss;
   ss << f.rdbuf();
-  const std::string src = ss.str();
+  std::string src = ss.str();
+
+  // Join adjacent string literals before searching. The row is one logical
+  // string that clang-format wraps across source lines, so a grep of the raw
+  // text would fail on the line break rather than on the content -- which is
+  // the gate crying wolf about its own formatting.
+  src = std::regex_replace(src, std::regex("\"[ \t\r\n]*\""), "");
 
   std::string expected;
   for (const cam::OpTypeRow& row : cam::OpTypes())

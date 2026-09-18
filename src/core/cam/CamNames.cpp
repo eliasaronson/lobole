@@ -48,6 +48,21 @@ constexpr OpTypeRow kRows[] = {
     {OpType::EdgeRound, "edge_round", true,
      OpField::Climb | OpField::Side | OpField::Stepover | OpField::EdgeSize |
          OpField::Finish},
+    // Finishing passes. Short rows, and the absences are the design: no
+    // stepdown (a finish pass is not a stack of levels -- pycam says this
+    // most clearly by simply not declaring the key), no side (there is no
+    // contour to be beside), no tabs, no corner relief, no lead arcs, no
+    // climb (a zigzag raster is half climb by definition), and no finish
+    // tool. Each is REFUSED by name rather than ignored.
+    //
+    // The raster steps ACROSS by a fraction of the cutter and samples ALONG
+    // in mm; the waterline steps DOWN in mm and has no stepover at all, which
+    // is the whole reason they are two types.
+    {OpType::SurfaceParallel, "surface_parallel", true,
+     OpField::StockToLeave | OpField::Stepover | OpField::SampleStep |
+         OpField::CutAngle},
+    {OpType::SurfaceWaterline, "surface_waterline", true,
+     OpField::StockToLeave | OpField::SampleStep | OpField::ZStep},
 };
 
 // A row per type, IN ENUM ORDER. Both halves matter: without the count a

@@ -541,4 +541,88 @@ TEST_CASE("waterline: what it refuses", "[cam][surface]") {
   CHECK_THAT(c.why, Catch::Matchers::ContainsSubstring("raster"));
 }
 
+TEST_CASE("surfacing closes the loop: generate, post, verify a dome",
+          "[cam][surface][slow]") {
+  // The check that matters, and the one the whole workstream is for: the
+  // toolpath goes out through the REAL post and comes back through the REAL
+  // verifier, which carves a height map with the tool's own profile. A bug in
+  // the drop cutter, the pattern, the linking or the post is invisible to
+  // anything that inspects a vector<Move>, and shows up here as a gouge.
+  //
+  // A sphere, because a curved surface is precisely what the 2.5D pipeline
+  // cannot finish -- and because a ball nose on a sphere is where a flat-tool
+  // CL surface would be wrong everywhere but the apex.
+  const double R = 18.0;
+  Body body;
+  body.name = "Dome";
+  body.shape = CADKernel::Instance().CreateSphere(glm::vec3(0.0f), R);
+  REQUIRE(body.shape.IsValid());
+  // Cut it in half so the dome sits on the bed rather than floating.
+  const CADShape below = CADKernel::Instance().CreateBox(
+      glm::vec3(-R - 1.0f, -R - 1.0f, -R - 1.0f),
+      glm::vec3(R + 1.0f, R + 1.0f, 0.0f));
+  REQUIRE(below.IsValid());
+  body.shape = body.shape.Difference(below);
+  REQUIRE(body.shape.IsValid());
+
+  std::vector<Body> bodies;
+  bodies.push_back(std::move(body));
+
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = R + 6.0;
+  setup.tools[0] = BallNose(6.0);
+  setup.tools[0].number = 1;
+  setup.tools[0].feedCut = 600.0;
+  setup.tools[0].feedPlunge = 200.0;
+  setup.tools[0].spindleRpm = 12000.0;
+  setup.stock.margin = {1.0, 1.0, 0.0};
+  setup.stock.bottomMargin = 0.0;
+
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::SurfaceParallel;
+  op.toolNumber = 1;
+  op.topZ = R;
+  op.bottomZ = 0.0;
+  op.stepover = 0.12;  // a fine finish: 0.72 mm across with a 6 mm ball
+  op.sampleStep = 0.4; // and the CL grid to match
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths = cam::GenerateAll(setup, bodies);
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  REQUIRE(paths[0].moves.size() > 100);
+
+  std::string gcode, error;
+  INFO(error);
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  REQUIRE(gcode.find("G1") != std::string::npos);
+
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, bodies, /*res=*/0.5);
+  INFO("gouge " << v.maxGouge << " at (" << v.gougeAt.x << ", " << v.gougeAt.y
+                << "), leftover " << v.maxLeftover << ", rapids through stock "
+                << v.rapidsThroughStock << ", outside travel "
+                << v.outsideTravel);
+  REQUIRE(v.cells > 0);
+
+  // THE assertion: a finishing pass does not cut into the designed surface.
+  // Zero, not merely within tolerance -- the drop cutter's whole job is that
+  // the tool never goes below the part, and this is the only check that sees
+  // the real posted file rather than a vector<Move>.
+  CHECK_THAT(v.maxGouge, WithinAbs(0.0, 1e-9));
+  CHECK(v.outsideTravel == 0);
+
+  // `rapidsThroughStock` is NOT asserted zero, and the reason is a fact about
+  // the JOB rather than about the toolpath. This job finishes raw stock: no
+  // roughing pass has run, so every column the cutter has not yet swept is
+  // still 18 mm of material. Retracting at the end of a pass lifts a 6 mm
+  // ball whose rim overhangs the neighbouring, uncut passes, and the verifier
+  // is right to say so. A real job roughs first -- the plan says as much, and
+  // Adaptive and Pocket already do it -- and the leftover figure below says
+  // the same thing from the other side.
+  INFO("leftover " << v.maxLeftover << " over " << v.leftoverArea << " mm2");
+  CHECK(v.maxLeftover > 1.0); // the bulk nobody roughed away
+}
+
 #endif // HAVE_CAM

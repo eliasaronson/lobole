@@ -141,6 +141,14 @@ constexpr MethodDoc kCamMethods[] = {
      "cutter wants in the material this setup cuts (a vendor's chart), given "
      "as a pair or not at all; without them the chip-load check falls back "
      "to a rule off the diameter, and every finding cites which it used. "
+     "surface_parallel and surface_waterline are FINISHING passes, whose Z "
+     "varies within a pass: they take no stepdown, no side, no tabs and no "
+     "climb, and setting one is refused. surface_parallel rasters at "
+     "cut_angle_deg (degrees anticlockwise from +X), stepping ACROSS by "
+     "stepover (a fraction of the cutter) and reading the surface ALONG by "
+     "sample_step_mm; surface_waterline laps at constant Z, stepping DOWN by "
+     "z_step_mm. Those are three different quantities and none of them is "
+     "the others. A zero sample_step_mm or z_step_mm derives from the cutter. "
      "flute_length is the cutter's USABLE DEPTH in mm (the fluted part, not "
      "the whole tool): an operation cutting deeper than that is cutting with "
      "the shank and driving the holder into the work, and the reach finding "
@@ -178,7 +186,8 @@ constexpr MethodDoc kCamMethods[] = {
      "stepover is the ONE exception and is NOT a length: it is a FRACTION of "
      "the tool diameter (0.05-0.9), so 0.45 steps over by 45% of the cutter. "
      "and feeds are mm/min on the TOOL, not here. {setup, type: "
-     "profile|pocket|face|drill|adaptive|edge_round, "
+     "profile|pocket|face|drill|adaptive|edge_round|surface_parallel|"
+     "surface_waterline, "
      "tool?, top_z?, bottom_z?, stepdown?, peck? (drill: retract between "
      "pecks of this depth; derived as the tool's diameter once a hole is "
      "deeper than three), corner_relief?: none|dogbone|tbone (profile and "
@@ -427,6 +436,9 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
       {"use_outline", cam::OpField::UseOutline},
       {"finish_tool", cam::OpField::Finish},
       {"finish_stock", cam::OpField::Finish},
+      {"cut_angle_deg", cam::OpField::CutAngle},
+      {"sample_step_mm", cam::OpField::SampleStep},
+      {"z_step_mm", cam::OpField::ZStep},
   };
   for (const auto& row : kOwned) {
     if (!p.contains(row.key) || cam::OpTypeHas(op.type, row.field))
@@ -501,6 +513,12 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     op.stepover = p.at("stepover").get<double>();
   if (p.contains("edge_size"))
     op.edgeSize = p.at("edge_size").get<double>();
+  if (p.contains("cut_angle_deg"))
+    op.cutAngleDeg = p.at("cut_angle_deg").get<double>();
+  if (p.contains("sample_step_mm"))
+    op.sampleStep = p.at("sample_step_mm").get<double>();
+  if (p.contains("z_step_mm"))
+    op.zStep = p.at("z_step_mm").get<double>();
   if (p.contains("enabled"))
     op.enabled = p.at("enabled").get<bool>();
   if (p.contains("tabs")) {
@@ -589,6 +607,12 @@ json OpJson(const cam::Operation& op) {
     j["finish_tool"] = op.finishTool;
     j["finish_stock"] = op.finishStock;
   }
+  if (has(cam::OpField::CutAngle))
+    j["cut_angle_deg"] = op.cutAngleDeg;
+  if (has(cam::OpField::SampleStep))
+    j["sample_step_mm"] = op.sampleStep;
+  if (has(cam::OpField::ZStep))
+    j["z_step_mm"] = op.zStep;
   if (has(cam::OpField::CornerRelief))
     j["corner_relief"] = op.cornerRelief == cam::CornerRelief::Dogbone
                              ? "dogbone"

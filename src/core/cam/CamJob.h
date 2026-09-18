@@ -165,6 +165,17 @@ enum class OpType {
   // roundover with a ball nose. The tool decides which; a flat mill is
   // refused rather than run as a square step nobody asked for.
   EdgeRound,
+  // Finishing passes (docs/cam/surfacing.md). Neither is a stack of levels:
+  // the Z varies continuously WITHIN a pass, which is what the 2.5D pipeline
+  // cannot express and why these are two more types rather than a flag on an
+  // existing one.
+  //
+  // Two and not one, because they answer opposite questions -- a raster is
+  // good on shallow surfaces and poor on steep ones, a waterline the reverse
+  // -- and because a single op cannot honestly carry both an XY fraction and
+  // a Z step under one name.
+  SurfaceParallel,
+  SurfaceWaterline,
   // Not a type: the sentinel every table is asserted against. Without it a
   // value appended here with no row in CamNames.cpp saved as "profile" and
   // reloaded as a full-depth contour round the part -- the silent
@@ -281,6 +292,29 @@ struct Operation {
   // for a ball, the horizontal width of the bevel for a V-bit. 0 = derive it
   // from the tool and the wall (defaults rule).
   double edgeSize = 0.0;
+
+  // --- surfacing (v118) ---------------------------------------------------
+  //
+  // Three quantities that a single "stepover" would have to carry, and the
+  // reason each has its own name. `stepover` above is the spacing ACROSS a
+  // raster's passes, as a fraction of tool diameter, which it already was.
+  // These two are millimetres and say so, because the surveyed tools all
+  // spell several different things "step over" -- FreeCAD has three ops whose
+  // StepOver means a percentage, a percentage that is NOT the waterline Z
+  // step, and a distance per revolution.
+
+  // SurfaceParallel only: the raster direction, degrees anticlockwise from
+  // +X. Zero runs the passes along X.
+  double cutAngleDeg = 0.0;
+  // Both surfacing types: spacing ALONG a pass, where the cutter-location
+  // surface is read, in mm. 0 = derive it from the CL grid, which is the
+  // finest answer that surface can give.
+  double sampleStep = 0.0;
+  // SurfaceWaterline only: the Z between laps, in mm. NOT a stepover: an XY
+  // fraction of tool diameter cannot express how far apart constant-Z laps
+  // sit, which is the conflation this field exists to avoid. 0 = derive it
+  // from the tool and the cusp.
+  double zStep = 0.0;
 
   bool enabled = true;
 };
