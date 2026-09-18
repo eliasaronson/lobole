@@ -1044,6 +1044,78 @@ TEST_CASE("A far end on several placements is refused, not taken as the first",
   CHECK_THAT(fit.grip, WithinAbs(24.0, 1e-3));
 }
 
+TEST_CASE("A thread ends a joint the way a nut does",
+          "[actions][parts][thread]") {
+  // A screw into a tapped BOSS has no nut to end its joint, and its bore runs
+  // out into open air rather than stopping on a floor. Re-derived from the
+  // rim — which is all check_fasteners has — the stack carried on down the
+  // axis into whatever was behind it, and two correct screws in a grill's lid
+  // handle were reported as having "0 mm of thread" in a part they do not
+  // touch (docs/grill-friction-plan.md). The threads were in the model the
+  // whole time; nothing read them.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate cover = MakePlate(state, "Cover", 3.0, 6.6, -1.0, 0.0);
+  {
+    const size_t tab = ui::AddPart(state, "Boss");
+    ui::SetActivePart(state, tab);
+    Document& doc = *state.document;
+    doc.AddFeature(std::make_unique<BoxFeature>(
+        "Boss", glm::vec3(-20.0f, -20.0f, 0.0f), 40.0, 40.0, 12.0));
+    auto centre = std::make_unique<SketchFeature>(
+        "Centre", SketchPlane(glm::vec3(0, 0, 12), glm::vec3(0, 0, 1),
+                              glm::vec3(1, 0, 0)));
+    centre->AddEntity(sketch::Point{{0, 0}, 1});
+    doc.AddFeature(std::move(centre));
+    auto hole = std::make_unique<HoleFeature>(
+        "Tapping", doc.GetFeature(doc.FeatureCount() - 1)->GetId(),
+        HoleKind::Simple, 5.0, 12.0);
+    hole->through = true; // tapped right through, into open air below
+    hole->fitThread = "M6";
+    hole->fitKind = "tapped";
+    doc.AddFeature(std::move(hole));
+    doc.Regenerate();
+    REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+    REQUIRE(doc.GetBodies()[0].threadRegions.size() == 1);
+  }
+  MakePlate(state, "Far", 10.0, 6.6, -1.0, 0.0);
+
+  ui::SetActivePart(state, ui::AddAssembly(state, "Boss rig"));
+  const auto place = [&](const char* part, float z) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = glm::vec3(0.0f, 0.0f, z);
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t coverOcc = place("Cover", 0.0f); // z 0..3
+  place("Boss", -12.0f);                          // z -12..0, tapped through
+  place("Far", -40.0f);                           // z -40..-30, not in it
+
+  ui::FastenerRequest req;
+  ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{coverOcc, cover.topRim}, req);
+  INFO(fit.why << " / " << fit.summary);
+  REQUIRE(fit.ok);
+  CHECK(fit.blind); // held by the thread, not by anything beyond it
+  CHECK_THAT(fit.grip, WithinAbs(15.0, 1e-3)); // the cover and the tapping
+  // The joint is the cover and the boss; what the axis carries on into is
+  // NAMED but not counted, as it is for a second pick.
+  const std::string listed = fit.summary.substr(0, fit.summary.find(';'));
+  CHECK(listed.find("Far") == std::string::npos);
+  CHECK(fit.summary.find("carries on into Far") != std::string::npos);
+
+  // And the check, which stores nothing and re-derives all of it, agrees.
+  const ui::FastenerReport report = ui::CheckFasteners(state);
+  for (const ui::FastenerCheck& finding : report.findings)
+    INFO(finding.part << ": " << finding.why);
+  CHECK(report.examined == 1);
+  CHECK(report.findings.empty());
+}
+
 TEST_CASE("A countersunk screw needs a countersunk hole", "[actions][parts]") {
   // F1 refused iso10642 outright: the rim you pick on a plain bore is the
   // bore's, so the head would end up inside solid material. Two things

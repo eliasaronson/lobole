@@ -424,6 +424,12 @@ def lid_handle(d):
     # with no NAME on its cylindrical face (see the findings), and a face
     # with no name cannot be threaded, picked or fitted: the screw then sat
     # in an unthreaded hole and read as a clash.
+    # A plug with a BLIND tapping, capped at the top. Bored right through it
+    # is the same part to a shop and the joint reads correctly either way
+    # (a thread ends a joint the way a nut does) — but on THIS body, and not
+    # on a straight swept tube or an extruded one, an exact boolean between
+    # the open bore and the screw in it comes back as the whole screw rather
+    # than the annulus around it, 305 mm3 against 93. See the findings.
     for i, sx in enumerate(S.sides()):
         bore = S.HANDLE_PLUG - 2.0
         plug = extrude(d, f"Plug {i + 1}", plane_at_z(0.0),
@@ -432,10 +438,6 @@ def lid_handle(d):
                         circle((sx * half, 0.0), S.TAP[S.HANDLE_BOLT] / 2.0)],
                        bore)
         body = boolean(d, f"With plug {i + 1}", body, plug)
-        # And a cap over it, so the tapping is BLIND: with the bore open into
-        # the tube the screw's axis runs on up the inside of the handle, and
-        # a check that re-derives the joint from the rim finds its far end in
-        # the tube's far wall rather than in the thread.
         cap = extrude(d, f"Plug cap {i + 1}", plane_at_z(bore),
                       [circle((sx * half, 0.0),
                               S.HANDLE_D / 2.0 - S.HANDLE_WALL)], 2.0)

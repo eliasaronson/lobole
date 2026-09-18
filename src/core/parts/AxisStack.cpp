@@ -1,6 +1,7 @@
 #include "core/parts/AxisStack.h"
 
 #include "cad/CADKernel.h"
+#include "core/Measure.h"
 
 #include <BRepClass3d_SolidClassifier.hxx>
 
@@ -199,8 +200,44 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
   return out;
 }
 
+double ThreadEndAlong(const std::vector<PlacedBody>& placed,
+                      const glm::dvec3& origin, const glm::dvec3& dir,
+                      const std::string& designation) {
+  const double len = glm::length(dir);
+  if (len < 1e-12)
+    return 0.0;
+  const glm::dvec3 axis = dir / len;
+  double first = 0.0;
+  for (const PlacedBody& p : placed) {
+    if (p.body == nullptr)
+      continue;
+    for (const Measure::ThreadSpan& span :
+         Measure::ThreadSpansOf(*p.body, p.world)) {
+      if (span.external || span.spec.designation != designation)
+        continue;
+      // Coaxial with this screw, and on its line: a thread beside the axis
+      // is a different hole in the same part.
+      if (std::abs(std::abs(glm::dot(span.axis, axis)) - 1.0) > 1e-6)
+        continue;
+      const glm::dvec3 delta = span.start - origin;
+      const double at = glm::dot(delta, axis);
+      if (glm::length(delta - at * axis) > 1e-3)
+        continue;
+      const double other =
+          at + (glm::dot(span.axis, axis) > 0 ? span.length : -span.length);
+      const double end = std::max(at, other);
+      if (end <= 1e-6)
+        continue; // behind the head
+      if (first <= 0.0 || end < first)
+        first = end;
+    }
+  }
+  return first;
+}
+
 JointExtent JointEnd(const std::vector<StackSegment>& stack,
-                     const std::vector<StackSegment>& onAxis, double truncate) {
+                     const std::vector<StackSegment>& onAxis, double truncate,
+                     double threadEnd) {
   JointExtent e;
   // Anything on the axis stops the screw there, whatever the plates beside it
   // do. `onAxis` is already in ray order, so its first hit is the near one.
@@ -210,6 +247,14 @@ JointExtent JointEnd(const std::vector<StackSegment>& stack,
   } else {
     for (const StackSegment& seg : stack)
       e.end = std::max(e.end, seg.exit);
+  }
+  // A THREAD ends the joint the way a nut does, and leaves it blind: what
+  // holds a screw in a tapped hole is the thread, not something it reaches
+  // through to. Applied before the caller's own bound, which may still be
+  // nearer (a nut on a stud through a threaded boss).
+  if (threadEnd > 0.0 && (!e.blind || threadEnd < e.end)) {
+    e.end = e.blind ? std::min(e.end, threadEnd) : threadEnd;
+    e.blind = true;
   }
   // A caller's own bound never reaches PAST where the axis stops: a far-end
   // pick or a nut says where the joint ends, and if the axis ended sooner

@@ -664,8 +664,13 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
   const std::vector<parts::StackSegment> onAxis = parts::TraverseAxis(
       placed, glm::dvec3(centre), glm::dvec3(-axis), 0.0, reach);
   // Where the joint ends, from the same helper `check_fasteners` uses, so the
-  // two cannot drift apart (docs/agent-scale-followup-plan.md, W1).
-  const parts::JointExtent extent = parts::JointEnd(stack, onAxis, truncate);
+  // two cannot drift apart (docs/agent-scale-followup-plan.md, W1) — thread
+  // bound included, or the two would disagree about a tapped boss the moment
+  // the check re-derived it.
+  const double threadEnds = parts::ThreadEndAlong(placed, glm::dvec3(centre),
+                                                  glm::dvec3(-axis), fit.size);
+  const parts::JointExtent extent =
+      parts::JointEnd(stack, onAxis, truncate, threadEnds);
   fit.blind = extent.blind;
   // The summary is bounded by the JOINT, not by the far-end pick alone: in a
   // blind hole the screw reaches the floor, so listing the block's full
@@ -792,10 +797,16 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     // air-cooled barrel's head bolts stop in a blind hole 30 mm down, and
     // their axis carries on 158 mm further into a crank web that the bolt
     // does not touch and was told not to (generators/aircooled_engine.py).
+    // A far-end pick says where the joint ends — and so does the THREAD the
+    // screw engages, for the same reason: what the axis meets past either is
+    // not part of this joint. Without the second, a screw into a tapped boss
+    // bored right through was refused for not reaching whatever stood behind
+    // it, which it is not meant to reach and has a thread instead.
     const parts::StackSegment* jointEnd = &stack.back();
-    if (truncate > 0.0)
+    const double bound = truncate > 0.0 ? truncate : threadEnds;
+    if (bound > 0.0)
       for (const parts::StackSegment& seg : stack)
-        if (seg.enter < truncate - 1e-6)
+        if (seg.enter < bound - 1e-6)
           jointEnd = &seg;
     if (blocking->partId != jointEnd->partId)
       return fail("the axis runs into " + blocking->part + " " + Mm(into) +

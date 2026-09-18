@@ -437,15 +437,9 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
 // Resolve against the CURRENT shape (including any occurrence transforms), so
 // copied/transformed bodies never carry stale world-space interface
 // coordinates.
-struct ThreadSpan {
-  threads::Standard spec;
-  glm::dvec3 start, axis;
-  double length, minimum;
-  bool external;
-};
-static std::vector<ThreadSpan> ThreadSpans(const Body& body,
-                                           const TopLoc_Location& loc) {
-  std::vector<ThreadSpan> out;
+static std::vector<Measure::ThreadSpan>
+ThreadSpans(const Body& body, const TopLoc_Location& loc) {
+  std::vector<Measure::ThreadSpan> out;
   for (const auto& region : body.threadRegions) {
     const auto spec = threads::Lookup(region.designation);
     const auto index = body.elementMap.Resolve(region.face.name);
@@ -478,10 +472,9 @@ static std::vector<ThreadSpan> ThreadSpans(const Body& body,
   return out;
 }
 
-static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
-                                           const std::vector<ThreadSpan>& a,
-                                           const std::vector<ThreadSpan>& b,
-                                           size_t& engaged) {
+static TopoDS_Shape RemoveThreadEngagement(
+    TopoDS_Shape overlap, const std::vector<Measure::ThreadSpan>& a,
+    const std::vector<Measure::ThreadSpan>& b, size_t& engaged) {
   for (const auto& x : a)
     for (const auto& y : b) {
       if (x.external == y.external || x.spec.majorDia != y.spec.majorDia ||
@@ -492,8 +485,8 @@ static TopoDS_Shape RemoveThreadEngagement(TopoDS_Shape overlap,
       // argument order: a quad's camera-cage screw in its spacer came back
       // clean as (screw, spacer) and 6.8 mm3 of clash as (spacer, screw) —
       // the same two solids, and the sweep picks the order.
-      const ThreadSpan& ext = x.external ? x : y;
-      const ThreadSpan& in = x.external ? y : x;
+      const Measure::ThreadSpan& ext = x.external ? x : y;
+      const Measure::ThreadSpan& in = x.external ? y : x;
       const double dot = glm::dot(ext.axis, in.axis);
       if (std::abs(std::abs(dot) - 1) > 1e-7)
         continue;
@@ -612,7 +605,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
       TopoDS_Shape shape;
       const CADShape* source = nullptr; // for the mesh cache, keyed on it
       Bnd_Box box;
-      std::vector<ThreadSpan> threads;
+      std::vector<Measure::ThreadSpan> threads;
     };
     const auto place = [](const std::vector<Body>& bodies,
                           const TopLoc_Location& loc) {
@@ -2060,6 +2053,11 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
                                                  : "OpenCASCADE failure");
     return std::nullopt;
   }
+}
+
+std::vector<ThreadSpan> ThreadSpansOf(const Body& body,
+                                      const glm::mat4& world) {
+  return ThreadSpans(body, TopLoc_Location(ToTrsf(world)));
 }
 
 } // namespace Measure

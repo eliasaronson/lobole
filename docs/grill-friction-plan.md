@@ -270,6 +270,27 @@ arithmetic that passes today, now against a path whose length is known
 rather than sampled); a bend below the minimum radius REFUSED by name; and
 the handle's bbox matching its true extent.
 
+### Found while building stage 4
+
+**An exact boolean can lose a bore.** A Ø6 pin standing in the Ø5 bore of the
+lid handle's plug reports an overlap of 305.4 mm3 — the WHOLE pin — where the
+truth is the annulus around it, 93.3. The handle's solid is valid
+(`BRepCheck_Analyzer`), its volume is right to 3 mm3 in 52,190, its faces are
+named and its bore measures Ø5 exactly. Reduced: an extruded tube with a ring
+plug and a pin answers 93.3; a straight `Pipe` swept along a `Curve3D` with
+the same plug and pin answers 93.3; only this body — the bent handle, two
+plugs, a union each — answers 305.4. It is the class of failure the bicycle
+round hit from the other side (an invalid body making `interference` report
+17 cm3 of cog inside a frame that does not reach it), except that here every
+check says the body is sound.
+
+It matters beyond one handle: `interference` and `contact_report` are the
+gates this whole round is verified by, and a boolean that silently swallows a
+void turns a correct model into a clash report nobody can act on. Next step
+is a reduction that runs headlessly — the shape is in `scratch/grill.dsgn`
+and the pin is fifteen lines — and then either a fix or a refusal, because a
+measurement that cannot be trusted has to say so.
+
 ## 8. The small ones, as one wave
 
 Each is a papercut that cost this round minutes, not hours:

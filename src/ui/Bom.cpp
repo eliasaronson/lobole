@@ -301,8 +301,15 @@ FastenerReport CheckFasteners(AppState& state) {
       else
         break;
     }
+    // A thread ends a joint the way a nut does — and a screw into a tapped
+    // BOSS has no nut to end it, so without this the re-derivation ran on
+    // down the axis and reported "0 mm of thread" in whatever it found
+    // there. The threads are in the model; nothing was reading them.
+    const double threadEnds = parts::ThreadEndAlong(
+        others, glm::dvec3(origin), glm::dvec3(axis), screw->size);
     // The SAME answer fit_fastener derived from, from the same helper.
-    const parts::JointExtent extent = parts::JointEnd(stack, onAxis, nutEnds);
+    const parts::JointExtent extent =
+        parts::JointEnd(stack, onAxis, nutEnds, threadEnds);
     const double grip = extent.end;
 
     // A nut BURIED IN A PART, which is the other way a joint comes apart and

@@ -93,13 +93,28 @@ TraverseAxis(const std::vector<PlacedBody>& placed, const glm::dvec3& origin,
 // only what actually STOPS a screw — a blind hole's floor, or a plate whose
 // hole does not line up. `truncate` is a caller's own bound (a far-end pick,
 // or the far face of the joint's own nut), or 0 for none.
+// `threadEnd` is where the THREAD a screw of this size engages comes to an
+// end, or 0 for none: a screw in a tapped hole is held by that thread, and
+// what the axis meets past it belongs to somebody else. Without it a tapped
+// BOSS — a bore that runs out into open air with the far wall of the part
+// beyond it — re-derived as a much longer joint ending in that wall, and a
+// correct screw was reported as having no thread in a part it does not touch
+// (docs/grill-friction-plan.md).
 struct JointExtent {
   double end = 0.0;   // how far down the axis the joint reaches, in mm
   bool blind = false; // it stopped ON material, not in daylight
 };
 [[nodiscard]] JointExtent JointEnd(const std::vector<StackSegment>& stack,
                                    const std::vector<StackSegment>& onAxis,
-                                   double truncate);
+                                   double truncate, double threadEnd = 0.0);
+
+// Where the first thread of `designation` on this axis ENDS, measured from
+// `origin` along `dir`, or 0 when the axis enters none. Internal threads
+// only: an external one is the screw's own.
+[[nodiscard]] double ThreadEndAlong(const std::vector<PlacedBody>& placed,
+                                    const glm::dvec3& origin,
+                                    const glm::dvec3& dir,
+                                    const std::string& designation);
 
 // The segment a distance down the axis lands in, or null when it falls in a
 // gap between two of them (which is a real answer: something solid sits on

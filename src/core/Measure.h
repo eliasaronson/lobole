@@ -3,6 +3,7 @@
 #include "core/ElementMap.h"
 #include "core/Feature.h"
 #include "core/MeshCollide.h"
+#include "core/ThreadStandards.h"
 #include "core/Units.h"
 
 #include <optional>
@@ -13,6 +14,21 @@
 // Measurement over stable element names (inspection I1, faces/edges v1):
 // resolve ElementRefs against the bodies' element maps, then ask OCC.
 namespace Measure {
+
+// One threaded span of a body, placed: what the clearance check relieves an
+// engagement against, and what tells a fastener's joint where it ENDS when
+// no nut does (a screw in a tapped boss is held by the thread, and the axis
+// beyond the thread is somebody else's material).
+struct ThreadSpan {
+  threads::Standard spec;
+  glm::dvec3 start, axis;
+  double length = 0.0, minimum = 0.0;
+  bool external = false;
+};
+
+// Every thread `body` carries, in world coordinates.
+[[nodiscard]] std::vector<ThreadSpan> ThreadSpansOf(const Body& body,
+                                                    const glm::mat4& world);
 
 struct Element {
   std::string kind;    // "face" | "edge"
