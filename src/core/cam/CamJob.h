@@ -165,6 +165,13 @@ enum class OpType {
   // roundover with a ball nose. The tool decides which; a flat mill is
   // refused rather than run as a square step nobody asked for.
   EdgeRound,
+  // Not a type: the sentinel every table is asserted against. Without it a
+  // value appended here with no row in CamNames.cpp saved as "profile" and
+  // reloaded as a full-depth contour round the part -- the silent
+  // substitution that file exists to abolish, in the one direction it did not
+  // cover. Switches carry an explicit `case Count:` that refuses, so a new
+  // type cannot quietly inherit someone else's branch either.
+  Count,
 };
 
 // Which side of a contour the tool runs on. For a pocket this is implicit

@@ -6,6 +6,7 @@
 #include "core/Feature.h"
 #include "core/Units.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
 #include "core/features/CurveFeature.h"
 #include "core/io/Serialization.h"
@@ -82,12 +83,10 @@ void AssertCamShapes(const std::vector<cam::Setup>& setups,
     std::vector<std::string> got;
     for (const cam::Setup& setup : setups)
       for (const cam::Operation& op : setup.operations)
-        got.push_back(op.type == cam::OpType::EdgeRound  ? "edge_round"
-                      : op.type == cam::OpType::Pocket   ? "pocket"
-                      : op.type == cam::OpType::Face     ? "face"
-                      : op.type == cam::OpType::Drill    ? "drill"
-                      : op.type == cam::OpType::Adaptive ? "adaptive"
-                                                         : "profile");
+        // Through the table, not a ternary chain ending in "profile" -- that
+        // chain would have censused an unhandled type AS a profile and passed,
+        // which is a test telling the reader the opposite of the truth.
+        got.push_back(cam::OpTypeNameOrThrow(op.type));
     REQUIRE(got.size() == want.size());
     for (size_t i = 0; i < got.size(); i++) {
       INFO("operation " << i);
@@ -680,6 +679,28 @@ TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
         bodies = part->GetBodies();
       }
 
+      // The op FIELDS as loaded, so the round trip below can fail when the
+      // writer drops one. `stepover` was written only for three op types and
+      // adaptive was not among them, so a 0.25 engagement reloaded at 0.45 --
+      // in a golden that carries a 0.25, checked by a gate that only ever
+      // compared op type names.
+      const auto fields = [](const cam::JobDocument& j) {
+        std::vector<double> v;
+        for (const cam::Setup& setup : j.GetSetups())
+          for (const cam::Operation& op : setup.operations) {
+            v.insert(v.end(),
+                     {op.topZ, op.bottomZ, op.stepdown, op.stockToLeave,
+                      op.stepover, op.edgeSize, op.peck, op.drilledBores,
+                      op.finishStock, static_cast<double>(op.finishTool),
+                      static_cast<double>(op.tabCount), op.tabWidth,
+                      op.tabHeight, static_cast<double>(op.climb),
+                      static_cast<double>(op.useOutline),
+                      static_cast<double>(op.leadArcs)});
+          }
+        return v;
+      };
+      const std::vector<double> before = fields(**job);
+
       auto check = [&](const cam::JobDocument& j) {
         AssertCamSides(j.GetSetups(), expect);
         AssertCamTopFace(j.GetSetups(), expect);
@@ -698,6 +719,12 @@ TEST_CASE("Job golden corpus loads and round-trips", "[golden][cam]") {
       auto reloaded = DocumentIO::LoadJob(tmp.string());
       REQUIRE(reloaded.has_value());
       check(**reloaded);
+      const std::vector<double> after = fields(**reloaded);
+      REQUIRE(after.size() == before.size());
+      for (size_t i = 0; i < before.size(); i++) {
+        INFO("golden " << golden.filename().string() << ", op field " << i);
+        CHECK_THAT(after[i], Catch::Matchers::WithinAbs(before[i], 1e-9));
+      }
       fs::remove(tmp);
     }
   }

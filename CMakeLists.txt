@@ -522,6 +522,23 @@ else()
     message(STATUS "libvterm not found - terminal panel disabled")
 endif()
 
+# -Werror=switch, for src/core/cam/ ONLY.
+#
+# The CAM dispatches are deliberately `default:`-less switches on OpType, so
+# -Wswitch names a type nobody wrote a case for. -Werror is off tree-wide
+# (see the comment above -Wall), which made that guarantee notional: the
+# warning went into a build log while `DeriveOperation` fell through and
+# returned a DEFAULT Operation -- top 0, bottom -1, no target -- reporting
+# ok. That shipped once for Adaptive and tests/test_cam.cpp is named after it.
+#
+# Scoped to this directory rather than raised tree-wide: it is where an enum
+# with a row-per-value table is dispatched on, and it is about to grow two
+# more values.
+set(cam_sources ${core_sources})
+list(FILTER cam_sources INCLUDE REGEX "src/core/cam/")
+set_source_files_properties(${cam_sources} PROPERTIES COMPILE_OPTIONS
+                            "-Werror=switch")
+
 add_library(designer_core STATIC ${core_sources})
 target_compile_definitions(designer_core PUBLIC
     DESIGNER_VERSION="${PROJECT_VERSION}"

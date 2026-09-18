@@ -174,7 +174,9 @@ constexpr MethodDoc kCamMethods[] = {
     {"remove_cam_setup", "Delete a setup {id} and its operations.", "id, job"},
     {"add_cam_op",
      "Add an operation. Every length here is MILLIMETRES — top_z, bottom_z, "
-     "stepdown, stepover, peck, finish_stock, stock_to_leave and edge_size — "
+     "stepdown, peck, finish_stock, stock_to_leave and edge_size — "
+     "stepover is the ONE exception and is NOT a length: it is a FRACTION of "
+     "the tool diameter (0.05-0.9), so 0.45 steps over by 45% of the cutter. "
      "and feeds are mm/min on the TOOL, not here. {setup, type: "
      "profile|pocket|face|drill|adaptive|edge_round, "
      "tool?, top_z?, bottom_z?, stepdown?, peck? (drill: retract between "
@@ -221,7 +223,8 @@ constexpr MethodDoc kCamMethods[] = {
      "type, use_outline"},
     {"set_cam_op",
      "Change an operation {id, …the add_cam_op fields, whose lengths — "
-     "stepdown, stepover, edge_size and the rest — are MILLIMETRES}. `tool` "
+     "stepdown, edge_size and the rest — are MILLIMETRES, while stepover is a "
+     "FRACTION of the tool diameter}. `tool` "
      "re-points it "
      "at another cutter: a stepdown still at the old tool's derived value "
      "follows the new one (every derived number is a fraction of the "
@@ -243,7 +246,8 @@ constexpr MethodDoc kCamMethods[] = {
      "What {setup, type, tool?, target?: {feature_id, element}} would produce "
      "WITHOUT adding it: the derived operation, or why that pick cannot make "
      "one. The dry run behind add_cam_op's derivation, and its lengths are "
-     "the same MILLIMETRES — stepdown, stepover, edge_size and the rest.",
+     "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
+     "is the same FRACTION of the tool diameter.",
      "bottom_z, climb, corner_relief, edge_size, enabled, finish_stock, "
      "finish_tool, lead_arcs, name, peck, setup, side, stepdown, stepover, "
      "job, drilled_bores, stock_to_leave, tabs, target, targets, tool, top_z, "
@@ -344,7 +348,7 @@ cam::ToolType ToolTypeFrom(const std::string& s) {
                            cam::ToolTypeNameList());
 }
 
-const char* TypeName(cam::OpType t) { return cam::OpTypeName(t); }
+const char* TypeName(cam::OpType t) { return cam::OpTypeNameOrThrow(t); }
 
 cam::OpType TypeFrom(const std::string& s) {
   cam::OpType t{};
@@ -535,21 +539,27 @@ json OpJson(const cam::Operation& op) {
             {"stock_to_leave", op.stockToLeave},
             {"use_outline", op.useOutline},
             {"enabled", op.enabled}};
-  if (op.type == cam::OpType::EdgeRound) {
+  // What this TYPE uses, from the one table (CamNames.h). These were three
+  // hand-kept lists that disagreed with the panel's and the serializer's:
+  // `stepover` was reported for edge_round ALONE, so a pocket's stepover was
+  // settable over the RPC and unreadable, and a script could not check what
+  // it had just written.
+  if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize))
     j["edge_size"] = op.edgeSize;
+  if (cam::OpTypeHas(op.type, cam::OpField::Stepover))
     j["stepover"] = op.stepover;
-  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Peck))
+    j["peck"] = op.peck;
   // Side is reported for the clearing types too. It was profile-only, so a
   // pocket built over the RPC kept the struct's Outside default INVISIBLY —
   // and adaptive, the one strategy that reads it, then cleared outside a
   // boundary with nothing beyond it and produced silence.
-  if (op.type != cam::OpType::Face && op.type != cam::OpType::Drill) {
+  if (cam::OpTypeHas(op.type, cam::OpField::Side))
     j["side"] = cam::SideName(op.side);
-    if (op.tabCount > 0)
-      j["tabs"] = {{"count", op.tabCount},
-                   {"width", op.tabWidth},
-                   {"height", op.tabHeight}};
-  }
+  if (cam::OpTypeHas(op.type, cam::OpField::Tabs) && op.tabCount > 0)
+    j["tabs"] = {{"count", op.tabCount},
+                 {"width", op.tabWidth},
+                 {"height", op.tabHeight}};
   if (!op.targets.empty()) {
     j["targets"] = json::array();
     for (const cam::Target& t : op.targets) {

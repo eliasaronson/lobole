@@ -2,6 +2,7 @@
 
 #include "core/cam/CamJob.h" // cam::OpType
 
+#include <cstdint>
 #include <span>
 #include <string>
 
@@ -19,11 +20,51 @@
 // (docs/architecture-review-2026-09-06.md, section 7).
 //
 // The generator itself stays a switch in CamStrategies.cpp on purpose: it has
-// no `default:`, so -Wswitch already fails the build when a new type has no
-// generator. A table would trade that compile-time guarantee for a runtime
-// one. What belongs here is everything the compiler CANNOT check -- the
-// names, and the predicate that pairs with the generator.
+// no `default:`, so -Wswitch fails the build when a new type has no
+// generator. That guarantee was notional until src/core/cam/ got
+// `-Werror=switch` (CMakeLists.txt): -Werror is off tree-wide, so the warning
+// went into a build log while `DeriveOperation` fell through and returned a
+// DEFAULT Operation -- top 0, bottom -1, no target -- reporting success. A
+// table would trade that compile-time guarantee for a runtime one. What
+// belongs here is everything the compiler CANNOT check -- the names, the
+// predicate that pairs with the generator, and which fields a type uses.
 namespace cam {
+
+// Which of `Operation`'s fields a type actually uses.
+//
+// `Operation` is ONE struct for every op type and carries no discriminant, so
+// "does a drill have tabs?" was answered independently wherever it came up --
+// and the answers disagreed. `stepover` alone had four: the panel showed it
+// for four types, the serializer wrote it for three, `OpJson` reported it for
+// ONE, and the deriver set it for all six, so a pocket's stepover was
+// settable and unreadable. This is that question, answered once.
+//
+// It describes what each generator READS, traced through the helpers. Where
+// a type stores and shows a field it never reads, the row says so rather than
+// dropping it: narrowing is a behaviour change and belongs with the refusals
+// it enables. What DOES change is the panel, which showed tabs on a drill and
+// a stepdown on an edge round because those widgets were unconditional.
+enum class OpField : uint32_t {
+  None = 0,
+  Stepdown = 1u << 0,
+  StockToLeave = 1u << 1,
+  Stepover = 1u << 2,
+  Side = 1u << 3,
+  Climb = 1u << 4,
+  Tabs = 1u << 5,
+  CornerRelief = 1u << 6,
+  LeadArcs = 1u << 7,
+  DrilledBores = 1u << 8,
+  Peck = 1u << 9,
+  EdgeSize = 1u << 10,
+  UseOutline = 1u << 11,
+  Finish = 1u << 12,
+};
+
+constexpr OpField operator|(OpField a, OpField b) {
+  return static_cast<OpField>(static_cast<uint32_t>(a) |
+                              static_cast<uint32_t>(b));
+}
 
 struct OpTypeRow {
   OpType type;
@@ -33,13 +74,21 @@ struct OpTypeRow {
   // One toolpath per target (a profile follows one wall at a time), or one
   // toolpath for all of them at once (a drill visits every hole).
   bool followsOneTargetAtATime;
+  // The fields above that this type reads.
+  OpField fields;
 };
 
 std::span<const OpTypeRow> OpTypes();
 
-// The name for a type. Falls back to "profile" for an out-of-range enum,
-// which is what both former copies did.
+// The name for a type, or NULLPTR for a value with no row. It used to fall
+// back to "profile", which is how a type whose row was forgotten would have
+// SAVED as a profile and reloaded as one. A caller that cannot handle null
+// should not be asking; `OpTypeNameOrThrow` is for the ones that must have a
+// string and would rather fail loudly than write a plausible wrong one.
 const char* OpTypeName(OpType t);
+// The same, refusing rather than returning null. Every serializer and every
+// RPC response goes through this.
+const char* OpTypeNameOrThrow(OpType t);
 
 // The type for a name, or false if it is not one we know. Callers REFUSE on
 // false, naming what is accepted -- they do not substitute a default. A job
@@ -50,7 +99,13 @@ bool TryOpTypeFromName(const std::string& s, OpType& out);
 // "profile, pocket, face, drill, adaptive, edge_round" -- for those refusals.
 std::string OpTypeNameList();
 
+// Refuses (throws) for a value with no row rather than answering `false`,
+// which silently made a new type behave like a drill.
 bool FollowsOneTargetAtATime(OpType t);
+
+// Does this op type use that field? The one answer the panel, `OpJson`,
+// `ApplyOpFields` and the feeds checks all read.
+bool OpTypeHas(OpType t, OpField f);
 
 // The tool's shape. Refusing here is what RemoteCam's own table already said
 // it was for -- "a name we do not know is refused, never silently read as the

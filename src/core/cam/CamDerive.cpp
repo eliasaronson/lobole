@@ -412,6 +412,13 @@ DerivedOp DeriveOperation(const Setup& setup,
       op.peck = drill->diameter;
     break;
   }
+  case OpType::Count:
+    // Not a type. This switch used to have no case for an unhandled value at
+    // all, so it fell through to `ok = true` with a DEFAULT Operation -- top
+    // 0, bottom -1, no target -- which is a job that looks derived and cuts
+    // nothing. Refusing here means a real new type breaks the build first.
+    out.why = "not an operation type";
+    return out;
   }
 
   out.op = op;

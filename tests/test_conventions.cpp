@@ -29,6 +29,8 @@
 // ones can do — provided it is NAMED into the family, which is the one way
 // FromSlug escaped. A new string-to-enum parser goes in as `*FromString`.
 
+#include "core/cam/CamNames.h"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstring>
@@ -232,6 +234,28 @@ TEST_CASE("no bare degree/radian conversion outside core/Angles.h",
             return s;
           }());
   CHECK(offenders.empty());
+}
+
+TEST_CASE("the RPC's op-type list matches the table", "[convention]") {
+  // `add_cam_op`'s row spells the op types out for the agent reading it --
+  // "profile|pocket|face|drill|adaptive|edge_round" -- because a row that
+  // says "one of the types below" helps nobody. A MethodDoc row is a compile
+  // -time literal, so it cannot call OpTypeNameList(); this is what keeps the
+  // two from drifting. Adding a type without touching the row leaves the
+  // agent-facing documentation quietly wrong about what it may ask for.
+  const fs::path path =
+      fs::path(DESIGNER_SOURCE_DIR) / "src/remote/RemoteCam.cpp";
+  std::ifstream f(path);
+  REQUIRE(f.good());
+  std::stringstream ss;
+  ss << f.rdbuf();
+  const std::string src = ss.str();
+
+  std::string expected;
+  for (const cam::OpTypeRow& row : cam::OpTypes())
+    expected += (expected.empty() ? "" : "|") + std::string(row.name);
+  INFO("expected the row to spell: " << expected);
+  CHECK(src.find(expected) != std::string::npos);
 }
 
 TEST_CASE("the adaptive key covers every field the pass reads",

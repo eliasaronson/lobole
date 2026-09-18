@@ -1093,6 +1093,11 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
   case OpType::EdgeRound:
     GenerateEdgeRound(setup, op, tool, bodies, tp);
     break;
+  case OpType::Count:
+    // Not a type. Named so the switch stays exhaustive and a REAL new type
+    // still breaks the build rather than landing here.
+    tp.error = "not an operation type";
+    break;
   }
 }
 

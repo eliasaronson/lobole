@@ -114,6 +114,11 @@ cam::Target TargetFromJson(const json& j) {
 
 namespace {
 
+// ONE default, read by the writer and the loader. Two copies of a literal is
+// how a field comes to be written when it equals the writer's idea of the
+// default and reloaded as the loader's.
+constexpr double kDefaultStepover = 0.45;
+
 std::string PostIdList() {
   std::string out;
   for (const std::string& id : cam::PostIds())
@@ -397,7 +402,7 @@ json CamSetupToJson(const cam::Setup& setup) {
   for (const cam::Operation& op : setup.operations) {
     json oj = {{"id", op.id},
                {"name", op.name},
-               {"type", cam::OpTypeName(op.type)},
+               {"type", cam::OpTypeNameOrThrow(op.type)},
                {"tool", op.toolNumber},
                {"top_z", op.topZ},
                {"bottom_z", op.bottomZ}};
@@ -413,7 +418,11 @@ json CamSetupToJson(const cam::Setup& setup) {
     // own boundary, where there is nothing, and produced no toolpath at all.
     // A job that worked before the save did not work after it
     // (docs/cam/dogfood-round.md).
-    if (op.type != cam::OpType::Face && op.type != cam::OpType::Drill)
+    // By VALUE, like everything else here, not by type. Writing a field only
+    // when its owner's type is on a list is how `stepover` below came to be
+    // dropped for adaptive ops, and the list had already been wrong once for
+    // `side` itself.
+    if (op.side != cam::Side::Outside)
       oj["side"] = cam::SideName(op.side);
     if (!op.climb)
       oj["climb"] = false;
@@ -437,10 +446,16 @@ json CamSetupToJson(const cam::Setup& setup) {
                     {"width", op.tabWidth},
                     {"height", op.tabHeight}};
     }
-    if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Face ||
-        op.type == cam::OpType::EdgeRound)
+    // ADAPTIVE was not on the old list and reads this field
+    // (CamAdaptive.cpp, `engine.stepOverFactor`), so an adaptive op set to
+    // 0.25 engagement saved without the key and reloaded at the 0.45 default
+    // -- the one number adaptive clearing exists to hold constant, changed by
+    // a round trip. tests/golden/job/v73-cam-clearing-side.json carries a
+    // 0.25 and nothing noticed, because the golden check compared op type
+    // NAMES and not numbers.
+    if (op.stepover != kDefaultStepover)
       oj["stepover"] = op.stepover;
-    if (op.type == cam::OpType::EdgeRound)
+    if (op.edgeSize != 0.0)
       oj["edge_size"] = op.edgeSize;
     if (!op.enabled)
       oj["enabled"] = false;
@@ -600,7 +615,7 @@ cam::Setup CamSetupFromJson(const json& j) {
       op.tabWidth = oj["tabs"].value("width", 6.0);
       op.tabHeight = oj["tabs"].value("height", 1.5);
     }
-    op.stepover = oj.value("stepover", 0.45);
+    op.stepover = oj.value("stepover", kDefaultStepover);
     op.edgeSize = oj.value("edge_size", 0.0);
     op.enabled = oj.value("enabled", true);
     for (const json& rj : oj.value("targets", json::array()))

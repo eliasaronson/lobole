@@ -10,6 +10,7 @@
 #include "common/Logger.h"
 #include "core/Document.h"
 #include "core/cam/CamMachine.h"
+#include "core/cam/CamNames.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
@@ -1268,16 +1269,22 @@ void DrawCamPanel(AppState& state) {
         touched(op.id);
       }
       ImGui::SetItemTooltip("Bottom of the cut (Z)");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(55.0f);
-      float step = static_cast<float>(op.stepdown);
-      if (ExprDragFloat(state, "###stepdown", &step, 0.25f, 0.0f, 100.0f,
-                        "%.2f")) {
-        op.stepdown = step;
-        touched(op.id);
+      // Per-type from the ONE table (CamNames.h), not a predicate written
+      // here. These guards disagreed with the serializer's and the RPC's, and
+      // the unconditional ones offered a stepdown on an edge round and tabs
+      // on a drill -- controls that moved a number nothing would read.
+      if (cam::OpTypeHas(op.type, cam::OpField::Stepdown)) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(55.0f);
+        float step = static_cast<float>(op.stepdown);
+        if (ExprDragFloat(state, "###stepdown", &step, 0.25f, 0.0f, 100.0f,
+                          "%.2f")) {
+          op.stepdown = step;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
       }
-      ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
-      if (op.type == cam::OpType::Profile || op.type == cam::OpType::Pocket) {
+      if (cam::OpTypeHas(op.type, cam::OpField::CornerRelief)) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(90.0f);
         const char* reliefLabel =
@@ -1302,7 +1309,7 @@ void DrawCamPanel(AppState& state) {
                               "tool's radius -- for a joint that takes a "
                               "square tenon.");
       }
-      if (op.type == cam::OpType::Profile || op.type == cam::OpType::Pocket) {
+      if (cam::OpTypeHas(op.type, cam::OpField::Finish)) {
         // Rough then finish (R6): a second tool takes the wall in one pass.
         ImGui::SameLine();
         ImGui::SetNextItemWidth(90.0f);
@@ -1349,7 +1356,7 @@ void DrawCamPanel(AppState& state) {
           ImGui::SetItemTooltip("What the rough leaves for the finish (mm)");
         }
       }
-      if (op.type == cam::OpType::Profile) {
+      if (cam::OpTypeHas(op.type, cam::OpField::LeadArcs)) {
         ImGui::SameLine();
         if (ImGui::Checkbox("Lead arcs###cam_leads", &op.leadArcs))
           touched(op.id);
@@ -1357,7 +1364,7 @@ void DrawCamPanel(AppState& state) {
                               "radius instead of stopping against it and "
                               "lifting -- the stop is the dwell mark.");
       }
-      if (op.type == cam::OpType::Drill) {
+      if (cam::OpTypeHas(op.type, cam::OpField::Peck)) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(55.0f);
         float peck = static_cast<float>(op.peck);
@@ -1369,7 +1376,7 @@ void DrawCamPanel(AppState& state) {
         ImGui::SetItemTooltip("Retract fully between pecks of this depth so "
                               "the chips clear (0 = one plunge)");
       }
-      if (op.type == cam::OpType::EdgeRound) {
+      if (cam::OpTypeHas(op.type, cam::OpField::EdgeSize)) {
         ImGui::SetNextItemWidth(70.0f);
         float size = static_cast<float>(op.edgeSize);
         if (ExprDragFloat(state, "Break###edgesize", &size, 0.1f, 0.0f, 100.0f,
@@ -1381,9 +1388,7 @@ void DrawCamPanel(AppState& state) {
                               "bevel (V-bit), mm. 0 = the biggest this tool "
                               "can make within the wall.");
       }
-      if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Face ||
-          op.type == cam::OpType::Adaptive ||
-          op.type == cam::OpType::EdgeRound) {
+      if (cam::OpTypeHas(op.type, cam::OpField::Stepover)) {
         ImGui::SetNextItemWidth(70.0f);
         float over = static_cast<float>(op.stepover);
         if (ExprDragFloat(state, "Stepover###stepover", &over, 0.01f, 0.05f,
@@ -1401,22 +1406,23 @@ void DrawCamPanel(AppState& state) {
       // the difference between a flange a driver seats flat on and a stack of
       // stepdown terraces. The engine has had it since C1; only a script
       // could reach it.
-      float leave = static_cast<float>(op.stockToLeave);
-      ImGui::SetNextItemWidth(58.0f);
-      if (ExprDragFloat(state, "Leave###leave", &leave, 0.05f, 0.0f, 10.0f,
-                        "%.2f")) {
-        op.stockToLeave = leave;
-        touched(op.id);
+      if (cam::OpTypeHas(op.type, cam::OpField::StockToLeave)) {
+        float leave = static_cast<float>(op.stockToLeave);
+        ImGui::SetNextItemWidth(58.0f);
+        if (ExprDragFloat(state, "Leave###leave", &leave, 0.05f, 0.0f, 10.0f,
+                          "%.2f")) {
+          op.stockToLeave = leave;
+          touched(op.id);
+        }
+        ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
+                              "with 0.2-0.4, then a second operation at 0 "
+                              "finishes the wall in one full-depth pass.");
       }
-      ImGui::SetItemTooltip("Material this pass leaves behind, in mm. Rough "
-                            "with 0.2-0.4, then a second operation at 0 "
-                            "finishes the wall in one full-depth pass.");
       // A hole in the floor is not an island: nothing stands in it, so the
       // cutter should pass over rather than detour around — and a detour
       // around a hole that nearly touches the pocket wall leaves an uncut
       // sliver too narrow for the tool to come back to.
-      if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Adaptive ||
-          op.type == cam::OpType::Face) {
+      if (cam::OpTypeHas(op.type, cam::OpField::UseOutline)) {
         if (ImGui::Checkbox("Over openings###useoutline", &op.useOutline))
           touched(op.id);
         ImGui::SetItemTooltip(
@@ -1424,18 +1430,24 @@ void DrawCamPanel(AppState& state) {
             "instead of going around each one. Turn it off when something "
             "really does stand in the pocket.");
       }
-      ImGui::SameLine();
-      if (ImGui::Checkbox("Climb###climb", &op.climb))
-        touched(op.id);
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(55.0f);
-      int tabs = op.tabCount;
-      if (ExprDragInt(state, "Tabs###tabs", &tabs, 0.2f, 0, 32)) {
-        op.tabCount = tabs;
-        touched(op.id);
+      if (cam::OpTypeHas(op.type, cam::OpField::Climb)) {
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Climb###climb", &op.climb))
+          touched(op.id);
       }
-      ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
-                            "pass (profile only)");
+      if (cam::OpTypeHas(op.type, cam::OpField::Tabs)) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(55.0f);
+        int tabs = op.tabCount;
+        if (ExprDragInt(state, "Tabs###tabs", &tabs, 0.2f, 0, 32)) {
+          op.tabCount = tabs;
+          touched(op.id);
+        }
+        // No longer "(profile only)" in words on an op that is not one: the
+        // control is simply not there.
+        ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
+                              "pass");
+      }
       if (!op.targets.empty())
         ImGui::TextDisabled("boundary: %s", op.targets[0].ref.name.c_str());
       ImGui::TreePop();

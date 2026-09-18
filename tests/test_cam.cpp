@@ -1910,8 +1910,76 @@ TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
   REQUIRE(setups.size() == 1);
   REQUIRE(setups[0].operations.size() == 1);
   CHECK(setups[0].operations[0].type == cam::OpType::Adaptive);
+  // The NUMBERS, not just the type. `stepover` was written only for
+  // pocket/face/edge_round, and adaptive -- which reads it as
+  // `engine.stepOverFactor` -- was not on that list, so 0.25 came back as the
+  // 0.45 loader default: the engagement fraction adaptive clearing exists to
+  // hold constant, changed by a save. This test passed throughout, because it
+  // checked the type and the machine and nothing else.
+  CHECK_THAT(setups[0].operations[0].stepover, WithinAbs(0.25, 1e-12));
+  CHECK_THAT(setups[0].operations[0].topZ, WithinAbs(10.0, 1e-12));
+  CHECK_THAT(setups[0].operations[0].bottomZ, WithinAbs(4.0, 1e-12));
   CHECK(setups[0]
             .machine.fitArcs); // v60, defaulting on for a document without it
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("cam: every op field survives a save and reload", "[cam]") {
+  // The general form of the bug above. A field written only when its owner's
+  // TYPE is on a list is silently dropped for every type somebody forgot, and
+  // the only thing that catches it is comparing the numbers back.
+  cam::JobDocument job;
+  cam::Setup& s = job.AddSetup("Job");
+  cam::Operation op;
+  op.id = job.AllocateId();
+  op.name = "Everything";
+  op.type = cam::OpType::Profile;
+  op.topZ = 12.0;
+  op.bottomZ = -0.5;
+  op.stepdown = 1.5;
+  op.stockToLeave = 0.3;
+  op.stepover = 0.31;
+  op.side = cam::Side::Inside;
+  op.climb = false;
+  op.tabCount = 3;
+  op.tabWidth = 7.5;
+  op.tabHeight = 2.25;
+  op.cornerRelief = cam::CornerRelief::Dogbone;
+  op.leadArcs = true;
+  op.drilledBores = 3.2;
+  op.peck = 1.1;
+  op.edgeSize = 0.8;
+  op.useOutline = true;
+  op.finishTool = 2;
+  op.finishStock = 0.2;
+  s.operations.push_back(op);
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_all_fields_roundtrip.json";
+  REQUIRE(DocumentIO::SaveJob(job, path.string()).has_value());
+  auto back = DocumentIO::LoadJob(path.string());
+  REQUIRE(back.has_value());
+  REQUIRE((*back)->GetSetups().size() == 1);
+  REQUIRE((*back)->GetSetups()[0].operations.size() == 1);
+  const cam::Operation& r = (*back)->GetSetups()[0].operations[0];
+  CHECK_THAT(r.topZ, WithinAbs(12.0, 1e-12));
+  CHECK_THAT(r.bottomZ, WithinAbs(-0.5, 1e-12));
+  CHECK_THAT(r.stepdown, WithinAbs(1.5, 1e-12));
+  CHECK_THAT(r.stockToLeave, WithinAbs(0.3, 1e-12));
+  CHECK_THAT(r.stepover, WithinAbs(0.31, 1e-12));
+  CHECK(r.side == cam::Side::Inside);
+  CHECK(r.climb == false);
+  CHECK(r.tabCount == 3);
+  CHECK_THAT(r.tabWidth, WithinAbs(7.5, 1e-12));
+  CHECK_THAT(r.tabHeight, WithinAbs(2.25, 1e-12));
+  CHECK(r.cornerRelief == cam::CornerRelief::Dogbone);
+  CHECK(r.leadArcs);
+  CHECK_THAT(r.drilledBores, WithinAbs(3.2, 1e-12));
+  CHECK_THAT(r.peck, WithinAbs(1.1, 1e-12));
+  CHECK_THAT(r.edgeSize, WithinAbs(0.8, 1e-12));
+  CHECK(r.useOutline);
+  CHECK(r.finishTool == 2);
+  CHECK_THAT(r.finishStock, WithinAbs(0.2, 1e-12));
   std::filesystem::remove(path);
 }
 
