@@ -168,6 +168,7 @@ HANDLE_D = 20.0
 HANDLE_WALL = 1.5
 HANDLE_SPAN = 400.0
 HANDLE_RISE = 90.0
+HANDLE_BEND_R = 45.0                     # the former the tube is bent round
 HANDLE_PLUG = 12.0                       # a welded plug, tapped, in each end
 HANDLE_Y = -(HOOD_TOP_Y / 2.0 - 40.0)    # near the lid's front edge
 

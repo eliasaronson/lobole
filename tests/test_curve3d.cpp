@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <memory>
+#include <numbers>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -146,4 +147,79 @@ TEST_CASE("Curve3D round-trips through JSON", "[curve3d]") {
   CHECK(cv2->closed);
   CHECK(cv2->points[1] == glm::vec3(1, 1, 1));
   delete cv2;
+}
+
+TEST_CASE("A bent path is straights and arcs, exactly", "[curve3d][bent]") {
+  // What a tube bender is programmed with: the corners, and the former the
+  // tube is bent round. A fitted spline through sampled arc points is none
+  // of that — it bows between the points on the straights, its radius is an
+  // approximation nothing can read back, and it took twenty-nine generated
+  // points to say what four and a radius say here
+  // (docs/grill-friction-plan.md).
+  Document doc;
+  auto cv = std::make_unique<CurveFeature>("Handle", Curve3DKind::BentPath);
+  cv->points = {{-200, 0, 0}, {-200, 0, 90}, {200, 0, 90}, {200, 0, 0}};
+  cv->radius = 45.0;
+  CurveFeature* c = AddCurve(doc, std::move(cv));
+  REQUIRE(doc.Regenerate());
+  INFO(c->GetError());
+  REQUIRE(c->GetError().empty());
+
+  // Two legs less what each corner eats, two quarter turns, and the span:
+  // the length is arithmetic, not a sampling.
+  const double want = 2 * (90.0 - 45.0) + 2 * (std::numbers::pi / 2 * 45.0) +
+                      (400.0 - 2 * 45.0);
+  CHECK_THAT(c->Length(), WithinRel(want, 1e-9));
+  CHECK_THAT(PolylineLength(c->Polyline()), WithinRel(want, 1e-3));
+
+  // And the bends are a SCHEDULE: each corner's turn, its former, and the
+  // free straight before it.
+  REQUIRE(c->Bends().size() == 2);
+  for (const CurveFeature::Bend& b : c->Bends()) {
+    CHECK_THAT(b.angleDeg, WithinAbs(90.0, 1e-9));
+    CHECK_THAT(b.radius, WithinAbs(45.0, 1e-12));
+    CHECK_THAT(b.rollDeg, WithinAbs(0.0, 1e-9)); // one plane: a flat handle
+  }
+  CHECK_THAT(c->Bends()[0].straightBefore, WithinAbs(45.0, 1e-9));
+  CHECK_THAT(c->Bends()[1].straightBefore, WithinAbs(400.0 - 2 * 45.0, 1e-9));
+}
+
+TEST_CASE("A former too big for the straight is refused by name",
+          "[curve3d][bent]") {
+  Document doc;
+  auto cv = std::make_unique<CurveFeature>("Tight", Curve3DKind::BentPath);
+  cv->points = {{0, 0, 0}, {0, 0, 20}, {100, 0, 20}, {100, 0, 0}};
+  cv->radius = 45.0; // each corner eats 45 of a 20 mm leg
+  CurveFeature* c = AddCurve(doc, std::move(cv));
+  doc.Regenerate();
+  INFO(c->GetError());
+  CHECK_FALSE(c->GetError().empty());
+  CHECK(c->GetError().find("20 mm") != std::string::npos);
+  CHECK(c->GetError().find("tighter former") != std::string::npos);
+
+  // A path that doubles back on itself is not a bend either — and just
+  // short of doubling back is refused by the straight it would need, which
+  // is the same answer said in the units the caller can act on.
+  auto back = std::make_unique<CurveFeature>("Back", Curve3DKind::BentPath);
+  back->points = {{0, 0, 0}, {100, 0, 0}, {0, 0, 0}};
+  back->radius = 5.0;
+  CurveFeature* b = AddCurve(doc, std::move(back));
+  doc.Regenerate();
+  CHECK(b->GetError().find("doubles back") != std::string::npos);
+}
+
+TEST_CASE("A bent path round-trips through JSON", "[curve3d][bent]") {
+  auto cv = std::make_unique<CurveFeature>("Bent", Curve3DKind::BentPath);
+  cv->points = {{0, 0, 0}, {0, 0, 50}, {80, 0, 50}};
+  cv->radius = 12.0;
+  cv->radiusExpr = "former";
+
+  const nlohmann::json j = DocumentIO::FeatureToJson(*cv);
+  auto back = DocumentIO::FeatureFromJson(j);
+  auto* read = dynamic_cast<CurveFeature*>(back.get());
+  REQUIRE(read != nullptr);
+  CHECK(read->kind == Curve3DKind::BentPath);
+  CHECK(read->points.size() == 3);
+  CHECK_THAT(read->radius, WithinAbs(12.0, 1e-12));
+  CHECK(read->radiusExpr == "former");
 }

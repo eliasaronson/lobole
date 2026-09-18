@@ -13,6 +13,12 @@ enum class Curve3DKind {
   FitSpline,   // interpolate through `points` (OCC GeomAPI_Interpolate)
   Helix,       // procedural helix on an axis
   ControlPoly, // B-spline with `points` as control poles (clamped, uniform)
+  // A bent TUBE's centreline: straights between `points`, each corner turned
+  // on a former of `radius`. Exactly what a bender is programmed with, and
+  // exactly line-arc-line — where a fitted spline through sampled arc points
+  // is neither, has no radius anything can read back, and bows between the
+  // points on the straights (docs/grill-friction-plan.md).
+  BentPath,
 };
 
 // A free 3D curve as its own history feature — the first Designer geometry that
@@ -60,6 +66,18 @@ public:
   int degree = 3;      // ControlPoly effective degree (clamped to points-1)
   bool closed = false; // FitSpline periodic (ControlPoly ignores in v1)
 
+  // BentPath: one bend record per corner, filled by Execute — the schedule a
+  // shop bends from, and what a check reads. Transient, like the polyline.
+  struct Bend {
+    glm::vec3 corner{0.0f};
+    double angleDeg = 0.0;       // how far the tube turns at this corner
+    double radius = 0.0;         // the former's radius (the centreline's)
+    double straightBefore = 0.0; // free length before it, mm
+    double rollDeg = 0.0;        // rotation about the tube from the last bend
+  };
+  [[nodiscard]] const std::vector<Bend>& Bends() const { return m_bends; }
+  [[nodiscard]] double Length() const { return m_length; }
+
   // Helix parameters (axis frame + geometry).
   glm::vec3 axisOrigin{0.0f};
   glm::vec3 axisDir{0.0f, 0.0f, 1.0f};
@@ -72,4 +90,6 @@ public:
 private:
   std::vector<glm::vec3> m_polyline;
   CADShape m_edgeShape;
+  std::vector<Bend> m_bends;
+  double m_length = 0.0;
 };

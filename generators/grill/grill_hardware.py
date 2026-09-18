@@ -378,10 +378,11 @@ def regulator(d):
 def lid_handle(d):
     """A handle bent from one tube: two legs, two bends and a span.
 
-    Swept along its own centreline — a Curve3D through the bends, then a
-    Pipe — which is what the part IS: a length of tube through a bender. Two
-    cylinders unioned at a sharp corner is a picture of something nobody can
-    make, and it shows: the corner has a seam and no radius.
+    Its centreline is a BENT PATH — the corners and the former's radius —
+    swept by a Pipe, which is what the part IS: a length of tube through a
+    bender. Two cylinders unioned at a sharp corner is a picture of something
+    nobody can make, and a spline fitted through sampled arc points is a
+    tube whose bend radius nothing can read back.
 
     Each end takes a welded plug, tapped, so the screw that comes up through
     the lid has something to pull on. A tube with nothing in its ends is
@@ -390,40 +391,22 @@ def lid_handle(d):
     part(d, "Lid handle")
     half = S.HANDLE_SPAN / 2.0
     rise = S.HANDLE_RISE
-    bend_r = 45.0  # the former the tube is bent round
-    # The straights carry intermediate points of their own: a spline fitted
-    # through two ends wanders between them, and the tube trumpets where it
-    # does.
-    pts = [[-half, 0.0, 0.0]]
-    for k in range(1, 4):
-        pts.append([-half, 0.0, (rise - bend_r) * k / 3.0])
-    for k in range(1, 8):  # up and over the near bend
-        a = math.radians(90.0 * k / 8.0)
-        pts.append([-half + bend_r * (1.0 - math.cos(a)), 0.0,
-                    rise - bend_r * (1.0 - math.sin(a))])
-    span = (half - bend_r) - (-half + bend_r)
-    for k in range(0, 7):
-        pts.append([-half + bend_r + span * k / 6.0, 0.0, rise])
-    for k in range(1, 8):  # and down the far one
-        a = math.radians(90.0 * k / 8.0)
-        pts.append([half - bend_r * (1.0 - math.sin(a)), 0.0,
-                    rise - bend_r * (1.0 - math.cos(a))])
-    for k in range(0, 4):
-        pts.append([half, 0.0, (rise - bend_r) * (3 - k) / 3.0])
+    # The centreline as a BENDER is told it: the corners, and the former it
+    # is bent round. Four points and a radius — where a fitted spline needed
+    # twenty-nine generated points (extra ones along the straights, or the
+    # tube trumpets between them, and eight per corner to approximate this
+    # radius), and still had no bend radius anything could read back.
     path = d.call("add_feature", feature={
-        "type": "Curve3D", "name": "Centreline", "kind": "fit_spline",
-        "points": pts})
+        "type": "Curve3D", "name": "Centreline", "kind": "bent_path",
+        "radius": S.HANDLE_BEND_R,
+        "points": [[-half, 0.0, 0.0], [-half, 0.0, rise],
+                   [half, 0.0, rise], [half, 0.0, 0.0]]})
     check(path, "handle centreline")
     tube = d.call("add_feature", feature={
         "type": "Pipe", "name": "Tube", "path_id": path["id"],
         "outer_diameter": S.HANDLE_D, "wall_thickness": S.HANDLE_WALL})
     check(tube, "handle tube")
     body = owner(d, tube, "Tube")
-    # Each plug is drawn as a RING — the tapping is the sketch's inner loop,
-    # not a hole drilled afterwards. Drilled, the bore at one end came out
-    # with no NAME on its cylindrical face (see the findings), and a face
-    # with no name cannot be threaded, picked or fitted: the screw then sat
-    # in an unthreaded hole and read as a clash.
     # A plug with a BLIND tapping, capped at the top. Bored right through it
     # is the same part to a shop and the joint reads correctly either way
     # (a thread ends a joint the way a nut does) — but on THIS body, and not

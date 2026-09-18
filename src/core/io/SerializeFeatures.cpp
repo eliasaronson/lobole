@@ -557,6 +557,8 @@ const char* Curve3DKindToString(Curve3DKind kind) {
     return "helix";
   case Curve3DKind::ControlPoly:
     return "control_poly";
+  case Curve3DKind::BentPath:
+    return "bent_path";
   }
   return "fit_spline";
 }
@@ -568,6 +570,8 @@ Curve3DKind Curve3DKindFromString(const std::string& s) {
     return Curve3DKind::Helix;
   if (s == "control_poly")
     return Curve3DKind::ControlPoly;
+  if (s == "bent_path")
+    return Curve3DKind::BentPath;
   throw std::runtime_error("Unknown curve3d kind: " + s);
 }
 
@@ -953,13 +957,19 @@ json FeatureToJson(const Feature& feature) {
     j["kind"] = Curve3DKindToString(cv->kind);
     switch (cv->kind) {
     case Curve3DKind::FitSpline:
-    case Curve3DKind::ControlPoly: {
+    case Curve3DKind::ControlPoly:
+    case Curve3DKind::BentPath: {
       json pts = json::array();
       for (const glm::vec3& p : cv->points)
         pts.push_back(Vec3ToJson(p));
       j["points"] = std::move(pts);
       if (cv->kind == Curve3DKind::ControlPoly)
         j["degree"] = cv->degree;
+      if (cv->kind == Curve3DKind::BentPath) {
+        j["radius"] = cv->radius; // the former's, to the centreline
+        if (!cv->radiusExpr.empty())
+          j["radius_expr"] = cv->radiusExpr;
+      }
       if (cv->closed)
         j["closed"] = true;
       break;
@@ -1388,7 +1398,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "[x,y,z] (+offset_expr), rotation_deg [rx,ry,rz] (+rotation_expr), "
      "applied as parent · T · Rx · Ry · Rz"},
     {"Curve3D", 42,
-     "kind: fit_spline|control_poly|helix; points [[x,y,z]...], degree?, "
+     "kind: fit_spline|control_poly|bent_path|helix; points [[x,y,z]...], "
+     "degree?, "
      "closed?; helix: origin, axis, radius (+_expr), pitch (+_expr), turns "
      "(+_expr), left_handed?"},
     {"Boolean", 1,
@@ -1968,10 +1979,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     switch (cv->kind) {
     case Curve3DKind::FitSpline:
     case Curve3DKind::ControlPoly:
+    case Curve3DKind::BentPath:
       for (const auto& pj : j.value("points", json::array()))
         cv->points.push_back(Vec3FromJson(pj));
       cv->degree = j.value("degree", 3);
       cv->closed = j.value("closed", false);
+      if (cv->kind == Curve3DKind::BentPath) {
+        cv->radius = j.value("radius", 0.0);
+        cv->radiusExpr = j.value("radius_expr", std::string{});
+      }
       break;
     case Curve3DKind::Helix:
       cv->axisOrigin = Vec3FromJson(j.at("origin"));

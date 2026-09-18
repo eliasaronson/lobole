@@ -27,7 +27,13 @@ TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId) {
     return sketch::BuildOpenPathWire(sk->plane, sk->entities);
   if (const auto* cv = dynamic_cast<const CurveFeature*>(f)) {
     const TopoDS_Shape& shape = cv->EdgeShape().GetShape();
-    if (shape.IsNull() || shape.ShapeType() != TopAbs_EDGE)
+    if (shape.IsNull())
+      return TopoDS_Wire();
+    // A bent path is several edges — straights and arcs — so the curve holds
+    // a WIRE, and a spine is a wire either way.
+    if (shape.ShapeType() == TopAbs_WIRE)
+      return TopoDS::Wire(shape);
+    if (shape.ShapeType() != TopAbs_EDGE)
       return TopoDS_Wire();
     BRepBuilderAPI_MakeWire wire(TopoDS::Edge(shape));
     return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
