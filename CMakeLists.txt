@@ -279,6 +279,8 @@ set(core_sources
     src/core/sheet/Unfold.cpp
     src/core/sheet/Flange.cpp
     src/core/sheet/Check.cpp
+    src/core/tube/Rules.cpp
+    src/core/tube/Check.cpp
     src/core/io/ExportDxf.cpp
     src/core/ToleranceStack.cpp
     src/core/MassProps.cpp
@@ -735,6 +737,7 @@ set(app_sources
     src/remote/RemoteUiActions.cpp
     src/remote/RemoteConfigurations.cpp
     src/remote/RemoteSheetMetal.cpp
+    src/remote/RemoteTube.cpp
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
     src/remote/RemoteInspection.cpp

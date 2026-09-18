@@ -1,0 +1,55 @@
+{
+  "format": "designer-document",
+  "version": 118,
+  "features": [
+    {
+      "id": 1,
+      "kind": "bent_path",
+      "name": "Centreline",
+      "points": [
+        [
+          -200.0,
+          0.0,
+          0.0
+        ],
+        [
+          -200.0,
+          0.0,
+          60.0
+        ],
+        [
+          200.0,
+          0.0,
+          60.0
+        ],
+        [
+          200.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "radius": 45.0,
+      "type": "Curve3D"
+    },
+    {
+      "id": 2,
+      "mode": "new_body",
+      "name": "Tube",
+      "outer_diameter": 20.0,
+      "path_id": 1,
+      "type": "Pipe",
+      "wall_thickness": 1.5
+    }
+  ],
+  "tube": {
+    "material": "steel",
+    "size": "25.4x2.4",
+    "outer_diameter": 25.4,
+    "wall_thickness": 2.4,
+    "former_radii": [
+      76.2,
+      101.6
+    ],
+    "max_thinning": 0.2
+  }
+}

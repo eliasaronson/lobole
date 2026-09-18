@@ -10,6 +10,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/features/CurveFeature.h"
 #include "core/io/Serialization.h"
+#include "core/tube/Rules.h"
 
 #include <nlohmann/json.hpp>
 
@@ -583,6 +584,30 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     }
     CHECK_THAT(curve->Length(),
                WithinRel(want.at("length_mm").get<double>(), 1e-9));
+  }
+  // v118: the stock a part is BENT from. The derived fields are the point:
+  // a minimum straight and a tail length are 2 x OD and 1.5 x OD, so a golden
+  // that states them in millimetres catches a literal creeping back in, and
+  // stating the die set catches a former list quietly dropped on the way
+  // through the envelope.
+  if (expect.contains("tube")) {
+    REQUIRE(doc.Tube().has_value());
+    const tube::TubeRules& r = *doc.Tube();
+    const nlohmann::json& want = expect.at("tube");
+    CHECK(r.material == want.at("material").get<std::string>());
+    CHECK(r.size == want.at("size").get<std::string>());
+    CHECK_THAT(r.outerDiameter,
+               WithinRel(want.at("outer_diameter_mm").get<double>(), 1e-9));
+    CHECK_THAT(r.wallThickness,
+               WithinRel(want.at("wall_mm").get<double>(), 1e-9));
+    CHECK(r.formerRadii ==
+          want.at("former_radii_mm").get<std::vector<double>>());
+    CHECK_THAT(r.EffectiveMinStraight(),
+               WithinRel(want.at("min_straight_mm").get<double>(), 1e-9));
+    CHECK_THAT(r.EffectiveTailLength(),
+               WithinRel(want.at("tail_length_mm").get<double>(), 1e-9));
+    CHECK_THAT(r.EffectiveMaxThinning(),
+               WithinRel(want.at("max_thinning").get<double>(), 1e-9));
   }
   // v97: whether an Import keeps the file's own coordinates. A flag that
   // round-trips as `false` is an import that silently moves — the whole

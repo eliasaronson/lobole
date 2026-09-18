@@ -4,6 +4,7 @@
 
 #include "core/Document.h"
 #include "core/Receipt.h"
+#include "remote/RpcParams.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -41,6 +42,14 @@ namespace remote {
 // (docs/agent-scale-followup-plan.md, W2).
 [[nodiscard]] Document* ResolvePartParam(ui::AppState& state,
                                          const nlohmann::json& part);
+
+// WHICH part a read-only question is about: the one it NAMES, or the tab you
+// are on. A question that names its part has no business caring what tab is
+// active — a bend audit over sixteen parts ran from an assembly and was
+// refused sixteen times, so it walked the tabs to ask. Throws, naming the
+// ways to say which, when there is neither a name nor an active part.
+[[nodiscard]] const Document& SubjectPart(ui::AppState& state, Document* active,
+                                          const RpcParams& params);
 
 // One entry per RPC method for the describe endpoint. Each domain module
 // keeps a static table ADJACENT to its dispatch if-chain (the drift defense:

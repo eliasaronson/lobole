@@ -36,6 +36,7 @@
 #include "remote/RemoteProject.h"
 #include "remote/RemoteSheetMetal.h"
 #include "remote/RemoteSimulation.h"
+#include "remote/RemoteTube.h"
 #include "remote/RpcParams.h"
 
 #include "render/Camera.h"
@@ -478,6 +479,7 @@ const remote::MethodDoc* FindMethod(const std::string& m) {
     add(remote::DrawingMethodDocs());
     add(remote::ConfigurationMethodDocs());
     add(remote::SheetMetalMethodDocs());
+    add(remote::TubeMethodDocs());
     add(remote::SimulationMethodDocs());
     return out;
   }();
@@ -515,6 +517,7 @@ static bool IsKnownMethod(const std::string& m) {
     add(remote::DrawingMethodDocs());
     add(remote::ConfigurationMethodDocs());
     add(remote::SheetMetalMethodDocs());
+    add(remote::TubeMethodDocs());
     add(remote::SimulationMethodDocs());
     return s;
   }();
@@ -837,6 +840,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::DrawingMethodDocs());
     addDocs(remote::ConfigurationMethodDocs());
     addDocs(remote::SheetMetalMethodDocs());
+    addDocs(remote::TubeMethodDocs());
     addDocs(remote::SimulationMethodDocs());
     if (!only.empty() && methods.empty())
       throw std::runtime_error(
@@ -893,6 +897,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // names the part it is asking about, and a question that names its part has
   // no business caring which tab is active. It is consulted from any tab and
   // refuses for itself when there is neither a name nor an active part.
+  if (json tubeOut; remote::HandleTubeRpc(state, doc, m, p, tubeOut))
+    return tubeOut;
   if (json smOut; remote::HandleSheetMetalRpc(state, doc, m, p, smOut))
     return smOut;
   if (doc) {

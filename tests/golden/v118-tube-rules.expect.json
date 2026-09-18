@@ -1,0 +1,29 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [
+    41965.5943
+  ],
+  "bent_path": {
+    "radius": 45.0,
+    "bends": 2,
+    "angles_deg": [
+      90.0,
+      90.0
+    ],
+    "length_mm": 481.3716694115407
+  },
+  "tube": {
+    "material": "steel",
+    "size": "25.4x2.4",
+    "outer_diameter_mm": 25.4,
+    "wall_mm": 2.4,
+    "former_radii_mm": [
+      76.2,
+      101.6
+    ],
+    "min_straight_mm": 50.8,
+    "tail_length_mm": 38.1,
+    "max_thinning": 0.2
+  }
+}

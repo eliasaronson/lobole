@@ -158,6 +158,53 @@ void SheetMetalToEnvelope(const std::optional<sheet::SheetMetalRules>& rules,
   j["sheet_metal"] = std::move(m);
 }
 
+// The tube stock, v118. Absent means the part is not bent from tube, which is
+// what every document written before v118 means. An unstocked size is REFUSED
+// rather than read as the nearest one: a wall 0.2 mm off the one asked for is
+// a different tube, and the document would load looking perfect.
+std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
+  if (!j.contains("tube"))
+    return std::nullopt;
+  const json m = j.at("tube");
+  tube::TubeRules r;
+  r.material = m.value("material", std::string{});
+  r.size = m.value("size", std::string{});
+  r.outerDiameter = m.value("outer_diameter", 0.0);
+  r.wallThickness = m.value("wall_thickness", 0.0);
+  if (m.contains("former_radii")) {
+    for (const auto& v : m.at("former_radii"))
+      r.formerRadii.push_back(v.get<double>());
+  }
+  r.minStraight = m.value("min_straight", 0.0);
+  r.tailLength = m.value("tail_length", 0.0);
+  r.maxThinning = m.value("max_thinning", 0.0);
+  if (const std::string why = tube::Validate(r); !why.empty())
+    throw std::runtime_error("tube rules: " + why);
+  return r;
+}
+
+// Written only when the part IS bent tube, so every document that is not
+// re-saves byte-identically and the goldens stay valid. The derived fields
+// are written only when overridden, for the same reason the sheet's are: a
+// stored value that came from the stock would silently stop tracking it.
+void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
+  if (!rules)
+    return;
+  json m = {{"material", rules->material},
+            {"size", rules->size},
+            {"outer_diameter", rules->outerDiameter},
+            {"wall_thickness", rules->wallThickness}};
+  if (!rules->formerRadii.empty())
+    m["former_radii"] = rules->formerRadii;
+  if (rules->minStraight > 0.0)
+    m["min_straight"] = rules->minStraight;
+  if (rules->tailLength > 0.0)
+    m["tail_length"] = rules->tailLength;
+  if (rules->maxThinning > 0.0)
+    m["max_thinning"] = rules->maxThinning;
+  j["tube"] = std::move(m);
+}
+
 // The same three keys, written only when they differ from the default.
 void UnitsToEnvelope(const units::System& u, json& j) {
   if (u.IsDefault())
@@ -230,6 +277,7 @@ json DocumentEnvelope(const Document& doc) {
   UnitsToEnvelope(doc.Units(), j);
   // Sheet-metal rules (v108), omitted when the part is not sheet metal.
   SheetMetalToEnvelope(doc.SheetMetal(), j);
+  TubeToEnvelope(doc.Tube(), j);
   return j;
 }
 
@@ -765,6 +813,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // Sheet-metal rules (v108) BEFORE the features: a flange reads the
     // gauge during Execute, and AddFeature below regenerates.
     doc->SetSheetMetal(SheetMetalFromEnvelope(index));
+    doc->SetTube(TubeFromEnvelope(index));
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
     std::map<uint64_t, fs::path> byId;
@@ -1453,6 +1502,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     }
     // Sheet-metal rules (v108) BEFORE the features, for the reason above.
     doc->SetSheetMetal(SheetMetalFromEnvelope(j));
+    doc->SetTube(TubeFromEnvelope(j));
     // Assets (v49 image bytes, v84 derived snapshots): decode the base64
     // "assets" map into the doc store BEFORE the features regenerate — a
     // Derived feature reads its B-Reps from it during Execute.

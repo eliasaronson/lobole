@@ -9,6 +9,7 @@
 #include "core/Units.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "core/tube/Rules.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -372,6 +373,20 @@ public:
     Regenerate();
   }
 
+  // The stock a tube part is BENT from — the material, the size and the
+  // bender, read by check_tube and the cut list. Document-level for the same
+  // reason the sheet's gauge is: a frame member is one length of tube, and a
+  // per-feature size would let a body be two walls at once.
+  //
+  // Unlike the sheet's rules this drives NO geometry — a Pipe carries its own
+  // diameter and wall, and a former is a number on the path. Changing it can
+  // therefore not rebuild anything, and does not: it changes what the checks
+  // say, which is why it sits outside the regen chain like a tolerance.
+  const std::optional<tube::TubeRules>& Tube() const { return m_tube; }
+  void SetTube(std::optional<tube::TubeRules> rules) {
+    m_tube = std::move(rules);
+  }
+
   // ---- Configurations ---------------------------------------------------
   // Named variants (parameter overrides + feature suppression), a sibling to
   // the parameter table like studies — not Features. The ACTIVE configuration
@@ -604,6 +619,7 @@ private:
   std::vector<Configuration> m_configurations;
   units::System m_units;
   std::optional<sheet::SheetMetalRules> m_sheetMetal;
+  std::optional<tube::TubeRules> m_tube;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.

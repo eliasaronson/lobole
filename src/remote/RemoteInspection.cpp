@@ -93,6 +93,19 @@ Document* ResolvePartParam(ui::AppState& state, const json& part) {
   return d;
 }
 
+// Declared in RemoteHelpers.h — the read-only counterpart, shared by every
+// module that answers a question ABOUT a part rather than changing one.
+const Document& SubjectPart(ui::AppState& state, Document* active,
+                            const RpcParams& p) {
+  if (p.contains("part"))
+    return *ResolvePartParam(state, p.at("part"));
+  if (active == nullptr)
+    throw std::runtime_error(
+        "there is no active part on this tab, so name the one you mean: "
+        "`part` takes a name, a stable id or a slot index");
+  return *active;
+}
+
 namespace {
 
 // The active part document, required by the part-tab-only inspection RPCs.

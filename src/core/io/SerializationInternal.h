@@ -17,7 +17,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    117; // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
+    118; // v118: `tube`, the stock a part is BENT from — material, size (OD x
+         //      wall), the bender's die set, the straight it needs to clamp
+         //      and grip, and a thinning limit. A build without it reads the
+         //      key as nothing and silently checks a frame against no rule
+         //      at all, which is why it is a bump (docs/tube/plan.md).
+         // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
          //      of a centreline and `radius` (+ _expr) the former it is
          //      bent round, swept line-arc-line. A build without the kind
          //      refuses the file by name, which is why it is a bump

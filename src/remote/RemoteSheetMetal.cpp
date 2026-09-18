@@ -75,23 +75,6 @@ std::span<const MethodDoc> SheetMetalMethodDocs() { return SheetMetalMethods; }
 
 namespace {
 
-// WHICH part the question is about: the one named, or the tab you are on.
-//
-// A read-only question that NAMES its part has no business caring what tab
-// is active — a bend audit over sixteen parts ran from an assembly and was
-// refused sixteen times, so it walked the tabs to ask (list_elements has
-// always got this right; these had not).
-const Document& Subject(ui::AppState& state, Document* active,
-                        const remote::RpcParams& p) {
-  if (p.contains("part"))
-    return *ResolvePartParam(state, p.at("part"));
-  if (active == nullptr)
-    throw std::runtime_error(
-        "there is no active part on this tab, so name the one you mean: "
-        "`part` takes a name, a stable id or a slot index");
-  return *active;
-}
-
 // The rules as an agent reads them back: what was stored, and next to it the
 // number a flange will actually use. A caller that sees only `bend_radius: 0`
 // cannot tell "unset" from "zero", and the resolved column is what makes the
@@ -201,7 +184,7 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
 
   if (m == "check_sheet_metal" || m == "export_dxf") {
     // rpc-params: part
-    const Document& src = Subject(state, doc, p);
+    const Document& src = SubjectPart(state, doc, p);
     const std::vector<Body>& bodies = src.GetBodies();
     if (bodies.empty())
       throw std::runtime_error("this part has no bodies");
@@ -252,7 +235,7 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
 
   if (m == "list_bends") {
     // rpc-params: part
-    const Document& src = Subject(state, doc, p);
+    const Document& src = SubjectPart(state, doc, p);
     if (!src.SheetMetal())
       throw std::runtime_error(
           "this part has no sheet-metal rules, so it has no bends to list "
@@ -327,7 +310,7 @@ bool HandleSheetMetalRpc(ui::AppState& state, Document* doc,
     // Read-only, so it answers about any part rather than only the active tab
     // (docs/agent-scale-followup-plan.md, W2).
     // rpc-params: part
-    const Document& src = Subject(state, doc, p);
+    const Document& src = SubjectPart(state, doc, p);
     out = {{"rules",
             src.SheetMetal() ? RulesJson(*src.SheetMetal()) : json(nullptr)},
            {"stock", StockJson()},
