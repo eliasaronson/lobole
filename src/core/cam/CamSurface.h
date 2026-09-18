@@ -70,6 +70,39 @@ struct SurfacePaths {
                                           const std::vector<Loop>& region,
                                           const ParallelRequest& req);
 
+struct WaterlineRequest {
+  // The Z spacing between levels, in mm. NOT a stepover, and deliberately a
+  // separate field: waterline's meaningful control is how far apart the laps
+  // are in Z, and an XY fraction of tool diameter cannot express it. FreeCAD
+  // put a percentage-of-diameter `StepOver` on its waterline op, then hid it
+  // for two of its three algorithms because it means nothing there -- while
+  // the Z step it actually uses is a different property entirely.
+  double zStep_mm = 1.0;
+
+  // The band to lap, in mm. Levels run from `topZ` downward to `bottomZ`,
+  // with the last landing exactly on it -- the same rule DepthPasses follows,
+  // for the same reason: a lap a hair below the one asked for is a scrapped
+  // part.
+  double topZ = 0.0;
+  double bottomZ = 0.0;
+
+  // Spacing along a lap, in mm; zero takes the CL grid's own resolution.
+  double sampleStep_mm = 0.0;
+
+  double floorZ = 0.0;
+};
+
+// Constant-Z laps of `cl` through the band, clipped to `region`.
+//
+// Waterline is the other half of finishing and answers the opposite question
+// to the raster: it is good on steep walls, where a raster's passes crowd
+// together, and poor on shallow ones, where they spread out. A separate verb
+// rather than a flag on one, because a single op cannot honestly carry both
+// an XY fraction and a Z step under one name.
+[[nodiscard]] SurfacePaths WaterlinePasses(const CLSurface& cl,
+                                           const std::vector<Loop>& region,
+                                           const WaterlineRequest& req);
+
 // Read the CL surface at a point, bilinearly. Exposed because it is what a
 // caller needs to check one pass against the surface it was planned on, and
 // what a test asserts with.

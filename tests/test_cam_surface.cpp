@@ -437,4 +437,108 @@ TEST_CASE("parallel passes: what they refuse", "[cam][surface]") {
   CHECK_THAT(b.why, Catch::Matchers::ContainsSubstring("never advance"));
 }
 
+TEST_CASE("waterline: laps a cone at the radius the arithmetic says",
+          "[cam][surface]") {
+  // A truncated cone is the shape whose waterline is checkable by hand. With
+  // a FLAT mill the CL surface is the cone offset outward by the tool radius,
+  // so the lap at height z encloses R(z) + r where R(z) runs linearly from
+  // R0 at the base to R1 at the top. Anything that quantised the contour to
+  // the grid, or forgot the tool, lands somewhere else. Truncated rather than
+  // pointed because a zero top radius is a degenerate solid.
+  const double R0 = 10.0;
+  const double R1 = 2.0;
+  const double H = 20.0;
+  const double r = 1.5;
+  Body body;
+  body.name = "Cone";
+  body.shape = CADKernel::Instance().CreateCone(
+      glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), R0, R1, H);
+  REQUIRE(body.shape.IsValid());
+  std::vector<Body> bodies;
+  bodies.push_back(std::move(body));
+
+  cam::DropRequest drop;
+  drop.min = {-14.0, -14.0};
+  drop.max = {14.0, 14.0};
+  drop.res = 0.15;
+  drop.floorZ = -5.0;
+  const cam::CLSurface cl = cam::DropCut(bodies, FlatMill(2.0 * r), drop);
+  INFO(cl.why);
+  REQUIRE(cl.ok);
+
+  cam::WaterlineRequest req;
+  req.topZ = 18.0;
+  req.bottomZ = 4.0;
+  req.zStep_mm = 2.0;
+  req.sampleStep_mm = 0.5;
+  req.floorZ = -5.0;
+
+  const cam::SurfacePaths p = cam::WaterlinePasses(cl, {}, req);
+  INFO(p.why);
+  REQUIRE(p.ok);
+  REQUIRE(p.passes.size() >= 5);
+
+  // Every point of a lap is at that lap's own Z -- that is what "constant Z"
+  // means, and it is why a waterline lap may still fit an arc in the post
+  // while a raster pass may not.
+  for (const cam::SurfacePath& lap : p.passes) {
+    const double z = lap.front().z;
+    for (const glm::dvec3& pt : lap)
+      CHECK_THAT(pt.z, WithinAbs(z, 1e-9));
+  }
+
+  // The radius of each lap, against the cone.
+  for (const cam::SurfacePath& lap : p.passes) {
+    const double z = lap.front().z;
+    if (z < 5.0 || z > 17.0)
+      continue; // skip the ends, where the tessellated tip is coarse
+    double sum = 0.0;
+    for (const glm::dvec3& pt : lap)
+      sum += std::hypot(pt.x, pt.y);
+    const double got = sum / lap.size();
+    const double want = R0 + (R1 - R0) * (z / H) + r;
+    INFO("lap at z = " << z << ", mean radius " << got << ", expected "
+                       << want);
+    CHECK_THAT(got, WithinAbs(want, 0.25));
+  }
+}
+
+TEST_CASE("waterline: what it refuses", "[cam][surface]") {
+  auto doc = BlockDoc(40, 30, 20);
+  cam::DropRequest drop;
+  drop.min = {5.0, 5.0};
+  drop.max = {35.0, 25.0};
+  drop.res = 0.5;
+  drop.floorZ = -10.0;
+  const cam::CLSurface cl = cam::DropCut(doc->GetBodies(), FlatMill(6.0), drop);
+  REQUIRE(cl.ok);
+
+  cam::WaterlineRequest zero;
+  zero.zStep_mm = 0.0;
+  zero.topZ = 20.0;
+  zero.bottomZ = 0.0;
+  const cam::SurfacePaths a = cam::WaterlinePasses(cl, {}, zero);
+  CHECK_FALSE(a.ok);
+  CHECK_THAT(a.why, Catch::Matchers::ContainsSubstring("never descend"));
+
+  cam::WaterlineRequest inverted;
+  inverted.zStep_mm = 1.0;
+  inverted.topZ = 0.0;
+  inverted.bottomZ = 20.0;
+  const cam::SurfacePaths b = cam::WaterlinePasses(cl, {}, inverted);
+  CHECK_FALSE(b.ok);
+  CHECK_THAT(b.why, Catch::Matchers::ContainsSubstring("no depth"));
+
+  // A flat top has no wall rising through the band, so a waterline has
+  // nothing to lap -- and says so, naming the strategy that does suit it.
+  cam::WaterlineRequest flat;
+  flat.zStep_mm = 1.0;
+  flat.topZ = 19.0;
+  flat.bottomZ = 15.0;
+  flat.floorZ = -10.0;
+  const cam::SurfacePaths c = cam::WaterlinePasses(cl, {}, flat);
+  CHECK_FALSE(c.ok);
+  CHECK_THAT(c.why, Catch::Matchers::ContainsSubstring("raster"));
+}
+
 #endif // HAVE_CAM
