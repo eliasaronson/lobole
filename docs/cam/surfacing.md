@@ -143,6 +143,18 @@ since capability columns touch every op type.
 
 ## Phase 1 — surfacing
 
+> The ENGINE is built and tested: the cutter-location surface
+> (`CamDropCutter`), the silhouette pick (`PickedSurfaceRegion` /
+> `WholePartSilhouette`), and both patterns (`ParallelPasses`,
+> `WaterlinePasses`). What remains is the WIRING — two `OpType` values, three
+> `Operation` fields, derivation, the strategy dispatch, serialization, RPC
+> and panel — and the closed-loop generate/post/verify test that needs them.
+>
+> The wiring carries the format bump, and that is why it is a seam rather than
+> a pause: a new enum value is a format change, so it takes a `kVersion`, a
+> golden at that version and a history row, and a version number chosen while
+> something else lands on main is a renumbering.
+
 ### What a surfacing pass is
 
 A finishing pass is a **pattern** swept over a **contact surface**. Those are
@@ -299,13 +311,13 @@ stated maximum, and reports clamping once per operation rather than per move.
 
 | file | what changes | lines |
 |---|---|---|
-| `core/cam/CamDropCutter.{h,cpp}` | new — CL surface by dilation, grid derivation, region mask, parallel over cells | 250-350 |
-| `core/cam/CamSurface.cpp` | new — `GenerateParallel`, `GenerateWaterline` (marching squares on the CL surface) | 450-600 |
+| `core/cam/CamDropCutter.{h,cpp}` | **built** — CL surface by dilation, derived grid and cusp, padded sampling, refuses a rotated frame | 300 |
+| `core/cam/CamSurface.{h,cpp}` | **built** — `ParallelPasses` and `WaterlinePasses` (marching squares on the CL surface), plain values in and polylines out | 560 |
+| `core/cam/CamGeometry.cpp` | **built** — `PickedSurfaceRegion` / `WholePartSilhouette` (the pick lives here, not in CamPicks, because that file builds without Clipper2) | 150 |
 | `core/cam/CamToolpathInternal.h`, `CamStrategies.cpp` | `EmitPolyline3D` for a varying-Z pass; dispatch | 130 |
 | `core/cam/CamJob.h` | two `OpType`s, `cutAngleDeg`, `sampleStep_mm`, `zStep_mm`, boundary mode | 90 |
 | `core/cam/CamNames.cpp` | two rows | 4 |
 | `core/cam/CamDerive.cpp` | derive both; refuse a flat mill on a slope, a V-bit; the field refusals | 150 |
-| `core/cam/CamPicks.cpp` | `PickedSurfaceRegion` | 150 |
 | `core/cam/CamPost.cpp` | **nothing** — `FitArc`'s `usable()` already requires a cut move at constant Z with no A word (`CamPost.cpp:334-337`), so a sloped raster fits no arcs and a constant-Z waterline lap correctly does. `LastCollinear` is fully 3D at 0.005 mm, well under any scallop, so the decimator will not flatten a pass either | 0 |
 | `core/cam/CamTravel.cpp` | R6 finish-path guard | 10 |
 | `core/io/SerializeCam.cpp` | new fields | 25 |
