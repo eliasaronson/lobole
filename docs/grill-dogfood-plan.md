@@ -54,7 +54,7 @@ are revolute; the other 32 joints are fastened.
 The parts themselves are drawn, not assembled out of primitives: a propane
 bottle is a profile revolved about its axis, a knob is a turned profile, and
 the lid handle is a tube swept along its own bent centreline (a `Curve3D`
-through the bends, then a `Pipe`) — which is what a handle IS. Two cylinders
+of kind `bent_path` — the corners and the former's radius — then a `Pipe`) — which is what a handle IS. Two cylinders
 unioned at a square corner is a picture of something nobody can make.
 
 ## How it is verified

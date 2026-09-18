@@ -160,12 +160,16 @@ missing; what is missing is that a bicycle frame is fourteen tubes, so it is
 41 dialogs to weld it solid and 83 to get it hollow with solid joints — the
 construction `bike_shop.Weldment` uses, which is what makes the mass right.
 
-**And the two path types are not equally robust.** A hollow bowed tube swept
+**And the path types are not equally robust.** A hollow bowed tube swept
 along a sketch ARC, unioned into another hollow tube, failed at **11 of 29**
 offsets tried half a millimetre apart; the same tube through the same points
 on a `Curve3D` fit-spline failed at **none**. An analytic spine gives the
 sweep analytic surfaces, and their exact intersections are where the booleans
-go degenerate. It is not a free swap — moving the generator's straight tubes
+go degenerate. (A third type has arrived since: `Curve3D` `bent_path`, v117,
+which is arcs — so it sits on the side that failed 11 of 29, and a weldment
+built on one should expect the same. It is the right path type for a part a
+bender makes; this measurement says to weld such tubes SOLID and bore after,
+as the bicycle round concluded.) It is not a free swap — moving the generator's straight tubes
 onto curves as well made the frame 4x slower (3.1 s to 12.3) and broke the
 wheel's 36 spoke unions outright, so it was measured and reverted. A person
 in the GUI cannot be expected to know which of the two to reach for, and a

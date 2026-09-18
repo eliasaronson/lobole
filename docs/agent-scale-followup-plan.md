@@ -65,8 +65,10 @@ Not an SDK invention: the app has exactly **one live document**.
 when a tab activates and moved back when it leaves (`StashActive` /
 `ActivateSlot`, AppActions.cpp:1091–1128). Every other tab's model is stashed.
 So "the active part" is a real thing in the document layer, and the RPC
-surface inherited it: RemoteServer.cpp:1091 refuses most methods when
-`state.doc` is null, with a list of 60-odd exceptions.
+surface inherited it: dispatch (`RemoteDispatch.cpp`) refuses a method when
+`state.doc` is null unless its `MethodDoc` row clears the `NeedsPart` flag —
+which replaced the hand-kept list of 60-odd exceptions this plan was written
+against.
 
 ### Could parts be handled by references instead?
 
@@ -88,7 +90,7 @@ source of the body LIST. And the two payloads are not nested:
 | | fields |
 |---|---|
 | `get_state` bodies | name, volume, bbox_min, bbox_max, material |
-| `list_elements` bodies | name, created_by, body, job_part, faces, edges |
+| `list_elements` bodies | name, created_by, body, job_part, faces, edges, unnamed_faces |
 
 Neither is a superset, which is why the SDK needs both and why `Body` carries
 `reference` from one and `created_by` from the other.
@@ -105,8 +107,8 @@ A tab switch is not a free pointer move. `ResetActiveTabUiState`
 (AppActions.cpp:1130) clears the selection, the hidden-body set, the measure
 session, simulation mode and the explode state, and forces a renderer resync.
 
-CLAUDE.md tells agents they may read from the human's `dev-watch` instance on
-8799 freely and only warns against mutating their document. But under today's
+CLAUDE.md tells agents they may read from the human's `dev-watch` instance
+(the port is whatever the instance registry announces) freely and only warns against mutating their document. But under today's
 SDK, *reading a part's faces switches their tab and clears their selection.*
 A documented-safe operation is not safe.
 
@@ -120,7 +122,13 @@ A documented-safe operation is not safe.
    `Part.activate()` stays for the write paths.
 3. Audit the rest of `describe` for read-only methods that refuse without a
    part tab and could take `part` the same way — `mass_properties` takes only
-   `body`, and is the obvious next one.
+   `body`, and is the obvious next one. **Partly done 2026-09-18**: the
+   sheet-metal group (`get_sheet_metal_rules`, `check_sheet_metal`,
+   `list_bends`, `export_dxf`) and `tube_schedule` take `part` and dropped
+   `NeedsPart`; `RemoteDispatch` now consults the sheet module outside the
+   `if (doc)` guard, the way the study RPCs already did
+   ([simulation/assembly-studies-plan.md](simulation/assembly-studies-plan.md),
+   "one handler, two homes"). `mass_properties` is still tab-bound.
 
 **Gate.** A smoke test that builds two parts, queries every read path on the
 first while the second is active, and asserts the active tab never changed —

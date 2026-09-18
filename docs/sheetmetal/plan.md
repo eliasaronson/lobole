@@ -148,17 +148,27 @@ NOT part of this: the bend list carries the same facts in text and the DXF
 carries them where a shop reads them. Worth adding when somebody is reading
 the folded part on screen rather than the blank.
 
-**S6 — `check_sheet_metal` and DXF.** The check in the shape of `check_geometry`
-/ `check_fasteners`: hole-to-bend distance, flange below minimum height,
-bend longer than the brake, missing relief, non-uniform thickness — each naming
-the element and the required-versus-actual number. A `Violation` list over RPC,
-the same list in the panel. Then `export_dxf` (`src/core/io/ExportDxf.cpp`),
-which writes the flat body's largest planar face — its outer wire and every
-hole — as R12 LINE / ARC / CIRCLE, arcs kept as arcs, plus each flat crease,
-on layers `CUT`, `BEND_UP`, `BEND_DOWN` with a dashed linetype on the bend
-layers, `$INSUNITS = 4`. UP is as seen from the side the first flange was
-picked on. This is the first file this project produces that a
-shop can cut.
+**S6 — `check_sheet_metal`, `list_bends` and DXF.** The check in the shape of
+`check_geometry` / `check_fasteners`: hole-to-bend distance, flange below
+minimum height, bend longer than the brake, missing relief, non-uniform
+thickness — each naming the element and the required-versus-actual number. A
+`Violation` list over RPC, the same list in the panel.
+
+`list_bends` (added 2026-09-18) is the same subject as DATA rather than as a
+verdict: a row per bend with its angle, radius, length, the material's minimum
+radius beside it, the K factor and where that K came from, the allowance, and
+whether a crushed hem exempts it — plus `folds: up|down` for a named side, or
+`null` where the bend is not square to it. A shop's DFM questions were
+otherwise answerable only by reading a drawing note's rendered text, and a
+generator's bend audit cost three calls a part. It takes `part`, so it answers
+from any tab.
+
+Then `export_dxf` (`src/core/io/ExportDxf.cpp`), which writes the flat body's
+largest planar face — its outer wire and every hole — as R12 LINE / ARC /
+CIRCLE, arcs kept as arcs, plus each flat crease, on layers `CUT`, `BEND_UP`,
+`BEND_DOWN` with a dashed linetype on the bend layers, `$INSUNITS = 4`. UP is
+as seen from the side the first flange was picked on. This is the first file
+this project produces that a shop can cut.
 
 ## Tier 2 — the rest of a working sheet-metal tool
 
@@ -306,7 +316,9 @@ assumed the old behaviour get fixed.
   to trip it, and the clean part fires none. A check nothing fails is not a
   check.
 - `tests/sheetmetal_smoke.py` — the RPC surface end to end: rules, two flanges,
-  flatten, check, DXF out, and the DXF re-read for its layer set.
+  flatten, check, `list_bends` (a row per bend, the count pinned to
+  `check_sheet_metal`'s `bends_checked`), DXF out, and the DXF re-read for its
+  layer set.
 - `defaults/*` GUI cases for all eight new tools, and a GUI test that flattens
   and unflattens through the toolbar toggle.
 - A dogfood part — a 1.5 mm aluminium electronics enclosure, four walls with

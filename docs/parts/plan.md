@@ -19,10 +19,12 @@
 >
 > **One thing it did not build: a way to place a fastener by CLICKING.**
 > `fit_fastener` is RPC-only, which inverts the U10 argument the derivation
-> was for. Planned in [gui-plan.md](gui-plan.md), about a day, and it opens
-> with a correctness fix that should ship on its own — the derivation
-> resolves a picked rim against the FIRST occurrence of the part, so on a
-> joint made of two occurrences of one plate it places at the wrong end.
+> was for. Planned in [gui-plan.md](gui-plan.md), about a day. (The
+> correctness fix this used to open with — a pick resolved against the FIRST
+> occurrence of the part, so a joint made of two occurrences of one plate
+> placed at the wrong end — SHIPPED 2026-09-18. Both picks now collect every
+> placement the element name answers to, use the one an `occurrence` names,
+> and otherwise refuse listing them.)
 
 ## Why
 
@@ -185,9 +187,14 @@ clearance") or refused when it matches nothing.
 
 Scripted twin, deriving identically:
 
-    add_fastener {target: {feature_id, element},   # the rim, a circular edge
+    fit_fastener {rim: {feature_id, element, occurrence?},   # a circular edge
                   standard: "iso4762", drive: "hex",
-                  far_end?: {feature_id, element}}  # optional override
+                  far_end?: {feature_id, element, occurrence?}}
+
+`occurrence` says WHICH placement of the part the pick means. One element name
+answers to every occurrence of its part, so without it a bolt on the right-hand
+cart side derived against the left-hand one's hole — 624 mm away. Both picks
+refuse an ambiguous element by name rather than taking the first.
 
 ### The pick is an EDGE, not a face
 

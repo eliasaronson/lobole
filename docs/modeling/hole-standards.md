@@ -179,3 +179,14 @@ against the COUNTERSINK radius as well as the bore, all three questions it was
 standing in for became answerable — is the hole countersunk, is this the
 countersink's rim or the bore's, and is the countersink deep enough for the
 head.
+
+**And a tapped hole now ENDS a joint** (2026-09-18). Since the bore a tapped
+fit cuts carries its thread, `parts::JointEnd` takes that thread's end as a
+bound: a screw into a tapped boss re-derives as blind at the bottom of the
+tapping, the same way a nut ends a joint on the far side. Two things follow.
+A screw in a tapped hole stops being 40 mm³ of silent interference — the
+engaged length is relieved, because the checker now knows the two are meant
+to screw together. And `fit_fastener` stopped refusing a tapped hole bored
+right THROUGH: it used to say the stack was "not all the way through" and ask
+for a far end it did not need, because the thread, not the metal, is what the
+screw ends in.

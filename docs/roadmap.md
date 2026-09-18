@@ -251,7 +251,7 @@ mesh off the frame (`async: true`) — that known-bugs entry is closed — and
 **phase 4** put the STEP import on it. **A3 is complete.** Plus the absences worth knowing: no
 user-definable feature types (`kFeatureTypes` is a compile-time C++ table), no
 surfacing. **The sheet-metal absence closed 2026-09-17**
-([sheetmetal/plan.md](sheetmetal/plan.md), S1-S11, v108-v115): the stock a part
+([sheetmetal/plan.md](sheetmetal/plan.md), S1-S11, v108-v116): the stock a part
 is cut from, a base flange, an edge flange with automatic bend relief, a flat
 pattern that unfolds from the bends the features RECORDED rather than by
 developing the cylinders afterwards, `check_sheet_metal`, and a DXF a shop can

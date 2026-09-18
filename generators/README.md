@@ -14,7 +14,8 @@ branch in a real language with no sandbox.
 
 **Layout.** A generator that is one file sits here; one that spans several
 sits in its own directory beside them — `om615/`, `fpv_drone/`,
-`cncest6090/`, `so101_gripper/`, `smart_speaker/`, `watch/` — with the same file names inside. Every
+`cncest6090/`, `so101_gripper/`, `smart_speaker/`, `watch/`, `bike/`,
+`grill/` — with the same file names inside. Every
 file adds BOTH its own directory and this one to `sys.path`, so a group's
 modules import each other by bare name and still reach `_lib` and `gear`.
 

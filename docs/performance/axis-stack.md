@@ -72,7 +72,10 @@ test, done for free by comparing ids:
 | before | 433.7 ms | 21.26 s |
 | after | **370.7 ms** | **18.15 s** |
 
-What remains is the ray casting itself, against the bodies the axis really
+What remains is the ray casting itself — plus, since 2026-09-18, one pass
+over the placed bodies for their THREAD spans (`parts::ThreadEndAlong`, so a
+screw into a tapped boss ends where the tapping does), whose inner loop is
+empty on a body carrying no threads — against the bodies the axis really
 does cross — and on this engine those are the block and the head, where an
 OCC ray-shape intersection is not cheap. Going further would mean a mesh
 first pass (`collide::Mesh` has the BVH for it), and that trades exactness
