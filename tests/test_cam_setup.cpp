@@ -6,7 +6,63 @@
 // (docs/architecture-review-2026-09-06.md, stage 1).
 
 #include "cam_fixtures.h"
+#include "core/features/RevolveFeature.h"
 #include "ui/DocumentSlots.h"
+
+TEST_CASE("cam stock: the blank is the part's REAL size, not its control "
+          "points",
+          "[cam][setup]") {
+  // OCC bounds a B-spline by its CONTROL POINTS, which lie outside the
+  // surface. Stock used to take that bound, so a 200 mm revolved waveguide
+  // asked for a 216 mm blank and the facing and profile passes cut air to
+  // reach it (docs/cam/dogfood-waveguide.md). Stock is the material a person
+  // buys and clamps -- and it is what sets the work origin -- so it takes the
+  // TIGHT bound.
+  //
+  // The fixture is a revolved ARC, because that is the shape whose two bounds
+  // differ. A box, a cylinder or a sphere is analytic and bounded exactly
+  // either way, which is both why the golden programs did not move when this
+  // changed and why the first version of this test passed against the bug.
+  // The REQUIRE below is what stops that happening again: it fails if the
+  // fixture is no longer testing anything.
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("Dish profile",
+                                            SketchPlane(PlaneType::XY));
+  sk->AddEntity(sketch::Line{{50.0f, 0.0f}, {100.0f, 0.0f}});
+  sk->AddEntity(sketch::Line{{100.0f, 0.0f}, {100.0f, 25.0f}});
+  sk->AddEntity(sketch::Line{{100.0f, 25.0f}, {92.0f, 25.0f}});
+  // Tangent to the front flat at the mouth and through the throat -- the
+  // waveguide's own flare, which is where the loose bound came from.
+  sk->AddEntity(sketch::Arc{{92.0f, 25.0f - 47.78f},
+                            47.78,
+                            std::atan2(0.0 - (25.0 - 47.78), 50.0 - 92.0),
+                            std::atan2(47.78, 0.0)});
+  doc.AddFeature(std::move(sk));
+  const uint64_t sid = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto rev = std::make_unique<RevolveFeature>("Dish", sid, 360.0,
+                                              ExtrudeMode::NewBody);
+  rev->axis.kind = AxisRef::Kind::Y;
+  doc.AddFeature(std::move(rev));
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  glm::vec3 looseLo(0.0f), looseHi(0.0f), tightLo(0.0f), tightHi(0.0f);
+  const CADShape& shape = doc.GetBodies()[0].shape;
+  shape.GetBoundingBox(looseLo, looseHi);
+  shape.GetBoundingBox(tightLo, tightHi, /*tight=*/true);
+  INFO("loose " << looseHi.x << " vs tight " << tightHi.x);
+  // The fixture must actually have a loose bound, or this test proves
+  // nothing -- which is exactly how its first version passed against the bug.
+  REQUIRE(looseHi.x > tightHi.x + 0.5);
+
+  cam::Setup setup = BasicSetup();
+  setup.stock.margin = {0.0, 0.0, 0.0};
+  setup.stock.bottomMargin = 0.0;
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(setup, doc.GetBodies(), lo, hi));
+  INFO("stock " << lo.x << ".." << hi.x);
+  CHECK_THAT(hi.x, WithinAbs(tightHi.x, 1e-6));
+  CHECK_THAT(lo.x, WithinAbs(tightLo.x, 1e-6));
+}
 
 TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
   // Setups are document objects (v58), and since v73 they are objects of a

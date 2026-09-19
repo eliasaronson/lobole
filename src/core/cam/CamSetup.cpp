@@ -78,7 +78,15 @@ bool ModelBoundsFramed(const std::vector<Body>& bodies, glm::dvec3& min,
     if (!b.shape.IsValid())
       continue;
     glm::vec3 bmin(0.0f), bmax(0.0f);
-    b.shape.GetBoundingBox(bmin, bmax);
+    // TIGHT. The default bound is computed from a B-spline's CONTROL POINTS,
+    // which lie outside the surface -- fine for a broad phase, wrong for
+    // stock, because stock is the size of material a person buys and clamps.
+    // A 200 mm revolved waveguide reported +-108.24 mm, so the blank came out
+    // 16 mm oversize across and the facing and profile passes cut air to
+    // reach it (docs/cam/dogfood-waveguide.md). CADKernel.h says which answer
+    // is for which purpose; this is the "what a PERSON or a script wants"
+    // case, and it is also what sets the work origin.
+    b.shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
     lo = any ? glm::min(lo, bmin) : bmin;
     hi = any ? glm::max(hi, bmax) : bmax;
     any = true;

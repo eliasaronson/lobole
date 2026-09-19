@@ -1920,6 +1920,30 @@ def main():
             d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
             expect("warnings" not in d.call("cam_toolpath", setup=cam_setup),
                    "restored top_z clears the warning")
+            # A tool with no `number` is REFUSED. It used to default to 1 and
+            # silently edit the first tool -- rename it, resize it, change
+            # its type -- and report success, which is how a second cutter
+            # asked for as tool 2 became a rename of tool 1 with nothing said
+            # (docs/cam/dogfood-waveguide.md).
+            try:
+                d.call("set_cam_setup", id=cam_setup,
+                       tool={"name": "no number here"})
+                raise AssertionError("a numberless tool must refuse")
+            except RuntimeError as e:
+                expect("needs a `number`" in str(e) and "SIBLING" in str(e),
+                       f"the refusal names the field and the call shape: {e}")
+
+            # The stock reads back what was set, not just the box it derives.
+            d.call("set_cam_setup", id=cam_setup,
+                   stock={"mode": "relative", "margin": [4.0, 4.0, 1.0],
+                          "bottom_margin": 0.5})
+            stk = d.call("list_cam_setups")["setups"][0]["stock"]
+            expect(stk["mode"] == "relative" and stk["margin"] == [4.0, 4.0, 1.0]
+                   and abs(stk["bottom_margin"] - 0.5) < 1e-9,
+                   f"the stock request reads back: {stk}")
+            expect("box" in stk and len(stk["box"]["max"]) == 3,
+                   f"and so does the box it resolves to: {stk.get('box')}")
+
             # A field the op type does not have is REFUSED, naming what it
             # does take. Every one of these used to be accepted for every
             # type and then never read: a drill carried tabs, a face carried
