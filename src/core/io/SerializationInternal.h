@@ -17,7 +17,7 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    118; // v118: a `Cope` feature, which cuts a frame member to the members
+    119; // v119: a `Cope` feature, which cuts a frame member to the members
          //      it MEETS and leaves those standing; and `tube`, the SHOP a
          //      part is bent in — the material, and the bender's die set,
          //      clamp straight, grip length and thinning limit. No size:
@@ -25,6 +25,14 @@ inline constexpr int kVersion =
          //      several at once. An unknown feature type is refused by name;
          //      a build without the rules reads the key as nothing and
          //      checks a frame against nothing (docs/tube/plan.md).
+         // v118: two finishing OpTypes, `surface_parallel` and
+         //      `surface_waterline`, whose Z varies continuously WITHIN a
+         //      pass -- and the three quantities they need, each named for
+         //      what it is: `cut_angle_deg` (the raster direction),
+         //      `sample_step_mm` (spacing ALONG a pass) and `z_step_mm` (the
+         //      Z between waterline laps, which is NOT a stepover). A build
+         //      without the types refuses the file by name, which is why it
+         //      is a bump (docs/cam/surfacing.md).
          // v117: a `Curve3D` of kind `bent_path`: `points` are the CORNERS
          //      of a centreline and `radius` (+ _expr) the former it is
          //      bent round, swept line-arc-line. A build without the kind

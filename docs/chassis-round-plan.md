@@ -95,7 +95,7 @@ scope. Pattern instances now carry the seed's names with an instance suffix,
 the convention patterned CUTS had used since R14. The grill audits clean: 80
 bodies, 1145 named faces, none unnamed.
 
-**3. The tube system** — [tube/plan.md](tube/plan.md), format v118 — and its
+**3. The tube system** — [tube/plan.md](tube/plan.md), format v119 — and its
 own "as built" section, which is where the measurement bugs are recorded.
 
 **4. The chassis** — `generators/chassis/`. 32 members, 19 coped, built in

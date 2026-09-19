@@ -198,7 +198,7 @@ chassis that produces an order a shop could work from
 
 ## As built
 
-T1–T4 shipped, format **v118**, and the chassis that accepted them is
+T1–T4 shipped, format **v119**, and the chassis that accepted them is
 `generators/chassis/` ([the round](../chassis-round-plan.md)).
 
 **T1 landed differently in one place, and the chassis is why.** `TubeRules`

@@ -1,0 +1,8 @@
+{
+  "part": "v60-cam-arcs.json",
+  "cam_op_types": [
+    "adaptive",
+    "surface_parallel",
+    "surface_waterline"
+  ]
+}

@@ -1,5 +1,7 @@
 #include "core/cam/CamToolpath.h"
 
+#include "core/cam/CamDropCutter.h"
+
 #include "core/cam/CamToolpathInternal.h"
 
 #include "core/Measure.h"
@@ -410,6 +412,51 @@ DerivedOp DeriveOperation(const Setup& setup,
     if (const Tool* drill = setup.FindTool(op.toolNumber);
         drill != nullptr && op.topZ - op.bottomZ > 3.0 * drill->diameter)
       op.peck = drill->diameter;
+    break;
+  }
+  case OpType::SurfaceParallel:
+  case OpType::SurfaceWaterline: {
+    // A finishing pass reads the part's SURFACE, so the tool has to have one
+    // a surface can be read against. A flat mill leaves a facet the width of
+    // its rim on every slope; a V-bit or a drill is a cone and ploughs. The
+    // refusal names the cutter rather than quietly producing a plausible
+    // path, because the result would look ordinary and be wrong everywhere
+    // the part is not level.
+    if (tool.type == ToolType::VBit || tool.type == ToolType::Drill) {
+      out.why = "tool " + std::to_string(tool.number) + " is a " +
+                (tool.type == ToolType::VBit ? "V-bit" : "drill") +
+                " — a cone cannot finish a surface, it ploughs a groove. Use "
+                "a ball nose, or a flat mill if the surface is level.";
+      return out;
+    }
+    op.name =
+        op.type == OpType::SurfaceParallel ? "Finish surface" : "Finish walls";
+    if (target.ref.IsSet())
+      op.targets = {target};
+    // The band to finish. The top of the stock down to the lowest point the
+    // region reaches -- derived from the model, never typed, because a
+    // literal here is right for one part and wrong for every other.
+    SurfaceRegion region =
+        target.ref.IsSet()
+            ? PickedSurfaceRegion(bodies, target.ref, 0.02, target.jobPartId)
+            : WholePartSilhouette(bodies, 0.02);
+    if (!region.ok) {
+      out.why = region.why;
+      return out;
+    }
+    op.topZ = hi.z;
+    op.bottomZ = region.minZ;
+    if (op.bottomZ >= op.topZ - 1e-9) {
+      out.why = "that face is level with the top of the stock — there is no "
+                "surface under it to finish";
+      return out;
+    }
+    // Across, along and down, each from the cutter. `stepover` is the cusp
+    // equation DerivedStepover already solves; `sampleStep` and `zStep` stay
+    // zero, which means "derive from the CL grid" at generate time -- the
+    // grid is not known until the region is.
+    op.stepover = DerivedStepover(tool);
+    op.cutAngleDeg = 0.0;
     break;
   }
   case OpType::Count:

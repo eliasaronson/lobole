@@ -158,8 +158,8 @@ void SheetMetalToEnvelope(const std::optional<sheet::SheetMetalRules>& rules,
   j["sheet_metal"] = std::move(m);
 }
 
-// The tube shop, v118. Absent means the part is not bent from tube, which is
-// what every document written before v118 means.
+// The tube shop, v119. Absent means the part is not bent from tube, which is
+// what every document written before v119 means.
 //
 // It carries the MATERIAL and the BENDER, and deliberately no size: unlike a
 // sheet part, which is cut from one blank, a tube frame is several sizes at

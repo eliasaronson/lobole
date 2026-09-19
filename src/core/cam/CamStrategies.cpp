@@ -5,6 +5,8 @@
 
 #include "core/Measure.h"
 #include "core/cam/CamAdaptive.h"
+#include "core/cam/CamDropCutter.h"
+#include "core/cam/CamSurface.h"
 
 #include <clipper2/clipper.h>
 
@@ -1071,6 +1073,115 @@ void GenerateEdgeRound(const Setup& setup, const Operation& op,
 // at all; the other four resolve ONE contour, so several targets on one of
 // them is several runs -- see GenerateFramed.
 
+// --- surfacing (v118) -----------------------------------------------------
+
+// A pass whose Z varies continuously. `EmitLoop` takes a scalar z by
+// signature and carries a contour's notions -- arc-length chaining, tabs,
+// lead-out -- none of which apply here, so this is a sibling rather than a
+// retrofit.
+//
+// The entry is a rapid to safe Z over the first point, then a plunge to it.
+// There is no ramp: a finishing pass starts on a surface the roughing already
+// cleared, so the descent is through air.
+void EmitSurfacePath(Toolpath& tp, const Setup& setup, const Tool& tool,
+                     const SurfacePath& path) {
+  if (path.size() < 2)
+    return;
+  Emit(tp, Move::Kind::Rapid, {path.front().x, path.front().y, setup.safeZ},
+       0.0);
+  Emit(tp, Move::Kind::Plunge, path.front(), tool.feedPlunge);
+  for (size_t i = 1; i < path.size(); i++)
+    Emit(tp, Move::Kind::Cut, path[i], tool.feedCut);
+  Emit(tp, Move::Kind::Rapid, {path.back().x, path.back().y, setup.safeZ}, 0.0);
+}
+
+void GenerateSurface(const Setup& setup, const Operation& op, const Tool& tool,
+                     const std::vector<Body>& bodies, Toolpath& tp) {
+  // The region to stay inside: the picked face's SILHOUETTE, or the whole
+  // part when nothing was picked. The face gives its outline and never its
+  // depths -- those come from the cutter-location surface of the whole model,
+  // because a pass taking Z from the picked face alone would gouge whatever
+  // stands beside it.
+  SurfaceRegion region;
+  if (op.targets.empty()) {
+    region = WholePartSilhouette(bodies, 0.02);
+  } else {
+    region = PickedSurfaceRegion(bodies, op.targets.front().ref, 0.02,
+                                 op.targets.front().jobPartId);
+  }
+  if (!region.ok) {
+    tp.error = region.why;
+    return;
+  }
+
+  glm::dvec2 lo(0.0), hi(0.0);
+  bool any = false;
+  for (const Loop& l : region.loops)
+    for (const glm::dvec2& p : l.pts) {
+      lo = any ? glm::min(lo, p) : p;
+      hi = any ? glm::max(hi, p) : p;
+      any = true;
+    }
+  if (!any) {
+    tp.error = "that region has no area to finish";
+    return;
+  }
+
+  DropRequest drop;
+  drop.min = lo;
+  drop.max = hi;
+  drop.res = op.sampleStep; // 0 derives, which is the usual case
+  drop.floorZ = op.bottomZ - 1.0;
+  const CLSurface cl = DropCut(bodies, tool, drop);
+  if (!cl.ok) {
+    tp.error = cl.why;
+    return;
+  }
+
+  // Leaving stock on a FINISHING pass raises the tool, it does not lower the
+  // bottom: the cut is a surface, not a depth, so the allowance is a distance
+  // above it. (On a 2.5D op the same field shifts `bottomZ`, which is the
+  // right answer there and the wrong one here.)
+  const double lift = op.stockToLeave;
+
+  std::vector<SurfacePath> passes;
+  std::string why;
+  if (op.type == OpType::SurfaceParallel) {
+    ParallelRequest req;
+    req.stepover_mm = std::clamp(op.stepover, 0.02, 0.95) * tool.diameter;
+    req.sampleStep_mm = op.sampleStep;
+    req.cutAngleDeg = op.cutAngleDeg;
+    req.floorZ = drop.floorZ;
+    SurfacePaths r = ParallelPasses(cl, region.loops, req);
+    why = r.why;
+    passes = std::move(r.passes);
+  } else {
+    WaterlineRequest req;
+    req.zStep_mm = op.zStep > 0.0 ? op.zStep : DerivedCusp(tool, 0.0) * 10.0;
+    req.topZ = op.topZ;
+    req.bottomZ = op.bottomZ;
+    req.sampleStep_mm = op.sampleStep;
+    req.floorZ = drop.floorZ;
+    SurfacePaths r = WaterlinePasses(cl, region.loops, req);
+    why = r.why;
+    passes = std::move(r.passes);
+  }
+  if (passes.empty()) {
+    tp.error = why.empty() ? "that region produced no finishing pass" : why;
+    return;
+  }
+
+  for (SurfacePath& path : passes) {
+    for (glm::dvec3& p : path) {
+      p.z += lift;
+      // A finishing pass never goes deeper than it was told to, whatever the
+      // surface says -- the same rule DepthPasses follows for a level.
+      p.z = std::max(p.z, op.bottomZ);
+    }
+    EmitSurfacePath(tp, setup, tool, path);
+  }
+}
+
 void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
                  const std::vector<Body>& bodies, Toolpath& tp,
                  GenerateContext* ctx) {
@@ -1092,6 +1203,10 @@ void GenerateOne(const Setup& setup, const Operation& op, const Tool& tool,
     break;
   case OpType::EdgeRound:
     GenerateEdgeRound(setup, op, tool, bodies, tp);
+    break;
+  case OpType::SurfaceParallel:
+  case OpType::SurfaceWaterline:
+    GenerateSurface(setup, op, tool, bodies, tp);
     break;
   case OpType::Count:
     // Not a type. Named so the switch stays exhaustive and a REAL new type

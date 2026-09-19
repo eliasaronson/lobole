@@ -1564,6 +1564,8 @@ struct AppState {
     Edge,
     Whole,
     Face,
+    Surface,
+    Walls,
   };
   CamVerb camVerb = CamVerb::None;
   // The operation the no-pick verbs (Whole, Face) just made, so the window

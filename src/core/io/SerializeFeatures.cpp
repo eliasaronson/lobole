@@ -1449,7 +1449,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?"},
-    {"Cope", 118,
+    {"Cope", 119,
      "member_id (the member being cut), against: [feature ids it MEETS - each "
      "cuts with its OUTER solid and SURVIVES, so a node is one cope per "
      "member and not a throwaway copy per pair), gap (+_expr, mm on the "
