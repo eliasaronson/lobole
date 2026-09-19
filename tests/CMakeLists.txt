@@ -65,6 +65,7 @@ add_executable(designer_tests
     test_sheetmetal_check.cpp
     test_tube.cpp
     test_cope.cpp
+    test_frame.cpp
     test_sweep.cpp
     test_curve3d.cpp
     test_pipe.cpp

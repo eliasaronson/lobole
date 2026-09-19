@@ -2,8 +2,10 @@
 
 #include "core/Document.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/tube/Check.h"
 #include "core/tube/CutList.h"
+#include "core/tube/Frame.h"
 #include "core/tube/Rules.h"
 #include "ui/AppState.h"
 
@@ -50,6 +52,19 @@ static constexpr MethodDoc TubeMethods[] = {
      "tail_length | the whole object is null when the part is not a tube "
      "part}, stocked?{per-material sizes, present only when rules is "
      "null}"},
+    {"check_frame",
+     "Is this frame a TRUSS? Three questions on the member graph: a member "
+     "welded to nothing at one end (a lever, and a space frame has none), a "
+     "joint landing on a neighbour's BEND (a torus, thinned by the bending, "
+     "with no straight to fit against), and a four-member bay with no "
+     "diagonal across it — which carries its load by BENDING its welds. "
+     "`not_checked` names the two things it cannot answer: how STIFF the "
+     "frame is, which is a beam model's question, and whether a PANEL braces "
+     "a bay, which a floor or a firewall does as surely as a diagonal. So an "
+     "empty `violations` is not a claim that the frame is stiff.",
+     "part", remote::Deferrable,
+     "violations[]{kind,message,member,bend,actual,required}, "
+     "members_checked, bends_checked, not_checked"},
     {"export_cut_list",
      "Write the cut list to a CSV {path}: one row per distinct member with "
      "the quantity, the material and size the part declares, the CUT length "
@@ -213,6 +228,53 @@ bool HandleTubeRpc(ui::AppState& state, Document* doc, const std::string& m,
       return true;
     }
     out = {{"rules", RulesJson(*subject.Tube())}};
+    return true;
+  }
+
+  if (m == "check_frame") {
+    // rpc-params: part
+    const Document& subject = SubjectPart(state, doc, p);
+    std::vector<tube::FrameMember> frame;
+    for (size_t i = 0; i < subject.FeatureCount(); i++) {
+      const auto* pipe =
+          dynamic_cast<const PipeFeature*>(subject.GetFeature(i));
+      if (pipe == nullptr)
+        continue;
+      const auto* curve = dynamic_cast<const CurveFeature*>(
+          subject.FindFeatureById(pipe->pathId));
+      if (curve == nullptr)
+        continue;
+      tube::FrameMember fm;
+      fm.name = pipe->GetName();
+      fm.outerDiameter = pipe->outerDiameter;
+      // The metal, not the corners it was drawn from.
+      for (const auto& [pt, at] : tube::SampleCurve(curve->EdgeShape(), 1.0))
+        fm.centreline.push_back(pt);
+      for (const CurveFeature::Bend& b : curve->Bends()) {
+        fm.bends.push_back({b.angleDeg, b.radius, b.straightBefore, b.rollDeg});
+        fm.corners.push_back(glm::dvec3(b.corner));
+      }
+      frame.push_back(std::move(fm));
+    }
+    if (frame.empty()) {
+      throw std::runtime_error(
+          "this part has no tube members, so there is no frame to check - a "
+          "member is a Pipe swept along a Curve3D");
+    }
+    const tube::CheckResult res = tube::CheckFrame(frame);
+    json violations = json::array();
+    for (const tube::Violation& v : res.violations) {
+      violations.push_back({{"kind", v.kind},
+                            {"message", v.message},
+                            {"member", v.member},
+                            {"bend", v.bend},
+                            {"actual", v.actual},
+                            {"required", v.required}});
+    }
+    out = {{"violations", std::move(violations)},
+           {"members_checked", res.membersChecked},
+           {"bends_checked", res.bendsChecked},
+           {"not_checked", res.notChecked}};
     return true;
   }
 

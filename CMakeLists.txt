@@ -282,6 +282,7 @@ set(core_sources
     src/core/tube/Rules.cpp
     src/core/tube/Check.cpp
     src/core/tube/CutList.cpp
+    src/core/tube/Frame.cpp
     src/core/io/ExportDxf.cpp
     src/core/ToleranceStack.cpp
     src/core/MassProps.cpp
