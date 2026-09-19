@@ -34,15 +34,18 @@ because the sentence that misled a caller once will mislead the next.
 
 ## 2. The stock is settable and unreadable
 
-`list_cam_setups` reports seventeen keys and `stock` is not among them, while
-`set_cam_setup` accepts one. So a script can state the blank it is cutting
-from and cannot read back what the setup thinks it is — and when the two
-disagree, nothing says so. This is the same class Phase 0 fixed for op fields
-(`stepover` settable, unreadable) left open one level up, on the field that
-decides how much material you buy.
+`set_cam_setup` accepts a stock, and the REQUEST behind it — the mode, the
+typed size, the placement, the margins — comes back nowhere. The derived box
+was already reported, so a fixed size that did not take looked exactly like
+one that did. Same class Phase 0 fixed for op fields (`stepover` settable,
+unreadable) left open one level up, on the field that decides how much
+material you buy.
 
-**Fix.** Report `stock` — mode, size, place, margins — and the derived box it
-resolves to, which is the number a caller actually wants.
+(First written here as "`stock` is not reported at all", which was wrong: the
+box was reported, forty lines further down, by a second assignment that
+overwrote the first attempt at this fix. One place now, not two.)
+
+**Fix.** Report the request beside the box it resolves to.
 
 ## 3. "top_z 25 is below the stock top (Z25)"
 
@@ -103,10 +106,16 @@ core that the capability table does not answer.
 ## Verification
 
 - A refused tool with no number, and an accepted one with it (`headless_smoke`).
-- `list_cam_setups` reports a stock that round-trips what `set_cam_setup` took.
+- `list_cam_setups` round-trips what `set_cam_setup` took, box included.
 - The warning does not fire when `top_z` equals the stock top, and when it does
-  fire the two numbers it prints differ.
-- The waveguide's derived stock is ±100, not ±108.24.
-- `tests/golden/cam-curved-*.nc` regenerated, diff read, and the block goldens
-  UNCHANGED — a prismatic part has no control points outside itself, so its
-  stock and origin must not move.
+  fire it prints the difference rather than two numbers that look equal.
+- The waveguide's derived stock is ±105 at a 5 mm margin, not ±113.24.
+- A unit test on a revolved ARC, which is the shape whose two bounds differ.
+  Its first version used a sphere cut from a cylinder and PASSED against the
+  bug, because both are analytic and bounded exactly; it now REQUIREs that its
+  own fixture is loose (151.30 against 139.78) before asserting anything, and
+  fails by 11.5 mm if the conservative bound comes back.
+- **No golden moved.** Both `cam-block-*` and `cam-curved-*` are byte-identical,
+  which is the right answer: a box and an analytic cylinder have no control
+  points outside themselves, so no existing prismatic job's origin shifts. The
+  change reaches only parts that were genuinely being oversized.

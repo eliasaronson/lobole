@@ -136,7 +136,8 @@ constexpr MethodDoc kCamMethods[] = {
      "tools {id, tool: {number, name?, diameter?, tool_type?: "
      "flat|ball|vbit|drill, tip_angle?, feed_cut?, feed_plunge?, "
      "spindle_rpm?, flutes?, flute_length?, chipload_min?, chipload_max?}} "
-     "— the tool is "
+     "— `id` and `tool` are SIBLING parameters, not a nested object, and "
+     "`number` is required because it says WHICH tool. The tool is "
      "added when the number is new. chipload_min/max are mm per tooth THIS "
      "cutter wants in the material this setup cuts (a vendor's chart), given "
      "as a pair or not at all; without them the chip-load check falls back "
@@ -1074,6 +1075,38 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                            : setup.order == cam::OrderOutputBy::Part
                                ? "part"
                                : "authored"}};
+      // The stock: what was ASKED for, and the box it resolves to.
+      //
+      // The BOX was already reported. What was not, and what a caller cannot
+      // otherwise discover, is the request behind it -- the mode, the typed
+      // size, the placement and the margins. So `set_cam_setup {stock: ...}`
+      // could be called and never read back, and a fixed size that did not
+      // take looked exactly like one that did. Same asymmetry Phase 0 closed
+      // for op fields, on the field that decides how much material you buy
+      // and where the work origin sits.
+      //
+      // One place, not two: this used to be assembled here and then
+      // overwritten by a narrower copy forty lines further down.
+      json stock = {
+          {"mode",
+           setup.stock.mode == cam::StockMode::Fixed ? "fixed" : "relative"},
+          {"margin",
+           {setup.stock.margin.x, setup.stock.margin.y, setup.stock.margin.z}},
+          {"bottom_margin", setup.stock.bottomMargin},
+          {"size",
+           {setup.stock.size.x, setup.stock.size.y, setup.stock.size.z}},
+          {"place",
+           {setup.stock.place.x, setup.stock.place.y, setup.stock.place.z}}};
+      glm::dvec3 slo(0.0), shi(0.0);
+      if (cam::StockBounds(setup, ui::JobBodies(state), slo, shi))
+        stock["box"] = {{"min", {slo.x, slo.y, slo.z}},
+                        {"max", {shi.x, shi.y, shi.z}}};
+      if (const std::string why =
+              cam::StockRefusal(setup, ui::JobBodies(state));
+          !why.empty())
+        stock["refusal"] = why;
+      sj["stock"] = std::move(stock);
+
       if (setup.topFace.IsSet())
         sj["top_face"] = {{"feature_id", setup.topFace.ref.featureId},
                           {"element", setup.topFace.ref.name},
@@ -1084,10 +1117,6 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       sj["operations"] = json::array();
       for (const cam::Operation& op : setup.operations)
         sj["operations"].push_back(OpJson(op));
-      glm::dvec3 lo(0.0), hi(0.0);
-      if (cam::StockBounds(setup, ui::JobBodies(state), lo, hi))
-        sj["stock"] = {{"min", {lo.x, lo.y, lo.z}},
-                       {"max", {hi.x, hi.y, hi.z}}};
       out.push_back(std::move(sj));
     }
     return json{{"setups", out}};
@@ -1231,7 +1260,19 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     }
     if (p.contains("tool")) {
       const json& tj = p.at("tool");
-      const int number = tj.value("number", 1);
+      // REFUSED, not defaulted to 1. A tool object with no number used to
+      // edit tool 1 -- rename it, resize it, change its type -- and report
+      // success, which is how a 6 mm ball asked for as tool 2 became a
+      // rename of the 6 mm flat with nothing said. The row's wording invites
+      // exactly that call, so the substitution had to go
+      // (docs/cam/dogfood-waveguide.md).
+      if (!tj.contains("number"))
+        throw std::runtime_error(
+            "a tool needs a `number`: it is which tool of the setup to add or "
+            "edit, and without it this would silently edit tool 1. Note that "
+            "`id` (the setup) and `tool` are SIBLING parameters: "
+            "set_cam_setup {id: <setup>, tool: {number: 2, ...}}");
+      const int number = tj.at("number").get<int>();
       cam::Tool* tool = nullptr;
       for (cam::Tool& t : setup.tools)
         if (t.number == number)
@@ -1658,11 +1699,20 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         std::snprintf(buf, sizeof buf, "%.4g", v);
         return std::string(buf);
       };
+      // A PHYSICAL tolerance. This was 1e-6 mm -- a nanometre -- against a
+      // bound derived from float32 geometry, whose error on a 25 mm part is
+      // about 2 nm, so a top_z typed to exactly the stock top tripped it and
+      // the message then read "top_z 25 is below the stock top (Z25)" because
+      // %.4g prints the difference it is complaining about as nothing. A
+      // micron is still a thousand times finer than any router cares about
+      // (docs/cam/dogfood-waveguide.md).
+      constexpr double kTopSlack = 1e-3;
       for (const cam::Operation& op : setup.operations) {
-        if (op.enabled && op.topZ < stockHi.z - 1e-6)
+        if (op.enabled && op.topZ < stockHi.z - kTopSlack)
           warnings.push_back(
               "op " + std::to_string(op.id) + " '" + op.name + "': top_z " +
-              zfmt(op.topZ) + " is below the stock top (Z" + zfmt(stockHi.z) +
+              zfmt(op.topZ) + " is " + zfmt(stockHi.z - op.topZ) +
+              " mm below the stock top (Z" + zfmt(stockHi.z) +
               ") — entry rapids will pass through stock; raise top_z or "
               "leave it out to derive");
       }
