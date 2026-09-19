@@ -862,9 +862,25 @@ TEST_CASE("cam reach: a cut deeper than the cutter is long is named",
     INFO(f.text);
   CHECK_FALSE(says(ok, "of flute"));
 
-  // Exactly at the limit is not over it: a 30 mm cutter cuts 30 mm.
+  // Exactly at the limit is NOT silence. A 30 mm cut with 30 mm of flute
+  // puts the collet nut on the stock surface with nothing to spare, and the
+  // first version of this check passed it because it only tested `deeper
+  // than`. It is a different sentence from the overrun -- advice, not a
+  // refusal -- so it is matched on its own words.
   setup.tools[0].fluteLength = 30.0;
+  const cam::FeedReport tight = cam::FeedsFor(setup, doc->GetBodies());
+  for (const cam::Finding& f : tight.findings)
+    INFO(f.text);
+  CHECK(says(tight, "to spare"));
+  CHECK(says(tight, "the collet needs"));
+  CHECK_FALSE(says(tight, "cut by the shank")); // not the overrun sentence
+
+  // Clear of it by more than the collet wants: nothing to say. Half a
+  // diameter on a 6 mm cutter is 3 mm, so 34 mm of flute over a 30 mm cut is
+  // comfortable.
+  setup.tools[0].fluteLength = 34.0;
   CHECK_FALSE(says(cam::FeedsFor(setup, doc->GetBodies()), "of flute"));
+  CHECK_FALSE(says(cam::FeedsFor(setup, doc->GetBodies()), "to spare"));
 
   // The DEEPEST operation decides, and a disabled one does not vote.
   setup.tools[0].fluteLength = 20.0;

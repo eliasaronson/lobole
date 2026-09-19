@@ -48,13 +48,20 @@ def tools(d, sid):
     1500 / (4 flutes x 6000 rpm) is 0.06 mm/tooth against a 0.12-0.24 band.
     Two flutes halves the rpm needed, which is the only lever left once the
     feed is at the ceiling.
+
+    32 mm of flute, not 25. The part is 25 mm thick and the profiles cut
+    through it, so a 25 mm cutter would finish the job with its collet nut
+    exactly on the stock surface -- and stock thickness and Z zero are each
+    good to a few tenths, which add. The app says so now; it did not when
+    this job was first written, because the reach check only fired when the
+    cut was DEEPER than the flute.
     """
     for t in ({"number": 1, "name": "6 mm flat 2F", "diameter": 6.0,
-               "tool_type": "flat", "flutes": 2, "flute_length": 25.0,
+               "tool_type": "flat", "flutes": 2, "flute_length": 32.0,
                "feed_cut": 1500.0, "feed_plunge": 400.0,
                "spindle_rpm": 6000.0},
               {"number": 2, "name": "6 mm ball 2F", "diameter": 6.0,
-               "tool_type": "ball", "flutes": 2, "flute_length": 25.0,
+               "tool_type": "ball", "flutes": 2, "flute_length": 32.0,
                "feed_cut": 1500.0, "feed_plunge": 400.0,
                "spindle_rpm": 6000.0},
               {"number": 3, "name": "3.4 mm drill", "diameter": 3.4,

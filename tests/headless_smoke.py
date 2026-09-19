@@ -1918,8 +1918,13 @@ def main():
             expect(any("stock top" in w for w in warned.get("warnings", [])),
                    f"low top_z warns: {warned.get('warnings')}")
             d.call("set_cam_op", id=cam_ops[0]["id"], top_z=cam_ops[0]["top_z"])
-            expect("warnings" not in d.call("cam_toolpath", setup=cam_setup),
-                   "restored top_z clears the warning")
+            # THAT warning is gone. Not "no warnings at all": this fixture
+            # also cuts 20 mm with a 20 mm cutter, which the reach check is
+            # right to mention, and an assertion that nothing at all is said
+            # is really an assertion that only one thing can ever be said.
+            again = d.call("cam_toolpath", setup=cam_setup).get("warnings", [])
+            expect(not any("stock top" in w for w in again),
+                   f"restored top_z clears that warning: {again}")
             # A tool with no `number` is REFUSED. It used to default to 1 and
             # silently edit the first tool -- rename it, resize it, change
             # its type -- and report success, which is how a second cutter

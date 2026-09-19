@@ -121,6 +121,16 @@ ChiploadBand ToolBandFor(const Tool& t, CutClass c) {
   return BandFor(c, t.diameter);
 }
 
+// How much flute a cut should leave ABOVE it, beyond its own depth.
+//
+// Derived from the cutter rather than typed, because the thing that has to
+// clear the work is the collet nut, and that is several times the cutter
+// across -- a 3 mm bit in an ER11 and a 12 mm bit in an ER20 do not want the
+// same margin. Half a diameter is the honest small end of that.
+double CollarClearance(const Tool& t) {
+  return std::max(1.0, t.diameter * 0.5);
+}
+
 FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
   FeedReport out;
   // The material of what is being cut. Several bodies may differ; the
@@ -142,6 +152,70 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
     }
   if (used.empty())
     return out; // nothing is cut, so there is nothing to say either way
+
+  // REACH FIRST, before the material gate below. A cutter too short for the
+  // cut is too short in MDF, in aluminium, and in a setup where nobody has
+  // said which -- it is a fact about the tool and the depth, and nothing to
+  // do with chip load. This check spent its first day living under that gate
+  // and therefore never ran at all in the default case, which is exactly the
+  // case a job starts in.
+  for (const Tool& t : setup.tools) {
+    if (used.find(t.number) == used.end())
+      continue;
+    const std::string who = "T" + std::to_string(t.number) + " (" +
+                            Fmt("%.0f", t.diameter) + " mm, " +
+                            std::to_string(t.flutes) + " flute)";
+    // Reach. The one failure here is not a finish problem: past the flutes a
+    // cutter is a plain shank, and past the shank is the collet and the
+    // spindle nose, so a cut deeper than the cutter is long rubs the work
+    // with something that has no edge and then drives the holder into it.
+    //
+    // EVERY op that cuts at depth, not just the two chip room asks about: a
+    // pocket or an adaptive pass buries a short cutter exactly as well as a
+    // slot does, and it is the deepest one that decides.
+    double reach = 0.0;
+    for (const Operation& op : setup.operations)
+      if (op.enabled && op.toolNumber == t.number)
+        reach = std::max(reach, op.topZ - op.bottomZ);
+    // A MICRON of overrun, not a nanometre. `reach` comes from typed depths
+    // against a float-derived stock top, so a cut that is exactly the flute
+    // length arrives as 25.00000025 and took the overrun branch -- which then
+    // said "the last 0.0 mm is cut by the shank", a sentence that reads as
+    // nonsense. Same trap as the low-top_z warning
+    // (docs/cam/dogfood-waveguide.md).
+    const double over = reach - t.fluteLength;
+    if (t.fluteLength > 0.0 && over > 1e-3) {
+      Finding f;
+      f.tool = t.number;
+      f.source = "the cutter's own usable length";
+      f.text = who + " cuts " + Fmt("%.1f", reach) + " mm deep and has " +
+               Fmt("%.1f", t.fluteLength) + " mm of flute, so the last " +
+               Fmt("%.1f", reach - t.fluteLength) +
+               " mm is cut by the shank and the holder is in the work. Use a "
+               "longer cutter, or take the depth in two setups";
+      out.findings.push_back(f);
+    } else if (t.fluteLength > 0.0 &&
+               reach > t.fluteLength - CollarClearance(t)) {
+      // MARGIN, not just overrun. The first version of this check fired only
+      // when the cut was DEEPER than the flute, so a 25.0 mm cut with a
+      // 25.0 mm cutter passed in silence -- and that is a cut whose collet
+      // nut sits exactly on the stock surface with nothing to spare. Stock
+      // thickness and Z zero are each good to a few tenths, and they add.
+      Finding f;
+      f.tool = t.number;
+      f.source = "the cutter's own usable length";
+      f.text = who + " cuts " + Fmt("%.1f", reach) + " mm deep with " +
+               Fmt("%.1f", t.fluteLength) + " mm of flute -- only " +
+               Fmt("%.1f", std::max(0.0, t.fluteLength - reach)) +
+               " mm to spare, and the collet needs about " +
+               Fmt("%.1f", CollarClearance(t)) +
+               " mm of it. Stock thickness and Z zero are each good to a few "
+               "tenths and they add, so this is the depth where the nut "
+               "touches the work. A longer cutter, or flip the part and cut "
+               "from both sides";
+      out.findings.push_back(f);
+    }
+  }
 
   if (klass == CutClass::Unknown) {
     // NOT silence. An empty answer reads as "checked, all fine", and this is
@@ -266,30 +340,6 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
                  "this deep";
         out.findings.push_back(f);
       }
-    }
-
-    // Reach. The one failure here is not a finish problem: past the flutes a
-    // cutter is a plain shank, and past the shank is the collet and the
-    // spindle nose, so a cut deeper than the cutter is long rubs the work
-    // with something that has no edge and then drives the holder into it.
-    //
-    // EVERY op that cuts at depth, not just the two chip room asks about: a
-    // pocket or an adaptive pass buries a short cutter exactly as well as a
-    // slot does, and it is the deepest one that decides.
-    double reach = 0.0;
-    for (const Operation& op : setup.operations)
-      if (op.enabled && op.toolNumber == t.number)
-        reach = std::max(reach, op.topZ - op.bottomZ);
-    if (t.fluteLength > 0.0 && reach > t.fluteLength) {
-      Finding f;
-      f.tool = t.number;
-      f.source = "the cutter's own usable length";
-      f.text = who + " cuts " + Fmt("%.1f", reach) + " mm deep and has " +
-               Fmt("%.1f", t.fluteLength) + " mm of flute, so the last " +
-               Fmt("%.1f", reach - t.fluteLength) +
-               " mm is cut by the shank and the holder is in the work. Use a "
-               "longer cutter, or take the depth in two setups";
-      out.findings.push_back(f);
     }
   }
   return out;
