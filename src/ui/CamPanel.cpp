@@ -2,8 +2,10 @@
 #include <filesystem>
 
 #include "ui/CamPanel.h"
+
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
+#include <cstring>
 
 #ifdef HAVE_CAM
 
@@ -230,6 +232,66 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
 
 } // namespace
 
+namespace {
+
+// The backplot's vertices, cached.
+//
+// `AppendPrimLine` pushes SIX PrimVertex per move, and this ran in full every
+// frame. A 2.5D job is a few thousand moves and nobody noticed; a 3-axis
+// finishing pass is not. The waveguide dogfood generates ~260,000 moves, so
+// the overlay rebuilt 1.56 MILLION vertices -- about 87 MB -- per frame, and
+// measured 133 ms of a 158 ms frame: 6 fps, with the GPU idling at 29 ms and
+// 84% of the time in `ui`.
+//
+// The vertices are a pure function of the toolpaths, so build them once.
+std::vector<PrimVertex> g_backplot;
+uint64_t g_backplotKey = 0;
+
+// A fingerprint, not a revision counter: `camToolpaths` is also mutated IN
+// PLACE when a deferred adaptive pass lands or is cancelled, so anything that
+// only counts assignments would show a stale path. O(toolpaths), not O(moves)
+// -- walking the moves to decide whether to walk the moves would defeat it.
+// Is `mid` on the segment a->b, to within a fraction of a millimetre? The
+// tolerance is a picture's, not a toolpath's: 10 um is far below one pixel at
+// any zoom a person works at, and the G-code is untouched either way.
+bool Collinear(const glm::dvec3& a, const glm::dvec3& mid,
+               const glm::dvec3& b) {
+  const glm::dvec3 ab = b - a;
+  const double len = glm::length(ab);
+  if (len < 1e-9)
+    return true;
+  return glm::length(glm::cross(ab, mid - a)) / len < 0.01;
+}
+
+uint64_t BackplotKey(const std::vector<cam::Toolpath>& paths) {
+  uint64_t k = 1469598103934665603ull;
+  const auto mix = [&k](uint64_t v) { k = (k ^ v) * 1099511628211ull; };
+  mix(paths.size());
+  for (const cam::Toolpath& tp : paths) {
+    mix(tp.operationId);
+    mix(tp.moves.size());
+    mix(tp.pending ? 1u : 0u);
+    mix(tp.error.size());
+    // The two ends as well, so a pass REPLACED by one of the same length --
+    // which is exactly what re-generating an operation produces -- is not
+    // mistaken for the pass it replaced.
+    if (!tp.moves.empty()) {
+      const auto bits = [](double d) {
+        uint64_t u = 0;
+        std::memcpy(&u, &d, sizeof u);
+        return u;
+      };
+      mix(bits(tp.moves.front().to.x));
+      mix(bits(tp.moves.front().to.z));
+      mix(bits(tp.moves.back().to.x));
+      mix(bits(tp.moves.back().to.z));
+    }
+  }
+  return k;
+}
+
+} // namespace
+
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
   // While a simulation is open the line drawn is the file being PLAYED, dimmed
   // behind the cursor — one path on screen, and it is the one being cut.
@@ -241,26 +303,42 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
     return;
   // Moves are in SETUP space (C9), and so is the viewport on a job tab
   // (v73/J6) — the parts are drawn laid out. Nothing to convert.
-  const auto shown = [&](const glm::dvec3& p) { return p; };
-  for (const cam::Toolpath& tp : state.camToolpaths) {
-    glm::dvec3 from(0.0);
-    bool have = false;
-    for (const cam::Move& m : tp.moves) {
-      if (have) {
+  if (const uint64_t key = BackplotKey(state.camToolpaths);
+      key != g_backplotKey) {
+    g_backplot.clear();
+    for (const cam::Toolpath& tp : state.camToolpaths) {
+      for (size_t i = 1; i < tp.moves.size(); i++) {
+        const cam::Move& m = tp.moves[i];
+        // Collapse a straight RUN into one line, the way the post collapses
+        // it into one G1: a finishing pass samples the surface every 0.15 mm,
+        // so a gently curving pass arrives as hundreds of segments that are
+        // collinear to well under a pixel. The post turns 380,000 moves into
+        // 34,000 lines this way; drawing all 380,000 conveys nothing and
+        // costs everything.
+        size_t j = i;
+        while (
+            j + 1 < tp.moves.size() && tp.moves[j + 1].kind == m.kind &&
+            Collinear(tp.moves[i - 1].to, tp.moves[j].to, tp.moves[j + 1].to))
+          j++;
         const glm::vec4 color = m.kind == cam::Move::Kind::Rapid ? kRapidColor
                                 : m.kind == cam::Move::Kind::Plunge
                                     ? kPlungeColor
                                     : kCutColor;
-        AppendPrimLine(glm::vec3(shown(from)), glm::vec3(shown(m.to)),
+        AppendPrimLine(glm::vec3(tp.moves[i - 1].to), glm::vec3(tp.moves[j].to),
                        m.kind == cam::Move::Kind::Rapid ? 1.0f : 2.4f, color,
-                       out);
+                       g_backplot);
+        i = j;
       }
-      from = m.to;
-      have = true;
     }
-    if (const cam::Setup* setup = ActiveCamSetup(state))
-      AppendToolGlyph(state, *setup, tp, out);
+    g_backplotKey = key;
   }
+  out.insert(out.end(), g_backplot.begin(), g_backplot.end());
+
+  // The tool glyph stays OUT of the cache: it is a handful of vertices and it
+  // follows the setup, which can move without the toolpath changing.
+  if (const cam::Setup* setup = ActiveCamSetup(state))
+    for (const cam::Toolpath& tp : state.camToolpaths)
+      AppendToolGlyph(state, *setup, tp, out);
 }
 
 void DrawCamPanel(AppState& state) {
