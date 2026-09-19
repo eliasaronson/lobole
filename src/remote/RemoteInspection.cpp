@@ -439,7 +439,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "is a yes/no riding on a cheap check — contact_report on the same tab "
      "gives the exact gaps. Naming a `body` checks that one and skips the "
      "connectivity pass entirely.",
-     "body", remote::NeedsPart},
+     "body", remote::NeedsPart,
+     "ok, valid, "
+     "bodies[]{body,name,valid,bad_faces,bad_edges,bad_wires,reasons}, "
+     "body_count, "
+     "feature_errors[]{index,name,error,after_earlier_failure?}, "
+     "receipt{schema,standing,summary,claims}, "
+     "stale_derived?[]{id,name,source}, body_components?, connected?, "
+     "warnings?"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -459,7 +466,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "limits — no distribution, no form or position error. "
      "`part` (on a side, or shared) resolves faces against another part "
      "without switching tab, so a bore and its shaft can live in two.",
-     "hole, intent, part, shaft, size"},
+     "hole, intent, part, shaft, size", remote::NoFlags,
+     "size, size_from, hole{class,lower,upper,min,max,it_grade,it}, "
+     "measured?{hole?,shaft?}, "
+     "shaft?{class,lower,upper,min,max,it_grade,it}, kind?, min_clearance?, "
+     "max_clearance?, note?, intent?, intent_ok?"},
     {"set_tolerance",
      "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
@@ -482,7 +493,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "or the distance between the two faces. A ref whose element no longer "
      "resolves is listed `resolved: false` rather than dropped: the intent "
      "outlives the topology that carried it.",
-     "part", remote::NeedsPart},
+     "part", remote::NeedsPart,
+     "tolerances[]{id,feature_id,element,kind,resolved,comment?,b?,lower?,"
+     "upper?,class?,nominal?,min?,max?,error?}"},
     {"clear_tolerance", "Remove one tolerance by {id}.", "id",
      remote::NeedsPart},
     {"stack_up",
@@ -515,7 +528,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "two faces of different basic size, a side stating explicit deviations "
      "(which say nothing about which side is the bore), or both sides the "
      "same case. The summary counts each kind apart.",
-     ""},
+     "", remote::NoFlags,
+     "fits[]{mate,mate_name,mate_type,status,reason?,size?,hole?,shaft?,kind?,"
+     "min_clearance?,max_clearance?,note?}, "
+     "status, passed, warned, failed, reported, unverified, "
+     "receipt{schema,standing,summary,claims}"},
     {"mass_properties",
      "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
      "from "
@@ -523,7 +540,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "a cheap conservative bound that can read ~60% over on a swept surface. "
      "`part` reads another part without switching to it; from an assembly tab "
      "with no `part`, aggregates every visible occurrence in world space.",
-     "body, part"},
+     "body, part", remote::NoFlags,
+     "bodies[]{body, name, volume, surface_area, center_of_mass, inertia, "
+     "material, bbox_min?, bbox_max?, density?, mass_g}, total{volume, "
+     "center_of_mass, mass_g}"},
     // This row said "point/distance/angle/radius" for a year and the handler
     // implemented distance. `describe` is what an agent trusts INSTEAD of
     // guessing, so a row that promises a branch nobody wrote is the
@@ -583,7 +603,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "rather than merely a long one. Edges are named only when something "
      "needs them (a plain box has six named faces and no named edges), so "
      "there is no such count for them.",
-     "body, max_faces, part"},
+     "body, max_faces, part", remote::NoFlags,
+     "bodies[]{body,name,created_by,job_part,faces,edges,unnamed_faces}"},
     {"tube_schedule",
      "The cut list and the bend schedule for every tube MEMBER of the part. "
      "It walks the BODIES: a member is a length of tube that EXISTS, so a "
@@ -601,7 +622,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "answer); without that it falls back to a bare R < 1.5 x D and says so "
      "in `tight_rule`. `curve` narrows it to one path. The sheet side's "
      "answer to the same question is list_bends.",
-     "part, curve", Deferrable},
+     "part, curve", Deferrable,
+     "tubes[]{curve, name, quantity, bodies, cut_length_mm, path_length_mm, "
+     "length_mm, bends, coped_off_mm?, outer_diameter_mm?, wall_mm?}, "
+     "count, members"},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
@@ -643,7 +667,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "checked and is listed in `not_checked` with its face count: the "
      "deadline stops new dispatches and cannot preempt a boolean already "
      "running, so one such pair does not slow the sweep down, it hangs it.",
-     "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol"},
+     "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol",
+     remote::NoFlags,
+     "connected, components, pairs[]{a, b, state, distance, volume}, "
+     "near_misses[]{a, b, distance}, clashes[]{a, b, volume}, touch_tol, "
+     "near_tol, scope?, bodies?"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
@@ -722,7 +750,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "resolved:false when a named datum/face is gone — such a cut stops "
      "cutting), offset, tilt, reverse, visible, and the cut plane "
      "{normal, d}.",
-     ""},
+     "", remote::NoFlags,
+     "sections[]{id,offset,tilt_u,tilt_v,reverse,visible,normal,d,source}"},
     {"update_section",
      "Change one cut {id, base_plane?, plane_id?, offset? (mm along the "
      "normal), tilt_u?, tilt_v? (degrees), reverse?, visible?}. Only the "

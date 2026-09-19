@@ -633,6 +633,10 @@ add_test(NAME rpc_params_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_params_gate.py)
 set_tests_properties(rpc_params_gate PROPERTIES TIMEOUT 60)
 
+add_test(NAME rpc_returns_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_returns_gate.py)
+set_tests_properties(rpc_returns_gate PROPERTIES TIMEOUT 60)
+
 add_test(NAME rpc_names_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_names_gate.py)
 set_tests_properties(rpc_names_gate PROPERTIES TIMEOUT 60)

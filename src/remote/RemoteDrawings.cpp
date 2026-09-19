@@ -36,7 +36,8 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"set_drawing_sheet",
      "Edit the active drawing's sheet {size?, landscape?, title_block?}.",
      "landscape, size, title_block"},
-    {"list_drawings", "List drawing documents.", ""},
+    {"list_drawings", "List drawing documents.", "", remote::NoFlags,
+     "drawings[]{name,index,id,views,dims}"},
     {"set_drawing_view",
      "Edit a view {id, position?, scale?, name?, "
      "show_hidden?, quality?, base_view?, configuration?}; folded axes note. "
@@ -69,7 +70,9 @@ static constexpr MethodDoc DrawingMethods[] = {
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
      "THAT sheet rather than whichever one is active — a report about the "
      "wrong sheet is worse than none.",
-     "drawing, update"},
+     "drawing, update", remote::NoFlags,
+     "ok, issues[]{kind,detail,view?,other_view?,dim?,note?}, views, dims, "
+     "receipt{schema,standing,summary,claims}"},
     {"add_drawing_view",
      "Add an HLR view of a part/assembly {drawing, source, orientation, "
      "scale, position, configuration?}. "
@@ -108,7 +111,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "normalised — a pair's time counts for both of its members, because "
      "leaving out either avoids it. A cached re-projection reports zero, "
      "which is what it spent.",
-     ""},
+     "", remote::NoFlags,
+     "views[]{id,name,source_id,orientation,scale,base_view,position,show_"
+     "hidden,quality,hidden,configuration,curves,has_geometry,stale,bbox,bend_"
+     "lines?,warnings?,cost?,error?}"},
     {"update_drawing",
      "Re-project all views from current geometry. {drawing?} names the sheet. "
      "`budget_s` bounds the WHOLE "
@@ -123,7 +129,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "87% of an 16.8 s view.",
      "budget_s, drawing"},
     {"list_drawing_geometry",
-     "Projected 2D curves of a view (for picking/dimensioning).", "view"},
+     "Projected 2D curves of a view (for picking/dimensioning).", "view",
+     remote::NoFlags,
+     "geometry[]{kind,source_id,ref,visible,source_feature?,type?,center?,"
+     "radius?,closed?,p1?,p2?}"},
     {"add_drawing_dim",
      "Add a driven dimension between picked view geometry. `offset` is the "
      "label's placement in SHEET millimetres from the measured geometry (not "
@@ -131,7 +140,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "auto-placed clear of the views and the title block.",
      "kind, offset, refs, view"},
     {"remove_drawing_dim", "Remove a dimension by id.", "id"},
-    {"list_drawing_dims", "List dimensions with values.", ""},
+    {"list_drawing_dims", "List dimensions with values.", "", remote::NoFlags,
+     "dims[]{id,kind,view,resolved,value,text}"},
     {"export_drawing", "Export the drawing to SVG or PDF by extension {path}.",
      "path", remote::NotInBatch},
     {"add_drawing_note",
@@ -145,7 +155,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "from the part every time, with `text` as its optional caption.",
      "position, ref, table, text, view"},
     {"remove_drawing_note", "Remove a note by id.", "id"},
-    {"list_drawing_notes", "List notes with leader state and table kind.", ""},
+    {"list_drawing_notes", "List notes with leader state and table kind.", "",
+     remote::NoFlags,
+     "notes[]{id,text,resolved_text,resolved,error,pos,view,table,leader_"
+     "resolved}"},
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 

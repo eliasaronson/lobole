@@ -60,7 +60,10 @@ constexpr MethodDoc MotionMethods[] = {
     {"remove_motion_study", "Remove a study by id.", "study"},
     {"list_motion_studies",
      "Every study, with whether it has a result and whether one is running.",
-     ""},
+     "", remote::NoFlags,
+     "studies[]{type,id,name,driver_mate,driver_dof,from,to,samples,check_"
+     "clash,clash_mode,unit,has_result,running,why_not?,stale?,clean?,"
+     "collision_checked?}"},
     {"run_motion_study",
      "Run it: {study, async?, include_poses?}. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "

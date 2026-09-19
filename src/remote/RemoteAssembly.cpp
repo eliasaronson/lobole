@@ -59,7 +59,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "where it actually sits, which get_state cannot give you because its "
      "boxes are in the part's own space. For a single named point or axis "
      "use `frame` with an occurrence instead.",
-     "bounds"},
+     "bounds", remote::NoFlags,
+     "occurrences[]{type,id,name,part_id,ref_kind,part_version,transform,"
+     "visible,fixed,configuration_id,attached_to?,attach_offset?,attach_"
+     "rotation?,bbox_min?,bbox_max?,leaf_count?,leaves?}"},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
@@ -137,7 +140,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "List mates with `status` (satisfied | redundant | error) and the "
      "error text when there is one. Each carries `rotation` in radians and "
      "`rotation_deg` beside it.",
-     ""},
+     "", remote::NoFlags,
+     "mates[]{type,id,name,mate_type,a,b,flipped,rotation,offset,rotation_deg,"
+     "status,dx?,dy?,ball_rotation?,error?,suppressed?,held?}"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam|freewheel|click, a: mate id, b: "
@@ -198,7 +203,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "at that lead — re-engaging it by hand.",
      "id, lead, name, phase, ratio"},
     {"remove_relation", "Remove a relation by id.", "id"},
-    {"list_relations", "List relations with status/errors.", ""},
+    {"list_relations", "List relations with status/errors.", "",
+     remote::NoFlags,
+     "relations[]{type,id,name,kind,mate_a,mate_b,dof_a,dof_b,ratio,phase,"
+     "thread_part?,thread_feature?,lift?,drives?,lead?,teeth?,ride?,error?}"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
@@ -291,13 +299,16 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "screw whose standard this build cannot size is not judged rather than "
      "passed. The receipt is unverifiable when nothing was examined and never "
      "verified while any screw was skipped.",
-     ""},
+     "", remote::NoFlags,
+     "ok, examined, skipped, findings[]{occurrence,part,why}, "
+     "receipt{schema,standing,summary,claims}"},
     {"export_bom", "Export the BOM as CSV {path}.", "path"},
     {"edit_in_context",
      "Enter in-context editing of a part within the assembly.", "occurrence"},
     {"add_exploded_view", "Add an exploded view.", "name"},
     {"remove_exploded_view", "Remove an exploded view.", "id"},
-    {"list_exploded_views", "List exploded views.", ""},
+    {"list_exploded_views", "List exploded views.", "", remote::NoFlags,
+     "views[]{type,id,name,steps}, active, factor"},
     {"set_explode_step",
      "Add/edit an explode step (occurrence + offset). `offset` is a [x, y, z] "
      "displacement in MILLIMETRES, applied for display only — it never moves "
@@ -322,7 +333,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "The declared clearances and where each one stands, WITHOUT re-checking: "
      "holds | violated | unverifiable | stale (the assembly changed since it "
      "was last checked) | never. Cheap.",
-     ""},
+     "", remote::NoFlags,
+     "assertions[]{id,name,a,b,min_mm,mode,standing,why?,measured_mm?,last_"
+     "verdict?,note?}"},
     {"remove_assertion", "Remove a declared clearance.", "id"},
     {"verify_assertions",
      "Re-check the declared clearances now and record the answers {id?: just "

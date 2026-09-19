@@ -61,7 +61,12 @@ def literal(field):
 
 
 def method_docs(paths):
-    """{method: {"doc": str, "params": [keys] | "*" | None, "file": path}}."""
+    """{method: {"doc", "params", "returns", "file"}}.
+
+    `returns` is the fifth field where a row carries one, else "" — the
+    response contract, which only the read family is required to state
+    (tests/rpc_returns_gate.py).
+    """
     out = {}
     for path in paths:
         with open(path) as f:
@@ -84,15 +89,17 @@ def method_docs(paths):
                     continue
                 fields = split_fields(row)
                 doc = literal(fields[1]) if len(fields) > 1 else ""
+                rets = literal(fields[4]) if len(fields) > 4 else ""
                 if len(fields) < 3:
                     out[nm.group(1)] = {"doc": doc, "params": None,
-                                        "file": path}
+                                        "returns": rets, "file": path}
                     continue
                 ps = literal(fields[2])
                 out[nm.group(1)] = {
                     "doc": doc,
                     "params": "*" if ps == "*" else
                     sorted(k.strip() for k in ps.split(",") if k.strip()),
+                    "returns": rets,
                     "file": path,
                 }
     return out

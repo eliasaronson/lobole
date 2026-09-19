@@ -82,10 +82,33 @@ struct MethodDoc {
   // unchanged: needing a part tab is the minority (41 of 230), and reaching
   // outside the document rarer still.
   uint8_t flags = 0;
+
+  // The top-level keys of the RESPONSE, in the same comma-separated shape
+  // `params` uses, with nesting shown where a caller would otherwise reach
+  // for the wrong level: `total{mass_g,volume}`, `bodies[]{name,volume}`.
+  //
+  // Every refusal this project makes is good: a wrong key is named, a
+  // missing field is named, an unknown enum lists the accepted set. That is
+  // the parameter contract, and `rpc_params_gate` keeps it true. The RESULT
+  // contract had nowhere to live, so it lived in prose when it lived at all
+  // — and a caller that guesses wrong does not get a refusal, it gets a
+  // KeyError three calls later. `mass_properties` reads "per body and
+  // total", which makes the total look like `r["mass_g"]` when it is
+  // `r["total"]["mass_g"]`; `list_elements` nests under `bodies` even when
+  // one body was asked for by index; `list_parts` returns drawings too.
+  //
+  // REQUIRED for every list_*, get_* and check_* method — the family an
+  // agent PARSES rather than merely calls — and gated by
+  // `tests/rpc_returns_gate.py`. A mutating verb's answer is its `regen`
+  // summary and its row says so already, so most rows leave this empty.
+  const char* returns = "";
 };
 
 // The columns above, as a bitmask.
 enum MethodFlag : uint8_t {
+  // No flag applies. Spelled rather than written as a bare 0, because a row
+  // that carries `returns` has to say something in the flags column.
+  NoFlags = 0,
   // Refuses unless the active tab is a PART. Most methods do not care -- they
   // act on the project, an assembly, a drawing or a job -- so this is stated
   // rather than assumed.

@@ -279,7 +279,17 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "set_active_part for a read: switching tabs clears the selection, the "
      "hidden bodies, the measure session and the explode state, which on "
      "somebody's running instance is their work.",
-     "part"},
+     "part", remote::NoFlags,
+     "features[]{type,name,index,id?,material?,appearance?,suppressed?,error?,"
+     "stale?,warning?,after_earlier_failure?, "
+     "plus per-type keys}, "
+     "bodies[]{name,volume,material,created_by,bbox_min,bbox_max,reference?,"
+     "appearance?,mesh?}, "
+     "selection{mesh,face,normal,center}, "
+     "selection_items[]{kind,id?,element?}, selected_feature, "
+     "camera{position,target,distance,fov_deg,aspect}, can_undo, can_redo, "
+     "rollback, view_rollback, regen{ok,failed,warnings,executed,cached}, "
+     "pending_feature_id"},
     {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
      "", remote::NotInBatch},
     {"redo", "Redo one step.", "", remote::NotInBatch},
@@ -348,7 +358,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "to measure a pass, since the encode between saved captures leaves the "
      "GPU idle enough to drop its clocks.",
      "hud, renders, reset, window"},
-    {"get_settings", "Read the user preferences (docs/ui/settings.md).", ""},
+    {"get_settings", "Read the user preferences (docs/ui/settings.md).", "",
+     remote::NoFlags,
+     "settings_format, ui_font_scale, gpu_device, shadows, ssao, "
+     "idle_throttle, shadow_map, git_user_name, git_user_email, "
+     "terminal_panel, autosave_interval, keys{per-command chord}, "
+     "window{x,y,w,h,maximized}, path, devices"},
     {"set_settings", "Change user preferences {key: value, ...}; persists.",
      "*", remote::NotInBatch},
     {"get_keymap",
@@ -357,7 +372,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "{context: \"sketch\"} narrows it. A context binding SHADOWS a global "
      "one with the same chord — that is how N is Coincident while sketching "
      "and align-to-face everywhere else.",
-     "context"},
+     "context", remote::NoFlags,
+     "contexts, "
+     "bindings[]{id,context,section,label,chord,default,custom,alt?,hidden?}, "
+     "active, conflicts[]{context,chord,commands}"},
     {"set_keybinding",
      "Rebind one command: {command: \"part.fillet\", chord: \"Shift+B\"}. "
      "An empty chord unbinds it; {reset: true} restores the default. "
@@ -372,7 +390,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "filed 'everything list_parts returned and nothing else claimed' into a "
      "Fasteners folder put the engine and the carburettor there. Filter on "
      "`type` unless you mean all four.",
-     ""},
+     "", remote::NoFlags,
+     "parts[]{name,index,id,type,folder?}, active, active_id, folders?"},
     {"rename_part", "Rename a part.", "new_name, part"},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path",
      remote::UiAction},
@@ -821,6 +840,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           }
           entry["params"] = std::move(keys);
         }
+        // What comes BACK. Kept as the row wrote it — `bodies[]{name,
+        // volume}`, `total{mass_g}`, `optional?` — because the nesting is
+        // the half a caller gets wrong, and flattening it to a key list
+        // would throw away exactly that. Required of every list_*, get_*
+        // and check_* method and gated by tests/rpc_returns_gate.py; absent
+        // elsewhere, where the answer is the `regen` summary the prose
+        // already describes.
+        if (d.returns != nullptr && *d.returns != '\0')
+          entry["returns"] = d.returns;
         const auto& contracts = remote::InspectionContracts().at("methods");
         if (contracts.contains(d.name)) {
           entry["request_schema"] = contracts[d.name]["request"];
@@ -1568,6 +1596,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // The whole struct, not one method per setting: the assistant and the
     // human stay on the same interface, and every setting is testable
     // headlessly.
+    // rpc-returns-from: src/core/io/Settings.cpp
     json j = settings::ToJson(state.settings);
     j["path"] = settings::ConfigPath();
     j["devices"] = state.gpuDevices; // what gpu_device may be set to

@@ -150,14 +150,16 @@ static constexpr MethodDoc ProjectMethods[] = {
      "scope: project|part}; returns value + regen.",
      "comment, expression, name, scope", remote::Deferrable},
     {"list_variables", "Project variables and the active part's local ones.",
-     ""},
+     "", remote::NoFlags,
+     "variables[]{name,expression,value,scope,comment?,error?}"},
     {"set_units",
      "The units the ACTIVE document is READ in {length?: mm|cm|m|in, mass?: "
      "g|kg|lb, angle?: deg|rad}. Display only — storage is always mm/g/deg, "
      "so this cannot move a vertex. Omitted keys keep their current value; "
      "an unrecognised one is refused, naming what is accepted.",
      "angle, length, mass"},
-    {"get_units", "The active document's display units.", ""},
+    {"get_units", "The active document's display units.", "", remote::NoFlags,
+     "length, mass, angle"},
     {"rename_variable",
      "Rename a variable {name, new_name, scope?}, rewriting "
      "every referencing expression.",

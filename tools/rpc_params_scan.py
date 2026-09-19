@@ -35,6 +35,7 @@ KEY_RE = re.compile(
     r'\b(?:p|params|request\.params)\s*'
     r'(?:\.\s*(?:at|value|contains)\s*\(|\[)\s*"([A-Za-z0-9_]+)"'
     r'|\bneed\s*\(\s*(?:p|params)\s*,\s*"([A-Za-z0-9_]+)"')
+LITERAL_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 RAW_RE = re.compile(r'\b(?:p|params)\s*\.\s*raw\s*\(\s*\)')
 # Method names in a condition: `m == "x"`, and the `||` chains that group
 # them. `request.method` is the second spelling: `screenshot` and
@@ -108,12 +109,16 @@ def scan_source(src):
 
     out = {}
 
-    def note(names, key=None, opaque=False, handoff=None, annotated=False):
+    def note(names, key=None, opaque=False, handoff=None, annotated=False,
+             literal=None):
         for nm in names:
             e = out.setdefault(nm, {"keys": set(), "opaque": False,
-                                    "handoff": set(), "annotated": False})
+                                    "handoff": set(), "annotated": False,
+                                    "literals": set()})
             if key:
                 e["keys"].add(key)
+            if literal:
+                e["literals"].add(literal)
             if opaque:
                 e["opaque"] = True
             if handoff:
@@ -171,6 +176,15 @@ def scan_source(src):
         owner = _innermost(scopes, mm.start())
         if owner:
             note(owner, opaque=True)
+    # Every string literal in the branch, which is where a RESPONSE key is
+    # written. Deliberately generous — prose in an error message lands here
+    # too — because tests/rpc_returns_gate.py only asks whether a declared
+    # key appears at all, never whether an emitted one was declared: a
+    # response nests, and this cannot tell a top-level key from a leaf.
+    for mm in LITERAL_RE.finditer(bare):
+        owner = _innermost(scopes, mm.start())
+        if owner:
+            note(owner, literal=mm.group(1))
     # The two escape hatches. `opaque` first, so a branch marked opaque is
     # not also parsed as a key list.
     for mm in re.finditer(re.escape(OPT_OUT), src):
@@ -202,7 +216,8 @@ def scan_source(src):
     for names, _s, _e in scopes:
         note(names)
     return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
-                "handoff": sorted(v["handoff"]), "annotated": v["annotated"]}
+                "handoff": sorted(v["handoff"]), "annotated": v["annotated"],
+                "literals": sorted(v["literals"])}
             for k, v in out.items()}
 
 
@@ -263,13 +278,16 @@ def scan_files(paths):
             for name, info in scan_source(f.read()).items():
                 e = merged.setdefault(name, {"keys": set(), "opaque": False,
                                              "handoff": set(),
-                                             "annotated": False})
+                                             "annotated": False,
+                                             "literals": set()})
                 e["keys"].update(info["keys"])
+                e["literals"].update(info.get("literals", ()))
                 e["opaque"] = e["opaque"] or info["opaque"]
                 e["handoff"].update(info["handoff"])
                 e["annotated"] = e["annotated"] or info["annotated"]
     return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
-                "handoff": sorted(v["handoff"]), "annotated": v["annotated"]}
+                "handoff": sorted(v["handoff"]), "annotated": v["annotated"],
+                "literals": sorted(v["literals"])}
             for k, v in sorted(merged.items())}
 
 

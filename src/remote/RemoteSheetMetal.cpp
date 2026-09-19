@@ -38,7 +38,12 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "a flange will use and labelled with where it came from, plus the "
      "materials and gauges this build carries. `rules` is null when the part "
      "is not sheet metal.",
-     "part", Deferrable},
+     "part", Deferrable,
+     "rules{material, gauge, thickness_mm, bend_radius_mm, "
+     "bend_radius_source, min_bend_radius_mm, k_factor, k_factor_source, "
+     "relief, relief_width_mm, relief_depth_mm | the whole object is null "
+     "when the part is not sheet metal}, stock{per-material gauges}, "
+     "relief_styles"},
     {"check_sheet_metal",
      "Can a brake actually make this? Every finding names the element and the "
      "required-versus-actual number: a bend tighter than the material takes "
@@ -47,7 +52,9 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "line stopping inside a panel with nothing to relieve it, a hole near "
      "enough to a bend to draw into an oval. `not_checked` says what this "
      "build cannot answer, so a clean verdict is never mistaken for one.",
-     "body, part", Deferrable},
+     "body, part", Deferrable,
+     "ok, violations[]{kind,message,actual_mm,required_mm,bend?,element?}, "
+     "bends_checked, holes_checked, not_checked"},
     {"list_bends",
      "Every bend of a sheet body, as DATA: its inside radius against the "
      "material's minimum (`below_minimum` is the DFM verdict, and a HEM is "
@@ -59,7 +66,12 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "and no direction is claimed. The rules the part was built under come "
      "back beside them, so a bend audit is ONE call instead of three plus a "
      "drawing note's text.",
-     "part, body, side", Deferrable},
+     "part, body, side", Deferrable,
+     "bends[]{index,body,feature_id,angle_deg,radius_mm,min_radius_mm,crushed,"
+     "below_minimum,width_mm,k_factor,k_source,flat,axis,axis_origin,allowance_"
+     "mm?,folds?}, "
+     "count, "
+     "rules{material,gauge,thickness_mm,bend_radius_mm,k_factor,relief}"},
     {"export_dxf",
      "Write a sheet body's FLAT PATTERN to a DXF a shop can cut: R12 ASCII, "
      "millimetres ($INSUNITS 4), outline and holes on CUT, bend lines on "

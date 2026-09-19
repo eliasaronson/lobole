@@ -37,7 +37,10 @@ constexpr MethodDoc kCamMethods[] = {
      "post, travel?: {min, max}, fit_arcs, has_rotary_axis, rapid_feed, "
      "tools}. A setup names one and EMBEDS a copy of it; set_cam_setup "
      "{machine} puts one on a setup.",
-     ""},
+     "", remote::NoFlags,
+     "machines[]{name,post,travel?,fit_arcs?,has_rotary_axis?,rapid_feed?,"
+     "tools?}, "
+     "dir"},
     {"save_machine",
      "Write a machine to the store {machine: {name, post?, travel?: {min: "
      "[x,y,z], max: [x,y,z]}, fit_arcs?, has_rotary_axis?, rapid_feed?, "
@@ -76,7 +79,7 @@ constexpr MethodDoc kCamMethods[] = {
      "substituted) and `placements`, each {setup, id, pos, rot_z, enabled, "
      "frame, clamped_per_part}. The id is what an operation target and a "
      "placement name.",
-     "job"},
+     "job", remote::NoFlags, "parts[]{id,source,name,missing,placements}"},
     {"check_layout",
      "How the parts are arranged in the stock {job?, setup?}. Per placement: "
      "`fit` -- `inside`, `partly_outside` (hanging over an edge) or "
@@ -90,7 +93,9 @@ constexpr MethodDoc kCamMethods[] = {
      "not while you drag: a sheet is laid out THROUGH states like these. The "
      "refusal lands again at cam_toolpath and cam_post, where the mistake "
      "becomes G-code.",
-     "job, setup"},
+     "job, setup", remote::NoFlags,
+     "setups[]{setup,name,placements,refusal?,warnings?}, "
+     "receipt{schema,standing,summary,claims}"},
     {"set_job_placement",
      "Where a part sits in the stock {setup, part, pos?: [x,y], rot_z?, "
      "enabled?, lay_face_up?: {feature_id, element}}. Position and spin are "
@@ -121,7 +126,10 @@ constexpr MethodDoc kCamMethods[] = {
      "store, by name), tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
      "so a setup that lays the part flat reports the box the machine sees.",
-     "job"},
+     "job", remote::NoFlags,
+     "setups[]{id,name,post,safe_z,rotation_a,has_rotary_axis,frame,origin,"
+     "origin_at,reach_offset,fit_arcs,machine,machine_match,split_output,order,"
+     "tools,operations,top_face?,stock?}"},
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "

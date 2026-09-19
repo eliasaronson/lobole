@@ -206,7 +206,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "CONTEXT (add_load, add_refinement, set_result_display) still takes "
      "`study`, because there `id` would mean the load or the refinement.",
      "id, study"},
-    {"list_studies", "List studies with status.", ""},
+    {"list_studies", "List studies with status.", "", remote::NoFlags,
+     "studies[]{id,name,type,mesh_size,loads,refinements,has_results,stale,"
+     "participants?,volume_fraction?,filter_radius?,max_iterations?,keep_faces?"
+     "}"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; `gravity` is metres per second "

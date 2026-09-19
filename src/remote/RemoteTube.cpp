@@ -45,7 +45,11 @@ static constexpr MethodDoc TubeMethods[] = {
      "where that number came from. With no rules set it answers null and "
      "lists what IS stocked, so a picker built from it cannot offer a size "
      "set_tube_rules would refuse.",
-     "part", remote::Deferrable},
+     "part", remote::Deferrable,
+     "rules{material, max_thinning, former_radii_mm, min_straight, "
+     "tail_length | the whole object is null when the part is not a tube "
+     "part}, stocked?{per-material sizes, present only when rules is "
+     "null}"},
     {"export_cut_list",
      "Write the cut list to a CSV {path}: one row per distinct member with "
      "the quantity, the material and size the part declares, the CUT length "
@@ -75,7 +79,9 @@ static constexpr MethodDoc TubeMethods[] = {
      "what this build cannot answer — ovality and springback belong to the "
      "tooling and the machine, which it has no model of — so an empty "
      "`violations` cannot be read as 'all clear' on those.",
-     "part", remote::Deferrable},
+     "part", remote::Deferrable,
+     "violations[]{kind,message,member,bend,actual,required}, "
+     "members_checked, bends_checked, not_checked"},
 };
 
 namespace {
